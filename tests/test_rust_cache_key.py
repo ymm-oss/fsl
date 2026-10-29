@@ -32,6 +32,7 @@ CACHE_STEP = """      - uses: Swatinem/rust-cache@v2
           prefix-key: v1-rust
           env-vars: FSL_CARGO_PROFILE_HASH
 """
+RESTORE_ONLY_FIXTURE = frozenset({("ci.yml", "build")})
 
 
 def workflow(steps: str) -> str:
@@ -62,9 +63,10 @@ def write_repository(tmp_path: Path, workflows: dict[str, str], *, prefix: str =
     return root
 
 
-def audit(tmp_path: Path, steps: str, **kwargs: object) -> list[str]:
+def audit(tmp_path: Path, steps: str, *, restore_only: bool = True, **kwargs: object) -> list[str]:
     root = write_repository(tmp_path, {"ci.yml": workflow(steps)}, **kwargs)
-    _audited, errors = validator.audit_repository(root, minimum_audited_steps=1)
+    identities = RESTORE_ONLY_FIXTURE if restore_only else frozenset()
+    _audited, errors = validator.audit_repository(root, minimum_audited_steps=1, restore_only_jobs=identities)
     return errors
 
 
@@ -107,6 +109,17 @@ def test_rejecting_cache_step_inputs(tmp_path: Path, old: str, new: str, expecte
     assert expected in errors[0]
 
 
+@pytest.mark.parametrize("restore_only,value", [(False, "false"), (True, validator.SAVE_GUARD)] + [
+    (restore_only, value) for restore_only in (False, True)
+    for value in ("true", '"false"', "${{ false }}", None, validator.SAVE_GUARD.replace("&&", "||"))
+])
+def test_rejecting_save_if(tmp_path: Path, restore_only: bool, value: str | None) -> None:
+    replacement = "" if value is None else f"          save-if: {value}\n"
+    steps = CACHE_STEP.replace("          save-if: false\n", replacement)
+    errors = audit(tmp_path, HASH_STEP + steps, restore_only=restore_only)
+    assert len(errors) == 1 and "`save-if`" in errors[0], errors
+
+
 def test_rejecting_audit_constant_drift(tmp_path: Path) -> None:
     errors = audit(tmp_path, HASH_STEP + CACHE_STEP, prefix="v2-rust")
     assert len(errors) == 1, errors
@@ -144,15 +157,15 @@ def test_rejecting_hash_step_overrides(tmp_path: Path, override: str) -> None:
 def test_rejecting_duplicate_prefix_key(tmp_path: Path) -> None:
     cache_step = CACHE_STEP + "          prefix-key: v0-rust\n"
     errors = audit(tmp_path, HASH_STEP + cache_step)
-    # The unreadable file also leaves the step floor unmet: both fail closed.
-    assert len(errors) == 2, errors
+    # Unreadable YAML also leaves the step floor and required identity unmet.
+    assert len(errors) == 3, errors
     assert "duplicate key 'prefix-key'" in errors[0]
     assert "fewer than the 1" in errors[1]
 
 
 def test_rejecting_fewer_steps_than_the_floor(tmp_path: Path) -> None:
     root = write_repository(tmp_path, {"ci.yml": workflow(HASH_STEP + CACHE_STEP)})
-    audited, errors = validator.audit_repository(root, minimum_audited_steps=2)
+    audited, errors = validator.audit_repository(root, minimum_audited_steps=2, restore_only_jobs=RESTORE_ONLY_FIXTURE)
     assert audited == 1
     assert len(errors) == 1 and "fewer than the 2" in errors[0]
 

@@ -1492,9 +1492,11 @@ two jobs, `fsl-logic`, `semantic-mutation-mutants`) still match their saver beca
 two inputs and compute the same hash from the same checkout; a pull request that edits the profiles
 misses on purpose, since `main`'s entry was built under the old ones.
 `.github/scripts/validate_rust_cache_key.py` (parser-backed, calibrated by
-`tests/test_rust_cache_key.py`, run by the automation lane) fails closed when any rust-cache step lacks
+`tests/test_rust_cache_key.py` and `--selftest`, run by the automation lane) fails closed when any rust-cache step lacks
 either input, when the step before it is not the hash step or has a different `if:`, or when the
-workflows' `prefix-key` and the audit's `CURRENT_KEY_PREFIX` differ. `rust/Cargo.toml` itself carries
+workflows' `prefix-key` and the audit's `CURRENT_KEY_PREFIX` differ. The plain check also enforces
+the save-if rule and exact four-job restore-only set; `--selftest` calibrates guard and role mutations.
+`rust/Cargo.toml` itself carries
 no note: a profile edit needs no manual step, and a comment there would make this CI-only change a
 product-surface diff.
 

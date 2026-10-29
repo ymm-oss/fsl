@@ -493,6 +493,7 @@ for (const ref of ["refs/pull/9/merge", "refs/heads/gh-readonly-queue/main/pr-9-
   for (const [key, code] of [
     ["v1-rust-rust-workspace-Linux-x64-aaaa-bbbb", "pull-request-cache-present"],
     ["v0-rust-unlisted-Linux-x64-aaaa-bbbb", "pull-request-rust-cache-present"],
+    ["v1-rust-unlisted-Linux-x64-aaaa-bbbb", "pull-request-rust-cache-present"],
     ["v0-rust-rust-workspace-Linux-x64-aaaa-bbbb", "pull-request-cache-present"],
   ]) {
     test(`rejecting: isolated-ref attribution below budget: ${ref} ${key}`, () => {
@@ -511,11 +512,20 @@ for (const ref of ["refs/pull/9/merge", "refs/heads/gh-readonly-queue/main/pr-9-
   });
 }
 
-test("rejecting: queue-ref bytes remain in the physical budget", () => {
-  const caches = [...healthyListing(), cacheBytes("unrelated-tool", "refs/heads/gh-readonly-queue/main/pr-9-abc", 2 * GIB)];
-  const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
-  assert.deepEqual(result.findings.map((finding) => finding.code), ["budget-exhausted"]);
+test("accepting: ordinary branch Rust caches are not forbidden saves", () => {
+  const caches = [...healthyListing(), cacheBytes("v1-rust-rust-workspace-Linux-x64-aaaa-bbbb", "refs/heads/feature", 1)];
+  assert.equal(auditCacheBudget({ caches, usageBytes: usageOf(caches) }).ok, true);
 });
+
+for (const ref of ["refs/heads/gh-readonly-queue/main/pr-9-abc", "refs/heads/feature"]) {
+  for (const laggingUsage of [false, true]) {
+    test(`rejecting: ${ref} bytes remain in the physical budget (lagging usage: ${laggingUsage})`, () => {
+      const caches = [...healthyListing(), cacheBytes("unrelated-tool", ref, 2 * GIB)];
+      const result = auditCacheBudget({ caches, usageBytes: usageOf(laggingUsage ? healthyListing() : caches) });
+      assert.deepEqual(result.findings.map((finding) => finding.code), ["budget-exhausted"]);
+    });
+  }
+}
 
 test("rejecting: pagination finds a forbidden PR Rust cache beyond the first 100 entries", async () => {
   const firstPage = withCacheIds(
@@ -2103,10 +2113,9 @@ test("rejecting: a pull-request save under a superseded prefix is still a violat
   assert.deepEqual(result.findings.map((finding) => finding.code), ["pull-request-rust-cache-present"]);
 });
 
-// Workflow-side consistency (every rust-cache step passes `CURRENT_KEY_PREFIX`
-// and `FSL_CARGO_PROFILE_HASH`) is the parser-backed
-// `.github/scripts/validate_rust_cache_key.py`, calibrated by
-// tests/test_rust_cache_key.py, not a line scan here (docs/design/DESIGN-ci.md,
+// The parser-backed `.github/scripts/validate_rust_cache_key.py` checks key/hash
+// inputs, save-if policy and the exact restore-only set; tests/test_rust_cache_key.py
+// and its --selftest calibrate it, not a line scan here (docs/design/DESIGN-ci.md,
 // "Automation contracts use parser-backed workflow inspection").
 
 // Profile states of rust/Cargo.toml around #1379 and #1380, abridged to the

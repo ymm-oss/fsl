@@ -188,10 +188,9 @@ check_automation() {
   # the live parser-backed audit.
   step --needs-module pytest python3 -m pytest tests/test_toolchain_pin.py -v
   step --needs-module yaml python3 .github/scripts/validate_toolchain_pin.py
-  # Every Swatinem/rust-cache step must pass the audited key generation
-  # (`prefix-key`) and the Cargo profile hash (`env-vars`), or restore-only
-  # lanes stop matching their saver and the cache audit judges the wrong
-  # generation (docs/design/DESIGN-ci.md, "Cache key generation").
+  # Audit rust-cache key/hash inputs, save-if and the exact restore-only set;
+  # pytest and --selftest calibrate guard/role rejections. See
+  # docs/design/DESIGN-ci.md, "Cache key generation".
   step --needs-module pytest python3 -m pytest tests/test_rust_cache_key.py -v
   step --needs-module yaml python3 .github/scripts/validate_rust_cache_key.py --selftest
   # Pin Windows shard wiring, live skip names and fail-closed aggregation.
