@@ -846,15 +846,17 @@ request gives up is a warm second run of itself; what it gains is that `main`'s 
 which is the only cache any pull request could ever share.
 
 **Queue adoption qualification (2026-10-29).** The decision's premise that only `main` saves
-no longer holds: the unchanged event guard also permits `merge_group` saves on queue refs.
-The original #747 incident and decision above remain history; see the known open cache risk in
-"Merge queue adoption (2026-10-29)" below for the current consequence and audit blind spot,
-tracked in #1615.
+initially stopped holding: the original event guard permitted `merge_group` saves on queue refs.
+**Resolution (#1615):** all seven save-enabled Rust cache steps now exclude both `pull_request`
+and `merge_group`; push, schedule and manual saves remain enabled. Audit rules 3 and 4 now
+attribute both `refs/pull/` and `refs/heads/gh-readonly-queue/`, without duplicate findings.
+The original #747 incident and decision above remain history; see
+"Merge queue adoption (2026-10-29)" below for the observed risk and resolution, not a measured eviction claim.
 
 **That is no longer a description of every step -- the current contract has two shapes, not one, and
 which key a restore-only step reads is not the same for all of them.** A step that saves its own
-declared key still carries the event guard above (`save-if: ${{ github.event_name != 'pull_request'
-}}`); a step below carries `save-if: false` unconditionally and saves nothing, ever, instead. Naming
+declared key carries `save-if: ${{ github.event_name != 'pull_request' && github.event_name !=
+'merge_group' }}`; a step below carries `save-if: false` unconditionally and saves nothing, ever, instead. Naming
 each: `merge-readiness.yml`'s `rust-compile` job reads `rust-workspace` (`shared-key: rust-workspace`,
 `save-if: false`). `merge-readiness.yml`'s `core-contracts` job reads `rust-workspace` the same way.
 `ci.yml`'s `fsl-logic` job reads `rust-workspace` the same way again. `ci.yml`'s
@@ -864,10 +866,10 @@ saves (below), not `rust-workspace`. `CI_SHARED_KEYS` in `audit-cache-budget.mjs
 identities rule 3 attributes by name today: `rust-workspace`, `wasm`, `semantic-mutation` -- three,
 not the four this section originally measured, since `fsl-logic`'s dedicated key was retired when
 that job went restore-only. That is not the complete list of keys any workflow actually saves:
-`ci.yml`'s own `rust-native-z3` job also saves, on non-pull-request events, one key per platform
+`ci.yml`'s own `rust-native-z3` job also saves, excluding PR and merge-group events, one key per platform
 (`Windows_NT` and `Darwin`) -- it just is not one of `CI_SHARED_KEYS`' three named identities. Its
 presence on `main` is required separately, by `REQUIRED_MAIN_ENTRIES`'s per-`{key, platform}` check;
-a leak of it onto a pull-request ref is caught separately too, by rule 4's generic `/^v\d+-rust-/`
+a leak of it onto a PR or queue ref is caught separately too, by rule 4's generic `/^v\d+-rust-/`
 detection rather than rule 3's name-based one.
 
 `merge-readiness.yml` was deliberately left unchanged at that point: its two keys total about
@@ -884,7 +886,7 @@ because GitHub only evicts a cache for staleness after **7 days without a read**
 landed inside that window for refs that closed more recently than that. The LRU evictor does not
 distinguish "small but many" from "few but large": it evicted `refs/heads/main`'s
 `native Z3 4.16 (windows-latest)` cache down to **zero entries**, observed via
-`gh api actions/caches`. **The `save-if` guard `ci.yml` uses is the wrong fix here and was
+`gh api actions/caches`. **The original `save-if` guard `ci.yml` used was the wrong fix here and was
 reverted before merging**: that guard only stops saving on `pull_request` events, and it relies on
 some other event on the same workflow saving a `main`-branch copy to restore from. `ci.yml` has a
 `push: branches: [main]` trigger to do that; `merge-readiness.yml` has none (`on:` above lists only
@@ -904,7 +906,7 @@ the same two jobs logged it at 09:33:03.06Z and 09:33:05.55Z, respectively. Thes
 rather than the derivation mechanism, establish the observed full-key match. A future lockfile change
 could still produce `Swatinem/rust-cache`'s ordinary prefix-restore fallback rather than a cold build,
 but that is not what these runs observed. Neither job ever writes to this key: save-enabled `ci.yml`
-steps write on non-`pull_request` events, so no `pull_request` event can grow it, and
+steps write only outside `pull_request` and `merge_group`, so neither event can grow it, and
 merge-readiness gains no eviction pressure of its own to reintroduce. Since the key was given an
 explicit generation and a Cargo profile hash, matching also requires each restore-only step to pass
 the same `prefix-key` and `env-vars` as its saver and to run the same hash step first; see "Cache key
@@ -955,7 +957,7 @@ save occurred before the current `save-if: false` guard, so it disproves a claim
 shard always won the historical race. The guard instead closes the mutants save path now, ensuring
 that future timing cannot make its `rust/target`-scoped evidence directory (kept under `rust/target`
 solely because the artifact-upload glob requires it) enter this shared cache.
-`semantic-mutation-operators` remains save-enabled on non-pull-request events with
+`semantic-mutation-operators` remains save-enabled outside PR and merge-group events with
 `cache-on-failure: true`, and is therefore the sole configured owner and recovery path.
 
 **Budget lever: `fsl-logic` goes restore-only against `rust-workspace`, taking its dedicated key out
@@ -1070,7 +1072,7 @@ observed semantic-mutation timeout-cancelled save. Since #752 paired the flag wi
 increases, subsequent outcomes cannot isolate either change's contribution.
 
 With the current configuration, the `semantic-mutation` key has exactly one class of savers: the
-three `semantic-mutation-operators` shards (`save-if` on non-pull-request events,
+three `semantic-mutation-operators` shards (`save-if` outside PR and merge-group events,
 `cache-on-failure: true` -- the owner keeps the recovery path for a cold start that fails or times
 out). `semantic-mutation-mutants` is restore-only (`save-if: false`); it carries no
 `cache-on-failure`, which would be meaningless there, since `Swatinem/rust-cache`'s save step exits
@@ -1218,11 +1220,16 @@ rather than approaching the repository quota.
 
 Given a usable observation, the pure audit fails closed on four states: usage at or above 85% of
 the limit, a missing `refs/heads/main` cache for any critical-path `{key, platform}` pair, — the
-rejecting control for the `save-if` guard itself — any pull-request-scoped cache for one of
+rejecting control for the `save-if` guard itself — any PR- or queue-scoped cache for one of
 `ci.yml`'s shared keys, and — the general form of that same control — any `v<N>-rust-*`-prefixed
-cache on a pull-request ref at all, whether or not its shared key is one `ci.yml` declares, and
+cache on a PR or queue ref at all, whether or not its shared key is one `ci.yml` declares, and
 under any key generation. The critical-path check counts only entries under the current key
-generation (`CURRENT_KEY_PREFIX`); see "Cache key generation".
+generation (`CURRENT_KEY_PREFIX`); see "Cache key generation". Rules 3 and 4 both match
+`refs/pull/` and `refs/heads/gh-readonly-queue/` under every key generation, including superseded
+prefixes. Rule 3 attributes named shared keys first; rule 4 skips those same entries, producing
+one finding per entry. The existing finding codes `pull-request-cache-present` and
+`pull-request-rust-cache-present` now cover queue refs too. Queue bytes remain in rule 1's raw
+physical budget; thresholds and cache visibility are unchanged.
 
 The critical-path check is per-`{key, platform}` pair, not per-key, because `rust-native-z3` is one
 shared key on `rust-native-z3-macos` and `rust-native-z3-windows-shards` in `ci.yml`: a key-only set lets either
@@ -1238,7 +1245,7 @@ and the independently saved `semantic-mutation` key on `Linux`; the latter is th
 restore source for every PR's restore-only mutants lane.
 
 The general pull-request-rust-cache rule exists because `merge-readiness.yml`'s restore-only fix
-(above) makes "no workflow saves a rust cache on a pull-request event" a repository-wide invariant,
+(above), extended by #1615, makes "no workflow saves a rust cache on a PR or merge-group event" a repository-wide invariant,
 not something scoped to `CI_SHARED_KEYS`' three declared keys (`rust-workspace`, `wasm`,
 `semantic-mutation`). Before this rule, `merge-readiness.yml`'s own
 now-removed per-job keys (`rust-compile`, `core-contracts`) were invisible to this audit for the same
@@ -1254,7 +1261,8 @@ mixed pairs that remain failing; tied-`created_at` boundary reordering; per-fiel
 every `CI_SHARED_KEYS` key missing from `main`; and direct live-wrapper controls for 22,300/22,301,
 HTTP failure, malformed ordinary pages, the 900-request cap, and rate-limit headers/headroom.
 There are also rejecting fixtures for a non-`ci.yml` rust cache on a pull-request ref and for each
-half of `rust-native-z3` missing from `main`.
+half of `rust-native-z3` missing from `main`. Small, below-threshold PR/queue injections cover
+known shared keys, generic `v0-rust-*` keys and superseded prefixes independently of budget pressure.
 `tools/check-merge-readiness.sh`'s `check_automation` lane runs that suite on every pull request, so
 a change to the checker is covered pre-merge even though the live audit deliberately is not a
 required context: the shared cache state can change after a pull request's own checks pass, so
@@ -1500,7 +1508,7 @@ Its bytes stay in the raw budget judgment, which is unchanged from "Generation c
 #926, measured 2026-09-04)": they physically occupy the budget until deleted or evicted after 7 days
 without access. Unlike the #926 case, deleting a superseded-generation entry cannot make anything
 colder — no current step can restore it — so it is safe to delete once the change is on `main`.
-Pull-request rules 3 and 4 stay generation-independent.
+PR/queue attribution rules 3 and 4 stay generation-independent.
 
 **Cost.** The first `main` run after a bump or a profile edit is cold on every key (the native lanes
 rebuild vendored Z3 from source) and saves the new generation; `merge-readiness.yml` and other pull
@@ -1673,22 +1681,28 @@ queue-specific bypass capability. If such a path remains available, it is reserv
 only; no bypass actor is added and no required check is weakened. The stub-off policy holds
 regardless of the outcome of a contemporary bypass check.
 
-**Known open cache risk.** As described in "Actions cache budget" above, Decision #747 relied on
-only `main` saving shared caches. With the queue active, `ci.yml`'s unchanged
-`save-if: ${{ github.event_name != 'pull_request' }}` also permits executing `merge_group` jobs
-to save under `refs/heads/gh-readonly-queue/...`. Other refs cannot restore those entries, but
-they still count toward the repository's 10 GiB budget: the same ref-isolated eviction pressure
-as #747. An exact cache hit does not save again; a changed key or an evicted `main` entry can
-expose this path.
+**Cache risk resolved (#1615).** Decision #747 relied on only `main` saving shared caches.
+Queue adoption exposed the original guard's permission for executing `merge_group` jobs to save
+under `refs/heads/gh-readonly-queue/...`. Other refs cannot restore those entries, but their
+bytes count toward the repository's 10 GiB budget. The save path was reachable on a changed
+key or cache miss; an exact cache hit does not save again.
 On the first product-gate `merge_group` run (`40840541665`), `save-if` evaluated true for
 `rust checks`, all three `rust tests` and all three `mutation operators`; the `rust tests` jobs
 did not save because their primary keys hit. At 18:05 on 2026-10-29, none of the repository's
-30 caches were on a `gh-readonly-queue` ref; this does not eliminate the risk, because a key
-change or eviction can allow a save.
-The cache audit's rules 3 and 4 currently filter only `refs/pull/`, so they do not attribute
-queue-ref entries, although those bytes still contribute to the total-budget judgment.
-Follow-up #1615 covers excluding `merge_group` from the save-enabled steps and extending both
-audit ref filters to `refs/heads/gh-readonly-queue/`. Neither executable behavior changes in this decision.
+30 caches were on a `gh-readonly-queue` ref; that observation alone did not eliminate the risk,
+because under the old guard a key change or eviction could allow a save.
+All seven save-enabled `Swatinem/rust-cache` steps now exclude both `pull_request` and
+`merge_group`; push, schedule and `workflow_dispatch` retain saving. The two `ci.yml` and two
+`merge-readiness.yml` restore-only steps stay `save-if: false`. Native-Z3 job conditions are
+unchanged. The parser-backed Rust-cache validator and its automation-lane selftest enumerate
+every guard, check the five-event truth table and reject a PR-only mutation of each saver.
+Audit rules 3 and 4 now attribute both ref families, deduplicating entries that match both;
+queue bytes still count toward the unchanged physical budget. This closes the configuration
+risk; it is not evidence of a measured queue-cache eviction or of current live cache usage.
+
+The separate `actions/cache` steps for cargo-nextest and wasm-bindgen remain out of scope:
+their tool keys do not match the Rust-key rules 3 and 4 and are not protected by the rust-cache
+save guard. They can still save on PR and queue refs; their bytes count toward rule 1.
 
 **First queued merge evidence.** #1608 was merged by the queue to `main` commit
 `625698621cadfd842a90b6b921e51eb8a9591b79`. The queue branch was

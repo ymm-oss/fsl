@@ -8,6 +8,8 @@ Each step must pass ``prefix-key`` equal to ``CURRENT_KEY_PREFIX`` in
 ``.github/scripts/audit-cache-budget.mjs`` and ``env-vars`` equal to
 ``PROFILE_HASH_ENV`` in ``.github/scripts/cargo-profile-hash.mjs``, and the
 step immediately before it must run that script under the same ``if:``.
+Saving must exclude PR and merge-group events; unconditional restore-only steps
+must retain boolean ``save-if: false`` (see "Actions cache budget" in DESIGN-ci.md).
 
 Why each half fails closed: a saving step and a restore-only step that differ
 in either input compute different keys, so the restore-only lane silently goes
@@ -25,6 +27,7 @@ inspection").
 from __future__ import annotations
 
 import argparse
+import copy
 import re
 import sys
 from collections.abc import Iterable
@@ -37,6 +40,7 @@ ACTION = "Swatinem/rust-cache"
 AUDIT_SCRIPT = Path(".github/scripts/audit-cache-budget.mjs")
 HASH_SCRIPT = Path(".github/scripts/cargo-profile-hash.mjs")
 HASH_COMMAND = "node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml"
+SAVE_GUARD = "${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}"
 # ci.yml has nine rust-cache steps and merge-readiness.yml two. A floor, not an
 # exact count, so adding a step is not a validator edit; dropping below it means
 # the audit has stopped seeing steps it used to see.
@@ -90,6 +94,14 @@ def _scalar(node: yaml.Node | None) -> str | None:
     return node.value.strip() if isinstance(node, yaml.ScalarNode) else None
 
 
+def _restore_only(node: yaml.Node | None) -> bool:
+    return (
+        isinstance(node, yaml.ScalarNode)
+        and node.tag == "tag:yaml.org,2002:bool"
+        and node.value.lower() == "false"
+    )
+
+
 def read_constant(path: Path, pattern: re.Pattern[str]) -> str:
     match = pattern.search(path.read_text(encoding="utf-8"))
     if match is None:
@@ -109,6 +121,9 @@ def audit_steps(steps: yaml.Node | None, path: str, prefix: str, env_var: str) -
         audited += 1
         where = f"{path}:{step.start_mark.line + 1}"
         inputs = _entry(step, "with")
+        save_if = _entry(inputs, "save-if")
+        if not _restore_only(save_if) and _scalar(save_if) != SAVE_GUARD:
+            errors.append(f"{where}: `save-if` must be false or {SAVE_GUARD}")
         if _scalar(_entry(inputs, "prefix-key")) != prefix:
             errors.append(f"{where}: `with: prefix-key:` must be {prefix!r} (audit-cache-budget.mjs CURRENT_KEY_PREFIX)")
         if _scalar(_entry(inputs, "env-vars")) != env_var:
@@ -160,9 +175,52 @@ def audit_repository(
     return audited, errors
 
 
+def calibrate_save_policy(repository: Path) -> None:
+    """Exercise each live guard, its event truth table, and its isolated mutation."""
+    prefix = read_constant(repository / AUDIT_SCRIPT, PREFIX_CONSTANT)
+    env_var = read_constant(repository / HASH_SCRIPT, ENV_CONSTANT)
+    restore_only_jobs = set()
+    for filename in ("ci.yml", "merge-readiness.yml"):
+        path = repository / ".github/workflows" / filename
+        document = yaml.compose(path.read_text(encoding="utf-8"), Loader=WorkflowLoader)
+        for job_key, job in _entry(document, "jobs").value:
+            steps = _entry(job, "steps")
+            for index, step in enumerate(steps.value):
+                if not (_scalar(_entry(step, "uses")) or "").startswith(f"{ACTION}@"):
+                    continue
+                guard = _entry(_entry(step, "with"), "save-if")
+                where = f"{filename}:{job_key.value}:{step.start_mark.line + 1}"
+                assert guard is not None, where
+                restore_only = _restore_only(guard)
+                if restore_only:
+                    restore_only_jobs.add((filename, job_key.value))
+                outcomes = {}
+                terms = re.findall(r"github\.event_name != '([^']+)'", guard.value)
+                for event in ("pull_request", "merge_group", "push", "schedule", "workflow_dispatch"):
+                    actual = not restore_only and all(event != excluded for excluded in terms)
+                    expected = not restore_only and event not in ("pull_request", "merge_group")
+                    assert actual == expected, (where, event, expected, actual)
+                    outcomes[event] = actual
+                if not restore_only:
+                    mutant = copy.deepcopy(steps)
+                    _entry(_entry(mutant.value[index], "with"), "save-if").value = guard.value.replace(
+                        " && github.event_name != 'merge_group'", ""
+                    )
+                    _, errors = audit_steps(mutant, filename, prefix, env_var)
+                    assert len(errors) == 1 and "`save-if`" in errors[0], (where, errors)
+                assert audit_steps(steps, filename, prefix, env_var)[1] == [], where
+                calibration = "restore-only" if restore_only else "PR-only mutation: exactly one save-if finding"
+                print(f"{where}: {outcomes}; {calibration}; original restored")
+    assert restore_only_jobs >= {
+        ("ci.yml", "fsl-logic"), ("ci.yml", "semantic-mutation-mutants"),
+        ("merge-readiness.yml", "rust-compile"), ("merge-readiness.yml", "core-contracts"),
+    }, restore_only_jobs
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--repository", type=Path, default=REPO_ROOT)
+    parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args(argv)
     try:
         audited, errors = audit_repository(args.repository)
@@ -175,6 +233,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {error}", file=sys.stderr)
         return 1
     print(f"rust-cache key audit: PASS -- {audited} `{ACTION}` step(s) use the audited key generation")
+    if args.selftest:
+        calibrate_save_policy(args.repository)
     return 0
 
 

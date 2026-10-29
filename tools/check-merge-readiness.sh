@@ -193,7 +193,7 @@ check_automation() {
   # lanes stop matching their saver and the cache audit judges the wrong
   # generation (docs/design/DESIGN-ci.md, "Cache key generation").
   step --needs-module pytest python3 -m pytest tests/test_rust_cache_key.py -v
-  step --needs-module yaml python3 .github/scripts/validate_rust_cache_key.py
+  step --needs-module yaml python3 .github/scripts/validate_rust_cache_key.py --selftest
   # Pin Windows shard wiring, live skip names and fail-closed aggregation.
   step --needs-module pytest python3 -m pytest tests/test_windows_native_shards.py -v
   # Keep both VS Code install instructions tied to the release packaging name.

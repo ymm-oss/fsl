@@ -12,7 +12,7 @@
 // pull requests exceeded the limit and evicted `main`'s caches. Every run then
 // built cold -- measured +8 to +16 min per shard -- and each cold run saved a
 // fresh ref-scoped copy, evicting more. Every step that still saves its own
-// key now restricts that save to non-pull-request events; a step that never
+// key now excludes pull_request and merge_group from saving; a step that never
 // saves at all is restore-only (`save-if: false`) instead (see below). Rules 3
 // and 4 below are what this audit uses to protect both shapes.
 //
@@ -27,8 +27,8 @@
 // therefore own no shared key of their own to add here. `ci.yml`'s
 // `semantic-mutation-mutants` job is also restore-only (`save-if: false`),
 // but reads `semantic-mutation` instead -- the key `semantic-mutation-operators`
-// owns and saves, not `rust-workspace`. As of the `merge-readiness.yml` fix,
-// no workflow in this repository ever saves a rust cache on a pull-request
+// owns and saves, not `rust-workspace`. Since the restore-only fix and #1615,
+// no workflow in this repository saves a rust cache on a pull-request or merge-group
 // event -- rule 4 below is the general form of that invariant, covering any
 // future workflow's rust-cache step as well as the keys `CI_SHARED_KEYS`
 // declares.
@@ -50,13 +50,13 @@ export const BUDGET_WARN_FRACTION = 0.85;
 // declared, whether it is "shared" in the same technical sense, or any other
 // generation rule); it is simply the enumerated set rule 3 checks. Do not
 // infer a rule for membership from the list's current contents. A
-// `refs/pull/*` entry for one of these three is a violation of the current
+// `refs/pull/*` or `refs/heads/gh-readonly-queue/*` entry is a violation of the current
 // invariant; it may predate the guard or indicate a later guard regression, so
 // inspect `created_at` and workflow provenance. This is the calibrated
 // rejecting signal for the fix itself, not merely a hygiene check.
 //
 // Every other `v0-rust-*` key, including `rust-native-z3` and `fsl-logic`, is
-// still covered against appearing on a `refs/pull/*` ref -- by rule 4 below,
+// still covered against appearing on either ref family -- by rule 4 below,
 // which matches on the raw key prefix and does not consult this list at all.
 // What is *not* covered for a key outside this list is rule 2's default-branch
 // presence requirement, which checks only the `{key, platform}` pairs in
@@ -68,6 +68,8 @@ export const CI_SHARED_KEYS = [
   "wasm",
   "semantic-mutation",
 ];
+
+const FORBIDDEN_SAVE_REF = /^refs\/(?:pull\/|heads\/gh-readonly-queue\/)/;
 
 // Entries whose absence on the default branch makes every pull request build
 // cold. Per-platform, not just per-key: `rust-native-z3` is a single shared
@@ -195,10 +197,9 @@ export function auditCacheBudget({
   // no per-entry breakdown to de-duplicate): at most one generation per
   // {sharedKey, platform} pair on the default branch is "current"; every
   // older generation in the same group is one `Swatinem/rust-cache` would not
-  // restore today. Every non-main entry -- including any `refs/pull/*` cache
-  // -- is left out of this grouping entirely (not merely "kept whole"): rules
-  // 3 and 4 below already judge those in full, and de-duplication logic must
-  // not touch the shape that caught the original #747 incident.
+  // restore today. Every non-main entry is left out of this grouping entirely.
+  // Rules 3 and 4 attribute Rust caches on PR and queue refs, not all non-main
+  // entries. Every ref's bytes remain in rule 1's raw physical total.
   const mainGenerationsByIdentity = new Map();
   for (const entry of caches) {
     if (entry.ref !== defaultBranchRef) continue;
@@ -359,43 +360,43 @@ export function auditCacheBudget({
     }
   }
 
-  // 3. No pull-request-scoped cache for a `ci.yml` shared key. This is the
+  // 3. No PR- or queue-scoped cache for a `ci.yml` shared key. This is the
   //    rejecting control for `save-if`: if the guard is removed, these reappear.
-  //    Generation-independent: a pull-request save is a violation under any
+  //    Generation-independent: either isolated-ref save is a violation under any
   //    `prefix-key`, current or superseded.
   const ciKeys = new Set(ciSharedKeys);
-  const attributedPullRequestEntries = new Set();
+  const attributedEntries = new Set();
   for (const entry of caches) {
-    if (!/^refs\/pull\//.test(entry.ref ?? "")) continue;
+    if (!FORBIDDEN_SAVE_REF.test(entry.ref ?? "")) continue;
     const { sharedKey } = entryIdentity(entry.key);
     if (sharedKey && ciKeys.has(sharedKey)) {
-      attributedPullRequestEntries.add(entry);
+      attributedEntries.add(entry);
       findings.push({
         code: "pull-request-cache-present",
         message: `\`${entry.ref}\` holds a cache for \`ci.yml\`'s shared key \`${sharedKey}\` (${formatGiB(
           entry.size_in_bytes ?? 0,
-        )}). This violates the current no-pull-request-save invariant. It may have been saved before the guard existed or may indicate a later guard regression; inspect created_at and workflow provenance.`,
+        )}). This violates the current no-PR-or-merge-group-save invariant. It may have been saved before the guard existed or may indicate a later guard regression; inspect created_at and workflow provenance.`,
       });
     }
   }
 
   // 4. Repository invariant since #752 and the `merge-readiness.yml`
-  //    restore-only fix: no workflow saves a rust cache on a pull-request
+  //    restore-only fix, extended by #1615: no Rust cache saves on a pull-request or merge-group
   //    event, full stop -- not just `CI_SHARED_KEYS`' three declared keys. Any
-  //    `v0-rust-*` key on a `refs/pull/*` ref is a violation of that current
+  //    `v<N>-rust-*` key on a PR or queue ref is a violation of that current
   //    invariant; it may predate the guard or indicate a later regression, so
   //    inspect `created_at` and workflow provenance. This applies whether it is
   //    a known shared key (already reported by rule 3 above, and skipped here to
   //    avoid a duplicate finding) or a new one.
   for (const entry of caches) {
-    if (attributedPullRequestEntries.has(entry)) continue;
-    if (!/^refs\/pull\//.test(entry.ref ?? "")) continue;
+    if (attributedEntries.has(entry)) continue;
+    if (!FORBIDDEN_SAVE_REF.test(entry.ref ?? "")) continue;
     if (!/^v\d+-rust-/.test(entry.key ?? "")) continue;
     findings.push({
       code: "pull-request-rust-cache-present",
       message: `\`${entry.ref}\` holds a rust cache \`${entry.key}\` (${formatGiB(
         entry.size_in_bytes ?? 0,
-      )}). No workflow may save a rust cache on a pull-request event; see docs/design/DESIGN-ci.md, "Actions cache budget".`,
+      )}). No workflow may save a rust cache on a pull-request or merge-group event; see docs/design/DESIGN-ci.md, "Actions cache budget".`,
     });
   }
 
@@ -404,7 +405,7 @@ export function auditCacheBudget({
 
 export function formatReport({ findings, informational = [], ok }) {
   const header = ok
-    ? "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches"
+    ? "cache budget audit: PASS -- budget within threshold, default-branch caches present, no PR- or queue-scoped Rust caches"
     : [
         `cache budget audit: FAIL -- ${findings.length} finding(s)`,
         ...findings.map((finding) => `  ${finding.code}: ${finding.message}`),
