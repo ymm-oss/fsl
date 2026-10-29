@@ -99,21 +99,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events, including `merge_group` on queue refs; this is not
-          # main-only. See the known open risk in docs/design/DESIGN-ci.md,
-          # "Merge queue adoption (2026-10-29)". The live audit's created_at order has no documented
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615).
+          # The live audit's created_at order has no documented
           # tie-breaker; a tied boundary can produce a duplicate ID, rejected immediately, or
           # different paired observations, which retry once and fail closed if still different;
           # an identical mixed state can repeat as an undetectable residual. See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
           # Cache key generation: `prefix-key` is the manual generation, bumped to
           # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
@@ -173,16 +172,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
           # Cache key generation: `prefix-key` is the manual generation, bumped to
           # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
@@ -327,16 +326,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
           # Cache key generation: `prefix-key` is the manual generation, bumped to
           # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
@@ -433,16 +432,16 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
           # Cache key generation: `prefix-key` is the manual generation, bumped to
           # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
@@ -520,16 +519,16 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
           # Cache key generation: `prefix-key` is the manual generation, bumped to
           # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
@@ -615,16 +614,16 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
           # Cache key generation: `prefix-key` is the manual generation, bumped to
           # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
@@ -683,16 +682,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
           # Cache key generation: `prefix-key` is the manual generation, bumped to
           # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`

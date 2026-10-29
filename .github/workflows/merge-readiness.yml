@@ -34,11 +34,12 @@ jobs:
           # (a) This workflow has no `push` trigger (see `on:` above) and never gains one
           # from `pull_request`/`merge_group` alone, so it has no path of its own to ever
           # save a main-branch copy. Guarding this step's own key with
-          # `save-if: ${{ github.event_name != 'pull_request' }}`, as `ci.yml` does, would
-          # leave every pull request permanently cold instead: the earlier fix in this
-          # branch made that mistake (see git history) before independent review caught
+          # `save-if: ${{ github.event_name != 'pull_request' &&
+          # github.event_name != 'merge_group' }}`, as `ci.yml` does, would
+          # leave every pull request permanently cold instead: an earlier PR-only guard
+          # made that mistake (see git history) before independent review caught
           # it. This job never saves at all and instead reads `ci.yml`'s `rust-workspace`
-          # entry, which successful non-pull-request `ci.yml` runs can populate.
+          # entry, which successful push/schedule/manual `ci.yml` runs can populate.
           # (b) Key derivation: `Swatinem/rust-cache` (`src/config.ts`) ignores `key` and
           # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
           # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
@@ -102,11 +103,12 @@ jobs:
           # (a) This workflow has no `push` trigger (see `on:` above) and never gains one
           # from `pull_request`/`merge_group` alone, so it has no path of its own to ever
           # save a main-branch copy. Guarding this step's own key with
-          # `save-if: ${{ github.event_name != 'pull_request' }}`, as `ci.yml` does, would
-          # leave every pull request permanently cold instead: the earlier fix in this
-          # branch made that mistake (see git history) before independent review caught
+          # `save-if: ${{ github.event_name != 'pull_request' &&
+          # github.event_name != 'merge_group' }}`, as `ci.yml` does, would
+          # leave every pull request permanently cold instead: an earlier PR-only guard
+          # made that mistake (see git history) before independent review caught
           # it. This job never saves at all and instead reads `ci.yml`'s `rust-workspace`
-          # entry, which successful non-pull-request `ci.yml` runs can populate.
+          # entry, which successful push/schedule/manual `ci.yml` runs can populate.
           # (b) Key derivation: `Swatinem/rust-cache` (`src/config.ts`) ignores `key` and
           # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
           # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace

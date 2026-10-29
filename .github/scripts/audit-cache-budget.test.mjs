@@ -58,7 +58,7 @@ function generationCoexistenceReport({ entries, staleGenerations, staleBytes, ef
   ).toFixed(2)} GiB. This is diagnostic visibility only, not subtracted from the budget judgment below; the listing and the independently-observed usage total are separate, non-atomic observations, so this split does not prove that either amount is in the usage total or that net-growth is repository-controllable.`;
 }
 const PASS_REPORT =
-  "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches\n" +
+  "cache budget audit: PASS -- budget within threshold, default-branch caches present, no PR- or queue-scoped Rust caches\n" +
   `  informational/generation-coexistence: ${generationCoexistenceReport({ entries: 5, staleGenerations: 0, staleBytes: 0, effectiveBytes: 7_836_593_125 })}`;
 const THRESHOLD_REPORT =
   "cache budget audit: FAIL -- 1 finding(s)\n" +
@@ -488,6 +488,44 @@ test("rejecting: a pull-request-scoped ci.yml cache requires provenance review",
   assert.match(finding.message, /rust-workspace/);
   assert.match(finding.message, /before the guard existed|later guard regression/);
 });
+
+for (const ref of ["refs/pull/9/merge", "refs/heads/gh-readonly-queue/main/pr-9-abc"]) {
+  for (const [key, code] of [
+    ["v1-rust-rust-workspace-Linux-x64-aaaa-bbbb", "pull-request-cache-present"],
+    ["v0-rust-unlisted-Linux-x64-aaaa-bbbb", "pull-request-rust-cache-present"],
+    ["v1-rust-unlisted-Linux-x64-aaaa-bbbb", "pull-request-rust-cache-present"],
+    ["v0-rust-rust-workspace-Linux-x64-aaaa-bbbb", "pull-request-cache-present"],
+  ]) {
+    test(`rejecting: isolated-ref attribution below budget: ${ref} ${key}`, () => {
+      const caches = [...healthyListing(), cacheBytes(key, ref, 1)];
+      assert.ok(usageOf(caches) < CACHE_LIMIT_BYTES * BUDGET_WARN_FRACTION);
+      const result = auditCacheBudget({ caches, usageBytes: usageOf(caches) });
+      assert.equal(result.ok, false);
+      assert.deepEqual(result.findings.map((finding) => finding.code), [code]);
+      assert.ok(result.findings[0].message.includes(ref));
+    });
+  }
+  test(`accepting: unrelated tool keys on ${ref}`, () => {
+    const tools = ["Linux-cargo-nextest-0.9.143", "Linux-wasm-bindgen-cli-0.2.126"];
+    const caches = [...healthyListing(), ...tools.map((key) => cacheBytes(key, ref, 1))];
+    assert.equal(auditCacheBudget({ caches, usageBytes: usageOf(caches) }).ok, true);
+  });
+}
+
+test("accepting: ordinary branch Rust caches are not forbidden saves", () => {
+  const caches = [...healthyListing(), cacheBytes("v1-rust-rust-workspace-Linux-x64-aaaa-bbbb", "refs/heads/feature", 1)];
+  assert.equal(auditCacheBudget({ caches, usageBytes: usageOf(caches) }).ok, true);
+});
+
+for (const ref of ["refs/heads/gh-readonly-queue/main/pr-9-abc", "refs/heads/feature"]) {
+  for (const laggingUsage of [false, true]) {
+    test(`rejecting: ${ref} bytes remain in the physical budget (lagging usage: ${laggingUsage})`, () => {
+      const caches = [...healthyListing(), cacheBytes("unrelated-tool", ref, 2 * GIB)];
+      const result = auditCacheBudget({ caches, usageBytes: usageOf(laggingUsage ? healthyListing() : caches) });
+      assert.deepEqual(result.findings.map((finding) => finding.code), ["budget-exhausted"]);
+    });
+  }
+}
 
 test("rejecting: pagination finds a forbidden PR Rust cache beyond the first 100 entries", async () => {
   const firstPage = withCacheIds(
@@ -1382,7 +1420,7 @@ test("retrying runner sends exact transport metadata for usage, every listing pa
   // entry, real or filler, reaches the audit), so it is asserted against the
   // actual listing length rather than the unrelated fixed constant.
   assert.deepEqual(reports, [
-    "cache budget audit: PASS -- budget within threshold, default-branch caches present, no pull-request-scoped Rust caches\n" +
+    "cache budget audit: PASS -- budget within threshold, default-branch caches present, no PR- or queue-scoped Rust caches\n" +
       `  informational/generation-coexistence: ${generationCoexistenceReport({ entries: listing.length, staleGenerations: 0, staleBytes: 0, effectiveBytes: usageOf(listing) })}`,
   ]);
   assert.deepEqual(errors, []);
@@ -1952,7 +1990,7 @@ test("formatReport fixes the complete default FAIL report count, order, and deli
       "  main-cache-absent: no `refs/heads/main` cache for shared key `semantic-mutation` on platform `Linux`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
       "  main-cache-absent: no `refs/heads/main` cache for shared key `rust-native-z3` on platform `Windows_NT`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
       "  main-cache-absent: no `refs/heads/main` cache for shared key `rust-native-z3` on platform `Darwin`. Actions caches are ref-scoped: a pull request can read its current ref, base branch, and default branch. For a main-targeting pull request those latter two are `refs/heads/main`; without this entry each such pull request (or, for a matrix job, that platform's shard) builds cold.",
-      "  pull-request-cache-present: `refs/pull/9/merge` holds a cache for `ci.yml`'s shared key `rust-workspace` (1.00 GiB). This violates the current no-pull-request-save invariant. It may have been saved before the guard existed or may indicate a later guard regression; inspect created_at and workflow provenance.",
+      "  pull-request-cache-present: `refs/pull/9/merge` holds a cache for `ci.yml`'s shared key `rust-workspace` (1.00 GiB). This violates the current no-PR-or-merge-group-save invariant. It may have been saved before the guard existed or may indicate a later guard regression; inspect created_at and workflow provenance.",
       `  informational/generation-coexistence: ${generationCoexistenceReport({ entries: 1, staleGenerations: 0, staleBytes: 0, effectiveBytes: 9_126_805_504 })}`,
     ].join("\n"),
   );
@@ -2075,10 +2113,9 @@ test("rejecting: a pull-request save under a superseded prefix is still a violat
   assert.deepEqual(result.findings.map((finding) => finding.code), ["pull-request-rust-cache-present"]);
 });
 
-// Workflow-side consistency (every rust-cache step passes `CURRENT_KEY_PREFIX`
-// and `FSL_CARGO_PROFILE_HASH`) is the parser-backed
-// `.github/scripts/validate_rust_cache_key.py`, calibrated by
-// tests/test_rust_cache_key.py, not a line scan here (docs/design/DESIGN-ci.md,
+// The parser-backed `.github/scripts/validate_rust_cache_key.py` checks key/hash
+// inputs, save-if policy and the exact restore-only set; tests/test_rust_cache_key.py
+// and the validator's --selftest calibrate it (docs/design/DESIGN-ci.md,
 // "Automation contracts use parser-backed workflow inspection").
 
 // Profile states of rust/Cargo.toml around #1379 and #1380, abridged to the
