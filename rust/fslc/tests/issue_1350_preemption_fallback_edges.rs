@@ -238,9 +238,9 @@ fn violated_initial_state_keeps_honest_note_instead_of_concrete_trace() {
     );
     assert_eq!(verified["violation_kind"], "type_bound");
     assert_eq!(verified["invariant"], "_bounds_x");
-    // The existing verify pre-pass first reports bounds on its d=0 step;
-    // the observed initial state is already invalid. Do not change verify.
-    assert_eq!(verified["violated_at_step"], 1);
+    // Verify now reports a violated initial state at step 0 with the initial
+    // state alone (#1591), matching the explain note below.
+    assert_eq!(verified["violated_at_step"], 0);
     assert_eq!(verified["trace"][0]["state"], json!({"x": 0}));
     let value = run_json(
         BAD_INIT,
