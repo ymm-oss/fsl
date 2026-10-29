@@ -5,9 +5,9 @@ mod common;
 #[path = "support/edition_dependency_cases.rs"]
 mod diagnostic;
 
-use common::{Results, Scratch};
+use common::{Results, Scratch, commit};
 use serde_json::{Value, json};
-use std::fmt::Write as _;
+use std::fmt::{Debug, Write as _};
 use std::process::Output;
 
 const COMPOSE: &str = "compose C { use S as s from \"dep.fsl\" @requirement(\"REQ-APPROVAL-001\",\"Keep\") invariant Reviewed { true } }\n";
@@ -15,7 +15,11 @@ const MAP: &str = "refinement M { impl S abs S map done = done action finish() -
 const COLON_MAP: &str = "refinement M {\n impl S\n abs S\n map done = forall i in 0..1: done\n action finish() -> finish()\n}\n";
 
 fn run(s: &Scratch, command: &str) -> Output {
-    common::command(env!("CARGO_BIN_EXE_fslc"), &s.0, command, true)
+    run_args(s, &common::split(command))
+}
+
+fn run_args(s: &Scratch, args: &[String]) -> Output {
+    common::invoke(env!("CARGO_BIN_EXE_fslc"), args, &s.0, true)
 }
 
 fn payload(output: &Output) -> Value {
@@ -65,6 +69,14 @@ fn finish(r: Results) {
     assert!(failures.is_empty(), "multi-root mismatches: {failures:?}");
 }
 
+fn equal<T: Debug + PartialEq + ?Sized>(r: &mut Results, label: &str, actual: &T, expected: &T) {
+    r.check(label, actual, expected, actual == expected);
+}
+
+fn bytes(s: &Scratch, path: &str) -> Vec<u8> {
+    std::fs::read(s.0.join(path)).unwrap()
+}
+
 fn canonical(r: &mut Results, s: &Scratch, command: &str, result: &str) -> Value {
     let output = run(s, command);
     let value = payload(&output);
@@ -109,78 +121,49 @@ fn relation(command: &str) -> Value {
     }
 }
 
-fn git(s: &Scratch, args: &[&str]) -> String {
-    let output = std::process::Command::new("git")
-        .args([
-            "-c",
-            "user.name=Edition Test",
-            "-c",
-            "user.email=edition@example.invalid",
-            "-c",
-            "commit.gpgsign=false",
-        ])
-        .args(args)
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .current_dir(&s.0)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "scratch git {args:?}: {output:?}");
-    String::from_utf8(output.stdout).unwrap().trim().into()
+fn canonical_relation(r: &mut Results, s: &Scratch, command: &str) -> Value {
+    let expected = relation(command);
+    canonical(r, s, command, expected["result"].as_str().unwrap());
+    expected
 }
 
-fn commit(s: &Scratch, files: &[&str]) -> String {
-    git(s, &["init", "-q"]);
-    let mut args = vec!["add", "--"];
-    args.extend(files);
-    git(s, &args);
-    git(s, &["commit", "-qm", "fixture revision"]);
-    git(s, &["rev-parse", "HEAD"])
+fn write_files(s: &Scratch, paths: &[&str], source: &str) {
+    for path in paths {
+        s.write(path, source);
+    }
 }
 
 #[test]
 fn positional_metadata_warnings_and_intermediate_reuse() {
     let mut r = Results::default();
-    for (command, slots, result) in [
-        (
-            "diff a.fsl b.fsl --depth 2",
-            vec!["a.fsl", "b.fsl"],
-            "semantic_diff",
-        ),
+    for (command, slots) in [
+        ("diff a.fsl b.fsl --depth 2", vec!["a.fsl", "b.fsl"]),
         (
             "diff a.fsl b.fsl --mapping map.fsl --depth 2",
             vec!["a.fsl", "b.fsl"],
-            "semantic_diff",
         ),
         (
             "refine a.fsl b.fsl map.fsl --depth 2",
             vec!["a.fsl", "b.fsl"],
-            "refines",
         ),
         (
             "refine a.fsl b.fsl map.fsl c.fsl map2.fsl --depth 2",
             vec!["a.fsl", "b.fsl", "c.fsl"],
-            "refines",
         ),
-        (
-            "diff a.fsl a.fsl --depth 2",
-            vec!["a.fsl", "a.fsl"],
-            "semantic_diff",
-        ),
+        ("diff a.fsl a.fsl --depth 2", vec!["a.fsl", "a.fsl"]),
         (
             "refine a.fsl a.fsl map.fsl --depth 2",
             vec!["a.fsl", "a.fsl"],
-            "refines",
         ),
     ] {
         let s = Scratch::new();
-        for name in ["a.fsl", "b.fsl", "c.fsl"] {
-            s.write(name, &diagnostic::annotated(diagnostic::LEAF));
-        }
-        s.write("map.fsl", MAP);
-        s.write("map2.fsl", MAP);
-        canonical(&mut r, &s, command, result);
-        let baseline = relation(command);
+        write_files(
+            &s,
+            &["a.fsl", "b.fsl", "c.fsl"],
+            &diagnostic::annotated(diagnostic::LEAF),
+        );
+        write_files(&s, &["map.fsl", "map2.fsl"], MAP);
+        let baseline = canonical_relation(&mut r, &s, command);
         for header in ["", "fsl 4\n", "fsl 5\n"] {
             for legacy in [false, true] {
                 // A next primary must be canonical; the secondary may be current
@@ -219,8 +202,7 @@ fn positional_metadata_warnings_and_intermediate_reuse() {
 fn secondary_mapping_warning_and_refusal_are_not_model_errors() {
     let mut r = Results::default();
     let s = Scratch::new();
-    s.write("a.fsl", diagnostic::LEAF);
-    s.write("b.fsl", diagnostic::LEAF);
+    write_files(&s, &["a.fsl", "b.fsl"], diagnostic::LEAF);
     let mapping = COLON_MAP.to_owned();
     let repaired = mapping.replace(": done", " { done }");
     for command in [
@@ -228,35 +210,35 @@ fn secondary_mapping_warning_and_refusal_are_not_model_errors() {
         "refine a.fsl b.fsl map.fsl --depth 2",
     ] {
         s.write("map.fsl", &repaired);
-        canonical(
-            &mut r,
-            &s,
-            command,
-            if command.starts_with("diff") {
-                "semantic_diff"
-            } else {
-                "refines"
-            },
-        );
-        let baseline = relation(command);
-        s.write("map.fsl", &mapping);
-        let findings = diagnostic::findings(&mapping, "map.fsl", "current");
-        expect(
-            &mut r,
-            &format!("mapping/warning/{command}"),
-            &run(&s, command),
-            admitted(baseline, "", findings),
-            0,
-        );
+        let baseline = canonical_relation(&mut r, &s, command);
         let rejected = format!("fsl 5\n{mapping}");
-        s.write("map.fsl", &rejected);
-        expect(
-            &mut r,
-            &format!("mapping/refusal/{command}"),
-            &run(&s, command),
-            diagnostic::cli_refusal(&rejected, "map.fsl"),
-            2,
-        );
+        for (label, source, expected, exit) in [
+            (
+                "warning",
+                mapping.as_str(),
+                admitted(
+                    baseline,
+                    "",
+                    diagnostic::findings(&mapping, "map.fsl", "current"),
+                ),
+                0,
+            ),
+            (
+                "refusal",
+                rejected.as_str(),
+                diagnostic::cli_refusal(&rejected, "map.fsl"),
+                2,
+            ),
+        ] {
+            s.write("map.fsl", source);
+            expect(
+                &mut r,
+                &format!("mapping/{label}/{command}"),
+                &run(&s, command),
+                expected,
+                exit,
+            );
+        }
     }
     finish(r);
 }
@@ -320,9 +302,7 @@ fn batch_scopes_are_per_file_and_project_is_not_a_primary_fsl_root() {
     let mut r = Results::default();
     let s = Scratch::new();
     s.write("dep.fsl", &diagnostic::annotated(diagnostic::LEAF));
-    for file in ["a.fsl", "b.fsl"] {
-        s.write(file, COMPOSE);
-    }
+    write_files(&s, &["a.fsl", "b.fsl"], COMPOSE);
     s.write("project.toml", "[design]\nfile = \"a.fsl\"\n");
     let a = canonical(&mut r, &s, "analyze a.fsl --projection tsg", "analyzed");
     let b = canonical(&mut r, &s, "analyze b.fsl --projection tsg", "analyzed");
@@ -339,8 +319,6 @@ fn batch_scopes_are_per_file_and_project_is_not_a_primary_fsl_root() {
         } else {
             "analyze b.fsl a.fsl a.fsl --projection tsg"
         };
-        let first = if mixed { &project } else { &a };
-        let first_name = if mixed { "project.toml" } else { "a.fsl" };
         let b = if mixed {
             json!({"fsl":"1.0","result":"error","kind":"semantics","message":"unsupported projection: traceability_graph"})
         } else {
@@ -353,38 +331,37 @@ fn batch_scopes_are_per_file_and_project_is_not_a_primary_fsl_root() {
         } else {
             vec![]
         };
-        let entries = if mixed {
-            vec![batch_entry("b.fsl", &b), batch_entry(first_name, first)]
+        let ordered = if mixed {
+            vec![("b.fsl", b), ("project.toml", project.clone())]
         } else {
-            vec![batch_entry(first_name, first), batch_entry("b.fsl", &b)]
+            vec![("a.fsl", a.clone()), ("b.fsl", b)]
+        };
+        let entries = |warning: Option<&Value>| {
+            ordered
+                .iter()
+                .map(|(file, value)| {
+                    let mut entry = batch_entry(file, value);
+                    if let Some(finding) = warning {
+                        entry["warnings"] = json!([finding]);
+                    }
+                    entry
+                })
+                .collect()
         };
         expect(
             &mut r,
             &format!("preserved/batch/{mixed}"),
             &run(&s, command),
-            batch(entries, errors.clone(), projection),
+            batch(entries(None), errors.clone(), projection),
             if mixed { 2 } else { 0 },
         );
         s.write("dep.fsl", diagnostic::LEGACY_LEAF);
         let finding = warning(diagnostic::LEGACY_LEAF, "dep.fsl");
-        let first = diagnostic::with_child_warnings(first.clone(), vec![finding.clone()]);
-        let second = diagnostic::with_child_warnings(b.clone(), vec![finding]);
-        let entries = if mixed {
-            vec![
-                batch_entry("b.fsl", &second),
-                batch_entry(first_name, &first),
-            ]
-        } else {
-            vec![
-                batch_entry(first_name, &first),
-                batch_entry("b.fsl", &second),
-            ]
-        };
         expect(
             &mut r,
             &format!("batch/two-independent-warning-owners/{mixed}"),
             &run(&s, command),
-            batch(entries, errors, projection),
+            batch(entries(Some(&finding)), errors, projection),
             if mixed { 2 } else { 0 },
         );
         s.write("dep.fsl", &diagnostic::annotated(diagnostic::LEAF));
@@ -426,9 +403,11 @@ fn project_direct_roots_mapping_and_empty_project_have_warning_only_metadata() {
     let mut r = Results::default();
     let s = Scratch::new();
     s.write("project.toml", "[requirements]\nfile = \"a.fsl\"\n[design]\nfile = \"b.fsl\"\nrefine_against = \"requirements\"\nmapping = \"map.fsl\"\n");
-    for file in ["a.fsl", "b.fsl"] {
-        s.write(file, &diagnostic::annotated(diagnostic::LEAF));
-    }
+    write_files(
+        &s,
+        &["a.fsl", "b.fsl"],
+        &diagnostic::annotated(diagnostic::LEAF),
+    );
     s.write("map.fsl", MAP);
     let command = "analyze project.toml --projection traceability_graph";
     let baseline = canonical(&mut r, &s, command, "analyzed");
@@ -457,9 +436,11 @@ fn project_direct_roots_mapping_and_empty_project_have_warning_only_metadata() {
             0,
         );
     }
-    for name in ["a.fsl", "b.fsl"] {
-        s.write(name, &diagnostic::annotated(diagnostic::LEAF));
-    }
+    write_files(
+        &s,
+        &["a.fsl", "b.fsl"],
+        &diagnostic::annotated(diagnostic::LEAF),
+    );
     s.write("map.fsl", &COLON_MAP.replace(": done", " { done }"));
     let mapped = canonical(&mut r, &s, command, "analyzed");
     s.write("map.fsl", COLON_MAP);
@@ -549,20 +530,26 @@ fn direct_diff_refine_and_multilink_own_complete_child_refusals() {
         "refine a.fsl b.fsl map.fsl c.fsl map.fsl --depth 2",
     ] {
         let s = Scratch::new();
-        for name in ["a.fsl", "b.fsl", "c.fsl"] {
-            s.write(name, COMPOSE);
-        }
+        write_files(&s, &["a.fsl", "b.fsl", "c.fsl"], COMPOSE);
         s.write("map.fsl", "refinement M { impl C abs C maps auto }\n");
         s.write("dep.fsl", diagnostic::LEAF);
-        canonical(
+        let baseline = canonical(
             &mut r,
             &s,
             command,
-            if command.starts_with("diff") {
-                "semantic_diff"
-            } else {
-                "refines"
-            },
+            relation(command)["result"].as_str().unwrap(),
+        );
+        s.write("dep.fsl", diagnostic::LEGACY_LEAF);
+        expect(
+            &mut r,
+            &format!("child-warning/{command}"),
+            &run(&s, command),
+            admitted(
+                baseline,
+                "",
+                vec![warning(diagnostic::LEGACY_LEAF, "dep.fsl")],
+            ),
+            0,
         );
         let child = diagnostic::next_leaf();
         s.write("dep.fsl", &child);
@@ -582,23 +569,32 @@ fn direct_diff_refine_and_multilink_own_complete_child_refusals() {
 fn direct_consumers_use_the_captured_stream_instead_of_reopening_it() {
     let mut r = Results::default();
     let s = Scratch::new();
-    s.write("a.fsl", diagnostic::LEAF);
-    s.write("b.fsl", diagnostic::LEAF);
     s.write("map.fsl", MAP);
-    for command in [
-        "diff a.fsl b.fsl --depth 2",
-        "refine a.fsl b.fsl map.fsl --depth 2",
+    for (command, source) in [
+        ("diff a.fsl b.fsl --depth 2", diagnostic::LEAF),
+        ("refine a.fsl b.fsl map.fsl --depth 2", diagnostic::LEAF),
+        (
+            "diff a.fsl b.fsl --depth 2",
+            "requirements S { number Amount const LO = 0 const HI = 2 state { amount: Amount } init { amount = 0 } }\nverify { values Amount = LO..HI }\n",
+        ),
     ] {
-        let mut expected = canonical(
-            &mut r,
-            &s,
-            command,
-            if command.starts_with("diff") {
-                "semantic_diff"
-            } else {
-                "refines"
-            },
-        );
+        s.write("a.fsl", source);
+        s.write("b.fsl", &source.replace("HI = 2", "HI = 5"));
+        let mut expected = canonical_relation(&mut r, &s, command);
+        let mode = if source == diagnostic::LEAF {
+            ""
+        } else {
+            "scoped/"
+        };
+        if !mode.is_empty() {
+            let old = json!({"instances":{},"values":{"Amount":[0,2]}});
+            let new = json!({"instances":{},"values":{"Amount":[0,5]}});
+            expected["scope"] =
+                json!({"old":old,"new":new,"comparison":"new","applied_to_old":new});
+            expected["findings"] =
+                json!([{"kind":"scope_changed","old":old,"new":new,"comparison":"new"}]);
+            expected["summary"] = json!(["scope_changed"]);
+        }
         if command.starts_with("diff") {
             expected["old"]["file"] = json!("/dev/stdin");
         }
@@ -607,11 +603,11 @@ fn direct_consumers_use_the_captured_stream_instead_of_reopening_it() {
             env!("CARGO_BIN_EXE_fslc"),
             &common::split(&command),
             &s.0,
-            &format!("fsl 5\n{}", diagnostic::LEAF),
+            &format!("fsl 5\n{source}"),
         );
         expect(
             &mut r,
-            &format!("capture/{command}"),
+            &format!("capture/{mode}{command}"),
             &actual,
             admitted(expected, "fsl 5\n", vec![]),
             0,
@@ -624,9 +620,11 @@ fn direct_consumers_use_the_captured_stream_instead_of_reopening_it() {
 fn failed_multilink_finishes_all_explicit_slots_only_once() {
     let mut r = Results::default();
     let s = Scratch::new();
-    for name in ["a.fsl", "b.fsl", "c.fsl"] {
-        s.write(name, &diagnostic::annotated(diagnostic::LEAF));
-    }
+    write_files(
+        &s,
+        &["a.fsl", "b.fsl", "c.fsl"],
+        &diagnostic::annotated(diagnostic::LEAF),
+    );
     s.write("map.fsl", MAP);
     s.write(
         "bad-map.fsl",
@@ -669,21 +667,24 @@ fn git_mapping_origin_distinguishes_live_from_materialized_inputs() {
     let mapping = COLON_MAP.to_owned();
     let rejected = format!("fsl 5\n{mapping}");
     for absolute in [false, true] {
-        let path = s.write("live-map.fsl", &rejected);
+        let path = s.write("live map.fsl", &rejected);
         let path = if absolute {
             path.to_str().unwrap().to_owned()
         } else {
-            "live-map.fsl".into()
+            "live map.fsl".into()
         };
-        let command = format!("diff --git {first}..{second} root.fsl --mapping {path} --depth 2");
+        let mut command =
+            common::split(&format!("diff --git {first}..{second} root.fsl --mapping"));
+        command.push(path.clone());
+        command.extend(common::split("--depth 2"));
         expect(
             &mut r,
             &format!("git/live-mapping/{absolute}"),
-            &run(&s, &command),
+            &run_args(&s, &command),
             diagnostic::cli_refusal(&rejected, &path),
             2,
         );
-        s.write("live-map.fsl", COLON_MAP);
+        s.write("live map.fsl", COLON_MAP);
         let mut expected = git_diff(&first, &second);
         expected = diagnostic::with_child_warnings(
             expected,
@@ -692,7 +693,7 @@ fn git_mapping_origin_distinguishes_live_from_materialized_inputs() {
         expect(
             &mut r,
             &format!("git/live-mapping-warning/{absolute}"),
-            &run(&s, &command),
+            &run_args(&s, &command),
             expected,
             0,
         );
@@ -782,6 +783,30 @@ fn chain_grouping_and_step_share_one_captured_root_stream() {
     finish(r);
 }
 
+fn assert_chain_shape(value: &Value, files: [&str; 2], kind: &str, refine: bool) {
+    let result = if kind == "verify" { "verified" } else { "ok" };
+    let mut expected = Vec::new();
+    for (layer, file) in [("requirements", files[0]), ("design", files[1])] {
+        let mut step = json!({"layer":layer,"kind":kind,"file":file,"status":"passed","result":result,"exit_code":0,"detail":{"result":result}});
+        if kind == "verify" {
+            step["depth"] = json!(2);
+        }
+        expected.push(step);
+    }
+    if refine {
+        expected.push(json!({"layer":"design->requirements","kind":"refine","file":"./b.fsl","against":"requirements","abs_file":"./a.fsl","mapping":"./map.fsl","depth":2,"status":"passed","result":"refines","exit_code":0,"detail":{"result":"refines"}}));
+    }
+    // This extra topology assertion projects details; full result comparisons below do not.
+    let mut actual = value["layers"].as_array().unwrap().clone();
+    for step in &mut actual {
+        step["detail"] = json!({"result":step["detail"]["result"]});
+    }
+    assert_eq!(
+        actual, expected,
+        "independent chain wrappers and detail kinds"
+    );
+}
+
 #[test]
 fn chain_dependency_delivery_is_inside_each_actual_step_thread() {
     let mut r = Results::default();
@@ -795,6 +820,12 @@ fn chain_dependency_delivery_is_inside_each_actual_step_thread() {
             s.write("chain.toml", &format!("[requirements]\nfile = \"a.fsl\"\n{depth}[design]\nfile = \"b.fsl\"\n{depth}refine_against = \"requirements\"\nmapping = \"map.fsl\"\nrefine_depth = 2\n"));
             let command = format!("chain chain.toml --jobs {jobs} --keep-going");
             let baseline = canonical(&mut r, &s, &command, "verified");
+            assert_chain_shape(
+                &baseline,
+                ["./a.fsl", "./b.fsl"],
+                if depth.is_empty() { "check" } else { "verify" },
+                true,
+            );
             s.write("dep.fsl", diagnostic::LEGACY_LEAF);
             let mut expected = baseline.clone();
             for layer in expected["layers"].as_array_mut().unwrap() {
@@ -859,6 +890,7 @@ fn chain_duplicate_grouping_keeps_root_warnings_on_cold_and_warm_cache() {
         );
         let command = format!("chain cache.toml --jobs {jobs}");
         let mut expected = canonical(&mut r, &s, &command, "verified");
+        assert_chain_shape(&expected, ["./a.fsl", "./a.fsl"], "verify", false);
         let source = format!("fsl 4\n{}", diagnostic::LEGACY_LEAF);
         s.write("a.fsl", &source);
         for layer in expected["layers"].as_array_mut().unwrap() {
@@ -1009,7 +1041,7 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                         &String::from_utf8(generated.stdout).unwrap(),
                     );
                 }
-                let artifact = std::fs::read(s.0.join("artifact.out")).unwrap();
+                let artifact = bytes(&s, "artifact.out");
                 // Fresh standalone bytes are supplied without stripping warnings.
                 // A nested renderer which loses diagnostics must fail this roundtrip.
                 let command = format!(
@@ -1035,9 +1067,7 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                 if !s.0.join("record.json").is_file() {
                     continue; // The failed create is already a strict red cell.
                 }
-                let record: Value =
-                    serde_json::from_slice(&std::fs::read(s.0.join("record.json")).unwrap())
-                        .unwrap();
+                let record: Value = serde_json::from_slice(&bytes(&s, "record.json")).unwrap();
                 let expected_create = admitted(
                     json!({"fsl":"1.0","result":"created","kind":"approval_record","output":"record.json","record":record}),
                     "",
@@ -1058,17 +1088,15 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                         && approved_at.bytes().filter(u8::is_ascii_digit).count() == 14,
                     "live record timestamp"
                 );
-                r.check(
+                equal(
+                    &mut r,
                     &format!("approval/{kind_label}/binding"),
-                    (
-                        &record["spec"]["git_commit"],
-                        &record["spec"]["path"],
-                        &record["target"]["kind"],
-                    ),
-                    (&revision, "root.fsl", kind),
-                    record["spec"]["git_commit"] == revision
-                        && record["spec"]["path"] == "root.fsl"
-                        && record["target"]["kind"] == kind,
+                    &json!([
+                        record["spec"]["git_commit"],
+                        record["spec"]["path"],
+                        record["target"]["kind"]
+                    ]),
+                    &json!([revision, "root.fsl", kind]),
                 );
                 if matches!(kind, "ledger" | "scenarios") {
                     let normalized = if kind == "scenarios" {
@@ -1081,11 +1109,11 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                     } else {
                         artifact.clone()
                     };
-                    r.check(
+                    equal(
+                        &mut r,
                         &format!("approval/{kind_label}/artifact-digest"),
                         &record["target"]["digest"],
-                        sha(&normalized),
-                        record["target"]["digest"] == sha(&normalized),
+                        &json!(sha(&normalized)),
                     );
                 }
                 let trust = if signed { "--trust-key public.pem" } else { "" };
@@ -1116,7 +1144,7 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                         "ledger root.fsl --depth 2 --approval record.json -o overlay.md {trust}"
                     );
                     let first = run(&s, &command);
-                    let first_artifact = std::fs::read(s.0.join("overlay.md")).unwrap();
+                    let first_artifact = bytes(&s, "overlay.md");
                     let second = run(&s, &command);
                     expect(
                         &mut r,
@@ -1126,11 +1154,11 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                         0,
                     );
                     let overlay = std::fs::read_to_string(s.0.join("overlay.md")).unwrap();
-                    r.check(
+                    equal(
+                        &mut r,
                         &format!("approval/{kind_label}/overlay-full-artifact"),
                         overlay.as_bytes(),
-                        &first_artifact,
-                        overlay.as_bytes() == first_artifact,
+                        first_artifact.as_slice(),
                     );
                     r.check(
                         &format!("approval/{kind_label}/overlay-status"),
@@ -1140,13 +1168,32 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                             && overlay.contains("legacy_string_metadata") == legacy,
                     );
                 }
-                let after = std::fs::read(s.0.join("artifact.out")).unwrap();
-                r.check(
+                equal(
+                    &mut r,
                     &format!("approval/{kind_label}/artifact-unchanged"),
-                    &after,
+                    &bytes(&s, "artifact.out"),
                     &artifact,
-                    after == artifact,
                 );
+                if kind == "scenarios" && !signed && !legacy {
+                    let mut expected = relation("diff root.fsl root.fsl --depth 2");
+                    for side in ["old", "new"] {
+                        expected[side]["spec"] = json!("C");
+                    }
+                    expected["old"]["file"] = json!(format!("{revision}:root.fsl"));
+                    expected["approval"] = json!({"record":"record.json","baseline_digest":record["spec"]["digest"],"baseline_commit":revision,"signature_status":"unsigned","key_id":null});
+                    s.write("dep.fsl", diagnostic::LEGACY_LEAF);
+                    expect(
+                        &mut r,
+                        "approval-diff/accepted-child-warning",
+                        &run(&s, "approval diff root.fsl --record record.json --depth 2"),
+                        admitted(
+                            expected,
+                            "",
+                            vec![warning(diagnostic::LEGACY_LEAF, "dep.fsl")],
+                        ),
+                        0,
+                    );
+                }
             }
         }
     }
