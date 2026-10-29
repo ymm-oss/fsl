@@ -774,7 +774,7 @@ fn free_scalar_init_preserves_symbolic_bound_violations() {
     // not permission for the symbolic engines to discard its free valuations.
     concrete_initial_error(
         &case,
-        "init references state variable 'x' before it is assigned",
+        "the explicit engine does not support a free initial value of state variable 'x' (nondeterministic init); use --engine bmc",
         &mut errors,
     );
     finish(&errors);
