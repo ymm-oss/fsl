@@ -2681,6 +2681,13 @@ abs が <code>fair</code> で保証した進行を impl が落としても、結
 メタデータで、impl の action を名指ししなければなりません。公平性を作ることも、
 実装のコンフォーマンスを証明することもありません。公平性は依然として下位レイヤーの
 <code>fair action</code> 宣言から来ます。
+引き込んだ名前は抽象の scope を保ちます。抽象の Int/Bool 定数は P/Q、<code>decreases</code>、
+バインダーの範囲とフィルターでリテラルになり、バインダーは同名の抽象 state map を隠します。
+impl の定数と同名のバインダー、または map が導入する impl の名前を捕まえる外側の
+プロパティバインダーは、<code>respond</code> の位置つきエラー(exit 2、<code>kind:"type"</code>、<code>loc</code> あり)
+で拒否し、改名したバインダーを公開しません。抽象の定数を範囲で読む違反で impl の
+定数を改名した形と、抽象の定数を本体で読み impl に同名がない違反は、従来の exit 2
+エラーから exit 1 <code>progress_lost</code> に変わります。
 非有界の証明には、引き続き下位レイヤーの <code>leadsTo ... decreases ...</code> と
 <code>verify --engine induction</code> を使ってください。</p></div></details>
 <details id="11-composition-compose"><summary>11. 合成(compose)<span class="tree-blurb"> — 名前空間と同期アクションによるスペックの合成。</span></summary><div class="tree-body"><p>検証済みのいくつかのコンポーネント spec を、<strong>名前空間つきで</strong> 1 つのシステム仕様
