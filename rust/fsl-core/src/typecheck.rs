@@ -446,7 +446,24 @@ fn infer_type_inner(
                 TypeRef::Bool
             },
         ),
-        Expr::Conditional { then_expr, .. } => infer_type(then_expr, env, model, expected),
+        Expr::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let ty = infer_type(then_expr, env, model, expected)?;
+            if expected.is_none() && has_int(&ty) {
+                let other = infer_type(else_expr, env, model, None)?;
+                if matches!(
+                    (&ty, &other),
+                    (TypeRef::Set(_), TypeRef::Set(_)) | (TypeRef::Seq(_, _), TypeRef::Seq(_, _))
+                ) && !has_int(&carrier_type(&other, model)?)
+                {
+                    return Ok(other);
+                }
+            }
+            Ok(ty)
+        }
         Expr::UnaryNamed { name, expr, .. } => match name.as_str() {
             "old" => infer_type(expr, env, model, expected),
             "abs" => Ok(TypeRef::Int),
