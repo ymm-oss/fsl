@@ -413,9 +413,11 @@ fn progress_collision(
         {
             return Some(name.clone());
         }
-        if let Expr::Binary { left, right, .. } = expr {
+        if let Expr::Binary { op, left, right } = expr
+            && crate::pattern_binding_flows(op, true)
+        {
             let mut names = HashSet::new();
-            crate::compose::extend_pattern_names(left, &mut names);
+            crate::compose::extend_pattern_names(left, &mut names, false);
             if let Some(name) = names.into_iter().find(|name| captures(right, name, maps)) {
                 return Some(name);
             }

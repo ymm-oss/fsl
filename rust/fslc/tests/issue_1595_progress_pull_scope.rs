@@ -194,21 +194,18 @@ cells! {
     s4c: ("", "", "forall w in 2..3 { w == 2 ~> w == 3 }", Lost(json!({"w": 2}))),
 }
 
-fn review(
-    cell: &str,
-    implementation: &str,
-    abstraction: &str,
-    maps: &str,
-    expected: i32,
-    abs_exit: Option<i32>,
-) {
+fn review(cell: &str, sources: (&str, &str, &str), expectation: (i32, Option<i32>)) {
+    let (implementation, abstraction, maps) = sources;
+    let (expected, abs_exit) = expectation;
     let mapping = format!(
         "refinement R {{ impl Impl abs Abs {maps} preserve progress {{ respond L by go }} }}"
     );
     let fixture = Fixture::sources(implementation, abstraction, &mapping);
-    for ((actual, exit), (_, abstract_exit)) in fixture.observations(cell) {
+    for ((actual, exit), (abs, abstract_exit)) in fixture.observations(cell) {
         if let Some(expected) = abs_exit {
             assert_eq!(abstract_exit, expected);
+            let expected = usize::try_from(expected).unwrap();
+            assert_eq!(abs["result"], ["verified", "violated", "error"][expected]);
         }
         assert_eq!(exit, expected, "{actual:#}");
         match expected {
@@ -231,13 +228,16 @@ fn review(
 
 macro_rules! review_cells {
     ($($name:ident: ($i:expr, $a:expr, $m:expr, $exit:expr, $abs:expr)),* $(,)?) => {
-        $(#[test] fn $name() { review(stringify!($name), $i, $a, $m, $exit, $abs); })*
+        $(#[test] fn $name() { review(stringify!($name), ($i, $a, $m), ($exit, $abs)); })*
     };
 }
 review_cells! {
     r1_pattern_capture: ("spec Impl { type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
         "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(x)) and y==x)} }",
         "map y=x map o=p action go()->step()", 2, Some(1)),
+    r1_pattern_or: ("spec Impl { type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
+        "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(x)) or y==3)} }",
+        "map y=x map o=p action go()->step()", 0, Some(0)),
     r1_pattern_const: ("spec Impl { type V=0..5 const N=1 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
         "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(N)) and (forall k in 0..N {k<=1}))} }",
         "map y=x map o=p action go()->step()", 2, Some(2)),
