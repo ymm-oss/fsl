@@ -732,6 +732,184 @@ fn git_diff(first: &str, second: &str) -> Value {
     value
 }
 
+#[test]
+fn inactive_project_target_never_prepares_its_mapping() {
+    let mut r = Results::default();
+    let s = Scratch::new();
+    write_files(
+        &s,
+        &["a.fsl", "b.fsl"],
+        &diagnostic::annotated(diagnostic::LEAF),
+    );
+    s.write("project.toml", "[design]\nfile = \"a.fsl\"\n");
+    let command = "analyze project.toml --projection traceability_graph";
+    let expected = canonical(&mut r, &s, command, "analyzed");
+    s.write("ignored.fsl", "not valid FSL");
+    s.write("project.toml", "[design]\nfile = \"a.fsl\"\nrefine_against = \"external\"\nmapping = \"unused.fsl\"\n[external]\nfile = \"ignored.fsl\"\n");
+    let rejected = format!("fsl 5\n{COLON_MAP}");
+    for (label, source) in [
+        ("absent", None),
+        ("legacy", Some(COLON_MAP)),
+        ("next", Some(rejected.as_str())),
+    ] {
+        if let Some(source) = source {
+            s.write("unused.fsl", source);
+        }
+        expect(
+            &mut r,
+            &format!("inactive-project/{label}"),
+            &run(&s, command),
+            expected.clone(),
+            0,
+        );
+    }
+    s.write("project.toml", "[requirements]\nfile = \"b.fsl\"\n[design]\nfile = \"a.fsl\"\nrefine_against = \"requirements\"\nmapping = \"unused.fsl\"\n");
+    s.write("unused.fsl", &COLON_MAP.replace(": done", " { done }"));
+    let active = canonical(&mut r, &s, command, "analyzed");
+    s.write("unused.fsl", COLON_MAP);
+    expect(
+        &mut r,
+        "active-project/warning",
+        &run(&s, command),
+        admitted(
+            active,
+            "",
+            diagnostic::findings(COLON_MAP, "unused.fsl", "current"),
+        ),
+        0,
+    );
+    s.write("unused.fsl", &rejected);
+    expect(
+        &mut r,
+        "active-project/refusal",
+        &run(&s, command),
+        diagnostic::cli_refusal(&rejected, "unused.fsl"),
+        2,
+    );
+    finish(r);
+}
+
+fn git_batch(first: &str, second: &str, warnings: Vec<Value>) -> Value {
+    let template = git_diff(first, second);
+    let comparisons = ["a.fsl", "b.fsl"]
+        .iter()
+        .map(|file| {
+            let mut value = template.clone();
+            value["old"]["file"] = json!(format!("{first}:{file}"));
+            value["new"]["file"] = json!(format!("{second}:{file}"));
+            admitted(value, "", warnings.clone())
+        })
+        .collect::<Vec<_>>();
+    json!({"fsl":"1.0","result":"semantic_diff_batch","vcs":template["vcs"],"specs":["a.fsl","b.fsl"],"comparisons":comparisons,"gate":{"violations":[],"passed":true}})
+}
+
+#[cfg(unix)]
+#[test]
+fn git_batch_borrows_one_live_mapping_for_every_comparison() {
+    let mut r = Results::default();
+    let s = Scratch::new();
+    write_files(&s, &["a.fsl", "b.fsl"], diagnostic::LEAF);
+    let first = commit(&s, &["a.fsl", "b.fsl"]);
+    write_files(&s, &["a.fsl", "b.fsl"], &format!("{}\n", diagnostic::LEAF));
+    let second = commit(&s, &["a.fsl", "b.fsl"]);
+    for (label, source) in [("canonical", MAP), ("warning", COLON_MAP)] {
+        let path = s.write("live map.fsl", source);
+        for stream in [false, true] {
+            let mapping = if stream {
+                "/dev/stdin"
+            } else {
+                path.to_str().unwrap()
+            };
+            let mut args =
+                common::split(&format!("diff --git {first}..{second} --depth 2 --mapping"));
+            args.push(mapping.into());
+            let warnings = if label == "warning" {
+                diagnostic::findings(source, mapping, "current")
+            } else {
+                vec![]
+            };
+            for single in [false, true] {
+                let mut expected = git_batch(&first, &second, warnings.clone());
+                let mut selected = args.clone();
+                if single {
+                    selected.insert(3, "a.fsl".into());
+                    expected = expected["comparisons"][0].clone();
+                }
+                let actual = if stream {
+                    common::invoke_input(env!("CARGO_BIN_EXE_fslc"), &selected, &s.0, source)
+                } else {
+                    run_args(&s, &selected)
+                };
+                expect(
+                    &mut r,
+                    &format!("git-batch/{label}/{stream}/{single}"),
+                    &actual,
+                    expected,
+                    0,
+                );
+            }
+        }
+    }
+    let missing = s.0.join("missing-map.fsl");
+    let mut expected = git_batch(&first, &second, vec![]);
+    for value in expected["comparisons"].as_array_mut().unwrap() {
+        *value = json!({"fsl":"1.0","result":"error","kind":"io","message":std::io::Error::from_raw_os_error(2).to_string(),"old":{"file":value["old"]["file"],"spec":null},"new":{"file":value["new"]["file"],"spec":null},"vcs":value["vcs"]});
+    }
+    expect(
+        &mut r,
+        "git-batch/mapping-io-envelope",
+        &run_args(
+            &s,
+            &[
+                "diff".into(),
+                "--git".into(),
+                format!("{first}..{second}"),
+                "--mapping".into(),
+                missing.to_string_lossy().into_owned(),
+                "--depth".into(),
+                "2".into(),
+            ],
+        ),
+        expected,
+        2,
+    );
+    for (label, range, spec, message) in [
+        (
+            "empty",
+            format!("{first}..{first}"),
+            None,
+            "Git range contains no changed .fsl files",
+        ),
+        (
+            "missing",
+            format!("{first}..{second}"),
+            Some("missing.fsl"),
+            "'missing.fsl' must exist in both revisions for semantic diff",
+        ),
+    ] {
+        let mut args = common::split(&format!(
+            "diff --git {range} --mapping /dev/stdin --depth 2"
+        ));
+        if let Some(spec) = spec {
+            args.insert(3, spec.into());
+        }
+        let actual = common::invoke_input(
+            env!("CARGO_BIN_EXE_fslc"),
+            &args,
+            &s.0,
+            &format!("fsl 5\n{COLON_MAP}"),
+        );
+        expect(
+            &mut r,
+            &format!("git-batch/precedence/{label}"),
+            &actual,
+            json!({"fsl":"1.0","result":"error","kind":"io","message":message}),
+            2,
+        );
+    }
+    finish(r);
+}
+
 #[cfg(unix)]
 #[test]
 fn chain_grouping_and_step_share_one_captured_root_stream() {

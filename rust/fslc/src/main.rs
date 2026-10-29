@@ -15415,6 +15415,8 @@ fn prefixed_analysis_edge(layer: &str, edge: &Value) -> Value {
     edge
 }
 
+const PROJECT_ANALYSIS_LAYERS: [&str; 3] = ["business", "requirements", "design"];
+
 struct ProjectRoot {
     layer: &'static str,
     mapping: bool,
@@ -15438,7 +15440,7 @@ fn prepare_project_roots(
 ) -> Result<Vec<ProjectRoot>, (Value, i32)> {
     let mut roots = Vec::new();
     for mapping in [false, true] {
-        for layer in ["business", "requirements", "design"] {
+        for layer in PROJECT_ANALYSIS_LAYERS {
             let Some(section) = sections.get(layer) else {
                 continue;
             };
@@ -15446,6 +15448,7 @@ fn prepare_project_roots(
                 section
                     .values
                     .get("refine_against")
+                    .filter(|target| PROJECT_ANALYSIS_LAYERS.contains(&target.as_str()))
                     .and_then(|target| sections.get(target))
                     .filter(|target| {
                         target.values.contains_key("file") && section.values.contains_key("file")
@@ -15530,7 +15533,7 @@ fn project_traceability_output(
         .insert("path".to_owned(), json!(manifest));
     insert_analysis_item(&mut nodes, manifest_node);
     let mut layers = std::collections::BTreeMap::new();
-    for layer in ["business", "requirements", "design"] {
+    for layer in PROJECT_ANALYSIS_LAYERS {
         let Some(file) = sections
             .get(layer)
             .and_then(|section| section.values.get("file"))
@@ -15601,7 +15604,7 @@ fn project_traceability_output(
             },
         );
     }
-    for layer in ["business", "requirements", "design"] {
+    for layer in PROJECT_ANALYSIS_LAYERS {
         let Some(section) = sections.get(layer) else {
             continue;
         };
@@ -17719,6 +17722,7 @@ fn run_diff_git(
     });
     let mut comparisons = Vec::new();
     let mut status = 0;
+    let mut live_mapping = None;
     for relative in &specs {
         let old = base_tree.join(relative);
         let new = head_tree.join(relative);
@@ -17751,20 +17755,26 @@ fn run_diff_git(
                     Err(error) => (spec_load_error_output(&error), 2),
                 }
             } else {
-                run_admitted_roots(
-                    vec![(path, read_unprefixed_spec_source(path))],
-                    None,
-                    false,
-                    |sources, editions| {
-                        editions[0].warnings_only().finish(run_historical_diff(
-                            &old,
-                            &new,
-                            depth,
-                            Some(&sources[0]),
-                            forbid,
-                        ))
-                    },
-                )
+                let captured = live_mapping.get_or_insert_with(|| {
+                    let source = read_unprefixed_spec_source(path)
+                        .map_err(|error| (spec_load_error_output(&error), 2))?;
+                    let edition = admit_root_source(path, &source, None)?;
+                    Ok::<_, (Value, i32)>((source, edition))
+                });
+                match captured {
+                    Ok((source, edition)) => {
+                        run_prepared_roots(std::slice::from_ref(edition), false, || {
+                            edition.warnings_only().finish(run_historical_diff(
+                                &old,
+                                &new,
+                                depth,
+                                Some(source.as_str()),
+                                forbid,
+                            ))
+                        })
+                    }
+                    Err(error) => error.clone(),
+                }
             }
         } else {
             run_historical_diff(&old, &new, depth, None, forbid)
