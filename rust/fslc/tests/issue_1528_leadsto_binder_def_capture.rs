@@ -177,6 +177,7 @@ fn component_capture_is_refused_at_component_call() {
 #[test]
 fn second_declaration_binder_capture_is_refused() {
     detector("before", "a: One, c: One", false, "Low()");
+    detector("before", "c: One, a: One", false, "Low()");
 }
 
 #[test]
