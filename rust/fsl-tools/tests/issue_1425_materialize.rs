@@ -15,9 +15,9 @@ spec Materialize {
   const SECOND = 20
   state { x: Bool }
   init { x = false }
-  action stay() {
-    let allowed = true
-    requires allowed
+  fair action stay() {
+    let limit = 10
+    requires limit == 10
     requires not x
     x = x
   }
@@ -82,4 +82,30 @@ fn remove_part_removes_only_the_selected_action_part() {
     };
     items.remove(2);
     assert_materializes(&base, &expected, "requires_remove", "stay requires #2");
+}
+
+#[test]
+fn fair_remove_preserves_the_action_except_for_its_fairness() {
+    let base = base();
+    let mut expected = base.clone();
+    let SpecItem::Action { fair, .. } = &mut expected.items[4] else {
+        panic!("stay action");
+    };
+    assert!(*fair, "base action must be fair");
+    *fair = false;
+    assert_materializes(&base, &expected, "fair_remove", "stay fair");
+}
+
+#[test]
+fn let_mutation_preserves_the_binding_name_span_and_other_parts() {
+    let base = base();
+    let mut expected = base.clone();
+    let SpecItem::Action { items, .. } = &mut expected.items[4] else {
+        panic!("stay action");
+    };
+    let ActionItem::Let(_, expr, _) = &mut items[0] else {
+        panic!("let binding");
+    };
+    *expr = Expr::Num(11);
+    assert_materializes(&base, &expected, "integer_literal_plus1", "stay let limit");
 }

@@ -38,3 +38,23 @@ dropped). The new identity test compares complete stdout bytes without field
 exclusions or normalization; these are preservation controls, not memory
 detectors. Do not regenerate them from the post-fix binary merely to make a
 changed output pass.
+
+## Final-round interleaved-action control
+
+`interleaved.fsl` adds a three-statement init and a fair action whose parts are
+requires, assignment, requires, let, assignment. Its four `interleaved.*.stdout.json`
+captures were generated from the **saved BASE binary**, not the fixed binary:
+
+```text
+FSLC_CACHE=off .claude/work/fslc-base-45a2de33 mutate rust/fslc/tests/fixtures/issue_1425/interleaved.fsl --depth 2 [--max-mutants <cap>]
+```
+
+The saved binary has the same base SHA-256 above and was originally built from
+`45a2de330d34aa1cbe3e08525bdbd416b66a51e3`. Capture worktree HEAD was
+`f5bd0e716a80001ad2e6b81979f84872b713b925`, rebased onto
+`173e5f970e571f46ef84f750287761919df2582e`; the saved executable is explicitly
+the older base binary, not an executable built from this capture HEAD.
+All four commands exited 0 (`mutated`): default 18 judged (2 killed, 16 survived),
+cap 0 drops 18, cap 1 drops 17, cap 2 drops 16. The existing 28 captures remain
+unchanged. The added full-output comparison pins init order, the requires/let
+pass before the statement pass despite interleaving, and fairness last.

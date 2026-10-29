@@ -109,3 +109,12 @@ fn forbidden_guarded_cancel() {
         "4",
     );
 }
+
+#[test]
+fn interleaved_action_passes_fairness_and_three_statement_init() {
+    assert_identity(
+        "interleaved",
+        "rust/fslc/tests/fixtures/issue_1425/interleaved.fsl",
+        "2",
+    );
+}
