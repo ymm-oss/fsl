@@ -3752,7 +3752,9 @@ check も一致します。ツールが 1 つ以上あれば、空の `authority
 各コマンドの従来の envelope を保ちます。#1545 は同じ no-tools の拒否を
 `ai compat`、`ai replay`、project の `ai check`、native/Worker の project 検査にも
 適用します。空の authority block を含むツールの無い component の受理に対する
-**破壊的な削除**です。単独の component に対する #1546 の envelope は変えません。
+**破壊的な削除**です。check と specialized-preflight の道では、単独の component に対する
+#1546 の envelope は変えません。lowering だけの道での fallback 重複の優先順位の例外は
+下記の実測に示します。
 native の `check` と共有 Worker 検査段階は、未宣言の authority tool または未知の
 hard rule を持つ project 内のすべての component も拒否し、`ok` ではなく project の
 `ai check` と同じ診断(semantics、exit 2)を返します。generic な project 検査で従来
@@ -3762,8 +3764,8 @@ project の意味論的な座標は引き続き component block 内が基準で�
 LSP が project 内の component の診断を出さない問題は別に追跡します(#1575)。
 
 **境界 sweep の実測 (#1545):** B
-`173e5f970e571f46ef84f750287761919df2582e` と H
-`c35fdf94d5d5e0c32d207c95c7fd1c2c79b47bc9` を、それぞれ独立した git archive の
+`c32e7f5a88b412056210ee66f0cff9765001fed9` と H
+`7be60c922c3d4f719746fda0d9763b075d1fa2a0` を、それぞれ独立した git archive の
 tree で build しました。B の tree で `<B-binary> check <relative-path>`、H の
 tree で `<H-binary> check <relative-path>` を実行し、`specs/`、`examples/`、
 `rust/fslc/tests/fixtures/` の全597 `.fsl`、Markdown 30件、新しい test の inline 入力
@@ -3787,14 +3789,17 @@ loc なしの semantics を返します。この check だけの sweep で、そ
 lowering だけの道も同じ validation 全体を使います。同じ B/H で `analyze <relative-path>`
 を AI に言及する corpus 18入力と明示的な4形式に実行し、変化した形式と compose の対照を
 `scenarios <relative-path> --depth 2 --deadlock ignore` と `explain <relative-path>` でも
-比較しました。計60観測で、analyze(22形式)、scenarios(4形式)、explain(4形式)は各々
+比較しました。コマンドと形式の30組 × 2バイナリ = 計60観測で、
+analyze(22形式)、scenarios(4形式)、explain(4形式)は各々
 **ok→error 1、error→ok 0、error の envelope 変化2** です。破壊的削除は
 `tool_authority` だけを選んで生成された参照から隠れていた未宣言 authority tool X で、
 成功の代わりに semantics、`unknown tool 'X' in authority block`、loc なし、exit 2 を
-返します。ツール無しで fallback x が重複すると、type/`declares no tools`/loc 1:1 から
+返します。ツール無しで fallback x が重複すると、
+type/`ai_component 'DupNoTools' declares no tools`/loc 1:1 から
 semantics/`duplicate fallback reason 'x'`/loc なしへ変わります(ともに exit 2)。ツールが
-ある場合は、loc なしの semantics/`duplicate action 'fallback_x'` から同じ重複 reason の
-message に変わります(ともに exit 2)。AI component を use する compose は引き続き
+ある場合は、loc なしの semantics/`duplicate action 'fallback_x'` から
+semantics/`duplicate fallback reason 'x'`/loc なしに変わります(ともに exit 2)。
+AI component を use する compose は引き続き
 `compose use must reference a spec at 2:3`、loc 2:3 で拒否されます。ほかの lowering の
 受理削除は観測していません。check だけの一致を、これらの意図した診断変更にまで
 一般化しないでください。

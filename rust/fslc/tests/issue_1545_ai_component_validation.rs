@@ -124,7 +124,7 @@ fn lowering_only_commands_reject_unselected_authority_reference() {
 }
 
 #[test]
-fn lowering_only_commands_keep_duplicate_fallback_priority() {
+fn lowering_only_commands_report_changed_duplicate_fallback_priority() {
     let path = fixture(
         "ai_component DupNoTools {\n  fallback {\n    when x require human_review;\n    when x require human_review;\n  }\n}\n",
     );

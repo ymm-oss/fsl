@@ -142,26 +142,28 @@ hard rule now returns the same diagnostic as project `ai check` (semantics,
 exit 2), rather than `ok`. In particular, the previously accepted fixtures
 `error_envelope_ai_project_unknown_tool.fsl` and
 `error_envelope_ai_project_invalid_rule.fsl` are breaking removals from generic
-project checking. Standalone #1546 no-tools envelopes remain unchanged.
+project checking. Standalone #1546 no-tools envelopes remain unchanged on
+check and specialized-preflight paths; the lowering-only duplicate-fallback
+priority exception is measured below.
 Project semantic positions retain their component-block coordinate frame
 (#1574); LSP project-component diagnostics remain separate work (#1575).
 
 ### Boundary sweep evidence (#1545)
 
-Base B `173e5f970e571f46ef84f750287761919df2582e` and head H
-`c35fdf94d5d5e0c32d207c95c7fd1c2c79b47bc9` were independently built in their
+Base B `c32e7f5a88b412056210ee66f0cff9765001fed9` and head H
+`7be60c922c3d4f719746fda0d9763b075d1fa2a0` were independently built in their
 own git-archive trees. The command `<B-binary> check <relative-path>` in B's
 tree and `<H-binary> check <relative-path>` in H's tree covered all 597 `.fsl`
 and 30 Markdown files under `specs/`, `examples/`, `rust/fslc/tests/fixtures/`,
 plus twelve new test-inline occurrences per tree: **1,278 checks**. Four Markdown
-files contain compiler-recognized FSL fences; all 30 were checked to include
-negative controls such as `examples/ai/README.md` (bash fences only). Cache and unstable-feature
+files contain compiler-recognized FSL fences. All 30 Markdown files were checked,
+including negative controls such as `examples/ai/README.md` (bash fences only). Cache and unstable-feature
 environment overrides were unset. Both corpus inventories and every compared
 source hash agree; no form or output field was excluded.
 
 The **three corpus ok/exit0 → error/exit2 breaking removals** are
-`error_envelope_ai_project_unknown_tool.fsl` and
-`error_envelope_ai_project_invalid_rule.fsl` and
+`error_envelope_ai_project_unknown_tool.fsl`,
+`error_envelope_ai_project_invalid_rule.fsl`, and
 `error_envelope_literate_ai_project.md` under `rust/fslc/tests/fixtures/`.
 The Markdown project now reports type, exact message
 `ai_component 'EnvelopeParityLiterateProject' declares no tools`, block loc 1:1,
@@ -185,7 +187,7 @@ and a compose use of an AI component. No existing parsed compose use targeted
 an AI component; the minimal probe is rejected by both binaries with
 `compose use must reference a spec at 2:3`, loc 2:3. Changed forms and the compose
 control were also run with `scenarios <relative-path> --depth 2 --deadlock ignore`
-and `explain <relative-path>`: **60 command observations** total.
+and `explain <relative-path>`: **30 command-form pairs × 2 binaries = 60 observations** total.
 
 | Path | Forms | ok→error | error→ok | Changed error envelope |
 |---|---:|---:|---:|---:|

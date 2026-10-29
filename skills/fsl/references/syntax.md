@@ -607,7 +607,9 @@ Existing hard-rule/unknown-authority errors retain priority and their historical
 per-command envelopes. #1545 extends no-tools rejection to `ai compat`,
 `ai replay`, project `ai check`, and native/Worker project checking: a breaking
 removal of tool-less components, including empty authority blocks. Standalone
-#1546 envelopes are unchanged. Native `check` and shared Worker stages now also
+#1546 envelopes are unchanged on check and specialized-preflight paths; the
+lowering-only duplicate-fallback priority exception is measured below.
+Native `check` and shared Worker stages now also
 reject undeclared authority tools and unknown hard rules in every project
 component, matching project `ai check` (semantics / exit 2). Generic checking no
 longer accepts `error_envelope_ai_project_unknown_tool.fsl` or
@@ -615,8 +617,8 @@ longer accepts `error_envelope_ai_project_unknown_tool.fsl` or
 block-relative (#1574); LSP project-component diagnostics remain separate (#1575).
 
 Measured #1545 breaking-removal sweep: independently built B
-`173e5f970e571f46ef84f750287761919df2582e` and H
-`c35fdf94d5d5e0c32d207c95c7fd1c2c79b47bc9`, each in its own git-archive tree.
+`c32e7f5a88b412056210ee66f0cff9765001fed9` and H
+`7be60c922c3d4f719746fda0d9763b075d1fa2a0`, each in its own git-archive tree.
 Commands `<B-binary> check <relative-path>` in B and
 `<H-binary> check <relative-path>` in H cover all 597 `.fsl` files and 30 Markdown
 files under `specs/`, `examples/`, `rust/fslc/tests/fixtures/`, plus twelve new
@@ -624,8 +626,8 @@ inline occurrences per tree: **1,278 checks**, cache/unstable overrides unset,
 no output exclusions. Four Markdown inputs have compiler-recognized FSL fences;
 all 30 were checked, including bash-only `examples/ai/README.md` as a negative control.
 The **three corpus ok/exit0 → error/exit2 removals** are
-`error_envelope_ai_project_unknown_tool.fsl` and
-`error_envelope_ai_project_invalid_rule.fsl` and `error_envelope_literate_ai_project.md`.
+`error_envelope_ai_project_unknown_tool.fsl`,
+`error_envelope_ai_project_invalid_rule.fsl`, and `error_envelope_literate_ai_project.md`.
 The Markdown project returns type/`ai_component 'EnvelopeParityLiterateProject' declares no tools`/
 block loc 1:1/exit2; standalone literate rejection and both multi-block toggle
 acceptances are unchanged. The **four new-inline removals**
@@ -639,13 +641,14 @@ an unneeded component, and repair undeclared tool/unknown rule references.
 Lowering-only validation was measured with the same B/H: `analyze <relative-path>`
 on 18 AI-mentioning corpus inputs plus four explicit shapes; changed shapes and
 compose control through `scenarios <relative-path> --depth 2 --deadlock ignore`
-and `explain <relative-path>` (60 observations). Analyze22/scenarios4/explain4
+and `explain <relative-path>` (30 command-form pairs × 2 binaries = 60 observations).
+Analyze22/scenarios4/explain4
 each show **one ok→error, zero error→ok, two changed error envelopes**. Selecting
 only `tool_authority` no longer hides undeclared `forbidden X`: success becomes
 semantics/`unknown tool 'X' in authority block`/no loc/exit2. With no tools,
-duplicate fallback x changes type/`declares no tools`/loc1:1 to semantics/
+duplicate fallback x changes type/`ai_component 'DupNoTools' declares no tools`/loc1:1 to semantics/
 `duplicate fallback reason 'x'`/no loc; with a tool, unlocated semantics/
-`duplicate action 'fallback_x'` becomes the duplicate reason diagnostic (all exit2).
+`duplicate action 'fallback_x'` becomes semantics/`duplicate fallback reason 'x'`/no loc (all exit2).
 Compose use of an AI component stays rejected: `compose use must reference a spec at 2:3`,
 loc2:3. No other lowering-only acceptance removal was observed.
 

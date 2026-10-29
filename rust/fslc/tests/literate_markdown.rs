@@ -674,8 +674,9 @@ fn assert_no_error_shaped_fields(output: &Value, command: &str) {
 /// frontend. Reclassifying the command as `LiterateCoverage::NotApplicable`
 /// in the parity matrix correctly stops generating Literate cells (this
 /// behavior is not a tracked defect), but these assertions restore the
-/// coverage the deleted pins held: a valid literate AI project succeeds, and
-/// other Markdown gets a clean semantic error with no `1:2` lie. `ai eval` is
+/// coverage the deleted pins held: ai eval still accepts the tool-less project
+/// fixture (#800), although check now rejects it; other Markdown gets a clean
+/// semantic error with no `1:2` lie. `ai eval` is
 /// not part of #694's fix and must keep behaving exactly as on `a3703211`.
 #[test]
 fn ai_eval_load_ai_project_literate_markdown_contract_is_preserved() {
