@@ -1300,23 +1300,33 @@ when checking a file, the message suffix changes from `at L:C` to
   located assignability error (semantics, exit 2), not later symbolic coercion.
   Scalar/Option numeric compatibility and scalar method arguments are unchanged.
   Int has no finite carrier: Set/Seq/Map involving it retain prior compatibility,
-  including inferred Seq literal capacity; literal inference itself is unchanged.
-  Refinement resolves both models independently, retaining its type error at 1:1.
+   including inferred Seq literal capacity. Set/Seq conditional inference retains
+   an already known finite arm's carrier/capacity through let in either arm order;
+   it does not materialize literals. Refinement resolves numeric types separately;
+   same-name struct-field and enum/range collisions remain open pending1599's
+   shared merge rule and Type-kind handoff. Its type error recovers authored map
+   spans (#1642), retaining unknown1:1 only without an authored span. Migrated
+   anchors: runtime1:40/1:45 map tokens, standalone4:3 map, inline2:3 implements,
+   all formerly1:1, with full spans checked against unchanged literal sources.
   Mutate classifies statically ill-typed implements maps by typed error kind as
   invalid, using the check-invalid path: numeric-range mutants of whole-container
   maps move from summary.errored to summary.invalid, outside kill_rate and without
   oracle_errors in the gate. Evaluation/solver failures stay errored; cutoffs
   stay inconclusive. Auto/explicit maps, standalone refinement, governance
   preflight and composed models share the map validator, not a new mutation oracle.
-  Base e4261ed3 vs this change on that base, independently built archives, twice checked
-  603 corpus + 16 original inline forms: zero corpus removals, zero error→error
-  diagnostic changes. Three inline ok→error removals: FALSE_VACUITY/CondMap
+   Base79687655 vs head3c99c93b, independently built archives, twice checked
+   606 corpus +16 original inline +18 literal-boundary +18 bridge forms: zero corpus
+   removals, zero error→error diagnostic changes. Nine ok→error removals include
+   the original three: FALSE_VACUITY/CondMap
   (Map keys 0..0 vs 0..2, 20:41), #1522 MAP (keys 0..2 vs 0..1, 7:35),
   SET_WIDENING (Set 0..2 to 0..4, 6:48). Also removed: whole Seq maps in runtime
   SeqWide→SeqAbs, SeqWider→SeqGuarded, CLI SEQ_WIDE_IMPL→SEQ_ABS and inline
   seq_req(-1), capacity 2, elements -1..2 or 0..3 vs 0..2; former refinement
-  failures now reject statically at 1:1. Use matching carriers, not weakened
-  properties. Another 18 literal-boundary forms keep identical check outputs.
+   failures now reject statically at the authored positions above. The six new
+   conditional/let removals are both arm orders of Set0..2→0..4, Seq0..2→0..4
+   with capacity2, and Seq capacity2→3 with equal elements (all8:3).
+   Standalone/same-carrier controls and the18 literal-boundary outputs remain
+   accepted/unchanged. Use matching carriers, not weakened properties.
   Literal typing remains #1467. Full commands/inventory:
   [carrier decision](../../../docs/design/DESIGN-finite-container-carriers.md).
   Symbolic init copies preserve introduced support in checked dependency order;

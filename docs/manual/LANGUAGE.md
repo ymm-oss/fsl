@@ -983,19 +983,28 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Scalar/Option numeric compatibility and add/contains/push arguments remain
   unchanged. `Int` has no finite carrier, including an inferred literal element:
   Set/Seq/Map uses involving it retain prior recursive compatibility (and inferred
-  Seq capacity), without changing literal typing. Refinement resolves each
-  model's types independently and retains
-  its existing `type` error with fixed unknown location 1:1.
-  Measured base `e4261ed3` vs this change on that base, each built in
-  its own archive, twice checked 603 corpus + 16 original inline forms: no corpus
-  removals, zero error→error diagnostic changes, and three inline ok→error forms:
+  Seq capacity). An uncontextualized Set/Seq conditional retains an already
+  known finite arm's carrier/capacity through a `let`, in either arm order;
+  it does not materialize literals. Refinement resolves numeric types in each
+  model independently; same-name struct-field and enum/range collisions remain
+  open pending #1599's shared merge rule and Type-kind handoff. Its existing
+  `type` error uses authored map recovery (#1642), retaining 1:1 only when no
+  authored span exists. The four migrated source anchors are runtime 1:40/1:45
+  (`map`), standalone 4:3 (`map`) and inline 2:3 (`implements`), formerly 1:1.
+  Measured base `79687655` vs `3c99c93b`, each built in its own archive, twice
+  checked 606 corpus +16 original inline +18 literal-boundary +18 bridge forms:
+  no corpus removals, zero error→error diagnostic changes, and nine ok→error forms.
+  Three original inline removals are:
   `FALSE_VACUITY` / `CondMap` (Map keys 0..0 vs 0..2, 20:41), #1522 `MAP`
   (Map keys 0..2 vs 0..1, 7:35), and `SET_WIDENING` (Set 0..2 to 0..4, 6:48).
   Also removed are admitted whole Seq maps in runtime `SeqWide`→`SeqAbs`,
   runtime `SeqWider`→`SeqGuarded`, CLI standalone `SEQ_WIDE_IMPL`→`SEQ_ABS`
   and inline `seq_req(-1)`: capacity 2, model-local elements -1..2 or 0..3 vs
-  0..2; former runtime refinement failures now reject statically at 1:1.
-  Another 18 literal-boundary forms retain identical base/head check outputs.
+  0..2; former runtime refinement failures now reject statically at the authored
+  locations above. The six additional breaking removals are conditional/let
+  copies in both arm orders: Set0..2→0..4, Seq0..2→0..4 at capacity2, and
+  Seq capacity2→3 with equal element carrier (all 8:3). Standalone/same-carrier
+  controls still check; the 18 original literal-boundary outputs are unchanged.
   See the [single carrier decision](../design/DESIGN-finite-container-carriers.md)
   for commands and the full removal inventory. Literal typing remains #1467.
   In mutate, a statically ill-typed implements map is `invalid`, using the shared
