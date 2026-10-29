@@ -10558,7 +10558,19 @@ fn native_mutation_bmc(
     model: &KernelModel,
     depth: usize,
 ) -> Result<fsl_verifier::BmcResult, BmcFailure> {
-    mutation_bmc_with_solver(fsl_solver_z3::Z3Solver::new, model, depth)
+    // Z3's default context is thread-local: solver history must not choose a
+    // different killer for the same mutant later in this run.
+    std::thread::scope(|scope| {
+        let check = std::thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .spawn_scoped(scope, || {
+                mutation_bmc_with_solver(fsl_solver_z3::Z3Solver::new, model, depth)
+            })
+            .expect("spawn a mutation BMC thread");
+        check
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
 }
 
 /// One mutation BMC call on a freshly created solver. A solver that cannot be
