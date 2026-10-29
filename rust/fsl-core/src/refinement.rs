@@ -978,13 +978,22 @@ pub fn merge_refinement_model(
                 _ => false,
             };
             if !same {
-                return Err(refinement_error(
+                let message = if let Some((impl_source, abs_source)) = implementation
+                    .instance_sources
+                    .get(name)
+                    .zip(abstraction.instance_sources.get(name))
+                {
+                    format!(
+                        "entity '{name}' has conflicting bounds in impl '{}': {impl_source} and abs '{}': {abs_source}; align instances in the verify blocks; for verify and refine, use --instances {name}=N on both specs (check does not accept --instances)",
+                        implementation.name, abstraction.name
+                    )
+                } else {
                     format!(
                         "type '{name}' is declared differently in impl '{}' and abs '{}'",
                         implementation.name, abstraction.name
-                    ),
-                    None,
-                ));
+                    )
+                };
+                return Err(refinement_error(message, None));
             }
         }
         context

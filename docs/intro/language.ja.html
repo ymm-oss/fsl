@@ -2716,7 +2716,14 @@ progress がなければ別 enum の同名 member 宣言は引き続き可能で
 refinement では ordinal が一致していてもこの宣言を拒みます。pulled model の safety
 違反は property 名と pulled model を示す exit 2 <code>error/semantics</code> となり、trace は
 付けず、<code>refines</code> や <code>progress_lost</code> とはしません。別の型名を使った mapping/引数の
-範囲外は従来の <code>map_out_of_bounds</code> のままで、偽の abstract guard が引き続き優先します。</p>
+範囲外は従来の <code>map_out_of_bounds</code> のままで、偽の abstract guard が引き続き優先します。
+<code>verify { instances Item = N }</code> から来る entity の範囲にも同じ規則を適用します。
+衝突時は両 spec の instances と、その出所(verify block または CLI override)を示します。
+verify block の値をそろえてください。<code>verify</code> と <code>refine</code> では、両 spec に効く
+<code>--instances Item=N</code> でもそろえられます。<strong><code>check</code> は <code>--instances</code> を受け付けません。</strong>
+破壊的 removal: <code>inline_implements_bounds/impl_spec_extra.fsl</code> の既定の check/verify は、
+Item=1 と Item=3 の相違により、exit 1 <code>refinement_failed</code> から <code>implements</code> 宣言位置の
+exit 2 <code>error/type</code> に変わります。同じ instances を共有する override なら引き続き refines です。</p>
 <h3 id="_1">チェーン検査(マッピングの合成)</h3>
 <p>レイヤーのチェーン(business ⊒ requirements ⊒ design …)の端から端までの忠実性は、
 <code>(spec mapping)</code> を順に並べると、<strong>合成によって直接</strong>検査できます:</p>

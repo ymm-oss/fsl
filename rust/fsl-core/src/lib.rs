@@ -309,6 +309,7 @@ impl From<ParseError> for CoreError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KernelSpec {
     spec: SurfaceSpec,
+    instance_sources: BTreeMap<String, String>,
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     projections: Vec<ProjectionDef>,
@@ -340,6 +341,7 @@ pub struct ProjectionDef {
 /// Returns [`ModelError`] when the mutated surface is not semantically valid.
 pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError> {
     build_model(KernelSpec {
+        instance_sources: BTreeMap::new(),
         spec,
         origins: OriginRegistry::default(),
         annotations: AnnotationRegistry::default(),
@@ -841,6 +843,7 @@ pub fn parse_kernel_source_with_bounds_with_options(
     let parsed = parse_document_with(SourceFile::new(source), options)?;
     reject_declared_separator(&parsed.surface, source)?;
     validate_dialect_scope_overrides(&parsed.surface, instances, values)?;
+    let instance_sources = instance_sources(&parsed.surface, instances);
     let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(mut spec) => {
             validate_direct_scope_overrides(&spec, instances, values)?;
@@ -875,7 +878,59 @@ pub fn parse_kernel_source_with_bounds_with_options(
         }),
     }?;
     kernel.annotations.extend(SPEC_TARGET, parsed.annotations);
+    kernel.instance_sources = instance_sources;
     Ok(kernel)
+}
+
+// Diagnostic-only provenance: do not change public Kernel/AST projections.
+fn instance_sources(
+    document: &SurfaceDocument,
+    overrides: &InstanceOverrides,
+) -> BTreeMap<String, String> {
+    let bounds: Vec<&[VerifyItem]> = match document {
+        SurfaceDocument::Spec(spec) => spec
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                SpecItem::VerifyBounds { items, .. } => Some(items.as_slice()),
+                _ => None,
+            })
+            .collect(),
+        SurfaceDocument::Business(business) => business
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                BusinessItem::VerifyBounds { items, .. } => Some(items.as_slice()),
+                _ => None,
+            })
+            .collect(),
+        SurfaceDocument::Requirements(requirements) => requirements
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                RequirementsItem::Common(SpecItem::VerifyBounds { items, .. }) => {
+                    Some(items.as_slice())
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    bounds
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let VerifyItem::Instances(name, count, _) = item else {
+                return None;
+            };
+            let authored = format!("verify block instances {name} = {count}");
+            let source = overrides.get(name).map_or_else(
+                || authored.clone(),
+                |value| format!("--instances {name}={value} (overrides {authored})"),
+            );
+            Some((name.clone(), source))
+        })
+        .collect()
 }
 
 /// Lower a parsed direct `spec` into the kernel representation.
@@ -895,6 +950,7 @@ fn lower_direct_spec_with_origins(
     let spec = expand_spec_domains(spec)?;
     Ok(KernelSpec {
         spec,
+        instance_sources: BTreeMap::new(),
         origins,
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),

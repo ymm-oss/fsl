@@ -76,6 +76,7 @@ pub fn parse_kernel_source_with_options(
 ) -> Result<KernelSpec, CoreError> {
     let parsed = parse_document_with(SourceFile::new(source), options)?;
     crate::reject_declared_separator(&parsed.surface, source)?;
+    let instance_sources = crate::instance_sources(&parsed.surface, &BTreeMap::new());
     let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(spec) => crate::lower_direct_spec(spec),
         SurfaceDocument::Business(business) => crate::lower_business(business),
@@ -90,6 +91,7 @@ pub fn parse_kernel_source_with_options(
         )
         .with_kind(CoreErrorKind::NotKernelLowerable)),
     }?;
+    kernel.instance_sources = instance_sources;
     kernel
         .annotations
         .extend(crate::SPEC_TARGET, parsed.annotations);
@@ -446,6 +448,7 @@ fn composed_kernel(
     diagnostics: Vec<Value>,
 ) -> KernelSpec {
     let mut kernel = KernelSpec {
+        instance_sources: BTreeMap::new(),
         spec: SurfaceSpec {
             name,
             meta: None,

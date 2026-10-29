@@ -2888,7 +2888,14 @@ with <code>preserve progress</code> rejects those declarations even if ordinals 
 Pulled-model safety violations fail closed as exit 2 <code>error/semantics</code>, naming
 the property and pulled model without a trace, never as <code>refines</code>/<code>progress_lost</code>.
 With distinct type names, out-of-domain mapping/argument errors retain their
-<code>map_out_of_bounds</code> behavior and false abstract guards still take precedence.</p>
+<code>map_out_of_bounds</code> behavior and false abstract guards still take precedence.
+Entity domains derived from <code>verify { instances Item = N }</code> follow the same rule.
+A conflict reports each spec's instances and whether its verify block or a CLI
+override supplied them. Align the verify blocks; with <code>verify</code> and <code>refine</code>,
+<code>--instances Item=N</code> can align both specs. <strong><code>check</code> has no <code>--instances</code> flag.</strong>
+Breaking removal: the default check/verify of <code>inline_implements_bounds/impl_spec_extra.fsl</code>
+(Item=1 versus Item=3) changes from exit 1 <code>refinement_failed</code> to exit 2 <code>error/type</code>
+at its <code>implements</code> declaration; an equal shared instances override still refines.</p>
 <h3 id="chain-checking-composition-of-mappings">Chain checking (composition of mappings)</h3>
 <p>The end-to-end fidelity of a layer chain (business ⊒ requirements ⊒ design …)
 can be checked <strong>directly by composition</strong> when you line up <code>(spec mapping)</code> in

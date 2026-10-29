@@ -735,6 +735,12 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    success or `progress_lost`: native refine returns exit 2 `error/semantics`, names
    the property and pulled model, and emits no trace. Existing impl self-violation
    and progress-loss reporting remain separate.
+   This includes entity domains lowered from `instances`: diagnostics name both
+   effective counts and their verify-block/CLI sources. Align verify blocks, or
+   use `--instances Item=N` for both specs with **verify/refine only**, not check.
+   The default check/verify of `inline_implements_bounds/impl_spec_extra.fsl`
+   (Item=1 vs Item=3) changes from exit 1 `refinement_failed` to located type/exit2;
+   the existing equal-instances override control remains accepted.
 9. **impl self-violation (precondition, issue #466)**: an impl whose own
    guard/type-bound weakening lets it violate itself within depth K (e.g. a
    dropped `requires` that lets a state variable step outside its declared

@@ -2628,6 +2628,13 @@ refinement では ordinal が一致していてもこの宣言を拒みます。
 違反は property 名と pulled model を示す exit 2 `error/semantics` となり、trace は
 付けず、`refines` や `progress_lost` とはしません。別の型名を使った mapping/引数の
 範囲外は従来の `map_out_of_bounds` のままで、偽の abstract guard が引き続き優先します。
+`verify { instances Item = N }` から来る entity の範囲にも同じ規則を適用します。
+衝突時は両 spec の instances と、その出所(verify block または CLI override)を示します。
+verify block の値をそろえてください。`verify` と `refine` では、両 spec に効く
+`--instances Item=N` でもそろえられます。**`check` は `--instances` を受け付けません。**
+破壊的 removal: `inline_implements_bounds/impl_spec_extra.fsl` の既定の check/verify は、
+Item=1 と Item=3 の相違により、exit 1 `refinement_failed` から `implements` 宣言位置の
+exit 2 `error/type` に変わります。同じ instances を共有する override なら引き続き refines です。
 
 ### チェーン検査(マッピングの合成)
 

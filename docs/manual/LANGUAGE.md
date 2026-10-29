@@ -2801,6 +2801,13 @@ Pulled-model safety violations fail closed as exit 2 `error/semantics`, naming
 the property and pulled model without a trace, never as `refines`/`progress_lost`.
 With distinct type names, out-of-domain mapping/argument errors retain their
 `map_out_of_bounds` behavior and false abstract guards still take precedence.
+Entity domains derived from `verify { instances Item = N }` follow the same rule.
+A conflict reports each spec's instances and whether its verify block or a CLI
+override supplied them. Align the verify blocks; with `verify` and `refine`,
+`--instances Item=N` can align both specs. **`check` has no `--instances` flag.**
+Breaking removal: the default check/verify of `inline_implements_bounds/impl_spec_extra.fsl`
+(Item=1 versus Item=3) changes from exit 1 `refinement_failed` to exit 2 `error/type`
+at its `implements` declaration; an equal shared instances override still refines.
 
 ### Chain checking (composition of mappings)
 
