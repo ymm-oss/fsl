@@ -766,9 +766,27 @@ spec FalseVacuity {
 ";
 
 #[test]
+fn false_vacuity_cross_carrier_conditional_is_rejected() {
+    // Keep the complete old source above for the type-boundary corpus sweep.
+    let kernel = parse_kernel_source(FALSE_VACUITY, &FsResolver::new(".")).expect("fixture lowers");
+    let Err(error) = build_model(kernel) else {
+        panic!("different whole Map carriers must be rejected");
+    };
+    assert_eq!(
+        error.to_string(),
+        "invalid model expression: expression of type Map(Named(\"Small\"), Named(\"V\")) is not assignable to Map(Named(\"K\"), Named(\"V\")) at 20:41"
+    );
+}
+
+#[test]
 fn false_vacuity_reproducers_are_live() {
+    // Same Map carriers; the wider scalar index still makes CondMap non-vacuous.
+    let source = FALSE_VACUITY
+        .replace("n: Map<Small, V>", "n: Map<K, V>")
+        .replace("forall k: Small { n[k] = 0 }", "forall k: K { n[k] = 0 }")
+        .replace("else n)[exact]", "else n)[high]");
     assert_catalog(
-        &model(FALSE_VACUITY),
+        &model(&source),
         &[
             "InitSatisfiable@Init",
             "PartialDefined@Init",

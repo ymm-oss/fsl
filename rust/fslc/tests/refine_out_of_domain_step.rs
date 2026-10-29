@@ -36,13 +36,24 @@ const SEQ_WIDE_IMPL: &str = "spec SeqWide {\n  type V = -1..2\n  state { seq: Se
      seq = seq.push(v)\n  }\n}\n";
 const SEQ_MAP: &str = "refinement M {\n  impl SeqWide\n  abs SeqAbs\n  map seq = seq\n  action push(v) -> push(v)\n}\n";
 
-fn seq_req(lo: i32) -> String {
+fn old_seq_req(lo: i32) -> String {
     format!(
         "requirements SeqReq {{\n  implements SeqAbs from \"abs.fsl\" {{ maps auto }}\n\n  \
          type V = {lo}..2\n  state {{ seq: Seq<V, 2> }}\n  init {{ seq = Seq {{}} }}\n  \
          action push(v: V) maps push(v) {{\n    requires seq.size() < 2\n    \
          seq = seq.push(v)\n  }}\n}}\n"
     )
+}
+
+fn argument_source(source: &str) -> String {
+    source
+        .replace("state {", "type S = 0..2\n  state {")
+        .replace("Seq<V, 2>", "Seq<S, 2>")
+        .replace("seq.push(v)", "seq.push(0)")
+}
+
+fn seq_req(lo: i32) -> String {
+    argument_source(&old_seq_req(lo))
 }
 
 const MAP_ABS: &str = "spec MapAbs {\n  type K = 0..2\n  state { m: Map<K, Bool> }\n  \
@@ -87,12 +98,57 @@ fn fslc(dir: &Path, args: &[&str]) -> (Value, i32) {
 }
 
 #[test]
-fn refine_reports_an_out_of_domain_abstract_argument_as_map_out_of_bounds() {
+fn old_standalone_whole_seq_map_is_rejected() {
     let dir = scratch(
-        "refine",
+        "old-refine",
         &[
             ("impl.fsl", SEQ_WIDE_IMPL),
             ("abs.fsl", SEQ_ABS),
+            ("map.fsl", SEQ_MAP),
+        ],
+    );
+    let (output, code) = fslc(
+        &dir,
+        &["refine", "impl.fsl", "abs.fsl", "map.fsl", "--depth", "2"],
+    );
+    assert_seq_map_rejected(&output, code);
+}
+
+#[test]
+fn old_inline_whole_seq_map_is_rejected() {
+    let dir = scratch(
+        "old-inline",
+        &[("req.fsl", &old_seq_req(-1)), ("abs.fsl", SEQ_ABS)],
+    );
+    let (output, code) = fslc(&dir, &["verify", "req.fsl", "--depth", "3"]);
+    assert_seq_map_rejected(&output, code);
+}
+
+fn assert_seq_map_rejected(output: &Value, code: i32) {
+    assert_eq!(code, 2, "{output}");
+    assert_eq!(output["result"], "error", "{output}");
+    assert_eq!(output["kind"], "type", "{output}");
+    assert_eq!(
+        output["message"],
+        "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"V\"), 2)",
+        "{output}"
+    );
+    assert_eq!(
+        output["loc"],
+        serde_json::json!({"line": 1, "column": 1}),
+        "{output}"
+    );
+}
+
+#[test]
+fn refine_reports_an_out_of_domain_abstract_argument_as_map_out_of_bounds() {
+    let implementation = argument_source(SEQ_WIDE_IMPL);
+    let abstraction = argument_source(SEQ_ABS);
+    let dir = scratch(
+        "refine",
+        &[
+            ("impl.fsl", &implementation),
+            ("abs.fsl", &abstraction),
             ("map.fsl", SEQ_MAP),
         ],
     );
@@ -108,8 +164,9 @@ fn refine_reports_an_out_of_domain_abstract_argument_as_map_out_of_bounds() {
 
 #[test]
 fn inline_implements_reports_domain_mismatches_as_map_out_of_bounds() {
+    let abstraction = argument_source(SEQ_ABS);
     for (name, req, abs) in [
-        ("param", seq_req(-1), SEQ_ABS),
+        ("param", seq_req(-1), abstraction.as_str()),
         ("map", MAP_NARROW_REQ.to_owned(), MAP_ABS),
     ] {
         let dir = scratch(name, &[("req.fsl", req.as_str()), ("abs.fsl", abs)]);
@@ -125,9 +182,10 @@ fn inline_implements_reports_domain_mismatches_as_map_out_of_bounds() {
 
 #[test]
 fn mutate_attributes_the_widened_parameter_mutant_to_refinement() {
+    let abstraction = argument_source(SEQ_ABS);
     let dir = scratch(
         "mutate",
-        &[("req.fsl", seq_req(0).as_str()), ("abs.fsl", SEQ_ABS)],
+        &[("req.fsl", seq_req(0).as_str()), ("abs.fsl", &abstraction)],
     );
     let (output, code) = fslc(
         &dir,
