@@ -146,6 +146,31 @@ project checking. Standalone #1546 no-tools envelopes remain unchanged.
 Project semantic positions retain their component-block coordinate frame
 (#1574); LSP project-component diagnostics remain separate work (#1575).
 
+### Boundary sweep evidence (#1545)
+
+Base B `e856bbe023f8fb64557658afbd365c355ac56715` and head H
+`651e58b344d0b4c95712ea216b9b177cdd7a7ca9` were independently built in their
+own git-archive trees. The command `<B-binary> check <relative-path>` in B's
+tree and `<H-binary> check <relative-path>` in H's tree covered all 597 `.fsl`
+files under `specs/`, `examples/` and `rust/fslc/tests/fixtures/`, plus ten new
+test-inline occurrences per tree: **1,214 checks**. Cache and unstable-feature
+environment overrides were unset. Both corpus inventories and every compared
+source hash agree; no form or output field was excluded.
+
+The **two corpus ok/exit0 → error/exit2 breaking removals** are
+`error_envelope_ai_project_unknown_tool.fsl` and
+`error_envelope_ai_project_invalid_rule.fsl` under `rust/fslc/tests/fixtures/`.
+The **four new-inline breaking removals** are projects containing a tool-less
+component in the CLI and Worker-shaped tests (two occurrences), a project whose
+component declares only empty authority (one), and a valid-first project whose
+later component names an undeclared authority tool (one). The three tool-less
+occurrences report type at component-block loc 1:1; the later invalid component
+reports the existing unlocated semantics error. There are **zero rewritten
+existing inline FSL forms**. All other exit/result/stdout/stderr observations
+are unchanged. Declare an intended tool (empty authority is allowed), remove an
+unneeded component, or correct the authority/rule reference; do not rely on the
+former analyzed-project success.
+
 ## Static Rules
 
 - `tool_authority`: a forbidden tool cannot also be executable.

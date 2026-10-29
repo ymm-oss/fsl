@@ -614,6 +614,23 @@ longer accepts `error_envelope_ai_project_unknown_tool.fsl` or
 `error_envelope_ai_project_invalid_rule.fsl`. Project semantic positions remain
 block-relative (#1574); LSP project-component diagnostics remain separate (#1575).
 
+Measured #1545 breaking-removal sweep: independently built B
+`e856bbe023f8fb64557658afbd365c355ac56715` and H
+`651e58b344d0b4c95712ea216b9b177cdd7a7ca9`, each in its own git-archive tree.
+Commands `<B-binary> check <relative-path>` in B and
+`<H-binary> check <relative-path>` in H cover all 597 `.fsl` files under
+`specs/`, `examples/`, `rust/fslc/tests/fixtures/` and ten new inline occurrences
+per tree: **1,214 checks**, cache/unstable overrides unset, no output exclusions.
+The **two corpus ok/exit0 → error/exit2 removals** are
+`error_envelope_ai_project_unknown_tool.fsl` and
+`error_envelope_ai_project_invalid_rule.fsl`. The **four new-inline removals**
+are tool-less-component projects in CLI and Worker-shaped tests (two), an
+empty-authority-only component in a project (one), and an invalid later component
+after a valid first one (one). Three return type at block loc 1:1; the later
+unknown tool returns unlocated semantics. Rewritten existing inline FSL: zero.
+All other exit/result/stdout/stderr comparisons agree. Declare a tool or remove
+an unneeded component, and repair undeclared tool/unknown rule references.
+
 `check hard { rule <Name>; ... }` selects which of the 5 named rules above get
 an explicit, separately-reported invariant/finding in `fslc ai check`; an
 unlisted name is a check-time error (`kind:"semantics"`, hint lists the 5).

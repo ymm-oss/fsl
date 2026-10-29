@@ -3939,6 +3939,24 @@ and `error_envelope_ai_project_invalid_rule.fsl` under generic project checking.
 Project semantic coordinates remain component-block-relative (#1574); missing
 LSP project-component diagnostics remain tracked separately (#1575).
 
+**Measured boundary sweep (#1545):** B
+`e856bbe023f8fb64557658afbd365c355ac56715` and H
+`651e58b344d0b4c95712ea216b9b177cdd7a7ca9` were built separately in their own
+git-archive trees. `<B-binary> check <relative-path>` in B and
+`<H-binary> check <relative-path>` in H checked all 597 corpus `.fsl` files
+under `specs/`, `examples/` and `rust/fslc/tests/fixtures/`, plus ten new inline
+test occurrences per tree (**1,214 checks**), with cache/unstable overrides
+unset and no excluded output fields. Corpus ok/exit0 → error/exit2 removals
+are exactly **two**: `error_envelope_ai_project_unknown_tool.fsl` and
+`error_envelope_ai_project_invalid_rule.fsl`. New test-inline removals are
+**four**: tool-less-component projects in CLI and Worker-shaped tests (two),
+an empty-authority-only component in a project (one), and an invalid later
+component after a valid first component (one). Zero existing inline FSL forms
+were rewritten. The three tool-less occurrences report type at block loc 1:1;
+the later undeclared tool reports unlocated semantics. Other exit/result and
+complete stdout/stderr observations are unchanged. Declare a tool or remove
+an unneeded component, and correct unknown tool/rule references.
+
 An `ai_component` may also declare which hard rules get an explicit,
 separately-reported invariant:
 

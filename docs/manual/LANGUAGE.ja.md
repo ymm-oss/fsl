@@ -3761,6 +3761,24 @@ hard rule を持つ project 内のすべての component も拒否し、`ok` で
 project の意味論的な座標は引き続き component block 内が基準です(#1574)。
 LSP が project 内の component の診断を出さない問題は別に追跡します(#1575)。
 
+**境界 sweep の実測 (#1545):** B
+`e856bbe023f8fb64557658afbd365c355ac56715` と H
+`651e58b344d0b4c95712ea216b9b177cdd7a7ca9` を、それぞれ独立した git archive の
+tree で build しました。B の tree で `<B-binary> check <relative-path>`、H の
+tree で `<H-binary> check <relative-path>` を実行し、`specs/`、`examples/`、
+`rust/fslc/tests/fixtures/` の全597 `.fsl` と、新しい test の inline 入力10出現を
+各 tree で検査しました(**計1,214検査**)。cache と unstable の環境上書きは unset、
+除外した出力 field はありません。corpus の ok/exit0 → error/exit2 はちょうど
+**2件**で、`error_envelope_ai_project_unknown_tool.fsl` と
+`error_envelope_ai_project_invalid_rule.fsl` です。新しい test の inline の削除は
+**4出現**です: CLI 側と Worker-shaped 側のツールの無い component を含む project
+(2出現)、空の authority だけの component を含む project(1出現)、正常な最初の
+component の後ろに不正な component がある project(1出現)。書き直した既存の inline
+FSL は0件です。ツールの無い3出現は block 内 loc 1:1 の type、後ろの未宣言 tool は
+loc なしの semantics を返します。それ以外の exit/result と stdout/stderr 全文は
+変わりません。意図した tool を宣言するか不要な component を除き、不明な tool/rule
+の参照を修正してください。
+
 `ai_component` はまた、どのハードルールが明示的で個別に報告される invariant を
 得るかを宣言できます:
 
