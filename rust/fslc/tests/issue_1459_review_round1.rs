@@ -351,15 +351,14 @@ fn reachable_rejects_conditional_nonself_through_let_alias() {
 }
 
 #[test]
-fn opus_reachable_rejects_selected_nonself_relation_with_different_bounds() {
+fn opus_reachable_rejects_conditional_endpoint_bound_mismatch_at_else_arm() {
     reject(
         "opus-s01",
         OPUS_REACHABLE,
         &[
-            "reachable() requires a self-relation (relation T -> T)",
-            SELF_HINT,
+            r#"expression of type Relation(Named("N"), Named("M")) is not assignable to Relation(Named("N"), Named("N"))"#,
         ],
-        &json!({"line": 10, "column": 3}),
+        &json!({"line": 10, "column": 51}),
     );
 }
 
