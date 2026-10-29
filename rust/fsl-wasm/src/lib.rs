@@ -8,6 +8,7 @@ use fsl_core::{
     CoreError, FileResolver, KernelModel, ModelWarningContext, finalize_envelope_model_warnings,
     finalize_model_warnings, model_warnings,
 };
+use fslc_rust::migration::{DependencyRecords, DependencyResolver};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use wasm_bindgen::prelude::*;
@@ -150,10 +151,28 @@ fn verifier_error(solver_version: &str, failure: &impl std::fmt::Display) -> Val
     )
 }
 
-fn build(request: &Request, solver_version: &str) -> Result<(KernelModel, Vec<Value>), Value> {
-    let resolver = MemoryResolver {
-        files: request.files.clone(),
-    };
+fn admitted_resolver<'a>(
+    request: &Request,
+    log: &DependencyRecords,
+    envelope: &'a dyn Fn() -> Map<String, Value>,
+) -> DependencyResolver<'a, MemoryResolver> {
+    DependencyResolver::new(
+        MemoryResolver {
+            files: request.files.clone(),
+        },
+        log.clone(),
+        request.parse_options(),
+        envelope,
+    )
+}
+
+fn build(
+    request: &Request,
+    solver_version: &str,
+    log: &fslc_rust::migration::DependencyRecords,
+) -> Result<(KernelModel, Vec<Value>), Value> {
+    let dependency_envelope = || envelope(solver_version);
+    let resolver = admitted_resolver(request, log, &dependency_envelope);
     // Classified by the same `kernel_load_error` the native CLI runs and
     // rendered by the same dispatch. This stage used to be hard-coded to
     // `kind:"parse"` here while native reported `semantics`/`type` for the very
@@ -240,8 +259,9 @@ async fn check_with<S: fsl_solver::SmtSolver>(
         Ok(edition) => edition,
         Err(refusal) => return refusal,
     };
-    let output = check_kernel(request, solver_version, new_solver, &edition).await;
-    edition.finish((output, 0)).0
+    let log = fslc_rust::migration::DependencyRecords::default();
+    let output = check_kernel(request, solver_version, new_solver, &edition, &log).await;
+    log.borrow().finish(edition.finish((output, 0))).0
 }
 
 async fn check_kernel<S: fsl_solver::SmtSolver>(
@@ -249,10 +269,10 @@ async fn check_kernel<S: fsl_solver::SmtSolver>(
     solver_version: &str,
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
     edition: &fslc_rust::migration::SourceEdition,
+    log: &fslc_rust::migration::DependencyRecords,
 ) -> Value {
-    let resolver = MemoryResolver {
-        files: request.files.clone(),
-    };
+    let dependency_envelope = || envelope(solver_version);
+    let resolver = admitted_resolver(request, log, &dependency_envelope);
     // The same validity stages, in the same order, that native `check` runs
     // (issue #1163): this surface only composes the success envelope.
     let checked = match fslc_rust::check_stages::run_check_stages(
@@ -288,13 +308,17 @@ async fn check_kernel<S: fsl_solver::SmtSolver>(
         &warning_ctx,
     );
     output.insert("warnings".to_owned(), Value::Array(warnings));
-    let output = match implements_output(request, &model, 8) {
+    let output = match implements_output(request, &model, 8, solver_version, log) {
         Ok(implements) => add_frontend_metadata(request, &model, implements, Value::Object(output)),
         Err(failure) => return implements_error(solver_version, &failure),
     };
     // Native check folds governance only after the model/implements path,
     // never for early project/agent gate envelopes (which can be successful).
-    fold_governance(request, solver_version, output).await
+    if output["result"] == "error" {
+        return output;
+    }
+    let governance = governance_output(request, solver_version, log).await;
+    fold_governance(solver_version, output, governance)
 }
 
 /// Classify the root before consumption and retain its warning delivery until
@@ -315,16 +339,20 @@ fn admit_edition(
     .map_err(|(refusal, _)| refusal)
 }
 
-/// Evaluate a governance document's preservations and fold them into a
-/// `check`/`verify` envelope, as native `fold_governance_from_source` does
-/// (issue #1303): an `error` envelope is returned untouched, a governance
-/// diagnostic replaces the envelope, and otherwise
+/// Fold already evaluated governance into a `check`/`verify` envelope: preserve
+/// kernel errors before ordinary governance errors, as native does. Verify only
+/// returns early from governance evaluation for a recorded dependency refusal.
+/// Otherwise
 /// [`fslc_rust::verification_output::attach_governance`] owns the verdict.
-async fn fold_governance(request: &Request, solver_version: &str, mut output: Value) -> Value {
+fn fold_governance(
+    solver_version: &str,
+    mut output: Value,
+    governance: Result<Option<Value>, fslc_rust::verification_output::GovernanceOutputError>,
+) -> Value {
     if output.get("result").and_then(Value::as_str) == Some("error") {
         return output;
     }
-    match governance_output(request).await {
+    match governance {
         Ok(Some(governance)) => {
             fslc_rust::verification_output::attach_governance(&mut output, governance);
         }
@@ -341,10 +369,11 @@ async fn fold_governance(request: &Request, solver_version: &str, mut output: Va
 
 async fn governance_output(
     request: &Request,
+    solver_version: &str,
+    log: &fslc_rust::migration::DependencyRecords,
 ) -> Result<Option<Value>, fslc_rust::verification_output::GovernanceOutputError> {
-    let resolver = MemoryResolver {
-        files: request.files.clone(),
-    };
+    let dependency_envelope = || envelope(solver_version);
+    let resolver = admitted_resolver(request, log, &dependency_envelope);
     let resolver_ref = &resolver;
     let options = request.parse_options();
     let options_ref = &options;
@@ -452,10 +481,11 @@ fn implements_output(
     request: &Request,
     model: &KernelModel,
     depth: usize,
+    solver_version: &str,
+    log: &fslc_rust::migration::DependencyRecords,
 ) -> Result<Option<Value>, fslc_rust::verification_output::RequirementsImplementsError> {
-    let resolver = MemoryResolver {
-        files: request.files.clone(),
-    };
+    let dependency_envelope = || envelope(solver_version);
+    let resolver = admitted_resolver(request, log, &dependency_envelope);
     fslc_rust::verification_output::requirements_implements_output(
         &request.source,
         &resolver,
@@ -503,9 +533,19 @@ async fn verify_with<S: fsl_solver::SmtSolver>(
         Ok(edition) => edition,
         Err(refusal) => return refusal,
     };
-    let output = verify_kernel(request, solver_version, new_solver, deadlock).await;
-    let output = fold_governance(request, solver_version, output).await;
-    edition.finish((output, 0)).0
+    let log = fslc_rust::migration::DependencyRecords::default();
+    let mut governance = Ok(None);
+    let output = verify_kernel(
+        request,
+        solver_version,
+        new_solver,
+        deadlock,
+        &log,
+        &mut governance,
+    )
+    .await;
+    let output = fold_governance(solver_version, output, governance);
+    log.borrow().finish(edition.finish((output, 0))).0
 }
 
 #[allow(clippy::too_many_lines)]
@@ -514,6 +554,8 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
     solver_version: &str,
     new_solver: &mut fslc_rust::requirements_solver::NewSolver<'_, S>,
     deadlock: fslc_rust::verification_output::DeadlockMode,
+    log: &fslc_rust::migration::DependencyRecords,
+    governance: &mut Result<Option<Value>, fslc_rust::verification_output::GovernanceOutputError>,
 ) -> Value {
     let started = performance_now();
     // Request options and edition admission are checked at entry. Preserve the
@@ -556,7 +598,7 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
     let loaded = reject_refuted_requirements(
         request,
         solver_version,
-        build(request, solver_version),
+        build(request, solver_version, log),
         new_solver,
     )
     .await;
@@ -577,7 +619,7 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
                 ) => {}
                 Err(failure) => return error(solver_version, "semantics", failure),
             }
-            match implements_output(request, model, request.options.depth) {
+            match implements_output(request, model, request.options.depth, solver_version, log) {
                 Ok(implements) => implements,
                 Err(failure) => return implements_error(solver_version, &failure),
             }
@@ -588,6 +630,15 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
         Ok(built) => built,
         Err(error) => return error,
     };
+    *governance = governance_output(request, solver_version, log).await;
+    if let Err(failure) = governance.as_ref()
+        && log.borrow().refusal.is_some()
+    {
+        return fslc_rust::verification_output::render_governance_error(
+            envelope(solver_version),
+            failure,
+        );
+    }
     // Native `verify` rejects an init that writes one variable twice before it
     // reaches the solver (`prepare_bmc`); `build_model` does not (issue #1163).
     if let Err(failure) = fsl_runtime::check_init_write_ownership(&model) {
@@ -1544,7 +1595,20 @@ mod tests {
             envelope(solver_version),
             &failure,
         );
-        expected_edition_output(request, output, &fixture_findings(request))
+        let mut findings = fixture_findings(request);
+        if request.files.get("business.fsl").is_some_and(|source| {
+            source == include_str!("../../fslc/tests/fixtures/actor_refinement/raw-abs.fsl")
+        }) {
+            findings.push(metadata_finding_at(
+                "business.fsl",
+                "ABS-1",
+                "by System",
+                [5, 20, 38],
+                [99, 116, 134],
+                2,
+            ));
+        }
+        expected_edition_output(request, output, &findings)
     }
 
     fn assert_worker_implements_error_matches_native(request: &Request, fixture: &str) {
@@ -1736,7 +1800,7 @@ mod tests {
             unstable: Vec::new(),
         };
 
-        let worker = build(&request, TEST_SOLVER_VERSION)
+        let worker = build(&request, TEST_SOLVER_VERSION, &std::rc::Rc::default())
             .expect_err("duplicate write must fail in Worker build");
         let native = native_check_error(&request, TEST_SOLVER_VERSION);
         assert_eq!(
@@ -1755,7 +1819,7 @@ mod tests {
             options: Options::default(),
             unstable: Vec::new(),
         };
-        let worker = build(&request, TEST_SOLVER_VERSION)
+        let worker = build(&request, TEST_SOLVER_VERSION, &std::rc::Rc::default())
             .expect_err("distinctness-unproved write must fail in Worker build");
         let native = native_check_error(&request, TEST_SOLVER_VERSION);
         assert_eq!(
@@ -2856,7 +2920,8 @@ mod tests {
             options: Options::default(),
             unstable: Vec::new(),
         };
-        let (model, _) = build(&request, TEST_SOLVER_VERSION).expect("compose model");
+        let (model, _) =
+            build(&request, TEST_SOLVER_VERSION, &std::rc::Rc::default()).expect("compose model");
         let result = BmcResult {
             spec: model.name.clone(),
             depth: 2,

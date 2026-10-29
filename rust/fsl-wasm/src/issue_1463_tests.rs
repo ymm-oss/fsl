@@ -55,7 +55,7 @@ mod issue_1463 {
                 verified, native,
                 "{}: full verify preflight envelope", c.id
             );
-            let built = build(&request, TEST_SOLVER_VERSION).expect_err("verify build must reject");
+            let built = build(&request, TEST_SOLVER_VERSION, &std::rc::Rc::default()).expect_err("verify build must reject");
             // Raw build precedes the public check/verify warning finalization.
             assert_eq!(
                 built,

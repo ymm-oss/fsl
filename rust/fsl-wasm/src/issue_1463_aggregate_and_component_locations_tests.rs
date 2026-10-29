@@ -36,7 +36,7 @@ mod aggregate_and_component_locations {
                 assert_eq!(report, native_check_error(&request, TEST_SOLVER_VERSION), "{}: full native/Worker error", case.id);
                 request.cmd = "verify".into();
                 assert_eq!(block_on(verify_with(&request, TEST_SOLVER_VERSION, &mut no_solver)), report, "{}: verify preflight", case.id);
-                assert_eq!(build(&request, TEST_SOLVER_VERSION).unwrap_err(), report);
+                assert_eq!(build(&request, TEST_SOLVER_VERSION, &std::rc::Rc::default()).unwrap_err(), report);
             } else {
                 assert_eq!(report["result"], "ok", "{}: {report}", case.id);
             }
