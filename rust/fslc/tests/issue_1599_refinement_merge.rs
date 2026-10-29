@@ -383,3 +383,13 @@ fn verifier_error_uses_semantics_boundary_without_trace() {
     }
     identifiers::assert_names(observed.0["message"].as_str().unwrap(), &["Int"]);
 }
+#[test]
+fn entity_instances_collision() {
+    let dir = root().join("rust/fslc/tests/fixtures/inline_implements_bounds");
+    for observed in ["check", "verify"].map(|cmd| run(&dir, &[cmd, "impl_spec_extra.fsl"])) {
+        located_collision(&observed, ["Item", "SharedOnlyReq", "SharedOnly"], 2, 3);
+        let message = observed.0["message"].as_str().unwrap();
+        identifiers::assert_names(message, &["1", "3", "verify", "instances"]);
+        assert!(message.contains("--instances Item="), "{message}");
+    }
+}
