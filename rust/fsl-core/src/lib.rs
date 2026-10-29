@@ -1180,6 +1180,13 @@ impl PredicateExpander {
 
     #[allow(clippy::too_many_lines)]
     fn expand_item(&self, item: SpecItem) -> Result<SpecItem, CoreError> {
+        let bound = match &item {
+            SpecItem::LeadsTo { binders, .. } => binders
+                .iter()
+                .map(|binder| binder_name(binder).to_owned())
+                .collect(),
+            _ => HashSet::new(),
+        };
         Ok(match item {
             SpecItem::Const { name, value } => SpecItem::Const {
                 name,
@@ -1342,16 +1349,16 @@ impl PredicateExpander {
                     .into_iter()
                     .map(|binder| self.expand_binder(binder, &mut Vec::new()))
                     .collect::<Result<_, _>>()?,
-                before: Box::new(self.expand_expr(*before, &mut Vec::new())?),
-                after: Box::new(self.expand_expr(*after, &mut Vec::new())?),
+                before: Box::new(self.expand_scoped_expr(*before, &bound)?),
+                after: Box::new(self.expand_scoped_expr(*after, &bound)?),
                 span,
                 meta,
                 annotations,
                 decreases: decreases
-                    .map(|expr| self.expand_expr(*expr, &mut Vec::new()).map(Box::new))
+                    .map(|expr| self.expand_scoped_expr(*expr, &bound).map(Box::new))
                     .transpose()?,
                 within: within
-                    .map(|expr| self.expand_expr(*expr, &mut Vec::new()).map(Box::new))
+                    .map(|expr| self.expand_scoped_expr(*expr, &bound).map(Box::new))
                     .transpose()?,
                 helpful: helpful
                     .into_iter()
@@ -1359,7 +1366,7 @@ impl PredicateExpander {
                         entry.args = entry
                             .args
                             .into_iter()
-                            .map(|arg| self.expand_expr(arg, &mut Vec::new()))
+                            .map(|arg| self.expand_scoped_expr(arg, &bound))
                             .collect::<Result<_, _>>()?;
                         Ok(entry)
                     })
@@ -1437,6 +1444,10 @@ impl PredicateExpander {
         stack: &mut Vec<String>,
     ) -> Result<Expr, CoreError> {
         self.scoped(self.bound_with(name), || self.expand_expr(expr, stack))
+    }
+
+    fn expand_scoped_expr(&self, expr: Expr, bound: &HashSet<String>) -> Result<Expr, CoreError> {
+        self.scoped(bound.clone(), || self.expand_expr(expr, &mut Vec::new()))
     }
 
     fn expand_param(&self, param: Param) -> Result<Param, CoreError> {
