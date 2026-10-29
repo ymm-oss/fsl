@@ -3,7 +3,7 @@
 use fsl_core::{validate_ai_component, validate_ai_component_with_location};
 
 #[test]
-fn located_validation_preserves_every_legacy_error_field() {
+fn located_validation_matches_legacy_wrapper_and_authored_positions() {
     for (body, anchor, message) in [
         (
             "ai_component C { authority { may_execute Missing; } }",
@@ -34,6 +34,8 @@ fn located_validation_preserves_every_legacy_error_field() {
             .components[0];
         let legacy = validate_ai_component(component).unwrap_err();
         let (located, loc) = validate_ai_component_with_location(component).unwrap_err();
+        // These compare wrapper equivalence, not historical error-field preservation.
+        // External envelope preservation has independent byte pins in fslc's tests.
         assert_eq!(format!("{legacy:?}"), format!("{located:?}"));
         assert_eq!(legacy.to_string(), located.to_string());
         assert_eq!(legacy.message, message);
