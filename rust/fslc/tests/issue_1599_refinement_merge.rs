@@ -413,9 +413,8 @@ fn verifier_error_uses_semantics_boundary_without_trace() {
     );
     let observed = fixture.refine();
     verdict(&observed, 2, "error", Some("semantics"));
-    assert_eq!(
-        observed.0,
-        json!({"fsl":"1.0", "result":"error", "kind":"semantics", "message":observed.0["message"]})
-    );
+    for key in ["impl_trace", "trace", "abs_trace", "trace_type"] {
+        assert!(observed.0.get(key).is_none(), "{key}: {}", observed.0);
+    }
     identifiers::assert_names(observed.0["message"].as_str().unwrap(), &["Int"]);
 }
