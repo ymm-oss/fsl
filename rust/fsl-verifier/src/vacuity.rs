@@ -179,7 +179,7 @@ fn frozen_state_vars(model: &KernelModel) -> BTreeSet<String> {
         .collect()
 }
 
-fn collect_assigned_roots(statements: &[Statement], out: &mut BTreeSet<String>) {
+pub(crate) fn collect_assigned_roots(statements: &[Statement], out: &mut BTreeSet<String>) {
     for statement in statements {
         match statement {
             Statement::Assign { target, .. } => {

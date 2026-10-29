@@ -17,7 +17,7 @@ use crate::transition::{
     init_constraints, init_evaluation_status, initial_state as symbolic_initial_state,
     transition_constraint,
 };
-use crate::vacuity::{VacuityFinding, retain_covered, static_findings};
+use crate::vacuity::{VacuityFinding, collect_assigned_roots, retain_covered, static_findings};
 use crate::value::{
     Bindings, SymbolicState, SymbolicValue, bool_term, bounds, concrete_value, i64_index,
     logical_equal, reframe_collections, snapshot_collections, symbolic_state,
@@ -399,10 +399,9 @@ async fn verify_bounded_session<S: SmtSolver>(
 /// declaration order (#1240). A non-partial failure is returned as the error
 /// the search would have reported at that point.
 ///
-/// The type bounds asserted here are the ones the search proved at the same
-/// steps (`check_state_properties` asserts each after proving it), so they
-/// are entailed and cannot change any answer. The init question sees only
-/// the init constraints and the step-0 bounds.
+/// Init sees equations, selected free-root bounds and assigned Seq capacity caps.
+/// Over-capacity-only failures are refused unlocated. Action questions
+/// retain all selected state bounds, as in the bounded search.
 ///
 /// The reset carries soundness, not only native/Worker parity. The search
 /// leaves the transitions of every step it unrolled asserted, and a
@@ -418,6 +417,7 @@ async fn verify_bounded_session<S: SmtSolver>(
 /// shared with the later sessions on the thread, and terms the search did not
 /// build move their answers (for example induction's CTIs). With neither an
 /// init question nor an action step to ask, the solver is not even reset.
+#[allow(clippy::too_many_lines)]
 async fn check_definedness<S: SmtSolver>(
     model: &KernelModel,
     solver: &mut S,
@@ -450,10 +450,43 @@ async fn check_definedness<S: SmtSolver>(
             solver.assert(&constraint)?;
         }
     }
-    assert_state_bounds(solver, model, checked_bounds, &initial)?;
-    if ask_init && let Some(error) = init_definedness_failure(solver, model, &initial).await? {
-        return Ok(Some(Undefined::Init(error)));
+    if ask_init {
+        let mut assigned = BTreeSet::new();
+        collect_assigned_roots(&model.init, &mut assigned);
+        let free_bounds = model
+            .state
+            .iter()
+            .filter(|(name, _)| !assigned.contains(name))
+            .map(|(name, _)| fsl_core::SyntheticName::Bounds { state: name }.internal())
+            .filter(|name| checked_bounds.is_none_or(|selected| selected.contains(name)))
+            .collect();
+        assert_state_bounds(solver, model, Some(&free_bounds), &initial)?;
+        solver.push();
+        let mut has_capacity = false;
+        for (name, value) in &initial {
+            if assigned.contains(name)
+                && let SymbolicValue::Seq { slots, len, .. } = value
+            {
+                has_capacity = true;
+                solver.assert(&solver.le(len, &solver.int_value(i64_index(slots.len())?))?)?;
+            }
+        }
+        let failure = init_definedness_failure(solver, model, &initial).await?;
+        solver.pop(1)?;
+        if let Some(error) = failure {
+            return Ok(Some(Undefined::Init(error)));
+        }
+        if has_capacity
+            && init_definedness_failure(solver, model, &initial)
+                .await?
+                .is_some()
+        {
+            return Ok(Some(Undefined::Init(VerifyError::new(
+                "model sequence length exceeds capacity",
+            ))));
+        }
     }
+    assert_state_bounds(solver, model, checked_bounds, &initial)?;
     if instances.is_empty() {
         return Ok(None);
     }
@@ -520,7 +553,7 @@ fn assert_state_bounds<S: SmtSolver>(
 }
 
 /// The init definedness question (#1258), on a solver that holds exactly the
-/// init constraints and the step-0 bounds of `initial`: `Some` is the first
+/// init constraints, free-input bounds and optional Seq caps: `Some` is the first
 /// failure site, in init evaluation order, that some initial state reaches,
 /// as the error the concrete engines report for it, located at its init
 /// statement.
