@@ -150,19 +150,34 @@ fn dependency_diagnostics(
         unreachable!("editor dependencies are compose uses")
     };
     let mut diagnostics = Vec::new();
-    for (path, child) in &log.sources {
-        let span = compose
-            .items
-            .iter()
-            .find_map(|item| match item {
-                fsl_syntax::ComposeItem::Use {
-                    path: reference,
-                    span,
-                    ..
-                } if reference == path => Some(*span),
-                _ => None,
-            })
-            .expect("read dependency has a use declaration");
+    let mut sources = log
+        .sources
+        .iter()
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut keys = Vec::new();
+    for (path, child, span) in compose.items.iter().filter_map(|item| match item {
+        fsl_syntax::ComposeItem::Use { path, span, .. } => {
+            sources.remove(path).map(|child| (path, child, *span))
+        }
+        _ => None,
+    }) {
+        let mut file = std::path::PathBuf::new();
+        let owner = if source_file.contains(':') && !std::path::Path::new(source_file).is_absolute()
+        {
+            "."
+        } else {
+            source_file
+        };
+        for part in std::path::absolute(std::path::Path::new(owner).with_file_name(path))
+            .expect("current directory")
+            .components()
+        {
+            if part == std::path::Component::ParentDir {
+                file.pop();
+            } else {
+                file.push(part);
+            }
+        }
         let refused = log.refusal.as_ref().is_some_and(|(output, _)| {
             output["loc"]["file"] == *path || output["findings"][0]["loc"]["file"] == *path
         });
@@ -177,6 +192,15 @@ fn dependency_diagnostics(
             log.warnings
                 .iter()
                 .filter(|finding| finding["loc"]["file"] == *path)
+                .filter(|finding| {
+                    let mut key = (*finding).clone();
+                    key["loc"]["file"] = serde_json::json!(file);
+                    if keys.contains(&key) {
+                        return false;
+                    }
+                    keys.push(key);
+                    true
+                })
                 .map(|finding| edition_diagnostic(child, finding)),
         );
         for mut diagnostic in children {
@@ -184,10 +208,7 @@ fn dependency_diagnostics(
                 diagnostic.message = edition_parse_error(child, options).message;
             }
             diagnostic.related = Some(DependencyDiagnostic {
-                file: std::path::Path::new(source_file)
-                    .with_file_name(path)
-                    .to_string_lossy()
-                    .into_owned(),
+                file: file.to_string_lossy().into_owned(),
                 source: child.clone(),
                 span: diagnostic.span,
                 error: refused,
