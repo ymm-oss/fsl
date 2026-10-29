@@ -348,6 +348,43 @@ domain Recursive {
 const AI_UNKNOWN_TOOL: &str =
     include_str!("../../fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl");
 
+#[test]
+fn no_tools_lowering_keeps_the_authored_component_origin() {
+    for (name, body) in [("NoTools", ""), ("EmptyAuthority", "authority { }")] {
+        let source = format!("\n  ai_component {name} {{ {body} }}\n");
+        let fsl_syntax::SurfaceDocument::AiComponent(component) =
+            fsl_syntax::parse_surface_document(&source).unwrap()
+        else {
+            panic!("AI fixture")
+        };
+        let error =
+            fsl_core::lower_ai_component(component).expect_err("no tools must fail lowering");
+        assert_eq!(
+            error.message,
+            format!("ai_component '{name}' declares no tools")
+        );
+        assert_eq!((error.line, error.column), (2, 3));
+        assert_eq!(error.kind, fsl_core::CoreErrorKind::Semantics);
+        let origin = error.origin.unwrap();
+        assert_eq!(origin.id.0, "ai-component:2:3");
+        assert_eq!(origin.dialect, "ai_component");
+        assert!(!origin.generated);
+        assert!(origin.secondary.is_empty() && origin.lowering_steps.is_empty());
+        let site = origin.primary.unwrap();
+        assert!(site.source_file.is_none());
+        assert_eq!(site.declaration_path, vec![name]);
+        assert_eq!(site.dialect, "ai_component");
+        let span = site.span.unwrap();
+        assert_eq!(
+            (span.start.line, span.start.column, span.start.offset),
+            (2, 3, 0)
+        );
+        assert_eq!(span.start, span.end);
+    }
+    let source = "ai_component OneTool { tool Search { schema S; } authority { } }";
+    assert!(fsl_core::parse_kernel_source(source, &FsResolver::new(".")).is_ok());
+}
+
 fn ai_authority_source(authority: &str) -> String {
     AI_UNKNOWN_TOOL.replace(
         "may_execute MissingTool;",

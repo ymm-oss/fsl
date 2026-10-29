@@ -443,7 +443,7 @@ enum InitWalkMode<'a> {
     Concrete,
     LegacyConcrete,
     ScopedFields(&'a BTreeSet<String>),
-    ReadOrder(&'a BTreeSet<String>),
+    ReadOrder(&'a BTreeSet<String>, bool), // Resolve static domains only for refinement.
 }
 
 /// Names and declared types of state roots that `model`'s init never
@@ -531,7 +531,9 @@ fn check_init_coverage(
         false,
         &BTreeMap::new(),
         model,
-        roots.map_or(InitWalkMode::Concrete, InitWalkMode::ReadOrder),
+        roots.map_or(InitWalkMode::Concrete, |roots| {
+            InitWalkMode::ReadOrder(roots, true)
+        }),
     )?;
     let mut missing_is_partial = false;
     let mut missing = model
@@ -693,7 +695,7 @@ fn meet_branches(
 /// and non-constant range bounds return `None`, so assignments at the binder key
 /// cannot prove coverage through this function. Fixed targets are separate:
 /// `init_binder_is_nonempty` can prove a static filtered domain nonempty
-/// (including a singleton) and permit their coverage even when this returns `None`.
+/// (including a singleton); scoped static supplementation/nonemptiness leaves legacy range resolution unchanged.
 fn compute_binder_values(
     binder: &Binder,
     model: &KernelModel,
@@ -732,10 +734,18 @@ fn init_binder_is_nonempty(
     model: &KernelModel,
     outer: Option<&BTreeMap<String, Option<Vec<Value>>>>,
 ) -> bool {
-    // This scoped policy is used only behind the failed legacy probe. Do not
-    // repair #1515's symbolic/global-const behavior or narrow legacy acceptance.
+    init_binder_static_values(binder, model, outer).is_some_and(|values| !values.is_empty())
+}
+
+/// Select only filter `Ok(true)` values; filter errors are not selected.
+/// Source errors, state reads and dependencies on supplied outer names return `None`.
+fn init_binder_static_values(
+    binder: &Binder,
+    model: &KernelModel,
+    outer: Option<&BTreeMap<String, Option<Vec<Value>>>>,
+) -> Option<Vec<Value>> {
     if outer.is_some_and(|names| init_binder_depends_on_outer(binder, names)) {
-        return false;
+        return None;
     }
     let (sources, filter) = init_binder_exprs(binder);
     if sources
@@ -744,16 +754,18 @@ fn init_binder_is_nonempty(
         || filter
             .is_some_and(|expr| !state_references(expr, model, [binder_name(binder)]).is_empty())
     {
-        return false;
+        return None;
     }
     let state = State::new();
-    let Ok(values) = super::binder_values(binder, &state, &Bindings::new(), model, None) else {
-        return false;
-    };
-    values.into_iter().any(|(value, mut bindings)| {
-        bindings.insert(binder_name(binder).to_owned(), value);
-        super::binder_where_holds(binder, &state, &mut bindings, model, None) == Ok(true)
-    })
+    let values = super::binder_values(binder, &state, &Bindings::new(), model, None).ok()?;
+    let mut selected = Vec::new();
+    for (value, mut bindings) in values {
+        bindings.insert(binder_name(binder).to_owned(), value.clone());
+        if super::binder_where_holds(binder, &state, &mut bindings, model, None) == Ok(true) {
+            selected.push(value);
+        }
+    }
+    Some(selected)
 }
 
 /// Binder sources are evaluated outside its scope; only the filter is inside.
@@ -1049,7 +1061,7 @@ pub fn check_init_write_ownership(model: &KernelModel) -> Result<(), RuntimeErro
         false,
         &BTreeMap::new(),
         model,
-        InitWalkMode::ReadOrder(&assigned_roots),
+        InitWalkMode::ReadOrder(&assigned_roots, false),
     )?;
     Ok(())
 }
@@ -1474,13 +1486,17 @@ fn walk_init(
     mode: InitWalkMode<'_>,
 ) -> Result<(BTreeMap<String, Coverage>, BTreeSet<InitWriteKey>), RuntimeError> {
     let field_read_roots = match mode {
-        InitWalkMode::ScopedFields(roots) | InitWalkMode::ReadOrder(roots) => Some(roots),
+        InitWalkMode::ScopedFields(roots) | InitWalkMode::ReadOrder(roots, _) => Some(roots),
         InitWalkMode::Concrete | InitWalkMode::LegacyConcrete => None,
     };
-    let read_order = matches!(mode, InitWalkMode::ReadOrder(_));
+    let read_order = matches!(mode, InitWalkMode::ReadOrder(..));
     let field_reads_only = field_read_roots.is_some();
     let legacy = matches!(mode, InitWalkMode::LegacyConcrete);
     let proof_scope = matches!(mode, InitWalkMode::ScopedFields(_)).then_some(bound_names);
+    let nonempty_scope = match mode {
+        InitWalkMode::ReadOrder(_, false) | InitWalkMode::LegacyConcrete => proof_scope,
+        _ => Some(bound_names),
+    };
     for statement in statements {
         match statement {
             Statement::Assign {
@@ -1605,17 +1621,23 @@ fn walk_init(
                     | Binder::Collection { where_expr, .. } => where_expr,
                 };
                 let binder_values = compute_binder_values(binder, model, proof_scope)?;
+                let binder_values = binder_values.or_else(|| match mode {
+                    InitWalkMode::Concrete | InitWalkMode::ReadOrder(_, true) => {
+                        init_binder_static_values(binder, model, Some(bound_names))
+                    }
+                    _ => None,
+                });
                 let mut nested_bound = bound_names.clone();
                 nested_bound.insert(binder_name(binder).to_owned(), binder_values);
                 // Only unresolved binders retain #1520's current-key exemption.
-                // compute_binder_values leaves filtered binders unresolved for their read check.
+                // Check leaves filtered binders unresolved; concrete/refinement resolve static values.
                 let mut nested_roots = BTreeSet::new();
-                let nested_mode = if let InitWalkMode::ReadOrder(roots) = mode
+                let nested_mode = if let InitWalkMode::ReadOrder(roots, resolve_static) = mode
                     && nested_bound[binder_name(binder)].is_none()
                 {
                     collect_assigned_init_roots(statements, &mut nested_roots);
                     nested_roots = roots.difference(&nested_roots).cloned().collect();
-                    InitWalkMode::ReadOrder(&nested_roots)
+                    InitWalkMode::ReadOrder(&nested_roots, resolve_static)
                 } else {
                     mode
                 };
@@ -1644,7 +1666,7 @@ fn walk_init(
                     model,
                     nested_mode,
                 )?;
-                if !init_binder_is_nonempty(binder, model, proof_scope) {
+                if !init_binder_is_nonempty(binder, model, nonempty_scope) {
                     definitely_assigned = before_forall;
                 }
             }

@@ -863,7 +863,12 @@ const AI_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
 };
 const CHECK_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
     parse: CHECK_PARSE_INPUT_SHAPES,
-    name: CHECK_NAME_INPUT_SHAPES,
+    guard: &[InputShape::Source, InputShape::Project],
+    name: &[
+        InputShape::Source,
+        InputShape::Component,
+        InputShape::Project,
+    ],
     ..SOURCE_INPUT_SHAPE_PROFILE
 };
 const VERIFY_INPUT_SHAPE_PROFILE: InputShapeProfile = InputShapeProfile {
@@ -1399,6 +1404,16 @@ const CHECK_COVERAGE: &[FailureCoverage] = &[
         fixture: AI_NAME_FIXTURE,
         uniform: AI_UNKNOWN_TOOL_SEMANTIC,
     },
+    FailureCoverage {
+        class: FailureClass::Guard,
+        fixture: AI_PROJECT_GUARD_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
+    FailureCoverage {
+        class: FailureClass::Name,
+        fixture: AI_PROJECT_NAME_FIXTURE,
+        uniform: SEMANTIC_WITHOUT_INPUT_PATH_WITHOUT_LOCATION,
+    },
 ];
 const VERIFY_COVERAGE: &[FailureCoverage] = &[
     CHECK_COVERAGE[0],
@@ -1846,7 +1861,10 @@ fn coverage_input_shape(command: &str, fixture: &str) -> InputShape {
     }
     if matches!(command, "check" | "mutate" | "verify") {
         return match fixture {
-            PARSE_AI_PROJECT_FIXTURE | PARSE_AI_PROJECT_DUPLICATE_FIXTURE => InputShape::Project,
+            PARSE_AI_PROJECT_FIXTURE
+            | PARSE_AI_PROJECT_DUPLICATE_FIXTURE
+            | AI_PROJECT_GUARD_FIXTURE
+            | AI_PROJECT_NAME_FIXTURE => InputShape::Project,
             PARSE_CAUSAL_FIXTURE => InputShape::Causal,
             _ => InputShape::Source,
         };
@@ -3804,6 +3822,31 @@ fn generic_check_matches_ai_check_for_an_unknown_authority_tool() {
 }
 
 #[test]
+fn generic_check_matches_ai_check_for_invalid_project_components() {
+    for fixture in [AI_PROJECT_NAME_FIXTURE, AI_PROJECT_GUARD_FIXTURE] {
+        let generic = run("check", fixture);
+        let specialized = run("ai check", fixture);
+        assert_eq!(generic.exit, 2, "{}", generic.stdout);
+        assert_eq!(specialized.exit, 2, "{}", specialized.stdout);
+        let mut generic = generic.json.expect("check JSON");
+        let specialized = specialized.json.expect("AI check JSON");
+        // check publishes native build metadata; AI check does not. Check that
+        // observed asymmetric field before comparing every diagnostic field.
+        let versions = generic.as_object_mut().unwrap().remove("versions").unwrap();
+        assert_eq!(
+            versions,
+            serde_json::json!({
+                "verifier": {"name": "fslc-rust", "version": env!("CARGO_PKG_VERSION")},
+                "core": {"name": "fsl-core", "version": env!("CARGO_PKG_VERSION")},
+                "solver": {"name": "z3", "backend": "native-z3", "version": "Z3 4.16.0.0"}
+            })
+        );
+        assert!(specialized.get("versions").is_none());
+        assert_eq!(generic, specialized, "{fixture}");
+    }
+}
+
+#[test]
 fn requirements_document_approval_invocation_uses_the_selected_kind() {
     let arguments = invoke(
         "approval create",
@@ -3934,7 +3977,7 @@ fn approval_diff_zero_digest_negative_control_stops_before_the_diff() {
 }
 
 #[test]
-fn name_matrix_keeps_nine_uniform_countercontrols() {
+fn name_matrix_keeps_ten_uniform_countercontrols() {
     let bounded_commands = [
         "check",
         "verify",
@@ -3951,9 +3994,12 @@ fn name_matrix_keeps_nine_uniform_countercontrols() {
         .collect::<Vec<_>>();
     assert_eq!(
         name_cells.len(),
-        9,
-        "Name matrix must keep nine countercontrols"
+        10,
+        "Name matrix must keep the original nine countercontrols plus AI project check"
     );
+    assert!(name_cells.iter().any(|cell| cell.command == "check"
+        && cell.shape == InputShape::Project
+        && cell.fixture == AI_PROJECT_NAME_FIXTURE));
     assert_eq!(
         name_cells
             .iter()
@@ -3967,7 +4013,7 @@ fn name_matrix_keeps_nine_uniform_countercontrols() {
             })
             .count(),
         0,
-        "Name matrix must keep all nine countercontrols uniform"
+        "Name matrix must keep all ten countercontrols uniform"
     );
 }
 
