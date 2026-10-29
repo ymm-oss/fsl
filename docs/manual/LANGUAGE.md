@@ -1482,6 +1482,15 @@ additional removals in #1463.
   capacity, for example when init stores an over-capacity sequence and reads
   beyond its slots, these engines instead refuse without a location:
   `model sequence length exceeds capacity`.
+  For quantified and aggregate expressions, all engines name the first reached
+  concrete failure, not a generic failure of the whole binder (#1607). Evaluation
+  visits the source first, then each present candidate's `where`, then its body
+  or summand if the filter is true. `forall` stops at the first false body;
+  `exists` stops at the first true body. `count`, `unique`, and `exactlyOne` do
+  not stop early when their result is determined. `sum` checks each running
+  partial sum for i64 overflow (`integer overflow in sum`), even if its final
+  mathematical sum would fit; an undefined summand reports its own failure
+  before accumulation. The location remains the containing init statement.
 - Dividing the minimum i64 value by `-1` (`MIN / -1`) or taking its remainder
   (`MIN % -1`) is integer overflow, including in property contexts where only
   zero divisors are totalized to `0`.

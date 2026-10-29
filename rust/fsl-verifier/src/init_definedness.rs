@@ -727,18 +727,72 @@ fn expression_sites_inner<S: SmtSolver>(
                 sites,
             )
         }
-        // A binder expression is one site: its range, `where`, body, and (for
-        // `sum`) accumulation are not named separately.
-        Expr::Quantified { .. } | Expr::Aggregate { .. } => {
-            let message = match expr {
-                Expr::Aggregate {
-                    kind: AggregateKind::Sum,
-                    ..
-                } => "integer overflow in sum or undefined summand",
-                _ => "undefined evaluation",
-            };
-            let undefined = solver.not(&defined(solver, model, expr, state, bindings)?)?;
-            sites.push((solver.and(&[reached.clone(), undefined])?, message));
+        Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => {
+            let mut active = reached.clone();
+            for source in binder_source_expressions(binder) {
+                expression_sites(solver, model, source, state, bindings, &active, sites)?;
+                active = solver.and(&[active, defined(solver, model, source, state, bindings)?])?;
+            }
+            let mut sum = solver.int_value(0);
+            for (name, candidate, membership) in
+                binder_values(solver, model, binder, state, bindings, None)?
+            {
+                let mut local = bindings.clone();
+                local.insert(name, candidate);
+                // Symbolic candidates include absent members and non-live slots.
+                let membership = membership.unwrap_or_else(|| solver.bool_value(true));
+                let present = solver.and(&[active.clone(), membership.clone()])?;
+                let mut where_defined = solver.bool_value(true);
+                if let Some(filter) = binder_where_expression(binder) {
+                    expression_sites(solver, model, filter, state, &local, &present, sites)?;
+                    where_defined = defined(solver, model, filter, state, &local)?;
+                }
+                let filter = binder_where(solver, model, binder, state, &mut local, None)?
+                    .unwrap_or_else(|| solver.bool_value(true));
+                let selected = solver.and(&[present, where_defined.clone(), filter.clone()])?;
+                let mut body_continues = solver.bool_value(true);
+                let value = match expr {
+                    Expr::Quantified { body, .. } => Some(body.as_ref()),
+                    Expr::Aggregate { value, .. } => value.as_deref(),
+                    _ => unreachable!(),
+                };
+                if let Some(value) = value {
+                    expression_sites(solver, model, value, state, &local, &selected, sites)?;
+                    let value_defined = defined(solver, model, value, state, &local)?;
+                    let value = eval(solver, model, value, state, &mut local, None)?;
+                    let result_continues = if let Expr::Quantified { quantifier, .. } = expr {
+                        if quantifier == "forall" {
+                            bool_term(&value)?.clone()
+                        } else {
+                            solver.not(bool_term(&value)?)?
+                        }
+                    } else {
+                        // Check every prefix, not just the final mathematical sum.
+                        let next_sum = solver.add(&sum, int_term(&value)?)?;
+                        let in_range = i64_term_is_in_range(solver, &next_sum)?;
+                        sites.push((
+                            solver.and(&[
+                                selected.clone(),
+                                value_defined.clone(),
+                                solver.not(&in_range)?,
+                            ])?,
+                            "integer overflow in sum",
+                        ));
+                        sum = solver.ite(&selected, &next_sum, &sum)?;
+                        in_range
+                    };
+                    body_continues = solver.and(&[value_defined, result_continues])?;
+                }
+                // Only quantifiers stop on a decisive result; all stop on error.
+                let candidate_continues = solver.or(&[
+                    solver.not(&membership)?,
+                    solver.and(&[
+                        where_defined,
+                        solver.or(&[solver.not(&filter)?, body_continues])?,
+                    ])?,
+                ])?;
+                active = solver.and(&[active, candidate_continues])?;
+            }
             Ok(())
         }
     }

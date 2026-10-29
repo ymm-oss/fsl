@@ -157,6 +157,15 @@ The schema is unchanged. Publishing init failure conditions, should a Kernel
 consumer need them, would add a field with its own `state_effect_on_failure`
 value and so a minor schema version.
 
+For binder expressions in init, symbolic diagnostics follow concrete evaluation
+order and name the first reached operation (#1607): source, then each present
+candidate's `where`, then its body/summand when selected. `forall` and `exists`
+respect their decisive-result short circuits; `count`, `unique`, and `exactlyOne`
+continue through all candidates. `sum` reports an undefined summand's operation
+before accumulation, and checks every partial sum for `integer overflow in sum`.
+These diagnostic sites retain the containing statement's location and remain
+verifier-internal; they do not add entries to `partial_operations`.
+
 ## Concrete boundary pre-pass budget
 
 Native verification has a solver-free concrete boundary BFS —
