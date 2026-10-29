@@ -804,9 +804,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   所有権エラーより先に位置付きの const-shadow エラーを返す、診断の優先順位の変化です。
   部分 init を有効にするものではありません。追加の受理の縮小には上の暗黙の名前と、
   `const i = 1` に対して `forall i in 0..0 { forall j in 0..i { m[j] = true } }` とする
-  init の入れ子があります。この fixture は base `c32e7f5a` で check を通り、今は外側
+  init の入れ子があります。この fixture は base `e0b4cbae` で check を通り、今は外側
   forall の owner **5:10** で拒みます。局所名と束縛された参照を改名してください。
-  依存する範囲境界の実行制限は別です。base `cfdf2d51` と計測した祖先 `1cb268ec` の
+  依存する範囲境界の実行制限は別です。base `e0b4cbae` と計測した祖先 `f1e2767f` の
   各 archive で native `check` を実行し、追加の `issue_1425/interleaved.fsl` を含む
   **598** corpus 形で受理の縮小 **0**、その他の出力差 **0** を確認しました。元の
   inline は152形の縮小、126形の fresh な受理維持、5形の診断変更です。さらに暗黙名・

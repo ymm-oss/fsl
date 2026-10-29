@@ -129,10 +129,10 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
 3. `kpi k = count E in S` → no kernel state/action/invariant. The declaration is
    validated and retained as typed `ProjectionDef` metadata whose expression is
    the shared `Aggregate::Count` plus a typed Binder for
-    `count(c: E where e_stage[c] == S)` when c does not meet a const. This c is
-    not a writable source local: on collision the projection alone uses the
-    existing reserved fresh-name allocator, with its index renamed consistently.
-    Native `explain` reads this projection's public metadata;
+   `count(c: E where e_stage[c] == S)` when c does not meet a const. This c is
+   not a writable source local: on collision the projection alone uses the
+   existing reserved fresh-name allocator, with its index renamed consistently.
+   Native `explain` reads this projection's public metadata;
    no ghost counter or consistency invariant is generated.
 4. `requirement <ID> "<text>" { items }` → lift the contained action /
    invariant / reachable / leadsTo to top level and attach

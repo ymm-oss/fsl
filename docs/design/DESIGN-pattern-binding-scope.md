@@ -728,20 +728,20 @@ strings remain unchanged, and other partial-init ownership controls remain.
 Additional admission removals include visible implicit process/entity/relation
 locals and the nested-init source with `const i = 1` and
 `forall i in 0..0 { forall j in 0..i { m[j] = true } }`. That source checked on
-base c32e7f5a; the refusal locates the outer forall at **5:10**. A local-name
+base e0b4cbae; the refusal locates the outer forall at **5:10**. A local-name
 rewrite must update its bound uses; it does not add general dependent ranges.
 
 ### Verification snapshot
 
 Native `check <form>` compared base
-`cfdf2d51c67fa3cd8a6dd2b443bbb5f132d4cf6d` with measurement commit
-`1cb268ecfa4430b3b03e688957f02d495dcda3e5`, each in its own archived tree,
+`e0b4cbae39569de8008a8eb049588aa84d8c1a42` with measurement commit
+`f1e2767f3a58d78c826b393ea723becf5768afde`, each in its own archived tree,
 with cache off and no ambient unstable features. All **598 corpus forms** in
 `specs/` (23), `examples/` (191) and `rust/fslc/tests/fixtures/` (384) have
 byte-identical exit/stdout/stderr triples: **0 `ok`→`error` and 0 other output
 differences**, without exclusions. The increase from 597 is the added
 `rust/fslc/tests/fixtures/issue_1425/interleaved.fsl`, not an acceptance change.
-Both sides have 401 exit-0 inputs, 191 exit-2 inputs and 6 exit-1 inputs.
+Both sides have 399 exit-0 inputs, 193 exit-2 inputs and 6 exit-1 inputs.
 
 The original pre-migration inline sources were rematerialized independently
 of the migrated tests: **126+24+2=152** `ok`→`error` forms, **126** fresh forms
