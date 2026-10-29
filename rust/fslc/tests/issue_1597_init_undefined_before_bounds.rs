@@ -128,7 +128,7 @@ failure_cell!(
     NESTED_IF_FORALL,
     "pop() on empty sequence",
     "7:26",
-    "init references state variable 'c' before it is assigned"
+    "the explicit engine does not support a free initial value of state variable 'c' (nondeterministic init); use --engine bmc"
 );
 failure_cell!(
     struct_field_bounded,
@@ -142,7 +142,7 @@ failure_cell!(
     OPTION_BOUNDED,
     "pop() on empty sequence",
     "5:30",
-    "init references state variable 'c' before it is assigned"
+    "the explicit engine does not support a free initial value of state variable 'c' (nondeterministic init); use --engine bmc"
 );
 
 const POP_UNBOUNDED: &str = "spec PopUnbounded {\n  type K = 0..1\n  state { xs: Seq<K, 2>, n: Int }\n  init { xs = Seq {}  n = xs.pop().size() }\n  action step() { }\n  invariant P { true }\n}\n";
@@ -196,7 +196,7 @@ fn require_free_input(engine: &str) {
         // error. Search still finds the existing unconstrained _bounds_k witness.
         // Explicit cannot execute such a read; its existing refusal is NOT a
         // proof of definedness. Auto falls back and preserves the symbolic result.
-        let refusal = "init references state variable 'k' before it is assigned";
+        let refusal = "the explicit engine does not support a free initial value of state variable 'k' (nondeterministic init); use --engine bmc";
         if engine == "explicit" {
             assert_error(&value, exit, refusal);
         } else {
@@ -273,7 +273,7 @@ fn require_seq_cap_guarded2(engine: &str) {
     require_capacity_refusal(
         SEQ_CAP_GUARDED2,
         engine,
-        "init references state variable 'k' before it is assigned",
+        "the explicit engine does not support a free initial value of state variable 'k' (nondeterministic init); use --engine bmc",
     );
 }
 

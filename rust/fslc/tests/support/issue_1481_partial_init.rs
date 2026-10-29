@@ -1809,22 +1809,34 @@ diagnostic_order_cell!(
     do1_scalar_duplicate,
     DO1,
     semantics_at("state variable 't' assigned more than once in init", 3, 16),
-    semantics("init references state variable 'x' before it is assigned"),
-    semantics("init references state variable 'x' before it is assigned")
+    semantics(
+        "the explicit engine does not support a free initial value of state variable 'x' (nondeterministic init); use --engine bmc"
+    ),
+    semantics(
+        "the explicit engine does not support a free initial value of state variable 'x' (nondeterministic init); use --engine bmc"
+    )
 );
 diagnostic_order_cell!(
     do2_partial_three_fields,
     DO2,
     semantics_at("state variable 's' assigned more than once in init", 5, 18),
-    semantics("init references state variable 'x' before it is assigned"),
-    semantics("init references state variable 'x' before it is assigned")
+    semantics(
+        "the explicit engine does not support a free initial value of state variable 'x' (nondeterministic init); use --engine bmc"
+    ),
+    semantics(
+        "the explicit engine does not support a free initial value of state variable 'x' (nondeterministic init); use --engine bmc"
+    )
 );
 diagnostic_order_cell!(
     do3_where_def_state,
     DO3,
     semantics_at("state variable 's' assigned more than once in init", 7, 47),
-    semantics("init references state variable 'x' before it is assigned"),
-    semantics("init references state variable 'x' before it is assigned")
+    semantics(
+        "the explicit engine does not support a free initial value of state variable 'x' (nondeterministic init); use --engine bmc"
+    ),
+    semantics(
+        "the explicit engine does not support a free initial value of state variable 'x' (nondeterministic init); use --engine bmc"
+    )
 );
 diagnostic_order_cell!(
     do4_collision_then_free_read,

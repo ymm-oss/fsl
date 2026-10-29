@@ -1255,8 +1255,16 @@ a partially assigned root is rejected. In particular, <code>struct-other-partial
 be free under #493. Existing ownership/field/forall refusals keep priority.</p>
 <p>A root init never assigns remains a symbolic free value, including the issue's
 <code>init { g = on }</code> and <code>if choose { x = 1 } else { x = 0 }</code> with unassigned
-<code>on</code>/<code>choose</code> (#493). Check still accepts them; explicit still refuses their
-reads. Only when binder values are unresolved, including filtered/collection
+<code>on</code>/<code>choose</code> (#493). Check still accepts them; BMC/induction retain their
+symbolic free values, and refinement's free-root enumeration is unchanged
+(#1521). Explicit and Monitor still refuse these reads, but now distinguish
+unsupported nondeterministic init from assigned-root early reads with
+<code>the explicit engine does not support a free initial value of state variable '&lt;name&gt;' (nondeterministic init); use --engine bmc</code>
+(kind <code>semantics</code>, exit 2; compose prefixes are retained). Auto still falls
+back to BMC. For non-error BMC results, <code>engine_fallback.reason</code> carries
+that diagnostic; BMC error results still omit fallback metadata.
+This is a message-only change, not new explicit enumeration or check rejection.
+Only when binder values are unresolved, including filtered/collection
 forms (#1520, X1/X2), does the #1518 current-key rule exempt an already-written
 current key from this root-wide check. A resolved partial domain still requires
 full root coverage; a typed full-domain forall remains accepted.

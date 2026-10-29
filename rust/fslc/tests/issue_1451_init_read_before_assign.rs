@@ -132,7 +132,13 @@ fn matches_oracle(
         } => {
             if consumer == "explicit" {
                 // Existing concrete support limit, NOT an agreement assertion.
-                read_refused(case, actual, name, composed)
+                error(
+                    actual,
+                    Some(&format!(
+                        "the explicit engine does not support a free initial value of state variable '{}' (nondeterministic init); use --engine bmc",
+                        root(name, composed)
+                    )),
+                )
             } else if violated && consumer != "check" {
                 actual.1 == 1
                     && actual.0["result"] == "violated"

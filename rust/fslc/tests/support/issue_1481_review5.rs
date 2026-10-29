@@ -309,7 +309,7 @@ probe_cell!(
     None,
     Some((
         "semantics",
-        "init references state variable 'free' before it is assigned"
+        "the explicit engine does not support a free initial value of state variable 'free' (nondeterministic init); use --engine bmc"
     )),
     Value::Null
 );

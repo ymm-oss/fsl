@@ -453,9 +453,9 @@ enum InitWalkMode<'a> {
 ///
 /// This is deliberately simpler than — and not layered on — the
 /// [`check_deterministic_init`]/[`walk_init`] coverage gate: that walk
-/// rejects a condition/index expression reading a not-yet-assigned root as
-/// an error (`init references state variable '...' before it is
-/// assigned`), which is exactly the pattern a nondeterministic `init if`
+/// rejects a condition/index expression reading a not-yet-assigned root,
+/// distinguishing unsupported free values from assigned-root early reads.
+/// A free condition is exactly the pattern a nondeterministic `init if`
 /// legitimately uses (the motivating case for #493). This scan instead only
 /// asks whether a root is ever an assignment *target* anywhere in init,
 /// regardless of read order or which branch is taken; it never errors and
@@ -1762,6 +1762,13 @@ fn check_init_expr(
         let ty = model.state_type(name.as_str());
         !ty.is_some_and(|ty| coverage_is_full(definitely_assigned.get(name.as_str()), ty, model))
     }) {
+        let mut assigned_roots = BTreeSet::new();
+        collect_assigned_init_roots(&model.init, &mut assigned_roots);
+        if !assigned_roots.contains(name.as_str()) {
+            return Err(runtime_error(format!(
+                "the explicit engine does not support a free initial value of state variable '{name}' (nondeterministic init); use --engine bmc"
+            )));
+        }
         return Err(runtime_error(format!(
             "init references state variable '{name}' before it is assigned"
         )));
