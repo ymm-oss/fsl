@@ -95,18 +95,29 @@ impl Model {
             .output()
             .expect("run native binary");
         let exit = output.status.code().expect("native exit code");
-        assert!(
-            output.stderr.is_empty(),
-            "{args:?}: exit={exit}, stdout={}, stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
             panic!(
                 "{args:?}: exit={exit}, invalid JSON {error}: {}",
                 String::from_utf8_lossy(&output.stdout)
             )
         });
+        if args.first() == Some(&"mutate") && value["result"] == "mutated" {
+            let stderr = std::str::from_utf8(&output.stderr).expect("UTF-8 progress");
+            assert!(!stderr.is_empty(), "successful mutate must report progress");
+            assert!(
+                stderr.lines().all(|line| line.starts_with("mutate ")
+                    && line.contains(" (engine=")
+                    && line.ends_with("s)")),
+                "{stderr}"
+            );
+        } else {
+            assert!(
+                output.stderr.is_empty(),
+                "{args:?}: exit={exit}, stdout={}, stderr={}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
         eprintln!("{args:?}: exit={exit} {value}");
         (value, exit)
     }

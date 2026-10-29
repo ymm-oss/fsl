@@ -2919,11 +2919,8 @@ pub struct BoundaryProbe {
     pub finding: Option<(Violation, Vec<TraceStep>)>,
     /// Whether the search stopped because it reached `budget` distinct
     /// states rather than because it exhausted every state reachable within
-    /// `depth`. A caller must treat `exhausted && finding.is_none()`
-    /// identically to a normal empty result: this probe is an evidence
-    /// detour, not a verdict authority, so an inconclusive budgeted search
-    /// falls through to the symbolic engine exactly as a completed empty
-    /// search does.
+    /// `depth`. An exhausted empty probe cannot certify clean; mutate falls
+    /// back to BMC, while a completed empty probe may permit explicit checking.
     pub exhausted: bool,
     /// The number of distinct states visited, for diagnostics and for the
     /// corpus-conservation check that calibrates `CONCRETE_PROBE_BUDGET`.

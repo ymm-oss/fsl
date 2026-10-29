@@ -85,6 +85,71 @@ fn tree(path: &Path) -> BTreeMap<String, (usize, String)> {
     files
 }
 
+// Only elapsed seconds are ambient; keep engine and all progress text exact.
+fn stable_mutate_progress(stderr: &[u8], report: &Value) -> Vec<u8> {
+    assert_eq!(report["result"], "mutated");
+    let mutants = report["mutants"].as_array().expect("mutant records");
+    assert!(stderr.ends_with(b"\n"), "missing mutation progress newline");
+    let lines = std::str::from_utf8(stderr)
+        .expect("UTF-8 mutation progress")
+        .split_terminator('\n')
+        .collect::<Vec<_>>();
+    assert_eq!(lines.len(), mutants.len() + 1, "live progress per record");
+    let mut stable = String::new();
+    for (index, line) in lines.into_iter().enumerate() {
+        let (prefix, seconds) = line.rsplit_once(", ").expect("progress duration");
+        let elapsed = seconds
+            .strip_suffix("s)")
+            .expect("seconds suffix")
+            .parse::<f64>()
+            .expect("numeric elapsed seconds");
+        assert!(elapsed.is_finite() && elapsed >= 0.0, "invalid duration");
+        let (body, engine) = prefix.rsplit_once(" (engine=").expect("progress engine");
+        assert!(matches!(engine, "explicit" | "bmc" | "probe" | "none"));
+        if index == 0 {
+            assert!(matches!(
+                body,
+                "mutate baseline: proved" | "mutate baseline: verified"
+            ));
+            assert!(matches!(engine, "explicit" | "bmc"));
+        } else {
+            assert!(body.starts_with(&format!("mutate [{index}/{}] ", mutants.len())));
+        }
+        writeln!(&mut stable, "{prefix}, <seconds>s)").unwrap();
+    }
+    stable.into_bytes()
+}
+
+#[test]
+fn mutation_progress_excludes_only_live_elapsed_seconds() {
+    let report = json!({"result":"mutated","mutants":[]});
+    let a = b"mutate baseline: proved (engine=explicit, 0.013s)\n";
+    let b = b"mutate baseline: proved (engine=explicit, 0.025s)\n";
+    assert_eq!(
+        stable_mutate_progress(a, &report),
+        stable_mutate_progress(b, &report)
+    );
+    for changed in [
+        b"mutate baseline: verified (engine=explicit, 0.013s)\n".as_slice(),
+        b"mutate baseline: proved (engine=bmc, 0.013s)\n".as_slice(),
+    ] {
+        assert_ne!(
+            stable_mutate_progress(a, &report),
+            stable_mutate_progress(changed, &report)
+        );
+    }
+    for bad in [
+        b"".as_slice(),
+        b"mutate baseline: proved (engine=explicit, NaNs)\n".as_slice(),
+        b"mutate baseline: proved (engine=explicit, -1s)\n".as_slice(),
+        b"warning: unexpected\n".as_slice(),
+    ] {
+        assert!(std::panic::catch_unwind(|| stable_mutate_progress(bad, &report)).is_err());
+    }
+    let missing = json!({"result":"mutated","mutants":[{}]});
+    assert!(std::panic::catch_unwind(|| stable_mutate_progress(a, &missing)).is_err());
+}
+
 fn stable_artifact(path: &Path) -> (Value, std::collections::BTreeSet<String>) {
     let bytes = std::fs::read(path).unwrap();
     cases::stable(
@@ -396,6 +461,16 @@ T17|explain root.fsl --depth 2|true"
         let repeated = run(&s, &canonical_command);
         let repeated_value = payload(&repeated);
         let repeated_artifact = artifact();
+        let canonical_stderr = if id == "T07" {
+            stable_mutate_progress(&canonical.stderr, &value)
+        } else {
+            canonical.stderr.clone()
+        };
+        let repeated_stderr = if id == "T07" {
+            stable_mutate_progress(&repeated.stderr, &repeated_value)
+        } else {
+            repeated.stderr.clone()
+        };
         let first = cases::stable(value.clone());
         let second = cases::stable(repeated_value);
         observations.eq(
@@ -403,13 +478,13 @@ T17|explain root.fsl --depth 2|true"
             (
                 canonical.status.code(),
                 &first,
-                &canonical.stderr,
+                &canonical_stderr,
                 &first_artifact,
             ),
             (
                 repeated.status.code(),
                 &second,
-                &repeated.stderr,
+                &repeated_stderr,
                 &repeated_artifact,
             ),
         );

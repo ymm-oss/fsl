@@ -15,7 +15,8 @@ existence check. This productizes mutation as a repeatable non-triviality check.
 survivors are review data, not failures, unless an explicit gate is requested —
 see "Opt-in gate" below).
 **That is the code for its own result, not an unconditional 0.** `mutate` verifies the
-spec first and re-emits that baseline envelope unchanged when it is not `verified`, so a
+spec first using auto, with a fresh BMC rerun on refusal (§3), and re-emits the
+refused BMC baseline envelope unchanged, so a
 spec that fails its own verification exits with the baseline's code and produces no
 mutants at all. Since #1002 a failed inline `implements` seam is such a baseline
 (`refinement_failed` / `impl_violated`, exit 1).
@@ -149,21 +150,40 @@ to the same spec name as the baseline.
 Malformed JSON, duplicate/invalid ids, invalid record shapes/instructions,
 parse/name/type/semantic build errors, and a different spec name are generation
 quality failures with `status:"invalid"`. They never count as kills. Once an
-external source builds, it goes through the exact same BMC + acceptance +
+external source builds, it goes through the exact same main + acceptance +
 forbidden + refinement oracle as a built-in mutant.
 
 ## 3. Kill oracle and baseline gate
 
 Each built-in mutant = mutated AST → `build_spec`; each valid external mutant =
-mutated source → `parse_src` → `build_spec`. Both then run **`verify` (BMC,
-depth K) + acceptance/forbidden
+mutated source → `parse_src` → `build_spec`. Both then run **the main oracle
+(depth K) + acceptance/forbidden
 replay + implements refine**. If any of these returns violated/reachable_failed/
 refinement_failed, or BMC rejects the mutant with a semantic error (for example an action
 body that is undefined in a reachable state, reported as `killed_by:"build_spec"`) →
 **killed** (killer recorded). All clean → **SURVIVED**. Induction is not used (`unknown_cti`
 makes the kill decision ambiguous and slow).
-**Baseline gate**: if the pre-mutation spec is not verified, refuse (in a buggy spec every
-mutant is killed trivially, which is meaningless).
+The main oracle first keeps any concrete boundary-probe finding. Only after a
+successful, finding-free, non-exhausted probe does it try the full model with
+the shared auto-engine explicit decision, budget 50,000 states (the probe
+budget). Explicit certifies **clean only**: supported, no runtime error, no
+budget overrun, no violation, and every reachable witnessed through K. Closure
+is not required; deadlock warnings do not become mutation kills. Otherwise the
+existing bounds-only then full-model BMC path runs, each call on its own fresh
+thread-local solver context. Explicit never selects a kill or its label.
+Requirements, implements, the init-bounds override, and attribution still run
+after this main result. Exhausted probes skip the extra concrete traversal.
+Cross-engine encoding gaps remain a risk: explicit-clean may bypass a BMC-only
+`build_spec` rejection described below; full-record agreement controls must
+reject any observed drift rather than allowlist it.
+
+**Baseline gate**: run auto with its default 1,000,000-state budget and accept
+`verified` or `proved`. If auto is not accepted, rerun the existing BMC baseline
+on a fresh scoped thread using the same captured source. A verified rerun
+continues mutation and reports `engine=bmc` on stderr; otherwise re-emit that
+BMC envelope with its existing exit code. Refusing a buggy baseline avoids
+trivially killing every mutant. Mutation JSON retains `"baseline":"verified"`
+even when the baseline is proved: mutant sensitivity is still bounded by K.
 
 Parse/name/type/semantic construction failures are intercepted before the kill
 oracle and classified `invalid`, for built-in and external mutants alike
@@ -194,8 +214,10 @@ limits of the verifier rather than findings about the mutant, and the `Seq`
 length projection errors ("model sequence length is negative / exceeds
 capacity"), which are likely the same type-bound projection gap #1283 closed
 for enum ordinals; both are left for follow-ups. The rule is
-the same for both sources: a failure before the mutant builds is `invalid`, a
-failure after it builds is `error`. The init-assignment `_bounds_<state>`
+the same for both sources: a failure before the mutant builds is `invalid`;
+after it builds, solver/backend and secondary-oracle failures are `error`,
+while the semantic BMC failures described above remain `build_spec` kills.
+The init-assignment `_bounds_<state>`
 re-attribution applies only to judged (clean/killed) outcomes, so it cannot
 hide an error. Without a gate the run still exits 0, and a note states how many
 mutants could not be judged.
@@ -270,6 +292,24 @@ per isolated model.
 
 ## 5. Output / ripple
 
+Stdout JSON is unchanged except for the encoding-only residual in §3: an
+explicit-clean mutant can survive where BMC alone reported `build_spec`.
+Mutation reports emit live progress on stderr only:
+
+```text
+mutate baseline: proved (engine=explicit, 0.100s)
+mutate [i/N] <op> <target>: <status>[ <killed_by>] (engine=explicit|bmc|probe|none, 0.100s)
+mutate external [i/M] <id>: <status>[ <killed_by>] (engine=explicit|bmc|probe|none, 0.100s)
+```
+
+The engine label names the main-oracle route, not whichever later check decides
+the final status or killer. `none` means the record never reached the oracle.
+N is the evaluated built-in count, not the cap or discovered count; M includes
+invalid external records. Timers include per-record materialization and later
+checks. External catalogs load before any progress (previously after built-ins),
+so command errors and refused baselines stay quiet. A completed mutation report
+still emits progress when a requested gate fails or a mutant has status `error`.
+
 ```json
 {"result":"mutated","spec":"…","depth":8,"baseline":"verified",
  "summary":{"total":N,"killed":K,"survived":S,"invalid":I,"kill_rate":0.75,
@@ -307,7 +347,7 @@ envelope byte for byte; one policy covers both undecided counts (#1251 adopted
 `total = killed + survived + invalid + errored + inconclusive`, reading an
 absent count as 0. Built-in entries have `source:"builtin"`;
 external entries add `id`, `source:"external"`, `input_kind`, and JSONL `line`.
-Mutation uses the ordinary bounded verifier, including its normal termination
+Mutation's BMC fallback uses the ordinary bounded verifier, including its normal termination
 after the initial state when a model has no action instances.
 
 ### Opt-in gate (#1237)
@@ -353,14 +393,15 @@ reproduced from the JSON alone:
   requested a gate and that `gate.passed` decides the exit code. The ungated
   note is unchanged.
 
-A baseline that does not verify is re-emitted unchanged with its own exit code;
+A baseline refused by auto and the fresh BMC rerun is re-emitted as the BMC
+envelope with its own exit code;
 the gate never applies to it and no `gate` key appears.
 
 ### What the score means (and does not)
 
 `kill_rate` is **bounded mutant-set sensitivity**: the fraction of a selected
 finite mutant set that the existing net of checks rejects, at the selected
-`--depth`, under the BMC + acceptance + forbidden + refinement oracle. The
+`--depth`, under the explicit-clean/BMC + acceptance + forbidden + refinement oracle. The
 number moves with every one of those choices — operator mix, `--max-mutants`
 truncation, depth, and oracle composition — so it is comparable only across
 runs that hold them fixed. It is not a production defect-detection rate, not a

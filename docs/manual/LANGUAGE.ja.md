@@ -4347,6 +4347,20 @@ DESIGN-*.md があります)。
   「invariant が欠けている場所」なのではなくレビューキューです: 生存者は
   等価ミュータント、ベースラインで死んでいる振る舞い、深さの境界を超えて
   初めて見える効果、あるいは本物の制約不足かもしれません。
+  ベースラインは auto(既定 1,000,000 状態)で `verified` または `proved` を
+  受理します。受理できなければ新しいスレッドで BMC を再実行し、verified なら
+  続行し、それ以外はそのベースライン envelope を返します。JSON は
+  `baseline:"verified"` のままです。各ミュータントではまず boundary probe の所見を
+  採用し、所見なしで完了した場合に explicit(50,000 状態)を試し、全 reachable が
+  K 以内で目撃されたときだけ clean を確定します。いずれでも決まらない場合は
+  既存の BMC 経路が verdict と kill label を選びます。後続の検査も引き続き
+  実行します。受理されたベースラインと評価した各ミュータントの
+  進捗は stderr に `engine=explicit|bmc|probe|none` と秒数で出ます。engine は
+  main oracle の経路であり、後続検査の判定元ではありません。stdout は
+  [`DESIGN-mutate` §3](../design/DESIGN-mutate.md#3-kill-oracle-and-baseline-gate) の
+  encoding-only residual(BMC 単独では `build_spec` だったものが explicit-clean で
+  生存し得る)を除いて変わりません。
+  ベースライン拒否やコマンドエラーでは進捗を出しません。
   `--from mutants.jsonl` はさらに、完全な `mutated_spec`、または正確な
   `replace:{target,replacement,occurrence?}` 命令として表現された、外部で生成
   された変異を裁定します。valid な外部ミュータントは、同じ
