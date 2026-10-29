@@ -1765,6 +1765,9 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    Guard it with an init `if`.
    Exception: if init also assigns a value outside a state's type, `bmc`/`induction`
    report the step-0 `type_bound` violation (exit 1) instead.
+   Dividing the minimum i64 value by `-1` (`MIN / -1`) or taking its remainder
+   (`MIN % -1`) is integer overflow, including in property contexts where only
+   zero divisors are totalized to `0`.
 6. `fair` = weak fairness: an infinite execution in which a fair instance that is
    enabled throughout the loop is never executed is excluded from leadsTo
    counterexamples. Fairness applies to whole action instances; model conditional
