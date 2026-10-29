@@ -11226,15 +11226,7 @@ fn apply_implements_mutation_oracle(
     if !outcome.is_clean() {
         return Ok(ImplementsOracle::Decided);
     }
-    let resolver = dependency_resolver(base);
-    let Some(contract) = fsl_core::requirements_implements_with_options(
-        source,
-        &resolver,
-        model,
-        crate::parse_options(),
-    )
-    .map_err(MutationOracle::refinement_error)?
-    else {
+    let Some(contract) = mutation_implements_contract(source, base, model)? else {
         return Ok(ImplementsOracle::Decided);
     };
     let checked =
@@ -11265,6 +11257,37 @@ fn apply_implements_mutation_oracle(
     });
     *outcome = MutationOracle::killed("refinement", killer_requirements);
     Ok(ImplementsOracle::Decided)
+}
+
+fn mutation_implements_contract(
+    source: &str,
+    base: &Path,
+    model: &KernelModel,
+) -> Result<Option<fsl_core::ImplementsContract>, MutationOracle> {
+    fsl_core::requirements_implements_with_options(
+        source,
+        &dependency_resolver(base),
+        model,
+        crate::parse_options(),
+    )
+    .map_err(MutationOracle::refinement_error)
+}
+
+/// Static validity precedes every runtime oracle, even one that would kill.
+fn mutation_oracle_after_implements_check(
+    source: &str,
+    base: &Path,
+    model: &KernelModel,
+    oracle: impl FnOnce() -> MainOracle,
+) -> MainOracle {
+    match mutation_implements_contract(source, base, model) {
+        Ok(_) => oracle(),
+        Err(outcome) => MainOracle {
+            outcome,
+            boundary_killer: None,
+            engine: "none",
+        },
+    }
 }
 
 /// The one place the published `status` of a mutant that reached an oracle is
@@ -12175,12 +12198,20 @@ fn run_mutate_from_source(
     for (index, mutant) in all_mutants.into_iter().take(max_mutants).enumerate() {
         let started = std::time::Instant::now();
         let mutated_spec = mutant.materialize(&spec);
-        let main = mutation_oracle(mutated_spec.clone(), depth, &model, explicit_budget, bmc);
+        let mutated_model = fsl_core::lower_direct_spec(mutated_spec.clone())
+            .ok()
+            .and_then(|kernel| fsl_core::build_model(kernel).ok());
+        let mut oracle =
+            || mutation_oracle(mutated_spec.clone(), depth, &model, explicit_budget, bmc);
+        let main = if let Some(mutated_model) = &mutated_model {
+            mutation_oracle_after_implements_check(&source, base, mutated_model, oracle)
+        } else {
+            oracle()
+        };
         let mut outcome = main.outcome.clone();
         let mut inconclusive = None;
         if outcome.is_clean()
-            && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
-            && let Ok(mutated_model) = fsl_core::build_model(kernel)
+            && let Some(mutated_model) = &mutated_model
         {
             // A requirement/implements oracle error used to become the kill
             // label itself (the error string, or `refinement`); it is an
@@ -12189,9 +12220,9 @@ fn run_mutate_from_source(
             // `inconclusive` (#1262).
             (outcome, inconclusive) = apply_secondary_mutation_oracles(
                 outcome,
-                |outcome| apply_requirement_mutation_oracle(&source, &mutated_model, outcome),
+                |outcome| apply_requirement_mutation_oracle(&source, mutated_model, outcome),
                 |outcome| {
-                    apply_implements_mutation_oracle(&source, base, &mutated_model, depth, outcome)
+                    apply_implements_mutation_oracle(&source, base, mutated_model, depth, outcome)
                 },
             );
         }
@@ -12387,8 +12418,12 @@ fn run_mutate_from_source(
             // evaluation failure is `error` (#1251), a static map type error
             // is `invalid` (#1472),
             // and an implements cutoff is `inconclusive` (#1262).
-            let main =
-                mutation_oracle_for_model(mutated_model.clone(), depth, explicit_budget, bmc);
+            let main = mutation_oracle_after_implements_check(
+                mutated_source,
+                base,
+                &mutated_model,
+                || mutation_oracle_for_model(mutated_model.clone(), depth, explicit_budget, bmc),
+            );
             let (outcome, inconclusive) = apply_secondary_mutation_oracles(
                 main.outcome.clone(),
                 |outcome| {
