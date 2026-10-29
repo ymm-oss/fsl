@@ -309,7 +309,16 @@ fn symbolic_first_preserves_boundary_and_runtime_error_priority() {
         ),
         (
             AUDIT_INIT_ERROR,
-            json!([1, "violated", null, null, "type_bound", "_bounds_n", 0]),
+            // #1597 reports undefined init before bounds, matching explicit evaluation.
+            json!([
+                2,
+                "error",
+                "semantics",
+                "division by zero in init at 3:16",
+                null,
+                null,
+                null
+            ]),
         ),
         (
             AUDIT_SEQ,
