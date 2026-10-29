@@ -21,12 +21,7 @@ pub struct Row {
     pub id: String,
     pub edge: &'static str,
     pub endpoint: &'static str,
-    pub role: &'static str,
-    pub scope_thread: &'static str,
-    pub artifact: &'static str,
     pub variant: Variant,
-    pub route: &'static str,
-    pub expected: &'static str,
 }
 
 // Endpoint incidence is deliberately separate from line numbers: the inventory
@@ -99,16 +94,7 @@ pub fn flat_rows() -> Vec<Row> {
                 id: format!("{id}/{variant:?}"),
                 edge,
                 endpoint,
-                role: "consumer",
-                scope_thread: "native owner on fslc thread; Worker request-local; LSP call-local",
-                artifact: "no model, solver result or user output before admission",
                 variant,
-                route: if matches!(id, "E07" | "E08" | "E09") {
-                    "causal"
-                } else {
-                    "check/verify"
-                },
-                expected: "N refusal/2; P/M canonical result; W one complete child finding",
             })
         })
         .collect()
@@ -201,16 +187,7 @@ pub fn additional_rows() -> Vec<Row> {
                 id: p[0].into(),
                 edge: "control",
                 endpoint: p[1],
-                route: p[2],
-                role: if p[0].starts_with('R') {
-                    "repair"
-                } else {
-                    "consumer"
-                },
-                scope_thread: p[3],
-                artifact: p[4],
                 variant: Variant::P,
-                expected: p[4],
             }
         })
         .collect()
@@ -261,33 +238,14 @@ pub fn worker_rows() -> Vec<Row> {
         .collect()
 }
 
-pub fn deferred_rows() -> Vec<(String, Vec<&'static str>)> {
+pub fn deferred_rows() -> Vec<String> {
     all_rows()
         .into_iter()
-        .filter_map(|row| {
+        .filter(|row| {
             let id = row.id.split('/').next().unwrap();
-            let mut reasons = Vec::new();
-            if worker_edge(id) {
-                reasons.push(if row.variant == Variant::N {
-                    "native Worker verify refusal after implementation"
-                } else {
-                    "accepted Worker verify reaches browser BMC; unobserved remaining risk"
-                });
-            }
-            if matches!(id, "E08" | "E09" | "E10" | "E11" | "E12") {
-                reasons.push("isolated late-endpoint admission/log driver after implementation");
-            }
-            if id.starts_with('T') {
-                reasons.push("direct scope/thread read-count probe after implementation");
-            }
-            if id == "L03" {
-                reasons.push("internal code_actions refusal probe after implementation");
-            }
-            if id == "O05" {
-                reasons.push("direct child-thread scope-activity probe after implementation");
-            }
-            (!reasons.is_empty()).then_some((row.id, reasons))
+            worker_edge(id) || matches!(id, "E08" | "E09" | "L03" | "O05") || id.starts_with('T')
         })
+        .map(|r| r.id)
         .collect()
 }
 
@@ -311,10 +269,6 @@ pub fn assert_assignment(adapter: &str, observations: &[(String, bool)]) {
         .iter()
         .map(|(label, _)| row_id(label))
         .collect::<BTreeSet<_>>();
-    println!(
-        "ASSIGNMENT {adapter} actual={actual:?} expected={:?}",
-        assigned(adapter)
-    );
     assert_eq!(
         actual,
         assigned(adapter),
@@ -358,10 +312,109 @@ pub const MAPPING: &str =
     "refinement M {\n impl S\n abs S\n map done = done\n action finish() -> finish()\n}\n";
 pub const BUSINESS: &str = "business Flow {\n actor User\n entity Item\n control CTRL-1 \"Keep\"\n process Item {\n  stages Open, Done\n  initial Open\n  transition finish Open -> Done by User\n }\n policy P-1 \"Finish\" satisfies CTRL-1\n  invariant { forall i in 0..1 { true } }\n}\nverify { instances Item = 1 }\n";
 
+pub fn legacy(body: &str) -> String {
+    body.replace(
+        "invariant Typed",
+        "invariant Typed \"REQ-DEP-001: 日本語😀\"",
+    )
+}
+
+pub fn annotated(body: &str) -> String {
+    body.replace(
+        "invariant Typed",
+        "@requirement(\"REQ-DEP-001\", \"日本語😀\") invariant Typed",
+    )
+}
+
+pub fn next(body: &str) -> String {
+    format!("fsl 5\n{body}")
+}
+pub fn next_leaf() -> String {
+    next(LEGACY_LEAF)
+}
+pub fn causal_legacy() -> String {
+    include_str!("../../../../examples/causal/incident_system.fsl").replace(
+        "invariant PrecisionBounded",
+        "invariant PrecisionBounded \"REQ-DEP-001: 日本語😀\"",
+    )
+}
+pub fn row(id: &str) -> Row {
+    flat_rows().into_iter().find(|r| r.id == id).unwrap()
+}
+pub fn identity(s: &common::Scratch, name: &str) -> String {
+    s.0.join(name)
+        .canonicalize()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .into()
+}
+pub fn fsl_envelope() -> serde_json::Map<String, Value> {
+    serde_json::from_value(json!({"fsl":"1.0"})).unwrap()
+}
+pub fn cli_refusal(source: &str, path: &str) -> Value {
+    refusal(source, path, fsl_envelope())
+}
+pub fn position(source: &str, offset: usize) -> (usize, usize, usize) {
+    let prefix = &source[..offset];
+    let last = prefix.rsplit('\n').next().unwrap();
+    (
+        prefix.bytes().filter(|b| *b == b'\n').count(),
+        last.chars().count(),
+        last.encode_utf16().count(),
+    )
+}
+pub fn with_child_warnings(mut expected: Value, findings: Vec<Value>) -> Value {
+    expected
+        .as_object_mut()
+        .unwrap()
+        .entry("warnings")
+        .or_insert(json!([]))
+        .as_array_mut()
+        .unwrap()
+        .extend(findings);
+    expected
+}
+
 pub struct Fixture {
     pub root: String,
     pub child: String,
     pub files: BTreeMap<String, String>,
+}
+
+impl Fixture {
+    pub fn materialize(&self, scratch: &common::Scratch, root: &str) {
+        for (name, source) in &self.files {
+            scratch.write(name, source);
+        }
+        scratch.write(root, &self.root);
+    }
+}
+
+pub fn twin_expected(
+    row: &Row,
+    fixture: &Fixture,
+    scratch: &common::Scratch,
+    run: impl FnOnce() -> Value,
+) -> Value {
+    let mut twin = row.clone();
+    twin.variant = Variant::P;
+    let twin = self::fixture(&twin);
+    scratch.write(&fixture.child, &twin.files[&fixture.child]);
+    let expected = run();
+    scratch.write(&fixture.child, &fixture.files[&fixture.child]);
+    if row.variant == Variant::W {
+        with_child_warnings(
+            expected,
+            findings(
+                &fixture.files[&fixture.child],
+                &identity(scratch, &fixture.child),
+                "current",
+            ),
+        )
+    } else {
+        expected
+    }
 }
 
 pub fn fixture(row: &Row) -> Fixture {
@@ -374,7 +427,7 @@ pub fn fixture(row: &Row) -> Fixture {
     let (mut root, child, body, legacy) = match id {
         "E01" => {
             let legacy = include_str!("../../../../examples/named_predicate.fsl").to_owned();
-            let canonical = include_str!("../../../fsl-wasm/tests/support/dependency_canonical.txt").into();
+            let canonical = legacy.replace("  invariant OnlyEligibleAutoApproved \"REQ-2: only eligible claims are auto-approved\" {", include_str!("../../../fsl-wasm/tests/support/dependency_canonical.txt").trim_end());
             (include_str!("../../../fsl-wasm/tests/support/dependency_root.txt").into(), "dep_next_colon.fsl", canonical, legacy)
         }
         "E02" => (IMPLEMENTS.into(), "dep.fsl", LEAF.into(), LEGACY_LEAF.into()),
@@ -388,7 +441,7 @@ pub fn fixture(row: &Row) -> Fixture {
             include_str!("../../../../examples/causal/incident_response.fsl").into(),
             "incident_system.fsl",
             include_str!("../../../../examples/causal/incident_system.fsl").into(),
-            include_str!("../../../../examples/causal/incident_system.fsl").replace("invariant PrecisionBounded", "invariant PrecisionBounded \"REQ-DEP-001: 日本語😀\"")),
+            causal_legacy()),
         _ => panic!("unknown edge row {id}"),
     };
     let child_source = match row.variant {
@@ -435,12 +488,9 @@ fn metadata_finding_at(source: &str, file: &str, edition: &str, start: usize, en
     if source[declaration..].starts_with("action ") && source[..declaration].ends_with("fair ") {
         declaration -= 5;
     }
-    let point = |offset: usize| {
-        let prefix = &source[..offset];
-        (
-            prefix.bytes().filter(|b| *b == b'\n').count() + 1,
-            prefix.rsplit('\n').next().unwrap().chars().count() + 1,
-        )
+    let point = |offset| {
+        let (line, column, _) = position(source, offset);
+        (line + 1, column + 1)
     };
     let (line, column) = point(start);
     let (end_line, end_column) = point(end);
@@ -489,8 +539,8 @@ pub fn findings(source: &str, file: &str, edition: &str) -> Vec<Value> {
         .trim_end_matches('}')
         .trim_end()
         .len();
-    let line = source[..start].bytes().filter(|b| *b == b'\n').count() + 1;
-    let column = source[..start].rsplit('\n').next().unwrap().chars().count() + 1;
+    let (line, column, _) = position(source, start);
+    let (line, column) = (line + 1, column + 1);
     vec![
         json!({"code":"legacy_quantifier_colon","kind":"legacy_quantifier_colon","taxonomy":"deprecated","severity":if edition == "next" {"error"} else {"warning"},"edition":edition,
         "message":"legacy colon quantifier syntax is deprecated","loc":{"file":file,"line":line,"column":column,"end_line":line,"end_column":column+6},
@@ -639,6 +689,10 @@ pub fn versioned_native_value(value: Value) -> Value {
 #[derive(Default)]
 pub struct Observations(common::Results);
 impl Observations {
+    pub fn eq<T: PartialEq + std::fmt::Debug>(&mut self, id: &str, actual: T, expected: T) {
+        let equal = actual == expected;
+        self.compare(id, actual, expected, equal);
+    }
     pub fn compare(
         &mut self,
         id: &str,
@@ -655,12 +709,6 @@ impl Observations {
             .check(&format!("DEPENDENCY {id}"), actual, expected, equal);
     }
     pub fn finish(self) {
-        println!(
-            "DEPENDENCY_TOTAL green={} red={} checks={}",
-            self.0.checked - self.0.failures.len(),
-            self.0.failures.len(),
-            self.0.checked
-        );
         assert!(
             self.0.failures.is_empty(),
             "dependency admission mismatches: {:?}",

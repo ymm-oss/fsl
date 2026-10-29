@@ -44,6 +44,16 @@ fn payload(output: &std::process::Output) -> Value {
     )
 }
 
+fn observe(repo: &Path, out: &str, lifecycle: Option<&str>) -> String {
+    format!(
+        "causal observe-expectations root.fsl --from-log {0}/examples/causal/evidence/incident-observation-log.jsonl --mapping {0}/examples/causal/evidence/incident-log-mapping.fsl --scope {0}/examples/causal/evidence/incident-replay-scope.json --period-start 2026-01-01 --period-end 2026-03-31 --out {out} {1}",
+        repo.display(),
+        lifecycle
+            .map(|p| format!("--lifecycle-out {p}"))
+            .unwrap_or_default()
+    )
+}
+
 fn tree(path: &Path) -> BTreeMap<String, (usize, String)> {
     use sha2::Digest;
     fn visit(base: &Path, path: &Path, files: &mut BTreeMap<String, (usize, String)>) {
@@ -97,14 +107,10 @@ fn preserve(
         a.0["result"], result,
         "{id} canonical route must reach its real consumer"
     );
-    observations.compare(
+    observations.eq(
         &format!("{id}/canonical"),
-        (first.status.code(), &a, &first.stderr),
-        (Some(status), &b, &second.stderr),
-        first.status.code() == Some(status)
-            && second.status.code() == Some(status)
-            && a == b
-            && first.stderr == second.stderr,
+        (first.status.code(), second.status.code(), &a, &first.stderr),
+        (Some(status), Some(status), &b, &second.stderr),
     );
     a.0
 }
@@ -118,17 +124,11 @@ fn reject(
     source: &str,
 ) {
     let actual = run(s, command);
-    let value = payload(&actual);
-    let expected = cases::refusal(
-        source,
-        s.0.join(child).canonicalize().unwrap().to_str().unwrap(),
-        serde_json::from_value(json!({"fsl":"1.0"})).unwrap(),
-    );
-    observations.compare(
+    let expected = cases::cli_refusal(source, &cases::identity(s, child));
+    observations.eq(
         id,
-        (actual.status.code(), &value, &actual.stderr),
-        (Some(2), &expected, Vec::<u8>::new()),
-        actual.status.code() == Some(2) && value == expected && actual.stderr.is_empty(),
+        (actual.status.code(), payload(&actual), &actual.stderr),
+        (Some(2), expected, &Vec::<u8>::new()),
     );
 }
 
@@ -141,16 +141,8 @@ fn dependency_edition_causal_routes_and_all_observation_outputs() {
     {
         let s = common::Scratch::new();
         let fixture = cases::fixture(&row);
-        for (name, source) in &fixture.files {
-            s.write(name, source);
-        }
-        s.write("root.fsl", &fixture.root);
-        let observe = format!(
-            "causal observe-expectations root.fsl --from-log {}/examples/causal/evidence/incident-observation-log.jsonl --mapping {}/examples/causal/evidence/incident-log-mapping.fsl --scope {}/examples/causal/evidence/incident-replay-scope.json --period-start 2026-01-01 --period-end 2026-03-31 --out evidence.json --lifecycle-out lifecycle.json",
-            repo.display(),
-            repo.display(),
-            repo.display()
-        );
+        fixture.materialize(&s, "root.fsl");
+        let observe = observe(&repo, "evidence.json", Some("lifecycle.json"));
         let commands = match row.id.split('/').next().unwrap() {
             "E07" => vec![
                 "causal check root.fsl".into(),
@@ -179,47 +171,22 @@ fn dependency_edition_causal_routes_and_all_observation_outputs() {
                     source,
                 );
                 let after = tree(&s.0);
-                observations.compare(
-                    &format!("{}/artifacts", row.id),
-                    &after,
-                    &before,
-                    after == before,
-                );
+                observations.eq(&format!("{}/artifacts", row.id), &after, &before);
             } else {
-                let mut twin = row.clone();
-                twin.variant = Variant::P;
-                let twin = cases::fixture(&twin);
-                s.write(&fixture.child, &twin.files[&fixture.child]);
-                let mut expected = payload(&run(&s, &command));
-                assert_ne!(
-                    expected["result"], "error",
-                    "canonical causal route {command}: {expected}"
-                );
-                if row.variant == Variant::W {
-                    if expected.get("warnings").is_none() {
-                        expected["warnings"] = json!([]);
-                    }
-                    expected["warnings"]
-                        .as_array_mut()
-                        .unwrap()
-                        .extend(cases::findings(
-                            source,
-                            s.0.join(&fixture.child)
-                                .canonicalize()
-                                .unwrap()
-                                .to_str()
-                                .unwrap(),
-                            "current",
-                        ));
-                }
-                s.write(&fixture.child, source);
+                let expected = cases::twin_expected(&row, &fixture, &s, || {
+                    let expected = payload(&run(&s, &command));
+                    assert_ne!(
+                        expected["result"], "error",
+                        "canonical causal route {command}: {expected}"
+                    );
+                    expected
+                });
                 let actual = run(&s, &command);
                 let value = payload(&actual);
-                observations.compare(
+                observations.eq(
                     &format!("{}/{}", row.id, command.split_whitespace().nth(1).unwrap()),
                     (actual.status.code(), &value),
                     (Some(0), &expected),
-                    actual.status.code() == Some(0) && value == expected,
                 );
             }
         }
@@ -270,11 +237,7 @@ fn dependency_edition_warnings_preserve_canonical_identity_and_distinct_findings
         if id == "W04" {
             findings.push(cases::metadata_finding(
                 &body,
-                s.0.join("dir/dep.fsl")
-                    .canonicalize()
-                    .unwrap()
-                    .to_str()
-                    .unwrap(),
+                &cases::identity(&s, "dir/dep.fsl"),
                 "current",
             ));
         }
@@ -299,12 +262,7 @@ fn dependency_edition_warnings_preserve_canonical_identity_and_distinct_findings
             expected["edition"] = json!("next");
             expected["fsl_edition"] = json!(5);
         }
-        observations.compare(
-            id,
-            (actual.status.code(), &value),
-            (Some(0), &expected),
-            actual.status.code() == Some(0) && value == expected,
-        );
+        observations.eq(id, (actual.status.code(), &value), (Some(0), &expected));
     }
     observations.finish();
 }
@@ -312,64 +270,37 @@ fn dependency_edition_warnings_preserve_canonical_identity_and_distinct_findings
 #[allow(clippy::too_many_lines)] // One writer/raw-delivery table and its shared sentinel protocol.
 fn dependency_edition_artifact_and_raw_routes_refuse_before_effects() {
     let mut observations = Observations::default();
-    for (id, command, violated) in [
-        ("A01", "testgen root.fsl --depth 2 -o output/result", false),
-        (
-            "A02",
-            "html root.fsl --depth 2 --no-timing -o output/result",
-            false,
-        ),
-        ("A02", "html root.fsl --depth 2 --no-timing", false),
-        ("A03", "ledger root.fsl --depth 2 -o output/result", false),
-        ("A03", "ledger root.fsl --depth 2", false),
-        (
-            "A04",
-            "counterexample export root.fsl --depth 2 -o output/result",
-            true,
-        ),
-        ("A10", "kernel root.fsl --kernel-version 2", false),
-        (
-            "A10",
-            "conformance root.fsl --depth 2 --kernel-version 2",
-            false,
-        ),
-        ("A10", "testplan root.fsl --depth 2", false),
-        ("A10", "typestate root.fsl --ts", false),
-        ("A10", "explain root.fsl --depth 2 --readable", false),
-        ("A10", "analyze root.fsl --format dot", false),
-        ("T01", "check root.fsl", false),
-        (
-            "T02",
-            "verify root.fsl --depth 2 --engine bmc --no-cache",
-            false,
-        ),
-        (
-            "T02",
-            "verify root.fsl --depth 2 --engine auto --explicit-budget 1 --no-cache",
-            false,
-        ),
-        ("T03", "sweep root.fsl --depth 2..2", false),
-        ("T07", "mutate root.fsl --depth 2 --max-mutants 0", false),
-        ("T07", "mutate root.fsl --depth 2 --max-mutants 1", false),
-        (
-            "T08",
-            "counterexample export root.fsl --depth 2 --engine bmc -o output/result",
-            true,
-        ),
-        (
-            "T09",
-            "html root.fsl --depth 2 --engine bmc --no-timing -o output/result",
-            false,
-        ),
-        (
-            "T10",
-            "ledger root.fsl --depth 2 --engine bmc -o output/result",
-            false,
-        ),
-        ("T14", "scenarios root.fsl --depth 2", true),
-        ("T15", "testgen root.fsl --depth 2 -o output/result", true),
-        ("T17", "explain root.fsl --depth 2", true),
-    ] {
+    for line in "\
+A01|testgen root.fsl --depth 2 -o output/result|false
+A02|html root.fsl --depth 2 --no-timing -o output/result|false
+A02|html root.fsl --depth 2 --no-timing|false
+A03|ledger root.fsl --depth 2 -o output/result|false
+A03|ledger root.fsl --depth 2|false
+A04|counterexample export root.fsl --depth 2 -o output/result|true
+A10|kernel root.fsl --kernel-version 2|false
+A10|conformance root.fsl --depth 2 --kernel-version 2|false
+A10|testplan root.fsl --depth 2|false
+A10|typestate root.fsl --ts|false
+A10|explain root.fsl --depth 2 --readable|false
+A10|analyze root.fsl --format dot|false
+T01|check root.fsl|false
+T02|verify root.fsl --depth 2 --engine bmc --no-cache|false
+T02|verify root.fsl --depth 2 --engine auto --explicit-budget 1 --no-cache|false
+T03|sweep root.fsl --depth 2..2|false
+T07|mutate root.fsl --depth 2 --max-mutants 0|false
+T07|mutate root.fsl --depth 2 --max-mutants 1|false
+T08|counterexample export root.fsl --depth 2 --engine bmc -o output/result|true
+T09|html root.fsl --depth 2 --engine bmc --no-timing -o output/result|false
+T10|ledger root.fsl --depth 2 --engine bmc -o output/result|false
+T14|scenarios root.fsl --depth 2|true
+T15|testgen root.fsl --depth 2 -o output/result|true
+T17|explain root.fsl --depth 2|true"
+        .lines()
+    {
+        let [id, command, violated] = line.split('|').collect::<Vec<_>>()[..] else {
+            panic!("writer row")
+        };
+        let violated: bool = violated.parse().unwrap();
         let s = common::Scratch::new();
         std::fs::create_dir_all(s.0.join("output")).unwrap();
         let body = if violated {
@@ -377,10 +308,7 @@ fn dependency_edition_artifact_and_raw_routes_refuse_before_effects() {
         } else {
             cases::LEAF.into()
         };
-        let canonical_body = body.replace(
-            "invariant Typed",
-            "@requirement(\"REQ-DEP-001\", \"日本語😀\") invariant Typed",
-        );
+        let canonical_body = cases::annotated(&body);
         s.write("dep.fsl", &canonical_body);
         s.write("root.fsl", "compose C { use S as s from \"dep.fsl\" }\n");
         let canonical_command = command.replace("output/result", "output/canonical");
@@ -400,7 +328,7 @@ fn dependency_edition_artifact_and_raw_routes_refuse_before_effects() {
         };
         let first = cases::stable(value.clone());
         let second = cases::stable(repeated_value);
-        observations.compare(
+        observations.eq(
             &format!("{id}/canonical-full/{command}"),
             (
                 canonical.status.code(),
@@ -414,10 +342,6 @@ fn dependency_edition_artifact_and_raw_routes_refuse_before_effects() {
                 &repeated.stderr,
                 &repeated_artifact,
             ),
-            canonical.status.code() == repeated.status.code()
-                && first == second
-                && canonical.stderr == repeated.stderr
-                && first_artifact == repeated_artifact,
         );
         if command.starts_with("kernel ")
             || command.starts_with("testplan ")
@@ -438,22 +362,20 @@ fn dependency_edition_artifact_and_raw_routes_refuse_before_effects() {
             };
             let expected =
                 json!({"fsl":"1.0","result":"error","kind":"semantics","message":message});
-            observations.compare(
+            observations.eq(
                 &format!("{id}/canonical-export"),
                 (canonical.status.code(), &value),
                 (Some(2), &expected),
-                canonical.status.code() == Some(2) && value == expected,
             );
         } else if command.starts_with("conformance ") {
             let expected = json!({"$schema":"https://fsl.dev/schemas/fslc/kernel/conformance.v2.schema.json","schema_version":"2.0.0","kernel_schema_version":"2.0.0","result":"conformance","spec":"C","depth":2,
                 "states":[{"id":"s0","depth":0,"state":{"s.done":false}},{"id":"s1","depth":1,"state":{"s.done":true}}],
                 "vectors":[{"state":"s0","action":{"name":"s.finish","params":{}},"outcome":{"kind":"ok","state_changed":true,"state":{"s.done":true},"changes":{"s.done":{"from":false,"to":true}}}},
                     {"state":"s1","action":{"name":"s.finish","params":{}},"outcome":{"kind":"ok","state_changed":false,"state":{"s.done":true},"changes":{}}}],"fsl":"1.0"});
-            observations.compare(
+            observations.eq(
                 "A10/canonical-conformance",
                 (canonical.status.code(), &value),
                 (Some(0), &expected),
-                canonical.status.code() == Some(0) && value == expected,
             );
         } else {
             assert!(
@@ -482,13 +404,7 @@ fn dependency_edition_artifact_and_raw_routes_refuse_before_effects() {
                 "violated testgen must not create an artifact"
             );
         }
-        let rejected = format!(
-            "fsl 5\n{}",
-            body.replace(
-                "invariant Typed",
-                "invariant Typed \"REQ-DEP-001: 日本語😀\""
-            )
-        );
+        let rejected = cases::next(&cases::legacy(&body));
         s.write("dep.fsl", &rejected);
         reject(
             &mut observations,
@@ -499,12 +415,7 @@ fn dependency_edition_artifact_and_raw_routes_refuse_before_effects() {
             &rejected,
         );
         let after = tree(&s.0.join("output"));
-        observations.compare(
-            &format!("{id}/sentinel/{command}"),
-            &after,
-            &before,
-            after == before,
-        );
+        observations.eq(&format!("{id}/sentinel/{command}"), &after, &before);
         if command.contains("-o") {
             let missing_parent = command.replace("output/result", "missing-parent/result");
             reject(
@@ -524,26 +435,15 @@ fn dependency_edition_artifact_and_raw_routes_refuse_before_effects() {
     s.write("dep.fsl", cases::LEAF);
     let baseline = run(&s, "fmt root.fsl");
     assert_eq!(baseline.status.code(), Some(0));
-    let child = format!("fsl 5\n{}", cases::LEGACY_LEAF);
+    let child = cases::next_leaf();
     s.write("dep.fsl", &child);
     let actual = run(&s, "fmt root.fsl");
-    let finding = cases::metadata_finding(
-        &child,
-        s.0.join("dep.fsl")
-            .canonicalize()
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        "next",
-    );
+    let finding = cases::metadata_finding(&child, &cases::identity(&s, "dep.fsl"), "next");
     let stderr = format!("warning: {finding}\n").into_bytes();
-    observations.compare(
+    observations.eq(
         "A15/fmt",
         (actual.status.code(), &actual.stdout, &actual.stderr),
         (Some(0), &baseline.stdout, &stderr),
-        actual.status.code() == Some(0)
-            && actual.stdout == baseline.stdout
-            && actual.stderr == stderr,
     );
     assert_eq!(std::fs::read_to_string(s.0.join("root.fsl")).unwrap(), root);
     assert_eq!(std::fs::read_to_string(s.0.join("dep.fsl")).unwrap(), child);
@@ -578,28 +478,16 @@ fn dependency_edition_repair_roles_report_but_do_not_reject_or_edit_children() {
         );
         let expected_root = std::fs::read(s.0.join("root.fsl")).unwrap();
         s.write("root.fsl", &root);
-        let child = format!("fsl 5\n{}", cases::LEGACY_LEAF);
+        let child = cases::next_leaf();
         s.write("dep.fsl", &child);
-        let finding = cases::metadata_finding(
-            &child,
-            s.0.join("dep.fsl")
-                .canonicalize()
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            "next",
-        );
-        if expected.get("warnings").is_none() {
-            expected["warnings"] = json!([]);
-        }
-        expected["warnings"].as_array_mut().unwrap().push(finding);
+        let finding = cases::metadata_finding(&child, &cases::identity(&s, "dep.fsl"), "next");
+        expected = cases::with_child_warnings(expected, vec![finding]);
         let actual = run(&s, command);
         let value = payload(&actual);
-        observations.compare(
+        observations.eq(
             id,
             (actual.status.code(), &value),
             (Some(status), &expected),
-            actual.status.code() == Some(status) && value == expected,
         );
         assert_eq!(std::fs::read_to_string(s.0.join("dep.fsl")).unwrap(), child);
         assert_eq!(std::fs::read(s.0.join("root.fsl")).unwrap(), expected_root);
@@ -631,80 +519,41 @@ fn dependency_edition_document_nonreaders_and_specialized_controls_are_preserved
             std::fs::read(s.0.join("document.md")).unwrap(),
             std::fs::read(s.0.join("claims.json")).ok(),
         );
-        s.write("dep.fsl", &format!("fsl 5\n{}", cases::LEGACY_LEAF));
+        s.write("dep.fsl", &cases::next_leaf());
         let actual = run(&s, command);
         let value = payload(&actual);
         let after = (
             std::fs::read(s.0.join("document.md")).unwrap(),
             std::fs::read(s.0.join("claims.json")).ok(),
         );
-        observations.compare(
+        observations.eq(
             id,
             (actual.status.code(), &value, &after),
             (Some(0), &expected, &before),
-            actual.status.code() == Some(0) && value == expected && after == before,
         );
     }
-    let root_refused = format!("fsl 5\n{}", cases::LEGACY_LEAF);
+    let root_refused = cases::next_leaf();
     s.write("root.fsl", &root_refused);
     let actual = run(&s, "document check root.fsl absent-document.md");
     let value = payload(&actual);
-    let expected = cases::refusal(
-        &root_refused,
-        "root.fsl",
-        serde_json::from_value(json!({"fsl":"1.0"})).unwrap(),
-    );
-    observations.compare(
+    let expected = cases::cli_refusal(&root_refused, "root.fsl");
+    observations.eq(
         "A13/root-priority",
         (actual.status.code(), &value),
         (Some(2), &expected),
-        actual.status.code() == Some(2) && value == expected,
     );
     let repo = common::root();
     s.write("domain.fsl", common::DOMAIN);
-    for (id, command, result) in [
-        (
-            "A14",
-            "domain expand domain.fsl -o expanded.fsl".into(),
-            "expanded",
-        ),
-        (
-            "A14",
-            "domain generate domain.fsl -o generated".into(),
-            "generated",
-        ),
-        (
-            "A14",
-            "db import schema.sql --source sql -o imported.fsl".into(),
-            "imported",
-        ),
-        (
-            "T11",
-            format!(
-                "db check {}/examples/db/safe_add_nullable_column.fsl --depth 2 --engine bmc",
-                repo.display()
-            ),
-            "verified_under_assumptions",
-        ),
-        (
-            "T12",
-            format!(
-                "ai check {}/examples/ai/refund_agent_tool_safety.fsl --depth 2 --engine bmc",
-                repo.display()
-            ),
-            "verified_under_assumptions",
-        ),
-        (
-            "T13",
-            "domain check domain.fsl --depth 2 --engine bmc".into(),
-            "verified_under_assumptions",
-        ),
-        (
-            "T16",
-            "domain testgen domain.fsl --depth 2 -o domain-tests".into(),
-            "generated",
-        ),
-    ] {
+    for line in "\
+A14|domain expand domain.fsl -o expanded.fsl|expanded
+A14|domain generate domain.fsl -o generated|generated
+A14|db import schema.sql --source sql -o imported.fsl|imported
+T11|db check {repo}/examples/db/safe_add_nullable_column.fsl --depth 2 --engine bmc|verified_under_assumptions
+T12|ai check {repo}/examples/ai/refund_agent_tool_safety.fsl --depth 2 --engine bmc|verified_under_assumptions
+T13|domain check domain.fsl --depth 2 --engine bmc|verified_under_assumptions
+T16|domain testgen domain.fsl --depth 2 -o domain-tests|generated".lines() {
+        let [id, command, result] = line.split('|').collect::<Vec<_>>()[..] else { panic!("nonreader row") };
+        let command = command.replace("{repo}", repo.to_str().unwrap());
         preserve(&mut observations, id, &s, &command, 0, result);
     }
     s.write(
@@ -788,7 +637,7 @@ fn dependency_edition_chain_steps_refuse_before_implementation_effects() {
             assert!(s.0.join("canonical-marker").exists());
         }
         s.write("chain.toml", &manifest);
-        let child = format!("fsl 5\n{}", cases::LEGACY_LEAF);
+        let child = cases::next_leaf();
         s.write("dep.fsl", &child);
         if parallel {
             s.write("other-dep.fsl", &child);
@@ -809,15 +658,7 @@ fn dependency_edition_chain_steps_refuse_before_implementation_effects() {
             } else {
                 "dep.fsl"
             };
-            let detail = cases::refusal(
-                &child,
-                s.0.join(child_path)
-                    .canonicalize()
-                    .unwrap()
-                    .to_str()
-                    .unwrap(),
-                serde_json::from_value(json!({"fsl":"1.0"})).unwrap(),
-            );
+            let detail = cases::cli_refusal(&child, &cases::identity(&s, child_path));
             let mut entry = json!({"layer":layer,"kind":if depth||refine||parallel {"verify"} else {"check"},"file":if *layer=="requirements" {"./abstract.fsl"} else {"./root.fsl"},"status":"failed","result":"error","exit_code":2,"detail":detail});
             if depth || refine || parallel {
                 entry["depth"] = json!(2);
@@ -833,19 +674,13 @@ fn dependency_edition_chain_steps_refuse_before_implementation_effects() {
             layers.push(json!({"layer":"impl","kind":"impl","status":"skipped","result":"skipped","exit_code":0}));
         }
         let expected = json!({"fsl":"1.0","result":"error","manifest":"chain.toml","keep_going":parallel,"layers":layers,"failed":failed,"kind":"chain","message":"one or more chain layers returned an error"});
-        observations.compare(
+        observations.eq(
             id,
             (actual.status.code(), &value, s.0.join("marker").exists()),
             (Some(2), &expected, false),
-            actual.status.code() == Some(2) && value == expected && !s.0.join("marker").exists(),
         );
         if !parallel {
-            observations.compare(
-                "A09",
-                s.0.join("marker").exists(),
-                false,
-                !s.0.join("marker").exists(),
-            );
+            observations.eq("A09", s.0.join("marker").exists(), false);
         }
     }
     observations.finish();
@@ -855,32 +690,17 @@ fn dependency_edition_chain_steps_refuse_before_implementation_effects() {
 fn dependency_edition_approval_writers_and_rerenders_use_strict_loaders() {
     use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
     let mut observations = Observations::default();
-    for (signed, kind, generate, artifact) in [
-        (
-            false,
-            "ledger",
-            "ledger root.fsl --depth 2 -o ledger.md",
-            "ledger.md",
-        ),
-        (
-            true,
-            "ledger",
-            "ledger root.fsl --depth 2 -o ledger.md",
-            "ledger.md",
-        ),
-        (
-            false,
-            "html",
-            "html root.fsl --depth 2 -o review.html",
-            "review.html",
-        ),
-        (
-            false,
-            "scenarios",
-            "scenarios root.fsl --depth 2",
-            "scenarios.json",
-        ),
-    ] {
+    for line in "\
+false|ledger|ledger root.fsl --depth 2 -o ledger.md|ledger.md
+true|ledger|ledger root.fsl --depth 2 -o ledger.md|ledger.md
+false|html|html root.fsl --depth 2 -o review.html|review.html
+false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
+        .lines()
+    {
+        let [signed, kind, generate, artifact] = line.split('|').collect::<Vec<_>>()[..] else {
+            panic!("approval row")
+        };
+        let signed: bool = signed.parse().unwrap();
         let s = common::Scratch::new();
         s.write("root.fsl","compose C { use S as s from \"dep.fsl\" @requirement(\"REQ-APPROVAL-001\",\"Keep\") invariant Reviewed { true } }\n");
         s.write(
@@ -969,7 +789,7 @@ fn dependency_edition_approval_writers_and_rerenders_use_strict_loaders() {
             s.write("overlay.md", "overlay sentinel\n");
         }
         s.write("record.json", "sentinel\n");
-        let child = format!("fsl 5\n{}", cases::LEGACY_LEAF);
+        let child = cases::next_leaf();
         s.write("dep.fsl", &child);
         for args in [
             vec!["add", "dep.fsl"],
@@ -1074,7 +894,7 @@ fn dependency_edition_deep_reads_and_governance_rereads() {
         let rejected = if id == "D01" {
             "fsl 5\nspec S { state {} invariant Typed \"REQ-DEEP-001: deep\" { true } }\n".into()
         } else {
-            format!("fsl 5\n{}", cases::LEGACY_LEAF)
+            cases::next_leaf()
         };
         s.write("deep.fsl", &rejected);
         reject(&mut observations, id, &s, command, "deep.fsl", &rejected);
@@ -1092,34 +912,19 @@ fn dependency_edition_deep_reads_and_governance_rereads() {
             );
         }
     }
-    let row = cases::flat_rows()
-        .into_iter()
-        .find(|r| r.id == "E04/W")
-        .unwrap();
+    let row = cases::row("E04/W");
     let fixture = cases::fixture(&row);
     let s = common::Scratch::new();
-    for (name, source) in &fixture.files {
-        s.write(name, source);
-    }
-    s.write("root.fsl", &fixture.root);
+    fixture.materialize(&s, "root.fsl");
     let expected = cases::expected_check(
         &row,
         &fixture,
-        s.0.join(&fixture.child)
-            .canonicalize()
-            .unwrap()
-            .to_str()
-            .unwrap(),
-        serde_json::from_value(json!({"fsl":"1.0"})).unwrap(),
+        &cases::identity(&s, &fixture.child),
+        cases::fsl_envelope(),
     );
     let actual = run(&s, "check root.fsl");
     let value = payload(&actual);
-    observations.compare(
-        "W05",
-        (actual.status.code(), &value),
-        (Some(0), &expected),
-        actual.status.code() == Some(0) && value == expected,
-    );
+    observations.eq("W05", (actual.status.code(), &value), (Some(0), &expected));
     observations.finish();
 }
 
@@ -1148,26 +953,17 @@ fn dependency_edition_a16_cache_and_c04_materialized_source_controls() {
     }
     let before = tree(&s.0.join("cache"));
     assert!(before.len() > 1, "cache positive must store a real entry");
-    let rejected = format!("fsl 5\n{}", cases::LEGACY_LEAF);
+    let rejected = cases::next_leaf();
     s.write("dep.fsl", &rejected);
     for args in [vec![], vec!["--engine", "induction", "--lemma", "true"]] {
         let actual = cached(&args);
         let value = payload(&actual);
         let after = tree(&s.0.join("cache"));
-        let expected = cases::refusal(
-            &rejected,
-            s.0.join("dep.fsl")
-                .canonicalize()
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            serde_json::from_value(json!({"fsl":"1.0"})).unwrap(),
-        );
-        observations.compare(
+        let expected = cases::cli_refusal(&rejected, &cases::identity(&s, "dep.fsl"));
+        observations.eq(
             "A16",
             (actual.status.code(), &value, &after),
             (Some(2), &expected, &before),
-            actual.status.code() == Some(2) && value == expected && after == before,
         );
     }
     s.write("root.md", &format!("# Test input\n\n```fsl\n{source}```\n"));
@@ -1192,7 +988,7 @@ fn dependency_edition_a16_cache_and_c04_materialized_source_controls() {
         // failures retain the parent's filename in their display message.
         let message=if matches!(label,"parse"|"missing") {format!("{detail} at root.fsl:1:13")} else {format!("{detail} at 1:13")};
         let expected=json!({"fsl":"1.0","result":"error","kind":"semantics","message":message,"loc":{"line":1,"column":13}});
-        for repeat in 0..2 {let actual=run(&s,"check root.fsl");let value=payload(&actual);observations.compare(&format!("C02/{label}/{repeat}"),(actual.status.code(),&value,&actual.stderr),(Some(2),&expected,Vec::<u8>::new()),actual.status.code()==Some(2)&&value==expected&&actual.stderr.is_empty());}
+        for repeat in 0..2 {let actual=run(&s,"check root.fsl");let value=payload(&actual);observations.eq(&format!("C02/{label}/{repeat}"),(actual.status.code(),&value,&actual.stderr),(Some(2),&expected,&Vec::<u8>::new()));}
     }
     s.write("root.fsl", cases::IMPLEMENTS);
     s.write("dep.fsl", cases::LEAF);
@@ -1204,11 +1000,10 @@ fn dependency_edition_a16_cache_and_c04_materialized_source_controls() {
     s.write("dep.fsl", &rejected);
     let actual = run(&s, command);
     let value = cases::stable(payload(&actual));
-    observations.compare(
+    observations.eq(
         "C02/suppression",
         (actual.status.code(), &value),
         (Some(0), &expected),
-        actual.status.code() == Some(0) && value == expected,
     );
     observations.finish();
 }
@@ -1219,10 +1014,7 @@ fn dependency_edition_observation_writers_and_three_read_dedup() {
     for single in [true, false] {
         let id = if single { "A07" } else { "A08" };
         let s = common::Scratch::new();
-        let row = cases::flat_rows()
-            .into_iter()
-            .find(|r| r.id == "E09/P")
-            .unwrap();
+        let row = cases::row("E09/P");
         let fixture = cases::fixture(&row);
         let root = if single {
             format!(
@@ -1235,16 +1027,10 @@ fn dependency_edition_observation_writers_and_three_read_dedup() {
         s.write("root.fsl", &root);
         s.write(&fixture.child, &fixture.files[&fixture.child]);
         std::fs::create_dir_all(s.0.join("output")).unwrap();
-        let command = format!(
-            "causal observe-expectations root.fsl --from-log {}/examples/causal/evidence/incident-observation-log.jsonl --mapping {}/examples/causal/evidence/incident-log-mapping.fsl --scope {}/examples/causal/evidence/incident-replay-scope.json --period-start 2026-01-01 --period-end 2026-03-31 --out output/evidence.json {}",
-            repo.display(),
-            repo.display(),
-            repo.display(),
-            if single {
-                ""
-            } else {
-                "--lifecycle-out output/lifecycle.json"
-            }
+        let command = observe(
+            &repo,
+            "output/evidence.json",
+            (!single).then_some("output/lifecycle.json"),
         );
         let canonical = preserve(
             &mut observations,
@@ -1264,18 +1050,12 @@ fn dependency_edition_observation_writers_and_three_read_dedup() {
         for name in files.keys().filter(|name| !name.ends_with('/')) {
             s.write(&format!("output/{name}"), "sentinel\n");
         }
-        let child = format!(
-            "fsl 5\n{}",
-            include_str!("../../../examples/causal/incident_system.fsl").replace(
-                "invariant PrecisionBounded",
-                "invariant PrecisionBounded \"REQ-DEP-001: 日本語😀\""
-            )
-        );
+        let child = cases::next(&cases::causal_legacy());
         s.write(&fixture.child, &child);
         let before = tree(&s.0.join("output"));
         reject(&mut observations, id, &s, &command, &fixture.child, &child);
         let after = tree(&s.0.join("output"));
-        observations.compare(&format!("{id}/sentinels"), &after, &before, after == before);
+        observations.eq(&format!("{id}/sentinels"), &after, &before);
         if !single {
             let current = child.replacen("fsl 5", "fsl 4", 1);
             s.write(&fixture.child, &current);
@@ -1284,19 +1064,10 @@ fn dependency_edition_observation_writers_and_three_read_dedup() {
             let mut expected = canonical;
             expected["warnings"] = json!(cases::findings(
                 &current,
-                s.0.join(&fixture.child)
-                    .canonicalize()
-                    .unwrap()
-                    .to_str()
-                    .unwrap(),
+                &cases::identity(&s, &fixture.child),
                 "current"
             ));
-            observations.compare(
-                "W06",
-                (actual.status.code(), &value),
-                (Some(0), &expected),
-                actual.status.code() == Some(0) && value == expected,
-            );
+            observations.eq("W06", (actual.status.code(), &value), (Some(0), &expected));
         }
     }
     observations.finish();
@@ -1338,16 +1109,24 @@ fn dependency_edition_plain_kernel_schema_controls() {
                 .is_some_and(|s| s.contains("kernel"))
         );
         assert_eq!(actual["spec"]["name"], "KernelContract");
-        observations.compare(
+        observations.eq(
             &format!("A17/plain-v{version}"),
-            (first.status.code(), &actual, &first.stderr),
-            (Some(0), &expected, &expected_stderr),
-            first.status.code() == Some(0)
-                && second.status.code() == Some(0)
-                && actual == expected
-                && payload(&second) == expected
-                && first.stderr == expected_stderr
-                && second.stderr == expected_stderr,
+            (
+                first.status.code(),
+                second.status.code(),
+                &actual,
+                &payload(&second),
+                &first.stderr,
+                &second.stderr,
+            ),
+            (
+                Some(0),
+                Some(0),
+                &expected,
+                &expected,
+                &expected_stderr,
+                &expected_stderr,
+            ),
         );
     }
     observations.finish();
@@ -1363,7 +1142,7 @@ fn dependency_edition_p03_document_recovery_reads_without_writing_artifacts() {
     let expected = json!({"fsl":"1.0","result":"error","kind":"document","message":"document projection does not support dialect 'compose' in RCIR v1","code":"FSL-DOC-DIALECT-UNSUPPORTED","dialect":"compose","supported_dialects":["requirements","spec"]});
     assert_eq!((canonical.status.code(), value), (Some(2), expected));
     assert!(!s.0.join("document.md").exists());
-    let child = format!("fsl 5\n{}", cases::LEGACY_LEAF);
+    let child = cases::next_leaf();
     s.write("dep.fsl", &child);
     let mut observations = Observations::default();
     reject(

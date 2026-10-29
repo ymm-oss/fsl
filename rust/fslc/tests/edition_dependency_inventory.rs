@@ -286,9 +286,7 @@ fn dependency_edition_inventory_discovers_read_sites_and_endpoint_incidence() {
         );
     }
     println!("DISCOVERED reads={discovered:?} spawns={spawn_sites:?}");
-    for (id, reasons) in cases::deferred_rows() {
-        println!("DEFERRED_SUBCONTRACT {id} {reasons:?}");
-    }
+    assert_eq!(cases::deferred_rows().len(), 76);
     println!(
         "DEPENDENCY I01 agreement=true produced=discovered read/provider/spawn sets expected=registry incidence and assignments"
     );

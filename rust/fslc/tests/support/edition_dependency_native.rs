@@ -8,7 +8,7 @@ use super::*;
 
 fn fixture() -> (common::Scratch, std::path::PathBuf, String) {
     let scratch = common::Scratch::new();
-    scratch.write("dep.fsl", &format!("fsl 5\n{}", cases::LEGACY_LEAF));
+    scratch.write("dep.fsl", &cases::next_leaf());
     let source = "compose C { use S as s from \"dep.fsl\" }\n".to_owned();
     let path = scratch.write("root.fsl", &source);
     (scratch, path, source)
@@ -37,13 +37,10 @@ fn dependency_edition_o01_fresh_thread_has_no_owner_and_fails_closed() {
         (json!({"fsl":"1.0","result":"ok","warnings":[]}), 0),
         "canonical no-owner loader must really build a model"
     );
-    scratch.write("dep.fsl", &format!("fsl 5\n{}", cases::LEGACY_LEAF));
+    scratch.write("dep.fsl", &cases::next_leaf());
     let result = std::thread::spawn(move || consume(&path, &source))
         .join()
         .unwrap();
-    println!(
-        "DEPENDENCY O01 produced={result:?} expected=nonzero and no Kernel schema/model/solver output"
-    );
     let mut observations = cases::Observations::default();
     observations.compare(
         "O01",
@@ -115,13 +112,7 @@ fn dependency_edition_p01_p04_lenient_helpers_cannot_swallow_refusal() {
             "P04" => assert_eq!(positive.0["suggestions"], "  - S: refines\n"),
             _ => unreachable!(),
         }
-        let rejected = format!(
-            "fsl 5\n{}",
-            body.replace(
-                "invariant Typed",
-                "invariant Typed \"REQ-DEP-001: 日本語😀\""
-            )
-        );
+        let rejected = cases::next(&cases::legacy(&body));
         scratch.write("dep.fsl", &rejected);
         let produced = run();
         let child = scratch.0.join("dep.fsl").canonicalize().unwrap();
@@ -129,7 +120,7 @@ fn dependency_edition_p01_p04_lenient_helpers_cannot_swallow_refusal() {
             cases::refusal(&rejected, child.to_str().unwrap(), envelope()),
             2,
         );
-        observations.compare(id, &produced, &expected, produced == expected);
+        observations.eq(id, &produced, &expected);
     }
     observations.finish();
 }
@@ -145,18 +136,14 @@ fn dependency_edition_o02_o03_sequential_owners_do_not_share_records() {
     let first = run();
     let child = scratch.0.join("dep.fsl").canonicalize().unwrap();
     let expected_a = (
-        cases::refusal(
-            &format!("fsl 5\n{}", cases::LEGACY_LEAF),
-            child.to_str().unwrap(),
-            envelope(),
-        ),
+        cases::refusal(&cases::next_leaf(), child.to_str().unwrap(), envelope()),
         2,
     );
-    observations.compare("O02/A", &first, &expected_a, first == expected_a);
+    observations.eq("O02/A", &first, &expected_a);
     scratch.write("dep.fsl", cases::LEAF);
     let second = run();
     let expected_b = (json!({"fsl":"1.0","result":"ok","warnings":[]}), 0);
-    observations.compare("O02/B", &second, &expected_b, second == expected_b);
+    observations.eq("O02/B", &second, &expected_b);
     scratch.write("dep.fsl", cases::LEGACY_LEAF);
     let warning_a = run();
     let warning_b = run();
@@ -165,7 +152,7 @@ fn dependency_edition_o02_o03_sequential_owners_do_not_share_records() {
         0,
     );
     for (label, result) in [("O03/A", warning_a), ("O03/B", warning_b)] {
-        observations.compare(label, &result, &expected, result == expected);
+        observations.eq(label, &result, &expected);
     }
     observations.finish();
 }
@@ -184,8 +171,8 @@ fn dependency_edition_o04_nested_owner_and_o05_fresh_child_thread() {
         0,
     );
     let mut observations = cases::Observations::default();
-    observations.compare("O04", &nested, &expected, nested == expected);
-    scratch.write("dep.fsl", &format!("fsl 5\n{}", cases::LEGACY_LEAF));
+    observations.eq("O04", &nested, &expected);
+    scratch.write("dep.fsl", &cases::next_leaf());
     let result = run_admitted_root(&path, Ok(source.clone()), None, false, |source| {
         std::thread::scope(|scope| scope.spawn(|| consume(&path, source)).join().unwrap())
     });
@@ -222,7 +209,7 @@ fn dependency_edition_c03_direct_slots_keep_individual_warning_cardinality() {
         0,
     );
     let mut observations = cases::Observations::default();
-    observations.compare("C03", &result, &expected, result == expected);
+    observations.eq("C03", &result, &expected);
     observations.finish();
 }
 
@@ -237,7 +224,7 @@ fn dependency_edition_t06_isolates_the_actual_unowned_refine_step() {
     assert!(!first.1 && !second.1);
     assert_eq!(first.0["detail"]["result"], "refines");
     assert_eq!(cases::stable(first.0), cases::stable(second.0));
-    scratch.write("dep.fsl", &format!("fsl 5\n{}", cases::LEGACY_LEAF));
+    scratch.write("dep.fsl", &cases::next_leaf());
     let result = run_chain_step_isolated("refine", "design", &sections, path.parent().unwrap());
     let mut observations = cases::Observations::default();
     observations.compare(
@@ -257,7 +244,7 @@ fn dependency_edition_mapping_role_calibration() {
     let implementation = scratch.write("after.fsl", cases::LEAF);
     let abstraction = scratch.write("before.fsl", cases::LEAF);
     for id in ["E04/P", "E04/N"] {
-        let row = cases::flat_rows().into_iter().find(|r| r.id == id).unwrap();
+        let row = cases::row(id);
         let fixture = cases::fixture(&row);
         let source = &fixture.files[&fixture.child];
         let path = scratch.write("mapping.fsl", source);

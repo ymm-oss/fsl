@@ -18,12 +18,8 @@ fn dependency_edition_cli_compose_and_implements_refusals_and_mixed_controls() {
     }) {
         let fixture = cases::fixture(&row);
         let scratch = common::Scratch::new();
-        for (name, source) in &fixture.files {
-            scratch.write(name, source);
-        }
-        scratch.write("root_compose.fsl", &fixture.root);
+        fixture.materialize(&scratch, "root_compose.fsl");
         let child = scratch.0.join(&fixture.child).canonicalize().unwrap();
-        let source = &fixture.files[&fixture.child];
         for cmd in ["check", "verify"] {
             let args = if cmd == "check" {
                 "check root_compose.fsl"
@@ -35,41 +31,30 @@ fn dependency_edition_cli_compose_and_implements_refusals_and_mixed_controls() {
                     &row,
                     &fixture,
                     child.to_str().unwrap(),
-                    serde_json::from_value(json!({"fsl":"1.0"})).unwrap(),
+                    cases::fsl_envelope(),
                 )
             } else {
-                let mut canonical = row.clone();
-                canonical.variant = Variant::P;
-                let canonical = cases::fixture(&canonical);
-                scratch.write(&fixture.child, &canonical.files[&fixture.child]);
-                let baseline = common::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, args, true);
-                assert_eq!(
-                    baseline.status.code(),
-                    Some(0),
-                    "canonical verification must finish"
-                );
-                let mut expected = cases::versioned_native_value(common::value(&baseline));
-                assert_eq!(expected["result"], "verified");
-                if row.variant == Variant::W {
-                    expected["warnings"]
-                        .as_array_mut()
-                        .unwrap()
-                        .extend(cases::findings(source, child.to_str().unwrap(), "current"));
-                }
-                scratch.write(&fixture.child, source);
-                expected
+                cases::twin_expected(&row, &fixture, &scratch, || {
+                    let baseline =
+                        common::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, args, true);
+                    assert_eq!(
+                        baseline.status.code(),
+                        Some(0),
+                        "canonical verification must finish"
+                    );
+                    let expected = cases::versioned_native_value(common::value(&baseline));
+                    assert_eq!(expected["result"], "verified");
+                    expected
+                })
             };
             let output = common::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, args, true);
             let actual = cases::versioned_native_value(common::value(&output));
             let label = format!("{}/{cmd}", row.id);
             if row.variant == Variant::N {
-                results.compare(
+                results.eq(
                     &label,
                     (output.status.code(), &actual, &output.stderr),
-                    (Some(2), &expected, Vec::<u8>::new()),
-                    output.status.code() == Some(2)
-                        && actual == expected
-                        && output.stderr.is_empty(),
+                    (Some(2), &expected, &Vec::<u8>::new()),
                 );
                 // A standalone classification is calibrated against literals,
                 // never used to manufacture the dependency's expected finding.
@@ -82,11 +67,10 @@ fn dependency_edition_cli_compose_and_implements_refusals_and_mixed_controls() {
                     );
                     let standalone_value =
                         cases::versioned_native_value(common::value(&standalone));
-                    results.compare(
+                    results.eq(
                         &format!("{label}/standalone"),
                         (&standalone_value, standalone.status.code()),
                         (&expected, Some(2)),
-                        standalone_value == expected && standalone.status.code() == Some(2),
                     );
                 }
             } else {
@@ -98,13 +82,10 @@ fn dependency_edition_cli_compose_and_implements_refusals_and_mixed_controls() {
                             && expected.1.contains("/cost/elapsed_s")
                     );
                 }
-                results.compare(
+                results.eq(
                     &label,
                     (output.status.code(), &actual, &output.stderr),
-                    (Some(0), &expected, Vec::<u8>::new()),
-                    output.status.code() == Some(0)
-                        && actual == expected
-                        && output.stderr.is_empty(),
+                    (Some(0), &expected, &Vec::<u8>::new()),
                 );
             }
         }
@@ -143,7 +124,7 @@ fn dependency_edition_fixture_roles_are_valid() {
         } else {
             json!({"accepted":true,"warnings":if row.variant==Variant::W {cases::findings(source,&fixture.child,"current")} else {Vec::new()}})
         };
-        observations.compare(&row.id, &actual, &expected, actual == expected);
+        observations.eq(&row.id, &actual, &expected);
     }
     observations.finish();
 }

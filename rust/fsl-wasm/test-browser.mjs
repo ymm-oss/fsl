@@ -322,56 +322,12 @@ for (const binder of ["seq_literal", "set_statement"]) {
   }
 }
 // One exact issue-pair negative, observed only by Linux WASM integration.
-// The native test seam cannot run the pre-fix main browser BMC. These literal
-// bytes are also checked against the shared Rust fixture by a native test.
+// The native test seam cannot run the pre-fix main browser BMC. Read the same
+// fixture files as the shared Rust table, rather than maintaining byte copies.
 // The existing batch protocol retains explicit unstable options; no product
 // transport or solver-injection surface is changed here.
-const dependencyRoot = String.raw`compose UsesNextDep {
-  use ClaimEligibility as claims from "dep_next_colon.fsl"
-}
-`;
-const dependencyChild = String.raw`fsl 5
-// Named predicates keep tagged contracts aligned with the business vocabulary.
-// expected: verified
-// expected-command: verify --depth 3
-
-spec ClaimEligibility {
-  type Claim = 0..1
-  type Amount = 0..100
-  const AUTO_LIMIT = 50
-
-  state {
-    amount: Map<Claim, Amount>,
-    submitted: Map<Claim, Bool>,
-    auto_approved: Map<Claim, Bool>
-  }
-
-  init {
-    forall c: Claim {
-      amount[c] = 0
-      submitted[c] = false
-      auto_approved[c] = false
-    }
-  }
-
-  def eligible(c: Claim) = submitted[c] and amount[c] <= AUTO_LIMIT
-
-  action submit(c: Claim, requested: Amount) {
-    requires not submitted[c]
-    amount[c] = requested
-    submitted[c] = true
-  }
-
-  action auto_approve(c: Claim) {
-    requires eligible(c)
-    auto_approved[c] = true
-  }
-
-  invariant OnlyEligibleAutoApproved "REQ-2: only eligible claims are auto-approved" {
-    forall c: Claim { auto_approved[c] => eligible(c) }
-  }
-}
-`;
+const dependencyRoot = await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_root.txt"), "utf8");
+const dependencyChild = `fsl 5\n${await readFile(join(repository, editionWarningCase), "utf8")}`;
 const dependencyCases = [];
 {
   const directory = await mkdtemp(join(dist, "dependency-edition-"));

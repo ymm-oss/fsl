@@ -25,30 +25,25 @@ fn dependency_edition_worker_check_uses_child_edition_and_ignores_unused_files()
             native_z3()
         }));
         let expected = cases::expected_check(&row, &fixture, &fixture.child, expected_envelope());
-        observations.compare(
+        observations.eq(
             &format!("{}/worker-check", row.id),
             (&actual, calls),
             (&expected, 0),
-            actual == expected && calls == 0,
         );
     }
-    let row = cases::flat_rows()
-        .into_iter()
-        .find(|r| r.id == "E01/P")
-        .unwrap();
+    let row = cases::row("E01/P");
     let fixture = cases::fixture(&row);
     let mut request: Request = serde_json::from_value(serde_json::json!({"cmd":"check","source":fixture.root,"source_file":"root_compose.fsl","files":fixture.files,"unstable":["fsl5"]})).unwrap();
-    request.files.insert(
-        "unused.fsl".into(),
-        format!("fsl 5\n{}", cases::LEGACY_LEAF),
-    );
+    request
+        .files
+        .insert("unused.fsl".into(), cases::next_leaf());
     let actual = block_on(check_with(&request, TEST_SOLVER_VERSION, &mut native_z3));
     let expected = cases::expected_check(&row, &fixture, &fixture.child, expected_envelope());
-    observations.compare("C01/unused", &actual, &expected, actual == expected);
-    request.source = format!("fsl 5\n{}", cases::LEGACY_LEAF);
+    observations.eq("C01/unused", &actual, &expected);
+    request.source = cases::next_leaf();
     let actual = block_on(check_with(&request, TEST_SOLVER_VERSION, &mut native_z3));
     let expected = cases::refusal(&request.source, "root_compose.fsl", expected_envelope());
-    observations.compare("C01/root-refusal", &actual, &expected, actual == expected);
+    observations.eq("C01/root-refusal", &actual, &expected);
     request.options.deadlock = "invalid-option".into();
     let mut calls = 0;
     let actual = block_on(crate::verify_with(
@@ -63,12 +58,7 @@ fn dependency_edition_worker_check_uses_child_edition_and_ignores_unused_files()
     expected["result"] = serde_json::json!("error");
     expected["kind"] = serde_json::json!("usage");
     expected["message"] = serde_json::json!("--deadlock must be warn, error, or ignore");
-    observations.compare(
-        "C01/option-priority",
-        (&actual, calls),
-        (&expected, 0),
-        actual == expected && calls == 0,
-    );
+    observations.eq("C01/option-priority", (&actual, calls), (&expected, 0));
     observations.finish();
 }
 
