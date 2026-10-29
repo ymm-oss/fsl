@@ -1684,12 +1684,23 @@ queue-ref entries, although those bytes still contribute to the total-budget jud
 A follow-up must exclude `merge_group` from the save-enabled steps and extend both audit ref
 filters to `refs/heads/gh-readonly-queue/`. Neither executable behavior changes in this decision.
 
-**First queued merge evidence.** After the policy change, `enqueuePullRequest` on #1608 returned
-`QUEUED`, and `merge_group` runs of `product gate`, `merge readiness`, `site reference freshness`
-and `cache budget audit wiring` started. Starting a workflow is not confirmation that every
-required context reported.
+**First queued merge evidence.** #1608 was merged by the queue to `main` commit
+`625698621cadfd842a90b6b921e51eb8a9591b79`. The queue branch was
+`gh-readonly-queue/main/pr-1608-f5f3f1942220ad6c1e1802fe9bc523fabe2155ae`.
+All four workflow runs below had event `merge_group`, head SHA
+`625698621cadfd842a90b6b921e51eb8a9591b79`, and completed with `success`.
+Evidence source: the workflow runs and check runs, read from the GitHub API.
 
-TODO: Record the first queued merge (#1608) `merge_group` run IDs and confirm all six required contexts reported; run IDs are pending, not inferred.
+| Workflow | Run ID | Required contexts reported with `success` |
+|---|---|---|
+| `product gate` | `40840541665` | `rust workspace`, `WASM`, `semantic mutation (changed)`, `FSL Logic Test (pr)` |
+| `merge readiness` | `40840541655` | `merge readiness` |
+| `site reference freshness` | `40840541582` | `site reference freshness` |
+| `cache budget audit wiring` | `40840541689` | None; this workflow is not a required context. |
+
+The `product gate` job itself and all four `native Z3 4.16` jobs were skipped, as designed for
+these deferred contexts. The check runs for `625698621cadfd842a90b6b921e51eb8a9591b79`
+from app ID `15368` also reported `success` for all six required context names listed above.
 
 ### The merge queue was tried, measured against this repository's workflow, and rejected
 
