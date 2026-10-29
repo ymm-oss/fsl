@@ -3477,9 +3477,9 @@ fn ai_span(loc: fsl_syntax::AiLoc) -> fsl_syntax::Span {
     }
 }
 
-/// Semantic validation shared by every `fslc ai` entry point that can emit a
-/// success verdict for an `ai_component` document, whether the component is
-/// supplied alone or as part of an fsl-ai project (issue #800).
+/// Semantic validation for AI check, compat, replay, and project checking.
+/// Standalone and embedded components share these rules; AI eval, drift and
+/// regress remain outside this validation contract (issue #800).
 ///
 /// # Errors
 ///
@@ -3487,13 +3487,22 @@ fn ai_span(loc: fsl_syntax::AiLoc) -> fsl_syntax::Span {
 /// `check hard { rule ... }` clause names an unknown rule, or a fallback
 /// reason is duplicated, or no tools are declared.
 pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), CoreError> {
+    validate_ai_component_with_location(component).map_err(|(error, _)| error)
+}
+
+/// Validate a component while retaining the authored failure position.
+///
+/// # Errors
+/// Returns the legacy validation error and its optional source location.
+pub fn validate_ai_component_with_location(
+    component: &fsl_syntax::AiComponent,
+) -> Result<(), (CoreError, Option<fsl_syntax::AiLoc>)> {
     let mut reasons = BTreeSet::new();
     for fallback in &component.fallback {
         if !reasons.insert(&fallback.reason) {
-            return Err(CoreError::unlocated(format!(
-                "duplicate fallback reason '{}'",
-                fallback.reason
-            )));
+            let error =
+                CoreError::unlocated(format!("duplicate fallback reason '{}'", fallback.reason));
+            return Err((error, Some(fallback.loc)));
         }
     }
     let tools = component
@@ -3510,13 +3519,18 @@ pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), 
         .chain(&component.authority.forbidden)
     {
         if !tools.contains(rule.name.as_str()) {
-            return Err(CoreError::unlocated(format!(
-                "unknown tool '{}' in authority block",
-                rule.name
-            )));
+            let error =
+                CoreError::unlocated(format!("unknown tool '{}' in authority block", rule.name));
+            return Err((error, rule.loc));
         }
     }
-    ai_rule_set(component)?;
+    ai_rule_set(component).map_err(|error| {
+        let loc = fsl_syntax::AiLoc {
+            line: error.line,
+            column: error.column,
+        };
+        (error, Some(loc))
+    })?;
     if component.tools.is_empty() {
         let span = ai_span(component.loc);
         let mut error = core_error(
@@ -3539,7 +3553,7 @@ pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), 
             lowering_steps: Vec::new(),
             generated: false,
         }));
-        return Err(error);
+        return Err((error, Some(component.loc)));
     }
     Ok(())
 }

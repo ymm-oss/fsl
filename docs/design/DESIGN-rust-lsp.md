@@ -156,10 +156,16 @@ server never implemented it. Rename edits all references that resolve to the sel
 inside the known workspace, including the declaration. An unresolved symbol or invalid replacement
 identifier returns no edit.
 
-Diagnostics use the shared compiler classification (`parse`, `type`, or `semantics`) as their code,
-the compiler message verbatim, and the compiler source span converted from one-based FSL positions
+Diagnostics use the shared compiler diagnostic identifier (for example `FSL-SEMANTIC`) as their code;
+`data.kind` carries the classification (`parse`, `type`, or `semantics`). They retain the compiler
+message and source span, converted from one-based FSL positions
 to zero-based LSP ranges. Migration diagnostics and their machine-applicable edits are derived from
 `fsl-syntax::canonical_rewrites`; code actions apply those exact edits.
+
+AI-project diagnostics validate every component through the same validity implementation as CLI
+checking. The compiler retains the authored failure position separately from the legacy CLI error,
+so publishing a whole-document UTF-16 range does not change CLI/Worker envelopes. Projects do not
+acquire a synthetic Kernel model or solver requirement; valid edits publish an explicit empty array.
 
 ## 5. Terms, laws, and link map
 

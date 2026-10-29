@@ -154,7 +154,14 @@ document lines and code-line columns are preserved. Unknown hard-rule messages
 remain anchored at `check hard`, not the `rule` token; parse errors are
 not translated twice. Only coordinates change: validity, diagnostic kind,
 envelope fields, exit status and assurance remain unchanged. LSP project-component
-diagnostics remain separate work (#1575).
+diagnostics share this validation and consume the already-document-relative locations.
+`validate_ai_component_with_location` retains the authored failure position alongside
+the unchanged legacy error; `validate_ai_component` delegates to that single body.
+The editor publishes authority-reference, hard-rule and no-tools errors without
+building a synthetic Kernel model or invoking a solver. Fixing an invalid component
+clears its versioned diagnostics; a valid first component does not hide a later error.
+Diagnostic byte spans are converted to UTF-16 only at the editor boundary, with no
+second component offset. This adds no verification result or assurance promotion.
 
 ### Boundary sweep evidence (#1545)
 
