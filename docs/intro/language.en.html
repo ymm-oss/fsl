@@ -773,15 +773,25 @@ rejections are unchanged. This applies to direct specs and source-local defs
 in compose components and synchronized actions.
 A non-global <code>is some(v)</code> binding exported by a <code>requires</code> guard or the left
 operand of a binary expression is also a caller binding for this check.</p>
+<p>The final implementation's <code>check</code> sweep of all 597 <code>.fsl</code> files under
+<code>specs/</code>, <code>examples/</code>, and <code>rust/fslc/tests/fixtures/</code>, using base
+<code>11f01225e244dabde0f8dfd9aaa665bc47dccfd4</code> and built implementation
+<code>dd7b47885680076412ab2f0b46ebe8854ff6758b</code> in their respective materialized
+trees, has an empty ok-to-error transition set. The newly rejected inline
+forms are not negated by that corpus result; the <code>leadsTo</code> declaration-binder
+path was closed later by #1528.</p>
 <p><strong>Breaking removal (#1528):</strong> binders declared directly by a <code>leadsTo</code> property
 also participate in this capture check for before/after expressions, <code>helpful</code>
 arguments, <code>decreases</code>, and <code>within</code>. A call capturing a def-body free name now
 rejects with exit 2, <code>kind: "semantics"</code>, and <code>would capture variable</code> at the
-call, in direct specs and compose components. Rename the declaration binder.
+call, in direct specs, compose components and root properties, and dialect
+properties lowered to <code>leadsTo</code> (such as requirements). Rename the declaration binder.
 Binder ranges and the binder's own <code>where</code> expansion are unchanged; capture in
 <code>where</code> can still precede the unsupported-property-wrapper-where rejection.
 An already-invalid state-reading <code>within</code> call can now report <code>would capture</code>
-at the call instead of <code>unknown constant</code>, still with exit 2 / semantics.</p>
+at the call instead of <code>unknown constant</code>, still with exit 2 / semantics.
+When a <code>leadsTo</code> also contains an already-invalid pattern-scope escape (#1547),
+<code>would capture</code> can likewise precede that rejection; exit 2 / semantics is unchanged.</p>
 <p>The #1528 <code>check</code> sweep used separately built <code>git archive</code> trees for base
 <code>08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc</code> and implementation
 <code>c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286</code>. All 601 <code>.fsl</code> files under
