@@ -1141,8 +1141,15 @@ forall の source/domain は既存の別の規則に従います。早すぎる�
 
 init が一度も代入しないルートは symbolic な自由値のままです。issue の
 `init { g = on }` や `if choose { x = 1 } else { x = 0 }` の未代入の
-`on`/`choose` も該当します(#493)。check は受理し、explicit は従来どおり読みを
-拒否します。binder の値が決まらない場合(filter 付き・collection の形である
+`on`/`choose` も該当します(#493)。check は受理し、BMC/induction の symbolic な
+自由値と refine の自由ルート列挙は変わりません(#1521)。explicit と Monitor は
+従来どおり読みを拒否しますが、代入されるルートの早すぎる読みと区別し、非対応の
+非決定的 init として次のメッセージを返します。
+`the explicit engine does not support a free initial value of state variable '<name>' (nondeterministic init); use --engine bmc`
+(kind `semantics`、exit 2。compose の接頭辞も保持)。auto は引き続き BMC に
+フォールバックし、`engine_fallback.reason` にこの診断を転送します。
+メッセージのみの変更で、explicit の列挙機能や check の拒否は追加しません。
+binder の値が決まらない場合(filter 付き・collection の形である
 #1520、X1/X2 など)だけ、#1518 の現在のキーの規則に従う既代入キーの読みを
 このルート全体の検査から免除します。値が決まる一部の domain では全ルートの
 被覆が必要で、型全体を走る forall は受理したままです。filter 付き・collection

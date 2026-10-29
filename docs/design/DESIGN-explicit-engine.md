@@ -81,6 +81,16 @@ Key points:
   so the explicit engine must never silently explore only the default-seeded
   state: any spec it accepts has exactly one initial state, and everything
   else is an explicit error. The Rust port must enforce the same gate.
+  For an init read of a root never assigned anywhere in init, native explicit
+  and Monitor report `the explicit engine does not support a free initial value of state variable '<name>' (nondeterministic init); use --engine bmc`
+  (kind `semantics`, exit 2), retaining compose prefixes in the reported name.
+  This intentionally replaces the misleading before-assignment message for
+  free-root reads only (#1451); assigned-root early reads keep their exact
+  `init references state variable '<name>' before it is assigned` check refusal.
+  Check still accepts free-root reads; BMC/induction keep symbolic free values
+  (#493), and refinement's separate free-root enumeration remains unchanged
+  (#1521). Auto still falls back to BMC and forwards the new diagnostic in
+  `engine_fallback.reason`; no free-root enumeration is added to explicit.
 - **Unsatisfiable init (fail closed, kind `vacuous`).** Definite assignment
   alone does not guarantee a consistent initial state: `init forall` executes
   once per binder value, and when two binder values write different concrete

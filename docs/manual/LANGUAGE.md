@@ -1221,8 +1221,15 @@ be free under #493. Existing ownership/field/forall refusals keep priority.
 
 A root init never assigns remains a symbolic free value, including the issue's
 `init { g = on }` and `if choose { x = 1 } else { x = 0 }` with unassigned
-`on`/`choose` (#493). Check still accepts them; explicit still refuses their
-reads. Only when binder values are unresolved, including filtered/collection
+`on`/`choose` (#493). Check still accepts them; BMC/induction retain their
+symbolic free values, and refinement's free-root enumeration is unchanged
+(#1521). Explicit and Monitor still refuse these reads, but now distinguish
+unsupported nondeterministic init from assigned-root early reads with
+`the explicit engine does not support a free initial value of state variable '<name>' (nondeterministic init); use --engine bmc`
+(kind `semantics`, exit 2; compose prefixes are retained). Auto still falls
+back to BMC, forwarding that diagnostic in `engine_fallback.reason`.
+This is a message-only change, not new explicit enumeration or check rejection.
+Only when binder values are unresolved, including filtered/collection
 forms (#1520, X1/X2), does the #1518 current-key rule exempt an already-written
 current key from this root-wide check. A resolved partial domain still requires
 full root coverage; a typed full-domain forall remains accepted.
