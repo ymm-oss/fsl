@@ -1598,7 +1598,16 @@ additional removals in #1463.</p></div></details>
   If a symbolic init failure is found only beyond a stored <code>Seq</code>'s represented
   capacity, for example when init stores an over-capacity sequence and reads
   beyond its slots, these engines instead refuse without a location:
-  <code>model sequence length exceeds capacity</code>.</li>
+  <code>model sequence length exceeds capacity</code>.
+  For quantified and aggregate expressions, all engines name the first reached
+  concrete failure, not a generic failure of the whole binder (#1607). Evaluation
+  visits the source first, then each present candidate's <code>where</code>, then its body
+  or summand if the filter is true. <code>forall</code> stops at the first false body;
+  <code>exists</code> stops at the first true body. <code>count</code>, <code>unique</code>, and <code>exactlyOne</code> do
+  not stop early when their result is determined. <code>sum</code> checks each running
+  partial sum for i64 overflow (<code>integer overflow in sum</code>), even if its final
+  mathematical sum would fit; an undefined summand reports its own failure
+  before accumulation. The location remains the containing init statement.</li>
 <li>Dividing the minimum i64 value by <code>-1</code> (<code>MIN / -1</code>) or taking its remainder
   (<code>MIN % -1</code>) is integer overflow, including in property contexts where only
   zero divisors are totalized to <code>0</code>.</li>

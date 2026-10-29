@@ -1502,7 +1502,15 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
   init が capacity を越えた <code>Seq</code> を格納してそのスロットの外を読む場合など、
   記号的な init の失敗が格納した <code>Seq</code> の表現可能な capacity の外でのみ見つかる
   ときは、これらのエンジンは位置を名指さず
-  <code>model sequence length exceeds capacity</code> で拒みます。</li>
+  <code>model sequence length exceeds capacity</code> で拒みます。
+  量化式・集約式でも、どのエンジンも binder 全体の総称エラーではなく、最初に
+  到達した具体的な失敗を名指しします(#1607)。source を先に評価し、存在する候補
+  ごとに <code>where</code>、filter が真なら body または summand の順に評価します。
+  <code>forall</code> は最初の偽の body、<code>exists</code> は最初の真の body で止まります。
+  <code>count</code>・<code>unique</code>・<code>exactlyOne</code> は結果が確定しても途中で止まりません。
+  <code>sum</code> は最終的な数学上の和が i64 に収まる場合でも、各部分和の i64 overflow を
+  検査します(<code>integer overflow in sum</code>)。summand が未定義なら、累算より先に
+  その演算自体の失敗を報告します。位置は引き続き、それを含む init の文です。</li>
 <li>i64 の最小値を <code>-1</code> で割る <code>MIN / -1</code> とその剰余 <code>MIN % -1</code> は整数の
   overflow であり、除数がゼロのときだけ <code>0</code> に全域化する property 文脈でも同じです。</li>
 <li>デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
