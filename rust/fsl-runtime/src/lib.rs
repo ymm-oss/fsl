@@ -655,8 +655,10 @@ fn eval_binary(
                 Ok(Value::Int(left.rem_euclid(right)))
             }
         }
-        "==" => Ok(Value::Bool(left == right)),
-        "!=" => Ok(Value::Bool(left != right)),
+        "==" | "!=" => {
+            let equal = normalize_relation_comparison(left) == normalize_relation_comparison(right);
+            Ok(Value::Bool(if op == "==" { equal } else { !equal }))
+        }
         "<" | "<=" | ">" | ">=" => {
             let ordering = left.cmp(&right);
             Ok(Value::Bool(match op {
@@ -1964,7 +1966,7 @@ fn alpha_state_inner(
                 None,
             )?
         };
-        alpha.insert(name.clone(), value);
+        alpha.insert(name.clone(), coerce_relation_literal(value, Some(abs_ty)));
     }
     let _ = implementation;
     Ok(alpha)
@@ -2086,10 +2088,7 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 /// the general Monitor-construction gate for partial/nondeterministic init
 /// is a different surface (issue #519).
 /// Init ownership and forall read-order checks also apply to free-root enumeration.
-/// Legacy-accepted partial assignments still use defaults with free roots (#1521).
-/// The shared gate rejects reads of later-assigned roots, not never-assigned roots.
-/// This is not a complete relational-init enumeration for those shapes; the
-/// stronger admission gate for new per-field shapes does not repair them.
+/// Assigned-root read order and completeness are checked before enumeration (#1521).
 ///
 /// # Errors
 ///
@@ -2097,6 +2096,7 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 /// scalar domain, or a combination cannot be evaluated concretely.
 fn concrete_initial_states(model: &KernelModel) -> Result<Vec<State>, RuntimeError> {
     check_init_write_ownership(model)?;
+    explicit::check_refinement_init(model)?;
     let free = explicit::unassigned_init_state_vars(model);
     if free.is_empty() {
         return Ok(vec![Monitor::new(model.clone())?.state]);
@@ -2184,9 +2184,7 @@ pub fn check_refinement_with_budget(
     // mid-walk self-violation means; by construction it cannot encounter
     // one within the same `depth`. `impl_initial_states` enumerates never-assigned
     // roots (#493), rather than selecting one default for them. This covers the
-    // supported nondeterministic initial branches, subject to the constructor's
-    // legacy partial-assignment / ordered-read limits (#1521); it is not a claim
-    // of complete relational-init coverage for those legacy shapes.
+    // supported branches; incomplete written roots are refused (future enumeration: #1579).
     //
     // The pre-pass walks the same reachable set the correspondence walk
     // does, so it takes the same `budget` (issue #1246): unbudgeted, it held
@@ -2215,7 +2213,7 @@ pub fn check_refinement_with_budget(
     }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
     // States produced by abs's own (possibly nondeterministic) init constructor,
-    // subject to its legacy limits above. Init correspondence below asks whether
+    // rejecting incomplete written roots. Init correspondence below asks whether
     // α(s₀) is a member of this set, not whether it equals one chosen default for
     // never-assigned abstract roots.
     let abs_initial_states: BTreeSet<State> =
@@ -4516,7 +4514,10 @@ fn assign(
 ) -> Result<(), RuntimeError> {
     match target {
         LValue::Var(name) => {
-            target_state.insert(name.clone(), coerce_relation_literal(name, value, model));
+            target_state.insert(
+                name.clone(),
+                coerce_relation_literal(value, model.state_type(name)),
+            );
         }
         LValue::Index(name, index_expr) => {
             let index = eval(index_expr, read_state, bindings, model, None)?;
@@ -4597,18 +4598,27 @@ fn assign(
 
 /// `Set {}` is the only relation literal surface syntax accepts (public
 /// Kernel typing rejects a non-empty one), but `eval`'s `Expr::Set` arm has
-/// no assignment-target type context and always produces `Value::Set`.
-/// Coerce it here, where the target variable's declared type is known --
-/// mirrors the symbolic evaluator's `SymbolicValue::SetLiteral` ->
+/// no expected type context and always produces `Value::Set`.
+/// State writes supply the target type. This mirrors the symbolic
+/// evaluator's `SymbolicValue::SetLiteral` ->
 /// `SymbolicValue::Relation` coercion (`fsl-verifier/src/value.rs::coerce`).
-fn coerce_relation_literal(name: &str, value: Value, model: &KernelModel) -> Value {
+fn coerce_relation_literal(value: Value, expected: Option<&TypeRef>) -> Value {
     if let Value::Set(items) = &value
         && items.is_empty()
-        && matches!(model.state_type(name), Some(TypeRef::Relation(_, _)))
+        && matches!(expected, Some(TypeRef::Relation(_, _)))
     {
         return Value::Relation(BTreeSet::new());
     }
     value
+}
+
+/// Normalize empty relations only at the comparison root or inside `Some`.
+fn normalize_relation_comparison(value: Value) -> Value {
+    match value {
+        Value::Relation(items) if items.is_empty() => Value::Set(BTreeSet::new()),
+        Value::Some(inner) => Value::Some(Box::new(normalize_relation_comparison(*inner))),
+        value => value,
+    }
 }
 
 fn lvalue_key(

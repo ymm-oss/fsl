@@ -490,12 +490,12 @@ both consume this set:
 
 **Scope**: only a state variable with *zero* assignment coverage — never an assignment
 target on any init path — is treated as free. A variable assigned on some but not all
-paths (e.g. only inside an `if` with no `else`) is left out of the enumeration and keeps
-the prior default-filled behavior for the branch that skips it; the static analysis cannot
-always prove such a remaining value is genuinely unconstrained rather than an approximation
-artifact (a `where`-filtered `forall`, for instance), so this checker does not guess there
-either. Fully characterizing that partial-coverage case is `Monitor` construction's own
-concern generally, not this refinement-local enumeration (issue #519, a different surface).
+paths (e.g. only inside an `if` with no `else`) is not enumerated: refinement now
+refuses incomplete assigned roots on either side instead of keeping unwritten
+components at defaults (#1521). This includes partial fields/keys and forall
+coverage not statically established as complete; bmc and induction retain their
+free-value verdicts. Enumerating these partial init components is future work
+(#1579); general Monitor admission remains a separate surface (issue #519).
 
 **Breaking change**: `fslc refine` verdicts change for a mapping between two specs where
 either side's `init` leaves a state variable fully unassigned on every path. A refinement
