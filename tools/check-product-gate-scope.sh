@@ -11,16 +11,13 @@
 # unfixable even by an admin merge. This script instead lets the job start,
 # check out, diff, and exit fast, so its context always reports something.
 #
-# It also owns the (currently inert) `merge_group`/`FSL_MERGE_QUEUE_CI`
-# decision described in docs/design/DESIGN-ci.md, "The merge queue was tried,
-# measured against this repository's workflow, and rejected". A merge queue
-# was configured on the `main` ruleset on 2026-08-05 and removed the same
-# day: an admin merge bypasses the queue entirely, and the ordinary
-# `enqueuePullRequest` path is unsatisfiable under the single-approver review
-# policy. Neither the repository variable nor a `merge_queue` ruleset rule
-# exists, so the `queue-entry-stub` branch below never runs in production.
-# It is kept because it is harmless and ready if that *human-review-policy*
-# question is ever answered differently -- not because a rollout is pending.
+# It also owns the `merge_group`/`FSL_MERGE_QUEUE_CI` decision described in
+# docs/design/DESIGN-ci.md, "Merge queue adoption (2026-10-29)". The queue is
+# active after the review policy changed to permit a single maintainer to
+# enqueue. FSL_MERGE_QUEUE_CI stays unset, so pull requests retain their
+# pre-merge evidence and each merge group computes its own diff_scope.
+# The `queue-entry-stub` branch stays off: an admin merge still bypasses
+# the queue and must not land a change with only stub evidence.
 #
 # Usage:
 #   ./tools/check-product-gate-scope.sh            # decide scope; prints
@@ -82,11 +79,9 @@ emit() {
 
 # Diff-based exemption shared by `pull_request` (when FSL_MERGE_QUEUE_CI is
 # not "enabled") and `merge_group` events -- the latter cannot be path-
-# filtered at the trigger level, so this in-job check would be the only place
-# the exemption could apply if a merge queue ever existed. None does, and the
-# queue was rejected rather than deferred: see the header comment. Fails
-# closed to a full run when either SHA is missing or the diff itself cannot be
-# computed.
+# filtered at the trigger level, so this in-job check applies the exemption
+# independently to each active merge group. Fails closed to a full run when
+# either SHA is missing or the diff itself cannot be computed.
 diff_scope() {
   if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
     emit true diff-unavailable-fail-closed
@@ -110,13 +105,11 @@ decide() {
         # Never stub or skip promotion evidence.
         emit true production-promotion-evidence
       elif [ "${FSL_MERGE_QUEUE_CI:-}" = "enabled" ]; then
-        # Unreachable: neither the `FSL_MERGE_QUEUE_CI` variable nor a
-        # `merge_queue` ruleset rule exists, and the queue was tried and
-        # rejected (see the header comment). Enabling the variable is
-        # therefore NOT "the only remaining step" -- doing so while no
-        # `merge_group` run replaces these stubs would land changes on `main`
-        # with no pre-merge Linux evidence at all. Reaching this branch
-        # requires the human-review-policy change first.
+        # Disabled by policy: FSL_MERGE_QUEUE_CI stays unset even though
+        # the queue is active (see the header comment). Pull requests must
+        # retain their pre-merge evidence: an admin merge still bypasses
+        # the queue, and stubs without a replacing merge_group run would
+        # land changes with no pre-merge Linux evidence at all.
         emit false queue-entry-stub
       else
         diff_scope

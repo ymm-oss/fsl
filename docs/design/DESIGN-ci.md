@@ -101,22 +101,18 @@ Measured on the batch that motivated this revision:
   warm cache and ≈18 min cold), so deferring the matrix is what buys the merge throughput this
   design is for.
 
-The cost is stated plainly: a pull request into `main` now waits for `rust workspace`, measured at
-18m17s on a cold cache and around twelve minutes warm, rather than forty seconds. Because a branch
-that falls behind `main` must re-run its checks, a serial chain of rebases pays that repeatedly. One
-mitigation exists and is worth using before the cost is treated as inherent: independent changes can
-share one pull request with one commit per topic.
+The cost is stated plainly: a pull request into `main` waits for `rust workspace`, measured at
+18m17s on a cold cache and around twelve minutes warm, rather than forty seconds. Before the strict
+policy was relaxed, a branch falling behind `main` had to re-run its checks, so a serial chain of
+rebases paid that repeatedly. Independent changes can still share one pull request with one commit
+per topic.
 
-A merge queue would be the other, batching several candidates into one validation, and both
-`merge-readiness.yml` and `ci.yml` carry a `merge_group` trigger for exactly that. **It is not an
-available mitigation.** The queue itself was configured on the `main` ruleset on 2026-08-05 and
-removed the same day; both triggers are inert and enabling one changes nothing, because no
-`merge_group` event fires without a queue. Reviving it is a human-review-policy decision, not a CI
-one — see "Required pre-merge contexts, and why the merge queue was rejected" below, and the
-"Non-goals" entry that follows from it. This paragraph previously recommended the queue as a
-mitigation "once `ci.yml` gains the same trigger"; `ci.yml` gained it, the queue was then measured
-and rejected, and the recommendation was left behind. It is corrected here rather than deleted so the
-sequence stays legible.
+A merge queue is now the other mitigation: it validates queued candidates against current `main`
+without requiring a chain of branch updates. Adopted on 2026-10-29 after an explicit review-policy
+change, it uses the existing `merge_group` triggers in `merge-readiness.yml` and `ci.yml`.
+Pull requests still retain their full pre-merge evidence; this is not a reduction in per-push checks.
+See "Merge queue adoption (2026-10-29)" below. The unsuccessful 2026-08-05 experiment is retained
+there as dated history, not the current policy.
 
 ## Merge readiness contract
 
@@ -288,13 +284,12 @@ the aggregate `product gate` context honour `FSL_OPTIMISTIC_CI` and skip on pull
 `main`.
 
 All four heavy jobs (`rust workspace`, `WASM`, `semantic mutation`, `FSL Logic Test`) are required
-contexts on the `main` ruleset, and all four also carry a `merge_group` trigger that is **inert**:
-no merge queue is configured on `main`, and the accepted decision below records that one was tried
-and rejected, so `merge_group` never fires. The same is true of
-`tools/check-product-gate-scope.sh`'s `queue-entry-stub` branch, which is gated on a
-`FSL_MERGE_QUEUE_CI` variable that does not exist. Every pull request therefore runs the complete
-Linux evidence in full, and that is the live contract — see "Required pre-merge contexts, and why
-the merge queue was rejected" below before assuming otherwise.
+contexts on the `main` ruleset, and all four also carry an active `merge_group` trigger.
+The queue was adopted on 2026-10-29. `FSL_MERGE_QUEUE_CI` stays unset, so
+`tools/check-product-gate-scope.sh`'s `queue-entry-stub` branch stays disabled: pull requests retain
+their full Linux evidence, subject to the existing in-job scope exemption, and each merge group
+computes its own scope with `diff_scope`. See "Merge queue adoption (2026-10-29)" below for the
+false-green risk that keeps the stub path off even with a queue.
 
 ### Native CLI Python expectation checks
 
@@ -370,8 +365,8 @@ time this mechanism moved* — `merge readiness` was the only one — so this wa
 not a response to an already-broken required check. The requirement change landed 2026-08-05,
 making `rust workspace`, `WASM`, `semantic mutation (changed)`, and `FSL Logic Test (pr)` required
 alongside `merge readiness`; `site reference freshness` joined the required set afterward, closing
-issue #707's drift-detection half (see "Required pre-merge contexts, and why the merge queue was
-rejected" below for the live set, and "Ruleset drift audit" for why a required context can no
+issue #707's drift-detection half (see "Required pre-merge contexts and merge queue adoption"
+below for the live set, and "Ruleset drift audit" for why a required context can no
 longer drift silently).
 
 No **product-gate lane** reads those files. The paths that do read them keep their own
@@ -1505,7 +1500,7 @@ requests are cold until that save lands. While both generations exist the listin
 up to twice the Rust bytes, so the audit can report `budget-exhausted` until the superseded entries
 are deleted or LRU-evicted, and `main-cache-absent` for any pair whose new entry is not saved yet.
 
-## Required pre-merge contexts, and why the merge queue was rejected
+## Required pre-merge contexts and merge queue adoption
 
 ### Automation contracts use parser-backed workflow inspection
 
@@ -1624,7 +1619,56 @@ permanently `Expected`. The in-job scope check that replaced `paths-ignore` (see
 "Agent-configuration exemption" above) is what makes them safe to require: every gated job now
 always reports, either from real evidence or from a fast early exit.
 
+### Merge queue adoption (2026-10-29)
+
+**Accepted decision.** The merge queue is now configured on `main`. Ruleset `19090821`
+(`main review for non-admins`) changed `required_approving_review_count` from `1` to `0` and
+`require_last_push_approval` from `true` to `false`. This deliberately removes enforced approval
+for non-admin contributors too: a single maintainer can now enqueue without GitHub demanding an
+approval from someone other than the last pusher. It answers the human-review-policy question
+that blocked the earlier experiment, rather than changing CI logic to evade that policy.
+
+Ruleset `19090811` (`main safety and CI`) now includes a `merge_queue` rule with these seven
+accepted parameters, captured in `.github/scripts/fixtures/ruleset-19090811.json`:
+
+| Parameter | Accepted value |
+|---|---|
+| `merge_method` | `SQUASH` |
+| `grouping_strategy` | `ALLGREEN` |
+| `max_entries_to_build` | `4` |
+| `min_entries_to_merge` | `1` |
+| `max_entries_to_merge` | `4` |
+| `min_entries_to_merge_wait_minutes` | `0` |
+| `check_response_timeout_minutes` | `240` |
+
+The six required contexts and `strict_required_status_checks_policy: false` are unchanged.
+Queued merges validate the candidate with current `main` and preceding queue entries through
+`merge_group`; ordinary branch updates are not needed merely because another queued change lands.
+The drift audit compares the queue's **presence as a rule type only**, not any of these seven
+parameters. They remain the same unaudited parameter blind spot as the `pull_request` rule's
+parameters; a clean audit is not evidence that their values match this table.
+
+**Full evidence stays on both paths.** `FSL_MERGE_QUEUE_CI` remains unset. Pull requests keep
+their full pre-merge evidence under the existing scope policy, and every `merge_group` run computes
+its own scope with `diff_scope`. A queued product change is checked on its pull-request head and
+again on its merge with current `main`. The `queue-entry-stub` path must stay off: an
+administrator's merge still bypasses the queue, so replacing pull-request checks with stubs could
+land a change with no pre-merge Linux evidence if no queue run replaces them. Queue adoption does
+not make that confidently-green false negative acceptable. Administrator queue bypass is reserved
+for emergencies only; it does not bypass the required status checks in `19090811`.
+
+**First queued merge evidence.** After the policy change, `enqueuePullRequest` on #1608 returned
+`QUEUED`, and `merge_group` runs of `product gate`, `merge readiness`, `site reference freshness`
+and `cache budget audit wiring` started. Starting a workflow is not confirmation that every
+required context reported.
+
+TODO: Record the first queued merge (#1608) `merge_group` run IDs and confirm all six required contexts reported; run IDs are pending, not inferred.
+
 ### The merge queue was tried, measured against this repository's workflow, and rejected
+
+**Historical decision, 2026-08-05.** The account below records the original rejection and its
+false-green reasoning. It is superseded by "Merge queue adoption (2026-10-29)" above; its statements
+about the queue being unavailable and review policy being unchanged describe that earlier state.
 
 A GitHub merge queue was configured on this ruleset on 2026-08-05 and removed the same day. The
 intent was to move the heavy Linux evidence from once per pull-request push to once per landed
@@ -1674,18 +1718,20 @@ The cost was measured on this repository, not reasoned about. Merging #1073 move
 #1075 and #1076 into `BEHIND` and invalidated eighteen already-succeeded checks on each. Both had to
 be updated and re-run before either could land. With N pull requests open, every merge costs N
 re-runs of the heavy Linux evidence — and `rust workspace` is ~33 min on a warm cache, measured
-above. The queue that normally absorbs this cost is unavailable here for reasons that are about
-human review policy rather than CI, recorded in "The merge queue was tried, measured against this
-repository's workflow, and rejected" above. That left the strict flag paying its full price with no
-way to batch it.
+above. At the time of this decision, the queue that normally absorbs this cost was unavailable
+for the review-policy reasons recorded in the 2026-08-05 history above. That left the strict flag
+paying its full price with no way to batch it. The queue has since been adopted as recorded in
+"Merge queue adoption (2026-10-29)"; the flag remains `false`.
 
-**What is given up.** Two pull requests can each be green against an older `main` and break when
-combined — one renames a surface, the other adds a caller. That class now lands on `main` and is
-caught by the post-merge push run and its failure reporter, not before merge.
+**What was given up without a queue.** Two pull requests can each be green against an older `main`
+and break when combined — one renames a surface, the other adds a caller. With the strict flag off
+and no queue, that class landed on `main` and was caught by the post-merge push run and its failure
+reporter, not before merge. The adopted queue now validates the combined state before a queued
+merge; emergency administrator bypass still carries the original stale-base risk.
 
-That is a real loss, and it is narrower than it sounds. It is not the *confidently-green false
+That was a real loss, and it is narrower than it sounds. It is not the *confidently-green false
 negative* the queue experiment above was rejected for: the six contexts still run, still block, and
-still report against the pull request's own head. What is lost is the guarantee that the head
+still report against the pull request's own head. Without queue validation, what is lost is the guarantee that the head
 included whatever landed in the meantime. This repository also already accepts post-merge detection
 for a comparable class — issue #806 records platform-specific defects reaching `main` because the
 native-Z3 matrix is promotion-only — so the shape is not new here.
@@ -1695,11 +1741,13 @@ maintainer, so the interleaving that makes stale bases dangerous is rare: the se
 usually rebased by the same person who just merged the first. Against that, the strict flag charged
 for the possibility on every merge regardless.
 
-**Reversal.** Set the flag back if any of these becomes true: a second maintainer starts landing
-changes concurrently, the post-merge reporter stops catching integration breaks that the strict flag
+**Original reversal conditions.** Set the flag back if any of these becomes true: a second maintainer
+starts landing changes concurrently, the post-merge reporter stops catching integration breaks that the strict flag
 would have caught pre-merge, or the review policy changes such that the merge queue becomes
 enqueueable. The first two are observable from the failure-issue history; the third is the condition
-the section above already names.
+the history above already names. Queue adoption supersedes the third condition: queued merges
+now validate against current `main` without restoring strict checks on each pull-request head.
+The first two remain reasons to reassess any merge path that bypasses the queue.
 
 The ruleset was changed first and this section recorded it (#1079), but `.github/ruleset-contract.json`
 and the checker still expected `true`, so the daily drift audit reported the intended change as
@@ -1739,9 +1787,10 @@ records which:
   skipped shard silently satisfy the ruleset, the exact false-negative shape that section's
   `if: always()` discussion warns about.
 - **unaudited** — the `pull_request` rule's own parameters (`required_approving_review_count`,
-  `allowed_merge_methods`, review dismissal, …). These are **deliberately never read**. Human
-  review policy is a separate accepted process decision (ruleset `19090821`, "The merge queue was
-  tried…" above); this audit's job is CI-evidence configuration, not review policy. An editable
+  `allowed_merge_methods`, review dismissal, …) and all seven `merge_queue` parameters. These are
+  **never read** by the audit; it compares the queue's presence in `rule_types` only. Human
+  review policy and queue parameter values are separate accepted process decisions (see
+  "Merge queue adoption (2026-10-29)" above); a clean audit does not validate them. An editable
   `allowed_merge_methods` change is the audit's blind control — its calibration suite proves the
   audit stays clean when that field changes, so a green audit is never accidentally load-bearing
   evidence for review-policy drift it was never designed to catch.
@@ -1757,9 +1806,11 @@ unset or revoked `RULESET_AUDIT_TOKEN` makes the audit fail closed with `bypass-
 rather than silently skip the check it exists for.
 
 **The seam.** `compareRuleset(contractEntry, observationJson)` and `validateContract(contract)` are
-pure — no network, no filesystem, no process access — so every case in the calibration suite is
-built by `structuredClone`-ing the checked-in fixture (`.github/scripts/fixtures/ruleset-19090811.json`,
-a verbatim capture) and mutating exactly one field, with no live ruleset ever touched by a test.
+pure — no network, no filesystem, no process access — so calibration cases clone the checked-in
+fixture (`.github/scripts/fixtures/ruleset-19090811.json`, a verbatim capture) or contract and mutate
+local data, with no live ruleset ever touched by a test. The queue-presence calibration removes
+`merge_queue` from a cloned contract and requires exactly one `rule-type-unexpected` finding
+against the captured fixture.
 The suite covers the accepting case (the fixture is clean against the contract, which also freezes
 contract/fixture agreement — editing one without the other fails pre-merge), two rejecting cases
 (a dropped context; a renamed context, which must surface as one `missing` plus one `unexpected`
@@ -1848,8 +1899,8 @@ produce the new required context. Roll out in this order:
 2. In the `main` repository ruleset, add `rust workspace` and `WASM` alongside `merge readiness`.
    `native Z3 4.16 (macos-15)` and `native Z3 4.16 (windows-latest)` stay out of the required set —
    they are the deferred cross-platform matrix. **Completed 2026-08-05**, together with
-   `semantic mutation (changed)` and `FSL Logic Test (pr)`; see "Required pre-merge contexts, and
-   why the merge queue was rejected" for the live set and for why requiring them was blocked until
+   `semantic mutation (changed)` and `FSL Logic Test (pr)`; see "Required pre-merge contexts and
+   merge queue adoption" for the live set and for why requiring them was blocked until
    the `paths-ignore` exemption moved in-job.
 3. Leave `FSL_OPTIMISTIC_CI=enabled`. It now governs only the cross-platform matrix and the
    aggregate `product gate` context; main pushes, schedules, manual runs, and production promotions
@@ -1874,9 +1925,5 @@ discipline, which step 1 alone does not achieve.
 - Hiding platform failures with `continue-on-error`.
 - Trusting agent-authored verification claims in place of independent GitHub-hosted execution.
 - Changing FSL language, Kernel, CLI/JSON, LSP, Worker, or frozen Python compatibility behavior.
-- Running a GitHub merge queue. One was configured and removed on 2026-08-05 after direct
-  measurement; reviving it is a human-review-policy decision, not a CI one. See "Required
-  pre-merge contexts, and why the merge queue was rejected".
-- Relaxing the review requirement in ruleset `main review for non-admins` (id `19090821`) to make
-  a merge queue enqueueable. That trades review enforcement for non-admin contributors against CI
-  latency and needs its own accepted decision.
+- Replacing pull-request evidence with queue-entry stubs. Queue adoption and the review-policy
+  change are accepted in "Merge queue adoption (2026-10-29)"; `FSL_MERGE_QUEUE_CI` stays unset.

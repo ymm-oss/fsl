@@ -73,11 +73,23 @@
           }
         ]
       }
+    },
+    {
+      "type": "merge_queue",
+      "parameters": {
+        "merge_method": "SQUASH",
+        "max_entries_to_build": 4,
+        "min_entries_to_merge": 1,
+        "max_entries_to_merge": 4,
+        "min_entries_to_merge_wait_minutes": 0,
+        "grouping_strategy": "ALLGREEN",
+        "check_response_timeout_minutes": 240
+      }
     }
   ],
   "node_id": "RRS_lACqUmVwb3NpdG9yec5Lu2QuzgEjTXs",
   "created_at": "2026-07-17T16:28:37.565+09:00",
-  "updated_at": "2026-09-17T11:53:56.771+09:00",
+  "updated_at": "2026-10-29T17:11:51.379+09:00",
   "bypass_actors": [],
   "current_user_can_bypass": "never",
   "_links": {
