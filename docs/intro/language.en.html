@@ -1436,9 +1436,10 @@ additional removals in #1463.</p></div></details>
   (an operation on the unreached side of an init <code>if</code>, conditional, or
   <code>and</code>/<code>or</code>/<code>=&gt;</code> is not reached) is a semantics error, exit 2, under every
   engine. It is not a <code>partial_op</code> violation, because there is no step before
-  the initial state. <code>bmc</code> and <code>induction</code> (whose base case is <code>bmc</code>) name the
-  failure and the init statement, e.g. <code>division by zero in init at 9:5</code>,
-  also when init is nondeterministic (#1258). One exception: when init also
+  the initial state. All engines name the failure and the init statement with
+  the same <code>in init at L:C</code> suffix, e.g. <code>division by zero in init at 9:5</code>
+  (#1543). <code>bmc</code> and <code>induction</code> (whose base case is <code>bmc</code>) also do so when init
+  is nondeterministic (#1258). One exception: when init also
   assigns a value outside a state variable's type, <code>bmc</code> and <code>induction</code>
   report that step-0 <code>type_bound</code> violation (exit 1) instead, because they
   ask the init question under the step-0 type bounds.</li>
