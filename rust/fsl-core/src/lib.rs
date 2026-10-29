@@ -3,7 +3,7 @@
 
 //! Typed kernel lowering and semantic model for the Rust FSL port.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 
 use fsl_syntax::{
@@ -1033,6 +1033,8 @@ struct PredicateExpander {
     definitions: HashMap<String, Definition>,
     locals: std::cell::RefCell<HashSet<String>>,
     globals: HashSet<String>,
+    constants: HashSet<String>,
+    owner: std::cell::Cell<Option<Span>>,
 }
 
 impl PredicateExpander {
@@ -1084,16 +1086,10 @@ impl PredicateExpander {
                         .into_name_resolution(),
                 );
             }
-            let bound = bound_vars(value)
-                .into_iter()
-                .collect::<std::collections::BTreeSet<_>>();
+            let bound = bound_vars(value).into_iter().collect::<BTreeSet<_>>();
             for binding in names.iter().chain(&bound) {
-                typecheck::reject_constant_shadow(binding, constants.clone()).map_err(|error| {
-                    CoreError {
-                        origin: Some(Box::new(model::type_diagnostic_origin(*span))),
-                        ..core_error(error.message, *span)
-                    }
-                })?;
+                typecheck::reject_constant_shadow(binding, constants.clone())
+                    .map_err(|error| type_error_at(error, *span))?;
             }
             if let Some(shadowed) = names.iter().filter(|name| bound.contains(*name)).min() {
                 return Err(core_error(
@@ -1126,6 +1122,8 @@ impl PredicateExpander {
             definitions,
             locals: std::cell::RefCell::default(),
             globals,
+            constants: constants.cloned().collect(),
+            owner: std::cell::Cell::new(None),
         };
         for name in expander.definitions.keys() {
             expander.validate_definition(name, &mut Vec::new())?;
@@ -1201,6 +1199,8 @@ impl PredicateExpander {
                 .collect(),
             _ => HashSet::new(),
         };
+        let owner = dialect::property_span(&item);
+        self.owner.set((owner.start.line != 0).then_some(owner));
         Ok(match item {
             SpecItem::Const { name, value } => SpecItem::Const {
                 name,
@@ -1637,6 +1637,14 @@ impl PredicateExpander {
                     span,
                 ));
             }
+            for binding in args.iter().flat_map(bound_vars).collect::<BTreeSet<_>>() {
+                typecheck::reject_constant_shadow(&binding, self.constants.iter()).map_err(
+                    |mut error| {
+                        error.message = model::ExpressionErrorContext::Model.message(error.message);
+                        type_error_at(error, self.owner.get().unwrap_or(span))
+                    },
+                )?;
+            }
             let args = args
                 .into_iter()
                 .map(|arg| self.expand_expr(arg, stack))
@@ -1803,6 +1811,13 @@ impl PredicateExpander {
             },
             other => other,
         })
+    }
+}
+
+fn type_error_at(error: typecheck::TypecheckError, span: Span) -> CoreError {
+    CoreError {
+        origin: Some(Box::new(model::type_diagnostic_origin(span))),
+        ..core_error(error.message, span)
     }
 }
 

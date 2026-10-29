@@ -747,6 +747,7 @@ fn expand_compose_predicates(
             ComposeItem::Common(SpecItem::Def { .. }) => continue,
             ComposeItem::Common(item) => ComposeItem::Common(expander.expand_item(item)?),
             ComposeItem::SyncAction(mut action) => {
+                expander.owner.set(Some(action.span));
                 action.params = action
                     .params
                     .into_iter()
