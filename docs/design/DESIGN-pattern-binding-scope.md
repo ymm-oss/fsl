@@ -728,20 +728,22 @@ strings remain unchanged, and other partial-init ownership controls remain.
 Additional admission removals include visible implicit process/entity/relation
 locals and the nested-init source with `const i = 1` and
 `forall i in 0..0 { forall j in 0..i { m[j] = true } }`. That source checked on
-base f5f3f194; the refusal locates the outer forall at **5:10**. A local-name
+base 08d9656c; the refusal locates the outer forall at **5:10**. A local-name
 rewrite must update its bound uses; it does not add general dependent ranges.
 
 ### Verification snapshot
 
 Native `check <form>` compared base
-`f5f3f1942220ad6c1e1802fe9bc523fabe2155ae` with measurement commit
-`bc70487f76c8e180014c96d22d6aabc6cbbc40b4`, each in its own archived tree,
-with cache off and no ambient unstable features. All **598 corpus forms** in
-`specs/` (23), `examples/` (191) and `rust/fslc/tests/fixtures/` (384) have
+`08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` with measurement commit
+`0d01044c6dd6fe900a5bb0781325cb8081fb110e`, each in its own archived tree,
+with cache off and no ambient unstable features. All **601 corpus forms** in
+`specs/` (23), `examples/` (191) and `rust/fslc/tests/fixtures/` (387) have
 byte-identical exit/stdout/stderr triples: **0 `ok`→`error` and 0 other output
-differences**, without exclusions. The increase from 597 is the added
-`rust/fslc/tests/fixtures/issue_1425/interleaved.fsl`, not an acceptance change.
-Both sides have 399 exit-0 inputs, 193 exit-2 inputs and 6 exit-1 inputs.
+differences**, without exclusions. The increase from 598 is the three added
+`rust/fslc/tests/fixtures/issue_1547_guard_reservations/` files `a.fsl`, `c.fsl`
+and `c_if.fsl`, not an acceptance change. The earlier added
+`rust/fslc/tests/fixtures/issue_1425/interleaved.fsl` remains included.
+Both sides have 402 exit-0 inputs, 193 exit-2 inputs and 6 exit-1 inputs.
 
 The original pre-migration inline sources were rematerialized independently
 of the migrated tests: **126+24+2=152** `ok`→`error` forms, **126** fresh forms
