@@ -490,6 +490,11 @@ fn published_diagnostics_each_at(
         }
         let publish = receive(&mut stdout);
         assert_eq!(publish["method"], "textDocument/publishDiagnostics");
+        assert_eq!(
+            publish["params"]["uri"],
+            json!(lsp_types::Url::parse(uri).unwrap())
+        );
+        assert_eq!(publish["params"]["version"], version + 1);
         published.push(
             publish["params"]["diagnostics"]
                 .as_array()
@@ -509,6 +514,174 @@ fn published_diagnostics_each_at(
     drop(stdin);
     assert!(child.wait().expect("wait for fslc-lsp").success());
     published
+}
+
+fn ai_project(body: &str) -> String {
+    format!("{body}\nstatistical_property Q {{\n target C\n require min_samples >= 0\n}}\n")
+}
+
+fn ai_expected(message: &str, kind: &str, line: usize, character: usize) -> Value {
+    let point = json!({"line":line,"character":character});
+    json!({"range":{"start":point,"end":point},"severity":1,
+        "code":"FSL-SEMANTIC","source":"fslc","message":message,"data":{"kind":kind}})
+}
+
+#[test]
+fn ai_project_authority_and_rule_publish_and_clear() {
+    let mut failures = Vec::new();
+    for (source, message, line, column, valid) in [
+        (
+            include_str!("../../fslc/tests/fixtures/error_envelope_ai_project_unknown_tool.fsl"),
+            "unknown tool 'MissingTool' in authority block",
+            13,
+            4,
+            include_str!("../../fslc/tests/fixtures/error_envelope_ai_project_unknown_tool.fsl")
+                .replace("MissingTool", "SearchOrder"),
+        ),
+        (
+            include_str!("../../fslc/tests/fixtures/error_envelope_ai_project_invalid_rule.fsl"),
+            "unknown ai hard-contract rule 'unregistered_hard_rule' at 9:3",
+            8,
+            2,
+            include_str!("../../fslc/tests/fixtures/error_envelope_ai_project_invalid_rule.fsl")
+                .replace("unregistered_hard_rule", "tool_authority")
+                .replace(
+                    "  model model_v1;",
+                    "  tool Search { schema S; }\n  model model_v1;",
+                ),
+        ),
+    ] {
+        let found = published_diagnostics_each(&[source, &valid, &valid, source], None, &[]);
+        let expected = vec![ai_expected(message, "semantics", line, column)];
+        let expected = vec![expected.clone(), vec![], vec![], expected];
+        if found != expected {
+            failures.push(format!(
+                "{message}: produced {found:?}, expected {expected:?}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn ai_project_later_and_inline_ranges_are_document_utf16() {
+    for (body, marker, message) in [
+        (
+            "ai_component C { model \"日本語😀\"; tool Search { schema S; } authority { may_execute Missing; } }",
+            "may_execute",
+            "unknown tool 'Missing' in authority block",
+        ),
+        (
+            "ai_component C { model \"日本語😀\"; tool Search { schema S; } check hard { rule bogus; } }",
+            "check hard",
+            "unknown ai hard-contract rule 'bogus'",
+        ),
+    ] {
+        for newline in ["\n", "\r\n"] {
+            let source = ai_project(&format!(
+                "// 日本語😀\nai_component First {{ tool Search {{ schema S; }} }}\n\n      {body}"
+            ))
+            .replace('\n', newline);
+            let prefix = &source[..source.find(marker).unwrap()];
+            let line = prefix.bytes().filter(|&b| b == b'\n').count();
+            let last = prefix.rsplit('\n').next().unwrap();
+            let column = last.encode_utf16().count();
+            let message = if marker == "check hard" {
+                format!("{message} at {}:{}", line + 1, last.chars().count() + 1)
+            } else {
+                message.to_owned()
+            };
+            let valid = source
+                .replace("Missing", "Search")
+                .replace("bogus", "tool_authority");
+            let found = published_diagnostics_each(&[&source, &valid], None, &[]);
+            assert_eq!(
+                found,
+                vec![
+                    vec![ai_expected(&message, "semantics", line, column)],
+                    vec![]
+                ]
+            );
+        }
+    }
+}
+
+#[test]
+fn ai_project_unchanged_valid_must_publish_then_reject_a_change() {
+    let valid = ai_project(
+        "ai_component C { tool Search { schema S; } authority { may_execute Search; } }",
+    );
+    let invalid = valid.replace("may_execute Search", "may_execute Missing");
+    let found = published_diagnostics_each(&[&valid, &valid, &invalid, &valid], None, &[]);
+    let column = invalid.find("may_execute").unwrap();
+    assert_eq!(
+        found,
+        vec![
+            vec![],
+            vec![],
+            vec![ai_expected(
+                "unknown tool 'Missing' in authority block",
+                "semantics",
+                0,
+                column
+            )],
+            vec![]
+        ]
+    );
+}
+
+#[test]
+fn ai_project_no_tools_and_standalone_controls_keep_their_contracts() {
+    for body in ["ai_component C { }", "ai_component C { authority { } }"] {
+        for source in [body.to_owned(), ai_project(body)] {
+            let valid = source.replace(
+                "ai_component C {",
+                "ai_component C { tool Search { schema S; }",
+            );
+            let found = published_diagnostics_each(&[&source, &valid], None, &[]);
+            assert_eq!(
+                found,
+                vec![
+                    vec![ai_expected(
+                        "ai_component 'C' declares no tools",
+                        "type",
+                        0,
+                        0
+                    )],
+                    vec![]
+                ]
+            );
+        }
+    }
+    let source = include_str!("../../fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl");
+    let message = "unknown tool 'MissingTool' in authority block at /tmp/fsl-lsp-astral.fsl:14:5";
+    assert_eq!(
+        published_diagnostics(source, None),
+        vec![ai_expected(message, "semantics", 13, 4)]
+    );
+}
+
+#[test]
+fn ai_project_parse_errors_are_not_relocated_twice_and_never_build_a_model() {
+    let source =
+        ai_project("// preceding comment\n    ai_component C { authority { may_execute ; } }");
+    let published = published_diagnostics(&source, None);
+    assert_eq!(published.len(), 1, "{published:#?}");
+    assert_eq!(published[0]["data"]["kind"], "parse");
+    assert_eq!(
+        published[0]["range"]["start"],
+        json!({"line":1,"character":45})
+    );
+    let (_, model) = fslc_rust::source_diagnostic::diagnostics_with_model(
+        &ai_project("ai_component C { tool Search { schema S; } }"),
+        "project.fsl",
+        &fsl_core::FsResolver::new("."),
+        &fsl_syntax::ParseOptions::stable(),
+    );
+    assert!(
+        model.is_none(),
+        "projects must not acquire a synthetic model"
+    );
 }
 
 /// decisions/048 J3: a decision table the enumeration leaves to the solver

@@ -4294,8 +4294,8 @@ Markdown, byte offsets refer to the extracted FSL text rather than the Markdown
 file; document lines and code-line columns are preserved. Unknown hard-rule
 messages point to <code>check hard</code>; existing parse errors are not translated twice.
 This corrects coordinates only, without changing validity, diagnostic kind,
-envelope fields, exit status or assurance. Missing LSP project-component
-diagnostics remain tracked separately (#1575).</p>
+envelope fields, exit status or assurance. The editor publishes project-component
+validation through the shared validator at document positions, with model <code>None</code>.</p>
 <p><strong>Measured boundary sweep (#1545):</strong> B
 <code>d37a215e8df6c00222e6aafd94bc9b556c445521</code> and H
 <code>99810256faca086360c6ca4233f935b9b56b1ec8</code> were built separately in their own
