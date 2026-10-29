@@ -474,3 +474,47 @@ than previously rejected outer escapes. These are 81 observed removals total;
 the corpus and existing literal transition sets are empty. There are no
 observed acceptance expansions or unapproved parity changes in this bounded
 sweep, not a claim of exhaustive language-wide admission equivalence.
+
+### Guard-reservation output recheck
+
+The subsequent native revision `8eef04058d51105c7788e17eb0c7baf328439ff3`
+restores the base guard-name collector and consolidates the remaining domain
+operator copies. Output was measured at its documentation-only successor
+`5ec10a0f00fd4cbfb5842ab94f0aa0ee88917f8b`, with head binary SHA256
+`66e7d99c10d195398b2d1c1897ed0c9a9569889cd46c5089086ef950ba235d80`
+and the same named c32 base binary above. Both binaries read the same source
+paths; their hashes and the input hashes stayed fixed throughout two runs.
+
+| Group | Commands | Two-run comparisons | Raw byte-equal | Timing-only differences |
+|---|---|---:|---:|---:|
+| Three reservation probes: component, sibling negated guards, conditional sync guard | `check`, `explain`, `analyze`, `html --no-timing`, `verify --engine explicit --depth 8 --no-cache` | 30 | 24 | 6 |
+| Every top-level compose in the three corpus roots: 20 existing and two new regression fixtures | `check`, `explain --depth 2`, `analyze` | 132 | 128 | 4 |
+
+The corpus inventory contains 22 compose files: two under `specs/`, one under
+`examples/`, and 19 under `rust/fslc/tests/fixtures/`. Invalid compose inputs are
+compared too, not excluded. The initial default-depth corpus attempt timed out
+after 180 seconds in the unchanged base's `explain specs/order_system.fsl`.
+Depth 2 is therefore an explicit uniform bound for corpus explanation, not a
+per-file bypass or a claim of default-depth completion. The reservation probes
+and both full base-generated regression goldens retain default explain depth 8;
+the guard/action rendering exercised by this fix is not pruned by search depth.
+
+Raw bytes, stderr and exits were retained. Observed wall-clock timers alone
+prevent byte equality for the six verification comparisons and the four
+bank/order explanation comparisons. The exact observed timer paths are:
+
+- `/cost/elapsed_s` for each of the three reservation probes' `verify` results;
+- `/counterfactuals/i/violation/cost/elapsed_s` for `specs/bank_system.fsl`,
+  only at indices `0, 1, 2, 4, 5, 6`;
+- the same counterfactual path for `specs/order_system.fsl`, only at indices
+  `1, 2, 3, 4`.
+
+These are measured elapsed times, not semantic outputs. Every exact timer key
+must exist and be numeric/nonnegative on both binaries; removing it from both
+sides is rejected (52 missing-key negative controls across two runs). The entire
+remaining JSON packet is compared, not a selected field list. No verdict,
+location, assurance, trace, exit, or other cost field is excluded. All stable
+outputs also agree across repetitions; there are no other observed differences.
+Six sync/foreign-argument guard controls additionally remain exit 0 with full
+byte equality in two runs. The full historical check sweep above was not rerun
+for this revision and must not be relabeled as current evidence.
