@@ -302,19 +302,23 @@ fn def_call_scope_after_or_preserves_free_names() {
     let mut controls = 0;
     for case in forms::def_call_cases() {
         let dir = fixture(&case);
-        let after_or = case.id == "def-call-or-free-name";
+        let reviewed = case.id == "def-call-implies-free-name";
+        let scope_error = case.id != "def-call-and-capture-control";
         let clause = point(&case.source, case.marker);
-        if after_or {
+        if scope_error {
             // Both routes retain exit 2 / semantics (exact_error). The old direct
             // capture had no location; both routes now identify this clause.
-            assert_eq!(clause, json!({"line":7,"column":3}));
+            assert_eq!(clause, json!({"line":if reviewed {6} else {7},"column":3}));
         }
-        let call = point(&case.source, "p() }");
-        inputs.push(json!({"id":case.id,"source":case.source,"component":case.component,"compose":case.compose,"directory":dir}));
+        let call = point(&case.source, if reviewed { "k()) }" } else { "p() }" });
+        inputs.push(json!({"id":case.id,"source":case.source,"component":case.component,"compose":case.compose,"directory":dir,"direct_only":reviewed,"review_equivalent":if reviewed {Some("def/d06.fsl")} else {None}}));
         for (route, file, composed) in [("direct", "d.fsl", false), ("compose", "c.fsl", true)] {
+            if reviewed && composed {
+                continue;
+            }
             let capture =
                 "predicate 'p' call would capture variable 'v'; rename the binder at the call site";
-            let (message, location) = if after_or {
+            let (message, location) = if scope_error {
                 (
                     format!(
                         "invalid model expression: public Kernel cannot type identifier 'v' at {}:{}",
@@ -347,18 +351,18 @@ fn def_call_scope_after_or_preserves_free_names() {
                 };
                 let agreement = actual == checked;
                 let ok = exact_error(&actual, &message, location.as_ref()) && agreement;
-                if after_or {
+                if scope_error {
                     detectors += usize::from(!ok);
                 } else {
                     controls += usize::from(!ok);
                 }
-                rows.push(json!({"id":case.id,"path":case.paths,"route":route,"consumer":consumer,"class":if after_or {"caller-scope-detector"} else {"capture-control"},"expected_message":message,"expected_location":location,"structured_location_present":location.is_some(),"call_location":call,"ok":ok,"check_error_agreement":agreement,"output":actual.0,"exit":actual.1}));
+                rows.push(json!({"id":case.id,"path":case.paths,"route":route,"consumer":consumer,"class":if scope_error {"caller-scope-detector"} else {"capture-control"},"expected_message":message,"expected_location":location,"structured_location_present":location.is_some(),"call_location":call,"ok":ok,"check_error_agreement":agreement,"output":actual.0,"exit":actual.1}));
             }
         }
     }
     std::fs::write(report.join("report.json"),serde_json::to_vec(&json!({"inputs":inputs,"observations":rows,"detector_failures":detectors,"control_failures":controls})).unwrap()).unwrap();
     eprintln!(
-        "DEF_CALL_SCOPE_RESULT cells=2 routes=4 observations={} detector_failures={detectors} control_failures={controls} report={}",
+        "DEF_CALL_SCOPE_RESULT cells=3 routes=5 observations={} detector_failures={detectors} control_failures={controls} report={}",
         rows.len(),
         report.display()
     );

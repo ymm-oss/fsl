@@ -54,11 +54,12 @@ pub(super) fn case(
     }
 }
 
-pub fn def_call_cases() -> [Case; 2] {
-    [
+pub fn def_call_cases() -> Vec<Case> {
+    let mut cases: Vec<_> = [
         ("def-call-or-free-name", "or"),
         ("def-call-and-capture-control", "and"),
     ]
+    .into_iter()
     .map(|(id, op)| {
         case(
             id,
@@ -71,6 +72,13 @@ pub fn def_call_cases() -> [Case; 2] {
             "invariant P",
         )
     })
+    .collect();
+    cases.push(case(
+        "def-call-implies-free-name", "def-expansion,def-call-scope", Role::Refuse,
+        "spec A {\n  state { o: Option<Int>, p: Option<Int>, x: Int }\n  init { o = some(1) p = some(2) x = 0 }\n  def k() = v == 1\n  action stay() {}\n  invariant P { ((o is some(v)) => true) and ((p is some(w)) => k()) }\n}\n".into(),
+        "invariant P",
+    ));
+    cases
 }
 
 #[allow(clippy::too_many_lines)] // Finite position/path table and paired controls.
