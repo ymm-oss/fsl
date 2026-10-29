@@ -32,11 +32,11 @@ Python implementation via `python -m fslc`. `--no-cache` was used for every
    outside it. This is the rule `docs/manual/LANGUAGE.md` already states for
    quantifier binders: *"when it shadows an enclosing name (an action
    parameter, say) the shadowing is confined to that scope"*.
-4. The collision should additionally be a **located `check`-time error**
+4. The collision is additionally a **located `check`-time error**
    ("pattern variable `v` shadows an action parameter; rename it"), for the
    reason recorded in `docs/design/DESIGN-def.md`: this repository prefers an
-   explicit local repair over silently changing meaning. See "Work this
-   decision implies" below — the error is not implemented yet.
+   explicit local repair over silently changing meaning. Implemented in #1259;
+   see "Work this decision implies" below for its full collision scope.
 
 ### Why not "match"
 
@@ -580,3 +580,192 @@ including S1/d06/collision/location pins and the newer baseline's explicit/init
 coverage controls; workspace Clippy, fmt, native build and generated-page
 freshness pass twice. Six guard-inventory controls additionally agree in full
 on the final normal binary in two runs.
+
+## 4. Executable locals may not shadow constants (#1515)
+
+### Decision and breaking removal
+
+`check` rejects an executable local binding whose name equals a const name,
+including non-integer constants. This is a breaking `ok`→`error` restriction,
+not a change to engine range evaluators. Symbolic range bounds previously
+resolved the name as the global const while concrete lexical evaluation used
+the local. Both false violations and false passes resulted. Rejecting the
+ambiguous source before selecting an engine prevents that disagreement.
+
+The shared diagnostic names the local and says it `shadows a constant`;
+`check`, BMC, induction and explicit return identical complete `semantics`
+error envelopes, exit 2. No verdict, assurance or location fields are excluded
+from that refusal comparison. The existing broader pattern-binding collision
+rule in section 1 is preserved, not replaced by this narrower const rule.
+
+### Binding inventory and location precision
+
+The location is the existing AST owner's span, **not a newly recovered name
+token**. No parser span carrier or source rereading is added.
+
+| Source-visible introduction or compiler exception | New const refusal | Diagnostic owner / reason |
+|---|---|---|
+| `forall`/`exists`, typed/range/collection | yes | enclosing expression or declaration retaining a span |
+| `count`, `sum`, `unique`, `exactlyOne` | yes | enclosing expression/declaration, before aggregate normalization |
+| statement `forall` in init/action | yes | `forall` statement |
+| outer `leadsTo` binder | yes | `leadsTo` declaration; existing collection/filter restrictions remain |
+| action typed/range param and `let` | yes | action declaration |
+| def param and binders in its body | yes | def declaration before substitution or dropping unused defs |
+| component versions of these forms | yes | parent's `use`; component owner coordinate retained in causal message |
+| requirements action/branch params and lets | yes | source action retained by lowering |
+| requirements transition/event inputs | yes | transition retained by generated action |
+| requirements indexed age binder | yes | age keyword retained by generated init/tick forall |
+| legacy process implicit c; next entity instance first-letter name | yes | source process/entity declaration for generated init, including when no local declaration is written |
+| relation event implicit actor-instance parameter | yes | source event declaration; matching const must be renamed |
+| hidden KPI projection implementation binder | no | on collision only, use existing fresh_binding_name and rename the generated index consistently |
+| `is some(v)` pattern | existing refusal | existing owning-declaration precision, unchanged |
+| compose glue/sync locals using `part.N` | no same-name collision | bare local `N` and qualified const `part.N` are distinct declarations |
+| refinement indexed-map binder | no additional gate | concrete correspondence binds keys locally before const lookup |
+| refinement action-correspondence formals | no additional gate | formals mirror the source action; that action still obeys ordinary checking |
+| business transition inputs | no new reachable gate | data-carrying `with` is already unsupported and rejected |
+| business Responds binders | shared leadsTo rule after lowering | business has no authored const declaration to collide with |
+| requirements imported as compose component | no new gate | compose already requires a `spec` component |
+
+Component source checks happen before constants acquire component prefixes and
+before local hygiene/substitution can erase a collision. Def parameters and
+body binders are checked before inlining; body-name diagnostic selection is
+deterministic. Requirements aliases retain their existing owner spans through
+lowering, rather than claiming a token-level position they do not store.
+
+Visible implicit instances are part of the source interface: `stage(c)` can
+refer to a legacy process's instance; next-edition Request uses r and a relation
+to Agent takes a. A const with one of these local names is rejected even when
+the user never declares the local. For example, the generated init for
+`requirements R { const c = 2 process Case { ... } }` locates the process
+declaration (line 3:3 in the regression fixture), not a nonexistent local token.
+Rename the const and its constant references while retaining instance uses.
+This is distinct from the hidden KPI Count binder, which is not source-writable.
+
+For example, the following source declares no local c, but its generated init
+is refused at **3:3**, the process line. Rename `const c` to `const LIMIT`;
+there is no local declaration token to edit.
+
+```fsl
+requirements R {
+  const c = 2
+  process Case {
+    stages Idle, Done
+    initial Idle
+  }
+  action idle() { }
+  invariant P { true }
+}
+verify { instances Case = 1 }
+```
+
+### Behavior notes: erased arguments and hidden KPI names
+
+Def-call arguments are checked for constant-shadowing binders **before any
+argument is expanded or substituted**. With const N, a call such as
+`ignore(forall N in 0..1 { true })` is refused even when ignore's unused formal
+would erase the argument. Retaining, duplicating or passing that argument
+through another def has the same message and original property/action owner,
+or the existing call span where there is no such owner. The
+common diagnostic conversion preserves source origins; no token lookup or
+engine-specific rule is added.
+
+Only an actual const collision freshens a hidden KPI projection binder. The
+in-memory projection expression and its **expression-level Kernel AST JSON**
+then use a reserved generated name such as `__c_substitution_0`; without a
+collision, c and its JSON remain unchanged. This is not a public Kernel schema
+change. Exported public Kernel v1/v2 documents do not include KPI projections,
+so that hidden identifier does not appear there. Native traces contain the
+event's visible instance parameter, not this projection-local name; `explain`
+publishes KPI name/entity/stage metadata without its implementation binder.
+Projection values and verdicts are preserved. Do not classify the implicit
+process c or an authored age binder as hidden merely because lowering generated
+their enclosing statement/action.
+
+### Migration and preserved behavior
+
+Rename the local declaration and its uses. With `const N = 2`, replace
+`forall N in 0..1 { N <= 1 }` with
+`forall k in 0..1 { k <= 1 }`; likewise rename an action/def parameter or let.
+This does not promise general dependent ranges (#1480): alpha-renaming a
+dependent bound alone may expose the existing static-bound limitation. Use
+supported static domains and, where supported, a `where` membership guard.
+
+State-name shadowing remains lexical and valid. Qualified component const
+accesses in glue and sync remain valid. Existing pattern errors and temporal
+capability boundaries remain unchanged: in particular, explicit still refuses
+supported-source `leadsTo` verification. The all-engine comparison above is
+for the new source errors, not a claim that successful engine-specific proof
+reports or supported temporal capabilities are identical.
+
+### Measured removal inventory and diagnostic priority
+
+The retained original pre-migration inline inventory is listed below. Counts are
+case-addressed forms; shared CLI/LSP/Worker consumers and repeated test products
+are counted once, not presented as byte-unique programs.
+
+| Regression family | `ok`→`error` forms | Representative original form | Migration |
+|---|---:|---|---|
+| Compose binding capture (#1442) | 126: 63 cells × standalone/composed | `const x = false` with `action go(x: Bool) { requires x }` | Rename local `x` and its uses; keep legal fresh/state/member controls. Original const-collision cells now assert located refusal. |
+| Nested aggregate bounds (#1463) | 24, shared across CLI/LSP/Worker | `const x = false` with `sum(x in 0..1 of count(y in 0..x)) == 3` | Rename the local and uses subject to the existing dependent-bound limitation; original collision sources remain refusal detectors. |
+| Per-binding helpful arguments (#1333) | 2: standalone/composed | `const c = 0` with `forall c: Case`, action parameter `c`, and `helpful step(c)` | Rename local `c` and uses. The regression uses a legal initialized state decoy to retain its helpful-argument capture control. |
+
+Total **152** removed inline forms. Of the 63 compose cells, 42 combine a
+typed/range parameter or let with seven expression/body positions and two
+orders; 21 cover nested quantifiers, aggregates and statement forall across
+typed/range/collection domains. All 126 fresh standalone/composed controls
+still check. These are deliberate capture decoys, not dispensable constants
+removed merely to make tests green.
+
+Five partial-init sources (#1481) are a separate **error→error diagnostic
+priority change**, not additional acceptance removals. Three have same-named
+`flag` consts and outer collection/range binders whose false inner filter must
+not establish coverage; two have `limit` consts and outer binders used in inner
+range/key bounds. The frontend const-shadow error now precedes the ownership
+refusal, at the outer forall owner. This also supersedes the former unlocated
+Monitor/refine ownership diagnostics with located frontend errors. The source
+strings remain unchanged, and other partial-init ownership controls remain.
+
+Additional admission removals include visible implicit process/entity/relation
+locals and the nested-init source with `const i = 1` and
+`forall i in 0..0 { forall j in 0..i { m[j] = true } }`. That source checked on
+base 46031415; the refusal locates the outer forall at **5:10**. A local-name
+rewrite must update its bound uses; it does not add general dependent ranges.
+
+### Verification snapshot
+
+Native `check <form>` compared base
+`46031415d5eaec6297280ae151c6695e64aebb14` with measurement commit
+`65bf28765e89dfe6c6312110ac150cabb41dd156`, each in its own archived tree,
+with cache off and no ambient unstable features. All **603 corpus forms** in
+`specs/` (23), `examples/` (191) and `rust/fslc/tests/fixtures/` (389) have
+byte-identical exit/stdout/stderr triples: **0 `ok`→`error` and 0 other output
+differences**, without exclusions. The increase from 601 is the two added
+`rust/fslc/tests/fixtures/ai_project_inline_invalid_rule.fsl` and
+`rust/fslc/tests/fixtures/ai_project_later_invalid_rule.fsl` files, not an
+acceptance change. The earlier three added
+`rust/fslc/tests/fixtures/issue_1547_guard_reservations/` files `a.fsl`, `c.fsl`
+and `c_if.fsl` and the earlier added
+`rust/fslc/tests/fixtures/issue_1425/interleaved.fsl` remain included.
+Both sides have 402 exit-0 inputs, 195 exit-2 inputs and 6 exit-1 inputs.
+
+The original pre-migration inline sources were rematerialized independently
+of the migrated tests: **126+24+2=152** `ok`→`error` forms, **126** fresh forms
+remaining `ok`, and **5** `error`→`error` diagnostic-priority changes. Additional
+specimens extracted from the fixed regression source give **70** more removal
+witnesses: **6** implicit-name/bound-use/nested-init forms, **60** argument forms
+(six expressions × five use/erase/duplicate bodies × direct/composed), and
+**4** unused-definition/body/parameter forms. Their **70** const-renamed controls
+and **2** hidden-KPI collision/control sources remain `ok`. These are bounded,
+case-addressed witnesses, not byte-unique programs or a claim that every check
+was newly introduced by the latest repair.
+
+A no-collision KPI source also has **byte-identical exported Kernel v1/v2**
+across the binaries, twice, with the same input file identity, cwd and arguments;
+no fields are removed or normalized. Kernel v2's file/provenance fields make
+matching source identity essential to that full-byte comparison.
+
+The measurement commit is an ancestor of this documentation update. Its Rust
+implementation sources and swept corpus inputs are identical to those of the
+documentation update; no rebase-only hash is substituted for an unperformed
+run. This bounded corpus result is separate from the inline removals and is
+not an exhaustive inventory of every removed program.

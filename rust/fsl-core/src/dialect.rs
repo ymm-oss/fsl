@@ -151,7 +151,11 @@ fn eventually_policy(policy: &BusinessItem, process: &Process, binder: &str) -> 
     }
 }
 
-fn kpi_projection(item: &BusinessItem, processes: &[Process]) -> Result<ProjectionDef, CoreError> {
+fn kpi_projection(
+    item: &BusinessItem,
+    processes: &[Process],
+    binder: &str,
+) -> Result<ProjectionDef, CoreError> {
     let BusinessItem::Kpi {
         name,
         case_name,
@@ -188,9 +192,9 @@ fn kpi_projection(item: &BusinessItem, processes: &[Process]) -> Result<Projecti
         expr: Expr::Aggregate {
             kind: AggregateKind::Count,
             binder: Binder::Typed {
-                name: "c".to_owned(),
+                name: binder.to_owned(),
                 type_name: qualified(case_name),
-                where_expr: Some(Box::new(stage_is(process, "c", stage))),
+                where_expr: Some(Box::new(stage_is(process, binder, stage))),
             },
             value: None,
         },
@@ -1576,7 +1580,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         .items
         .iter()
         .filter(|item| matches!(item, BusinessItem::Kpi { .. }))
-        .map(|item| kpi_projection(item, &processes))
+        .map(|item| kpi_projection(item, &processes, "c"))
         .collect::<Result<Vec<_>, _>>()?;
     let mut origins = resolve_stage_items(&mut items, &processes, "business")?;
     for transition in processes.iter().flat_map(|process| &process.transitions) {
@@ -3103,6 +3107,15 @@ pub(crate) fn lower_resolved_requirements(
         .iter()
         .map(|process| process.process.clone())
         .collect::<Vec<_>>();
+    let constants = items.iter().filter_map(|item| match item {
+        SpecItem::Const { name, .. } => Some(name),
+        _ => None,
+    });
+    let kpi_binder = if constants.clone().any(|name| name == "c") {
+        crate::fresh_binding_name("c", &constants.cloned().collect())
+    } else {
+        "c".to_owned()
+    };
     let mut projections = requirements
         .items
         .iter()
@@ -3110,7 +3123,7 @@ pub(crate) fn lower_resolved_requirements(
             RequirementsItem::Kpi(item) => Some(item),
             _ => None,
         })
-        .map(|item| kpi_projection(item, &stage_processes))
+        .map(|item| kpi_projection(item, &stage_processes, &kpi_binder))
         .collect::<Result<Vec<_>, _>>()?;
     if let Some(next) = &requirements.next {
         projections.extend(next_rules::measure_projections(
@@ -3322,14 +3335,16 @@ fn property_meta(item: &SpecItem) -> Option<&MetaTag> {
     }
 }
 
-fn property_span(item: &SpecItem) -> fsl_syntax::Span {
+pub(crate) fn property_span(item: &SpecItem) -> fsl_syntax::Span {
     match item {
         SpecItem::Invariant { span, .. }
         | SpecItem::Trans { span, .. }
         | SpecItem::Reachable { span, .. }
         | SpecItem::Until { span, .. }
         | SpecItem::Unless { span, .. }
-        | SpecItem::LeadsTo { span, .. } => *span,
+        | SpecItem::LeadsTo { span, .. }
+        | SpecItem::Action { span, .. }
+        | SpecItem::Terminal { span, .. } => *span,
         _ => zero_span(),
     }
 }
@@ -3477,9 +3492,9 @@ fn ai_span(loc: fsl_syntax::AiLoc) -> fsl_syntax::Span {
     }
 }
 
-/// Semantic validation shared by every `fslc ai` entry point that can emit a
-/// success verdict for an `ai_component` document, whether the component is
-/// supplied alone or as part of an fsl-ai project (issue #800).
+/// Semantic validation for AI check, compat, replay, and project checking.
+/// Standalone and embedded components share these rules; AI eval, drift and
+/// regress remain outside this validation contract (issue #800).
 ///
 /// # Errors
 ///
@@ -3487,13 +3502,22 @@ fn ai_span(loc: fsl_syntax::AiLoc) -> fsl_syntax::Span {
 /// `check hard { rule ... }` clause names an unknown rule, or a fallback
 /// reason is duplicated, or no tools are declared.
 pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), CoreError> {
+    validate_ai_component_with_location(component).map_err(|(error, _)| error)
+}
+
+/// Validate a component while retaining the authored failure position.
+///
+/// # Errors
+/// Returns the legacy validation error and its optional source location.
+pub fn validate_ai_component_with_location(
+    component: &fsl_syntax::AiComponent,
+) -> Result<(), (CoreError, Option<fsl_syntax::AiLoc>)> {
     let mut reasons = BTreeSet::new();
     for fallback in &component.fallback {
         if !reasons.insert(&fallback.reason) {
-            return Err(CoreError::unlocated(format!(
-                "duplicate fallback reason '{}'",
-                fallback.reason
-            )));
+            let error =
+                CoreError::unlocated(format!("duplicate fallback reason '{}'", fallback.reason));
+            return Err((error, Some(fallback.loc)));
         }
     }
     let tools = component
@@ -3510,13 +3534,18 @@ pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), 
         .chain(&component.authority.forbidden)
     {
         if !tools.contains(rule.name.as_str()) {
-            return Err(CoreError::unlocated(format!(
-                "unknown tool '{}' in authority block",
-                rule.name
-            )));
+            let error =
+                CoreError::unlocated(format!("unknown tool '{}' in authority block", rule.name));
+            return Err((error, rule.loc));
         }
     }
-    ai_rule_set(component)?;
+    ai_rule_set(component).map_err(|error| {
+        let loc = fsl_syntax::AiLoc {
+            line: error.line,
+            column: error.column,
+        };
+        (error, Some(loc))
+    })?;
     if component.tools.is_empty() {
         let span = ai_span(component.loc);
         let mut error = core_error(
@@ -3539,7 +3568,7 @@ pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), 
             lowering_steps: Vec::new(),
             generated: false,
         }));
-        return Err(error);
+        return Err((error, Some(component.loc)));
     }
     Ok(())
 }

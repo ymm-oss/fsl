@@ -38,7 +38,8 @@ pub fn diagnostics(
 /// Run frontend diagnostics and retain the checked model for analysis consumers.
 ///
 /// # Panics
-/// Panics if the shared edition classifier violates its diagnostic contract.
+/// Panics if edition classification or parsed AI diagnostics omit required
+/// diagnostic metadata.
 #[must_use]
 pub fn diagnostics_with_model(
     source: &str,
@@ -110,7 +111,7 @@ pub(crate) fn diagnostics_admitted(
     _edition: &crate::migration::SourceEdition,
 ) -> (Vec<SourceDiagnostic>, Option<fsl_core::KernelModel>) {
     if crate::frontend_output::is_ai_project(source) {
-        return (migration_diagnostics(source, options), None);
+        return (ai_project_diagnostics(source, source_file, options), None);
     }
     // Standalone causal models bypass dialect dispatch (docs/design/DESIGN-causal.md):
     // surface their own parse errors, never FSL-DIALECT-UNKNOWN, and no kernel.
@@ -162,6 +163,38 @@ pub(crate) fn diagnostics_admitted(
         Ok(model) => (migration_diagnostics(source, options), Some(model)),
         Err(error) => (vec![model_diagnostic(source, &error, options)], None),
     }
+}
+
+fn ai_project_diagnostics(
+    source: &str,
+    source_file: &str,
+    options: fsl_syntax::ParseOptions,
+) -> Vec<SourceDiagnostic> {
+    let project = match crate::frontend_output::parse_checked_ai_project(
+        source,
+        crate::frontend_output::ai_project_name(source_file),
+    ) {
+        Ok(project) => project,
+        Err(error) => {
+            let (line, column) = error.position.expect("project parse location");
+            return vec![message_diagnostic(
+                "parse",
+                error.diagnostic_code.expect("project parse code"),
+                error.message,
+                point_span(source, line, column),
+            )];
+        }
+    };
+    for component in &project.components {
+        if let Err((error, loc)) = fsl_core::validate_ai_component_with_location(component) {
+            let loc = loc.expect("parsed component failure location");
+            let mut diagnostic = core_diagnostic(source, &error);
+            diagnostic.span = point_span(source, loc.line, loc.column);
+            diagnostic.located = true;
+            return vec![diagnostic];
+        }
+    }
+    migration_diagnostics(source, options)
 }
 
 /// The code of a diagnostic reporting an acceptance / forbidden trace the

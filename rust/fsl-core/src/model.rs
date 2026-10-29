@@ -2232,7 +2232,7 @@ fn source_origin(name: &str, primary: Span, secondary: Option<Span>) -> OriginCh
     }
 }
 
-fn type_diagnostic_origin(span: Span) -> OriginChain {
+pub(crate) fn type_diagnostic_origin(span: Span) -> OriginChain {
     OriginChain {
         id: OriginId(format!(
             "kernel:type-diagnostic:{}:{}",

@@ -618,7 +618,11 @@ pub fn lower_compose_with_options(
                                 hygiene::root_statements(statements, &component.names, &ambient)
                             })
                             .map_err(|error| {
-                                component_rewrite_error(error, ExpressionErrorContext::Init)
+                                component_rewrite_error(
+                                    error,
+                                    ExpressionErrorContext::Init,
+                                    Some(component),
+                                )
                             })?,
                     );
                     if init_meta.is_none() {
@@ -743,6 +747,7 @@ fn expand_compose_predicates(
             ComposeItem::Common(SpecItem::Def { .. }) => continue,
             ComposeItem::Common(item) => ComposeItem::Common(expander.expand_item(item)?),
             ComposeItem::SyncAction(mut action) => {
+                expander.owner.set(Some(action.span));
                 action.params = action
                     .params
                     .into_iter()
@@ -801,7 +806,19 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
 fn component_rewrite_error(
     error: TypecheckError,
     context: ExpressionErrorContext<'_>,
+    component: Option<&Component>,
 ) -> CoreError {
+    if error.constant_shadow
+        && let Some(component) = component
+    {
+        let source = component_rewrite_error(error, context, None);
+        return component_error(
+            &component.path,
+            component.use_span,
+            &source,
+            "failed to lower",
+        );
+    }
     let TypecheckError { message, span, .. } = error;
     let message = context.message(message);
     if let Some(span) = span {
@@ -854,10 +871,12 @@ fn rewrite_component_item(item: SpecItem, component: &Component) -> Result<SpecI
             })
         });
         match owner {
-            Some((_, name)) => {
-                component_rewrite_error(error, ExpressionErrorContext::InlineInitializer(name))
-            }
-            None => component_rewrite_error(error, ExpressionErrorContext::Model),
+            Some((_, name)) => component_rewrite_error(
+                error,
+                ExpressionErrorContext::InlineInitializer(name),
+                Some(component),
+            ),
+            None => component_rewrite_error(error, ExpressionErrorContext::Model, Some(component)),
         }
     })
 }
@@ -1182,6 +1201,8 @@ fn rewrite_type(ty: TypeExpr, component: &Component) -> Result<TypeExpr, Typeche
 }
 
 fn rewrite_param(param: Param, component: &Component) -> Result<Param, TypecheckError> {
+    let (Param::Typed(name, _) | Param::Range(name, ..)) = &param;
+    crate::typecheck::reject_constant_shadow(name, &component.names.consts)?;
     Ok(match param {
         Param::Typed(name, mut qualified) => {
             if qualified.namespace.is_none() && component.names.types.contains(&qualified.name) {
@@ -1295,6 +1316,7 @@ fn rewrite_action_items(
                 ActionItem::Ensures(rewrite_expr_at(expr, component, bound, action_span)?, span)
             }
             ActionItem::Let(name, expr, span) => {
+                crate::typecheck::reject_constant_shadow(&name, &component.names.consts)?;
                 let expr = rewrite_expr_at(expr, component, bound, action_span)?;
                 ActionItem::Let(name, expr, span)
             }
@@ -1575,6 +1597,7 @@ fn rewrite_binder_in_phase(
     phase: &crate::typecheck::ValidationPhase,
     child_phase: &crate::typecheck::ValidationPhase,
 ) -> Result<Binder, TypecheckError> {
+    crate::typecheck::reject_constant_shadow(binder_name(&binder), &component.names.consts)?;
     let mut nested = bound.clone();
     nested.insert(binder_name(&binder).to_owned());
     let filter = |expr: Option<Box<Expr>>| {

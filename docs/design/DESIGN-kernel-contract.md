@@ -159,9 +159,9 @@ value and so a minor schema version.
 
 ## Concrete boundary pre-pass budget
 
-Before `prepare_bmc` hands a spec to the symbolic engine, it runs a solver-free
-concrete BFS — `fsl_runtime::find_boundary_violation` — over exactly the
-`Monitor` semantics above, looking only for a `partial_op` or `type_bound`
+Native verification has a solver-free concrete boundary BFS —
+`fsl_runtime::find_boundary_violation` — over exactly the `Monitor` semantics
+above, looking only for a `partial_op` or `type_bound`
 outcome, supplying concrete, replayable `violated`/`type_bound` evidence for
 state assignments beyond a sequence's declared capacity. Symbolic `push`
 temporaries retain every live element even past `Seq<T, N>`'s capacity; the
@@ -177,17 +177,21 @@ failure: it can reject a selected run even when its property does not read the
 Seq, or after a reachable target was already witnessed, if a later explored
 frame overflows.
 
-The native `prepare_bmc` pre-pass runs when `selected_implicit_bounds` returns
+The native boundary pre-pass runs when `selected_implicit_bounds` returns
 `None`, no initial state is supplied, and init is deterministic. Standalone BMC
 `--property` selections skip it. Induction instead materializes the selected user
 properties and clears selector metadata before preparing its base: every implicit
 bound assumed by its step is checked even under `--property P` or
 `--property _bounds_xs` (#1598). These induction runs can enter the pre-pass and
 receive the initial step-0 correction. Selected-trans induction additionally
-retains all user invariant hypotheses. The pre-pass's own dispatch conditions
-are unchanged.
+retains all user invariant hypotheses. For an induction base whose typed state
+contains no Seq (including nested types), symbolic BMC runs first (#1628).
+Only a `verified` base skips the redundant concrete search; every symbolic
+non-success or error still runs the same pre-pass with the same evidence
+priority. Seq models and standalone BMC keep the eager pre-pass. No implicit
+bound check or induction hypothesis is removed.
 `--exclude-property <user property>` alone leaves all implicit bounds checked
-and still enters the pre-pass: its initial-bound evidence also moves from
+and retains pre-pass eligibility: its initial-bound evidence also moves from
 step 1 / two states to step 0 / one state when the old probe found an idle
 successor. It can likewise change a depth-0 Seq projection error to a violation.
 Internally, `checked_bounds: Some(...)` can likewise omit bounds; the symbolic
@@ -260,7 +264,7 @@ an existing BMC `leadsTo` violation rather than replacing it with a phantom CTI;
 on the post-induction path it is reported as the semantics error.
 
 This pre-pass is an evidence detour, not a verdict authority: it only ever
-returns `partial_op`/`type_bound`, and `prepare_bmc` consumes only the
+returns `partial_op`/`type_bound`, and `probe_bmc_boundary` consumes only the
 non-`partial_op` half (`partial_op` belongs to `verify_bounded*` itself, per
 issue #651). Nothing about it may change *whether* a spec verifies — only
 *how good the evidence looks* when it doesn't. That is what makes it safe to

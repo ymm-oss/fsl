@@ -796,6 +796,75 @@ name in a `decreases` call. There are no unrelated breaking removals.
   outside is a type error, and when it shadows an enclosing name (an action
   parameter, say) the shadowing is confined to that scope — a satisfied
   `exists` never exports its witness to the enclosing bindings.
+  **Constant-name collisions are rejected (#1515).** This breaking removal
+  applies to every const type, not just integer constants: quantifier and
+  aggregate binders, statement `forall` in init/actions, `leadsTo` binders,
+  action parameters and `let` bindings, and `def` parameters may not have the
+  same name as a const. Requirements action/transition inputs and indexed age
+  binders follow the same rule. Components are checked before constant prefixing;
+  defs are checked before inlining. `check` and all verification engines return
+  the same `semantics` error (exit 2), naming the binding. The location is the
+  existing AST owner's span, **not the binding-name token**: the enclosing
+  expression/declaration for expression binders, the `forall` statement for
+  statement binders, the `leadsTo` declaration for wrapper binders, the action
+  for parameters/lets, the def for its parameters, the source transition for
+  lowered inputs, and the age keyword for an indexed age. Component errors
+  locate the parent's `use` and retain the component owner's coordinate in the
+  message. Rename the local and its uses: with `const N = 2`, replace
+  `forall N in 0..1 { N <= 1 }` with `forall k in 0..1 { k <= 1 }`.
+  State-name shadowing remains valid; bare local `N` does not collide with
+  qualified component const `part.N` in glue/sync. Refinement indexed-map and
+  action-correspondence declarations have no additional const-shadow gate;
+  their source specs still obey the ordinary checks. Existing pattern-binding
+  freshness restrictions remain unchanged. This refusal prevents static-const
+  and lexical-bound resolution from yielding opposite engine verdicts; it does
+  not add general dependent range bounds (#1480).
+  Source-visible implicit instance names obey the same rule: legacy process
+  `c`, a next-edition entity's lowercased first letter (`r` for Request), and
+  a relation event's implicit actor-instance parameter (`a` for Agent).
+  A matching const is rejected even if the source never spells that local
+  declaration. Rename the conflicting const and its constant references;
+  keep `stage(c)` when it means the process instance. For example, in
+  `requirements R { const c = 2 process Case { ... } }`, the generated init
+  rejection loc is the **process declaration**, not the const token or an
+  unwritten binder token. Relation-parameter refusal uses the source event.
+  Hidden KPI projection binders are different: on a const collision only,
+  their internal binder is freshened; a const `c` need not be renamed merely
+  because a KPI's implementation previously used `c`.
+  Def-call argument binders are checked before argument expansion, so an
+  ignored, retained or duplicated parameter cannot change the refusal's
+  message/owner. With `const N = 2`, `ignore(forall N in 0..1 { true })`
+  is rejected even if `def ignore(p: Bool) = true` discards the argument.
+  The retained original inline fixture inventory (shared consumers counted once)
+  contains **126**
+  compose-capture forms (#1442: 63 standalone/composed cells), e.g.
+  `const x = false` with `action go(x: Bool) { requires x }`, including nested
+  binders; **24** nested-aggregate forms (#1463, shared CLI/LSP/Worker source),
+  e.g. `const x = false` with `sum(x in 0..1 of count(y in 0..x)) == 3`;
+  **2** per-binding helpful-argument forms (#1333: standalone/composed), e.g.
+  `const c = 0` with `forall c: Case`, action parameter `c`, `helpful step(c)`.
+  Total: **152** inline removal forms; the 126 fresh compose controls remain
+  `ok`. Rename the local declaration and its uses, not the constant merely to
+  hide the collision. Five partial-init sources (#1481) are **error→error**,
+  not acceptance removals: outer `flag`/`limit` binders over same-named consts
+  now report the located const-shadow error before the former ownership error.
+  This changes diagnostic priority; it does not make partial init valid.
+  Additional removals include the implicit-name cases above and nested init
+  `const i = 1` with `forall i in 0..0 { forall j in 0..i { m[j] = true } }`.
+  The nested init fixture checked on base `46031415` but now reports the outer
+  forall owner at **5:10**. Rename the local and its bound uses; dependent-range
+  execution limits remain separate. Native `check` at base `46031415` versus
+  measured ancestor `65bf2876`, each in its own archive, found **0** removals
+  and **0** other output differences in **603** corpus forms, including
+  `issue_1425/interleaved.fsl` and three added `issue_1547_guard_reservations/`
+  fixtures and two added `ai_project_*_invalid_rule.fsl` fixtures. The original
+  inline counts remain 152
+  removals, 126 fresh accepted and 5 diagnostic changes. Another 70 removal
+  witnesses cover implicit/nested sources, raw arguments and unused definitions;
+  70 renamed controls and both hidden-KPI cases remain accepted. The measurement
+  ancestor has identical Rust implementation and corpus sources to this docs
+  update. The design note records the full comparison; it does not enumerate
+  every removed program.
   This expression rule does not promise executable `leadsTo` wrapper binders:
   `check` rejects a collection domain or any `where` filter on an outer
   `leadsTo` binder. Unfiltered supported typed/range wrappers remain available,
@@ -2989,8 +3058,9 @@ missing components (#1521); bmc and induction retain their free-value verdicts.
 Enumerating partial init components is future work (#1579).
 For new admission proofs, a source, filter or key bound depending on an outer
 binder is conservatively unresolved, even if a same-named global const exists.
-Enclosing binding combinations are not enumerated; this does not change legacy
-acceptance or repair symbolic binder/const shadow resolution (#1515).
+Enclosing binding combinations are not enumerated. Independently, the frontend
+rejects executable local bindings that share a const's name (#1515), before
+engine-specific bound resolution; this does not add dependent-range support.
 For newly admitted shapes, `check` rejects reads of any root init may assign
 until the entire root is definitely assigned, including roots written only as
 whole values and reads of an already-written field or entry. Early reads of
@@ -3577,6 +3647,15 @@ guard passes `check`. No checked-in spec or example has the removed shape; the
 597-form base `1844fa74` / head `7b9b34b3` sweep found no corpus acceptance
 transitions.
 
+The implicit entity parameter `c` is a source-visible local for #1515's const
+rule: do not declare a same-named const in a requirements document using that
+process interface. Rename the const, not the instance reference `stage(c)`.
+Next-edition entity instance names use the entity's lowercased first letter;
+relation events similarly take an implicit instance of their target actor.
+Those visible names also reject matching consts, at the generated init's source
+process/entity declaration or the relation event declaration. Hidden KPI
+projection bindings are not source names and instead freshen on collision.
+
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 
 Write business processes, policies, and KPIs with zero implementation
@@ -4047,8 +4126,8 @@ Markdown, byte offsets refer to the extracted FSL text rather than the Markdown
 file; document lines and code-line columns are preserved. Unknown hard-rule
 messages point to `check hard`; existing parse errors are not translated twice.
 This corrects coordinates only, without changing validity, diagnostic kind,
-envelope fields, exit status or assurance. Missing LSP project-component
-diagnostics remain tracked separately (#1575).
+envelope fields, exit status or assurance. The editor publishes project-component
+validation through the shared validator at document positions, with model `None`.
 
 **Measured boundary sweep (#1545):** B
 `d37a215e8df6c00222e6aafd94bc9b556c445521` and H

@@ -129,7 +129,10 @@ types/state/init, `requirement` blocks, `fair action`, `branches`, and explicit
 3. `kpi k = count E in S` → no kernel state/action/invariant. The declaration is
    validated and retained as typed `ProjectionDef` metadata whose expression is
    the shared `Aggregate::Count` plus a typed Binder for
-   `count(c: E where e_stage[c] == S)`. Native `explain` reads this projection;
+   `count(c: E where e_stage[c] == S)` when c does not meet a const. This c is
+   not a writable source local: on collision the projection alone uses the
+   existing reserved fresh-name allocator, with its index renamed consistently.
+   Native `explain` reads this projection's public metadata;
    no ghost counter or consistency invariant is generated.
 4. `requirement <ID> "<text>" { items }` → lift the contained action /
    invariant / reachable / leadsTo to top level and attach
@@ -229,6 +232,16 @@ the declared name. The message is the #1256 one with the position
 Previously the walk missed these three, so they passed `check`. No spec or
 example in the repository has such a name. Migration: rename the role,
 resource, or measure without `__` and update its references.
+
+The transition's implicit c is a source-visible local under #1515: a same-named
+const is rejected, even when the source never declares a local c. Rename the
+const and its constant references; retain `stage(c)` for the entity instance.
+Next-edition entities use their lowercased first letter for the visible instance
+name, and relation events take an implicit instance of their target actor by
+that naming rule. These names also reject matching consts. A generated init
+reports the source process/entity declaration, not an unwritten binder token;
+the relation-parameter refusal reports the source event. Hidden projection
+binders are not covered by this visible-name restriction.
 
 ### 2.3 Tests (tests/test_req_dialect.py)
 
