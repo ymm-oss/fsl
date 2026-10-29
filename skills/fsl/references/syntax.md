@@ -1615,7 +1615,7 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    (including valid empty domains), and compose preserves original-global
    refusals without adding foreign-name refusals.
    Induction additionally requires state-independent helpful arguments: leadsTo
-   binders, integer/Boolean literals, and integer `+`, `-`, `*` (including unary `-`).
+   binders, constants, enum members, integer/Boolean literals, and integer `+`, `-`, `*` (including unary `-`).
    `check` and BMC accept well-typed state reads; induction refuses them.
    - **Placement**: `decreases` is a sibling of the forall wrapper, *outside*
      its braces — `leadsTo L { forall c: Case { P ~> Q } decreases M }`.

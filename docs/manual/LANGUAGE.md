@@ -501,7 +501,7 @@ ill-typed arguments, unknown names and forbidden pattern shadowing now fail `che
 Normalized `count`/`sum` patterns retain their standalone acceptance, including
 valid empty aggregates; composition cannot hide an original global-name refusal
 by prefixing, nor introduce one from a foreign declaration.
-Induction additionally requires state-independent arguments: leadsTo binders,
+Induction additionally requires state-independent arguments: leadsTo binders, constants, enum members,
 integer/Boolean literals, and integer `+`, `-`, `*` combinations (including unary `-`).
 `check` and BMC accept well-typed arguments that read state; induction refuses them.
 `within K` is a bounded deadline on a response; `K` must be a non-negative
