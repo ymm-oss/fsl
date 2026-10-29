@@ -21,6 +21,44 @@ fn model(source: &str) -> fsl_core::KernelModel {
         .expect("build model")
 }
 
+fn pulled_safety(broken: bool) -> Result<fsl_verifier::ProgressCheck, fsl_verifier::VerifyError> {
+    let implementation = model(&format!(
+        "spec Impl {{ state {{ x: Int = 0 }} fair action go() {{ requires x == 0 x = 1 }} invariant Safe {{ x <= {} }} }}",
+        i32::from(!broken)
+    ));
+    let abstraction = model(
+        "spec Abs { state { y: Int = 0 } fair action step() { requires y == 0 y = 1 } leadsTo L { y == 0 ~> y == 1 } }",
+    );
+    let mapping = parse_refinement("refinement R { impl Impl abs Abs map y = x action go() -> step() preserve progress { respond L by go } }", &implementation, &abstraction).unwrap();
+    let mut solver = fsl_solver_z3::Z3Solver::new().unwrap();
+    let observed = block_on(fsl_verifier::check_refinement_progress(
+        &implementation,
+        &abstraction,
+        &mapping,
+        &mut solver,
+        4,
+    ));
+    println!("OBS pulled safety broken={broken} {observed:?}");
+    observed
+}
+
+#[test]
+fn issue_1599_pulled_safety_fails_closed() {
+    let error = pulled_safety(true).expect_err("pulled safety must not become refines");
+    assert!(!error.is_solver_failure());
+    let message = error.to_string();
+    for name in ["pulled", "Safe"] {
+        assert!(message.contains(name), "{message}");
+    }
+}
+
+#[test]
+fn issue_1599_pulled_safety_counterpart_keeps_progress_check() {
+    let checked = pulled_safety(false).unwrap();
+    assert!(checked.violation.is_none(), "{checked:?}");
+    assert_eq!(checked.checked["L"], vec!["go".to_owned()]);
+}
+
 /// The canonical indexed-map shape from DESIGN-refinement.md:20-40 (`map
 /// stock[i: ItemId] = impl_stock[i] - reserved[i]` alongside `preserve
 /// progress`): an indexed per-element map used by the pulled `leadsTo`.

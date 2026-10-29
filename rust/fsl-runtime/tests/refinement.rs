@@ -36,6 +36,38 @@ fn model(source: &str) -> fsl_core::KernelModel {
 const ABS: &str = "spec MinAbs { type AQty = 0..1 state { n: AQty } init { n = 1 } \
      action dec() { requires n > 0 n = n - 1 } }";
 
+#[test]
+fn issue_1599_runtime_rejects_collisions_without_frontend_validation() {
+    let implementation = model("spec Impl { type T = 0..2 state { x: Int = 0 } }");
+    let mut abstraction = model("spec Abs { type T = 0..2 state { x: Int = 0 } }");
+    let mapping = parse_refinement(
+        "refinement R { impl Impl abs Abs maps auto }",
+        &implementation,
+        &abstraction,
+    )
+    .unwrap();
+    assert_refines(
+        &fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2).unwrap(),
+    );
+    // Inject the conflicting operand after parsing: no frontend collision gate can protect runtime.
+    abstraction.types.insert(
+        "T".into(),
+        fsl_core::TypeDef::Domain {
+            lo: 0,
+            hi: 1,
+            symmetric: false,
+        },
+    );
+    let observed = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2);
+    println!("OBS runtime collision {observed:?}");
+    let message = observed
+        .expect_err("runtime must reject different domain definitions")
+        .to_string();
+    for name in ["T", "Impl", "Abs"] {
+        assert!(message.contains(name), "{message}");
+    }
+}
+
 /// Negative control for #466: an impl whose own guardless `dec()` walks its
 /// state past its declared type bound must be reported as violating itself
 /// — never `refines`. Before the fix, `check_refinement`'s BFS silently

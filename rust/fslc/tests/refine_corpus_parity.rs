@@ -253,8 +253,8 @@ const CASES: &[Case] = &[
             anchor: "expected-result",
         }),
         depth: 2,
-        expected_result: "refinement_failed",
-        expected_kind: Some("abs_state_mismatch"),
+        expected_result: "error",
+        expected_kind: Some("type"),
         declared_by: "examples/gallery/adversarial/refine_mapping_boundary_map.fsl:1-3 \
                       (`expected-command`/`expected-result`/`expected-kind`, including \
                       `--depth 2`), corroborated by examples/gallery/README.md:56-60 \
