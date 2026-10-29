@@ -34,16 +34,16 @@ verify {{
 }
 
 fn assert_accepts(label: &str, entity: &str, field: &str, def_binder: &str, rule_binder: &str) {
+    assert_source_accepts(label, &source(entity, field, def_binder, rule_binder));
+}
+
+fn assert_source_accepts(label: &str, source: &str) {
     let directory = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("issue_1584_guard_generated_name_binder")
         .join(std::process::id().to_string())
         .join(label);
     std::fs::create_dir_all(&directory).expect("create owned fixture directory");
-    std::fs::write(
-        directory.join("rule.fsl"),
-        source(entity, field, def_binder, rule_binder),
-    )
-    .expect("write rule fixture");
+    std::fs::write(directory.join("rule.fsl"), source).expect("write rule fixture");
 
     // Collect both modes before asserting so a check-time rejection does not
     // hide verify's result. Retain complete observations, including stderr.
@@ -158,3 +158,142 @@ accepts!(
 accepts!(control_d_claim_stage, "Claim", "amount", "claim_stage", "d");
 accepts!(control_d_order_total, "Order", "total", "order_total", "d");
 accepts!(control_d_order_stage, "Order", "total", "order_stage", "d");
+
+fn second_field_source(rule_binder: &str) -> String {
+    format!(
+        r#"fsl 5
+requirements R {{
+  number Amount
+  def same(x: Claim) = exists claim_limit: Claim {{ claim_limit == x }}
+  actor Manager
+  entity Claim {{
+    amount: Amount = 0
+    limit: Amount = 0
+    lifecycle Draft -> Approved
+  }}
+  event approve = Manager approves Claim Draft -> Approved
+  rule REQ-1 "x" {{
+    allow Manager approves Claim only when exists {rule_binder}: Claim {{ same({rule_binder}) }}
+  }}
+}}
+verify {{
+  instances Claim = 2
+  values Amount = 0..2
+}}
+"#
+    )
+}
+
+// A fix that gathers only the first declared field must fail this detector.
+#[test]
+fn detector_second_field_claim_limit() {
+    assert_source_accepts(
+        "detector_second_field_claim_limit",
+        &second_field_source("claim_limit"),
+    );
+}
+
+#[test]
+fn control_d_second_field_claim_limit() {
+    assert_source_accepts(
+        "control_d_second_field_claim_limit",
+        &second_field_source("d"),
+    );
+}
+
+fn relation_role_source(rule_binder: &str) -> String {
+    format!(
+        r#"fsl 5
+requirements R {{
+  number Qty
+  def same(x: Order) = exists order_buyer: Order {{ order_buyer == x }}
+  actor User, Shop
+  entity User
+  entity Order {{
+    qty: Qty = 0
+    lifecycle Empty -> Placed -> Approved
+  }}
+  Order belongs to User as buyer via place
+  event place = User places Order Empty -> Placed
+  event approve = Shop approves Order Placed -> Approved
+  rule REQ-1 "x" {{
+    allow Shop approves Order only when exists {rule_binder}: Order {{ same({rule_binder}) }}
+  }}
+}}
+verify {{
+  instances Order = 2
+  instances User = 1
+  values Qty = 0..1
+}}
+"#
+    )
+}
+
+// Relation roles also contribute generated entity state maps.
+#[test]
+fn detector_relation_role_order_buyer() {
+    assert_source_accepts(
+        "detector_relation_role_order_buyer",
+        &relation_role_source("order_buyer"),
+    );
+}
+
+#[test]
+fn control_d_relation_role_order_buyer() {
+    assert_source_accepts(
+        "control_d_relation_role_order_buyer",
+        &relation_role_source("d"),
+    );
+}
+
+#[test]
+fn reserved_relation_role_cannot_collide_with_guard_fresh_name() {
+    let source = r#"fsl 5
+requirements R {
+  number Amount
+  def same(x: Claim) = exists __claim_amount_substitution_0: Claim { __claim_amount_substitution_0 == x }
+  actor User
+  entity User
+  entity Claim {
+    amount: Amount = 0
+    lifecycle Draft -> Approved
+  }
+  Claim belongs to User as __claim_amount_substitution_0 via approve
+  event approve = User approves Claim Draft -> Approved
+  rule REQ-1 "x" {
+    allow User approves Claim only when exists claim_amount: Claim { same(claim_amount) }
+  }
+}
+verify {
+  instances User = 2
+  instances Claim = 2
+  values Amount = 0..2
+}
+"#;
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("issue_1584_guard_generated_name_binder")
+        .join(std::process::id().to_string())
+        .join("reserved_relation_role");
+    std::fs::create_dir_all(&directory).expect("create owned fixture directory");
+    std::fs::write(directory.join("rule.fsl"), source).expect("write rule fixture");
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(["check", "rule.fsl"])
+        .current_dir(&directory)
+        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
+        .env("FSLC_CACHE", "off")
+        .output()
+        .expect("run fslc");
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("invalid JSON {error}: {output:?}"));
+    assert!(output.stderr.is_empty(), "{output:?}");
+    assert_eq!(output.status.code(), Some(2), "{value:#}");
+    assert_eq!(value["result"], "error", "{value:#}");
+    assert_eq!(value["kind"], "name", "{value:#}");
+    assert!(
+        value["message"].as_str().is_some_and(|message| message.starts_with(
+            "relation role name '__claim_amount_substitution_0' contains '__', which is reserved for the names FSL generates"
+        )),
+        "{value:#}"
+    );
+    assert_eq!(value["loc"], json!({"line": 11, "column": 28}));
+}
