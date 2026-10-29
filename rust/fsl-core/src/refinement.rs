@@ -383,13 +383,20 @@ fn progress_collision(
     abstraction: &KernelModel,
     maps: &BTreeMap<String, StateMap>,
 ) -> Option<String> {
-    fn captures(expr: &Expr, name: &str, maps: &BTreeMap<String, StateMap>) -> bool {
-        let used = crate::free_vars_bound(expr, &HashSet::from([name.to_owned()]));
-        maps.iter().any(|(key, map)| {
-            used.contains(key)
-                && map.binder.as_ref().map(crate::binder_name) != Some(name)
-                && crate::free_vars(&map.expr).contains(name)
-        })
+    fn reads_local(expr: &Expr, name: &str) -> bool {
+        let (binder, body) = match expr {
+            Expr::Quantified { binder, body, .. } => (binder, Some(body.as_ref())),
+            Expr::Aggregate { binder, value, .. } => (binder, value.as_deref()),
+            _ => return false,
+        };
+        let filter = match binder {
+            Binder::Typed { where_expr, .. }
+            | Binder::Range { where_expr, .. }
+            | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
+        };
+        body.into_iter()
+            .chain(filter)
+            .any(|part| crate::free_vars(part).contains(name))
     }
     recursion::guard(|| {
         let binding = match expr {
@@ -403,7 +410,8 @@ fn progress_collision(
             _ => None,
         };
         if let Some(name) = binding
-            && (implementation.consts.contains_key(name) || abstraction.consts.contains_key(name))
+            && (implementation.consts.contains_key(name)
+                || (abstraction.consts.contains_key(name) && reads_local(expr, name)))
         {
             return Some(name.to_owned());
         }
@@ -412,15 +420,6 @@ fn progress_collision(
             && maps.contains_key(name)
         {
             return Some(name.clone());
-        }
-        if let Expr::Binary { op, left, right } = expr
-            && crate::pattern_binding_flows(op, true)
-        {
-            let mut names = HashSet::new();
-            crate::compose::extend_pattern_names(left, &mut names, false);
-            if let Some(name) = names.into_iter().find(|name| captures(right, name, maps)) {
-                return Some(name);
-            }
         }
         let mut found = None;
         let _ = crate::visit_expr_children(expr, &mut |child| {
@@ -473,6 +472,25 @@ pub fn pull_refinement_leadsto(
             binder: binder.clone(),
             body: Box::new(expr),
         };
+    }
+    let used = crate::free_vars(&expr);
+    let mut patterns = HashSet::new();
+    crate::collect_pattern_names(&expr, &mut patterns);
+    if let Some(name) = patterns
+        .into_iter()
+        .filter(|name| {
+            state_maps.iter().any(|(key, map)| {
+                used.contains(key)
+                    && map.binder.as_ref().map(crate::binder_name) != Some(name.as_str())
+                    && crate::free_vars(&map.expr).contains(name)
+            })
+        })
+        .min()
+    {
+        return Err(refinement_error(
+            format!("rename the abstract pattern binder '{name}' to avoid mapped-name capture"),
+            Some(span),
+        ));
     }
     if let Some(name) = progress_collision(&expr, implementation, abstraction, state_maps) {
         return Err(refinement_error(

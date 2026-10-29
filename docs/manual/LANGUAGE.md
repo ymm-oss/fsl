@@ -2769,16 +2769,16 @@ is `refinement_failed` with `kind:"progress_lost"` and
 actions are review metadata and must name impl actions; they do not create
 fairness or prove implementation conformance. Fairness still comes from
 lower-layer `fair action` declarations.
-Abstract Int/Bool constants become literals in P/Q, `decreases`, binder domains and
-supported nested filters. Quantifier/aggregate/pattern binders matching an impl
-constant, or property reads/binders sharing an abstract constant's state/local name,
-are refused (direct refine: `respond`, exit 2, `kind:"type"`, `loc` present).
-The ambiguous abstract const/state bound witness gives refine exit 2 versus
-abstract-only BMC exit 1 `violated`. Outer property binders and pattern continuations
-refuse actual mapped-name capture, not unused maps; outer names are preserved,
-but nested diagnostics may rename. For a violated abstract constant bound with
-the impl constant renamed, or an abstract constant body read with no impl namesake,
-the former exit-2 errors now report exit 1 `progress_lost`.
+Abstract Int/Bool constants become literals in P/Q, `decreases`, domains and nested filters.
+Impl-constant binder collisions are refused; abstract const/state-or-local ambiguities
+are refused only where read in their scope. Any property pattern binder matching a free
+impl name introduced by a map actually used under lexical scope is refused, regardless
+of readable continuations; rename the abstract pattern binder. Ordinary scope is unchanged.
+Direct refine gives exit 2, `kind:"type"`, `loc` at `respond`. The ambiguous const/state
+bound witness gives refine exit 2 versus abstract-only BMC exit 1 `violated`.
+Unused maps/locals stay admissible; outer capture is refused. Only nested diagnostics may rename.
+For a violated abstract constant bound with the impl constant renamed, or a body constant
+without an impl namesake, former exit-2 errors now report exit 1 `progress_lost`.
 For unbounded proof, keep using a lower-layer `leadsTo ... decreases ...` and
 `verify --engine induction`.
 

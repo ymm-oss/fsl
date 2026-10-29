@@ -97,14 +97,13 @@ refinement CartImplRefinesCart {
   `progress_failure:"lasso_blocks_progress"` or
   `"deadlock_or_stall_blocks_progress"`, pending bindings, `impl_trace`, and
   `progress:{leadsTo, actions}` so repair can target the lower-layer action.
-  Abstract Int/Bool constants become literals in P/Q, `decreases`, binder domains
-  and supported nested filters. Quantifier/aggregate/pattern binders matching an
-  impl constant, or property reads/binders sharing an abstract constant's state/local
-  name, are refused (direct refine: `respond`, exit 2, `kind:"type"`, `loc` present).
-  The ambiguous abstract const/state bound witness is refused at exit 2 even though
-  abstract-only BMC reports exit 1 `violated`. Pattern continuations and outer
-  property binders refuse actual mapped-name capture, not unused maps. Outer binding
-  names are preserved; nested diagnostics may rename. A map's own index is bound.
+  Abstract Int/Bool constants become literals in P/Q, `decreases`, domains and nested filters.
+  Impl-constant binder collisions are refused; abstract const/state-or-local ambiguities
+  are refused only when read in the relevant scope. Any property pattern binder matching
+  a free impl name from a map actually used under lexical scope is refused, even outside
+  readable continuations: rename that pattern binder. Direct refine locates type errors
+  at `respond` (exit 2); the ambiguous const/state bound has abstract-only BMC exit 1.
+  Unused maps/locals stay admissible; outer capture is refused. Only nested diagnostics may rename.
 - The grammar does not coexist with existing `.fsl` files (an **independent
   file** with `refinement` at the top level. Parsing adds `refinement_def` to
   the same Lark grammar).
