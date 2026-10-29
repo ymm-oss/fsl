@@ -77,8 +77,8 @@ refinement or governance documents newly supported mutate inputs.
 
 ## Type-boundary evidence
 
-Base `e4261ed32e98cd0798bdbfc62a83560641dadc4f` and implementation ancestor
-`ec09d184a2aa063dcfc393ce177acb5a4271a440` were each extracted with `git archive`
+The measurement compares base `e4261ed32e98cd0798bdbfc62a83560641dadc4f`
+with this change on that base. Both were extracted with `git archive`
 into a fresh directory and built independently with Rust 1.98.0. Each binary
 ran `fslc check <relative-path>` in its own tree, with cache disabled, twice over
 all **603** `.fsl` files in `specs/`, `examples/` and `rust/fslc/tests/fixtures/`,

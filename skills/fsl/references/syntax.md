@@ -1308,7 +1308,7 @@ when checking a file, the message suffix changes from `at L:C` to
   oracle_errors in the gate. Evaluation/solver failures stay errored; cutoffs
   stay inconclusive. Auto/explicit maps, standalone refinement, governance
   preflight and composed models share the map validator, not a new mutation oracle.
-  Base e4261ed3 vs ancestor ec09d184, independently built archives, twice checked
+  Base e4261ed3 vs this change on that base, independently built archives, twice checked
   603 corpus + 16 original inline forms: zero corpus removals, zero error→error
   diagnostic changes. Three inline ok→error removals: FALSE_VACUITY/CondMap
   (Map keys 0..0 vs 0..2, 20:41), #1522 MAP (keys 0..2 vs 0..1, 7:35),
