@@ -466,10 +466,14 @@ fn normalize_number_key(source: &str, quote: &str, key: &str, replacement: &str)
 /// expands them before `kernel_ast_v1` is projected.
 pub fn spec_digest(path: &Path) -> Result<String, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    spec_digest_from_source(path, &source)
+}
+
+pub fn spec_digest_from_source(path: &Path, source: &str) -> Result<String, String> {
     let resolver =
         crate::spec_loading::dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
     let kernel = fsl_core::parse_kernel_source_with_options(
-        &source,
+        source,
         &resolver,
         crate::process::parse_options(),
     )

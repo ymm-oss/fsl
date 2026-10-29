@@ -722,6 +722,12 @@ impl DependencyScope {
         }
         finish_dependency_reports(&self.log, result, stderr)
     }
+
+    /// A distinct artifact or baseline needs its own diagnostics even when nested.
+    #[must_use]
+    pub fn finish_distinct(&self, result: (Value, i32)) -> (Value, i32) {
+        self.log.borrow().finish(result)
+    }
 }
 
 impl Drop for DependencyScope {

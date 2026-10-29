@@ -64,9 +64,9 @@ use spec_loading::{
     run_admitted_roots,
 };
 use spec_loading::{
-    load_kernel_model_from_source, load_model, load_model_from_source,
-    load_model_scoped_from_source, load_snapshot_value_object, read_spec_source,
-    require_trace_gate, snapshot_value, validate_requirement_trace_source,
+    load_kernel_model_from_source, load_model_from_source, load_model_scoped_from_source,
+    load_snapshot_value_object, read_spec_source, require_trace_gate, snapshot_value,
+    validate_requirement_trace_source,
 };
 use strict_tags::strict_tag_warnings_from_source;
 use verification::{run_verify_cli, run_verify_cli_admitted, run_verify_cli_from_source};
@@ -1933,13 +1933,7 @@ fn document_projection_error_output(error: &fsl_tools::DocumentProjectionError) 
     }
 }
 
-fn load_document_claims(path: &Path) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
-    let source = read_spec_source(path).map_err(|error| spec_load_error_output(&error))?;
-    let claims = load_document_claims_from_source(path, &source, &path.to_string_lossy())?;
-    Ok((source, claims))
-}
-
-/// Like [`load_document_claims`], but projects under an explicit label
+/// Projects caller-owned source under an explicit label
 /// rather than `path`'s own spelling. `fslc document check` (issue #329)
 /// needs this: every rendered `出典`/`Source:` line carries the label
 /// verbatim, so re-projecting under a *different* spelling of the same file
@@ -5457,16 +5451,24 @@ fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32)
         None,
         false,
         |sources, editions| {
-            let source = &sources[0];
-            let (output, status) =
-                run_scenarios_mode_from_source(path, source, depth, deadlock_mode, false);
             finish_admitted(
-                fold_scenarios_refinements(path, source, depth, output, status),
+                run_scenarios_from_source(path, &sources[0], depth, deadlock_mode),
                 editions,
                 false,
             )
         },
     )
+}
+
+fn run_scenarios_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+) -> (Value, i32) {
+    let (output, status) =
+        run_scenarios_mode_from_source(path, source, depth, deadlock_mode, false);
+    fold_scenarios_refinements(path, source, depth, output, status)
 }
 
 /// Fold inline `implements` and governance preservations into a `scenarios`
@@ -13117,6 +13119,7 @@ fn report_verification_from_source(
     engine: &str,
     edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
     let result = if edition.is_some() {
         run_verify_admitted_from_source(
             path,
@@ -13139,10 +13142,10 @@ fn report_verification_from_source(
             1,
         )
     };
-    match edition {
+    dependencies.finish_distinct(match edition {
         Some(edition) if result.0["result"] != "error" => edition.finish(result),
         _ => result,
-    }
+    })
 }
 
 fn finish_admitted_report(result: (Value, i32), editions: &[SourceEdition]) -> (Value, i32) {
@@ -13151,20 +13154,6 @@ fn finish_admitted_report(result: (Value, i32), editions: &[SourceEdition]) -> (
     } else {
         finish_admitted(result, editions, false)
     }
-}
-
-fn run_html_report(
-    path: &Path,
-    depth: usize,
-    deadlock_mode: &str,
-    engine: &str,
-    output_path: Option<&Path>,
-) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_html_report_from_source(path, &source, depth, deadlock_mode, engine, output_path)
 }
 
 fn run_html_report_with_timing(
@@ -13202,6 +13191,7 @@ fn run_html_report_with_timing(
 /// Model lowering, verification, explanation, and rendered source all derive
 /// from `source`. Dependency files loaded by `FsResolver` deliberately retain
 /// their independent read semantics.
+#[cfg(test)]
 fn run_html_report_from_source(
     path: &Path,
     source: &str,
@@ -13383,6 +13373,7 @@ fn document_generation_inputs(
 /// time) alongside the canonical Markdown.
 fn render_document_for_approval(
     path: &Path,
+    source: &str,
     inputs: &approval::DocumentGenerationInputs,
 ) -> Result<(fsl_tools::RequirementClaimSet, String), Value> {
     let locale = fsl_tools::Locale::parse(&inputs.lang).ok_or_else(|| {
@@ -13391,7 +13382,7 @@ fn render_document_for_approval(
             &format!("unsupported document lang '{}'", inputs.lang),
         )
     })?;
-    let (source, claims) = load_document_claims(path)?;
+    let claims = load_document_claims_from_source(path, source, &path.to_string_lossy())?;
     let loaded_glossary = load_glossary(
         inputs
             .glossary
@@ -13408,7 +13399,7 @@ fn render_document_for_approval(
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = dependency_resolver(base);
     let kernel =
-        fsl_core::parse_kernel_source_with_options(&source, &resolver, crate::parse_options())
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
             .map_err(|error| semantic_error_output(&error.to_string()))?;
     let model =
         fsl_core::build_model(kernel.clone()).map_err(|error| model_error_output(&error))?;
@@ -13422,7 +13413,7 @@ fn render_document_for_approval(
         &claims,
         &kernel,
         &model,
-        &source,
+        source,
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
@@ -13441,6 +13432,8 @@ fn render_document_for_approval(
 /// which have no RCIR concept at all).
 fn approval_artifact(
     path: &Path,
+    source: &str,
+    edition: &SourceEdition,
     kind: &str,
     inputs: &approval::GenerationInputs,
 ) -> Result<(Vec<u8>, Option<String>), Value> {
@@ -13451,7 +13444,7 @@ fn approval_artifact(
                 "requirements_document approval requires document generation inputs",
             ));
         };
-        let (claims, markdown) = render_document_for_approval(path, document_inputs)?;
+        let (claims, markdown) = render_document_for_approval(path, source, document_inputs)?;
         return Ok((markdown.into_bytes(), Some(claims.spec.claim_set_digest)));
     }
     let approval::GenerationInputs::Solver(inputs) = inputs else {
@@ -13460,25 +13453,44 @@ fn approval_artifact(
             "ledger/html/scenarios approval requires solver generation inputs",
         ));
     };
-    let (result, status) = match kind {
-        "ledger" => generate_unapproved_ledger_report(&LedgerReportRequest {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let (result, status) = dependencies.finish_distinct(match kind {
+        "ledger" => generate_unapproved_ledger_report_from_source(
+            &LedgerReportRequest {
+                path,
+                depth: inputs.depth,
+                deadlock_mode: &inputs.deadlock,
+                engine: &inputs.engine,
+                impl_log: None,
+                evidence_paths: &[],
+                output_path: None,
+            },
+            source,
+            Some(edition),
+        ),
+        "html" => run_html_report_from_source_with_timing(
             path,
-            depth: inputs.depth,
-            deadlock_mode: &inputs.deadlock,
-            engine: &inputs.engine,
-            impl_log: None,
-            evidence_paths: &[],
-            output_path: None,
-        }),
-        "html" => run_html_report(path, inputs.depth, &inputs.deadlock, &inputs.engine, None),
-        "scenarios" => run_scenarios(path, inputs.depth, &inputs.deadlock),
+            source,
+            inputs.depth,
+            &inputs.deadlock,
+            &inputs.engine,
+            None,
+            false,
+            Some(edition),
+        ),
+        "scenarios" => edition.finish(run_scenarios_from_source(
+            path,
+            source,
+            inputs.depth,
+            &inputs.deadlock,
+        )),
         _ => {
             return Err(error_output(
                 "usage",
                 &format!("unsupported approval target '{kind}'"),
             ));
         }
-    };
+    });
     if status != 0 {
         return Err(result);
     }
@@ -13497,19 +13509,20 @@ fn approval_artifact(
     Ok((bytes, None))
 }
 
-fn approval_spec_digest(path: &Path) -> Result<String, SpecLoadError> {
+fn approval_spec_digest(path: &Path, source: &str) -> Result<String, SpecLoadError> {
     if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
-        return approval::spec_digest(path).map_err(SpecLoadError::unlocated_semantic);
+        return approval::spec_digest_from_source(path, source)
+            .map_err(SpecLoadError::unlocated_semantic);
     }
-    let source = read_spec_source(path)?;
-    if fsl_syntax::extract_literate_fsl(&source).is_some() {
-        return approval::spec_digest(path).map_err(SpecLoadError::unlocated_semantic);
+    if fsl_syntax::extract_literate_fsl(source).is_some() {
+        return approval::spec_digest_from_source(path, source)
+            .map_err(SpecLoadError::unlocated_semantic);
     }
     let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
     let kernel =
-        fsl_core::parse_kernel_source_with_options(&source, &resolver, crate::parse_options())
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
             .map_err(|error| {
-                surface_parse_failure(&source, crate::parse_options()).map_or_else(
+                surface_parse_failure(source, crate::parse_options()).map_or_else(
                     || SpecLoadError::unlocated_semantic(error.to_string()),
                     |error| SpecLoadError::Parse(Box::new(error)),
                 )
@@ -13543,7 +13556,45 @@ fn run_approval_create(
     if approver.trim().is_empty() {
         return (error_output("usage", "--approver must not be empty"), 2);
     }
-    let model = match load_model(path) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_approval_create_from_source(
+                    path,
+                    &sources[0],
+                    &editions[0],
+                    kind,
+                    artifact_path,
+                    approver,
+                    selected_requirements,
+                    inputs,
+                    output_path,
+                    signing_key,
+                ),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn run_approval_create_from_source(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    kind: &str,
+    artifact_path: &Path,
+    approver: &str,
+    selected_requirements: &[String],
+    inputs: &approval::GenerationInputs,
+    output_path: Option<&Path>,
+    signing_key: Option<&Path>,
+) -> (Value, i32) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -13551,7 +13602,7 @@ fn run_approval_create(
         Ok(binding) => binding,
         Err(error) => return (error_output("io", &error), 2),
     };
-    let digest = match approval::spec_digest(path) {
+    let digest = match approval::spec_digest_from_source(path, source) {
         Ok(digest) => digest,
         Err(error) => return (semantic_error_output(&error), 2),
     };
@@ -13567,11 +13618,11 @@ fn run_approval_create(
                     2,
                 );
             };
-            let (claims, fresh_markdown) = match render_document_for_approval(path, document_inputs)
-            {
-                Ok(result) => result,
-                Err(error) => return (error, 2),
-            };
+            let (claims, fresh_markdown) =
+                match render_document_for_approval(path, source, document_inputs) {
+                    Ok(result) => result,
+                    Err(error) => return (error, 2),
+                };
             let reviewed_text = match std::fs::read_to_string(artifact_path) {
                 Ok(text) => text,
                 Err(error) => return (error_output("io", &error.to_string()), 2),
@@ -13615,10 +13666,11 @@ fn run_approval_create(
                     2,
                 );
             };
-            let (expected_artifact, _) = match approval_artifact(path, kind, inputs) {
-                Ok(artifact) => artifact,
-                Err(error) => return (error, 2),
-            };
+            let (expected_artifact, _) =
+                match approval_artifact(path, source, edition, kind, inputs) {
+                    Ok(artifact) => artifact,
+                    Err(error) => return (error, 2),
+                };
             let reviewed_artifact = match std::fs::read(artifact_path) {
                 Ok(artifact) => artifact,
                 Err(error) => return (error_output("io", &error.to_string()), 2),
@@ -13746,6 +13798,8 @@ fn run_approval_create(
 
 fn approval_evaluation(
     path: &Path,
+    source: &str,
+    edition: &SourceEdition,
     record_path: &Path,
     trust: &approval::TrustStore,
 ) -> Result<Value, Value> {
@@ -13792,9 +13846,14 @@ fn approval_evaluation(
     approval::verify_git_baseline(&repo, &relative_path, &record.spec.git_commit)
         .map_err(|error| error_output("io", &error))?;
     let current_spec_digest =
-        approval_spec_digest(path).map_err(|error| spec_load_error_output(&error))?;
-    let (artifact, current_claim_set_digest) =
-        approval_artifact(path, &record.target.kind, &record.target.inputs)?;
+        approval_spec_digest(path, source).map_err(|error| spec_load_error_output(&error))?;
+    let (artifact, current_claim_set_digest) = approval_artifact(
+        path,
+        source,
+        edition,
+        &record.target.kind,
+        &record.target.inputs,
+    )?;
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| error_output("internal", &error))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
@@ -13818,11 +13877,38 @@ fn approval_evaluation(
 }
 
 fn run_approval_check(path: &Path, record_path: &Path, trust_keys: &[PathBuf]) -> (Value, i32) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_approval_check_from_source(
+                    path,
+                    &sources[0],
+                    &editions[0],
+                    record_path,
+                    trust_keys,
+                ),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+fn run_approval_check_from_source(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    record_path: &Path,
+    trust_keys: &[PathBuf],
+) -> (Value, i32) {
     let trust = match approval::TrustStore::load(trust_keys) {
         Ok(trust) => trust,
         Err(error) => return (error_output("io", &error), 2),
     };
-    let evaluation = match approval_evaluation(path, record_path, &trust) {
+    let evaluation = match approval_evaluation(path, source, edition, record_path, &trust) {
         Ok(evaluation) => evaluation,
         Err(error) => return (error, 2),
     };
@@ -13838,6 +13924,8 @@ fn run_approval_check(path: &Path, record_path: &Path, trust_keys: &[PathBuf]) -
 
 fn approval_overlay(
     path: &Path,
+    source: &str,
+    edition: &SourceEdition,
     record_paths: &[PathBuf],
     trust_keys: &[PathBuf],
 ) -> Result<Value, Value> {
@@ -13846,7 +13934,7 @@ fn approval_overlay(
     let mut requirements = Map::new();
     let mut records = Vec::new();
     for record_path in record_paths {
-        let evaluation = approval_evaluation(path, record_path, &trust)?;
+        let evaluation = approval_evaluation(path, source, edition, record_path, &trust)?;
         for requirement in evaluation
             .get("requirements")
             .and_then(Value::as_array)
@@ -13881,7 +13969,7 @@ struct PreparedLedgerReport {
 }
 
 /// The direct `fslc ledger` entry point. Unlike
-/// `generate_unapproved_ledger_report` (which `approval_artifact` also calls
+/// `generate_unapproved_ledger_report_from_source` (which `approval_artifact` also calls
 /// to reproduce a target's canonical rendering purely for a digest
 /// comparison -- a verdict mismatch there is legitimate drift evidence for
 /// `approval check`/`create`, not a hard error), this is the command a user
@@ -13944,7 +14032,7 @@ fn run_ledger_report_admitted_from_source(
     let approvals = if approval_paths.is_empty() {
         None
     } else {
-        match approval_overlay(request.path, approval_paths, trust_keys) {
+        match approval_overlay(request.path, source, edition, approval_paths, trust_keys) {
             Ok(approvals) => Some(approvals),
             Err(error) => return (error, 2),
         }
@@ -13968,20 +14056,13 @@ fn run_ledger_report_admitted_from_source(
     )
 }
 
-fn generate_unapproved_ledger_report(request: &LedgerReportRequest<'_>) -> (Value, i32) {
-    let source = match read_spec_source(request.path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    generate_unapproved_ledger_report_from_source(request, &source)
-}
-
 /// Generate the approval-rendering form from one caller-owned root snapshot.
 fn generate_unapproved_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
+    edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source, false, None) {
+    let prepared = match prepare_ledger_report_from_source(request, source, false, edition) {
         Ok(prepared) => prepared,
         Err(error) => return error,
     };
@@ -17211,9 +17292,30 @@ fn materialize_git_tree(repo: &Path, revision: &str, destination: &Path) -> Resu
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_approval_diff(
     path: &Path,
+    record_path: &Path,
+    depth: usize,
+    trust_keys: &[PathBuf],
+) -> (Value, i32) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_approval_diff_from_source(path, &sources[0], record_path, depth, trust_keys),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_approval_diff_from_source(
+    path: &Path,
+    source: &str,
     record_path: &Path,
     depth: usize,
     trust_keys: &[PathBuf],
@@ -17302,7 +17404,15 @@ fn run_approval_diff(
             2,
         );
     }
-    let (mut result, status) = run_diff(&old, path, depth, None, &[]);
+    let old_source = match read_unprefixed_spec_source(&old) {
+        Ok(source) => source,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&root);
+            return (spec_load_error_output(&error), 2);
+        }
+    };
+    let (mut result, status) =
+        run_diff_from_sources([(&old, &old_source), (path, source)], depth, None, &[]);
     if let Value::Object(output) = &mut result {
         if let Some(Value::Object(old)) = output.get_mut("old") {
             old.insert(
@@ -18196,7 +18306,8 @@ mod exit_status_tests {
             expected
         );
 
-        let (rendered, status) = generate_unapproved_ledger_report_from_source(&request, &source);
+        let (rendered, status) =
+            generate_unapproved_ledger_report_from_source(&request, &source, None);
         assert_eq!(
             status, 0,
             "approval rendering must bypass verification error: {rendered}"
@@ -18253,7 +18364,7 @@ mod exit_status_tests {
                 expected
             );
             assert_eq!(
-                generate_unapproved_ledger_report_from_source(&request, &source),
+                generate_unapproved_ledger_report_from_source(&request, &source, None),
                 expected
             );
         }
