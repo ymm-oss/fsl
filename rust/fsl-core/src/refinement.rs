@@ -976,27 +976,34 @@ fn validate_state_map(
             | Binder::Range { name, .. }
             | Binder::Collection { name, .. } => name.clone(),
         };
-        crate::typecheck::validate_expression_type(
+        crate::typecheck::validate_expression_type_between(
             &Expr::Var(binder_name.clone()),
             &key,
             &[(binder_name.clone(), binder_ty.clone())],
             context,
+            abstraction,
         )
         .map_err(|error| invalid_state_map_at_map(state_map, "binder", &error.message))?;
         bindings.push((binder_name, binder_ty));
         expected = *value;
     }
-    crate::typecheck::validate_expression_type(&state_map.expr, &expected, &bindings, context)
-        .map_err(|error| {
-            invalid_state_map(
-                state_map,
-                "expression",
-                &error.message,
-                error
-                    .span
-                    .expect("mapped expression type errors carry source spans"),
-            )
-        })
+    crate::typecheck::validate_expression_type_between(
+        &state_map.expr,
+        &expected,
+        &bindings,
+        context,
+        abstraction,
+    )
+    .map_err(|error| {
+        invalid_state_map(
+            state_map,
+            "expression",
+            &error.message,
+            error
+                .span
+                .expect("mapped expression type errors carry source spans"),
+        )
+    })
 }
 
 fn invalid_state_map_at_map(state_map: &StateMap, part: &str, message: &str) -> RefinementError {
@@ -1339,11 +1346,12 @@ fn lower_action_target(
             for (index, (argument, parameter)) in
                 args.iter().zip(&abstraction_action.params).enumerate()
             {
-                crate::typecheck::validate_expression_type(
+                crate::typecheck::validate_expression_type_between(
                     argument,
                     &parameter_type(parameter),
                     &bindings,
                     context,
+                    abstraction,
                 )
                 .map_err(|error| {
                     refinement_error(

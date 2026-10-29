@@ -825,6 +825,22 @@ fn term_for_key<'a, K: PartialEq, T>(entries: &'a [(K, T)], key: &K) -> Result<&
         .ok_or_else(|| VerifyError::new("finite collection domain mismatch"))
 }
 
+fn can_retag<T>(
+    value: &SymbolicValue<T>,
+    ty: &TypeRef,
+    model: &KernelModel,
+) -> Result<bool, VerifyError> {
+    Ok(value.ty() == Some(ty)
+        || matches!(
+            ty,
+            TypeRef::Set(_) | TypeRef::Seq(_, _) | TypeRef::Map(_, _) | TypeRef::Relation(_, _)
+        ) && value
+            .ty()
+            .map(|actual| model.same_carrier(actual, ty))
+            .transpose()?
+            == Some(true))
+}
+
 pub(crate) fn coerce<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
@@ -915,7 +931,7 @@ pub(crate) fn coerce<S: SmtSolver>(
                 term,
             })
         }
-        (mut value, ty) if value.ty() == Some(ty) => {
+        (mut value, ty) if can_retag(&value, ty, model)? => {
             set_value_type(&mut value, ty.clone());
             Ok(value)
         }
