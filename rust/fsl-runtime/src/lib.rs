@@ -639,7 +639,9 @@ fn eval_binary(
                     Err(partial_operation_error(PartialOperation::Divide))
                 }
             } else {
-                Ok(Value::Int(left.div_euclid(right)))
+                left.checked_div_euclid(right)
+                    .map(Value::Int)
+                    .ok_or_else(|| runtime_error("integer overflow in division"))
             }
         }
         "%" => {
@@ -652,7 +654,9 @@ fn eval_binary(
                     Err(partial_operation_error(PartialOperation::Remainder))
                 }
             } else {
-                Ok(Value::Int(left.rem_euclid(right)))
+                left.checked_rem_euclid(right)
+                    .map(Value::Int)
+                    .ok_or_else(|| runtime_error("integer overflow in remainder"))
             }
         }
         "==" | "!=" => {
@@ -4443,6 +4447,8 @@ fn execute_init_statement(
                 | "integer overflow in addition"
                 | "integer overflow in subtraction"
                 | "integer overflow in multiplication"
+                | "integer overflow in division"
+                | "integer overflow in remainder"
                 | "integer overflow in sum"
                 | "head() on empty sequence"
                 | "pop() on empty sequence"

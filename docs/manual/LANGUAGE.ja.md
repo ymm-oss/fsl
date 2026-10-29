@@ -1363,6 +1363,8 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
   例外が 1 つあります。init が状態変数の型の外の値も代入する
   とき、`bmc` と `induction` は step 0 の型境界を仮定して init を問うため、
   その step 0 の `type_bound` 違反(exit 1)を報告します。
+- i64 の最小値を `-1` で割る `MIN / -1` とその剰余 `MIN % -1` は整数の
+  overflow であり、除数がゼロのときだけ `0` に全域化する property 文脈でも同じです。
 - デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   `deadlock reachable at step 1 (state: status=ToolFault, ...)`)。完全なトレースは
   JSON の `deadlock.trace` にもあります。
