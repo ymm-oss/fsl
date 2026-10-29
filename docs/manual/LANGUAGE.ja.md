@@ -848,9 +848,34 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `=>` の左辺が `or` や別の含意である場合の後続、比較の operand 間や比較の外、
   量化・集約の本体や filter へ論理和から流れ込む束縛の使用を `check` が拒否します。
   否定・量化・集約の外への漏れと、`if` の条件から腕への束縛は base でも拒否済みで、
-  新しい除去ではなく既存拒否の維持です。衝突の予約集合は可視性とは別に base と同じ
-  `Is(Some)`/Binary の範囲を保ち、読めない名前でも再宣言を拒む場合があります。
-  既存の not/if 再使用の問題は #1573 で別に扱います。
+  新しい除去ではなく既存拒否の維持です。衝突の予約集合は可視性とは別であり、
+  読めない名前でも再宣言を拒む場合があります。破壊的な受理範囲の縮小(#1573):
+  `not` と式の `if` の中の match は、後のoperand・guard・actionの文・ensuresへ
+  名前を予約します。式のifの条件は両腕へ予約し、**thenの名前もelseへ予約**します。
+  symbolic評価器が腕の束縛表を共有するためです(#1577)。量化・集約の`where`は、
+  本体や`of`があればそこへ予約します。count・unique・exactlyOneはfilterだけを持ち、
+  独立した本体/ofはありません。文のifの条件は両腕と後の文へ予約し、どちらかの腕の
+  内部の束縛も後の文へ予約します。文の反対の腕は独立のままで、候補内の名前は
+  量化・集約の外へ出ません。文の規則はinitとaction本体の両方に適用します。
+  direct specのinit入口は全init blockとinline初期化子を共通の予約walkで検査し、
+  既存のinitializer・const・map-keyの診断ownerを保ちます。composeでは同一sourceの
+  init断片間やinline→initへの予約に既知の検査欠落があり、compose自身のinitも
+  無関係なsourceのFresh決定で検査を素通りする場合があります。再束縛は不正のままです。
+  偽のverifiedは#1622の族で、composeのinitの断片への予約は別のissueで追います
+  (mergeの後に起票)。一般的なcomposed initの検査保証ではありません。
+  後の束縛名を変えてください。例えば
+  `(p is some(v)) and v == 2`を`(p is some(w)) and w == 2`にします。
+  これらの予約で名前の読める範囲は広がりません。従来の#1442の入れ子ifの例も、
+  standalone/composeの4ルートが破壊的な除去になります。元の拒否入力を残し、
+  内側の`u`だけを`w`に変えた形を受理の保存対照とします。
+  sync actionとinit以外の経路ではcomposeが独立source間の束縛を分離するため、
+  表示されるguardの著者名`v`が
+  `__v_substitution_0/1`になる場合があります。guard名の回帰例のexplainのresultと
+  通常のverifyの判定は変わりません。文のpayloadを誤って共有していた2 sourceでは、
+  checkの受理を保ったまま、誤った`violated`が分離後にholdsへ変わります。
+  本当に偽のpayload条件はviolatedのままです。これはchecker/hygiene側の補償であり、
+  評価器そのものの修復ではありません。残る束縛寿命の問題は#1622で扱います。
+  独立sourceのinit同士のpattern分離は今回直さず、同じ残件に含みます。
   スコープ外の `v` は `kind: "semantics"`、終了コード 2、
   メッセージは
   `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`
@@ -870,6 +895,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   測定した除去と診断例は、
   [スコープ設計](../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547)
   に記録しています。
+  [予約の改訂](../design/DESIGN-pattern-binding-scope.md#5-retained-pattern-reservations-1573)
+  に追加の除去とsource分離後の出力契約を記録しています。
   `v` は新しい名前でなければなりません: 状態変数・定数・enum のメンバー・action の
   引数・量化子の束縛変数・`let`・それより前のパターン束縛と同じ名前の `v` は
   `check` が拒否し、名前を変えるよう求めます。

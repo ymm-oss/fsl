@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+compose Joined {
+  use A as a from "a.fsl"
+  use B as b from "b.fsl"
+  internal a.stay
+  internal b.stay
+  action joined() = a.stay() || b.stay() {}
+}

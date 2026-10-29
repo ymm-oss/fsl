@@ -769,3 +769,183 @@ implementation sources and swept corpus inputs are identical to those of the
 documentation update; no rebase-only hash is substituted for an unperformed
 run. This bounded corpus result is separate from the inline removals and is
 not an exhaustive inventory of every removed program.
+
+## 5. Retained pattern reservations (#1573)
+
+This amendment supersedes section 3's deliberately limited Is/Binary collision
+inventory and guard-name preservation decision. Visibility is unchanged. The
+checker and compose hygiene compensate for existing evaluator binding lifetime;
+they do not repair the evaluators. The remaining evaluator work is tracked in
+#1622; expression-arm evaluation remains related to #1577, and more precise
+clause locations remain separate work in #1550.
+
+### Invariant and shared implementation
+
+For sync actions and the non-init paths covered here, the invariant is:
+
+**合わせた kernel を syntax に戻して検査し直すツールは、source の判断に頼らない。
+syntax の上で名前を離す。**
+
+In those paths, compose must leave distinct binding identities in the lowered
+syntax, not only in transient source-check decisions. Structural consumers discard those
+decisions when converting a Kernel back to syntax: reachable/invariant
+counterfactuals used by explain and HTML, and mutation oracles that build a
+materialized candidate again. Preserving an original checked model alone does
+not repair the changed candidates, and skipping their checks is not a repair.
+Their source capture protection therefore uses the same widened name collector
+as collision reservation. There is no separate inventory mode or explain bypass.
+The existing hygiene `Scope.locals` remains the reservation set; moving it into
+another phase is unnecessary because it already uses the shared collector.
+
+`extend_pattern_names` extends its collision traversal through not and all
+expression-if children, without changing its visible-export mode.
+`extend_statement_pattern_names` summarizes assignment values and the condition
+and both arms of statement-if, delegating expression names to that collector.
+The summary performs no rejection and exports nothing from statement-forall
+candidates. Native validation and hygiene consume those same summaries while
+advancing statement cursors. Each opposite statement arm starts from its own
+copy of the condition's reservations, rather than the previous arm's cursor.
+Ensures retain the final guard phase, not the action body's statement cursor.
+Direct model construction carries one phase through the logical init sequence
+and invokes the same statement validator after its existing assignment checks.
+Its per-statement wrapper still owns init/inline-initializer, const/map-key and
+component-origin diagnostics. Public Kernel revalidation is not the only init
+gate. The native borrowed-AST checker and owned-AST source rewriter retain their
+separate condition/where/cursor wiring and diagnostic-owner loops; extraction
+and outward statement summaries, not all traversal wiring, are shared once.
+
+The direct guarantee includes all init blocks and inline initializers in one
+logical sequence (all inline initializers before explicit init). Two direct
+regressions cover separate init blocks and inline→init; renaming only the later
+binding/read restores acceptance and genuine four-consumer violations of P.
+Their composed false verified results are deliberately not regression expectations.
+
+Compose still has a distinct same-source init check gap: per-fragment hygiene
+resets its Scope, while name-keyed Fresh decisions can bypass the later model
+cursor. Inline→init is affected as well. Common compose init can inherit an
+unrelated component action's Fresh decision even in a single block. These are
+illegal rebindings, not an exception to the language rule. False verified
+results belong to the evaluator-lifetime family in #1622; compose init-fragment
+reservations will be tracked in a separate issue filed after merge. That scope
+decision is separate from the independent-source init separation below.
+
+Independent-source init separation remains outside this patch. Concatenating A's
+init match of some(1) and B's same-named match of some(2) can still make b.P
+incorrectly violated even though B alone verifies; this pre-existing init
+reproduction belongs to the evaluator-lifetime family in #1622, alongside the
+sync-action capture that hygiene compensates for here. It is not a preserved
+bad-verdict oracle. A later-name-only init repair is accepted and conformant,
+while the raw unresolved fixture checks only acceptance.
+
+### Breaking removals and repair
+
+The following are breaking removals of previously accepted name reuse. A
+collision reservation does not make the name readable.
+
+| Reservation flow | Rejected reuse | Repair |
+|---|---|---|
+| not / expression-if → later operand, requires, body or ensures | A later match binds the earlier retained name | Rename the later declaration and its reads |
+| Expression-if condition → either arm; **then → else** | The arms bind the same name, including inside a def or argument expression | Rename one arm's binding |
+| Quantifier/aggregate where → body/of | A candidate's body binds a name already reserved by its filter | Rename the body/of binding |
+| Statement-if condition → either arm or a later statement | A later match reuses the condition's name | Rename the later binding |
+| **Inside either statement-if arm → later statement**, including nested arms | A later statement reuses a possibly retained arm binding | Rename the later binding |
+
+Four further breaking-removal routes retain the two original generated-inline
+#1442 nested-if examples, each standalone and composed: an outer condition's
+`u` is rebound in a nested then statement or expression. They now reject with
+the complete collision packet at 5:39/5:53. Separate controls change only the
+inner declaration to `w`; they remain accepted and genuinely violate Seen in
+BMC, induction, explicit and Monitor. They are preservation controls, not the
+old rebinding-dependent visibility detectors, and the original sources remain
+in the base/head sweep.
+
+For example, replace the later `(p is some(v)) and v == 2` with
+`(p is some(w)) and w == 2`. Do not replace a binding with an out-of-scope read.
+The then-to-else reservation of an **expression** if is intentional: the
+symbolic expression evaluator shares its binding map across arms (#1577).
+Statement arms are separate evaluator contexts and may still bind the same
+name independently. Quantifier/aggregate candidates also remain independent.
+Count, unique and exactlyOne have only a filter, not an independent body/of;
+their repeated filter bindings were already rejected.
+
+Range/Collection count and sum normalization builds repeated conditional copies.
+Authored expressions are checked first; only the generated re-check suppresses
+duplicate-binding rejection via the existing substitution phase. It still checks
+types. This is not permission to reuse a name in the authored where/body pair.
+
+The collision diagnostic remains exit 2, kind semantics, with the existing
+`pattern binding 'v' in 'is some(v)' shadows a name already in scope ...; rename
+the pattern variable` message. The original and renamed acceptance pairs pin
+the full message and containing clause/arm location, including action-level
+requires/ensures locations. The existing #1547 earlier-error controls are preserved.
+With #1515's const-shadow gate, an earlier newly rejected pattern reuse may now
+precede a later const-shadow binder or let: the direct diagnostic changes from
+const to pattern at the same clause/action location. A component expression can
+move from the parent's use location to the source pattern's clause location.
+The inverse order, pre-expansion erased-argument/unused-def checks, and leadsTo
+definition capture retain their complete existing packets. The mixed-priority
+fixture pins all twelve direct/compose routes; these are error-to-error priority
+changes, not additional acceptance removals or new token-level span precision.
+For each of the three changed routes, alpha-renaming only the later pattern
+declaration and its bound reads restores the complete base const-shadow packet.
+The repair controls preserve the wrapped component use location 2:3 as well as
+the message; a live count requires all three controls to execute.
+
+With #1638's preserved-progress capture gate, the existing map-expression type
+check runs before the progress preflight. A map with retained-name reuse and a
+mapping/abstract-binder capture therefore changes from the declaration's capture
+error at 1:130 (span 129..136) to the earlier map-expression collision. Both remain
+kind type/exit 2. When that expression error has only the unknown zero-width span,
+it now uses the map declaration span when available: the regression's map keyword at 1:33,
+span 32..35. Meaningful expression spans are preserved. Renaming only the later
+q-pattern/read z→w restores the complete base capture packet, including 1:130 and
+its nonempty span. This fourth priority row is separate from acceptance removals.
+The same origin repair updates the existing enum-to-numeric-set map rejection
+from the unknown 1:1 origin to its authored map keyword at 4:3, span 40..43;
+the error message, type kind and exit 2 remain unchanged.
+
+### Source-separated syntax is an output contract change
+
+The two guard-output fixtures under
+`rust/fslc/tests/fixtures/issue_1547_guard_reservations/` now render independent
+bindings as `__v_substitution_0` and `__v_substitution_1`, instead of both using
+the authored `v`. Their explain result remains explained and their ordinary
+verification verdict remains verified. Full explain and HTML comparisons permit
+only this observed name substitution, not loss of counterfactuals or witnesses.
+The two explain goldens are regenerated from the native output.
+
+Mutation is also an acceptance anchor, not just a successful CLI exit. Against
+the recalibrated baseline `299ac3df`, c.fsl has killed 14 / survived 12 / invalid 0
+and c_if.fsl has killed 7 / survived 8 / invalid 0 at depth 4. Keeping the old
+narrow source
+inventory makes otherwise valid candidates fail their new collision check:
+invalid becomes 24/13. The regression test checks the outcome counts,
+and the fault that removes not/conditional from the source inventory must fail
+that test. These exact counts are baseline-specific and require recalibration
+when the mutation oracle or baseline changes.
+
+### Independent-source payloads: before and after
+
+The source inventory also includes statement summaries before sync merges the
+sources. Without that protection, source A's `some(1) is some(v)` can leave its
+payload for source B's independently authored match of some(2). Check still
+accepts the composition, but all four consumers can falsely report that B's
+`v == 2` property is violated. With distinct syntax-level names, B receives 2
+and the property holds: BMC verified, induction/explicit proved, Monitor
+conformant with final `b.flag == true` after the joined action.
+
+The check envelope is a preservation control; it is not a detector of this
+payload capture. The semantic detector is red even on base. A genuinely false
+B condition (`v < 1`) remains violated/nonconformant on base and after hygiene,
+so the change is not an unconditional promotion to holds. Removing only the
+source inventory's statement summary must make the positive detector fail.
+These are the same binding-lifetime effects for which statement-if reservations
+compensate; evaluator behavior is not changed here.
+
+The executable contracts are in `issue_1573_pattern_reuse.rs`: the original
+direct/compose matrix is retained, nested arm-to-later cases are added,
+Range/Collection normalization and two-source check envelopes are compared in
+full, and a conditional-source/conjunctive-source probe requires the foreign
+guard to enable the action. New-base product verification must repeat the
+base/head corpus, static-literal and authored-input comparisons rather than
+reusing observations made before a rebase.

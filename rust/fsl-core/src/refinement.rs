@@ -1012,6 +1012,10 @@ fn invalid_state_map(
     message: &str,
     span: Span,
 ) -> RefinementError {
+    let span = state_map
+        .span
+        .filter(|_| span == crate::typecheck::unknown_span())
+        .unwrap_or(span);
     refinement_error(
         format!("invalid map {part} for '{}': {message}", state_map.name),
         Some(span),

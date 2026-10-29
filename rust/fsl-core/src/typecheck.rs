@@ -1170,6 +1170,12 @@ impl ValidationPhase {
         phase
     }
 
+    fn after_where(&self, binder: &Binder) -> Self {
+        crate::model::binder_scope(binder)
+            .1
+            .map_or_else(|| self.clone(), |expr| self.after_patterns(expr))
+    }
+
     fn check(
         &self,
         expr: &Expr,
@@ -1565,8 +1571,14 @@ fn validate_expression_inner(
             spans,
         } => {
             validate(condition, env, spans.condition, Some(&TypeRef::Bool))?;
-            validate(then_expr, env, spans.then_expr, Some(&ty))?;
-            validate(else_expr, env, spans.else_expr, Some(&ty))?;
+            let then_phase = phase.after_patterns(condition);
+            let else_phase = then_phase.after_patterns(then_expr);
+            for (expr, span, phase) in [
+                (then_expr, spans.then_expr, &then_phase),
+                (else_expr, spans.else_expr, &else_phase),
+            ] {
+                phase.check(expr, env, model, span, Some(&ty), self_relations)?;
+            }
         }
         Expr::Is { expr, pattern } => {
             if let Pattern::Some(binding) = pattern {
@@ -1624,7 +1636,7 @@ fn validate_expression_inner(
                 model,
                 span,
                 Some(&TypeRef::Bool),
-                &child_phase,
+                &child_phase.after_where(binder),
                 &local_relations,
             )?;
         }
@@ -1657,14 +1669,18 @@ fn validate_expression_inner(
                     model,
                     span,
                     Some(&TypeRef::Int),
-                    &child_phase,
+                    &child_phase.after_where(binder),
                     &local_relations,
                 )?;
             }
             if phase.normalize_aggregates && expands {
                 let normalized = normalize_aggregate(*kind, binder, value.as_deref(), env, model)
                     .map_err(|error| error.with_span(span))?;
-                validate(&normalized, env, span, expected)?;
+                // Generated copies have already passed authored binding checks.
+                let mut generated = phase.clone();
+                crate::collect_pattern_names(&normalized, &mut generated.collisions);
+                generated.substituted.extend(generated.collisions.drain());
+                generated.check(&normalized, env, model, span, expected, self_relations)?;
             }
         }
         Expr::BinaryNamed { left, right, .. } => {
@@ -1710,6 +1726,21 @@ fn validate_expression_inner(
     Ok(())
 }
 
+fn validate_statements(
+    statements: &[Statement],
+    env: &TypeEnv,
+    model: &KernelModel,
+    phase: &ValidationPhase,
+    self_relations: &SelfRelations,
+) -> Result<(), TypecheckError> {
+    let mut phase = phase.clone();
+    for statement in statements {
+        validate_statement(statement, env, model, &phase, self_relations)?;
+        crate::compose::extend_statement_pattern_names(statement, &mut phase.collisions);
+    }
+    Ok(())
+}
+
 fn validate_statement(
     statement: &Statement,
     env: &TypeEnv,
@@ -1742,10 +1773,9 @@ fn validate_statement(
                 Some(&TypeRef::Bool),
                 self_relations,
             )?;
-            then_statements
-                .iter()
-                .chain(else_statements)
-                .try_for_each(|item| validate_statement(item, env, model, phase, self_relations))
+            let phase = phase.after_patterns(condition);
+            validate_statements(then_statements, env, model, &phase, self_relations)?;
+            validate_statements(else_statements, env, model, &phase, self_relations)
         }
         Statement::ForAll {
             binder,
@@ -1757,9 +1787,8 @@ fn validate_statement(
             local.insert(binder_name(binder).to_owned(), ty);
             let mut local_relations = self_relations.clone();
             local_relations.remove(binder_name(binder));
-            statements.iter().try_for_each(|item| {
-                validate_statement(item, &local, model, phase, &local_relations)
-            })
+            let phase = phase.after_where(binder);
+            validate_statements(statements, &local, model, &phase, &local_relations)
         }
     }
 }
@@ -1967,7 +1996,9 @@ pub(crate) fn expression_binder_type(
 pub(crate) fn validate_statement_types(
     statement: &Statement,
     model: &KernelModel,
+    phase: &mut ValidationPhase,
 ) -> Result<(), TypecheckError> {
+    let self_relations = SelfRelations::new();
     let visible_consts = model
         .consts
         .keys()
@@ -1984,21 +2015,20 @@ pub(crate) fn validate_statement_types(
         &base_env(model),
         model,
         &visible_consts,
-        &SelfRelations::new(),
-    )
+        &self_relations,
+    )?;
+    validate_statement(statement, &base_env(model), model, phase, &self_relations)?;
+    crate::compose::extend_statement_pattern_names(statement, &mut phase.collisions);
+    Ok(())
 }
 
 pub(crate) fn validate_checked_model_types(model: &KernelModel) -> Result<(), TypecheckError> {
     let env = base_env(model);
     let self_relations = SelfRelations::new();
+    let mut phase = ValidationPhase::normalized();
     for statement in &model.init {
-        validate_statement(
-            statement,
-            &env,
-            model,
-            &ValidationPhase::normalized(),
-            &self_relations,
-        )?;
+        validate_statement(statement, &env, model, &phase, &self_relations)?;
+        crate::compose::extend_statement_pattern_names(statement, &mut phase.collisions);
     }
     validate_model_expression_types(model)?;
     for projection in &model.projections {
@@ -2148,8 +2178,9 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
                 })();
                 checked.map_err(|error: TypecheckError| error.in_component_item(model, &target))?;
             }
+            let mut order = phase.clone();
             for (index, statement) in action.statements.iter().enumerate() {
-                validate_statement(statement, &local, model, &phase, &local_relations).map_err(
+                validate_statement(statement, &local, model, &order, &local_relations).map_err(
                     |error| {
                         error.in_component_item(
                             model,
@@ -2157,6 +2188,7 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
                         )
                     },
                 )?;
+                crate::compose::extend_statement_pattern_names(statement, &mut order.collisions);
             }
             for (index, expr) in action.ensures.iter().enumerate() {
                 let target = crate::origin::action_ensure_target(&action.name, index);

@@ -254,9 +254,16 @@ fn enum_domain_refinement_map_to_numeric_set_is_rejected_before_simulation() {
     assert!(output["message"].as_str().is_some_and(|message| {
         message.contains("invalid map expression for 'xs': expression of type Set(Named(\"Color\")) is not assignable to Set(Named(\"N\"))")
     }), "{output:#}");
-    // Existing refinement map diagnostics use the unknown-span origin, not
-    // the authored map keyword. Pin that limitation without inventing a span.
-    assert_eq!(output["loc"], json!({"line": 1, "column": 1}), "{output:#}");
+    // An unknown expression origin now uses the authored map declaration.
+    assert_eq!(output["loc"], json!({"line": 4, "column": 3}), "{output:#}");
+    assert_eq!(
+        output["span"],
+        json!({
+            "start": {"offset": 40, "line": 4, "column": 3},
+            "end": {"offset": 43, "line": 4, "column": 6}
+        }),
+        "{output:#}"
+    );
     assert!(output.get("impl_trace").is_none(), "{output:#}");
 }
 

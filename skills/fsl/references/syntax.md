@@ -1233,8 +1233,34 @@ when checking a file, the message suffix changes from `at L:C` to
   out of comparison results, and disjunctive flow into quantifier/aggregate
   bodies and filters. Outer not/quantifier/aggregate escapes and condition-to-if-arm
   bindings already failed on base, so are not new removals. Visibility remains
-  separate from base-equivalent Is/Binary collision reservations; the pre-existing
-  not/if reuse issue stays in #1573. Out-of-scope `v` reports
+  separate from collision reservations. Breaking removal (#1573): matches inside
+  not/expression-if reserve names for later siblings, guards, statements and
+  ensures. An expression-if condition reserves both arms; **then also reserves
+  else** because the symbolic binding map is shared (#1577). Where reserves a
+  quantifier/aggregate body or of expression when one exists; count, unique and
+  exactlyOne have only their filter. Statement-if conditions reserve both arms
+  and later statements, and bindings inside either arm reserve later statements.
+  Opposite statement arms stay independent; candidate-local bindings stay local.
+  The statement rules apply to init and action bodies. Direct-spec init checking
+  shares one reservation phase across all init blocks and inline initializers,
+  retaining initializer/const/map-key diagnostic owners. Composed init has a
+  known check gap for same-source fragments and inline→init; common init can
+  also inherit an unrelated source's Fresh decision. Rebinding remains illegal.
+  False verified results belong to #1622; compose init-fragment reservations
+  will be tracked in a separate issue filed after merge. Do not claim general
+  composed-init checking from the direct guarantee.
+  Repair by renaming the later declaration and its reads, e.g. replace
+  `(p is some(v)) and v == 2` with `(p is some(w)) and w == 2`; do not treat a
+  reservation as permission to read a name. Four formerly accepted #1442 nested
+  if routes (standalone/compose) are also breaking removals: keep the original
+  rejection inputs and rename only the inner `u` to `w` in preservation controls.
+  In sync actions and non-init paths, compose may print hygienic
+  `__v_substitution_0/1` instead of `v` to keep independent sources distinct.
+  Guard-name regression examples retain their explain result/verify verdict.
+  In the two-source statement-payload case, check remains accepted and erroneous
+  violated verdicts become holds; a genuinely false payload stays violated.
+  Independent-source init separation is not repaired here. It belongs to the
+  remaining evaluator binding-lifetime work in #1622. Out-of-scope `v` reports
   `kind: "semantics"`, exit 2, and
   `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
   Location is the containing clause/if arm; guards/ensures retain the action-level
@@ -1252,6 +1278,8 @@ when checking a file, the message suffix changes from `at L:C` to
   do not claim equivalence with an undefined expression.
   Measured removals and diagnostic examples are recorded in
   [the design](../../../docs/design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
+  The [reservation amendment](../../../docs/design/DESIGN-pattern-binding-scope.md#5-retained-pattern-reservations-1573)
+  records the additional removals and source-separated output contract.
   `v` must be fresh: `check` rejects a `v` that names a state variable,
   constant, enum member, action parameter, binder, `let`, or an earlier pattern
   binding in scope.
