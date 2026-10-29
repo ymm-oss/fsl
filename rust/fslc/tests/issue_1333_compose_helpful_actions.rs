@@ -138,9 +138,8 @@ fn a1333_3_per_binding_helpful_keeps_its_bound_argument() {
 
 #[test]
 fn a1333_4_helpful_argument_component_constant_is_prefixed() {
-    // Both sources check and bounded-verify; induction's independent handling
-    // of constants is not the subject of this regression. Inspect the lowered
-    // argument too: check alone currently does not validate helper free names.
+    // Both sources check; #1580 also pins induction lookup of a__ONE.
+    // Inspect the lowered argument to keep the compose rewrite explicit.
     let component = "spec A {
   const ONE = 1
   type Id = 0..1
@@ -161,6 +160,26 @@ fn a1333_4_helpful_argument_component_constant_is_prefixed() {
     assert_eq!(standalone["result"], "verified", "{standalone}");
     let (composed, status) = check(&dir, "c.fsl");
     assert_eq!(status, 0, "{composed}");
+    for (engine, expected) in [("bmc", "verified"), ("induction", "proved")] {
+        let (output, status) = compose_scratch::run(
+            &dir,
+            &[
+                "verify",
+                "c.fsl",
+                "--engine",
+                engine,
+                "--depth",
+                "3",
+                "--no-cache",
+            ],
+        );
+        eprintln!("{engine} exit={status} output={output}");
+        assert_eq!(
+            (status, output["result"].as_str()),
+            (0, Some(expected)),
+            "{output}"
+        );
+    }
     assert_eq!(
         lowered_helper(&dir)
             .args

@@ -1219,6 +1219,7 @@ fn model_bool<S: SmtSolver>(solver: &S, term: &S::Term) -> Result<bool, VerifyEr
     }
 }
 
+// Named values follow symbolic lookup precedence, but state reads remain forbidden.
 const HELPFUL_ARG_HINT: &str = "helpful action arguments must be state-independent leadsto \
     binders, constants, enum members, or arithmetic (+, -, *) over those values";
 
@@ -1243,9 +1244,9 @@ const HELPFUL_PROGRESS_HINT: &str = "helpful marks which action instance is resp
 ///
 /// # Errors
 ///
-/// Returns [`VerifyError`] when the expression references anything other than
-/// a bound leadsTo binder or a constant, or does not fold to an integer,
-/// Boolean, or enum-member value.
+/// Returns [`VerifyError`] for state reads, names absent from the supplied
+/// binder/constant/enum-member environment, or expressions that do not fold to
+/// an integer, Boolean, or enum-member value.
 fn eval_state_independent(
     expr: &KernelExpr,
     binder_env: &BTreeMap<String, FslValue>,
@@ -1306,6 +1307,10 @@ fn helpful_matches<S: SmtSolver>(
     binder_concrete: &BTreeMap<String, FslValue>,
     instances: &[ActionInstance<S::Term>],
 ) -> Result<Vec<usize>, VerifyError> {
+    let mut arg_env = model.enum_members.clone();
+    arg_env.extend(model.consts.clone());
+    arg_env.retain(|name, _| !model.state.iter().any(|(state_name, _)| state_name == name));
+    arg_env.extend(binder_concrete.clone());
     let mut out = Vec::new();
     for helper in &leadsto.helpful {
         let Some(action) = model
@@ -1323,7 +1328,7 @@ fn helpful_matches<S: SmtSolver>(
         let expected = helper
             .args
             .iter()
-            .map(|arg| eval_state_independent(arg, binder_concrete))
+            .map(|arg| eval_state_independent(arg, &arg_env))
             .collect::<Result<Vec<_>, _>>()?;
         for (index, instance) in instances.iter().enumerate() {
             if instance.action != helper.action {

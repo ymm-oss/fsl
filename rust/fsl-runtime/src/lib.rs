@@ -2088,10 +2088,7 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 /// the general Monitor-construction gate for partial/nondeterministic init
 /// is a different surface (issue #519).
 /// Init ownership and forall read-order checks also apply to free-root enumeration.
-/// Legacy-accepted partial assignments still use defaults with free roots (#1521).
-/// The shared gate rejects reads of later-assigned roots, not never-assigned roots.
-/// This is not a complete relational-init enumeration for those shapes; the
-/// stronger admission gate for new per-field shapes does not repair them.
+/// Assigned-root read order and completeness are checked before enumeration (#1521).
 ///
 /// # Errors
 ///
@@ -2099,6 +2096,7 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 /// scalar domain, or a combination cannot be evaluated concretely.
 fn concrete_initial_states(model: &KernelModel) -> Result<Vec<State>, RuntimeError> {
     check_init_write_ownership(model)?;
+    explicit::check_refinement_init(model)?;
     let free = explicit::unassigned_init_state_vars(model);
     if free.is_empty() {
         return Ok(vec![Monitor::new(model.clone())?.state]);
@@ -2186,9 +2184,7 @@ pub fn check_refinement_with_budget(
     // mid-walk self-violation means; by construction it cannot encounter
     // one within the same `depth`. `impl_initial_states` enumerates never-assigned
     // roots (#493), rather than selecting one default for them. This covers the
-    // supported nondeterministic initial branches, subject to the constructor's
-    // legacy partial-assignment / ordered-read limits (#1521); it is not a claim
-    // of complete relational-init coverage for those legacy shapes.
+    // supported branches; incomplete written roots are refused (future enumeration: #1579).
     //
     // The pre-pass walks the same reachable set the correspondence walk
     // does, so it takes the same `budget` (issue #1246): unbudgeted, it held
@@ -2217,7 +2213,7 @@ pub fn check_refinement_with_budget(
     }
     let eval_model = merged_refinement_model(implementation, abstraction)?;
     // States produced by abs's own (possibly nondeterministic) init constructor,
-    // subject to its legacy limits above. Init correspondence below asks whether
+    // rejecting incomplete written roots. Init correspondence below asks whether
     // α(s₀) is a member of this set, not whether it equals one chosen default for
     // never-assigned abstract roots.
     let abs_initial_states: BTreeSet<State> =

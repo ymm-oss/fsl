@@ -112,6 +112,8 @@ Helpful argument state independence is an induction-only restriction (#1483):
 `check` validates action parameter types, not state independence; BMC accepts well-typed state reads.
 Induction uses `HELPFUL_ARG_HINT` and `eval_state_independent` in rust/fsl-verifier/src/induction.rs
 to refuse state reads and select a fixed action instance for each leadsTo binding.
+Allowed arguments include leadsTo binders, constants, enum members, integer/Boolean literals,
+and integer `+`, `-`, `*` combinations (including unary `-`).
 
 **With one or more `helpful action(args)` lines**, the third obligation is
 relaxed for non-matching actions, and two extra obligations are added to
