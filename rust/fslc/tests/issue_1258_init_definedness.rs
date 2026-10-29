@@ -338,7 +338,11 @@ fn init_failure_sites_follow_the_evaluation_order() {
     }
     let fixture = Fixture::new("explicit-and-order", INIT_AND_ORDER);
     let (output, status) = verify(&fixture, "explicit");
-    assert_semantics_error(&output, status, "map index outside finite key domain");
+    assert_semantics_error(
+        &output,
+        status,
+        "map index outside finite key domain in init at 12:5",
+    );
 }
 
 /// The short-circuit direction of the failure sites (#1258 m3): `d = 0`
@@ -387,7 +391,11 @@ fn a_short_circuited_side_names_no_init_failure() {
             );
         }
         let (output, status) = verify(&fixture, "explicit");
-        assert_semantics_error(&output, status, "map index outside finite key domain");
+        assert_semantics_error(
+            &output,
+            status,
+            "map index outside finite key domain in init at 12:5",
+        );
     }
 }
 
@@ -448,21 +456,22 @@ fn undefined_init_supersedes_a_search_that_stops_early() {
     }
 }
 
-/// The explicit engine already stopped on these inits; its envelope is the
-/// reference the symbolic messages name.
+/// The explicit engine already stopped on these inits. "Unchanged" preserves
+/// those failures and message stems, now with the same init location as BMC
+/// (#1543); it does not preserve the old location-less diagnostic.
 #[test]
 fn explicit_engine_reports_the_same_failures_unchanged() {
     let cases = [
-        ("explicit-div", INIT_DIV, "division by zero"),
+        ("explicit-div", INIT_DIV, "division by zero in init at 9:5"),
         (
             "explicit-map-read",
             INIT_MAP_READ,
-            "map index outside finite key domain",
+            "map index outside finite key domain in init at 12:5",
         ),
         (
             "explicit-ovf",
             INIT_OVF,
-            "integer overflow in multiplication",
+            "integer overflow in multiplication in init at 9:5",
         ),
     ];
     for (name, source, message) in cases {

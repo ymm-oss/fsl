@@ -148,6 +148,45 @@ No profile is emitted by BMC or induction, or by `auto` when it falls back to
 BMC. It is adjacent to `cost`, never nested inside solver statistics, so the
 runtime remains solver-independent.
 
+### Init evaluation failure locations (#1543)
+
+Concrete init execution appends ` in init at L:C` to evaluation failures whose
+symbolic counterparts are located by `init_definedness`: out-of-domain Map reads
+and writes, out-of-range Seq operations, empty `head`/`pop`, zero division or
+remainder, and integer overflow (including sum). Undefined quantified/aggregate
+evaluation keeps the concrete underlying failure message. Runtime message stems
+are unchanged; sum and quantified/aggregate stems can still differ from BMC.
+The separate MIN divided/remaindered by -1 panic (#1596) and bounded-target pop
+diagnostic discrepancy (#1597) are not repaired by this change. Indexed Seq
+assignment remains unreachable through a checked model.
+
+`L:C` is the start of the containing assignment, including failures in its RHS
+or target index. An `if` condition uses the `if` statement's start; a `forall`
+source or `where` uses the `forall` statement's start. Failures inside their
+bodies retain the inner statement location, not the enclosing statement's.
+These are the same span choices as BMC. The shared runtime init path applies
+this suffix to explicit, auto, Monitor/replay, scenarios, testgen, Worker,
+refinement (including requirements `implements`), causal, conformance, and
+semantic diff consumers that execute that init. It does not add a structured
+`loc`, alter error metadata, kind, or exit status, or annotate other init errors
+such as `init constraints are unsatisfiable`.
+
+**Contract change.** CLI and Worker JSON `message` values for these concrete
+init failures gain the suffix; consumers matching the old complete string must
+accept the located form. The regression matrix covers 26 failure forms,
+including an assignment inside an `if` branch, across four engines (104 cells)
+plus four paired unsatisfiable/success controls (108 tests total), and one
+separate Worker acceptance-replay cell.
+
+Existing expectations change in three CLI test files. Seven literal expectations
+in `issue_1258_init_definedness.rs` and `support/issue_1481_review5.rs` change only
+by appending the suffix (one literal serves both explicit and replay). The
+`init_failure_evidence` helper in `issue_1457_collection_binders.rs` previously
+appended the location to explicit's message to construct symbolic expectations.
+It now expects all three engines to match explicit's message and separately
+checks that explicit's message ends with the location computed from the generated
+source. No existing runtime message stem, kind, exit code, or JSON field changes.
+
 ## 4. Property semantics
 
 The engine checks the same property surface as `bmc.verify`, with identical

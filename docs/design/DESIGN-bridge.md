@@ -312,9 +312,8 @@ only explicit verification and empty Monitor replay:
   genuine mapped-init `refinement_failed`, according to the mapping.
 - `verify --engine auto` can replace unsupported-init fallback to bounded BMC
   with explicit unbounded closure. On the superset-key example it instead
-  replaces BMC's located message (`in init at 5:29`) with the existing unlocated
-  explicit out-of-domain message. This diagnostic loss is part of the change,
-  not an unchanged-location guarantee.
+  reports the explicit out-of-domain error. Since #1543, explicit includes the
+  same location as BMC (`in init at 5:29`), so auto no longer loses that location.
 - `conformance` can now emit initialized vectors; `testgen` can emit a test
   module instead of its existing constructor error (exit 3/internal). Their
   prechecks differ: symbolic init errors can still preempt test generation.

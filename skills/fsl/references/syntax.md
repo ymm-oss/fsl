@@ -1643,8 +1643,9 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    check is skipped there.
    `init` uses the action-context rules: a reached `/`/`%` by zero, `Seq` partial
    operation, `Map` key outside its domain, or i64 overflow in init is a semantics
-   error (exit 2) under every engine, e.g. `division by zero in init at 9:5` from
-   `bmc`/`induction` — not a `partial_op` violation. Guard it with an init `if`.
+   error (exit 2) under every engine, with the same ` in init at L:C` suffix,
+   e.g. `division by zero in init at 9:5` (#1543) — not a `partial_op` violation.
+   Guard it with an init `if`.
    Exception: if init also assigns a value outside a state's type, `bmc`/`induction`
    report the step-0 `type_bound` violation (exit 1) instead.
 6. `fair` = weak fairness: an infinite execution in which a fair instance that is
