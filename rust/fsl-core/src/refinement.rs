@@ -383,21 +383,6 @@ fn progress_collision(
     abstraction: &KernelModel,
     maps: &BTreeMap<String, StateMap>,
 ) -> Option<String> {
-    fn reads_local(expr: &Expr, name: &str) -> bool {
-        let (binder, body) = match expr {
-            Expr::Quantified { binder, body, .. } => (binder, Some(body.as_ref())),
-            Expr::Aggregate { binder, value, .. } => (binder, value.as_deref()),
-            _ => return false,
-        };
-        let filter = match binder {
-            Binder::Typed { where_expr, .. }
-            | Binder::Range { where_expr, .. }
-            | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
-        };
-        body.into_iter()
-            .chain(filter)
-            .any(|part| crate::free_vars(part).contains(name))
-    }
     recursion::guard(|| {
         let binding = match expr {
             Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => {
@@ -410,8 +395,7 @@ fn progress_collision(
             _ => None,
         };
         if let Some(name) = binding
-            && (implementation.consts.contains_key(name)
-                || (abstraction.consts.contains_key(name) && reads_local(expr, name)))
+            && crate::typecheck::reject_constant_shadow(name, implementation.consts.keys()).is_err()
         {
             return Some(name.to_owned());
         }

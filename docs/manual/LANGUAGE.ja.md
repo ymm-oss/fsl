@@ -2603,13 +2603,13 @@ refinement DesignRefinesReq {
 実装のコンフォーマンスを証明することもありません。公平性は依然として下位レイヤーの
 `fair action` 宣言から来ます。
 抽象の Int/Bool 定数は P/Q、`decreases`、範囲と入れ子のフィルターでリテラルになります。
-impl の定数と同名の binder は拒否します。抽象の定数と state/local が同名の場合は、
-その scope で実際に読まれるときだけ拒否します。性質内のどこかの pattern binder が、
+別モデルの impl の定数と同名の binder と、読まれる抽象の const/state の同名は拒否します。
+const と同名の local は先に `check` が拒否し、pull では再判定しません。性質内の pattern binder が、
 字句 scope を考慮して実際に使う map の導入する自由な impl 名と同名なら、読める続きの
 規則とは独立に拒否します。抽象の pattern binder を改名してください。通常の scope は不変です。
 直接の refine は `respond` の位置つきエラー(exit 2、`kind:"type"`、`loc` あり)です。
 抽象の定数と state が同名の曖昧な範囲の例は refine が exit 2、抽象単独の BMC が exit 1 です。
-未使用の map/local は受け入れ、外側の捕獲は拒否します。外側の名前を維持し、入れ子の診断は改名し得ます。
+未使用の map/合法な local は受け入れ、外側の捕獲は拒否します。外側の名前を維持し、入れ子の診断は改名し得ます。
 抽象の定数を範囲で読む違反で impl の定数を改名した形と、抽象の定数を本体で読み impl に
 同名がない違反は、従来の exit 2 エラーから exit 1 `progress_lost` に変わります。
 非有界の証明には、引き続き下位レイヤーの `leadsTo ... decreases ...` と

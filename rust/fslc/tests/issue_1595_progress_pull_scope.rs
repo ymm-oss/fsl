@@ -194,14 +194,14 @@ cells! {
     s4c: ("", "", "forall w in 2..3 { w == 2 ~> w == 3 }", Lost(json!({"w": 2}))),
 }
 
-fn review(cell: &str, sources: (&str, &str, &str), expectation: (i32, Option<i32>, Option<&str>)) {
+fn review(cell: &str, sources: (&str, &str, &str), case: (i32, Option<i32>, Option<&str>, bool)) {
     let (implementation, abstraction, maps) = sources;
-    let (expected, abs_exit, message) = expectation;
+    let (expected, abs_exit, message, input) = case;
     let mapping = format!(
         "refinement R {{ impl Impl abs Abs {maps} preserve progress {{ respond L by go }} }}"
     );
     let fixture = Fixture::sources(implementation, abstraction, &mapping);
-    for ((actual, exit), (abs, abstract_exit)) in fixture.observations(cell) {
+    for ((actual, exit), (mut abs, abstract_exit)) in fixture.observations(cell) {
         if let Some(expected) = abs_exit {
             assert_eq!(abstract_exit, expected);
             let expected = usize::try_from(expected).unwrap();
@@ -213,11 +213,17 @@ fn review(cell: &str, sources: (&str, &str, &str), expectation: (i32, Option<i32
         }
         match expected {
             2 => {
-                assert_error(&actual, exit, "type");
-                assert_eq!(
-                    actual["loc"],
-                    json!({"line": 1, "column": mapping.find("respond").unwrap() + 1})
-                );
+                let kind = if input { "semantics" } else { "type" };
+                assert_error(&actual, exit, kind);
+                if input {
+                    assert!(abs.as_object_mut().unwrap().remove("versions").is_some());
+                    assert_eq!(actual, abs);
+                } else {
+                    assert_eq!(
+                        actual["loc"],
+                        json!({"line": 1, "column": mapping.find("respond").unwrap() + 1})
+                    );
+                }
             }
             1 => {
                 assert_lost(&actual, exit, "refinement_failed", &json!({}));
@@ -230,70 +236,64 @@ fn review(cell: &str, sources: (&str, &str, &str), expectation: (i32, Option<i32
 }
 
 macro_rules! review_cells {
-    ($($name:ident: ($i:expr, $a:expr, $m:expr, $exit:expr, $abs:expr, $message:expr)),* $(,)?) => {
-        $(#[test] fn $name() { review(stringify!($name), ($i, $a, $m), ($exit, $abs, $message)); })*
+    ($($name:ident: ($i:expr, $a:expr, $m:expr, $exit:expr, $abs:expr, $message:expr, $input:expr)),* $(,)?) => {
+        $(#[test] fn $name() { review(stringify!($name), ($i, $a, $m), ($exit, $abs, $message, $input)); })*
     };
 }
+const SCALAR_IMPL: &str = "spec Impl{state{x:Int=0}fair action go(){requires x==0 x=1}}";
+const SCALAR_MAP: &str = "map y=x action go()->step()";
 const PATTERN_CAPTURE: &str = "rename the abstract pattern binder 'x' to avoid mapped-name capture";
 review_cells! {
     r1_pattern_capture: ("spec Impl { type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
         "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(x)) and y==x)} }",
-        "map y=x map o=p action go()->step()", 2, Some(1), Some(PATTERN_CAPTURE)),
+        "map y=x map o=p action go()->step()", 2, Some(1), Some(PATTERN_CAPTURE), false),
     r1_pattern_or: ("spec Impl { type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
         "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(x)) or y==3)} }",
-        "map y=x map o=p action go()->step()", 2, Some(0), Some(PATTERN_CAPTURE)),
+        "map y=x map o=p action go()->step()", 2, Some(0), Some(PATTERN_CAPTURE), false),
     r1_pattern_const: ("spec Impl { type V=0..5 const N=1 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
         "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(N)) and (forall k in 0..N {k<=1}))} }",
-        "map y=x map o=p action go()->step()", 2, Some(2), None),
+        "map y=x map o=p action go()->step()", 2, Some(2), None, false),
     r1_ambiguous_const_state: ("spec Impl {state {x:Int=0} fair action go(){x=0}}",
         "spec Abs {const N=3 state {N:Int=1} fair action step(){N=1} leadsTo L {forall z in 0..N {true ~> z<=1}}}",
-        "map N=1 action go()->step()", 2, None, None),
+        "map N=1 action go()->step()", 2, None, None, false),
     r1_unused_map: ("spec Impl {state {x:Int=0} fair action go(){requires x==0 x=1}}",
         "spec Abs {state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall x in 0..3 {x==0 ~> x==0}}}",
-        "map y=x action go()->step()", 0, Some(0), None),
+        "map y=x action go()->step()", 0, Some(0), None, false),
     r1_nested_const_binder: ("spec Impl {const k=1 state {x:Int=0} fair action go(){requires x==0 x=1}}",
         "spec Abs {state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> count(k in 0..3 where k>=0)<=2}}",
-        "map y=x action go()->step()", 2, Some(1), None),
+        "map y=x action go()->step()", 2, Some(1), None, false),
     r1_indexed_key_const: ("spec Impl {type K=0..1 const Z=1 state {d:Map<K,Int>} init {forall k:K {d[k]=0}} fair action go(k:K){requires d[k]==0 and k==1 d[k]=1}}",
         "spec Abs {type K=0..1 const Z=0 state {m:Map<K,Int>} init {forall k:K {m[k]=0}} fair action step(k:K){requires m[k]==0 m[k]=1} leadsTo L {m[Z]==0 ~> m[Z]==1}}",
-        "map m[k:K]=d[k] action go(k)->step(k)", 1, Some(0), None),
+        "map m[k:K]=d[k] action go(k)->step(k)", 1, Some(0), None, false),
     r1_indexed_own_binder: ("spec Impl {type K=0..1 state {d:Map<K,Int>} init {forall k:K {d[k]=0}} fair action go(k:K){requires d[k]==0 d[k]=1}}",
         "spec Abs {type K=0..1 state {m:Map<K,Int>} init {forall k:K {m[k]=0}} fair action step(k:K){requires m[k]==0 m[k]=1} leadsTo L {forall k:K {m[k]==0 ~> m[k]==1}}}",
-        "map m[k:K]=d[k] action go(k)->step(k)", 0, Some(0), None),
+        "map m[k:K]=d[k] action go(k)->step(k)", 0, Some(0), None, false),
     r2_pattern_and_false_or: ("spec Impl {type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1}}",
         "spec Abs {type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> (((o is some(x)) and false) or y==3)}}",
-        "map y=x map o=p action go()->step()", 2, Some(1), Some(PATTERN_CAPTURE)),
+        "map y=x map o=p action go()->step()", 2, Some(1), Some(PATTERN_CAPTURE), false),
     r2_pattern_or_false_and: ("spec Impl {type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1}}",
         "spec Abs {type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> (((o is some(x)) or false) and y==3)}}",
-        "map y=x map o=p action go()->step()", 2, Some(1), Some(PATTERN_CAPTURE)),
+        "map y=x map o=p action go()->step()", 2, Some(1), Some(PATTERN_CAPTURE), false),
     r2_pattern_not_or: ("spec Impl {type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1}}",
         "spec Abs {type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> (not (o is some(x)) or y==3)}}",
-        "map y=x map o=p action go()->step()", 2, Some(1), Some(PATTERN_CAPTURE)),
+        "map y=x map o=p action go()->step()", 2, Some(1), Some(PATTERN_CAPTURE), false),
     r2_pattern_implies_or: ("spec Impl {type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1}}",
         "spec Abs {type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> (((o is some(x)) => false) or y==3)}}",
-        "map y=x map o=p action go()->step()", 2, Some(1), Some(PATTERN_CAPTURE)),
+        "map y=x map o=p action go()->step()", 2, Some(1), Some(PATTERN_CAPTURE), false),
     r2_pattern_fresh: ("spec Impl {type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1}}",
         "spec Abs {type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> (((o is some(w)) or false) and y==3)}}",
-        "map y=x map o=p action go()->step()", 1, Some(1), None),
+        "map y=x map o=p action go()->step()", 1, Some(1), None, false),
     r2_nested_shadow: ("spec Impl {type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1}}",
         "spec Abs {type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {true ~> (forall y in 0..0 {(o is some(x)) and y==0})}}",
-        "map y=x map o=p action go()->step()", 0, Some(0), None),
+        "map y=x map o=p action go()->step()", 0, Some(0), None, false),
     r2_indexed_shadow: ("spec Impl {type V=0..5 type K=0..1 state {x:Int=0,p:Option<V> = some(3),d:Map<K,Int>} init {forall k:K {d[k]=0}} fair action go(){requires x==0 x=0}}",
         "spec Abs {type V=0..5 type K=0..1 state {y:Int=0,o:Option<V> = some(3),m:Map<K,Int>} init {forall k:K {m[k]=0}} fair action step(){requires y==0 y=0} leadsTo L {true ~> (forall m in 0..0 {(o is some(x)) and m==0})}}",
-        "map y=x map o=p map m[k:K]=d[k]+x action go()->step()", 0, Some(0), None),
-    r2_unused_local: ("spec Impl {state {x:Int=0} fair action go(){requires x==0 x=1}}",
-        "spec Abs {const N=3 state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall N in 0..3 {y==0 ~> y==1}}}",
-        "map y=x action go()->step()", 0, Some(0), None),
+        "map y=x map o=p map m[k:K]=d[k]+x action go()->step()", 0, Some(0), None, false),
+    r2_unused_local: (SCALAR_IMPL, "spec Abs {const N=3 state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall N in 0..3 {y==0 ~> y==1}}}", SCALAR_MAP, 2, Some(2), Some("invalid model expression: local binding 'N' shadows a constant of the same name; rename the local binding at 1:75"), true),
     r2_unused_local_fresh: ("spec Impl {state {x:Int=0} fair action go(){requires x==0 x=1}}",
         "spec Abs {const N=3 state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall M in 0..3 {y==0 ~> y==1}}}",
-        "map y=x action go()->step()", 0, Some(0), None),
-    r2_local_read: ("spec Impl {state {x:Int=0} fair action go(){requires x==0 x=1}}",
-        "spec Abs {const N=3 state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall N in 0..1 {N==0 ~> N==0}}}",
-        "map y=x action go()->step()", 2, Some(0), None),
-    r2_local_domain_only: ("spec Impl {state {x:Int=0} fair action go(){requires x==0 x=1}}",
-        "spec Abs {const N=3 state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall N in 0..N {y==0 ~> y==1}}}",
-        "map y=x action go()->step()", 0, Some(0), None),
-    r2_local_filter_read: ("spec Impl {state {x:Int=0} fair action go(){requires x==0 x=1}}",
-        "spec Abs {const N=3 state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> count(N in 0..1 where N>=0)<=2}}",
-        "map y=x action go()->step()", 2, Some(0), None),
+        "map y=x action go()->step()", 0, Some(0), None, false),
+    r2_local_read: (SCALAR_IMPL, "spec Abs {const N=3 state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall N in 0..1 {N==0 ~> N==0}}}", SCALAR_MAP, 2, Some(2), None, true),
+    r2_local_domain_only: (SCALAR_IMPL, "spec Abs {const N=3 state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall N in 0..N {y==0 ~> y==1}}}", SCALAR_MAP, 2, Some(2), None, true),
+    r2_local_filter_read: (SCALAR_IMPL, "spec Abs {const N=3 state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> count(N in 0..1 where N>=0)<=2}}", SCALAR_MAP, 2, Some(2), None, true),
 }
