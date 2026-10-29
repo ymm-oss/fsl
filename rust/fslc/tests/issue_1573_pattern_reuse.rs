@@ -86,6 +86,7 @@ impl Fixture {
             "check" => vec!["check", self.file],
             "Monitor" => vec!["replay", self.file, "--trace", "trace.json"],
             "mutate" => vec!["mutate", self.file, "--depth", "4", "--max-mutants", "128"],
+            "refine" => vec!["refine", "impl.fsl", "abs.fsl", self.file, "--depth", "4"],
             _ => vec![
                 "verify",
                 self.file,
@@ -183,17 +184,17 @@ fn verdict(value: &Value, exit: i32, consumer: &str, truth: bool, property: &str
 }
 
 fn matrix(cases: Vec<Case>) {
-    matrix_in_context(cases, "invalid model expression");
+    matrix_in_context(cases, "invalid model expression", &[false, true]);
 }
 
-fn matrix_in_context(cases: Vec<Case>, context: &str) {
+fn matrix_in_context(cases: Vec<Case>, context: &str, composition_modes: &[bool]) {
     eprintln!(
         "AXIS visibility: unchanged, no name-export contract is granted by collision-set rows"
     );
     let mut failures = Vec::new();
     let mut count = 0;
     for case in cases {
-        for composed in [false, true] {
+        for &composed in composition_modes {
             count += 1;
             let label = format!("{}/compose={composed}", case.name);
             let fixture = Fixture::new(&case, composed);
@@ -284,7 +285,71 @@ fn nested_statement_arm_names_are_reserved_in_later_statements() {
 
 #[test]
 fn ordinary_init_entries_reject_retained_pattern_reuse() {
-    matrix_in_context(forms::init_positions(), "invalid init statement");
+    matrix_in_context(
+        forms::init_positions(),
+        "invalid init statement",
+        &[false, true],
+    );
+}
+
+#[test]
+fn direct_init_reservations_cross_blocks_and_inline_initializers() {
+    // Composed fragments remain a known gap; never pin their false verified result.
+    matrix_in_context(
+        forms::direct_init_fragments(),
+        "invalid init statement",
+        &[false],
+    );
+}
+
+fn refinement_error_packet(message: &str, column: u64, width: u64) -> Value {
+    json!({
+        "fsl": "1.0", "result": "error", "kind": "type", "message": message,
+        "loc": {"line": 1, "column": column},
+        "span": {
+            "start": {"offset": column - 1, "line": 1, "column": column},
+            "end": {"offset": column - 1 + width, "line": 1, "column": column + width}
+        }
+    })
+}
+
+#[test]
+fn refinement_map_priority_and_alpha_repair_keep_complete_packets() {
+    let (case, abstraction, mapping) = forms::refinement_priority();
+    let later = "(q is some(z)) and z==3";
+    assert_eq!(mapping.matches(later).count(), 1);
+    for renamed in [false, true] {
+        let mut fixture = Fixture::new(&case, false);
+        let mapping = if renamed {
+            mapping.replacen(later, "(q is some(w)) and w==3", 1)
+        } else {
+            mapping.to_owned()
+        };
+        for (file, source) in [
+            ("impl.fsl", case.source.as_str()),
+            ("abs.fsl", abstraction),
+            ("map.fsl", mapping.as_str()),
+        ] {
+            std::fs::write(fixture.root.join(file), source).expect("write refinement input");
+        }
+        fixture.file = "map.fsl";
+        let (value, exit) = fixture.observe(&case.name, "refine");
+        let expected = if renamed {
+            refinement_error_packet(
+                "rename the mapping pattern binder 'z' to avoid capture",
+                130,
+                7,
+            )
+        } else {
+            refinement_error_packet(
+                "invalid map expression for 'b': pattern binding 'z' in 'is some(z)' shadows a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding) of the same name; rename the pattern variable",
+                33,
+                3,
+            )
+        };
+        assert_eq!(exit, 2, "{value}");
+        assert_eq!(value, expected, "renamed={renamed}");
+    }
 }
 
 #[test]

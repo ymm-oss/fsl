@@ -5,8 +5,12 @@ and its reads; the four standalone/compose #1442 nested-if reuse routes are
 included, with original refusal inputs retained and only the inner `u` renamed
 to `w` for accepted preservation controls. Visibility is not broadened, opposite
 statement arms remain independent, and candidate-local names do not escape.
-The statement rules also apply to ordinary init checking, preserving its
-initializer/const/map-key diagnostics. Expression then-to-else
+Direct-spec init checking applies these rules across all init blocks and inline
+initializers, preserving initializer/const/map-key diagnostics. Composed init
+still has a same-source fragment/inline→init reservation gap; common init can
+inherit unrelated Fresh decisions. Rebinding remains illegal. False verified
+results belong to #1622; compose init-fragment reservations will be tracked in
+a separate issue filed after merge. Expression then-to-else
 reuse is also rejected while the symbolic expression evaluator shares bindings
 (#1577). For sync actions and non-init paths, compose gives independent sources
 distinct hygienic pattern names:
@@ -17,3 +21,7 @@ used by another; check stays accepted and the correct verdict is holds, while
 a genuinely false control remains violated. Evaluator lifetime work remains
 tracked in #1622, including the still-unrepaired separation of component init
 patterns; the general init-source separation guarantee is not made here.
+Refinement map-expression collisions can precede preserved-progress capture
+errors; a later-name-only repair restores the base capture packet. Unknown
+zero-width map-expression error spans now use the available map declaration span,
+without replacing meaningful expression spans.

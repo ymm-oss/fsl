@@ -1241,8 +1241,14 @@ when checking a file, the message suffix changes from `at L:C` to
   exactlyOne have only their filter. Statement-if conditions reserve both arms
   and later statements, and bindings inside either arm reserve later statements.
   Opposite statement arms stay independent; candidate-local bindings stay local.
-  The statement rules apply to ordinary init and action checking; init retains
-  its initializer/const/map-key diagnostic owners while using the shared walk.
+  The statement rules apply to init and action bodies. Direct-spec init checking
+  shares one reservation phase across all init blocks and inline initializers,
+  retaining initializer/const/map-key diagnostic owners. Composed init has a
+  known check gap for same-source fragments and inline→init; common init can
+  also inherit an unrelated source's Fresh decision. Rebinding remains illegal.
+  False verified results belong to #1622; compose init-fragment reservations
+  will be tracked in a separate issue filed after merge. Do not claim general
+  composed-init checking from the direct guarantee.
   Repair by renaming the later declaration and its reads, e.g. replace
   `(p is some(v)) and v == 2` with `(p is some(w)) and w == 2`; do not treat a
   reservation as permission to read a name. Four formerly accepted #1442 nested

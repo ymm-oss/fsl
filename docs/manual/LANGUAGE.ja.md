@@ -857,8 +857,13 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   独立した本体/ofはありません。文のifの条件は両腕と後の文へ予約し、どちらかの腕の
   内部の束縛も後の文へ予約します。文の反対の腕は独立のままで、候補内の名前は
   量化・集約の外へ出ません。文の規則はinitとaction本体の両方に適用します。
-  通常のinit入口も共通の予約walkへ接続し、既存のinitializer・const・map-keyの
-  診断ownerは保ちます。後の束縛名を変えてください。例えば
+  direct specのinit入口は全init blockとinline初期化子を共通の予約walkで検査し、
+  既存のinitializer・const・map-keyの診断ownerを保ちます。composeでは同一sourceの
+  init断片間やinline→initへの予約に既知の検査欠落があり、compose自身のinitも
+  無関係なsourceのFresh決定で検査を素通りする場合があります。再束縛は不正のままです。
+  偽のverifiedは#1622の族で、composeのinitの断片への予約は別のissueで追います
+  (mergeの後に起票)。一般的なcomposed initの検査保証ではありません。
+  後の束縛名を変えてください。例えば
   `(p is some(v)) and v == 2`を`(p is some(w)) and w == 2`にします。
   これらの予約で名前の読める範囲は広がりません。従来の#1442の入れ子ifの例も、
   standalone/composeの4ルートが破壊的な除去になります。元の拒否入力を残し、

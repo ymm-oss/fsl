@@ -806,13 +806,28 @@ candidates. Native validation and hygiene consume those same summaries while
 advancing statement cursors. Each opposite statement arm starts from its own
 copy of the condition's reservations, rather than the previous arm's cursor.
 Ensures retain the final guard phase, not the action body's statement cursor.
-Ordinary model construction carries one phase through the logical init sequence
+Direct model construction carries one phase through the logical init sequence
 and invokes the same statement validator after its existing assignment checks.
 Its per-statement wrapper still owns init/inline-initializer, const/map-key and
 component-origin diagnostics. Public Kernel revalidation is not the only init
 gate. The native borrowed-AST checker and owned-AST source rewriter retain their
 separate condition/where/cursor wiring and diagnostic-owner loops; extraction
 and outward statement summaries, not all traversal wiring, are shared once.
+
+The direct guarantee includes all init blocks and inline initializers in one
+logical sequence (all inline initializers before explicit init). Two direct
+regressions cover separate init blocks and inline→init; renaming only the later
+binding/read restores acceptance and genuine four-consumer violations of P.
+Their composed false verified results are deliberately not regression expectations.
+
+Compose still has a distinct same-source init check gap: per-fragment hygiene
+resets its Scope, while name-keyed Fresh decisions can bypass the later model
+cursor. Inline→init is affected as well. Common compose init can inherit an
+unrelated component action's Fresh decision even in a single block. These are
+illegal rebindings, not an exception to the language rule. False verified
+results belong to the evaluator-lifetime family in #1622; compose init-fragment
+reservations will be tracked in a separate issue filed after merge. That scope
+decision is separate from the independent-source init separation below.
 
 Independent-source init separation remains outside this patch. Concatenating A's
 init match of some(1) and B's same-named match of some(2) can still make b.P
@@ -875,6 +890,19 @@ For each of the three changed routes, alpha-renaming only the later pattern
 declaration and its bound reads restores the complete base const-shadow packet.
 The repair controls preserve the wrapped component use location 2:3 as well as
 the message; a live count requires all three controls to execute.
+
+With #1638's preserved-progress capture gate, the existing map-expression type
+check runs before the progress preflight. A map with retained-name reuse and a
+mapping/abstract-binder capture therefore changes from the declaration's capture
+error at 1:130 (span129..136) to the earlier map-expression collision. Both remain
+kind type/exit2. When that expression error has only the unknown zero-width span,
+it now uses the map declaration span when available: the regression's map keyword at 1:33,
+span32..35. Meaningful expression spans are preserved. Renaming only the later
+q-pattern/read z→w restores the complete base capture packet, including1:130 and
+its nonempty span. This fourth priority row is separate from acceptance removals.
+The same origin repair updates the existing enum-to-numeric-set map rejection
+from the unknown 1:1 origin to its authored map keyword at 4:3, span40..43;
+the error message, type kind and exit2 remain unchanged.
 
 ### Source-separated syntax is an output contract change
 

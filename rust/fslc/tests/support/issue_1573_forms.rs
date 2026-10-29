@@ -604,3 +604,52 @@ pub fn init_source_pair(renamed: bool) -> (Case, String) {
         ),
     )
 }
+
+pub fn direct_init_fragments() -> Vec<Case> {
+    let mut cases = Vec::new();
+    for (name, source, line, column) in [
+        (
+            "blocks",
+            "spec A {\n  state { first: Bool, flag: Bool }\n  init {\n    if (some(1) is some(v)) { first = true }\n    else { first = false }\n  }\n  init {\n    flag = (some(2) is some(v)) and v == 1\n  }\n  action stay() {}\n  invariant P { flag }\n}\n",
+            8,
+            5,
+        ),
+        (
+            "inline-then-block",
+            "spec A {\n  state {\n    first: Bool = if (some(1) is some(v)) then true else false,\n    flag: Bool\n  }\n  init { flag = (some(2) is some(v)) and v == 1 }\n  action stay() {}\n  invariant P { flag }\n}\n",
+            6,
+            10,
+        ),
+    ] {
+        for renamed in [false, true] {
+            let later = "(some(2) is some(v)) and v == 1";
+            assert_eq!(source.matches(later).count(), 1);
+            cases.push(Case::new(
+                format!("direct-init-fragments/{name}/renamed={renamed}"),
+                if renamed {
+                    source.replacen(later, "(some(2) is some(w)) and w == 1", 1)
+                } else {
+                    source.into()
+                },
+                if renamed {
+                    Expected::Truth(false)
+                } else {
+                    Expected::Reject(line, column)
+                },
+            ));
+        }
+    }
+    cases
+}
+
+pub fn refinement_priority() -> (Case, &'static str, &'static str) {
+    (
+        Case::new(
+            "refinement-priority",
+            "spec Impl {type V=0..5 state {p:Option<V> = some(1),q:Option<V> = some(3)} fair action go(){p=some(1) q=some(3)}}\n".into(),
+            Expected::Check,
+        ),
+        "spec Abs {state {b:Bool=false} fair action step(){b=false} leadsTo L {forall z in 0..3 {true ~> (b or z!=3)}}}\n",
+        "refinement R {impl Impl abs Abs map b=((not (p is some(z))) or ((q is some(z)) and z==3)) action go()->step() preserve progress {respond L by go}}\n",
+    )
+}

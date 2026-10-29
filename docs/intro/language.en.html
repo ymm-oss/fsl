@@ -961,9 +961,14 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   bindings inside either arm also reserve names in later statements. Opposite
   statement arms remain independent, and candidate-local names do not escape
   a quantifier/aggregate. These statement rules apply in init and action bodies;
-  ordinary init validation shares the reservation walk while preserving its
-  existing initializer/const/map-key diagnostic owners. Rename the later binding,
-  for example change
+  direct-spec init validation shares the reservation walk across all init blocks
+  and inline initializers, preserving its initializer/const/map-key diagnostic
+  owners. Compose has a known check gap across same-source init fragments and
+  inline→init, and common init can inherit an unrelated source's Fresh decision.
+  These programs remain illegal; their false verified results belong to #1622,
+  while compose init-fragment reservations will be tracked in a separate issue
+  filed after merge. This is not a general composed-init checking guarantee.
+  Rename the later binding, for example change
   <code>(p is some(v)) and v == 2</code> to <code>(p is some(w)) and w == 2</code>.
   None of these reservations grants additional read visibility. This includes
   four breaking-removal routes from the earlier #1442 nested-if examples
