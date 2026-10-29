@@ -617,7 +617,7 @@ pub fn apply_edition(
 
 /// One input slot's diagnostics, classified before consumption and shared by its
 /// distinct results. Each result is moved into its finalization site once.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct SourceEdition {
     declared: Option<Edition>,
     next: bool,

@@ -221,13 +221,14 @@ fn dependency_edition_t06_isolates_the_actual_unowned_refine_step() {
     scratch.write("abstract.fsl", &source);
     scratch.write("map.fsl", "refinement M { impl C abs C maps auto }\n");
     let sections=parse_project_manifest("[requirements]\nfile = \"abstract.fsl\"\n[design]\nfile = \"root.fsl\"\nrefine_against = \"requirements\"\nmapping = \"map.fsl\"\ndepth = 2\n").unwrap();
-    let first = run_chain_step_isolated("refine", "design", &sections, &scratch.0);
-    let second = run_chain_step_isolated("refine", "design", &sections, &scratch.0);
+    let roots = prepare_project_roots(&sections, &scratch.0, read_unprefixed_spec_source).unwrap();
+    let first = run_chain_step_isolated("refine", "design", &sections, &scratch.0, &roots);
+    let second = run_chain_step_isolated("refine", "design", &sections, &scratch.0, &roots);
     assert!(!first.1 && !second.1);
     assert_eq!(first.0["detail"]["result"], "refines");
     assert_eq!(cases::stable(first.0), cases::stable(second.0));
     scratch.write("dep.fsl", &cases::next_leaf());
-    let result = run_chain_step_isolated("refine", "design", &sections, path.parent().unwrap());
+    let result = run_chain_step_isolated("refine", "design", &sections, path.parent().unwrap(), &roots);
     let mut observations = cases::Observations::default();
     let expected = json!({"layer":"design->requirements","kind":"refine","file":path,"against":"requirements","abs_file":scratch.0.join("abstract.fsl"),"mapping":scratch.0.join("map.fsl"),"depth":2,"status":"failed","result":"error","exit_code":2,"detail":cases::cli_refusal(&cases::next_leaf(),"dep.fsl")});
     observations.eq("T06/direct-step", result, (expected, true));

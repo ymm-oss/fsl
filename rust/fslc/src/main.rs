@@ -55,9 +55,11 @@ use log_replay::{
 };
 use process::{STACK_SIZE, block_on_native, parse_options};
 use property_selection::is_bounds_name;
+#[cfg(test)]
+use refinement::run_refine;
 use refinement::{
     abs_violation_json, fold_governance_from_source, implements_error_output,
-    implements_result_from_source_with_bounds, mismatch_paths, run_refine, run_refine_from_sources,
+    implements_result_from_source_with_bounds, mismatch_paths, run_refine_from_sources,
 };
 use spec_loading::{
     admit_root_source, dependency_resolver, finish_admitted, raw_delivery_allowed,
@@ -69,7 +71,7 @@ use spec_loading::{
     validate_requirement_trace_source,
 };
 use strict_tags::strict_tag_warnings_from_source;
-use verification::{run_verify_cli, run_verify_cli_admitted, run_verify_cli_from_source};
+use verification::{run_verify_cli_admitted, run_verify_cli_from_source};
 
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
 
@@ -3802,7 +3804,11 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
-    let mut results = run_chain_steps(&steps, &sections, base, keep_going, jobs);
+    let roots = match prepare_project_roots(&sections, base, read_unprefixed_spec_source) {
+        Ok(roots) => roots,
+        Err(refusal) => return refusal,
+    };
+    let mut results = run_chain_steps(&steps, &sections, base, roots, keep_going, jobs);
     let mut layers = Vec::new();
     for (index, slot) in results.iter_mut().enumerate() {
         // Every step up to and including the first failure has run at any
@@ -3912,11 +3918,7 @@ type ChainStepResults = Vec<Option<(Value, bool)>>;
 /// the root file's bytes is conservative: it covers every pair that can share
 /// a key, plus some that cannot. Refine and `impl` steps never touch the
 /// cache.
-fn chain_step_groups(
-    steps: &[(String, String)],
-    sections: &std::collections::BTreeMap<String, ManifestSection>,
-    base: &Path,
-) -> Vec<Vec<usize>> {
+fn chain_step_groups(steps: &[(String, String)], roots: &[ProjectRoot]) -> Vec<Vec<usize>> {
     let mut groups = Vec::<Vec<usize>>::new();
     let mut by_source = std::collections::BTreeMap::<Vec<u8>, usize>::new();
     for (index, (kind, layer)) in steps.iter().enumerate() {
@@ -3924,9 +3926,14 @@ fn chain_step_groups(
             continue;
         }
         let source = (kind == "spec")
-            .then(|| sections[layer].values.get("file"))
+            .then(|| {
+                roots
+                    .iter()
+                    .find(|root| root.layer == layer && !root.mapping)
+            })
             .flatten()
-            .and_then(|file| std::fs::read(base.join(file)).ok());
+            .and_then(|root| root.source.as_ref().ok())
+            .map(|source| source.as_bytes().to_vec());
         match source {
             Some(source) => {
                 if let Some(&group) = by_source.get(&source) {
@@ -3958,12 +3965,13 @@ fn run_chain_step_isolated(
     layer: &str,
     sections: &std::collections::BTreeMap<String, ManifestSection>,
     base: &Path,
+    roots: &[ProjectRoot],
 ) -> (Value, bool) {
     std::thread::scope(|scope| {
         let step = std::thread::Builder::new()
             .stack_size(STACK_SIZE)
             .name("fslc-chain-step".to_owned())
-            .spawn_scoped(scope, || run_chain_step(kind, layer, sections, base))
+            .spawn_scoped(scope, || run_chain_step(kind, layer, sections, base, roots))
             .expect("spawn a chain step thread");
         step.join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
@@ -4017,6 +4025,7 @@ fn run_chain_steps(
     steps: &[(String, String)],
     sections: &std::collections::BTreeMap<String, ManifestSection>,
     base: &Path,
+    roots: Vec<ProjectRoot>,
     keep_going: bool,
     jobs: usize,
 ) -> ChainStepResults {
@@ -4026,7 +4035,7 @@ fn run_chain_steps(
     let mut results: ChainStepResults = vec![None; steps.len()];
     if jobs <= 1 {
         for (index, (kind, layer)) in steps.iter().enumerate() {
-            let result = run_chain_step_isolated(kind, layer, sections, base);
+            let result = run_chain_step_isolated(kind, layer, sections, base, &roots);
             let failed = result.1;
             results[index] = Some(result);
             if failed && !keep_going {
@@ -4035,8 +4044,8 @@ fn run_chain_steps(
         }
         return results;
     }
-    let groups = Arc::new(chain_step_groups(steps, sections, base));
-    let shared = Arc::new((steps.to_vec(), sections.clone(), base.to_path_buf()));
+    let groups = Arc::new(chain_step_groups(steps, &roots));
+    let shared = Arc::new((steps.to_vec(), sections.clone(), base.to_path_buf(), roots));
     let next_group = Arc::new(AtomicUsize::new(0));
     let cutoff = Arc::new(AtomicUsize::new(usize::MAX));
     let (sender, receiver) = std::sync::mpsc::channel::<ChainStepMessage>();
@@ -4052,7 +4061,7 @@ fn run_chain_steps(
             .stack_size(STACK_SIZE)
             .name(format!("fslc-chain-{worker}"))
             .spawn(move || {
-                let (steps, sections, base) = &*shared;
+                let (steps, sections, base, roots) = &*shared;
                 while let Some(group) = groups.get(next_group.fetch_add(1, Ordering::SeqCst)) {
                     for &index in group {
                         if index > cutoff.load(Ordering::SeqCst) {
@@ -4060,7 +4069,7 @@ fn run_chain_steps(
                         }
                         let (kind, layer) = &steps[index];
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            run_chain_step_isolated(kind, layer, sections, base)
+                            run_chain_step_isolated(kind, layer, sections, base, roots)
                         }));
                         let ends_serial_loop = result
                             .as_ref()
@@ -4117,7 +4126,7 @@ fn run_chain_steps(
         && let Some(index) = steps.iter().position(|(kind, _)| kind == "impl")
     {
         let (kind, layer) = &steps[index];
-        results[index] = Some(run_chain_step(kind, layer, sections, base));
+        results[index] = Some(run_chain_step(kind, layer, sections, base, &shared.3));
     }
     results
 }
@@ -4167,6 +4176,7 @@ fn run_chain_step(
     layer: &str,
     sections: &std::collections::BTreeMap<String, ManifestSection>,
     base: &Path,
+    roots: &[ProjectRoot],
 ) -> (Value, bool) {
     let section = &sections[layer];
     if kind == "spec" {
@@ -4190,7 +4200,12 @@ fn run_chain_step(
                                     .to_owned(),
                                 ..CliVerifyOptions::default()
                             };
-                            let (detail, status) = run_verify_cli(&file_path, &file_path, &options);
+                            let root = project_root(roots, layer, false);
+                            let (detail, status) = run_prepared_project_roots(&[root], |sources| {
+                                run_verify_cli_admitted(
+                                    &file_path, &file_path, sources[0], &options, None,
+                                )
+                            });
                             (detail, status, "verify", Some(depth))
                         }
                         Err(message) => (
@@ -4201,7 +4216,10 @@ fn run_chain_step(
                         ),
                     }
                 } else {
-                    let (detail, status) = run_check(&file_path, &file_path);
+                    let root = project_root(roots, layer, false);
+                    let (detail, status) = run_prepared_project_roots(&[root], |sources| {
+                        run_check_from_source(&file_path, &file_path, sources[0], &root.edition)
+                    });
                     (detail, status, "check", None)
                 };
                 let passed = chain_layer_passes(&detail, status);
@@ -4285,8 +4303,19 @@ fn run_chain_step(
             };
             match depth_result {
                 Ok(depth) => {
-                    let (detail, status) =
-                        run_refine(&file_path, &target_path, &mapping_path, depth);
+                    let inputs = [
+                        project_root(roots, layer, false),
+                        project_root(roots, target, false),
+                        project_root(roots, layer, true),
+                    ];
+                    let (detail, status) = run_prepared_project_roots(&inputs, |sources| {
+                        run_refine_from_sources(
+                            &file_path,
+                            &target_path,
+                            [sources[0], sources[1], sources[2]],
+                            depth,
+                        )
+                    });
                     let passed = chain_layer_passes(&detail, status);
                     (
                         json!({
@@ -6057,20 +6086,6 @@ fn format_bindings(binding: &fsl_runtime::Bindings) -> String {
         .map(|(name, value)| format!("{name}={}", display_binding(value)))
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-/// `path` is read for source content (for a literate `.md` input, this is the
-/// materialized, blanked `.literate.fsl` sibling — its line positions match
-/// the original document). `display_path` is stamped into every user-visible
-/// label (`file` fields, embedded `at file:line:col` text) so the machine-
-/// readable output always names the document the caller actually passed in,
-/// never the transient materialization.
-fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_check_with_tags_from_source(path, display_path, &source, false, None, None)
 }
 
 /// Check one caller-owned root-source snapshot.
@@ -15419,6 +15434,7 @@ impl ProjectRoot {
 fn prepare_project_roots(
     sections: &std::collections::BTreeMap<String, ManifestSection>,
     base: &Path,
+    read_mapping: fn(&Path) -> Result<String, SpecLoadError>,
 ) -> Result<Vec<ProjectRoot>, (Value, i32)> {
     let mut roots = Vec::new();
     for mapping in [false, true] {
@@ -15440,7 +15456,11 @@ fn prepare_project_roots(
             };
             if let Some(file) = file {
                 let path = base.join(file);
-                let source = read_spec_source(&path);
+                let source = if mapping {
+                    read_mapping(&path)
+                } else {
+                    read_spec_source(&path)
+                };
                 roots.push(ProjectRoot {
                     layer,
                     mapping,
@@ -15464,6 +15484,27 @@ fn project_root<'a>(roots: &'a [ProjectRoot], layer: &str, mapping: bool) -> &'a
         .iter()
         .find(|root| root.layer == layer && root.mapping == mapping)
         .expect("prepared manifest slot")
+}
+
+fn run_prepared_project_roots(
+    roots: &[&ProjectRoot],
+    run: impl FnOnce(&[&str]) -> (Value, i32),
+) -> (Value, i32) {
+    let sources = match roots
+        .iter()
+        .map(|root| root.source())
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(sources) => sources,
+        Err(error) => return error,
+    };
+    let editions = roots
+        .iter()
+        .map(|root| root.edition.clone())
+        .collect::<Vec<_>>();
+    run_prepared_roots(&editions, false, || {
+        finish_admitted(run(&sources), &editions, false)
+    })
 }
 
 struct ProjectSources {
@@ -15873,8 +15914,11 @@ fn prepare_analysis(path: &Path) -> Result<PreparedAnalysis, (Value, i32)> {
                 2,
             )
         })?;
-        let roots =
-            prepare_project_roots(&sections, path.parent().unwrap_or_else(|| Path::new(".")))?;
+        let roots = prepare_project_roots(
+            &sections,
+            path.parent().unwrap_or_else(|| Path::new(".")),
+            read_spec_source,
+        )?;
         for root in &roots {
             root.source()?;
         }
@@ -18342,7 +18386,8 @@ mod chain_jobs_tests {
         }
         sections.insert("impl".to_owned(), ManifestSection::default());
         steps.push(("impl".to_owned(), "impl".to_owned()));
-        let groups = chain_step_groups(&steps, &sections, &base);
+        let roots = prepare_project_roots(&sections, &base, read_unprefixed_spec_source).unwrap();
+        let groups = chain_step_groups(&steps, &roots);
         std::fs::remove_dir_all(&base).expect("remove scratch dir");
         assert_eq!(groups, vec![vec![0], vec![1], vec![2]]);
         assert_eq!(chain_worker_count(64, groups.len()), 3);
