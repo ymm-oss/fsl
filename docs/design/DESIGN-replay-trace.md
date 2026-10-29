@@ -85,7 +85,7 @@ requirements branch split as `submit.b1` (the name conformance prints, #1256) or
 (`NameMap::resolve_action` in `rust/fsl-core/src/naming.rs`); neither spelling
 is rewritten into the other. A spelling that matched more than one action would
 be an input error (exit 2) rather than a choice. A checked model cannot reach
-that case, because no declared name contains `__` (check rejects one, #1256, #1600).
+that case, because no declared name contains `__` (check rejects one, #1256).
 An `internal` component action is absent from the model and is rejected under
 either spelling.
 

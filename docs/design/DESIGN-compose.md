@@ -237,7 +237,7 @@ In the stage before `build_spec`, the compose is **expanded into the AST of a si
    component declaration from a glue one). The table is the model's
    `fsl_core::NameMap` (`rust/fsl-core/src/naming.rs`), which is also the only
    place that spells the `alias__name` physical name and the names the engines
-   build (`fsl_core::SyntheticName`). No declared name contains `__` (#1256, #1600:
+   build (`fsl_core::SyntheticName`). No declared name contains `__` (#1256:
    check rejects one, `fsl_core::reject_declared_separator`, before lowering),
    so the physical name `alias__name` has one reading. Before #1256 it did not
    (`a__b` + `c` and `a` + `b__c` both gave `a__b__c`); the public name

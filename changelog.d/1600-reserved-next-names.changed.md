@@ -1,6 +1,6 @@
 Changed (#1600, breaking): in next-edition requirements, a relation role, a
-resource name, and a measure name may no longer contain `__`, completing
-#1256's rule for declared names. `fslc check` rejects
+resource name, and a measure name may no longer contain `__`, extending
+#1256's `__` reservation to these three kinds of next-edition declaration. `fslc check` rejects
 `Claim belongs to User as __owner via approve`, `resource __r: Amount = 0`,
 and `measure __m = count Claim in Approved` with `kind: "name"`, exit 2,
 located at the declaration, and the message
