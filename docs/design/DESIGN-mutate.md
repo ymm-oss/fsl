@@ -102,10 +102,14 @@ Consequences that follow from mutating the rendered text rather than the domain 
 Native built-in mutants are retained as edits: a replacement item, a replacement
 action part, or a removed action part. Only selected mutants are materialized,
 one at a time, by cloning the enumerated base spec and applying one edit; explain
-counterfactuals likewise materialize only their selected operators. Retained
-memory no longer scales as the full spec size times the catalog size. Residual:
-expression mutations still retain whole rewritten expressions (and statement
-mutations retain their rewritten statements), not minimal expression-path edits.
+counterfactuals likewise materialize only their selected operators. Discovery
+avoids a full spec clone for every candidate. Residual: edits are not minimal
+expression-path patches. Expression mutations retain whole rewritten expressions;
+each init mutant retains a rewritten copy of the entire init statement vector,
+and mutants of a whole top-level `if` statement retain a rewritten copy of that
+entire statement, including its branches. For these init and `if` mutants,
+retained memory still scales with that block or statement's size times its
+mutant count, so a large block can still have quadratic retained-edit cost.
 Selection order and the full discovery count remain the §1 contract; §5's cap
 note and gate accounting are unchanged.
 
