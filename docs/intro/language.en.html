@@ -1158,12 +1158,12 @@ This is also a conservative concrete-support breaking removal: after
 <code>flag = true</code>, a fixed-target write under <code>where flag and k == 0</code> is refused
 by explicit and Monitor with <code>init does not assign</code> even if the runtime domain
 is nonempty, rather than producing an incorrect verdict.</p>
-<p>There is a separate pre-existing explicit limitation (#1520): with a
-where-filtered or collection binder, reading the current key after writing it
-is allowed by the #1518 read-order rule, but explicit and Monitor still refuse
-with <code>before it is assigned</code>, as they did on the base. This is a conservative
-binder-key coverage limitation, not an incorrect verdict; <code>--engine auto</code>
-falls back to BMC. #1520 tracks support for these forms.</p>
+<p>Explicit, Monitor and refinement resolve state-independent filtered type/range
+and collection binder domains for init key coverage (#1520). A current-key read
+after its write is supported when the selected keys establish full-root coverage;
+<code>--engine auto</code> then uses explicit without fallback. Empty domains contribute no
+coverage, partial domains cover only selected keys, and state-dependent filters
+remain unresolved. The check-time read-order rule is unchanged.</p>
 <p>Breaking-removal sweep (#1518): base
 <code>28c4eab710f8d83e766bb0e7c7e006d09d7777d8</code> versus head
 <code>9d94c5cb5447834f329002200afa0f3404d9a9a0</code> plus the production runtime change
