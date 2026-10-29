@@ -77,8 +77,8 @@ refinement or governance documents newly supported mutate inputs.
 
 ## Type-boundary evidence
 
-Base `5536ebc193219c3f396a21a5ea15c560fabfdc33` and implementation ancestor
-`fbaab5899b95d5542bc3dad0e76e3afa4e23934a` were each extracted with `git archive`
+Base `e4261ed32e98cd0798bdbfc62a83560641dadc4f` and implementation ancestor
+`ec09d184a2aa063dcfc393ce177acb5a4271a440` were each extracted with `git archive`
 into a fresh directory and built independently with Rust 1.98.0. Each binary
 ran `fslc check <relative-path>` in its own tree, with cache disabled, twice over
 all **603** `.fsl` files in `specs/`, `examples/` and `rust/fslc/tests/fixtures/`,
@@ -109,6 +109,24 @@ case changes both check and verify, but is one source removal, not two.
 Three standalone refine and two inline verify consumers supplement the check
 sweep, twice per binary; legal `seq_req(0)` remains verified. These are all
 equal-carrier-rule removals, not a change to indexed scalar mappings.
+
+## Diagnostic priority with preserved progress
+
+After integration with #1595, independent probes exercised a state map
+`seq = if (p is some(z)) then xs else xs` and a preserved abstract progress
+property with a binder named `z`. With equal Seq carriers, both base and head
+report the mapping-pattern capture at the existing `respond` location 1:116.
+With implementation `V=0..3` versus abstract `V=0..2`, head reports the map's
+carrier error first, at the existing unknown location 1:1, whether or not the
+pattern also captures `z`. Base still accepts the type-only form and reports
+the capture for the doubly invalid form. A fresh pattern `w` with equal carriers
+refines on both. All four probes ran twice per binary. Thus the mixed probe has
+an observed error→error priority change outside the 637-form sweep above; the
+#1595 capture check is not removed or bypassed for well-typed maps.
+
+This is a standalone refinement boundary. Attempting `preserve progress`
+inside inline `implements` remains a parse error on both binaries, before
+mutation enumeration. It is not newly assigned a mutation classification.
 
 ## Executable controls and limits
 

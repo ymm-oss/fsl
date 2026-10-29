@@ -921,7 +921,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `Int`は有限のドメインを持ちません。リテラルから推論した要素型も含め、これを含む
   Set/Seq/Mapは従来の再帰的な型互換(Seqリテラルの推論容量も含む)を保ちます。
   リテラルの型付けを変更するものではありません。
-  base `5536ebc1` と実装の祖先 `fbaab589` を各 archive で build し、603 corpus形と
+  base `e4261ed3` と実装の祖先 `ec09d184` を各 archive で build し、603 corpus形と
   元の inline 16形を各2回 check しました。corpusの除去0、error→errorの診断変更0、
   inlineのok→errorは3形です。`FALSE_VACUITY` / `CondMap` (Mapキー0..0対0..2、20:41)、
   #1522の`MAP` (Mapキー0..2対0..1、7:35)、`SET_WIDENING` (Setの0..2から0..4、6:48)。

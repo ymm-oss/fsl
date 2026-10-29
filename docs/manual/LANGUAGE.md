@@ -986,7 +986,7 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Seq capacity), without changing literal typing. Refinement resolves each
   model's types independently and retains
   its existing `type` error with fixed unknown location 1:1.
-  Measured base `5536ebc1` vs implementation ancestor `fbaab589`, each built in
+  Measured base `e4261ed3` vs implementation ancestor `ec09d184`, each built in
   its own archive, twice checked 603 corpus + 16 original inline forms: no corpus
   removals, zero error→error diagnostic changes, and three inline ok→error forms:
   `FALSE_VACUITY` / `CondMap` (Map keys 0..0 vs 0..2, 20:41), #1522 `MAP`
