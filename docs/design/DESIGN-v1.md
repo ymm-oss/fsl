@@ -406,6 +406,10 @@ app spec.
 
 ### 7.1 CLI
 
+> **Historical `--property` interface (v1).** The invariant-only selector
+> below records the v1 design, not the current CLI contract. For current
+> property-selection rules, see the [language reference, §7](../manual/LANGUAGE.md#7-the-verifier-fslc).
+
 ```
 fslc check  <file.fsl>                          # syntax/name/type check only (for the fast loop)
 fslc verify <file.fsl> [--depth K]              # BMC (default K=8)

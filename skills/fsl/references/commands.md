@@ -671,13 +671,14 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   unreachable at baseline should show all of their mutants surviving with
   the existing dead-action note, not killed.
 - `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
-  `reachable` declarations and checks only the named property kind in isolation.
-  Under `--engine induction --property <trans>`, the named transition is the
-  only transition obligation, while every user invariant and implicit type
-  bound remains in the base case and induction hypothesis. This is the one
-  dependency-preserving exception to model restriction. Existing selected-
-  invariant behavior is unchanged and still drops sibling invariants. Selected
-  `leadsTo` and `reachable` remain rejected by the induction selector.
+  `reachable` declarations and restricts user declarations to the selected name.
+  Selecting an invariant drops sibling user invariants regardless of engine.
+  Under induction, selecting a `trans` retains all user invariants in the base
+  case and induction hypothesis, with no sibling transition obligations.
+  Retaining those user declarations is the one dependency-preserving exception
+  to model restriction. Independently, the induction base checks every implicit
+  type bound for any selected name; see [automatic checks](syntax.md#6-automatic-checks-checked-even-if-not-written).
+  Selected `leadsTo` and `reachable` remain rejected by the induction selector.
   `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
   it removes named invariants, `trans`, `leadsTo`, and `reachable` checks from
   the run and from checked-property outputs. If both options name the same
