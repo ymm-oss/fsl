@@ -2468,14 +2468,18 @@ mod tests {
         worker["governance"]["preservations"][0]["result"].clone()
     }
 
+    mod issue_1599_identifiers {
+        include!("../../fslc/tests/support/identifiers.rs");
+    }
+
     fn issue_1599_request(hi: u32) -> Request {
         let mut request = governance_request(
             "SmallImpl",
-            "spec SmallImpl { type T = 0..2 state { n: Int = 0 } }",
+            "spec SmallImpl { type Carrier1599 = 0..2 state { n: Int = 0 } }",
         );
         request.files.insert(
             "small_abs.fsl".into(),
-            format!("spec SmallAbs {{ type T = 0..{hi} state {{ n: Int = 0 }} }}"),
+            format!("spec SmallAbs {{ type Carrier1599 = 0..{hi} state {{ n: Int = 0 }} }}"),
         );
         request
     }
@@ -2490,9 +2494,7 @@ mod tests {
         assert_eq!(worker["loc"]["line"], 4, "{worker}");
         assert_eq!(worker["loc"]["column"], 3, "{worker}");
         let message = worker["message"].as_str().unwrap();
-        for name in ["T", "SmallImpl", "SmallAbs"] {
-            assert!(message.contains(name), "{message}");
-        }
+        issue_1599_identifiers::assert_names(message, &["Carrier1599", "SmallImpl", "SmallAbs"]);
     }
 
     #[test]

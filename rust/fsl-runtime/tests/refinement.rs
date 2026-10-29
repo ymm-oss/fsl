@@ -5,6 +5,9 @@ use fsl_core::TraceStep;
 use fsl_core::{FsResolver, build_model, parse_kernel_source, parse_refinement};
 use fsl_runtime::{RefinementCheck, RefinementFailure, RefinementVerdict, Violation};
 
+#[path = "../../fslc/tests/support/identifiers.rs"]
+mod identifiers;
+
 // The outcome is read only through `RefinementCheck::verdict` (#1262). In
 // debug builds `verdict()` also asserts that at most one outcome field is
 // set, which is what the old "impl_violation and failure must be mutually
@@ -38,10 +41,12 @@ const ABS: &str = "spec MinAbs { type AQty = 0..1 state { n: AQty } init { n = 1
 
 #[test]
 fn issue_1599_runtime_rejects_collisions_without_frontend_validation() {
-    let implementation = model("spec Impl { type T = 0..2 state { x: Int = 0 } }");
-    let mut abstraction = model("spec Abs { type T = 0..2 state { x: Int = 0 } }");
+    let implementation =
+        model("spec Impl1599Spec { type Carrier1599 = 0..2 state { x: Int = 0 } }");
+    let mut abstraction =
+        model("spec Abs1599Spec { type Carrier1599 = 0..2 state { x: Int = 0 } }");
     let mapping = parse_refinement(
-        "refinement R { impl Impl abs Abs maps auto }",
+        "refinement R { impl Impl1599Spec abs Abs1599Spec maps auto }",
         &implementation,
         &abstraction,
     )
@@ -51,7 +56,7 @@ fn issue_1599_runtime_rejects_collisions_without_frontend_validation() {
     );
     // Inject the conflicting operand after parsing: no frontend collision gate can protect runtime.
     abstraction.types.insert(
-        "T".into(),
+        "Carrier1599".into(),
         fsl_core::TypeDef::Domain {
             lo: 0,
             hi: 1,
@@ -63,9 +68,7 @@ fn issue_1599_runtime_rejects_collisions_without_frontend_validation() {
     let message = observed
         .expect_err("runtime must reject different domain definitions")
         .to_string();
-    for name in ["T", "Impl", "Abs"] {
-        assert!(message.contains(name), "{message}");
-    }
+    identifiers::assert_names(&message, &["Carrier1599", "Impl1599Spec", "Abs1599Spec"]);
 }
 
 /// Negative control for #466: an impl whose own guardless `dec()` walks its

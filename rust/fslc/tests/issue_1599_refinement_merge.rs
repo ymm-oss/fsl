@@ -5,11 +5,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[path = "support/identifiers.rs"]
+mod identifiers;
+
 static NEXT: AtomicUsize = AtomicUsize::new(0);
-const HEADER: &str = "// location sentinel\n\n   refinement R { impl Impl abs Abs ";
-const IMPL_RANGE: &str =
-    "spec Impl { type T = 0..2 state { x: T = 0 } action go() { requires x == 0 x = 1 } }";
-const ABS_PROGRESS: &str = "spec Abs { type T = 0..0 state { y: Int = 0 } fair action step() { requires y < 2 y = y + 1 } leadsTo L { y == 0 ~> y == 2 } }";
+const HEADER: &str = "// location sentinel\n\n   refinement R { impl Impl1599Spec abs Abs1599Spec ";
+const IMPL_RANGE: &str = "spec Impl1599Spec { type Carrier1599 = 0..2 state { x: Carrier1599 = 0 } action go() { requires x == 0 x = 1 } }";
+const ABS_PROGRESS: &str = "spec Abs1599Spec { type Carrier1599 = 0..0 state { y: Int = 0 } fair action step() { requires y < 2 y = y + 1 } leadsTo L { y == 0 ~> y == 2 } }";
 const PROGRESS: &str = "action go() -> step() preserve progress { respond L by go } }";
 
 struct Fixture(PathBuf);
@@ -83,57 +85,62 @@ fn located_collision(observed: &(Value, i32), names: [&str; 3], line: u32, col: 
     assert_eq!(observed.0["loc"]["line"], line, "{}", observed.0);
     assert_eq!(observed.0["loc"]["column"], col, "{}", observed.0);
     let message = observed.0["message"].as_str().unwrap();
-    for token in names {
-        assert!(message.contains(token), "{message}");
-    }
+    identifiers::assert_names(message, &names);
 }
 
 fn issue_case(index: usize, control: bool) {
-    let abs_enum = "spec Abs { enum P { B } state { y: Int = 0 } fair action step() { requires y == 0 y = 1 } leadsTo L { y == 0 ~> y == 1 } }";
-    let abs_safety =
-        "spec Abs { type T = 0..1 state { y: Int = 0 } action step() { requires y == 0 y = 1 } }";
+    let abs_enum = "spec Abs1599Spec { enum P { Member1599B } state { y: Int = 0 } fair action step() { requires y == 0 y = 1 } leadsTo L { y == 0 ~> y == 1 } }";
+    let abs_safety = "spec Abs1599Spec { type Carrier1599 = 0..1 state { y: Int = 0 } action step() { requires y == 0 y = 1 } }";
     let rows = [
         (
             IMPL_RANGE,
             ABS_PROGRESS,
             "map y = x ".to_owned() + PROGRESS,
-            "T",
+            "Carrier1599",
             "progress_lost",
         ),
         (
-            "spec Impl { enum S { A, B, C } state { s: S = A } fair action go() { requires s == B s = C } }",
+            "spec Impl1599Spec { enum S { A, Member1599B, C } state { s: S = A } fair action go() { requires s == Member1599B s = C } }",
             abs_enum,
             "map y = if s == C then 1 else 0 ".to_owned() + PROGRESS,
-            "B",
+            "Member1599B",
             "progress_lost",
         ),
         (
-            "spec Impl { enum S { A, B } state { s: S = A } fair action go() { requires s == A s = B } }",
+            "spec Impl1599Spec { enum S { A, Member1599B } state { s: S = A } fair action go() { requires s == A s = Member1599B } }",
             abs_enum,
             "map y = if s == A then 0 else 1 ".to_owned() + PROGRESS,
-            "B",
+            "Member1599B",
             "",
         ),
         (
-            "spec Impl { type T = 0..2 state { x: Int = 0 } action go() { requires x == 0 x = 1 } }",
+            "spec Impl1599Spec { type Carrier1599 = 0..2 state { x: Int = 0 } action go() { requires x == 0 x = 1 } }",
             abs_safety,
-            "map y = if (exists k: T { k == 2 }) then 1 else 0 action go() -> stutter }".to_owned(),
-            "T",
+            "map y = if (exists k: Carrier1599 { k == 2 }) then 1 else 0 action go() -> stutter }".to_owned(),
+            "Carrier1599",
             "abs_state_mismatch",
         ),
         (
-            "spec Impl { enum T { A, B } state { x: Int = 0 } action go() { requires x == 0 x = 1 } }",
+            "spec Impl1599Spec { enum Carrier1599 { A, Member1599B } state { x: Int = 0 } action go() { requires x == 0 x = 1 } }",
             abs_safety,
-            "map y = if (exists k: T { k == B }) then 1 else 0 action go() -> stutter }".to_owned(),
-            "T",
+            "map y = if (exists k: Carrier1599 { k == Member1599B }) then 1 else 0 action go() -> stutter }".to_owned(),
+            "Carrier1599",
             "abs_state_mismatch",
         ),
     ];
     let (implementation, abstraction, body, name, failure) = &rows[index];
     let abstraction = if control {
         abstraction.replace(
-            if *name == "T" { "type T" } else { "{ B }" },
-            if *name == "T" { "type U" } else { "{ Q }" },
+            if *name == "Carrier1599" {
+                "type Carrier1599"
+            } else {
+                "{ Member1599B }"
+            },
+            if *name == "Carrier1599" {
+                "type Renamed1599"
+            } else {
+                "{ Q }"
+            },
         )
     } else {
         (*abstraction).to_owned()
@@ -158,7 +165,7 @@ fn issue_case(index: usize, control: bool) {
     }
     let observed = fixture.refine();
     if !control {
-        located_collision(&observed, [name, "Impl", "Abs"], 3, 4);
+        located_collision(&observed, [name, "Impl1599Spec", "Abs1599Spec"], 3, 4);
     } else if failure.is_empty() {
         verdict(&observed, 0, "refines", None);
     } else {
@@ -175,14 +182,20 @@ issue_tests! {
 }
 
 fn definitions(left: &str, right: &str, reject: bool) {
+    let [left, right] = [left, right].map(|declaration| declaration.replace('T', "Carrier1599"));
     let fixture = Fixture::new(
-        &format!("spec Impl {{ {left} state {{ x: Int = 0 }} }}"),
-        &format!("spec Abs {{ {right} state {{ x: Int = 0 }} }}"),
+        &format!("spec Impl1599Spec {{ {left} state {{ x: Int = 0 }} }}"),
+        &format!("spec Abs1599Spec {{ {right} state {{ x: Int = 0 }} }}"),
         &(HEADER.to_owned() + "maps auto }"),
     );
     let observed = fixture.refine();
     if reject {
-        located_collision(&observed, ["T", "Impl", "Abs"], 3, 4);
+        located_collision(
+            &observed,
+            ["Carrier1599", "Impl1599Spec", "Abs1599Spec"],
+            3,
+            4,
+        );
     } else {
         verdict(&observed, 0, "refines", None);
     }
@@ -212,17 +225,22 @@ fn shared_enum_without_progress_is_accepted() {
 #[test]
 fn progress_member_collision_rejects_even_matching_ordinals() {
     let fixture = Fixture::new(
-        "spec Impl { enum S { A, B } state { s: S = A } fair action go() { requires s == A s = B } }",
-        "spec Abs { enum P { Q, B } state { y: Int = 0 } fair action step() { requires y == 0 y = 1 } leadsTo L { y == 0 ~> y == 1 } }",
+        "spec Impl1599Spec { enum S { A, Member1599B } state { s: S = A } fair action go() { requires s == A s = Member1599B } }",
+        "spec Abs1599Spec { enum P { Q, Member1599B } state { y: Int = 0 } fair action step() { requires y == 0 y = 1 } leadsTo L { y == 0 ~> y == 1 } }",
         &(HEADER.to_owned() + "map y = if s == A then 0 else 1 " + PROGRESS),
     );
-    located_collision(&fixture.refine(), ["B", "Impl", "Abs"], 3, 4);
+    located_collision(
+        &fixture.refine(),
+        ["Member1599B", "Impl1599Spec", "Abs1599Spec"],
+        3,
+        4,
+    );
 }
 #[test]
 fn shared_enum_bare_reference_remains_ambiguous() {
     let fixture = Fixture::new(
-        "spec Impl { enum S { A, B } state { s: S = A } }",
-        "spec Abs { enum P { B } state { y: Int = 0 } }",
+        "spec Impl1599Spec { enum S { A, B } state { s: S = A } }",
+        "spec Abs1599Spec { enum P { B } state { y: Int = 0 } }",
         &(HEADER.to_owned() + "map y = if s == B then 1 else 0 }"),
     );
     let observed = fixture.refine();
@@ -235,7 +253,7 @@ fn shared_enum_bare_reference_remains_ambiguous() {
     );
 }
 
-const GOVERNANCE: &str = "governance G {\n  control CTRL-1 \"preserved\"\n\n  preservation P {\n    before Abs from \"abs.fsl\"\n    after Impl from \"impl.fsl\"\n    preserve CTRL-1\n    checked_by refinement \"map.fsl\"\n  }\n}";
+const GOVERNANCE: &str = "governance G {\n  control CTRL-1 \"preserved\"\n\n  preservation P {\n    before Abs1599Spec from \"abs.fsl\"\n    after Impl1599Spec from \"impl.fsl\"\n    preserve CTRL-1\n    checked_by refinement \"map.fsl\"\n  }\n}";
 fn governance_collision(cmd: &str) {
     let fixture = Fixture::new(
         IMPL_RANGE,
@@ -245,7 +263,7 @@ fn governance_collision(cmd: &str) {
     fixture.write("governance.fsl", GOVERNANCE);
     located_collision(
         &fixture.run(&[cmd, "governance.fsl"]),
-        ["T", "Impl", "Abs"],
+        ["Carrier1599", "Impl1599Spec", "Abs1599Spec"],
         4,
         3,
     );
@@ -260,11 +278,15 @@ fn governance_verify_collision() {
 }
 #[test]
 fn inline_collision_is_located_at_implements() {
-    let fixture = Fixture::new("", "spec Abs { type T = 0..1 state { x: Int = 0 } }", "");
-    fixture.write("inline.fsl", "requirements Impl {\n\n   implements Abs from \"abs.fsl\" { maps auto }\n type T = 0..2\n state { x: Int = 0 }\n}");
+    let fixture = Fixture::new(
+        "",
+        "spec Abs1599Spec { type Carrier1599 = 0..1 state { x: Int = 0 } }",
+        "",
+    );
+    fixture.write("inline.fsl", "requirements Impl1599Spec {\n\n   implements Abs1599Spec from \"abs.fsl\" { maps auto }\n type Carrier1599 = 0..2\n state { x: Int = 0 }\n}");
     located_collision(
         &fixture.run(&["check", "inline.fsl"]),
-        ["T", "Impl", "Abs"],
+        ["Carrier1599", "Impl1599Spec", "Abs1599Spec"],
         3,
         4,
     );
@@ -276,8 +298,14 @@ fn chain_collision_reports_failed_link() {
         ABS_PROGRESS,
         &(HEADER.to_owned() + "map y = x " + PROGRESS),
     );
-    fixture.write("top.fsl", &ABS_PROGRESS.replace("Abs", "Top"));
-    fixture.write("top-map.fsl", "refinement S { impl Abs abs Top maps auto }");
+    fixture.write(
+        "top.fsl",
+        &ABS_PROGRESS.replace("Abs1599Spec", "Top1599Spec"),
+    );
+    fixture.write(
+        "top-map.fsl",
+        "refinement S { impl Abs1599Spec abs Top1599Spec maps auto }",
+    );
     let observed = fixture.run(&[
         "refine",
         "impl.fsl",
@@ -288,55 +316,47 @@ fn chain_collision_reports_failed_link() {
         "--depth",
         "4",
     ]);
-    located_collision(&observed, ["T", "Impl", "Abs"], 3, 4);
+    located_collision(
+        &observed,
+        ["Carrier1599", "Impl1599Spec", "Abs1599Spec"],
+        3,
+        4,
+    );
     assert_eq!(
         observed.0["failed_link"],
-        json!({"from":"Impl", "to":"Abs", "kind":"type"})
+        json!({"from":"Impl1599Spec", "to":"Abs1599Spec", "kind":"type"})
     );
 }
 
-fn corpus(
-    implementation: &str,
-    abstraction: &str,
-    mapping: &str,
-    depth: &str,
-    status: i32,
-    kind: Option<&str>,
-) {
-    let observed = run(
-        &root(),
-        &[
-            "refine",
-            implementation,
-            abstraction,
-            mapping,
-            "--depth",
-            depth,
-        ],
-    );
+fn corpus(paths: &[&str], depth: &str, status: i32, kind: Option<&str>) {
+    let mut args = vec!["refine"];
+    args.extend_from_slice(paths);
+    args.extend(["--depth", depth]);
+    let observed = run(&root(), &args);
     verdict(
         &observed,
         status,
         if status == 0 {
             "refines"
-        } else if status == 2 {
-            "error"
         } else {
             "refinement_failed"
         },
         kind,
     );
 }
-#[test]
-fn agentic_rag_symmetric_difference_stays_refines() {
-    corpus(
-        "examples/agentic_rag/agentic_rag_requirements.fsl",
-        "examples/agentic_rag/agentic_rag_business.fsl",
-        "examples/agentic_rag/agentic_rag_requirements_refines_business.fsl",
-        "7",
-        0,
-        None,
-    );
+macro_rules! corpus_tests { ($($name:ident: $(($paths:expr, $depth:expr, $status:expr, $kind:expr)),+;)*) => { $(#[test] fn $name() { $(corpus($paths, $depth, $status, $kind);)+ })* }; }
+corpus_tests! {
+    agentic_rag_symmetric_difference_stays_refines: (&["examples/agentic_rag/agentic_rag_requirements.fsl", "examples/agentic_rag/agentic_rag_business.fsl", "examples/agentic_rag/agentic_rag_requirements_refines_business.fsl"], "7", 0, None);
+    identical_chain_types_stay_accepted:
+        (&["examples/refinement_chain/bot.fsl", "examples/refinement_chain/mid.fsl", "examples/refinement_chain/bot_refines_mid.fsl"], "6", 0, None),
+        (&["examples/refinement_chain/mid.fsl", "examples/refinement_chain/top.fsl", "examples/refinement_chain/mid_refines_top.fsl"], "6", 0, None),
+        (&["examples/refinement_chain/bot.fsl", "examples/refinement_chain/mid.fsl", "examples/refinement_chain/bot_refines_mid.fsl", "examples/refinement_chain/top.fsl", "examples/refinement_chain/mid_refines_top.fsl"], "6", 0, None);
+    order_refund_preserves_both_verdicts:
+        (&["examples/validation/order_refund_windowed.fsl", "examples/validation/order_refund.fsl", "examples/validation/order_refund_windowed_refines.fsl"], "8", 0, None),
+        (&["examples/validation/order_refund_instant.fsl", "examples/validation/order_refund.fsl", "examples/validation/order_refund_instant_refines.fsl"], "8", 1, Some("abs_requires_failed"));
+    typed_enum_conversion_and_abstraction_stay_accepted:
+        (&["rust/fslc/tests/fixtures/issue_450_design.fsl", "rust/fslc/tests/fixtures/issue_450_requirements.fsl", "rust/fslc/tests/fixtures/issue_450_mapping.fsl"], "2", 0, None),
+        (&["examples/layers/return_impl.fsl", "examples/layers/return_system.fsl", "examples/layers/return_impl_refines.fsl"], "5", 0, None);
 }
 #[test]
 fn boundary_changes_to_type_error() {
@@ -358,60 +378,44 @@ fn boundary_changes_to_type_error() {
         1,
     );
 }
-#[test]
-fn identical_chain_types_stay_accepted() {
-    corpus(
-        "examples/refinement_chain/bot.fsl",
-        "examples/refinement_chain/mid.fsl",
-        "examples/refinement_chain/bot_refines_mid.fsl",
-        "6",
-        0,
-        None,
-    );
-    corpus(
-        "examples/refinement_chain/mid.fsl",
-        "examples/refinement_chain/top.fsl",
-        "examples/refinement_chain/mid_refines_top.fsl",
-        "6",
-        0,
-        None,
+
+fn progress_governance_corpus(cmd: &str) {
+    let mut args = vec![
+        cmd,
+        "examples/refinement_liveness/governance_detects_progress_merge_collision.fsl",
+    ];
+    if cmd == "verify" {
+        args.push("--no-cache");
+    }
+    let observed = run(&root(), &args);
+    located_collision(
+        &observed,
+        ["Carrier1599", "Impl1599Spec", "Abs1599Spec"],
+        7,
+        3,
     );
 }
 #[test]
-fn order_refund_preserves_both_verdicts() {
-    corpus(
-        "examples/validation/order_refund_windowed.fsl",
-        "examples/validation/order_refund.fsl",
-        "examples/validation/order_refund_windowed_refines.fsl",
-        "8",
-        0,
-        None,
-    );
-    corpus(
-        "examples/validation/order_refund_instant.fsl",
-        "examples/validation/order_refund.fsl",
-        "examples/validation/order_refund_instant_refines.fsl",
-        "8",
-        1,
-        Some("abs_requires_failed"),
-    );
+fn progress_governance_corpus_check() {
+    progress_governance_corpus("check");
 }
 #[test]
-fn typed_enum_conversion_and_abstraction_stay_accepted() {
-    corpus(
-        "rust/fslc/tests/fixtures/issue_450_design.fsl",
-        "rust/fslc/tests/fixtures/issue_450_requirements.fsl",
-        "rust/fslc/tests/fixtures/issue_450_mapping.fsl",
-        "2",
-        0,
-        None,
+fn progress_governance_corpus_verify() {
+    progress_governance_corpus("verify");
+}
+
+#[test]
+fn verifier_error_uses_semantics_boundary_without_trace() {
+    let fixture = Fixture::new(
+        "spec Impl1599Spec { state { x: Int = 0 } fair action go() { requires x == 0 x = 1 } }",
+        "spec Abs1599Spec { state { y: Int = 0 } fair action step() { requires y == 0 y = 1 } leadsTo L { forall k: Int { y == 0 ~> y == 1 } } }",
+        &(HEADER.to_owned() + "map y = x " + PROGRESS),
     );
-    corpus(
-        "examples/layers/return_impl.fsl",
-        "examples/layers/return_system.fsl",
-        "examples/layers/return_impl_refines.fsl",
-        "5",
-        0,
-        None,
+    let observed = fixture.refine();
+    verdict(&observed, 2, "error", Some("semantics"));
+    assert_eq!(
+        observed.0,
+        json!({"fsl":"1.0", "result":"error", "kind":"semantics", "message":observed.0["message"]})
     );
+    identifiers::assert_names(observed.0["message"].as_str().unwrap(), &["Int"]);
 }

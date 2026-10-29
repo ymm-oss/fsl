@@ -1,0 +1,2 @@
+// SPDX-License-Identifier: Apache-2.0
+spec Abs1599Spec { type Carrier1599 = 0..0 state { y: Int = 0 } fair action step() { requires y < 2 y = y + 1 } leadsTo Progress1599 { y == 0 ~> y == 2 } }

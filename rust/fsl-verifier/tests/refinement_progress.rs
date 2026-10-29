@@ -6,6 +6,9 @@ use std::task::{Context, Poll, Waker};
 
 use fsl_core::{FsResolver, build_model, parse_kernel_source, parse_refinement};
 
+#[path = "../../fslc/tests/support/identifiers.rs"]
+mod identifiers;
+
 fn block_on<F: Future>(future: F) -> F::Output {
     let mut future = pin!(future);
     let waker = Waker::noop();
@@ -21,42 +24,129 @@ fn model(source: &str) -> fsl_core::KernelModel {
         .expect("build model")
 }
 
-fn pulled_safety(broken: bool) -> Result<fsl_verifier::ProgressCheck, fsl_verifier::VerifyError> {
+fn mapping(
+    implementation: &fsl_core::KernelModel,
+    abstraction: &fsl_core::KernelModel,
+) -> fsl_core::Refinement {
+    parse_refinement("refinement R { impl Impl1599Spec abs Abs1599Spec map y = x action go() -> step() preserve progress { respond Progress1599 by go } }", implementation, abstraction).unwrap()
+}
+fn progress(
+    implementation: &fsl_core::KernelModel,
+    abstraction: &fsl_core::KernelModel,
+    mapping: &fsl_core::Refinement,
+) -> Result<fsl_verifier::ProgressCheck, fsl_verifier::VerifyError> {
+    let mut solver = fsl_solver_z3::Z3Solver::new().unwrap();
+    block_on(fsl_verifier::check_refinement_progress(
+        implementation,
+        abstraction,
+        mapping,
+        &mut solver,
+        4,
+    ))
+}
+
+fn pulled_safety(
+    broken: bool,
+    name: &str,
+) -> Result<fsl_verifier::ProgressCheck, fsl_verifier::VerifyError> {
     let implementation = model(&format!(
-        "spec Impl {{ state {{ x: Int = 0 }} fair action go() {{ requires x == 0 x = 1 }} invariant Safe {{ x <= {} }} }}",
+        "spec Impl1599Spec {{ state {{ x: Int = 0 }} fair action go() {{ requires x == 0 x = 1 }} invariant {name} {{ x <= {} }} }}",
         i32::from(!broken)
     ));
     let abstraction = model(
-        "spec Abs { state { y: Int = 0 } fair action step() { requires y == 0 y = 1 } leadsTo L { y == 0 ~> y == 1 } }",
+        "spec Abs1599Spec { state { y: Int = 0 } fair action step() { requires y == 0 y = 1 } leadsTo Progress1599 { y == 0 ~> y == 1 } }",
     );
-    let mapping = parse_refinement("refinement R { impl Impl abs Abs map y = x action go() -> step() preserve progress { respond L by go } }", &implementation, &abstraction).unwrap();
-    let mut solver = fsl_solver_z3::Z3Solver::new().unwrap();
-    let observed = block_on(fsl_verifier::check_refinement_progress(
+    let observed = progress(
         &implementation,
         &abstraction,
-        &mapping,
-        &mut solver,
-        4,
-    ));
+        &mapping(&implementation, &abstraction),
+    );
     println!("OBS pulled safety broken={broken} {observed:?}");
     observed
 }
 
 #[test]
 fn issue_1599_pulled_safety_fails_closed() {
-    let error = pulled_safety(true).expect_err("pulled safety must not become refines");
+    assert_pulled_safety("Invariant1599Broken");
+}
+
+fn assert_pulled_safety(name: &str) {
+    let error = pulled_safety(true, name).expect_err("pulled safety must not become refines");
     assert!(!error.is_solver_failure());
     let message = error.to_string();
-    for name in ["pulled", "Safe"] {
-        assert!(message.contains(name), "{message}");
-    }
+    identifiers::assert_names(&message, &["pulled", name]);
+}
+
+#[test]
+fn issue_1599_pulled_safety_renamed_invariant() {
+    assert_pulled_safety("Invariant1599Renamed");
 }
 
 #[test]
 fn issue_1599_pulled_safety_counterpart_keeps_progress_check() {
-    let checked = pulled_safety(false).unwrap();
+    let checked = pulled_safety(false, "Invariant1599Broken").unwrap();
     assert!(checked.violation.is_none(), "{checked:?}");
-    assert_eq!(checked.checked["L"], vec!["go".to_owned()]);
+    assert_eq!(checked.checked["Progress1599"], vec!["go".to_owned()]);
+}
+
+fn merge_collision(member: bool) {
+    let implementation = model(
+        "spec Impl1599Spec { type Carrier1599 = 0..2 enum Source1599 { Member1599A, Member1599B } state { x: Int = 0 } fair action go() { requires x == 0 x = 1 } }",
+    );
+    let mut abstraction = model(
+        "spec Abs1599Spec { type Carrier1599 = 0..2 enum Target1599 { Member1599Q } state { y: Int = 0 } fair action step() { requires y == 0 y = 1 } leadsTo Progress1599 { y == 0 ~> y == 1 } }",
+    );
+    let mapping = mapping(&implementation, &abstraction);
+    assert!(
+        progress(&implementation, &abstraction, &mapping)
+            .unwrap()
+            .violation
+            .is_none()
+    );
+    let name = if member {
+        abstraction.enum_members.remove("Member1599Q");
+        abstraction.types.insert(
+            "Target1599".into(),
+            fsl_core::TypeDef::Enum {
+                members: vec!["Member1599B".into()],
+                symmetric: false,
+            },
+        );
+        abstraction.enum_members.insert(
+            "Member1599B".into(),
+            fsl_core::FslValue::Enum {
+                type_name: "Target1599".into(),
+                member: "Member1599B".into(),
+            },
+        );
+        "Member1599B"
+    } else {
+        abstraction.types.insert(
+            "Carrier1599".into(),
+            fsl_core::TypeDef::Domain {
+                lo: 0,
+                hi: 1,
+                symmetric: false,
+            },
+        );
+        "Carrier1599"
+    };
+    let observed = progress(&implementation, &abstraction, &mapping);
+    println!("OBS verifier merge {name} {observed:?}");
+    identifiers::assert_names(
+        &observed
+            .expect_err("direct verifier must reject merge collision")
+            .to_string(),
+        &[name, "Impl1599Spec", "Abs1599Spec"],
+    );
+}
+#[test]
+fn issue_1599_verifier_domain_collision() {
+    merge_collision(false);
+}
+#[test]
+fn issue_1599_verifier_member_collision() {
+    merge_collision(true);
 }
 
 /// The canonical indexed-map shape from DESIGN-refinement.md:20-40 (`map
