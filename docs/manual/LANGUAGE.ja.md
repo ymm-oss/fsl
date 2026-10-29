@@ -3765,7 +3765,9 @@ hard rule を持つ project 内のすべての component も拒否し、`ok` で
 埋め込まれた component の位置は元の文書全体を指します。行と列は 1 始まりで、
 列は byte や UTF-16 単位ではなく Unicode scalar value を数えます。project parser は
 component IR を作る前に token の span を一度だけ移し、ネストした位置と annotation の
-UTF-8 byte offset も元の文書に揃えます。未知の hard rule の message は `check hard` を
+UTF-8 byte offset も元の文書に揃えます。ただし literate Markdown の byte offset は
+抽出後の FSL text が基準であり、文書の行と code 行内の列を保ちます。
+未知の hard rule の message は `check hard` を
 指し、既存の parse error を二重には移しません。座標だけの修正であり、受理・拒否、
 診断の kind、envelope の field、exit status、assurance は変えません。LSP が project 内の
 component の診断を出さない問題は別に追跡します(#1575)。
@@ -3783,12 +3785,15 @@ FSL fence を認識します。bash fence だけの `examples/ai/README.md` も�
 **3件**で、`error_envelope_ai_project_unknown_tool.fsl`、
 `error_envelope_ai_project_invalid_rule.fsl`、`error_envelope_literate_ai_project.md` です。
 Markdown project は type、`ai_component 'EnvelopeParityLiterateProject' declares no tools`、
-block 内 loc 1:1、exit 2 を返します。単独の literate component の拒否と、複数 block の
+block 内 loc 1:1、exit 2 を返しました(当時の #1545 の座標系であり、#1574 以後は文書の
+loc 5:1 です)。単独の literate component の拒否と、複数 block の
 toggle 2件の受理は変わりません。新しい test の inline の削除は
 **4出現**です: CLI 側と Worker-shaped 側のツールの無い component を含む project
 (2出現)、空の authority だけの component を含む project(1出現)、正常な最初の
 component の後ろに不正な component がある project(1出現)。書き直した既存の inline
-FSL は0件です。ツールの無い3出現は block 内 loc 1:1 の type、後ろの未宣言 tool は
+FSL は0件です。ツールの無い3出現は当時 block 内 loc 1:1 の type でした。
+#1574 以後は字下げされた CLI project の形では文書の loc 2:3 となり、文書先頭の
+Worker の形は 1:1 のままです。後ろの未宣言 tool は
 loc なしの semantics を返します。この check だけの sweep で、それ以外の exit/result と stdout/stderr 全文は
 変わりません。意図した tool を宣言するか不要な component を除き、不明な tool/rule
 の参照を修正してください。

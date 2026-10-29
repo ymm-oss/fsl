@@ -7,10 +7,11 @@ Generic project checking no longer accepts
 the fixtures `error_envelope_ai_project_unknown_tool.fsl`,
 `error_envelope_ai_project_invalid_rule.fsl` and the tool-less Markdown project
 `error_envelope_literate_ai_project.md`. The first two report their existing
-unknown tool/rule semantics errors; the Markdown project reports type,
+unknown tool/rule semantics errors; the Markdown project reported type,
 `ai_component 'EnvelopeParityLiterateProject' declares no tools`, block loc1:1,
-exit2. Project semantic coordinates remain
-block-relative (#1574); LSP project-component diagnostics remain separate (#1575).
+exit2 (historical #1545 frame; #1574 now reports document loc5:1).
+#1574 corrects project semantic coordinates to document positions;
+LSP project-component diagnostics remain separate (#1575).
 Measured using independently built B
 `d37a215e8df6c00222e6aafd94bc9b556c445521` and H
 `99810256faca086360c6ca4233f935b9b56b1ec8` in their own git-archive trees:
@@ -23,7 +24,9 @@ the three named fixtures. Four new test-inline
 occurrences are also breaking removals: tool-less-component projects in CLI and
 Worker-shaped tests (two), an empty-authority-only component in a project (one),
 and an invalid later component after a valid first one (one). The three tool-less
-occurrences report type at block loc 1:1; the later unknown tool reports
+occurrences reported type at block loc 1:1 (historical frame; #1574 now reports
+document loc2:3 for the indented CLI project forms, while the first-character
+Worker case stays 1:1); the later unknown tool reports
 unlocated semantics. No existing inline FSL was rewritten; other check-only
 output/status observations are unchanged. Lowering-only analyze on 18 AI corpus
 inputs plus four explicit shapes, followed by scenarios (depth2/deadlock ignore)

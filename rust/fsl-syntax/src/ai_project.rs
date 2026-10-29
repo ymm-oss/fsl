@@ -317,6 +317,9 @@ impl AiProject {
 
 /// Parse one fsl-ai project source into its typed declarations.
 ///
+/// Component tokens and stored locations use the supplied project source's
+/// coordinate frame, with UTF-8 byte offsets and one-based scalar columns.
+///
 /// # Errors
 ///
 /// Returns a typed parser diagnostic when no recognized top-level block is
@@ -326,8 +329,6 @@ impl AiProject {
 /// The fsl-ai project's brace scanner owns its own syntax. Its failures must
 /// therefore retain their source span here rather than being reinterpreted by
 /// the generic surface parser at a command boundary.
-/// Component tokens and stored locations use the original project's coordinate
-/// frame, including UTF-8 byte offsets and one-based scalar columns.
 pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, ParseError> {
     let blocks = top_blocks(source, 0, source)?;
     if blocks.is_empty() {
@@ -412,8 +413,8 @@ struct RawBlock {
     /// source, so a clause inside it can report its own `loc` (#562).
     body_offset: usize,
     /// The exact original text of the block, header included (`"kind name {
-    /// ... }"`), used to hand `ai_component` blocks to the strict token
-    /// parser unmodified.
+    /// ... }"`), lexed locally before token spans are translated to the whole
+    /// project source's coordinate frame.
     text: String,
     body: String,
 }

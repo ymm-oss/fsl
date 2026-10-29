@@ -155,3 +155,32 @@ fn assert_valid_control(command: &str) {
 
 ai_commands!(parse_error_control, assert_parse_error_control);
 ai_commands!(valid_project_control, assert_valid_control);
+
+fn assert_no_tools_location(command: &str, fixture: &str, name: &str, line: u32) {
+    let (actual, exit) = run(command, &format!("{FIXTURES}/{fixture}"));
+    assert_eq!(exit, 2, "{command}: {actual}");
+    let expected = expected_envelope(
+        command,
+        json!({
+            "fsl":"1.0", "result":"error", "kind":"type",
+            "message":format!("ai_component '{name}' declares no tools"),
+            "loc":{"line":line,"column":1}
+        }),
+    );
+    assert_eq!(actual, expected, "{command} {fixture}");
+}
+
+#[test]
+fn literate_project_check_reports_document_location() {
+    assert_no_tools_location(
+        "native-check",
+        "error_envelope_literate_ai_project.md",
+        "EnvelopeParityLiterateProject",
+        5,
+    );
+}
+
+#[test]
+fn compat_no_tools_after_leading_comment_reports_document_location() {
+    assert_no_tools_location("compat", "issue_562_nested_slice_clause.fsl", "Target", 7);
+}

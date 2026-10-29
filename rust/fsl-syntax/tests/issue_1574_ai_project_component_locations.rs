@@ -381,6 +381,11 @@ fn indented_inline_unicode_positions() {
 }
 
 #[test]
+fn non_bmp_text_before_component_on_the_same_line() {
+    assert_inline_positions(&format!("dataset D {{ source \"😀😀\" }} {INLINE}\n"));
+}
+
+#[test]
 fn crlf_and_bom_inline_unicode_positions() {
     assert_inline_positions(&format!("\u{feff}// 日本語😀\r\n\r\n\t  {INLINE}\r\n"));
 }

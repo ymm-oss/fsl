@@ -3943,7 +3943,9 @@ and `error_envelope_ai_project_invalid_rule.fsl` under generic project checking.
 Embedded component locations refer to the original document: lines and columns
 are one-based, and columns count Unicode scalar values, not bytes or UTF-16 units.
 The project parser translates token spans once before building component IR,
-including nested locations and annotation UTF-8 byte offsets. Unknown hard-rule
+including nested locations and annotation UTF-8 byte offsets. For literate
+Markdown, byte offsets refer to the extracted FSL text rather than the Markdown
+file; document lines and code-line columns are preserved. Unknown hard-rule
 messages point to `check hard`; existing parse errors are not translated twice.
 This corrects coordinates only, without changing validity, diagnostic kind,
 envelope fields, exit status or assurance. Missing LSP project-component
@@ -3961,14 +3963,17 @@ contain compiler-recognized FSL fences; all 30, including the bash-only
 unset and no excluded output fields. Corpus ok/exit0 → error/exit2 removals
 are exactly **three**: `error_envelope_ai_project_unknown_tool.fsl`,
 `error_envelope_ai_project_invalid_rule.fsl` and
-`error_envelope_literate_ai_project.md`. The Markdown project reports type,
+`error_envelope_literate_ai_project.md`. The Markdown project reported type,
 `ai_component 'EnvelopeParityLiterateProject' declares no tools`, block loc 1:1,
-exit 2; the standalone literate component's rejection and both multi-block
+exit 2 (historical #1545 frame; #1574 now reports document loc 5:1);
+the standalone literate component's rejection and both multi-block
 toggles are unchanged. New test-inline removals are
 **four**: tool-less-component projects in CLI and Worker-shaped tests (two),
 an empty-authority-only component in a project (one), and an invalid later
 component after a valid first component (one). Zero existing inline FSL forms
-were rewritten. The three tool-less occurrences report type at block loc 1:1;
+were rewritten. The three tool-less occurrences reported type at block loc 1:1
+(historical frame; #1574 now reports document loc 2:3 for the indented CLI project
+forms, while the first-character Worker case stays 1:1);
 the later undeclared tool reports unlocated semantics. Other exit/result and
 complete stdout/stderr observations in this check-only sweep are unchanged. Declare a tool or remove
 an unneeded component, and correct unknown tool/rule references.
