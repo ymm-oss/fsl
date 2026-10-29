@@ -1705,8 +1705,8 @@ impl PredicateExpander {
             },
             Expr::Binary { op, left, right } => {
                 let left = self.expand_expr(*left, stack)?;
-                let ok = pattern_binding_flows(&op, true);
-                let bound = compose::pattern_scope(&left, &self.locals.borrow(), &self.globals, ok);
+                let bound =
+                    compose::pattern_scope(&left, &self.locals.borrow(), &self.globals, Some(&op));
                 self.scoped(bound, || {
                     Ok(Expr::Binary {
                         op,

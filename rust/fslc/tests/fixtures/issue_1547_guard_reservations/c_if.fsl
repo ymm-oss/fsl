@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+compose C {
+  use A as l from "a.fsl"
+  internal l.n
+  action s() = l.n() {
+    requires if (l.o is some(v)) then true else true
+  }
+}

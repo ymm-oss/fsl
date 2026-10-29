@@ -599,15 +599,10 @@ fn ensure_assignable_inner(
     }
 }
 
-/// Cycle entry for pattern-binding extension, and where `recursion::guard`
-/// belongs (#1164): it recurses on itself down both operands of every
-/// `and`; `pattern_binding_flows` also scopes RHS bindings for `and`/`=>`. Such a chain
-/// makes its depth the chain's length. `validate_expression`'s guard does not
-/// cover it: validation calls this once per level, and the walk then descends
-/// the whole left spine without passing back through validation.
-///
-/// Crash-witnessed by `check` on a 1000-term `x + ... + x` invariant (debug
-/// aarch64): ~3000 frames of this function above `validate_expression`.
+/// Extend readable payload bindings from a true expression result.
+/// Only conjunctions recurse through both operands. This traversal has its own
+/// recursion guard: a nested `and` chain consumes one frame per level without
+/// passing back through expression validation. Arithmetic chains are not visited.
 pub(crate) fn extend_pattern_binding(
     expression: &Expr,
     env: &mut TypeEnv,

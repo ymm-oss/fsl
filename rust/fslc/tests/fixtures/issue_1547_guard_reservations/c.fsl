@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+compose C {
+  use A as l from "a.fsl"
+  use A as r from "a.fsl"
+  internal l.n
+  internal r.n
+  action s() = l.n() || r.n() {
+  }
+}

@@ -1268,7 +1268,7 @@ pub(super) fn map_scoped_action_items<E>(
     map_normalized_action_items(items, bound, |item, bound| {
         let item = rewrite(item, bound)?;
         match &item {
-            ActionItem::Requires(expr, _) => *bound = pattern_scope(expr, bound, globals, true),
+            ActionItem::Requires(expr, _) => *bound = pattern_scope(expr, bound, globals, None),
             ActionItem::Let(name, ..) => {
                 bound.insert(name.clone());
             }
@@ -1447,8 +1447,7 @@ fn rewrite_expr_in_phase(
             )?,
             Expr::Binary { op, left, right } => {
                 let left = rewrite(*left)?;
-                let ok = crate::pattern_binding_flows(&op, true);
-                let nested = pattern_scope(&left, bound, &HashSet::new(), ok);
+                let nested = pattern_scope(&left, bound, &HashSet::new(), Some(&op));
                 let right_phase = phase.after_patterns(&left);
                 Expr::Binary {
                     op,
@@ -2011,7 +2010,7 @@ fn source_names(source: &SyncSource) -> Result<SourceNames, CoreError> {
                 names.guards.insert(name.clone());
             }
             ActionItem::Requires(expr, _) => {
-                crate::collect_pattern_names(expr, &mut names.guards);
+                extend_pattern_names(expr, &mut names.guards, true);
             }
             ActionItem::Statement(_) | ActionItem::Ensures(..) => {}
         }
@@ -2345,8 +2344,7 @@ fn resolve_alias_expr_scoped(
             }
             Expr::Binary { op, left, right } => {
                 let left = resolve(*left)?;
-                let ok = crate::pattern_binding_flows(&op, true);
-                let nested = pattern_scope(&left, bound, &HashSet::new(), ok);
+                let nested = pattern_scope(&left, bound, &HashSet::new(), Some(&op));
                 Expr::Binary {
                     op,
                     left: Box::new(left),
@@ -2405,12 +2403,14 @@ fn resolve_alias_expr_scoped(
 }
 
 /// Match the public Kernel's Is/Binary pattern continuation scope.
+/// `None` denotes continuation after a true requires guard, not a Binary RHS.
 pub(super) fn pattern_scope(
     expr: &Expr,
     bound: &HashSet<String>,
     globals: &HashSet<String>,
-    active: bool,
+    op: Option<&str>,
 ) -> HashSet<String> {
+    let active = op.is_none_or(|op| crate::pattern_binding_flows(op, true));
     let mut patterns = HashSet::new();
     extend_pattern_names(expr, &mut patterns, false);
     let mut nested = bound.clone();
