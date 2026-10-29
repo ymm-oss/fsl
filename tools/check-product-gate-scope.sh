@@ -16,8 +16,11 @@
 # active after the review policy changed to permit a single maintainer to
 # enqueue. FSL_MERGE_QUEUE_CI stays unset, so pull requests retain their
 # pre-merge evidence and each merge group computes its own diff_scope.
-# The `queue-entry-stub` branch stays off: an admin merge still bypasses
-# the queue and must not land a change with only stub evidence.
+# The `queue-entry-stub` branch stays off whether or not admin queue bypass
+# remains possible. The bypass premise comes from #717 on 2026-08-05
+# (`gh pr merge --admin`, 7b140af), not a check against current ruleset
+# 19090811. Its live capture has bypass_actors empty and
+# current_user_can_bypass "never"; current queue-specific bypass is unverified.
 #
 # Usage:
 #   ./tools/check-product-gate-scope.sh            # decide scope; prints
@@ -106,10 +109,11 @@ decide() {
         emit true production-promotion-evidence
       elif [ "${FSL_MERGE_QUEUE_CI:-}" = "enabled" ]; then
         # Disabled by policy: FSL_MERGE_QUEUE_CI stays unset even though
-        # the queue is active (see the header comment). Pull requests must
-        # retain their pre-merge evidence: an admin merge still bypasses
-        # the queue, and stubs without a replacing merge_group run would
-        # land changes with no pre-merge Linux evidence at all.
+        # the queue is active (see the header comment). The #717 admin
+        # bypass observation is historical, not verified against the
+        # current ruleset. Whether or not bypass is possible, PR evidence
+        # stays: stubs without a replacing merge_group run would leave no
+        # pre-merge Linux evidence.
         emit false queue-entry-stub
       else
         diff_scope

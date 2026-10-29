@@ -43,8 +43,10 @@ permissions:
 # FSL_MERGE_QUEUE_CI stays unset: pull requests retain their full pre-merge
 # evidence, and each merge group independently computes diff_scope in
 # `tools/check-product-gate-scope.sh`. Its `queue-entry-stub` branch must
-# stay off; an admin merge still bypasses the queue and must not land a
-# change with only stub evidence. See docs/design/DESIGN-ci.md,
+# stay off whether or not admin queue bypass remains possible. The bypass
+# premise comes from #717 on 2026-08-05 (`gh pr merge --admin`, 7b140af),
+# not a check against current ruleset 19090811. Its live capture shows
+# bypass_actors empty and current_user_can_bypass "never". See docs/design/DESIGN-ci.md,
 # "Merge queue adoption (2026-10-29)".
 #
 # Only the cross-platform matrix — `native Z3 4.16` on macOS and Windows — stays
@@ -104,7 +106,9 @@ jobs:
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. The live audit's created_at order has no documented
+          # non-`pull_request` events, including `merge_group` on queue refs; this is not
+          # main-only. See the known open risk in docs/design/DESIGN-ci.md,
+          # "Merge queue adoption (2026-10-29)". The live audit's created_at order has no documented
           # tie-breaker; a tied boundary can produce a duplicate ID, rejected immediately, or
           # different paired observations, which retry once and fail closed if still different;
           # an identical mixed state can repeat as an undetectable residual. See

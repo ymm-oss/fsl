@@ -845,6 +845,11 @@ in `ci.yml` carried `save-if: ${{ github.event_name != 'pull_request' }}`. Pull 
 request gives up is a warm second run of itself; what it gains is that `main`'s caches stay resident,
 which is the only cache any pull request could ever share.
 
+**Queue adoption qualification (2026-10-29).** The decision's premise that only `main` saves
+no longer holds: the unchanged event guard also permits `merge_group` saves on queue refs.
+The original #747 incident and decision above remain history; see the known open cache risk in
+"Merge queue adoption (2026-10-29)" below for the current consequence and audit blind spot.
+
 **That is no longer a description of every step -- the current contract has two shapes, not one, and
 which key a restore-only step reads is not the same for all of them.** A step that saves its own
 declared key still carries the event guard above (`save-if: ${{ github.event_name != 'pull_request'
@@ -1561,8 +1566,9 @@ on every pull request with no path filter — `.github/workflows/site-reference-
 `pull_request`/`merge_group` triggers carry no `paths:` restriction — so requiring it cannot
 deadlock a pull request the way requiring `native Z3 4.16` or `product gate` would; those stay
 deferred precisely because they never report on an ordinary pull request.
-`bypass_actors` is empty, so `current_user_can_bypass` is `"never"` for every account — an
-administrator cannot merge past a failing or missing required context.
+The live capture has `bypass_actors: []` and `current_user_can_bypass: "never"` for its caller;
+no required-check bypass is configured. This is not a contemporary observation of an
+administrator's queue-specific merge behavior; see "Merge queue adoption (2026-10-29)" below.
 `strict_required_status_checks_policy` is `false`; see "Required contexts no longer have to run
 against current `main`" below.
 
@@ -1653,11 +1659,30 @@ parameters; a clean audit is not evidence that their values match this table.
 **Full evidence stays on both paths.** `FSL_MERGE_QUEUE_CI` remains unset. Pull requests keep
 their full pre-merge evidence under the existing scope policy, and every `merge_group` run computes
 its own scope with `diff_scope`. A queued product change is checked in the pull-request run and
-again on the queue's combined revision with current `main`. The `queue-entry-stub` path must stay off: an
-administrator's merge still bypasses the queue, so replacing pull-request checks with stubs could
-land a change with no pre-merge Linux evidence if no queue run replaces them. Queue adoption does
-not make that confidently-green false negative acceptable. Administrator queue bypass is reserved
-for emergencies only; it does not bypass the required status checks in `19090811`.
+again on the queue's combined revision with current `main`. The `queue-entry-stub` path must stay
+off whether or not administrator queue bypass remains possible: queue validation supplements,
+rather than replaces, pull-request evidence. Stubs without a replacing queue run would leave no
+pre-merge Linux evidence; queue adoption does not make that confidently-green false negative acceptable.
+
+**Administrator bypass evidence.** The bypass premise is carried forward from the 2026-08-05
+observation on #717: `gh pr merge --admin` merged `7b140af` without a `merge_group` run. It has
+not been verified against the current ruleset `19090811`, whose live capture shows
+`bypass_actors: []` and `current_user_can_bypass: "never"`. Those fields do not establish a current
+queue-specific bypass capability. If such a path remains available, it is reserved for emergencies
+only; no bypass actor is added and no required check is weakened. The stub-off policy holds
+regardless of the outcome of a contemporary bypass check.
+
+**Known open cache risk.** As described in "Actions cache budget" above, Decision #747 relied on
+only `main` saving shared caches. With the queue active, `ci.yml`'s unchanged
+`save-if: ${{ github.event_name != 'pull_request' }}` also permits executing `merge_group` jobs
+to save under `refs/heads/gh-readonly-queue/...`. Other refs cannot restore those entries, but
+they still count toward the repository's 10 GiB budget: the same ref-isolated eviction pressure
+as #747. An exact cache hit does not save again; a changed key or an evicted `main` entry can
+expose this path. This is a configuration-derived risk, not a measurement of queue-cache bytes.
+The cache audit's rules 3 and 4 currently filter only `refs/pull/`, so they do not attribute
+queue-ref entries, although those bytes still contribute to the total-budget judgment.
+A follow-up must exclude `merge_group` from the save-enabled steps and extend both audit ref
+filters to `refs/heads/gh-readonly-queue/`. Neither executable behavior changes in this decision.
 
 **First queued merge evidence.** After the policy change, `enqueuePullRequest` on #1608 returned
 `QUEUED`, and `merge_group` runs of `product gate`, `merge readiness`, `site reference freshness`
@@ -1729,7 +1754,7 @@ paying its full price with no way to batch it. The queue has since been adopted 
 and break when combined — one renames a surface, the other adds a caller. With the strict flag off
 and no queue, that class landed on `main` and was caught by the post-merge push run and its failure
 reporter, not before merge. The adopted queue now validates the combined state before a queued
-merge; emergency administrator bypass still carries the original stale-base risk.
+merge; any path without queue validation would still carry the original stale-base risk.
 
 That was a real loss, and it is narrower than it sounds. It is not the *confidently-green false
 negative* the queue experiment above was rejected for: the six contexts still run, still block, and
