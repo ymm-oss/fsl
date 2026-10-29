@@ -1,5 +1,5 @@
-Preserved progress now refuses any property pattern binder whose name matches a
-free impl name introduced by a map actually used under lexical scope, even outside
-readable continuations. Formerly accepted `or` forms change from exit 0 `refines` to
-located exit 2 type errors. Rename the abstract pattern binder to repair the mapping.
+Preserved progress refuses property pattern names matching free impl names from lexically
+used maps, even outside readable continuations; prior `or` exit 0 `refines` becomes exit 2/type.
+Used-map RHS patterns may not reuse any property binder or sibling used-map pattern name.
+Rename the abstract or mapping pattern binder to repair these located errors at `respond`.
 Ordinary source binding scope is unchanged. Refs #1595.

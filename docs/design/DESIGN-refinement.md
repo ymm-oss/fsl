@@ -98,11 +98,11 @@ refinement CartImplRefinesCart {
   `"deadlock_or_stall_blocks_progress"`, pending bindings, `impl_trace`, and
   `progress:{leadsTo, actions}` so repair can target the lower-layer action.
   Abstract Int/Bool constants become literals in P/Q, `decreases`, domains and nested filters.
-  Impl-constant binder collisions and read abstract const/state ambiguities are refused;
-  `check` rejects const-namesake locals before pulling. Any property pattern binder matching
-  a free impl name from a map actually used under lexical scope is refused, even outside
-  readable continuations: rename that pattern binder. Direct refine locates type errors
-  at `respond` (exit 2); the ambiguous const/state bound has abstract-only BMC exit 1.
+  Impl-constant/read const-state collisions are refused; `check` already rejects const-namesake locals.
+  Property patterns matching free impl names from lexically used maps are refused outside
+  readable continuations too; rename the abstract pattern binder. Used-map RHS patterns cannot
+  reuse property binder names or other used-map patterns; rename the mapping pattern binder.
+  Direct pull errors locate `respond` (type, exit 2); the const/state bound has abstract-only BMC exit 1.
   Unused maps/legal locals stay admissible; outer capture is refused. Only nested diagnostics may rename.
 - The grammar does not coexist with existing `.fsl` files (an **independent
   file** with `refinement` at the top level. Parsing adds `refinement_def` to

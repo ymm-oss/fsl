@@ -416,6 +416,40 @@ fn progress_collision(
     })
 }
 
+fn progress_pattern_error(expr: &Expr, maps: &BTreeMap<String, StateMap>) -> Option<String> {
+    let used = crate::free_vars(expr);
+    let active = maps.iter().filter(|(key, _)| used.contains(*key));
+    let mut patterns = HashSet::new();
+    crate::collect_pattern_names(expr, &mut patterns);
+    let mut occupied = crate::bound_vars(expr);
+    occupied.extend(patterns.iter().cloned());
+    if let Some(name) = patterns
+        .into_iter()
+        .filter(|name| {
+            active.clone().any(|(_, map)| {
+                map.binder.as_ref().map(crate::binder_name) != Some(name.as_str())
+                    && crate::free_vars(&map.expr).contains(name)
+            })
+        })
+        .min()
+    {
+        return Some(format!(
+            "rename the abstract pattern binder '{name}' to avoid mapped-name capture"
+        ));
+    }
+    for (_, map) in active {
+        let mut introduced = HashSet::new();
+        crate::collect_pattern_names(&map.expr, &mut introduced);
+        if let Some(name) = introduced.intersection(&occupied).min() {
+            return Some(format!(
+                "rename the mapping pattern binder '{name}' to avoid capture"
+            ));
+        }
+        occupied.extend(introduced);
+    }
+    None
+}
+
 /// Pull a progress property through state maps without changing its abstract scope.
 ///
 /// # Errors
@@ -457,24 +491,8 @@ pub fn pull_refinement_leadsto(
             body: Box::new(expr),
         };
     }
-    let used = crate::free_vars(&expr);
-    let mut patterns = HashSet::new();
-    crate::collect_pattern_names(&expr, &mut patterns);
-    if let Some(name) = patterns
-        .into_iter()
-        .filter(|name| {
-            state_maps.iter().any(|(key, map)| {
-                used.contains(key)
-                    && map.binder.as_ref().map(crate::binder_name) != Some(name.as_str())
-                    && crate::free_vars(&map.expr).contains(name)
-            })
-        })
-        .min()
-    {
-        return Err(refinement_error(
-            format!("rename the abstract pattern binder '{name}' to avoid mapped-name capture"),
-            Some(span),
-        ));
+    if let Some(message) = progress_pattern_error(&expr, state_maps) {
+        return Err(refinement_error(message, Some(span)));
     }
     if let Some(name) = progress_collision(&expr, implementation, abstraction, state_maps) {
         return Err(refinement_error(
