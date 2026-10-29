@@ -495,12 +495,15 @@ leadsTo <Name> {
 ```
 
 `~>` is **exclusive to leadsTo blocks** — it cannot be used in general expressions.
-Each `helpful action(args...)` argument is checked against its action parameter
+`check` checks each `helpful action(args...)` argument against its action parameter
 type in the property's binder scope. This closes a previously unchecked position:
 ill-typed arguments, unknown names and forbidden pattern shadowing now fail `check`.
 Normalized `count`/`sum` patterns retain their standalone acceptance, including
 valid empty aggregates; composition cannot hide an original global-name refusal
 by prefixing, nor introduce one from a foreign declaration.
+Induction additionally requires state-independent arguments: leadsTo binders,
+integer/Boolean literals, and integer `+`, `-`, `*` combinations (including unary `-`).
+`check` and BMC accept well-typed arguments that read state; induction refuses them.
 `within K` is a bounded deadline on a response; `K` must be a non-negative
 constant expression. It is checked by BMC, not by the ranked induction proof.
 `decreases` is optional and must be an integer-valued expression. Under
@@ -960,7 +963,7 @@ Range-bound errors and terminal errors also use their authored origins, not a
 generated 1:1 location. Numeric/Set compatibility and valid dynamic verdicts
 are unchanged. These claims concern the expression trees visited by the shared
 validator. The historical round-1 baseline checked helpful action existence and
-arity only; main's #1483 now also checks parameter types, and that behavior is
+arity only; main's #1527 now also checks parameter types, and that behavior is
 preserved. Unsupported relation-valued temporary collections remain separate
 upstream work, not newly supported by this fix.
 

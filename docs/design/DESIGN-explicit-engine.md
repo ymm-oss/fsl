@@ -163,6 +163,67 @@ verdict semantics:
   the error steers the user to `--engine bmc` for the bounded lasso/stutter
   check.
 
+### Selected bounds and witness replay (#1531)
+
+Witness replay uses the same implicit-bound selection as the verification run.
+An omitted range bound does not roll back a concrete replay step: for
+`n: 0..1`, init `n = 0`, action `n = n + 1`, and invariant `P { n <= 2 }`,
+`--property P` reports `violated` at step 3 (exit 1), not a replay mismatch.
+
+An omitted Seq bound is different: if an explored successor exceeds the root
+state's `Seq<T, N>` capacity, explicit fails closed with exit 2,
+`kind: "semantics"`, `message: "model sequence length exceeds capacity"`,
+using BMC's error contract. It does not enqueue that successor or publish a
+verdict from it, even though the concrete value can retain all its elements.
+Checked Seq bounds still report the ordinary `type_bound` violation; range-bound selection is not
+replaced by global bound enforcement. The initial frame itself is not screened
+by this guard, but every explored successor is, including a successor that
+preserves an initially overflowing Seq unchanged; see
+[DESIGN-kernel-contract.md](DESIGN-kernel-contract.md#concrete-boundary-pre-pass-budget).
+
+If a genuine violation and an unchecked Seq overflow first occur on different
+successors at the same BFS depth, explicit may return either outcome according
+to exploration order: frontier states in value order, then action declaration
+order among successors of the same state. BMC checks for an overflowing path before the
+level's properties, so this is not a promise of identical cross-engine outcomes
+for that case; neither explicit outcome is green.
+
+**Contract change.** The #1519 selected-overflow regression has three literal
+forms and four explicit selected cells whose old verdicts are intentionally
+removed. All now return the semantics error above:
+
+| Form and selected run | Old explicit result | New result |
+|---|---|---|
+| SF1: init `[0]`, capacity 1, push 1; `P { xs.size() == 1 or xs.at(1) == 1 }`, depth 1, select P | exit 0 `verified` | exit 2 `error` |
+| SF2: same update; `reachable R { xs.size() == 2 and xs.at(1) == 0 }`, depth 1, select R | exit 1 `reachable_failed` | exit 2 `error` |
+| SF3: init `[]`, capacity 1, guarded pushes `1` then `0`; `P { xs.size() == 2 => xs.at(1) == 0 }`, depth 2, select P | exit 0 `verified` | exit 2 `error` |
+| Same SF3; `reachable R { xs.size() == 2 and xs.at(1) == 1 }`, depth 2, select R | exit 1 `reachable_failed` | exit 2 `error` |
+
+The #1531 reproducer is one further form: init `[]`, capacity 1, unconditional
+push 1, `P { xs.size() <= 3 }`. Selecting P changes depth 2/3 from exit 0
+`verified` to exit 2, and depth 4/5 from exit 3 replay mismatch to exit 2.
+An initially overflowing idle form is also affected:
+
+```fsl
+spec InitIdle {
+  type K = 0..1
+  state { xs: Seq<K, 1>, t: Bool }
+  init { xs = Seq { 0, 1 } t = false }
+  action idle() { t = t }
+  invariant P { xs.size() <= 5 }
+}
+```
+
+Selecting P, at depth 0 explicit remains exit 0 `verified`; at depth at least 1
+it changes from exit 0 `proved` to exit 2 `semantics` with the same capacity
+message. The recorded depths 1 and 3 are two changed cells of this one additional
+literal form, with one unchanged depth-0 control. BMC and induction already
+return that error on this form, including at depth 0. Other initial-overflow
+forms that previously remained bounded `verified`, or later failed replay,
+likewise error when an explored successor still exceeds capacity.
+These counts describe selected acceptance cases, not a corpus-wide transition
+set or a change to runs that check all bounds.
+
 ## 5. Support matrix (fail closed)
 
 The engine executes concrete semantics via the ported interpreter
@@ -205,8 +266,9 @@ not an explicit-only limitation that switching to BMC can bypass.
 BFS in this codebase, and the two must not be confused. `fsl_runtime::
 find_boundary_violation`'s `CONCRETE_PROBE_BUDGET` (issue #697,
 `docs/design/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget") bounds
-the *internal* concrete pre-pass every BMC/induction `verify` run makes ahead
-of the symbolic engine, looking only for a `partial_op`/`type_bound`
+the *internal* concrete pre-pass eligible all-bounds BMC/induction `verify`
+runs make ahead of the symbolic engine: no bound selection, no supplied initial
+state, and deterministic init. It looks only for a `partial_op`/`type_bound`
 boundary outcome. Exhausting it is invisible to the caller: it falls through
 to the symbolic engine exactly like an ordinary empty result, and never
 becomes a public verdict. Exhausting `--explicit-budget`, by contrast, is a
@@ -290,9 +352,10 @@ relies on. On top of that, the Rust-native gates apply:
 - Verdict agreement on the corpus: explicit vs the Rust BMC engine (explicit
   `proved` subsumes BMC `verified`; `violated_at_step` equal), as Rust
   integration tests.
-- Violated traces must replay through the concrete interpreter
-  (`fsl_runtime::replay_trace`) — every counterexample is a checked concrete
-  execution.
+- Violated traces must replay through the concrete interpreter under the run's
+  bound selection (`fsl_runtime::replay_trace_with_bounds` /
+  `replay_trace_from_state_with_bounds`; legacy wrappers use all bounds) — every
+  counterexample is a checked concrete execution.
 - `tools/check-native-integration.sh` runs the Rust workspace and dependency
   checks without making the frozen Python reference a product gate.
 

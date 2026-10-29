@@ -655,8 +655,10 @@ fn eval_binary(
                 Ok(Value::Int(left.rem_euclid(right)))
             }
         }
-        "==" => Ok(Value::Bool(left == right)),
-        "!=" => Ok(Value::Bool(left != right)),
+        "==" | "!=" => {
+            let equal = normalize_relation_comparison(left) == normalize_relation_comparison(right);
+            Ok(Value::Bool(if op == "==" { equal } else { !equal }))
+        }
         "<" | "<=" | ">" | ">=" => {
             let ordering = left.cmp(&right);
             Ok(Value::Bool(match op {
@@ -1964,7 +1966,7 @@ fn alpha_state_inner(
                 None,
             )?
         };
-        alpha.insert(name.clone(), value);
+        alpha.insert(name.clone(), coerce_relation_literal(value, Some(abs_ty)));
     }
     let _ = implementation;
     Ok(alpha)
@@ -3580,7 +3582,20 @@ pub fn induction_warnings(warnings: &[JsonValue]) -> Vec<JsonValue> {
 /// Returns [`RuntimeError`] for an empty/malformed trace, a disabled action, or
 /// any state/change mismatch.
 pub fn replay_trace(model: KernelModel, trace: &[TraceStep]) -> Result<(), RuntimeError> {
-    replay_trace_with_initial(model, trace, None)
+    replay_trace_with_bounds(model, trace, None)
+}
+
+/// Replay with the verification run's implicit-bound selection (`None`: all bounds).
+///
+/// # Errors
+///
+/// Returns the same errors as [`replay_trace`].
+pub fn replay_trace_with_bounds(
+    model: KernelModel,
+    trace: &[TraceStep],
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<(), RuntimeError> {
+    replay_trace_with_initial(model, trace, None, checked_bounds)
 }
 
 /// Replay a trace whose step zero is a caller-provided complete logical state.
@@ -3594,13 +3609,28 @@ pub fn replay_trace_from_state(
     trace: &[TraceStep],
     initial_state: &State,
 ) -> Result<(), RuntimeError> {
-    replay_trace_with_initial(model, trace, Some(initial_state))
+    replay_trace_from_state_with_bounds(model, trace, initial_state, None)
+}
+
+/// Replay from a complete state with the run's implicit-bound selection.
+///
+/// # Errors
+///
+/// Returns the same errors as [`replay_trace_from_state`].
+pub fn replay_trace_from_state_with_bounds(
+    model: KernelModel,
+    trace: &[TraceStep],
+    initial_state: &State,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<(), RuntimeError> {
+    replay_trace_with_initial(model, trace, Some(initial_state), checked_bounds)
 }
 
 fn replay_trace_with_initial(
     model: KernelModel,
     trace: &[TraceStep],
     initial_state: Option<&State>,
+    checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<(), RuntimeError> {
     let first = trace
         .first()
@@ -3650,7 +3680,7 @@ fn replay_trace_with_initial(
                     action.name
                 ))
             })?;
-        let stepped = monitor.step_candidate(candidate, None)?;
+        let stepped = monitor.step_candidate(candidate, checked_bounds)?;
         let observed_state = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
         if observed_state != &entry.state {
             return Err(runtime_error(format!(
@@ -4488,7 +4518,10 @@ fn assign(
 ) -> Result<(), RuntimeError> {
     match target {
         LValue::Var(name) => {
-            target_state.insert(name.clone(), coerce_relation_literal(name, value, model));
+            target_state.insert(
+                name.clone(),
+                coerce_relation_literal(value, model.state_type(name)),
+            );
         }
         LValue::Index(name, index_expr) => {
             let index = eval(index_expr, read_state, bindings, model, None)?;
@@ -4569,18 +4602,27 @@ fn assign(
 
 /// `Set {}` is the only relation literal surface syntax accepts (public
 /// Kernel typing rejects a non-empty one), but `eval`'s `Expr::Set` arm has
-/// no assignment-target type context and always produces `Value::Set`.
-/// Coerce it here, where the target variable's declared type is known --
-/// mirrors the symbolic evaluator's `SymbolicValue::SetLiteral` ->
+/// no expected type context and always produces `Value::Set`.
+/// State writes supply the target type. This mirrors the symbolic
+/// evaluator's `SymbolicValue::SetLiteral` ->
 /// `SymbolicValue::Relation` coercion (`fsl-verifier/src/value.rs::coerce`).
-fn coerce_relation_literal(name: &str, value: Value, model: &KernelModel) -> Value {
+fn coerce_relation_literal(value: Value, expected: Option<&TypeRef>) -> Value {
     if let Value::Set(items) = &value
         && items.is_empty()
-        && matches!(model.state_type(name), Some(TypeRef::Relation(_, _)))
+        && matches!(expected, Some(TypeRef::Relation(_, _)))
     {
         return Value::Relation(BTreeSet::new());
     }
     value
+}
+
+/// Normalize empty relations only at the comparison root or inside `Some`.
+fn normalize_relation_comparison(value: Value) -> Value {
+    match value {
+        Value::Relation(items) if items.is_empty() => Value::Set(BTreeSet::new()),
+        Value::Some(inner) => Value::Some(Box::new(normalize_relation_comparison(*inner))),
+        value => value,
+    }
 }
 
 fn lvalue_key(

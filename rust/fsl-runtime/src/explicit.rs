@@ -286,6 +286,20 @@ pub fn verify_explicit_selected(
                 scratch.state = state.clone();
                 scratch.step = level;
                 let stepped = scratch.step_candidate(candidate, checked_bounds)?;
+                // Match symbolic frames: an omitted Seq bound must not let
+                // exploration proceed beyond the frame's representable capacity.
+                let after = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
+                for (name, ty) in &scratch.model.state {
+                    if checked_bounds.is_some_and(|selected| {
+                        !selected
+                            .contains(&fsl_core::SyntheticName::Bounds { state: name }.internal())
+                    }) && let TypeRef::Seq(_, capacity) = ty
+                        && let Some(Value::Seq(values)) = after.get(name)
+                        && values.len() > *capacity
+                    {
+                        return Err(runtime_error("model sequence length exceeds capacity"));
+                    }
+                }
                 if let Some(violation) = stepped.violation {
                     // The Monitor rolls back on violation (`state` is the pre-step
                     // state); the trace must show the attempted post-state.

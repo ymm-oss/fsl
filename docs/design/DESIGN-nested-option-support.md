@@ -645,7 +645,7 @@ origin with 1:1. These checks cover expression trees visited by the shared
 validator: unselected conditional branches, initializers, action assignments,
 guard/let values and ensures, properties, leadsTo predicates/ranking, terminal
 predicates, and trace expression internals. Parameter-type checking of helpful
-action arguments was outside the historical baseline; main's #1483 now provides
+action arguments was outside the historical baseline; main's #1527 now provides
 it and is preserved. Outer trace argument kinds retain their existing replay contract.
 
 | Breaking removal category | Previously accepted examples now rejected |
@@ -824,7 +824,7 @@ model without a terminal span retains the legacy fallback; an authored terminal
 does not use it.
 
 Two scope clarifications remain explicit. At the historical round-1 baseline,
-`helpful` actions checked existence/arity only; main's #1483 now checks parameter
+`helpful` actions checked existence/arity only; main's #1527 now checks parameter
 types and is preserved during integration. Relation-valued temporary collection
 literals are not generalized by the self-relation provenance fix: a mixed
 relation sequence can check while both engines reject it because such sequences
