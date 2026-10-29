@@ -613,8 +613,15 @@ Native `check` and shared Worker stages now also
 reject undeclared authority tools and unknown hard rules in every project
 component, matching project `ai check` (semantics / exit 2). Generic checking no
 longer accepts `error_envelope_ai_project_unknown_tool.fsl` or
-`error_envelope_ai_project_invalid_rule.fsl`. Project semantic positions remain
-block-relative (#1574); LSP project-component diagnostics remain separate (#1575).
+`error_envelope_ai_project_invalid_rule.fsl`.
+Embedded component locations use the original document's one-based lines and
+Unicode-scalar columns, not bytes or UTF-16 units. Token spans are translated
+once before constructing IR, including nested locations and annotation UTF-8 byte
+offsets. For literate Markdown, byte offsets refer to the extracted FSL text,
+not the Markdown file; document lines and code-line columns are preserved.
+Unknown hard-rule messages point to `check hard`; parse errors are not
+double-translated. Validity, diagnostic kind, envelope fields, exit status and
+assurance do not change. LSP project-component diagnostics remain separate (#1575).
 
 Measured #1545 breaking-removal sweep: independently built B
 `d37a215e8df6c00222e6aafd94bc9b556c445521` and H
@@ -628,12 +635,15 @@ all 30 were checked, including bash-only `examples/ai/README.md` as a negative c
 The **three corpus ok/exit0 → error/exit2 removals** are
 `error_envelope_ai_project_unknown_tool.fsl`,
 `error_envelope_ai_project_invalid_rule.fsl`, and `error_envelope_literate_ai_project.md`.
-The Markdown project returns type/`ai_component 'EnvelopeParityLiterateProject' declares no tools`/
-block loc 1:1/exit2; standalone literate rejection and both multi-block toggle
+The Markdown project returned type/`ai_component 'EnvelopeParityLiterateProject' declares no tools`/
+block loc 1:1/exit2 (historical #1545 frame; #1574 now reports document loc 5:1);
+standalone literate rejection and both multi-block toggle
 acceptances are unchanged. The **four new-inline removals**
 are tool-less-component projects in CLI and Worker-shaped tests (two), an
 empty-authority-only component in a project (one), and an invalid later component
-after a valid first one (one). Three return type at block loc 1:1; the later
+after a valid first one (one). Three returned type at block loc 1:1 (historical
+frame; #1574 now reports document loc 2:3 for the indented CLI project forms,
+while the first-character Worker case stays 1:1); the later
 unknown tool returns unlocated semantics. Rewritten existing inline FSL: zero.
 Other check-only exit/result/stdout/stderr comparisons agree. Declare a tool or remove
 an unneeded component, and repair undeclared tool/unknown rule references.

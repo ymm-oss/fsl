@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The component and its check block begin on one indented line.
+      ai_component InlineRule { check hard { rule unregistered_inline_rule; } }
+
+statistical_property Quality {
+  target InlineRule
+  require min_samples >= 0
+}

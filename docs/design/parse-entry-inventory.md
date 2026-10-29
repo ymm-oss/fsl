@@ -251,7 +251,7 @@ wrappers.
 | `fsl-runtime/src/bin/fsl-refine.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
 | `fsl-runtime/src/bin/fsl-refine.rs` | `parse_refinement` | 1 | Definition | PARITY_TOOL |
 | `fsl-syntax/src/ai.rs` | `lex` | 1 | D8 | CAUSAL_AI |
-| `fsl-syntax/src/ai_project.rs` | `parse_ai_component` | 1 | D8 | CAUSAL_AI |
+| `fsl-syntax/src/ai_project.rs` | `lex` | 1 | D8 | CAUSAL_AI |
 | `fsl-syntax/src/bin/fsl-parse-surface.rs` | `parse_surface_document` | 1 | Definition | PARITY_TOOL |
 | `fsl-syntax/src/causal.rs` | `declaration_keyword` | 1 | D8 | CAUSAL_AI |
 | `fsl-syntax/src/causal.rs` | `lex` | 1 | D8 | CAUSAL_AI |

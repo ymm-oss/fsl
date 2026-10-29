@@ -145,8 +145,16 @@ exit 2), rather than `ok`. In particular, the previously accepted fixtures
 project checking. Standalone #1546 no-tools envelopes remain unchanged on
 check and specialized-preflight paths; the lowering-only duplicate-fallback
 priority exception is measured below.
-Project semantic positions retain their component-block coordinate frame
-(#1574); LSP project-component diagnostics remain separate work (#1575).
+Embedded component locations use the original document's one-based lines and
+Unicode-scalar columns, not component-block coordinates or UTF-16 units. The
+project parser translates token spans once before constructing component IR,
+including nested locations and annotation UTF-8 byte offsets. For literate
+Markdown, byte offsets refer to the extracted FSL text, not the Markdown file;
+document lines and code-line columns are preserved. Unknown hard-rule messages
+remain anchored at `check hard`, not the `rule` token; parse errors are
+not translated twice. Only coordinates change: validity, diagnostic kind,
+envelope fields, exit status and assurance remain unchanged. LSP project-component
+diagnostics remain separate work (#1575).
 
 ### Boundary sweep evidence (#1545)
 
@@ -165,15 +173,18 @@ The **three corpus ok/exit0 → error/exit2 breaking removals** are
 `error_envelope_ai_project_unknown_tool.fsl`,
 `error_envelope_ai_project_invalid_rule.fsl`, and
 `error_envelope_literate_ai_project.md` under `rust/fslc/tests/fixtures/`.
-The Markdown project now reports type, exact message
+The Markdown project reported type, exact message
 `ai_component 'EnvelopeParityLiterateProject' declares no tools`, block loc 1:1,
-exit 2. The standalone literate component remains rejected as on base; both
+exit 2 (historical #1545 frame; #1574 now reports document loc 5:1).
+The standalone literate component remains rejected as on base; both
 multi-block toggle examples remain accepted. No other Markdown acceptance changes.
 The **four new-inline breaking removals** are projects containing a tool-less
 component in the CLI and Worker-shaped tests (two occurrences), a project whose
 component declares only empty authority (one), and a valid-first project whose
 later component names an undeclared authority tool (one). The three tool-less
-occurrences report type at component-block loc 1:1; the later invalid component
+occurrences reported type at component-block loc 1:1 (historical frame; #1574 now
+reports document loc 2:3 for the indented CLI project forms, while the
+first-character Worker case stays 1:1); the later invalid component
 reports the existing unlocated semantics error. There are **zero rewritten
 existing inline FSL forms**. Other observations in this **check-only** sweep
 are unchanged; the lowering-only differences below are separate. Declare an intended tool (empty authority is allowed), remove an

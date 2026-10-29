@@ -13,7 +13,8 @@
 //! `src/fslc/ai_project.py`: a small typed metadata model built with a
 //! brace-matching block scanner, not a strict grammar.
 
-use crate::{AiComponent, ParseError, SourcePos, Span, parse_ai_component};
+use crate::ai::parse_ai_component_tokens;
+use crate::{AiComponent, ParseError, SourcePos, Span, lex};
 
 /// Top-level declaration kinds this parser recognizes as fsl-ai project
 /// blocks. A block whose kind is not in this set is ignored (mirrors the
@@ -316,6 +317,9 @@ impl AiProject {
 
 /// Parse one fsl-ai project source into its typed declarations.
 ///
+/// Component tokens and stored locations use the supplied project source's
+/// coordinate frame, with UTF-8 byte offsets and one-based scalar columns.
+///
 /// # Errors
 ///
 /// Returns a typed parser diagnostic when no recognized top-level block is
@@ -341,10 +345,9 @@ pub fn parse_ai_project(source: &str, name: &str) -> Result<AiProject, ParseErro
     for block in &blocks {
         match block.kind.as_str() {
             "ai_component" => {
-                project.components.push(
-                    parse_ai_component(&block.text)
-                        .map_err(|error| relocate_parse_error(source, block, error))?,
-                );
+                project
+                    .components
+                    .push(parse_project_component(source, block)?);
             }
             "dataset" => project.datasets.push(parse_dataset(block)),
             // Descended only far enough to record the name: these are tracked
@@ -410,8 +413,8 @@ struct RawBlock {
     /// source, so a clause inside it can report its own `loc` (#562).
     body_offset: usize,
     /// The exact original text of the block, header included (`"kind name {
-    /// ... }"`), used to hand `ai_component` blocks to the strict token
-    /// parser unmodified.
+    /// ... }"`), lexed locally before token spans are translated to the whole
+    /// project source's coordinate frame.
     text: String,
     body: String,
 }
@@ -619,16 +622,37 @@ fn parse_error_at(source: &str, char_offset: usize, message: impl Into<String>) 
     )
 }
 
-fn relocate_parse_error(source: &str, block: &RawBlock, error: ParseError) -> ParseError {
-    let start = block.start + block.text[..error.span.start.offset].chars().count();
-    let end = block.start + block.text[..error.span.end.offset].chars().count();
+fn parse_project_component(source: &str, block: &RawBlock) -> Result<AiComponent, ParseError> {
+    let origin = source_pos(source, block.start);
+    let mut tokens =
+        lex(&block.text).map_err(|error| relocate_parse_error(origin, error.into()))?;
+    for token in &mut tokens {
+        token.span = relocate_span(origin, token.span);
+    }
+    parse_ai_component_tokens(source, tokens, 0)
+}
+
+fn relocate_span(origin: SourcePos, span: Span) -> Span {
+    let position = |local: SourcePos| SourcePos {
+        offset: origin.offset + local.offset,
+        line: origin.line + local.line - 1,
+        column: if local.line == 1 {
+            origin.column + local.column - 1
+        } else {
+            local.column
+        },
+    };
+    Span {
+        start: position(span.start),
+        end: position(span.end),
+    }
+}
+
+fn relocate_parse_error(origin: SourcePos, error: ParseError) -> ParseError {
     ParseError::coded(
         error.code(),
         error.message,
-        Span {
-            start: source_pos(source, start),
-            end: source_pos(source, end),
-        },
+        relocate_span(origin, error.span),
     )
 }
 

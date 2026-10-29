@@ -206,7 +206,7 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
     ("fsl-syntax/src/ai.rs", "lex", 1, Owner::D8, CAUSAL_AI),
     (
         "fsl-syntax/src/ai_project.rs",
-        "parse_ai_component",
+        "lex",
         1,
         Owner::D8,
         CAUSAL_AI,

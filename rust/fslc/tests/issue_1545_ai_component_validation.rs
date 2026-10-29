@@ -68,11 +68,9 @@ fn no_tools_are_rejected_before_profiles_replay_and_project_analysis() {
                 let (value, status) = run(command, &path);
                 println!("{command:?}, project={project}: exit={status}, {value}");
                 assert_eq!(status, 2, "{value}");
-                // Project component coordinates retain their existing block
-                // frame; translating to physical coordinates is tracked by #1574.
                 let mut expected = json!({"fsl":"1.0", "result":"error", "kind":"type",
                     "message":format!("ai_component '{name}' declares no tools"),
-                    "loc": if project { json!({"line":1,"column":1}) } else { json!({"line":2,"column":3}) }});
+                    "loc":{"line":2,"column":3}});
                 if command == ["check"] {
                     expected["versions"] = json!({
                         "verifier":{"name":"fslc-rust","version":env!("CARGO_PKG_VERSION")},
