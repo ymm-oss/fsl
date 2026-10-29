@@ -30,11 +30,9 @@ fn capped_mutate_does_not_keep_a_full_spec_for_every_candidate() {
     //
     // Direct K=2048 macOS measurements (base 45a2de33, fixed f5bd0e71):
     // eager 3,309,305,856 bytes max RSS / 6.51 s; fixed 72,056,832 / 5.14 s.
-    // Commands (FSLC_CACHE=off, with a 60 s timeout on each):
-    // /usr/bin/time -l .claude/work/fslc-base-45a2de33 mutate \
-    //   .claude/work/generated-1425-final-k2048.fsl --depth 1 --max-mutants 1
-    // /usr/bin/time -l rust/target/debug/fslc mutate \
-    //   .claude/work/generated-1425-final-k2048.fsl --depth 1 --max-mutants 1
+    // Measured with `/usr/bin/time -l fslc mutate <generated K=2048 spec>
+    // --depth 1 --max-mutants 1` (FSLC_CACHE=off, 60 s timeout), using a
+    // main 45a2de33 binary and the fixed binary.
     // Binary SHA256s, respectively:
     // 751d19897ed319c9499aa7f9b5a0a749e9bca8521ee72191b61a5f4dcc6a8b07
     // d21fe2c32b39366afdf7d23045f61af13ae31cfb60e91fc5fdc7c101519e3f35

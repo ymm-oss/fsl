@@ -46,7 +46,7 @@ requires, assignment, requires, let, assignment. Its four `interleaved.*.stdout.
 captures were generated from the **saved BASE binary**, not the fixed binary:
 
 ```text
-FSLC_CACHE=off .claude/work/fslc-base-45a2de33 mutate rust/fslc/tests/fixtures/issue_1425/interleaved.fsl --depth 2 [--max-mutants <cap>]
+FSLC_CACHE=off <main 45a2de33 fslc binary> mutate rust/fslc/tests/fixtures/issue_1425/interleaved.fsl --depth 2 [--max-mutants <cap>]
 ```
 
 The saved binary has the same base SHA-256 above and was originally built from
