@@ -229,7 +229,7 @@ fn dependency_edition_t06_isolates_the_actual_unowned_refine_step() {
     scratch.write("dep.fsl", &cases::next_leaf());
     let result = run_chain_step_isolated("refine", "design", &sections, path.parent().unwrap());
     let mut observations = cases::Observations::default();
-    let expected = json!({"layer":"design->requirements","kind":"refine","file":path,"against":"requirements","abs_file":scratch.0.join("abstract.fsl"),"mapping":scratch.0.join("map.fsl"),"depth":2,"status":"failed","result":"error","exit_code":2,"detail":cases::unowned_expected(&cases::identity(&scratch,"dep.fsl"),path.to_str().unwrap())});
+    let expected = json!({"layer":"design->requirements","kind":"refine","file":path,"against":"requirements","abs_file":scratch.0.join("abstract.fsl"),"mapping":scratch.0.join("map.fsl"),"depth":2,"status":"failed","result":"error","exit_code":2,"detail":cases::cli_refusal(&cases::next_leaf(),"dep.fsl")});
     observations.eq("T06/direct-step", result, (expected, true));
     observations.finish();
 }

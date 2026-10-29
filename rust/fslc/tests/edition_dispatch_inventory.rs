@@ -250,6 +250,34 @@ fn advertised() -> BTreeSet<String> {
     leaves
 }
 
+fn assert_population(table: &BTreeSet<String>, actual: &BTreeSet<String>) {
+    assert_eq!(table, actual, "actual dispatch differs from edition table");
+}
+
+#[test]
+fn unknown_dispatch_leaf_is_detected_even_when_not_deferred() {
+    let source = include_str!("../src/main.rs");
+    let mutated = source.replacen("\"check\" =>", "\"check\" | \"unregistered-leaf\" =>", 1);
+    assert_ne!(mutated, source, "live dispatch mutation anchor");
+    let actual = dispatch(&mutated);
+    assert!(actual.contains("unregistered-leaf"));
+    assert!(cases::deferred("unregistered-leaf").is_none());
+    let table = cases::rows()
+        .iter()
+        .filter(|row| row.role != "lsp")
+        .map(|row| row.key.to_owned())
+        .collect();
+    let rejected = std::panic::catch_unwind(|| assert_population(&table, &actual));
+    println!(
+        "MUTATION unknown-dispatch-leaf produced_rejection={} expected_rejection=true",
+        rejected.is_err()
+    );
+    assert!(
+        rejected.is_err(),
+        "unknown leaf must not evade exact population"
+    );
+}
+
 #[test]
 fn metadata_and_dispatch_population_is_exact() {
     let rows = cases::rows();
@@ -268,11 +296,7 @@ fn metadata_and_dispatch_population_is_exact() {
         .map(|r| r.key.to_owned())
         .collect();
     assert_eq!(cli, advertised(), "metadata leaf absent from edition table");
-    assert_eq!(
-        table,
-        dispatch(include_str!("../src/main.rs")),
-        "actual dispatch differs from edition table"
-    );
+    assert_population(&table, &dispatch(include_str!("../src/main.rs")));
     assert_eq!(rows.iter().filter(|r| r.role == "nonreader").count(), 3);
     let deferred: BTreeSet<_> = cases::DEFERRED_TO_SECOND_PR
         .iter()

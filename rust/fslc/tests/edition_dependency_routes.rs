@@ -883,9 +883,6 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
             "valid-record.json",
             &std::fs::read_to_string(s.0.join("record.json")).unwrap(),
         );
-        let record: Value =
-            serde_json::from_str(&std::fs::read_to_string(s.0.join("valid-record.json")).unwrap())
-                .unwrap();
         let trust = if signed {
             "--trust-key test-public.pem"
         } else {
@@ -930,11 +927,11 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
         ] {
             git(&s, &args);
         }
-        // Direct digest loads have no owner; the existing read-error renderer
-        // carries the path/code in its message, not a new edition envelope.
+        // The live root owner delivers the complete dependency refusal before
+        // digest, record/signature writes, or approval metadata decoration.
         let actual = run(&s, &command);
         let id = if signed { "A06" } else { "A05" };
-        let expected = cases::unowned_expected("dep.fsl", "root.fsl");
+        let expected = cases::cli_refusal(&child, "dep.fsl");
         observations.output(id, &actual, expected, 2);
         observations.eq(
             id,
@@ -943,14 +940,7 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
         );
         for (id, command) in [("T18", command), ("T19", evaluation), ("T20", difference)] {
             let actual = run(&s, &command);
-            let mut expected = cases::unowned_expected(
-                &cases::identity(&s, "dep.fsl"),
-                if id == "T19" { "" } else { "root.fsl" },
-            );
-            if id == "T20" {
-                // Diff appends this fixture-bound metadata to ordinary errors too.
-                expected["approval"] = json!({"record":"valid-record.json","baseline_digest":record["spec"]["digest"],"baseline_commit":record["spec"]["git_commit"],"signature_status":if signed {"signed"} else {"unsigned"},"key_id":if signed {record["signature"]["key_id"].clone()} else {Value::Null}});
-            }
+            let expected = cases::cli_refusal(&child, &cases::identity(&s, "dep.fsl"));
             observations.output(id, &actual, expected, 2);
             observations.eq(
                 id,

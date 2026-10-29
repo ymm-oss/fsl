@@ -1,0 +1,1141 @@
+// SPDX-License-Identifier: Apache-2.0
+
+#[path = "support/edition_cases.rs"]
+mod common;
+#[path = "support/edition_dependency_cases.rs"]
+mod diagnostic;
+
+use common::{Results, Scratch};
+use serde_json::{Value, json};
+use std::fmt::Write as _;
+use std::process::Output;
+
+const COMPOSE: &str = "compose C { use S as s from \"dep.fsl\" @requirement(\"REQ-APPROVAL-001\",\"Keep\") invariant Reviewed { true } }\n";
+const MAP: &str = "refinement M { impl S abs S map done = done action finish() -> finish() }\n";
+const COLON_MAP: &str = "refinement M {\n impl S\n abs S\n map done = forall i in 0..1: done\n action finish() -> finish()\n}\n";
+
+fn run(s: &Scratch, command: &str) -> Output {
+    common::command(env!("CARGO_BIN_EXE_fslc"), &s.0, command, true)
+}
+
+fn payload(output: &Output) -> Value {
+    diagnostic::native_value(common::value(output))
+}
+
+fn stderr(value: &Value) -> Vec<u8> {
+    let Some(layers) = value.get("layers").and_then(Value::as_array) else {
+        return vec![];
+    };
+    let mut table =
+        "Layer  Check  Status  Result  Detail\n-----  -----  ------  ------  ------\n".to_owned();
+    for layer in layers {
+        let detail = layer
+            .get("depth")
+            .map_or_else(|| "-".into(), |depth| format!("depth={depth}"));
+        writeln!(
+            table,
+            "{}  {}  {}  {}  {detail}",
+            layer["layer"].as_str().unwrap(),
+            layer["kind"].as_str().unwrap(),
+            layer["status"].as_str().unwrap(),
+            layer["result"].as_str().unwrap()
+        )
+        .unwrap();
+    }
+    table.into_bytes()
+}
+
+fn expect(r: &mut Results, label: &str, actual: &Output, expected: Value, exit: i32) {
+    let expected_stderr = stderr(&expected);
+    let actual_value = diagnostic::stable(payload(actual));
+    let expected_value = diagnostic::stable(expected);
+    r.check(
+        label,
+        (actual.status.code(), &actual_value, &actual.stderr),
+        (Some(exit), &expected_value, &expected_stderr),
+        actual.status.code() == Some(exit)
+            && actual_value == expected_value
+            && actual.stderr == expected_stderr,
+    );
+}
+
+fn finish(r: Results) {
+    // These new controls must fail even while the older population is deferred.
+    let failures = r.failures;
+    assert!(failures.is_empty(), "multi-root mismatches: {failures:?}");
+}
+
+fn canonical(r: &mut Results, s: &Scratch, command: &str, result: &str) -> Value {
+    let output = run(s, command);
+    let value = payload(&output);
+    r.check(
+        &format!("preserved/{command}"),
+        (output.status.code(), &value, &output.stderr),
+        (0, result, stderr(&value)),
+        output.status.code() == Some(0)
+            && value["result"] == result
+            && output.stderr == stderr(&value),
+    );
+    value
+}
+
+fn warning(source: &str, path: &str) -> Value {
+    diagnostic::metadata_finding(source, path, "current")
+}
+
+fn admitted(mut value: Value, header: &str, warnings: Vec<Value>) -> Value {
+    if header == "fsl 5\n" {
+        value["edition"] = json!("next");
+        value["fsl_edition"] = json!(5);
+    } else if header == "fsl 4\n" {
+        value["fsl_edition"] = json!(4);
+    }
+    if !warnings.is_empty() {
+        value = diagnostic::with_child_warnings(value, warnings);
+    }
+    value
+}
+
+fn relation(command: &str) -> Value {
+    let args = common::split(command);
+    if args[0] == "diff" {
+        json!({"fsl":"1.0","result":"semantic_diff","old":{"file":args[1],"spec":"S"},"new":{"file":args[2],"spec":"S"},"bounded":{"depth":2,"completeness":"bounded"},"scope":{"old":{"instances":{},"values":{}},"new":{"instances":{},"values":{}},"comparison":"new","applied_to_old":{"instances":{},"values":{}}},"directions":{"new_to_old":{"result":"refines","checked_to_depth":2},"old_to_new":{"result":"refines","checked_to_depth":2}},"summary":["no_semantic_change"],"findings":[],"gate":{"forbidden":[],"violations":[],"passed":true}})
+    } else {
+        let mut value = json!({"fsl":"1.0","impl":"S","abs":"S","result":"refines","checked_to_depth":2,"action_map":{"finish":"finish"}});
+        if args.len() == 8 {
+            value["chain"] = json!(["S", "S", "S"]);
+        }
+        value
+    }
+}
+
+fn git(s: &Scratch, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Edition Test",
+            "-c",
+            "user.email=edition@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .current_dir(&s.0)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "scratch git {args:?}: {output:?}");
+    String::from_utf8(output.stdout).unwrap().trim().into()
+}
+
+fn commit(s: &Scratch, files: &[&str]) -> String {
+    git(s, &["init", "-q"]);
+    let mut args = vec!["add", "--"];
+    args.extend(files);
+    git(s, &args);
+    git(s, &["commit", "-qm", "fixture revision"]);
+    git(s, &["rev-parse", "HEAD"])
+}
+
+#[test]
+fn positional_metadata_warnings_and_intermediate_reuse() {
+    let mut r = Results::default();
+    for (command, slots, result) in [
+        (
+            "diff a.fsl b.fsl --depth 2",
+            vec!["a.fsl", "b.fsl"],
+            "semantic_diff",
+        ),
+        (
+            "diff a.fsl b.fsl --mapping map.fsl --depth 2",
+            vec!["a.fsl", "b.fsl"],
+            "semantic_diff",
+        ),
+        (
+            "refine a.fsl b.fsl map.fsl --depth 2",
+            vec!["a.fsl", "b.fsl"],
+            "refines",
+        ),
+        (
+            "refine a.fsl b.fsl map.fsl c.fsl map2.fsl --depth 2",
+            vec!["a.fsl", "b.fsl", "c.fsl"],
+            "refines",
+        ),
+        (
+            "diff a.fsl a.fsl --depth 2",
+            vec!["a.fsl", "a.fsl"],
+            "semantic_diff",
+        ),
+        (
+            "refine a.fsl a.fsl map.fsl --depth 2",
+            vec!["a.fsl", "a.fsl"],
+            "refines",
+        ),
+    ] {
+        let s = Scratch::new();
+        for name in ["a.fsl", "b.fsl", "c.fsl"] {
+            s.write(name, &diagnostic::annotated(diagnostic::LEAF));
+        }
+        s.write("map.fsl", MAP);
+        s.write("map2.fsl", MAP);
+        canonical(&mut r, &s, command, result);
+        let baseline = relation(command);
+        for header in ["", "fsl 4\n", "fsl 5\n"] {
+            for legacy in [false, true] {
+                // A next primary must be canonical; the secondary may be current
+                // legacy. Repeated occurrences contribute independently.
+                let mut findings = Vec::new();
+                for name in ["a.fsl", "b.fsl", "c.fsl"] {
+                    let head = if name == "a.fsl" { header } else { "" };
+                    let body = if legacy && head != "fsl 5\n" {
+                        diagnostic::LEGACY_LEAF.to_owned()
+                    } else {
+                        diagnostic::annotated(diagnostic::LEAF)
+                    };
+                    let source = format!("{head}{body}");
+                    s.write(name, &source);
+                    for _ in slots.iter().filter(|slot| **slot == name) {
+                        if legacy && head != "fsl 5\n" {
+                            findings.push(warning(&source, name));
+                        }
+                    }
+                }
+                let expected = admitted(baseline.clone(), header, findings);
+                expect(
+                    &mut r,
+                    &format!("slots/{command}/{header:?}/{legacy}"),
+                    &run(&s, command),
+                    expected,
+                    0,
+                );
+            }
+        }
+    }
+    finish(r);
+}
+
+#[test]
+fn secondary_mapping_warning_and_refusal_are_not_model_errors() {
+    let mut r = Results::default();
+    let s = Scratch::new();
+    s.write("a.fsl", diagnostic::LEAF);
+    s.write("b.fsl", diagnostic::LEAF);
+    let mapping = COLON_MAP.to_owned();
+    let repaired = mapping.replace(": done", " { done }");
+    for command in [
+        "diff a.fsl b.fsl --mapping map.fsl --depth 2",
+        "refine a.fsl b.fsl map.fsl --depth 2",
+    ] {
+        s.write("map.fsl", &repaired);
+        canonical(
+            &mut r,
+            &s,
+            command,
+            if command.starts_with("diff") {
+                "semantic_diff"
+            } else {
+                "refines"
+            },
+        );
+        let baseline = relation(command);
+        s.write("map.fsl", &mapping);
+        let findings = diagnostic::findings(&mapping, "map.fsl", "current");
+        expect(
+            &mut r,
+            &format!("mapping/warning/{command}"),
+            &run(&s, command),
+            admitted(baseline, "", findings),
+            0,
+        );
+        let rejected = format!("fsl 5\n{mapping}");
+        s.write("map.fsl", &rejected);
+        expect(
+            &mut r,
+            &format!("mapping/refusal/{command}"),
+            &run(&s, command),
+            diagnostic::cli_refusal(&rejected, "map.fsl"),
+            2,
+        );
+    }
+    finish(r);
+}
+
+fn batch_entry(file: &str, value: &Value) -> Value {
+    let mut entry = json!({"file":file,"result":value["result"]});
+    for key in [
+        "spec",
+        "refinement",
+        "projection",
+        "profile",
+        "schema_version",
+        "formal_status",
+        "edition",
+        "fsl_edition",
+        "warnings",
+        "kind",
+        "message",
+        "loc",
+        "expected",
+        "hint",
+    ] {
+        if let Some(value) = value.get(key) {
+            entry[key] = value.clone();
+        }
+    }
+    if value["result"] == "analyzed" {
+        let mut summary = json!({});
+        for key in [
+            "nodes",
+            "edges",
+            "findings",
+            "components",
+            "cycles",
+            "errors",
+        ] {
+            if let Some(items) = value.get(key).and_then(Value::as_array) {
+                summary[key] = json!(items.len());
+            }
+        }
+        entry["summary"] = summary;
+    } else if let Some(findings) = value.get("findings") {
+        entry["findings"] = findings.clone();
+    }
+    entry
+}
+
+fn batch(files: Vec<Value>, errors: Vec<Value>, projection: &str) -> Value {
+    let failed = !errors.is_empty();
+    let mut value = json!({"fsl":"1.0","result":if failed {"error"} else {"analyzed"},"analysis":"structure","mode":"batch","projection":projection,"profile":null,"files":Value::Array(files),"errors":Value::Array(errors)});
+    if failed {
+        value["kind"] = json!("batch");
+        value["message"] = json!("one or more files failed structural analysis");
+    }
+    value
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // Cross-file ownership and mixed-project acceptance matrix.
+fn batch_scopes_are_per_file_and_project_is_not_a_primary_fsl_root() {
+    let mut r = Results::default();
+    let s = Scratch::new();
+    s.write("dep.fsl", &diagnostic::annotated(diagnostic::LEAF));
+    for file in ["a.fsl", "b.fsl"] {
+        s.write(file, COMPOSE);
+    }
+    s.write("project.toml", "[design]\nfile = \"a.fsl\"\n");
+    let a = canonical(&mut r, &s, "analyze a.fsl --projection tsg", "analyzed");
+    let b = canonical(&mut r, &s, "analyze b.fsl --projection tsg", "analyzed");
+    let project = canonical(
+        &mut r,
+        &s,
+        "analyze project.toml --projection traceability_graph",
+        "analyzed",
+    );
+    for mixed in [false, true] {
+        let projection = if mixed { "traceability_graph" } else { "tsg" };
+        let command = if mixed {
+            "analyze b.fsl project.toml --projection traceability_graph"
+        } else {
+            "analyze b.fsl a.fsl a.fsl --projection tsg"
+        };
+        let first = if mixed { &project } else { &a };
+        let first_name = if mixed { "project.toml" } else { "a.fsl" };
+        let b = if mixed {
+            json!({"fsl":"1.0","result":"error","kind":"semantics","message":"unsupported projection: traceability_graph"})
+        } else {
+            b.clone()
+        };
+        let errors = if mixed {
+            vec![
+                json!({"file":"b.fsl","result":"error","kind":"semantics","message":"unsupported projection: traceability_graph","loc":null}),
+            ]
+        } else {
+            vec![]
+        };
+        let entries = if mixed {
+            vec![batch_entry("b.fsl", &b), batch_entry(first_name, first)]
+        } else {
+            vec![batch_entry(first_name, first), batch_entry("b.fsl", &b)]
+        };
+        expect(
+            &mut r,
+            &format!("preserved/batch/{mixed}"),
+            &run(&s, command),
+            batch(entries, errors.clone(), projection),
+            if mixed { 2 } else { 0 },
+        );
+        s.write("dep.fsl", diagnostic::LEGACY_LEAF);
+        let finding = warning(diagnostic::LEGACY_LEAF, "dep.fsl");
+        let first = diagnostic::with_child_warnings(first.clone(), vec![finding.clone()]);
+        let second = diagnostic::with_child_warnings(b.clone(), vec![finding]);
+        let entries = if mixed {
+            vec![
+                batch_entry("b.fsl", &second),
+                batch_entry(first_name, &first),
+            ]
+        } else {
+            vec![
+                batch_entry(first_name, &first),
+                batch_entry("b.fsl", &second),
+            ]
+        };
+        expect(
+            &mut r,
+            &format!("batch/two-independent-warning-owners/{mixed}"),
+            &run(&s, command),
+            batch(entries, errors, projection),
+            if mixed { 2 } else { 0 },
+        );
+        s.write("dep.fsl", &diagnostic::annotated(diagnostic::LEAF));
+    }
+    // A's rejected dependency cannot replace B or the batch envelope.
+    s.write("b.fsl", diagnostic::LEAF);
+    let b = canonical(&mut r, &s, "analyze b.fsl --projection tsg", "analyzed");
+    let child = diagnostic::next_leaf();
+    s.write("dep.fsl", &child);
+    let refusal = diagnostic::cli_refusal(&child, "dep.fsl");
+    let expected = batch(
+        vec![batch_entry("a.fsl", &refusal), batch_entry("b.fsl", &b)],
+        vec![
+            json!({"file":"a.fsl","result":"error","kind":"unsupported_in_edition","message":null,"loc":null}),
+        ],
+        "tsg",
+    );
+    expect(
+        &mut r,
+        "batch/refused-child-does-not-poison-b",
+        &run(&s, "analyze a.fsl b.fsl --projection tsg"),
+        expected,
+        2,
+    );
+    std::fs::create_dir(s.0.join("empty")).unwrap();
+    s.write("empty/ignored.toml", "[design]\nfile = \"missing.fsl\"\n");
+    expect(
+        &mut r,
+        "preserved/batch/empty-directory",
+        &run(&s, "analyze empty --projection tsg"),
+        batch(vec![], vec![], "tsg"),
+        0,
+    );
+    finish(r);
+}
+
+#[test]
+fn project_direct_roots_mapping_and_empty_project_have_warning_only_metadata() {
+    let mut r = Results::default();
+    let s = Scratch::new();
+    s.write("project.toml", "[requirements]\nfile = \"a.fsl\"\n[design]\nfile = \"b.fsl\"\nrefine_against = \"requirements\"\nmapping = \"map.fsl\"\n");
+    for file in ["a.fsl", "b.fsl"] {
+        s.write(file, &diagnostic::annotated(diagnostic::LEAF));
+    }
+    s.write("map.fsl", MAP);
+    let command = "analyze project.toml --projection traceability_graph";
+    let baseline = canonical(&mut r, &s, command, "analyzed");
+    for header in ["", "fsl 4\n"] {
+        let source = format!("{header}{}", diagnostic::LEGACY_LEAF);
+        s.write("a.fsl", &source);
+        s.write("b.fsl", &source);
+        let findings = vec![warning(&source, "a.fsl"), warning(&source, "b.fsl")];
+        expect(
+            &mut r,
+            &format!("project/warnings/{header:?}"),
+            &run(&s, command),
+            admitted(baseline.clone(), "", findings),
+            0,
+        );
+    }
+    for name in ["a.fsl", "b.fsl"] {
+        s.write(name, &diagnostic::annotated(diagnostic::LEAF));
+    }
+    s.write("map.fsl", &COLON_MAP.replace(": done", " { done }"));
+    let mapped = canonical(&mut r, &s, command, "analyzed");
+    s.write("map.fsl", COLON_MAP);
+    expect(
+        &mut r,
+        "project/mapping-warning",
+        &run(&s, command),
+        admitted(
+            mapped,
+            "",
+            diagnostic::findings(COLON_MAP, "map.fsl", "current"),
+        ),
+        0,
+    );
+    s.write("project.toml", "# no FSL roots\n");
+    let empty = canonical(&mut r, &s, command, "analyzed");
+    r.check(
+        "preserved/project/empty-no-artificial-edition",
+        &empty,
+        "no edition metadata",
+        empty.get("edition").is_none() && empty.get("fsl_edition").is_none(),
+    );
+    finish(r);
+}
+
+#[test]
+fn later_io_precedes_earlier_model_or_parse_errors_outside_chain() {
+    let mut r = Results::default();
+    for broken in [
+        "not valid FSL",
+        "spec S { state {} invariant Bad { missing } }\n",
+    ] {
+        let s = Scratch::new();
+        s.write("a.fsl", broken);
+        s.write("b.fsl", diagnostic::LEAF);
+        s.write("map.fsl", MAP);
+        let io = std::io::Error::from_raw_os_error(2).to_string();
+        for command in [
+            "refine a.fsl b.fsl missing-map.fsl --depth 2",
+            "refine a.fsl b.fsl map.fsl missing.fsl map.fsl --depth 2",
+            "diff a.fsl b.fsl --mapping missing-map.fsl --depth 2",
+        ] {
+            let message = if command.contains(" missing.fsl ") {
+                format!("missing.fsl: {io}")
+            } else {
+                io.clone()
+            };
+            expect(
+                &mut r,
+                &format!("priority/{command}/{broken:?}"),
+                &run(&s, command),
+                json!({"fsl":"1.0","result":"error","kind":"io","message":message}),
+                2,
+            );
+        }
+        s.write(
+            "project.toml",
+            "[business]\nfile = \"a.fsl\"\n[design]\nfile = \"missing.fsl\"\n",
+        );
+        // Project uses the established source loader's path-bearing error.
+        let expected = json!({"fsl":"1.0","result":"error","kind":"io","message":format!("missing.fsl: {io}")});
+        expect(
+            &mut r,
+            &format!("priority/project/{broken:?}"),
+            &run(&s, "analyze project.toml --projection traceability_graph"),
+            expected,
+            2,
+        );
+        s.write("z.toml", "[design]\nfile = \"missing.fsl\"\n");
+        expect(
+            &mut r,
+            &format!("priority/batch-project/{broken:?}"),
+            &run(&s, "analyze a.fsl z.toml --projection traceability_graph"),
+            json!({"fsl":"1.0","result":"error","kind":"io","message":format!("missing.fsl: {io}")}),
+            2,
+        );
+    }
+    finish(r);
+}
+
+#[test]
+fn direct_diff_refine_and_multilink_own_complete_child_refusals() {
+    let mut r = Results::default();
+    for command in [
+        "diff a.fsl b.fsl --depth 2",
+        "refine a.fsl b.fsl map.fsl --depth 2",
+        "refine a.fsl b.fsl map.fsl c.fsl map.fsl --depth 2",
+    ] {
+        let s = Scratch::new();
+        for name in ["a.fsl", "b.fsl", "c.fsl"] {
+            s.write(name, COMPOSE);
+        }
+        s.write("map.fsl", "refinement M { impl C abs C maps auto }\n");
+        s.write("dep.fsl", diagnostic::LEAF);
+        canonical(
+            &mut r,
+            &s,
+            command,
+            if command.starts_with("diff") {
+                "semantic_diff"
+            } else {
+                "refines"
+            },
+        );
+        let child = diagnostic::next_leaf();
+        s.write("dep.fsl", &child);
+        expect(
+            &mut r,
+            &format!("child/{command}"),
+            &run(&s, command),
+            diagnostic::cli_refusal(&child, "dep.fsl"),
+            2,
+        );
+    }
+    finish(r);
+}
+
+#[cfg(unix)]
+#[test]
+fn direct_consumers_use_the_captured_stream_instead_of_reopening_it() {
+    let mut r = Results::default();
+    let s = Scratch::new();
+    s.write("a.fsl", diagnostic::LEAF);
+    s.write("b.fsl", diagnostic::LEAF);
+    s.write("map.fsl", MAP);
+    for command in [
+        "diff a.fsl b.fsl --depth 2",
+        "refine a.fsl b.fsl map.fsl --depth 2",
+    ] {
+        let mut expected = canonical(
+            &mut r,
+            &s,
+            command,
+            if command.starts_with("diff") {
+                "semantic_diff"
+            } else {
+                "refines"
+            },
+        );
+        if command.starts_with("diff") {
+            expected["old"]["file"] = json!("/dev/stdin");
+        }
+        let command = command.replace("a.fsl", "/dev/stdin");
+        let actual = common::invoke_input(
+            env!("CARGO_BIN_EXE_fslc"),
+            &common::split(&command),
+            &s.0,
+            &format!("fsl 5\n{}", diagnostic::LEAF),
+        );
+        expect(
+            &mut r,
+            &format!("capture/{command}"),
+            &actual,
+            admitted(expected, "fsl 5\n", vec![]),
+            0,
+        );
+    }
+    finish(r);
+}
+
+#[test]
+fn failed_multilink_finishes_all_explicit_slots_only_once() {
+    let mut r = Results::default();
+    let s = Scratch::new();
+    for name in ["a.fsl", "b.fsl", "c.fsl"] {
+        s.write(name, &diagnostic::annotated(diagnostic::LEAF));
+    }
+    s.write("map.fsl", MAP);
+    s.write(
+        "bad-map.fsl",
+        "refinement M { impl S abs S map done = not done action finish() -> finish() }\n",
+    );
+    let command = "refine a.fsl b.fsl map.fsl c.fsl bad-map.fsl --depth 2";
+    let first = run(&s, command);
+    let value = payload(&first);
+    r.check(
+        "preserved/multi-link/real-failed-link",
+        (first.status.code(), &value),
+        "refinement_failed/1 with failed_link",
+        first.status.code() == Some(1)
+            && value["result"] == "refinement_failed"
+            && value.get("failed_link").is_some(),
+    );
+    let mut findings = Vec::new();
+    for name in ["a.fsl", "b.fsl", "c.fsl"] {
+        s.write(name, diagnostic::LEGACY_LEAF);
+        findings.push(warning(diagnostic::LEGACY_LEAF, name));
+    }
+    expect(
+        &mut r,
+        "multi-link/failed-link-warning-cardinality",
+        &run(&s, command),
+        admitted(value, "", findings),
+        1,
+    );
+    finish(r);
+}
+
+#[test]
+fn git_mapping_origin_distinguishes_live_from_materialized_inputs() {
+    let mut r = Results::default();
+    let s = Scratch::new();
+    s.write("root.fsl", diagnostic::LEAF);
+    let first = commit(&s, &["root.fsl"]);
+    s.write("root.fsl", &format!("fsl 5\n{}", diagnostic::LEAF));
+    let second = commit(&s, &["root.fsl"]);
+    let mapping = COLON_MAP.to_owned();
+    let rejected = format!("fsl 5\n{mapping}");
+    for absolute in [false, true] {
+        let path = s.write("live-map.fsl", &rejected);
+        let path = if absolute {
+            path.to_str().unwrap().to_owned()
+        } else {
+            "live-map.fsl".into()
+        };
+        let command = format!("diff --git {first}..{second} root.fsl --mapping {path} --depth 2");
+        expect(
+            &mut r,
+            &format!("git/live-mapping/{absolute}"),
+            &run(&s, &command),
+            diagnostic::cli_refusal(&rejected, &path),
+            2,
+        );
+        s.write("live-map.fsl", COLON_MAP);
+        let mut expected = git_diff(&first, &second);
+        expected = diagnostic::with_child_warnings(
+            expected,
+            diagnostic::findings(COLON_MAP, &path, "current"),
+        );
+        expect(
+            &mut r,
+            &format!("git/live-mapping-warning/{absolute}"),
+            &run(&s, &command),
+            expected,
+            0,
+        );
+    }
+    s.write("tracked-map.fsl", &rejected);
+    let third = commit(&s, &["tracked-map.fsl"]);
+    let command =
+        format!("diff --git {first}..{third} root.fsl --mapping tracked-map.fsl --depth 2");
+    let actual = run(&s, &command);
+    // Historical mapping remains a raw input, not an extra admitted live slot.
+    let expected = git_diff(&first, &third);
+    expect(
+        &mut r,
+        "preserved/git/materialized-mapping-not-admitted",
+        &actual,
+        expected.clone(),
+        0,
+    );
+    // Changing the live homonym must not change the materialized selection.
+    s.write("tracked-map.fsl", "invalid live mapping");
+    expect(
+        &mut r,
+        "preserved/git/materialized-mapping-wins-over-live",
+        &run(&s, &command),
+        expected,
+        0,
+    );
+    finish(r);
+}
+
+fn git_diff(first: &str, second: &str) -> Value {
+    let mut value = relation("diff root.fsl root.fsl --depth 2");
+    value["old"]["file"] = json!(format!("{first}:root.fsl"));
+    value["new"]["file"] = json!(format!("{second}:root.fsl"));
+    value["vcs"] = json!({"kind":"git","range":format!("{first}..{second}"),"base":{"revision":first,"commit":first},"head":{"revision":second,"commit":second},"materialization":"git_archive_full_tree"});
+    value
+}
+
+#[cfg(unix)]
+#[test]
+fn chain_grouping_and_step_share_one_captured_root_stream() {
+    let mut r = Results::default();
+    let s = Scratch::new();
+    let source = format!("fsl 5\n{}", diagnostic::LEAF);
+    s.write("a.fsl", &source);
+    for (kind, depth) in [("check", ""), ("verify", "depth = 2\n")] {
+        let command = format!(
+            "{kind} a.fsl {}",
+            if kind == "verify" {
+                "--depth 2 --no-cache"
+            } else {
+                ""
+            }
+        );
+        let detail = canonical(
+            &mut r,
+            &s,
+            &command,
+            if kind == "verify" { "verified" } else { "ok" },
+        );
+        s.write(
+            "stream.toml",
+            &format!("[design]\nfile = \"/dev/stdin\"\n{depth}"),
+        );
+        let mut layer = json!({"layer":"design","kind":kind,"file":"/dev/stdin","status":"passed","result":detail["result"],"exit_code":0,"detail":detail});
+        if kind == "verify" {
+            layer["depth"] = json!(2);
+        }
+        let expected = json!({"fsl":"1.0","result":"verified","manifest":"stream.toml","keep_going":false,"layers":[layer]});
+        for jobs in [1, 3] {
+            let command = format!("chain stream.toml --jobs {jobs}");
+            let output = common::invoke_input(
+                env!("CARGO_BIN_EXE_fslc"),
+                &common::split(&command),
+                &s.0,
+                &source,
+            );
+            expect(
+                &mut r,
+                &format!("chain/captured-grouping/{kind}/{jobs}"),
+                &output,
+                expected.clone(),
+                0,
+            );
+        }
+    }
+    finish(r);
+}
+
+#[test]
+fn chain_dependency_delivery_is_inside_each_actual_step_thread() {
+    let mut r = Results::default();
+    for jobs in [1, 3] {
+        for depth in ["", "depth = 2\n"] {
+            let s = Scratch::new();
+            s.write("dep.fsl", &diagnostic::annotated(diagnostic::LEAF));
+            s.write("a.fsl", COMPOSE);
+            s.write("b.fsl", COMPOSE);
+            s.write("map.fsl", "refinement M { impl C abs C maps auto }\n");
+            s.write("chain.toml", &format!("[requirements]\nfile = \"a.fsl\"\n{depth}[design]\nfile = \"b.fsl\"\n{depth}refine_against = \"requirements\"\nmapping = \"map.fsl\"\nrefine_depth = 2\n"));
+            let command = format!("chain chain.toml --jobs {jobs} --keep-going");
+            let baseline = canonical(&mut r, &s, &command, "verified");
+            s.write("dep.fsl", diagnostic::LEGACY_LEAF);
+            let mut expected = baseline.clone();
+            for layer in expected["layers"].as_array_mut().unwrap() {
+                layer["detail"] = diagnostic::with_child_warnings(
+                    layer["detail"].clone(),
+                    vec![warning(diagnostic::LEGACY_LEAF, "dep.fsl")],
+                );
+            }
+            expect(
+                &mut r,
+                &format!("chain/per-step-child-warning/{jobs}/{depth:?}"),
+                &run(&s, &command),
+                expected,
+                0,
+            );
+        }
+    }
+    finish(r);
+}
+
+#[test]
+fn chain_retains_ordinary_io_layer_projection_and_cutoff() {
+    let mut r = Results::default();
+    let s = Scratch::new();
+    s.write("a.fsl", diagnostic::LEAF);
+    s.write(
+        "chain.toml",
+        "[business]\nfile = \"missing.fsl\"\n[design]\nfile = \"a.fsl\"\n",
+    );
+    let expected = json!({"fsl":"1.0","result":"error","manifest":"chain.toml","keep_going":false,"kind":"chain","message":"one or more chain layers returned an error","failed":["business"],"layers":[{"layer":"business","kind":"check","file":"./missing.fsl","status":"failed","result":"error","exit_code":2,"detail":{"fsl":"1.0","result":"error","kind":"io","message":format!("./missing.fsl: {}", std::io::Error::from_raw_os_error(2))}},{"layer":"design","kind":"spec","status":"skipped","result":"skipped","exit_code":0}]});
+    for jobs in [1, 3] {
+        expect(
+            &mut r,
+            &format!("preserved/chain/io-cutoff/{jobs}"),
+            &run(&s, &format!("chain chain.toml --jobs {jobs}")),
+            expected.clone(),
+            2,
+        );
+        let mut continued = expected.clone();
+        continued["keep_going"] = json!(true);
+        continued["layers"][1] = json!({"layer":"design","kind":"check","file":"./a.fsl","status":"passed","result":"ok","exit_code":0,"detail":{"fsl":"1.0","result":"ok","spec":"S","warnings":[]}});
+        expect(
+            &mut r,
+            &format!("preserved/chain/io-keep-going/{jobs}"),
+            &run(&s, &format!("chain chain.toml --jobs {jobs} --keep-going")),
+            continued,
+            2,
+        );
+    }
+    finish(r);
+}
+
+#[test]
+fn chain_duplicate_grouping_keeps_root_warnings_on_cold_and_warm_cache() {
+    let mut r = Results::default();
+    for jobs in [1, 3] {
+        let s = Scratch::new();
+        s.write("a.fsl", &diagnostic::annotated(diagnostic::LEAF));
+        s.write(
+            "cache.toml",
+            "[requirements]\nfile = \"a.fsl\"\ndepth = 2\n[design]\nfile = \"a.fsl\"\ndepth = 2\n",
+        );
+        let command = format!("chain cache.toml --jobs {jobs}");
+        let mut expected = canonical(&mut r, &s, &command, "verified");
+        let source = format!("fsl 4\n{}", diagnostic::LEGACY_LEAF);
+        s.write("a.fsl", &source);
+        for layer in expected["layers"].as_array_mut().unwrap() {
+            layer["detail"] = admitted(
+                layer["detail"].clone(),
+                "fsl 4\n",
+                vec![warning(&source, "./a.fsl")],
+            );
+        }
+        for warm in [false, true] {
+            let actual = std::process::Command::new(env!("CARGO_BIN_EXE_fslc"))
+                .args(common::split(&command))
+                .current_dir(&s.0)
+                .env("FSLC_UNSTABLE", "fsl5")
+                .env("FSLC_CACHE", "on")
+                .env("FSLC_CACHE_DIR", s.0.join("cache"))
+                .env("TMPDIR", common::root().join(".codex/tmp"))
+                .output()
+                .unwrap();
+            let mut value = payload(&actual);
+            for (index, layer) in value["layers"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .enumerate()
+            {
+                let cache = layer["detail"].as_object_mut().unwrap().remove("cache");
+                let valid = match &cache {
+                    Some(cache) => {
+                        cache["hit"] == true
+                            && cache["source"] == "exact"
+                            && cache["key"].as_str().is_some_and(|key| {
+                                key.len() == 64 && key.bytes().all(|byte| byte.is_ascii_hexdigit())
+                            })
+                    }
+                    None => !warm,
+                };
+                r.check(
+                    &format!("preserved/chain/cache-membership/{jobs}/{warm}/{index}"),
+                    &cache,
+                    "cold optional exact hit; warm mandatory exact hit",
+                    valid,
+                );
+            }
+            let actual_stable = diagnostic::stable(value);
+            let expected_stable = diagnostic::stable(expected.clone());
+            r.check(
+                &format!("preserved/chain/cache-full-result/{jobs}/{warm}"),
+                (actual.status.code(), &actual_stable, &actual.stderr),
+                (Some(0), &expected_stable, stderr(&expected)),
+                actual.status.code() == Some(0)
+                    && actual_stable == expected_stable
+                    && actual.stderr == stderr(&expected),
+            );
+        }
+    }
+    finish(r);
+}
+
+fn sha(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    format!("sha256:{:x}", sha2::Sha256::digest(bytes))
+}
+
+// The artifact wire contract hashes sorted JSON, preserving every finding.
+fn sorted(value: Value) -> Value {
+    match value {
+        Value::Object(fields) => Value::Object(
+            fields
+                .into_iter()
+                .map(|(key, value)| (key, sorted(value)))
+                .collect::<std::collections::BTreeMap<_, _>>()
+                .into_iter()
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(items.into_iter().map(sorted).collect()),
+        value => value,
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines, clippy::default_trait_access)]
+fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned() {
+    use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
+    let mut r = Results::default();
+    for kind in ["ledger", "html", "scenarios", "requirements_document"] {
+        for signed in [false, true] {
+            for legacy in [false, true] {
+                let kind_label = format!("{kind}/{signed}/{legacy}");
+                let s = Scratch::new();
+                let root = if kind == "requirements_document" {
+                    diagnostic::IMPLEMENTS.replace(
+                        "invariant Typed",
+                        "@requirement(\"REQ-ROOT-001\",\"Keep\") invariant Typed",
+                    )
+                } else {
+                    COMPOSE.into()
+                };
+                s.write("root.fsl", &root);
+                s.write(
+                    "dep.fsl",
+                    &if legacy {
+                        diagnostic::LEGACY_LEAF.into()
+                    } else {
+                        diagnostic::annotated(diagnostic::LEAF)
+                    },
+                );
+                let findings = if legacy {
+                    vec![warning(diagnostic::LEGACY_LEAF, "dep.fsl")]
+                } else {
+                    vec![]
+                };
+                let revision = commit(&s, &["root.fsl", "dep.fsl"]);
+                let key = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+                s.write(
+                    "private.pem",
+                    &key.to_pkcs8_pem(Default::default()).unwrap(),
+                );
+                s.write(
+                    "public.pem",
+                    &key.verifying_key()
+                        .to_public_key_pem(Default::default())
+                        .unwrap(),
+                );
+                let generate = match kind {
+                    "requirements_document" => "document generate root.fsl -o artifact.out".into(),
+                    "scenarios" => "scenarios root.fsl --depth 2 --deadlock ignore".into(),
+                    _ => format!("{kind} root.fsl --depth 2 --deadlock ignore -o artifact.out"),
+                };
+                let generated = run(&s, &generate);
+                r.check(
+                    &format!("preserved/approval/{kind_label}/standalone"),
+                    generated.status.code(),
+                    0,
+                    generated.status.code() == Some(0) && generated.stderr.is_empty(),
+                );
+                if kind == "scenarios" {
+                    let value = payload(&generated);
+                    r.check(
+                        &format!("approval/scenarios/{signed}/{legacy}/standalone-warning"),
+                        &value["warnings"],
+                        "one complete child finding",
+                        value["warnings"] == json!(findings),
+                    );
+                    s.write(
+                        "artifact.out",
+                        &String::from_utf8(generated.stdout).unwrap(),
+                    );
+                }
+                let artifact = std::fs::read(s.0.join("artifact.out")).unwrap();
+                // Fresh standalone bytes are supplied without stripping warnings.
+                // A nested renderer which loses diagnostics must fail this roundtrip.
+                let command = format!(
+                    "approval create root.fsl --kind {kind} --artifact artifact.out --approver edition-test {} -o record.json {}",
+                    if kind == "requirements_document" {
+                        ""
+                    } else {
+                        "--depth 2"
+                    },
+                    if signed {
+                        "--signing-key private.pem"
+                    } else {
+                        ""
+                    }
+                );
+                let created = run(&s, &command);
+                r.check(
+                    &format!("approval/{kind_label}/fresh-create"),
+                    (created.status.code(), payload(&created)),
+                    "created/0 and a record",
+                    created.status.code() == Some(0) && s.0.join("record.json").is_file(),
+                );
+                if !s.0.join("record.json").is_file() {
+                    continue; // The failed create is already a strict red cell.
+                }
+                let record: Value =
+                    serde_json::from_slice(&std::fs::read(s.0.join("record.json")).unwrap())
+                        .unwrap();
+                let expected_create = admitted(
+                    json!({"fsl":"1.0","result":"created","kind":"approval_record","output":"record.json","record":record}),
+                    "",
+                    findings.clone(),
+                );
+                expect(
+                    &mut r,
+                    &format!("approval/{kind_label}/create-envelope"),
+                    &created,
+                    expected_create,
+                    0,
+                );
+                let approved_at = record["approval"]["approved_at"].as_str().unwrap();
+                assert!(
+                    approved_at.len() == 20
+                        && approved_at.ends_with('Z')
+                        && approved_at.as_bytes()[10] == b'T'
+                        && approved_at.bytes().filter(u8::is_ascii_digit).count() == 14,
+                    "live record timestamp"
+                );
+                r.check(
+                    &format!("approval/{kind_label}/binding"),
+                    (
+                        &record["spec"]["git_commit"],
+                        &record["spec"]["path"],
+                        &record["target"]["kind"],
+                    ),
+                    (&revision, "root.fsl", kind),
+                    record["spec"]["git_commit"] == revision
+                        && record["spec"]["path"] == "root.fsl"
+                        && record["target"]["kind"] == kind,
+                );
+                if matches!(kind, "ledger" | "scenarios") {
+                    let normalized = if kind == "scenarios" {
+                        let value: Value = serde_json::from_slice(&artifact).unwrap();
+                        assert!(
+                            value.get("cost").is_none() && value.get("cache").is_none(),
+                            "this scenario route has no execution metadata to exclude"
+                        );
+                        serde_json::to_vec(&sorted(value)).unwrap()
+                    } else {
+                        artifact.clone()
+                    };
+                    r.check(
+                        &format!("approval/{kind_label}/artifact-digest"),
+                        &record["target"]["digest"],
+                        sha(&normalized),
+                        record["target"]["digest"] == sha(&normalized),
+                    );
+                }
+                let trust = if signed { "--trust-key public.pem" } else { "" };
+                let mut expected_check = json!({"fsl":"1.0","result":"approval_check","status":"approved","reasons":[],"record":"record.json","target_kind":kind,"approver":"edition-test","approved_at":approved_at,"requirements":record["approval"]["requirements"],"baseline_digest":record["spec"]["digest"],"current_digest":record["spec"]["digest"],"artifact_digest":record["target"]["digest"],"current_artifact_digest":record["target"]["digest"],"diff_base":revision,"semantic_diff_command":"fslc approval diff root.fsl --record record.json","signature_status":if signed {"signed"} else {"unsigned"},"key_id":if signed { record["signature"]["key_id"].clone() } else {Value::Null}});
+                if kind == "requirements_document" {
+                    for (field, target) in [
+                        ("claim_set_digest", "claim_set_digest"),
+                        ("current_claim_set_digest", "claim_set_digest"),
+                        ("reviewed_digest", "reviewed_digest"),
+                        ("current_reviewed_digest", "reviewed_digest"),
+                    ] {
+                        expected_check[field] = record["target"][target].clone();
+                    }
+                }
+                let expected_check = admitted(expected_check, "", findings);
+                expect(
+                    &mut r,
+                    &format!("approval/{kind_label}/check-envelope"),
+                    &run(
+                        &s,
+                        &format!("approval check root.fsl --record record.json {trust}"),
+                    ),
+                    expected_check,
+                    0,
+                );
+                if matches!(kind, "html" | "ledger") {
+                    let command = format!(
+                        "ledger root.fsl --depth 2 --approval record.json -o overlay.md {trust}"
+                    );
+                    let first = run(&s, &command);
+                    let first_artifact = std::fs::read(s.0.join("overlay.md")).unwrap();
+                    let second = run(&s, &command);
+                    expect(
+                        &mut r,
+                        &format!("approval/{kind_label}/overlay-repeat"),
+                        &second,
+                        payload(&first),
+                        0,
+                    );
+                    let overlay = std::fs::read_to_string(s.0.join("overlay.md")).unwrap();
+                    r.check(
+                        &format!("approval/{kind_label}/overlay-full-artifact"),
+                        overlay.as_bytes(),
+                        &first_artifact,
+                        overlay.as_bytes() == first_artifact,
+                    );
+                    r.check(
+                        &format!("approval/{kind_label}/overlay-status"),
+                        &overlay,
+                        "approved ledger and full dependency diagnostic",
+                        overlay.contains("approved")
+                            && overlay.contains("legacy_string_metadata") == legacy,
+                    );
+                }
+                let after = std::fs::read(s.0.join("artifact.out")).unwrap();
+                r.check(
+                    &format!("approval/{kind_label}/artifact-unchanged"),
+                    &after,
+                    &artifact,
+                    after == artifact,
+                );
+            }
+        }
+    }
+    finish(r);
+}
