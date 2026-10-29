@@ -437,11 +437,23 @@ fn project_direct_roots_mapping_and_empty_project_have_warning_only_metadata() {
         s.write("a.fsl", &source);
         s.write("b.fsl", &source);
         let findings = vec![warning(&source, "a.fsl"), warning(&source, "b.fsl")];
+        let mut expected = baseline.clone();
+        // Graph spans belong to these bytes, not the annotated canonical twin.
+        for node in expected["nodes"].as_array_mut().unwrap() {
+            let needle = match node["kind"].as_str() {
+                Some("invariant") => "invariant Typed",
+                Some("action") => "action finish",
+                Some("effect") => "done = true",
+                _ => continue,
+            };
+            let (line, column, _) = diagnostic::position(&source, source.find(needle).unwrap());
+            node["loc"] = json!({"line":line + 1,"column":column + 1});
+        }
         expect(
             &mut r,
             &format!("project/warnings/{header:?}"),
             &run(&s, command),
-            admitted(baseline.clone(), "", findings),
+            admitted(expected, "", findings),
             0,
         );
     }
