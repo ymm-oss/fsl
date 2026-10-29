@@ -1163,7 +1163,9 @@ and collection binder domains for init key coverage (#1520). A current-key read
 after its write is supported when the selected keys establish full-root coverage;
 <code>--engine auto</code> then uses explicit without fallback. Empty domains contribute no
 coverage, partial domains cover only selected keys, and state-dependent filters
-remain unresolved. The check-time read-order rule is unchanged.</p>
+remain unresolved. The check-time read-order rule is unchanged.
+Refinement now refuses nested fixed-target initialization depending on an outer binder
+that shadows a same-named constant, previously incorrectly accepted as <code>refines</code>.</p>
 <p>Breaking-removal sweep (#1518): base
 <code>28c4eab710f8d83e766bb0e7c7e006d09d7777d8</code> versus head
 <code>9d94c5cb5447834f329002200afa0f3404d9a9a0</code> plus the production runtime change
