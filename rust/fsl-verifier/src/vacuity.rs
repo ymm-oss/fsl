@@ -22,7 +22,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::{
-    ActionDef, KernelBinder as Binder, KernelExpr as Expr, KernelLValue as LValue, KernelModel,
+    ActionDef, KernelExpr as Expr, KernelLValue as LValue, KernelModel,
     KernelStatement as Statement, PropertyDef, Span,
 };
 use fsl_solver::{SatResult, SmtSolver};
@@ -203,120 +203,10 @@ fn lvalue_root(target: &LValue) -> &str {
     }
 }
 
-/// State variables an expression may read.
-///
-/// Only used to decide whether a lane is worth a query; both an over- and an
-/// under-approximation stay sound, because the query itself quantifies over
-/// the whole type space either way.
+/// Free state reads, excluding lexical binders so they cannot trigger a frozen
+/// query or be reported as frozen state variables.
 fn referenced_state_vars(model: &KernelModel, expr: &Expr) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    collect_vars(expr, &mut names);
-    names
-        .into_iter()
-        .filter(|name| model.state.iter().any(|(state, _)| state == name))
-        .collect()
-}
-
-fn collect_vars(expr: &Expr, out: &mut BTreeSet<String>) {
-    match expr {
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::EnumMember { .. } => {}
-        Expr::Var(name) => {
-            out.insert(name.clone());
-        }
-        Expr::Some(inner)
-        | Expr::Neg(inner)
-        | Expr::Not(inner)
-        | Expr::Field(inner, _)
-        | Expr::UnaryNamed { expr: inner, .. }
-        | Expr::Stage { entity: inner, .. } => collect_vars(inner, out),
-        Expr::Set(items) | Expr::Seq(items) => {
-            for item in items {
-                collect_vars(item, out);
-            }
-        }
-        Expr::Struct { fields, .. } => {
-            for (_, value) in fields {
-                collect_vars(value, out);
-            }
-        }
-        Expr::Call { args, .. } => {
-            for arg in args {
-                collect_vars(arg, out);
-            }
-        }
-        Expr::Method { receiver, args, .. } => {
-            collect_vars(receiver, out);
-            for arg in args {
-                collect_vars(arg, out);
-            }
-        }
-        Expr::Index(left, right)
-        | Expr::Binary { left, right, .. }
-        | Expr::BinaryNamed { left, right, .. } => {
-            collect_vars(left, out);
-            collect_vars(right, out);
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            collect_vars(condition, out);
-            collect_vars(then_expr, out);
-            collect_vars(else_expr, out);
-        }
-        Expr::TernaryNamed {
-            first,
-            second,
-            third,
-            ..
-        } => {
-            collect_vars(first, out);
-            collect_vars(second, out);
-            collect_vars(third, out);
-        }
-        Expr::Is { expr, .. } => collect_vars(expr, out),
-        Expr::Quantified { binder, body, .. } => {
-            collect_binder_vars(binder, out);
-            collect_vars(body, out);
-        }
-        Expr::Aggregate { binder, value, .. } => {
-            collect_binder_vars(binder, out);
-            if let Some(value) = value {
-                collect_vars(value, out);
-            }
-        }
-    }
-}
-
-fn collect_binder_vars(binder: &Binder, out: &mut BTreeSet<String>) {
-    match binder {
-        Binder::Typed { where_expr, .. } => {
-            if let Some(where_expr) = where_expr {
-                collect_vars(where_expr, out);
-            }
-        }
-        Binder::Range {
-            lo, hi, where_expr, ..
-        } => {
-            collect_vars(lo, out);
-            collect_vars(hi, out);
-            if let Some(where_expr) = where_expr {
-                collect_vars(where_expr, out);
-            }
-        }
-        Binder::Collection {
-            collection,
-            where_expr,
-            ..
-        } => {
-            collect_vars(collection, out);
-            if let Some(where_expr) = where_expr {
-                collect_vars(where_expr, out);
-            }
-        }
-    }
+    fsl_core::state_references(expr, model, [])
 }
 
 fn is_generated_invariant(model: &KernelModel, name: &str) -> bool {

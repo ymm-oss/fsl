@@ -5,121 +5,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fsl_core::{
-    ActionDef, Annotations, KernelBinder, KernelExpr, KernelLValue, KernelModel, KernelStatement,
-};
+use fsl_core::{ActionDef, Annotations, KernelExpr, KernelLValue, KernelModel, KernelStatement};
 use fsl_syntax::Span;
 use serde_json::{Value, json};
 
-#[allow(clippy::too_many_lines)]
 fn expression_roots(model: &KernelModel, expr: &KernelExpr) -> BTreeSet<String> {
-    fn collect(expr: &KernelExpr, roots: &mut BTreeSet<String>) {
-        match expr {
-            KernelExpr::Var(name) => {
-                roots.insert(name.clone());
-            }
-            KernelExpr::Some(value)
-            | KernelExpr::Neg(value)
-            | KernelExpr::Not(value)
-            | KernelExpr::Field(value, _)
-            | KernelExpr::Stage { entity: value, .. }
-            | KernelExpr::UnaryNamed { expr: value, .. } => collect(value, roots),
-            KernelExpr::Index(left, right)
-            | KernelExpr::Binary { left, right, .. }
-            | KernelExpr::BinaryNamed { left, right, .. } => {
-                collect(left, roots);
-                collect(right, roots);
-            }
-            KernelExpr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            }
-            | KernelExpr::TernaryNamed {
-                first: condition,
-                second: then_expr,
-                third: else_expr,
-                ..
-            } => {
-                collect(condition, roots);
-                collect(then_expr, roots);
-                collect(else_expr, roots);
-            }
-            KernelExpr::Set(items) | KernelExpr::Seq(items) => {
-                for item in items {
-                    collect(item, roots);
-                }
-            }
-            KernelExpr::Struct { fields, .. } => {
-                for (_, value) in fields {
-                    collect(value, roots);
-                }
-            }
-            KernelExpr::Call { args, .. } | KernelExpr::Method { args, .. } => {
-                if let KernelExpr::Method { receiver, .. } = expr {
-                    collect(receiver, roots);
-                }
-                for arg in args {
-                    collect(arg, roots);
-                }
-            }
-            KernelExpr::Is { expr, .. } => collect(expr, roots),
-            KernelExpr::Quantified { binder, body, .. } => {
-                collect_binder(binder, roots);
-                collect(body, roots);
-            }
-            KernelExpr::Aggregate { binder, value, .. } => {
-                collect_binder(binder, roots);
-                if let Some(value) = value {
-                    collect(value, roots);
-                }
-            }
-            KernelExpr::Num(_)
-            | KernelExpr::Bool(_)
-            | KernelExpr::None
-            | KernelExpr::EnumMember { .. } => {}
-        }
-    }
-
-    fn collect_binder(binder: &KernelBinder, roots: &mut BTreeSet<String>) {
-        match binder {
-            KernelBinder::Typed { where_expr, .. } => {
-                if let Some(expr) = where_expr {
-                    collect(expr, roots);
-                }
-            }
-            KernelBinder::Range {
-                lo, hi, where_expr, ..
-            } => {
-                collect(lo, roots);
-                collect(hi, roots);
-                if let Some(expr) = where_expr {
-                    collect(expr, roots);
-                }
-            }
-            KernelBinder::Collection {
-                collection,
-                where_expr,
-                ..
-            } => {
-                collect(collection, roots);
-                if let Some(expr) = where_expr {
-                    collect(expr, roots);
-                }
-            }
-        }
-    }
-
-    let state = model
-        .state
-        .iter()
-        .map(|(name, _)| name)
-        .collect::<BTreeSet<_>>();
-    let mut roots = BTreeSet::new();
-    collect(expr, &mut roots);
-    roots.retain(|name| state.contains(name));
-    roots
+    fsl_core::state_references(expr, model, [])
 }
 
 fn lvalue_roots(model: &KernelModel, target: &KernelLValue) -> BTreeSet<String> {
