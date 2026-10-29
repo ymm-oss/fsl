@@ -469,6 +469,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fslc/src/main.rs",
+        11262,
+        "mutation_implements_contract",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fsl-core/src/refinement.rs",
         1268,
         "requirements_implements_with_bounds",
