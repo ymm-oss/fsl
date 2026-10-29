@@ -32,10 +32,13 @@ mapping IO precede an ordinary root parse/model error in log replay. Document
 check admits before artifact IO/frontmatter and projects captured bytes under
 the recorded label without rereading its path. Direct raw reports warn on stderr;
 HTML/ledger file-output envelopes and approval-only stderr remain unchanged.
-Eight modes across seven leaves remain: analyze batch/project, approval
-check/create/diff (including ledger --approval overlay root rereads), chain
-admission, live diff and refine. Their deferred-mode controls still execute;
-this remains a partial delivery and does not close #1449.
+The multi-root completion covers analyze batch/project, approval check/create/diff
+and the captured-source ledger --approval overlay, chain, live diff and refine.
+Later direct-input IO now precedes earlier parse/model errors outside chain.
+Newly owned dependency failures use the complete child refusal/exit 2 rather than
+flattened loader errors; successful results receive child warnings once. Approval
+diff keeps approval metadata on success, but a child refusal replaces it. Batch
+diagnostics stay file-local, and chain finishes each detail before its wrapper.
 Git-revision roots (#1513), public-example warning cleanup (#608), lint dialect
 support (#609) and other ledger warning classifications (#1497) are separate.
 Breaking consumer removals: four next-edition migration forms (enum union,

@@ -1686,9 +1686,10 @@ output effects. Causal diff includes both operands; observation includes its
 explicit FSL mapping. Each slot is distinct, so repeating a file in two slots
 permits one warning per slot. Headers, existing edition options and read-error
 kinds keep their rules; no new dialect/header combination is accepted.
-The single-input analyze entry also preflights `.toml` text, without admitting
-the referenced FSL roots or completing project-mode intake. Envelope `fsl_edition`
-and `edition` describe only the primary root, while warnings retain each slot.
+Project analysis captures its TOML manifest once and admits the referenced direct
+FSL layers and active mappings before projection; TOML itself contributes no
+edition metadata. Envelope `fsl_edition` and `edition` describe only the primary
+FSL root, while warnings retain each slot.
 Preparing all causal roots means a later operand/mapping read error intentionally
 precedes an earlier root's parse/model error.
 Log replay now prepares its root and mapping before model work, so mapping IO
@@ -1707,8 +1708,10 @@ Current-edition warnings preserve verdicts, assurance and exits; next-edition
 migration findings refuse before consumption with the existing edition error/exit 2.
 Direct raw HTML/ledger, document generate/claims and domain expansion/testgen deliver
 migration warnings on stderr. HTML/ledger file-output envelopes stay unchanged;
-their distinct baselines retain one warning. Approval-only rendering retains its
-own baseline admission without new stderr delivery. Mutate owns the authored
+their distinct baselines retain one warning. Approval-only rendering borrows the
+captured source/token and preserves standalone artifact/baseline diagnostics
+without new stderr delivery. Requirements-document rendering does not read or
+speculatively scan an `implements` child. Mutate owns the authored
 source's finish, and each sweep cell borrows one captured root's token.
 Previously ungated consumers can therefore reject next-edition input they accepted.
 
@@ -1755,11 +1758,36 @@ requirements, colon quantifier and inline mapping (5). These are formerly
 non-error consumer inputs, not grammar removals or proof claims. A mapping-only
 control already errored at BASE and is not counted as a removal.
 
-This remains partial: eight modes across seven leaves are deferred—analyze batch
-and project, approval check/create/diff, chain admission, live diff and refine.
-Approval-check transport includes the ledger `--approval` overlay's root rereads.
-Their deferred controls still execute and must retain rejecting evidence; #1449
-is not closed by these 21 completed modes.
+Live multi-root coverage also includes analyze batch/project, approval
+check/create/diff and ledger `--approval`, chain, live diff and direct/multi-link
+refine. The deferred set is empty; complete-adapter controls require every
+nonhistorical observation to agree and reject a restored deferral. The historical
+Git old/new and approval-baseline controls still execute separately (#1513).
+Diff's old root and refinement's first implementation supply primary metadata;
+approval diff's sole live root is primary. Repeated explicit occurrences remain
+distinct, but a multi-link intermediate spec is not counted again for each link.
+Live Git mappings are secondary slots; materialized mappings remain historical,
+with the existing absolute/relative selection unchanged.
+
+All batch roots are prepared before any file consumer, after the existing sort
+and adjacent deduplication, while dependency scope and diagnostics remain per
+file. A refused child cannot discard another file or replace the batch envelope.
+Project results receive direct-root warnings without a fabricated TOML edition;
+empty project/batch inputs retain their existing success. Chain groups captured
+bytes and carries immutable source/tokens through its existing scheduler; each
+actual step thread finishes its detail before wrapping it. Ordinary chain IO
+retains the established layer/cutoff rather than becoming a top-level refusal.
+
+These are intentional consumer-output changes: outside chain, later direct-input
+IO now precedes earlier parse/model errors (including project and mixed-batch
+preparation). Newly owned dependency reads in diff/refine/approval and chain's
+refine detail return the complete child refusal/findings/edition with exit 2,
+instead of flattened errors, and deliver accepted child warnings once. Approval
+diff retains approval metadata on success; a child refusal replaces it. Distinct
+approval artifacts and baselines keep standalone diagnostics without new stderr.
+They can reject previously ungated consumer input, not add grammar or assurance.
+Neither HTML nor ledger has independent baseline pinning in this completion;
+that strengthening and three internal seam controls are tracked in #1641.
 Report baselines and ledger migration rendering are retained; migration-only rows
 use 🟡 移行候補 / risk —, not vacuity/mutate advice. Mixed/non-migration rows remain
 🔴 要確認 / 要確認. Dependency admission is described below; historical Git roots
@@ -1775,7 +1803,8 @@ including nested reads and rereads, before their bytes enter model/solver or out
 virtual files and declared references a consumer does not read are not scanned.
 Owned commands return the child's complete edition refusal/exit 2; owner-free
 strict loaders retain their read-error envelope with the child path/codes in its
-cause and still fail closed. This does not complete the deferred root modes above.
+cause and still fail closed. This dependency rule is separate from the explicit
+root-slot completion above.
 
 Dependency migration warnings finish once per provider-resource/complete finding
 within each outer native owner, or each explicit local log, without replacing
@@ -1802,7 +1831,7 @@ check envelope (plus validated runtime versions). The inline shape is retained b
 `edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`
 and the `edition_dispatch_inventory` contexts
 `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
-`deferred_modes_have_live_disagreements_across_the_complete_native_adapters`.
+`all_nonhistorical_cells_agree_across_the_complete_native_adapters`.
 
 The materialized-tree `fslc check <path>` comparison from `bc14d885` to corrected
 Rust source/test tree `a65eddd5` checked all **603 corpus forms in both parser

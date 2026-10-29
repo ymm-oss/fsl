@@ -1574,9 +1574,10 @@ causal diff は両方の引数、observation は明示的な FSL mapping も対�
 各 slot は独立し、同じファイルを2つの slot に渡した場合は slot ごとに1回の警告を
 許します。ヘッダー・既存の edition オプション・read error の kind の規則を維持し、
 新しい dialect とヘッダーの組み合わせを受理するものではありません。
-単一入力の analyze は `.toml` の本文も preflight しますが、参照先 FSL root の受け入れや
-project-mode intake の完了を意味しません。envelope の `fsl_edition` と `edition` は
-主の root だけを表し、警告は各 slot のものを保持します。全 causal root を先に準備するため、
+project analyze は TOML manifest を一度捕捉し、参照する直接の FSL layer と有効な
+mapping を投影前に受け入れます。TOML 自体の edition metadata は作りません。
+envelope の `fsl_edition` と `edition` は主の FSL root だけを表し、警告は各 slot の
+ものを保持します。全 causal root を先に準備するため、
 後の引数や mapping の read error が、先の root の parse/model error より優先されます。
 log replay もモデル構築前に root と mapping を準備するため、mapping の IO が
 通常の root の parse/model error より先になります。document check は artifact の
@@ -1595,8 +1596,10 @@ finding は消費前に既存の edition error/exit 2 で拒否します。従�
 consumer が、以前受理した次エディションの入力を拒否する場合があります。
 直接の raw HTML/ledger、document generate/claims、domain expand/testgen は、移行警告を
 stderr に出します。HTML/ledger のファイル出力 envelope は変えず、別の結果である
-baseline に警告を一度だけ保持します。承認専用の render は自分の baseline の受け入れを
-維持し、新しい stderr 配信をしません。mutate は authored source の結果を仕上げ、
+baseline に警告を一度だけ保持します。承認専用の render は捕捉済み source/token を借り、
+artifact/baseline の単独実行時の診断を保持し、新しい stderr 配信をしません。
+requirements document の render は `implements` の子を読まず、先回りの走査もしません。
+mutate は authored source の結果を仕上げ、
 sweep の各 cell は一度捕捉した root の token を借用します。
 
 測定は BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4` と build 済み実装
@@ -1636,10 +1639,31 @@ requirements の metadata・コロン量化子・inline mapping(5組)です。�
 consumer 入力の破壊的な削除であり、文法の削除や証明の主張ではありません。mapping だけの
 control は BASE でも error だったため、受理済み入力の削除には数えません。
 
-引き続き部分的な提供です。analyze の batch と project、approval check/create/diff、
-chain admission、live diff、refine の7 leaf・8 mode は延期し、拒否する対照を実行し続けます。
-approval check の transport には ledger `--approval` overlay の root の読み直しも含みます。
-今回の21 mode の完成だけでは #1449 を閉じません。report baseline と
+live な複数 root についても、analyze batch/project、approval check/create/diff と
+ledger `--approval`、chain、live diff、直接および multi-link の refine に対応します。
+延期の集合は空で、全 adapter の対照は履歴以外の全観測の一致を要求し、延期の再導入を
+拒みます。履歴 Git の old/new と approval baseline の対照は別に実行し続けます(#1513)。
+diff の old、refine の最初の implementation、approval diff の唯一の live root が
+主 metadata を持ちます。同じ path の明示的な各出現は別 slot ですが、multi-link の
+中間 spec を link ごとに数え直しません。live Git mapping は secondary slot、
+materialize した mapping は履歴のままで、既存の絶対/相対 path の選択は変えません。
+
+batch は既存の sort と隣接 deduplication の後、全 root を file consumer より先に準備し、
+依存先の scope と診断は file ごとに保ちます。子の拒否で別 file や batch envelope を
+置き換えません。project は直接 root の警告を受け取り、TOML の edition を作りません。
+空の project/batch の既存の成功も保ちます。chain は捕捉済み bytes でグループ分けし、
+既存 scheduler に不変な source/token を渡し、実際の各 step thread 内で detail を
+wrapper より先に仕上げます。通常の chain IO は top-level 拒否にせず、従来の layer/cutoff に残します。
+
+利用側の出力には意図した変化があります。chain 以外では、project/mixed batch の準備を
+含め、後の直接入力の IO が先の parse/model error に優先します。新たに owner 内へ入った
+diff/refine/approval の依存先 read と chain refine detail は、平坦化した error の代わりに、
+子の完全な拒否・finding・edition と exit 2 を返し、受け入れた子の警告を一度届けます。
+approval diff は成功時の approval metadata を保ち、子の拒否ではそれを置き換えます。
+別々の artifact/baseline は単独実行時の診断を保ち、新しい stderr 配信はしません。
+従来判定されなかった入力を拒む場合がありますが、文法や保証を追加するものではありません。
+HTML と ledger の独立した baseline の固定は、どちらも今回には含みません。
+その強化と内部 seam の3対照は #1641 で扱います。report baseline と
 ledger の移行表示は維持します。移行 finding だけの行は vacuity/mutate の助言ではなく
 🟡 移行候補 / risk —、非移行 finding を含む行は 🔴 要確認 / 要確認 と表示します。
 依存先の admission は下記の拡張で扱い、履歴 Git root は #1513 の範囲です。修復の投影と
@@ -1653,7 +1677,8 @@ before/after 文書と refinement mapping は、入れ子や読み直しも含�
 solver・出力へ入る前に同じ admission を通します。未使用の virtual file や、consumer が読まない
 宣言上の参照を先回りして走査しません。owner のあるコマンドは子の完全な edition 拒否と
 exit 2 を返します。owner の外の strict loader も、子の path/code を原因文に含む既存の
-read-error envelope で閉じる側に倒れます。上記の延期された root mode の完了ではありません。
+read-error envelope で閉じる側に倒れます。この依存先の規則と、上記の明示的 root slot の
+対応完了は別の境界です。
 
 依存先の移行警告は、外側の native owner ごと(または明示的な局所 log ごと)に、
 provider resource と完全な finding の組を一度だけ仕上げ、
@@ -1681,7 +1706,7 @@ finding の message が `legacy colon quantifier syntax is deprecated` である
 `edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` と、
 `edition_dispatch_inventory` の
 `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`、
-`deferred_modes_have_live_disagreements_across_the_complete_native_adapters` の各 context に残します。
+`all_nonhistorical_cells_agree_across_the_complete_native_adapters` の各 context に残します。
 
 各 materialized tree の `fslc check <path>` による `bc14d885` から修正後の Rust
 source/test tree `a65eddd5` への比較では、**corpus の全603形を両 parser 設定で検査(各 tree 1206回)**し、
