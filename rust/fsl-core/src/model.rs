@@ -2757,7 +2757,9 @@ fn eval_const_binary(op: &str, left: &Value, right: &Value) -> Result<Value, Mod
             if right == 0 {
                 return Err(model_error("division by zero"));
             }
-            Ok(Value::Int(left.div_euclid(right)))
+            left.checked_div_euclid(right)
+                .map(Value::Int)
+                .ok_or_else(|| model_error("integer overflow in division"))
         }
         "%" => {
             let left = as_int(left)?;
@@ -2765,7 +2767,9 @@ fn eval_const_binary(op: &str, left: &Value, right: &Value) -> Result<Value, Mod
             if right == 0 {
                 return Err(model_error("remainder by zero"));
             }
-            Ok(Value::Int(left.rem_euclid(right)))
+            left.checked_rem_euclid(right)
+                .map(Value::Int)
+                .ok_or_else(|| model_error("integer overflow in remainder"))
         }
         "==" => Ok(Value::Bool(left == right)),
         "!=" => Ok(Value::Bool(left != right)),

@@ -738,7 +738,9 @@ options:
   --deadlock {warn,error,ignore}
   --vacuity {warn,error,ignore}
   --property PROPERTY_NAME
-                        check a single named property in isolation
+                        check a single named property in isolation; under
+                        induction, every implicit type bound is still checked
+                        in the base case
   --instances INSTANCES
                         sweep an entity bound (NAME=LO..HI; repeatable)
   --values VALUES       sweep a number upper bound as LO..LO through LO..HI
@@ -789,7 +791,8 @@ options:
                         select one named property obligation; resolves across
                         invariant/trans/leadsTo/reachable declarations; under
                         induction, a selected trans keeps all invariant
-                        hypotheses
+                        hypotheses, and every implicit type bound is still
+                        checked in the base case
   --exclude-property EXCLUDE_PROPERTY_NAMES
                         skip a named property; repeat to omit
                         invariants/trans/leadsTo/reachable declarations

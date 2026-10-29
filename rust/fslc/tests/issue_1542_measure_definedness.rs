@@ -99,6 +99,32 @@ const S1: &str = "spec S1 {
   leadsTo L { n < 2 ~> n == 2 decreases if done then xs.head() else 2 - n }
 }";
 
+// Unlike S1, take makes both P and Q false. The successor probe must not
+// assume P: a pending-not-preserved CTI would still expose its measure.
+const A: &str = "spec A {
+  type K = 0..1
+  state { xs: Seq<K, 1>, n: 0..2, go: Bool, done: Bool }
+  init { xs = Seq {} n = 0 go = false done = false }
+  action tick() { requires n < 2 and not go n = n + 1 }
+  action idle() { requires n == 2 and not go }
+  action take() { requires go done = true go = false }
+  invariant ND { not done }
+  leadsTo L { n < 2 and not done ~> n == 2 decreases if done then xs.head() else 2 - n }
+}";
+
+// Helpful ranking still reads the successor measure of non-helpful take:
+// it leaves P true and Q false, but reaches an undefined head after done.
+const C2: &str = "spec C2 {
+  type K = 0..1
+  state { xs: Seq<K, 1>, n: 0..2, go: Bool, done: Bool }
+  init { xs = Seq {} n = 0 go = false done = false }
+  fair action tick() { requires n < 2 n = n + 1 go = false }
+  action idle() { requires n == 2 and not go }
+  action take() { requires go done = true go = false }
+  invariant ND { not done }
+  leadsTo L { n < 2 ~> n == 2 helpful tick() decreases if done then xs.head() else 2 - n }
+}";
+
 // Enabled transitions imply not dead at both ends. Only rank_deadlock can
 // choose dead=true; init and reachable states never do.
 const S2: &str = "spec D1 {
@@ -302,6 +328,18 @@ measure_cell!(
 measure_cell!(
     s1_successor_only,
     S1,
+    Some("leadsTo 'L' decreases measure may be undefined: head()"),
+    &["--k", "2"]
+);
+measure_cell!(
+    a1_not_p_not_q,
+    A,
+    Some("leadsTo 'L' decreases measure may be undefined: head()"),
+    &["--k", "2"]
+);
+measure_cell!(
+    c2_nonhelpful_pending,
+    C2,
     Some("leadsTo 'L' decreases measure may be undefined: head()"),
     &["--k", "2"]
 );

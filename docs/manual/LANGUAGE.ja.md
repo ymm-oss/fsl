@@ -881,8 +881,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   一時値の `contains`、`size`、削除、等値比較はその値を参照し、add の結果を元の有界 receiver へ戻すと
   メンバーや遷移を消さずに `type_bound` / `_bounds_<var>` を報告します。静的な型検査と
   受理範囲は変えず、非有界 Set や複合コレクションの型推論を追加するものではありません。
-  より広いドメインの Set/関係を丸ごと代入する操作は、base と同様に BMC/induction が
+  より広いドメインの Set を丸ごと代入する操作は、base と同様に BMC/induction が
   `cannot coerce symbolic value` (exit 2)で拒否します。
+  関係のドメイン互換性は、後述のとおり評価前に検査します。
   記号的 init は、検査済みの依存順に写し・写しの連鎖・条件を通して追加されたメンバーを
   保持しますが、関係としての init を逐次実行に置き換えません。BMC で境界を選ばない
   ルートを re-frame するには、新しい frame の有限の support の外に生きたキーがない
@@ -897,6 +898,24 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   含みます。
   受理された関係の add も、どちらかの端点のドメイン外にあるペアを保持し、domain/range と
   グラフ操作はそのペアを参照します。add の結果を元の有界の関係へ戻すと `_bounds_<var>` 違反になります。
+  破壊的な受理範囲の縮小(#1522、関連 #1524): 関係値の型互換には、対応する両端点の
+  ドメインがそれぞれ一致する必要があります。数値別名は名前ではなく解決後の下限・上限を
+  比較するため、`N = 0..2` と `M = 0..2` は互換ですが、`A = 0..1` と `B = 0..2` は互換ではありません。
+  異なる関係ドメインを混ぜる条件式の分岐、Set/Seq の要素(入れ子を含む)、代入は、
+  `check` が位置付きの代入可能性エラー(`semantics`、終了コード 2)で拒否します。
+  `verify` と `replay` も同じ検査を共有します。通常のスカラー Int/Range 互換、
+  Map のキー互換、公称 enum、宣言された自己関係の判定は変更しません。
+  同じ境界を持つ関係のリテラルは引き続き check を通りますが、記号エンジンの残る対応は
+  #1467 に属し、この変更は key-union の実装ではありません。
+  同じ検査で action の `r = q`、init の `q = Set {} r = q`、`let x = q` に続く
+  `r = x`、let 内の異なる関係型を混ぜる条件式も拒否します。不適合な用途を持たない
+  単なる別名は引き続き受理します。narrow→wide の関係のコピーも action の代入・init・
+  let 経由で拒否します。従来は BMC/induction が変換できず、action/let を判定する
+  explicit と Monitor に一致しなかったためです。init は explicit も終了コード 2 でした。
+  対照的に、A のドメインが B に含まれる数値型の `Set<A>` → `Set<B>` の代入は今も
+  check を通ります。Set の記号評価の不一致は #1627 に残ります。
+  破壊的な受理範囲の縮小の証拠は
+  [互換性の設計決定](../design/DESIGN-relation-endpoint-compatibility.md)を参照してください。
   `r: relation A -> B` の `contains`、`add`、`remove`、`reachable` は、
   `a` を `A`、`b` を `B` に対して独立に型検査します。不適合な端点は
   check 時の `kind: "semantics"` エラー(終了コード 2)となり、代入可能性の
@@ -1366,6 +1385,8 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
   記号的な init の失敗が格納した `Seq` の表現可能な capacity の外でのみ見つかる
   ときは、これらのエンジンは位置を名指さず
   `model sequence length exceeds capacity` で拒みます。
+- i64 の最小値を `-1` で割る `MIN / -1` とその剰余 `MIN % -1` は整数の
+  overflow であり、除数がゼロのときだけ `0` に全域化する property 文脈でも同じです。
 - デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   `deadlock reachable at step 1 (state: status=ToolFault, ...)`)。完全なトレースは
   JSON の `deadlock.trace` にもあります。
@@ -1414,6 +1435,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--property <Name>]               # check one named property obligation —
                                                  #   invariant / trans / leadsTo / reachable;
                                                  #   induction の trans 選択は全 invariant を保持
+                                                 #   induction は全ての暗黙の型境界をベースケースでも検査
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
