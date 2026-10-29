@@ -246,6 +246,24 @@ fn control_d_relation_role_order_buyer() {
     );
 }
 
+// qty precedes the generated buyer role field, so a last-field-only rename
+// would miss this binder. Change only the def binder in the existing fixture.
+#[test]
+fn detector_non_last_field_order_qty() {
+    assert_source_accepts(
+        "detector_non_last_field_order_qty",
+        &relation_role_source("order_qty").replace("order_buyer", "order_qty"),
+    );
+}
+
+#[test]
+fn control_d_non_last_field_order_qty() {
+    assert_source_accepts(
+        "control_d_non_last_field_order_qty",
+        &relation_role_source("d").replace("order_buyer", "order_qty"),
+    );
+}
+
 #[test]
 fn reserved_relation_role_cannot_collide_with_guard_fresh_name() {
     let source = r#"fsl 5
