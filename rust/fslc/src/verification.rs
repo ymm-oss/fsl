@@ -2398,7 +2398,7 @@ fn prepare_cli_verification_from_source(
     };
     let has_scope = !options.scope.instances.is_empty() || !options.scope.values.is_empty();
     if let Err(error) = validate_specialized_document_from_source(path, source) {
-        return Err((semantic_error_output(&error), 2));
+        return Err((spec_load_error_output(&error), 2));
     }
     // `--instances`/`--values` scope overrides go through
     // `parse_kernel_source_with_bounds` (`load_model_scoped_from_source`),

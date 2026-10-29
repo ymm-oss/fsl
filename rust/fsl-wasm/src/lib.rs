@@ -551,14 +551,7 @@ async fn verify_kernel<S: fsl_solver::SmtSolver>(
         &request.source_file,
         &request.parse_options(),
     ) {
-        return fslc_rust::verification_output::render_semantic_error(
-            envelope(solver_version),
-            &failure,
-            None,
-            &fslc_rust::verification_output::DiagnosticClass::Message,
-            None,
-            None,
-        );
+        return fslc_rust::spec_load::render_spec_load_error(envelope(solver_version), &failure);
     }
     let loaded = reject_refuted_requirements(
         request,

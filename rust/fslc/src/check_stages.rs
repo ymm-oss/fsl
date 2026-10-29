@@ -184,7 +184,10 @@ fn check_stages(
     // cannot reach `lower_ai_component`'s generated-member lookup. Surface
     // parsing stays ahead of this validation to retain parse-error envelopes.
     if let Err(error) = validate_specialized_document(source, source_path, options) {
-        return Err((semantic_error(envelope(), &error), 2));
+        return Err((
+            crate::spec_load::render_spec_load_error(envelope(), &error),
+            2,
+        ));
     }
     if let Some(diagnostic) =
         diagnostics_admitted(source, display_path, resolver, *options, admission)
@@ -233,25 +236,25 @@ fn check_stages(
 ///
 /// # Errors
 ///
-/// Returns the validation (or surface-parse) message; a parse message names
+/// Returns the classified validation failure; a parse message names
 /// `source_path` as its file.
 pub fn validate_specialized_document(
     source: &str,
     source_path: &str,
     options: &fsl_syntax::ParseOptions,
-) -> Result<(), String> {
+) -> Result<(), SpecLoadError> {
     let document = fsl_syntax::parse_surface_document_with(source, options).map_err(|error| {
-        format!(
+        SpecLoadError::unlocated_semantic(format!(
             "{} at {}:{}:{}",
             error.message, source_path, error.span.start.line, error.span.start.column
-        )
+        ))
     })?;
     match document {
-        fsl_syntax::SurfaceDocument::Db(system) => {
-            fsl_tools::validate_db(&system).map_err(|error| error.to_string())
-        }
+        fsl_syntax::SurfaceDocument::Db(system) => fsl_tools::validate_db(&system)
+            .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string())),
         fsl_syntax::SurfaceDocument::AiComponent(component) => {
-            fsl_core::validate_ai_component(&component).map_err(|error| error.to_string())
+            fsl_core::validate_ai_component(&component)
+                .map_err(|error| kernel_load_error(source, &error, options))
         }
         _ => Ok(()),
     }
@@ -326,15 +329,4 @@ pub fn agent_error_output(mut output: Map<String, Value>, error: &fsl_tools::Age
         output.insert("hint".to_owned(), json!(hint));
     }
     Value::Object(output)
-}
-
-fn semantic_error(output: Map<String, Value>, message: &str) -> Value {
-    render_semantic_error(
-        output,
-        message,
-        None,
-        &crate::verification_output::DiagnosticClass::Message,
-        None,
-        None,
-    )
 }
