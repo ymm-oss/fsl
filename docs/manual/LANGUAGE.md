@@ -2619,6 +2619,14 @@ compose OrderSystem {
   physical name `alias__x` of a compose component declaration and the split
   `submit__b1` of a requirements `branches` action. A generated name may still
   be referenced, as a refinement mapping does with `submit__b1`.
+  Breaking removal (#1600): in next-edition requirements, a relation role
+  (`Claim belongs to User as __owner via approve`), a resource name
+  (`resource __r: Amount = 0`), and a measure name
+  (`measure __m = count Claim in Approved`) must not contain `__` either.
+  These previously passed `check`; `fslc check` now rejects one at the
+  declaration (`kind:"name"`, exit 2) with, for example,
+  `relation role name '__owner' contains '__', which is reserved for the names FSL generates ...`.
+  Rename the role, resource, or measure without `__` and update its references.
 - JSON display: a generated name is published with `.` in place of its `__`,
   in one spelling for every output: the physical name `alias__x` is `alias.x`,
   and a branch split `submit__b1` is `submit.b1` (state keys, action names,

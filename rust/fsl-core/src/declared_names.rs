@@ -229,6 +229,15 @@ impl<'a> Walk<'a> {
             for concept in &next.concepts {
                 self.name(&concept.name, "concept", Some(concept.span));
             }
+            for relation in &next.relations {
+                self.name(&relation.role, "relation role", Some(relation.span));
+            }
+            for resource in &next.resources {
+                self.name(&resource.name, "resource", Some(resource.span));
+            }
+            for measure in &next.measures {
+                self.name(&measure.name, "measure", Some(measure.span));
+            }
         }
     }
 

@@ -1051,6 +1051,16 @@ misreading would be silent (`invariant AlwaysHolds { true }` reads the literal,
 never a state variable named `true`), so the declaration is rejected. No other word is reserved — `count`, `sum`, `stage`, `in`,
 `is`, `where`, `old`, `abs`, `and`, `or` are contextual and stay valid names.
 
+A next-edition relation role, resource name, or measure name must not contain
+`__`, which is reserved for the names FSL
+generates (`alias__x`, `submit__b1`); check rejects one at the declaration with
+`kind: "name"`, exit 2. Breaking removal (#1600): in next-edition requirements
+this now also covers a relation role (`Claim belongs to User as __owner via approve`),
+a resource name (`resource __r: Amount = 0`), and a measure name
+(`measure __m = count Claim in Approved`), which previously passed check; the
+message begins `relation role name '__owner' contains '__', ...` (or
+`resource name`, `measure name`). Rename it without `__` and update its references.
+
 - Arithmetic: `+ - * / %`, unary `-`, `min(a,b)` `max(a,b)` `abs(a)`
   (in `a//b` everything after `//` becomes a comment, so write division with a
   space: `a / b`)

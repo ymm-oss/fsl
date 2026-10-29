@@ -2696,7 +2696,15 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   parent's <code>use</code>. <code>__</code> is reserved for the names lowering generates: the
   physical name <code>alias__x</code> of a compose component declaration and the split
   <code>submit__b1</code> of a requirements <code>branches</code> action. A generated name may still
-  be referenced, as a refinement mapping does with <code>submit__b1</code>.</li>
+  be referenced, as a refinement mapping does with <code>submit__b1</code>.
+  Breaking removal (#1600): in next-edition requirements, a relation role
+  (<code>Claim belongs to User as __owner via approve</code>), a resource name
+  (<code>resource __r: Amount = 0</code>), and a measure name
+  (<code>measure __m = count Claim in Approved</code>) must not contain <code>__</code> either.
+  These previously passed <code>check</code>; <code>fslc check</code> now rejects one at the
+  declaration (<code>kind:"name"</code>, exit 2) with, for example,
+  <code>relation role name '__owner' contains '__', which is reserved for the names FSL generates ...</code>.
+  Rename the role, resource, or measure without <code>__</code> and update its references.</li>
 <li>JSON display: a generated name is published with <code>.</code> in place of its <code>__</code>,
   in one spelling for every output: the physical name <code>alias__x</code> is <code>alias.x</code>,
   and a branch split <code>submit__b1</code> is <code>submit.b1</code> (state keys, action names,

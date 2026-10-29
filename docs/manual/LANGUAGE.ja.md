@@ -2477,6 +2477,15 @@ compose OrderSystem {
   宣言の物理名 `alias__x` と、requirements の `branches` の action を分けた
   `submit__b1` です。作られた名前を参照することはできます(refinement の対応が
   `submit__b1` を参照するように)。
+  破壊的な削除 (#1600): 次のエディションの requirements では、関係の役割
+  (`Claim belongs to User as __owner via approve`)、resource の名前
+  (`resource __r: Amount = 0`)、measure の名前
+  (`measure __m = count Claim in Approved`)にも `__` を含められません。
+  これらは以前は `check` を通っていました。`fslc check` は宣言の位置で拒否し
+  (`kind:"name"`、exit 2)、たとえば
+  `relation role name '__owner' contains '__', which is reserved for the names FSL generates ...`
+  と報告します。役割・resource・measure を `__` を含まない名前に変え、その参照も
+  更新してください。
 - JSON の表示: 作られた名前は `__` を `.` に置き換えた 1 つの綴りで、すべての
   出力に出ます。物理名 `alias__x` は `alias.x`、`branches` で分けた
   `submit__b1` は `submit.b1` です(状態のキー、action 名、invariant /
