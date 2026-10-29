@@ -1769,6 +1769,13 @@ distinct, but a multi-link intermediate spec is not counted again for each link.
 Live Git mappings are secondary slots; materialized mappings remain historical,
 with the existing absolute/relative selection unchanged.
 
+A single live Git mapping is captured once at its first legitimate use and lent
+to all selected comparisons, including stream-backed paths already readable by
+the filesystem API. Comparison-local warning/IO results and empty-range/missing-
+operand precedence are unchanged. Project mapping preparation requires canonical
+business/requirements/design endpoints with files; a skipped external target's
+mapping is not read or classified, and no stricter TOML validation is introduced.
+
 All batch roots are prepared before any file consumer, after the existing sort
 and adjacent deduplication, while dependency scope and diagnostics remain per
 file. A refused child cannot discard another file or replace the batch envelope.

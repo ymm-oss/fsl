@@ -1648,6 +1648,12 @@ diff の old、refine の最初の implementation、approval diff の唯一の l
 中間 spec を link ごとに数え直しません。live Git mapping は secondary slot、
 materialize した mapping は履歴のままで、既存の絶対/相対 path の選択は変えません。
 
+live Git mapping の明示的な1出現は、最初に消費できる位置で一度だけ捕捉して、選択した
+全比較に貸します。既存の filesystem API が読める stream path も同じです。比較ごとの
+警告・IO envelope と、空 range/欠けた operand が mapping より先になる順序は維持します。
+project の mapping 準備は、file のある business/requirements/design の両端を要求します。
+投影で使わない external target の mapping は読まず判定せず、TOML の検証を追加しません。
+
 batch は既存の sort と隣接 deduplication の後、全 root を file consumer より先に準備し、
 依存先の scope と診断は file ごとに保ちます。子の拒否で別 file や batch envelope を
 置き換えません。project は直接 root の警告を受け取り、TOML の edition を作りません。

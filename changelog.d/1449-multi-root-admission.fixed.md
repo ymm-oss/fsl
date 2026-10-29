@@ -6,5 +6,8 @@ artifact and baseline. Batch dependency scopes remain file-local; actual chain
 step threads own their detail delivery. Live Git mappings are admitted without
 changing historical mapping selection or admitting historical roots (#1513).
 The deferred-mode set is empty and strict inventory controls remain executable.
+Live Git mapping capture is shared across every selected comparison, including
+existing stream-backed paths, without changing IO precedence or historical selection.
+Project analysis does not prepare mappings for noncanonical, unused target sections.
 Independent HTML/ledger baseline pinning and internal seam controls remain
 tracked in #1641; neither renderer's independent pin is included in this change.

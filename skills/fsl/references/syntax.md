@@ -422,6 +422,11 @@ Diff old/refine first impl supply primary metadata; approval diff uses its sole
 live root. Repeated slots stay distinct; multi-link intermediate specs are not
 counted per link. Live Git mappings are secondary slots, materialized mappings
 stay historical, and mapping-path selection is unchanged.
+One explicit live Git mapping is captured at first legitimate use, once for all
+comparisons, preserving comparison-local diagnostics and missing-operand/empty-
+range precedence. Project mapping preparation uses canonical file-bearing
+business/requirements/design endpoints only; ignored targets do not expose unused
+mapping IO or edition diagnostics. This adds neither a stream flag nor stricter TOML validation.
 Batch prepares every root before consumers but keeps dependency scopes and
 diagnostics per file; a refused child cannot replace another file or the batch.
 Project warnings add no TOML edition, and empty inputs retain success. Chain

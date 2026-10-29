@@ -314,6 +314,14 @@ approval diff's sole live root is primary. A live Git `--mapping` is a secondary
 slot, whereas a mapping selected from the materialized tree remains historical.
 The existing absolute/relative mapping selection is unchanged.
 
+One explicit live Git mapping is captured and classified at its first legitimate
+use, after operand-existence validation, and its immutable bytes/token are reused
+for every selected comparison. Each comparison retains its own warning delivery
+and ordinary IO envelope; an empty range or missing operand still wins before
+mapping consumption. Mapping preparation uses the same canonical analysis-layer
+set as the consumer and requires both endpoint files: an ignored noncanonical
+target does not cause its unused mapping to be read, warned about or refused.
+
 Batch preserves its display sort and adjacent canonical deduplication before
 assigning slots. Every root is prepared before any file runs, but dependency
 execution and delivery remain file-local: a rejected child in one file cannot

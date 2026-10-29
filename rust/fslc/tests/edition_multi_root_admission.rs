@@ -789,7 +789,7 @@ fn inactive_project_target_never_prepares_its_mapping() {
     finish(r);
 }
 
-fn git_batch(first: &str, second: &str, warnings: Vec<Value>) -> Value {
+fn git_batch(first: &str, second: &str, warnings: &[Value]) -> Value {
     let template = git_diff(first, second);
     let comparisons = ["a.fsl", "b.fsl"]
         .iter()
@@ -797,7 +797,7 @@ fn git_batch(first: &str, second: &str, warnings: Vec<Value>) -> Value {
             let mut value = template.clone();
             value["old"]["file"] = json!(format!("{first}:{file}"));
             value["new"]["file"] = json!(format!("{second}:{file}"));
-            admitted(value, "", warnings.clone())
+            admitted(value, "", warnings.to_vec())
         })
         .collect::<Vec<_>>();
     json!({"fsl":"1.0","result":"semantic_diff_batch","vcs":template["vcs"],"specs":["a.fsl","b.fsl"],"comparisons":comparisons,"gate":{"violations":[],"passed":true}})
@@ -805,6 +805,7 @@ fn git_batch(first: &str, second: &str, warnings: Vec<Value>) -> Value {
 
 #[cfg(unix)]
 #[test]
+#[allow(clippy::too_many_lines)] // Complete batch, stream, warning and IO-precedence table.
 fn git_batch_borrows_one_live_mapping_for_every_comparison() {
     let mut r = Results::default();
     let s = Scratch::new();
@@ -829,7 +830,7 @@ fn git_batch_borrows_one_live_mapping_for_every_comparison() {
                 vec![]
             };
             for single in [false, true] {
-                let mut expected = git_batch(&first, &second, warnings.clone());
+                let mut expected = git_batch(&first, &second, &warnings);
                 let mut selected = args.clone();
                 if single {
                     selected.insert(3, "a.fsl".into());
@@ -851,7 +852,7 @@ fn git_batch_borrows_one_live_mapping_for_every_comparison() {
         }
     }
     let missing = s.0.join("missing-map.fsl");
-    let mut expected = git_batch(&first, &second, vec![]);
+    let mut expected = git_batch(&first, &second, &[]);
     for value in expected["comparisons"].as_array_mut().unwrap() {
         *value = json!({"fsl":"1.0","result":"error","kind":"io","message":std::io::Error::from_raw_os_error(2).to_string(),"old":{"file":value["old"]["file"],"spec":null},"new":{"file":value["new"]["file"],"spec":null},"vcs":value["vcs"]});
     }
