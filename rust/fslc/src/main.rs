@@ -60,8 +60,8 @@ use refinement::{
     implements_result_from_source_with_bounds, mismatch_paths, run_refine, run_refine_from_sources,
 };
 use spec_loading::{
-    dependency_resolver, finish_admitted, raw_delivery_allowed, run_admitted_root,
-    run_admitted_roots,
+    admit_root_source, dependency_resolver, finish_admitted, raw_delivery_allowed,
+    run_admitted_root, run_admitted_roots, run_prepared_roots,
 };
 use spec_loading::{
     load_kernel_model_from_source, load_model_from_source, load_model_scoped_from_source,
@@ -6423,11 +6423,6 @@ fn parse_surface_document_from_source(
             error.span.start.column
         )
     })
-}
-
-fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    parse_surface_document_from_source(path, &source)
 }
 
 /// Load a dialect surface document from an already-captured source string.
@@ -15405,13 +15400,83 @@ fn prefixed_analysis_edge(layer: &str, edge: &Value) -> Value {
     edge
 }
 
+struct ProjectRoot {
+    layer: &'static str,
+    mapping: bool,
+    path: PathBuf,
+    source: Result<String, SpecLoadError>,
+    edition: SourceEdition,
+}
+
+impl ProjectRoot {
+    fn source(&self) -> Result<&str, (Value, i32)> {
+        self.source
+            .as_deref()
+            .map_err(|error| (spec_load_error_output(error), 2))
+    }
+}
+
+fn prepare_project_roots(
+    sections: &std::collections::BTreeMap<String, ManifestSection>,
+    base: &Path,
+) -> Result<Vec<ProjectRoot>, (Value, i32)> {
+    let mut roots = Vec::new();
+    for mapping in [false, true] {
+        for layer in ["business", "requirements", "design"] {
+            let Some(section) = sections.get(layer) else {
+                continue;
+            };
+            let file = if mapping {
+                section
+                    .values
+                    .get("refine_against")
+                    .and_then(|target| sections.get(target))
+                    .filter(|target| {
+                        target.values.contains_key("file") && section.values.contains_key("file")
+                    })
+                    .and_then(|_| section.values.get("mapping"))
+            } else {
+                section.values.get("file")
+            };
+            if let Some(file) = file {
+                let path = base.join(file);
+                let source = read_spec_source(&path);
+                roots.push(ProjectRoot {
+                    layer,
+                    mapping,
+                    path,
+                    source,
+                    edition: SourceEdition::default(),
+                });
+            }
+        }
+    }
+    for root in &mut roots {
+        if let Ok(source) = &root.source {
+            root.edition = admit_root_source(&root.path, source, None)?;
+        }
+    }
+    Ok(roots)
+}
+
+fn project_root<'a>(roots: &'a [ProjectRoot], layer: &str, mapping: bool) -> &'a ProjectRoot {
+    roots
+        .iter()
+        .find(|root| root.layer == layer && root.mapping == mapping)
+        .expect("prepared manifest slot")
+}
+
+struct ProjectSources {
+    sections: std::collections::BTreeMap<String, ManifestSection>,
+    roots: Vec<ProjectRoot>,
+}
+
 #[allow(clippy::too_many_lines)]
-fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
-    let source = read_spec_source(path)?;
-    // The manifest is TOML, not a specification; its message already names the
-    // manifest line, and a `loc` here would be read as a position in the `.fsl`
-    // file the envelope is reporting on.
-    let sections = parse_project_manifest(&source).map_err(SpecLoadError::unlocated_semantic)?;
+fn project_traceability_output(
+    path: &Path,
+    prepared: &ProjectSources,
+) -> Result<Value, SpecLoadError> {
+    let sections = &prepared.sections;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let manifest = analysis_display_path(path);
     let mut nodes = std::collections::BTreeMap::new();
@@ -15432,15 +15497,18 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
             continue;
         };
         let layer_path = base.join(file);
-        let layer_source = read_spec_source(&layer_path)?;
-        let model = load_model_from_source(&layer_path, &layer_source)?;
+        let layer_source = project_root(&prepared.roots, layer, false)
+            .source
+            .as_deref()
+            .expect("readable project slot");
+        let model = load_model_from_source(&layer_path, layer_source)?;
         // `build_tsg` projects `requirement`/`kpi` nodes and `covers` edges
         // (#495) from `model.requirement_targets()`/`model.projections`, but it
         // only ever sees the lowered `KernelModel`. The source-only kinds run
         // through the same enrichment the standalone path uses, per layer and
         // on the unprefixed graph, so both input forms yield the same
         // vocabulary and the layer prefix below still applies uniformly (#558).
-        let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, &layer_source);
+        let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, layer_source);
         let display = analysis_display_path(&layer_path);
         let file_id = format!("file:{layer}:{display}");
         let mut file_node = project_analysis_node(&file_id, "file", &display);
@@ -15511,16 +15579,19 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
         // from the manifest the envelope reports on. Their spans exist but
         // index a different source, and `loc` carries no file, so emitting one
         // would point a repair agent into the wrong document.
-        let document =
-            parse_surface_document(&mapping_path).map_err(SpecLoadError::unlocated_semantic)?;
+        let mapping_source = project_root(&prepared.roots, layer, true)
+            .source
+            .as_deref()
+            .expect("readable project mapping");
+        let document = parse_surface_document_from_source(&mapping_path, mapping_source)
+            .map_err(SpecLoadError::unlocated_semantic)?;
         let fsl_syntax::SurfaceDocument::Refinement(refinement) = document else {
             return Err(SpecLoadError::unlocated_semantic(
                 "expected refinement mapping",
             ));
         };
-        let mapping_source = read_spec_source(&mapping_path)?;
         let checked_refinement = fsl_core::parse_refinement_with_options(
-            &mapping_source,
+            mapping_source,
             &implementation.model,
             &abstraction.model,
             crate::parse_options(),
@@ -15786,7 +15857,43 @@ fn analysis_acceptance_predicates_from_source(
         .collect()
 }
 
-#[allow(clippy::too_many_lines)]
+struct PreparedAnalysis {
+    source: String,
+    project: Option<ProjectSources>,
+    editions: Vec<SourceEdition>,
+}
+
+fn prepare_analysis(path: &Path) -> Result<PreparedAnalysis, (Value, i32)> {
+    let source = read_spec_source(path).map_err(|error| (spec_load_error_output(&error), 2))?;
+    let (project, editions) = if path.extension().and_then(std::ffi::OsStr::to_str) == Some("toml")
+    {
+        let sections = parse_project_manifest(&source).map_err(|error| {
+            (
+                spec_load_error_output(&SpecLoadError::unlocated_semantic(error)),
+                2,
+            )
+        })?;
+        let roots =
+            prepare_project_roots(&sections, path.parent().unwrap_or_else(|| Path::new(".")))?;
+        for root in &roots {
+            root.source()?;
+        }
+        let editions = roots
+            .iter()
+            .map(|root| root.edition.warnings_only())
+            .collect();
+        (Some(ProjectSources { sections, roots }), editions)
+    } else {
+        (None, vec![admit_root_source(path, &source, None)?])
+    };
+    Ok(PreparedAnalysis {
+        source,
+        project,
+        editions,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_analyze(
     path: &Path,
     projection: &str,
@@ -15796,34 +15903,58 @@ fn run_analyze(
     export_kind: Option<&str>,
     code_path: Option<&Path>,
 ) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
-        None,
-        output_format != "json",
-        |sources, editions| {
-            finish_admitted(
-                run_analyze_from_source(
-                    path,
-                    &sources[0],
-                    projection,
-                    focus,
-                    output_format,
-                    profile,
-                    export_kind,
-                    code_path,
-                ),
-                editions,
-                output_format != "json",
-            )
-        },
+    let prepared = match prepare_analysis(path) {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
+    };
+    run_prepared_analysis(
+        path,
+        &prepared,
+        projection,
+        focus,
+        output_format,
+        profile,
+        export_kind,
+        code_path,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_prepared_analysis(
+    path: &Path,
+    prepared: &PreparedAnalysis,
+    projection: &str,
+    focus: Option<&str>,
+    output_format: &str,
+    profile: Option<&str>,
+    export_kind: Option<&str>,
+    code_path: Option<&Path>,
+) -> (Value, i32) {
+    run_prepared_roots(&prepared.editions, output_format != "json", || {
+        let result = run_analyze_from_source(
+            path,
+            &prepared.source,
+            projection,
+            focus,
+            output_format,
+            profile,
+            export_kind,
+            code_path,
+            prepared.project.as_ref(),
+        );
+        if prepared.editions.is_empty() {
+            result
+        } else {
+            finish_admitted(result, &prepared.editions, output_format != "json")
+        }
+    })
 }
 
 /// Analyze one caller-owned root-source snapshot.
 ///
 /// The tag-review model, refinement surface, ordinary model, and AI-review
-/// acceptance predicates all derive from `source`. Project-manifest analysis
-/// and its referenced layer files retain their own input contract.
+/// acceptance predicates derive from `source`; manifest layers and mappings
+/// use the prepared slots captured before analysis begins.
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_analyze_from_source(
     path: &Path,
@@ -15834,6 +15965,7 @@ fn run_analyze_from_source(
     profile: Option<&str>,
     export_kind: Option<&str>,
     code_path: Option<&Path>,
+    project: Option<&ProjectSources>,
 ) -> (Value, i32) {
     if !matches!(output_format, "json" | "dot" | "mermaid") {
         return (
@@ -15928,10 +16060,11 @@ fn run_analyze_from_source(
                 2,
             );
         }
-        let analysis = match project_traceability_output(path) {
-            Ok(analysis) => analysis,
-            Err(error) => return (spec_load_error_output(&error), 2),
-        };
+        let analysis =
+            match project_traceability_output(path, project.expect("prepared project analysis")) {
+                Ok(analysis) => analysis,
+                Err(error) => return (spec_load_error_output(&error), 2),
+            };
         return finish_analysis(analysis, None, projection, output_format);
     }
     if let Some(export_kind) = export_kind {
@@ -16068,6 +16201,9 @@ fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
         "profile",
         "schema_version",
         "formal_status",
+        "warnings",
+        "edition",
+        "fsl_edition",
     ] {
         if let Some(value) = result.get(key) {
             entry.insert(key.to_owned(), value.clone());
@@ -16095,7 +16231,7 @@ fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
             );
         }
     } else {
-        for key in ["kind", "message", "loc", "expected", "hint"] {
+        for key in ["kind", "message", "loc", "expected", "hint", "findings"] {
             if let Some(value) = result.get(key) {
                 entry.insert(key.to_owned(), value.clone());
             }
@@ -16104,6 +16240,7 @@ fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
     Value::Object(entry)
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_analyze_batch(
     paths: &[PathBuf],
     projection: &str,
@@ -16172,14 +16309,24 @@ fn run_analyze_batch(
         left.canonicalize().unwrap_or_else(|_| left.clone())
             == right.canonicalize().unwrap_or_else(|_| right.clone())
     });
+    let prepared = match files
+        .iter()
+        .map(|path| prepare_analysis(path))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
+    };
     let mut entries = Vec::new();
     let mut errors = Vec::new();
-    for path in files {
-        let (result, _) = run_analyze(&path, projection, None, "json", profile, None, None);
-        entries.push(analysis_batch_entry(&path, &result));
+    for (path, prepared) in files.iter().zip(&prepared) {
+        let (result, _) = run_prepared_analysis(
+            path, prepared, projection, None, "json", profile, None, None,
+        );
+        entries.push(analysis_batch_entry(path, &result));
         if result.get("result").and_then(Value::as_str) != Some("analyzed") {
             errors.push(json!({
-                "file":analysis_display_path(&path),
+                "file":analysis_display_path(path),
                 "result":result.get("result"),
                 "kind":result.get("kind"),
                 "message":result.get("message"),
@@ -18951,6 +19098,7 @@ spec InitTraceability {
             "tsg",
             None,
             "json",
+            None,
             None,
             None,
             None,
