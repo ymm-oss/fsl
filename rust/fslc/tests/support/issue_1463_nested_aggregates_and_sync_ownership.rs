@@ -3,6 +3,15 @@
 use super::forms::Case;
 
 pub fn assert_message(case: &Case, message: &str) {
+    if case.id.starts_with("nested/") && case.rejection {
+        assert!(
+            message.contains(
+                "local binding 'x' shadows a constant of the same name; rename the local binding"
+            ),
+            "{}: {message}",
+            case.id
+        );
+    }
     if let Some(name) = case.public_name {
         assert!(message.contains(name), "{}: {message}", case.id);
         assert!(!message.contains("__"), "{}: {message}", case.id);
@@ -63,7 +72,9 @@ pub fn cases() -> Vec<Case> {
                         cases.push(Case {
                             id: format!("nested/{domain}/{empty}/{shadow}/{mode}/{negative}"),
                             source: format!("spec Nested {{\n  {}\n  type K = 0..1\n  state {{ xs: Set<K>, done: Bool }}\n  init {{ xs = Set {{ {} }} done = false }}\n  action go() {{}}\n  invariant Capture {{ {expression} == {} }}\n}}\n", if shadow { "const x = false" } else { "" }, if empty { "" } else { "0, 1" }, expected + i32::from(negative)),
-                            files: vec![], rejection: false, negative, public_name: None, marker: "invariant Capture",
+                            // Const-shadow forms are now located refusal detectors;
+                            // fresh forms retain their original execution oracle.
+                            files: vec![], rejection: shadow, negative, public_name: None, marker: "invariant Capture",
                         });
                     }
                 }

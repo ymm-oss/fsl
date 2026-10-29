@@ -94,11 +94,10 @@ fn a1333_2_component_helpful_progress_rejects_a_real_lasso() {
 }
 
 const PER_BINDING: &str = "spec A {
-  const c = 0
   type Case = 0..1
   type Level = 0..2
-  state { level: Map<Case, Level> }
-  init { forall c: Case { level[c] = 2 } }
+  state { level: Map<Case, Level>, c: Case }
+  init { c = 0 forall c: Case { level[c] = 2 } }
   fair action step(c: Case) {
     requires level[c] > 0
     level[c] = level[c] - 1
@@ -113,6 +112,7 @@ const PER_BINDING: &str = "spec A {
 
 #[test]
 fn a1333_3_per_binding_helpful_keeps_its_bound_argument() {
+    // The state decoy still becomes a__c if a bound helpful argument is captured.
     let dir = scratch(
         "issue-1333-binding",
         &[("a.fsl", PER_BINDING), ("c.fsl", COMPOSE)],

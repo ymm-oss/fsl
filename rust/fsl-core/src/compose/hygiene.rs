@@ -141,7 +141,7 @@ pub(super) fn rewrite(
             }
         })
     })
-    .map_err(|error| component_rewrite_error(error, ExpressionErrorContext::Model))
+    .map_err(|error| component_rewrite_error(error, ExpressionErrorContext::Model, None))
 }
 
 #[derive(Clone, Copy)]

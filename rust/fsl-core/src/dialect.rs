@@ -151,7 +151,11 @@ fn eventually_policy(policy: &BusinessItem, process: &Process, binder: &str) -> 
     }
 }
 
-fn kpi_projection(item: &BusinessItem, processes: &[Process]) -> Result<ProjectionDef, CoreError> {
+fn kpi_projection(
+    item: &BusinessItem,
+    processes: &[Process],
+    binder: &str,
+) -> Result<ProjectionDef, CoreError> {
     let BusinessItem::Kpi {
         name,
         case_name,
@@ -188,9 +192,9 @@ fn kpi_projection(item: &BusinessItem, processes: &[Process]) -> Result<Projecti
         expr: Expr::Aggregate {
             kind: AggregateKind::Count,
             binder: Binder::Typed {
-                name: "c".to_owned(),
+                name: binder.to_owned(),
                 type_name: qualified(case_name),
-                where_expr: Some(Box::new(stage_is(process, "c", stage))),
+                where_expr: Some(Box::new(stage_is(process, binder, stage))),
             },
             value: None,
         },
@@ -1576,7 +1580,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         .items
         .iter()
         .filter(|item| matches!(item, BusinessItem::Kpi { .. }))
-        .map(|item| kpi_projection(item, &processes))
+        .map(|item| kpi_projection(item, &processes, "c"))
         .collect::<Result<Vec<_>, _>>()?;
     let mut origins = resolve_stage_items(&mut items, &processes, "business")?;
     for transition in processes.iter().flat_map(|process| &process.transitions) {
@@ -3103,6 +3107,15 @@ pub(crate) fn lower_resolved_requirements(
         .iter()
         .map(|process| process.process.clone())
         .collect::<Vec<_>>();
+    let constants = items.iter().filter_map(|item| match item {
+        SpecItem::Const { name, .. } => Some(name),
+        _ => None,
+    });
+    let kpi_binder = if constants.clone().any(|name| name == "c") {
+        crate::fresh_binding_name("c", &constants.cloned().collect())
+    } else {
+        "c".to_owned()
+    };
     let mut projections = requirements
         .items
         .iter()
@@ -3110,7 +3123,7 @@ pub(crate) fn lower_resolved_requirements(
             RequirementsItem::Kpi(item) => Some(item),
             _ => None,
         })
-        .map(|item| kpi_projection(item, &stage_processes))
+        .map(|item| kpi_projection(item, &stage_processes, &kpi_binder))
         .collect::<Result<Vec<_>, _>>()?;
     if let Some(next) = &requirements.next {
         projections.extend(next_rules::measure_projections(
@@ -3322,14 +3335,16 @@ fn property_meta(item: &SpecItem) -> Option<&MetaTag> {
     }
 }
 
-fn property_span(item: &SpecItem) -> fsl_syntax::Span {
+pub(crate) fn property_span(item: &SpecItem) -> fsl_syntax::Span {
     match item {
         SpecItem::Invariant { span, .. }
         | SpecItem::Trans { span, .. }
         | SpecItem::Reachable { span, .. }
         | SpecItem::Until { span, .. }
         | SpecItem::Unless { span, .. }
-        | SpecItem::LeadsTo { span, .. } => *span,
+        | SpecItem::LeadsTo { span, .. }
+        | SpecItem::Action { span, .. }
+        | SpecItem::Terminal { span, .. } => *span,
         _ => zero_span(),
     }
 }

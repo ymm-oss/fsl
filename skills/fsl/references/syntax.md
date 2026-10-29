@@ -1089,6 +1089,58 @@ message begins `relation role name '__owner' contains '__', ...` (or
 - Comparison: `== != < <= > >=` / logic: `and or not =>`
 - Finite binders: `x: T`, `x in lo..hi`, or `x in set_or_seq`, each with an
   optional `where BoolExpr`. Maps and unbounded domains are rejected.
+  **Const-name collisions are a breaking removal (#1515):** for all const
+  types, reject quantifier/aggregate binders, init/action statement `forall`,
+  `leadsTo` binders, action params/lets and def params named like a const.
+  Requirements action/transition inputs and indexed ages inherit the rule.
+  Components are checked before prefixing, defs before inlining. Refusals are
+  `semantics`, exit 2, with identical full envelopes across check and engines.
+  The message names the local; loc is an existing AST owner, not its name token:
+  enclosing expression/declaration, `forall` statement, `leadsTo` declaration,
+  action for params/lets, def for its params, source transition for lowered
+  inputs, age keyword for indexed ages. Component loc is the parent's `use`,
+  with the component owner coordinate in the message. Rename the local and
+  its uses, e.g. `forall N in 0..1 { N <= 1 }` →
+  `forall k in 0..1 { k <= 1 }` with `const N = 2`.
+  Preserve state-name shadowing, local `N` versus qualified `part.N` in
+  glue/sync, and existing pattern freshness rules. Refinement indexed-map and
+  action-correspondence declarations have no additional const gate, but their
+  source specs still undergo ordinary checking. General dependent ranges
+  (#1480) are not added by this refusal.
+  Visible implicit instance names also reject const collisions: legacy process
+  `c`, next entity first-letter names (`r` for Request), and relation actor
+  parameters (`a` for Agent). Rename the conflicting const; keep source instance
+  uses such as `stage(c)`. The location can be the process/entity declaration
+  for an unwritten generated init binder, or the event for a relation parameter.
+  Hidden KPI projection binders instead freshen only on collision. Raw def-call
+  arguments are checked before expansion: `ignore(forall N in 0..1 { true })`
+  still refuses const N even when ignore returns true without using its param;
+  retained/erased/duplicated calls retain the same message/owner.
+  Original inline removal inventory (shared consumers counted once):
+  **126** compose-capture forms (#1442: 63 cells × standalone/composed), e.g.
+  `const x = false` with `action go(x: Bool) { requires x }`; **24** nested
+  aggregate forms (#1463), e.g. `const x = false` with
+  `sum(x in 0..1 of count(y in 0..x)) == 3`; **2** helpful-argument forms
+  (#1333: standalone/composed), e.g. `const c = 0`, `forall c: Case`, action
+  param `c` and `helpful step(c)`. Total **152** `ok`→`error` forms; 126 fresh
+  compose controls remain `ok`. Rename the local and its uses. Five partial-init
+  forms (#1481) remain **error→error**: the outer `flag`/`limit` const-shadow
+  error now precedes the previous ownership error, changing message/owner loc
+  priority rather than acceptance. Additional removals include the implicit
+  names above and `const i = 1` with nested init
+  `forall i in 0..0 { forall j in 0..i { m[j] = true } }`: the fixture checked on
+  base `46031415`, but now rejects at the outer forall owner **5:10**. Rename the
+  local and its uses without promising general dependent-bound execution.
+  Fresh native `check`, base `46031415` versus measured ancestor `65bf2876`,
+  in their own archives: **603** corpus forms (including interleaved.fsl,
+  three issue_1547_guard_reservations fixtures and two added
+  ai_project_*_invalid_rule.fsl fixtures), **0**
+  removals/other output differences; original inline **152** removals, **126**
+  fresh accepted, **5** diagnostic changes. Another **70** removal witnesses
+  cover implicit/nested sources, raw arguments and unused defs, with **70**
+  renamed controls and **2** hidden-KPI sources accepted. The ancestor's Rust
+  implementation and corpus sources match this docs update. Full evidence is
+  in the design note; corpus agreement does not enumerate all removed programs.
   Position matters: `check` rejects collection domains and all `where` filters
   on outer `leadsTo` wrapper binders. Supported unfiltered typed/range wrappers
   and collection quantifiers inside P/Q remain distinct. This breaking removal
@@ -1377,7 +1429,8 @@ whole root; choosing formerly free values is a model-strengthening decision.
   the relational repeated-write constraint itself is unchanged.
   New admission proofs treat outer-binder-dependent sources/filters/key bounds
   as unproved, never as same-named global consts; no outer valuation product is
-  enumerated and #1515's symbolic shadow-resolution behavior is not repaired.
+  enumerated. Independently, #1515 rejects executable const-shadowing locals
+  before engine-specific resolution; dependent-range support is unchanged.
   For shapes newly admitted by per-field ownership, `check` also requires the
   entire may-assigned root (all Map keys/fields) to be covered before a read,
   including roots written only as whole values; early reads of non-field-written
