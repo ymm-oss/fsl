@@ -188,33 +188,33 @@ failure_cell!(
     "6:5"
 );
 
-// These two stems intentionally differ: #1543 adds locations, not a rewrite
-// of the runtime's existing sum/quantified-expression diagnostics.
+// #1607 also aligns symbolic binder diagnostics with the concrete operation;
+// #1543's containing-statement locations remain unchanged.
 failure_cell!(
     sum_overflow,
     arithmetic(MAX, "0", "sum(k in 0..1 of a)"),
-    "integer overflow in sum or undefined summand",
+    "integer overflow in sum",
     "integer overflow in sum",
     "6:5"
 );
 failure_cell!(
     sum_undefined_summand,
     arithmetic("0", "0", "sum(k in 0..1 of 1 / a)"),
-    "integer overflow in sum or undefined summand",
+    "division by zero",
     "division by zero",
     "6:5"
 );
 failure_cell!(
     count_undefined_filter,
     arithmetic("0", "0", "count(k in 0..1 where 1 / a > k)"),
-    "undefined evaluation",
+    "division by zero",
     "division by zero",
     "6:5"
 );
 failure_cell!(
     quantified_body,
     "spec Quantified {\n  state { d: Int, ok: Bool }\n  init {\n    d = 0\n    ok = forall k in 0..1 { 1 / d > k }\n  }\n  action step() { }\n  invariant P { true }\n}\n",
-    "undefined evaluation",
+    "division by zero",
     "division by zero",
     "5:5"
 );
