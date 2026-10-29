@@ -954,7 +954,8 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                         diagnostic::annotated(diagnostic::LEAF)
                     },
                 );
-                let findings = if legacy {
+                // Documents do not consume implements children or scan them speculatively.
+                let findings = if legacy && kind != "requirements_document" {
                     vec![warning(diagnostic::LEGACY_LEAF, "dep.fsl")]
                 } else {
                     vec![]
