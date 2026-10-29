@@ -40,6 +40,12 @@ Run the existing BMC at depth `K_bmc` as-is (code reuse). If violated, return th
 usual violated JSON and stop (the counterexample is a real trace, and returning
 it here is best).
 
+The native non-Seq base runs symbolic BMC first and omits the concrete boundary
+probe only on `verified` (#1628). Every assumed implicit bound is still checked
+at every base frame. Any non-success or error retains the existing concrete
+probe and evidence priority; typed state containing Seq, including nested Seq,
+keeps the eager probe. This changes cost, not verdicts, witnesses or proof scope.
+
 Note: the base of textbook k-induction is "up to depth k-1," but in FSL we take
 **base = ordinary BMC (depth K_bmc ≥ k)**. The deeper the base is run, the more
 false CTIs (violations that are actually reachable) can be detected first as
