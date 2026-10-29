@@ -694,8 +694,8 @@ fn meet_branches(
 /// without evaluating against a concrete state. Filtered or collection binders
 /// and non-constant range bounds return `None`, so assignments at the binder key
 /// cannot prove coverage through this function. Fixed targets are separate:
-/// `init_binder_is_nonempty` proves fixed-target coverage; concrete/refinement
-/// walks additionally resolve static filtered/collection keys with `init_binder_static_values`.
+/// `init_binder_is_nonempty` can prove a static filtered domain nonempty
+/// (including a singleton); concrete/refinement leave outer-dependent sources/filters unresolved.
 fn compute_binder_values(
     binder: &Binder,
     model: &KernelModel,
@@ -727,22 +727,26 @@ fn compute_binder_values(
 }
 
 /// Fixed targets only gain coverage if at least one iteration is guaranteed.
-/// State-dependent filters cannot prove nonemptiness or binder-key coverage.
+/// This does not change ownership or the conservative binder-key coverage of
+/// `compute_binder_values`: a state-dependent filter can still skip every write.
 fn init_binder_is_nonempty(
     binder: &Binder,
     model: &KernelModel,
     outer: Option<&BTreeMap<String, Option<Vec<Value>>>>,
 ) -> bool {
-    // This scoped policy is used only behind the failed legacy probe. Do not
-    // repair #1515's symbolic/global-const behavior or narrow legacy acceptance.
-    if outer.is_some_and(|names| init_binder_depends_on_outer(binder, names)) {
-        return false;
-    }
-    init_binder_static_values(binder, model).is_some_and(|values| !values.is_empty())
+    init_binder_static_values(binder, model, outer).is_some_and(|values| !values.is_empty())
 }
 
-/// Exact state-independent filtered values; `Some([])` is empty, `None` unresolved.
-fn init_binder_static_values(binder: &Binder, model: &KernelModel) -> Option<Vec<Value>> {
+/// Select only filter `Ok(true)` values; filter errors are not selected.
+/// Source errors and state/outer-binder dependencies return `None`.
+fn init_binder_static_values(
+    binder: &Binder,
+    model: &KernelModel,
+    outer: Option<&BTreeMap<String, Option<Vec<Value>>>>,
+) -> Option<Vec<Value>> {
+    if outer.is_some_and(|names| init_binder_depends_on_outer(binder, names)) {
+        return None;
+    }
     let (sources, filter) = init_binder_exprs(binder);
     if sources
         .iter()
@@ -1489,6 +1493,10 @@ fn walk_init(
     let field_reads_only = field_read_roots.is_some();
     let legacy = matches!(mode, InitWalkMode::LegacyConcrete);
     let proof_scope = matches!(mode, InitWalkMode::ScopedFields(_)).then_some(bound_names);
+    let nonempty_scope = match mode {
+        InitWalkMode::ReadOrder(_, false) | InitWalkMode::LegacyConcrete => proof_scope,
+        _ => Some(bound_names),
+    };
     for statement in statements {
         match statement {
             Statement::Assign {
@@ -1615,7 +1623,7 @@ fn walk_init(
                 let binder_values = compute_binder_values(binder, model, proof_scope)?;
                 let binder_values = binder_values.or_else(|| match mode {
                     InitWalkMode::Concrete | InitWalkMode::ReadOrder(_, true) => {
-                        init_binder_static_values(binder, model)
+                        init_binder_static_values(binder, model, Some(bound_names))
                     }
                     _ => None,
                 });
@@ -1658,7 +1666,7 @@ fn walk_init(
                     model,
                     nested_mode,
                 )?;
-                if !init_binder_is_nonempty(binder, model, proof_scope) {
+                if !init_binder_is_nonempty(binder, model, nonempty_scope) {
                     definitely_assigned = before_forall;
                 }
             }
