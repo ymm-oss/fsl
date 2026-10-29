@@ -704,11 +704,11 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec と 
 元から不正な、状態を読む `within` の呼び出しでは、`unknown constant` の代わりに
 呼び出し位置の `would capture` を報告する場合があります。exit 2 / semantics は不変です。
 
-#1528 の `check` sweep は、base `f5f3f1942220ad6c1e1802fe9bc523fabe2155ae` と実装
-`2c955b9756b5fd8f5d0650ffef650ba9952571bc` の別々に build した `git archive` tree で実施しました。
-`specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全598個の `.fsl` は、stdout/stderr の
+#1528 の `check` sweep は、base `08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` と実装
+`c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286` の別々に build した `git archive` tree で実施しました。
+`specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全601個の `.fsl` は、stdout/stderr の
 全内容と exit が一致し、ok→error と error→error の診断変化はともに0件でした。
-移した既存の inline テストの1形 (合計599形) だけが ok→error に変わりました。
+移した既存の inline テストの1形 (合計602形) だけが ok→error に変わりました。
 これは宣言バインダーが `decreases` 内の def 呼び出しの自由な状態名を捕まえる形です。
 捕獲と無関係な受理の削除はありません。
 

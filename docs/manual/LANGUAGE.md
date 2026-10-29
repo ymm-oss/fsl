@@ -735,11 +735,11 @@ An already-invalid state-reading `within` call can now report `would capture`
 at the call instead of `unknown constant`, still with exit 2 / semantics.
 
 The #1528 `check` sweep used separately built `git archive` trees for base
-`f5f3f1942220ad6c1e1802fe9bc523fabe2155ae` and implementation
-`2c955b9756b5fd8f5d0650ffef650ba9952571bc`. All 598 `.fsl` files under
+`08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` and implementation
+`c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286`. All 601 `.fsl` files under
 `specs/`, `examples/`, and `rust/fslc/tests/fixtures/` agree in full stdout/stderr
 and exits: zero ok-to-error transitions and zero error-to-error diagnostic
-changes. The one migrated inline test source (599 forms total) is the only
+changes. The one migrated inline test source (602 forms total) is the only
 ok-to-error transition: a declaration binder captures a def-body free state
 name in a `decreases` call. There are no unrelated breaking removals.
 

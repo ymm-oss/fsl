@@ -14,10 +14,10 @@ the fixed check/BMC/induction error envelopes omit structured loc and agree in f
 This is an error-to-error diagnostic change, not a false-green baseline.
 
 Separately built `git archive` trees for base
-`f5f3f1942220ad6c1e1802fe9bc523fabe2155ae` and implementation
-`2c955b9756b5fd8f5d0650ffef650ba9952571bc` checked all 598 `.fsl` corpus files
+`08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` and implementation
+`c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286` checked all 601 `.fsl` corpus files
 under specs, examples, and CLI fixtures, plus the one migrated inline source
-(599 forms). All corpus stdout/stderr bytes and exits agree: zero ok-to-error
+(602 forms). All corpus stdout/stderr bytes and exits agree: zero ok-to-error
 transitions and zero error-to-error diagnostic changes. The inline source is
 the only ok-to-error transition, a declaration binder capturing a def-body free
 state name in a decreases call. No unrelated acceptance is removed.

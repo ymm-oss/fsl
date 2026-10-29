@@ -150,14 +150,14 @@ bounded evidence; declaration-binder capture is rejected separately by #1528.
 
 The command shapes `<base-binary> check <path>` and `<head-binary> check <path>`
 were run in separately built, fresh `git archive` trees for base
-`f5f3f1942220ad6c1e1802fe9bc523fabe2155ae` and implementation
-`2c955b9756b5fd8f5d0650ffef650ba9952571bc`. All 598 `.fsl` files under
-`specs/` (23), `examples/` (191), and `rust/fslc/tests/fixtures/` (384) agree
+`08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` and implementation
+`c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286`. All 601 `.fsl` files under
+`specs/` (23), `examples/` (191), and `rust/fslc/tests/fixtures/` (387) agree
 in full stdout/stderr bytes and exit status: zero ok-to-error transitions and
 zero error-to-error diagnostic changes. No field is excluded.
 
 The one migrated inline source from `issue_1450_def_pattern_scope.rs` was also
-checked in each tree (599 forms total). It changes from exit 0 / ok to exit 2 /
+checked in each tree (602 forms total). It changes from exit 0 / ok to exit 2 /
 semantics: its `forall on: K` declaration captures the free state name `on` in
 `def p() = on`, called in `decreases p()` and `helpful g(p())`. The first error
 is `predicate 'p' call would capture variable 'on'; rename the binder at the call site at 7:70`.

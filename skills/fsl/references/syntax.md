@@ -124,10 +124,10 @@ Binder ranges and the binder's own `where` expansion are unchanged; capture in
 State-reading `within` calls already rejecting with `unknown constant` can
 instead report `would capture` at the call, still exit 2 / semantics.
 The #1528 `check` sweep in separately built `git archive` trees for base
-`f5f3f1942220ad6c1e1802fe9bc523fabe2155ae` and implementation
-`2c955b9756b5fd8f5d0650ffef650ba9952571bc` compares all 598 `.fsl` files under
+`08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` and implementation
+`c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286` compares all 601 `.fsl` files under
 `specs/`, `examples/`, and `rust/fslc/tests/fixtures/` plus one migrated inline
-source (599 forms). Corpus stdout/stderr and exits agree in full: zero
+source (602 forms). Corpus stdout/stderr and exits agree in full: zero
 ok-to-error or error-to-error diagnostic changes. The inline source is the
 only ok-to-error transition, a declaration binder capturing a def-body free
 state name in `decreases`; there are no unrelated breaking removals.
