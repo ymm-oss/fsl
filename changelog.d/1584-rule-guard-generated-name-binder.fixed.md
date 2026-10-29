@@ -1,1 +1,1 @@
-Fixed (#1584): Rule guards now rename binders named like generated entity field or stage state maps before expanding predicates, matching event lowering and avoiding false rule-conflict rejections.
+Fixed (#1584): The rule-conflict check's copy of a rule guard now renames binders named like generated entity field, relation-role or stage state maps before expanding predicates. The event's own guard already renamed these binders; matching that behavior avoids false rule-conflict rejections.
