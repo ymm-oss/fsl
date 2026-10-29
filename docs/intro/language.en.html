@@ -514,7 +514,7 @@ ill-typed arguments, unknown names and forbidden pattern shadowing now fail <cod
 Normalized <code>count</code>/<code>sum</code> patterns retain their standalone acceptance, including
 valid empty aggregates; composition cannot hide an original global-name refusal
 by prefixing, nor introduce one from a foreign declaration.
-Induction additionally requires state-independent arguments: leadsTo binders,
+Induction additionally requires state-independent arguments: leadsTo binders, constants, enum members,
 integer/Boolean literals, and integer <code>+</code>, <code>-</code>, <code>*</code> combinations (including unary <code>-</code>).
 <code>check</code> and BMC accept well-typed arguments that read state; induction refuses them.
 <code>within K</code> is a bounded deadline on a response; <code>K</code> must be a non-negative
