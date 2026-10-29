@@ -881,8 +881,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   一時値の `contains`、`size`、削除、等値比較はその値を参照し、add の結果を元の有界 receiver へ戻すと
   メンバーや遷移を消さずに `type_bound` / `_bounds_<var>` を報告します。静的な型検査と
   受理範囲は変えず、非有界 Set や複合コレクションの型推論を追加するものではありません。
-  より広いドメインの Set/関係を丸ごと代入する操作は、base と同様に BMC/induction が
+  より広いドメインの Set を丸ごと代入する操作は、base と同様に BMC/induction が
   `cannot coerce symbolic value` (exit 2)で拒否します。
+  関係のドメイン互換性は、後述のとおり評価前に検査します。
   記号的 init は、検査済みの依存順に写し・写しの連鎖・条件を通して追加されたメンバーを
   保持しますが、関係としての init を逐次実行に置き換えません。BMC で境界を選ばない
   ルートを re-frame するには、新しい frame の有限の support の外に生きたキーがない
@@ -897,6 +898,24 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   含みます。
   受理された関係の add も、どちらかの端点のドメイン外にあるペアを保持し、domain/range と
   グラフ操作はそのペアを参照します。add の結果を元の有界の関係へ戻すと `_bounds_<var>` 違反になります。
+  破壊的な受理範囲の縮小(#1522、関連 #1524): 関係値の型互換には、対応する両端点の
+  ドメインがそれぞれ一致する必要があります。数値別名は名前ではなく解決後の下限・上限を
+  比較するため、`N = 0..2` と `M = 0..2` は互換ですが、`A = 0..1` と `B = 0..2` は互換ではありません。
+  異なる関係ドメインを混ぜる条件式の分岐、Set/Seq の要素(入れ子を含む)、代入は、
+  `check` が位置付きの代入可能性エラー(`semantics`、終了コード 2)で拒否します。
+  `verify` と `replay` も同じ検査を共有します。通常のスカラー Int/Range 互換、
+  Map のキー互換、公称 enum、宣言された自己関係の判定は変更しません。
+  同じ境界を持つ関係のリテラルは引き続き check を通りますが、記号エンジンの残る対応は
+  #1467 に属し、この変更は key-union の実装ではありません。
+  同じ検査で action の `r = q`、init の `q = Set {} r = q`、`let x = q` に続く
+  `r = x`、let 内の異なる関係型を混ぜる条件式も拒否します。不適合な用途を持たない
+  単なる別名は引き続き受理します。narrow→wide の関係のコピーも action の代入・init・
+  let 経由で拒否します。従来は BMC/induction が変換できず、action/let を判定する
+  explicit と Monitor に一致しなかったためです。init は explicit も終了コード 2 でした。
+  対照的に、A のドメインが B に含まれる数値型の `Set<A>` → `Set<B>` の代入は今も
+  check を通ります。Set の記号評価の不一致は #1627 に残ります。
+  破壊的な受理範囲の縮小の証拠は
+  [互換性の設計決定](../design/DESIGN-relation-endpoint-compatibility.md)を参照してください。
   `r: relation A -> B` の `contains`、`add`、`remove`、`reachable` は、
   `a` を `A`、`b` を `B` に対して独立に型検査します。不適合な端点は
   check 時の `kind: "semantics"` エラー(終了コード 2)となり、代入可能性の
@@ -1363,6 +1382,8 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
   例外が 1 つあります。init が状態変数の型の外の値も代入する
   とき、`bmc` と `induction` は step 0 の型境界を仮定して init を問うため、
   その step 0 の `type_bound` 違反(exit 1)を報告します。
+- i64 の最小値を `-1` で割る `MIN / -1` とその剰余 `MIN % -1` は整数の
+  overflow であり、除数がゼロのときだけ `0` に全域化する property 文脈でも同じです。
 - デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   `deadlock reachable at step 1 (state: status=ToolFault, ...)`)。完全なトレースは
   JSON の `deadlock.trace` にもあります。
@@ -1411,6 +1432,7 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                [--property <Name>]               # check one named property obligation —
                                                  #   invariant / trans / leadsTo / reachable;
                                                  #   induction の trans 選択は全 invariant を保持
+                                                 #   induction は全ての暗黙の型境界をベースケースでも検査
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
@@ -1582,9 +1604,54 @@ approval check の transport には ledger `--approval` overlay の root の読�
 今回の21 mode の完成だけでは #1449 を閉じません。report baseline と
 ledger の移行表示は維持します。移行 finding だけの行は vacuity/mutate の助言ではなく
 🟡 移行候補 / risk —、非移行 finding を含む行は 🔴 要確認 / 要確認 と表示します。
-依存先を再帰的に admission せず、履歴 Git root は #1513 の範囲です。修復の投影と
+依存先の admission は下記の拡張で扱い、履歴 Git root は #1513 の範囲です。修復の投影と
 終了コードは変えず、lint の既存の dialect 制限(#609)を維持します。公開 example の
 警告(#608)や、他の ledger warning の誤分類(#1497)を解消するものでもありません。
+
+実際に読まれる依存先は、親が要求した edition を継承せず、**自分の**ヘッダーまたは
+現行の既定 edition で判定します(#1452)。canonical な異なる edition の混在は許します。
+compose の `use`、`implements from`、causal の `uses`、governance の delegates、
+before/after 文書と refinement mapping は、入れ子や読み直しも含め、子の bytes がモデル・
+solver・出力へ入る前に同じ admission を通します。未使用の virtual file や、consumer が読まない
+宣言上の参照を先回りして走査しません。owner のあるコマンドは子の完全な edition 拒否と
+exit 2 を返します。owner の外の strict loader も、子の path/code を原因文に含む既存の
+read-error envelope で閉じる側に倒れます。上記の延期された root mode の完了ではありません。
+
+依存先の移行警告は、外側の native owner ごと(または明示的な局所 log ごと)に、
+provider resource と完全な finding の組を一度だけ仕上げ、
+主 root の edition metadata を置き換えず、明示的な root slot をまとめません。filesystem
+では実の canonical path を key とし、子の `loc.file` は参照に書いた綴りを維持します。
+virtual lookup は provider の key を維持します。
+閉じた/raw stdout と stderr 警告の既存規則も維持します。Worker/editor の記録は呼び出しに
+局所です。editor は自分の key と関連 link の path だけを絶対化・字句正規化します。
+Store の lookup や symlink は正規化せず、file path のない buffer の label を directory と見なしません。
+完全な finding で重複を除き、読込順で最初の
+親の use と、子自身の本文による範囲・severity を関連付けます。子を拒むと
+モデル構築・解析・親への quick-fix 配信を行いません。修復ツールは consumer として子を
+拒まず、子の edit を適用せずに finding を報告し、root の planner/formatter と終了コードを維持します。
+parse の報告も command envelope を入れ子にせず finding の形にします。全参照を先に読むという
+保証ではなく、native の lemma mode の implements と governance の read は root の solver の
+後にも行われますが、拒んだ子の bytes は solver/cache に入りません。Worker の通常の governance
+error は native と同じく kernel error を優先し、依存先の拒否がある場合だけ早く返します。
+
+**破壊的な受理の削除:** ヘッダーのない compose root が、legacy なコロン量化子を持つ
+次 edition の子を import すると、以前は message のない `ok`/0 を返していました。今は
+finding の message が `legacy colon quantifier syntax is deprecated` である、子の完全な
+`unsupported_in_edition`/2 を返します。波括弧の canonical twin は、完全な
+`fsl:1.0,result:ok,spec:C,warnings:[]` の check envelope と検証済み runtime version を
+保って成功します。この inline 形は
+`edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` と、
+`edition_dispatch_inventory` の
+`dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`、
+`deferred_modes_have_live_disagreements_across_the_complete_native_adapters` の各 context に残します。
+
+各 materialized tree の `fslc check <path>` による `bc14d885` から修正後の Rust
+source/test tree `a65eddd5` への比較では、**corpus の全603形を両 parser 設定で検査(各 tree 1206回)**し、
+**required test の inline/included 入力を各 tree 368回**、合計 **3148回**検査しました。
+`ok`→`error` は、上記の legacy-compose の形を3 context で各2回実行した **6回だけ**で、
+**その他の遷移は0件、corpus 内も0件**です。canonical twin はすべて受理を維持します。
+正確な source tree の identity と範囲は
+[`DESIGN-migration.md`](../design/DESIGN-migration.md) の依存先 admission の節を参照してください。
 
 `fslc lint` の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
 通常ファイルの `*.fsl` へ再帰的に展開され、その走査中はシンボリックリンクの

@@ -104,7 +104,8 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
                [--property <Name>]                  # check one named property obligation
                                                     #   (invariant / trans / leadsTo / reachable;
-                                                    #    selected trans keeps induction invariants)
+                                                    #    selected trans keeps induction invariants;
+                                                    #    induction still checks every implicit type bound in its base case)
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`

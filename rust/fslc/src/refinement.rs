@@ -25,7 +25,7 @@ pub(crate) fn governance_result_from_source(
     depth: usize,
 ) -> Result<Option<Value>, fslc_rust::verification_output::GovernanceOutputError> {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = crate::spec_loading::dependency_resolver(base);
     fslc_rust::verification_output::governance_output(
         source,
         &resolver,
@@ -108,7 +108,8 @@ pub(crate) fn implements_result_from_source_with_bounds(
     depth: usize,
     scope: &ScopeBounds,
 ) -> Result<Option<Value>, fslc_rust::verification_output::RequirementsImplementsError> {
-    let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+    let resolver =
+        crate::spec_loading::dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
     fslc_rust::verification_output::requirements_implements_output_with_bounds(
         source,
         &resolver,

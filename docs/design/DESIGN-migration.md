@@ -197,9 +197,10 @@ Document check admits the captured root before artifact IO or frontmatter parsin
 then projects those same bytes under the artifact's recorded display label;
 that label is not another path to read. Ordinary projection still follows label
 discovery. These two error-precedence changes are intentional.
-JSON traces, evidence, plans, records and trust keys are not FSL roots. Recursive
-compose `use`, `implements from`, causal `uses` and governance dependencies are
-outside this root-admission change. Git-revision roots are tracked by #1513.
+JSON traces, evidence, plans, records and trust keys are not FSL roots. The
+dependency extension below admits actually read compose, implements, causal and
+governance sources separately from these explicit root slots. Git-revision roots
+are tracked by #1513.
 
 The planner still owns complete finding identity and migration safety. Each
 result is moved to one warning-finalization site; a borrowed `SourceEdition` can
@@ -311,3 +312,89 @@ comparison above records the exact revisions, form counts and per-command
 transitions for this extension. Public-example
 warning cleanup (#608), AI/causal lint-planner support (#609) and unrelated ledger
 warning classification (#1497) are not part of this delivery.
+
+## Amendment: dependency edition admission (#1452)
+
+Every FSL dependency actually read by a consumer is classified by its own header
+or the current default before its bytes reach lowering, a model, a solver or an
+output producer. The parent's requested edition is not inherited; canonical mixed
+editions remain valid. This covers compose `use`, `implements from`, causal
+`uses`, and governance delegates, before/after documents and refinement mappings,
+including nested reads and rereads. It does not pre-scan unused virtual files,
+introduce a graph walk, or add semantic checks to consumers that do not read a
+declared dependency.
+
+One resolver decorator reuses `admit_source`. Native captured-root, check and
+verify owners share outer-owner-local thread-local records; nested owners retain
+refusal precedence but only the outer owner delivers dependency warnings. Worker
+and editor calls pass local records explicitly rather than using thread-local
+transport. In owned commands, a child's complete refusal envelope and exit 2
+replace an ordinary wrapped component error, including when a helper otherwise
+swallows that error. Outside an owner the read still fails closed through the
+existing read-error renderer, with the child's path and finding codes in a
+single-line cause; no unowned rejection record survives the read.
+
+Dependency findings use warnings-only finalization, without replacing the primary
+root's edition metadata. Repeated findings for the same provider resource are
+delivered once per outer native owner (or explicit local log), not once across all
+owners a command may run. Native deduplication keys use real canonical filesystem
+paths; child `loc.file` retains the reference spelling, not that absolute key.
+Virtual file lookup keeps its provider keys. Distinct explicit root slots retain their existing
+warning cardinality. Closed/raw outputs keep their stdout contracts and existing
+stderr delivery rules. The editor builds an absolute, lexically normalized path
+for its own complete-finding key and related link; it does not normalize the
+Store provider's lookup or resolve symlinks. Labels without a filesystem path are not
+filesystem directories. Findings anchor at the first parent use in read order and relate the
+child's own source range and severity; child edits are not parent quick-fixes.
+
+Repair roles `lint`, `migrate` and `fmt` only report child classifications and keep
+their existing validation, root-edit and exit contracts; they never apply a child
+edit. Parse-class child reports are findings (`code`, `kind`, `severity`, `message`
+and `loc`), not nested command envelopes. Strict consumption still refuses without an owner. The eight deferred root
+intake modes above are not completed by dependency admission, and #1449 remains
+open. A child admission is not standalone verification of all its properties.
+Admission is a boundary on child bytes, not a global preflight of every declared
+edge: native lemma-mode inline-implements reads and governance reads can follow
+root solver work (and the latter the root-kernel cache store). Refused child bytes
+still cannot enter a model, solver, lemma or cache. Worker governance pre-evaluation
+returns early only for a recorded dependency refusal; ordinary governance errors
+are folded after the kernel result, preserving its `error` precedence.
+
+This is a **breaking consumer removal**, not a grammar removal: a headerless
+compose root could previously consume a child whose own edition rejects a legacy
+colon quantifier. It now returns the full child `unsupported_in_edition` envelope
+and exit 2, with finding message `legacy colon quantifier syntax is deprecated`,
+instead of `ok`/0 with no message. The independently checked braced canonical twin
+still returns the complete successful check envelope. The same inline form is
+retained in all three required-test contexts:
+
+| Target | Required test | Before → after |
+|---|---|---|
+| `edition_dialect_controls` | `actual_dialects_and_valid_sidecars_are_preserved_twice` | composed legacy child `ok`/0 → complete child refusal/2; canonical twin `ok`/0 |
+| `edition_dispatch_inventory` | `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` | same form and full rejection/canonical controls |
+| `edition_dispatch_inventory` | `deferred_modes_have_live_disagreements_across_the_complete_native_adapters` | same helper's former bypass-preservation cell is now rejecting |
+
+The materialized-tree comparison used base
+`bc14d8855963487185cbe2608970492ff8638ba7` and corrected Rust source/test
+tree `a65eddd54e38eac34331a70beb3360f8b98901e2` (the `rust/` subtree), each
+built and run in its own materialized Git-root tree. The source-tree identity
+remains stable when fixups are folded; final-head commit IDs belong to the PR's
+verification record. The check command was that tree's native `fslc check <path>`. All **603**
+`.fsl` forms under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` ran in
+both stable and opt-in parser configurations (**1206 checks per tree**).
+The **368 required-test inline/included occurrences per tree** include each
+context above twice, its canonical twin, and the unchanged inline inputs of the
+rewritten Worker tests. Across **3148 checks**, there were **6 `ok`→`error`
+occurrences**: exactly the legacy-compose cell in those three contexts, twice
+each. There were **0 other `ok`→`error` transitions**, including **0 in the
+corpus**; all canonical twins remained accepted. This counts repeated test
+occurrences, not six distinct language constructs. Documentation-only edits
+do not change that Rust source/test identity or the checked corpus inputs.
+
+Removing only a later causal original-model read or Worker preservation reread's
+decorator does not change stable-file public fixtures: those exact paths are
+necessarily read earlier through admission. Their coverage is the prior-read
+table plus a site-specific static provider-type inventory, not a claimed isolated
+runtime detector. A raw late provider makes that inventory fail; full-route
+controls still preserve their observed result. No runtime fault-injection hook or
+new production test seam was added.

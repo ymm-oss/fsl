@@ -59,7 +59,10 @@ use refinement::{
     abs_violation_json, fold_governance_from_source, implements_error_output,
     implements_result_from_source_with_bounds, mismatch_paths, run_refine,
 };
-use spec_loading::{finish_admitted, raw_delivery_allowed, run_admitted_root, run_admitted_roots};
+use spec_loading::{
+    dependency_resolver, finish_admitted, raw_delivery_allowed, run_admitted_root,
+    run_admitted_roots,
+};
 use spec_loading::{
     load_kernel_model_from_source, load_model, load_model_from_source, load_model_scoped,
     load_snapshot_value_object, read_spec_source, require_trace_gate, snapshot_value,
@@ -267,6 +270,25 @@ fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, S
 }
 
 fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
+    let log = fslc_rust::migration::DependencyRecords::default();
+    let (output, status) = run_fmt_inner(options, &log);
+    match output {
+        FmtCliOutput::Json(output) => {
+            let (output, status) =
+                fslc_rust::migration::finish_dependency_reports(&log, (output, status), false);
+            (FmtCliOutput::Json(output), status)
+        }
+        FmtCliOutput::Source(source) => {
+            fslc_rust::migration::finish_dependency_reports(&log, (Value::Null, status), true);
+            (FmtCliOutput::Source(source), status)
+        }
+    }
+}
+
+fn run_fmt_inner(
+    options: &FmtOptions,
+    log: &fslc_rust::migration::DependencyRecords,
+) -> (FmtCliOutput, i32) {
     let mut files = Vec::new();
     let mut any_changed = false;
     for path in &options.paths {
@@ -301,10 +323,10 @@ fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
         // The document fmt reads: the one parse error it repairs (a particle
         // written onto its word) repaired.
         let read = fsl_syntax::space_particles(&source, crate::parse_options());
-        if let Err(error) = validate_fmt_semantics(&read, path) {
+        if let Err(error) = validate_fmt_semantics(&read, path, log) {
             return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
         }
-        if let Err(error) = validate_fmt_semantics(&formatted, path) {
+        if let Err(error) = validate_fmt_semantics(&formatted, path, log) {
             return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
         }
         if options.respelling != fsl_syntax::Respelling::default()
@@ -428,6 +450,14 @@ fn parse_migration_options(
 }
 
 fn run_lint(options: &MigrationOptions) -> (Value, i32) {
+    let log = fslc_rust::migration::DependencyRecords::default();
+    fslc_rust::migration::finish_dependency_reports(&log, run_lint_inner(options, &log), false)
+}
+
+fn run_lint_inner(
+    options: &MigrationOptions,
+    log: &fslc_rust::migration::DependencyRecords,
+) -> (Value, i32) {
     let (id_policy, policy_source) = match load_id_policy(options.project.as_deref()) {
         Ok(policy) => policy,
         Err(error) => return (error_output("config", &error), 2),
@@ -439,7 +469,7 @@ fn run_lint(options: &MigrationOptions) -> (Value, i32) {
     let mut files = Vec::new();
     let mut finding_count = 0_usize;
     for path in &paths {
-        let (source, mut plan, edition) = match load_migration_plan(path, options) {
+        let (source, mut plan, edition) = match load_migration_plan(path, options, log) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
         };
@@ -580,12 +610,20 @@ fn load_id_policy(
 }
 
 fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
+    let log = fslc_rust::migration::DependencyRecords::default();
+    fslc_rust::migration::finish_dependency_reports(&log, run_migrate_inner(options, &log), false)
+}
+
+fn run_migrate_inner(
+    options: &MigrationOptions,
+    log: &fslc_rust::migration::DependencyRecords,
+) -> (Value, i32) {
     let mut planned = Vec::new();
     let mut files = Vec::new();
     let mut refused = false;
     let mut manual_required = false;
     for path in &options.paths {
-        let (source, plan, edition) = match load_migration_plan(path, options) {
+        let (source, plan, edition) = match load_migration_plan(path, options, log) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
         };
@@ -680,6 +718,7 @@ impl MigrationOptions {
 fn load_migration_plan(
     path: &Path,
     options: &MigrationOptions,
+    log: &fslc_rust::migration::DependencyRecords,
 ) -> Result<
     (
         String,
@@ -715,7 +754,7 @@ fn load_migration_plan(
     // `unsupported_in_edition` finding, so skip it in that case.
     let refused = plan.refused();
     if !refused {
-        validate_migration_input_semantics(&source, path)?;
+        validate_migration_input_semantics(&source, path, log)?;
     }
     let header =
         fslc_rust::migration::missing_edition_header(&source, edition, crate::parse_options());
@@ -783,14 +822,18 @@ fn load_migration_plan(
 /// (`fslc check specs/cart_refines.fsl` itself fails "spec has no state
 /// block"; neither `check` nor `fmt --check` nor this pre-flight treats
 /// that as a `lint`/`migrate` defect).
-fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), Value> {
+fn validate_migration_input_semantics(
+    source: &str,
+    path: &Path,
+    log: &fslc_rust::migration::DependencyRecords,
+) -> Result<(), Value> {
     let dialect = fsl_syntax::dialect_keyword_with(source, crate::parse_options())
         .map_err(|error| semantic_error_output(&error.to_string()))?;
     if matches!(dialect, "refinement" | "agent") {
         return Ok(());
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base).report_to(log.clone());
     let kernel = fsl_core::parse_kernel_source_with_file_with_options(
         source,
         &resolver,
@@ -929,14 +972,18 @@ fn atomic_write_migrations(writes: &[(&Path, &str)]) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_fmt_semantics(source: &str, path: &Path) -> Result<(), String> {
+fn validate_fmt_semantics(
+    source: &str,
+    path: &Path,
+    log: &fslc_rust::migration::DependencyRecords,
+) -> Result<(), String> {
     let dialect = fsl_syntax::dialect_keyword_with(source, crate::parse_options())
         .map_err(|error| error.to_string())?;
     if path.as_os_str() == "-" || matches!(dialect, "refinement" | "agent") {
         return Ok(());
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base).report_to(log.clone());
     let source_file = path.to_string_lossy();
     let kernel = fsl_core::parse_kernel_source_with_file_with_options(
         source,
@@ -1940,7 +1987,7 @@ fn load_document_claims_from_source(
 /// the way the document commands build theirs. A requirements check the
 /// solver refutes rejects the spec after the gate, as `check` orders them.
 fn document_trace_gate(source: &str, base: &Path) -> Result<(), Value> {
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     let kernel =
         fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
             .map_err(|error| semantic_error_output(&error.to_string()))?;
@@ -1962,7 +2009,7 @@ fn document_trace_gate(source: &str, base: &Path) -> Result<(), Value> {
 /// projection failure that is not a model failure, leaving the projector's own
 /// envelope in place.
 fn document_model_failure(source: &str, base: &Path) -> Option<fsl_core::ModelError> {
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     fsl_core::build_model(
         fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
             .ok()?,
@@ -2268,7 +2315,7 @@ fn run_document_generate(
         }
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     let kernel =
         match fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
         {
@@ -2638,7 +2685,7 @@ fn run_document_check(
         Err(output) => return (output, 2),
     };
     let base = spec_path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     let kernel =
         match fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
         {
@@ -6034,7 +6081,7 @@ fn run_check_from_source(
     source: &str,
     admission: &SourceEdition,
 ) -> (Value, i32) {
-    let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+    let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
     // The validity stages are shared with the Worker (issue #1163); only the
     // success envelope is composed here.
     match crate::process::block_on_native(fslc_rust::check_stages::run_check_stages(
@@ -6140,7 +6187,7 @@ fn run_kernel_contract_from_source(
         return (core_error_output(&error), 2);
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     let portable_path = if version == fsl_core::PublicKernelVersion::V2 {
         match portable_cli_source_path(path) {
             Ok(path) => Some(path),
@@ -6334,6 +6381,7 @@ fn run_check_with_tags_from_source(
     requirements: Option<&Path>,
     edition: Option<fsl_syntax::Edition>,
 ) -> (Value, i32) {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
     let admission = match fslc_rust::migration::admit_source(
         source,
         &display_path.to_string_lossy(),
@@ -6349,7 +6397,7 @@ fn run_check_with_tags_from_source(
     if status == 0 && strict_tags {
         let model = match load_model_from_source(path, source) {
             Ok(model) => model,
-            Err(error) => return (spec_load_error_output(&error), 2),
+            Err(error) => return dependencies.finish((spec_load_error_output(&error), 2), false),
         };
         if let Err(error) =
             add_strict_tag_warnings_from_source(&mut output, &model, source, true, requirements)
@@ -6357,7 +6405,7 @@ fn run_check_with_tags_from_source(
             return (error_output("io", &error), 2);
         }
     }
-    admission.finish((output, status))
+    dependencies.finish(admission.finish((output, status)), false)
 }
 
 fn parse_surface_document_from_source(
@@ -9463,8 +9511,7 @@ fn reachable_counterfactuals_from_source(
         | fsl_syntax::SurfaceDocument::Business(_)
         | fsl_syntax::SurfaceDocument::Requirements(_)
         | fsl_syntax::SurfaceDocument::Compose(_) => {
-            let resolver =
-                fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+            let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
             let Ok(kernel) = fsl_core::parse_kernel_source_with_options(
                 source,
                 &resolver,
@@ -9893,8 +9940,7 @@ fn invariant_counterfactuals_from_source(
         | fsl_syntax::SurfaceDocument::Business(_)
         | fsl_syntax::SurfaceDocument::Requirements(_)
         | fsl_syntax::SurfaceDocument::Compose(_) => {
-            let resolver =
-                fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+            let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
             let Ok(kernel) = fsl_core::parse_kernel_source_with_options(
                 source,
                 &resolver,
@@ -11174,7 +11220,7 @@ fn apply_implements_mutation_oracle(
     if !outcome.is_clean() {
         return Ok(ImplementsOracle::Decided);
     }
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     let Some(contract) = fsl_core::requirements_implements_with_options(
         source,
         &resolver,
@@ -11795,7 +11841,7 @@ fn external_mutation_model(
             None,
         ));
     }
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     let kernel =
         fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
             .map_err(|error| {
@@ -12041,8 +12087,7 @@ fn run_mutate_from_source(
         fsl_syntax::SurfaceDocument::Business(_)
         | fsl_syntax::SurfaceDocument::Requirements(_)
         | fsl_syntax::SurfaceDocument::Compose(_) => {
-            let resolver =
-                fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+            let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
             match fsl_core::parse_kernel_source_with_options(
                 &source,
                 &resolver,
@@ -12516,7 +12561,7 @@ fn run_typestate(path: &Path, typescript_only: bool) -> (Value, i32) {
 
 fn run_typestate_from_source(path: &Path, source: &str) -> (Value, i32) {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     let kernel =
         match fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
         {
@@ -13361,7 +13406,7 @@ fn render_document_for_approval(
         .collect();
     let loaded_evidence = load_evidence(&evidence_paths)?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     let kernel =
         fsl_core::parse_kernel_source_with_options(&source, &resolver, crate::parse_options())
             .map_err(|error| semantic_error_output(&error.to_string()))?;
@@ -13460,7 +13505,7 @@ fn approval_spec_digest(path: &Path) -> Result<String, SpecLoadError> {
     if fsl_syntax::extract_literate_fsl(&source).is_some() {
         return approval::spec_digest(path).map_err(SpecLoadError::unlocated_semantic);
     }
-    let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+    let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
     let kernel =
         fsl_core::parse_kernel_source_with_options(&source, &resolver, crate::parse_options())
             .map_err(|error| {
@@ -17894,6 +17939,9 @@ fn finish(output: &mut Map<String, Value>, checked: usize, started: Instant) {
 
 #[cfg(test)]
 mod chain_jobs_tests {
+    mod dependency_edition {
+        include!("../tests/support/edition_dependency_native.rs");
+    }
     use super::*;
 
     #[test]

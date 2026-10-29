@@ -22,6 +22,22 @@ pub struct SourceDiagnostic {
     /// that renders this diagnostic again classifies it from the type rather
     /// than from [`Self::message`] (issue 1167).
     pub class: DiagnosticClass,
+    pub related: Option<DependencyDiagnostic>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DependencyDiagnostic {
+    pub file: String,
+    pub source: String,
+    pub span: Span,
+    pub error: bool,
+}
+
+struct ResolverRef<'a>(&'a dyn fsl_core::FileResolver);
+impl fsl_core::FileResolver for ResolverRef<'_> {
+    fn read(&self, path: &str) -> Result<String, fsl_core::CoreError> {
+        self.0.read(path)
+    }
 }
 
 /// Run the authoritative syntax and typed-model gates and return editor diagnostics.
@@ -58,20 +74,7 @@ pub fn diagnostics_with_model(
         Ok(edition) => edition,
         Err((refusal, _)) => {
             let diagnostics = if refusal["kind"] == "parse" {
-                let span = match fsl_syntax::document_edition(
-                    source,
-                    None,
-                    fsl_syntax::Edition::Fsl4,
-                    options,
-                ) {
-                    Err(error) => error.span,
-                    Ok(edition) => {
-                        fsl_syntax::parse_surface_document_with(source, options)
-                            .expect_err("edition parse refusal")
-                            .for_edition(source, edition, options)
-                            .span
-                    }
-                };
+                let span = edition_parse_error(source, *options).span;
                 vec![message_diagnostic(
                     "parse",
                     refusal["diagnostic_code"].as_str().expect("parse code"),
@@ -92,15 +95,130 @@ pub fn diagnostics_with_model(
             return (diagnostics, None);
         }
     };
-    let (mut diagnostics, model) =
-        diagnostics_admitted(source, source_file, resolver, *options, &edition);
+    let log = crate::migration::DependencyRecords::default();
+    let admitted = crate::migration::DependencyResolver::new(
+        ResolverRef(resolver),
+        log.clone(),
+        *options,
+        &serde_json::Map::new,
+    );
+    let (mut diagnostics, mut model) =
+        diagnostics_admitted(source, source_file, &admitted, *options, &edition);
+    let log = log.borrow();
+    if log.refusal.is_some() {
+        diagnostics.clear();
+        model = None;
+    }
     diagnostics.extend(
         edition
             .warnings()
             .iter()
             .map(|finding| edition_diagnostic(source, finding)),
     );
+    diagnostics.extend(dependency_diagnostics(
+        source,
+        source_file,
+        resolver,
+        *options,
+        &log,
+    ));
     (diagnostics, model)
+}
+
+fn edition_parse_error(source: &str, options: fsl_syntax::ParseOptions) -> fsl_syntax::ParseError {
+    match fsl_syntax::document_edition(source, None, fsl_syntax::Edition::Fsl4, &options) {
+        Err(error) => error,
+        Ok(edition) => fsl_syntax::parse_surface_document_with(source, &options)
+            .expect_err("edition parse refusal")
+            .for_edition(source, edition, &options),
+    }
+}
+
+fn dependency_diagnostics(
+    source: &str,
+    source_file: &str,
+    resolver: &dyn fsl_core::FileResolver,
+    options: fsl_syntax::ParseOptions,
+    log: &crate::migration::DependencyLog,
+) -> Vec<SourceDiagnostic> {
+    if log.sources.is_empty() {
+        return Vec::new();
+    }
+    let SurfaceDocument::Compose(compose) =
+        fsl_syntax::parse_surface_document_with(source, &options).expect("read compose")
+    else {
+        unreachable!("editor dependencies are compose uses")
+    };
+    let mut diagnostics = Vec::new();
+    let mut sources = log
+        .sources
+        .iter()
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut keys = Vec::new();
+    for (path, child, span) in compose.items.iter().filter_map(|item| match item {
+        fsl_syntax::ComposeItem::Use { path, span, .. } => {
+            sources.remove(path).map(|child| (path, child, *span))
+        }
+        _ => None,
+    }) {
+        let mut file = std::path::PathBuf::new();
+        let owner = if source_file.contains(':') && !std::path::Path::new(source_file).is_absolute()
+        {
+            "."
+        } else {
+            source_file
+        };
+        for part in std::path::absolute(std::path::Path::new(owner).with_file_name(path))
+            .expect("current directory")
+            .components()
+        {
+            if part == std::path::Component::ParentDir {
+                file.pop();
+            } else {
+                file.push(part);
+            }
+        }
+        let refused = log.refusal.as_ref().is_some_and(|(output, _)| {
+            output["loc"]["file"] == *path || output["findings"][0]["loc"]["file"] == *path
+        });
+        // The same snapshot already refused admission, so this reuses the root
+        // refusal-to-diagnostic projection without lowering the child.
+        let mut children = if refused {
+            diagnostics_with_model(child, path, resolver, &options).0
+        } else {
+            Vec::new()
+        };
+        children.extend(
+            log.warnings
+                .iter()
+                .filter(|finding| finding["loc"]["file"] == *path)
+                .filter(|finding| {
+                    let mut key = (*finding).clone();
+                    key["loc"]["file"] = serde_json::json!(file);
+                    if keys.contains(&key) {
+                        return false;
+                    }
+                    keys.push(key);
+                    true
+                })
+                .map(|finding| edition_diagnostic(child, finding)),
+        );
+        for mut diagnostic in children {
+            if diagnostic.kind == "parse" {
+                diagnostic.message = edition_parse_error(child, options).message;
+            }
+            diagnostic.related = Some(DependencyDiagnostic {
+                file: file.to_string_lossy().into_owned(),
+                source: child.clone(),
+                span: diagnostic.span,
+                error: refused,
+            });
+            diagnostic.span = span;
+            diagnostic.quick_fix = None;
+            diagnostics.push(diagnostic);
+        }
+    }
+    diagnostics
 }
 
 pub(crate) fn diagnostics_admitted(
@@ -253,6 +371,7 @@ pub async fn solver_diagnostics<S: fsl_solver::SmtSolver>(
                 hint: None,
                 quick_fix: None,
                 class: diagnostic.class,
+                related: None,
             }
         })
         .into_iter()
@@ -301,6 +420,7 @@ fn trace_refusal_diagnostic(source: &str, refusal: &serde_json::Value) -> Source
         hint: None,
         quick_fix: None,
         class: DiagnosticClass::Message,
+        related: None,
     }
 }
 
@@ -337,6 +457,7 @@ fn core_diagnostic(source: &str, error: &fsl_core::CoreError) -> SourceDiagnosti
         hint: None,
         quick_fix: None,
         class: diagnostic.class,
+        related: None,
     }
 }
 
@@ -374,6 +495,7 @@ fn model_diagnostic(
         hint: error.hint.as_deref().cloned(),
         quick_fix: error.quick_fix.as_deref().cloned(),
         class,
+        related: None,
     }
 }
 
@@ -407,6 +529,7 @@ fn message_diagnostic(
         hint: None,
         quick_fix: None,
         class: DiagnosticClass::Message,
+        related: None,
     }
 }
 

@@ -468,6 +468,15 @@ fn infer_type_inner(
     }
 }
 
+/// Container carriers must be equal, not merely scalar-assignable.
+fn same_carrier(
+    actual: &TypeRef,
+    expected: &TypeRef,
+    model: &KernelModel,
+) -> Result<bool, TypecheckError> {
+    Ok(resolve(model, actual)? == resolve(model, expected)?)
+}
+
 pub(crate) fn types_compatible(
     actual: &TypeRef,
     expected: &TypeRef,
@@ -484,13 +493,16 @@ pub(crate) fn types_compatible(
         | (TypeRef::Seq(actual, _), TypeRef::Seq(expected, _)) => {
             types_compatible(actual, expected, model)?
         }
-        (TypeRef::Map(actual_key, actual_value), TypeRef::Map(expected_key, expected_value))
-        | (
+        (TypeRef::Map(actual_key, actual_value), TypeRef::Map(expected_key, expected_value)) => {
+            types_compatible(actual_key, expected_key, model)?
+                && types_compatible(actual_value, expected_value, model)?
+        }
+        (
             TypeRef::Relation(actual_key, actual_value),
             TypeRef::Relation(expected_key, expected_value),
         ) => {
-            types_compatible(actual_key, expected_key, model)?
-                && types_compatible(actual_value, expected_value, model)?
+            same_carrier(actual_key, expected_key, model)?
+                && same_carrier(actual_value, expected_value, model)?
         }
         _ => false,
     })

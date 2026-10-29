@@ -70,23 +70,33 @@ causal observe-expectations {repo}/examples/causal/incident_response.fsl --from-
 pub(crate) fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
     let mut results = Results::default();
     let scratch = Scratch::new();
-    scratch.write("dep.fsl", "fsl 5\nspec Dep { state { ready: Bool = false } invariant Typed { forall i in 0..1: ready == true or ready == false } }\n");
+    let child = "fsl 5\nspec Dep { state { ready: Bool = false } invariant Typed { forall i in 0..1: ready == true or ready == false } }\n";
     scratch.write(
         "compose.fsl",
         "compose C { use Dep as d from \"dep.fsl\" }\n",
     );
     let commands = dialect_commands();
     for repeat in 0..2 {
-        // Q2 is root-only: a dependency rejected on its own is deliberately
-        // still accepted through compose. This is preservation, not a detector
-        // for the separately tracked dependency-admission defect.
-        let dependency = run(&scratch, "check dep.fsl");
-        results.check(
-            &format!("preserved/dependency-scope/{repeat}"),
-            value(&dependency),
-            "standalone unsupported_in_edition",
-            dependency.status.code() == Some(2)
-                && value(&dependency)["kind"] == "unsupported_in_edition",
+        // Consumed children must refuse just as standalone; the braced twin stays valid.
+        scratch.write("dep.fsl", child);
+        let expected = json!({"fsl":"1.0","result":"error","kind":"unsupported_in_edition","edition":"next","fsl_edition":5,"findings":[{"code":"legacy_quantifier_colon","kind":"legacy_quantifier_colon","taxonomy":"deprecated","severity":"error","edition":"next","message":"legacy colon quantifier syntax is deprecated","loc":{"file":"dep.fsl","line":2,"column":60,"end_line":2,"end_column":66},"canonical_replacement":"braced quantifier","machine_applicable":true,"edits":[{"start":81,"end":82,"replacement":" {"},{"start":114,"end":114,"replacement":" }"}]}]});
+        results.error_envelope(
+            &format!("dependency/root/{repeat}"),
+            &run(&scratch, "check dep.fsl"),
+            &expected,
+            true,
+        );
+        results.error_envelope(
+            &format!("dependency/compose/{repeat}"),
+            &run(&scratch, "check compose.fsl"),
+            &expected,
+            true,
+        );
+        scratch.write(
+            "dep.fsl",
+            &child
+                .replace(": ready", " { ready")
+                .replace("false } }", "false } } }"),
         );
         for command in &commands {
             let output = cases::invoke(env!("CARGO_BIN_EXE_fslc"), command, &scratch.0, true);
@@ -95,7 +105,13 @@ pub(crate) fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
                 &format!("preserved/dialect/{repeat}/{}", command.join(" ")),
                 (output.status.code(), &actual),
                 "successful real dialect and sidecar",
-                output.status.code() == Some(0) && actual["result"] != "error",
+                output.status.code() == Some(0)
+                    && if command.last().is_some_and(|arg| arg == "compose.fsl") {
+                        without_versions(actual.clone())
+                            == json!({"fsl":"1.0","result":"ok","spec":"C","warnings":[]})
+                    } else {
+                        actual["result"] != "error"
+                    },
             );
         }
         let document = format!("fsl 5\n{}", cases::DOCUMENT_LEGACY);

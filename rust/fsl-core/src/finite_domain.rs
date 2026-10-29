@@ -292,8 +292,12 @@ pub(crate) fn evaluate(
                     "+" => FslValue::Int(left.checked_add(right).ok_or_else(overflow)?),
                     "-" => FslValue::Int(left.checked_sub(right).ok_or_else(overflow)?),
                     "*" => FslValue::Int(left.checked_mul(right).ok_or_else(overflow)?),
-                    "/" if right != 0 => FslValue::Int(left.div_euclid(right)),
-                    "%" if right != 0 => FslValue::Int(left.rem_euclid(right)),
+                    "/" if right != 0 => {
+                        FslValue::Int(left.checked_div_euclid(right).ok_or_else(overflow)?)
+                    }
+                    "%" if right != 0 => {
+                        FslValue::Int(left.checked_rem_euclid(right).ok_or_else(overflow)?)
+                    }
                     _ => return Err(format!("operator '{op}' is not evaluated here")),
                 }
             }

@@ -936,8 +936,9 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Assigning the result back to that bounded receiver reports `type_bound` /
   `_bounds_<var>` instead of dropping the member or transition. Static typing/admission is unchanged;
   this does not enable unbounded Sets or composite-collection inference.
-  BMC/induction still reject whole-collection assignments from a wider Set or
-  relation carrier with `cannot coerce symbolic value` (exit 2), as on base.
+  BMC/induction still reject whole-collection assignments from a wider Set
+  carrier with `cannot coerce symbolic value` (exit 2), as on base.
+  Relation carrier compatibility is checked before evaluation as described below.
   Symbolic init preserves introduced members through copies, copy chains and
   conditions in the checked dependency order, without replacing relational init
   with sequential execution. In BMC, re-framing a root whose bound is omitted
@@ -953,6 +954,26 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Accepted relation adds likewise retain pairs outside either endpoint carrier;
   domain/range and graph operations see those pairs. Storing the add result back
   to that bounded relation reports its `_bounds_<var>` violation.
+  Breaking removal (#1522, related #1524): relation values are compatible only
+  when both corresponding endpoint carriers agree. Numeric aliases compare their
+  resolved lower and upper bounds, not their names: `N = 0..2` and `M = 0..2` remain
+  compatible, but `A = 0..1` and `B = 0..2` do not. Conditional arms, Set/Seq
+  items (including nested items), and assignments mixing these relation carriers
+  now fail `check` with a located assignability error (`semantics`, exit 2),
+  shared by `verify` and `replay`. Ordinary scalar Int/Range compatibility,
+  Map key compatibility, nominal enums, and the declared self-relation gate are
+  unchanged. Equal-bound relation literals still check, but their remaining
+  symbolic engine support belongs to #1467; this is not key-union support.
+  The shared gate also rejects action assignment `r = q`, init
+  `q = Set {} r = q`, `let x = q` followed by `r = x`, and mixed relation
+  conditionals in a let. A plain alias without an incompatible use stays valid.
+  Narrow-to-wide relation copies are also refused in action assignment, init
+  and let uses: previously BMC/induction could not coerce these forms while
+  explicit decided action/let and Monitor agreed; init also failed explicit.
+  In contrast, numeric `Set<A>` → `Set<B>` assignment with A's carrier inside
+  B's still passes check; Set's symbolic disagreement remains #1627.
+  See [the compatibility decision](../design/DESIGN-relation-endpoint-compatibility.md)
+  for the breaking-removal evidence.
   For `r: relation A -> B`, `contains`, `add`, `remove`, and `reachable`
   check `a` against `A` and `b` against `B` independently. Incompatible
   endpoints are check-time `kind: "semantics"` errors (exit 2), with the
@@ -1458,6 +1479,9 @@ additional removals in #1463.
   assigns a value outside a state variable's type, `bmc` and `induction`
   report that step-0 `type_bound` violation (exit 1) instead, because they
   ask the init question under the step-0 type bounds.
+- Dividing the minimum i64 value by `-1` (`MIN / -1`) or taking its remainder
+  (`MIN % -1`) is integer overflow, including in property contexts where only
+  zero divisors are totalized to `0`.
 - A deadlock warning includes which state you got stuck in (e.g. `deadlock reachable at
   step 1 (state: status=ToolFault, ...)`). The full trace is also in the JSON `deadlock.trace`.
 - **Intended terminal states** (states where stopping is correct, such as
@@ -1506,6 +1530,7 @@ fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexa
                [--property <Name>]               # check one named property obligation —
                                                  #   invariant / trans / leadsTo / reachable;
                                                  #   induction keeps all invariants for a selected trans
+                                                 #   induction still checks every implicit type bound in its base case
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
 fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
@@ -1691,10 +1716,56 @@ Their deferred controls still execute and must retain rejecting evidence; #1449
 is not closed by these 21 completed modes.
 Report baselines and ledger migration rendering are retained; migration-only rows
 use 🟡 移行候補 / risk —, not vacuity/mutate advice. Mixed/non-migration rows remain
-🔴 要確認 / 要確認. Dependencies are not recursively admitted; historical Git roots
+🔴 要確認 / 要確認. Dependency admission is described below; historical Git roots
 remain #1513. Repair projections/exits stay unchanged, including lint's existing
 dialect limits (#609); this does not remove public-example warnings (#608) or fix
 other ledger warning classifications (#1497).
+
+Actually read dependencies use **their own** header or the current default
+(#1452), not a parent's requested edition. Canonical mixed editions remain valid.
+Compose `use`, `implements from`, causal `uses` and governance delegates,
+before/after documents and refinement mappings all pass the same admission rule,
+including nested reads and rereads, before their bytes enter model/solver or output work. Unused
+virtual files and declared references a consumer does not read are not scanned.
+Owned commands return the child's complete edition refusal/exit 2; owner-free
+strict loaders retain their read-error envelope with the child path/codes in its
+cause and still fail closed. This does not complete the deferred root modes above.
+
+Dependency migration warnings finish once per provider-resource/complete finding
+within each outer native owner, or each explicit local log, without replacing
+primary-root edition metadata or merging explicit root slots. Native keys use
+real canonical paths; child `loc.file` keeps the reference spelling. Virtual lookup keeps its
+provider keys. Existing closed/raw stdout and stderr-warning rules remain.
+Worker/editor records are local to their call. The editor makes its own key and
+related link absolute and lexically normalized, without changing Store lookup or
+resolving symlinks; labels without file paths are not directories. It relates the child's own
+text/severity to the first parent use in read order. A child refusal prevents model/analysis
+and parent quick-fix delivery. Repair tools report child findings without consumer
+rejection or child edits, preserving their root planner/formatter exits. Parse
+reports are findings, not nested command envelopes. This is not a global preflight:
+native lemma-mode implements and governance reads may follow root solver work;
+refused child bytes still never enter that solver/cache. Ordinary Worker governance
+errors retain native kernel-error precedence; only dependency refusal returns early.
+
+**Breaking removal:** a headerless compose root importing a next-edition child
+with a legacy colon quantifier formerly returned `ok`/0 with no message. It now
+returns the complete child `unsupported_in_edition` refusal/2, whose finding
+message is `legacy colon quantifier syntax is deprecated`. A braced canonical
+twin still succeeds with the complete `fsl:1.0,result:ok,spec:C,warnings:[]`
+check envelope (plus validated runtime versions). The inline shape is retained by
+`edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`
+and the `edition_dispatch_inventory` contexts
+`dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
+`deferred_modes_have_live_disagreements_across_the_complete_native_adapters`.
+
+The materialized-tree `fslc check <path>` comparison from `bc14d885` to corrected
+Rust source/test tree `a65eddd5` checked all **603 corpus forms in both parser
+configurations (1206 checks per tree)** and **368 required-test inline/included
+occurrences per tree**, for **3148 checks**. It found **6 `ok`→`error`
+occurrences**, only the legacy-compose cell above in three contexts twice each;
+**0 other transitions**, including **0 corpus transitions**. All canonical twins
+remain accepted. See the dependency amendment in
+[`DESIGN-migration.md`](../design/DESIGN-migration.md) for the exact source-tree identity and scope.
 
 Each `fslc lint` path may be a file or directory. Directories recursively expand
 to regular `*.fsl` files; symlink entries and other extensions are skipped while

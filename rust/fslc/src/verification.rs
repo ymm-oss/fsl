@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use fsl_core::{FslValue, KernelExpr, KernelModel};
+use fsl_core::{FslValue, KernelExpr, KernelModel, TypeDef, TypeRef};
 use fslc_rust::spec_load::SpecLoadError;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -245,23 +245,10 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         initial_state: None,
         skip_vacuity_probe,
     };
-    let (base_prepared, base_solved) = match execute_bmc(&base_request, started) {
+    let (base_solved, (base_value, base_status)) = match execute_bmc(&base_request, started, true) {
         Ok(execution) => execution,
         Err(output) => return output,
     };
-    let (base_value, base_status) = fslc_rust::verification_output::render_bmc_output(
-        envelope(),
-        &base_prepared.model,
-        &base_solved.result,
-        fslc_rust::verification_output::BmcOutputOptions {
-            depth: base_request.depth,
-            deadlock: base_request.deadlock,
-            checked_bounds: base_prepared.checked_bounds.as_ref(),
-            elapsed_s: started.elapsed().as_secs_f64(),
-            statistics: &base_solved.statistics,
-            skip_vacuity_probe: base_request.skip_vacuity_probe,
-        },
-    );
     let Value::Object(base) = &base_value else {
         return (
             error_output("internal", "BMC returned a non-object envelope"),
@@ -1157,10 +1144,17 @@ fn finish_explicit_output(rendered: Result<(Value, i32), String>) -> (Value, i32
 
 pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
     let started = Instant::now();
-    let (prepared, solved) = match execute_bmc(&request, started) {
-        Ok(execution) => execution,
-        Err(output) => return output,
-    };
+    match execute_bmc(&request, started, false) {
+        Ok((_, output)) | Err(output) => output,
+    }
+}
+
+fn render_bmc(
+    request: &BmcRequest<'_>,
+    prepared: &PreparedBmc,
+    solved: &SolvedBmc,
+    started: Instant,
+) -> (Value, i32) {
     fslc_rust::verification_output::render_bmc_output(
         envelope(),
         &prepared.model,
@@ -1176,16 +1170,48 @@ pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
     )
 }
 
+fn contains_sequence(model: &KernelModel, ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Seq(_, _) => true,
+        TypeRef::Map(key, value) | TypeRef::Relation(key, value) => {
+            contains_sequence(model, key) || contains_sequence(model, value)
+        }
+        TypeRef::Set(inner) | TypeRef::Option(inner) => contains_sequence(model, inner),
+        TypeRef::Named(name) => matches!(model.types.get(name), Some(TypeDef::Struct { fields })
+            if fields.iter().any(|(_, ty)| contains_sequence(model, ty))),
+        TypeRef::Int | TypeRef::Bool | TypeRef::Range(_, _) => false,
+    }
+}
+
 fn execute_bmc(
     request: &BmcRequest<'_>,
     started: Instant,
-) -> Result<(PreparedBmc, SolvedBmc), CommandResult> {
-    let prepared = prepare_bmc(request, started)?;
-    let solved = solve_bmc(request, &prepared)?;
-    Ok((prepared, solved))
+    symbolic_first: bool,
+) -> Result<(SolvedBmc, CommandResult), CommandResult> {
+    let prepared = prepare_bmc(request)?;
+    let deferred = symbolic_first
+        && !prepared
+            .model
+            .state
+            .iter()
+            .any(|(_, ty)| contains_sequence(&prepared.model, ty));
+    if !deferred {
+        probe_bmc_boundary(request, &prepared, started)?;
+    }
+    let solved = solve_bmc(request, &prepared);
+    let output = match &solved {
+        Ok(solved) => render_bmc(request, &prepared, solved, started),
+        Err(output) => output.clone(),
+    };
+    // Only a successful all-bounds base makes the concrete search redundant.
+    // Every non-success retains the existing boundary evidence and priority.
+    if deferred && output.0.get("result").and_then(Value::as_str) != Some("verified") {
+        probe_bmc_boundary(request, &prepared, started)?;
+    }
+    Ok((solved?, output))
 }
 
-fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc, CommandResult> {
+fn prepare_bmc(request: &BmcRequest<'_>) -> Result<PreparedBmc, CommandResult> {
     let model = load_selected_model(request.selection)
         .map_err(|error| (spec_load_error_output(&error), 2))?;
     if request.initial_state.is_none() {
@@ -1201,16 +1227,29 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
         request.selection.property,
         request.selection.excluded,
     );
+    Ok(PreparedBmc {
+        model,
+        checked_bounds,
+    })
+}
+
+fn probe_bmc_boundary(
+    request: &BmcRequest<'_>,
+    prepared: &PreparedBmc,
+    started: Instant,
+) -> Result<(), CommandResult> {
+    let model = &prepared.model;
+    let checked_bounds = &prepared.checked_bounds;
     // Some concrete boundary outcomes (notably an over-capacity Seq successor)
     // cannot be represented by the bounded symbolic value and must retain the
     // exact Monitor evidence. Action-context `partial_op` is deliberately not
     // consumed here: it belongs to `verify_bounded*` itself (#651).
     if checked_bounds.is_none()
         && request.initial_state.is_none()
-        && fsl_runtime::deterministic_initial_state(&model).is_ok()
+        && fsl_runtime::deterministic_initial_state(model).is_ok()
     {
         match fsl_runtime::find_boundary_violation(
-            &model,
+            model,
             request.depth,
             fsl_runtime::CONCRETE_PROBE_BUDGET,
         ) {
@@ -1221,7 +1260,7 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
                     let statistics = fsl_solver::VerificationStatistics::default();
                     return Err(fslc_rust::verification_output::render_boundary_output(
                         envelope(),
-                        &model,
+                        model,
                         &violation,
                         &trace,
                         &fslc_rust::verification_output::BmcOutputOptions {
@@ -1244,10 +1283,7 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
             Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
         }
     }
-    Ok(PreparedBmc {
-        model,
-        checked_bounds,
-    })
+    Ok(())
 }
 
 /// Per-check wall-clock limit for the #1149 ranking pre-pass. A check that
@@ -2217,6 +2253,7 @@ pub(super) fn run_verify_cli_from_source(
     source: &str,
     options: &CliVerifyOptions,
 ) -> CommandResult {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
     let edition = match fslc_rust::migration::admit_source(
         source,
         &cache_identity_path.to_string_lossy(),
@@ -2228,7 +2265,10 @@ pub(super) fn run_verify_cli_from_source(
         Ok(edition) => edition,
         Err(refusal) => return refusal,
     };
-    run_verify_cli_admitted(path, cache_identity_path, source, options, Some(&edition))
+    dependencies.finish(
+        run_verify_cli_admitted(path, cache_identity_path, source, options, Some(&edition)),
+        false,
+    )
 }
 
 /// Consume a captured, admitted root. Specialized outer owners pass `None`;
@@ -2292,11 +2332,20 @@ fn run_verify_cli_kernel_from_source(
     {
         return crate::causal::causal_parse_error_output(&error, false);
     }
-    let recorder = RecordingResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let recorder = fslc_rust::migration::DependencyResolver::native(
+        RecordingResolver::new(base),
+        base,
+        *parse_options(),
+        &envelope,
+    );
     let prepared = match prepare_cli_verification_from_source(path, source, options, &recorder) {
         Ok(prepared) => prepared,
         Err(output) => return output,
     };
+    if let Some(refusal) = recorder.refusal() {
+        return refusal;
+    }
     if !options.lemmas.is_empty() {
         let (mut output, mut status) = run_induction_with_lemmas(path, options, &prepared);
         // The `--lemma` path returns before `execute_cli_verification`, so the
@@ -2367,7 +2416,7 @@ fn run_verify_cli_kernel_from_source(
             Err(_) => None,
         }
     };
-    let sources = recorder.take_sources();
+    let sources = recorder.inner().take_sources();
     // `auto` never keys a cache entry under the literal string "auto": a
     // lookup consults the explicit/bmc keys directly
     // (`cached_auto_verification`) and a store writes under whichever engine
@@ -2414,7 +2463,7 @@ fn prepare_cli_verification_from_source(
     path: &Path,
     source: &str,
     options: &CliVerifyOptions,
-    recorder: &RecordingResolver,
+    recorder: &dyn fsl_core::FileResolver,
 ) -> Result<PreparedCliVerification, CommandResult> {
     let is_agent_document = match fsl_syntax::parse_surface_document_with(source, parse_options()) {
         Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,

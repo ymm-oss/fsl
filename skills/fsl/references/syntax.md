@@ -416,9 +416,52 @@ The approval-check scope includes ledger `--approval` overlay root rereads.
 Deferred controls still execute and must reject; this does not close #1449.
 Existing baselines and ledger migration rows are retained;
 migration-only rows use 🟡 移行候補 / risk —, mixed/non-migration rows 🔴 要確認 / 要確認.
-Dependencies are not recursively admitted. Git-revision roots (#1513), example
+Actually read dependencies are admitted as described below. Git-revision roots (#1513), example
 warning cleanup (#608), lint dialect support (#609) and other ledger warning
 classifications (#1497) are separate; do not infer full reader coverage.
+
+Dependency admission (#1452) uses each consumed child's own header/current default,
+never the parent's requested edition; canonical mixed editions are allowed.
+Compose use, implements, causal uses and governance delegate/before/after/mapping
+reads, including nested and repeated reads, admit before their bytes enter lowering,
+model/solver/cache or output. There is no unused-file or speculative-reference scan. Owned commands
+retain the full child refusal/exit 2; an owner-free strict loader still refuses
+through its ordinary read-error renderer, naming child path and finding codes.
+The remaining root-intake modes above are still separate work.
+
+Dependency findings use warnings-only finalization once per provider resource and
+complete finding within each outer native owner (or explicit local log), preserving
+primary-root metadata and explicit-root slot counts. Native keys are real canonical
+paths, but child `loc.file` retains reference spelling; virtual lookup preserves provider keys.
+Existing raw/closed stdout and stderr delivery stay unchanged. Worker/editor logs
+are call-local. The editor makes its own key/related path absolute and lexically
+normalized, not the Store lookup or symlink target; labels without file paths are not
+directories. Complete findings and child ranges/severity relate to the first parent use
+in read order. Refusal means no model/analysis or parent quick-fix. Repair tools only
+report child findings and preserve root edits/exits; they do not edit children.
+Parse reports are findings, not nested command envelopes. Native lemma-mode
+implements and governance reads may follow root solver work: this is not a global
+preflight, but refused child bytes never reach solver/cache. Worker ordinary
+governance errors preserve native kernel-error precedence; only refusal returns early.
+
+Breaking removal: headerless compose plus a next-edition legacy-colon child
+previously checked `ok`/0 without a message, but now returns the complete child
+`unsupported_in_edition`/2 and finding message
+`legacy colon quantifier syntax is deprecated`. The braced canonical twin retains
+the complete successful check envelope. This inline form remains in
+`edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`
+and the `edition_dispatch_inventory` contexts
+`dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
+`deferred_modes_have_live_disagreements_across_the_complete_native_adapters`;
+it is a consumer removal, not new grammar.
+
+Materialized-tree `fslc check <path>` evidence (`bc14d885` → corrected Rust
+source/test tree `a65eddd5`): **603 corpus forms × two parser configurations =1206 checks per
+tree**, plus **368 required-test inline/included occurrences per tree**, **3148
+checks total**. The **6 `ok`→`error` occurrences** are exactly that legacy-compose
+cell, three required-test contexts twice each. **0 other transitions; 0 corpus
+transitions**; canonical twins stay accepted. Exact source-tree identity/scope are recorded
+in the dependency amendment of `docs/design/DESIGN-migration.md`.
 
 ```fsl
 domain <Name> {
@@ -1198,7 +1241,8 @@ message begins `relation role name '__owner' contains '__', ...` (or
   `_bounds_<root>`, not a dropped transition. Existing static typing and
   finite-scalar admission still apply.
   BMC/induction still fail closed on whole-collection assignments from a wider
-  Set/relation carrier (`cannot coerce symbolic value`, exit 2), as on base.
+  Set carrier (`cannot coerce symbolic value`, exit 2), as on base; relation
+  carrier compatibility is checked before evaluation as described below.
   Symbolic init copies preserve introduced support in checked dependency order;
   repeated assignments remain relational equalities. In BMC, re-framing a root
   whose bound is omitted requires proof that no live key escapes the new frame's
@@ -1212,6 +1256,23 @@ message begins `relation role name '__owner' contains '__', ...` (or
   Accepted adds retain pairs outside either endpoint carrier, including through
   domain/range and graph operations; storing the add result back exposes that
   receiver's bound.
+  Breaking removal (#1522, related #1524): compatible relation values require
+  equal source and target carriers, comparing resolved numeric lower/upper
+  bounds rather than alias names. `N = 0..2` and `M = 0..2` remain compatible; mixing
+  `A = 0..1` and `B = 0..2` in if arms, Set/Seq items (nested included), or
+  assignments is now a located check-time assignability error (`semantics`,
+  exit 2), shared by verify/replay. Scalar Int/Range compatibility, Map keys,
+  nominal enums and declared self-relation identity are unchanged. Equal-bound
+  literals still check; #1467 owns their remaining engine support. The same gate
+  rejects action `r = q`, init `q = Set {} r = q`, `let x = q` followed by
+  `r = x`, and mixed relation conditionals in a let; plain aliases remain valid.
+  Even narrow-to-wide relation copies are refused in action assignment, init
+  and let uses because BMC/induction could not coerce them while explicit
+  decided action/let and Monitor agreed; init also failed explicit. Numeric
+  `Set<A>` → `Set<B>` assignment with A's carrier inside B's still checks;
+  Set's symbolic disagreement remains #1627.
+  See the [compatibility decision](../../../docs/design/DESIGN-relation-endpoint-compatibility.md)
+  for breaking-removal evidence. Do not treat this as key union.
   For `r: relation A -> B`, `contains`/`add`/`remove`/`reachable` require
   source `a` assignable to `A` and target `b` assignable to `B` independently.
   A mismatch is `kind: "semantics"`, exit 2, with the existing assignability
@@ -1765,6 +1826,9 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    Guard it with an init `if`.
    Exception: if init also assigns a value outside a state's type, `bmc`/`induction`
    report the step-0 `type_bound` violation (exit 1) instead.
+   Dividing the minimum i64 value by `-1` (`MIN / -1`) or taking its remainder
+   (`MIN % -1`) is integer overflow, including in property contexts where only
+   zero divisors are totalized to `0`.
 6. `fair` = weak fairness: an infinite execution in which a fair instance that is
    enabled throughout the loop is never executed is excluded from leadsTo
    counterexamples. Fairness applies to whole action instances; model conditional

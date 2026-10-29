@@ -107,22 +107,26 @@ const SIBLING: &str = r"spec S1 {
   invariant Q { not flag }
 }";
 
-fn cell(source: &str, bound: Option<(&str, usize)>, engine: &str) {
+fn observe(source: &str, engine: &str, depth: usize) -> (Value, i32) {
     let target = report_cli::repository_root().join("rust/target");
     std::fs::create_dir_all(&target).expect("fixture parent directory");
+    let dir = scratch_identity::unique(target.join("issue-1598"));
+    std::fs::create_dir(&dir).expect("fresh fixture directory");
+    let path = dir.join("model.fsl");
+    std::fs::write(&path, source).expect("write fixture");
+    report_cli::run_json(
+        "verify",
+        path.to_str().expect("UTF-8 path"),
+        depth,
+        &["--engine", engine, "--property", "P"],
+    )
+}
+
+fn cell(source: &str, bound: Option<(&str, usize)>, engine: &str) {
     // Each repetition gets fresh evidence; cache state cannot decide a control.
     for _ in 0..2 {
-        let dir = scratch_identity::unique(target.join("issue-1598"));
-        std::fs::create_dir(&dir).expect("fresh fixture directory");
-        let path = dir.join("model.fsl");
-        std::fs::write(&path, source).expect("write fixture");
         let depth = if engine == "induction" { 4 } else { 8 };
-        let (value, exit) = report_cli::run_json(
-            "verify",
-            path.to_str().expect("UTF-8 path"),
-            depth,
-            &["--engine", engine, "--property", "P"],
-        );
+        let (value, exit) = observe(source, engine, depth);
         if source == FREE_INIT && engine == "explicit" {
             // BFS requires a concrete init; it must not invent the free values.
             assert_eq!(
@@ -147,8 +151,7 @@ fn cell(source: &str, bound: Option<(&str, usize)>, engine: &str) {
         assert_eq!(
             (exit, &value["result"], &value["completeness"]),
             (expected_exit, &json!(verdict), &json!(completeness)),
-            "{engine} depth={depth} fixture={} {value}",
-            path.display()
+            "{engine} depth={depth}: {value}"
         );
         if let Some((name, step)) = bound {
             // Standalone selected BMC/BFS still check only P. Six actions are
@@ -205,3 +208,129 @@ engines!(g03_scalar_valid, G03, None);
 engines!(collection_valid, COLLECTION_VALID, None);
 engines!(free_init, FREE_INIT, Some(("_bounds_v", 0)));
 engines!(sibling_unselected, SIBLING, None);
+
+fn without_concrete_init(source: &str) -> String {
+    source.replace("flag: Bool", "flag: Bool, spare: Int")
+}
+
+#[test]
+fn symbolic_base_rejects_scalar_and_collection_bounds_without_the_probe() {
+    // The unused free Int disables concrete init, not symbolic bound checks.
+    for (source, bound) in [(G01, "_bounds_s"), (G02, "_bounds_v")] {
+        cell(
+            &without_concrete_init(source),
+            Some((bound, 0)),
+            "induction",
+        );
+    }
+}
+
+#[test]
+fn symbolic_base_checks_bounds_at_every_frame() {
+    for source in [G03, COLLECTION_VALID] {
+        for source in [source.to_owned(), without_concrete_init(source)] {
+            for _ in 0..2 {
+                let (value, exit) = observe(&source, "induction", 4);
+                assert_eq!((exit, &value["result"]), (0, &json!("proved")), "{value}");
+                let properties = value["cost"]["properties"].as_array().expect("cost rows");
+                for bound in if source.contains("CollectionValid") {
+                    &["_bounds_s", "_bounds_r"][..]
+                } else {
+                    &["_bounds_v"][..]
+                } {
+                    let row = properties
+                        .iter()
+                        .find(|row| row["kind"] == "type_bound" && row["name"] == *bound)
+                        .expect("bound queries");
+                    // Five base frames plus one induction query; k_used alone
+                    // would not establish that the base checked any frame.
+                    assert_eq!(row["checks"], 6, "{bound}: {value}");
+                }
+            }
+        }
+    }
+}
+
+const AUDIT_OVERFLOW: &str = r"spec AuditOverflow {
+  state { n: Int }
+  init { n = 9223372036854775807 }
+  action cross() { n = n + 1 }
+  invariant P { true }
+}";
+const AUDIT_GUARD: &str = r"spec AuditGuard {
+  state { n: 0..1 }
+  init { n = 0 }
+  action cross() { requires 1 / n > 0 n = 1 }
+  invariant P { true }
+}";
+const AUDIT_MASKED_BOUND: &str = r"spec AuditMaskedBound {
+  state { n: 0..9223372036854775807 }
+  init { n = 9223372036854775807 }
+  action cross() { n = -1 }
+  invariant P { n + 1 > n }
+}";
+const AUDIT_INIT_ERROR: &str = r"spec AuditInitError {
+  state { n: 0..1, x: Int }
+  init { n = 2 x = 1 / 0 }
+  action idle() {}
+  invariant P { true }
+}";
+const AUDIT_SEQ: &str = r"spec AuditSeq {
+  state { xs: Seq<Int, 1> }
+  init { xs = Seq { 0, 1 } }
+  action idle() {}
+  invariant P { true }
+}";
+
+#[test]
+fn symbolic_first_preserves_boundary_and_runtime_error_priority() {
+    // MaskedBound and Seq detect forcing a skip after symbolic failure:
+    // their concrete bound evidence must precede the symbolic error.
+    for (source, expected) in [
+        (
+            AUDIT_OVERFLOW,
+            json!([
+                2,
+                "error",
+                "semantics",
+                "integer overflow in addition",
+                null,
+                null,
+                null
+            ]),
+        ),
+        (
+            AUDIT_GUARD,
+            json!([1, "violated", null, null, "partial_op", "_partial_cross", 1]),
+        ),
+        (
+            AUDIT_MASKED_BOUND,
+            json!([1, "violated", null, null, "type_bound", "_bounds_n", 1]),
+        ),
+        (
+            AUDIT_INIT_ERROR,
+            json!([1, "violated", null, null, "type_bound", "_bounds_n", 0]),
+        ),
+        (
+            AUDIT_SEQ,
+            json!([1, "violated", null, null, "type_bound", "_bounds_xs", 0]),
+        ),
+    ] {
+        for _ in 0..2 {
+            let (value, exit) = observe(source, "induction", 1);
+            assert_eq!(
+                json!([
+                    exit,
+                    value["result"],
+                    value["kind"],
+                    value["message"],
+                    value["violation_kind"],
+                    value["invariant"],
+                    value["violated_at_step"]
+                ]),
+                expected,
+                "{source}: {value}"
+            );
+        }
+    }
+}
