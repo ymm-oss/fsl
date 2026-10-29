@@ -388,25 +388,31 @@ fn argument_model(source: &str) -> fsl_core::KernelModel {
     )
 }
 
-fn reject_old_seq_map(implementation: &str, abstraction: &str, source: &str) {
+fn reject_old_seq_map(implementation: &str, abstraction: &str, source: &str, column: u32) {
+    let start = usize::try_from(column - 1).unwrap();
+    assert_eq!(&source[start..start + 3], "map");
+    assert!(!source[..start].contains('\n'));
     let error = parse_refinement(source, &model(implementation), &model(abstraction))
         .expect_err("different model-local Seq carriers must be rejected");
+    assert_eq!(error.kind, fsl_core::RefinementErrorKind::Type);
     assert_eq!(
         error.message,
         "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"V\"), 2)"
     );
     let span = error.span.expect("located map rejection");
-    assert_eq!((span.start.line, span.start.column), (1, 1));
+    assert_eq!((span.start.line, span.start.column), (1, column));
+    assert_eq!((span.start.offset, span.end.offset), (start, start + 3));
+    assert_eq!((span.end.line, span.end.column), (1, column + 3));
 }
 
 #[test]
 fn old_argument_fixture_whole_seq_map_is_rejected() {
-    reject_old_seq_map(SEQ_WIDE, SEQ_ABS, SEQ_WIDE_MAP);
+    reject_old_seq_map(SEQ_WIDE, SEQ_ABS, SEQ_WIDE_MAP, 40);
 }
 
 #[test]
 fn old_guard_fixture_whole_seq_map_is_rejected() {
-    reject_old_seq_map(SEQ_WIDER, SEQ_GUARDED, SEQ_WIDER_MAP);
+    reject_old_seq_map(SEQ_WIDER, SEQ_GUARDED, SEQ_WIDER_MAP, 45);
 }
 
 const MAP_ABS: &str = "spec MapAbs { type K = 0..2 state { m: Map<K, Bool> } \

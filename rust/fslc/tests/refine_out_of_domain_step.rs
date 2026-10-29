@@ -111,20 +111,31 @@ fn old_standalone_whole_seq_map_is_rejected() {
         &dir,
         &["refine", "impl.fsl", "abs.fsl", "map.fsl", "--depth", "2"],
     );
-    assert_seq_map_rejected(&output, code);
+    assert_seq_map_rejected(&output, code, SEQ_MAP, (45, 48, 4, 3), "map");
 }
 
 #[test]
 fn old_inline_whole_seq_map_is_rejected() {
-    let dir = scratch(
-        "old-inline",
-        &[("req.fsl", &old_seq_req(-1)), ("abs.fsl", SEQ_ABS)],
-    );
+    let source = old_seq_req(-1);
+    let dir = scratch("old-inline", &[("req.fsl", &source), ("abs.fsl", SEQ_ABS)]);
     let (output, code) = fslc(&dir, &["verify", "req.fsl", "--depth", "3"]);
-    assert_seq_map_rejected(&output, code);
+    assert_seq_map_rejected(&output, code, &source, (24, 34, 2, 3), "implements");
 }
 
-fn assert_seq_map_rejected(output: &Value, code: i32) {
+fn assert_seq_map_rejected(
+    output: &Value,
+    code: i32,
+    source: &str,
+    (start, end, line, column): (usize, usize, usize, usize),
+    token: &str,
+) {
+    // Independent authored-source anchors, not offsets supplied by the parser.
+    assert_eq!(&source[start..end], token);
+    assert_eq!(source[..start].lines().count(), line);
+    assert_eq!(
+        source[..start].rsplit('\n').next().unwrap().len() + 1,
+        column
+    );
     assert_eq!(code, 2, "{output}");
     assert_eq!(output["result"], "error", "{output}");
     assert_eq!(output["kind"], "type", "{output}");
@@ -135,7 +146,15 @@ fn assert_seq_map_rejected(output: &Value, code: i32) {
     );
     assert_eq!(
         output["loc"],
-        serde_json::json!({"line": 1, "column": 1}),
+        serde_json::json!({"line": line, "column": column}),
+        "{output}"
+    );
+    assert_eq!(
+        output["span"],
+        serde_json::json!({
+            "start": {"offset":start,"line":line,"column":column},
+            "end": {"offset":end,"line":line,"column":column + token.len()}
+        }),
         "{output}"
     );
 }
