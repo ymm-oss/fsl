@@ -508,6 +508,18 @@ This adds two cold baselines/compute. A historical per-ID projection of roughly 
 is only an estimate, not observed parallel CI wall time; serialized local sums are not speedup
 evidence. No cache-save policy, first-party reuse, paid resources, or other gate is changed.
 
+Observed CI comparison (different runners, same `07e089ed` Rust tree): the unsharded mutation job
+in [main07 run `41026377668`](https://github.com/ymm-oss/fsl/actions/runs/41026377668/job/123965359863)
+took **77m45s**; [complete run `41057387167`, attempt 1](https://github.com/ymm-oss/fsl/actions/runs/41057387167/attempts/1)
+at `7ea395aa` recorded shards **40m38s / 50m04s / 38m35s**. The maximum was **50m04s (−35.6%)**,
+while summed job time rose to **129m17s versus 77m45s (+66.3% job-minutes)**. All 68 classifications
+agreed (52 caught, 16 unviable, zero survivors/timeouts), as did every full `FAILED` test set.
+Four first `primary_failing_test` names differed only with concurrent `FAILED`-line ordering;
+the actual recorded values were retained, so this is **not whole-report equality**. This is an
+observational result, not a causal speedup attribution or performance promise. The later
+`56f67445` producer integration has a different Rust tree and requires its own checks;
+the `7ea395aa` complete/partial-rerun evidence does not transfer to it.
+
 **Why `if: always()` is load-bearing on both aggregators.** GitHub treats a *skipped* required
 status check as satisfied — it is not "pending" or "failing," it reads as passed. If `rust-workspace`
 or `semantic-mutation` inherited the default skip-on-upstream-failure behavior, a failing shard would
