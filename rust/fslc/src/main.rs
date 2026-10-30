@@ -3971,7 +3971,11 @@ fn run_chain_step_isolated(
         let step = std::thread::Builder::new()
             .stack_size(STACK_SIZE)
             .name("fslc-chain-step".to_owned())
-            .spawn_scoped(scope, || run_chain_step(kind, layer, sections, base, roots))
+            .spawn_scoped(scope, || {
+                #[cfg(test)]
+                let _observer = install_root_observer(roots, "step", layer);
+                run_chain_step(kind, layer, sections, base, roots)
+            })
             .expect("spawn a chain step thread");
         step.join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
@@ -4068,6 +4072,8 @@ fn run_chain_steps(
                             break;
                         }
                         let (kind, layer) = &steps[index];
+                        #[cfg(test)]
+                        let _observer = install_root_observer(roots, "worker", layer);
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             run_chain_step_isolated(kind, layer, sections, base, roots)
                         }));
@@ -15468,6 +15474,34 @@ struct ProjectRoot {
     path: PathBuf,
     source: Result<String, SpecLoadError>,
     edition: SourceEdition,
+    #[cfg(test)]
+    observer: Option<spec_loading::admission_observer::Handle>,
+}
+
+#[cfg(test)]
+fn install_root_observer(
+    roots: &[ProjectRoot],
+    hop: &'static str,
+    layer: &str,
+) -> spec_loading::admission_observer::Guard {
+    use spec_loading::admission_observer::{self, Event};
+    let guard = admission_observer::install(roots.first().and_then(|root| root.observer.clone()));
+    admission_observer::record(Event::Hop(
+        hop,
+        layer.to_owned(),
+        std::thread::current().id(),
+        roots.as_ptr() as usize,
+        roots
+            .iter()
+            .filter_map(|root| {
+                root.source
+                    .as_ref()
+                    .ok()
+                    .map(|source| source.as_ptr() as usize)
+            })
+            .collect(),
+    ));
+    guard
 }
 
 impl ProjectRoot {
@@ -15515,6 +15549,8 @@ fn prepare_project_roots(
                     path,
                     source,
                     edition: SourceEdition::default(),
+                    #[cfg(test)]
+                    observer: spec_loading::admission_observer::current(),
                 });
             }
         }

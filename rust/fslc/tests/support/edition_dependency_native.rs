@@ -336,6 +336,497 @@ fn dependency_edition_e08_compiles_against_a_canonical_prefix() {
     observations.finish();
 }
 
+// Match the existing adapter's process-local opt-in; never mutate the test
+// runner's environment while other tests are executing.
+fn in_fsl5_test_process() -> bool {
+    if crate::parse_options()
+        .unstable()
+        .contains(fsl_syntax::UnstableFeature::Fsl5)
+    {
+        return true;
+    }
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([std::thread::current().name().unwrap(), "--exact"])
+        .env("FSLC_UNSTABLE", "fsl5")
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "opted-in seam test must execute successfully"
+    );
+    false
+}
+
+#[test]
+fn dependency_edition_prepared_execution_has_exact_captured_slots_and_no_readmission() {
+    use spec_loading::admission_observer::{self as observer, Event};
+    if !in_fsl5_test_process() {
+        return;
+    }
+    let s = common::Scratch::new();
+    let layer = format!("fsl 4\n{}", cases::LEGACY_LEAF);
+    let mapping = "fsl 5\nrefinement M { impl S abs S maps auto }\n";
+    let layer_path = s.write("layer.fsl", &layer);
+    let map_path = s.write("map.fsl", mapping);
+    let sections = parse_project_manifest("[requirements]\nfile = \"layer.fsl\"\n[design]\nfile = \"layer.fsl\"\nrefine_against = \"requirements\"\nmapping = \"map.fsl\"\n").unwrap();
+    let events = observer::Handle::default();
+    let _guard = observer::install(Some(events.clone()));
+    let roots = prepare_project_roots(&sections, &s.0, read_unprefixed_spec_source).unwrap();
+    let census = vec![
+        Event::Admission(layer_path.clone(), layer.clone()),
+        Event::Admission(layer_path.clone(), layer.clone()),
+        Event::Admission(map_path, mapping.into()),
+    ];
+    assert_eq!(
+        *events.lock().unwrap(),
+        census,
+        "C2/preparation-positive-census"
+    );
+    s.write("layer.fsl", "not FSL after capture");
+    s.write("map.fsl", "not a mapping after capture");
+    let produced = std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                let _guard = observer::install(Some(events.clone()));
+                run_prepared_project_roots(&roots.iter().collect::<Vec<_>>(), |sources| {
+                    assert_eq!(
+                        sources,
+                        [layer.as_str(), layer.as_str(), mapping],
+                        "C2/captured-literals"
+                    );
+                    for source in &sources[..2] {
+                        let (_, model) =
+                            load_kernel_model_from_source(&layer_path, source).unwrap();
+                        assert_eq!(model.name, "S", "C2/model-identity");
+                    }
+                    (json!({"fsl":"1.0","result":"ok","warnings":[]}), 0)
+                })
+            })
+            .join()
+            .unwrap()
+    });
+    let finding = cases::metadata_finding(&layer, layer_path.to_str().unwrap(), "current");
+    assert_eq!(
+        produced,
+        (
+            json!({"fsl":"1.0","result":"ok","fsl_edition":4,"warnings":[finding.clone(),finding]}),
+            0
+        ),
+        "C2/complete-token-result"
+    );
+    assert_eq!(
+        *events.lock().unwrap(),
+        census,
+        "C2/no-root-owner-readmission"
+    );
+}
+
+#[test]
+fn dependency_edition_standalone_and_nested_whole_reports_keep_independent_findings() {
+    let s = common::Scratch::new();
+    let source = "compose C { use S as s from \"dep.fsl\" }\n";
+    let path = s.write("root.fsl", source);
+    let inputs = approval::GenerationInputs::Solver(approval::SolverGenerationInputs {
+        depth: 2,
+        deadlock: "ignore".into(),
+        engine: "bmc".into(),
+    });
+    for legacy in [false, true] {
+        s.write(
+            "dep.fsl",
+            if legacy {
+                cases::LEGACY_LEAF
+            } else {
+                cases::LEAF
+            },
+        );
+        let expected = if legacy {
+            vec![cases::metadata_finding(
+                cases::LEGACY_LEAF,
+                "dep.fsl",
+                "current",
+            )]
+        } else {
+            vec![]
+        };
+        for kind in ["html", "ledger"] {
+            let standalone = if kind == "html" {
+                run_html_report_with_timing(&path, 2, "ignore", "bmc", None, false)
+            } else {
+                run_ledger_report_from_source(
+                    &LedgerReportRequest {
+                        path: &path,
+                        depth: 2,
+                        deadlock_mode: "ignore",
+                        engine: "bmc",
+                        impl_log: None,
+                        evidence_paths: &[],
+                        output_path: None,
+                    },
+                    source,
+                    &[],
+                    &[],
+                )
+            };
+            assert_eq!(standalone.1, 0, "C1/standalone-status/{kind}");
+            let artifact = standalone.0["content"].as_str().unwrap();
+            let findings: Value = if kind == "html" {
+                let raw = artifact.split_once("<details><summary>verify JSON</summary><div><div class=\"code-block\"><pre>").unwrap().1.split_once("</pre>").unwrap().0
+                    .replace("&quot;","\"").replace("&#x27;","'").replace("&lt;","<").replace("&gt;",">").replace("&amp;","&");
+                serde_json::from_str::<Value>(&raw).unwrap()["warnings"].clone()
+            } else {
+                serde_json::from_str(
+                    artifact
+                        .split_once("<details><summary>raw findings</summary>\n\n```json\n")
+                        .unwrap()
+                        .1
+                        .split_once("\n```")
+                        .unwrap()
+                        .0,
+                )
+                .unwrap()
+            };
+            assert_eq!(
+                findings,
+                json!(expected),
+                "C1/{kind}/independent-whole-report-findings"
+            );
+            assert_eq!(
+                findings.as_array().unwrap().len(),
+                usize::from(legacy),
+                "C1/{kind}/independent-whole-report-count"
+            );
+            let mut nested = None;
+            let result = run_admitted_root(&path, Ok(source.into()), None, false, |captured| {
+                let edition = admit_root_source(&path, captured, None).unwrap();
+                nested = Some(
+                    approval_artifact(&path, captured, &edition, kind, &inputs)
+                        .unwrap()
+                        .0,
+                );
+                (json!({"result":"ok"}), 0)
+            });
+            assert_eq!(result.1, 0);
+            assert_eq!(
+                approval::normalized_artifact(kind, &nested.unwrap()).unwrap(),
+                approval::normalized_artifact(kind, artifact.as_bytes()).unwrap(),
+                "C1/{kind}/complete-normalized-artifact"
+            );
+        }
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // Keep positional, IO, and captured grouping controls on one carrier.
+fn dependency_edition_positional_carrier_keeps_errors_and_captured_grouping() {
+    let s = common::Scratch::new();
+    let layer = s.write("same.fsl", cases::LEAF);
+    let mapping_source = "refinement M { impl S abs S maps auto }\n";
+    let mapping = s.write("same-map.fsl", mapping_source);
+    let missing = s.0.join("later.fsl");
+    let io = std::fs::read_to_string(&missing).unwrap_err().to_string();
+    let manifest = "[business]\nfile = \"same.fsl\"\n[requirements]\nfile = \"same.fsl\"\nrefine_against = \"business\"\nmapping = \"same-map.fsl\"\n[design]\nfile = \"later.fsl\"\nrefine_against = \"requirements\"\nmapping = \"same-map.fsl\"\n";
+    let sections = parse_project_manifest(manifest).unwrap();
+    let roots = prepare_project_roots(&sections, &s.0, read_spec_source).unwrap();
+    let error = json!({"fsl":"1.0","result":"error","kind":"io","message":format!("{}: {io}", missing.display())});
+    let projection = || {
+        roots
+            .iter()
+            .map(|root| {
+                (
+                    root.layer,
+                    root.mapping,
+                    root.path.clone(),
+                    root.source().map(str::to_owned),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let expected = vec![
+        ("business", false, layer.clone(), Ok(cases::LEAF.to_owned())),
+        ("requirements", false, layer, Ok(cases::LEAF.to_owned())),
+        ("design", false, missing, Err((error.clone(), 2))),
+        (
+            "requirements",
+            true,
+            mapping.clone(),
+            Ok(mapping_source.into()),
+        ),
+        ("design", true, mapping, Ok(mapping_source.into())),
+    ];
+    assert_eq!(projection(), expected, "C4/five-positional-slots");
+    s.write("later.fsl", cases::LEAF);
+    s.write("same.fsl", "changed after capture");
+    s.write("same-map.fsl", "changed mapping");
+    assert_eq!(projection(), expected, "C4/captured-error-and-bytes");
+    assert_eq!(
+        run_prepared_project_roots(&[&roots[2]], |_| panic!("C4/unreadable-callback-ran")),
+        (error, 2),
+        "C4/unreadable-result"
+    );
+    let steps = vec![
+        ("spec".into(), "business".into()),
+        ("impl".into(), "impl".into()),
+        ("spec".into(), "requirements".into()),
+        ("spec".into(), "design".into()),
+        ("refine".into(), "design".into()),
+    ];
+    let mut grouping = cases::Observations::default();
+    grouping.eq(
+        "C4/equal-captured-grouping",
+        chain_step_groups(&steps, &roots),
+        vec![vec![0, 2], vec![3], vec![4]],
+    );
+
+    s.write("same.fsl", cases::LEAF);
+    s.write("later.fsl", &format!("{}\n", cases::LEAF));
+    s.write("same-map.fsl", mapping_source);
+    let path = s.write("project.toml", manifest);
+    let prepared = prepare_analysis(&path).unwrap();
+    let run = || {
+        run_prepared_analysis(
+            &path,
+            &prepared,
+            "traceability_graph",
+            None,
+            "json",
+            None,
+            None,
+            None,
+        )
+    };
+    let before = run();
+    assert_eq!(before.1, 0, "C4/real-analysis: {before:?}");
+    s.write("project.toml", "not a manifest");
+    s.write("same.fsl", "invalid root");
+    s.write("later.fsl", "invalid root");
+    s.write("same-map.fsl", "invalid mapping");
+    assert_eq!(prepared.source, manifest, "C4/captured-manifest");
+    let project = prepared.project.as_ref().unwrap();
+    assert_eq!(
+        project
+            .sections
+            .iter()
+            .map(|(name, section)| (name.as_str(), json!(section.values)))
+            .collect::<Vec<_>>(),
+        vec![
+            ("business", json!({"file":"same.fsl"})),
+            (
+                "design",
+                json!({"file":"later.fsl","refine_against":"requirements","mapping":"same-map.fsl"})
+            ),
+            (
+                "requirements",
+                json!({"file":"same.fsl","refine_against":"business","mapping":"same-map.fsl"})
+            ),
+        ],
+        "C4/complete-captured-sections"
+    );
+    assert_eq!(
+        project
+            .roots
+            .iter()
+            .map(|root| (
+                root.layer,
+                root.mapping,
+                root.path.clone(),
+                root.source().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("business", false, s.0.join("same.fsl"), cases::LEAF),
+            ("requirements", false, s.0.join("same.fsl"), cases::LEAF),
+            (
+                "design",
+                false,
+                s.0.join("later.fsl"),
+                format!("{}\n", cases::LEAF).as_str()
+            ),
+            (
+                "requirements",
+                true,
+                s.0.join("same-map.fsl"),
+                mapping_source
+            ),
+            ("design", true, s.0.join("same-map.fsl"), mapping_source),
+        ],
+        "C4/top-level-slot-order"
+    );
+    grouping.eq(
+        "C4/distinct-captured-grouping",
+        chain_step_groups(&steps, &project.roots),
+        vec![vec![0, 2], vec![3], vec![4]],
+    );
+    assert_eq!(run(), before, "C4/complete-captured-analysis");
+
+    // Different paths, initially equal bytes: changing just one backing file
+    // must not split their captured-source group.
+    s.write("same.fsl", cases::LEAF);
+    s.write("twin.fsl", cases::LEAF);
+    let sections = parse_project_manifest("[business]\nfile = \"same.fsl\"\n[requirements]\nfile = \"twin.fsl\"\n[design]\nfile = \"absent.fsl\"\n").unwrap();
+    let roots = prepare_project_roots(&sections, &s.0, read_spec_source).unwrap();
+    s.write("same.fsl", "different A");
+    s.write("twin.fsl", "different B");
+    grouping.eq(
+        "C4/equal-to-different-captured-grouping",
+        chain_step_groups(&steps, &roots),
+        vec![vec![0, 2], vec![3], vec![4]],
+    );
+    grouping.finish();
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn dependency_edition_actual_workers_transport_tokens_and_finish_detail_before_wrapper() {
+    use spec_loading::admission_observer::{self as observer, Event};
+    if !in_fsl5_test_process() {
+        return;
+    }
+    let s = common::Scratch::new();
+    let caller = std::thread::current().id();
+    let layers = ["business", "requirements", "design"];
+    let sources =
+        layers.map(|layer| format!("fsl 4\ncompose C {{ use S as s from \"{layer}-dep.fsl\" }}\n"));
+    let mapping = "fsl 5\nrefinement M { impl C abs C maps auto }\n";
+    for (layer, source) in layers.iter().zip(&sources) {
+        s.write(&format!("{layer}.fsl"), source);
+        s.write(&format!("{layer}-dep.fsl"), cases::LEGACY_LEAF);
+    }
+    s.write("map.fsl", mapping);
+    let sections = parse_project_manifest("[business]\nfile = \"business.fsl\"\n[requirements]\nfile = \"requirements.fsl\"\n[design]\nfile = \"design.fsl\"\nrefine_against = \"requirements\"\nmapping = \"map.fsl\"\nrefine_depth = 2\n").unwrap();
+    let steps = vec![
+        ("spec".into(), "business".into()),
+        ("spec".into(), "requirements".into()),
+        ("spec".into(), "design".into()),
+        ("refine".into(), "design".into()),
+    ];
+    let mut observations = cases::Observations::default();
+    for rejected in [false, true] {
+        // Recreate the captured roots, but mutate backing roots/mapping before any worker consumes them.
+        for (layer, source) in layers.iter().zip(&sources) {
+            s.write(&format!("{layer}.fsl"), source);
+        }
+        s.write("map.fsl", mapping);
+        let events = observer::Handle::default();
+        let _guard = observer::install(Some(events.clone()));
+        let roots = prepare_project_roots(&sections, &s.0, read_unprefixed_spec_source).unwrap();
+        let mut census = layers
+            .iter()
+            .zip(&sources)
+            .map(|(layer, source)| {
+                Event::Admission(s.0.join(format!("{layer}.fsl")), source.clone())
+            })
+            .collect::<Vec<_>>();
+        census.push(Event::Admission(s.0.join("map.fsl"), mapping.into()));
+        assert_eq!(
+            *events.lock().unwrap(),
+            census,
+            "C3/preparation-positive-census"
+        );
+        let allocations = roots
+            .iter()
+            .map(|root| root.source.as_ref().unwrap().as_ptr() as usize)
+            .collect::<Vec<_>>();
+        for layer in layers {
+            s.write(&format!("{layer}.fsl"), "invalid changed root");
+        }
+        s.write("map.fsl", "invalid changed mapping");
+        if rejected {
+            s.write("design-dep.fsl", &cases::next_leaf());
+        }
+        let actual = run_chain_steps(&steps, &sections, &s.0, roots, true, 3);
+        let child = |layer: &str| {
+            cases::metadata_finding(cases::LEGACY_LEAF, &format!("{layer}-dep.fsl"), "current")
+        };
+        let mut expected = Vec::new();
+        for layer in layers {
+            let failed = rejected && layer == "design";
+            let detail = if failed {
+                cases::cli_refusal(&cases::next_leaf(), "design-dep.fsl")
+            } else {
+                json!({"fsl":"1.0","result":"ok","spec":"C","warnings":[child(layer)],"fsl_edition":4})
+            };
+            // Dependency refusal replaces the finalized detail, retaining the child's edition.
+            let mut detail = detail;
+            if !failed {
+                detail["fsl_edition"] = json!(4);
+            }
+            expected.push(Some((json!({"layer":layer,"kind":"check","file":s.0.join(format!("{layer}.fsl")),"status":if failed {"failed"} else {"passed"},"result":if failed {"error"} else {"ok"},"exit_code":if failed {2} else {0},"detail":detail}),failed)));
+        }
+        let mut detail = if rejected {
+            cases::cli_refusal(&cases::next_leaf(), "design-dep.fsl")
+        } else {
+            json!({"fsl":"1.0","impl":"C","abs":"C","result":"refines","checked_to_depth":2,"action_map":{"s.finish":"s.finish"},"warnings":[child("design"),child("requirements")]})
+        };
+        if !rejected {
+            detail["fsl_edition"] = json!(4);
+        }
+        expected.push(Some((json!({"layer":"design->requirements","kind":"refine","file":s.0.join("design.fsl"),"against":"requirements","abs_file":s.0.join("requirements.fsl"),"mapping":s.0.join("map.fsl"),"depth":2,"status":if rejected {"failed"} else {"passed"},"result":if rejected {"error"} else {"refines"},"exit_code":if rejected {2} else {0},"detail":detail}),rejected)));
+        observations.eq(
+            &format!("C3/complete-ordered-isolated-packets/rejected={rejected}"),
+            &actual,
+            &expected,
+        );
+        let observed = events.lock().unwrap();
+        assert_eq!(
+            observed
+                .iter()
+                .filter(|event| matches!(event, Event::Admission(..)))
+                .cloned()
+                .collect::<Vec<_>>(),
+            census,
+            "C3/no-root-owner-readmission"
+        );
+        for (_, layer) in &steps {
+            // design has both a check and refine dispatch; pair in per-worker event order below.
+            let workers = observed
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Hop("worker", name, thread, roots, bytes) if name == layer => {
+                        Some((thread, roots, bytes))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let fresh = observed
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Hop("step", name, thread, roots, bytes) if name == layer => {
+                        Some((thread, roots, bytes))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let count = if layer == "design" { 2 } else { 1 };
+            assert_eq!(workers.len(), count, "C3/worker-observer-live/{layer}");
+            assert_eq!(fresh.len(), count, "C3/fresh-step-observer-live/{layer}");
+            assert!(
+                workers.iter().all(|(worker, _, _)| **worker != caller),
+                "C3/worker-not-caller"
+            );
+            for (thread, root, bytes) in &fresh {
+                assert_ne!(**thread, caller, "C3/fresh-not-caller");
+                assert!(
+                    workers.iter().all(|(worker, _, _)| worker != thread),
+                    "C3/fresh-not-worker"
+                );
+                assert!(
+                    workers
+                        .iter()
+                        .all(|(_, worker_root, worker_bytes)| worker_root == root
+                            && worker_bytes == bytes),
+                    "C3/shared-carrier-identity"
+                );
+                assert_eq!(
+                    **bytes, allocations,
+                    "C3/captured-source-allocation-identity"
+                );
+            }
+        }
+    }
+    observations.finish();
+}
+
 #[test]
 fn dependency_edition_private_adapter_executes_all_assigned_rows() {
     let gate = fsl_syntax::UnstableFeature::Fsl5;
