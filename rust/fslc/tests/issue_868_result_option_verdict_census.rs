@@ -414,6 +414,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Ordinary,
         "rust/fsl-core/src/model.rs",
+        214,
+        "expression_type",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/model.rs",
         387,
         "resolve_replay_action",
         ResultOption
@@ -803,6 +810,7 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
         "without_indexed_replacement"
     ),
     unresolved_ordinary!("rust/fsl-core/src/typecheck.rs", 58, "base_env"),
+    unresolved_ordinary!("rust/fsl-core/src/typecheck.rs", 222, "expression_env"),
     unresolved_ordinary!("rust/fsl-solver-z3/src/lib.rs", 235, "bool_value"),
     unresolved_ordinary!("rust/fsl-solver-z3/src/lib.rs", 239, "int_value"),
     unresolved_ordinary!("rust/fsl-solver-z3js/src/lib.rs", 186, "bool_value"),
