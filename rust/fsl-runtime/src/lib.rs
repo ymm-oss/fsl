@@ -510,7 +510,9 @@ pub fn violating_bindings(
                 if !binder_where_holds(binder, state, &mut local, model, None)? {
                     continue;
                 }
-                if !as_bool(eval(body, state, &mut local, model, None)?)? {
+                // Keep the matched continuation as diagnostic evidence only;
+                // this snapshot is private to the current binder candidate.
+                if !as_bool(eval_with_bindings(body, state, &mut local, model, None)?)? {
                     bad.push(local);
                 }
             }

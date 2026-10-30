@@ -71,3 +71,101 @@ fn error_restores_outer_scope_and_short_circuit_stays_lazy() {
         assert_eq!(bindings, before);
     }
 }
+
+#[test]
+fn diagnostic_candidates_retain_only_body_continuation_payloads() {
+    for (filter, body, payloads) in [
+        (
+            "",
+            "o is some(v) and v == 2",
+            Some(vec![(0, Some(1)), (1, Some(1))]),
+        ),
+        ("", "o is some(v) and v == 1", None),
+        (
+            " where o is some(w) and w == 1",
+            "o is some(v) and v == 2",
+            Some(vec![(0, Some(1)), (1, Some(1))]),
+        ),
+        (" where o is some(w) and w == 2", "false", None),
+        ("", "not (o is some(v))", Some(vec![(0, None), (1, None)])),
+        (
+            "",
+            "(o is some(v)) => false",
+            Some(vec![(0, None), (1, None)]),
+        ),
+        (
+            "",
+            "if true then (o is some(v) and false) else true",
+            Some(vec![(0, None), (1, None)]),
+        ),
+        (
+            "",
+            "(if k == 0 then some(1) else some(2)) is some(v) and v == 3",
+            Some(vec![(0, Some(1)), (1, Some(2))]),
+        ),
+    ] {
+        let model = build_model(
+            parse_kernel_source(
+                &format!(
+                    "spec W {{state {{o:Option<Int> = some(1)}} action tick() {{}}
+             invariant Q {{forall k in 0..1{filter} {{{body}}}}} }}"
+                ),
+                &FsResolver::new("."),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let monitor = Monitor::new(model.clone()).unwrap();
+        let before = monitor.state.clone();
+        let expr = &model
+            .invariants
+            .iter()
+            .find(|p| p.name == "Q")
+            .unwrap()
+            .expr;
+        let expected = payloads.map(|items| {
+            items
+                .into_iter()
+                .map(|(k, v)| {
+                    let mut bindings = Bindings::from([("k".into(), Value::Int(k))]);
+                    if let Some(v) = v {
+                        bindings.insert("v".into(), Value::Int(v));
+                    }
+                    bindings
+                })
+                .collect::<Vec<_>>()
+        });
+        let actual = violating_bindings(expr, &monitor.state, &model).unwrap();
+        assert_eq!(actual, expected, "{filter}: {body}");
+        assert_eq!(monitor.state, before);
+        let mut caller = Bindings::from([("v".into(), Value::Int(9))]);
+        let outer = caller.clone();
+        eval(expr, &monitor.state, &mut caller, &model, None).unwrap();
+        assert_eq!(caller, outer, "diagnostics must not reopen ordinary eval");
+    }
+}
+
+#[test]
+fn diagnostic_conjunction_search_and_fallback_stay_closed() {
+    for (expression, expected) in [
+        ("false and true", Bindings::new()),
+        ("not (some(1) is some(v))", Bindings::new()),
+        (
+            "(forall k in 0..0 { some(1) is some(v) and v == 2 }) and false",
+            Bindings::from([("k".into(), Value::Int(0)), ("v".into(), Value::Int(1))]),
+        ),
+    ] {
+        let model = model(expression);
+        let monitor = Monitor::new(model.clone()).unwrap();
+        let expr = &model
+            .invariants
+            .iter()
+            .find(|p| p.name == "Q")
+            .unwrap()
+            .expr;
+        assert_eq!(
+            violating_bindings(expr, &monitor.state, &model).unwrap(),
+            Some(vec![expected])
+        );
+    }
+}

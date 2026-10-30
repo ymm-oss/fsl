@@ -359,6 +359,14 @@ Separate CLI controls preserve impossible/reached progress outcomes and pin
 later-payload init values. No solver, substitution, public envelope or grammar
 change is part of this repair.
 
+Diagnostic snapshot lifetime is distinct from caller binding lifetime. For a
+quantified failed body, `violating_bindings` evaluates its candidate-local body
+as an explicit continuation, retaining matched conjunctive payloads in that
+snapshot (for example `{k: 0, v: 1}`). Ordinary evaluation, candidate filters,
+non-conjunctive children and sibling candidates remain closed. The public
+top-level and blame witness packets retain those payload keys; diagnostics do
+not collect historical out-of-continuation bindings.
+
 `fsl-core::pattern_binding_flows(op, right_operand)` is the single operator
 decision. The initial eight-consumer estimate omitted the separate free-name
 walk, and review found the Renamer as a tenth logical consumer:
@@ -813,10 +821,12 @@ not an exhaustive inventory of every removed program.
 
 This amendment supersedes section 3's deliberately limited Is/Binary collision
 inventory and guard-name preservation decision. Visibility is unchanged. The
-checker and compose hygiene compensate for existing evaluator binding lifetime;
-they do not repair the evaluators. The remaining evaluator work is tracked in
-#1622; expression-arm evaluation remains related to #1577, and more precise
-clause locations remain separate work in #1550.
+checker and compose hygiene in the #1573 amendment compensated for the then-existing
+evaluator binding lifetime; that amendment did not repair the evaluators. Its
+pending evaluator work (#1622/#1577) is addressed by the subsequent
+[evaluator lifetime repair](#shared-policy-and-sibling-consumers) above. The
+reservations remain in force; more precise clause locations remain separate
+work in #1550.
 
 ### Invariant and shared implementation
 
@@ -863,18 +873,23 @@ Compose still has a distinct same-source init check gap: per-fragment hygiene
 resets its Scope, while name-keyed Fresh decisions can bypass the later model
 cursor. Inline→init is affected as well. Common compose init can inherit an
 unrelated component action's Fresh decision even in a single block. These are
-illegal rebindings, not an exception to the language rule. False verified
-results belong to the evaluator-lifetime family in #1622; compose init-fragment
-reservations will be tracked in a separate issue filed after merge. That scope
-decision is separate from the independent-source init separation below.
+illegal rebindings, not an exception to the language rule. At the #1573 amendment,
+their false verified results were deferred to the evaluator-lifetime family in
+#1622. The subsequent [lifetime repair](#shared-policy-and-sibling-consumers)
+corrects evaluation without closing these admission gaps. The #1573 scope
+decision deferred compose init-fragment reservations to a separate issue after
+merge, independently of the init evaluation defect described below.
 
-Independent-source init separation remains outside this patch. Concatenating A's
-init match of some(1) and B's same-named match of some(2) can still make b.P
-incorrectly violated even though B alone verifies; this pre-existing init
-reproduction belongs to the evaluator-lifetime family in #1622, alongside the
-sync-action capture that hygiene compensates for here. It is not a preserved
-bad-verdict oracle. A later-name-only init repair is accepted and conformant,
-while the raw unresolved fixture checks only acceptance.
+Independent-source init separation was outside the #1573 amendment. At that time,
+concatenating A's init match of some(1) and B's same-named match of some(2) could
+make b.P incorrectly violated even though B alone verified. This pre-existing
+reproduction was deferred to #1622, alongside the sync-action capture that #1573
+hygiene compensated for. It was not a preserved bad-verdict oracle: the
+later-name-only repair checked conformance, while the raw unresolved fixture
+checked only acceptance. The subsequent
+[evaluator lifetime repair](#shared-policy-and-sibling-consumers) now tests actual
+later-payload truth in symbolic and concrete composed initializers; it does not
+relax the source reservations or close the separate compose admission gap.
 
 ### Breaking removals and repair
 
@@ -900,8 +915,9 @@ in the base/head sweep.
 
 For example, replace the later `(p is some(v)) and v == 2` with
 `(p is some(w)) and w == 2`. Do not replace a binding with an out-of-scope read.
-The then-to-else reservation of an **expression** if is intentional: the
-symbolic expression evaluator shares its binding map across arms (#1577).
+The then-to-else reservation of an **expression** if is intentional. It was
+introduced for the symbolic evaluator's shared arm binding map (#1577) and is
+retained after the subsequent [lifetime repair](#shared-policy-and-sibling-consumers).
 Statement arms are separate evaluator contexts and may still bind the same
 name independently. Quantifier/aggregate candidates also remain independent.
 Count, unique and exactlyOne have only a filter, not an independent body/of;

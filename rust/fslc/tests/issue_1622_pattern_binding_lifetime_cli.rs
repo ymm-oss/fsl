@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
@@ -218,6 +218,62 @@ fn composed_init_fragments_are_false_with_payload_two_compared_to_one() {
                     let state = if name == "own" { "flag" } else { "a.flag" };
                     assert_eq!(report["invariant"], property, "{report:#}");
                     assert_eq!(report["trace"][0]["state"][state], false, "{report:#}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn quantified_diagnostic_keeps_matched_payload_and_full_failure_contract() {
+    for compared in [1, 2] {
+        let source = format!(
+            "spec W {{ state {{ o: Option<Int> = some(1) }} action tick() {{}} invariant Q {{ forall k in 0..0 {{ o is some(v) and v == {compared} }} }} }}\n"
+        );
+        let fixture = Fixture::new(&[("w.fsl", &source)]);
+        for engine in ["bmc", "explicit"] {
+            for repeat in 1..=2 {
+                let (report, exit) =
+                    fixture.verify("w.fsl", engine, &format!("w-{compared}-{engine}-{repeat}"));
+                if compared == 2 {
+                    verdict(&report, exit, "violated", 1);
+                    assert_eq!(report["violating_bindings"], json!([{"k":0,"v":1}]));
+                    assert_eq!(
+                        report["blame"],
+                        json!({"conjuncts":[{
+                            "index":0,"text":"forall k in 0..0 { o is some(v) and v == 2 }",
+                            "holds":false,"violating_bindings":[{"k":0,"v":1}]
+                        }]})
+                    );
+                    assert_eq!(report["loc"], json!({"line":1,"column":62}));
+                    assert_eq!(report["trace"], json!([{"step":0,"state":{"o":1}}]));
+                    assert_eq!(report["violation_kind"], "invariant");
+                    assert_eq!(report["invariant"], "Q");
+                    assert_eq!(report["violated_at_step"], 0);
+                    assert_eq!(report["checked_to_depth"], 0);
+                    assert_eq!(report["completeness"], "bounded");
+                    assert_eq!(report["last_action"], Value::Null);
+                } else {
+                    verdict(
+                        &report,
+                        exit,
+                        if engine == "bmc" {
+                            "verified"
+                        } else {
+                            "proved"
+                        },
+                        0,
+                    );
+                    assert!(report.get("violating_bindings").is_none());
+                    assert!(report.get("blame").is_none());
+                    assert_eq!(
+                        report["completeness"],
+                        if engine == "bmc" {
+                            "bounded"
+                        } else {
+                            "unbounded"
+                        }
+                    );
                 }
             }
         }
