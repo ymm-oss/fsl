@@ -11,8 +11,9 @@ use fsl_core::{
 use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
+use crate::value::TypedBindings as Bindings;
 use crate::value::{
-    Bindings, SymbolicState, SymbolicValue, bool_term, coerce, collection_contains,
+    SymbolicState, SymbolicValue, TypedBinding, bool_term, coerce, collection_contains,
     collection_entries, collection_key_equal, concrete_value, distinct_entries, i64_index,
     int_term, is_collection, ite_value, literal_key, logical_equal, select_finite, solver_sort,
 };
@@ -56,9 +57,23 @@ pub(crate) fn eval<S: SmtSolver>(
 
 fn binding_types<T>(bindings: &Bindings<T>) -> Vec<(String, TypeRef)> {
     bindings
-        .iter()
-        .filter_map(|(name, value)| value.ty().map(|ty| (name.clone(), ty.clone())))
+        .types()
+        .map(|(name, ty)| (name.clone(), ty.clone()))
         .collect()
+}
+
+pub(crate) fn eval_binding<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+) -> Result<TypedBinding<S::Term>, VerifyError> {
+    let ty = model
+        .expression_type(expr, &binding_types(bindings), None)?
+        .ok_or_else(|| VerifyError::new("binding requires an inferred type"))?;
+    let value = eval(solver, model, expr, state, bindings, None)?;
+    Ok(TypedBinding(value, Some(ty)))
 }
 
 fn scalar_literal<T>(value: &SymbolicValue<T>) -> bool {
@@ -1949,6 +1964,7 @@ fn eval_aggregate<S: SmtSolver>(
 }
 
 type ConditionalBinderCandidates<T> = Vec<(String, SymbolicValue<T>, Option<T>)>;
+type TypedBinderCandidates<T> = Vec<(String, TypedBinding<T>, Option<T>)>;
 
 /// An unfiltered binder has condition true, the identity for conjunction.
 pub(crate) fn binder_condition<S: SmtSolver>(
@@ -1970,7 +1986,7 @@ pub(crate) fn binder_values<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
-) -> Result<ConditionalBinderCandidates<S::Term>, VerifyError> {
+) -> Result<TypedBinderCandidates<S::Term>, VerifyError> {
     let Binder::Collection {
         name, collection, ..
     } = binder
@@ -1978,13 +1994,19 @@ pub(crate) fn binder_values<S: SmtSolver>(
         return static_binder_values(solver, model, binder).map(|values| {
             values
                 .into_iter()
-                .map(|(name, value)| (name, value, None))
+                .map(|(name, value)| (name, value.into(), None))
                 .collect()
         });
     };
+    let ty = model
+        .expression_type(collection, &binding_types(bindings), None)?
+        .ok_or_else(|| VerifyError::new("collection binder requires an inferred type"))?;
+    let (TypeRef::Set(element) | TypeRef::Seq(element, _)) = ty else {
+        return Err(VerifyError::new("collection binder requires a Set or Seq"));
+    };
     let mut local = bindings.clone();
     let collection = eval(solver, model, collection, state, &mut local, old_state)?;
-    match collection {
+    let candidates: ConditionalBinderCandidates<S::Term> = match collection {
         SymbolicValue::Collection { ty, entries } => {
             let TypeRef::Set(element_ty) = ty else {
                 return Err(VerifyError::new("collection binder requires a Set"));
@@ -2043,7 +2065,14 @@ pub(crate) fn binder_values<S: SmtSolver>(
         _ => Err(VerifyError::new(
             "collection binder expects a Set or Seq expression",
         )),
-    }
+    }?;
+    Ok(candidates
+        .into_iter()
+        .map(|(name, value, membership)| {
+            let binding = TypedBinding(value, Some(element.as_ref().clone()));
+            (name, binding, membership)
+        })
+        .collect())
 }
 
 fn set_literal_candidates<S: SmtSolver>(

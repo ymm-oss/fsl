@@ -9,6 +9,61 @@ use crate::VerifyError;
 
 pub type SymbolicState<T> = BTreeMap<String, SymbolicValue<T>>;
 pub type Bindings<T> = BTreeMap<String, SymbolicValue<T>>;
+
+#[derive(Clone, Debug)]
+pub(crate) struct TypedBinding<T>(pub(crate) SymbolicValue<T>, pub(crate) Option<TypeRef>);
+
+impl<T> From<SymbolicValue<T>> for TypedBinding<T> {
+    fn from(value: SymbolicValue<T>) -> Self {
+        let ty = value.ty().cloned();
+        Self(value, ty)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TypedBindings<T>(BTreeMap<String, TypedBinding<T>>);
+
+impl<T> TypedBindings<T> {
+    pub(crate) fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    pub(crate) fn insert(&mut self, name: String, value: impl Into<TypedBinding<T>>) {
+        self.0.insert(name, value.into());
+    }
+
+    pub(crate) fn get(&self, name: &str) -> Option<&SymbolicValue<T>> {
+        self.0.get(name).map(|binding| &binding.0)
+    }
+
+    pub(crate) fn contains_key(&self, name: &str) -> bool {
+        self.0.contains_key(name)
+    }
+
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &String> {
+        self.0.keys()
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &SymbolicValue<T>)> {
+        self.0.iter().map(|(name, binding)| (name, &binding.0))
+    }
+
+    pub(crate) fn types(&self) -> impl Iterator<Item = (&String, &TypeRef)> {
+        self.0
+            .iter()
+            .filter_map(|(name, binding)| binding.1.as_ref().map(|ty| (name, ty)))
+    }
+}
+
+impl<T> FromIterator<(String, SymbolicValue<T>)> for TypedBindings<T> {
+    fn from_iter<I: IntoIterator<Item = (String, SymbolicValue<T>)>>(iter: I) -> Self {
+        Self(
+            iter.into_iter()
+                .map(|(name, value)| (name, value.into()))
+                .collect(),
+        )
+    }
+}
 type MapEntries<T> = Vec<(FslValue, SymbolicValue<T>)>;
 pub(crate) type CollectionEntries<T> = Vec<(Vec<T>, T)>;
 
@@ -68,6 +123,26 @@ impl<T> SymbolicValue<T> {
             | Self::Collection { ty, .. }
             | Self::Relation { ty, .. } => Some(ty),
             Self::None | Self::SetLiteral(_) | Self::SeqLiteral(_) => None,
+        }
+    }
+
+    fn inferred_collection_element<'a>(&self, target: &'a TypeRef) -> Option<&'a TypeRef> {
+        match (self, target) {
+            (
+                Self::Collection {
+                    ty: TypeRef::Set(source),
+                    ..
+                },
+                TypeRef::Set(element),
+            )
+            | (
+                Self::Seq {
+                    ty: TypeRef::Seq(source, _),
+                    ..
+                },
+                TypeRef::Seq(element, _),
+            ) if **source == TypeRef::Int => Some(element),
+            _ => None,
         }
     }
 }
@@ -925,36 +1000,12 @@ pub(crate) fn coerce<S: SmtSolver>(
                 len: solver.int_value(i64_index(items.len())?),
             })
         }
-        // Int-derived temporaries retain the checker's literal compatibility (#1472).
-        // Keep their complete support, including values a selected storage bound rejects.
-        (
-            SymbolicValue::Collection {
-                ty: TypeRef::Set(source),
-                entries,
-            },
-            TypeRef::Set(element),
-        ) if *source == TypeRef::Int && solver_sort(model, element).is_ok() => {
-            Ok(SymbolicValue::Collection {
-                ty: target_ty.clone(),
-                entries,
-            })
-        }
-        (
-            SymbolicValue::Seq {
-                ty: TypeRef::Seq(source, _),
-                slots,
-                len,
-            },
-            TypeRef::Seq(element, _),
-        ) if *source == TypeRef::Int && solver_sort(model, element).is_ok() => {
-            Ok(SymbolicValue::Seq {
-                ty: target_ty.clone(),
-                slots: slots
-                    .into_iter()
-                    .map(|slot| coerce(solver, model, slot, element))
-                    .collect::<Result<_, _>>()?,
-                len,
-            })
+        (value, ty)
+            if value
+                .inferred_collection_element(ty)
+                .is_some_and(|element| solver_sort(model, element).is_ok()) =>
+        {
+            coerce_inferred_collection(solver, model, value, ty)
         }
         (SymbolicValue::Scalar { term, .. }, ty) if solver_sort(model, ty).is_ok() => {
             Ok(SymbolicValue::Scalar {
@@ -970,6 +1021,34 @@ pub(crate) fn coerce<S: SmtSolver>(
             "cannot coerce symbolic value {:?} to {ty:?}",
             value.ty()
         ))),
+    }
+}
+
+fn coerce_inferred_collection<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    value: SymbolicValue<S::Term>,
+    target: &TypeRef,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    match value {
+        SymbolicValue::Collection { entries, .. } => Ok(SymbolicValue::Collection {
+            ty: target.clone(),
+            entries,
+        }),
+        SymbolicValue::Seq { slots, len, .. } => {
+            let TypeRef::Seq(element, _) = target else {
+                unreachable!()
+            };
+            Ok(SymbolicValue::Seq {
+                ty: target.clone(),
+                slots: slots
+                    .into_iter()
+                    .map(|slot| coerce(solver, model, slot, element))
+                    .collect::<Result<_, _>>()?,
+                len,
+            })
+        }
+        _ => unreachable!(),
     }
 }
 

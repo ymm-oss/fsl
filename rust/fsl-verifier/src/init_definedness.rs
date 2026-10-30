@@ -30,7 +30,7 @@ use crate::eval::{
     binder_source_expressions, binder_values, binder_where, binder_where_expression, eval,
     evaluation_status, i64_term_is_in_range, index_accessible, method_definedness,
 };
-use crate::value::{Bindings, SymbolicState, SymbolicValue, bool_term, int_term};
+use crate::value::{SymbolicState, SymbolicValue, TypedBindings as Bindings, bool_term, int_term};
 
 /// One place an init evaluation can fail.
 pub(crate) struct InitFailureSite<T> {

@@ -3,7 +3,6 @@
 //! L2: ordinary symbolic zero-capacity read terms must be unconstrained and
 //! fresh per evaluation, not fixed fallbacks or a shared unconstrained term.
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::pin;
 use std::task::{Context, Poll, Waker};
@@ -49,7 +48,8 @@ fn read_term<S: SmtSolver>(
     read_expr: &KernelExpr,
     state: &value::SymbolicState<S::Term>,
 ) -> Result<S::Term, VerifyError> {
-    let read_value = eval::eval(solver, model, read_expr, state, &mut BTreeMap::new(), None)?;
+    let mut bindings = value::TypedBindings::new();
+    let read_value = eval::eval(solver, model, read_expr, state, &mut bindings, None)?;
     let value::SymbolicValue::Scalar { term, .. } = read_value else {
         panic!("scalar read term required");
     };
