@@ -140,10 +140,10 @@ mkdir -p "$scratch/rust/target"
 # A target shared by disposable checkouts can retain a mutant artifact whose
 # source timestamp is newer than the freshly copied baseline. Give each run a
 # fresh build directory, so the baseline can never reuse another run's
-# mutation. This scratch tree is disposable working state, not evidence: it
-# sits outside `rust/target` (unlike the `$output` evidence directory above,
-# which the artifact-upload glob `rust/target/semantic-mutation.*/**` in
-# ci.yml requires), so `Swatinem/rust-cache` never saves it. This closes a
+# mutation. This build tree is disposable working state, not evidence: it
+# sits outside `rust/target`, unlike the `$output` evidence directory above
+# whose path is published to the artifact-upload step in ci.yml, so
+# `Swatinem/rust-cache` never saves the build tree. This closes a
 # path by which a run-scoped directory here *could* have ridden into a future
 # save while it lived under `rust/target/semantic-mutation-build` -- it is not
 # known to have actually done so: the `semantic-mutation` cache entry's
@@ -178,14 +178,16 @@ list_inventory() {
 }
 
 record_shard() {
+  local report_revision
+  report_revision="$(git -C "$root" rev-parse HEAD)"
   if [ -z "$shard_spec" ]; then
     # Unsharded/default completion must retain actual-outcome freshness too.
     python3 "$cohort_helper" validate "$output" "$shard_index" "$shard_total" "$mode" "$equivalents" \
-      "$(git -C "$root" rev-parse HEAD)"
+      "$report_revision"
     return
   fi
   python3 "$cohort_helper" record "$output" "$shard_index" "$shard_total" "$mode" "$equivalents" \
-    "${GITHUB_RUN_ID:-local}" "${GITHUB_RUN_ATTEMPT:-1}" "$(git -C "$root" rev-parse HEAD)"
+    "${GITHUB_RUN_ID:-local}" "${GITHUB_RUN_ATTEMPT:-1}" "$report_revision"
 }
 
 if [ "$mode" = changed ]; then
@@ -234,7 +236,8 @@ python3 "$cohort_helper" prepare "$output" "$shard_index" "$shard_total" "$mode"
 
 # An empty logical slice still runs all 35 real detectors in its fresh target.
 # Do not fabricate cargo-mutants outcomes: the runner emits none for this case.
-if [ "$(jq length "$output/selected-mutants.json")" -eq 0 ]; then
+selected_mutant_count="$(jq length "$output/selected-mutants.json")"
+if [ "$selected_mutant_count" -eq 0 ]; then
   (
     cd "$scratch/rust"
     cargo test --locked -p fsl-verifier -p fslc-rust \

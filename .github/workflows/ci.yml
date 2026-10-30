@@ -790,8 +790,8 @@ jobs:
           # restored `No cache found.`, then its successful post step uploaded
           # 2,922,378,363 B while all three operators shards were cancelled and
           # their post steps skipped. This job's rust/target-scoped evidence
-          # (`rust/target/semantic-mutation.*`, kept there solely because the
-          # artifact-upload glob below requires it) must not enter a future cache
+          # (`rust/target/semantic-mutation.*`, uploaded through the published
+          # report-directory output below) must not enter a future cache
           # save. `cache-on-failure` is absent because `save-if: false` bypasses
           # the save path. See docs/design/DESIGN-ci.md, "Actions cache budget", and
           # issue #747.

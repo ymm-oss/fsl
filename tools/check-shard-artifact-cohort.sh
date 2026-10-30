@@ -508,6 +508,6 @@ case "${1:-}" in
     selftest
     ;;
   *)
-    fail "usage: $0 {rust|semantic} <cohort-dir> <run-id> <current-attempt> <head-revision> <shard-total> | selftest"
+    fail "usage: $0 {rust|semantic|mutants} <cohort-dir> <run-id> <current-attempt> <head-revision> <shard-total> | selftest"
     ;;
 esac

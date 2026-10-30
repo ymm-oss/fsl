@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Ryoichi Izumita
 """Exact generic-mutant inventories, including genuine empty logical shards."""
 
 from __future__ import annotations
