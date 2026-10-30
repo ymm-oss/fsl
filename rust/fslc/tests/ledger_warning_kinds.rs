@@ -158,3 +158,56 @@ fn calibration_table_duplicate_stale_and_missing_keys_are_rejected() {
     let named = r#"const TABLE: &[WarningPresentation] = &[WarningPresentation { kind:"lane", trace_type:"warning" }]; const FALLBACK: WarningPresentation = WarningPresentation { kind:"fallback", trace_type:"warning" };"#;
     assert_eq!(census::table_keys(named).unwrap(), keys(&["lane"]));
 }
+
+fn runtime_with_emission(emission: &str) -> String {
+    let runtime = std::fs::read_to_string(root().join("rust/fsl-runtime/src/lib.rs")).unwrap();
+    let anchor = "    let mut warnings = model_warnings(model);";
+    assert_eq!(runtime.matches(anchor).count(), 1);
+    runtime.replacen(anchor, &format!("{anchor}\n    {emission}"), 1)
+}
+
+#[test]
+fn calibration_qualified_emission_from_runtime_owner_is_rejected() {
+    let baseline = census::producers(&root()).unwrap();
+    let runtime =
+        runtime_with_emission(r#"warnings.push(serde_json::json!({"kind":"qualified_lane"}));"#);
+    let produced = census::producers_with_runtime(&root(), &runtime).unwrap();
+    let table = baseline.named.into_iter().collect::<Vec<_>>();
+    assert_eq!(
+        census::complete(&produced.named, &table).unwrap_err(),
+        "missing=[\"qualified_lane\"]; stale=[]"
+    );
+}
+
+#[test]
+fn calibration_new_delegate_from_runtime_owner_is_rejected() {
+    let mut runtime = runtime_with_emission("warnings.push(new_census_warning());");
+    runtime
+        .push_str(r#"fn new_census_warning() -> JsonValue { json!({"kind":"delegated_lane"}) }"#);
+    let error = census::producers_with_runtime(&root(), &runtime).unwrap_err();
+    assert_eq!(error, "unmodeled warning delegate new_census_warning");
+}
+
+#[test]
+fn calibration_local_delegate_from_runtime_owner_is_rejected() {
+    let mut runtime = runtime_with_emission(
+        "let new_warning = new_census_warning(); warnings.push(new_warning);",
+    );
+    runtime
+        .push_str(r#"fn new_census_warning() -> JsonValue { json!({"kind":"delegated_lane"}) }"#);
+    assert_eq!(
+        census::producers_with_runtime(&root(), &runtime).unwrap_err(),
+        "unmodeled warning delegate new_census_warning"
+    );
+}
+
+#[test]
+fn calibration_macro_alias_from_runtime_owner_is_rejected() {
+    let runtime = runtime_with_emission(
+        r#"use serde_json::json as warning_json; warnings.push(warning_json!({"kind":"aliased_lane"}));"#,
+    );
+    assert_eq!(
+        census::producers_with_runtime(&root(), &runtime).unwrap_err(),
+        "unmodeled warning macro warning_json"
+    );
+}

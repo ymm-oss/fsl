@@ -213,7 +213,15 @@ struct JsonWarnings<'a> {
 }
 impl<'ast> Visit<'ast> for JsonWarnings<'_> {
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        if !mac.path.is_ident("json") {
+        if !mac.path.is_ident("json")
+            && mac
+                .path
+                .segments
+                .iter()
+                .map(|part| part.ident.to_string())
+                .collect::<Vec<_>>()
+                != ["serde_json", "json"]
+        {
             return;
         }
         let result = (|| {
@@ -511,7 +519,103 @@ fn forwarded_codes(root: &Path, constants: &Constants) -> Result<(Kinds, Kinds),
     Ok((lexical, next))
 }
 
+// Only these value shapes feed the current owner's warning sinks.
+fn emitted(value: &Expr) -> Result<(), String> {
+    match value {
+        Expr::Macro(value)
+            if value.mac.path.is_ident("json")
+                || value
+                    .mac
+                    .path
+                    .segments
+                    .iter()
+                    .map(|part| part.ident.to_string())
+                    .collect::<Vec<_>>()
+                    == ["serde_json", "json"] =>
+        {
+            Ok(())
+        }
+        Expr::Macro(value) => Err(format!(
+            "unmodeled warning macro {}",
+            value.mac.path.segments.last().unwrap().ident
+        )),
+        // Callee ownership is checked by Delegates, including local initializers.
+        Expr::Call(_) | Expr::Continue(_) => Ok(()),
+        Expr::Match(value) => value.arms.iter().try_for_each(|arm| emitted(&arm.body)),
+        Expr::MethodCall(_) if key(value).as_deref() == Some("solver_vacuity.iter().cloned()") => {
+            Ok(())
+        }
+        _ => Err("unmodeled warning value".to_owned()),
+    }
+}
+// New owners at the warning sink require an explicit census model.
+struct Delegates<'ast> {
+    locals: BTreeMap<String, &'ast Expr>,
+    sink: bool,
+    error: Option<String>,
+}
+impl<'ast> Visit<'ast> for Delegates<'ast> {
+    fn visit_local(&mut self, node: &'ast syn::Local) {
+        if let syn::Pat::Ident(name) = &node.pat
+            && let Some(init) = &node.init
+        {
+            self.locals.insert(name.ident.to_string(), &init.expr);
+        }
+        visit::visit_local(self, node);
+    }
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        let previous = self.sink;
+        self.sink |= key(&node.receiver).as_deref() == Some("warnings")
+            && matches!(node.method.to_string().as_str(), "push" | "extend");
+        if self.sink && !previous {
+            for arg in &node.args {
+                let value = key(arg)
+                    .and_then(|name| self.locals.get(&name))
+                    .copied()
+                    .unwrap_or(arg);
+                if let Err(error) = emitted(value) {
+                    self.error = Some(error);
+                }
+                self.visit_expr(value);
+            }
+        }
+        visit::visit_expr_method_call(self, node);
+        self.sink = previous;
+    }
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        let writes_warnings = node.args.iter().any(|arg| {
+            matches!(arg, Expr::Reference(value) if value.mutability.is_some()
+                && key(&value.expr).as_deref() == Some("warnings"))
+        });
+        if self.sink || writes_warnings {
+            let name = key(&node.func).unwrap_or_else(|| "<computed>".to_owned());
+            if !matches!(
+                name.as_str(),
+                "never_enabled_action_warning" | "vacuity_reachability_warning"
+            ) {
+                self.error = Some(format!("unmodeled warning delegate {name}"));
+            }
+        }
+        visit::visit_expr_call(self, node);
+    }
+}
+
+fn validate_warning_delegates(owner: &syn::Block) -> Result<(), String> {
+    let mut delegates = Delegates {
+        locals: BTreeMap::new(),
+        sink: false,
+        error: None,
+    };
+    delegates.visit_block(owner);
+    delegates.error.map_or(Ok(()), Err)
+}
+
 pub fn producers(root: &Path) -> Result<Inventory, String> {
+    let runtime = std::fs::read_to_string(root.join("rust/fsl-runtime/src/lib.rs")).unwrap();
+    producers_with_runtime(root, &runtime)
+}
+
+pub fn producers_with_runtime(root: &Path, runtime: &str) -> Result<Inventory, String> {
     let read = |path: &str| std::fs::read_to_string(root.join("rust").join(path)).unwrap();
     // These are verify's warning-producing modules, not all JSON `kind` users.
     let constant_paths = [
@@ -553,12 +657,13 @@ pub fn producers(root: &Path) -> Result<Inventory, String> {
             &BTreeMap::from([("warning.code".to_owned(), code.clone())]),
         )?);
     }
-    let runtime = read("fsl-runtime/src/lib.rs");
     let mut calls = Calls {
         name: "vacuity_reachability_warning",
         kinds: Ok(Kinds::new()),
     };
-    calls.visit_block(&function(&runtime, "verification_warnings")?);
+    let owner = function(runtime, "verification_warnings")?;
+    validate_warning_delegates(&owner)?;
+    calls.visit_block(&owner);
     let bindings = BTreeMap::from([("kind".to_owned(), calls.kinds?)]);
     for name in [
         "verification_warnings",
@@ -566,7 +671,7 @@ pub fn producers(root: &Path) -> Result<Inventory, String> {
         "vacuity_reachability_warning",
     ] {
         add(scan_block(
-            &function(&runtime, name)?,
+            &function(runtime, name)?,
             &constants,
             &bindings,
         )?);
