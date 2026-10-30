@@ -144,11 +144,11 @@ A01|testgen writer|testgen|owner|no artifact before admission
 A02|html writer|html|owner|file and raw guarded
 A03|ledger writer|ledger|nested owner|file raw overlay guarded
 A04|counterexample writer|counterexample export|owner|violation exports only canonical
-A05|approval unsigned|approval create|no outer scope; strict loader|no record before admission
-A06|approval signed|approval create|no outer scope; strict loader|no signature or record
+A05|approval unsigned|approval create|root owner|complete refusal; no record before admission
+A06|approval signed|approval create|root owner|complete refusal; no signature or record
 A07|causal evidence|causal observe-expectations|owner|single output guarded
 A08|causal lifecycle|causal observe-expectations|owner|all suffixes guarded
-A09|chain marker|chain jobs 1/2|fresh step owner; refine inactive|no implementation marker
+A09|chain marker|chain jobs 1/2|fresh step owner|no implementation marker
 A10|raw delivery|kernel/conformance/testplan/typestate/explain/analyze|owner|testplan rejects compose before reading children; other readers refuse before raw delivery
 A11|document generate|document generate|owner nonreader|no speculative dependency scan
 A12|document claims|document claims|owner nonreader|no speculative dependency scan
@@ -162,7 +162,7 @@ T02|fslc/src/verification.rs:ranked_lasso_discharges|verify bmc/auto|owner; rank
 T03|sweep|sweep|outer owner; cells borrow; ranking inactive/read0|no multiplication
 T04|fslc/src/main.rs:run_chain_step_isolated|chain jobs 1|fresh check owner|precise child refusal
 T05|fslc/src/main.rs:run_chain_steps|chain jobs 2|pool inactive/read0; verify owner; ranking inactive/read0|parallel logs separate
-T06|chain refine|chain jobs 1/2|step inactive strict loader|fail closed
+T06|chain refine|chain jobs 1/2|fresh step owner|complete refusal in layer detail
 T07|fslc/src/main.rs:run_mutate_from_source|mutate|outer owner; BMC rerun inactive strict loader; ranking inactive/read0|no mutants after refusal
 T08|counterexample ranking|counterexample export|owner; ranking inactive/read0|no output after refusal
 T09|html ranking|html|report owner; ranking inactive/read0|file/raw guarded
@@ -174,9 +174,9 @@ T14|scenarios fallback|scenarios|owner; ranking inactive/read0|real fallback con
 T15|testgen fallback|testgen|owner; ranking inactive/read0|violation stays exit1
 T16|domain fallback|domain testgen|owner; ranking inactive/read0|canonical nonreader
 T17|explain witness|explain|owner; ranking inactive/read0|swallowed status does not hide refusal
-T18|approval rerender|approval create|initial inactive strict loader; renderer owner|all solver kinds guarded
-T19|approval evaluation|approval check|direct inactive strict loader; renderer owner|approval_spec_digest flattens CoreError to unlocated semantic; no loc
-T20|approval difference|approval diff|direct inactive strict loader; renderer owner|separate invocation logs
+T18|approval rerender|approval create|root owner; distinct artifact delivery|all solver kinds guarded
+T19|approval evaluation|approval check|root owner; distinct artifact delivery|complete refusal before digest and artifact
+T20|approval difference|approval diff|live root owner; historical dependency decorated|complete refusal replaces approval metadata; separate invocation logs
 T21|fsl-lsp/src/server.rs:requirements_diagnostics|publish_diagnostics|local log; solver inactive/read0|no model means no solver
 I01|inventory|source discovery|test only|all endpoints and incidences accounted
 C01|Worker files|check/verify|request-local|unused file unread; option priority

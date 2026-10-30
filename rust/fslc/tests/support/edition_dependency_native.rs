@@ -215,23 +215,49 @@ fn dependency_edition_c03_direct_slots_keep_individual_warning_cardinality() {
     observations.finish();
 }
 
-fn dependency_edition_t06_isolates_the_actual_unowned_refine_step() {
+fn dependency_edition_t06_isolates_the_actual_owned_refine_step() {
     let (scratch, path, source) = fixture();
     scratch.write("dep.fsl", cases::LEAF);
     scratch.write("abstract.fsl", &source);
     scratch.write("map.fsl", "refinement M { impl C abs C maps auto }\n");
     let sections=parse_project_manifest("[requirements]\nfile = \"abstract.fsl\"\n[design]\nfile = \"root.fsl\"\nrefine_against = \"requirements\"\nmapping = \"map.fsl\"\ndepth = 2\n").unwrap();
-    let first = run_chain_step_isolated("refine", "design", &sections, &scratch.0);
-    let second = run_chain_step_isolated("refine", "design", &sections, &scratch.0);
+    let roots = prepare_project_roots(&sections, &scratch.0, read_unprefixed_spec_source).unwrap();
+    let first = run_chain_step_isolated("refine", "design", &sections, &scratch.0, &roots);
+    let second = run_chain_step_isolated("refine", "design", &sections, &scratch.0, &roots);
     assert!(!first.1 && !second.1);
     assert_eq!(first.0["detail"]["result"], "refines");
     assert_eq!(cases::stable(first.0), cases::stable(second.0));
     scratch.write("dep.fsl", &cases::next_leaf());
-    let result = run_chain_step_isolated("refine", "design", &sections, path.parent().unwrap());
+    let result = run_chain_step_isolated("refine", "design", &sections, path.parent().unwrap(), &roots);
     let mut observations = cases::Observations::default();
-    let expected = json!({"layer":"design->requirements","kind":"refine","file":path,"against":"requirements","abs_file":scratch.0.join("abstract.fsl"),"mapping":scratch.0.join("map.fsl"),"depth":2,"status":"failed","result":"error","exit_code":2,"detail":cases::unowned_expected(&cases::identity(&scratch,"dep.fsl"),path.to_str().unwrap())});
+    let expected = json!({"layer":"design->requirements","kind":"refine","file":path,"against":"requirements","abs_file":scratch.0.join("abstract.fsl"),"mapping":scratch.0.join("map.fsl"),"depth":2,"status":"failed","result":"error","exit_code":2,"detail":cases::cli_refusal(&cases::next_leaf(),"dep.fsl")});
     observations.eq("T06/direct-step", result, (expected, true));
     observations.finish();
+}
+
+#[test]
+fn ledger_overlay_uses_captured_root_after_disk_changes() {
+    let scratch = common::Scratch::new();
+    let source = cases::annotated(cases::LEAF);
+    let path = scratch.write("root.fsl", &source);
+    common::commit(&scratch, &["root.fsl"]);
+    let inputs = approval::GenerationInputs::Solver(approval::SolverGenerationInputs {
+        depth: 2, deadlock: "ignore".into(), engine: "bmc".into(),
+    });
+    let request = LedgerReportRequest {
+        path: &path, depth: 2, deadlock_mode: "ignore", engine: "bmc",
+        impl_log: None, evidence_paths: &[], output_path: None,
+    };
+    let (rendered, status) = generate_unapproved_ledger_report_from_source(&request, &source, None);
+    assert_eq!(status, 0, "{rendered}");
+    let artifact = scratch.write("artifact.md", rendered["content"].as_str().unwrap());
+    let records = [scratch.0.join("record.json")];
+    let created = run_approval_create(&path, "ledger", &artifact, "test", &[], &inputs, Some(&records[0]), None);
+    assert_eq!(created.1, 0, "{created:?}");
+    let expected = run_ledger_report_from_source(&request, &source, &records, &[]);
+    assert_eq!(expected.1, 0, "{expected:?}");
+    scratch.write("root.fsl", "not valid FSL");
+    assert_eq!(run_ledger_report_from_source(&request, &source, &records, &[]), expected);
 }
 
 fn dependency_edition_mapping_role_calibration() {
@@ -342,7 +368,7 @@ fn dependency_edition_private_adapter_executes_all_assigned_rows() {
             dependency_edition_o04_nested_owner_and_o05_fresh_child_thread,
             dependency_edition_p01_p04_lenient_helpers_cannot_swallow_refusal,
             dependency_edition_c03_direct_slots_keep_individual_warning_cardinality,
-            dependency_edition_t06_isolates_the_actual_unowned_refine_step,
+            dependency_edition_t06_isolates_the_actual_owned_refine_step,
             dependency_edition_mapping_role_calibration,
             dependency_edition_e08_compiles_against_a_canonical_prefix,
         ],

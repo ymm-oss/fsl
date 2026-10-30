@@ -23,8 +23,7 @@ use crate::refinement::{
 use crate::spec_loading::{
     load_kernel_model_from_source_with_resolver, load_model, load_model_from_source,
     load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
-    load_state_snapshot, read_spec_source, require_trace_gate,
-    validate_specialized_document_from_source,
+    load_state_snapshot, require_trace_gate, validate_specialized_document_from_source,
 };
 use crate::strict_tags::add_strict_tag_warnings;
 
@@ -1655,7 +1654,7 @@ fn run_induction_with_lemmas(
     // See `execute_cli_verification`'s matching comment: this is the
     // `--lemma` path's own derivation of the same CLI `--vacuity` option,
     // since `run_induction_with_lemmas` is called directly from
-    // `run_verify_cli` rather than through `execute_cli_verification`.
+    // `run_verify_cli_from_source` rather than through `execute_cli_verification`.
     let skip_vacuity_probe = options.vacuity == "ignore";
     let (mut result, status) = loop {
         let (current, status) = run_induction_filtered(InductionRequest {
@@ -2130,18 +2129,6 @@ struct PreparedCliVerification {
     /// spec's `acceptance`/`forbidden` scenarios as out of the overridden
     /// scope (#1008, #1218); `None` when every scenario was replayed.
     requirement_traces_not_evaluated: Option<Value>,
-}
-
-pub(super) fn run_verify_cli(
-    path: &Path,
-    cache_identity_path: &Path,
-    options: &CliVerifyOptions,
-) -> CommandResult {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_verify_cli_from_source(path, cache_identity_path, &source, options)
 }
 
 /// Why this run does not evaluate the inline `implements` seam, in a fixed
@@ -2852,8 +2839,8 @@ fn execute_cli_verification(
     // is the *only* place in the product that may set `skip_vacuity_probe`
     // to `true`. It is derived directly from the CLI's own `--vacuity`
     // option parsing, which both `verify` and `sweep` funnel through
-    // `run_verify_cli` -- `sweep` builds its own `CliVerifyOptions` per
-    // grid cell and calls `run_verify_cli` exactly like `verify` does.
+    // `run_verify_cli_from_source` -- `sweep` builds its own `CliVerifyOptions` per
+    // grid cell and calls `run_verify_cli_from_source` exactly like `verify` does.
     // No-cache baseline adapters also reach this derivation, with the
     // default `warn` policy, so they keep the probe. Other request
     // constructors (including tests) must pass `false`.

@@ -817,7 +817,7 @@ fn dependency_edition_chain_steps_refuse_before_implementation_effects() {
 }
 
 #[allow(clippy::too_many_lines, clippy::default_trait_access)] // Three solver kinds and the existing transitive PEM test-key convention.
-fn dependency_edition_approval_writers_and_rerenders_use_strict_loaders() {
+fn dependency_edition_approval_writers_and_rerenders_own_dependencies() {
     use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
     let mut observations = Observations::default();
     for line in "\
@@ -883,9 +883,6 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
             "valid-record.json",
             &std::fs::read_to_string(s.0.join("record.json")).unwrap(),
         );
-        let record: Value =
-            serde_json::from_str(&std::fs::read_to_string(s.0.join("valid-record.json")).unwrap())
-                .unwrap();
         let trust = if signed {
             "--trust-key test-public.pem"
         } else {
@@ -930,11 +927,11 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
         ] {
             git(&s, &args);
         }
-        // Direct digest loads have no owner; the existing read-error renderer
-        // carries the path/code in its message, not a new edition envelope.
+        // The live root owner delivers the complete dependency refusal before
+        // digest, record/signature writes, or approval metadata decoration.
         let actual = run(&s, &command);
         let id = if signed { "A06" } else { "A05" };
-        let expected = cases::unowned_expected("dep.fsl", "root.fsl");
+        let expected = cases::cli_refusal(&child, "dep.fsl");
         observations.output(id, &actual, expected, 2);
         observations.eq(
             id,
@@ -943,14 +940,7 @@ false|scenarios|scenarios root.fsl --depth 2|scenarios.json"
         );
         for (id, command) in [("T18", command), ("T19", evaluation), ("T20", difference)] {
             let actual = run(&s, &command);
-            let mut expected = cases::unowned_expected(
-                &cases::identity(&s, "dep.fsl"),
-                if id == "T19" { "" } else { "root.fsl" },
-            );
-            if id == "T20" {
-                // Diff appends this fixture-bound metadata to ordinary errors too.
-                expected["approval"] = json!({"record":"valid-record.json","baseline_digest":record["spec"]["digest"],"baseline_commit":record["spec"]["git_commit"],"signature_status":if signed {"signed"} else {"unsigned"},"key_id":if signed {record["signature"]["key_id"].clone()} else {Value::Null}});
-            }
+            let expected = cases::cli_refusal(&child, &cases::identity(&s, "dep.fsl"));
             observations.output(id, &actual, expected, 2);
             observations.eq(
                 id,
@@ -1328,7 +1318,7 @@ fn dependency_edition_all_existing_api_cli_routes_execute_their_assigned_rows() 
             dependency_edition_repair_roles_report_but_do_not_reject_or_edit_children,
             dependency_edition_document_nonreaders_and_specialized_controls_are_preserved,
             dependency_edition_chain_steps_refuse_before_implementation_effects,
-            dependency_edition_approval_writers_and_rerenders_use_strict_loaders,
+            dependency_edition_approval_writers_and_rerenders_own_dependencies,
             dependency_edition_deep_reads_and_governance_rereads,
             dependency_edition_a16_cache_and_c04_materialized_source_controls,
             dependency_edition_observation_writers_and_three_read_dedup,
