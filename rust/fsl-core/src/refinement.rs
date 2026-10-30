@@ -474,10 +474,73 @@ fn progress_pattern_error(expr: &Expr, maps: &BTreeMap<String, StateMap>) -> Opt
     None
 }
 
+fn unpullable_progress_map(
+    expr: &Expr,
+    indexed: &IndexedReplacements,
+    bound: &HashSet<String>,
+) -> Option<String> {
+    recursion::guard(|| {
+        let binding = match expr {
+            Expr::Quantified { binder, body, .. } => Some((binder, Some(body.as_ref()))),
+            Expr::Aggregate { binder, value, .. } => Some((binder, value.as_deref())),
+            _ => None,
+        };
+        if let Some((binder, body)) = binding {
+            // Domains are outside the new binding; filters and bodies are inside.
+            let domain = match binder {
+                Binder::Typed { .. } => None,
+                Binder::Range { lo, hi, .. } => unpullable_progress_map(lo, indexed, bound)
+                    .or_else(|| unpullable_progress_map(hi, indexed, bound)),
+                Binder::Collection { collection, .. } => {
+                    unpullable_progress_map(collection, indexed, bound)
+                }
+            };
+            if domain.is_some() {
+                return domain;
+            }
+            let mut local = bound.clone();
+            local.insert(crate::binder_name(binder).to_owned());
+            return crate::model::binder_scope(binder)
+                .1
+                .and_then(|filter| unpullable_progress_map(filter, indexed, &local))
+                .or_else(|| body.and_then(|body| unpullable_progress_map(body, indexed, &local)));
+        }
+        match expr {
+            Expr::Var(name) => {
+                return (indexed.contains_key(name) && !bound.contains(name)).then(|| name.clone());
+            }
+            Expr::Index(base, index)
+                if matches!(base.as_ref(), Expr::Var(name)
+                    if indexed.contains_key(name) && !bound.contains(name)) =>
+            {
+                // Only the direct base is replaced by an element template.
+                return unpullable_progress_map(index, indexed, bound);
+            }
+            Expr::Binary { op, left, right } => {
+                return unpullable_progress_map(left, indexed, bound).or_else(|| {
+                    let local =
+                        crate::compose::pattern_scope(left, bound, &HashSet::new(), Some(op));
+                    unpullable_progress_map(right, indexed, &local)
+                });
+            }
+            _ => {}
+        }
+        let mut found = None;
+        let _ = crate::visit_expr_children(expr, &mut |child| {
+            found = found
+                .take()
+                .or_else(|| unpullable_progress_map(child, indexed, bound));
+            Ok(())
+        });
+        found
+    })
+}
+
 /// Pull a progress property through state maps without changing its abstract scope.
 ///
 /// # Errors
-/// Returns a located error if preserving binder scope would require public renaming.
+/// Returns a located error for an unpullable whole-map read or if preserving
+/// binder scope would require public renaming.
 ///
 /// # Panics
 /// Panics if model constants or the internal substitution wrapper violate their invariants.
@@ -524,26 +587,16 @@ pub fn pull_refinement_leadsto(
             Some(span),
         ));
     }
-    expr = crate::substitute_expr_indexed(expr, &replacements, &indexed);
-    // Element templates cannot replace a bare whole-map read. If such a read
-    // remains unresolved in the downstream context, report that existing failure
-    // at the respond declaration rather than losing its location in verification.
-    let free = crate::free_vars(&expr);
-    if indexed.keys().any(|name| free.contains(name)) {
-        let context = merge_refinement_model(implementation, abstraction, true)?;
-        let env = crate::typecheck::base_env(&context);
-        if let Some(name) = indexed
-            .keys()
-            .filter(|name| free.contains(*name) && !env.contains_key(*name))
-            .min()
-        {
-            return Err(refinement_error(
-                format!("cannot pull whole-map read '{name}' through an indexed state map"),
-                Some(span),
-            )
-            .type_error());
-        }
+    // Inspect abstract source only: inserted implementation expressions may
+    // legitimately read whole maps, even with the same names as abstract maps.
+    if let Some(name) = unpullable_progress_map(&expr, &indexed, &HashSet::new()) {
+        return Err(refinement_error(
+            format!("cannot pull whole-map read '{name}' through an indexed state map"),
+            Some(span),
+        )
+        .type_error());
     }
+    expr = crate::substitute_expr_indexed(expr, &replacements, &indexed);
     let mut pulled = property.clone();
     pulled.binders.clear();
     for original in &property.binders {
