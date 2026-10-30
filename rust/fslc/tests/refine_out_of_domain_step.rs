@@ -104,11 +104,25 @@ fn fslc(dir: &Path, args: &[&str]) -> (Value, i32) {
 
 #[test]
 fn old_standalone_whole_seq_map_is_rejected() {
+    standalone_seq_map(false);
+}
+
+#[test]
+fn distinct_domain_names_retain_the_authored_map_gate() {
+    standalone_seq_map(true);
+}
+
+fn standalone_seq_map(renamed: bool) {
+    let abstraction = if renamed {
+        SEQ_ABS.replace('V', "AV")
+    } else {
+        SEQ_ABS.to_owned()
+    };
     let dir = scratch(
         "old-refine",
         &[
             ("impl.fsl", SEQ_WIDE_IMPL),
-            ("abs.fsl", SEQ_ABS),
+            ("abs.fsl", &abstraction),
             ("map.fsl", SEQ_MAP),
         ],
     );
@@ -116,7 +130,12 @@ fn old_standalone_whole_seq_map_is_rejected() {
         &dir,
         &["refine", "impl.fsl", "abs.fsl", "map.fsl", "--depth", "2"],
     );
-    assert_seq_map_rejected(&output, code, SEQ_MAP, (45, 48, 4, 3), "map");
+    let (anchor, token) = if renamed {
+        ((45, 48, 4, 3), "map")
+    } else {
+        ((0, 10, 1, 1), "refinement")
+    };
+    assert_seq_map_rejected(&output, code, SEQ_MAP, anchor, token, "SeqWide");
 }
 
 #[test]
@@ -124,7 +143,14 @@ fn old_inline_whole_seq_map_is_rejected() {
     let source = old_seq_req(-1);
     let dir = scratch("old-inline", &[("req.fsl", &source), ("abs.fsl", SEQ_ABS)]);
     let (output, code) = fslc(&dir, &["verify", "req.fsl", "--depth", "3"]);
-    assert_seq_map_rejected(&output, code, &source, (24, 34, 2, 3), "implements");
+    assert_seq_map_rejected(
+        &output,
+        code,
+        &source,
+        (24, 34, 2, 3),
+        "implements",
+        "SeqReq",
+    );
 }
 
 fn assert_seq_map_rejected(
@@ -133,10 +159,11 @@ fn assert_seq_map_rejected(
     source: &str,
     (start, end, line, column): (usize, usize, usize, usize),
     token: &str,
+    implementation: &str,
 ) {
     // Independent authored-source anchors, not offsets supplied by the parser.
     assert_eq!(&source[start..end], token);
-    assert_eq!(source[..start].lines().count(), line);
+    assert_eq!(source[..start].split('\n').count(), line);
     assert_eq!(
         source[..start].rsplit('\n').next().unwrap().len() + 1,
         column
@@ -144,11 +171,12 @@ fn assert_seq_map_rejected(
     assert_eq!(code, 2, "{output}");
     assert_eq!(output["result"], "error", "{output}");
     assert_eq!(output["kind"], "type", "{output}");
-    assert_eq!(
-        output["message"],
-        "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"V\"), 2)",
-        "{output}"
-    );
+    let expected = if token == "map" {
+        "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"AV\"), 2)".to_owned()
+    } else {
+        format!("type 'V' is declared differently in impl '{implementation}' and abs 'SeqAbs'")
+    };
+    assert_eq!(output["message"], expected, "{output}");
     assert_eq!(
         output["loc"],
         serde_json::json!({"line": line, "column": column}),

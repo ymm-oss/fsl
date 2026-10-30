@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 #[path = "support/mutate_progress.rs"]
 mod mutation_progress;
 
+const DECLARATION_CONFLICT: &str = "type 'V' is declared differently in impl 'Req' and abs 'Abs'";
+
 fn run(directory: &Path, maps: &str) -> Value {
     std::fs::create_dir_all(directory).expect("create isolated fixtures");
     std::fs::write(
@@ -100,8 +102,7 @@ fn static_whole_map_mutants_are_invalid_not_oracle_failures() {
         assert_eq!(invalid["status"], "invalid", "{output}");
         assert_eq!(invalid["invalid"]["kind"], "semantics", "{output}");
         assert_eq!(
-            invalid["invalid"]["message"],
-            "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"V\"), 2)",
+            invalid["invalid"]["message"], DECLARATION_CONFLICT,
             "{output}"
         );
         assert!(invalid.get("error").is_none(), "{output}");
@@ -115,10 +116,10 @@ fn static_whole_map_mutants_are_invalid_not_oracle_failures() {
     }
 }
 
-fn invalid_before_kill(requirement: bool) {
+fn invalid_before_kill(requirement: bool, renamed: bool) {
     for (label, maps) in [("auto", "maps auto"), ("explicit", "map seq = seq")] {
         let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-            "collection-priority-{}-{requirement}-{label}",
+            "collection-priority-{}-{requirement}-{renamed}-{label}",
             std::process::id()
         ));
         std::fs::create_dir_all(&directory).unwrap();
@@ -128,7 +129,8 @@ fn invalid_before_kill(requirement: bool) {
             init {{ seq = Seq {{ {init} }} }} action push(v: V) {{ \
             requires seq.size() < 2 seq = seq.push(v) }}"
         );
-        std::fs::write(directory.join("abs.fsl"), format!("spec Abs {{ {body} }}")).unwrap();
+        let abs = body.replace('V', if renamed { "AV" } else { "V" });
+        std::fs::write(directory.join("abs.fsl"), format!("spec Abs {{ {abs} }}")).unwrap();
         let trace = if requirement {
             "acceptance AC-1 \"top\" { push(2) expect seq.contains(2) }"
         } else {
@@ -176,7 +178,11 @@ fn invalid_before_kill(requirement: bool) {
             assert_eq!(mutant["invalid"]["kind"], "semantics", "{report}");
             assert_eq!(
                 mutant["invalid"]["message"],
-                "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"V\"), 2)",
+                if renamed {
+                    "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"AV\"), 2)"
+                } else {
+                    DECLARATION_CONFLICT
+                },
                 "{report}"
             );
             assert!(
@@ -195,12 +201,18 @@ fn invalid_before_kill(requirement: bool) {
 
 #[test]
 fn static_map_invalid_precedes_main_kill() {
-    invalid_before_kill(false);
+    invalid_before_kill(false, false);
 }
 
 #[test]
 fn static_map_invalid_precedes_requirement_kill() {
-    invalid_before_kill(true);
+    invalid_before_kill(true, false);
+}
+
+#[test]
+fn distinct_domain_map_invalid_precedes_both_kills() {
+    invalid_before_kill(false, true);
+    invalid_before_kill(true, true);
 }
 
 #[test]

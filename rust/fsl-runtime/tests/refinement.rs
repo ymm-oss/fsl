@@ -425,30 +425,54 @@ fn argument_model(source: &str) -> fsl_core::KernelModel {
 }
 
 fn reject_old_seq_map(implementation: &str, abstraction: &str, source: &str, column: u32) {
+    let token = if column == 1 { "refinement" } else { "map" };
+    let width = token.len();
     let start = usize::try_from(column - 1).unwrap();
-    assert_eq!(&source[start..start + 3], "map");
+    assert_eq!(&source[start..start + width], token);
     assert!(!source[..start].contains('\n'));
     let error = parse_refinement(source, &model(implementation), &model(abstraction))
         .expect_err("different model-local Seq carriers must be rejected");
     assert_eq!(error.kind, fsl_core::RefinementErrorKind::Type);
-    assert_eq!(
-        error.message,
-        "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"V\"), 2)"
-    );
+    let expected = if column == 1 {
+        format!(
+            "type 'V' is declared differently in impl '{}' and abs '{}'",
+            implementation.split_whitespace().nth(1).unwrap(),
+            abstraction.split_whitespace().nth(1).unwrap()
+        )
+    } else {
+        "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"AV\"), 2)".to_owned()
+    };
+    assert_eq!(error.message, expected);
     let span = error.span.expect("located map rejection");
     assert_eq!((span.start.line, span.start.column), (1, column));
-    assert_eq!((span.start.offset, span.end.offset), (start, start + 3));
-    assert_eq!((span.end.line, span.end.column), (1, column + 3));
+    assert_eq!((span.start.offset, span.end.offset), (start, start + width));
+    let end = column + u32::try_from(width).unwrap();
+    assert_eq!((span.end.line, span.end.column), (1, end));
 }
 
 #[test]
 fn old_argument_fixture_whole_seq_map_is_rejected() {
-    reject_old_seq_map(SEQ_WIDE, SEQ_ABS, SEQ_WIDE_MAP, 40);
+    reject_old_seq_map(SEQ_WIDE, SEQ_ABS, SEQ_WIDE_MAP, 1);
 }
 
 #[test]
 fn old_guard_fixture_whole_seq_map_is_rejected() {
-    reject_old_seq_map(SEQ_WIDER, SEQ_GUARDED, SEQ_WIDER_MAP, 45);
+    reject_old_seq_map(SEQ_WIDER, SEQ_GUARDED, SEQ_WIDER_MAP, 1);
+}
+
+#[test]
+fn distinct_domain_names_still_reach_the_seq_map_gate() {
+    for (implementation, abstraction, mapping, column) in [
+        (SEQ_WIDE, SEQ_ABS, SEQ_WIDE_MAP, 40),
+        (SEQ_WIDER, SEQ_GUARDED, SEQ_WIDER_MAP, 45),
+    ] {
+        reject_old_seq_map(
+            implementation,
+            &abstraction.replace('V', "AV"),
+            mapping,
+            column,
+        );
+    }
 }
 
 const MAP_ABS: &str = "spec MapAbs { type K = 0..2 state { m: Map<K, Bool> } \
