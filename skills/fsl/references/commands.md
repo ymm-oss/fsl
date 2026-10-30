@@ -495,8 +495,9 @@ in.
 `ledger` re-organizes `verify`/`scenarios`/`replay` findings **by
 requirement id** into a Markdown audit ledger a PM / governance / internal-audit
 reader can decide approve/reject/risk-accept from. It is a presentation layer
-(no new verification): the `trace_type` discriminator drives a per-finding
-business translation, governance columns (risk/decider) come from `control`
+(no new verification): warning kinds select their presentation from one table;
+other findings use their `trace_type` for business translation. Governance
+columns (risk/decider) come from `control`
 metadata when present (fill-in otherwise), and the guarantee limit is stated in
 positive form. A spec whose acceptance / forbidden traces the requirement-trace
 gate refuses (the `kind: "acceptance"` / `"forbidden"` / `"forbidden_setup"`
@@ -530,6 +531,14 @@ Full CTI/hint/rank-failure evidence stays in the
 appendix; only each finding's top-level `cost` and `cache` are excluded, not
 same-named nested domain fields. Added findings and corrected attribution change affected
 ledger approval digests and require review and re-approval.
+Warning presentation preserves the six vacuity and five migration families.
+`deadlock` is a deadlock finding; `never_enabled_action` is coverage, and
+`vacuity_probe_truncated` is `verification_incomplete` without mutate advice.
+Unknown or missing kinds remain generic warnings. `no_user_invariants` describes
+absent safety declarations, not an absence of reachable or progress checks.
+Changed rows make affected approvals `drifted` for `rendering_changed` (exit 0);
+review and re-approve. Raw evidence, assurance, envelopes and command exits stay
+unchanged.
 Aggregate assurance is plain `bounded` if any `leads_to` entry is not `unbounded`.
 Reachables show ⚪ 未評価 / `not_run` for `violated` + `invariant`/`trans`/`ensures`/`partial_op`/`type_bound`;
 the library also applies this to explicit deadlock. Other non-error results count as evaluated (#1565 tracks precise witness status).

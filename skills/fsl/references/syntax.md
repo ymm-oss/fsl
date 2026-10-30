@@ -2109,6 +2109,15 @@ instead — vacuity was never established either way, so it selects under
 too). Budget exhaustion is rare; a corpus-conservation test keeps the
 budget generous enough that no maintained spec hits it.
 
+Ledger warning presentation (#1497) keeps six vacuity and five migration
+families unchanged. Deadlock is a deadlock finding; never-enabled warnings are
+coverage, and truncated probes are `verification_incomplete` without mutate
+advice. Unknown or missing kinds stay generic warnings. Absence of user safety
+declarations does not mean reachable or progress checks were absent. These rows
+do not change raw evidence, assurance, envelopes or command exits. Changed
+renderings make affected approvals `drifted` for `rendering_changed` (exit 0);
+review and re-approve the ledger.
+
 ## 8. Idioms (reuse them as-is)
 
 ```fsl

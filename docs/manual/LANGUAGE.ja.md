@@ -2053,6 +2053,17 @@ inline seam を仕様全体の所見としても載せます。無関係な要�
 ([ledger amendment](../design/DESIGN-ledger.md))で帰属する帰納証明の未確立所見であり、
 到達可能な反例ではありません。生の CTI、hint、rank_failure の証跡を保持します。
 所見の追加と帰属の訂正も、対象 ledger の承認 digest を変えるため再承認が必要です。
+ledger の警告は、種類ごとの1つの表示表で検出種別・要約・業務翻訳・助言を選びます(#1497)。
+空虚性6種と移行5種の描画は維持します。`deadlock` は停止状態の所見、
+`never_enabled_action` は既存の coverage 所見に加える coverage 警告、
+`vacuity_probe_truncated` は mutate を勧めない `verification_incomplete` になります。
+未知・欠落・文字列以外の種類も、一般の警告として残します。
+`no_user_invariants` は利用者の不変条件と遷移制約がないことを示します。
+到達可能性や進行の性質は検証している場合があります。生の警告と他の証跡、保証クラス、
+生成 artifact の封筒とコマンドの exit は変わりません。描画が変わる既存の承認は
+`rendering_changed` による `drifted`(exit 0)になります。台帳を確認して承認を作り直してください。
+新しい台帳に対する承認は `approved` のままです。
+
 直接の `ledger` と `html` は、検証の `result:"error"` には元の JSON エラー封筒と exit 2/3 を
 返し、描画も artifact の書き込みもしません。直接の `ledger` は付随の replay、evidence の読み込み、
 witness の準備より前に止まります(`html` は explain より前に止まります)。`-o` でも
