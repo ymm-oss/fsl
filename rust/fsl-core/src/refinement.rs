@@ -978,18 +978,26 @@ pub fn merge_refinement_model(
                 _ => false,
             };
             if !same {
+                let public_name = implementation.names().public_type(name);
                 let message = if let Some((impl_source, abs_source)) = implementation
                     .instance_sources
                     .get(name)
                     .zip(abstraction.instance_sources.get(name))
                 {
+                    let repair = if public_name.as_str() == name {
+                        format!(
+                            "align instances in the verify blocks; for verify and refine, use --instances {public_name}=N on both specs (check does not accept --instances)"
+                        )
+                    } else {
+                        "align instances in the component verify blocks".to_owned()
+                    };
                     format!(
-                        "entity '{name}' has conflicting bounds in impl '{}': {impl_source} and abs '{}': {abs_source}; align instances in the verify blocks; for verify and refine, use --instances {name}=N on both specs (check does not accept --instances)",
+                        "entity '{public_name}' has conflicting bounds in impl '{}': {impl_source} and abs '{}': {abs_source}; {repair}",
                         implementation.name, abstraction.name
                     )
                 } else {
                     format!(
-                        "type '{name}' is declared differently in impl '{}' and abs '{}'",
+                        "type '{public_name}' is declared differently in impl '{}' and abs '{}'",
                         implementation.name, abstraction.name
                     )
                 };
@@ -1008,9 +1016,10 @@ pub fn merge_refinement_model(
                 .get(name)
                 .is_some_and(|existing| existing != value)
         {
+            let public_name = implementation.names().public_identifier(name);
             return Err(refinement_error(
                 format!(
-                    "enum member '{name}' is declared differently in impl '{}' and abs '{}' with preserve progress",
+                    "enum member '{public_name}' is declared differently in impl '{}' and abs '{}' with preserve progress",
                     implementation.name, abstraction.name
                 ),
                 None,

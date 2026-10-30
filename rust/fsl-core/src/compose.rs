@@ -91,7 +91,7 @@ pub fn parse_kernel_source_with_options(
         )
         .with_kind(CoreErrorKind::NotKernelLowerable)),
     }?;
-    kernel.instance_sources = instance_sources;
+    kernel.instance_sources.extend(instance_sources);
     kernel
         .annotations
         .extend(crate::SPEC_TARGET, parsed.annotations);
@@ -161,6 +161,7 @@ struct Component {
     use_span: fsl_syntax::Span,
     names: ComponentNames,
     spec: SurfaceSpec,
+    instance_sources: BTreeMap<String, String>,
     ambient: HashSet<String>,
     public_bindings: HashSet<String>,
 }
@@ -421,15 +422,17 @@ fn record_component_origins(
 
 fn parse_component(
     source: &str,
+    alias: &str,
     path: &str,
     use_span: fsl_syntax::Span,
     options: ParseOptions,
-) -> Result<(SurfaceSpec, Annotations), CoreError> {
+) -> Result<(Component, Annotations), CoreError> {
     let parsed = parse_document_with(SourceFile::new(source), &options).map_err(|error| {
         component_error(path, use_span, &CoreError::from(error), "failed to parse")
     })?;
     crate::reject_declared_separator(&parsed.surface, source)
         .map_err(|error| component_error(path, use_span, &error, "failed to lower"))?;
+    let instance_sources = crate::instance_sources(&parsed.surface, &BTreeMap::new());
     let SurfaceDocument::Spec(spec) = parsed.surface else {
         return Err(error_at("compose use must reference a spec", use_span));
     };
@@ -438,7 +441,19 @@ fn parse_component(
         .map_err(|error| component_error(path, use_span, &error, "failed to lower"))?;
     let spec = expand_spec_domains(spec)
         .map_err(|error| component_error(path, use_span, &error, "failed to lower"))?;
-    Ok((spec, parsed.annotations))
+    Ok((
+        Component {
+            alias: alias.to_owned(),
+            path: path.to_owned(),
+            use_span,
+            names: ComponentNames::collect(&spec),
+            spec,
+            instance_sources,
+            ambient: HashSet::new(),
+            public_bindings: HashSet::new(),
+        },
+        parsed.annotations,
+    ))
 }
 
 fn composed_kernel(
@@ -507,21 +522,10 @@ pub fn lower_compose_with_options(
         let source = resolver
             .read(path)
             .map_err(|error| component_error(path, *span, &error, "could not be read"))?;
-        let (spec, annotations) = parse_component(&source, path, *span, *options)?;
+        let (component, annotations) = parse_component(&source, alias, path, *span, *options)?;
         component_annotations.extend(annotations.source_order().iter().cloned());
         order.push(alias.clone());
-        components.insert(
-            alias.clone(),
-            Component {
-                alias: alias.clone(),
-                path: path.clone(),
-                use_span: *span,
-                names: ComponentNames::collect(&spec),
-                spec,
-                ambient: HashSet::new(),
-                public_bindings: HashSet::new(),
-            },
-        );
+        components.insert(alias.clone(), component);
     }
     let compose = expand_compose_predicates(compose, &components)?;
     let internal = compose
@@ -593,10 +597,17 @@ pub fn lower_compose_with_options(
     let mut init_annotations = Annotations::default();
     let mut actions = Vec::new();
     let mut names = NameMap::default();
+    let mut instance_sources = BTreeMap::new();
     let mut origins = BTreeMap::new();
     let mut init_origins = Vec::new();
     for alias in &order {
         let component = &components[alias];
+        for (name, source) in &component.instance_sources {
+            instance_sources.insert(
+                prefix(alias, name),
+                format!("component '{alias}' from '{}': {source}", component.path),
+            );
+        }
         for state in &component.names.state {
             names.insert_state(alias, state);
         }
@@ -710,6 +721,7 @@ pub fn lower_compose_with_options(
     });
     static_items.extend(actions);
     let mut kernel = composed_kernel(compose.name, static_items, component_annotations, warnings);
+    kernel.instance_sources = instance_sources;
     kernel.names = names;
     kernel.names.pattern_scopes = composition_names.pattern_scopes.borrow().clone();
     for (target, origin) in origins {
