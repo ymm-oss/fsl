@@ -565,7 +565,7 @@ pub fn cases() -> Vec<Case> {
         "Seq { 1 }.head() == 1",
         "Set { 1 } == Set { 1 }",
     ] {
-        cases.push(case(
+        let mut c = case(
             format!("X1/1467/{expr}"),
             source(
                 "done: Bool",
@@ -575,7 +575,9 @@ pub fn cases() -> Vec<Case> {
             ),
             [Ok, Error, Error, Safe],
             None,
-        ));
+        );
+        c.expected = [Ok, Safe, Safe, Safe];
+        cases.push(c);
     }
     cases
 }

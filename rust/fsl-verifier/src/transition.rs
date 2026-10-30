@@ -11,14 +11,14 @@ use fsl_solver::SmtSolver;
 use crate::VerifyError;
 use crate::eval::{
     EvaluationStatus, FailureClass, binder_condition, binder_source_expressions, binder_values,
-    binder_where, binder_where_expression, classified_evaluation_status, eval, eval_expected,
-    index_access_status, index_accessible, safe_status, sequence_statuses,
+    binder_where, binder_where_expression, classified_evaluation_status, eval, eval_binding,
+    eval_expected, index_access_status, index_accessible, safe_status, sequence_statuses,
 };
+use crate::value::TypedBindings as Bindings;
 use crate::value::{
-    Bindings, SymbolicState, SymbolicValue, bool_term, coerce, collection_contains,
-    collection_entries, collection_types, concrete_value, i64_index, ite_value, literal_key,
-    logical_equal, map_collections, select_finite, solver_sort, store_finite,
-    symbolic_state_with_suffix,
+    SymbolicState, SymbolicValue, bool_term, coerce, collection_contains, collection_entries,
+    collection_types, concrete_value, i64_index, ite_value, literal_key, logical_equal,
+    map_collections, select_finite, solver_sort, store_finite, symbolic_state_with_suffix,
 };
 
 type GuardEvaluation<T> = (Vec<T>, Bindings<T>);
@@ -101,7 +101,7 @@ pub(crate) fn action_guards<S: SmtSolver>(
     for guard in &action.guards {
         match guard {
             ActionGuard::Let(name, expr) => {
-                let value = eval(solver, model, expr, state, &mut bindings, None)?;
+                let value = eval_binding(solver, model, expr, state, &mut bindings)?;
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expr) => {
@@ -160,13 +160,14 @@ pub(crate) fn classified_action_guard_definedness<S: SmtSolver>(
             fully_defined,
             solver.implies(&reaches_guard, &status.fully_defined)?,
         ])?;
-        let value = eval(solver, model, expression, state, &mut bindings, None)?;
         match guard {
             ActionGuard::Let(name, _) => {
+                let value = eval_binding(solver, model, expression, state, &mut bindings)?;
                 reaches_guard = solver.and(&[reaches_guard, status.fully_defined])?;
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(_) => {
+                let value = eval(solver, model, expression, state, &mut bindings, None)?;
                 reaches_guard = solver.and(&[
                     reaches_guard,
                     status.fully_defined,

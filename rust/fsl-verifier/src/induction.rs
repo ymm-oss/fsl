@@ -21,8 +21,8 @@ use crate::transition::{
     classified_action_statements_evaluation_status, transition_constraint,
 };
 use crate::value::{
-    Bindings, SymbolicState, SymbolicValue, bool_term, bounds, i64_index, int_term,
-    reframe_collections, symbolic_state_with_suffix,
+    SymbolicState, SymbolicValue, TypedBindings as Bindings, bool_term, bounds, i64_index,
+    int_term, reframe_collections, symbolic_state_with_suffix,
 };
 use crate::violation_kind;
 

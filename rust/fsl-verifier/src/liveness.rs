@@ -9,7 +9,7 @@ use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
 use crate::eval::{eval, static_binder_values};
-use crate::value::{Bindings, SymbolicState, bool_term};
+use crate::value::{SymbolicState, TypedBindings as Bindings, bool_term};
 
 #[derive(Clone)]
 pub(crate) struct LeadstoBinding<T> {
