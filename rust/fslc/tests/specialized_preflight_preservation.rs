@@ -86,6 +86,36 @@ fn json(output: &Output) -> Value {
     })
 }
 
+fn native_versions_match(output: &Value) -> bool {
+    // Native check metadata is independent of cache use. Keep this oracle
+    // separate from the production metadata builder and compare every field.
+    output.get("versions")
+        == Some(&serde_json::json!({
+            "verifier": {"name": "fslc-rust", "version": env!("CARGO_PKG_VERSION")},
+            "core": {"name": "fsl-core", "version": env!("CARGO_PKG_VERSION")},
+            "solver": {"name": "z3", "backend": "native-z3", "version": "Z3 4.16.0.0"}
+        }))
+}
+
+#[test]
+fn native_versions_matcher_rejects_missing_wrong_and_extra_metadata() {
+    let valid = serde_json::json!({"versions": {
+        "verifier": {"name": "fslc-rust", "version": env!("CARGO_PKG_VERSION")},
+        "core": {"name": "fsl-core", "version": env!("CARGO_PKG_VERSION")},
+        "solver": {"name": "z3", "backend": "native-z3", "version": "Z3 4.16.0.0"}
+    }});
+    assert!(native_versions_match(&valid));
+    assert!(!native_versions_match(&serde_json::json!({})));
+    for component in ["verifier", "core", "solver"] {
+        let mut wrong = valid.clone();
+        wrong["versions"][component]["version"] = "incorrect".into();
+        assert!(!native_versions_match(&wrong), "{component}: {wrong}");
+    }
+    let mut extra = valid;
+    extra["versions"]["unexpected"] = true.into();
+    assert!(!native_versions_match(&extra), "{extra}");
+}
+
 fn assert_success(output: &Output, result: &str, cell: &str) {
     assert_eq!(
         output.status.code(),
@@ -242,10 +272,7 @@ fn db_only_unreachable_schema_rejection_does_not_become_a_kernel_gate() {
         assert_eq!(checked[key], expected, "{checked}");
     }
     assert!(checked.get("loc").is_none(), "{checked}");
-    assert_eq!(
-        checked.get("versions").is_some(),
-        std::env::var("FSLC_CACHE").as_deref() != Ok("off")
-    );
+    assert!(native_versions_match(&checked), "{checked}");
     for version in ["1", "2"] {
         assert_success(
             &directory.run(&["kernel", "db04.fsl", "--kernel-version", version]),
@@ -303,10 +330,7 @@ fn check_rejected_refinement_preserves_fmt_lint_and_migrate_carve_out() {
         assert_eq!(checked[key], expected, "{checked}");
     }
     assert!(checked.get("loc").is_none(), "{checked}");
-    assert_eq!(
-        checked.get("versions").is_some(),
-        std::env::var("FSLC_CACHE").as_deref() != Ok("off")
-    );
+    assert!(native_versions_match(&checked), "{checked}");
     let formatted = "refinement CartImplRefinesCart {\n  impl CartImpl\n  abs ShoppingCart\n\n  map stock[i: ItemId] = impl_stock[i] - reserved[i]\n  map cart[u: UserId] = impl_cart[u]\n\n  action add_to_cart(u, i) -> add_to_cart(u, i)\n  action remove_from_cart(u) -> remove_from_cart(u)\n  action impl_checkout(u) -> checkout(u)\n  action reserve(i) -> stutter\n}\n";
     let lint = LINT_STDOUT.replace("case.fsl", path);
     let migrate = MIGRATE_STDOUT.replace("case.fsl", path);
