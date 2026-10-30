@@ -1346,6 +1346,24 @@ when checking a file, the message suffix changes from `at L:C` to
   Arithmetic and ordering on Option are type errors.
 - struct: literal `S { f: 0, o: none }`, `s.f`, `==` (field-wise equality; for an
   Option field, presence matches ∧ present ⇒ values match)
+- Set/Seq materialization (Refs #1467): admitted scalar/enum-element expressions
+  use shared checked-model inferred/expected types for symbolic receivers,
+  comparisons, binders and `let`. Context reaches both if arms before construction
+  and equality obtains missing context from the opposite operand, including an
+  empty left operand. Inferred `Int` temporaries retain values/slots/length;
+  equal finite carriers, Seq capacity, alias retagging and model-local bounds remain.
+  Private lexical metadata preserves types without forcing raw `none`/composites;
+  the public Rust `Bindings<T>` BTreeMap alias is unchanged. State/storage
+  restrictions do not reject all composite expression literals. Preserve existing
+  deciding composite Seq paths; remaining composite/relation gaps, including
+  symbolic Set<Option> literal binders, stay tracked by #1467, not engine policy.
+  [Decision](../../../docs/design/DESIGN-typed-collection-materialization.md).
+  Historical own-tree `FSLC_CACHE=off <binary-for-SHA> check <form>` covered
+  606 corpus +3 unique rewritten-test inline forms at each of
+  `a52bef4931adc67ea2b1fdca827e2318b4ae25ab`,
+  `e201c0d66834ed8c860be84e96876690487b11af` and
+  `cc7a538c3b647c1c3bed5bf2088551806442c794`: both base->cc7 ok->error sets empty.
+  Not b8 validation, whole-corpus engine agreement or closure of #1467.
 - Set: `Set {}` `Set { 1, 2 }`, `.add(e) .remove(e) .contains(e) .size()`
   An accepted add retains computed outside-carrier members in temporaries;
   membership, size, removal and equality must not treat them as absent. Storing
@@ -1362,7 +1380,7 @@ when checking a file, the message suffix changes from `at L:C` to
   Int has no finite carrier: Set/Seq/Map involving it retain prior compatibility,
    including inferred Seq literal capacity. Set/Seq conditional inference retains
    an already known finite arm's carrier/capacity through let in either arm order;
-   it does not materialize literals. Refinement resolves numeric types separately;
+   that inference alone does not materialize literals. Refinement resolves numeric types separately;
    #1599 first rejects same-name declarations through its shared Type-kind
    merge gate. For remaining map errors, it recovers authored map
    spans (#1642), retaining unknown1:1 only without an authored span. Migrated
@@ -1387,7 +1405,7 @@ when checking a file, the message suffix changes from `at L:C` to
    with capacity2, and Seq capacity2→3 with equal elements (all8:3).
    Standalone/same-carrier controls and the18 literal-boundary outputs remain
    accepted/unchanged. Use matching carriers, not weakened properties.
-  Literal typing remains #1467. Full commands/inventory:
+  Remaining literal gaps stay tracked by #1467. Full commands/inventory:
   [carrier decision](../../../docs/design/DESIGN-finite-container-carriers.md).
   Symbolic init copies preserve introduced support in checked dependency order;
   repeated assignments remain relational equalities. In BMC, re-framing a root

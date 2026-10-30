@@ -12,8 +12,8 @@ use crate::transition::{
     transition_constraint,
 };
 use crate::value::{
-    Bindings, SymbolicState, SymbolicValue, bool_term, bounds, concrete_value, logical_equal,
-    project_state, symbolic_state_with_suffix,
+    SymbolicState, SymbolicValue, TypedBindings as Bindings, bool_term, bounds, concrete_value,
+    logical_equal, project_state, symbolic_state_with_suffix,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

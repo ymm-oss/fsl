@@ -19,8 +19,8 @@ use crate::transition::{
 };
 use crate::vacuity::{VacuityFinding, collect_assigned_roots, retain_covered, static_findings};
 use crate::value::{
-    Bindings, SymbolicState, SymbolicValue, bool_term, bounds, concrete_value, i64_index,
-    logical_equal, reframe_collections, snapshot_collections, symbolic_state,
+    SymbolicState, SymbolicValue, TypedBindings as Bindings, bool_term, bounds, concrete_value,
+    i64_index, logical_equal, reframe_collections, snapshot_collections, symbolic_state,
     symbolic_state_with_suffix,
 };
 use crate::violation_kind;

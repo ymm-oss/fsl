@@ -33,7 +33,7 @@ use crate::transition::{
     ActionInstance, action_guards, init_constraints, initial_state, transition_constraint,
 };
 use crate::value::{
-    Bindings, SymbolicState, bool_term, bounds, i64_index, logical_equal,
+    SymbolicState, TypedBindings as Bindings, bool_term, bounds, i64_index, logical_equal,
     symbolic_state_with_suffix,
 };
 
