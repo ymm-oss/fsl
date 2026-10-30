@@ -1953,6 +1953,23 @@ fn check_requirements_field_patterns(
                 next.measures
                     .iter()
                     .map(|m| (&m.entity, &m.condition, m.span)),
+            )
+            .chain(next.decisions.iter().flat_map(|table| {
+                table
+                    .assuming
+                    .iter()
+                    .map(|expression| (&table.entity, expression, table.span))
+                    .chain(
+                        table
+                            .rows
+                            .iter()
+                            .map(|row| (&table.entity, &row.condition, row.span)),
+                    )
+            }))
+            .chain(
+                next.concepts
+                    .iter()
+                    .filter_map(|c| c.condition.as_ref().map(|expr| (&c.entity, expr, c.span))),
             );
         for (entity, expression, span) in expressions {
             if let Some(process) = processes.iter().find(|p| &p.process.entity == entity) {

@@ -249,3 +249,31 @@ fn preservation_fresh_kernel_binding_and_unrelated_common_action() {
     assert_eq!(exit, 0, "{report:#}");
     assert_eq!(report["action_coverage"]["approve"], true, "{report:#}");
 }
+
+#[test]
+fn detector_decision_assumptions_rows_and_unused_concepts() {
+    for (label, declarations, owner) in [
+        (
+            "decision-assuming",
+            "decide D \"Decision\" for Draft Claim {\n    otherwise => Manager approves\n  } assuming some(1) is some(amount)",
+            "decide D",
+        ),
+        (
+            "decision-row",
+            "concept Eligible = Claim where some(1) is some(amount) and amount == 1\n  decide D \"Decision\" for Draft Claim {\n    Eligible => Manager approves\n  }",
+            "decide D",
+        ),
+        (
+            "unused-concept",
+            "concept Eligible = Claim where some(1) is some(amount) and amount == 1",
+            "concept Eligible",
+        ),
+    ] {
+        let source = allow("true", declarations);
+        refusal(label, &source, "amount", owner);
+        let repaired = source
+            .replace("is some(amount)", "is some(v)")
+            .replace("and amount == 1", "and v == 1");
+        accepts(&format!("{label}-fresh"), &repaired);
+    }
+}
