@@ -966,12 +966,29 @@ name in a `decreases` call. There are no unrelated breaking removals.
   it. Ordering is not defined.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
+- Set/Seq expression materialization (Refs #1467): admitted scalar/enum-element
+  literals use the checked model's inferred/expected type in symbolic methods,
+  comparisons, binders and `let`. Context reaches both conditional arms before
+  construction; equality also obtains it from the opposite operand, including
+  empty-left forms. Inferred `Int` temporaries retain members, slots and length;
+  finite-carrier, Seq-capacity and storage-bound rules below are unchanged.
+  The state/storage whitelist is not a blanket rejection of composite expression
+  literals: some pass `check` while symbolic implementation remains incomplete.
+  Existing deciding composite Seq paths are preserved; remaining composite and
+  relation-valued temporary gaps stay tracked by #1467, not permanent engine
+  exceptions. See the [materialization decision](../design/DESIGN-typed-collection-materialization.md).
+  Historical `FSLC_CACHE=off <binary-for-SHA> check <form>` in each own tree checked
+  606 corpus forms and 3 unique rewritten-test inline forms at each of
+  `a52bef4931adc67ea2b1fdca827e2318b4ae25ab`,
+  `e201c0d66834ed8c860be84e96876690487b11af` and
+  `cc7a538c3b647c1c3bed5bf2088551806442c794`: both base->cc7 ok->error sets were
+  empty. This is not later b8 integration validation or whole-corpus engine agreement.
 - Set: `Set {}` / `Set { 1, 2 }`, `.add(e)` `.remove(e)` `.contains(e)` `.size()`
   An accepted `add` retains a computed member outside the declared carrier:
   `contains`, `size`, removal and equality observe it in the temporary value.
   Assigning the result back to that bounded receiver reports `type_bound` /
   `_bounds_<var>` instead of dropping the member or transition. Scalar argument
-  typing is unchanged; this does not enable unbounded Sets or composite literals.
+  typing is unchanged; this does not enable unbounded Set storage.
   **Breaking removal (#1472, #1627):** whole Set, Seq, Map and relation values
   are compatible only with equal corresponding carriers. Numeric aliases with
   identical lower/upper bounds remain compatible; Seq capacity must also match,
@@ -985,7 +1002,7 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Set/Seq/Map uses involving it retain prior recursive compatibility (and inferred
   Seq capacity). An uncontextualized Set/Seq conditional retains an already
   known finite arm's carrier/capacity through a `let`, in either arm order;
-  it does not materialize literals. Refinement resolves numeric types in each
+  that inference alone does not materialize literals. Refinement resolves numeric types in each
   model independently. #1599's shared Type-kind gate rejects same-name declarations
   before map validation. Other map errors use authored recovery (#1642),
   retaining unknown 1:1 only without an authored span. The historical
@@ -1006,7 +1023,7 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Seq capacity2→3 with equal element carrier (all 8:3). Standalone/same-carrier
   controls still check; the 18 original literal-boundary outputs are unchanged.
   See the [single carrier decision](../design/DESIGN-finite-container-carriers.md)
-  for commands and the full removal inventory. Literal typing remains #1467.
+  for commands and the full removal inventory. Remaining literal gaps stay tracked by #1467.
   In mutate, a statically ill-typed implements map is `invalid`, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map
   mutants that change a numeric range move from `errored` to `invalid` in the
