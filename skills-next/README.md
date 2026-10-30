@@ -14,14 +14,30 @@ directory is not packaged, installed, or declared as a release resource.
 | [`fsl-requirements/`](fsl-requirements/) | `skills/fsl-requirements/` | the requirements forms of this edition (`entity` / `lifecycle` / `event` / `rule` / `decide` / `scenario` / `forbidden` / relations / measures), English as the canonical spelling, the English / Japanese keyword table, and how to write a `glossary` |
 | [`fsl-design/`](fsl-design/) | `skills/fsl-design/` | a kernel design under `fsl 5` that refines a requirements spec of this edition through its lowered names |
 | [`fsl-verify/`](fsl-verify/) | `skills/fsl-verify/` | the diagnostics of this edition (entity / event, `rule`, `decide`, glossary aliases, particles) and the origin self-check with `fslc explain --readable` / `--lowering` |
+| [`fsl/`](fsl/) | `skills/fsl/` | complete shared entry point and local reference closure; requirements syntax routes to its owner, kernel examples use the header, and DB/domain/AI/agent/causal capabilities keep their own syntax and evidence limits |
+| [`fsl-delivery/`](fsl-delivery/) | `skills/fsl-delivery/` | edition-aware routing, rule/decision-origin handoffs, frozen seams, executed implementation evidence and separate proof categories |
+| [`fsl-design-review/`](fsl-design-review/) | `skills/fsl-design-review/` | the complete five-step contract review, guard-strengthening limits and negative controls; an undecided induction result is never called a true contract |
+| [`fsl-from-code/`](fsl-from-code/) | `skills/fsl-from-code/` | source-witnessed kernel extraction, confirmed intent and real-code conformance; negative intent does not introduce unsupported requirements declarations into a kernel spec |
 
-The other skills (`fsl`, `fsl-delivery`, `fsl-design-review`,
-`fsl-from-code`, `fsl-requirements-document`) have no next-edition version
-yet. A skill here is a whole replacement of its namesake, not a patch: when
+`fsl-requirements-document` intentionally stays as the existing edition-neutral
+skill. It authors no FSL and contains no FSL examples: it consumes an already
+checked `requirements` or `spec`, obtains deterministic RCIR with `document
+claims`/`generate`, edits only the non-normative background slot, and runs
+`document check`. Its assurance/evidence/approval and unsupported-dialect
+boundaries do not change with the requirements surface syntax. This is supported
+by `rust/fslc/tests/document_cli.rs` (entity/event/rule/decision-table generation
+in both spellings, plus rejecting unsupported-dialect controls) and the native
+`document_projection_error_output` boundary in `rust/fslc/src/main.rs`; no new
+RCIR dialect support or agent-written normative prose is assumed.
+
+A skill here is a whole replacement of its namesake, not a patch: when
 the edition is released, each directory here replaces the directory of the
 same name under `skills/`, and the others stay as they are. Until then, to use
 these skills, install `skills/` and then these directories over it, so that
-the `../fsl/` references resolve.
+the `../fsl/` references resolve. The shared replacement supplies all nine topic
+references locally; retained document-skill links resolve through that same
+overlay. The four layer owners above remain the source for their layer syntax;
+the core does not duplicate a legacy requirements guide over them.
 
 ## Conventions the checks hold
 

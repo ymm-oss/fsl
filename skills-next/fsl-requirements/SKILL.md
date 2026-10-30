@@ -22,10 +22,10 @@ This skill owns the syntax of this layer:
   spelling of the example below.
 
 Expressions (`and`, `or`, `not`, comparisons, arithmetic), the `verify { }`
-block, and kernel members are those of `../fsl/references/syntax.md`. **Do not
-use the requirements section of `../fsl/references/layers.md` or any
-`process` / `transition` example**: that is the earlier form, and a file headed
-`fsl 5` rejects it (`mixed_requirements_forms`). `fslc migrate --edition 5`
+block, and kernel members are those of `../fsl/references/syntax.md`. The shared
+`../fsl/references/layers.md` covers edition-aware seams and delegates requirements
+syntax here. **Do not use earlier requirements `process` / `transition` forms**:
+`fsl 5` rejects them (`mixed_requirements_forms`). `fslc migrate --edition 5`
 rewrites an existing process-form file into the forms below.
 
 ## English is canonical
