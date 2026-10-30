@@ -1013,12 +1013,29 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   it. Ordering is not defined.</li>
 <li>struct: literal <code>Order { st: Open, qty: 0 }</code>, field reference <code>o.st</code>,
   <code>==</code> is field-by-field equality</li>
+<li>Set/Seq expression materialization (Refs #1467): admitted scalar/enum-element
+  literals use the checked model's inferred/expected type in symbolic methods,
+  comparisons, binders and <code>let</code>. Context reaches both conditional arms before
+  construction; equality also obtains it from the opposite operand, including
+  empty-left forms. Inferred <code>Int</code> temporaries retain members, slots and length;
+  finite-carrier, Seq-capacity and storage-bound rules below are unchanged.
+  The state/storage whitelist is not a blanket rejection of composite expression
+  literals: some pass <code>check</code> while symbolic implementation remains incomplete.
+  Existing deciding composite Seq paths are preserved; remaining composite and
+  relation-valued temporary gaps stay tracked by #1467, not permanent engine
+  exceptions. See the <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-typed-collection-materialization.md">materialization decision</a>.
+  Historical <code>FSLC_CACHE=off &lt;binary-for-SHA&gt; check &lt;form&gt;</code> in each own tree checked
+  606 corpus forms and 3 unique rewritten-test inline forms at each of
+  <code>a52bef4931adc67ea2b1fdca827e2318b4ae25ab</code>,
+  <code>e201c0d66834ed8c860be84e96876690487b11af</code> and
+  <code>cc7a538c3b647c1c3bed5bf2088551806442c794</code>: both base-&gt;cc7 ok-&gt;error sets were
+  empty. This is not later b8 integration validation or whole-corpus engine agreement.</li>
 <li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>, <code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code>
   An accepted <code>add</code> retains a computed member outside the declared carrier:
   <code>contains</code>, <code>size</code>, removal and equality observe it in the temporary value.
   Assigning the result back to that bounded receiver reports <code>type_bound</code> /
   <code>_bounds_&lt;var&gt;</code> instead of dropping the member or transition. Scalar argument
-  typing is unchanged; this does not enable unbounded Sets or composite literals.
+  typing is unchanged; this does not enable unbounded Set storage.
   <strong>Breaking removal (#1472, #1627):</strong> whole Set, Seq, Map and relation values
   are compatible only with equal corresponding carriers. Numeric aliases with
   identical lower/upper bounds remain compatible; Seq capacity must also match,
@@ -1032,7 +1049,7 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   Set/Seq/Map uses involving it retain prior recursive compatibility (and inferred
   Seq capacity). An uncontextualized Set/Seq conditional retains an already
   known finite arm's carrier/capacity through a <code>let</code>, in either arm order;
-  it does not materialize literals. Refinement resolves numeric types in each
+  that inference alone does not materialize literals. Refinement resolves numeric types in each
   model independently. #1599's shared Type-kind gate rejects same-name declarations
   before map validation. Other map errors use authored recovery (#1642),
   retaining unknown 1:1 only without an authored span. The historical
@@ -1053,7 +1070,7 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   Seq capacity2→3 with equal element carrier (all 8:3). Standalone/same-carrier
   controls still check; the 18 original literal-boundary outputs are unchanged.
   See the <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-finite-container-carriers.md">single carrier decision</a>
-  for commands and the full removal inventory. Literal typing remains #1467.
+  for commands and the full removal inventory. Remaining literal gaps stay tracked by #1467.
   In mutate, a statically ill-typed implements map is <code>invalid</code>, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map
   mutants that change a numeric range move from <code>errored</code> to <code>invalid</code> in the
