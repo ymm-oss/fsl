@@ -14,7 +14,7 @@ runner_version="cargo-mutants 27.1.0"
 # sharded with `--shard K/N`, forwarded verbatim to
 # `run-fault-operators.sh`); `--lane mutants` runs everything else: the
 # generic cargo-mutants half plus the manifest/schema checks that are cheap
-# enough to run in both lanes. `--shard` without `--lane operators` is
+# enough to run in both lanes. `--shard` without an explicit lane is
 # refused rather than silently ignored.
 mode=""
 lane=""
@@ -51,10 +51,14 @@ done
 mode="${mode:-complete}"
 
 if [ -n "$shard_spec" ]; then
-  [ "$lane" = "operators" ] || usage
+  [ -n "$lane" ] || usage
   [[ "$shard_spec" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]] || usage
   [ "${BASH_REMATCH[1]}" -le "${BASH_REMATCH[2]}" ] || usage
 fi
+shard_index="${shard_spec%/*}"
+shard_total="${shard_spec#*/}"
+shard_index="${shard_index:-1}"
+shard_total="${shard_total:-1}"
 
 case "$mode" in
   changed|complete) ;;
@@ -123,10 +127,13 @@ fi
 
 mkdir -p "$root/rust/target"
 output="$(mktemp -d "$root/rust/target/semantic-mutation.${mode}.XXXXXX")"
+if [ -n "$shard_spec" ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
+  printf 'report=%s\n' "$output" >>"$GITHUB_OUTPUT"
+fi
 scratch="$output/checkout"
 mkdir -p "$scratch"
 rsync -a --delete \
-  --exclude=target/ --exclude=.git --exclude=node_modules/ \
+  --exclude=target/ --exclude=.git --exclude=node_modules/ --exclude=.codex/tmp/ \
   "$root/" "$scratch/"
 git -C "$scratch" init --quiet
 mkdir -p "$scratch/rust/target"
@@ -157,6 +164,29 @@ args=(
 diff_args=()
 scope="$root/rust/fslc/tests/implementation_mutation/scope.v1.json"
 equivalents="$root/rust/fslc/tests/implementation_mutation/equivalents.v1.json"
+cohort_helper="$root/tools/check-mutant-shard-cohort.py"
+
+list_inventory() {
+  local destination="$1"
+  (
+    cd "$scratch/rust"
+    cargo mutants "${args[@]}" --list --json
+  ) >"$destination"
+  # Pinned 27.1.0 emits no JSON at all when the GLOBAL diff selection is empty.
+  # Encode that successful empty inventory, never fabricated runner outcomes.
+  [ -s "$destination" ] || printf '[]\n' >"$destination"
+}
+
+record_shard() {
+  if [ -z "$shard_spec" ]; then
+    # Unsharded/default completion must retain actual-outcome freshness too.
+    python3 "$cohort_helper" validate "$output" "$shard_index" "$shard_total" "$mode" "$equivalents" \
+      "$(git -C "$root" rev-parse HEAD)"
+    return
+  fi
+  python3 "$cohort_helper" record "$output" "$shard_index" "$shard_total" "$mode" "$equivalents" \
+    "${GITHUB_RUN_ID:-local}" "${GITHUB_RUN_ATTEMPT:-1}" "$(git -C "$root" rev-parse HEAD)"
+}
 
 if [ "$mode" = changed ]; then
   diff_file="${FSL_MUTATION_DIFF:-}"
@@ -184,41 +214,61 @@ if [ "$mode" = changed ]; then
     jq -r '.decisions[].path | sub("^rust/"; "")' "$scope" \
       | sort -u >"$changed_scope_inventory"
     changed_scope_paths="$(comm -12 "$changed_diff_paths" "$changed_scope_inventory")"
-    if [ -z "$changed_scope_paths" ]; then
-      (
-        cd "$scratch/rust"
-        cargo test --locked -p fsl-verifier -p fslc-rust \
-          --test solver_fail_closed --test triangulated_assurance
-      )
-      paths_json="$(sed -n 's|^+++ b/||p' "$diff_file" | sort -u | jq -Rsc 'split("\n") | map(select(length > 0) | "rust/" + .)')" \
-        || { echo "semantic-mutation: could not serialize changed paths" >&2; exit 1; }
-      report_revision="$(git -C "$root" rev-parse HEAD)"
-      jq -n \
-        --arg revision "$report_revision" \
-        --arg diff_base "${FSL_MUTATION_BASE:-unknown}" \
-        --argjson paths "$paths_json" \
-        '{
-          schema: "fslc.implementation-mutation-report.v1",
-          schema_version: 1,
-          base_revision: $revision,
-          diff_scope: {mode: "changed", base: $diff_base, paths: $paths},
-          runner: {name: "cargo-mutants", version: "27.1.0"},
-          configuration: "rust/.cargo/mutants.toml",
-          complete: true,
-          mutants: []
-        }' >"$output/implementation-mutation-report.v1.json"
-      FSL_IMPLEMENTATION_MUTATION_REPORT="$output/implementation-mutation-report.v1.json" \
-        run_manifest_test emitted_report_matches_schema_when_requested -- --exact
-      printf 'semantic-mutation: mode=%s mutants=0 report=%s\n' "$mode" "$output"
-      if [ -n "${GITHUB_OUTPUT:-}" ]; then
-        printf 'report=%s\n' "$output" >>"$GITHUB_OUTPUT"
-      fi
-      exit 0
+    if [ -n "$changed_scope_paths" ]; then
+      echo "semantic-mutation: changed critical path produced no line mutant; escalating to complete P2 scope"
+    else
+      args+=("${diff_args[@]}")
     fi
-    echo "semantic-mutation: changed critical path produced no line mutant; escalating to complete P2 scope"
   else
     args+=("${diff_args[@]}")
   fi
+fi
+
+# Capture the GLOBAL selection after diff filtering/escalation, BEFORE slicing.
+list_inventory "$output/global-mutants.json"
+if [ -n "$shard_spec" ]; then
+  args+=(--shard "$((shard_index - 1))/$shard_total" --sharding round-robin)
+fi
+list_inventory "$output/selected-mutants.json"
+python3 "$cohort_helper" prepare "$output" "$shard_index" "$shard_total" "$mode" "$equivalents"
+
+# An empty logical slice still runs all 35 real detectors in its fresh target.
+# Do not fabricate cargo-mutants outcomes: the runner emits none for this case.
+if [ "$(jq length "$output/selected-mutants.json")" -eq 0 ]; then
+  (
+    cd "$scratch/rust"
+    cargo test --locked -p fsl-verifier -p fslc-rust \
+      --test solver_fail_closed --test triangulated_assurance
+  ) 2>&1 | tee "$output/baseline.log"
+  if [ "$mode" = changed ]; then
+    paths_json="$(sed -n 's|^+++ b/||p' "$diff_file" | sort -u | jq -Rsc 'split("\n") | map(select(length > 0) | "rust/" + .)')"
+  else
+    paths_json="$(jq -c '[.decisions[].path] | unique' "$scope")"
+  fi
+  report_revision="$(git -C "$root" rev-parse HEAD)"
+  jq -n \
+    --arg revision "$report_revision" \
+    --arg mode "$mode" \
+    --arg diff_base "${FSL_MUTATION_BASE:-unknown}" \
+    --argjson paths "$paths_json" \
+    '{
+      schema: "fslc.implementation-mutation-report.v1",
+      schema_version: 1,
+      base_revision: $revision,
+      diff_scope: {mode: $mode, base: (if $mode == "changed" then $diff_base else null end), paths: $paths},
+      runner: {name: "cargo-mutants", version: "27.1.0"},
+      configuration: "rust/.cargo/mutants.toml",
+      complete: true,
+      mutants: []
+    }' >"$output/implementation-mutation-report.v1.json"
+  FSL_IMPLEMENTATION_MUTATION_REPORT="$output/implementation-mutation-report.v1.json" \
+    run_manifest_test emitted_report_matches_schema_when_requested -- --exact
+  record_shard
+  printf 'semantic-mutation: mode=%s mutants=0 report=%s\n' "$mode" "$output"
+  if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    printf 'report=%s\n' "$output" >>"$GITHUB_OUTPUT"
+  fi
+  exit 0
 fi
 
 set +e
@@ -279,20 +329,8 @@ else
   paths_json="$(jq -c '[.decisions[].path] | unique' "$scope")"
 fi
 
-if [ "$mode" = complete ]; then
-  stale_equivalents="$(jq --slurpfile equivalents "$equivalents" '
-    . as $root
-    | [
-        $equivalents[0].entries[].mutant_id
-        | select(. as $id | ([$root.outcomes[] | select(.scenario != "Baseline") | .scenario.Mutant.name] | index($id)) == null)
-      ]
-    | length
-  ' "$raw/outcomes.json")"
-  if [ "$stale_equivalents" -ne 0 ]; then
-    echo "semantic-mutation: $stale_equivalents reviewed-equivalent mutant ID(s) are stale" >&2
-    exit 1
-  fi
-fi
+# Reviewed equivalents were checked against the GLOBAL roster in prepare,
+# never against this shard's deliberately partial outcomes.
 
 # Resolve every runtime mutant back to the manifest's stable decision ID. The
 # source lines are derived from exact maintained anchors at run time, so line
@@ -451,6 +489,7 @@ if [ "$unreviewed_survivors" -ne 0 ] || [ "$timeout_outcomes" -ne 0 ]; then
   echo "semantic-mutation: surviving or timed-out mutant in $raw" >&2
   exit 1
 fi
+record_shard
 
 printf 'semantic-mutation: mode=%s report=%s\n' "$mode" "$output"
 if [ -n "${GITHUB_OUTPUT:-}" ]; then

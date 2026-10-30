@@ -62,7 +62,7 @@ def _named_step(job: Mapping[str, Any], name: str) -> Mapping[str, Any] | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def _require_scalar(errors: list[str], owner: str, actual: Any, expected: str) -> None:
+def _require_scalar(errors: list[str], owner: str, actual: Any, expected: Any) -> None:
     if actual != expected:
         errors.append(f"{owner}: expected {expected!r}, actual {actual!r}")
 
@@ -160,14 +160,54 @@ def audit_workflow(document: Mapping[str, Any]) -> list[str]:
                 if not isinstance(run, str) or token not in run:
                     errors.append(f"{lane['aggregator']} dependency guard run: expected token {token!r}, actual {run!r}")
 
+    producer = _mapping(jobs.get("semantic-mutation-mutants"))
+    aggregator = _mapping(jobs.get("semantic-mutation"))
+    _require_scalar(errors, "mutants matrix", _mapping(_mapping(producer.get("strategy")).get("matrix")).get("shard"), [1, 2, 3])
+    if _mapping(producer.get("strategy")).get("fail-fast") is not False:
+        errors.append("mutants matrix must disable fail-fast")
+    upload = _named_step(producer, "Preserve mutation evidence")
+    for label, actual, expected in (
+        ("upload name", _mapping(_mapping(upload).get("with")).get("name"), "semantic-mutation-mutants-${{ matrix.shard }}-${{ github.run_id }}"),
+        ("upload path", _mapping(_mapping(upload).get("with")).get("path"), "${{ steps.changed.outputs.report || steps.complete.outputs.report }}"),
+        ("upload if", _mapping(upload).get("if"), "always() && steps.scope.outputs.run == 'true'"),
+        ("upload overwrite", _mapping(_mapping(upload).get("with")).get("overwrite"), True),
+    ):
+        _require_scalar(errors, "semantic-mutation-mutants " + label, actual, expected)
+    for mode, name in (("changed", "Calibrate changed implementation semantics"), ("complete", "Calibrate complete accepted implementation scope")):
+        step = _mapping(_named_step(producer, name))
+        _require_scalar(errors, f"mutants {mode} command", step.get("run"), f"./tools/run-semantic-mutation-gate.sh {mode} --lane mutants --shard ${{{{ matrix.shard }}}}/3")
+        _require_scalar(errors, f"mutants {mode} id", step.get("id"), mode)
+        tier = "(github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production'))" if mode == "changed" else "github.event_name != 'merge_group' && (github.event_name != 'pull_request' || github.base_ref == 'production')"
+        _require_scalar(errors, f"mutants {mode} tier", step.get("if"), "steps.scope.outputs.run == 'true' && " + tier)
+    download = _mapping(_named_step(aggregator, "Download mutant shard evidence"))
+    verify = _mapping(_named_step(aggregator, "Verify mutant shard completeness"))
+    _require_scalar(errors, "mutants download pattern", _mapping(download.get("with")).get("pattern"), "semantic-mutation-mutants-*-${{ github.run_id }}")
+    _require_scalar(errors, "mutants download path", _mapping(download.get("with")).get("path"), "semantic-mutation-mutants")
+    _require_scalar(errors, "mutants verifier", verify.get("run"), f'{HELPER} mutants semantic-mutation-mutants "${{{{ github.run_id }}}}" "${{{{ github.run_attempt }}}}" "$(git rev-parse HEAD)" 3')
+    for label, step in (("download", download), ("verify", verify)):
+        _require_scalar(errors, f"mutants {label} if", step.get("if"), "steps.scope.outputs.run == 'true'")
+    _require_scalar(errors, "semantic-mutation needs", aggregator.get("needs"), ["semantic-mutation-operators", "semantic-mutation-mutants"])
+    guard = _mapping(_named_step(aggregator, "Require complete operator-shard and mutants-lane evidence"))
+    _require_scalar(errors, "semantic-mutation guard if", guard.get("if"), None)
+    _require_scalar(errors, "semantic-mutation guard results", guard.get("env"), {
+        "SEMANTIC_MUTATION_OPERATORS": "${{ needs.semantic-mutation-operators.result }}",
+        "SEMANTIC_MUTATION_MUTANTS": "${{ needs.semantic-mutation-mutants.result }}",
+    })
+    expected_guard = '''failures=0
+for result in "$SEMANTIC_MUTATION_OPERATORS" "$SEMANTIC_MUTATION_MUTANTS"; do
+  if [ "$result" != "success" ]; then
+    failures=1
+  fi
+done
+if [ "$failures" -ne 0 ]; then
+  echo "semantic mutation failed: operators=$SEMANTIC_MUTATION_OPERATORS mutants=$SEMANTIC_MUTATION_MUTANTS" >&2
+  exit 1
+fi'''
+    _require_scalar(errors, "semantic-mutation all-results guard", str(guard.get("run", "")).strip(), expected_guard)
+
     # These unsharded artifacts are intentionally attempt-scoped and guard the
     # audit against an indiscriminate global replacement.
     unsharded_uploads = (
-        (
-            "semantic-mutation-mutants",
-            "Preserve mutation evidence",
-            "semantic-mutation-mutants-${{ github.run_id }}-${{ github.run_attempt }}",
-        ),
         (
             "fsl-logic",
             "Preserve FSL Logic evidence",
