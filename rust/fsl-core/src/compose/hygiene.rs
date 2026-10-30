@@ -216,6 +216,7 @@ impl<'a> Renamer<'a> {
                     .iter()
                     .chain(&scope.locals)
                     .map(String::as_str),
+                [],
             )?;
             if decision == PatternBinding::Substituted {
                 // Keep the aggregate binder's identity so normalization still
@@ -245,6 +246,7 @@ impl<'a> Renamer<'a> {
                     .iter()
                     .chain(&scope.locals)
                     .map(String::as_str),
+                [],
             ))
         } else {
             None

@@ -1890,6 +1890,79 @@ fn requirements_processes(
         .collect()
 }
 
+/// Check source field spellings before substitution erases them (#1561).
+fn check_field_patterns(
+    expression: &Expr,
+    fields: &[ProcessField],
+    inputs: &BTreeSet<&str>,
+    span: fsl_syntax::Span,
+) -> Result<(), CoreError> {
+    let mut names = std::collections::HashSet::new();
+    crate::collect_pattern_names(expression, &mut names);
+    for name in names.into_iter().collect::<BTreeSet<_>>() {
+        crate::typecheck::reject_pattern_binding_name(
+            &crate::typecheck::ValidationPhase::normalized(),
+            None,
+            &name,
+            [],
+            [],
+            [],
+            [],
+            fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .filter(|name| !inputs.contains(name)),
+        )
+        .map_err(|error| crate::type_error_at(error, span))?;
+    }
+    Ok(())
+}
+
+fn check_requirements_field_patterns(
+    requirements: &SurfaceRequirements,
+    processes: &[RequirementsProcess],
+) -> Result<(), CoreError> {
+    for process in processes {
+        for transition in &process.process.transitions {
+            let inputs = transition
+                .event
+                .iter()
+                .flat_map(|_| &transition.inputs)
+                .map(crate::rule_guards::input_name)
+                .collect();
+            let check = |expression: &Expr, span| {
+                check_field_patterns(expression, &process.fields, &inputs, span)
+            };
+            if let Some(guard) = &transition.guard {
+                check(guard, transition.span)?;
+            }
+            for guard in transition.event.iter().flat_map(|event| &event.rule_guards) {
+                check(&guard.condition, guard.span)?;
+            }
+            for (_, value) in &transition.assignments {
+                check(value, transition.span)?;
+            }
+        }
+    }
+    if let Some(next) = &requirements.next {
+        let expressions = next
+            .properties
+            .iter()
+            .map(|p| (&p.entity, &p.condition, p.span))
+            .chain(
+                next.measures
+                    .iter()
+                    .map(|m| (&m.entity, &m.condition, m.span)),
+            );
+        for (entity, expression, span) in expressions {
+            if let Some(process) = processes.iter().find(|p| &p.process.entity == entity) {
+                check_field_patterns(expression, &process.fields, &BTreeSet::new(), span)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn process_field_state(process: &str, field: &str) -> String {
     crate::naming::process_field_state(process, field)
 }
@@ -2248,9 +2321,7 @@ fn check_generated_names(
             .iter()
             .map(|field| field.name.as_str())
             .chain(process.process.transitions.iter().flat_map(|transition| {
-                transition.inputs.iter().map(|input| match input {
-                    Param::Typed(name, _) | Param::Range(name, _, _) => name.as_str(),
-                })
+                transition.inputs.iter().map(crate::rule_guards::input_name)
             }));
         if let Some(local) = locals.into_iter().find(|local| local == binder) {
             return Err(collision(
@@ -2436,6 +2507,7 @@ pub(crate) fn lower_resolved_requirements(
 
     let processes = requirements_processes(&requirements)?;
     let binders = process_binders(&requirements, &processes);
+    check_requirements_field_patterns(&requirements, &processes)?;
     let decision_tables = crate::decision_table::Tables::of(&requirements);
     let guard_lowering = RuleGuardLowering::new(&requirements, &processes).ok();
     let rule_guards = crate::rule_guards::RuleGuards::of(&requirements, guard_lowering.as_ref());
@@ -2563,9 +2635,7 @@ pub(crate) fn lower_resolved_requirements(
             let inputs = transition
                 .inputs
                 .iter()
-                .map(|input| match input {
-                    Param::Typed(name, _) | Param::Range(name, _, _) => name.as_str(),
-                })
+                .map(crate::rule_guards::input_name)
                 .collect::<BTreeSet<_>>();
             let replacements = process
                 .fields

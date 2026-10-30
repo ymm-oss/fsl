@@ -10,6 +10,9 @@ use std::process::Command;
 
 use serde_json::{Value, json};
 
+#[path = "support/pattern_field.rs"]
+mod pattern_field;
+
 const LOOKUP: &str = "state { lookup: Map<Amount, Amount> }
   init { forall i: Amount { lookup[i] = i } }";
 const BOX: &str = "struct Box { value: Amount }";
@@ -244,10 +247,8 @@ control!(
 
 #[test]
 fn control_is_pattern_field_name_matches_lowering() {
-    // The guard copy follows the action's lowering: a pattern named `amount`
-    // does not hide that entity field in the continuation. Both guards are
-    // impossible field constraints and must be rejected, just as on base.
-    // The typecheck/lowering discrepancy is tracked separately in #1561.
+    // #1561 rejects the original sources before field substitution/conflict
+    // analysis. The former rule-conflict diagnostic is intentionally replaced.
     let outputs = [
         (
             "control_is_pattern_field_name_matches_lowering-and",
@@ -260,55 +261,27 @@ fn control_is_pattern_field_name_matches_lowering() {
     ]
     .map(|(label, condition)| run(label, &source(condition, "", false)));
     for (mode, exit, value) in outputs.iter().flatten() {
-        assert_eq!(*exit, 2, "{mode}: {outputs:#?}");
-        assert_eq!(value["result"], "error", "{mode}: {value:#}");
-        assert_eq!(value["kind"], "semantics", "{mode}: {value:#}");
-        assert_eq!(
-            value["diagnostic_code"], "rule_conflict_unsatisfiable_guard",
-            "{mode}: {value:#}"
-        );
-        assert!(
-            value["message"]
-                .as_str()
-                .expect("message")
-                .contains("event 'approve' can never occur"),
-            "{mode}: {value:#}"
-        );
+        pattern_field::assert_refused(*exit, value, "amount", "rule.fsl", 12, 5);
+        assert_eq!(value, &outputs[0][0].2, "{mode}: {outputs:#?}");
     }
 }
 
 #[test]
-fn control_is_pattern_field_name_satisfiable_matches_base() {
-    // #1561: lowering still reads the field, which can equal the payload here.
-    // Preserve base's accepted result classes; this does not establish that
-    // pattern binding and field lookup have the same meaning.
+fn detector_is_pattern_field_name_satisfiable_is_rejected() {
+    // Preserve the exact formerly accepted input as a breaking-removal detector.
     let outputs = run(
         "control_is_pattern_field_name_satisfiable_matches_base",
         &source("some(1) is some(amount) and amount == 1", "", false),
     );
     for (mode, exit, value) in &outputs {
-        let expected = if *mode == "check" { "ok" } else { "verified" };
-        assert_eq!(
-            (
-                *exit,
-                value["result"].as_str(),
-                value.get("diagnostic_code")
-            ),
-            (0, Some(expected), None),
-            "{mode}: {outputs:#?}"
-        );
-        if *mode == "verify" {
-            assert_eq!(value["checked_to_depth"], 2, "{mode}: {value:#}");
-            assert_eq!(value["completeness"], "bounded", "{mode}: {value:#}");
-        }
+        pattern_field::assert_refused(*exit, value, "amount", "rule.fsl", 12, 5);
+        assert_eq!(value, &outputs[0].2, "{mode}: {outputs:#?}");
     }
 }
 
 #[test]
 fn control_is_pattern_in_quantifier_body_matches_lowering() {
-    // Base accepted this although `approve` can never occur (a false ok).
-    // This is the one intended accepted-to-rejected change: the rule check now
-    // reads the field in the quantifier body as the action lowering does (#1561).
+    // #1552 already refused this input; #1561 changes its diagnostic and owner.
     let outputs = run(
         "control_is_pattern_in_quantifier_body_matches_lowering",
         &source(
@@ -318,20 +291,29 @@ fn control_is_pattern_in_quantifier_body_matches_lowering() {
         ),
     );
     for (mode, exit, value) in &outputs {
-        assert_eq!(*exit, 2, "{mode}: {outputs:#?}");
-        assert_eq!(value["result"], "error", "{mode}: {value:#}");
-        assert_eq!(value["kind"], "semantics", "{mode}: {value:#}");
+        pattern_field::assert_refused(*exit, value, "amount", "rule.fsl", 12, 5);
+        assert_eq!(value, &outputs[0].2, "{mode}: {outputs:#?}");
+    }
+}
+
+#[test]
+fn control_fresh_pattern_payload_enables_event() {
+    let outputs = run(
+        "control_fresh_pattern_payload_enables_event",
+        &source("some(1) is some(v) and v == 1", "", false),
+    );
+    for (mode, exit, value) in &outputs {
+        let expected = if *mode == "check" { "ok" } else { "verified" };
         assert_eq!(
-            value["diagnostic_code"], "rule_conflict_unsatisfiable_guard",
-            "{mode}: {value:#}"
+            (*exit, value["result"].as_str()),
+            (0, Some(expected)),
+            "{outputs:#?}"
         );
-        assert!(
-            value["message"]
-                .as_str()
-                .expect("message")
-                .contains("event 'approve' can never occur"),
-            "{mode}: {value:#}"
-        );
+        if *mode == "verify" {
+            assert_eq!(value["checked_to_depth"], 2, "{value:#}");
+            assert_eq!(value["completeness"], "bounded", "{value:#}");
+            assert_eq!(value["action_coverage"]["approve"], true, "{value:#}");
+        }
     }
 }
 
