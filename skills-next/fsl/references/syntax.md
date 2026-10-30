@@ -51,6 +51,9 @@ not builtin Int. Inline `action f(p in lo..hi) { … }` is also supported.
 `fair` is weak fairness. A leadsTo can have outer unfiltered typed/range
 `forall` wrappers; collection domains and `where` on those wrappers reject.
 Collection quantifiers inside P/Q remain distinct and supported.
+With an outer response wrapper, `helpful` and `decreases` are siblings of the
+whole wrapper inside leadsTo, **outside** its forall braces; see the
+[ranked-response recipe](#ranked-response-recipe).
 
 ### Annotations and reusable predicates
 
@@ -100,8 +103,12 @@ compose/arrows or the domain expression language.
 | Relation | bounded scalar endpoints: `relation User -> Role` |
 
 Business has no `number`; identity/numeric kinds are also supported in kernel
-specs. Symmetric ranges/enums retain their values and enable liveness symmetry
-reduction. Do not use empty enums for vacuity. Nested structs, nested Maps,
+specs. Both `symmetric type` and `symmetric enum` assert **interchangeable
+identities**: model behavior and properties must be equivariant under a single
+global renaming of those values. Liveness reduction constrains the lasso loop
+head or deadlocked/stalled representative state, not every intermediate state;
+do not mark a semantically distinguished identity symmetric merely for speed.
+Do not use empty enums for vacuity. Nested structs, nested Maps,
 Map/Set/Seq/relation as Map values, and unbounded Map keys are not state types.
 Storage restrictions do not imply every composite expression literal is supported
 or unsupported: check the actual expression path; do not infer engine coverage
@@ -215,11 +222,47 @@ read state, even assigned state or an unreachable branch's state.
 - A kernel `spec` has kernel properties, not requirements scenario/forbidden
   declarations. Use the [requirements owner](../../fsl-requirements/references/syntax.md)
   for requirements grammar and replay-checked positive/negative traces.
-- `within` is a nonnegative constant step bound. Ranked response proofs need an
-  appropriate integer decrease and fair/enabled progress. Helpful action names
-  and parameter types are checked; they do not create fairness.
+- `within K` is a nonnegative constant response deadline checked by BMC, distinct
+  from an unbounded eventual-response ranking proof; adding `decreases` does
+  not make the K-step deadline an unbounded induction guarantee. See the recipe below.
 - Never weaken a property, domain or trace to hide a counterexample. Decide
   whether intent, model, mapping or code is wrong before repairing.
+
+### Ranked-response recipe
+
+For a confirmed per-case response, the partial declaration shape is
+`leadsTo Responds { forall c: Case { level[c] > 0 ~> level[c] == 0 }`
+followed by `helpful step(c)` and `decreases level[c]`, then the final leadsTo
+closing brace. Both clauses belong **after** the forall's closing brace;
+putting them inside the response wrapper is not ranked-forall syntax.
+
+- `check` type-checks helpful arguments in the property's binder scope.
+  **Induction additionally requires state-independent arguments:** leadsTo
+  binders, constants, enum members, integer/Boolean literals, and integer
+  `+`, `-`, `*` combinations (including unary `-`). A well-typed state read
+  such as `helpful step(cursor)` can pass check/BMC yet be refused by induction.
+- Under proved invariants while P is pending and Q false, the integer rank must
+  be nonnegative and progress possible. Without helpful, **every** enabled action
+  must reach Q or preserve P and strictly decrease the rank.
+- Under interleaving, another case's valid step can leave `level[c]` unchanged.
+  Use a matching per-binding `helpful step(c)`: it must be a `fair action`,
+  enabled whenever that binding is pending, and strictly decrease its rank when
+  it fires. Other instances/actions must preserve the pending obligation unless
+  they reach Q, and must **not increase** the rank. Helpful creates no fairness.
+- With two or more distinct helpful action names, once a helpful instance is
+  enabled while pending, it must stay enabled until firing or Q holds; an
+  alternating “some helper is enabled” condition does not satisfy weak fairness
+  for any one instance.
+- Alternatively use an appropriate global rank such as
+  `decreases sum(k: Case of level[k])` when every enabled action reaches Q or
+  preserves the pending obligation and decreases the total. This avoids a
+  fixed-instance-count sum; it does not waive the progress/decrease obligations.
+
+Without decreases, response evidence remains bounded to depth. A successful rank
+proves eventual response at the checked world sizes; the base, coverage and
+`within K` deadline retain their own bounded obligations. For an expensive search
+use [scoped liveness exploration](commands.md#scoped-liveness-exploration), then
+restore full-world safety and unfiltered completion rather than shrinking the claim.
 
 ## 6. Automatic checks (checked even if not written)
 

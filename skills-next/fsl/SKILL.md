@@ -128,6 +128,9 @@ action route() {
    includes step K. An unranked `leadsTo` remains bounded; `decreases` can
    support an unbounded response proof. `unknown_cti` is undecided, not truth.
    Independently adjudicated `--lemma "EXPR"` candidates count only if proved.
+   Follow the [ranked-response recipe](references/syntax.md#ranked-response-recipe)
+   for helpful arguments, wrapper placement and interleaving. A `within K`
+   deadline stays BMC-checked, separate from an unbounded eventual-response rank.
 5. Run the layer's scenarios, seams, origin self-check, and applicable
    mutation/vacuity/implementation checks from [fsl-verify](../fsl-verify/SKILL.md).
    Read [errors](references/errors.md) before choosing a repair.

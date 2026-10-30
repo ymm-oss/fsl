@@ -43,6 +43,13 @@ Edition-specific codes and origin reading are in
 | `document_drifted` | Regenerate from source if spec moved; revert out-of-slot edits. Never hand-patch generated claims. |
 | AI evidence failure | dataset_invalid → evaluator_untrusted → insufficient_samples → inconclusive → statistically_unsupported precedence. Fix evidence/calibration/sample scope, not kernel formulas. |
 
+For ranked-response repair, use the [authoring recipe](syntax.md#ranked-response-recipe),
+not just the rank_failure label: a state-dependent helpful argument can fail
+induction despite check/BMC acceptance; per-entity interleaving needs a matching
+helpful instance or a justified global rank. For expensive lasso/stall diagnosis,
+follow [scoped liveness exploration](commands.md#scoped-liveness-exploration);
+the smaller/selected run does not discharge full-world completion or seams.
+
 ## Warning and review channels
 
 | Signal | Response |

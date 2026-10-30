@@ -101,6 +101,10 @@ Induction `proved` carries k_used and base depth; unranked response/coverage/
 reachability remain bounded. Arithmetic may add `not_covered: ["int_overflow"]`:
 the step uses mathematical integers; only base checks i64 overflow. Ranked leadsTo
 entries explicitly identify ranking/unboundedness. Report sizes beside every proof.
+Use the [ranked-response recipe](syntax.md#ranked-response-recipe) for outside-wrapper
+helpful/decreases placement, state-independent helpful arguments, and per-binding
+versus global ranks under interleaving. `within K` remains a BMC deadline, not an
+all-depth deadline certified by an eventual-response rank.
 
 Property selection restricts named invariant/trans/leadsTo/reachable checks;
 induction selection supports invariant/trans, not selected leadsTo/reachable.
@@ -115,6 +119,31 @@ skip a scenario: warnings acceptance_skipped/forbidden_skipped and
 requirement_traces.result:not_evaluated list them. Inputs already outside declared
 scope and in-range failures still fail. Matching upper entity/number bounds are
 overridden at inline seams too. Always complete an unscoped run.
+
+### Scoped liveness exploration
+
+Lasso search can grow sharply with interleavings; separate diagnosis from the
+original obligations rather than assuming every safety run is cheap:
+
+1. **Explore a stated smaller world/depth for one response**, without editing
+   the original source bounds. For a declared entity Case, a typical diagnostic
+   run is `fslc verify file.fsl --engine bmc --instances Case=1 --property Responds --depth 8`.
+   Choose the smallest world that still exhibits the relevant interaction, not
+   automatically one case. Use overrides only for declared entity/number bounds.
+   Report the effective world and depth: this result does not establish the
+   original larger-world response. Selected leadsTo is not an induction selector.
+2. **Check safety separately at the full declared world and required depth.**
+   Run each needed safety property (for example --property SafetyName) without
+   reduced bounds while isolating costly response exploration. Do not mistake
+   one selected safety pass for all safety obligations or a completed seam.
+3. **Complete the original contract unfiltered**, using its layer's required
+   check/lint/verify/induction/scenarios and refinement runs at original world
+   sizes/depths, without property selection/exclusion, from-state or reduced
+   overrides. Read requirement_traces skips and implements:not_evaluated from
+   diagnostic runs; replay the original scenarios and gate the original seams.
+   If full-scope obligations remain unresolved, report that limit. A reduced-world
+   pass, full-world safety pass or ranked eventual response is not permission
+   to claim the original deadline/liveness/seam obligation passed.
 
 Snapshot verification takes a **complete** logical Monitor state, replaces init,
 bypasses verdict cache and concrete-identity symmetry, and is BMC-only. Results
