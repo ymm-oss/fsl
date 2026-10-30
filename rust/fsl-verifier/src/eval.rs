@@ -1712,6 +1712,14 @@ fn eval_equality_operands<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicPair<S::Term>, VerifyError> {
+    let types = binding_types(bindings);
+    if model.expression_type(left, &types, None)?.is_none() {
+        let ty = model.equality_operand_type(left, right, &types)?;
+        return Ok((
+            eval_expected(solver, model, left, &ty, state, bindings, old_state)?,
+            eval_expected(solver, model, right, &ty, state, bindings, old_state)?,
+        ));
+    }
     match eval_raw(solver, model, left, state, bindings, old_state) {
         Ok(left_value) => {
             if let Some(left_ty) = left_value.ty() {
@@ -1724,7 +1732,7 @@ fn eval_equality_operands<S: SmtSolver>(
                     && scalar_literal(&left_value)
                     && scalar_literal(&right_value)
                 {
-                    let ty = model.equality_operand_type(left, right, &binding_types(bindings))?;
+                    let ty = model.equality_operand_type(left, right, &types)?;
                     return Ok((
                         materialize(solver, model, left_value, &ty, false)?,
                         materialize(solver, model, right_value, &ty, false)?,
@@ -1738,24 +1746,7 @@ fn eval_equality_operands<S: SmtSolver>(
                 Ok((left_value, right_value))
             }
         }
-        Err(_) if requires_expected_type(left) => {
-            let right_value = eval(solver, model, right, state, bindings, old_state)?;
-            let right_ty = right_value
-                .ty()
-                .ok_or_else(|| VerifyError::new("equality requires a typed operand"))?;
-            let left_value =
-                eval_expected(solver, model, left, right_ty, state, bindings, old_state)?;
-            Ok((left_value, right_value))
-        }
         Err(error) => Err(error),
-    }
-}
-
-fn requires_expected_type(expr: &Expr) -> bool {
-    match expr {
-        Expr::None => true,
-        Expr::Some(inner) => requires_expected_type(inner),
-        _ => false,
     }
 }
 
