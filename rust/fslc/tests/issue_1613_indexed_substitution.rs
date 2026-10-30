@@ -170,7 +170,7 @@ fn pair(shape: &str, renamed: bool, progress: bool) -> Fixture {
     )
 }
 
-fn run_progress(fixture: Fixture, line: u32, repeat: bool) {
+fn run_progress(fixture: &Fixture, line: u32, repeat: bool) {
     fixture.check_specs();
     let first = progress_lost(&fixture.refine(), line, true);
     if repeat {
@@ -181,35 +181,35 @@ fn run_progress(fixture: Fixture, line: u32, repeat: bool) {
 
 #[test]
 fn self_identity_reports_progress_lost_not_stack_overflow() {
-    run_progress(identity(false, true), 7, false);
+    run_progress(&identity(false, true), 7, false);
 }
 
 #[test]
 fn swap_reports_progress_lost_not_stack_overflow() {
-    run_progress(pair("swap", false, true), 7, false);
+    run_progress(&pair("swap", false, true), 7, false);
 }
 
 #[test]
 fn chain_reports_progress_lost_not_false_refines() {
-    run_progress(pair("chain", false, true), 8, false);
+    run_progress(&pair("chain", false, true), 8, false);
 }
 
 #[test]
 fn renamed_identity_preserves_progress_lost_twice() {
-    run_progress(identity(true, true), 7, true);
+    run_progress(&identity(true, true), 7, true);
 }
 
 #[test]
 fn renamed_swap_preserves_progress_lost_twice() {
-    run_progress(pair("swap", true, true), 7, true);
+    run_progress(&pair("swap", true, true), 7, true);
 }
 
 #[test]
 fn renamed_chain_preserves_progress_lost_twice() {
-    run_progress(pair("chain", true, true), 8, true);
+    run_progress(&pair("chain", true, true), 8, true);
 }
 
-fn simulation(fixture: Fixture) {
+fn simulation(fixture: &Fixture) {
     fixture.check_specs();
     let mut previous = None;
     for _ in 0..2 {
@@ -227,17 +227,17 @@ fn simulation(fixture: Fixture) {
 
 #[test]
 fn identity_without_preserve_still_refines_twice() {
-    simulation(identity(false, false));
+    simulation(&identity(false, false));
 }
 
 #[test]
 fn swap_without_preserve_still_refines_twice() {
-    simulation(pair("swap", false, false));
+    simulation(&pair("swap", false, false));
 }
 
 #[test]
 fn chain_without_preserve_still_refines_twice() {
-    simulation(pair("chain", false, false));
+    simulation(&pair("chain", false, false));
 }
 
 #[test]
