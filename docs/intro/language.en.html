@@ -3058,8 +3058,39 @@ Direct refine gives exit 2, <code>kind:"type"</code>, <code>loc</code> at <code>
 bound witness gives refine exit 2 versus abstract-only BMC exit 1 <code>violated</code>.
 Unused maps/legal locals stay admissible; outer capture is refused. Only nested diagnostics may rename.
 For a violated abstract constant bound with the impl constant renamed, or a body constant
-without an impl namesake, former exit-2 errors now report exit 1 <code>progress_lost</code>.
-For unbounded proof, keep using a lower-layer <code>leadsTo ... decreases ...</code> and
+without an impl namesake, former exit-2 errors now report exit 1 <code>progress_lost</code>.</p>
+<p>Indexed progress mappings are simultaneous (#1613). For <code>map a[i: K] = expr</code>,
+a source read <code>a[e]</code> becomes <code>expr</code> with <code>i</code> replaced by the already-pulled <code>e</code>.
+The inserted expression is in implementation scope and is not mapped again.
+Identity/swap maps no longer overflow the stack; a chain cannot silently follow
+another abstract mapping inside an implementation read. Their genuine progress
+failures report <code>progress_lost</code>, not <code>refines</code>.</p>
+<p><strong>Breaking removal (#1613):</strong> a free abstract whole-map read of an indexed state
+in the pulled property is now <code>error/type</code> (exit 2) at <code>respond</code>, even when an
+implementation state shares its name. The <code>whole-same</code> acceptance witness
+(<code>map m[i: K] = n[i]</code>, property <code>m == z ~&gt; m != z</code>) changes false <code>refines</code>/0
+to a type error/2 at 8:23. Renaming the unrelated implementation state does not
+repair it. Source binder shadowing and legal whole-map reads inside inserted
+implementation templates remain accepted; this is not a general collection ban.
+Re-author P/Q with supported element-read predicates <strong>without changing temporal
+meaning</strong>. Whole-map equality requires all keys to agree, while inequality needs
+only one differing key. Moving <code>forall</code> outside <code>~&gt;</code> can change that obligation;
+the singleton witness is not a general migration equivalence. Keep the intended
+property and <code>preserve progress</code>, rather than weakening either.</p>
+<p>Boundary audit: base <code>f8e3726e2ead231c89cd4f52eef3dd5d652c774d</code> → production head
+<code>2aab19f2b2d286c01c1aa79497c131df334aaff1</code>, each binary in its own tree, with
+<code>FSLC_UNSTABLE=fsl5 FSLC_CACHE=off</code>: <code>fslc check &lt;path&gt;</code> on 610 corpus forms
+(23 specs/195 examples/392 fixtures) and 54 inline forms has <strong>no ok→error
+transitions</strong> and identical complete outputs. The 595-source inventory has
+0 rewritten-required-test inline forms; only two acceptance tests were added.
+Separately, 28 corpus <code>refine</code> commands are unchanged; 18 inline
+<code>fslc refine impl.fsl abs.fsl map.fsl --depth 4</code> cases have 9 unchanged and
+9 changed: 5 abort→progress_lost, 1 false-refines→progress_lost, 2 already-error
+location/classification fixes, and <strong>1 admitted→error whole-map removal</strong> above.
+All 710 routes ran twice per SHA, without CLI field masks. See
+<a href="../design/DESIGN-refinement.md#4-implementation-notes">DESIGN-refinement §4</a>
+for the full scope, migration and repeat evidence.</p>
+<p>For unbounded proof, keep using a lower-layer <code>leadsTo ... decreases ...</code> and
 <code>verify --engine induction</code>.</p></div></details>
 <details id="11-composition-compose"><summary>11. Composition (compose)<span class="tree-blurb"> — Composing specs via namespaces and synchronized actions.</span></summary><div class="tree-body"><p><strong>Merge with namespaces</strong> several verified component specs into a single system
 specification. After expansion it becomes an ordinary single spec, so <code>verify</code> /

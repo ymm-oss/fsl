@@ -2872,8 +2872,35 @@ const と同名の local は先に <code>check</code> が拒否します。性�
 抽象の定数と state が同名の曖昧な範囲の例は refine が exit 2、抽象単独の BMC が exit 1 です。
 未使用の map/合法な local は受け入れ、外側の捕獲は拒否します。外側の名前を維持し、入れ子の診断は改名し得ます。
 抽象の定数を範囲で読む違反で impl の定数を改名した形と、抽象の定数を本体で読み impl に
-同名がない違反は、従来の exit 2 エラーから exit 1 <code>progress_lost</code> に変わります。
-非有界の証明には、引き続き下位レイヤーの <code>leadsTo ... decreases ...</code> と
+同名がない違反は、従来の exit 2 エラーから exit 1 <code>progress_lost</code> に変わります。</p>
+<p>indexed progress mapping は同時置換です(#1613)。<code>map a[i: K] = expr</code> に対し、
+ソースの読み出し <code>a[e]</code> は、引き込み済みの <code>e</code> で <code>i</code> を置換した <code>expr</code> になります。
+挿入した式は impl の scope にあり、抽象の mapping を再適用しません。identity/swap の
+map は stack overflow を起こさず、chain も impl の読み出しの内側で別の抽象 mapping を
+たどりません。実際に進行を失う場合は、誤った <code>refines</code> ではなく <code>progress_lost</code> です。</p>
+<p><strong>破壊的 removal (#1613):</strong> 引き込む性質が indexed 抽象 state を map 全体として自由参照
+する形は、同名の impl state があっても <code>respond</code> 位置の <code>error/type</code>(exit 2)になります。
+受入例 <code>whole-same</code>(<code>map m[i: K] = n[i]</code>、性質 <code>m == z ~&gt; m != z</code>)は、誤った
+<code>refines</code>/0 から 8:23 の type error/2 に変わります。無関係な impl state の改名では
+修復できません。ソースの binder による shadowing と、挿入される impl の式の合法な
+map 全体の読み出しは引き続き受け入れます。collection 全般の禁止ではありません。
+P/Q は対応する要素読み出しの述語で書き直し、<strong>時間的な意味を変えないでください</strong>。
+map 全体の等値は全キーの一致、不等値は少なくとも一つのキーの相違です。<code>forall</code> を
+<code>~&gt;</code> の外に移すと応答義務が変わり得るため、singleton の例を一般的な移行の同値性と
+見なせません。性質や <code>preserve progress</code> を弱めず、意図した契約を維持してください。</p>
+<p>境界監査: base <code>f8e3726e2ead231c89cd4f52eef3dd5d652c774d</code> → production head
+<code>2aab19f2b2d286c01c1aa79497c131df334aaff1</code>。各 binary を自身の tree で、
+<code>FSLC_UNSTABLE=fsl5 FSLC_CACHE=off</code> として実行しました。corpus610形
+(specs23・examples195・fixtures392)と inline54形の <code>fslc check &lt;path&gt;</code> は、
+<strong>ok→error が空集合</strong>で、出力全体が一致します。595 source の inventory で、書き換えた
+required test の inline は0形、追加は受入テスト2本のみです。別枠の corpus <code>refine</code>
+28 command は不変です。inline18組の <code>fslc refine impl.fsl abs.fsl map.fsl --depth 4</code>
+では9組が不変、9組が変化しました: abort→progress_lost が5組、誤った
+refines→progress_lost が1組、既存 error の位置・分類修正が2組、上記の
+<strong>受入→error の whole-map removal が1組</strong>です。710 route 全体を各SHAで2回実行し、
+CLI field の mask はありません。scope・移行・反復の証拠は
+<a href="../design/DESIGN-refinement.md#4-implementation-notes">DESIGN-refinement §4</a>を参照してください。</p>
+<p>非有界の証明には、引き続き下位レイヤーの <code>leadsTo ... decreases ...</code> と
 <code>verify --engine induction</code> を使ってください。</p></div></details>
 <details id="11-composition-compose"><summary>11. 合成(compose)<span class="tree-blurb"> — 名前空間と同期アクションによるスペックの合成。</span></summary><div class="tree-body"><p>検証済みのいくつかのコンポーネント spec を、<strong>名前空間つきで</strong> 1 つのシステム仕様
 にマージします。展開後は通常の単一 spec になるので、<code>verify</code> /
