@@ -8,45 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
 
-// leaf | mode | remaining consumer contract. These cells still execute.
-pub const DEFERRED_TO_SECOND_PR: &[(&str, &str, &str)] = &[
-    ("analyze", "batch", "Admit every explicit batch root."),
-    (
-        "analyze",
-        "project",
-        "Admit every manifest root and mapping before projection.",
-    ),
-    (
-        "approval check",
-        "all",
-        "Admit the live root before consuming records or trust; stop rereading the root in the ledger --approval overlay.",
-    ),
-    (
-        "approval create",
-        "all",
-        "Admit the root before artifact and record operations.",
-    ),
-    (
-        "approval diff",
-        "all",
-        "Admit the live root before baseline operations.",
-    ),
-    (
-        "chain",
-        "admission",
-        "Prepare all roots before layer work and implementation effects.",
-    ),
-    (
-        "diff",
-        "all",
-        "Admit both live roots and mapping with per-slot warning ownership.",
-    ),
-    (
-        "refine",
-        "all",
-        "Admit all explicit root and mapping slots, including repeated paths.",
-    ),
-];
+pub const DEFERRED_TO_SECOND_PR: &[(&str, &str, &str)] = &[];
 
 pub const OUT_OF_SCOPE_1513: &[(&str, &str)] = &[
     (
@@ -125,33 +87,64 @@ pub fn capture(run: impl FnOnce()) -> Vec<(String, bool)> {
     CAPTURE.with(|cells| cells.borrow_mut().take().unwrap())
 }
 
-pub fn assert_deferred_evidence(cells: &[(String, bool)]) {
+pub fn assert_no_deferred(deferred: &[(&str, &str, &str)]) {
+    assert!(
+        deferred.is_empty(),
+        "completed admission must not be deferred"
+    );
+}
+
+pub fn assert_complete_evidence(cells: &[(String, bool)]) {
+    assert_no_deferred(DEFERRED_TO_SECOND_PR);
     for (label, agrees) in cells
         .iter()
         .filter(|(label, _)| label.starts_with("preserved/"))
     {
         assert!(agrees, "preserved control failed: {label}");
     }
-    for &(leaf, mode, reason) in DEFERRED_TO_SECOND_PR {
-        let group: Vec<_> = cells
-            .iter()
-            .filter(|(label, _)| {
-                !label.starts_with("preserved/") && deferred(label) == Some((leaf, mode))
-            })
-            .collect();
-        let red = group.iter().filter(|(_, agrees)| !agrees).count();
-        for (label, agrees) in &group {
-            if !agrees {
-                println!("DEFERRED_RED {leaf}/{mode} cell={label}");
-            }
+    for (label, agrees) in cells {
+        if out_of_scope(label) {
+            assert!(!agrees, "historical root unexpectedly admitted: {label}");
+            println!("HISTORICAL {label} agreement={agrees}");
+        } else {
+            assert!(agrees, "admission disagreement: {label}");
         }
-        println!(
-            "DEFERRED {leaf}/{mode} executed={} red={red} reason={reason}",
-            group.len()
-        );
-        assert!(!group.is_empty(), "unexecuted deferred mode {leaf}/{mode}");
-        assert!(red > 0, "completed mode remains deferred: {leaf}/{mode}");
     }
+    for &(label, _) in OUT_OF_SCOPE_1513 {
+        assert!(
+            cells.iter().any(|(observed, _)| observed == label),
+            "unexecuted historical control: {label}"
+        );
+    }
+}
+
+fn git(s: &Scratch, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=Edition Test",
+            "-c",
+            "user.email=edition@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .current_dir(&s.0)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "scratch git {args:?}: {output:?}");
+    String::from_utf8(output.stdout).unwrap().trim().into()
+}
+
+pub fn commit(s: &Scratch, files: &[&str]) -> String {
+    git(s, &["init", "-q"]);
+    let mut args = vec!["add", "--"];
+    args.extend(files);
+    git(s, &args);
+    git(s, &["commit", "-qm", "fixture revision"]);
+    git(s, &["rev-parse", "HEAD"])
 }
 
 pub fn invoke(binary: &str, args: &[String], cwd: &Path, gate: bool) -> std::process::Output {
@@ -590,6 +583,7 @@ impl Results {
         }
     }
     pub fn finish(self) {
+        assert_no_deferred(DEFERRED_TO_SECOND_PR);
         println!(
             "TOTAL checked={} preserved={} red={}",
             self.checked,
@@ -604,10 +598,7 @@ impl Results {
         let unexpected: Vec<_> = self
             .failures
             .iter()
-            .filter(|label| {
-                label.starts_with("preserved/")
-                    || (deferred(label).is_none() && !out_of_scope(label))
-            })
+            .filter(|label| label.starts_with("preserved/") || !out_of_scope(label))
             .collect();
         assert!(
             unexpected.is_empty(),

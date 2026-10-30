@@ -55,21 +55,23 @@ use log_replay::{
 };
 use process::{STACK_SIZE, block_on_native, parse_options};
 use property_selection::is_bounds_name;
+#[cfg(test)]
+use refinement::run_refine;
 use refinement::{
     abs_violation_json, fold_governance_from_source, implements_error_output,
-    implements_result_from_source_with_bounds, mismatch_paths, run_refine,
+    implements_result_from_source_with_bounds, mismatch_paths, run_refine_from_sources,
 };
 use spec_loading::{
-    dependency_resolver, finish_admitted, raw_delivery_allowed, run_admitted_root,
-    run_admitted_roots,
+    admit_root_source, dependency_resolver, finish_admitted, raw_delivery_allowed,
+    run_admitted_root, run_admitted_roots, run_prepared_roots,
 };
 use spec_loading::{
-    load_kernel_model_from_source, load_model, load_model_from_source, load_model_scoped,
+    load_kernel_model_from_source, load_model_from_source, load_model_scoped_from_source,
     load_snapshot_value_object, read_spec_source, require_trace_gate, snapshot_value,
     validate_requirement_trace_source,
 };
 use strict_tags::strict_tag_warnings_from_source;
-use verification::{run_verify_cli, run_verify_cli_admitted, run_verify_cli_from_source};
+use verification::{run_verify_cli_admitted, run_verify_cli_from_source};
 
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
 
@@ -1370,7 +1372,7 @@ fn command() -> Result<(Value, i32), String> {
                 }
             }
             if options.rest.is_empty() {
-                Ok(run_refine(
+                Ok(run_refine_admitted(
                     &options.path,
                     &options.abstraction,
                     &options.mapping,
@@ -1933,13 +1935,7 @@ fn document_projection_error_output(error: &fsl_tools::DocumentProjectionError) 
     }
 }
 
-fn load_document_claims(path: &Path) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
-    let source = read_spec_source(path).map_err(|error| spec_load_error_output(&error))?;
-    let claims = load_document_claims_from_source(path, &source, &path.to_string_lossy())?;
-    Ok((source, claims))
-}
-
-/// Like [`load_document_claims`], but projects under an explicit label
+/// Projects caller-owned source under an explicit label
 /// rather than `path`'s own spelling. `fslc document check` (issue #329)
 /// needs this: every rendered `出典`/`Source:` line carries the label
 /// verbatim, so re-projecting under a *different* spelling of the same file
@@ -3808,7 +3804,11 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
-    let mut results = run_chain_steps(&steps, &sections, base, keep_going, jobs);
+    let roots = match prepare_project_roots(&sections, base, read_unprefixed_spec_source) {
+        Ok(roots) => roots,
+        Err(refusal) => return refusal,
+    };
+    let mut results = run_chain_steps(&steps, &sections, base, roots, keep_going, jobs);
     let mut layers = Vec::new();
     for (index, slot) in results.iter_mut().enumerate() {
         // Every step up to and including the first failure has run at any
@@ -3918,11 +3918,7 @@ type ChainStepResults = Vec<Option<(Value, bool)>>;
 /// the root file's bytes is conservative: it covers every pair that can share
 /// a key, plus some that cannot. Refine and `impl` steps never touch the
 /// cache.
-fn chain_step_groups(
-    steps: &[(String, String)],
-    sections: &std::collections::BTreeMap<String, ManifestSection>,
-    base: &Path,
-) -> Vec<Vec<usize>> {
+fn chain_step_groups(steps: &[(String, String)], roots: &[ProjectRoot]) -> Vec<Vec<usize>> {
     let mut groups = Vec::<Vec<usize>>::new();
     let mut by_source = std::collections::BTreeMap::<Vec<u8>, usize>::new();
     for (index, (kind, layer)) in steps.iter().enumerate() {
@@ -3930,9 +3926,14 @@ fn chain_step_groups(
             continue;
         }
         let source = (kind == "spec")
-            .then(|| sections[layer].values.get("file"))
+            .then(|| {
+                roots
+                    .iter()
+                    .find(|root| root.layer == layer && !root.mapping)
+            })
             .flatten()
-            .and_then(|file| std::fs::read(base.join(file)).ok());
+            .and_then(|root| root.source.as_ref().ok())
+            .map(|source| source.as_bytes().to_vec());
         match source {
             Some(source) => {
                 if let Some(&group) = by_source.get(&source) {
@@ -3964,12 +3965,13 @@ fn run_chain_step_isolated(
     layer: &str,
     sections: &std::collections::BTreeMap<String, ManifestSection>,
     base: &Path,
+    roots: &[ProjectRoot],
 ) -> (Value, bool) {
     std::thread::scope(|scope| {
         let step = std::thread::Builder::new()
             .stack_size(STACK_SIZE)
             .name("fslc-chain-step".to_owned())
-            .spawn_scoped(scope, || run_chain_step(kind, layer, sections, base))
+            .spawn_scoped(scope, || run_chain_step(kind, layer, sections, base, roots))
             .expect("spawn a chain step thread");
         step.join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
@@ -4023,6 +4025,7 @@ fn run_chain_steps(
     steps: &[(String, String)],
     sections: &std::collections::BTreeMap<String, ManifestSection>,
     base: &Path,
+    roots: Vec<ProjectRoot>,
     keep_going: bool,
     jobs: usize,
 ) -> ChainStepResults {
@@ -4032,7 +4035,7 @@ fn run_chain_steps(
     let mut results: ChainStepResults = vec![None; steps.len()];
     if jobs <= 1 {
         for (index, (kind, layer)) in steps.iter().enumerate() {
-            let result = run_chain_step_isolated(kind, layer, sections, base);
+            let result = run_chain_step_isolated(kind, layer, sections, base, &roots);
             let failed = result.1;
             results[index] = Some(result);
             if failed && !keep_going {
@@ -4041,8 +4044,8 @@ fn run_chain_steps(
         }
         return results;
     }
-    let groups = Arc::new(chain_step_groups(steps, sections, base));
-    let shared = Arc::new((steps.to_vec(), sections.clone(), base.to_path_buf()));
+    let groups = Arc::new(chain_step_groups(steps, &roots));
+    let shared = Arc::new((steps.to_vec(), sections.clone(), base.to_path_buf(), roots));
     let next_group = Arc::new(AtomicUsize::new(0));
     let cutoff = Arc::new(AtomicUsize::new(usize::MAX));
     let (sender, receiver) = std::sync::mpsc::channel::<ChainStepMessage>();
@@ -4058,7 +4061,7 @@ fn run_chain_steps(
             .stack_size(STACK_SIZE)
             .name(format!("fslc-chain-{worker}"))
             .spawn(move || {
-                let (steps, sections, base) = &*shared;
+                let (steps, sections, base, roots) = &*shared;
                 while let Some(group) = groups.get(next_group.fetch_add(1, Ordering::SeqCst)) {
                     for &index in group {
                         if index > cutoff.load(Ordering::SeqCst) {
@@ -4066,7 +4069,7 @@ fn run_chain_steps(
                         }
                         let (kind, layer) = &steps[index];
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            run_chain_step_isolated(kind, layer, sections, base)
+                            run_chain_step_isolated(kind, layer, sections, base, roots)
                         }));
                         let ends_serial_loop = result
                             .as_ref()
@@ -4123,7 +4126,7 @@ fn run_chain_steps(
         && let Some(index) = steps.iter().position(|(kind, _)| kind == "impl")
     {
         let (kind, layer) = &steps[index];
-        results[index] = Some(run_chain_step(kind, layer, sections, base));
+        results[index] = Some(run_chain_step(kind, layer, sections, base, &shared.3));
     }
     results
 }
@@ -4173,6 +4176,7 @@ fn run_chain_step(
     layer: &str,
     sections: &std::collections::BTreeMap<String, ManifestSection>,
     base: &Path,
+    roots: &[ProjectRoot],
 ) -> (Value, bool) {
     let section = &sections[layer];
     if kind == "spec" {
@@ -4196,7 +4200,12 @@ fn run_chain_step(
                                     .to_owned(),
                                 ..CliVerifyOptions::default()
                             };
-                            let (detail, status) = run_verify_cli(&file_path, &file_path, &options);
+                            let root = project_root(roots, layer, false);
+                            let (detail, status) = run_prepared_project_roots(&[root], |sources| {
+                                run_verify_cli_admitted(
+                                    &file_path, &file_path, sources[0], &options, None,
+                                )
+                            });
                             (detail, status, "verify", Some(depth))
                         }
                         Err(message) => (
@@ -4207,7 +4216,10 @@ fn run_chain_step(
                         ),
                     }
                 } else {
-                    let (detail, status) = run_check(&file_path, &file_path);
+                    let root = project_root(roots, layer, false);
+                    let (detail, status) = run_prepared_project_roots(&[root], |sources| {
+                        run_check_from_source(&file_path, &file_path, sources[0], &root.edition)
+                    });
                     (detail, status, "check", None)
                 };
                 let passed = chain_layer_passes(&detail, status);
@@ -4291,8 +4303,19 @@ fn run_chain_step(
             };
             match depth_result {
                 Ok(depth) => {
-                    let (detail, status) =
-                        run_refine(&file_path, &target_path, &mapping_path, depth);
+                    let inputs = [
+                        project_root(roots, layer, false),
+                        project_root(roots, target, false),
+                        project_root(roots, layer, true),
+                    ];
+                    let (detail, status) = run_prepared_project_roots(&inputs, |sources| {
+                        run_refine_from_sources(
+                            &file_path,
+                            &target_path,
+                            [sources[0], sources[1], sources[2]],
+                            depth,
+                        )
+                    });
                     let passed = chain_layer_passes(&detail, status);
                     (
                         json!({
@@ -5457,16 +5480,24 @@ fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32)
         None,
         false,
         |sources, editions| {
-            let source = &sources[0];
-            let (output, status) =
-                run_scenarios_mode_from_source(path, source, depth, deadlock_mode, false);
             finish_admitted(
-                fold_scenarios_refinements(path, source, depth, output, status),
+                run_scenarios_from_source(path, &sources[0], depth, deadlock_mode),
                 editions,
                 false,
             )
         },
     )
+}
+
+fn run_scenarios_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+) -> (Value, i32) {
+    let (output, status) =
+        run_scenarios_mode_from_source(path, source, depth, deadlock_mode, false);
+    fold_scenarios_refinements(path, source, depth, output, status)
 }
 
 /// Fold inline `implements` and governance preservations into a `scenarios`
@@ -6057,20 +6088,6 @@ fn format_bindings(binding: &fsl_runtime::Bindings) -> String {
         .join(", ")
 }
 
-/// `path` is read for source content (for a literate `.md` input, this is the
-/// materialized, blanked `.literate.fsl` sibling — its line positions match
-/// the original document). `display_path` is stamped into every user-visible
-/// label (`file` fields, embedded `at file:line:col` text) so the machine-
-/// readable output always names the document the caller actually passed in,
-/// never the transient materialization.
-fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_check_with_tags_from_source(path, display_path, &source, false, None, None)
-}
-
 /// Check one caller-owned root-source snapshot.
 ///
 /// The displayed path intentionally remains independent of the path used to
@@ -6421,11 +6438,6 @@ fn parse_surface_document_from_source(
             error.span.start.column
         )
     })
-}
-
-fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    parse_surface_document_from_source(path, &source)
 }
 
 /// Load a dialect surface document from an already-captured source string.
@@ -13162,6 +13174,7 @@ fn report_verification_from_source(
     engine: &str,
     edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
     let result = if edition.is_some() {
         run_verify_admitted_from_source(
             path,
@@ -13184,10 +13197,10 @@ fn report_verification_from_source(
             1,
         )
     };
-    match edition {
+    dependencies.finish_distinct(match edition {
         Some(edition) if result.0["result"] != "error" => edition.finish(result),
         _ => result,
-    }
+    })
 }
 
 fn finish_admitted_report(result: (Value, i32), editions: &[SourceEdition]) -> (Value, i32) {
@@ -13196,20 +13209,6 @@ fn finish_admitted_report(result: (Value, i32), editions: &[SourceEdition]) -> (
     } else {
         finish_admitted(result, editions, false)
     }
-}
-
-fn run_html_report(
-    path: &Path,
-    depth: usize,
-    deadlock_mode: &str,
-    engine: &str,
-    output_path: Option<&Path>,
-) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_html_report_from_source(path, &source, depth, deadlock_mode, engine, output_path)
 }
 
 fn run_html_report_with_timing(
@@ -13247,6 +13246,7 @@ fn run_html_report_with_timing(
 /// Model lowering, verification, explanation, and rendered source all derive
 /// from `source`. Dependency files loaded by `FsResolver` deliberately retain
 /// their independent read semantics.
+#[cfg(test)]
 fn run_html_report_from_source(
     path: &Path,
     source: &str,
@@ -13428,6 +13428,7 @@ fn document_generation_inputs(
 /// time) alongside the canonical Markdown.
 fn render_document_for_approval(
     path: &Path,
+    source: &str,
     inputs: &approval::DocumentGenerationInputs,
 ) -> Result<(fsl_tools::RequirementClaimSet, String), Value> {
     let locale = fsl_tools::Locale::parse(&inputs.lang).ok_or_else(|| {
@@ -13436,7 +13437,7 @@ fn render_document_for_approval(
             &format!("unsupported document lang '{}'", inputs.lang),
         )
     })?;
-    let (source, claims) = load_document_claims(path)?;
+    let claims = load_document_claims_from_source(path, source, &path.to_string_lossy())?;
     let loaded_glossary = load_glossary(
         inputs
             .glossary
@@ -13453,7 +13454,7 @@ fn render_document_for_approval(
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = dependency_resolver(base);
     let kernel =
-        fsl_core::parse_kernel_source_with_options(&source, &resolver, crate::parse_options())
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
             .map_err(|error| semantic_error_output(&error.to_string()))?;
     let model =
         fsl_core::build_model(kernel.clone()).map_err(|error| model_error_output(&error))?;
@@ -13467,7 +13468,7 @@ fn render_document_for_approval(
         &claims,
         &kernel,
         &model,
-        &source,
+        source,
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
@@ -13486,6 +13487,8 @@ fn render_document_for_approval(
 /// which have no RCIR concept at all).
 fn approval_artifact(
     path: &Path,
+    source: &str,
+    edition: &SourceEdition,
     kind: &str,
     inputs: &approval::GenerationInputs,
 ) -> Result<(Vec<u8>, Option<String>), Value> {
@@ -13496,7 +13499,7 @@ fn approval_artifact(
                 "requirements_document approval requires document generation inputs",
             ));
         };
-        let (claims, markdown) = render_document_for_approval(path, document_inputs)?;
+        let (claims, markdown) = render_document_for_approval(path, source, document_inputs)?;
         return Ok((markdown.into_bytes(), Some(claims.spec.claim_set_digest)));
     }
     let approval::GenerationInputs::Solver(inputs) = inputs else {
@@ -13505,25 +13508,44 @@ fn approval_artifact(
             "ledger/html/scenarios approval requires solver generation inputs",
         ));
     };
-    let (result, status) = match kind {
-        "ledger" => generate_unapproved_ledger_report(&LedgerReportRequest {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let (result, status) = dependencies.finish_distinct(match kind {
+        "ledger" => generate_unapproved_ledger_report_from_source(
+            &LedgerReportRequest {
+                path,
+                depth: inputs.depth,
+                deadlock_mode: &inputs.deadlock,
+                engine: &inputs.engine,
+                impl_log: None,
+                evidence_paths: &[],
+                output_path: None,
+            },
+            source,
+            Some(edition),
+        ),
+        "html" => run_html_report_from_source_with_timing(
             path,
-            depth: inputs.depth,
-            deadlock_mode: &inputs.deadlock,
-            engine: &inputs.engine,
-            impl_log: None,
-            evidence_paths: &[],
-            output_path: None,
-        }),
-        "html" => run_html_report(path, inputs.depth, &inputs.deadlock, &inputs.engine, None),
-        "scenarios" => run_scenarios(path, inputs.depth, &inputs.deadlock),
+            source,
+            inputs.depth,
+            &inputs.deadlock,
+            &inputs.engine,
+            None,
+            false,
+            Some(edition),
+        ),
+        "scenarios" => edition.finish(run_scenarios_from_source(
+            path,
+            source,
+            inputs.depth,
+            &inputs.deadlock,
+        )),
         _ => {
             return Err(error_output(
                 "usage",
                 &format!("unsupported approval target '{kind}'"),
             ));
         }
-    };
+    });
     if status != 0 {
         return Err(result);
     }
@@ -13542,19 +13564,20 @@ fn approval_artifact(
     Ok((bytes, None))
 }
 
-fn approval_spec_digest(path: &Path) -> Result<String, SpecLoadError> {
+fn approval_spec_digest(path: &Path, source: &str) -> Result<String, SpecLoadError> {
     if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
-        return approval::spec_digest(path).map_err(SpecLoadError::unlocated_semantic);
+        return approval::spec_digest_from_source(path, source)
+            .map_err(SpecLoadError::unlocated_semantic);
     }
-    let source = read_spec_source(path)?;
-    if fsl_syntax::extract_literate_fsl(&source).is_some() {
-        return approval::spec_digest(path).map_err(SpecLoadError::unlocated_semantic);
+    if fsl_syntax::extract_literate_fsl(source).is_some() {
+        return approval::spec_digest_from_source(path, source)
+            .map_err(SpecLoadError::unlocated_semantic);
     }
     let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
     let kernel =
-        fsl_core::parse_kernel_source_with_options(&source, &resolver, crate::parse_options())
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
             .map_err(|error| {
-                surface_parse_failure(&source, crate::parse_options()).map_or_else(
+                surface_parse_failure(source, crate::parse_options()).map_or_else(
                     || SpecLoadError::unlocated_semantic(error.to_string()),
                     |error| SpecLoadError::Parse(Box::new(error)),
                 )
@@ -13588,7 +13611,45 @@ fn run_approval_create(
     if approver.trim().is_empty() {
         return (error_output("usage", "--approver must not be empty"), 2);
     }
-    let model = match load_model(path) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_approval_create_from_source(
+                    path,
+                    &sources[0],
+                    &editions[0],
+                    kind,
+                    artifact_path,
+                    approver,
+                    selected_requirements,
+                    inputs,
+                    output_path,
+                    signing_key,
+                ),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn run_approval_create_from_source(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    kind: &str,
+    artifact_path: &Path,
+    approver: &str,
+    selected_requirements: &[String],
+    inputs: &approval::GenerationInputs,
+    output_path: Option<&Path>,
+    signing_key: Option<&Path>,
+) -> (Value, i32) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -13596,7 +13657,7 @@ fn run_approval_create(
         Ok(binding) => binding,
         Err(error) => return (error_output("io", &error), 2),
     };
-    let digest = match approval::spec_digest(path) {
+    let digest = match approval::spec_digest_from_source(path, source) {
         Ok(digest) => digest,
         Err(error) => return (semantic_error_output(&error), 2),
     };
@@ -13612,11 +13673,11 @@ fn run_approval_create(
                     2,
                 );
             };
-            let (claims, fresh_markdown) = match render_document_for_approval(path, document_inputs)
-            {
-                Ok(result) => result,
-                Err(error) => return (error, 2),
-            };
+            let (claims, fresh_markdown) =
+                match render_document_for_approval(path, source, document_inputs) {
+                    Ok(result) => result,
+                    Err(error) => return (error, 2),
+                };
             let reviewed_text = match std::fs::read_to_string(artifact_path) {
                 Ok(text) => text,
                 Err(error) => return (error_output("io", &error.to_string()), 2),
@@ -13660,10 +13721,11 @@ fn run_approval_create(
                     2,
                 );
             };
-            let (expected_artifact, _) = match approval_artifact(path, kind, inputs) {
-                Ok(artifact) => artifact,
-                Err(error) => return (error, 2),
-            };
+            let (expected_artifact, _) =
+                match approval_artifact(path, source, edition, kind, inputs) {
+                    Ok(artifact) => artifact,
+                    Err(error) => return (error, 2),
+                };
             let reviewed_artifact = match std::fs::read(artifact_path) {
                 Ok(artifact) => artifact,
                 Err(error) => return (error_output("io", &error.to_string()), 2),
@@ -13791,6 +13853,8 @@ fn run_approval_create(
 
 fn approval_evaluation(
     path: &Path,
+    source: &str,
+    edition: &SourceEdition,
     record_path: &Path,
     trust: &approval::TrustStore,
 ) -> Result<Value, Value> {
@@ -13837,9 +13901,14 @@ fn approval_evaluation(
     approval::verify_git_baseline(&repo, &relative_path, &record.spec.git_commit)
         .map_err(|error| error_output("io", &error))?;
     let current_spec_digest =
-        approval_spec_digest(path).map_err(|error| spec_load_error_output(&error))?;
-    let (artifact, current_claim_set_digest) =
-        approval_artifact(path, &record.target.kind, &record.target.inputs)?;
+        approval_spec_digest(path, source).map_err(|error| spec_load_error_output(&error))?;
+    let (artifact, current_claim_set_digest) = approval_artifact(
+        path,
+        source,
+        edition,
+        &record.target.kind,
+        &record.target.inputs,
+    )?;
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| error_output("internal", &error))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
@@ -13863,11 +13932,38 @@ fn approval_evaluation(
 }
 
 fn run_approval_check(path: &Path, record_path: &Path, trust_keys: &[PathBuf]) -> (Value, i32) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_approval_check_from_source(
+                    path,
+                    &sources[0],
+                    &editions[0],
+                    record_path,
+                    trust_keys,
+                ),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+fn run_approval_check_from_source(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    record_path: &Path,
+    trust_keys: &[PathBuf],
+) -> (Value, i32) {
     let trust = match approval::TrustStore::load(trust_keys) {
         Ok(trust) => trust,
         Err(error) => return (error_output("io", &error), 2),
     };
-    let evaluation = match approval_evaluation(path, record_path, &trust) {
+    let evaluation = match approval_evaluation(path, source, edition, record_path, &trust) {
         Ok(evaluation) => evaluation,
         Err(error) => return (error, 2),
     };
@@ -13883,6 +13979,8 @@ fn run_approval_check(path: &Path, record_path: &Path, trust_keys: &[PathBuf]) -
 
 fn approval_overlay(
     path: &Path,
+    source: &str,
+    edition: &SourceEdition,
     record_paths: &[PathBuf],
     trust_keys: &[PathBuf],
 ) -> Result<Value, Value> {
@@ -13891,7 +13989,7 @@ fn approval_overlay(
     let mut requirements = Map::new();
     let mut records = Vec::new();
     for record_path in record_paths {
-        let evaluation = approval_evaluation(path, record_path, &trust)?;
+        let evaluation = approval_evaluation(path, source, edition, record_path, &trust)?;
         for requirement in evaluation
             .get("requirements")
             .and_then(Value::as_array)
@@ -13926,7 +14024,7 @@ struct PreparedLedgerReport {
 }
 
 /// The direct `fslc ledger` entry point. Unlike
-/// `generate_unapproved_ledger_report` (which `approval_artifact` also calls
+/// `generate_unapproved_ledger_report_from_source` (which `approval_artifact` also calls
 /// to reproduce a target's canonical rendering purely for a digest
 /// comparison -- a verdict mismatch there is legitimate drift evidence for
 /// `approval check`/`create`, not a hard error), this is the command a user
@@ -13989,7 +14087,7 @@ fn run_ledger_report_admitted_from_source(
     let approvals = if approval_paths.is_empty() {
         None
     } else {
-        match approval_overlay(request.path, approval_paths, trust_keys) {
+        match approval_overlay(request.path, source, edition, approval_paths, trust_keys) {
             Ok(approvals) => Some(approvals),
             Err(error) => return (error, 2),
         }
@@ -14013,20 +14111,13 @@ fn run_ledger_report_admitted_from_source(
     )
 }
 
-fn generate_unapproved_ledger_report(request: &LedgerReportRequest<'_>) -> (Value, i32) {
-    let source = match read_spec_source(request.path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    generate_unapproved_ledger_report_from_source(request, &source)
-}
-
 /// Generate the approval-rendering form from one caller-owned root snapshot.
 fn generate_unapproved_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
+    edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source, false, None) {
+    let prepared = match prepare_ledger_report_from_source(request, source, false, edition) {
         Ok(prepared) => prepared,
         Err(error) => return error,
     };
@@ -15369,13 +15460,112 @@ fn prefixed_analysis_edge(layer: &str, edge: &Value) -> Value {
     edge
 }
 
+const PROJECT_ANALYSIS_LAYERS: [&str; 3] = ["business", "requirements", "design"];
+
+struct ProjectRoot {
+    layer: &'static str,
+    mapping: bool,
+    path: PathBuf,
+    source: Result<String, SpecLoadError>,
+    edition: SourceEdition,
+}
+
+impl ProjectRoot {
+    fn source(&self) -> Result<&str, (Value, i32)> {
+        self.source
+            .as_deref()
+            .map_err(|error| (spec_load_error_output(error), 2))
+    }
+}
+
+fn prepare_project_roots(
+    sections: &std::collections::BTreeMap<String, ManifestSection>,
+    base: &Path,
+    read_mapping: fn(&Path) -> Result<String, SpecLoadError>,
+) -> Result<Vec<ProjectRoot>, (Value, i32)> {
+    let mut roots = Vec::new();
+    for mapping in [false, true] {
+        for layer in PROJECT_ANALYSIS_LAYERS {
+            let Some(section) = sections.get(layer) else {
+                continue;
+            };
+            let file = if mapping {
+                section
+                    .values
+                    .get("refine_against")
+                    .filter(|target| PROJECT_ANALYSIS_LAYERS.contains(&target.as_str()))
+                    .and_then(|target| sections.get(target))
+                    .filter(|target| {
+                        target.values.contains_key("file") && section.values.contains_key("file")
+                    })
+                    .and_then(|_| section.values.get("mapping"))
+            } else {
+                section.values.get("file")
+            };
+            if let Some(file) = file {
+                let path = base.join(file);
+                let source = if mapping {
+                    read_mapping(&path)
+                } else {
+                    read_spec_source(&path)
+                };
+                roots.push(ProjectRoot {
+                    layer,
+                    mapping,
+                    path,
+                    source,
+                    edition: SourceEdition::default(),
+                });
+            }
+        }
+    }
+    for root in &mut roots {
+        if let Ok(source) = &root.source {
+            root.edition = admit_root_source(&root.path, source, None)?;
+        }
+    }
+    Ok(roots)
+}
+
+fn project_root<'a>(roots: &'a [ProjectRoot], layer: &str, mapping: bool) -> &'a ProjectRoot {
+    roots
+        .iter()
+        .find(|root| root.layer == layer && root.mapping == mapping)
+        .expect("prepared manifest slot")
+}
+
+fn run_prepared_project_roots(
+    roots: &[&ProjectRoot],
+    run: impl FnOnce(&[&str]) -> (Value, i32),
+) -> (Value, i32) {
+    let sources = match roots
+        .iter()
+        .map(|root| root.source())
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(sources) => sources,
+        Err(error) => return error,
+    };
+    let editions = roots
+        .iter()
+        .map(|root| root.edition.clone())
+        .collect::<Vec<_>>();
+    run_prepared_roots(&editions, false, || {
+        finish_admitted(run(&sources), &editions, false)
+    })
+}
+
+struct ProjectSources {
+    sections: std::collections::BTreeMap<String, ManifestSection>,
+    roots: Vec<ProjectRoot>,
+}
+
 #[allow(clippy::too_many_lines)]
-fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
-    let source = read_spec_source(path)?;
-    // The manifest is TOML, not a specification; its message already names the
-    // manifest line, and a `loc` here would be read as a position in the `.fsl`
-    // file the envelope is reporting on.
-    let sections = parse_project_manifest(&source).map_err(SpecLoadError::unlocated_semantic)?;
+fn project_traceability_output(
+    path: &Path,
+    prepared: &ProjectSources,
+) -> Result<Value, SpecLoadError> {
+    let sections = &prepared.sections;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let manifest = analysis_display_path(path);
     let mut nodes = std::collections::BTreeMap::new();
@@ -15388,7 +15578,7 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
         .insert("path".to_owned(), json!(manifest));
     insert_analysis_item(&mut nodes, manifest_node);
     let mut layers = std::collections::BTreeMap::new();
-    for layer in ["business", "requirements", "design"] {
+    for layer in PROJECT_ANALYSIS_LAYERS {
         let Some(file) = sections
             .get(layer)
             .and_then(|section| section.values.get("file"))
@@ -15396,15 +15586,18 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
             continue;
         };
         let layer_path = base.join(file);
-        let layer_source = read_spec_source(&layer_path)?;
-        let model = load_model_from_source(&layer_path, &layer_source)?;
+        let layer_source = project_root(&prepared.roots, layer, false)
+            .source
+            .as_deref()
+            .expect("readable project slot");
+        let model = load_model_from_source(&layer_path, layer_source)?;
         // `build_tsg` projects `requirement`/`kpi` nodes and `covers` edges
         // (#495) from `model.requirement_targets()`/`model.projections`, but it
         // only ever sees the lowered `KernelModel`. The source-only kinds run
         // through the same enrichment the standalone path uses, per layer and
         // on the unprefixed graph, so both input forms yield the same
         // vocabulary and the layer prefix below still applies uniformly (#558).
-        let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, &layer_source);
+        let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, layer_source);
         let display = analysis_display_path(&layer_path);
         let file_id = format!("file:{layer}:{display}");
         let mut file_node = project_analysis_node(&file_id, "file", &display);
@@ -15456,7 +15649,7 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
             },
         );
     }
-    for layer in ["business", "requirements", "design"] {
+    for layer in PROJECT_ANALYSIS_LAYERS {
         let Some(section) = sections.get(layer) else {
             continue;
         };
@@ -15475,16 +15668,19 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
         // from the manifest the envelope reports on. Their spans exist but
         // index a different source, and `loc` carries no file, so emitting one
         // would point a repair agent into the wrong document.
-        let document =
-            parse_surface_document(&mapping_path).map_err(SpecLoadError::unlocated_semantic)?;
+        let mapping_source = project_root(&prepared.roots, layer, true)
+            .source
+            .as_deref()
+            .expect("readable project mapping");
+        let document = parse_surface_document_from_source(&mapping_path, mapping_source)
+            .map_err(SpecLoadError::unlocated_semantic)?;
         let fsl_syntax::SurfaceDocument::Refinement(refinement) = document else {
             return Err(SpecLoadError::unlocated_semantic(
                 "expected refinement mapping",
             ));
         };
-        let mapping_source = read_spec_source(&mapping_path)?;
         let checked_refinement = fsl_core::parse_refinement_with_options(
-            &mapping_source,
+            mapping_source,
             &implementation.model,
             &abstraction.model,
             crate::parse_options(),
@@ -15750,7 +15946,46 @@ fn analysis_acceptance_predicates_from_source(
         .collect()
 }
 
-#[allow(clippy::too_many_lines)]
+struct PreparedAnalysis {
+    source: String,
+    project: Option<ProjectSources>,
+    editions: Vec<SourceEdition>,
+}
+
+fn prepare_analysis(path: &Path) -> Result<PreparedAnalysis, (Value, i32)> {
+    let source = read_spec_source(path).map_err(|error| (spec_load_error_output(&error), 2))?;
+    let (project, editions) = if path.extension().and_then(std::ffi::OsStr::to_str) == Some("toml")
+    {
+        let sections = parse_project_manifest(&source).map_err(|error| {
+            (
+                spec_load_error_output(&SpecLoadError::unlocated_semantic(error)),
+                2,
+            )
+        })?;
+        let roots = prepare_project_roots(
+            &sections,
+            path.parent().unwrap_or_else(|| Path::new(".")),
+            read_spec_source,
+        )?;
+        for root in &roots {
+            root.source()?;
+        }
+        let editions = roots
+            .iter()
+            .map(|root| root.edition.warnings_only())
+            .collect();
+        (Some(ProjectSources { sections, roots }), editions)
+    } else {
+        (None, vec![admit_root_source(path, &source, None)?])
+    };
+    Ok(PreparedAnalysis {
+        source,
+        project,
+        editions,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_analyze(
     path: &Path,
     projection: &str,
@@ -15760,34 +15995,58 @@ fn run_analyze(
     export_kind: Option<&str>,
     code_path: Option<&Path>,
 ) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
-        None,
-        output_format != "json",
-        |sources, editions| {
-            finish_admitted(
-                run_analyze_from_source(
-                    path,
-                    &sources[0],
-                    projection,
-                    focus,
-                    output_format,
-                    profile,
-                    export_kind,
-                    code_path,
-                ),
-                editions,
-                output_format != "json",
-            )
-        },
+    let prepared = match prepare_analysis(path) {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
+    };
+    run_prepared_analysis(
+        path,
+        &prepared,
+        projection,
+        focus,
+        output_format,
+        profile,
+        export_kind,
+        code_path,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_prepared_analysis(
+    path: &Path,
+    prepared: &PreparedAnalysis,
+    projection: &str,
+    focus: Option<&str>,
+    output_format: &str,
+    profile: Option<&str>,
+    export_kind: Option<&str>,
+    code_path: Option<&Path>,
+) -> (Value, i32) {
+    run_prepared_roots(&prepared.editions, output_format != "json", || {
+        let result = run_analyze_from_source(
+            path,
+            &prepared.source,
+            projection,
+            focus,
+            output_format,
+            profile,
+            export_kind,
+            code_path,
+            prepared.project.as_ref(),
+        );
+        if prepared.editions.is_empty() {
+            result
+        } else {
+            finish_admitted(result, &prepared.editions, output_format != "json")
+        }
+    })
 }
 
 /// Analyze one caller-owned root-source snapshot.
 ///
 /// The tag-review model, refinement surface, ordinary model, and AI-review
-/// acceptance predicates all derive from `source`. Project-manifest analysis
-/// and its referenced layer files retain their own input contract.
+/// acceptance predicates derive from `source`; manifest layers and mappings
+/// use the prepared slots captured before analysis begins.
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_analyze_from_source(
     path: &Path,
@@ -15798,6 +16057,7 @@ fn run_analyze_from_source(
     profile: Option<&str>,
     export_kind: Option<&str>,
     code_path: Option<&Path>,
+    project: Option<&ProjectSources>,
 ) -> (Value, i32) {
     if !matches!(output_format, "json" | "dot" | "mermaid") {
         return (
@@ -15892,10 +16152,11 @@ fn run_analyze_from_source(
                 2,
             );
         }
-        let analysis = match project_traceability_output(path) {
-            Ok(analysis) => analysis,
-            Err(error) => return (spec_load_error_output(&error), 2),
-        };
+        let analysis =
+            match project_traceability_output(path, project.expect("prepared project analysis")) {
+                Ok(analysis) => analysis,
+                Err(error) => return (spec_load_error_output(&error), 2),
+            };
         return finish_analysis(analysis, None, projection, output_format);
     }
     if let Some(export_kind) = export_kind {
@@ -16032,6 +16293,9 @@ fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
         "profile",
         "schema_version",
         "formal_status",
+        "warnings",
+        "edition",
+        "fsl_edition",
     ] {
         if let Some(value) = result.get(key) {
             entry.insert(key.to_owned(), value.clone());
@@ -16059,7 +16323,7 @@ fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
             );
         }
     } else {
-        for key in ["kind", "message", "loc", "expected", "hint"] {
+        for key in ["kind", "message", "loc", "expected", "hint", "findings"] {
             if let Some(value) = result.get(key) {
                 entry.insert(key.to_owned(), value.clone());
             }
@@ -16068,6 +16332,7 @@ fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
     Value::Object(entry)
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_analyze_batch(
     paths: &[PathBuf],
     projection: &str,
@@ -16136,14 +16401,24 @@ fn run_analyze_batch(
         left.canonicalize().unwrap_or_else(|_| left.clone())
             == right.canonicalize().unwrap_or_else(|_| right.clone())
     });
+    let prepared = match files
+        .iter()
+        .map(|path| prepare_analysis(path))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
+    };
     let mut entries = Vec::new();
     let mut errors = Vec::new();
-    for path in files {
-        let (result, _) = run_analyze(&path, projection, None, "json", profile, None, None);
-        entries.push(analysis_batch_entry(&path, &result));
+    for (path, prepared) in files.iter().zip(&prepared) {
+        let (result, _) = run_prepared_analysis(
+            path, prepared, projection, None, "json", profile, None, None,
+        );
+        entries.push(analysis_batch_entry(path, &result));
         if result.get("result").and_then(Value::as_str) != Some("analyzed") {
             errors.push(json!({
-                "file":analysis_display_path(&path),
+                "file":analysis_display_path(path),
                 "result":result.get("result"),
                 "kind":result.get("kind"),
                 "message":result.get("message"),
@@ -16897,7 +17172,6 @@ fn public_scope(scope: &ScopeBounds) -> Value {
     })
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_diff(
     old: &Path,
     new: &Path,
@@ -16905,28 +17179,69 @@ fn run_diff(
     mapping: Option<&Path>,
     forbid: &[String],
 ) -> (Value, i32) {
-    let old_source = match std::fs::read_to_string(old) {
+    let mut roots = vec![
+        (old, read_unprefixed_spec_source(old)),
+        (new, read_unprefixed_spec_source(new)),
+    ];
+    roots.extend(mapping.map(|path| (path, read_unprefixed_spec_source(path))));
+    run_admitted_roots(roots, None, false, |sources, editions| {
+        finish_admitted(
+            run_diff_from_sources(
+                [(old, &sources[0]), (new, &sources[1])],
+                depth,
+                sources.get(2).map(String::as_str),
+                forbid,
+            ),
+            editions,
+            false,
+        )
+    })
+}
+
+fn run_historical_diff(
+    old: &Path,
+    new: &Path,
+    depth: usize,
+    mapping_source: Option<&str>,
+    forbid: &[String],
+) -> (Value, i32) {
+    let old_source = match read_unprefixed_spec_source(old) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let new_source = match std::fs::read_to_string(new) {
+    let new_source = match read_unprefixed_spec_source(new) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (spec_load_error_output(&error), 2),
     };
+    run_diff_from_sources(
+        [(old, &old_source), (new, &new_source)],
+        depth,
+        mapping_source,
+        forbid,
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_diff_from_sources(
+    [(old, old_source), (new, new_source)]: [(&Path, &str); 2],
+    depth: usize,
+    mapping_source: Option<&str>,
+    forbid: &[String],
+) -> (Value, i32) {
     // The declared scope's `values` bounds are resolved against each spec's
     // own built model (the same evaluator `check` uses for
     // `SpecItem::Type`), not re-folded from the raw AST here, so a const
     // bound compares and overrides the same way a literal one does.
-    let old_model_declared = match load_model(old) {
+    let old_model_declared = match load_model_from_source(old, old_source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let new_model = match load_model(new) {
+    let new_model = match load_model_from_source(new, new_source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let old_scope = resolve_scope(declared_raw_scope(&old_source), &old_model_declared);
-    let new_scope = resolve_scope(declared_raw_scope(&new_source), &new_model);
+    let old_scope = resolve_scope(declared_raw_scope(old_source), &old_model_declared);
+    let new_scope = resolve_scope(declared_raw_scope(new_source), &new_model);
     let scope_changed = old_scope != new_scope;
     let overrides = ScopeBounds {
         instances: new_scope
@@ -16953,7 +17268,7 @@ fn run_diff(
     // in the re-scoped old model; dropping it keeps the old document's bound.
     let old_model = if scope_changed {
         let loadable = match fsl_core::retain_dialect_scope_overrides_with_options(
-            &old_source,
+            old_source,
             &overrides.instances,
             &overrides.values,
             crate::parse_options(),
@@ -16962,7 +17277,7 @@ fn run_diff(
             Err(error) => {
                 return (
                     spec_load_error_output(&kernel_load_error(
-                        &old_source,
+                        old_source,
                         &error,
                         crate::parse_options(),
                     )),
@@ -16970,19 +17285,15 @@ fn run_diff(
                 );
             }
         };
-        match load_model_scoped(old, &loadable) {
+        match load_model_scoped_from_source(old, old_source, &loadable) {
             Ok(model) => model,
             Err(error) => return (spec_load_error_output(&error), 2),
         }
     } else {
         old_model_declared
     };
-    let mapping_source = match mapping.map(std::fs::read_to_string).transpose() {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
     let mut explicit_direction = None;
-    if let Some(source) = mapping_source.as_deref() {
+    if let Some(source) = mapping_source {
         let surface = match fsl_syntax::parse_surface_document_with(source, crate::parse_options())
         {
             Ok(fsl_syntax::SurfaceDocument::Refinement(surface)) => surface,
@@ -17021,7 +17332,7 @@ fn run_diff(
         &old_model,
         depth,
         (explicit_direction == Some("new_to_old"))
-            .then_some(mapping_source.as_deref())
+            .then_some(mapping_source)
             .flatten(),
     ) {
         Ok(result) => result,
@@ -17032,7 +17343,7 @@ fn run_diff(
         &new_model,
         depth,
         (explicit_direction == Some("old_to_new"))
-            .then_some(mapping_source.as_deref())
+            .then_some(mapping_source)
             .flatten(),
     ) {
         Ok(result) => result,
@@ -17079,7 +17390,7 @@ fn run_diff(
         }
     }
     findings.extend(compare_diff_invariants(&old_model, &new_model));
-    match forbidden_diff_findings((&old_source, &old_model), (&new_source, &new_model)) {
+    match forbidden_diff_findings((old_source, &old_model), (new_source, &new_model)) {
         Ok(forbidden_findings) => findings.extend(forbidden_findings),
         Err(error) => return (error_output("type", &error), 2),
     }
@@ -17220,9 +17531,30 @@ fn materialize_git_tree(repo: &Path, revision: &str, destination: &Path) -> Resu
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_approval_diff(
     path: &Path,
+    record_path: &Path,
+    depth: usize,
+    trust_keys: &[PathBuf],
+) -> (Value, i32) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_approval_diff_from_source(path, &sources[0], record_path, depth, trust_keys),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_approval_diff_from_source(
+    path: &Path,
+    source: &str,
     record_path: &Path,
     depth: usize,
     trust_keys: &[PathBuf],
@@ -17311,7 +17643,15 @@ fn run_approval_diff(
             2,
         );
     }
-    let (mut result, status) = run_diff(&old, path, depth, None, &[]);
+    let old_source = match read_unprefixed_spec_source(&old) {
+        Ok(source) => source,
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&root);
+            return (spec_load_error_output(&error), 2);
+        }
+    };
+    let (mut result, status) =
+        run_diff_from_sources([(&old, &old_source), (path, source)], depth, None, &[]);
     if let Value::Object(output) = &mut result {
         if let Some(Value::Object(old)) = output.get_mut("old") {
             old.insert(
@@ -17427,6 +17767,7 @@ fn run_diff_git(
     });
     let mut comparisons = Vec::new();
     let mut status = 0;
+    let mut live_mapping = None;
     for relative in &specs {
         let old = base_tree.join(relative);
         let new = head_tree.join(relative);
@@ -17452,8 +17793,44 @@ fn run_diff_git(
                 }
             }
         });
-        let (mut comparison, comparison_status) =
-            run_diff(&old, &new, depth, resolved_mapping.as_deref(), forbid);
+        let (mut comparison, comparison_status) = if let Some(path) = resolved_mapping.as_deref() {
+            if path.starts_with(&head_tree) {
+                match read_unprefixed_spec_source(path) {
+                    Ok(source) => run_historical_diff(&old, &new, depth, Some(&source), forbid),
+                    Err(error) => (spec_load_error_output(&error), 2),
+                }
+            } else {
+                let captured = live_mapping.get_or_insert_with(|| {
+                    let source = read_unprefixed_spec_source(path)
+                        .map_err(|error| (spec_load_error_output(&error), 2))?;
+                    let edition = admit_root_source(path, &source, None)?;
+                    Ok::<_, (Value, i32)>((source, edition))
+                });
+                match captured {
+                    Ok((source, edition)) => {
+                        run_prepared_roots(std::slice::from_ref(edition), false, || {
+                            edition.warnings_only().finish(run_historical_diff(
+                                &old,
+                                &new,
+                                depth,
+                                Some(source.as_str()),
+                                forbid,
+                            ))
+                        })
+                    }
+                    Err(error) => error.clone(),
+                }
+            }
+        } else {
+            run_historical_diff(&old, &new, depth, None, forbid)
+        };
+        if comparison_status == 2
+            && comparison.get("edition").is_some()
+            && comparison["findings"].is_array()
+        {
+            let _ = std::fs::remove_dir_all(&root);
+            return (comparison, comparison_status);
+        }
         status = status.max(comparison_status);
         if let Value::Object(output) = &mut comparison {
             output.insert(
@@ -17540,6 +17917,35 @@ fn implements_result_from_source(
     implements_result_from_source_with_bounds(path, source, model, depth, &ScopeBounds::default())
 }
 
+fn run_refine_admitted(
+    implementation: &Path,
+    abstraction: &Path,
+    mapping: &Path,
+    depth: usize,
+) -> (Value, i32) {
+    run_admitted_roots(
+        vec![
+            (implementation, read_spec_source(implementation)),
+            (abstraction, read_spec_source(abstraction)),
+            (mapping, read_unprefixed_spec_source(mapping)),
+        ],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_refine_from_sources(
+                    implementation,
+                    abstraction,
+                    [&sources[0], &sources[1], &sources[2]],
+                    depth,
+                ),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
 fn run_refine_chain(
     implementation: &Path,
     first_abstraction: &Path,
@@ -17556,13 +17962,41 @@ fn run_refine_chain(
         specifications.push(pair[0].clone());
         mappings.push(pair[1].clone());
     }
+    let mut roots = specifications
+        .iter()
+        .map(|path| (path.as_path(), read_spec_source(path)))
+        .collect::<Vec<_>>();
+    roots.extend(
+        mappings
+            .iter()
+            .map(|path| (path.as_path(), read_unprefixed_spec_source(path))),
+    );
+    run_admitted_roots(roots, None, false, |sources, editions| {
+        finish_admitted(
+            run_refine_chain_from_sources(&specifications, &mappings, sources, depth),
+            editions,
+            false,
+        )
+    })
+}
+
+fn run_refine_chain_from_sources(
+    specifications: &[PathBuf],
+    mappings: &[PathBuf],
+    sources: &[String],
+    depth: usize,
+) -> (Value, i32) {
     let mut names = Vec::new();
     let mut composed = std::collections::BTreeMap::<String, String>::new();
     for index in 0..mappings.len() {
-        let (link, status) = run_refine(
+        let (link, status) = run_refine_from_sources(
             &specifications[index],
             &specifications[index + 1],
-            &mappings[index],
+            [
+                &sources[index],
+                &sources[index + 1],
+                &sources[specifications.len() + index],
+            ],
             depth,
         );
         let impl_name = link
@@ -18007,7 +18441,8 @@ mod chain_jobs_tests {
         }
         sections.insert("impl".to_owned(), ManifestSection::default());
         steps.push(("impl".to_owned(), "impl".to_owned()));
-        let groups = chain_step_groups(&steps, &sections, &base);
+        let roots = prepare_project_roots(&sections, &base, read_unprefixed_spec_source).unwrap();
+        let groups = chain_step_groups(&steps, &roots);
         std::fs::remove_dir_all(&base).expect("remove scratch dir");
         assert_eq!(groups, vec![vec![0], vec![1], vec![2]]);
         assert_eq!(chain_worker_count(64, groups.len()), 3);
@@ -18118,7 +18553,8 @@ mod exit_status_tests {
             expected
         );
 
-        let (rendered, status) = generate_unapproved_ledger_report_from_source(&request, &source);
+        let (rendered, status) =
+            generate_unapproved_ledger_report_from_source(&request, &source, None);
         assert_eq!(
             status, 0,
             "approval rendering must bypass verification error: {rendered}"
@@ -18175,7 +18611,7 @@ mod exit_status_tests {
                 expected
             );
             assert_eq!(
-                generate_unapproved_ledger_report_from_source(&request, &source),
+                generate_unapproved_ledger_report_from_source(&request, &source, None),
                 expected
             );
         }
@@ -18762,6 +19198,7 @@ spec InitTraceability {
             "tsg",
             None,
             "json",
+            None,
             None,
             None,
             None,

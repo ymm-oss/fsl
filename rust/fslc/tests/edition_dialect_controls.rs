@@ -2,7 +2,10 @@
 
 #[path = "support/edition_cases.rs"]
 pub(crate) mod cases;
+#[path = "support/edition_dependency_cases.rs"]
+mod diagnostic;
 
+use cases as common;
 use cases::{Results, Scratch, value, without_versions};
 use serde_json::{Value, json};
 
@@ -294,8 +297,8 @@ fn approval_only_report_renderers_do_not_deliver_stderr_warnings() {
         ] {
             let output = run(&scratch, &command);
             let actual = value(&output);
-            // Until approval admission changes, the flow has no envelope or
-            // stderr warning delivery. Report baselines still embed theirs.
+            // Approval has its own open result; file report delivery keeps the
+            // established no-stderr/no-envelope-warning rule.
             let warning_count = actual
                 .to_string()
                 .matches("\"code\":\"legacy_string_metadata\"")
@@ -306,7 +309,20 @@ fn approval_only_report_renderers_do_not_deliver_stderr_warnings() {
                 actual.get("warnings"),
                 warning_count
             ]);
-            let expected = json!([0, [], null, 0]);
+            let expected = if matches!(phase, "create" | "check") {
+                json!([
+                    0,
+                    [],
+                    [diagnostic::metadata_finding(
+                        cases::WARNING_CASES[1].2,
+                        "spec.fsl",
+                        "current"
+                    )],
+                    1
+                ])
+            } else {
+                json!([0, [], null, 0])
+            };
             results.check(
                 &format!("preserved/approval-render/{kind}/{phase}"),
                 &produced,
