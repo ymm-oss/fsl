@@ -22,6 +22,13 @@ checked model. `KernelModel.types` is the canonical inventory for nominal member
 `Expr::EnumMember { type_name, member }` is the canonical checked expression when identity
 must survive a merge.
 
+For preserved progress (#1599), the pulled model also evaluates implementation
+bodies whose bare members were checked in the impl scope. Therefore a refinement
+with `preserve progress` rejects different nominal owners of a shared spelling
+at its declaration, even for unused members or matching ordinals. Without
+progress the typed conversion/abstraction and bare-use rules above are unchanged.
+The shared core merge owns this check; identical type definitions remain valid.
+
 ## Context and local rationale
 
 The flat `BTreeMap<String, Value>` is locally useful. It makes legacy bare expressions cheap to

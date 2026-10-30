@@ -1054,13 +1054,34 @@ are a separate set. See `docs/design/DESIGN-refinement.md`, section
 policy and correct the action itself, not enclosing prose. No general automatic
 migration, bypass or grace period; if problems occur, return to a 4.x binary.
 
-Give impl and abs distinct enum/struct type names. Refinement merges type
-metadata by name; a same-named enum/struct with a different member list/field
-set on each side is rejected as `kind: "type"` (exit 2) rather than silently
-merged (merging would let an impl-only member get reinterpreted as whichever
-abs member sits at the same ordinal index). Same-named domain types
-(`lo..hi`) with different bounds are fine — an out-of-range value there is
-still caught as `map_out_of_bounds`/`abs_state_mismatch`.
+Same-named impl/abs types must agree in kind, resolved bounds, ordered enum
+members and struct fields/types. Ignore `symmetric`, retain the impl entry.
+Different definitions, even unused, fail type/exit2 at the refinement or inline
+implements declaration; governance retains the preservation location. Messages
+name both specs and the conflict. Breaking removal (#1599): different bounds
+may no longer share a name; boundary gallery exit1/refinement_failed becomes
+exit2/error/type. Use distinct type names for distinct definitions.
+Different enums' shared member names are rejected only with preserve progress,
+even at equal ordinals. Without progress, typed conversions/abstractions remain
+accepted and ambiguous bare uses remain errors. Pulled safety violations return
+error/semantics/exit2 without a trace, naming the property and pulled model;
+they are neither refines nor progress_lost.
+Composed entity conflicts keep both component files, counts and verify-block
+sources under public type names such as `p.Item`. Align component verify blocks;
+compose does not support an instances override. Direct verify/refine overrides
+and internal type/member identities retain their existing rules.
+Audit: a52bef4931adc67ea2b1fdca827e2318b4ae25ab → 9eaaea7d1c526ede6a13408ea414616ddadccf69;
+check610 corpus forms (606 existing/4 new),39 next-edition controls,60 mappings,
+20 inline/2 expression triples and39 acceptance cells; all fields/stderr/exit twice.
+Existing corpus check ok→error is empty. Inline removals: original D-bound
+issue1296/1302, inline_collision_is_located_at_implements, governance_check_collision;
+verify counterparts also reject. Refine removals: cases1/2a/3a/3b, domain_bounds,
+domain_lower, kind_change, struct_named_type, matching-ordinal/chain collision,
+and original shared-member expression_agreement progress; renamed controls pass.
+Boundary/entity failure→type error changes verdict class. Original2 runtime/2 CLI/
+3 mutation Seq controls now name declaration conflicts, preserving invalid/gates.
+Authored1:1 is the ten-byte refinement token (end1:11), not unknown fallback;
+inline keeps implements, distinct-name carrier companions keep map-token errors.
 
 Distinct nominal enums stay incompatible without an explicit named enum
 mapping. Use `enum conversion` plus `convert(name, expr)` for a bijection. Both
@@ -1342,8 +1363,8 @@ when checking a file, the message suffix changes from `at L:C` to
    including inferred Seq literal capacity. Set/Seq conditional inference retains
    an already known finite arm's carrier/capacity through let in either arm order;
    it does not materialize literals. Refinement resolves numeric types separately;
-   same-name struct-field and enum/range collisions remain open pending1599's
-   shared merge rule and Type-kind handoff. Its type error recovers authored map
+   #1599 first rejects same-name declarations through its shared Type-kind
+   merge gate. For remaining map errors, it recovers authored map
    spans (#1642), retaining unknown1:1 only without an authored span. Migrated
    anchors: runtime1:40/1:45 map tokens, standalone4:3 map, inline2:3 implements,
    all formerly1:1, with full spans checked against unchanged literal sources.

@@ -179,6 +179,19 @@ fn assert_projection_exclusions_are_live(actual: &[Value], expected: &Map<String
 
 const CASES: &[Case] = &[
     Case {
+        implementation: "examples/refinement_liveness/design_merge_collision.fsl",
+        abstraction: "examples/refinement_liveness/policy_merge_collision.fsl",
+        mapping: "examples/refinement_liveness/design_merge_collision_refines.fsl",
+        depth: 4,
+        expected_result: "error",
+        expected_kind: Some("type"),
+        declared_by: "examples/refinement_liveness/design_merge_collision_refines.fsl:2-4",
+        declaration: Some(Declaration {
+            path: "examples/refinement_liveness/design_merge_collision_refines.fsl",
+            anchor: "expected-result",
+        }),
+    },
+    Case {
         implementation: "specs/cart_impl.fsl",
         abstraction: "specs/cart_v1.fsl",
         mapping: "specs/cart_refines.fsl",
@@ -253,8 +266,8 @@ const CASES: &[Case] = &[
             anchor: "expected-result",
         }),
         depth: 2,
-        expected_result: "refinement_failed",
-        expected_kind: Some("abs_state_mismatch"),
+        expected_result: "error",
+        expected_kind: Some("type"),
         declared_by: "examples/gallery/adversarial/refine_mapping_boundary_map.fsl:1-3 \
                       (`expected-command`/`expected-result`/`expected-kind`, including \
                       `--depth 2`), corroborated by examples/gallery/README.md:56-60 \

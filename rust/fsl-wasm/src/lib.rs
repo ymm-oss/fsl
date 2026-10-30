@@ -2468,6 +2468,41 @@ mod tests {
         worker["governance"]["preservations"][0]["result"].clone()
     }
 
+    mod issue_1599_identifiers {
+        include!("../../fslc/tests/support/identifiers.rs");
+    }
+
+    fn issue_1599_request(hi: u32) -> Request {
+        let mut request = governance_request(
+            "SmallImpl",
+            "spec SmallImpl { type Carrier1599 = 0..2 state { n: Int = 0 } }",
+        );
+        request.files.insert(
+            "small_abs.fsl".into(),
+            format!("spec SmallAbs {{ type Carrier1599 = 0..{hi} state {{ n: Int = 0 }} }}"),
+        );
+        request
+    }
+
+    #[test]
+    fn issue_1599_governance_rejects_conflicting_type() {
+        let request = issue_1599_request(1);
+        let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+        println!("OBS wasm collision {worker}");
+        assert_eq!(worker["result"], "error", "{worker}");
+        assert_eq!(worker["kind"], "type", "{worker}");
+        assert_eq!(worker["loc"]["line"], 4, "{worker}");
+        assert_eq!(worker["loc"]["column"], 3, "{worker}");
+        let message = worker["message"].as_str().unwrap();
+        issue_1599_identifiers::assert_names(message, &["Carrier1599", "SmallImpl", "SmallAbs"]);
+    }
+
+    #[test]
+    fn issue_1599_governance_identical_type_control() {
+        let request = issue_1599_request(2);
+        assert_eq!(worker_preservation_result(&request), json!("refines"));
+    }
+
     /// A correspondence walk cut off by its state budget (55,987 reachable
     /// states at depth 8) is `unknown_budget`, as native reports -- not
     /// `refines`.

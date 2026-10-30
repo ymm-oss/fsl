@@ -986,10 +986,10 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Seq capacity). An uncontextualized Set/Seq conditional retains an already
   known finite arm's carrier/capacity through a `let`, in either arm order;
   it does not materialize literals. Refinement resolves numeric types in each
-  model independently; same-name struct-field and enum/range collisions remain
-  open pending #1599's shared merge rule and Type-kind handoff. Its existing
-  `type` error uses authored map recovery (#1642), retaining 1:1 only when no
-  authored span exists. The four migrated source anchors are runtime 1:40/1:45
+  model independently. #1599's shared Type-kind gate rejects same-name declarations
+  before map validation. Other map errors use authored recovery (#1642),
+  retaining unknown 1:1 only without an authored span. The historical
+  map anchors from #1472 are runtime 1:40/1:45
   (`map`), standalone 4:3 (`map`) and inline 2:3 (`implements`), formerly 1:1.
   Measured base `79687655` vs `3c99c93b`, each built in its own archive, twice
   checked 606 corpus +16 original inline +18 literal-boundary +18 bridge forms:
@@ -2851,20 +2851,52 @@ branch was missed before); a refinement that previously reported
 equal the mapped impl state may now report `refines` (the impl state
 matches a different, still-valid, abs initial branch).
 
-Give impl and abs **distinct enum/struct type names**, even when a state
-variable pair is mapped 1:1. Type metadata is merged by name for refinement
-checking; a same-named enum (or struct) declared with a different member
-list (or field set) on each side is rejected as `kind: "type"` (exit 2)
-rather than merged — merging would let an impl-only member get silently
-reinterpreted as whichever abs member sits at the same ordinal index. Domain
-types (`type X = lo..hi`) may safely share a name with different bounds; an
-out-of-range value there is still caught as `map_out_of_bounds`/
-`abs_state_mismatch`. That includes an action-correspondence argument outside
-the abstract action's parameter domain (a wider impl parameter type; a false
-abstract guard is still reported first as `abs_requires_failed`) and a
-state-mapping expression that reads an impl `Map` at a key outside its domain
-(for example a narrower impl key type): both are `map_out_of_bounds` (exit 1),
-not a `kind: "type"` error.
+Same-named impl/abs types must agree in kind, resolved domain bounds, ordered
+enum members, and struct fields/types. `symmetric` is ignored; equal definitions
+keep the impl entry. Different definitions, even unused ones, are `kind: "type"`
+errors (exit 2), located at the `refinement` or inline `implements` declaration
+and naming both specs. Governance retains the outer preservation location.
+Give different definitions distinct names. **Breaking removal (#1599):** unequal
+bounds may no longer share a type name; the boundary gallery's former exit 1
+`refinement_failed/abs_state_mismatch` becomes exit 2 `error/type`.
+Different enums may share member names without progress: ambiguous bare uses
+still fail, while typed conversions/abstractions remain accepted. A refinement
+with `preserve progress` rejects those declarations even if ordinals coincide.
+Pulled-model safety violations fail closed as exit 2 `error/semantics`, naming
+the property and pulled model without a trace, never as `refines`/`progress_lost`.
+With distinct type names, out-of-domain mapping/argument errors retain their
+`map_out_of_bounds` behavior and false abstract guards still take precedence.
+Entity domains derived from `verify { instances Item = N }` follow the same rule.
+A conflict reports each spec's instances and whether its verify block or a CLI
+override supplied them. Align the verify blocks; with `verify` and `refine`,
+`--instances Item=N` can align both direct specs. **`check` has no `--instances` flag.**
+Composed conflicts name the public type (for example `p.Item`) and retain both
+component files, instance counts and verify-block sources. Align the component
+verify blocks; compose does not support that instances override. Diagnostics use
+public names without changing internal type/member identities or member syntax.
+Breaking removal: the default check/verify of `inline_implements_bounds/impl_spec_extra.fsl`
+(Item=1 versus Item=3) changes from exit 1 `refinement_failed` to exit 2 `error/type`
+at its `implements` declaration; an equal shared instances override still refines.
+
+Boundary audit (#1599): base `a52bef4931adc67ea2b1fdca827e2318b4ae25ab`,
+measured product/test head `9eaaea7d1c526ede6a13408ea414616ddadccf69`;
+`check`610 corpus forms (606 existing,4 added),39 next-edition controls,
+60 typed mappings,20 rewritten inline triples,2 expression triples and39
+acceptance cells, full JSON/stderr/exit twice per tree. Existing corpus
+check ok→error set: **empty**. Inline check removals are the original D-bound
+fixtures of issue_1296_abs_partial_op/issue_1302_abs_step_violation and the
+inline_collision_is_located_at_implements/governance_check_collision cells;
+their verify routes also become type errors. Refine removals: cases1/2a/3a/3b,
+domain_bounds/domain_lower/kind_change/struct_named_type, matching-ordinal
+member collision, chain collision and the original shared-member progress
+expression_agreement form. Renamed companions retain successful agreement.
+Boundary/entity refinement_failed→type error is a verdict-class change.
+The original2 runtime/2 CLI/3 mutation Seq controls change diagnostic priority,
+not rejection or invalid counts/gates: declaration validation runs first.
+Authored standalone1:1 denotes the full ten-byte `refinement` keyword span
+(end1:11), not an unknown-location fallback. Inline keeps the `implements`
+token; distinct-name carrier companions still fail at the authored map token.
+Previously reported type errors also gain loaded impl/abs identities.
 
 ### Chain checking (composition of mappings)
 

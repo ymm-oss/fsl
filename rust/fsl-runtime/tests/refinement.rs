@@ -5,6 +5,9 @@ use fsl_core::TraceStep;
 use fsl_core::{FsResolver, build_model, parse_kernel_source, parse_refinement};
 use fsl_runtime::{RefinementCheck, RefinementFailure, RefinementVerdict, Violation};
 
+#[path = "../../fslc/tests/support/identifiers.rs"]
+mod identifiers;
+
 // The outcome is read only through `RefinementCheck::verdict` (#1262). In
 // debug builds `verdict()` also asserts that at most one outcome field is
 // set, which is what the old "impl_violation and failure must be mutually
@@ -35,6 +38,38 @@ fn model(source: &str) -> fsl_core::KernelModel {
 
 const ABS: &str = "spec MinAbs { type AQty = 0..1 state { n: AQty } init { n = 1 } \
      action dec() { requires n > 0 n = n - 1 } }";
+
+#[test]
+fn issue_1599_runtime_rejects_collisions_without_frontend_validation() {
+    let implementation =
+        model("spec Impl1599Spec { type Carrier1599 = 0..2 state { x: Int = 0 } }");
+    let mut abstraction =
+        model("spec Abs1599Spec { type Carrier1599 = 0..2 state { x: Int = 0 } }");
+    let mapping = parse_refinement(
+        "refinement R { impl Impl1599Spec abs Abs1599Spec maps auto }",
+        &implementation,
+        &abstraction,
+    )
+    .unwrap();
+    assert_refines(
+        &fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2).unwrap(),
+    );
+    // Inject the conflicting operand after parsing: no frontend collision gate can protect runtime.
+    abstraction.types.insert(
+        "Carrier1599".into(),
+        fsl_core::TypeDef::Domain {
+            lo: 0,
+            hi: 1,
+            symmetric: false,
+        },
+    );
+    let observed = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2);
+    println!("OBS runtime collision {observed:?}");
+    let message = observed
+        .expect_err("runtime must reject different domain definitions")
+        .to_string();
+    identifiers::assert_names(&message, &["Carrier1599", "Impl1599Spec", "Abs1599Spec"]);
+}
 
 /// Negative control for #466: an impl whose own guardless `dec()` walks its
 /// state past its declared type bound must be reported as violating itself
@@ -384,35 +419,60 @@ fn argument_model(source: &str) -> fsl_core::KernelModel {
         &source
             .replace("state {", "type S = 0..2 state {")
             .replace("Seq<V, 2>", "Seq<S, 2>")
+            .replace("Seq<AV, 2>", "Seq<S, 2>")
             .replace("seq.push(v)", "seq.push(0)"),
     )
 }
 
 fn reject_old_seq_map(implementation: &str, abstraction: &str, source: &str, column: u32) {
+    let token = if column == 1 { "refinement" } else { "map" };
+    let width = token.len();
     let start = usize::try_from(column - 1).unwrap();
-    assert_eq!(&source[start..start + 3], "map");
+    assert_eq!(&source[start..start + width], token);
     assert!(!source[..start].contains('\n'));
     let error = parse_refinement(source, &model(implementation), &model(abstraction))
         .expect_err("different model-local Seq carriers must be rejected");
     assert_eq!(error.kind, fsl_core::RefinementErrorKind::Type);
-    assert_eq!(
-        error.message,
-        "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"V\"), 2)"
-    );
+    let expected = if column == 1 {
+        format!(
+            "type 'V' is declared differently in impl '{}' and abs '{}'",
+            implementation.split_whitespace().nth(1).unwrap(),
+            abstraction.split_whitespace().nth(1).unwrap()
+        )
+    } else {
+        "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"AV\"), 2)".to_owned()
+    };
+    assert_eq!(error.message, expected);
     let span = error.span.expect("located map rejection");
     assert_eq!((span.start.line, span.start.column), (1, column));
-    assert_eq!((span.start.offset, span.end.offset), (start, start + 3));
-    assert_eq!((span.end.line, span.end.column), (1, column + 3));
+    assert_eq!((span.start.offset, span.end.offset), (start, start + width));
+    let end = column + u32::try_from(width).unwrap();
+    assert_eq!((span.end.line, span.end.column), (1, end));
 }
 
 #[test]
 fn old_argument_fixture_whole_seq_map_is_rejected() {
-    reject_old_seq_map(SEQ_WIDE, SEQ_ABS, SEQ_WIDE_MAP, 40);
+    reject_old_seq_map(SEQ_WIDE, SEQ_ABS, SEQ_WIDE_MAP, 1);
 }
 
 #[test]
 fn old_guard_fixture_whole_seq_map_is_rejected() {
-    reject_old_seq_map(SEQ_WIDER, SEQ_GUARDED, SEQ_WIDER_MAP, 45);
+    reject_old_seq_map(SEQ_WIDER, SEQ_GUARDED, SEQ_WIDER_MAP, 1);
+}
+
+#[test]
+fn distinct_domain_names_still_reach_the_seq_map_gate() {
+    for (implementation, abstraction, mapping, column) in [
+        (SEQ_WIDE, SEQ_ABS, SEQ_WIDE_MAP, 40),
+        (SEQ_WIDER, SEQ_GUARDED, SEQ_WIDER_MAP, 45),
+    ] {
+        reject_old_seq_map(
+            implementation,
+            &abstraction.replace('V', "AV"),
+            mapping,
+            column,
+        );
+    }
 }
 
 const MAP_ABS: &str = "spec MapAbs { type K = 0..2 state { m: Map<K, Bool> } \
@@ -426,7 +486,7 @@ const MAP_ABS: &str = "spec MapAbs { type K = 0..2 state { m: Map<K, Bool> } \
 #[test]
 fn an_abstract_argument_outside_its_parameter_domain_is_map_out_of_bounds() {
     let implementation = argument_model(SEQ_WIDE);
-    let abstraction = argument_model(SEQ_ABS);
+    let abstraction = argument_model(&SEQ_ABS.replace('V', "AV"));
     let mapping =
         parse_refinement(SEQ_WIDE_MAP, &implementation, &abstraction).expect("parse mapping");
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
@@ -445,7 +505,7 @@ fn an_indexed_map_over_a_narrower_impl_key_domain_is_map_out_of_bounds() {
         "spec MapNarrow { type K = 0..1 state { m: Map<K, Bool> } \
          init { forall k: K { m[k] = false } } action set(k: K) { m[k] = true } }",
     );
-    let abstraction = model(MAP_ABS);
+    let abstraction = model(&MAP_ABS.replace('K', "AK"));
     let mapping = parse_refinement(
         "refinement M { impl MapNarrow abs MapAbs maps auto }",
         &implementation,
@@ -467,7 +527,7 @@ fn an_indexed_map_over_a_narrower_impl_key_domain_is_map_out_of_bounds() {
 #[test]
 fn a_false_abstract_guard_wins_over_an_out_of_domain_argument() {
     let implementation = argument_model(SEQ_WIDER);
-    let abstraction = argument_model(SEQ_GUARDED);
+    let abstraction = argument_model(&SEQ_GUARDED.replace('V', "AV"));
     let mapping =
         parse_refinement(SEQ_WIDER_MAP, &implementation, &abstraction).expect("parse mapping");
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
@@ -475,6 +535,34 @@ fn a_false_abstract_guard_wins_over_an_out_of_domain_argument() {
     let failure = failure(&checked);
     assert_eq!(failure.kind, "abs_requires_failed");
     assert_eq!(failure.step, 1);
+}
+
+fn colliding_used_domain(body: &str) {
+    let implementation = model(&format!("spec Impl1599Spec {{ type T = 0..1 {body} }}"));
+    let abstraction = model(&format!("spec Abs1599Spec {{ type T = 0..2 {body} }}"));
+    let error = parse_refinement(
+        "refinement R { impl Impl1599Spec abs Abs1599Spec maps auto }",
+        &implementation,
+        &abstraction,
+    )
+    .expect_err("used domains must obey the same declaration rule");
+    let span = error.span.expect("located type error");
+    assert_eq!((span.start.line, span.start.column), (1, 1));
+    identifiers::assert_names(&error.message, &["T", "Impl1599Spec", "Abs1599Spec"]);
+}
+
+#[test]
+fn issue_1599_rejects_colliding_scalar_parameter_domains() {
+    colliding_used_domain(
+        "state { seq: Seq<T, 2> } init { seq = Seq {} } action push(v: T) { requires seq.size() < 2 seq = seq.push(v) }",
+    );
+}
+
+#[test]
+fn issue_1599_rejects_colliding_map_key_domains() {
+    colliding_used_domain(
+        "state { m: Map<T, Bool> } init { forall k: T { m[k] = false } } action set(k: T) { m[k] = true }",
+    );
 }
 
 const BOOL_ABS: &str =

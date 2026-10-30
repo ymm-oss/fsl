@@ -965,8 +965,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   後から失敗するのでなく check が既存の位置付き代入可能性エラー(<code>semantics</code>、終了コード2)
   で拒否し、全 verify engine が共有します。スカラー・Option の数値互換と
    add/contains/push の引数は変えません。refinement は両モデルの数値型を独立に解決します。
-   同名structのfieldとenum/範囲の衝突は、#1599の共有merge規則とType-kindの引渡しに残る未解決です。
-   既存の <code>type</code> エラーは#1642の作成元map位置の回復を使い、作成元spanが無いときだけ1:1を保ちます。
+   同名の定義衝突は#1599の共有Type-kind gateでmap検査より先に拒否します。
+   map自体のtypeエラーは#1642の作成元spanを使い、無いときだけunknown1:1を保ちます。
    移行した4つのソースアンカーはruntimeの1:40/1:45 (<code>map</code>)、単独の4:3 (<code>map</code>)、
    inlineの2:3 (<code>implements</code>)で、以前は1:1でした。
   <code>Int</code>は有限のドメインを持ちません。リテラルから推論した要素型も含め、これを含む
@@ -2754,14 +2754,50 @@ init 対応関係の違反により)<code>refinement_failed</code> を報告す�
 理由だけで <code>refinement_failed</code> と報告されていた refinement が、(impl の状態が
 別の、なお有効な abs の初期分岐と一致するため)<code>refines</code> を報告するようになる
 場合があります。</p>
-<p>状態変数のペアが 1:1 でマップされる場合でも、impl と abs には<strong>別々の enum/struct
-型名</strong>を与えてください。型メタデータは refinement 検査のために名前でマージされ
-ます。両側で異なるメンバーリスト(またはフィールド集合)を持って宣言された同名の
-enum(または struct)は、マージされるのではなく <code>kind: "type"</code>(exit 2)として拒否
-されます — マージすると、impl 専用のメンバーが、同じ順序位置に座っている abs の
-メンバーとして黙って再解釈されかねないからです。ドメイン型
-(<code>type X = lo..hi</code>)は異なる境界で安全に名前を共有できます。そこでの範囲外の値は
-依然として <code>map_out_of_bounds</code>/<code>abs_state_mismatch</code> として捕捉されます。抽象 action のパラメーター定義域の外に出る action 対応の引数(impl のパラメーター型が広い場合。抽象の guard が偽ならこれまでどおり先に <code>abs_requires_failed</code> になります)と、impl の <code>Map</code> を定義域の外のキーで読む状態マッピングの式(impl のキー型が狭い場合など)も、<code>kind: "type"</code> のエラーではなく <code>map_out_of_bounds</code>(exit 1)になります。</p>
+<p>impl/abs の同名の型は、種類、解決後の domain 境界、enum の member と順序、
+struct の field と型が一致しなければなりません。<code>symmetric</code> は比較せず、一致すれば
+impl の定義を残します。未使用でも異なる定義は <code>kind: "type"</code>(exit 2)で拒み、
+<code>refinement</code> または inline <code>implements</code> の宣言位置と両 spec の名前を示します。
+governance では外側の preservation の位置を保ちます。異なる定義には別名を付けて
+ください。<strong>破壊的 removal (#1599):</strong> 異なる境界の型は同名にできません。
+boundary gallery の従来の exit 1 <code>refinement_failed/abs_state_mismatch</code> は
+exit 2 <code>error/type</code> に変わります。
+progress がなければ別 enum の同名 member 宣言は引き続き可能です。曖昧な bare 参照は
+拒み、型付き conversion/abstraction は受け入れます。<code>preserve progress</code> がある
+refinement では ordinal が一致していてもこの宣言を拒みます。pulled model の safety
+違反は property 名と pulled model を示す exit 2 <code>error/semantics</code> となり、trace は
+付けず、<code>refines</code> や <code>progress_lost</code> とはしません。別の型名を使った mapping/引数の
+範囲外は従来の <code>map_out_of_bounds</code> のままで、偽の abstract guard が引き続き優先します。
+<code>verify { instances Item = N }</code> から来る entity の範囲にも同じ規則を適用します。
+衝突時は両 spec の instances と、その出所(verify block または CLI override)を示します。
+verify block の値をそろえてください。<code>verify</code> と <code>refine</code> では、両 spec に効く
+直接の spec なら <code>--instances Item=N</code> でもそろえられます。
+<strong><code>check</code> は <code>--instances</code> を受け付けません。</strong>
+compose の衝突では <code>p.Item</code> のような公開名と、両 component のファイル・instances・
+verify block の出所を示します。component の verify block をそろえてください。
+compose はこの instances override に対応しません。診断の公開名表示は、内部の型・
+メンバーの識別やメンバーの構文を変えません。
+破壊的 removal: <code>inline_implements_bounds/impl_spec_extra.fsl</code> の既定の check/verify は、
+Item=1 と Item=3 の相違により、exit 1 <code>refinement_failed</code> から <code>implements</code> 宣言位置の
+exit 2 <code>error/type</code> に変わります。同じ instances を共有する override なら引き続き refines です。</p>
+<p>境界監査(#1599): base <code>a52bef4931adc67ea2b1fdca827e2318b4ae25ab</code>、
+測定した product/test head <code>9eaaea7d1c526ede6a13408ea414616ddadccf69</code>。
+corpus610形(既存606・追加4)の check、次版39 controls、typed mapping60、
+書き換えた inline20組・expression2組・受入39 cell を、両 tree で2回、
+JSON全体・stderr・exit で比較しました。既存 corpus check の ok→error は<strong>空集合</strong>です。
+inline check の breaking removal は、issue_1296_abs_partial_op と
+issue_1302_abs_step_violation の元の D 境界の形、および
+inline_collision_is_located_at_implements/governance_check_collision です。
+対応する verify も type error になります。refine の removal は cases1/2a/3a/3b、
+domain_bounds/domain_lower/kind_change/struct_named_type、ordinal が同じ member 衝突、
+chain 衝突、元の shared-member progress の expression_agreement です。
+改名した counterpart は従来の成功・agreement を保ちます。
+boundary/entity の refinement_failed→type error は判定分類の変更です。
+元の runtime2・CLI2・mutation3 の Seq controls は、宣言検査が先になることで
+診断が変わりますが、拒否や invalid 数・gate は変わりません。standalone の実在する
+1:1 は10 byteの <code>refinement</code> keyword全体(end1:11)で、unknown位置の代用ではありません。
+inline は <code>implements</code> token、別型名の carrier counterpart は map token を保ちます。
+既存の type error にも、読み込んだ impl/abs の名前が付くようになります。</p>
 <h3 id="_1">チェーン検査(マッピングの合成)</h3>
 <p>レイヤーのチェーン(business ⊒ requirements ⊒ design …)の端から端までの忠実性は、
 <code>(spec mapping)</code> を順に並べると、<strong>合成によって直接</strong>検査できます:</p>

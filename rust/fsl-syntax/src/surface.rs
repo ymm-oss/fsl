@@ -304,6 +304,7 @@ pub enum RefinementItem {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SurfaceRefinement {
     pub name: String,
+    pub span: Span,
     pub items: Vec<RefinementItem>,
 }
 

@@ -101,10 +101,24 @@ spec Agreement {
 
 #[test]
 fn elaborated_enum_conversion_agrees_concretely_symbolically_and_in_preserved_progress() {
+    enum_conversion_progress(false);
+}
+
+#[test]
+fn shared_enum_conversion_members_are_rejected_with_preserved_progress() {
+    enum_conversion_progress(true);
+}
+
+fn enum_conversion_progress(shared_members: bool) {
     let resolver = FsResolver::new(".");
+    let (a, b, c) = if shared_members {
+        ("A", "B", "C")
+    } else {
+        ("IA", "IB", "IC")
+    };
     let implementation = build_model(
         parse_kernel_source(
-            "spec Impl { enum ImplStage { C, B, A } state { stage: ImplStage } init { stage = A } fair action step() { requires stage == A stage = B } }",
+            &format!("spec Impl {{ enum ImplStage {{ {c}, {b}, {a} }} state {{ stage: ImplStage }} init {{ stage = {a} }} fair action step() {{ requires stage == {a} stage = {b} }} }}"),
             &resolver,
         )
         .expect("parse implementation"),
@@ -119,16 +133,24 @@ fn elaborated_enum_conversion_agrees_concretely_symbolically_and_in_preserved_pr
     )
     .expect("build abstraction");
     let mapping = parse_refinement(
-        "refinement R { impl Impl abs Abs enum conversion stage ImplStage -> AbsStage { A -> A B -> B C -> C } map status = convert(stage, stage) action step() -> step() preserve progress { respond Advances by step } }",
+        &format!(
+            "refinement R {{ impl Impl abs Abs enum conversion stage ImplStage -> AbsStage {{ {a} -> A {b} -> B {c} -> C }} map status = convert(stage, stage) action step() -> step() preserve progress {{ respond Advances by step }} }}"
+        ),
         &implementation,
         &abstraction,
-    )
-    .expect("build conversion mapping");
+    );
+    if shared_members {
+        let error = mapping.expect_err("shared progress member must be rejected at the boundary");
+        let span = error.span.expect("located refinement type error");
+        assert_eq!((span.start.line, span.start.column), (1, 1));
+        assert!(error.message.contains("enum member 'A'"), "{error}");
+        return;
+    }
+    let mapping = mapping.expect("build conversion mapping");
 
     let expression = &mapping.state_maps["status"].expr;
-    let mut merged = implementation.clone();
-    merged.types.extend(abstraction.types.clone());
-    merged.enum_members.extend(abstraction.enum_members.clone());
+    let merged = fsl_core::merge_refinement_model(&implementation, &abstraction, true)
+        .expect("merge conversion models");
     let mut monitor = fsl_runtime::Monitor::new(implementation.clone()).expect("monitor");
     let mut states = vec![monitor.state.clone()];
     let action = monitor.enabled().expect("enabled")[0].clone();

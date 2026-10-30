@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+// expected-command: check
+// expected-result: error
+// expected-kind: type
+governance ProgressMergeControls {
+  control CTRL-MERGE "Progress inventory is preserved"
+  preservation ProgressMergePreserved {
+    before Abs1599Spec from "policy_merge_collision.fsl"
+    after Impl1599Spec from "design_merge_collision.fsl"
+    preserve CTRL-MERGE
+    checked_by refinement "design_merge_collision_refines.fsl"
+  }
+}
