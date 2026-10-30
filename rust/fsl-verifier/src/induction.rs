@@ -10,8 +10,8 @@ use fsl_solver::{ModelValue, SatResult, SmtSolver};
 use crate::VerifyError;
 use crate::eval::{
     FailureClass, binder_source_expressions, binder_values, binder_where, binder_where_expression,
-    classified_evaluation_status, classified_property_evaluation_status, eval, evaluation_status,
-    property_evaluation_status,
+    classified_evaluation_status, classified_property_evaluation_status, confine_binary_rhs, eval,
+    eval_with_bindings, evaluation_status, property_evaluation_status,
 };
 use crate::liveness::{leadsto_bindings, leadsto_condition};
 use crate::trace::{has_missing_sequence_slots, project_trace};
@@ -1599,7 +1599,7 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
             )
             .await?;
             let right_path = if matches!(op.as_str(), "and" | "or" | "=>") {
-                let left = eval(solver, model, left, state, &mut local, old_state)?;
+                let left = eval_with_bindings(solver, model, left, state, &mut local, old_state)?;
                 let reached = if op == "or" {
                     solver.not(bool_term(&left)?)?
                 } else {
@@ -1609,6 +1609,7 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
             } else {
                 path.clone()
             };
+            confine_binary_rhs(op, bindings, &mut local);
             reject_zero_slot_measure_reads(
                 solver, model, right, state, &local, old_state, right_path,
             )

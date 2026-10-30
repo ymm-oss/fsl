@@ -955,8 +955,9 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   redeclaration without being readable. Breaking removal (#1573): matches inside
   <code>not</code> and expression <code>if</code> reserve their names for later operands, guards,
   action statements and ensures. An expression-if condition reserves names in
-  both arms, and its <strong>then arm also reserves names in the else arm</strong> because
-  the symbolic evaluator shares their binding map (#1577). A quantifier/aggregate
+  both arms, and its <strong>then arm also reserves names in the else arm</strong>. This
+  reservation was introduced for the shared symbolic binding-map defect (#1577)
+  and remains after the evaluator lifetime repair (#1622). A quantifier/aggregate
   <code>where</code> reserves names in its body or <code>of</code> expression, when present; count,
   unique and exactlyOne have only a filter, not an independent body/of.
   A statement-if condition reserves names in both arms and later statements;
@@ -967,8 +968,8 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   and inline initializers, preserving its initializer/const/map-key diagnostic
   owners. Compose has a known check gap across same-source init fragments and
   inline→init, and common init can inherit an unrelated source's Fresh decision.
-  These programs remain illegal; their false verified results belong to #1622,
-  while compose init-fragment reservations will be tracked in a separate issue
+  These programs remain illegal; #1622 corrects their evaluation without expanding
+  admission, while compose init-fragment reservations will be tracked in a separate issue
   filed after merge. This is not a general composed-init checking guarantee.
   Rename the later binding, for example change
   <code>(p is some(v)) and v == 2</code> to <code>(p is some(w)) and w == 2</code>.
@@ -983,9 +984,14 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   are unchanged. For two sources whose statement payloads were incorrectly
   shared, check remains accepted but the previously false <code>violated</code> verdict
   becomes holds after separation; a genuinely false payload condition remains
-  violated. These are checker/hygiene compensations, not an evaluator repair
-  (the remaining binding-lifetime work is tracked in #1622). Independent-source
-  init pattern separation is not repaired here and remains part of that work.
+  violated. Those were checker/hygiene compensations. The evaluator repair (#1622)
+  now confines payloads in BMC, induction, Monitor and solver-free explicit BFS,
+  including composed initializers. Closed expressions restore outer values and
+  declared binding types; only true continuations retain payloads. This includes
+  raw and expected-type conditionals, comparison/compound operands, arguments and
+  candidate-local quantifier/aggregate evaluation. Conjunctive <code>requires</code> still
+  exports to later guards/body; a <code>let</code> RHS does not. No collision reservation,
+  checked typing rule or source admission is relaxed by this runtime correction.
   Out-of-scope <code>v</code> is a <code>kind: "semantics"</code> error (exit 2), with message
   <code>invalid model expression: public Kernel cannot type identifier 'v' at &lt;line&gt;:&lt;column&gt;</code>.
   The location identifies the clause or <code>if</code> arm containing the use. Guards and

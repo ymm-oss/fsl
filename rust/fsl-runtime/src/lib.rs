@@ -20,6 +20,9 @@ use serde_json::{Value as JsonValue, json};
 mod explicit;
 mod trace;
 
+#[cfg(test)]
+mod scope_tests;
+
 pub use explicit::{
     ActionStats, ExplicitReachableWitness, ExplicitResult, ExplicitViolation,
     check_init_write_ownership, deterministic_initial_state, explicit_unsupported_reason,
@@ -100,9 +103,8 @@ impl From<ModelError> for RuntimeError {
 
 /// Evaluate one expression in a concrete logical state.
 ///
-/// Pattern matches intentionally mutate `bindings`, matching FSL's
-/// `value is some(name)` binding semantics for the remainder of a
-/// short-circuited Boolean expression.
+/// Pattern payloads are local to their true continuation. The caller's
+/// bindings are unchanged, including when evaluation returns an error.
 ///
 /// # Errors
 ///
@@ -118,6 +120,23 @@ impl From<ModelError> for RuntimeError {
 /// left-nested `x + x + ... + x` invariant, which (unlike an `if` chain that
 /// stops at its first true arm) forces evaluation of every level.
 pub fn eval(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+) -> Result<Value, RuntimeError> {
+    if matches!(expr, Expr::Is { .. })
+        || matches!(expr, Expr::Binary { op, .. } if fsl_core::pattern_binding_flows(op, false))
+    {
+        eval_with_bindings(expr, state, &mut bindings.clone(), model, old_state)
+    } else {
+        eval_with_bindings(expr, state, bindings, model, old_state)
+    }
+}
+
+/// Evaluate an explicit true continuation, such as a conjunctive requires.
+fn eval_with_bindings(
     expr: &Expr,
     state: &State,
     bindings: &mut Bindings,
@@ -247,11 +266,9 @@ fn eval_inner(
                 (Value::Some(_), fsl_core::Pattern::None)
                 | (Value::None, fsl_core::Pattern::Some(_)) => Ok(Value::Bool(false)),
                 (Value::Some(value), fsl_core::Pattern::Some(name)) => {
-                    // A pattern binding never overwrites a name already in scope
-                    // (action parameter, binder, let): the frozen reference guards
-                    // this in `_eval_requires` (`if k not in param_binds`), and #1153
-                    // is the port dropping it. A new name still reaches the body.
-                    bindings.entry(name.clone()).or_insert(*value);
+                    // Rewritten matches may shadow only in this continuation;
+                    // closed evaluation retains the caller's outer binding.
+                    bindings.insert(name.clone(), *value);
                     Ok(Value::Bool(true))
                 }
                 _ => Err(runtime_error("is pattern requires an Option value")),
@@ -599,29 +616,26 @@ fn eval_binary(
     model: &KernelModel,
     old_state: Option<&State>,
 ) -> Result<Value, RuntimeError> {
-    if op == "and" {
-        if !as_bool(eval(left, state, bindings, model, old_state)?)? {
-            return Ok(Value::Bool(false));
+    if matches!(op, "and" | "or" | "=>") {
+        let mut local = bindings.clone();
+        let left = as_bool(eval_with_bindings(
+            left, state, &mut local, model, old_state,
+        )?)?;
+        match (op, left) {
+            ("and", false) => return Ok(Value::Bool(false)),
+            ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
+            _ => {}
         }
-        return Ok(Value::Bool(as_bool(eval(
-            right, state, bindings, model, old_state,
-        )?)?));
-    }
-    if op == "or" {
-        if as_bool(eval(left, state, bindings, model, old_state)?)? {
-            return Ok(Value::Bool(true));
+        if !fsl_core::pattern_binding_flows(op, true) {
+            local.clone_from(bindings);
         }
-        return Ok(Value::Bool(as_bool(eval(
-            right, state, bindings, model, old_state,
-        )?)?));
-    }
-    if op == "=>" {
-        if !as_bool(eval(left, state, bindings, model, old_state)?)? {
-            return Ok(Value::Bool(true));
+        let right = as_bool(eval_with_bindings(
+            right, state, &mut local, model, old_state,
+        )?)?;
+        if fsl_core::pattern_binding_flows(op, false) {
+            *bindings = local;
         }
-        return Ok(Value::Bool(as_bool(eval(
-            right, state, bindings, model, old_state,
-        )?)?));
+        return Ok(Value::Bool(right));
     }
     let left = eval(left, state, bindings, model, old_state)?;
     let right = eval(right, state, bindings, model, old_state)?;
@@ -1995,7 +2009,7 @@ fn refinement_action_instance(
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expr) => {
-                if !as_bool(eval(
+                if !as_bool(eval_with_bindings(
                     expr,
                     &monitor.state,
                     &mut bindings,
@@ -4360,7 +4374,7 @@ fn evaluate_action_guards_at(
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expression) => {
-                let value = eval(expression, state, &mut bindings, model, None)
+                let value = eval_with_bindings(expression, state, &mut bindings, model, None)
                     .and_then(as_bool)
                     .map_err(failed)?;
                 if !value {

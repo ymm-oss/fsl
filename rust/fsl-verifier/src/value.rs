@@ -36,10 +36,6 @@ impl<T> TypedBindings<T> {
         self.0.get(name).map(|binding| &binding.0)
     }
 
-    pub(crate) fn contains_key(&self, name: &str) -> bool {
-        self.0.contains_key(name)
-    }
-
     pub(crate) fn keys(&self) -> impl Iterator<Item = &String> {
         self.0.keys()
     }

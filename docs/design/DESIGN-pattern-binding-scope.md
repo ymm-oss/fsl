@@ -296,7 +296,8 @@ readable scope carried across `requires` items contains only conjunctive
 exports. Subsequent model validation checks cross-item collisions; sync source
 hygiene separately carries its reserved locals. Together these checks prevent
 a narrower readable environment from admitting repeated names that the
-first-binding-wins evaluators would interpret incorrectly. Evaluators are unchanged.
+first-binding-wins evaluators would interpret incorrectly. Evaluators were
+unchanged in the #1547 amendment; see the subsequent #1622 repair below.
 
 This inventory intentionally preserves the base boundary rather than claiming
 to inventory every possible evaluator binding. The existing not/if reuse
@@ -320,9 +321,43 @@ The original baseline accepted
 `((o is some(v)) or x == 0) => v == 1` with `o = none` and `x = 0`;
 BMC and induction could report `violated` using the unbound payload name.
 Rejecting the source is necessary: that verdict cannot establish a valid
-counterexample for an ill-scoped formula. Evaluator semantics are unchanged.
+counterexample for an ill-scoped formula. That amendment did not change evaluator
+semantics; source refusals remain in force after the later lifetime repair.
 
 ### Shared policy and sibling consumers
+
+#### Evaluator lifetime repair (#1622 / #1577)
+
+Symbolic values and concrete evaluation now use closed expression boundaries
+and explicit true-continuation entry points. Only a match and a conjunctive
+whole result can export payloads. Binary RHS visibility follows the same
+`pattern_binding_flows` policy; reaching an `or` RHS does not inherit the left
+environment. A rewritten local match may shadow an outer binder within its
+continuation, but closed evaluation restores the complete outer environment,
+including independently stored declared type metadata, also on errors.
+
+Ordinary/raw and expected-type conditionals isolate condition and both arms;
+comparison operands, compound values, access, arguments and candidate-local
+quantifier/aggregate evaluation also close their children. Existing checked
+inference and collection materialization remain authoritative. Guard value and
+definedness walks explicitly export conjunctive `requires` bindings to later
+guards/body, while a `let` RHS stays closed. Init diagnostic reachability and
+ranked-measure traversal use the same RHS boundary without altering short-circuit
+reachability, partial-operation order or bounds priority.
+
+The concrete runtime preserves lazy logical/conditional evaluation and remains
+solver-independent. Monitor, solver-free BFS, BMC and induction-with-bounded-base
+controls assert actual truth, not agreement with historical incorrect concrete
+results. Shared evaluators also correct cross-statement/composed-init payload
+leakage. The frontend's #1573 reservation (including then-to-else), #1595
+refinement refusals and known composed-init reservation gaps are unchanged; the
+repair is not permission to reuse a reserved name in source.
+
+Direct evaluator controls bypass only collision admission, retain checked
+expression typing, and assert restored environments and true/false results.
+Separate CLI controls preserve impossible/reached progress outcomes and pin
+later-payload init values. No solver, substitution, public envelope or grammar
+change is part of this repair.
 
 `fsl-core::pattern_binding_flows(op, right_operand)` is the single operator
 decision. The initial eight-consumer estimate omitted the separate free-name
@@ -340,6 +375,10 @@ walk, and review found the Renamer as a tenth logical consumer:
 | Free-name analysis | `model.rs` | RHS flow |
 | Name export collector | `compose.rs` | Whole-expression export |
 | Source-owned Renamer | `compose/hygiene.rs` | RHS mapping flow and whole-result mapping export |
+| Symbolic evaluator and status | `fsl-verifier/src/eval.rs` | Closed children, RHS visibility and whole-result export |
+| Init diagnostic reachability | `fsl-verifier/src/init_definedness.rs` | RHS visibility |
+| Ranked-measure traversal | `fsl-verifier/src/induction.rs` | RHS visibility |
+| Concrete evaluator | `fsl-runtime/src/lib.rs` | Closed children, RHS visibility and whole-result export |
 
 The whole-export and RHS decisions in both DDD paths, `domain_lowering.rs` and
 `domain.rs`, also delegate to the same helper, replacing four equivalent

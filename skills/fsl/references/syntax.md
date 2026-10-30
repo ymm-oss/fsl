@@ -1296,7 +1296,8 @@ when checking a file, the message suffix changes from `at L:C` to
   separate from collision reservations. Breaking removal (#1573): matches inside
   not/expression-if reserve names for later siblings, guards, statements and
   ensures. An expression-if condition reserves both arms; **then also reserves
-  else** because the symbolic binding map is shared (#1577). Where reserves a
+  else**. Introduced for the shared symbolic binding-map bug (#1577), that
+  reservation remains after the evaluator lifetime repair (#1622). Where reserves a
   quantifier/aggregate body or of expression when one exists; count, unique and
   exactlyOne have only their filter. Statement-if conditions reserve both arms
   and later statements, and bindings inside either arm reserve later statements.
@@ -1306,7 +1307,7 @@ when checking a file, the message suffix changes from `at L:C` to
   retaining initializer/const/map-key diagnostic owners. Composed init has a
   known check gap for same-source fragments and inline→init; common init can
   also inherit an unrelated source's Fresh decision. Rebinding remains illegal.
-  False verified results belong to #1622; compose init-fragment reservations
+  #1622 corrects evaluation without widening admission; compose init-fragment reservations
   will be tracked in a separate issue filed after merge. Do not claim general
   composed-init checking from the direct guarantee.
   Repair by renaming the later declaration and its reads, e.g. replace
@@ -1319,8 +1320,13 @@ when checking a file, the message suffix changes from `at L:C` to
   Guard-name regression examples retain their explain result/verify verdict.
   In the two-source statement-payload case, check remains accepted and erroneous
   violated verdicts become holds; a genuinely false payload stays violated.
-  Independent-source init separation is not repaired here. It belongs to the
-  remaining evaluator binding-lifetime work in #1622. Out-of-scope `v` reports
+  The evaluator repair (#1622) confines payloads in BMC, induction, Monitor and
+  solver-free explicit BFS, including composed initializers. Closed expressions
+  restore outer values and declared binding types. Raw/contextual if arms,
+  comparisons, compound operands/arguments and quantifier/aggregate candidates
+  stay local. Conjunctive requires still exports to later guards/body, but a let
+  RHS does not. Collision reservation and checked typing are unchanged.
+  Out-of-scope `v` reports
   `kind: "semantics"`, exit 2, and
   `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`.
   Location is the containing clause/if arm; guards/ensures retain the action-level

@@ -16,7 +16,9 @@ use serde_json::Value;
 type InstanceOverrides = BTreeMap<String, i64>;
 type ValueOverrides = BTreeMap<String, (i64, i64)>;
 type FilteredScopeOverrides = Option<(InstanceOverrides, ValueOverrides)>;
-pub(crate) fn pattern_binding_flows(op: &str, right_operand: bool) -> bool {
+/// Whether patterns flow to a binary RHS or its enclosing true continuation.
+#[must_use]
+pub fn pattern_binding_flows(op: &str, right_operand: bool) -> bool {
     op == "and" || (right_operand && op == "=>")
 }
 

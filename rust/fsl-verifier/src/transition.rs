@@ -12,7 +12,8 @@ use crate::VerifyError;
 use crate::eval::{
     EvaluationStatus, FailureClass, binder_condition, binder_source_expressions, binder_values,
     binder_where, binder_where_expression, classified_evaluation_status, eval, eval_binding,
-    eval_expected, index_access_status, index_accessible, safe_status, sequence_statuses,
+    eval_expected, eval_with_bindings, index_access_status, index_accessible, safe_status,
+    sequence_statuses,
 };
 use crate::value::TypedBindings as Bindings;
 use crate::value::{
@@ -105,7 +106,7 @@ pub(crate) fn action_guards<S: SmtSolver>(
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expr) => {
-                let value = eval(solver, model, expr, state, &mut bindings, None)?;
+                let value = eval_with_bindings(solver, model, expr, state, &mut bindings, None)?;
                 guards.push(bool_term(&value)?.clone());
             }
         }
@@ -167,7 +168,8 @@ pub(crate) fn classified_action_guard_definedness<S: SmtSolver>(
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(_) => {
-                let value = eval(solver, model, expression, state, &mut bindings, None)?;
+                let value =
+                    eval_with_bindings(solver, model, expression, state, &mut bindings, None)?;
                 reaches_guard = solver.and(&[
                     reaches_guard,
                     status.fully_defined,
