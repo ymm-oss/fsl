@@ -66,6 +66,18 @@ violations (see [the ledger amendment](../design/DESIGN-ledger.md)),
 not a reachable counterexample; raw CTI, hint, and rank-failure evidence is
 preserved. Added findings and corrected attribution also change affected ledger
 approval digests.
+Ledger warning kinds select their trace type, summary, translation and advice
+from one presentation table (#1497). Six vacuity and five migration families
+retain their rendered rows; `deadlock` is a deadlock finding,
+`never_enabled_action` is coverage beside the existing coverage projection, and
+`vacuity_probe_truncated` is `verification_incomplete` without mutate advice.
+Unknown, missing or non-string kinds remain visible generic warnings.
+`no_user_invariants` describes absent user invariants and transition constraints;
+reachable and progress checks may still run. Raw warnings and other evidence,
+assurance, generated-artifact envelopes and command exits remain unchanged.
+Changed rows make affected approvals `drifted` for `rendering_changed` (exit 0);
+review the ledger and regenerate the approval. Newly approved ledgers stay approved.
+
 Direct `ledger` and `html` return verification `result:&quot;error&quot;` as the original
 JSON error envelope and exit 2/3, before rendering or writing an artifact;
 direct `ledger` stops before ancillary replay, evidence loading, and witness preparation

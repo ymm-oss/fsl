@@ -22,7 +22,10 @@ reads as "guarantees nothing".
   bound (`checked_to_depth` + `completeness`).
 - Edition-migration findings render as `trace_type: migration` with a 移行候補 summary containing the code and message, without mutate advice (#1449).
 - Rows containing only migration findings use status 🟡 移行候補 and risk —; rows with any non-migration finding retain 🔴 要確認 and risk 要確認, including specification-wide and approval views.
-- Baseline migration findings and their evidence are retained; raw-success warning stderr remains deferred under #1449. Other non-migration warning-family classification defects are tracked by #1497, not fixed by the migration-row change.
+- Baseline migration findings and their evidence are retained. Successful raw ledger output already delivers migration warnings on stderr through captured-root admission; file-output envelopes and distinct approval baselines retain their existing delivery rules (#1449).
+- Warning kinds select their trace type, summary, business translation and default advice from one private presentation table (#1497). Six vacuity kinds and five migration kinds retain their complete rendered rows. `deadlock` is a deadlock finding; `never_enabled_action` adds a coverage warning beside the existing coverage projection; `vacuity_probe_truncated` is `verification_incomplete` without mutate advice. Other named kinds have warning-specific wording; unknown, missing and non-string kinds remain visible generic warnings, never implicit vacuity findings.
+- `no_user_invariants` describes absent user invariants and transition constraints; it does not imply that reachable or progress properties were not checked. The raw verifier warning is unchanged (#1004).
+- These presentation changes preserve raw evidence, assurance, command exits and generated-artifact envelopes. An affected existing approval becomes `drifted` for `rendering_changed`, still exit 0; review the new ledger and regenerate the approval. A newly approved ledger remains `approved`.
 - `run_scenarios(file, depth, deadlock)` — passing acceptance / forbidden /
   reachable confirmations per requirement.
 - `--impl-log <trace.json>` (optional) → `run_replay` — implementation-log

@@ -178,6 +178,10 @@ silently reusing the closed-search verdict.
   verdict; deliberately cause-neutral, matching `Reachability::Exhausted`
   not distinguishing budget cutoff from an evaluation error). `html.rs`
   renders `kind`/`message` generically and needed no change.
+  Its ledger trace type is `verification_incomplete`, with advice to inspect the
+  state space and expression evaluation rather than run mutate (#1497). The six
+  actual vacuity presentation kinds retain their rendered rows; warning kinds
+  outside that set do not acquire a vacuity claim from the ledger.
   `assurance_token` never reads `warnings`, so a truncated-probe finding
   cannot move a requirement's assurance class
   (`rust/fsl-tools/tests/issue_729_vacuity_probe_truncated_ledger.rs`).

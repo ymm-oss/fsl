@@ -2303,7 +2303,18 @@ violations (see <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DE
 not a reachable counterexample; raw CTI, hint, and rank-failure evidence is
 preserved. Added findings and corrected attribution also change affected ledger
 approval digests.
-Direct <code>ledger</code> and <code>html</code> return verification <code>result:"error"</code> as the original
+Ledger warning kinds select their trace type, summary, translation and advice
+from one presentation table (#1497). Six vacuity and five migration families
+retain their rendered rows; <code>deadlock</code> is a deadlock finding,
+<code>never_enabled_action</code> is coverage beside the existing coverage projection, and
+<code>vacuity_probe_truncated</code> is <code>verification_incomplete</code> without mutate advice.
+Unknown, missing or non-string kinds remain visible generic warnings.
+<code>no_user_invariants</code> describes absent user invariants and transition constraints;
+reachable and progress checks may still run. Raw warnings and other evidence,
+assurance, generated-artifact envelopes and command exits remain unchanged.
+Changed rows make affected approvals <code>drifted</code> for <code>rendering_changed</code> (exit 0);
+review the ledger and regenerate the approval. Newly approved ledgers stay approved.</p>
+<p>Direct <code>ledger</code> and <code>html</code> return verification <code>result:"error"</code> as the original
 JSON error envelope and exit 2/3, before rendering or writing an artifact;
 direct <code>ledger</code> stops before ancillary replay, evidence loading, and witness preparation
 (<code>html</code> also stops before explain). With <code>-o</code>, no artifact is created. Other
