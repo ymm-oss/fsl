@@ -5,3 +5,5 @@ Closed expressions restore outer values and declared binding types; legal
 conjunctive requires flow and all existing source collision refusals remain.
 Quantified diagnostic snapshots retain their matched continuation payloads in
 both top-level and blame witnesses without reopening ordinary evaluation.
+Reached payload evidence also survives nested conjunction short-circuit returns;
+skipped operands remain unevaluated and non-continuation scopes remain closed.

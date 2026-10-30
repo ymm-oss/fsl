@@ -624,7 +624,11 @@ fn eval_binary(
             left, state, &mut local, model, old_state,
         )?)?;
         match (op, left) {
-            ("and", false) => return Ok(Value::Bool(false)),
+            ("and", false) => {
+                // Retain reached conjunct evidence even when its RHS is skipped.
+                *bindings = local;
+                return Ok(Value::Bool(false));
+            }
             ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
             _ => {}
         }

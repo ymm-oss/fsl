@@ -236,23 +236,14 @@ fn quantified_diagnostic_keeps_matched_payload_and_full_failure_contract() {
                 let (report, exit) =
                     fixture.verify("w.fsl", engine, &format!("w-{compared}-{engine}-{repeat}"));
                 if compared == 2 {
-                    verdict(&report, exit, "violated", 1);
-                    assert_eq!(report["violating_bindings"], json!([{"k":0,"v":1}]));
-                    assert_eq!(
-                        report["blame"],
-                        json!({"conjuncts":[{
-                            "index":0,"text":"forall k in 0..0 { o is some(v) and v == 2 }",
-                            "holds":false,"violating_bindings":[{"k":0,"v":1}]
-                        }]})
+                    assert_w_failure(
+                        &report,
+                        exit,
+                        "forall k in 0..0 { o is some(v) and v == 2 }",
+                        &json!([{"k":0,"v":1}]),
+                        &json!(1),
+                        62,
                     );
-                    assert_eq!(report["loc"], json!({"line":1,"column":62}));
-                    assert_eq!(report["trace"], json!([{"step":0,"state":{"o":1}}]));
-                    assert_eq!(report["violation_kind"], "invariant");
-                    assert_eq!(report["invariant"], "Q");
-                    assert_eq!(report["violated_at_step"], 0);
-                    assert_eq!(report["checked_to_depth"], 0);
-                    assert_eq!(report["completeness"], "bounded");
-                    assert_eq!(report["last_action"], Value::Null);
                 } else {
                     verdict(
                         &report,
@@ -274,6 +265,96 @@ fn quantified_diagnostic_keeps_matched_payload_and_full_failure_contract() {
                             "unbounded"
                         }
                     );
+                }
+            }
+        }
+    }
+}
+
+fn assert_w_failure(
+    report: &Value,
+    exit: i32,
+    text: &str,
+    bindings: &Value,
+    option: &Value,
+    column: u32,
+) {
+    verdict(report, exit, "violated", 1);
+    assert_eq!(&report["violating_bindings"], bindings);
+    assert_eq!(
+        report["blame"],
+        json!({"conjuncts":[{
+            "index":0,"text":text,"holds":false,"violating_bindings":bindings
+        }]})
+    );
+    assert_eq!(report["loc"], json!({"line":1,"column":column}));
+    assert_eq!(report["trace"], json!([{"step":0,"state":{"o":option}}]));
+    assert_eq!(report["violation_kind"], "invariant");
+    assert_eq!(report["invariant"], "Q");
+    assert_eq!(report["violated_at_step"], 0);
+    assert_eq!(report["checked_to_depth"], 0);
+    assert_eq!(report["completeness"], "bounded");
+    assert_eq!(report["last_action"], Value::Null);
+}
+
+#[test]
+fn nested_conjunction_witness_packets_keep_reached_payloads() {
+    for (name, frame, rendered) in [
+        ("left", "($) and true", "$ and true"),
+        ("right", "true and ($)", "true and ($)"),
+        (
+            "deeper",
+            "((true and ($)) and true) and true",
+            "true and ($) and true and true",
+        ),
+        (
+            "deeper-right",
+            "true and (true and (($) and true))",
+            "true and (true and ($ and true))",
+        ),
+    ] {
+        for (kind, option, matched, hi, compare, expected) in [
+            ("exact", "some(1)", "o", 0, 2, json!([{"k":0,"v":1}])),
+            (
+                "varied",
+                "some(1)",
+                "(if k == 0 then o else some(2))",
+                1,
+                3,
+                json!([{"k":0,"v":1},{"k":1,"v":2}]),
+            ),
+            (
+                "absent",
+                "none",
+                "(if k == 0 then o else some(2))",
+                1,
+                3,
+                json!([{"k":0},{"k":1,"v":2}]),
+            ),
+        ] {
+            let matched = format!("{matched} is some(v) and v == {compare}");
+            let body = frame.replace('$', &matched);
+            let text = format!(
+                "forall k in 0..{hi} {{ {} }}",
+                rendered.replace('$', &matched)
+            );
+            let source = format!(
+                "spec W {{ state {{ o: Option<Int> = {option} }} action tick() {{}} invariant Q {{ forall k in 0..{hi} {{ {body} }} }} }}\n"
+            );
+            let fixture = Fixture::new(&[("w.fsl", &source)]);
+            for engine in ["bmc", "explicit"] {
+                for repeat in 1..=2 {
+                    let (report, exit) = fixture.verify(
+                        "w.fsl",
+                        engine,
+                        &format!("nested-{name}-{kind}-{engine}-{repeat}"),
+                    );
+                    let (state, column) = if option == "none" {
+                        (Value::Null, 59)
+                    } else {
+                        (json!(1), 62)
+                    };
+                    assert_w_failure(&report, exit, &text, &expected, &state, column);
                 }
             }
         }

@@ -104,17 +104,7 @@ fn diagnostic_candidates_retain_only_body_continuation_payloads() {
             Some(vec![(0, Some(1)), (1, Some(2))]),
         ),
     ] {
-        let model = build_model(
-            parse_kernel_source(
-                &format!(
-                    "spec W {{state {{o:Option<Int> = some(1)}} action tick() {{}}
-             invariant Q {{forall k in 0..1{filter} {{{body}}}}} }}"
-                ),
-                &FsResolver::new("."),
-            )
-            .unwrap(),
-        )
-        .unwrap();
+        let model = witness_model("some(1)", &format!("forall k in 0..1{filter} {{{body}}}"));
         let monitor = Monitor::new(model.clone()).unwrap();
         let before = monitor.state.clone();
         let expr = &model
@@ -142,6 +132,105 @@ fn diagnostic_candidates_retain_only_body_continuation_payloads() {
         let outer = caller.clone();
         eval(expr, &monitor.state, &mut caller, &model, None).unwrap();
         assert_eq!(caller, outer, "diagnostics must not reopen ordinary eval");
+    }
+}
+
+fn witness_model(option: &str, expression: &str) -> KernelModel {
+    build_model(parse_kernel_source(&format!(
+        "spec W {{ state {{ o: Option<Int> = {option} }} action tick() {{}} invariant Q {{ {expression} }} }}"
+    ), &FsResolver::new(".")).unwrap()).unwrap()
+}
+
+#[test]
+fn nested_conjunction_diagnostics_keep_all_reached_candidate_payloads() {
+    for frame in [
+        "$",
+        "($) and true",
+        "true and ($)",
+        "((true and ($)) and true) and true",
+        "true and (true and (($) and true))",
+    ] {
+        for present in [true, false] {
+            let body = frame.replace('$', "(if k == 0 then o else some(2)) is some(v) and v == 3");
+            let model = witness_model(
+                if present { "some(1)" } else { "none" },
+                &format!("forall k in 0..1 {{{body}}}"),
+            );
+            let monitor = Monitor::new(model.clone()).unwrap();
+            let expr = &model
+                .invariants
+                .iter()
+                .find(|p| p.name == "Q")
+                .unwrap()
+                .expr;
+            let mut first = Bindings::from([("k".into(), Value::Int(0))]);
+            if present {
+                first.insert("v".into(), Value::Int(1));
+            }
+            let expected = vec![
+                first,
+                Bindings::from([("k".into(), Value::Int(1)), ("v".into(), Value::Int(2))]),
+            ];
+            assert_eq!(
+                violating_bindings(expr, &monitor.state, &model).unwrap(),
+                Some(expected),
+                "frame={frame} present={present}"
+            );
+            let mut caller = Bindings::from([("v".into(), Value::Int(9))]);
+            let before = caller.clone();
+            assert_eq!(
+                eval(expr, &monitor.state, &mut caller, &model, None).unwrap(),
+                Value::Bool(false)
+            );
+            assert_eq!(caller, before);
+        }
+    }
+}
+
+#[test]
+fn continuation_short_circuit_exports_only_conjunction_and_stays_lazy() {
+    for (body, expected, exported) in [
+        (
+            "(some(1) is some(v) and v == 2) and (1 / 0 == 0)",
+            false,
+            true,
+        ),
+        (
+            "(some(1) is some(v) and v == 1) or (1 / 0 == 0)",
+            true,
+            false,
+        ),
+        (
+            "(some(1) is some(v) and v == 2) => (1 / 0 == 0)",
+            true,
+            false,
+        ),
+    ] {
+        let model = witness_model("some(1)", body);
+        let monitor = Monitor::new(model.clone()).unwrap();
+        let expr = &model
+            .invariants
+            .iter()
+            .find(|p| p.name == "Q")
+            .unwrap()
+            .expr;
+        let mut bindings = Bindings::from([("outer".into(), Value::Int(9))]);
+        let before = bindings.clone();
+        assert_eq!(
+            eval_with_bindings(expr, &monitor.state, &mut bindings, &model, None).unwrap(),
+            Value::Bool(expected)
+        );
+        let mut expected_bindings = before.clone();
+        if exported {
+            expected_bindings.insert("v".into(), Value::Int(1));
+        }
+        assert_eq!(bindings, expected_bindings, "{body}");
+        let mut closed = before.clone();
+        assert_eq!(
+            eval(expr, &monitor.state, &mut closed, &model, None).unwrap(),
+            Value::Bool(expected)
+        );
+        assert_eq!(closed, before);
     }
 }
 

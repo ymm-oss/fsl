@@ -366,6 +366,12 @@ snapshot (for example `{k: 0, v: 1}`). Ordinary evaluation, candidate filters,
 non-conjunctive children and sibling candidates remain closed. The public
 top-level and blame witness packets retain those payload keys; diagnostics do
 not collect historical out-of-continuation bindings.
+This includes arbitrarily nested conjunctions: when an `and` short-circuits
+after a false left subtree, it retains that subtree's reached candidate evidence
+without evaluating the right subtree. Both the early and reached-RHS return
+routes preserve the whole-exporting conjunction's local snapshot. `or` and
+implication still export no whole-result bindings, and ordinary closed evaluation
+discards the snapshot. Retention for diagnostics does not widen read visibility.
 
 `fsl-core::pattern_binding_flows(op, right_operand)` is the single operator
 decision. The initial eight-consumer estimate omitted the separate free-name
