@@ -201,11 +201,11 @@ back — a state value, a trace step's action choice, or a ranking value the
 model does not provide (`stage:"bmc"`; the verifier marks these with
 `VerifyError::is_solver_failure`, distinguishing them from the semantic errors
 above, which stay kills); or the acceptance/forbidden oracle or the implements
-oracle returned an error (`stage:"requirements"` / `"implements"`, previously
+oracle could not evaluate the mutant (`stage:"requirements"` / `"implements"`, previously
 the error string itself or `refinement` as the killer for built-ins and
 `invalid` for externals). Such a mutant is published with `status:"error"`,
 `killed_by:null`, and `error:{stage,message}`; it is never killed, never
-`invalid`, excluded from both sides of `kill_rate`, counted in
+`invalid` (static input failures are distinguished below), excluded from both sides of `kill_rate`, counted in
 `summary.errored` (and per source; the key appears only when non-zero, see
 §5), and fails any requested gate. **Known residual:** a BMC error the verifier
 does not mark as a solver failure stays the `build_spec` kill. That includes
@@ -214,9 +214,15 @@ limits of the verifier rather than findings about the mutant, and the `Seq`
 length projection errors ("model sequence length is negative / exceeds
 capacity"), which are likely the same type-bound projection gap #1283 closed
 for enum ordinals; both are left for follow-ups. The rule is
-the same for both sources: a failure before the mutant builds is `invalid`;
-after it builds, solver/backend and secondary-oracle failures are `error`,
-while the semantic BMC failures described above remain `build_spec` kills.
+the same for both sources: statically invalid input is `invalid`, including
+failures that `check` rejects and static implements-map type errors
+(`RefinementErrorKind::Type`, #1472). The shared implements validation runs
+before runtime oracles, so an earlier main or requirement kill cannot hide
+an invalid map, with either auto or explicit maps. These mutants are excluded
+from `judged` and `kill_rate`, not counted as oracle errors. Solver/backend and
+secondary-oracle evaluation failures remain `error`, while the semantic BMC
+failures described above remain `build_spec` kills. The runtime refinement
+walk still runs after the main and requirement oracles leave the mutant clean.
 The init-assignment `_bounds_<state>`
 re-attribution applies only to judged (clean/killed) outcomes, so it cannot
 hide an error. Without a gate the run still exits 0, and a note states how many
@@ -232,7 +238,7 @@ survived: it is `status:"inconclusive"` with
 against; counting it `killed` would inflate `kill_rate` (the fail-open
 direction #1251 describes for oracle failures). A later decided oracle wins
 over the cutoff (a built-in `_bounds_*` init kill stays `killed`). An implements
-oracle that returns an error rather than a verdict is `error` (above), not
+oracle that fails during evaluation rather than returning a verdict is `error` (above), not
 `inconclusive`: the two undecided states stay distinct because they call for
 different action (fix the tool or input vs. accept or raise the budget).
 
@@ -240,7 +246,8 @@ different action (fix the tool or input vs. accept or raise the budget).
 `rust/fslc/src/main.rs`) decides the `status` of every mutant that reached an
 oracle, for both sources (external records rejected before any oracle are
 published as `invalid` earlier):
-`invalid` is exclusive (the mutant never reached the oracle); otherwise
+`invalid` is exclusive (statically invalid input, including static implements-map
+type errors, independent of runtime oracle order); otherwise
 `killed` > `error` > `inconclusive` > `survived`. A decided kill beats both
 undecided states: the oracles run in order and stop at the first kill, so a
 kill is evidence the spec detects the mutant whatever a later oracle would have

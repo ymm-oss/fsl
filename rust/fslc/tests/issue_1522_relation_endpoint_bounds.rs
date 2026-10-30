@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #1522 / #1524 option B: relation compatibility compares endpoint carriers,
-//! recursively, without tightening scalar ranges, Map keys, or alias identity.
+//! recursively. #1472 extends the carrier rule to whole Sets, Seqs and Maps;
+//! scalar range compatibility and equal-bound aliases remain unchanged.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -325,8 +326,14 @@ fn scalar_range_aliases_remain_compatible() {
 }
 
 #[test]
-fn map_key_range_aliases_remain_compatible() {
-    assert_check_ok("map", MAP);
+fn conditional_rejects_different_map_key_carriers() {
+    assert_source_rejected(
+        "map",
+        MAP,
+        &json!({"line": 7, "column": 35}),
+        r#"Map(Named("B"), Bool)"#,
+        r#"Map(Named("A"), Bool)"#,
+    );
 }
 
 #[test]
@@ -489,6 +496,12 @@ fn let_assignment_rejects_narrow_to_wide_relation() {
 }
 
 #[test]
-fn numeric_set_narrow_to_wide_assignment_still_checks() {
-    assert_check_ok("set-widening", SET_WIDENING);
+fn numeric_set_narrow_to_wide_assignment_is_rejected() {
+    assert_source_rejected(
+        "set-widening",
+        SET_WIDENING,
+        &json!({"line": 6, "column": 48}),
+        r#"Set(Named("N"))"#,
+        r#"Set(Named("M"))"#,
+    );
 }

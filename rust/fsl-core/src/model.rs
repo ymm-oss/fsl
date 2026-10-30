@@ -206,6 +206,15 @@ pub struct KernelModel {
 }
 
 impl KernelModel {
+    /// Compare complete carriers, resolving numeric aliases without enumerating values.
+    ///
+    /// # Errors
+    /// Returns an error if a named type is not defined in this model.
+    pub fn same_carrier(&self, actual: &TypeRef, expected: &TypeRef) -> Result<bool, ModelError> {
+        crate::typecheck::same_carrier(actual, expected, self)
+            .map_err(|error| model_error(error.message))
+    }
+
     /// Whether a state type contributes an implicit verifier bound property.
     #[must_use]
     pub fn type_has_bounds(&self, ty: &TypeRef) -> bool {

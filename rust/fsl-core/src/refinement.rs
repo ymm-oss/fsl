@@ -95,10 +95,25 @@ pub struct ImplementsContract {
     pub refinement: Refinement,
 }
 
+/// Distinguish statically ill-typed mappings from dependency and other failures.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RefinementErrorKind {
+    Type,
+    Other,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RefinementError {
     pub message: String,
     pub span: Option<Span>,
+    pub kind: RefinementErrorKind,
+}
+
+impl RefinementError {
+    fn type_error(mut self) -> Self {
+        self.kind = RefinementErrorKind::Type;
+        self
+    }
 }
 
 impl fmt::Display for RefinementError {
@@ -144,6 +159,7 @@ pub fn parse_refinement_with_options(
         RefinementError {
             message: error.message,
             span: Some(error.span),
+            kind: RefinementErrorKind::Other,
         }
     })?;
     let SurfaceDocument::Refinement(surface) = document else {
@@ -976,27 +992,34 @@ fn validate_state_map(
             | Binder::Range { name, .. }
             | Binder::Collection { name, .. } => name.clone(),
         };
-        crate::typecheck::validate_expression_type(
+        crate::typecheck::validate_expression_type_between(
             &Expr::Var(binder_name.clone()),
             &key,
             &[(binder_name.clone(), binder_ty.clone())],
             context,
+            abstraction,
         )
         .map_err(|error| invalid_state_map_at_map(state_map, "binder", &error.message))?;
         bindings.push((binder_name, binder_ty));
         expected = *value;
     }
-    crate::typecheck::validate_expression_type(&state_map.expr, &expected, &bindings, context)
-        .map_err(|error| {
-            invalid_state_map(
-                state_map,
-                "expression",
-                &error.message,
-                error
-                    .span
-                    .expect("mapped expression type errors carry source spans"),
-            )
-        })
+    crate::typecheck::validate_expression_type_between(
+        &state_map.expr,
+        &expected,
+        &bindings,
+        context,
+        abstraction,
+    )
+    .map_err(|error| {
+        invalid_state_map(
+            state_map,
+            "expression",
+            &error.message,
+            error
+                .span
+                .expect("mapped expression type errors carry source spans"),
+        )
+    })
 }
 
 fn invalid_state_map_at_map(state_map: &StateMap, part: &str, message: &str) -> RefinementError {
@@ -1004,6 +1027,7 @@ fn invalid_state_map_at_map(state_map: &StateMap, part: &str, message: &str) -> 
         format!("invalid map {part} for '{}': {message}", state_map.name),
         state_map.span,
     )
+    .type_error()
 }
 
 fn invalid_state_map(
@@ -1020,6 +1044,7 @@ fn invalid_state_map(
         format!("invalid map {part} for '{}': {message}", state_map.name),
         Some(span),
     )
+    .type_error()
 }
 
 fn parameter_type(parameter: &ParamDef) -> TypeRef {
@@ -1339,11 +1364,12 @@ fn lower_action_target(
             for (index, (argument, parameter)) in
                 args.iter().zip(&abstraction_action.params).enumerate()
             {
-                crate::typecheck::validate_expression_type(
+                crate::typecheck::validate_expression_type_between(
                     argument,
                     &parameter_type(parameter),
                     &bindings,
                     context,
+                    abstraction,
                 )
                 .map_err(|error| {
                     refinement_error(
@@ -1356,6 +1382,7 @@ fn lower_action_target(
                         ),
                         error.span.or(Some(source.span)),
                     )
+                    .type_error()
                 })?;
             }
             if source.origin == CorrespondenceOrigin::Auto
@@ -1408,6 +1435,7 @@ fn refinement_error(message: impl Into<String>, span: Option<Span>) -> Refinemen
     RefinementError {
         message: message.into(),
         span,
+        kind: RefinementErrorKind::Other,
     }
 }
 
@@ -1610,6 +1638,7 @@ pub fn requirements_implements_with_bounds_with_options(
         RefinementError {
             message: error.message,
             span: Some(error.span),
+            kind: RefinementErrorKind::Other,
         }
     })?;
     let SurfaceDocument::Requirements(requirements) = document else {
@@ -1630,6 +1659,7 @@ pub fn requirements_implements_with_bounds_with_options(
     let abs_source = resolver.read(path).map_err(|error| RefinementError {
         message: error.message,
         span: Some(span),
+        kind: RefinementErrorKind::Other,
     })?;
     let kernel = parse_abstraction_kernel_source_with_bounds_with_options(
         &abs_source,
@@ -1641,10 +1671,12 @@ pub fn requirements_implements_with_bounds_with_options(
     .map_err(|error| RefinementError {
         message: error.message,
         span: Some(span),
+        kind: RefinementErrorKind::Other,
     })?;
     let abstraction = build_model(kernel).map_err(|error| RefinementError {
         message: error.message,
         span: Some(span),
+        kind: RefinementErrorKind::Other,
     })?;
     if abstraction.name != *abs_name {
         return Err(refinement_error(

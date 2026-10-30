@@ -446,7 +446,24 @@ fn infer_type_inner(
                 TypeRef::Bool
             },
         ),
-        Expr::Conditional { then_expr, .. } => infer_type(then_expr, env, model, expected),
+        Expr::Conditional {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            let ty = infer_type(then_expr, env, model, expected)?;
+            if expected.is_none() && has_int(&ty) {
+                let other = infer_type(else_expr, env, model, None)?;
+                if matches!(
+                    (&ty, &other),
+                    (TypeRef::Set(_), TypeRef::Set(_)) | (TypeRef::Seq(_, _), TypeRef::Seq(_, _))
+                ) && !has_int(&carrier_type(&other, model)?)
+                {
+                    return Ok(other);
+                }
+            }
+            Ok(ty)
+        }
         Expr::UnaryNamed { name, expr, .. } => match name.as_str() {
             "old" => infer_type(expr, env, model, expected),
             "abs" => Ok(TypeRef::Int),
@@ -469,12 +486,46 @@ fn infer_type_inner(
 }
 
 /// Container carriers must be equal, not merely scalar-assignable.
-fn same_carrier(
+pub(crate) fn same_carrier(
     actual: &TypeRef,
     expected: &TypeRef,
     model: &KernelModel,
 ) -> Result<bool, TypecheckError> {
-    Ok(resolve(model, actual)? == resolve(model, expected)?)
+    Ok(carrier_type(actual, model)? == carrier_type(expected, model)?)
+}
+
+fn carrier_type(ty: &TypeRef, model: &KernelModel) -> Result<TypeRef, TypecheckError> {
+    let inner = |ty| carrier_type(ty, model).map(Box::new);
+    Ok(match resolve(model, ty)? {
+        TypeRef::Set(item) => TypeRef::Set(inner(&item)?),
+        TypeRef::Seq(item, capacity) => TypeRef::Seq(inner(&item)?, capacity),
+        TypeRef::Option(item) => TypeRef::Option(inner(&item)?),
+        TypeRef::Map(key, value) => TypeRef::Map(inner(&key)?, inner(&value)?),
+        TypeRef::Relation(source, target) => TypeRef::Relation(inner(&source)?, inner(&target)?),
+        ty => ty,
+    })
+}
+
+// Int carries no finite domain, including when inferred from a literal (#1467).
+fn has_int(ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Int => true,
+        TypeRef::Set(item) | TypeRef::Seq(item, _) | TypeRef::Option(item) => has_int(item),
+        TypeRef::Map(key, value) | TypeRef::Relation(key, value) => has_int(key) || has_int(value),
+        _ => false,
+    }
+}
+
+fn compatible_carrier(
+    actual: &TypeRef,
+    expected: &TypeRef,
+    model: &KernelModel,
+) -> Result<bool, TypecheckError> {
+    if has_int(actual) || has_int(expected) {
+        types_compatible(actual, expected, model)
+    } else {
+        same_carrier(actual, expected, model)
+    }
 }
 
 pub(crate) fn types_compatible(
@@ -488,14 +539,19 @@ pub(crate) fn types_compatible(
         (TypeRef::Int | TypeRef::Range(_, _), TypeRef::Int | TypeRef::Range(_, _))
         | (TypeRef::Bool, TypeRef::Bool) => true,
         (TypeRef::Named(actual), TypeRef::Named(expected)) => actual == expected,
-        (TypeRef::Set(actual), TypeRef::Set(expected))
-        | (TypeRef::Option(actual), TypeRef::Option(expected))
-        | (TypeRef::Seq(actual, _), TypeRef::Seq(expected, _)) => {
+        (TypeRef::Option(actual), TypeRef::Option(expected)) => {
             types_compatible(actual, expected, model)?
         }
+        (TypeRef::Set(actual), TypeRef::Set(expected)) => {
+            compatible_carrier(actual, expected, model)?
+        }
+        (TypeRef::Seq(actual, actual_capacity), TypeRef::Seq(expected, expected_capacity)) => {
+            (actual_capacity == expected_capacity || has_int(actual) || has_int(expected))
+                && compatible_carrier(actual, expected, model)?
+        }
         (TypeRef::Map(actual_key, actual_value), TypeRef::Map(expected_key, expected_value)) => {
-            types_compatible(actual_key, expected_key, model)?
-                && types_compatible(actual_value, expected_value, model)?
+            compatible_carrier(actual_key, expected_key, model)?
+                && compatible_carrier(actual_value, expected_value, model)?
         }
         (
             TypeRef::Relation(actual_key, actual_value),
@@ -519,14 +575,17 @@ pub(crate) fn expression_type(
     if let Some(expected) = expected
         && !types_compatible(&ty, expected, model).map_err(|error| error.with_span(span))?
     {
-        return Err(error(format!(
-            "expression of type {:?} is not assignable to {:?}",
-            shown_type(&ty),
-            shown_type(expected)
-        ))
-        .with_span(span));
+        return Err(not_assignable(&ty, expected).with_span(span));
     }
     Ok(ty)
+}
+
+fn not_assignable(actual: &TypeRef, expected: &TypeRef) -> TypecheckError {
+    error(format!(
+        "expression of type {:?} is not assignable to {:?}",
+        shown_type(actual),
+        shown_type(expected)
+    ))
 }
 
 pub(crate) fn collection_item_type(
@@ -1944,15 +2003,31 @@ pub(crate) fn validate_expression_type(
     bindings: &[(String, TypeRef)],
     model: &KernelModel,
 ) -> Result<(), TypecheckError> {
+    validate_expression_type_between(expr, expected, bindings, model, model)
+}
+
+pub(crate) fn validate_expression_type_between(
+    expr: &Expr,
+    expected: &TypeRef,
+    bindings: &[(String, TypeRef)],
+    model: &KernelModel,
+    expected_model: &KernelModel,
+) -> Result<(), TypecheckError> {
     let mut env = base_env(model);
     env.extend(bindings.iter().cloned());
     let span = unknown_span();
+    let resolved = carrier_type(expected, expected_model).map_err(|error| error.with_span(span))?;
+    let actual =
+        infer_type(expr, &env, model, Some(&resolved)).map_err(|error| error.with_span(span))?;
+    if !types_compatible(&actual, &resolved, model).map_err(|error| error.with_span(span))? {
+        return Err(not_assignable(&actual, expected).with_span(span));
+    }
     validate_expression(
         expr,
         &env,
         model,
         span,
-        Some(expected),
+        Some(&resolved),
         &SelfRelations::new(),
     )
     .map_err(|error| error.with_span(span))

@@ -365,6 +365,56 @@ fn check_refinement_still_refines_when_the_correspondence_divisor_is_always_guar
 const SEQ_ABS: &str = "spec SeqAbs { type V = 0..2 state { seq: Seq<V, 2> } init { seq = Seq {} } \
      action push(v: V) { requires seq.size() < 2 seq = seq.push(v) } }";
 
+// Original complete fixtures remain inputs to the rejection/sweep controls.
+const SEQ_WIDE: &str = "spec SeqWide { type V = -1..2 state { seq: Seq<V, 2> } init { seq = Seq {} } \
+         action push(v: V) { requires seq.size() < 2 seq = seq.push(v) } }";
+const SEQ_WIDER: &str = "spec SeqWider { type V = 0..3 state { seq: Seq<V, 2> } init { seq = Seq {} } \
+         action push(v: V) { requires seq.size() < 2 seq = seq.push(v) } }";
+const SEQ_GUARDED: &str = "spec SeqGuarded { type V = 0..2 state { seq: Seq<V, 2> } init { seq = Seq {} } \
+         action push(v: V) { requires v <= 2 requires seq.size() < 2 seq = seq.push(v) } }";
+const SEQ_WIDE_MAP: &str =
+    "refinement M { impl SeqWide abs SeqAbs map seq = seq action push(v) -> push(v) }";
+const SEQ_WIDER_MAP: &str =
+    "refinement M { impl SeqWider abs SeqGuarded map seq = seq action push(v) -> push(v) }";
+
+fn argument_model(source: &str) -> fsl_core::KernelModel {
+    // The parameter can escape without either whole-carrier mismatch or an
+    // implementation storage violation masking the argument/guard finding.
+    model(
+        &source
+            .replace("state {", "type S = 0..2 state {")
+            .replace("Seq<V, 2>", "Seq<S, 2>")
+            .replace("seq.push(v)", "seq.push(0)"),
+    )
+}
+
+fn reject_old_seq_map(implementation: &str, abstraction: &str, source: &str, column: u32) {
+    let start = usize::try_from(column - 1).unwrap();
+    assert_eq!(&source[start..start + 3], "map");
+    assert!(!source[..start].contains('\n'));
+    let error = parse_refinement(source, &model(implementation), &model(abstraction))
+        .expect_err("different model-local Seq carriers must be rejected");
+    assert_eq!(error.kind, fsl_core::RefinementErrorKind::Type);
+    assert_eq!(
+        error.message,
+        "invalid map expression for 'seq': expression of type Seq(Named(\"V\"), 2) is not assignable to Seq(Named(\"V\"), 2)"
+    );
+    let span = error.span.expect("located map rejection");
+    assert_eq!((span.start.line, span.start.column), (1, column));
+    assert_eq!((span.start.offset, span.end.offset), (start, start + 3));
+    assert_eq!((span.end.line, span.end.column), (1, column + 3));
+}
+
+#[test]
+fn old_argument_fixture_whole_seq_map_is_rejected() {
+    reject_old_seq_map(SEQ_WIDE, SEQ_ABS, SEQ_WIDE_MAP, 40);
+}
+
+#[test]
+fn old_guard_fixture_whole_seq_map_is_rejected() {
+    reject_old_seq_map(SEQ_WIDER, SEQ_GUARDED, SEQ_WIDER_MAP, 45);
+}
+
 const MAP_ABS: &str = "spec MapAbs { type K = 0..2 state { m: Map<K, Bool> } \
      init { forall k: K { m[k] = false } } action set(k: K) { m[k] = true } \
      invariant Total { forall k: K { m[k] or not m[k] } } }";
@@ -375,17 +425,10 @@ const MAP_ABS: &str = "spec MapAbs { type K = 0..2 state { m: Map<K, Bool> } \
 /// runtime error from stepping the abstraction with an ill-typed argument.
 #[test]
 fn an_abstract_argument_outside_its_parameter_domain_is_map_out_of_bounds() {
-    let implementation = model(
-        "spec SeqWide { type V = -1..2 state { seq: Seq<V, 2> } init { seq = Seq {} } \
-         action push(v: V) { requires seq.size() < 2 seq = seq.push(v) } }",
-    );
-    let abstraction = model(SEQ_ABS);
-    let mapping = parse_refinement(
-        "refinement M { impl SeqWide abs SeqAbs map seq = seq action push(v) -> push(v) }",
-        &implementation,
-        &abstraction,
-    )
-    .expect("parse mapping");
+    let implementation = argument_model(SEQ_WIDE);
+    let abstraction = argument_model(SEQ_ABS);
+    let mapping =
+        parse_refinement(SEQ_WIDE_MAP, &implementation, &abstraction).expect("parse mapping");
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
         .expect("an out-of-domain abstract argument is a finding, not an error");
     let failure = failure(&checked);
@@ -423,20 +466,10 @@ fn an_indexed_map_over_a_narrower_impl_key_domain_is_map_out_of_bounds() {
 /// to report as `map_out_of_bounds`.
 #[test]
 fn a_false_abstract_guard_wins_over_an_out_of_domain_argument() {
-    let implementation = model(
-        "spec SeqWider { type V = 0..3 state { seq: Seq<V, 2> } init { seq = Seq {} } \
-         action push(v: V) { requires seq.size() < 2 seq = seq.push(v) } }",
-    );
-    let abstraction = model(
-        "spec SeqGuarded { type V = 0..2 state { seq: Seq<V, 2> } init { seq = Seq {} } \
-         action push(v: V) { requires v <= 2 requires seq.size() < 2 seq = seq.push(v) } }",
-    );
-    let mapping = parse_refinement(
-        "refinement M { impl SeqWider abs SeqGuarded map seq = seq action push(v) -> push(v) }",
-        &implementation,
-        &abstraction,
-    )
-    .expect("parse mapping");
+    let implementation = argument_model(SEQ_WIDER);
+    let abstraction = argument_model(SEQ_GUARDED);
+    let mapping =
+        parse_refinement(SEQ_WIDER_MAP, &implementation, &abstraction).expect("parse mapping");
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
         .expect("check_refinement runs");
     let failure = failure(&checked);

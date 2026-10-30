@@ -10523,8 +10523,8 @@ fn run_explain_from_source(
 /// (Z3 could not be created, the solver answered `unknown` or failed, or a
 /// secondary oracle errored). `Error` is never a kill: it is published as
 /// `status:"error"`, excluded from both sides of `kill_rate`, and fails any
-/// requested gate. `Invalid` is a built-in mutant that never reached the
-/// oracle because it does not lower/build, classified like an external one.
+/// requested gate. `Invalid` is a mutant with statically invalid input,
+/// including a type-invalid refinement map, classified like a check refusal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MutationOracle {
     Clean,
@@ -10558,6 +10558,14 @@ impl OracleFailure {
 }
 
 impl MutationOracle {
+    fn refinement_error(error: fsl_core::RefinementError) -> Self {
+        if error.kind == fsl_core::RefinementErrorKind::Type {
+            Self::Invalid(error.message)
+        } else {
+            Self::Error(OracleFailure::new("implements", error.message))
+        }
+    }
+
     fn killed(killed_by: impl Into<String>, killer_requirements: Vec<String>) -> Self {
         Self::Killed {
             killed_by: killed_by.into(),
@@ -11182,14 +11190,15 @@ impl ImplementsOracle {
 /// Run the acceptance/forbidden oracle and then the implements oracle on a
 /// mutant the BMC oracle left clean, for built-in and external mutants alike.
 /// A secondary oracle that returns `Err` has not judged the mutant, so its
-/// error becomes `Error` (stage `requirements` / `implements`) — never a kill
-/// and never `invalid` (#1251). An implements walk cut off by its budget is
+/// evaluation failure becomes `Error` — never a kill (#1251). A typed static
+/// map error instead follows the check-time `Invalid` path (#1472).
+/// An implements walk cut off by its budget is
 /// not an error: the outcome stays as it is and the `inconclusive` detail is
 /// returned alongside it (#1262).
 fn apply_secondary_mutation_oracles(
     mut outcome: MutationOracle,
     requirement: impl FnOnce(&mut MutationOracle) -> Result<(), String>,
-    implements: impl FnOnce(&mut MutationOracle) -> Result<ImplementsOracle, String>,
+    implements: impl FnOnce(&mut MutationOracle) -> Result<ImplementsOracle, MutationOracle>,
 ) -> (MutationOracle, Option<Value>) {
     if !outcome.is_clean() {
         return (outcome, None);
@@ -11202,10 +11211,7 @@ fn apply_secondary_mutation_oracles(
     }
     match implements(&mut outcome) {
         Ok(oracle) => (outcome, oracle.inconclusive_detail()),
-        Err(message) => (
-            MutationOracle::Error(OracleFailure::new("implements", message)),
-            None,
-        ),
+        Err(failure) => (failure, None),
     }
 }
 
@@ -11216,24 +11222,18 @@ fn apply_implements_mutation_oracle(
     model: &KernelModel,
     depth: usize,
     outcome: &mut MutationOracle,
-) -> Result<ImplementsOracle, String> {
+) -> Result<ImplementsOracle, MutationOracle> {
     if !outcome.is_clean() {
         return Ok(ImplementsOracle::Decided);
     }
-    let resolver = dependency_resolver(base);
-    let Some(contract) = fsl_core::requirements_implements_with_options(
-        source,
-        &resolver,
-        model,
-        crate::parse_options(),
-    )
-    .map_err(|error| error.to_string())?
-    else {
+    let Some(contract) = mutation_implements_contract(source, base, model)? else {
         return Ok(ImplementsOracle::Decided);
     };
     let checked =
         fsl_runtime::check_refinement(model, &contract.abstraction, &contract.refinement, depth)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                MutationOracle::Error(OracleFailure::new("implements", error.to_string()))
+            })?;
     let killer_requirements = match checked.verdict() {
         fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
             return Ok(ImplementsOracle::Inconclusive { states_explored });
@@ -11259,6 +11259,37 @@ fn apply_implements_mutation_oracle(
     Ok(ImplementsOracle::Decided)
 }
 
+fn mutation_implements_contract(
+    source: &str,
+    base: &Path,
+    model: &KernelModel,
+) -> Result<Option<fsl_core::ImplementsContract>, MutationOracle> {
+    fsl_core::requirements_implements_with_options(
+        source,
+        &dependency_resolver(base),
+        model,
+        crate::parse_options(),
+    )
+    .map_err(MutationOracle::refinement_error)
+}
+
+/// Static validity precedes every runtime oracle, even one that would kill.
+fn mutation_oracle_after_implements_check(
+    source: &str,
+    base: &Path,
+    model: &KernelModel,
+    oracle: impl FnOnce() -> MainOracle,
+) -> MainOracle {
+    match mutation_implements_contract(source, base, model) {
+        Ok(_) => oracle(),
+        Err(outcome) => MainOracle {
+            outcome,
+            boundary_killer: None,
+            engine: "none",
+        },
+    }
+}
+
 /// The one place the published `status` of a mutant that reached an oracle is
 /// decided, for built-in and external mutants alike, together with the detail
 /// object to publish under the returned key (`error`, `invalid`, or
@@ -11267,7 +11298,7 @@ fn apply_implements_mutation_oracle(
 /// as `invalid` before this point.
 ///
 /// Precedence for one mutant (#1251, #1262):
-/// `invalid` (never reached the oracle) — exclusive; otherwise
+/// `invalid` (statically invalid input, including maps) — exclusive; otherwise
 /// `killed` > `error` > `inconclusive` > `survived`.
 ///
 /// - A decided kill beats both undecided states: the oracles run in order and
@@ -12167,22 +12198,31 @@ fn run_mutate_from_source(
     for (index, mutant) in all_mutants.into_iter().take(max_mutants).enumerate() {
         let started = std::time::Instant::now();
         let mutated_spec = mutant.materialize(&spec);
-        let main = mutation_oracle(mutated_spec.clone(), depth, &model, explicit_budget, bmc);
+        let mutated_model = fsl_core::lower_direct_spec(mutated_spec.clone())
+            .ok()
+            .and_then(|kernel| fsl_core::build_model(kernel).ok());
+        let mut oracle =
+            || mutation_oracle(mutated_spec.clone(), depth, &model, explicit_budget, bmc);
+        let main = if let Some(mutated_model) = &mutated_model {
+            mutation_oracle_after_implements_check(&source, base, mutated_model, oracle)
+        } else {
+            oracle()
+        };
         let mut outcome = main.outcome.clone();
         let mut inconclusive = None;
         if outcome.is_clean()
-            && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
-            && let Ok(mutated_model) = fsl_core::build_model(kernel)
+            && let Some(mutated_model) = &mutated_model
         {
             // A requirement/implements oracle error used to become the kill
             // label itself (the error string, or `refinement`); it is an
-            // oracle error now (#1251). An implements cutoff stays
+            // evaluation failures remain oracle errors (#1251); statically
+            // ill-typed maps are invalid (#1472). An implements cutoff stays
             // `inconclusive` (#1262).
             (outcome, inconclusive) = apply_secondary_mutation_oracles(
                 outcome,
-                |outcome| apply_requirement_mutation_oracle(&source, &mutated_model, outcome),
+                |outcome| apply_requirement_mutation_oracle(&source, mutated_model, outcome),
                 |outcome| {
-                    apply_implements_mutation_oracle(&source, base, &mutated_model, depth, outcome)
+                    apply_implements_mutation_oracle(&source, base, mutated_model, depth, outcome)
                 },
             );
         }
@@ -12375,10 +12415,15 @@ fn run_mutate_from_source(
             };
             // The mutant built, so from here on it is judged exactly like a
             // built-in one: a semantic BMC error is the `build_spec` kill, any
-            // oracle failure is `error` (neither `invalid` nor killed, #1251),
+            // evaluation failure is `error` (#1251), a static map type error
+            // is `invalid` (#1472),
             // and an implements cutoff is `inconclusive` (#1262).
-            let main =
-                mutation_oracle_for_model(mutated_model.clone(), depth, explicit_budget, bmc);
+            let main = mutation_oracle_after_implements_check(
+                mutated_source,
+                base,
+                &mutated_model,
+                || mutation_oracle_for_model(mutated_model.clone(), depth, explicit_budget, bmc),
+            );
             let (outcome, inconclusive) = apply_secondary_mutation_oracles(
                 main.outcome.clone(),
                 |outcome| {
@@ -19303,6 +19348,15 @@ mod mutate_oracle_error_tests {
         );
     }
 
+    pub(super) fn failed_implements(
+        _: &mut MutationOracle,
+    ) -> Result<ImplementsOracle, MutationOracle> {
+        Err(MutationOracle::Error(OracleFailure::new(
+            "implements",
+            "refinement check failed",
+        )))
+    }
+
     /// The requirement oracle's error string used to become `killed_by`, and
     /// an implements oracle `Err` used to be a `refinement` kill.
     #[test]
@@ -19322,11 +19376,8 @@ mod mutate_oracle_error_tests {
                 None
             )
         );
-        let implements_error = apply_secondary_mutation_oracles(
-            MutationOracle::Clean,
-            |_| Ok(()),
-            |_| Err("refinement check failed".to_owned()),
-        );
+        let implements_error =
+            apply_secondary_mutation_oracles(MutationOracle::Clean, |_| Ok(()), failed_implements);
         assert_eq!(
             implements_error,
             (
@@ -19606,7 +19657,7 @@ mod mutant_status_tests {
         assert_eq!(mutant_status(&MutationOracle::Clean, None).0, "survived");
     }
 
-    /// The implements oracle's `Err` is `error` (stage `implements`); its
+    /// An implements evaluation failure is `error` (stage `implements`); its
     /// budget cutoff is not an error and stays a clean outcome with the
     /// `inconclusive` detail, which `mutant_status` publishes as
     /// `inconclusive`. This is the path both the built-in and the external
@@ -19616,7 +19667,7 @@ mod mutant_status_tests {
         let (outcome, inconclusive) = apply_secondary_mutation_oracles(
             MutationOracle::Clean,
             |_| Ok(()),
-            |_| Err("refinement check failed".to_owned()),
+            super::mutate_oracle_error_tests::failed_implements,
         );
         assert_eq!(mutant_status(&outcome, inconclusive).0, "error");
         let (outcome, inconclusive) = apply_secondary_mutation_oracles(

@@ -782,7 +782,9 @@ name in a `decreases` call. There are no unrelated breaking removals.
   enum-to-integer conversions. Well-typed `not (c == Red)`, `-(-1)` and numeric
   `- n` remain valid.
 - Conditional: `if condition then when_true else when_false`. The condition is
-  `Bool`; both branches are checked and must have the same logical type. It is
+  `Bool`; both branches are checked and must have compatible types. Scalars
+  retain integer/range compatibility; whole finite containers require equal
+  carriers (and equal Seq capacity), as specified below. It is
   available anywhere an expression is accepted, including guards, assignments,
   properties, function arguments, ranking expressions, constants, and
   refinement mappings. Conditional expressions associate to the right and each
@@ -968,11 +970,50 @@ name in a `decreases` call. There are no unrelated breaking removals.
   An accepted `add` retains a computed member outside the declared carrier:
   `contains`, `size`, removal and equality observe it in the temporary value.
   Assigning the result back to that bounded receiver reports `type_bound` /
-  `_bounds_<var>` instead of dropping the member or transition. Static typing/admission is unchanged;
-  this does not enable unbounded Sets or composite-collection inference.
-  BMC/induction still reject whole-collection assignments from a wider Set
-  carrier with `cannot coerce symbolic value` (exit 2), as on base.
-  Relation carrier compatibility is checked before evaluation as described below.
+  `_bounds_<var>` instead of dropping the member or transition. Scalar argument
+  typing is unchanged; this does not enable unbounded Sets or composite literals.
+  **Breaking removal (#1472, #1627):** whole Set, Seq, Map and relation values
+  are compatible only with equal corresponding carriers. Numeric aliases with
+  identical lower/upper bounds remain compatible; Seq capacity must also match,
+  and Map requires both key and value carriers to match. Assignment, comparison,
+  conditional arms, projections and whole refinement maps share this rule.
+  Both wider-to-narrower and narrower-to-wider whole Set assignments now fail
+  check with the existing located assignability error (`semantics`, exit 2),
+  shared by every verify engine, rather than failing later in symbolic coercion.
+  Scalar/Option numeric compatibility and add/contains/push arguments remain
+  unchanged. `Int` has no finite carrier, including an inferred literal element:
+  Set/Seq/Map uses involving it retain prior recursive compatibility (and inferred
+  Seq capacity). An uncontextualized Set/Seq conditional retains an already
+  known finite arm's carrier/capacity through a `let`, in either arm order;
+  it does not materialize literals. Refinement resolves numeric types in each
+  model independently; same-name struct-field and enum/range collisions remain
+  open pending #1599's shared merge rule and Type-kind handoff. Its existing
+  `type` error uses authored map recovery (#1642), retaining 1:1 only when no
+  authored span exists. The four migrated source anchors are runtime 1:40/1:45
+  (`map`), standalone 4:3 (`map`) and inline 2:3 (`implements`), formerly 1:1.
+  Measured base `79687655` vs `3c99c93b`, each built in its own archive, twice
+  checked 606 corpus +16 original inline +18 literal-boundary +18 bridge forms:
+  no corpus removals, zero error→error diagnostic changes, and nine ok→error forms.
+  Three original inline removals are:
+  `FALSE_VACUITY` / `CondMap` (Map keys 0..0 vs 0..2, 20:41), #1522 `MAP`
+  (Map keys 0..2 vs 0..1, 7:35), and `SET_WIDENING` (Set 0..2 to 0..4, 6:48).
+  Also removed are admitted whole Seq maps in runtime `SeqWide`→`SeqAbs`,
+  runtime `SeqWider`→`SeqGuarded`, CLI standalone `SEQ_WIDE_IMPL`→`SEQ_ABS`
+  and inline `seq_req(-1)`: capacity 2, model-local elements -1..2 or 0..3 vs
+  0..2; former runtime refinement failures now reject statically at the authored
+  locations above. The six additional breaking removals are conditional/let
+  copies in both arm orders: Set0..2→0..4, Seq0..2→0..4 at capacity2, and
+  Seq capacity2→3 with equal element carrier (all 8:3). Standalone/same-carrier
+  controls still check; the 18 original literal-boundary outputs are unchanged.
+  See the [single carrier decision](../design/DESIGN-finite-container-carriers.md)
+  for commands and the full removal inventory. Literal typing remains #1467.
+  In mutate, a statically ill-typed implements map is `invalid`, using the shared
+  check-invalid classification, not an oracle error. Thus whole-container map
+  mutants that change a numeric range move from `errored` to `invalid` in the
+  summary; they are excluded from `kill_rate` and do not add `oracle_errors` to
+  the gate. Solver/evaluation failures remain errored and budget cutoffs remain
+  inconclusive; the same typed map validator serves auto/explicit maps,
+  standalone refinement, governance preflight and composed models.
   Symbolic init preserves introduced members through copies, copy chains and
   conditions in the checked dependency order, without replacing relational init
   with sequential execution. In BMC, re-framing a root whose bound is omitted
@@ -995,7 +1036,7 @@ name in a `decreases` call. There are no unrelated breaking removals.
   items (including nested items), and assignments mixing these relation carriers
   now fail `check` with a located assignability error (`semantics`, exit 2),
   shared by `verify` and `replay`. Ordinary scalar Int/Range compatibility,
-  Map key compatibility, nominal enums, and the declared self-relation gate are
+  nominal enums, and the declared self-relation gate are
   unchanged. Equal-bound relation literals still check, but their remaining
   symbolic engine support belongs to #1467; this is not key-union support.
   The shared gate also rejects action assignment `r = q`, init
@@ -1004,8 +1045,8 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Narrow-to-wide relation copies are also refused in action assignment, init
   and let uses: previously BMC/induction could not coerce these forms while
   explicit decided action/let and Monitor agreed; init also failed explicit.
-  In contrast, numeric `Set<A>` → `Set<B>` assignment with A's carrier inside
-  B's still passes check; Set's symbolic disagreement remains #1627.
+  #1472 extends this rule to whole Set, Seq and Map values, including
+  narrow-to-wide Set copies (#1627); see the carrier decision above.
   See [the compatibility decision](../design/DESIGN-relation-endpoint-compatibility.md)
   for the breaking-removal evidence.
   For `r: relation A -> B`, `contains`, `add`, `remove`, and `reachable`
@@ -4664,9 +4705,14 @@ DESIGN-*.md).
   instruction, parse, name, type, and construction errors are `invalid`, never
   killed, and are excluded from combined/per-source kill-rate denominators
   (they measure external generator quality, not spec strength); a built-in
-  mutant that does not build is `invalid` the same way. A mutant the oracle
+  mutant that does not build is `invalid` the same way. `invalid` means statically
+  invalid input, including implements-map static type errors (auto or explicit
+  maps). This validation precedes runtime oracles: a main or requirement kill
+  cannot turn an invalid map into a judged mutant. Invalid inputs are excluded
+  from `gate.judged` and `kill_rate`, regardless of runtime verdict order.
+  A mutant the oracle
   could not judge (Z3 unavailable, solver `unknown`/backend failure, or an
-  acceptance/forbidden/implements oracle error) is `status:"error"` with
+  acceptance/forbidden/implements evaluation failure) remains `status:"error"` with
   `error{stage, message}`: never killed, excluded from `kill_rate`, counted in
   `summary.errored` (present only when non-zero, like `summary.inconclusive`),
   and it fails any requested gate (`oracle_errors`). Precedence for one mutant:

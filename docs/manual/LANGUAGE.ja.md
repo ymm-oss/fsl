@@ -748,7 +748,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   整数への変換ではありません。型が正しい `not (c == Red)`、`-(-1)`、数値の
   `- n` は引き続き有効です。
 - 条件: `if condition then when_true else when_false`。条件は `Bool` で、両方の
-  分岐が検査され、同じ論理型を持たなければなりません。ガード、代入、プロパティ、
+  分岐が検査され、互換な型を持たなければなりません。スカラーの整数・範囲互換は保ち、
+  有限の入れ物の値全体は後述の同じドメイン(Seq は容量も同じ)を要求します。ガード、代入、プロパティ、
   関数引数、ランキング式、定数、refinement マッピングを含む、式が受理される任意の
   場所で使えます。条件式は右結合し、各分岐は囲むデリミタまで延びます。後続の演算子
   を条件式全体に適用したいときは括弧を使ってください。具象評価は選択された分岐だけ
@@ -906,11 +907,42 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
 - Set: `Set {}` / `Set { 1, 2 }`、`.add(e)` `.remove(e)` `.contains(e)` `.size()`
   受理された `add` は、計算結果が宣言されたドメインの外でもメンバーを保持します。
   一時値の `contains`、`size`、削除、等値比較はその値を参照し、add の結果を元の有界 receiver へ戻すと
-  メンバーや遷移を消さずに `type_bound` / `_bounds_<var>` を報告します。静的な型検査と
-  受理範囲は変えず、非有界 Set や複合コレクションの型推論を追加するものではありません。
-  より広いドメインの Set を丸ごと代入する操作は、base と同様に BMC/induction が
-  `cannot coerce symbolic value` (exit 2)で拒否します。
-  関係のドメイン互換性は、後述のとおり評価前に検査します。
+  メンバーや遷移を消さずに `type_bound` / `_bounds_<var>` を報告します。スカラー引数の
+  型検査は変えず、非有界 Set や複合リテラルを追加するものではありません。
+  **破壊的な受理範囲の縮小(#1472、#1627):** Set、Seq、Map、relation の値全体は、
+  対応するドメインが同じときだけ互換です。数値別名は下限・上限が同じなら互換のままです。
+  Seq は容量も一致し、Map はキーと値の両方のドメインが一致する必要があります。
+  代入、比較、条件式の分岐、射影、refinement の全体 map はこの規則を共有します。
+  広い Set から狭い Set だけでなく、狭い Set から広い Set への全体代入も、記号変換で
+  後から失敗するのでなく check が既存の位置付き代入可能性エラー(`semantics`、終了コード2)
+  で拒否し、全 verify engine が共有します。スカラー・Option の数値互換と
+   add/contains/push の引数は変えません。refinement は両モデルの数値型を独立に解決します。
+   同名structのfieldとenum/範囲の衝突は、#1599の共有merge規則とType-kindの引渡しに残る未解決です。
+   既存の `type` エラーは#1642の作成元map位置の回復を使い、作成元spanが無いときだけ1:1を保ちます。
+   移行した4つのソースアンカーはruntimeの1:40/1:45 (`map`)、単独の4:3 (`map`)、
+   inlineの2:3 (`implements`)で、以前は1:1でした。
+  `Int`は有限のドメインを持ちません。リテラルから推論した要素型も含め、これを含む
+  Set/Seq/Mapは従来の再帰的な型互換(Seqリテラルの推論容量も含む)を保ちます。
+   文脈の無いSet/Seq条件式は、既知の有限な腕のドメインと容量を両方の腕の順でletを通して保ちます。
+   リテラルの実体化は追加しません。base `79687655` とhead `3c99c93b` を各archiveでbuildし、
+   606 corpus形、元のinline16形、リテラル境界18形、bridge18形を各2回checkしました。
+   corpusの除去0、error→errorの診断変更0、ok→errorは9形です。元のinlineの3除去は
+   `FALSE_VACUITY` / `CondMap` (Mapキー0..0対0..2、20:41)、
+  #1522の`MAP` (Mapキー0..2対0..1、7:35)、`SET_WIDENING` (Setの0..2から0..4、6:48)。
+  さらに、受理されていた全体Seq mapのruntime `SeqWide`→`SeqAbs`、
+  runtime `SeqWider`→`SeqGuarded`、CLI単独`SEQ_WIDE_IMPL`→`SEQ_ABS`、inline
+  `seq_req(-1)`を除去します。容量2、モデルごとの要素範囲-1..2または0..3対0..2の形で、
+   従来の実行時refinement失敗を上記の作成元位置の静的エラーに変えます。
+   追加の6除去は、両方の腕の順の条件式/letコピーで、Setの0..2→0..4、容量2のSeqの0..2→0..4、
+   同じ要素ドメインのSeq容量2→3です(すべて8:3)。単独・同じドメインの対照はcheckを通り、
+   元のリテラル境界18形もbase/headで同じcheck出力を保ちます。コマンドと全除去の一覧は
+  [単一のドメイン互換の決定](../design/DESIGN-finite-container-carriers.md)を参照してください。
+  リテラルの型付けは#1467に残ります。
+  mutateでは、静的に型が不正なimplementsのmapをoracleの失敗でなく`invalid`として、
+  checkで不正なmutantと同じ経路で分類します。入れ物全体のmapを持つspecの範囲変更mutantは、
+  集計上`errored`から`invalid`へ移り、`kill_rate`から除かれ、gateに`oracle_errors`を
+  追加しません。solver・評価の失敗はerrored、budgetによる打切りはinconclusiveのままです。
+  自動・明示map、単独refinement、governanceの事前検査、composeのモデルは型付きのmap検査を共有します。
   記号的 init は、検査済みの依存順に写し・写しの連鎖・条件を通して追加されたメンバーを
   保持しますが、関係としての init を逐次実行に置き換えません。BMC で境界を選ばない
   ルートを re-frame するには、新しい frame の有限の support の外に生きたキーがない
@@ -931,7 +963,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   異なる関係ドメインを混ぜる条件式の分岐、Set/Seq の要素(入れ子を含む)、代入は、
   `check` が位置付きの代入可能性エラー(`semantics`、終了コード 2)で拒否します。
   `verify` と `replay` も同じ検査を共有します。通常のスカラー Int/Range 互換、
-  Map のキー互換、公称 enum、宣言された自己関係の判定は変更しません。
+  公称 enum、宣言された自己関係の判定は変更しません。
   同じ境界を持つ関係のリテラルは引き続き check を通りますが、記号エンジンの残る対応は
   #1467 に属し、この変更は key-union の実装ではありません。
   同じ検査で action の `r = q`、init の `q = Set {} r = q`、`let x = q` に続く
@@ -939,8 +971,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   単なる別名は引き続き受理します。narrow→wide の関係のコピーも action の代入・init・
   let 経由で拒否します。従来は BMC/induction が変換できず、action/let を判定する
   explicit と Monitor に一致しなかったためです。init は explicit も終了コード 2 でした。
-  対照的に、A のドメインが B に含まれる数値型の `Set<A>` → `Set<B>` の代入は今も
-  check を通ります。Set の記号評価の不一致は #1627 に残ります。
+  #1472はこの規則をSet、Seq、Mapの値全体にも適用し、狭いSetから広いSetへのコピー
+  (#1627)も拒否します。上のドメイン互換の決定を参照してください。
   破壊的な受理範囲の縮小の証拠は
   [互換性の設計決定](../design/DESIGN-relation-endpoint-compatibility.md)を参照してください。
   `r: relation A -> B` の `contains`、`add`、`remove`、`reachable` は、
@@ -4440,9 +4472,13 @@ DESIGN-*.md があります)。
   パース、名前、型、構築のエラーは `invalid` で、決して killed にはならず、
   combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
   なく、外部ジェネレーターの品質を測ります)。構築できない組み込みミュータントも
-  同じく `invalid` です。オラクルが判定できなかったミュータント(Z3 を作れない、
+  同じく `invalid` です。`invalid` は静的に不正な入力を意味し、implements の map の
+  静的な型の誤り(auto と明示の maps)も含みます。この検査は実行時のオラクルより先に
+  行うため、main や requirement による kill が不正な map を判定済みに変えることは
+  ありません。実行時の判定の順に依らず、`gate.judged` と `kill_rate` から除外します。
+  オラクルが判定できなかったミュータント(Z3 を作れない、
   solver の `unknown`/backend の失敗、acceptance/forbidden/implements オラクルの
-  エラー)は `status:"error"` と `error{stage, message}` になり、決して killed には
+  評価の失敗)は引き続き `status:"error"` と `error{stage, message}` になり、決して killed には
   ならず、`kill_rate` から除外され、`summary.errored`(`summary.inconclusive` と同じく非 0 のときだけ出ます)に数えられ、要求された
   gate を不合格にします(`oracle_errors`)。
   すべてのエントリは `source:"builtin"|"external"` を運びます。`--max-mutants` は
