@@ -1685,6 +1685,12 @@ ledger の移行表示は維持します。移行 finding だけの行は vacuit
 検査し、全218,571コマンドとなります。両 ok→error 集合と BASE/HEAD の完全な
 JSON/stderr/exit の差は空で、除外 field はありません。反復出現と変更した依存先 test の入力も保持します。
 
+有効な target と mapping の一度の捕捉に関する修正は、同じ main base と独立に build した
+Rust/source-test head `e47dce898889e891e9fa82a5fdd8698749e4db80` で再検査しました。
+新しい修正入力も含め、corpus 全606 file、inline 35,663出現、72,963組 / 145,926コマンドです。
+再利用した fixture の bytes は hash で検証し、CLI 検査結果自体は再利用していません。
+ok→error と完全な JSON/stderr/exit の差は空で、除外 field はありません。
+
 実際に読まれる依存先は、親が要求した edition を継承せず、**自分の**ヘッダーまたは
 現行の既定 edition で判定します(#1452)。canonical な異なる edition の混在は許します。
 compose の `use`、`implements from`、causal の `uses`、governance の delegates、

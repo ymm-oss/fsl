@@ -376,6 +376,15 @@ and the same inline occurrences, for 218,571 commands overall. Both ok-to-error
 sets and the complete base/head JSON/stderr/exit difference set are empty;
 no output fields are excluded. Duplicate fixture occurrences remain counted.
 
+The active-target/single-mapping repair has a fresh comparison against the same
+main base, using independently materialized Rust/source-test head
+`e47dce898889e891e9fa82a5fdd8698749e4db80`. `fslc check FORM` covers all 606
+corpus files and 35,663 inline occurrences, including all newly assembled repair
+inputs: 72,963 configuration pairs / 145,926 actual commands. Reused fixture
+contexts were byte-hash verified; no prior CLI observation was reused. The
+ok-to-error set and complete JSON/stderr/exit difference set are empty, with no
+excluded fields. This is new-head evidence, not a relabeling of the earlier audit.
+
 Every FSL dependency actually read by a consumer is classified by its own header
 or the current default before its bytes reach lowering, a model, a solver or an
 output producer. The parent's requested edition is not inherited; canonical mixed

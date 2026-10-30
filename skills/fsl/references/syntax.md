@@ -453,6 +453,12 @@ and observed edition requests, 72,859 pairs. Additional base
 inputs: 218,571 commands overall. Both ok-to-error sets and full base/head
 JSON/stderr/exit differences are empty, no excluded fields; duplicates retained.
 
+Fresh active-target/single-mapping repair audit: same named main base versus
+independently built head `e47dce898889e891e9fa82a5fdd8698749e4db80`, 606 corpus
+files +35,663 inline occurrences including new repair inputs, 72,963 pairs /
+145,926 commands. Reused fixture hashes verified, every CLI check rerun; empty
+ok-to-error and complete JSON/stderr/exit differences, no excluded fields.
+
 Dependency admission (#1452) uses each consumed child's own header/current default,
 never the parent's requested edition; canonical mixed editions are allowed.
 Compose use, implements, causal uses and governance delegate/before/after/mapping

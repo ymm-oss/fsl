@@ -84,3 +84,10 @@ parser modes and observed edition requests, 72,859 pairs. Additional base
 e16f65bfeae773218d23f425376ea7c23b895bff covers its 603 files and the same inline
 inputs, yielding 218,571 commands overall. Both ok-to-error sets and complete
 base/head JSON/stderr/exit difference sets are empty; no fields are excluded.
+
+The active-target/single-mapping repair repeats the boundary comparison against
+the same main base with independently materialized head
+e47dce898889e891e9fa82a5fdd8698749e4db80: all 606 corpus files and 35,663 inline
+occurrences including new inputs, 72,963 pairs / 145,926 commands. Fixture hashes
+verified and CLI checks rerun; no ok-to-error or full JSON/stderr/exit differences,
+and no excluded fields.

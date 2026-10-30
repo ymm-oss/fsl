@@ -1812,6 +1812,13 @@ The additional `e16f65bfeae773218d23f425376ea7c23b895bff` comparison covers its
 ok-to-error sets and empty full base/head JSON/stderr/exit differences, with no
 excluded fields. Repeated occurrences and rewritten dependency-test inputs remain.
 
+The active-target/single-mapping repair repeats that comparison with independent
+Rust/source-test head `e47dce898889e891e9fa82a5fdd8698749e4db80` and the same
+named main base: 606 corpus files, 35,663 inline occurrences including new repair
+inputs, 72,963 configuration pairs / 145,926 commands. Reused fixture bytes were
+verified and every CLI check rerun. Both the ok-to-error and complete
+JSON/stderr/exit difference sets are empty; no fields are excluded.
+
 Actually read dependencies use **their own** header or the current default
 (#1452), not a parent's requested edition. Canonical mixed editions remain valid.
 Compose `use`, `implements from`, causal `uses` and governance delegates,
