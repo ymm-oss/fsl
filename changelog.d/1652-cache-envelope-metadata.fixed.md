@@ -1,0 +1,1 @@
+Native error-envelope parity tests now require complete check/verify version metadata independently of cache settings, while preserving its absence on specialized commands. Missing, corrupted and unexpected metadata remain rejecting controls; CLI output is unchanged.

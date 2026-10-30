@@ -3160,12 +3160,16 @@ fn specialized_envelope_matches(
             return false;
         }
     }
-    // Observed with FSLC_CACHE unset: check/verify attach versions, other
-    // commands do not. Version values belong to the installed backend, not
-    // this malformed-input contract. Presence remains a live assertion.
-    let versions = matches!(command, "check" | "verify")
-        && std::env::var("FSLC_CACHE").as_deref() != Ok("off");
-    if output.get("versions").is_some() != versions {
+    // check/verify attach native metadata independently of cache use;
+    // other commands retain their established absence of this field.
+    let versions = matches!(command, "check" | "verify").then(|| {
+        serde_json::json!({
+            "verifier": {"name": "fslc-rust", "version": env!("CARGO_PKG_VERSION")},
+            "core": {"name": "fsl-core", "version": env!("CARGO_PKG_VERSION")},
+            "solver": {"name": "z3", "backend": "native-z3", "version": "Z3 4.16.0.0"}
+        })
+    });
+    if output.get("versions") != versions.as_ref() {
         return false;
     }
     if command == "approval diff" {
@@ -3186,6 +3190,63 @@ fn specialized_envelope_matches(
         return false;
     }
     true
+}
+
+#[test]
+fn specialized_envelope_matcher_requires_exact_command_versions() {
+    let expected = specialized_error("semantics", AI_UNKNOWN_TOOL_MESSAGE);
+    let versions = serde_json::json!({
+        "verifier": {"name": "fslc-rust", "version": env!("CARGO_PKG_VERSION")},
+        "core": {"name": "fsl-core", "version": env!("CARGO_PKG_VERSION")},
+        "solver": {"name": "z3", "backend": "native-z3", "version": "Z3 4.16.0.0"}
+    });
+    let actual = |output: Value| Actual {
+        stdout: output.to_string(),
+        json: Some(output),
+        stderr: String::new(),
+        exit: 2,
+    };
+    for command in ["check", "verify"] {
+        let mut output = expected.clone();
+        output["versions"] = versions.clone();
+        assert!(specialized_envelope_matches(
+            &actual(output.clone()),
+            &expected,
+            command,
+            None
+        ));
+        output.as_object_mut().unwrap().remove("versions");
+        assert!(!specialized_envelope_matches(
+            &actual(output.clone()),
+            &expected,
+            command,
+            None
+        ));
+        output["versions"] = versions.clone();
+        output["versions"]["solver"]["version"] = "incorrect".into();
+        assert!(!specialized_envelope_matches(
+            &actual(output),
+            &expected,
+            command,
+            None
+        ));
+    }
+    for command in ["ai check", "db check"] {
+        assert!(specialized_envelope_matches(
+            &actual(expected.clone()),
+            &expected,
+            command,
+            None
+        ));
+        let mut output = expected.clone();
+        output["versions"] = versions.clone();
+        assert!(!specialized_envelope_matches(
+            &actual(output),
+            &expected,
+            command,
+            None
+        ));
+    }
 }
 
 fn contract_command<'a>(contract: &'a Value, command: &str) -> &'a Value {
