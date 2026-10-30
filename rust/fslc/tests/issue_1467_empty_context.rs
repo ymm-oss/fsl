@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[allow(dead_code)]
 #[path = "support/collection_replay.rs"]
 mod collection_replay;
 use collection_replay::{ReplayCase, finish, require};
