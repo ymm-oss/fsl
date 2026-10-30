@@ -206,6 +206,50 @@ pub struct KernelModel {
 }
 
 impl KernelModel {
+    /// Infer an expression using the checked model and its current lexical bindings.
+    /// Returns `None` when the expression requires an expected type.
+    ///
+    /// # Errors
+    /// Returns shared inference errors other than a missing expected context.
+    pub fn expression_type(
+        &self,
+        expr: &Expr,
+        bindings: &[(String, TypeRef)],
+        expected: Option<&TypeRef>,
+    ) -> Result<Option<TypeRef>, ModelError> {
+        match crate::typecheck::infer_type(
+            expr,
+            &crate::typecheck::expression_env(self, bindings),
+            self,
+            expected,
+        ) {
+            Ok(ty) => Ok(Some(ty)),
+            Err(error) if error.needs_context => Ok(None),
+            Err(error) => Err(model_error(error.message)),
+        }
+    }
+
+    /// Infer equality's operand context, including the empty-left right-context retry.
+    ///
+    /// # Errors
+    /// Returns the shared operand-inference error if neither side supplies context.
+    pub fn equality_operand_type(
+        &self,
+        left: &Expr,
+        right: &Expr,
+        bindings: &[(String, TypeRef)],
+    ) -> Result<TypeRef, ModelError> {
+        crate::typecheck::binary_operand_types(
+            "==",
+            left,
+            right,
+            &crate::typecheck::expression_env(self, bindings),
+            self,
+        )
+        .map(|(ty, _)| ty)
+        .map_err(|error| model_error(error.message))
+    }
+
     /// Compare complete carriers, resolving numeric aliases without enumerating values.
     ///
     /// # Errors

@@ -866,7 +866,7 @@ pub(crate) fn coerce<S: SmtSolver>(
             })
         }
         (SymbolicValue::SetLiteral(items), TypeRef::Set(element_ty)) => {
-            if items.is_empty() {
+            if items.is_empty() && !matches!(element_ty.as_ref(), TypeRef::Int) {
                 return concrete_value(solver, model, target_ty, &model.default_value(target_ty)?);
             }
             let mut entries = Vec::new();
@@ -923,6 +923,37 @@ pub(crate) fn coerce<S: SmtSolver>(
                 ty: target_ty.clone(),
                 slots,
                 len: solver.int_value(i64_index(items.len())?),
+            })
+        }
+        // Int-derived temporaries retain the checker's literal compatibility (#1472).
+        // Keep their complete support, including values a selected storage bound rejects.
+        (
+            SymbolicValue::Collection {
+                ty: TypeRef::Set(source),
+                entries,
+            },
+            TypeRef::Set(element),
+        ) if *source == TypeRef::Int && solver_sort(model, element).is_ok() => {
+            Ok(SymbolicValue::Collection {
+                ty: target_ty.clone(),
+                entries,
+            })
+        }
+        (
+            SymbolicValue::Seq {
+                ty: TypeRef::Seq(source, _),
+                slots,
+                len,
+            },
+            TypeRef::Seq(element, _),
+        ) if *source == TypeRef::Int && solver_sort(model, element).is_ok() => {
+            Ok(SymbolicValue::Seq {
+                ty: target_ty.clone(),
+                slots: slots
+                    .into_iter()
+                    .map(|slot| coerce(solver, model, slot, element))
+                    .collect::<Result<_, _>>()?,
+                len,
             })
         }
         (SymbolicValue::Scalar { term, .. }, ty) if solver_sort(model, ty).is_ok() => {

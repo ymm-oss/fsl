@@ -43,6 +43,52 @@ pub(crate) fn eval<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    let value = eval_raw(solver, model, expr, state, bindings, old_state)?;
+    if scalar_literal(&value) {
+        let ty = model
+            .expression_type(expr, &binding_types(bindings), None)?
+            .ok_or_else(|| VerifyError::new("collection literal requires an expected type"))?;
+        materialize(solver, model, value, &ty, false)
+    } else {
+        Ok(value)
+    }
+}
+
+fn binding_types<T>(bindings: &Bindings<T>) -> Vec<(String, TypeRef)> {
+    bindings
+        .iter()
+        .filter_map(|(name, value)| value.ty().map(|ty| (name.clone(), ty.clone())))
+        .collect()
+}
+
+fn scalar_literal<T>(value: &SymbolicValue<T>) -> bool {
+    matches!(value, SymbolicValue::SetLiteral(items) | SymbolicValue::SeqLiteral(items)
+        if items.iter().all(|item| matches!(item, SymbolicValue::Scalar { .. })))
+}
+
+/// The only literal materialization boundary, for inferred and explicit contexts.
+fn materialize<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    value: SymbolicValue<S::Term>,
+    ty: &TypeRef,
+    contextual: bool,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    if contextual || scalar_literal(&value) || value.ty().is_some() {
+        coerce(solver, model, value, ty)
+    } else {
+        Ok(value)
+    }
+}
+
+fn eval_raw<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
     recursion::guard(|| eval_inner(solver, model, expr, state, bindings, old_state))
 }
 
@@ -153,9 +199,17 @@ fn eval_inner<S: SmtSolver>(
             else_expr,
             ..
         } => {
+            if let Some(ty) = model.expression_type(expr, &binding_types(bindings), None)?
+                && matches!(&ty, TypeRef::Set(item) | TypeRef::Seq(item, _)
+                    if solver_sort(model, item).is_ok())
+            {
+                return eval_in_context(
+                    solver, model, expr, &ty, state, bindings, old_state, false,
+                );
+            }
             let condition = eval(solver, model, condition, state, bindings, old_state)?;
-            let then_value = eval(solver, model, then_expr, state, bindings, old_state)?;
-            let else_value = eval(solver, model, else_expr, state, bindings, old_state)?;
+            let then_value = eval_raw(solver, model, then_expr, state, bindings, old_state)?;
+            let else_value = eval_raw(solver, model, else_expr, state, bindings, old_state)?;
             ite_value(
                 solver,
                 model,
@@ -1658,14 +1712,24 @@ fn eval_equality_operands<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicPair<S::Term>, VerifyError> {
-    match eval(solver, model, left, state, bindings, old_state) {
+    match eval_raw(solver, model, left, state, bindings, old_state) {
         Ok(left_value) => {
             if let Some(left_ty) = left_value.ty() {
                 let right_value =
                     eval_expected(solver, model, right, left_ty, state, bindings, old_state)?;
                 Ok((left_value, right_value))
             } else {
-                let right_value = eval(solver, model, right, state, bindings, old_state)?;
+                let right_value = eval_raw(solver, model, right, state, bindings, old_state)?;
+                if right_value.ty().is_none()
+                    && scalar_literal(&left_value)
+                    && scalar_literal(&right_value)
+                {
+                    let ty = model.equality_operand_type(left, right, &binding_types(bindings))?;
+                    return Ok((
+                        materialize(solver, model, left_value, &ty, false)?,
+                        materialize(solver, model, right_value, &ty, false)?,
+                    ));
+                }
                 let right_ty = right_value
                     .ty()
                     .ok_or_else(|| VerifyError::new("equality requires a typed operand"))?;
@@ -1705,6 +1769,22 @@ pub(crate) fn eval_expected<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    eval_in_context(
+        solver, model, expr, expected, state, bindings, old_state, true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn eval_in_context<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    expected: &TypeRef,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    contextual: bool,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
     if let Expr::Conditional {
         condition,
         then_expr,
@@ -1713,11 +1793,11 @@ pub(crate) fn eval_expected<S: SmtSolver>(
     } = expr
     {
         let condition = eval(solver, model, condition, state, bindings, old_state)?;
-        let then_value = eval_expected(
-            solver, model, then_expr, expected, state, bindings, old_state,
+        let then_value = eval_in_context(
+            solver, model, then_expr, expected, state, bindings, old_state, contextual,
         )?;
-        let else_value = eval_expected(
-            solver, model, else_expr, expected, state, bindings, old_state,
+        let else_value = eval_in_context(
+            solver, model, else_expr, expected, state, bindings, old_state, contextual,
         )?;
         return ite_value(
             solver,
@@ -1731,13 +1811,13 @@ pub(crate) fn eval_expected<S: SmtSolver>(
         return Ok(SymbolicValue::Option {
             ty: expected.clone(),
             present: solver.bool_value(true),
-            value: Box::new(eval_expected(
-                solver, model, inner, inner_ty, state, bindings, old_state,
+            value: Box::new(eval_in_context(
+                solver, model, inner, inner_ty, state, bindings, old_state, contextual,
             )?),
         });
     }
-    let value = eval(solver, model, expr, state, bindings, old_state)?;
-    coerce(solver, model, value, expected)
+    let value = eval_raw(solver, model, expr, state, bindings, old_state)?;
+    materialize(solver, model, value, expected, contextual)
 }
 
 fn eval_pattern<S: SmtSolver>(

@@ -16,7 +16,7 @@ use crate::{ActionGuard, KernelModel, TypeDef, TypeRef};
 pub(crate) struct TypecheckError {
     pub(crate) message: String,
     pub(crate) span: Option<Span>,
-    needs_context: bool,
+    pub(crate) needs_context: bool,
     pub(crate) constant_shadow: bool,
 }
 
@@ -216,6 +216,12 @@ pub(crate) fn base_env(model: &KernelModel) -> TypeEnv {
                 .or_insert_with(|| TypeRef::Named(type_name.to_owned()));
         }
     }
+    env
+}
+
+pub(crate) fn expression_env(model: &KernelModel, bindings: &[(String, TypeRef)]) -> TypeEnv {
+    let mut env = base_env(model);
+    env.extend(bindings.iter().cloned());
     env
 }
 
