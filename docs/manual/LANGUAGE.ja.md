@@ -901,6 +901,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `v` は新しい名前でなければなりません: 状態変数・定数・enum のメンバー・action の
   引数・量化子の束縛変数・`let`・それより前のパターン束縛と同じ名前の `v` は
   `check` が拒否し、名前を変えるよう求めます。
+  requirements のフィールド置換文脈では、エンティティのフィールドや relation role と
+  同名のパターンも、lowering が元の綴りを失う前に拒否します (#1561)。event input の
+  既存の例外と、量化子・集約の合法なフィールド隠蔽は維持します。
   順序は定義されません。
 - struct: リテラル `Order { st: Open, qty: 0 }`、フィールド参照 `o.st`、
   `==` はフィールドごとの等値
@@ -3437,21 +3440,53 @@ verify {
 }
 ```
 
-**破壊的削除 (#1552):** requirements の `rule ... only when` 条件では、量化子の
+**破壊的削除 (#1552, #1561):** requirements の `rule ... only when` 条件では、量化子の
 本体または集約の値の式で、エンティティのフィールド名を `is` パターンの名前として
 再利用した、充足不能なガードを、以前は受理していても `check` で拒否するように
 なりました。競合検査用のガードは、イベントの lowering と同じく、その名前を
 マッチしたペイロードではなくフィールドとして読みます。例えば、
 `amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })`
 は、フィールドが 0 と 1 の両方であることを要求し、イベントが決して起きないのに
-受理されていました。現在は exit 2、`kind: "semantics"`、
-`rule_conflict_unsatisfiable_guard` で拒否されます。ペイロードを検査するには、
+受理されていました。#1552 では `rule_conflict_unsatisfiable_guard` で拒否され、
+#1561 ではフィールド置換前のパターン宣言を先に拒否します。exit 2、
+`kind: "semantics"`、メッセージは
+`pattern binding 'amount' in 'is some(amount)' shadows an entity field of the same name; rename the pattern variable`
+です。位置は保持された rule 文の所有位置であり、パターントークンを新たに復元した
+ものではありません。ペイロードを検査するには、
 フィールドと異なるパターン名を使い、`some(x) is some(amount) and amount == 1` を
 `some(x) is some(v) and v == 1` に書き換えてください。外側の条件と量化子を保った
 この式は、フィールドが 0 であり、1 に等しい `x` が存在して、そのマッチした
 ペイロード `v` が 1 に等しいことを意味し、書き換え後の例は `check` を通ります。
-パターン名自体の規則は引き続き #1561 で扱います。この修正は、競合検査を
-lowering 後のイベントに揃えるものです。
+以前は受理された `some(1) is some(amount) and amount == 1` も、新たな破壊的削除
+(#1561) です。宣言と継続中の参照をともに `v` に改名すれば、イベントは到達します。
+同じ規則を legacy guard、event の代入右辺、rule property、measure、decision の
+assuming と行、未使用を含む concept のフィールド
+置換前にも適用し、relation role も対象に含めます。新たなフィールド隠蔽の意味規則は
+導入しません。event input の既存の例外と、量化子・集約の合法なフィールド隠蔽は維持
+します。フィールド置換後に導入される def 内部のパターン名はフィールド別名ではなく、
+呼び出し引数に書かれたパターンは def がその引数を消去しても先に検査します。
+
+各自の materialized tree で `FSLC_CACHE=off <binary> check <form>`
+を2回実行し、base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` と測定 head
+`13676f0bca83b2433cc974468bbb00c59aef25a9` (binary SHA256
+`0cab1c914a05344d8958a6f9bd5ce5a17618f87f9f7e74e279b449fbca47f314`) を比較しました。
+corpus 全610形式 (specs 23、examples 195、CLI fixtures 392) は変更なしでした。
+元の #1552 全63形式、以前の #1561 全49形式、追加した fresh control、decision/concept
+の6形式、レビューで使った2形式を含め、inline の **27ケースが `ok`→`error`** です:
+
+| 削除されたケースのラベル | 件数 |
+|---|---:|
+| `control_is_pattern_field_name_satisfiable_matches_base` | 1 |
+| `expression-0`, `expression-1`, `expression-2`, `expression-3`, `expression-4`, `expression-5`, `expression-6`, `expression-7`, `expression-8`, `expression-9`, `expression-10`, `expression-11`, `expression-12` (and・入れ子・含意・or・not・if・コンテナ・量化子・集約) | 13 |
+| `argument-1`, `argument-4`, `argument-9` (保持・消去・間接的消去) | 3 |
+| `event-set`, `when`, `set`, `never`, `property`, `measure`, `role` | 7 |
+| `decision-assuming`, `unused-concept`, `review-original-collision` | 3 |
+
+これはケース単位の件数で、すべてが異なるプログラムとは限りません。既存の拒否5形式
+(and・含意・量化子内の矛盾、重複する `argument-7`、`decision-row`) は診断変更であり、
+追加の受理削除ではありません。全2,924観測 (731形式×両バイナリ×2回) は反復差分0、
+除外フィールドなしです。他の必須テストの元入力を改訂・省略していません。これは上記の測定
+head の証拠であり、後の統合コミットに対して未実施の sweep を行ったとの主張ではありません。
 
 - process+data プロファイルは、単一エンティティのライフサイクルに対する第一の
   requirements 形式です。`process E with f: T { ... }` は、エンティティの stage

@@ -808,6 +808,7 @@ fn reject_colliding_pattern_binding(
         model.consts.keys().map(String::as_str),
         model.enum_members.keys().map(String::as_str),
         env.keys().chain(&phase.collisions).map(String::as_str),
+        [],
     )
     .map(|_| ())
     .map_err(|error| error.with_span(span))
@@ -822,6 +823,7 @@ pub(crate) enum PatternBinding {
 pub(crate) type PatternScopes = BTreeMap<String, Result<PatternBinding, TypecheckError>>;
 
 /// The same collision rule applies before compose prefixes global names.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn reject_pattern_binding_name<'a>(
     phase: &ValidationPhase,
     source_scope: Option<&Result<PatternBinding, TypecheckError>>,
@@ -830,6 +832,7 @@ pub(crate) fn reject_pattern_binding_name<'a>(
     constants: impl IntoIterator<Item = &'a str>,
     enum_members: impl IntoIterator<Item = &'a str>,
     local: impl IntoIterator<Item = &'a str>,
+    fields: impl IntoIterator<Item = &'a str>,
 ) -> Result<PatternBinding, TypecheckError> {
     if phase.substitutes(binding) {
         return Ok(PatternBinding::Substituted);
@@ -846,6 +849,8 @@ pub(crate) fn reject_pattern_binding_name<'a>(
         "an enum member"
     } else if local.into_iter().any(is_binding) {
         "a name already in scope (an action parameter, quantifier binder, let, or earlier pattern binding)"
+    } else if fields.into_iter().any(is_binding) {
+        "an entity field"
     } else {
         return Ok(PatternBinding::Fresh);
     };

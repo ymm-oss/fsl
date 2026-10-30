@@ -195,14 +195,23 @@ guard copy now reads that name as the field, just as the event's lowering does,
 not as the matched payload. For example,
 `amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })`
 was accepted even though its event could never occur: the field must be both 0
-and 1. It now fails with exit 2, `kind: "semantics"`, and
-`rule_conflict_unsatisfiable_guard`. To test the payload instead, use a non-field
+and 1. #1552 rejected it with `rule_conflict_unsatisfiable_guard`; #1561 now
+rejects the field-name pattern first, with exit 2, `kind: "semantics"`, and the
+shared pattern-shadowing diagnostic asking for a rename. To test the payload instead, use a non-field
 pattern name: replace `some(x) is some(amount) and amount == 1` with
 `some(x) is some(v) and v == 1`. Keeping the outer condition and quantifier, this
 means the field is 0 and there is an `x` equal to 1 whose matched payload `v`
-equals 1; the rewritten example passes `check`. The pattern-name rule itself
-remains tracked in #1561; this correction only aligns the conflict check with
-the lowered event.
+equals 1; the rewritten example passes `check`. #1561 also removes the formerly
+accepted `some(1) is some(amount) and amount == 1`: both lowering paths now refuse
+this ambiguous source before losing its field spelling. Rename the pattern and
+continuation to fresh `v`; the event is covered. Legacy guards, assignment RHS,
+rule properties, measures, decision assumptions/rows, concept conditions (even
+unused) and relation roles share that source admission rule.
+Event Typed/Range inputs retain their bare-field exclusions without adding typed
+solver metadata for Range. Ordinary quantifier/aggregate shadowing and patterns
+local to definitions expanded after field substitution are unchanged. See
+[the scope amendment](DESIGN-pattern-binding-scope.md#6-requirements-field-pattern-freshness-1561)
+for diagnostic owners and measured breaking inventory.
 
 **Breaking removal (#1569):** in legacy requirements with a process field
 `amount`, `check` now rejects a transition guard such as

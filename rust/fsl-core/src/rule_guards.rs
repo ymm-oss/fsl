@@ -319,6 +319,12 @@ impl EventGuards {
     }
 }
 
+pub(crate) fn input_name(input: &Param) -> &str {
+    match input {
+        Param::Typed(name, _) | Param::Range(name, _, _) => name,
+    }
+}
+
 fn event_guards(
     entity: &str,
     fields: &[ProcessField],
@@ -346,9 +352,10 @@ fn event_guards(
         .map(|field| field.name.as_str())
         .chain(roles.iter().map(String::as_str))
         .collect::<BTreeSet<_>>();
-    let input_names = inputs
+    let input_names = transition
+        .inputs
         .iter()
-        .map(|(name, _)| name.as_str())
+        .map(input_name)
         .collect::<BTreeSet<_>>();
     let guards = event
         .rule_guards
@@ -676,6 +683,41 @@ fn quantified(name: &str, type_name: QualifiedName, body: Expr) -> Expr {
 mod tests {
     use super::*;
     use fsl_syntax::{ConditionalSpans, SourcePos};
+
+    #[test]
+    fn issue_1561_typed_and_range_inputs_shadow_fields() {
+        let options = fsl_syntax::ParseOptions::with_unstable(
+            fsl_syntax::UnstableFeatures::parse_list("fsl5").0,
+        );
+        let fsl_syntax::SurfaceDocument::Requirements(mut requirements) =
+            fsl_syntax::parse_surface_document_with(
+                "fsl 5\nrequirements R { number Amount actor Manager entity Claim { amount: Amount = 0 lifecycle Draft -> Approved } event approve = Manager approves Claim with amount: Amount Draft -> Approved rule REQ-1 \"t\" { allow Manager approves Claim only when input amount == 1 } } verify { instances Claim = 1 values Amount = 0..2 }",
+                &options,
+            ).unwrap()
+        else { panic!("requirements") };
+        let typed = RuleGuards::of(&requirements, None);
+        for item in &mut requirements.items {
+            if let RequirementsItem::Process(BusinessItem::Process { items, .. }) = item {
+                for item in items {
+                    if let ProcessItem::Transition(transition) = item {
+                        transition.inputs[0] =
+                            Param::Range("amount".to_owned(), Expr::Num(0), Expr::Num(2));
+                    }
+                }
+            }
+        }
+        let ranged = RuleGuards::of(&requirements, None);
+        assert_eq!(typed.events[0].guards, ranged.events[0].guards);
+        assert_eq!(
+            ranged.events[0].guards[0].condition,
+            binary("==", var("amount"), Expr::Num(1))
+        );
+        assert_eq!(typed.events[0].inputs.len(), 1);
+        assert!(
+            ranged.events[0].inputs.is_empty(),
+            "no invented typed-domain metadata"
+        );
+    }
 
     fn var(name: &str) -> Expr {
         Expr::Var(name.to_owned())

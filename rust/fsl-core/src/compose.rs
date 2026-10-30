@@ -1507,6 +1507,7 @@ fn rewrite_expr_in_phase(
                         component.names.consts.iter().map(String::as_str),
                         component.names.enum_members.keys().map(String::as_str),
                         bound.iter().chain(&phase.collisions).map(String::as_str),
+                        [],
                     )?;
                 }
                 Expr::Is {

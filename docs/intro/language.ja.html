@@ -949,6 +949,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   <code>v</code> は新しい名前でなければなりません: 状態変数・定数・enum のメンバー・action の
   引数・量化子の束縛変数・<code>let</code>・それより前のパターン束縛と同じ名前の <code>v</code> は
   <code>check</code> が拒否し、名前を変えるよう求めます。
+  requirements のフィールド置換文脈では、エンティティのフィールドや relation role と
+  同名のパターンも、lowering が元の綴りを失う前に拒否します (#1561)。event input の
+  既存の例外と、量化子・集約の合法なフィールド隠蔽は維持します。
   順序は定義されません。</li>
 <li>struct: リテラル <code>Order { st: Open, qty: 0 }</code>、フィールド参照 <code>o.st</code>、
   <code>==</code> はフィールドごとの等値</li>
@@ -3505,21 +3508,73 @@ verify {
   values Amount = 0..3
 }
 </code></pre>
-<p><strong>破壊的削除 (#1552):</strong> requirements の <code>rule ... only when</code> 条件では、量化子の
+<p><strong>破壊的削除 (#1552, #1561):</strong> requirements の <code>rule ... only when</code> 条件では、量化子の
 本体または集約の値の式で、エンティティのフィールド名を <code>is</code> パターンの名前として
 再利用した、充足不能なガードを、以前は受理していても <code>check</code> で拒否するように
 なりました。競合検査用のガードは、イベントの lowering と同じく、その名前を
 マッチしたペイロードではなくフィールドとして読みます。例えば、
 <code>amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })</code>
 は、フィールドが 0 と 1 の両方であることを要求し、イベントが決して起きないのに
-受理されていました。現在は exit 2、<code>kind: "semantics"</code>、
-<code>rule_conflict_unsatisfiable_guard</code> で拒否されます。ペイロードを検査するには、
+受理されていました。#1552 では <code>rule_conflict_unsatisfiable_guard</code> で拒否され、
+#1561 ではフィールド置換前のパターン宣言を先に拒否します。exit 2、
+<code>kind: "semantics"</code>、メッセージは
+<code>pattern binding 'amount' in 'is some(amount)' shadows an entity field of the same name; rename the pattern variable</code>
+です。位置は保持された rule 文の所有位置であり、パターントークンを新たに復元した
+ものではありません。ペイロードを検査するには、
 フィールドと異なるパターン名を使い、<code>some(x) is some(amount) and amount == 1</code> を
 <code>some(x) is some(v) and v == 1</code> に書き換えてください。外側の条件と量化子を保った
 この式は、フィールドが 0 であり、1 に等しい <code>x</code> が存在して、そのマッチした
 ペイロード <code>v</code> が 1 に等しいことを意味し、書き換え後の例は <code>check</code> を通ります。
-パターン名自体の規則は引き続き #1561 で扱います。この修正は、競合検査を
-lowering 後のイベントに揃えるものです。</p>
+以前は受理された <code>some(1) is some(amount) and amount == 1</code> も、新たな破壊的削除
+(#1561) です。宣言と継続中の参照をともに <code>v</code> に改名すれば、イベントは到達します。
+同じ規則を legacy guard、event の代入右辺、rule property、measure、decision の
+assuming と行、未使用を含む concept のフィールド
+置換前にも適用し、relation role も対象に含めます。新たなフィールド隠蔽の意味規則は
+導入しません。event input の既存の例外と、量化子・集約の合法なフィールド隠蔽は維持
+します。フィールド置換後に導入される def 内部のパターン名はフィールド別名ではなく、
+呼び出し引数に書かれたパターンは def がその引数を消去しても先に検査します。</p>
+<p>各自の materialized tree で <code>FSLC_CACHE=off &lt;binary&gt; check &lt;form&gt;</code>
+を2回実行し、base <code>f8e3726e2ead231c89cd4f52eef3dd5d652c774d</code> と測定 head
+<code>13676f0bca83b2433cc974468bbb00c59aef25a9</code> (binary SHA256
+<code>0cab1c914a05344d8958a6f9bd5ce5a17618f87f9f7e74e279b449fbca47f314</code>) を比較しました。
+corpus 全610形式 (specs 23、examples 195、CLI fixtures 392) は変更なしでした。
+元の #1552 全63形式、以前の #1561 全49形式、追加した fresh control、decision/concept
+の6形式、レビューで使った2形式を含め、inline の <strong>27ケースが <code>ok</code>→<code>error</code></strong> です:</p>
+<table>
+<thead>
+<tr>
+<th>削除されたケースのラベル</th>
+<th style="text-align: right;">件数</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>control_is_pattern_field_name_satisfiable_matches_base</code></td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>expression-0</code>, <code>expression-1</code>, <code>expression-2</code>, <code>expression-3</code>, <code>expression-4</code>, <code>expression-5</code>, <code>expression-6</code>, <code>expression-7</code>, <code>expression-8</code>, <code>expression-9</code>, <code>expression-10</code>, <code>expression-11</code>, <code>expression-12</code> (and・入れ子・含意・or・not・if・コンテナ・量化子・集約)</td>
+<td style="text-align: right;">13</td>
+</tr>
+<tr>
+<td><code>argument-1</code>, <code>argument-4</code>, <code>argument-9</code> (保持・消去・間接的消去)</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td><code>event-set</code>, <code>when</code>, <code>set</code>, <code>never</code>, <code>property</code>, <code>measure</code>, <code>role</code></td>
+<td style="text-align: right;">7</td>
+</tr>
+<tr>
+<td><code>decision-assuming</code>, <code>unused-concept</code>, <code>review-original-collision</code></td>
+<td style="text-align: right;">3</td>
+</tr>
+</tbody>
+</table>
+<p>これはケース単位の件数で、すべてが異なるプログラムとは限りません。既存の拒否5形式
+(and・含意・量化子内の矛盾、重複する <code>argument-7</code>、<code>decision-row</code>) は診断変更であり、
+追加の受理削除ではありません。全2,924観測 (731形式×両バイナリ×2回) は反復差分0、
+除外フィールドなしです。他の必須テストの元入力を改訂・省略していません。これは上記の測定
+head の証拠であり、後の統合コミットに対して未実施の sweep を行ったとの主張ではありません。</p>
 <ul>
 <li>process+data プロファイルは、単一エンティティのライフサイクルに対する第一の
   requirements 形式です。<code>process E with f: T { ... }</code> は、エンティティの stage
