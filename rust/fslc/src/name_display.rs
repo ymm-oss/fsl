@@ -94,10 +94,8 @@ fn respell_value(
     prose: &[String],
 ) {
     match value {
-        Value::String(text) => {
-            if !is_prose(key, reference) {
-                *text = respell_text(text, rename, prose);
-            }
+        Value::String(text) if !is_prose(key, reference) => {
+            *text = respell_text(text, rename, prose);
         }
         Value::Array(items) => items
             .iter_mut()
