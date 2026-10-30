@@ -208,13 +208,30 @@ fslc ai check FILE [--depth K] [--engine bmc|induction]
 fslc ai replay FILE --logs events.jsonl
 ```
 
-Hard checks cover tool_authority, human_approval_required, forbidden_tool_blocked,
-tool_schema_declared, tool_precondition_declared. Omit optional check hard to check
-all five; an explicit block narrows to exactly listed known rules. Do not narrow
-it to hide a violation. Unknown rules/tools, duplicate singleton fields, missing
-required fields or malformed clauses reject. Tool authority, symbolic precondition
-evidence, approval and fallback routing are checked, not LLM truth/groundedness or
-statistical quality. Replay evidence (replay_conformant) is not a universal proof.
+The five accepted rule names are tool_authority, human_approval_required,
+forbidden_tool_blocked, tool_schema_declared and tool_precondition_declared.
+Omitting optional check hard defaults to all five. **Selecting rules is not a
+switch for disabling admission, structural findings or runtime replay checks.**
+In the current implementation only forbidden_tool_blocked and
+human_approval_required affect which explicit certifying kernel invariants are
+generated. Those invariants are redundant certificates of unconditional structural
+guards: forbidden tools get no execute action, and approval-required execute
+actions still require human_approved even if their certifying rule is unselected.
+
+| Path | Checks that selection does not disable |
+|---|---|
+| Component admission | Unknown hard-rule names/authority tools, duplicate fallback reasons, tool-less components, and parser validation of required fields/singleton clauses. |
+| Static hard-contract findings in ai check | Forbidden-and-executable authority conflicts; non-forbidden irreversible tools missing explicit requires_human_approval (even if only suggestible); executable tools with no schema. These run independently of the selected rule set. |
+| Runtime ai replay | Observed authority/forbidden calls, required approval tokens, supplied schema validity/mismatch, and evidence for every declared symbolic precondition. Missing precondition evidence is not a pass, regardless of check hard selection. |
+
+Do not remove a rule to hide a violation or describe an unselected rule as a
+disabled structural check. Tool preconditions are symbolic declarations whose
+runtime evidence is checked, not kernel proof of arbitrary business predicates.
+Hard checks model authority, approval and fallback routing, not LLM truth,
+groundedness or statistical quality. `ai check` reports
+verified_under_assumptions only for an accepted kernel verification result;
+static findings remain failures. Replay reports replay_conformant or
+replay_nonconformant with formal_result:not_run, never a universal proof.
 
 ## Recursive agents
 
@@ -250,7 +267,8 @@ the immediate parent. Orchestration is a separate graph. Explicit review_gate
 children mark paths that high-authority descendants must pass; undeclared review
 intent is not mechanically inferred. Only literal trust low has a special check;
 other free identifiers do not acquire invented trust semantics. Agent contract
-hard rules are parsed/echoed metadata, not validated/cross-checked ai_component rules.
+hard rules are parsed/echoed metadata, not the validated ai_component
+[certification selection](#ai-hard-contracts) described above.
 
 `ai check` returns agent_analyzed, agent_ir and graph summaries. Findings include
 grant exceedance, low-trust authority reachability, irreversible tools without

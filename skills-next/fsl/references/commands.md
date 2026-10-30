@@ -318,3 +318,7 @@ separate project loader. An approval positional is always a spec, even when its
 
 Cross-dialect command families and their syntax/evidence limits are retained in
 [advanced](advanced.md) and [causal/NFR implementation guidance](impl.md).
+For AI components, [check hard rule selection](advanced.md#ai-hard-contracts)
+controls explicit certification, not admission/structural/replay checks; it is
+not a bypass or the same selector as verify --property. Recursive agent contract
+rules remain metadata, not that component certification mechanism.
