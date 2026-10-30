@@ -104,6 +104,10 @@ refinement CartImplRefinesCart {
   reuse property binder names or other used-map patterns; rename the mapping pattern binder.
   Direct pull errors locate `respond` (type, exit 2); the const/state bound has abstract-only BMC exit 1.
   Unused maps/legal locals stay admissible; outer capture is refused. Only nested diagnostics may rename.
+  State replacement is simultaneous: an indexed read `a[e]` instantiates its
+  implementation-scope template once, after pulling `e`. A free whole-map read
+  of an indexed abstract state is refused at `respond`, even if an implementation
+  state has the same spelling; see the #1613 audit in §4.
 - The grammar does not coexist with existing `.fsl` files (an **independent
   file** with `refinement` at the top level. Parsing adds `refinement_def` to
   the same Lark grammar).
@@ -669,6 +673,76 @@ Static checks (`kind: "type"` error, exit 2):
   instance. They run on top of PERF1's shared expansion and expression cache.
 - The counterexample's `abs_before/after` display applies `logical_state_values`
   to the values obtained by evaluating α's expression dict in the model.
+
+### Indexed progress pull and breaking whole-map removal (#1613)
+
+The progress pull, unlike the simulation's bounded array construction above,
+substitutes abstract reads syntactically. For `map a[i: K] = expr`, a source
+read `a[e]` becomes `expr[i := pull(e)]`. The inserted `expr` is already in
+implementation scope: do not apply the abstract scalar or indexed mapping
+tables inside it again. Scalar replacement likewise remains single-pass.
+Identity and cyclic indexed maps are therefore legal; their names alone neither
+prove nor refute progress, and they must not recurse indefinitely.
+
+An element template cannot pull a free abstract whole-map occurrence such as
+`m == z`. Refuse that source form with `error/type`, exit 2, at the mapping's
+`respond`, without a proof or trace. Resolve scope **before** insertion: a
+same-named implementation state must not make the abstract occurrence legal,
+and a legitimate whole-map expression inside an implementation template must
+not be mistaken for an abstract read. Only a direct indexed base is consumed;
+its index expression is still inspected. Binder domains use the incoming
+scope; filters and bodies use the local binding. Existing pattern-continuation
+policy, unused mappings, legal source locals, scalar maps and no-progress
+simulation retain their semantics.
+
+**Breaking removal:** the `whole-same` witness in
+`rust/fslc/tests/issue_1613_whole_map_scope.rs` maps `m[i] = n[i]` while an
+unrelated implementation `m` changes and `n`/`z` stay zero. Its abstract
+`m == z ~> m != z` previously falsely returned `refines`/exit 0. It now returns
+the located type error at `respond` 8:23 (span offsets 166..173). Renaming only
+the unrelated implementation `m` is not a workaround: that source was already
+rejected, and now receives the same located error.
+
+Migration must re-express the intended Boolean P and Q with supported element
+reads while preserving their quantifiers and temporal structure. For a
+whole-map equality over the same finite key domain, keep the all-keys equality
+inside P or Q; its negation means **some** key differs. Do not mechanically
+replace a whole-map `P ~> Q` by `forall k { P[k] ~> Q[k] }`: that changes the
+response obligation in general. The singleton element-read witness loses
+progress at `k=0`; it does not establish this rewrite for larger domains.
+Do not remove `preserve progress` or weaken the property to avoid the error.
+
+**Named boundary audit:** base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d`,
+normal production head `2aab19f2b2d286c01c1aa79497c131df334aaff1`, each binary
+built and executed in its own materialized tree. With `FSLC_UNSTABLE=fsl5` and
+`FSLC_CACHE=off`, run `fslc check <path>` on all **610** corpus forms
+(23 `specs/`, 195 `examples/`, 392 `rust/fslc/tests/fixtures/`) and **54**
+materialized inline forms. The `check` ok→error set is **empty**; all their
+stdout/stderr/exit/JSON observations are identical between base and head.
+The 595-source test inventory found no rewritten, renamed, removed or
+deselected required tests: mandatory rewritten-test inline forms **0**;
+only the two independently authored #1613 acceptance files were added.
+
+Separately run `fslc refine impl.fsl abs.fsl map.fsl --depth 4` on all **18**
+materialized acceptance cases, and all **28** live commands (operands and depths)
+in `rust/fslc/tests/refine_corpus_parity.rs`. That is **710 routes, twice per
+SHA** (1,420 observations per SHA), with complete CLI fields and no masks.
+All 28 corpus refinement routes are unchanged. Of 18 inline refinement cases,
+9 are unchanged and 9 change in both repetitions:
+
+- Five former stack aborts (identity, swap, singleton elements, implementation
+  template and its element control) become structured `progress_lost`/exit 1.
+- The indexed chain's false `refines` becomes `progress_lost`/exit 1.
+- Two already-rejected whole-map forms keep exit 2 but change unlocated
+  `semantics` into located `type`, retaining loaded impl/abs names.
+- **One admitted→error restriction:** `whole-same`, as described above.
+
+The empty check-removal set does not erase that separate refinement removal.
+All head repeat outputs are identical. The only five base repeat differences
+are the observed thread IDs in stack-abort stderr; raw stderr and empty/invalid
+JSON outputs are retained, not excluded or normalized. There were no timeouts
+and no invalid JSON outputs at head. This audit is bounded behavior evidence,
+not an unbounded proof or an assurance promotion.
 
 ## 5. Test Plan (tests/test_refine.py) + Sample
 

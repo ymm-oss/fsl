@@ -2801,6 +2801,37 @@ const と同名の local は先に `check` が拒否します。性質の patter
 未使用の map/合法な local は受け入れ、外側の捕獲は拒否します。外側の名前を維持し、入れ子の診断は改名し得ます。
 抽象の定数を範囲で読む違反で impl の定数を改名した形と、抽象の定数を本体で読み impl に
 同名がない違反は、従来の exit 2 エラーから exit 1 `progress_lost` に変わります。
+
+indexed progress mapping は同時置換です(#1613)。`map a[i: K] = expr` に対し、
+ソースの読み出し `a[e]` は、引き込み済みの `e` で `i` を置換した `expr` になります。
+挿入した式は impl の scope にあり、抽象の mapping を再適用しません。identity/swap の
+map は stack overflow を起こさず、chain も impl の読み出しの内側で別の抽象 mapping を
+たどりません。実際に進行を失う場合は、誤った `refines` ではなく `progress_lost` です。
+
+**破壊的 removal (#1613):** 引き込む性質が indexed 抽象 state を map 全体として自由参照
+する形は、同名の impl state があっても `respond` 位置の `error/type`(exit 2)になります。
+受入例 `whole-same`(`map m[i: K] = n[i]`、性質 `m == z ~> m != z`)は、誤った
+`refines`/0 から 8:23 の type error/2 に変わります。無関係な impl state の改名では
+修復できません。ソースの binder による shadowing と、挿入される impl の式の合法な
+map 全体の読み出しは引き続き受け入れます。collection 全般の禁止ではありません。
+P/Q は対応する要素読み出しの述語で書き直し、**時間的な意味を変えないでください**。
+map 全体の等値は全キーの一致、不等値は少なくとも一つのキーの相違です。`forall` を
+`~>` の外に移すと応答義務が変わり得るため、singleton の例を一般的な移行の同値性と
+見なせません。性質や `preserve progress` を弱めず、意図した契約を維持してください。
+
+境界監査: base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` → production head
+`2aab19f2b2d286c01c1aa79497c131df334aaff1`。各 binary を自身の tree で、
+`FSLC_UNSTABLE=fsl5 FSLC_CACHE=off` として実行しました。corpus610形
+(specs23・examples195・fixtures392)と inline54形の `fslc check <path>` は、
+**ok→error が空集合**で、出力全体が一致します。595 source の inventory で、書き換えた
+required test の inline は0形、追加は受入テスト2本のみです。別枠の corpus `refine`
+28 command は不変です。inline18組の `fslc refine impl.fsl abs.fsl map.fsl --depth 4`
+では9組が不変、9組が変化しました: abort→progress_lost が5組、誤った
+refines→progress_lost が1組、既存 error の位置・分類修正が2組、上記の
+**受入→error の whole-map removal が1組**です。710 route 全体を各SHAで2回実行し、
+CLI field の mask はありません。scope・移行・反復の証拠は
+[DESIGN-refinement §4](../design/DESIGN-refinement.md#4-implementation-notes)を参照してください。
+
 非有界の証明には、引き続き下位レイヤーの `leadsTo ... decreases ...` と
 `verify --engine induction` を使ってください。
 

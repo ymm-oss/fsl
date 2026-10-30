@@ -2988,6 +2988,41 @@ bound witness gives refine exit 2 versus abstract-only BMC exit 1 `violated`.
 Unused maps/legal locals stay admissible; outer capture is refused. Only nested diagnostics may rename.
 For a violated abstract constant bound with the impl constant renamed, or a body constant
 without an impl namesake, former exit-2 errors now report exit 1 `progress_lost`.
+
+Indexed progress mappings are simultaneous (#1613). For `map a[i: K] = expr`,
+a source read `a[e]` becomes `expr` with `i` replaced by the already-pulled `e`.
+The inserted expression is in implementation scope and is not mapped again.
+Identity/swap maps no longer overflow the stack; a chain cannot silently follow
+another abstract mapping inside an implementation read. Their genuine progress
+failures report `progress_lost`, not `refines`.
+
+**Breaking removal (#1613):** a free abstract whole-map read of an indexed state
+in the pulled property is now `error/type` (exit 2) at `respond`, even when an
+implementation state shares its name. The `whole-same` acceptance witness
+(`map m[i: K] = n[i]`, property `m == z ~> m != z`) changes false `refines`/0
+to a type error/2 at 8:23. Renaming the unrelated implementation state does not
+repair it. Source binder shadowing and legal whole-map reads inside inserted
+implementation templates remain accepted; this is not a general collection ban.
+Re-author P/Q with supported element-read predicates **without changing temporal
+meaning**. Whole-map equality requires all keys to agree, while inequality needs
+only one differing key. Moving `forall` outside `~>` can change that obligation;
+the singleton witness is not a general migration equivalence. Keep the intended
+property and `preserve progress`, rather than weakening either.
+
+Boundary audit: base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` → production head
+`2aab19f2b2d286c01c1aa79497c131df334aaff1`, each binary in its own tree, with
+`FSLC_UNSTABLE=fsl5 FSLC_CACHE=off`: `fslc check <path>` on 610 corpus forms
+(23 specs/195 examples/392 fixtures) and 54 inline forms has **no ok→error
+transitions** and identical complete outputs. The 595-source inventory has
+0 rewritten-required-test inline forms; only two acceptance tests were added.
+Separately, 28 corpus `refine` commands are unchanged; 18 inline
+`fslc refine impl.fsl abs.fsl map.fsl --depth 4` cases have 9 unchanged and
+9 changed: 5 abort→progress_lost, 1 false-refines→progress_lost, 2 already-error
+location/classification fixes, and **1 admitted→error whole-map removal** above.
+All 710 routes ran twice per SHA, without CLI field masks. See
+[DESIGN-refinement §4](../design/DESIGN-refinement.md#4-implementation-notes)
+for the full scope, migration and repeat evidence.
+
 For unbounded proof, keep using a lower-layer `leadsTo ... decreases ...` and
 `verify --engine induction`.
 
