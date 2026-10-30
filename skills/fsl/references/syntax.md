@@ -352,7 +352,8 @@ observation its explicit mapping. Classification and consumption share captured
 bytes; each input slot is distinct, including two slots naming the same file.
 Envelope edition metadata belongs only to the first slot; other slots add warnings.
 All-root preparation makes a later causal root/mapping read error precede an
-earlier root's parse/model error. Project-mode intake remains deferred.
+earlier root's parse/model error. Project analysis captures its manifest and
+admits direct FSL layers and active mappings, without inventing TOML metadata.
 Log replay similarly reports mapping IO before an ordinary root parse/model
 error. Document check admits before artifact IO/frontmatter, then projects the
 captured source under the recorded display label without reading that label's path.
@@ -381,8 +382,10 @@ solver use; editor refusal precedes model/analysis and retains UTF-16 ranges.
 Repair projections, safety and exits are unchanged.
 Direct raw HTML/ledger, document generate/claims and domain expand/testgen use migration
 stderr delivery too. HTML/ledger file-output envelopes stay unchanged, with one
-warning in the distinct baseline; approval-only rendering self-admits its baseline
-without new stderr delivery. Mutate finishes its authored input once; sweep cells
+warning in the distinct baseline; approval-only rendering borrows captured source
+and tokens, retaining standalone diagnostics without new stderr delivery.
+Requirements-document rendering does not consume or scan an `implements` child.
+Mutate finishes its authored input once; sweep cells
 borrow the one captured root's token.
 
 Latest extension sweep: BASE `1844fa74a717ba9229e0b292d9421c0939016e5e`, Rust
@@ -410,15 +413,51 @@ enum union, metadata in spec and requirements, colon quantifier and inline mappi
 (5). These were non-error consumer inputs, not grammar removals or proof claims.
 A mapping-only control already errored at BASE and is not counted as a removal.
 
-Coverage remains partial: eight modes across seven leaves remain—analyze batch
-and project, approval check/create/diff, chain admission, live diff and refine.
-The approval-check scope includes ledger `--approval` overlay root rereads.
-Deferred controls still execute and must reject; this does not close #1449.
+Live-root coverage includes analyze batch/project, approval check/create/diff and
+captured-source ledger `--approval`, chain, live diff and direct/multi-link refine.
+The deferred set is empty; strict complete-adapter controls reject any
+nonhistorical disagreement and a restored deferral. All three historical-root
+controls still execute (#1513); their consumed dependencies are still checked.
+Diff old/refine first impl supply primary metadata; approval diff uses its sole
+live root. Repeated slots stay distinct; multi-link intermediate specs are not
+counted per link. Live Git mappings are secondary slots, materialized mappings
+stay historical, and mapping-path selection is unchanged.
+One explicit live Git mapping is captured at first legitimate use, once for all
+comparisons, preserving comparison-local diagnostics and missing-operand/empty-
+range precedence. Project mapping preparation uses canonical file-bearing
+business/requirements/design endpoints only; ignored targets do not expose unused
+mapping IO or edition diagnostics. This adds neither a stream flag nor stricter TOML validation.
+Batch prepares every root before consumers but keeps dependency scopes and
+diagnostics per file; a refused child cannot replace another file or the batch.
+Project warnings add no TOML edition, and empty inputs retain success. Chain
+groups captured bytes, transports immutable tokens with the existing scheduler,
+and finishes detail in the actual step thread before its wrapper. Ordinary chain
+IO retains layer/cutoff. Other multi-root modes intentionally report later input
+IO before earlier parse/model errors. Newly owned child refusals are complete
+exit-2 envelopes rather than flattened errors; accepted child warnings arrive
+once. Approval diff keeps metadata on success, not on child refusal. Distinct
+artifacts/baselines retain standalone diagnostics, without new stderr delivery.
+Neither HTML nor ledger has independent baseline pinning here; both renderer
+halves and three internal seam controls are tracked in #1641.
 Existing baselines and ledger migration rows are retained;
 migration-only rows use 🟡 移行候補 / risk —, mixed/non-migration rows 🔴 要確認 / 要確認.
 Actually read dependencies are admitted as described below. Git-revision roots (#1513), example
 warning cleanup (#608), lint dialect support (#609) and other ledger warning
-classifications (#1497) are separate; do not infer full reader coverage.
+classifications (#1497) are separate; historical-root coverage is not implied.
+
+Multi-root audit: base `796876558b83f2dedd7dafdf04ef77fced3de033` versus Rust/source-test
+revision `8796f19d9646a4edffbac0719c3693a8f88c1405`, independently materialized/built;
+`fslc check FORM`, 606 corpus files +35,611 inline occurrences, both parser modes
+and observed edition requests, 72,859 pairs. Additional base
+`e16f65bfeae773218d23f425376ea7c23b895bff` covers its 603 files and the same inline
+inputs: 218,571 commands overall. Both ok-to-error sets and full base/head
+JSON/stderr/exit differences are empty, no excluded fields; duplicates retained.
+
+Fresh active-target/single-mapping repair audit: same named main base versus
+independently built head `e47dce898889e891e9fa82a5fdd8698749e4db80`, 606 corpus
+files +35,663 inline occurrences including new repair inputs, 72,963 pairs /
+145,926 commands. Reused fixture hashes verified, every CLI check rerun; empty
+ok-to-error and complete JSON/stderr/exit differences, no excluded fields.
 
 Dependency admission (#1452) uses each consumed child's own header/current default,
 never the parent's requested edition; canonical mixed editions are allowed.
@@ -427,7 +466,7 @@ reads, including nested and repeated reads, admit before their bytes enter lower
 model/solver/cache or output. There is no unused-file or speculative-reference scan. Owned commands
 retain the full child refusal/exit 2; an owner-free strict loader still refuses
 through its ordinary read-error renderer, naming child path and finding codes.
-The remaining root-intake modes above are still separate work.
+Explicit root-slot completion and this consumed-dependency rule remain separate boundaries.
 
 Dependency findings use warnings-only finalization once per provider resource and
 complete finding within each outer native owner (or explicit local log), preserving
@@ -452,7 +491,7 @@ the complete successful check envelope. This inline form remains in
 `edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`
 and the `edition_dispatch_inventory` contexts
 `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
-`deferred_modes_have_live_disagreements_across_the_complete_native_adapters`;
+`all_nonhistorical_cells_agree_across_the_complete_native_adapters`;
 it is a consumer removal, not new grammar.
 
 Materialized-tree `fslc check <path>` evidence (`bc14d885` → corrected Rust

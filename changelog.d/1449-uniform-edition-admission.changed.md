@@ -32,10 +32,13 @@ mapping IO precede an ordinary root parse/model error in log replay. Document
 check admits before artifact IO/frontmatter and projects captured bytes under
 the recorded label without rereading its path. Direct raw reports warn on stderr;
 HTML/ledger file-output envelopes and approval-only stderr remain unchanged.
-Eight modes across seven leaves remain: analyze batch/project, approval
-check/create/diff (including ledger --approval overlay root rereads), chain
-admission, live diff and refine. Their deferred-mode controls still execute;
-this remains a partial delivery and does not close #1449.
+The multi-root completion covers analyze batch/project, approval check/create/diff
+and the captured-source ledger --approval overlay, chain, live diff and refine.
+Later direct-input IO now precedes earlier parse/model errors outside chain.
+Newly owned dependency failures use the complete child refusal/exit 2 rather than
+flattened loader errors; successful results receive child warnings once. Approval
+diff keeps approval metadata on success, but a child refusal replaces it. Batch
+diagnostics stay file-local, and chain finishes each detail before its wrapper.
 Git-revision roots (#1513), public-example warning cleanup (#608), lint dialect
 support (#609) and other ledger warning classifications (#1497) are separate.
 Breaking consumer removals: four next-edition migration forms (enum union,
@@ -73,3 +76,18 @@ retaining per-cell warning ownership without finishing the aggregate. Success
 controls compare one complete finding where the dialect has migration forms and
 require warning absence for AI/DB dialects without those forms. No planner or
 language behavior is added by those controls.
+
+The multi-root audit compares main base 796876558b83f2dedd7dafdf04ef77fced3de033
+and Rust/source-test revision 8796f19d9646a4edffbac0719c3693a8f88c1405, each in
+its own materialized tree: 606 corpus files, 35,611 inline occurrences, both
+parser modes and observed edition requests, 72,859 pairs. Additional base
+e16f65bfeae773218d23f425376ea7c23b895bff covers its 603 files and the same inline
+inputs, yielding 218,571 commands overall. Both ok-to-error sets and complete
+base/head JSON/stderr/exit difference sets are empty; no fields are excluded.
+
+The active-target/single-mapping repair repeats the boundary comparison against
+the same main base with independently materialized head
+e47dce898889e891e9fa82a5fdd8698749e4db80: all 606 corpus files and 35,663 inline
+occurrences including new inputs, 72,963 pairs / 145,926 commands. Fixture hashes
+verified and CLI checks rerun; no ok-to-error or full JSON/stderr/exit differences,
+and no excluded fields.

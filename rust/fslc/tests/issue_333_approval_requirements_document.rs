@@ -195,19 +195,13 @@ fn generate_document(root: &Path) -> Value {
 
 // #1475 uses the same test-owned Git baseline as the approval tests above.
 // Drop also cleans up on a detector assertion failure.
-fn assert_base_golden(actual: &Value) {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/issue_1475_golden/approval-fixed.json");
-    let mut expected: Value =
-        serde_json::from_slice(&std::fs::read(path).expect("read base golden"))
-            .expect("base golden JSON");
-    assert_eq!(expected["base"], "c25f8653b9c83a247321f375f98cd59f430b6326");
-    expected["observed"]["overlay"]["generate"]["warnings"] = json!([
+fn approval_root_warnings(path: &str) -> Value {
+    json!([
         {
             "code":"legacy_string_metadata", "kind":"legacy_string_metadata",
             "taxonomy":"deprecated", "severity":"warning", "edition":"current",
             "message":"legacy string metadata is deprecated; use a typed annotation",
-            "loc":{"file":"spec.fsl", "line":12, "column":20, "end_line":12, "end_column":63},
+            "loc":{"file":path, "line":12, "column":20, "end_line":12, "end_column":63},
             "canonical_replacement":"@requirement(\"REQ-190\", \"a pending review can be approved\")",
             "machine_applicable":true,
             "edits":[
@@ -219,7 +213,7 @@ fn assert_base_golden(actual: &Value) {
             "code":"legacy_string_metadata", "kind":"legacy_string_metadata",
             "taxonomy":"deprecated", "severity":"warning", "edition":"current",
             "message":"legacy string metadata is deprecated; use a typed annotation",
-            "loc":{"file":"spec.fsl", "line":18, "column":30, "end_line":18, "end_column":76},
+            "loc":{"file":path, "line":18, "column":30, "end_line":18, "end_column":76},
             "canonical_replacement":"@requirement(\"REQ-190\", \"an approved review remains approved\")",
             "machine_applicable":true,
             "edits":[
@@ -227,7 +221,18 @@ fn assert_base_golden(actual: &Value) {
                 {"start":396, "end":442, "replacement":""}
             ]
         }
-    ]);
+    ])
+}
+
+fn assert_base_golden(actual: &Value) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/issue_1475_golden/approval-fixed.json");
+    let mut expected: Value =
+        serde_json::from_slice(&std::fs::read(path).expect("read base golden"))
+            .expect("base golden JSON");
+    assert_eq!(expected["base"], "c25f8653b9c83a247321f375f98cd59f430b6326");
+    expected["observed"]["overlay"]["generate"]["warnings"] = approval_root_warnings("spec.fsl");
+    expected["observed"]["check"]["warnings"] = approval_root_warnings("spec.fsl");
     assert_eq!(actual, &expected["observed"], "full base approval output");
 }
 
@@ -335,7 +340,8 @@ impl PanicAuditApproval {
             json_output(&output),
             json!({
                 "fsl":"1.0", "result":"error", "kind":"io",
-                "message":"approval record requires a canonical UTC approval timestamp"
+                "message":"approval record requires a canonical UTC approval timestamp",
+                "warnings":approval_root_warnings("spec.fsl")
             })
         );
     }
@@ -386,7 +392,8 @@ fn issue_1475_newline_filename_approval_uses_shared_document_refusal() {
         json_output(&output),
         json!({
             "fsl":"1.0", "result":"error", "kind":"document",
-            "message":"malformed frontmatter line: \"not-a-frontmatter-field\""
+            "message":"malformed frontmatter line: \"not-a-frontmatter-field\"",
+            "warnings":approval_root_warnings(name)
         })
     );
     assert!(!fixture.root.join("newline-record.json").exists());

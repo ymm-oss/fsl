@@ -23,7 +23,6 @@ pub(crate) fn run_admitted_roots(
     stderr_on_success: bool,
     run: impl FnOnce(&[String], &[SourceEdition]) -> (Value, i32),
 ) -> (Value, i32) {
-    let dependencies = fslc_rust::migration::DependencyScope::enter();
     let mut sources = Vec::new();
     let mut editions = Vec::new();
     for (path, source) in roots {
@@ -31,21 +30,39 @@ pub(crate) fn run_admitted_roots(
             Ok(source) => source,
             Err(error) => return (spec_load_error_output(&error), 2),
         };
-        let edition = match fslc_rust::migration::admit_source(
-            &source,
-            &path.to_string_lossy(),
-            requested,
-            crate::process::parse_options(),
-            &envelope,
-            true,
-        ) {
+        let edition = match admit_root_source(path, &source, requested) {
             Ok(edition) => edition,
             Err(error) => return error,
         };
         sources.push(source);
         editions.push(edition);
     }
-    let result = run(&sources, &editions);
+    run_prepared_roots(&editions, stderr_on_success, || run(&sources, &editions))
+}
+
+pub(crate) fn admit_root_source(
+    path: &Path,
+    source: &str,
+    requested: Option<fsl_syntax::Edition>,
+) -> Result<SourceEdition, (Value, i32)> {
+    fslc_rust::migration::admit_source(
+        source,
+        &path.to_string_lossy(),
+        requested,
+        crate::process::parse_options(),
+        &envelope,
+        true,
+    )
+}
+
+/// Execute already admitted slots in the consuming thread's dependency scope.
+pub(crate) fn run_prepared_roots(
+    editions: &[SourceEdition],
+    stderr_on_success: bool,
+    run: impl FnOnce() -> (Value, i32),
+) -> (Value, i32) {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let result = run();
     let stderr = stderr_on_success && raw_delivery_allowed(&result);
     let result = dependencies.finish(result, stderr);
     if stderr_on_success && raw_delivery_allowed(&result) {

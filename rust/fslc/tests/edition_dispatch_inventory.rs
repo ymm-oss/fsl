@@ -250,6 +250,34 @@ fn advertised() -> BTreeSet<String> {
     leaves
 }
 
+fn assert_population(table: &BTreeSet<String>, actual: &BTreeSet<String>) {
+    assert_eq!(table, actual, "actual dispatch differs from edition table");
+}
+
+#[test]
+fn unknown_dispatch_leaf_is_detected_even_when_not_deferred() {
+    let source = include_str!("../src/main.rs");
+    let mutated = source.replacen("\"check\" =>", "\"check\" | \"unregistered-leaf\" =>", 1);
+    assert_ne!(mutated, source, "live dispatch mutation anchor");
+    let actual = dispatch(&mutated);
+    assert!(actual.contains("unregistered-leaf"));
+    assert!(cases::deferred("unregistered-leaf").is_none());
+    let table = cases::rows()
+        .iter()
+        .filter(|row| row.role != "lsp")
+        .map(|row| row.key.to_owned())
+        .collect();
+    let rejected = std::panic::catch_unwind(|| assert_population(&table, &actual));
+    println!(
+        "MUTATION unknown-dispatch-leaf produced_rejection={} expected_rejection=true",
+        rejected.is_err()
+    );
+    assert!(
+        rejected.is_err(),
+        "unknown leaf must not evade exact population"
+    );
+}
+
 #[test]
 fn metadata_and_dispatch_population_is_exact() {
     let rows = cases::rows();
@@ -268,28 +296,20 @@ fn metadata_and_dispatch_population_is_exact() {
         .map(|r| r.key.to_owned())
         .collect();
     assert_eq!(cli, advertised(), "metadata leaf absent from edition table");
-    assert_eq!(
-        table,
-        dispatch(include_str!("../src/main.rs")),
-        "actual dispatch differs from edition table"
-    );
+    assert_population(&table, &dispatch(include_str!("../src/main.rs")));
     assert_eq!(rows.iter().filter(|r| r.role == "nonreader").count(), 3);
-    let deferred: BTreeSet<_> = cases::DEFERRED_TO_SECOND_PR
-        .iter()
-        .map(|(leaf, mode, reason)| {
-            assert!(!reason.is_empty());
-            assert!(
-                all.contains(*leaf),
-                "deferred leaf absent from edition table: {leaf}"
-            );
-            (*leaf, *mode)
-        })
-        .collect();
-    assert_eq!(
-        deferred.len(),
-        cases::DEFERRED_TO_SECOND_PR.len(),
-        "duplicate deferred mode"
+    cases::assert_no_deferred(cases::DEFERRED_TO_SECOND_PR);
+}
+
+#[test]
+fn restoring_a_deferred_mode_is_rejected() {
+    let rejected =
+        std::panic::catch_unwind(|| cases::assert_no_deferred(&[("diff", "all", "mutation")]));
+    println!(
+        "MUTATION reintroduced-deferred produced_rejection={} expected_rejection=true",
+        rejected.is_err()
     );
+    assert!(rejected.is_err());
 }
 
 #[test]
@@ -298,7 +318,7 @@ fn preserved_failure_is_not_deferred_evidence_even_with_a_red_route() {
         ("preserved/ai check".to_owned(), false),
         ("ai check".to_owned(), false),
     ];
-    let panic = std::panic::catch_unwind(|| cases::assert_deferred_evidence(&cells))
+    let panic = std::panic::catch_unwind(|| cases::assert_complete_evidence(&cells))
         .expect_err("a broken preserved control must fail before counting route evidence");
     let message = panic.downcast_ref::<String>().expect("assertion message");
     assert!(message.contains("preserved control failed: preserved/ai check"));
@@ -308,7 +328,7 @@ fn preserved_failure_is_not_deferred_evidence_even_with_a_red_route() {
 }
 
 #[test]
-fn deferred_modes_have_live_disagreements_across_the_complete_native_adapters() {
+fn all_nonhistorical_cells_agree_across_the_complete_native_adapters() {
     let mut cells = all_commands::cases::capture(|| {
         all_commands::every_registered_root_has_the_same_admission_before_dialect_or_sidecars();
         all_commands::four_warning_classes_and_refusals_finish_once_on_all_eight_verification_routes();
@@ -342,5 +362,5 @@ fn deferred_modes_have_live_disagreements_across_the_complete_native_adapters() 
         dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice();
         dialect_controls::approval_records_and_git_roots_refuse_before_output_writes();
     }));
-    cases::assert_deferred_evidence(&cells);
+    cases::assert_complete_evidence(&cells);
 }

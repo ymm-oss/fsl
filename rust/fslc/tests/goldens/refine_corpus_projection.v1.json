@@ -255,7 +255,27 @@
       "resp_mgr": "stutter",
       "retry": "stutter",
       "submit": "stutter"
-    }
+    },
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/ui_spike/return_ui.fsl",
+          "line": 5,
+          "column": 15,
+          "end_line": 5,
+          "end_column": 71
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      }
+    ]
   },
   "examples/layers/return_impl_refines.fsl": {
     "fsl": "1.0",
@@ -302,7 +322,299 @@
       "pay_submit": "pay",
       "submit_large": "submit",
       "submit_small": "submit"
-    }
+    },
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/e2e/3_design.fsl",
+          "line": 59,
+          "column": 7,
+          "end_line": 59,
+          "end_column": 128
+        },
+        "canonical_replacement": "@requirement(\"REQ-EXPENSE-001\", \"an employee files a low-amount claim (at or below the auto-approval limit); it enters automatic review\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 2597,
+            "end": 2597,
+            "replacement": "@requirement(\"REQ-EXPENSE-001\", \"an employee files a low-amount claim (at or below the auto-approval limit); it enters automatic review\")\n  "
+          },
+          {
+            "start": 2649,
+            "end": 2770,
+            "replacement": ""
+          }
+        ]
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/e2e/3_design.fsl",
+          "line": 67,
+          "column": 7,
+          "end_line": 67,
+          "end_column": 121
+        },
+        "canonical_replacement": "@requirement(\"REQ-EXPENSE-001\", \"an employee files a high-amount claim (above the auto-approval limit); it enters manager review\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 2933,
+            "end": 2933,
+            "replacement": "@requirement(\"REQ-EXPENSE-001\", \"an employee files a high-amount claim (above the auto-approval limit); it enters manager review\")\n  "
+          },
+          {
+            "start": 2985,
+            "end": 3099,
+            "replacement": ""
+          }
+        ]
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/e2e/3_design.fsl",
+          "line": 74,
+          "column": 7,
+          "end_line": 74,
+          "end_column": 97
+        },
+        "canonical_replacement": "@requirement(\"REQ-EXPENSE-002\", \"the system auto-approves a low-amount claim that is in automatic review\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 3245,
+            "end": 3245,
+            "replacement": "@requirement(\"REQ-EXPENSE-002\", \"the system auto-approves a low-amount claim that is in automatic review\")\n  "
+          },
+          {
+            "start": 3286,
+            "end": 3376,
+            "replacement": ""
+          }
+        ]
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/e2e/3_design.fsl",
+          "line": 81,
+          "column": 7,
+          "end_line": 81,
+          "end_column": 90
+        },
+        "canonical_replacement": "@requirement(\"REQ-EXPENSE-003\", \"a manager approves a high-amount claim that is in manager review\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 3514,
+            "end": 3514,
+            "replacement": "@requirement(\"REQ-EXPENSE-003\", \"a manager approves a high-amount claim that is in manager review\")\n  "
+          },
+          {
+            "start": 3554,
+            "end": 3637,
+            "replacement": ""
+          }
+        ]
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/e2e/3_design.fsl",
+          "line": 88,
+          "column": 7,
+          "end_line": 88,
+          "end_column": 89
+        },
+        "canonical_replacement": "@requirement(\"REQ-EXPENSE-003\", \"a manager rejects a high-amount claim that is in manager review\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 3780,
+            "end": 3780,
+            "replacement": "@requirement(\"REQ-EXPENSE-003\", \"a manager rejects a high-amount claim that is in manager review\")\n  "
+          },
+          {
+            "start": 3819,
+            "end": 3901,
+            "replacement": ""
+          }
+        ]
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/e2e/3_design.fsl",
+          "line": 95,
+          "column": 7,
+          "end_line": 95,
+          "end_column": 123
+        },
+        "canonical_replacement": "@requirement(\"REQ-EXPENSE-004\", \"Finance submits an approved claim for payment, bumps the payment count, and queues a notification\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 4037,
+            "end": 4037,
+            "replacement": "@requirement(\"REQ-EXPENSE-004\", \"Finance submits an approved claim for payment, bumps the payment count, and queues a notification\")\n  "
+          },
+          {
+            "start": 4076,
+            "end": 4192,
+            "replacement": ""
+          }
+        ]
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/e2e/3_design.fsl",
+          "line": 104,
+          "column": 7,
+          "end_line": 104,
+          "end_column": 75
+        },
+        "canonical_replacement": "@requirement(\"REQ-EXPENSE-004\", \"a payment that was submitted is confirmed as paid\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 4433,
+            "end": 4433,
+            "replacement": "@requirement(\"REQ-EXPENSE-004\", \"a payment that was submitted is confirmed as paid\")\n  "
+          },
+          {
+            "start": 4473,
+            "end": 4541,
+            "replacement": ""
+          }
+        ]
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/e2e/3_design.fsl",
+          "line": 110,
+          "column": 7,
+          "end_line": 110,
+          "end_column": 169
+        },
+        "canonical_replacement": "@requirement(\"MODEL-EXPENSE-001\", \"the oldest queued payment notification is sent and leaves the outbox (notification dispatch is design-internal, absent from the requirements)\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 4633,
+            "end": 4633,
+            "replacement": "@requirement(\"MODEL-EXPENSE-001\", \"the oldest queued payment notification is sent and leaves the outbox (notification dispatch is design-internal, absent from the requirements)\")\n  "
+          },
+          {
+            "start": 4665,
+            "end": 4827,
+            "replacement": ""
+          }
+        ]
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/e2e/3_design.fsl",
+          "line": 116,
+          "column": 7,
+          "end_line": 116,
+          "end_column": 221
+        },
+        "canonical_replacement": "@requirement(\"MODEL-EXPENSE-002\", \"the recorded payment count always equals the number of claims that have entered payment (submitted for payment or already paid) — no under-counting, no double-counting (ghost-counter integrity)\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 4894,
+            "end": 4894,
+            "replacement": "@requirement(\"MODEL-EXPENSE-002\", \"the recorded payment count always equals the number of claims that have entered payment (submitted for payment or already paid) — no under-counting, no double-counting (ghost-counter integrity)\")\n  "
+          },
+          {
+            "start": 4937,
+            "end": 5153,
+            "replacement": ""
+          }
+        ]
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/e2e/3_design.fsl",
+          "line": 121,
+          "column": 7,
+          "end_line": 121,
+          "end_column": 136
+        },
+        "canonical_replacement": "@requirement(\"MODEL-EXPENSE-003\", \"every claim sitting in the notification outbox has genuinely entered payment (submitted for payment or paid)\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 5272,
+            "end": 5272,
+            "replacement": "@requirement(\"MODEL-EXPENSE-003\", \"every claim sitting in the notification outbox has genuinely entered payment (submitted for payment or paid)\")\n  "
+          },
+          {
+            "start": 5324,
+            "end": 5453,
+            "replacement": ""
+          }
+        ]
+      }
+    ]
   },
   "examples/refinement_chain/bot_refines_mid.fsl": {
     "fsl": "1.0",
@@ -339,7 +651,38 @@
       "start": "start",
       "submit": "submit",
       "tick": "tick"
-    }
+    },
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/nfr/sla_worker_design.fsl",
+          "line": 82,
+          "column": 17,
+          "end_line": 82,
+          "end_column": 73
+        },
+        "canonical_replacement": "@requirement(\"NFR-1\", \"an accepted request is completed within 4 ticks\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 2910,
+            "end": 2910,
+            "replacement": "@requirement(\"NFR-1\", \"an accepted request is completed within 4 ticks\")\n  "
+          },
+          {
+            "start": 2924,
+            "end": 2980,
+            "replacement": ""
+          }
+        ]
+      }
+    ]
   },
   "examples/validation/order_refund_windowed_refines.fsl": {
     "fsl": "1.0",
@@ -353,7 +696,38 @@
       "refund": "refund",
       "ship": "ship",
       "tick": "stutter"
-    }
+    },
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/validation/order_refund.fsl",
+          "line": 47,
+          "column": 29,
+          "end_line": 47,
+          "end_column": 65
+        },
+        "canonical_replacement": "@requirement(\"ASSUME-2\", \"no cancel after shipping\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 2134,
+            "end": 2134,
+            "replacement": "@requirement(\"ASSUME-2\", \"no cancel after shipping\")\n  "
+          },
+          {
+            "start": 2160,
+            "end": 2196,
+            "replacement": ""
+          }
+        ]
+      }
+    ]
   },
   "examples/validation/order_refund_instant_refines.fsl": {
     "fsl": "1.0",
@@ -401,8 +775,39 @@
       "stock": 2
     },
     "mismatch": [],
-    "trace_type": "refinement",
-    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "deprecated",
+        "severity": "warning",
+        "edition": "current",
+        "message": "legacy string metadata is deprecated; use a typed annotation",
+        "loc": {
+          "file": "examples/validation/order_refund.fsl",
+          "line": 47,
+          "column": 29,
+          "end_line": 47,
+          "end_column": 65
+        },
+        "canonical_replacement": "@requirement(\"ASSUME-2\", \"no cancel after shipping\")",
+        "machine_applicable": true,
+        "edits": [
+          {
+            "start": 2134,
+            "end": 2134,
+            "replacement": "@requirement(\"ASSUME-2\", \"no cancel after shipping\")\n  "
+          },
+          {
+            "start": 2160,
+            "end": 2196,
+            "replacement": ""
+          }
+        ]
+      }
+    ],
+    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action",
+    "trace_type": "refinement"
   },
   "examples/agentic_rag/agentic_rag_requirements_refines_business.fsl": {
     "fsl": "1.0",
@@ -462,7 +867,225 @@
           "execute_tool"
         ]
       }
-    }
+    },
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 256,
+          "column": 39,
+          "end_line": 256,
+          "end_column": 81
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 268,
+          "column": 49,
+          "end_line": 268,
+          "end_column": 87
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 279,
+          "column": 43,
+          "end_line": 279,
+          "end_column": 77
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 289,
+          "column": 40,
+          "end_line": 289,
+          "end_column": 75
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 299,
+          "column": 41,
+          "end_line": 299,
+          "end_column": 75
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 307,
+          "column": 35,
+          "end_line": 307,
+          "end_column": 68
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 317,
+          "column": 40,
+          "end_line": 317,
+          "end_column": 78
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 326,
+          "column": 39,
+          "end_line": 326,
+          "end_column": 76
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 334,
+          "column": 40,
+          "end_line": 334,
+          "end_column": 82
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 343,
+          "column": 32,
+          "end_line": 343,
+          "end_column": 62
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 354,
+          "column": 41,
+          "end_line": 354,
+          "end_column": 83
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 365,
+          "column": 36,
+          "end_line": 365,
+          "end_column": 85
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      }
+    ]
   },
   "examples/agentic_rag/agentic_rag_design_refines_requirements.fsl": {
     "fsl": "1.0",
@@ -513,7 +1136,225 @@
           "execute_tool"
         ]
       }
-    }
+    },
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 256,
+          "column": 39,
+          "end_line": 256,
+          "end_column": 81
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 268,
+          "column": 49,
+          "end_line": 268,
+          "end_column": 87
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 279,
+          "column": 43,
+          "end_line": 279,
+          "end_column": 77
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 289,
+          "column": 40,
+          "end_line": 289,
+          "end_column": 75
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 299,
+          "column": 41,
+          "end_line": 299,
+          "end_column": 75
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 307,
+          "column": 35,
+          "end_line": 307,
+          "end_column": 68
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 317,
+          "column": 40,
+          "end_line": 317,
+          "end_column": 78
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 326,
+          "column": 39,
+          "end_line": 326,
+          "end_column": 76
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 334,
+          "column": 40,
+          "end_line": 334,
+          "end_column": 82
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 343,
+          "column": 32,
+          "end_line": 343,
+          "end_column": 62
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 354,
+          "column": 41,
+          "end_line": 354,
+          "end_column": 83
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 365,
+          "column": 36,
+          "end_line": 365,
+          "end_column": 85
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      }
+    ]
   },
   "examples/agentic_rag/negative/guard_bypass_refines_requirements.fsl": {
     "fsl": "1.0",
@@ -612,8 +1453,226 @@
       }
     },
     "mismatch": [],
-    "trace_type": "refinement",
-    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 256,
+          "column": 39,
+          "end_line": 256,
+          "end_column": 81
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 268,
+          "column": 49,
+          "end_line": 268,
+          "end_column": 87
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 279,
+          "column": 43,
+          "end_line": 279,
+          "end_column": 77
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 289,
+          "column": 40,
+          "end_line": 289,
+          "end_column": 75
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 299,
+          "column": 41,
+          "end_line": 299,
+          "end_column": 75
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 307,
+          "column": 35,
+          "end_line": 307,
+          "end_column": 68
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 317,
+          "column": 40,
+          "end_line": 317,
+          "end_column": 78
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 326,
+          "column": 39,
+          "end_line": 326,
+          "end_column": 76
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 334,
+          "column": 40,
+          "end_line": 334,
+          "end_column": 82
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 343,
+          "column": 32,
+          "end_line": 343,
+          "end_column": 62
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 354,
+          "column": 41,
+          "end_line": 354,
+          "end_column": 83
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 365,
+          "column": 36,
+          "end_line": 365,
+          "end_column": 85
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      }
+    ],
+    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action",
+    "trace_type": "refinement"
   },
   "examples/agentic_rag/negative/tool_approval_bypass_refines_requirements.fsl": {
     "fsl": "1.0",
@@ -712,8 +1771,226 @@
       }
     },
     "mismatch": [],
-    "trace_type": "refinement",
-    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 256,
+          "column": 39,
+          "end_line": 256,
+          "end_column": 81
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 268,
+          "column": 49,
+          "end_line": 268,
+          "end_column": 87
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 279,
+          "column": 43,
+          "end_line": 279,
+          "end_column": 77
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 289,
+          "column": 40,
+          "end_line": 289,
+          "end_column": 75
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 299,
+          "column": 41,
+          "end_line": 299,
+          "end_column": 75
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 307,
+          "column": 35,
+          "end_line": 307,
+          "end_column": 68
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 317,
+          "column": 40,
+          "end_line": 317,
+          "end_column": 78
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 326,
+          "column": 39,
+          "end_line": 326,
+          "end_column": 76
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 334,
+          "column": 40,
+          "end_line": 334,
+          "end_column": 82
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 343,
+          "column": 32,
+          "end_line": 343,
+          "end_column": 62
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 354,
+          "column": 41,
+          "end_line": 354,
+          "end_column": 83
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/agentic_rag/agentic_rag_requirements.fsl",
+          "line": 365,
+          "column": 36,
+          "end_line": 365,
+          "end_column": 85
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      }
+    ],
+    "hint": "the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action",
+    "trace_type": "refinement"
   },
   "examples/agentic_rag/negative/liveness_drop_refines_requirements.fsl": {
     "fsl": "1.0",
@@ -816,7 +2093,207 @@
           "execute_tool"
         ]
       }
-    }
+    },
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 258,
+          "column": 35,
+          "end_line": 258,
+          "end_column": 64
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 265,
+          "column": 44,
+          "end_line": 265,
+          "end_column": 76
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 272,
+          "column": 36,
+          "end_line": 272,
+          "end_column": 73
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 280,
+          "column": 42,
+          "end_line": 280,
+          "end_column": 84
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 290,
+          "column": 42,
+          "end_line": 290,
+          "end_column": 74
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 297,
+          "column": 48,
+          "end_line": 297,
+          "end_column": 75
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 304,
+          "column": 40,
+          "end_line": 304,
+          "end_column": 78
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 311,
+          "column": 39,
+          "end_line": 311,
+          "end_column": 83
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 318,
+          "column": 35,
+          "end_line": 318,
+          "end_column": 76
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 328,
+          "column": 33,
+          "end_line": 328,
+          "end_column": 67
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 345,
+          "column": 30,
+          "end_line": 345,
+          "end_column": 59
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      }
+    ]
   },
   "examples/multi_agent_system/multi_agent_design_refines_requirements.fsl": {
     "fsl": "1.0",
@@ -874,6 +2351,206 @@
           "execute_tool"
         ]
       }
-    }
+    },
+    "warnings": [
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 258,
+          "column": 35,
+          "end_line": 258,
+          "end_column": 64
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 265,
+          "column": 44,
+          "end_line": 265,
+          "end_column": 76
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 272,
+          "column": 36,
+          "end_line": 272,
+          "end_column": 73
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 280,
+          "column": 42,
+          "end_line": 280,
+          "end_column": 84
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 290,
+          "column": 42,
+          "end_line": 290,
+          "end_column": 74
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 297,
+          "column": 48,
+          "end_line": 297,
+          "end_column": 75
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 304,
+          "column": 40,
+          "end_line": 304,
+          "end_column": 78
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 311,
+          "column": 39,
+          "end_line": 311,
+          "end_column": 83
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 318,
+          "column": 35,
+          "end_line": 318,
+          "end_column": 76
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 328,
+          "column": 33,
+          "end_line": 328,
+          "end_column": 67
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      },
+      {
+        "code": "legacy_string_metadata",
+        "kind": "legacy_string_metadata",
+        "taxonomy": "ambiguous_intent",
+        "severity": "warning",
+        "edition": "current",
+        "message": "cannot move string metadata across an attached comment or annotation",
+        "loc": {
+          "file": "examples/multi_agent_system/multi_agent_requirements.fsl",
+          "line": 345,
+          "column": 30,
+          "end_line": 345,
+          "end_column": 59
+        },
+        "canonical_replacement": "move the comment, then use a typed annotation",
+        "machine_applicable": false,
+        "edits": []
+      }
+    ]
   }
 }

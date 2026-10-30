@@ -16,7 +16,7 @@ use crate::cli_output::{
     trace_last_action,
 };
 use crate::process::block_on_native;
-use crate::spec_loading::load_model;
+use crate::spec_loading::{load_model, load_model_from_source};
 
 /// Derive governance output from one caller-owned root-source snapshot.
 pub(crate) fn governance_result_from_source(
@@ -291,33 +291,43 @@ pub(crate) fn run_refine(
     depth: usize,
 ) -> (Value, i32) {
     run_refine_with_loaders(
-        implementation_path,
-        abstraction_path,
-        mapping_path,
         depth,
-        load_model,
-        |path| std::fs::read_to_string(path),
+        || load_model(implementation_path),
+        || load_model(abstraction_path),
+        || std::fs::read_to_string(mapping_path),
+    )
+}
+
+pub(crate) fn run_refine_from_sources(
+    implementation_path: &Path,
+    abstraction_path: &Path,
+    [implementation, abstraction, mapping]: [&str; 3],
+    depth: usize,
+) -> (Value, i32) {
+    run_refine_with_loaders(
+        depth,
+        || load_model_from_source(implementation_path, implementation),
+        || load_model_from_source(abstraction_path, abstraction),
+        || Ok(mapping.to_owned()),
     )
 }
 
 #[allow(clippy::too_many_lines)]
-pub(crate) fn run_refine_with_loaders(
-    implementation_path: &Path,
-    abstraction_path: &Path,
-    mapping_path: &Path,
+fn run_refine_with_loaders(
     depth: usize,
-    load_model: impl Fn(&Path) -> Result<KernelModel, SpecLoadError>,
-    read_mapping: impl Fn(&Path) -> std::io::Result<String>,
+    load_implementation: impl FnOnce() -> Result<KernelModel, SpecLoadError>,
+    load_abstraction: impl FnOnce() -> Result<KernelModel, SpecLoadError>,
+    read_mapping: impl FnOnce() -> std::io::Result<String>,
 ) -> (Value, i32) {
-    let implementation = match load_model(implementation_path) {
+    let implementation = match load_implementation() {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let abstraction = match load_model(abstraction_path) {
+    let abstraction = match load_abstraction() {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let source = match read_mapping(mapping_path) {
+    let source = match read_mapping() {
         Ok(source) => source,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
