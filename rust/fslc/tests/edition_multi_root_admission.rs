@@ -962,10 +962,18 @@ fn chain_grouping_and_step_share_one_captured_root_stream() {
     finish(r);
 }
 
+fn native_chain_path(file: &str) -> String {
+    std::path::Path::new(".")
+        .join(file)
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn assert_chain_shape(value: &Value, files: [&str; 2], kind: &str, refine: bool) {
     let result = if kind == "verify" { "verified" } else { "ok" };
     let mut expected = Vec::new();
     for (layer, file) in [("requirements", files[0]), ("design", files[1])] {
+        let file = native_chain_path(file);
         let mut step = json!({"layer":layer,"kind":kind,"file":file,"status":"passed","result":result,"exit_code":0,"detail":{"result":result}});
         if kind == "verify" {
             step["depth"] = json!(2);
@@ -973,7 +981,7 @@ fn assert_chain_shape(value: &Value, files: [&str; 2], kind: &str, refine: bool)
         expected.push(step);
     }
     if refine {
-        expected.push(json!({"layer":"design->requirements","kind":"refine","file":"./b.fsl","against":"requirements","abs_file":"./a.fsl","mapping":"./map.fsl","depth":2,"status":"passed","result":"refines","exit_code":0,"detail":{"result":"refines"}}));
+        expected.push(json!({"layer":"design->requirements","kind":"refine","file":native_chain_path("b.fsl"),"against":"requirements","abs_file":native_chain_path("a.fsl"),"mapping":native_chain_path("map.fsl"),"depth":2,"status":"passed","result":"refines","exit_code":0,"detail":{"result":"refines"}}));
     }
     // This extra topology assertion projects details; full result comparisons below do not.
     let mut actual = value["layers"].as_array().unwrap().clone();
@@ -1001,7 +1009,7 @@ fn chain_dependency_delivery_is_inside_each_actual_step_thread() {
             let baseline = canonical(&mut r, &s, &command, "verified");
             assert_chain_shape(
                 &baseline,
-                ["./a.fsl", "./b.fsl"],
+                ["a.fsl", "b.fsl"],
                 if depth.is_empty() { "check" } else { "verify" },
                 true,
             );
@@ -1034,7 +1042,7 @@ fn chain_retains_ordinary_io_layer_projection_and_cutoff() {
         "chain.toml",
         "[business]\nfile = \"missing.fsl\"\n[design]\nfile = \"a.fsl\"\n",
     );
-    let expected = json!({"fsl":"1.0","result":"error","manifest":"chain.toml","keep_going":false,"kind":"chain","message":"one or more chain layers returned an error","failed":["business"],"layers":[{"layer":"business","kind":"check","file":"./missing.fsl","status":"failed","result":"error","exit_code":2,"detail":{"fsl":"1.0","result":"error","kind":"io","message":format!("./missing.fsl: {}", std::io::Error::from_raw_os_error(2))}},{"layer":"design","kind":"spec","status":"skipped","result":"skipped","exit_code":0}]});
+    let expected = json!({"fsl":"1.0","result":"error","manifest":"chain.toml","keep_going":false,"kind":"chain","message":"one or more chain layers returned an error","failed":["business"],"layers":[{"layer":"business","kind":"check","file":native_chain_path("missing.fsl"),"status":"failed","result":"error","exit_code":2,"detail":{"fsl":"1.0","result":"error","kind":"io","message":format!("{}: {}", native_chain_path("missing.fsl"), std::io::Error::from_raw_os_error(2))}},{"layer":"design","kind":"spec","status":"skipped","result":"skipped","exit_code":0}]});
     for jobs in [1, 3] {
         expect(
             &mut r,
@@ -1045,7 +1053,7 @@ fn chain_retains_ordinary_io_layer_projection_and_cutoff() {
         );
         let mut continued = expected.clone();
         continued["keep_going"] = json!(true);
-        continued["layers"][1] = json!({"layer":"design","kind":"check","file":"./a.fsl","status":"passed","result":"ok","exit_code":0,"detail":{"fsl":"1.0","result":"ok","spec":"S","warnings":[]}});
+        continued["layers"][1] = json!({"layer":"design","kind":"check","file":native_chain_path("a.fsl"),"status":"passed","result":"ok","exit_code":0,"detail":{"fsl":"1.0","result":"ok","spec":"S","warnings":[]}});
         expect(
             &mut r,
             &format!("preserved/chain/io-keep-going/{jobs}"),
@@ -1069,14 +1077,14 @@ fn chain_duplicate_grouping_keeps_root_warnings_on_cold_and_warm_cache() {
         );
         let command = format!("chain cache.toml --jobs {jobs}");
         let mut expected = canonical(&mut r, &s, &command, "verified");
-        assert_chain_shape(&expected, ["./a.fsl", "./a.fsl"], "verify", false);
+        assert_chain_shape(&expected, ["a.fsl", "a.fsl"], "verify", false);
         let source = format!("fsl 4\n{}", diagnostic::LEGACY_LEAF);
         s.write("a.fsl", &source);
         for layer in expected["layers"].as_array_mut().unwrap() {
             layer["detail"] = admitted(
                 layer["detail"].clone(),
                 "fsl 4\n",
-                vec![warning(&source, "./a.fsl")],
+                vec![warning(&source, &native_chain_path("a.fsl"))],
             );
         }
         for warm in [false, true] {
