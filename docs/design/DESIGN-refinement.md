@@ -737,7 +737,11 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    and progress-loss reporting remain separate.
    This includes entity domains lowered from `instances`: diagnostics name both
    effective counts and their verify-block/CLI sources. Align verify blocks, or
-   use `--instances Item=N` for both specs with **verify/refine only**, not check.
+   use `--instances Item=N` for both direct specs with **verify/refine only**, not check.
+   Composed conflicts retain component file, instance count and verify-block source
+   under the public type name (for example `p.Item`). Align the component verify
+   blocks; compose does not support that instances override. Public diagnostic
+   spelling does not change internal type/member identities or add member syntax.
    The default check/verify of `inline_implements_bounds/impl_spec_extra.fsl`
    (Item=1 vs Item=3) changes from exit 1 `refinement_failed` to located type/exit2;
    the existing equal-instances override control remains accepted.

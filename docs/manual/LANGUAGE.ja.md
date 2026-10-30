@@ -917,8 +917,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   後から失敗するのでなく check が既存の位置付き代入可能性エラー(`semantics`、終了コード2)
   で拒否し、全 verify engine が共有します。スカラー・Option の数値互換と
    add/contains/push の引数は変えません。refinement は両モデルの数値型を独立に解決します。
-   同名structのfieldとenum/範囲の衝突は、#1599の共有merge規則とType-kindの引渡しに残る未解決です。
-   既存の `type` エラーは#1642の作成元map位置の回復を使い、作成元spanが無いときだけ1:1を保ちます。
+   同名の定義衝突は#1599の共有Type-kind gateでmap検査より先に拒否します。
+   map自体のtypeエラーは#1642の作成元spanを使い、無いときだけunknown1:1を保ちます。
    移行した4つのソースアンカーはruntimeの1:40/1:45 (`map`)、単独の4:3 (`map`)、
    inlineの2:3 (`implements`)で、以前は1:1でした。
   `Int`は有限のドメインを持ちません。リテラルから推論した要素型も含め、これを含む
@@ -2631,7 +2631,12 @@ refinement では ordinal が一致していてもこの宣言を拒みます。
 `verify { instances Item = N }` から来る entity の範囲にも同じ規則を適用します。
 衝突時は両 spec の instances と、その出所(verify block または CLI override)を示します。
 verify block の値をそろえてください。`verify` と `refine` では、両 spec に効く
-`--instances Item=N` でもそろえられます。**`check` は `--instances` を受け付けません。**
+直接の spec なら `--instances Item=N` でもそろえられます。
+**`check` は `--instances` を受け付けません。**
+compose の衝突では `p.Item` のような公開名と、両 component のファイル・instances・
+verify block の出所を示します。component の verify block をそろえてください。
+compose はこの instances override に対応しません。診断の公開名表示は、内部の型・
+メンバーの識別やメンバーの構文を変えません。
 破壊的 removal: `inline_implements_bounds/impl_spec_extra.fsl` の既定の check/verify は、
 Item=1 と Item=3 の相違により、exit 1 `refinement_failed` から `implements` 宣言位置の
 exit 2 `error/type` に変わります。同じ instances を共有する override なら引き続き refines です。

@@ -1027,6 +1027,10 @@ even at equal ordinals. Without progress, typed conversions/abstractions remain
 accepted and ambiguous bare uses remain errors. Pulled safety violations return
 error/semantics/exit2 without a trace, naming the property and pulled model;
 they are neither refines nor progress_lost.
+Composed entity conflicts keep both component files, counts and verify-block
+sources under public type names such as `p.Item`. Align component verify blocks;
+compose does not support an instances override. Direct verify/refine overrides
+and internal type/member identities retain their existing rules.
 Audit: a52bef4931adc67ea2b1fdca827e2318b4ae25ab → 9eaaea7d1c526ede6a13408ea414616ddadccf69;
 check610 corpus forms (606 existing/4 new),39 next-edition controls,60 mappings,
 20 inline/2 expression triples and39 acceptance cells; all fields/stderr/exit twice.
@@ -1320,8 +1324,8 @@ when checking a file, the message suffix changes from `at L:C` to
    including inferred Seq literal capacity. Set/Seq conditional inference retains
    an already known finite arm's carrier/capacity through let in either arm order;
    it does not materialize literals. Refinement resolves numeric types separately;
-   same-name struct-field and enum/range collisions remain open pending1599's
-   shared merge rule and Type-kind handoff. Its type error recovers authored map
+   #1599 first rejects same-name declarations through its shared Type-kind
+   merge gate. For remaining map errors, it recovers authored map
    spans (#1642), retaining unknown1:1 only without an authored span. Migrated
    anchors: runtime1:40/1:45 map tokens, standalone4:3 map, inline2:3 implements,
    all formerly1:1, with full spans checked against unchanged literal sources.

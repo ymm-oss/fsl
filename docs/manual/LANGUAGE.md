@@ -986,10 +986,10 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Seq capacity). An uncontextualized Set/Seq conditional retains an already
   known finite arm's carrier/capacity through a `let`, in either arm order;
   it does not materialize literals. Refinement resolves numeric types in each
-  model independently; same-name struct-field and enum/range collisions remain
-  open pending #1599's shared merge rule and Type-kind handoff. Its existing
-  `type` error uses authored map recovery (#1642), retaining 1:1 only when no
-  authored span exists. The four migrated source anchors are runtime 1:40/1:45
+  model independently. #1599's shared Type-kind gate rejects same-name declarations
+  before map validation. Other map errors use authored recovery (#1642),
+  retaining unknown 1:1 only without an authored span. The historical
+  map anchors from #1472 are runtime 1:40/1:45
   (`map`), standalone 4:3 (`map`) and inline 2:3 (`implements`), formerly 1:1.
   Measured base `79687655` vs `3c99c93b`, each built in its own archive, twice
   checked 606 corpus +16 original inline +18 literal-boundary +18 bridge forms:
@@ -2804,7 +2804,11 @@ With distinct type names, out-of-domain mapping/argument errors retain their
 Entity domains derived from `verify { instances Item = N }` follow the same rule.
 A conflict reports each spec's instances and whether its verify block or a CLI
 override supplied them. Align the verify blocks; with `verify` and `refine`,
-`--instances Item=N` can align both specs. **`check` has no `--instances` flag.**
+`--instances Item=N` can align both direct specs. **`check` has no `--instances` flag.**
+Composed conflicts name the public type (for example `p.Item`) and retain both
+component files, instance counts and verify-block sources. Align the component
+verify blocks; compose does not support that instances override. Diagnostics use
+public names without changing internal type/member identities or member syntax.
 Breaking removal: the default check/verify of `inline_implements_bounds/impl_spec_extra.fsl`
 (Item=1 versus Item=3) changes from exit 1 `refinement_failed` to exit 2 `error/type`
 at its `implements` declaration; an equal shared instances override still refines.
