@@ -152,11 +152,22 @@ tier (`changed`/`complete`), with the same classifications and the same evidence
   either must be caught regardless of which shard happens to run it. `check_no_op_control`'s loop and
   the main operator loop are both restricted to the shard's assigned indices, which is what makes the
   ~912s no-op control shardable at all.
-- `semantic-mutation-mutants` runs `tools/run-semantic-mutation-gate.sh <mode> --lane mutants`,
-  complete and **unsharded**: at the measured ~14.3 min it is already close to the curated lane's
-  post-split floor, and cargo-mutants sharding (mutant-inventory slicing, uncertain
-  `--shard`/partition index-base semantics in the pinned runner, migrating the stale-reviewed-
-  equivalents check) would add real risk for no measured wall-clock gain.
+- `semantic-mutation-mutants` (3-way matrix) runs
+  `tools/run-semantic-mutation-gate.sh <mode> --lane mutants --shard K/3`.
+  The wrapper captures the GLOBAL selected inventory after diff filtering and critical-zero
+  escalation, before native slicing. Public indices are one-based; pinned cargo-mutants 27.1.0
+  receives `--shard (K-1)/3 --sharding round-robin --no-shuffle`. An actual runner listing pilot
+  on `07e089ed` selected 68 mutants as 23/23/22; a one-mutant changed diff selected 1/0/0,
+  each exactly the corresponding round-robin slice. Stale reviewed equivalents are checked
+  against the GLOBAL complete-tier roster, never against an individual slice.
+  Every shard keeps the same 35 detectors (19 solver-fail-closed and 16 triangulated-assurance),
+  full scratch checkout and fresh first-party target. Empty logical shards and zero-mutant
+  changed runs execute those real detectors and retain a baseline log plus a revision-bound empty
+  report; no raw cargo-mutants outcomes are invented. Nonempty shards must match the actual raw
+  and reported outcome IDs to the selected slice before publishing success.
+  This adds two cold baselines and their compute, not paid runner capacity. The historical 14.3-minute
+  unsharded rationale is superseded by later 72–78-minute observations; no parallel speedup is
+  established by listing or by summing serialized local shard times.
 - The `semantic-mutation` aggregator requires both lanes to report `success` (`if: always()`, so a
   failing shard cannot be masked by a GitHub-treated-as-satisfied *skip* of the aggregator), then
   downloads every stable-name operator shard artifact. The names omit `run_attempt`, so a partial
@@ -170,6 +181,16 @@ tier (`changed`/`complete`), with the same classifications and the same evidence
   fail-closed subset/disjoint/union-equality primitive used by the `rust workspace` split). A shard
   writes its manifest and provenance only after it succeeds, so a failed shard cannot contribute
   evidence that reads as complete; its `if: always()` upload remains diagnostic only.
+- Generic shards use the same stable logical-name/compatible-attempt protocol through
+  `tools/check-shard-artifact-cohort.sh mutants`, backed by the small generic-specific
+  `tools/check-mutant-shard-cohort.py` helper because the line-set/operator protocol forbids
+  empty universes and cannot validate native outcome rows. Each generic sidecar binds run,
+  revision, shard, mode, ordered GLOBAL inventory, selected slice, report and retained raw evidence
+  hashes. The aggregate rechecks baseline evidence and exact raw/reported outcome rosters,
+  identical GLOBAL inventories/diff scope, disjointness and executed union equality. Missing,
+  duplicate, foreign, stale, future-attempt or incomplete evidence fails closed. Partial reruns
+  may combine attempts only within the same run/revision/inventory cohort. Uploads after a failed
+  shard remain diagnostic and never satisfy the all-results guard.
 
 With no `--lane` flag, `tools/run-semantic-mutation-gate.sh`'s behavior is unchanged from before this
 split: the same manifest test, the same unsharded `run-fault-operators.sh` call, and the same

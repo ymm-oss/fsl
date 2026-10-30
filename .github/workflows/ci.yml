@@ -644,10 +644,10 @@ jobs:
   # curated control matrix plus generic mutants intersecting their diff.
   # Push, schedule, and manual runs execute the complete accepted P2 pilot
   # scope. `semantic-mutation-operators` shards the curated fault-operator
-  # controls three ways; `semantic-mutation-mutants` runs the generic
-  # cargo-mutants half complete and unsharded, because it is already at
-  # roughly the operator lane's floor and sharding it would add cargo-mutants
-  # partitioning risk for no wall-clock gain. The `semantic-mutation` job
+  # controls three ways; `semantic-mutation-mutants` partitions the GLOBAL
+  # generic inventory three ways with exact executed-ID cohort validation.
+  # Each shard pays a cold baseline; parallel wall-clock gain is not assumed.
+  # The `semantic-mutation` job
   # below aggregates both under the exact required-context name expression
   # and keeps its job id unchanged, so `product-gate`'s `needs:` list and the
   # `main` ruleset's required-context set both keep working without any
@@ -752,11 +752,15 @@ jobs:
           overwrite: true
 
   semantic-mutation-mutants:
-    name: mutation mutants
+    name: mutation mutants (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     # 150, not 90: a changed-scope run with no critical-path line mutant escalates to
     # the complete P2 scope, which ran past 90 minutes on PR #1318 (#1319).
     timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -786,8 +790,8 @@ jobs:
           # restored `No cache found.`, then its successful post step uploaded
           # 2,922,378,363 B while all three operators shards were cancelled and
           # their post steps skipped. This job's rust/target-scoped evidence
-          # (`rust/target/semantic-mutation.*`, kept there solely because the
-          # artifact-upload glob below requires it) must not enter a future cache
+          # (`rust/target/semantic-mutation.*`, uploaded through the published
+          # report-directory output below) must not enter a future cache
           # save. `cache-on-failure` is absent because `save-if: false` bypasses
           # the save path. See docs/design/DESIGN-ci.md, "Actions cache budget", and
           # issue #747.
@@ -819,22 +823,24 @@ jobs:
         run: git diff --relative=rust --binary "$BASE_SHA...$HEAD_SHA" -- rust >"$RUNNER_TEMP/semantic-mutation.diff"
 
       - name: Calibrate changed implementation semantics
+        id: changed
         if: steps.scope.outputs.run == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production'))
         env:
           FSL_MUTATION_DIFF: ${{ runner.temp }}/semantic-mutation.diff
           FSL_MUTATION_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-        run: ./tools/run-semantic-mutation-gate.sh changed --lane mutants
+        run: ./tools/run-semantic-mutation-gate.sh changed --lane mutants --shard ${{ matrix.shard }}/3
 
       - name: Calibrate complete accepted implementation scope
+        id: complete
         if: steps.scope.outputs.run == 'true' && github.event_name != 'merge_group' && (github.event_name != 'pull_request' || github.base_ref == 'production')
-        run: ./tools/run-semantic-mutation-gate.sh complete --lane mutants
+        run: ./tools/run-semantic-mutation-gate.sh complete --lane mutants --shard ${{ matrix.shard }}/3
 
       - name: Preserve mutation evidence
         if: always() && steps.scope.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: semantic-mutation-mutants-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rust/target/semantic-mutation.*/**
+          name: semantic-mutation-mutants-${{ matrix.shard }}-${{ github.run_id }}
+          path: ${{ steps.changed.outputs.report || steps.complete.outputs.report }}
           if-no-files-found: error
           retention-days: 14
           overwrite: true
@@ -891,6 +897,17 @@ jobs:
       - name: Verify operator shard completeness
         if: steps.scope.outputs.run == 'true'
         run: ./tools/check-shard-artifact-cohort.sh semantic semantic-mutation-operators "${{ github.run_id }}" "${{ github.run_attempt }}" "$(git rev-parse HEAD)" 3
+
+      - name: Download mutant shard evidence
+        if: steps.scope.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: semantic-mutation-mutants-*-${{ github.run_id }}
+          path: semantic-mutation-mutants
+
+      - name: Verify mutant shard completeness
+        if: steps.scope.outputs.run == 'true'
+        run: ./tools/check-shard-artifact-cohort.sh mutants semantic-mutation-mutants "${{ github.run_id }}" "${{ github.run_attempt }}" "$(git rev-parse HEAD)" 3
 
   # M13 deterministic finite-model agreement (#673). The report begins
   # incomplete and becomes complete only after every selected case and edge

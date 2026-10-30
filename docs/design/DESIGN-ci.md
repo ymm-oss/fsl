@@ -273,9 +273,9 @@ parallel:
   projected timings and the two-main-run measurement follow-up are recorded below (#1532);
 - the M13 semantic mutation gate, sharded across three jobs: `semantic-mutation-operators` runs the
   curated fault-operator controls three ways via `tools/run-semantic-mutation-gate.sh <mode> --lane
-  operators --shard K/3`; `semantic-mutation-mutants` runs the generic cargo-mutants half, complete
-  and unsharded, via `tools/run-semantic-mutation-gate.sh <mode> --lane mutants`; the
-  `semantic-mutation` aggregator requires both and enforces operator-union completeness (`semantic
+  operators --shard K/3`; `semantic-mutation-mutants` runs the generic cargo-mutants half in the
+  selected changed/complete tier via `tools/run-semantic-mutation-gate.sh <mode> --lane mutants --shard K/3`; the
+  `semantic-mutation` aggregator requires both and enforces both exact executed unions (`semantic
   mutation`; see "Sharded pre-merge Linux evidence" below);
 - the deterministic finite-model agreement gate from `tools/check-native-integration.sh fsl-logic`
   (`FSL Logic Test`).
@@ -447,8 +447,8 @@ split into a sharded lane plus an aggregator that keeps the exact required-conte
 - `rust workspace` = `rust-checks` (once) + `rust-tests` (`cargo-nextest`, 3-way, duration-aware —
   see "Duration-aware `rust-tests` shard pinning" below) + the `rust-workspace` aggregator.
 - `semantic mutation (…)` = `semantic-mutation-operators` (3-way round-robin shard of
-  `operators.txt`) + `semantic-mutation-mutants` (generic cargo-mutants, complete and **deliberately
-  unsharded** — see below) + the `semantic-mutation` aggregator.
+  `operators.txt`) + `semantic-mutation-mutants` (3-way generic cargo-mutants in the selected
+  changed/complete tier — see below) + the `semantic-mutation` aggregator.
 
 Measured wall clock after sharding is **20.7 min**, down from 38m15s — 1.85x, saving ~17.5 min per
 pull request. Recorded from the first sharded run (30989320577, PR #719), all lanes green:
@@ -491,13 +491,34 @@ speed" move this repository's invariants forbid, so
 `rust-checks`, alongside formatting, Clippy, the full workspace build, and the boundary/stack-parity
 controls. `rust-tests` then shards only what `cargo-nextest` can run: everything else.
 
-**The generic mutants lane is deliberately unsharded.** At ~14.3 min it is already close to the
-curated operator lane's floor once that lane is split three ways (see below), and cargo-mutants
-sharding would add real risk — mutant-inventory slicing, uncertain `--shard`/partition index-base
-semantics in the pinned runner, and migrating the stale-reviewed-equivalents check to a sharded
-world — for no measurable wall-clock gain. `semantic-mutation-mutants` therefore runs
-`tools/run-semantic-mutation-gate.sh <mode> --lane mutants`, complete, on one runner, with the same
-fresh-`CARGO_TARGET_DIR` anti-contamination behavior it has always had.
+**The generic mutants lane now has three coverage-preserving shards.** The ~14.3-minute
+unsharded rationale above describes the historical run, not the current critical path. Later
+observations include the 72-minute run recorded below and run `41026377668`, job `123965359863`
+at `07e089ed`: approximately 78 minutes, 68 mutants (52 caught/16 unviable), 940s baseline build,
+4511s total build versus 37.8s test time. Cold vendored Z3 and fingerprint-driven CLI compilation
+dominate; this is not a reason to freeze fingerprints or reuse the baseline CLI across mutants.
+The pinned 27.1.0 actual-list pilot established zero-based native round-robin slices 23/23/22
+and a changed one-mutant 1/0/0 case. Public `--shard K/3` remains one-based. The GLOBAL selected
+inventory is captured before slicing and drives complete-tier stale-equivalent checks.
+Every shard retains a full scratch checkout, a fresh target, and the same 35 detectors, including
+a real baseline for empty slices. The required aggregate validates stable logical artifacts and
+exact raw/reported executed-ID union, including empty shards, through
+`check-shard-artifact-cohort.sh mutants` (see DESIGN-semantic-mutation-gate).
+This adds two cold baselines/compute. A historical per-ID projection of roughly 36–40 minutes
+is only an estimate, not observed parallel CI wall time; serialized local sums are not speedup
+evidence. No cache-save policy, first-party reuse, paid resources, or other gate is changed.
+
+Observed CI comparison (different runners, same `07e089ed` Rust tree): the unsharded mutation job
+in [main07 run `41026377668`](https://github.com/ymm-oss/fsl/actions/runs/41026377668/job/123965359863)
+took **77m45s**; [complete run `41057387167`, attempt 1](https://github.com/ymm-oss/fsl/actions/runs/41057387167/attempts/1)
+at `7ea395aa` recorded shards **40m38s / 50m04s / 38m35s**. The maximum was **50m04s (−35.6%)**,
+while summed job time rose to **129m17s versus 77m45s (+66.3% job-minutes)**. All 68 classifications
+agreed (52 caught, 16 unviable, zero survivors/timeouts), as did every full `FAILED` test set.
+Four first `primary_failing_test` names differed only with concurrent `FAILED`-line ordering;
+the actual recorded values were retained, so this is **not whole-report equality**. This is an
+observational result, not a causal speedup attribution or performance promise. The later
+`56f67445` producer integration has a different Rust tree and requires its own checks;
+the `7ea395aa` complete/partial-rerun evidence does not transfer to it.
 
 **Why `if: always()` is load-bearing on both aggregators.** GitHub treats a *skipped* required
 status check as satisfied — it is not "pending" or "failing," it reads as passed. If `rust-workspace`
@@ -571,7 +592,9 @@ rejection asserts the produced value beside the expected diagnostic. The parser-
 `.github/scripts/validate-shard-artifact-workflow.py` and
 `tests/test_shard_artifact_workflow.py` additionally reject one-sided name/pattern drift, lost
 overwrite/provenance/helper wiring, lost aggregator/dependency guards, and accidental changes to
-both unsharded attempt-scoped artifacts (`semantic-mutation-mutants` and `fsl-logic`). All are
+the remaining unsharded attempt-scoped artifact (`fsl-logic`). Generic mutation controls additionally
+reject missing/duplicate IDs or shards, foreign metadata, stale GLOBAL equivalents,
+zero-slice selection drift, baseline omission, union bypass, and skip-green guards. All are
 required by `check-merge-readiness.sh automation`.
 
 This local evidence does not establish GitHub's cross-attempt `upload-artifact@v4` overwrite scope,
