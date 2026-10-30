@@ -309,6 +309,7 @@ fn direct_init_reservations_cross_blocks_and_inline_initializers() {
 
 fn refinement_error_packet(message: &str, column: u64, width: u64) -> Value {
     json!({
+        "impl": "Impl", "abs": "Abs",
         "fsl": "1.0", "result": "error", "kind": "type", "message": message,
         "loc": {"line": 1, "column": column},
         "span": {
