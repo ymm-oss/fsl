@@ -1027,6 +1027,18 @@ even at equal ordinals. Without progress, typed conversions/abstractions remain
 accepted and ambiguous bare uses remain errors. Pulled safety violations return
 error/semantics/exit2 without a trace, naming the property and pulled model;
 they are neither refines nor progress_lost.
+Audit: a52bef4931adc67ea2b1fdca827e2318b4ae25ab → 9eaaea7d1c526ede6a13408ea414616ddadccf69;
+check610 corpus forms (606 existing/4 new),39 next-edition controls,60 mappings,
+20 inline/2 expression triples and39 acceptance cells; all fields/stderr/exit twice.
+Existing corpus check ok→error is empty. Inline removals: original D-bound
+issue1296/1302, inline_collision_is_located_at_implements, governance_check_collision;
+verify counterparts also reject. Refine removals: cases1/2a/3a/3b, domain_bounds,
+domain_lower, kind_change, struct_named_type, matching-ordinal/chain collision,
+and original shared-member expression_agreement progress; renamed controls pass.
+Boundary/entity failure→type error changes verdict class. Original2 runtime/2 CLI/
+3 mutation Seq controls now name declaration conflicts, preserving invalid/gates.
+Authored1:1 is the ten-byte refinement token (end1:11), not unknown fallback;
+inline keeps implements, distinct-name carrier companions keep map-token errors.
 
 Distinct nominal enums stay incompatible without an explicit named enum
 mapping. Use `enum conversion` plus `convert(name, expr)` for a bijection. Both

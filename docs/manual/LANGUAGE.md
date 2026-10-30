@@ -2809,6 +2809,26 @@ Breaking removal: the default check/verify of `inline_implements_bounds/impl_spe
 (Item=1 versus Item=3) changes from exit 1 `refinement_failed` to exit 2 `error/type`
 at its `implements` declaration; an equal shared instances override still refines.
 
+Boundary audit (#1599): base `a52bef4931adc67ea2b1fdca827e2318b4ae25ab`,
+measured product/test head `9eaaea7d1c526ede6a13408ea414616ddadccf69`;
+`check`610 corpus forms (606 existing,4 added),39 next-edition controls,
+60 typed mappings,20 rewritten inline triples,2 expression triples and39
+acceptance cells, full JSON/stderr/exit twice per tree. Existing corpus
+check ok→error set: **empty**. Inline check removals are the original D-bound
+fixtures of issue_1296_abs_partial_op/issue_1302_abs_step_violation and the
+inline_collision_is_located_at_implements/governance_check_collision cells;
+their verify routes also become type errors. Refine removals: cases1/2a/3a/3b,
+domain_bounds/domain_lower/kind_change/struct_named_type, matching-ordinal
+member collision, chain collision and the original shared-member progress
+expression_agreement form. Renamed companions retain successful agreement.
+Boundary/entity refinement_failed→type error is a verdict-class change.
+The original2 runtime/2 CLI/3 mutation Seq controls change diagnostic priority,
+not rejection or invalid counts/gates: declaration validation runs first.
+Authored standalone1:1 denotes the full ten-byte `refinement` keyword span
+(end1:11), not an unknown-location fallback. Inline keeps the `implements`
+token; distinct-name carrier companions still fail at the authored map token.
+Previously reported type errors also gain loaded impl/abs identities.
+
 ### Chain checking (composition of mappings)
 
 The end-to-end fidelity of a layer chain (business ⊒ requirements ⊒ design …)

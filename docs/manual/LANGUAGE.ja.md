@@ -2636,6 +2636,25 @@ verify block の値をそろえてください。`verify` と `refine` では、
 Item=1 と Item=3 の相違により、exit 1 `refinement_failed` から `implements` 宣言位置の
 exit 2 `error/type` に変わります。同じ instances を共有する override なら引き続き refines です。
 
+境界監査(#1599): base `a52bef4931adc67ea2b1fdca827e2318b4ae25ab`、
+測定した product/test head `9eaaea7d1c526ede6a13408ea414616ddadccf69`。
+corpus610形(既存606・追加4)の check、次版39 controls、typed mapping60、
+書き換えた inline20組・expression2組・受入39 cell を、両 tree で2回、
+JSON全体・stderr・exit で比較しました。既存 corpus check の ok→error は**空集合**です。
+inline check の breaking removal は、issue_1296_abs_partial_op と
+issue_1302_abs_step_violation の元の D 境界の形、および
+inline_collision_is_located_at_implements/governance_check_collision です。
+対応する verify も type error になります。refine の removal は cases1/2a/3a/3b、
+domain_bounds/domain_lower/kind_change/struct_named_type、ordinal が同じ member 衝突、
+chain 衝突、元の shared-member progress の expression_agreement です。
+改名した counterpart は従来の成功・agreement を保ちます。
+boundary/entity の refinement_failed→type error は判定分類の変更です。
+元の runtime2・CLI2・mutation3 の Seq controls は、宣言検査が先になることで
+診断が変わりますが、拒否や invalid 数・gate は変わりません。standalone の実在する
+1:1 は10 byteの `refinement` keyword全体(end1:11)で、unknown位置の代用ではありません。
+inline は `implements` token、別型名の carrier counterpart は map token を保ちます。
+既存の type error にも、読み込んだ impl/abs の名前が付くようになります。
+
 ### チェーン検査(マッピングの合成)
 
 レイヤーのチェーン(business ⊒ requirements ⊒ design …)の端から端までの忠実性は、
