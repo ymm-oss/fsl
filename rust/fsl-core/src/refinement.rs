@@ -525,6 +525,25 @@ pub fn pull_refinement_leadsto(
         ));
     }
     expr = crate::substitute_expr_indexed(expr, &replacements, &indexed);
+    // Element templates cannot replace a bare whole-map read. If such a read
+    // remains unresolved in the downstream context, report that existing failure
+    // at the respond declaration rather than losing its location in verification.
+    let free = crate::free_vars(&expr);
+    if indexed.keys().any(|name| free.contains(name)) {
+        let context = merge_refinement_model(implementation, abstraction, true)?;
+        let env = crate::typecheck::base_env(&context);
+        if let Some(name) = indexed
+            .keys()
+            .filter(|name| free.contains(*name) && !env.contains_key(*name))
+            .min()
+        {
+            return Err(refinement_error(
+                format!("cannot pull whole-map read '{name}' through an indexed state map"),
+                Some(span),
+            )
+            .type_error());
+        }
+    }
     let mut pulled = property.clone();
     pulled.binders.clear();
     for original in &property.binders {

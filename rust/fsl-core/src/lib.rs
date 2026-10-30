@@ -2126,7 +2126,9 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
                 && let Some((binder, state_expr)) = indexed.get(name)
             {
                 let single = HashMap::from([(binder_name(binder).to_owned(), *substituted_index)]);
-                substitute(state_expr.clone(), &single, indexed)
+                // The template is already in implementation scope. Instantiate only
+                // its binder; abstract maps must not rewrite the inserted expression.
+                substitute_expr(state_expr.clone(), &single)
             } else {
                 Expr::Index(
                     Box::new(substitute(*base, replacements, indexed)),
