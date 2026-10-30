@@ -20,6 +20,9 @@ use std::process::Command;
 
 use serde_json::Value;
 
+#[path = "support/identifiers.rs"]
+mod identifiers;
+
 fn fixture_dir(example: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/fsl5")
@@ -519,6 +522,7 @@ fn implements_over_another_stage_order_names_both_orders() {
     ] {
         assert!(message.contains(expected), "{message:?} lacks {expected:?}");
     }
+    identifiers::assert_names(message, &["R", "ToBe"]);
 }
 
 /// A stage only one layer has is named, so the reader sees which stage to
@@ -542,4 +546,5 @@ fn implements_over_other_stages_names_the_stages_one_side_lacks() {
     ] {
         assert!(message.contains(expected), "{message:?} lacks {expected:?}");
     }
+    identifiers::assert_names(message, &["R", "ToBe"]);
 }

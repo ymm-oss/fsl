@@ -315,6 +315,7 @@ impl<'a> Parser<'a> {
     }
 
     fn surface_refinement(&mut self) -> Result<SurfaceRefinement, ParseError> {
+        let span = self.peek().span;
         self.expect_ident_value("refinement")?;
         let name = self.expect_ident()?;
         self.expect_symbol("{")?;
@@ -322,7 +323,7 @@ impl<'a> Parser<'a> {
         while !self.eat_symbol("}") {
             items.push(self.refinement_item(CorrespondenceOrigin::RefinementFile)?);
         }
-        Ok(SurfaceRefinement { name, items })
+        Ok(SurfaceRefinement { name, span, items })
     }
 
     fn surface_business(&mut self) -> Result<SurfaceBusiness, ParseError> {

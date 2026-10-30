@@ -30,10 +30,10 @@ This rule applies to assignments, equality/inequality, conditional arms,
 projection results such as `domain`/`range`, collection receivers and aggregate
 binders, and whole refinement state mappings. Both models resolve their own
 numeric types before refinement comparison: identical names do not imply equal
-ranges across numeric models. Same-name struct-field carrier collisions and
-enum-versus-range name collisions are still open pending #1599's single
-`merge_refinement_model` rule and its `RefinementErrorKind::Type` handoff;
-this change does not add recursive nominal merging or claim those cases fixed.
+ranges across numeric models. Same-name struct-field and enum/range collisions
+now reject through #1599's shared `merge_refinement_model` and
+`RefinementErrorKind::Type` before map validation; see
+[the refinement contract](DESIGN-refinement.md).
 Indexed Map mappings still compare each mapped value,
 not whole Map key domains. Scalar Int/Range compatibility, Option payload
 compatibility and numeric arguments to `add`, `contains`, `push` and relation

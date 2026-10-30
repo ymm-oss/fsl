@@ -27,7 +27,204 @@ struct Finding {
     summary: String,
     next_action: Option<String>,
     raw: Value,
+    warning_presentation: Option<&'static WarningPresentation>,
 }
+
+struct WarningPresentation {
+    kind: &'static str,
+    trace_type: &'static str,
+    prefix: &'static str,
+    translation: &'static str,
+    advice: &'static str,
+}
+
+const GENERIC_WARNING: WarningPresentation = WarningPresentation {
+    kind: "",
+    trace_type: "warning",
+    prefix: "未分類の警告",
+    translation: "警告の分類が未登録。付録の生 JSON と警告内容を確認し、責任者が対応方針を決定する。",
+    advice: "警告内容と分類を確認",
+};
+const VACUITY_WARNING: WarningPresentation = WarningPresentation {
+    trace_type: "vacuity",
+    prefix: "空虚性の疑い",
+    translation: "性質『{name}』が空虚に成立している疑い（中身がない可能性）。`fslc mutate` で実効性を確認する。",
+    advice: "fslc mutate で実効性を確認",
+    ..GENERIC_WARNING
+};
+const MIGRATION_WARNING: WarningPresentation = WarningPresentation {
+    trace_type: "migration",
+    prefix: "移行候補",
+    translation: "検出種別 migration（付録の生 JSON を参照）。",
+    advice: "責任者が対応方針を決定",
+    ..GENERIC_WARNING
+};
+
+const WARNING_PRESENTATIONS: &[WarningPresentation] = &[
+    WarningPresentation {
+        kind: "vacuous_implication",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "vacuous_leadsto",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "tautology_over_frozen",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "urgency_freeze",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "vacuous_deadline",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "always_true_requires",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "deprecated_domain_enum_union",
+        ..MIGRATION_WARNING
+    },
+    WarningPresentation {
+        kind: "legacy_string_metadata",
+        ..MIGRATION_WARNING
+    },
+    WarningPresentation {
+        kind: "legacy_quantifier_colon",
+        ..MIGRATION_WARNING
+    },
+    WarningPresentation {
+        kind: "inline_action_maps",
+        ..MIGRATION_WARNING
+    },
+    WarningPresentation {
+        kind: "implicit_initial_value",
+        ..MIGRATION_WARNING
+    },
+    WarningPresentation {
+        kind: "deadlock",
+        trace_type: "deadlock",
+        prefix: "停止状態の到達",
+        translation: "実行可能なアクションがない状態に到達する。意図した停止かを確認し、必要なら操作を追加するか terminal を宣言する。",
+        advice: "停止の意図を確認 / アクション追加 / terminal 宣言",
+    },
+    WarningPresentation {
+        kind: "never_enabled_action",
+        trace_type: "coverage",
+        prefix: "深さ内で一度も実行可能にならない",
+        translation: "アクション『{name}』が検証した深さ内で一度も実行可能にならない。ガードと前提操作を確認し、必要なら検証の深さを見直す。",
+        advice: "ガード・前提アクションを確認 / 検証の深さを見直し",
+    },
+    WarningPresentation {
+        kind: "vacuity_probe_truncated",
+        trace_type: "verification_incomplete",
+        prefix: "空虚性未確立（到達性 probe が判定に至らず）",
+        translation: "性質『{name}』の空虚性は未確立。到達性 probe が判定に至っていないため、状態空間と式の評価可否を確認する。",
+        advice: "状態空間を簡素化 / 深さを下げる / 式の評価可否を確認",
+    },
+    WarningPresentation {
+        kind: "no_user_invariants",
+        prefix: "安全性の確認対象なし",
+        translation: "利用者が記述した不変条件や遷移制約がない。必要な安全性の確認対象を見直す。",
+        advice: "必要な不変条件を追加 / 検証対象を確認",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "fair_not_inherited",
+        prefix: "公平性の前提未継承",
+        translation: "合成元の fair 指定が合成後に引き継がれていない。進行に必要な公平性の前提を確認する。",
+        advice: "合成後の fair 指定を確認",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "unused_control",
+        prefix: "統制の参照なし",
+        translation: "宣言した統制が参照されていない。統制と業務操作の対応を確認する。",
+        advice: "統制の参照を追加 / 不要な統制を見直し",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "fullwidth_space",
+        prefix: "表記上の警告",
+        translation: "全角空白が通常の空白として解釈されている。原文の表記を確認する。",
+        advice: "全角空白を通常の空白に修正",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "non_nfc_identifier",
+        prefix: "識別子の正規化",
+        translation: "識別子が NFC 正規形に正規化されている。意図した名前かを確認する。",
+        advice: "識別子を NFC 正規形に修正",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "lifecycle_edge_without_event",
+        prefix: "イベントのない状態遷移",
+        translation: "ライフサイクルの遷移に対応するイベントがない。業務上の遷移操作を確認する。",
+        advice: "遷移に対応するイベントを確認",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "actor_shadows_member",
+        prefix: "名前の重なり",
+        translation: "actor 名がメンバー名と重なっている。参照先が意図どおりかを確認する。",
+        advice: "actor とメンバーの名前を見直し",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "implied_by_lifecycle",
+        prefix: "ライフサイクルによる含意",
+        translation: "記述したルールはライフサイクルから既に導かれる。重複した記述が意図したものかを確認する。",
+        advice: "ルールとライフサイクルの対応を確認",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "never_rule_without_forbidden",
+        prefix: "禁止フローの確認不足",
+        translation: "禁止ルールに対応する forbidden がない。拒否すべき業務経路を具体例で確認する。",
+        advice: "対応する forbidden を追加 / 禁止ルールを確認",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "decide_row_emptied",
+        prefix: "判断表の行が空",
+        translation: "判断表の行に該当する場合が残っていない。条件の優先順位と重なりを確認する。",
+        advice: "判断表の条件と優先順位を見直し",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "acceptance_skipped",
+        prefix: "受入シナリオ未評価",
+        translation: "検証範囲の上書きにより受入シナリオが評価されていない。対象の値を含む範囲で再検証する。",
+        advice: "instances / values の範囲を見直して再検証",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "forbidden_skipped",
+        prefix: "禁止フロー未評価",
+        translation: "検証範囲の上書きにより禁止フローが評価されていない。対象の値を含む範囲で再検証する。",
+        advice: "instances / values の範囲を見直して再検証",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "untagged",
+        prefix: "要件の紐付けなし",
+        translation: "宣言に要件の注釈がない。要求との対応を確認する。",
+        advice: "要件の注釈を追加 / モデル上の意図を記録",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "unreferenced_requirement",
+        prefix: "要件の参照なし",
+        translation: "要件 ID を参照する宣言やシナリオがない。仕様への反映を確認する。",
+        advice: "要件 ID を宣言・受入条件・禁止フローに紐付け",
+        ..GENERIC_WARNING
+    },
+];
 
 fn add_requirement(
     order: &mut Vec<String>,
@@ -326,6 +523,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             raw: verification.clone(),
+            warning_presentation: None,
         });
     } else if result == "reachable_failed" {
         for item in verification
@@ -363,6 +561,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                 summary,
                 next_action: item.get("hint").and_then(Value::as_str).map(str::to_owned),
                 raw: item.clone(),
+                warning_presentation: None,
             });
         }
     } else if result == "error" && matches!(trace_type, "acceptance" | "forbidden") {
@@ -419,6 +618,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             raw: verification.clone(),
+            warning_presentation: None,
         });
     }
     if let Some(implements) = verification.get("implements") {
@@ -485,6 +685,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             summary,
             next_action: item.get("hint").and_then(Value::as_str).map(str::to_owned),
             raw: item.clone(),
+            warning_presentation: None,
         });
     }
     for warning in verification
@@ -499,31 +700,27 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             .and_then(Value::as_str)
             .unwrap_or("");
         let metadata = requirement(warning);
-        let kind = warning.get("kind").and_then(Value::as_str).unwrap_or("");
+        let kind = warning
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("不明");
         let message = warning.get("message").and_then(Value::as_str).unwrap_or("");
-        let migration = fsl_syntax::CURRENT_EDITION_MIGRATION_CODES.contains(&kind)
-            || kind == "implicit_initial_value";
+        let presentation = WARNING_PRESENTATIONS
+            .iter()
+            .find(|entry| entry.kind == kind)
+            .unwrap_or(&GENERIC_WARNING);
+        let prefix = presentation.prefix;
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
-            trace_type: if migration { "migration" } else { "vacuity" }.to_owned(),
+            trace_type: presentation.trace_type.to_owned(),
             name: name.to_owned(),
-            // `vacuity_probe_truncated` (issue #729) is not itself a
-            // vacuity finding: it means the reachability probe (state
-            // budget exhaustion, or a per-candidate evaluation failure --
-            // `fsl_runtime::Reachability::Exhausted` does not distinguish
-            // the two) never reached a verdict either way. That is a
-            // distinct claim from "疑い" (suspected hollow), so it gets its
-            // own prefix -- "未確立" (not established), not "疑い"
-            // (suspected).
-            summary: if migration {
-                format!("移行候補（{kind}）: {message}")
-            } else if kind == "vacuity_probe_truncated" {
-                format!("空虚性未確立（到達性 probe が判定に至らず）: {message}")
+            summary: if kind == "vacuity_probe_truncated" {
+                format!("{prefix}: {message}")
             } else {
-                format!("空虚性の疑い（{kind}）: {message}")
+                format!("{prefix}（{kind}）: {message}")
             },
-            next_action: if migration {
+            next_action: if presentation.trace_type == "migration" {
                 None
             } else {
                 warning
@@ -532,6 +729,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                     .map(str::to_owned)
             },
             raw: warning.clone(),
+            warning_presentation: Some(presentation),
         });
     }
     findings
@@ -556,6 +754,7 @@ fn refinement_finding(
         summary: format!("{}: {} {context}", name, result.unwrap_or("—")),
         next_action: None,
         raw: raw.clone(),
+        warning_presentation: None,
     })
 }
 
@@ -609,6 +808,9 @@ fn escape(value: &str) -> String {
 }
 
 fn translate(finding: &Finding) -> String {
+    if let Some(presentation) = finding.warning_presentation {
+        return presentation.translation.replace("{name}", &finding.name);
+    }
     match finding.trace_type.as_str() {
         "reachable" => format!(
             "業務経路『{}』が仕様上到達できない。受入条件に到達 trace を追加し、責任者が期待経路を承認する（死経路でないことの確認）。",
@@ -690,6 +892,9 @@ fn translate(finding: &Finding) -> String {
 
 fn next_action(finding: &Finding) -> String {
     finding.next_action.clone().unwrap_or_else(|| {
+        if let Some(presentation) = finding.warning_presentation {
+            return presentation.advice.to_owned();
+        }
         match finding.trace_type.as_str() {
             "reachable" => "受入条件に到達 trace を追加 / ガードを緩める",
             "forbidden" => match forbidden_failure(&finding.raw) {
@@ -811,6 +1016,7 @@ fn replay_finding(replay: &Value) -> Option<Finding> {
         summary: "実装ログが仕様に非適合".to_owned(),
         next_action: None,
         raw: replay.clone(),
+        warning_presentation: None,
     })
 }
 
@@ -842,6 +1048,7 @@ fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
                 summary,
                 next_action: None,
                 raw: item.clone(),
+                warning_presentation: None,
             });
             continue;
         }
@@ -854,6 +1061,7 @@ fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
                 summary: summary.clone(),
                 next_action: None,
                 raw: item.clone(),
+                warning_presentation: None,
             });
         }
     }

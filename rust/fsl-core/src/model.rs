@@ -184,6 +184,7 @@ pub struct LeadsToDef {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KernelModel {
     pub name: String,
+    pub(crate) instance_sources: BTreeMap<String, String>,
     pub consts: BTreeMap<String, Value>,
     pub types: BTreeMap<String, TypeDef>,
     pub enum_members: BTreeMap<String, Value>,
@@ -878,6 +879,7 @@ pub fn build_model(kernel: KernelSpec) -> Result<KernelModel, ModelError> {
 
 struct ModelBuilder {
     spec: SurfaceSpec,
+    instance_sources: BTreeMap<String, String>,
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     projections: Vec<ProjectionDef>,
@@ -891,6 +893,7 @@ impl ModelBuilder {
     fn new(kernel: KernelSpec) -> Self {
         let KernelSpec {
             spec,
+            instance_sources,
             origins,
             annotations,
             projections,
@@ -899,6 +902,7 @@ impl ModelBuilder {
         } = kernel;
         Self {
             spec,
+            instance_sources,
             origins,
             annotations,
             projections,
@@ -1250,6 +1254,7 @@ impl ModelBuilder {
         inline_init.extend(init);
         let init = inline_init;
         let mut model = KernelModel {
+            instance_sources: self.instance_sources,
             name: self.spec.name,
             consts: self.consts,
             types: self.types,

@@ -339,13 +339,13 @@ fn run_refine_with_loaders(
     ) {
         Ok(mapping) => mapping,
         Err(error) => {
-            return (
-                error.span.map_or_else(
-                    || error_output("type", &error.message),
-                    |span| located_error_output("type", &error.message, span),
-                ),
-                2,
+            let mut output = error.span.map_or_else(
+                || error_output("type", &error.message),
+                |span| located_error_output("type", &error.message, span),
             );
+            output["impl"] = json!(implementation.name);
+            output["abs"] = json!(abstraction.name);
+            return (output, 2);
         }
     };
     let checked =

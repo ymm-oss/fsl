@@ -183,7 +183,15 @@ fn build_refinement(
     let mut action_correspondences = BTreeMap::new();
     let mut action_sources = Vec::new();
     let mut progress = Vec::new();
-    let type_context = refinement_type_context(implementation, abstraction);
+    let preserve_progress = surface
+        .items
+        .iter()
+        .any(|item| matches!(item, RefinementItem::PreserveProgress { .. }));
+    let type_context = merge_refinement_model(implementation, abstraction, preserve_progress)
+        .map_err(|mut error| {
+            error.span = Some(surface.span);
+            error
+        })?;
     for item in surface.items {
         match item {
             RefinementItem::Impl(name) => impl_name = Some(name),
@@ -948,21 +956,81 @@ fn validate_refinement_expressions(
     Ok(())
 }
 
-fn refinement_type_context(implementation: &KernelModel, abstraction: &KernelModel) -> KernelModel {
+/// Combine refinement declarations without changing implementation semantics.
+/// Symmetry annotations do not change a type's definition at this boundary.
+///
+/// # Errors
+/// Returns an unlocated conflict; the frontend attaches its refinement declaration span.
+pub fn merge_refinement_model(
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    preserve_progress: bool,
+) -> Result<KernelModel, RefinementError> {
     let mut context = implementation.clone();
     for (name, definition) in &abstraction.types {
+        if let Some(existing) = implementation.types.get(name) {
+            let same = match (existing, definition) {
+                (TypeDef::Domain { lo: a, hi: b, .. }, TypeDef::Domain { lo: c, hi: d, .. }) => {
+                    a == c && b == d
+                }
+                (TypeDef::Enum { members: a, .. }, TypeDef::Enum { members: b, .. }) => a == b,
+                (TypeDef::Struct { fields: a }, TypeDef::Struct { fields: b }) => a == b,
+                _ => false,
+            };
+            if !same {
+                let public_name = implementation.names().public_type(name);
+                let message = if let Some((impl_source, abs_source)) = implementation
+                    .instance_sources
+                    .get(name)
+                    .zip(abstraction.instance_sources.get(name))
+                {
+                    let repair = if public_name.as_str() == name {
+                        format!(
+                            "align instances in the verify blocks; for verify and refine, use --instances {public_name}=N on both specs (check does not accept --instances)"
+                        )
+                    } else {
+                        "align instances in the component verify blocks".to_owned()
+                    };
+                    format!(
+                        "entity '{public_name}' has conflicting bounds in impl '{}': {impl_source} and abs '{}': {abs_source}; {repair}",
+                        implementation.name, abstraction.name
+                    )
+                } else {
+                    format!(
+                        "type '{public_name}' is declared differently in impl '{}' and abs '{}'",
+                        implementation.name, abstraction.name
+                    )
+                };
+                return Err(refinement_error(message, None).type_error());
+            }
+        }
         context
             .types
             .entry(name.clone())
             .or_insert(definition.clone());
     }
     for (name, value) in &abstraction.enum_members {
+        if preserve_progress
+            && implementation
+                .enum_members
+                .get(name)
+                .is_some_and(|existing| existing != value)
+        {
+            let public_name = implementation.names().public_identifier(name);
+            return Err(refinement_error(
+                format!(
+                    "enum member '{public_name}' is declared differently in impl '{}' and abs '{}' with preserve progress",
+                    implementation.name, abstraction.name
+                ),
+                None,
+            ).type_error());
+        }
         context
             .enum_members
             .entry(name.clone())
             .or_insert(value.clone());
     }
-    context
+    Ok(context)
 }
 
 fn validate_state_map(
@@ -1487,6 +1555,11 @@ fn check_shared_enums(
     abstraction: &KernelModel,
     span: Span,
 ) -> Result<(), RefinementError> {
+    // The merge owns acceptance; this path only enriches a rejected stage/enum diagnostic.
+    let Err(mut error) = merge_refinement_model(implementation, abstraction, false) else {
+        return Ok(());
+    };
+    error.span = Some(span);
     for (name, definition) in &abstraction.types {
         let (Some(TypeDef::Enum { members: here, .. }), TypeDef::Enum { members: there, .. }) =
             (implementation.types.get(name), definition)
@@ -1528,7 +1601,8 @@ fn check_shared_enums(
                 format!("declare the members in the order of '{abs}'")
             };
             format!(
-                "{what} lists its {noun} in another order than '{abs}' does: here {}{here_order}, in '{abs}' {}; implements compares them by position, so {fix}",
+                "{what} in '{}' lists its {noun} in another order than '{abs}' does: here {}{here_order}, in '{abs}' {}; implements compares them by position, so {fix}",
+                implementation.name,
                 list(here),
                 list(there),
             )
@@ -1541,15 +1615,16 @@ fn check_shared_enums(
                 sides.push(format!("only in '{abs}': {}", list(&abs_only)));
             }
             format!(
-                "{what} has other {noun} than in '{abs}': here {}{here_order}, in '{abs}' {} ({}); an enum both layers declare must list the same {noun} in the same order",
+                "{what} in '{}' has other {noun} than in '{abs}': here {}{here_order}, in '{abs}' {} ({}); an enum both layers declare must list the same {noun} in the same order",
+                implementation.name,
                 list(here),
                 list(there),
                 sides.join("; "),
             )
         };
-        return Err(refinement_error(message, Some(span)));
+        return Err(refinement_error(message, Some(span)).type_error());
     }
-    Ok(())
+    Err(error)
 }
 
 /// Resolve a requirements-layer `implements` declaration into the abstract
@@ -1759,6 +1834,7 @@ pub fn requirements_implements_with_bounds_with_options(
     let refinement = build_refinement(
         SurfaceRefinement {
             name: format!("{}Implements{}", implementation.name, abstraction.name),
+            span,
             items,
         },
         implementation,

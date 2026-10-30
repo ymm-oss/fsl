@@ -802,6 +802,17 @@ macro_rules! unresolved_ordinary {
 // shape. They are explicitly ordinary rather than silently omitted: a return
 // whose alias becomes relevant to optional verdicts must be reconsidered here.
 const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
+    // ProgressResult is Result<ProgressCheck, VerifyError>, not an optional carrier.
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/refinement_progress.rs",
+        34,
+        "progress"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/refinement_progress.rs",
+        39,
+        "pulled_safety"
+    ),
     unresolved_ordinary!("rust/fsl-core/src/domain.rs", 417, "build_normalize_scope"),
     unresolved_ordinary!("rust/fsl-core/src/domain_lowering.rs", 2712, "saga_scope"),
     unresolved_ordinary!(

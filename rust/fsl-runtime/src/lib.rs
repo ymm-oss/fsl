@@ -1884,27 +1884,10 @@ pub const IMPLEMENTS_SEARCH_BUDGET: usize = 50_000;
 fn merged_refinement_model(
     implementation: &KernelModel,
     abstraction: &KernelModel,
+    preserve_progress: bool,
 ) -> Result<KernelModel, RuntimeError> {
-    let mut merged = implementation.clone();
-    for (name, definition) in &abstraction.types {
-        if let Some(existing) = implementation.types.get(name) {
-            let conflicts = matches!(
-                (existing, definition),
-                (TypeDef::Enum { .. }, TypeDef::Enum { .. })
-                    | (TypeDef::Struct { .. }, TypeDef::Struct { .. })
-            ) && existing != definition;
-            if conflicts {
-                return Err(runtime_error(format!(
-                    "type '{name}' is declared differently in the impl and abs specs"
-                )));
-            }
-        }
-        merged.types.insert(name.clone(), definition.clone());
-    }
-    for (name, value) in &abstraction.enum_members {
-        merged.enum_members.insert(name.clone(), value.clone());
-    }
-    Ok(merged)
+    fsl_core::merge_refinement_model(implementation, abstraction, preserve_progress)
+        .map_err(|error| runtime_error(error.message))
 }
 
 fn alpha_state(
@@ -2215,7 +2198,8 @@ pub fn check_refinement_with_budget(
             budget_exhausted,
         });
     }
-    let eval_model = merged_refinement_model(implementation, abstraction)?;
+    let eval_model =
+        merged_refinement_model(implementation, abstraction, !mapping.progress.is_empty())?;
     // States produced by abs's own (possibly nondeterministic) init constructor,
     // rejecting incomplete written roots. Init correspondence below asks whether
     // α(s₀) is a member of this set, not whether it equals one chosen default for

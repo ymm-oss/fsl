@@ -1,0 +1,2 @@
+// SPDX-License-Identifier: Apache-2.0
+spec Impl1599Spec { type Carrier1599 = 0..2 state { x: Carrier1599 = 0 } action go() { requires x == 0 x = 1 } }

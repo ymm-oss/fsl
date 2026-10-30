@@ -235,6 +235,13 @@ for (const cmd of ["check", "verify"]) {
     throw new Error(`${failedPreservationCase} (${cmd}) must remain in the parity corpus`);
   }
 }
+// #1599: progress-bearing preservation must stay in full native/Worker parity.
+const progressMergeCase = "examples/refinement_liveness/governance_detects_progress_merge_collision.fsl";
+for (const cmd of ["check", "verify"]) {
+  if (!parityCases.some((testCase) => testCase.path === progressMergeCase && testCase.cmd === cmd)) {
+    throw new Error(`${progressMergeCase} (${cmd}) must remain in the parity corpus`);
+  }
+}
 // #577: anchors the retirement of the 28 stale refinement exclusions. Native
 // and Worker check/verify envelopes now agree for every refinement document
 // in the corpus (the exclusion premise measured in #568 no longer holds), so

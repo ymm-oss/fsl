@@ -717,17 +717,60 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    out-of-domain key inside an action-correspondence argument expression, and
    an abstract guard whose evaluation fails at the mapped state for reasons
    other than an out-of-domain argument.
-8. **conflicting same-named type**: impl and abs both declare a type with the
-   same name but a different shape (an enum with different members, or a
-   struct with different fields) → kind: type, exit 2. Type metadata is
-   merged by name for refinement checking (`_merge_types_meta`); a same name
-   with a different member list would otherwise let an impl-only member get
-   silently reinterpreted as whichever abs member sits at the same ordinal
-   index, turning a real refinement violation into a false "refines". Domain
-   types with different bounds are still allowed to share a name — an
-   out-of-range impl value there is already caught downstream as
-   `abs_state_mismatch`, so merging is safe. The fix: give impl and abs
-   layers distinct type names.
+8. **conflicting same-named declarations (#1599)**: one core
+   `merge_refinement_model` owns the typecheck, runtime and progress inventories.
+   Same-named types must have the same kind, resolved domain bounds, ordered enum
+   members, or struct fields/types; `symmetric` is ignored and the impl entry stays.
+   Differences, including unused declarations, are type errors (exit 2) at the
+   `refinement`/inline `implements` declaration, naming both specs and the conflict.
+   Governance retains the outer preservation location. Use distinct type names
+   for different definitions. Previously permitted same-name unequal bounds are
+   a breaking removal: the boundary gallery changes from exit 1
+   `refinement_failed/abs_state_mismatch` to exit 2 `error/type`.
+   Different enums may share member spellings without progress; ambiguous bare
+   uses still fail, while typed conversions/abstractions remain supported. With
+   `preserve progress`, shared spellings with different nominal owners are rejected
+   even at equal ordinals, so impl bodies cannot be reinterpreted in the pulled model.
+   A pulled-model safety violation is a non-solver `VerifyError`, not progress
+   success or `progress_lost`: native refine returns exit 2 `error/semantics`, names
+   the property and pulled model, and emits no trace. Existing impl self-violation
+   and progress-loss reporting remain separate.
+   This includes entity domains lowered from `instances`: diagnostics name both
+   effective counts and their verify-block/CLI sources. Align verify blocks, or
+   use `--instances Item=N` for both direct specs with **verify/refine only**, not check.
+   Composed conflicts retain component file, instance count and verify-block source
+   under the public type name (for example `p.Item`). Align the component verify
+   blocks; compose does not support that instances override. Public diagnostic
+   spelling does not change internal type/member identities or add member syntax.
+   The default check/verify of `inline_implements_bounds/impl_spec_extra.fsl`
+   (Item=1 vs Item=3) changes from exit 1 `refinement_failed` to located type/exit2;
+   the existing equal-instances override control remains accepted.
+   Declaration validation precedes map-expression validation (#1599/#1472).
+   Authored standalone 1:1 is not an unknown-location fallback: its complete
+   span is the literal ten-byte `refinement` token, including end1:11. Inline
+   diagnostics retain the literal `implements` token; distinct-name carrier
+   mismatches still reach the map gate. Original and renamed companions are
+   calibrated separately by declaration-bypass and carrier-bypass controls.
+
+   Native boundary audit: base `a52bef4931adc67ea2b1fdca827e2318b4ae25ab`,
+   measured product/test head `9eaaea7d1c526ede6a13408ea414616ddadccf69`;
+   `check`610 corpus forms (606 existing,4 added),39 next-edition controls,
+   60 typed mappings,20 rewritten inline triples and2 expression triples,
+   plus39 acceptance cells; full JSON/stderr/exit measured twice per tree.
+   Existing corpus `check` ok→error set is **empty**, not inferred from parity.
+   Inline check removals: the original D=1..4 vs D=0..4 fixtures in
+   `issue_1296_abs_partial_op` and `issue_1302_abs_step_violation`, plus
+   `inline_collision_is_located_at_implements` and `governance_check_collision`.
+   Their corresponding verify routes also become type errors.
+   Refine removals: cases1/2a/3a/3b, domain_bounds/domain_lower/kind_change,
+   struct_named_type, matching-ordinal member collision and chain collision;
+   the original shared-member expression_agreement progress form also changes
+   refines→type error. Renamed companions preserve its successful agreement.
+   Boundary/entity refinement_failed→type error remains a verdict-class change.
+   Diagnostic-only changes: the two original runtime Seq controls, two CLI
+   controls and three mutation controls now name the declaration conflict;
+   mutation invalid counts/gates remain unchanged. Existing type errors also
+   gain loaded impl/abs identities (incomplete conversion and actor mappings).
 9. **impl self-violation (precondition, issue #466)**: an impl whose own
    guard/type-bound weakening lets it violate itself within depth K (e.g. a
    dropped `requires` that lets a state variable step outside its declared
