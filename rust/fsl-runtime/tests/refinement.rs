@@ -419,6 +419,7 @@ fn argument_model(source: &str) -> fsl_core::KernelModel {
         &source
             .replace("state {", "type S = 0..2 state {")
             .replace("Seq<V, 2>", "Seq<S, 2>")
+            .replace("Seq<AV, 2>", "Seq<S, 2>")
             .replace("seq.push(v)", "seq.push(0)"),
     )
 }
@@ -461,7 +462,7 @@ const MAP_ABS: &str = "spec MapAbs { type K = 0..2 state { m: Map<K, Bool> } \
 #[test]
 fn an_abstract_argument_outside_its_parameter_domain_is_map_out_of_bounds() {
     let implementation = argument_model(SEQ_WIDE);
-    let abstraction = argument_model(&SEQ_ABS.replace("type V", "type AV").replace("v: V", "v: AV"));
+    let abstraction = argument_model(&SEQ_ABS.replace('V', "AV"));
     let mapping =
         parse_refinement(SEQ_WIDE_MAP, &implementation, &abstraction).expect("parse mapping");
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)
@@ -502,7 +503,7 @@ fn an_indexed_map_over_a_narrower_impl_key_domain_is_map_out_of_bounds() {
 #[test]
 fn a_false_abstract_guard_wins_over_an_out_of_domain_argument() {
     let implementation = argument_model(SEQ_WIDER);
-    let abstraction = argument_model(&SEQ_GUARDED.replace("type V", "type AV").replace("v: V", "v: AV"));
+    let abstraction = argument_model(&SEQ_GUARDED.replace('V', "AV"));
     let mapping =
         parse_refinement(SEQ_WIDER_MAP, &implementation, &abstraction).expect("parse mapping");
     let checked = fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, 2)

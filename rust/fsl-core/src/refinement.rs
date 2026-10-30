@@ -993,7 +993,7 @@ pub fn merge_refinement_model(
                         implementation.name, abstraction.name
                     )
                 };
-                return Err(refinement_error(message, None));
+                return Err(refinement_error(message, None).type_error());
             }
         }
         context
@@ -1014,7 +1014,7 @@ pub fn merge_refinement_model(
                     implementation.name, abstraction.name
                 ),
                 None,
-            ));
+            ).type_error());
         }
         context
             .enum_members
@@ -1613,7 +1613,7 @@ fn check_shared_enums(
                 sides.join("; "),
             )
         };
-        return Err(refinement_error(message, Some(span)));
+        return Err(refinement_error(message, Some(span)).type_error());
     }
     Err(error)
 }

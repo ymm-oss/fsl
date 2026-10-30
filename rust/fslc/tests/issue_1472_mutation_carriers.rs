@@ -73,6 +73,18 @@ fn run(directory: &Path, maps: &str) -> Value {
 }
 
 #[test]
+fn same_named_domain_uses_type_invalid_handoff() {
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("same-name-1599");
+    let [auto, explicit] = ["maps auto", "map seq = seq"].map(|maps| run(&directory, maps));
+    assert_eq!(auto["summary"], explicit["summary"]);
+    assert_eq!(auto["gate"], explicit["gate"]);
+    assert_eq!(auto["summary"]["invalid"], 2);
+    let detail = &auto["mutants"][1]["invalid"];
+    assert_eq!(detail, &explicit["mutants"][1]["invalid"]);
+    assert_eq!(detail["kind"], "semantics");
+}
+
+#[test]
 fn static_whole_map_mutants_are_invalid_not_oracle_failures() {
     for (label, maps) in [("auto", "maps auto"), ("explicit", "map seq = seq")] {
         let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
