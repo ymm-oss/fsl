@@ -949,3 +949,143 @@ full, and a conditional-source/conjunctive-source probe requires the foreign
 guard to enable the action. New-base product verification must repeat the
 base/head corpus, static-literal and authored-input comparisons rather than
 reusing observations made before a rebase.
+
+## 6. Requirements field-pattern freshness (#1561)
+
+Decision 4 also applies to source entity fields and relation roles where
+requirements lowering replaces their bare names with generated state-map reads.
+The same admitted pattern and continuation must have the same binding identity
+in event lowering and the rule-guard/solver copy. Renaming the field to
+`claim_amount` before checking the authored pattern `amount` lost that collision.
+Reject the ambiguous declaration before substitution and guard-conflict analysis;
+do not add pattern-over-field shadow semantics or change the evaluators.
+
+The source preflight reuses the complete pattern-name collector and the shared
+`reject_pattern_binding_name` rule. It covers legacy transition guards, event
+allow/never guards, assignment RHS, rule-property and measure conditions,
+decision assumptions and rows, and concept conditions even when unused.
+Relation roles join the existing field inventory. Event Typed and
+Range input names use one extraction helper for admission, lowering and guard
+spelling; typed solver-domain metadata remains separate. No Range event grammar
+is added. Ordinary quantifier/aggregate field shadowing remains legal.
+
+The diagnostic is exit 2, kind semantics, with the existing message shape:
+`pattern binding 'amount' in 'is some(amount)' shadows an entity field of the same name; rename the pattern variable`.
+The retained owning span, rendered through the shared type-diagnostic conversion,
+supplies the source-file suffix and JSON loc: rule statement for allow/never,
+transition/event for guards and assignments, property statement, measure or
+concept declaration, and decision/row owner for those siblings. No pattern-token
+span is reconstructed. Used concepts retain their earlier event/property/measure
+owner when that lowered use is checked first.
+The original #1552 helper now locates its allow statement at 12:5 instead of
+its event at 10:3. Check and all three verification engines agree in full on the
+new refusal packets. These errors precede solver conflicts intentionally.
+
+Authored arguments are scanned before def expansion can erase or duplicate them.
+Definition-local patterns introduced only after field substitution are not
+source field aliases: the def-local `some(x) is some(amount) and amount == 1`
+still reads its payload and enables the event. A duplicated argument can still
+fail the existing repeated-pattern rule after renaming; a field repair is not
+permission to bind the fresh name twice. The dedicated CLI regression covers
+these boundaries, nested expression children and each substitution sibling.
+
+### Measured removals and state identity
+
+The comparison ran `FSLC_UNSTABLE=fsl5 FSLC_CACHE=off <binary> check <form>` twice
+in each own materialized tree. BASE is
+`f8e3726e2ead231c89cd4f52eef3dd5d652c774d`, binary SHA256
+`e34ea5b8bddbf8573ec7b1d8e4e55d3b4c516d65b18f39d610eeafef6d3ec3e6`.
+Measured HEAD is `13676f0bca83b2433cc974468bbb00c59aef25a9`, built afresh after
+the source/test commit. Its production Rust diff SHA256 is
+`1f84fd80a10a86e8ac447d3334223017fc90230132ed703028bcf4779cb93c8d`,
+full tracked Rust diff SHA256
+`019dd0e14f26a6e34b60072086a85343a64d37d480d1453fcd2537b4209489bd`,
+and binary SHA256
+`0cab1c914a05344d8958a6f9bd5ce5a17618f87f9f7e74e279b449fbca47f314`.
+These hashes and every input stayed fixed across both repetitions. This
+measurement must not be relabeled as a run on an unmeasured later commit.
+
+| Group | Forms | ok→error | Other full-output changes |
+|---|---:|---:|---:|
+| All specs/examples/CLI fixtures | 610 (23/195/392) | 0 | 0 |
+| All original #1552 source-helper products | 63 | 1 | 3 |
+| All prior #1561 authored products | 49 | 23 | 1 |
+| Head-added #1552 fresh coverage control | 1 | 0 | 0 |
+| Decision/concept revision products | 6 | 2 | 1 |
+| Exact review reproduction and fresh repair | 2 | 1 | 0 |
+
+All original helper products were retained: 23 detector pairs including event-input
+controls, ten preservation controls, five literal calls and two loop cells.
+All 49 authored products of the initial implementation were byte-preserved,
+including fresh controls. The revised manifest adds the six decision/concept
+products, the head-added fresh control and the exact two-source review pair.
+No other existing required test input was rewritten, removed or skipped. The
+2,924 executions (731 forms, both binaries, twice) compare full stdout/stderr/exit triples with no excluded fields
+and zero repeat differences. Corpus removal set is empty, not an assumption from
+the narrower specs/examples CI sweep.
+
+The **27 case-addressed inline removals** (not necessarily byte-unique programs)
+are enumerated below. All are exit 0→2; rename the colliding declaration and its
+payload reads, not ordinary field accesses. The fresh repair of the original
+`some(1) is some(amount) and amount == 1` uses Kernel `var v`, and approve is covered.
+
+| Removed original/authored case | Count / source shape |
+|---|---|
+| `control_is_pattern_field_name_satisfiable_matches_base` | 1: direct some(1)/amount continuation |
+| `expression-0`, `expression-1`, `expression-2`, `expression-3`, `expression-4`, `expression-5`, `expression-6`, `expression-7`, `expression-8`, `expression-9`, `expression-10`, `expression-11`, `expression-12` | 13: and, nested and, implication, or, not, if then/condition/else, Set/method, quantified body/filter, sum value, count filter |
+| `argument-1`, `argument-4`, `argument-9` | 3: retained argument p, erased argument true, indirect erasure ignore(p) |
+| `event-set`, `when`, `set`, `never`, `property`, `measure`, `role` | 7: each field-substitution sibling, including relation role |
+| `decision-assuming`, `unused-concept`, `review-original-collision` | 3: assumption with/without the extra rule fixture and an unused concept |
+
+Five error→error packet changes are separate: the original and, implication and
+quantified-body contradictions, authored `argument-7` (duplicated p and p), and
+authored `decision-row`. They now report the earlier source-field collision;
+they are not extra removals. All remaining outputs, including fresh controls,
+agree in full; no acceptance expansions were observed in this bounded inventory.
+
+Disabling only the source preflight makes the satisfiable refusal detector fail
+with cargo exit 101 twice: produced check ok/0 versus expected error/2. Exact
+production diff-hash equality before/after restoration and subsequent normal
+green controls distinguish the mutation from the measured implementation.
+Fresh-name coverage, def-local payload behavior and existing collision/scope
+controls are preservation evidence, not detectors of the new admission boundary.
+
+### Decision/concept sibling inventory and revision control
+
+Independent review found the missing decision-assumption path at the initial
+immutable implementation `d8cb4bffb8216058b2ea1a27294a536d34a2249b`:
+`decide D "Decision" for Draft Claim { otherwise => Manager approves }
+assuming some(1) is some(amount)` still checked ok/0, twice; fresh v also did.
+The assumption becomes an invariant independently of the event's guards, so
+checking transition guards alone cannot cover it. The new refusal test was red
+before changing source, with produced ok/0 versus required error/2.
+
+The revised preflight inventories all next requirements expression carriers:
+properties, measures, decisions' assumptions/rows and concept conditions have
+entity-field context. Roles join the process fields; events and sets survive as
+process transitions. Resources and field initializers have no implicit field-read
+substitution context; Common/standalone actions do not acquire one merely because
+an entity declares that field. Goal/policy forms here carry entity/stage names,
+not additional authored conditions. Remaining next metadata contains no Expr.
+This extends the same collector/diagnostic, not a second AST validator.
+
+Omitting only decision-assumption scanning fails the new detector twice with
+cargo101, producing check ok/0. The entire tracked Rust patch was captured before
+that isolated fault and compared byte-for-byte after restoration (SHA256
+`9c6612850500294ee893142b2a557d8d8cba9f2a41013e7223e170c801ee6a69`
+relative to the initial implementation). The restored revised source was then
+committed, rebuilt and swept; no active-fault or old-head observation was retagged.
+
+The final head build explicitly pins `RUSTUP_TOOLCHAIN=1.98.0-aarch64-apple-darwin`
+and the 1.98 toolchain's rustc/rustdoc paths through `RUSTC`/`RUSTDOC`.
+The same locked wrapper reports cargo/rustc/rustdoc 1.98.0 and Clippy 0.1.98;
+final focused and guard controls pass twice, and target Clippy passes.
+The preceding target metadata recorded rustc 1.95 after an unpinned Clippy run.
+Thus earlier PATH-only probes do not prove a 1.98 Clippy/compiler invocation;
+they also do not prove that every earlier build used 1.95. The earlier named-head
+binary `6d01651607b84e8d3f5eeffbb29024afbbed9821266b9ea07470303cf02c64e8`
+and its measurement are retained, not relabeled. A fresh final sweep of the
+explicitly pinned head build reproduces all 2,924 raw stdout/stderr/exit triples
+exactly, with the same 27 removals and five diagnostic changes. The base remains
+the parent-supplied immutable binary identified above; this does not invent a
+compiler identity for its original build or claim a new whole-workspace CI run.

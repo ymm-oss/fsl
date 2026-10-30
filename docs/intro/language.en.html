@@ -1010,7 +1010,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   <code>v</code> must be a fresh name: <code>check</code> rejects a <code>v</code> that is
   already a state variable, constant, enum member, action parameter, quantifier
   binder, <code>let</code>, or an earlier pattern binding in scope, and asks you to rename
-  it. Ordering is not defined.</li>
+  it. Requirements field-substitution contexts also reject a pattern name that
+  equals an entity field or relation role, before lowering loses that spelling
+  (#1561). Event inputs keep their existing field-shadowing exception; ordinary
+  quantifier/aggregate field shadowing is unchanged. Ordering is not defined.</li>
 <li>struct: literal <code>Order { st: Open, qty: 0 }</code>, field reference <code>o.st</code>,
   <code>==</code> is field-by-field equality</li>
 <li>Set/Seq expression materialization (Refs #1467): admitted scalar/enum-element
@@ -3713,21 +3716,74 @@ verify {
   values Amount = 0..3
 }
 </code></pre>
-<p><strong>Breaking removal (#1552):</strong> for requirements <code>rule ... only when</code> conditions,
+<p><strong>Breaking removals (#1552, #1561):</strong> for requirements <code>rule ... only when</code> conditions,
 <code>check</code> now rejects previously accepted unsatisfiable guards that reuse an entity
 field's name as an <code>is</code> pattern inside a quantifier body or aggregate value. The
 guard copy now reads that name as the field, just as the event's lowering does,
 not as the matched payload. For example,
 <code>amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })</code>
 was accepted even though its event could never occur: the field must be both 0
-and 1. It now fails with exit 2, <code>kind: "semantics"</code>, and
-<code>rule_conflict_unsatisfiable_guard</code>. To test the payload instead, use a non-field
+and 1. #1552 rejected it with <code>rule_conflict_unsatisfiable_guard</code>; #1561 now
+rejects the pattern declaration first, with exit 2, <code>kind: "semantics"</code>, and
+<code>pattern binding 'amount' in 'is some(amount)' shadows an entity field of the same name; rename the pattern variable</code>.
+The location is the retained rule-statement owner, not a recovered pattern token.
+To test the payload instead, use a non-field
 pattern name: replace <code>some(x) is some(amount) and amount == 1</code> with
 <code>some(x) is some(v) and v == 1</code>. Keeping the outer condition and quantifier, this
 means the field is 0 and there is an <code>x</code> equal to 1 whose matched payload <code>v</code>
-equals 1; the rewritten example passes <code>check</code>. The pattern-name rule itself
-remains tracked in #1561; this correction only aligns the conflict check with
-the lowered event.</p>
+equals 1; the rewritten example passes <code>check</code>. The previously accepted
+<code>some(1) is some(amount) and amount == 1</code> is a further breaking removal (#1561):
+rename both pattern declaration and continuation to <code>v</code>; the repaired event is
+covered. The same source-field rule applies before substitution in legacy guards,
+event assignments, rule properties, measures, decision assumptions/rows and
+concepts (including unused concepts), including relation roles. It
+does not add pattern-over-field shadow semantics. Definition-local patterns
+introduced after field substitution are not field aliases; authored call arguments
+are checked even if a definition later erases them.</p>
+<p>The own-tree comparison ran <code>FSLC_CACHE=off &lt;binary&gt; check &lt;form&gt;</code>
+twice for base <code>f8e3726e2ead231c89cd4f52eef3dd5d652c774d</code> and measured head
+<code>13676f0bca83b2433cc974468bbb00c59aef25a9</code> (binary SHA256
+<code>0cab1c914a05344d8958a6f9bd5ce5a17618f87f9f7e74e279b449fbca47f314</code>).
+All 610 corpus forms (23 specs, 195 examples, 392 CLI fixtures) were unchanged;
+all 63 original #1552 forms, all 49 prior #1561 forms, the added fresh control,
+six decision/concept forms and the two exact review sources were included.
+The <strong>27 inline <code>ok</code>→<code>error</code> cases</strong> are:</p>
+<table>
+<thead>
+<tr>
+<th>Removed case labels</th>
+<th style="text-align: right;">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>control_is_pattern_field_name_satisfiable_matches_base</code></td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>expression-0</code>, <code>expression-1</code>, <code>expression-2</code>, <code>expression-3</code>, <code>expression-4</code>, <code>expression-5</code>, <code>expression-6</code>, <code>expression-7</code>, <code>expression-8</code>, <code>expression-9</code>, <code>expression-10</code>, <code>expression-11</code>, <code>expression-12</code> (and/nesting/implication/or/not/if/container/quantifier/aggregate)</td>
+<td style="text-align: right;">13</td>
+</tr>
+<tr>
+<td><code>argument-1</code>, <code>argument-4</code>, <code>argument-9</code> (retained/erased/indirectly erased)</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td><code>event-set</code>, <code>when</code>, <code>set</code>, <code>never</code>, <code>property</code>, <code>measure</code>, <code>role</code></td>
+<td style="text-align: right;">7</td>
+</tr>
+<tr>
+<td><code>decision-assuming</code>, <code>unused-concept</code>, <code>review-original-collision</code></td>
+<td style="text-align: right;">3</td>
+</tr>
+</tbody>
+</table>
+<p>These are case-addressed forms, not necessarily unique programs. Five existing
+refusals change diagnostics, not acceptance: the and/implication/quantified
+contradictions, duplicated <code>argument-7</code> and <code>decision-row</code>. All 2,924 observations
+(731 forms on both binaries, twice) had zero repeat differences and no excluded
+fields. No other required-test input was rewritten or omitted. This is evidence at
+the named measurement head, not an unperformed sweep of later integration commits.</p>
 <ul>
 <li>The process+data profile is the primary requirements form for a single-entity
   lifecycle. <code>process E with f: T { ... }</code> creates the entity stage map and

@@ -168,21 +168,49 @@ verify {
 }
 ```
 
-Breaking removal (#1552): for requirements `rule ... only when` conditions,
+Breaking removals (#1552, #1561): for requirements `rule ... only when` conditions,
 `check` now rejects previously accepted unsatisfiable guards that reuse an entity
 field's name as an `is` pattern inside a quantifier body or aggregate value. The
 guard copy now reads that name as the field, just as the event's lowering does,
 not as the matched payload. For example,
 `amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })`
 was accepted even though its event could never occur: the field must be both 0
-and 1. It now fails with exit 2, `kind: "semantics"`, and
-`rule_conflict_unsatisfiable_guard`. To test the payload instead, use a non-field
+and 1. #1552 rejected it with `rule_conflict_unsatisfiable_guard`; #1561 now
+rejects its field-name pattern first (exit 2, kind semantics), asking the author
+to rename the pattern variable. The owner is the rule statement, not the pattern
+token. To test the payload instead, use a non-field
 pattern name: replace `some(x) is some(amount) and amount == 1` with
 `some(x) is some(v) and v == 1`. Keeping the outer condition and quantifier, this
 means the field is 0 and there is an `x` equal to 1 whose matched payload `v`
-equals 1; the rewritten example passes `check`. The pattern-name rule itself
-remains tracked in #1561; this correction only aligns the conflict check with
-the lowered event.
+equals 1; the rewritten example passes `check`. The formerly accepted
+`some(1) is some(amount) and amount == 1` is also removed by #1561: rename its
+binding and continuation to fresh `v`; the event is then covered. This rule also
+covers legacy guards, assignment RHS, rule properties, measures, decisions'
+assumptions/rows, concepts even unused, and relation roles
+before field substitution. Event-input exclusions and legal quantifier/aggregate
+field shadowing stay unchanged; no new shadow policy or evaluator is introduced.
+Definition-local patterns after field substitution are not field aliases;
+authored call arguments are checked before erasure.
+The own-tree command `FSLC_CACHE=off <binary> check <form>` ran
+twice on base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` and measured head
+`13676f0bca83b2433cc974468bbb00c59aef25a9` (binary SHA256
+`0cab1c914a05344d8958a6f9bd5ce5a17618f87f9f7e74e279b449fbca47f314`):
+610 corpus forms unchanged; 121 supplemental forms include original63, prior49,
+added fresh1, decision/concept6 and exact review2. All 27 inline removals are:
+
+| Removed case labels | Count |
+|---|---:|
+| `control_is_pattern_field_name_satisfiable_matches_base` | 1 |
+| `expression-0`, `expression-1`, `expression-2`, `expression-3`, `expression-4`, `expression-5`, `expression-6`, `expression-7`, `expression-8`, `expression-9`, `expression-10`, `expression-11`, `expression-12` | 13 |
+| `argument-1`, `argument-4`, `argument-9` | 3 |
+| `event-set`, `when`, `set`, `never`, `property`, `measure`, `role` | 7 |
+| `decision-assuming`, `unused-concept`, `review-original-collision` | 3 |
+
+These are case-addressed, not necessarily byte-unique. Five error→error changes
+are the original and/implication/quantifier contradictions plus `argument-7` and
+`decision-row`, not extra removals. All 2,924 executions have zero repeat
+differences and no excluded fields. No other required-test inputs were rewritten
+or omitted. Later integration commits are not this measurement.
 
 **Breaking removal (#1569):** in legacy requirements with a process field
 `amount`, `check` now rejects a transition guard such as

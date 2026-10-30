@@ -963,7 +963,10 @@ name in a `decreases` call. There are no unrelated breaking removals.
   `v` must be a fresh name: `check` rejects a `v` that is
   already a state variable, constant, enum member, action parameter, quantifier
   binder, `let`, or an earlier pattern binding in scope, and asks you to rename
-  it. Ordering is not defined.
+  it. Requirements field-substitution contexts also reject a pattern name that
+  equals an entity field or relation role, before lowering loses that spelling
+  (#1561). Event inputs keep their existing field-shadowing exception; ordinary
+  quantifier/aggregate field shadowing is unchanged. Ordering is not defined.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
 - Set/Seq expression materialization (Refs #1467): admitted scalar/enum-element
@@ -3646,21 +3649,54 @@ verify {
 }
 ```
 
-**Breaking removal (#1552):** for requirements `rule ... only when` conditions,
+**Breaking removals (#1552, #1561):** for requirements `rule ... only when` conditions,
 `check` now rejects previously accepted unsatisfiable guards that reuse an entity
 field's name as an `is` pattern inside a quantifier body or aggregate value. The
 guard copy now reads that name as the field, just as the event's lowering does,
 not as the matched payload. For example,
 `amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })`
 was accepted even though its event could never occur: the field must be both 0
-and 1. It now fails with exit 2, `kind: "semantics"`, and
-`rule_conflict_unsatisfiable_guard`. To test the payload instead, use a non-field
+and 1. #1552 rejected it with `rule_conflict_unsatisfiable_guard`; #1561 now
+rejects the pattern declaration first, with exit 2, `kind: "semantics"`, and
+`pattern binding 'amount' in 'is some(amount)' shadows an entity field of the same name; rename the pattern variable`.
+The location is the retained rule-statement owner, not a recovered pattern token.
+To test the payload instead, use a non-field
 pattern name: replace `some(x) is some(amount) and amount == 1` with
 `some(x) is some(v) and v == 1`. Keeping the outer condition and quantifier, this
 means the field is 0 and there is an `x` equal to 1 whose matched payload `v`
-equals 1; the rewritten example passes `check`. The pattern-name rule itself
-remains tracked in #1561; this correction only aligns the conflict check with
-the lowered event.
+equals 1; the rewritten example passes `check`. The previously accepted
+`some(1) is some(amount) and amount == 1` is a further breaking removal (#1561):
+rename both pattern declaration and continuation to `v`; the repaired event is
+covered. The same source-field rule applies before substitution in legacy guards,
+event assignments, rule properties, measures, decision assumptions/rows and
+concepts (including unused concepts), including relation roles. It
+does not add pattern-over-field shadow semantics. Definition-local patterns
+introduced after field substitution are not field aliases; authored call arguments
+are checked even if a definition later erases them.
+
+The own-tree comparison ran `FSLC_CACHE=off <binary> check <form>`
+twice for base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` and measured head
+`13676f0bca83b2433cc974468bbb00c59aef25a9` (binary SHA256
+`0cab1c914a05344d8958a6f9bd5ce5a17618f87f9f7e74e279b449fbca47f314`).
+All 610 corpus forms (23 specs, 195 examples, 392 CLI fixtures) were unchanged;
+all 63 original #1552 forms, all 49 prior #1561 forms, the added fresh control,
+six decision/concept forms and the two exact review sources were included.
+The **27 inline `ok`→`error` cases** are:
+
+| Removed case labels | Count |
+|---|---:|
+| `control_is_pattern_field_name_satisfiable_matches_base` | 1 |
+| `expression-0`, `expression-1`, `expression-2`, `expression-3`, `expression-4`, `expression-5`, `expression-6`, `expression-7`, `expression-8`, `expression-9`, `expression-10`, `expression-11`, `expression-12` (and/nesting/implication/or/not/if/container/quantifier/aggregate) | 13 |
+| `argument-1`, `argument-4`, `argument-9` (retained/erased/indirectly erased) | 3 |
+| `event-set`, `when`, `set`, `never`, `property`, `measure`, `role` | 7 |
+| `decision-assuming`, `unused-concept`, `review-original-collision` | 3 |
+
+These are case-addressed forms, not necessarily unique programs. Five existing
+refusals change diagnostics, not acceptance: the and/implication/quantified
+contradictions, duplicated `argument-7` and `decision-row`. All 2,924 observations
+(731 forms on both binaries, twice) had zero repeat differences and no excluded
+fields. No other required-test input was rewritten or omitted. This is evidence at
+the named measurement head, not an unperformed sweep of later integration commits.
 
 - The process+data profile is the primary requirements form for a single-entity
   lifecycle. `process E with f: T { ... }` creates the entity stage map and
