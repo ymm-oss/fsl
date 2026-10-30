@@ -62,7 +62,7 @@ const ROWS: &[Row] = &[
         kind: "no_user_invariants",
         trace: "warning",
         prefix: "安全性の確認対象なし",
-        translation: "利用者が記述した不変条件がなく、暗黙の型境界だけを検証している。守るべき業務ルールを確認する。",
+        translation: "利用者が記述した不変条件や遷移制約がない。必要な安全性の確認対象を見直す。",
         advice: "必要な不変条件を追加 / 検証対象を確認",
     },
     Row {

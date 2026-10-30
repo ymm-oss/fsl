@@ -116,6 +116,34 @@ fn deadlock_error_keeps_failure_and_ignore_has_no_warning() {
 }
 
 #[test]
+fn reachable_only_warning_keeps_checked_reachability_and_accurate_translation() {
+    let root = fixture();
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/issue_961/no_safety_reachable.fsl"),
+        root.join("spec.fsl"),
+    )
+    .unwrap();
+    let verify: Value =
+        serde_json::from_slice(&run(&root, &["verify", "spec.fsl", "--depth", "2"], 0).stdout)
+            .unwrap();
+    assert_eq!(verify["result"], "verified");
+    assert_eq!(verify["reachables"]["Grew"]["witnessed_at_step"], 1);
+    assert_eq!(verify["reachables"]["Grew"]["witness"][1]["state"]["x"], 1);
+    assert!(
+        verify["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| { warning["kind"] == "no_user_invariants" })
+    );
+    let body = ledger(&root, "warn", 0);
+    assert_eq!(raw_findings(&body), verify["warnings"]);
+    let (presentation, _) = body.split_once("## 付録: 生 JSON 反例（証跡）").unwrap();
+    assert!(presentation.lines().any(|line| line == "  - 業務翻訳: 利用者が記述した不変条件や遷移制約がない。必要な安全性の確認対象を見直す。"));
+}
+
+#[test]
 fn file_output_matches_stdout_and_preserves_the_full_generated_envelope() {
     let root = fixture();
     let stdout = ledger(&root, "warn", 0);
