@@ -61,10 +61,47 @@ fn masked_absence_ignores_independent_hidden_payloads() {
 fn masked_payload_count_is_an_observable_literal_state_value() {
     let mut errors = Vec::new();
     for negative in [false, true] {
-        let text = format!(
+        let mut text = format!(
             "spec VisibleCount {{\n  type K = 0..1 type Count = 0..2\n  state {{ c: Bool, a: Option<K>, b: Option<K>, total: Count }}\n  init {{ c = true a = none b = none total = 0 }}\n  action go() {{ c = false total = Set {{a,b}}.size() }}\n  invariant Capture {{ c or total == {} }}\n}}\n",
             usize::from(!negative)
         );
+        if !negative {
+            let predicate = "a is none and b is none";
+            let alone = text.replace(
+                "invariant Capture { c or total == 1 }",
+                &format!("invariant ReachableAbsentInputs {{ {predicate} }}"),
+            );
+            assert!(!alone.contains("Capture"));
+            finish(&continuation(
+                "1467-aux-absent-inputs-alone",
+                &alone,
+                &Oracle {
+                    outcome: "pass",
+                    step: 1,
+                    line: 6,
+                    frozen: false,
+                    witness: None,
+                },
+            ));
+            let rejecting = alone
+                .replace("b = none", "b = some(0)")
+                .replace("ReachableAbsentInputs", "Capture");
+            finish(&continuation(
+                "1467-aux-absent-inputs-reject",
+                &rejecting,
+                &Oracle {
+                    outcome: "invariant",
+                    step: 0,
+                    line: 6,
+                    frozen: false,
+                    witness: None,
+                },
+            ));
+            text = text.replace(
+                "\n}",
+                &format!("\n  invariant ReachableAbsentInputs {{ {predicate} }}\n}}"),
+            );
+        }
         errors.extend(continuation(
             "1467-visible-masked-count",
             &text,

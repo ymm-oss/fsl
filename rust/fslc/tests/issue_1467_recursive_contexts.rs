@@ -6,6 +6,43 @@ mod support;
 use serde_json::json;
 use support::{Oracle, continuation, finish};
 
+// Prove only the reachable presence facts, never the recursive equality/count.
+fn reachable_header(header: &str, name: &str, predicate: &str, line: usize) -> String {
+    let alone = header
+        .replace("invariant Capture", &format!("invariant {name}"))
+        .replace("$P", predicate);
+    assert!(!alone.contains("Capture"));
+    finish(&continuation(
+        &format!("1467-aux-{name}-alone"),
+        &alone,
+        &Oracle {
+            outcome: "pass",
+            step: 1,
+            line,
+            frozen: false,
+            witness: None,
+        },
+    ));
+    let rejecting = header
+        .replace("o = some(none)", "o = none")
+        .replace("$P", predicate);
+    finish(&continuation(
+        &format!("1467-aux-{name}-reject"),
+        &rejecting,
+        &Oracle {
+            outcome: "invariant",
+            step: 0,
+            line,
+            frozen: false,
+            witness: None,
+        },
+    ));
+    header.replace(
+        "\n}",
+        &format!("\n  invariant {name} {{ {predicate} }}\n}}"),
+    )
+}
+
 #[test]
 fn c0_auxiliary_is_inductive() {
     let source = "spec Absence {\n  type K = 0..1\n  state { c: Bool, o0: Option<K>, o1: Option<K> }\n  init { c = true o0 = some(0) o1 = some(1) }\n  action go() { c = false o0 = none o1 = none }\n  invariant Capture { c or (o0 is none and o1 is none) }\n}\n";
@@ -94,6 +131,12 @@ fn recursive_target_context_retains_outside_support_until_bounds() {
 fn recursive_contextual_none_and_nominal_identity() {
     let header = "spec Nominal {\n  type K = 0..1\n  enum E { Zed, Able }\n  enum F { ZedF, AbleF }\n  struct P { a: K, e: E }\n  struct Q { a: K, e: E }\n  state { c: Bool, o: Option<Option<K>> }\n  init { c = true o = some(none) }\n  action go() { c = false }\n  invariant Capture { $P }\n}\n";
     let mut errors = Vec::new();
+    let reachable = reachable_header(
+        header,
+        "ReachableNestedAbsence",
+        "(o is some(inner_absence_1467)) and inner_absence_1467 is none",
+        10,
+    );
     for outer in ["Set", "Seq"] {
         for reverse in [false, true] {
             let (left, right) = if reverse {
@@ -114,7 +157,7 @@ fn recursive_contextual_none_and_nominal_identity() {
                 );
                 errors.extend(continuation(
                     "1467-recursive-none-context",
-                    &header.replace("$P", &predicate),
+                    &if negative { header } else { &reachable }.replace("$P", &predicate),
                     &Oracle {
                         outcome: if negative { "invariant" } else { "pass" },
                         step: 1,
@@ -155,6 +198,7 @@ fn recursive_contextual_none_and_nominal_identity() {
 fn empty_opposites_contextual_none_aliases_and_live_lengths() {
     let mut errors = Vec::new();
     let header = "spec Context {\n  type K = 0..1\n  type L = 0..1\n  enum E { Zed, Able }\n  enum F { ZedF, AbleF }\n  struct P { a: K, e: E }\n  struct Q { a: K, e: E }\n  state { b: Bool, n: K, k: Seq<K, 2>, l: Seq<L, 2>, o: Option<Option<K>> }\n  init { b = true n = 0 k = Seq {0} l = Seq {0} o = some(none) }\n  action go() { b = false n = 1 }\n  invariant Capture { $P }\n}\n";
+    let reachable = reachable_header(header, "ReachableOuterPresence", "not (o is none)", 11);
     for outer in ["Set", "Seq"] {
         for item in [
             "P {a:n,e:Able}",
@@ -210,7 +254,12 @@ fn empty_opposites_contextual_none_aliases_and_live_lengths() {
                     };
                     errors.extend(continuation(
                         &format!("1467-context-{outer}-{item}-{reverse}-{negative}"),
-                        &header.replace("$P", &predicate),
+                        &if !negative && outer == "Set" && item == "some(none)" {
+                            &reachable
+                        } else {
+                            header
+                        }
+                        .replace("$P", &predicate),
                         &Oracle {
                             outcome: if negative { "invariant" } else { "pass" },
                             step: 1,

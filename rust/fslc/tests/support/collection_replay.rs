@@ -594,6 +594,7 @@ pub fn finish(errors: &[String]) {
 }
 
 /// Full-packet counterpart for recursive-value tests; old scalar checks stay intact.
+#[allow(dead_code)]
 pub fn full_fixture(label: &str, source: &str) -> PathBuf {
     let parent = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
     std::fs::create_dir_all(parent).unwrap();
@@ -613,6 +614,7 @@ pub fn full_fixture(label: &str, source: &str) -> PathBuf {
     directory
 }
 
+#[allow(dead_code)]
 pub fn full_observe(directory: &std::path::Path, route: &str) -> (Value, i32) {
     use sha2::{Digest, Sha256};
     static DIGEST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -676,6 +678,7 @@ pub fn full_observe(directory: &std::path::Path, route: &str) -> (Value, i32) {
 
 /// Only measured wall-clock fields vary between identical early probe packets.
 /// Every exclusion is live/type-checked; all verdict/assurance/location data stay.
+#[allow(dead_code)]
 pub fn stable_full_packet(mut report: Value) -> Value {
     if let Some(cost) = report.get_mut("cost") {
         assert!(cost["elapsed_s"].as_f64().is_some());
@@ -695,6 +698,7 @@ pub fn stable_full_packet(mut report: Value) -> Value {
 
 /// Acceptance continuation: expected semantics are supplied by each literal fixture.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Oracle {
     pub outcome: &'static str,
     pub step: usize,
@@ -704,6 +708,7 @@ pub struct Oracle {
 }
 
 impl Oracle {
+    #[allow(dead_code)]
     fn accepts(&self, r: &Value, exit: i32, route: &str) -> bool {
         let positive = self.outcome == "pass";
         let bound = self.outcome.starts_with("_bounds_");
@@ -763,6 +768,7 @@ impl Oracle {
     }
 }
 
+#[allow(dead_code)]
 pub fn continuation(label: &str, source: &str, oracle: &Oracle) -> Vec<String> {
     let mut errors = Vec::new();
     let directory = full_fixture(label, source);
@@ -835,6 +841,7 @@ pub fn continuation(label: &str, source: &str, oracle: &Oracle) -> Vec<String> {
     errors
 }
 
+#[allow(dead_code)]
 pub fn ready<F: std::future::Future>(future: F) -> F::Output {
     use std::task::{Context, Poll, Waker};
     match std::pin::pin!(future)

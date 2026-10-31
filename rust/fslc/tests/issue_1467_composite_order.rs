@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Ordering must decide short-circuit/partiality, not just a commutative count.
+#[path = "support/issue_1467_order_reachability.rs"]
+mod order_reachability;
 #[allow(dead_code)]
 #[path = "support/collection_replay.rs"]
 mod support;
@@ -185,6 +187,7 @@ fn recursive_order_matches_literal_first_observables() {
                         "\n  invariant ReachableAbsence { c or (o0 is none and o1 is none) }\n}",
                     );
                 }
+                text = order_reachability::order_positive(text, name, outer, outcome);
                 errors.extend(exercise(
                     &format!("1467-order-{name}-{outer}-{outcome}"),
                     &text,
@@ -210,7 +213,10 @@ fn presence_multiplicity_live_lengths_and_relation_closure_remain_distinct() {
     ] {
         errors.extend(exercise(
             "1467-recursive-preservation",
-            &TEMPLATE.replace("$P", predicate),
+            &order_reachability::preservation_positive(
+                TEMPLATE.replace("$P", predicate),
+                predicate,
+            ),
             "pass",
             None,
         ));
