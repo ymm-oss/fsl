@@ -914,7 +914,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `==` はフィールドごとの等値
 - Set/Seq 式の実体化 (Refs #1467): 既に受理される再帰的な式は、構築・等値比較・
   条件式の結合・メソッドとその連鎖・量化/集約 binder・`let` で、検査済みモデルの
-  推論型・期待型を使います。要素には Int、Bool、Enum、Struct、Option (Option<Enum> と
+  推論型・期待型を使います。要素には Int、Bool、Enum、Struct、Option (`Option<Enum>` と
   入れ子の不在)、入れ子の Set/Seq、Set-of-Seq、Seq-of-Set、relation、既存の Map 値を含みます。
   評価前に両方の条件式の腕・入れ子の要素・`some`・`none`・空 collection へ文脈を渡します。
   等値比較は左側が空の場合も反対側から不足する文脈を得て、項や腕の順序に依存しません。

@@ -978,7 +978,7 @@ name in a `decreases` call. There are no unrelated breaking removals.
 - Set/Seq expression materialization (Refs #1467): already-admitted recursive
   expressions use the checked model's inferred/expected type for construction,
   equality, conditional joins, methods/chains, quantifier/aggregate binders and
-  `let`. Elements include Int, Bool, Enum, Struct, Option (Option<Enum> and nested
+  `let`. Elements include Int, Bool, Enum, Struct, Option (`Option<Enum>` and nested
   absence), nested Set/Seq, Set-of-Seq, Seq-of-Set, relation and existing Map values.
   Context reaches both conditional arms, nested items, `some`, `none` and empty
   collections before evaluation; equality obtains missing context from the
