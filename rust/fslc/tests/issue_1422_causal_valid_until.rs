@@ -2,7 +2,9 @@
 // Copyright 2026 Ryoichi Izumita
 use fsl_tools::{artifact_digest, lifecycle_record_digest};
 use serde_json::{Value, json};
-use std::{path::Path, process::Command, time::SystemTime};
+use std::{path::Path, process::Command};
+#[path = "support/scratch_identity.rs"]
+mod scratch_identity;
 const ROUTES: [&[&str]; 3] = [
     &["analyze", "--projection", "causal_evidence_graph"],
     &["analyze", "--profile", "causal-review"],
@@ -28,11 +30,9 @@ fn artifact(value: Option<Value>) -> Value {
 }
 fn run(artifact: &Value, route: &[&str], lifecycle: bool, as_of: bool) -> (Value, i32, Vec<u8>) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let nonce = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let scratch = std::env::temp_dir().join(format!("fsl-1422-{}-{nonce}", std::process::id()));
+    let scratch = scratch_identity::unique(
+        std::env::temp_dir().join(format!("fsl-1422-{}", std::process::id())),
+    );
     std::fs::create_dir(&scratch).unwrap();
     let evidence = scratch.join("S1.json");
     std::fs::write(&evidence, artifact.to_string()).unwrap();
