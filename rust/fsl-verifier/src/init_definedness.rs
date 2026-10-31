@@ -27,8 +27,9 @@ use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
 use crate::eval::{
-    binder_source_expressions, binder_values, binder_where, binder_where_expression, eval,
-    evaluation_status, i64_term_is_in_range, index_accessible, method_definedness,
+    binder_source_expressions, binder_values, binder_where, binder_where_expression,
+    confine_binary_rhs, eval, eval_with_bindings, evaluation_status, i64_term_is_in_range,
+    index_accessible, method_definedness,
 };
 use crate::value::{SymbolicState, SymbolicValue, TypedBindings as Bindings, bool_term, int_term};
 
@@ -643,15 +644,18 @@ fn expression_sites_inner<S: SmtSolver>(
             let left_defined = defined(solver, model, left, state, &local)?;
             let right_reached = match op.as_str() {
                 "and" | "=>" => {
-                    let left_value = eval(solver, model, left, state, &mut local, None)?;
+                    let left_value =
+                        eval_with_bindings(solver, model, left, state, &mut local, None)?;
                     bool_term(&left_value)?.clone()
                 }
                 "or" => {
-                    let left_value = eval(solver, model, left, state, &mut local, None)?;
+                    let left_value =
+                        eval_with_bindings(solver, model, left, state, &mut local, None)?;
                     solver.not(bool_term(&left_value)?)?
                 }
                 _ => solver.bool_value(true),
             };
+            confine_binary_rhs(op, bindings, &mut local);
             let right_reached =
                 solver.and(&[reached.clone(), left_defined.clone(), right_reached])?;
             expression_sites(solver, model, right, state, &local, &right_reached, sites)?;

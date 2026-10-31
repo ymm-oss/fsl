@@ -3,11 +3,11 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use fsl_core::recursion;
 use fsl_core::{
     FslValue, KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelModel, Pattern, TypeDef, TypeRef,
 };
+use fsl_core::{pattern_binding_flows, recursion};
 use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
@@ -20,6 +20,9 @@ use crate::value::{
 
 type BinderCandidates<T> = Vec<(String, SymbolicValue<T>)>;
 type SymbolicPair<T> = (SymbolicValue<T>, SymbolicValue<T>);
+
+#[cfg(test)]
+mod scope_tests;
 
 /// Symbolic evaluation of one kernel expression, and the cycle entry this
 /// module's stack guard belongs on (`recursion::guard`): `eval_binary`,
@@ -44,7 +47,36 @@ pub(crate) fn eval<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
-    let value = eval_raw(solver, model, expr, state, bindings, old_state)?;
+    in_closed_scope(expr, bindings, |scope| {
+        eval_with_bindings(solver, model, expr, state, scope, old_state)
+    })
+}
+
+/// Only matches and conjunctions export to a true continuation. All other
+/// constructors close their children, including raw/contextual evaluation.
+fn in_closed_scope<T: Clone, R>(
+    expr: &Expr,
+    bindings: &mut Bindings<T>,
+    evaluate: impl FnOnce(&mut Bindings<T>) -> R,
+) -> R {
+    if matches!(expr, Expr::Is { .. })
+        || matches!(expr, Expr::Binary { op, .. } if pattern_binding_flows(op, false))
+    {
+        evaluate(&mut bindings.clone())
+    } else {
+        evaluate(bindings)
+    }
+}
+
+pub(crate) fn eval_with_bindings<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    let value = recursion::guard(|| eval_inner(solver, model, expr, state, bindings, old_state))?;
     if scalar_literal(&value) {
         let ty = model
             .expression_type(expr, &binding_types(bindings), None)?
@@ -52,6 +84,13 @@ pub(crate) fn eval<S: SmtSolver>(
         materialize(solver, model, value, &ty, false)
     } else {
         Ok(value)
+    }
+}
+
+/// Reaching an RHS (notably through `or`) does not imply binding visibility.
+pub(crate) fn confine_binary_rhs<T: Clone>(op: &str, outer: &Bindings<T>, local: &mut Bindings<T>) {
+    if !pattern_binding_flows(op, true) {
+        local.clone_from(outer);
     }
 }
 
@@ -104,7 +143,9 @@ fn eval_raw<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
-    recursion::guard(|| eval_inner(solver, model, expr, state, bindings, old_state))
+    in_closed_scope(expr, bindings, |scope| {
+        recursion::guard(|| eval_inner(solver, model, expr, state, scope, old_state))
+    })
 }
 
 #[allow(clippy::too_many_lines)]
@@ -867,15 +908,18 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
             )?;
             let reached_right = match op.as_str() {
                 "and" | "=>" => {
-                    let left_value = eval(solver, model, left, state, &mut local, old_state)?;
+                    let left_value =
+                        eval_with_bindings(solver, model, left, state, &mut local, old_state)?;
                     bool_term(&left_value)?.clone()
                 }
                 "or" => {
-                    let left_value = eval(solver, model, left, state, &mut local, old_state)?;
+                    let left_value =
+                        eval_with_bindings(solver, model, left, state, &mut local, old_state)?;
                     solver.not(bool_term(&left_value)?)?
                 }
                 _ => solver.bool_value(true),
             };
+            confine_binary_rhs(op, bindings, &mut local);
             let right_status = evaluation_status_with_policy(
                 solver, model, right, state, &local, old_state, policy,
             )?;
@@ -1663,10 +1707,14 @@ fn eval_binary<S: SmtSolver>(
     let (left, right) = if matches!(op, "==" | "!=") {
         eval_equality_operands(solver, model, left, right, state, bindings, old_state)?
     } else {
-        (
-            eval(solver, model, left, state, bindings, old_state)?,
-            eval(solver, model, right, state, bindings, old_state)?,
-        )
+        let mut local = bindings.clone();
+        let left = eval_with_bindings(solver, model, left, state, &mut local, old_state)?;
+        confine_binary_rhs(op, bindings, &mut local);
+        let right = eval_with_bindings(solver, model, right, state, &mut local, old_state)?;
+        if pattern_binding_flows(op, false) {
+            *bindings = local;
+        }
+        (left, right)
     };
     match op {
         "and" => Ok(bool_value(
@@ -1841,22 +1889,15 @@ fn eval_pattern<S: SmtSolver>(
             Ok(bool_value(solver, solver.not(&present)?))
         }
         (SymbolicValue::Option { present, value, .. }, Pattern::Some(name)) => {
-            // Never overwrite a name already in scope (#1153); see the concrete
-            // evaluator. A new name still reaches the action body.
-            if !bindings.contains_key(name) {
-                // The concrete evaluator binds only when the operand is
-                // present (#1259): where it is absent, a name that also
-                // resolves to a state variable, constant or enum member keeps
-                // that meaning. `check` rejects such a collision, so this only
-                // keeps the engines agreeing on a model that bypassed it.
-                let bound = match lookup(solver, model, name, state, bindings) {
-                    Ok(outer) if outer.ty() == value.ty() => {
-                        ite_value(solver, model, &present, &value, &outer)?
-                    }
-                    _ => *value,
-                };
-                bindings.insert(name.clone(), bound);
-            }
+            // Rewritten matches shadow locally; closed evaluation restores the
+            // complete outer typed binding. Absence retains its outer meaning.
+            let bound = match lookup(solver, model, name, state, bindings) {
+                Ok(outer) if outer.ty() == value.ty() => {
+                    ite_value(solver, model, &present, &value, &outer)?
+                }
+                _ => *value,
+            };
+            bindings.insert(name.clone(), bound);
             Ok(bool_value(solver, present))
         }
         _ => Err(VerifyError::new("is pattern requires an Option value")),

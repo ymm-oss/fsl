@@ -296,7 +296,8 @@ readable scope carried across `requires` items contains only conjunctive
 exports. Subsequent model validation checks cross-item collisions; sync source
 hygiene separately carries its reserved locals. Together these checks prevent
 a narrower readable environment from admitting repeated names that the
-first-binding-wins evaluators would interpret incorrectly. Evaluators are unchanged.
+first-binding-wins evaluators would interpret incorrectly. Evaluators were
+unchanged in the #1547 amendment; see the subsequent #1622 repair below.
 
 This inventory intentionally preserves the base boundary rather than claiming
 to inventory every possible evaluator binding. The existing not/if reuse
@@ -320,9 +321,64 @@ The original baseline accepted
 `((o is some(v)) or x == 0) => v == 1` with `o = none` and `x = 0`;
 BMC and induction could report `violated` using the unbound payload name.
 Rejecting the source is necessary: that verdict cannot establish a valid
-counterexample for an ill-scoped formula. Evaluator semantics are unchanged.
+counterexample for an ill-scoped formula. That amendment did not change evaluator
+semantics; source refusals remain in force after the later lifetime repair.
 
 ### Shared policy and sibling consumers
+
+#### Evaluator lifetime repair (#1622 / #1577)
+
+Symbolic values and concrete evaluation now use closed expression boundaries
+and explicit true-continuation entry points. Only a match and a conjunctive
+whole result can export payloads. Binary RHS visibility follows the same
+`pattern_binding_flows` policy; reaching an `or` RHS does not inherit the left
+environment. A rewritten local match may shadow an outer binder within its
+continuation, but closed evaluation restores the complete outer environment,
+including independently stored declared type metadata, also on errors.
+
+Ordinary/raw and expected-type conditionals isolate condition and both arms;
+comparison operands, compound values, access, arguments and candidate-local
+quantifier/aggregate evaluation also close their children. Existing checked
+inference and collection materialization remain authoritative. Guard value and
+definedness walks explicitly export conjunctive `requires` bindings to later
+guards/body, while a `let` RHS stays closed. Init diagnostic reachability and
+ranked-measure traversal use the same RHS boundary without altering short-circuit
+reachability, partial-operation order or bounds priority.
+
+The concrete runtime preserves lazy logical/conditional evaluation and remains
+solver-independent. Monitor, solver-free BFS, BMC and induction-with-bounded-base
+controls assert actual truth, not agreement with historical incorrect concrete
+results. Shared evaluators also correct cross-statement/composed-init payload
+leakage. The frontend's #1573 reservation (including then-to-else), #1595
+refinement refusals and known composed-init reservation gaps are unchanged; the
+repair is not permission to reuse a reserved name in source.
+
+Direct evaluator controls bypass only collision admission, retain checked
+expression typing, and assert restored environments and true/false results.
+Separate CLI controls preserve impossible/reached progress outcomes and pin
+later-payload init values. No solver, substitution, public envelope or grammar
+change is part of this repair.
+
+Diagnostic observation lifetime is distinct from lexical binding lifetime.
+`violating_bindings` seeds a fresh evidence frame with each candidate's original
+binder assignments after enumerating its source, then observes its selected
+filter and closed body exactly once. A failed selected candidate publishes that
+frame; filtered and successful candidates discard it. Each successful `is some`
+records its payload directly, retaining the first value for each key, independently
+of lexical shadowing. Evidence is never identifier lookup or continuation authority.
+
+Every actually executed child shares the frame, including `not`, `or`, implication,
+conditional conditions/selected arms, eager operands/arguments and optimized access
+indices. Short-circuited operands and unselected arms are not evaluated or observed.
+Nested quantifier/aggregate sources, filters and bodies remain isolated; no nested
+local captures merge into the parent frame. Nonquantified diagnostic fallback also
+observes closed evaluation, while searched conjuncts have separate frames. Ordinary
+evaluation still closes its children and `or`/implication export no whole-result
+bindings. Top-level and blame packets preserve reached payloads without widening
+read visibility or changing truth/errors. Native projection remains one candidate
+level and blame renders a whole expression; historical descriptions of recursive
+nested-forall projection or conjunct splitting are not implemented by this repair
+(#1437).
 
 `fsl-core::pattern_binding_flows(op, right_operand)` is the single operator
 decision. The initial eight-consumer estimate omitted the separate free-name
@@ -340,6 +396,10 @@ walk, and review found the Renamer as a tenth logical consumer:
 | Free-name analysis | `model.rs` | RHS flow |
 | Name export collector | `compose.rs` | Whole-expression export |
 | Source-owned Renamer | `compose/hygiene.rs` | RHS mapping flow and whole-result mapping export |
+| Symbolic evaluator and status | `fsl-verifier/src/eval.rs` | Closed children, RHS visibility and whole-result export |
+| Init diagnostic reachability | `fsl-verifier/src/init_definedness.rs` | RHS visibility |
+| Ranked-measure traversal | `fsl-verifier/src/induction.rs` | RHS visibility |
+| Concrete evaluator | `fsl-runtime/src/lib.rs` | Closed children, RHS visibility and whole-result export |
 
 The whole-export and RHS decisions in both DDD paths, `domain_lowering.rs` and
 `domain.rs`, also delegate to the same helper, replacing four equivalent
@@ -774,10 +834,12 @@ not an exhaustive inventory of every removed program.
 
 This amendment supersedes section 3's deliberately limited Is/Binary collision
 inventory and guard-name preservation decision. Visibility is unchanged. The
-checker and compose hygiene compensate for existing evaluator binding lifetime;
-they do not repair the evaluators. The remaining evaluator work is tracked in
-#1622; expression-arm evaluation remains related to #1577, and more precise
-clause locations remain separate work in #1550.
+checker and compose hygiene in the #1573 amendment compensated for the then-existing
+evaluator binding lifetime; that amendment did not repair the evaluators. Its
+pending evaluator work (#1622/#1577) is addressed by the subsequent
+[evaluator lifetime repair](#shared-policy-and-sibling-consumers) above. The
+reservations remain in force; more precise clause locations remain separate
+work in #1550.
 
 ### Invariant and shared implementation
 
@@ -824,18 +886,23 @@ Compose still has a distinct same-source init check gap: per-fragment hygiene
 resets its Scope, while name-keyed Fresh decisions can bypass the later model
 cursor. Inline→init is affected as well. Common compose init can inherit an
 unrelated component action's Fresh decision even in a single block. These are
-illegal rebindings, not an exception to the language rule. False verified
-results belong to the evaluator-lifetime family in #1622; compose init-fragment
-reservations will be tracked in a separate issue filed after merge. That scope
-decision is separate from the independent-source init separation below.
+illegal rebindings, not an exception to the language rule. At the #1573 amendment,
+their false verified results were deferred to the evaluator-lifetime family in
+#1622. The subsequent [lifetime repair](#shared-policy-and-sibling-consumers)
+corrects evaluation without closing these admission gaps. The #1573 scope
+decision deferred compose init-fragment reservations to a separate issue after
+merge, independently of the init evaluation defect described below.
 
-Independent-source init separation remains outside this patch. Concatenating A's
-init match of some(1) and B's same-named match of some(2) can still make b.P
-incorrectly violated even though B alone verifies; this pre-existing init
-reproduction belongs to the evaluator-lifetime family in #1622, alongside the
-sync-action capture that hygiene compensates for here. It is not a preserved
-bad-verdict oracle. A later-name-only init repair is accepted and conformant,
-while the raw unresolved fixture checks only acceptance.
+Independent-source init separation was outside the #1573 amendment. At that time,
+concatenating A's init match of some(1) and B's same-named match of some(2) could
+make b.P incorrectly violated even though B alone verified. This pre-existing
+reproduction was deferred to #1622, alongside the sync-action capture that #1573
+hygiene compensated for. It was not a preserved bad-verdict oracle: the
+later-name-only repair checked conformance, while the raw unresolved fixture
+checked only acceptance. The subsequent
+[evaluator lifetime repair](#shared-policy-and-sibling-consumers) now tests actual
+later-payload truth in symbolic and concrete composed initializers; it does not
+relax the source reservations or close the separate compose admission gap.
 
 ### Breaking removals and repair
 
@@ -861,8 +928,9 @@ in the base/head sweep.
 
 For example, replace the later `(p is some(v)) and v == 2` with
 `(p is some(w)) and w == 2`. Do not replace a binding with an out-of-scope read.
-The then-to-else reservation of an **expression** if is intentional: the
-symbolic expression evaluator shares its binding map across arms (#1577).
+The then-to-else reservation of an **expression** if is intentional. It was
+introduced for the symbolic evaluator's shared arm binding map (#1577) and is
+retained after the subsequent [lifetime repair](#shared-policy-and-sibling-consumers).
 Statement arms are separate evaluator contexts and may still bind the same
 name independently. Quantifier/aggregate candidates also remain independent.
 Count, unique and exactlyOne have only a filter, not an independent body/of;

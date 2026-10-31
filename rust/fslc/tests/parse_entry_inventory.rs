@@ -203,6 +203,13 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         Owner::Definition,
         PARITY_TOOL,
     ),
+    (
+        "fsl-runtime/src/scope_tests.rs",
+        "parse_kernel_source",
+        2,
+        Owner::Definition,
+        FIXTURE,
+    ),
     ("fsl-syntax/src/ai.rs", "lex", 1, Owner::D8, CAUSAL_AI),
     (
         "fsl-syntax/src/ai_project.rs",
@@ -309,6 +316,13 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         1,
         Owner::Definition,
         STABLE_WRAPPER,
+    ),
+    (
+        "fsl-verifier/src/eval/scope_tests.rs",
+        "parse_kernel_source",
+        1,
+        Owner::Definition,
+        FIXTURE,
     ),
     (
         "fslc/src/bin/fsl-bmc.rs",

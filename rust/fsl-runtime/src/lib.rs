@@ -20,6 +20,9 @@ use serde_json::{Value as JsonValue, json};
 mod explicit;
 mod trace;
 
+#[cfg(test)]
+mod scope_tests;
+
 pub use explicit::{
     ActionStats, ExplicitReachableWitness, ExplicitResult, ExplicitViolation,
     check_init_write_ownership, deterministic_initial_state, explicit_unsupported_reason,
@@ -100,9 +103,8 @@ impl From<ModelError> for RuntimeError {
 
 /// Evaluate one expression in a concrete logical state.
 ///
-/// Pattern matches intentionally mutate `bindings`, matching FSL's
-/// `value is some(name)` binding semantics for the remainder of a
-/// short-circuited Boolean expression.
+/// Pattern payloads are local to their true continuation. The caller's
+/// bindings are unchanged, including when evaluation returns an error.
 ///
 /// # Errors
 ///
@@ -124,7 +126,53 @@ pub fn eval(
     model: &KernelModel,
     old_state: Option<&State>,
 ) -> Result<Value, RuntimeError> {
-    recursion::guard(|| eval_inner(expr, state, bindings, model, old_state))
+    eval_observing(expr, state, bindings, model, old_state, None)
+}
+
+fn eval_observing(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<Value, RuntimeError> {
+    if matches!(expr, Expr::Is { .. })
+        || matches!(expr, Expr::Binary { op, .. } if fsl_core::pattern_binding_flows(op, false))
+    {
+        eval_with_bindings_observing(
+            expr,
+            state,
+            &mut bindings.clone(),
+            model,
+            old_state,
+            observed,
+        )
+    } else {
+        eval_with_bindings_observing(expr, state, bindings, model, old_state, observed)
+    }
+}
+
+/// Evaluate an explicit true continuation, such as a conjunctive requires.
+fn eval_with_bindings(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+) -> Result<Value, RuntimeError> {
+    eval_with_bindings_observing(expr, state, bindings, model, old_state, None)
+}
+
+fn eval_with_bindings_observing(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<Value, RuntimeError> {
+    recursion::guard(|| eval_inner(expr, state, bindings, model, old_state, observed))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -134,24 +182,43 @@ fn eval_inner(
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
     match expr {
         Expr::Num(value) => Ok(Value::Int(*value)),
         Expr::Bool(value) => Ok(Value::Bool(*value)),
         Expr::None => Ok(Value::None),
-        Expr::Some(expr) => Ok(Value::Some(Box::new(eval(
-            expr, state, bindings, model, old_state,
+        Expr::Some(expr) => Ok(Value::Some(Box::new(eval_observing(
+            expr, state, bindings, model, old_state, observed,
         )?))),
         Expr::Set(items) => Ok(Value::Set(
             items
                 .iter()
-                .map(|item| eval(item, state, bindings, model, old_state))
+                .map(|item| {
+                    eval_observing(
+                        item,
+                        state,
+                        bindings,
+                        model,
+                        old_state,
+                        observed.as_deref_mut(),
+                    )
+                })
                 .collect::<Result<_, _>>()?,
         )),
         Expr::Seq(items) => Ok(Value::Seq(
             items
                 .iter()
-                .map(|item| eval(item, state, bindings, model, old_state))
+                .map(|item| {
+                    eval_observing(
+                        item,
+                        state,
+                        bindings,
+                        model,
+                        old_state,
+                        observed.as_deref_mut(),
+                    )
+                })
                 .collect::<Result<_, _>>()?,
         )),
         Expr::Struct { name, fields } => Ok(Value::Struct {
@@ -161,7 +228,14 @@ fn eval_inner(
                 .map(|(field, expr)| {
                     Ok((
                         field.clone(),
-                        eval(expr, state, bindings, model, old_state)?,
+                        eval_observing(
+                            expr,
+                            state,
+                            bindings,
+                            model,
+                            old_state,
+                            observed.as_deref_mut(),
+                        )?,
                     ))
                 })
                 .collect::<Result<_, RuntimeError>>()?,
@@ -194,18 +268,39 @@ fn eval_inner(
         }
         Expr::Stage { .. } => Err(runtime_error("unlowered stage access")),
         Expr::Index(base, index) => {
-            if let Some(value) = eval_place(expr, state, bindings, model, old_state)? {
+            if let Some(value) = eval_place(
+                expr,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )? {
                 return Ok(value);
             }
-            let base = eval(base, state, bindings, model, old_state)?;
-            let index = eval(index, state, bindings, model, old_state)?;
+            let base = eval_observing(
+                base,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?;
+            let index = eval_observing(index, state, bindings, model, old_state, observed)?;
             index_place(&base, index).cloned()
         }
         Expr::Field(base, field) => {
-            if let Some(value) = eval_place(expr, state, bindings, model, old_state)? {
+            if let Some(value) = eval_place(
+                expr,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )? {
                 return Ok(value);
             }
-            let base = eval(base, state, bindings, model, old_state)?;
+            let base = eval_observing(base, state, bindings, model, old_state, observed)?;
             field_place(&base, field).cloned()
         }
         Expr::Method {
@@ -213,20 +308,31 @@ fn eval_inner(
             name,
             args,
         } => {
-            let receiver = eval(receiver, state, bindings, model, old_state)?;
-            eval_method(receiver, name, args, state, bindings, model, old_state)
+            let receiver = eval_observing(
+                receiver,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?;
+            eval_method(
+                receiver, name, args, state, bindings, model, old_state, observed,
+            )
         }
         Expr::Binary { op, left, right } => {
-            eval_binary(op, left, right, state, bindings, model, old_state)
+            eval_binary(op, left, right, state, bindings, model, old_state, observed)
         }
         Expr::Neg(expr) => {
-            let value = as_int(eval(expr, state, bindings, model, old_state)?)?;
+            let value = as_int(eval_observing(
+                expr, state, bindings, model, old_state, observed,
+            )?)?;
             Ok(Value::Int(value.checked_neg().ok_or_else(|| {
                 runtime_error("integer overflow in negation")
             })?))
         }
-        Expr::Not(expr) => Ok(Value::Bool(!as_bool(eval(
-            expr, state, bindings, model, old_state,
+        Expr::Not(expr) => Ok(Value::Bool(!as_bool(eval_observing(
+            expr, state, bindings, model, old_state, observed,
         )?)?)),
         Expr::Conditional {
             condition,
@@ -234,24 +340,42 @@ fn eval_inner(
             else_expr,
             ..
         } => {
-            if as_bool(eval(condition, state, bindings, model, old_state)?)? {
-                eval(then_expr, state, bindings, model, old_state)
+            if as_bool(eval_observing(
+                condition,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?)? {
+                eval_observing(then_expr, state, bindings, model, old_state, observed)
             } else {
-                eval(else_expr, state, bindings, model, old_state)
+                eval_observing(else_expr, state, bindings, model, old_state, observed)
             }
         }
         Expr::Is { expr, pattern } => {
-            let value = eval(expr, state, bindings, model, old_state)?;
+            let value = eval_observing(
+                expr,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?;
             match (value, pattern) {
                 (Value::None, fsl_core::Pattern::None) => Ok(Value::Bool(true)),
                 (Value::Some(_), fsl_core::Pattern::None)
                 | (Value::None, fsl_core::Pattern::Some(_)) => Ok(Value::Bool(false)),
                 (Value::Some(value), fsl_core::Pattern::Some(name)) => {
-                    // A pattern binding never overwrites a name already in scope
-                    // (action parameter, binder, let): the frozen reference guards
-                    // this in `_eval_requires` (`if k not in param_binds`), and #1153
-                    // is the port dropping it. A new name still reaches the body.
-                    bindings.entry(name.clone()).or_insert(*value);
+                    // Evidence survives lexical closure but is never lookup authority.
+                    if let Some(observed) = observed {
+                        observed
+                            .entry(name.clone())
+                            .or_insert_with(|| (*value).clone());
+                    }
+                    // Rewritten matches may shadow only in this continuation;
+                    // closed evaluation retains the caller's outer binding.
+                    bindings.insert(name.clone(), *value);
                     Ok(Value::Bool(true))
                 }
                 _ => Err(runtime_error("is pattern requires an Option value")),
@@ -262,6 +386,7 @@ fn eval_inner(
             binder,
             body,
         } => {
+            // Nested binder-local evaluation is outside the enclosing evidence frame.
             let candidates = binder_values(binder, state, bindings, model, old_state)?;
             if quantifier == "forall" {
                 for (value, mut local) in candidates {
@@ -304,6 +429,7 @@ fn eval_inner(
             binder,
             value,
         } => {
+            // Aggregate sources, filters and values likewise keep their own scope.
             let mut matches = 0_i64;
             let mut sum = 0_i64;
             for (candidate, mut local) in binder_values(binder, state, bindings, model, old_state)?
@@ -327,15 +453,18 @@ fn eval_inner(
             })
         }
         Expr::UnaryNamed { name, expr, .. } => match name.as_str() {
-            "old" => eval(
+            "old" => eval_observing(
                 expr,
                 old_state.ok_or_else(|| runtime_error("old() used without old state"))?,
                 bindings,
                 model,
                 None,
+                observed,
             ),
             "abs" => {
-                let value = as_int(eval(expr, state, bindings, model, old_state)?)?;
+                let value = as_int(eval_observing(
+                    expr, state, bindings, model, old_state, observed,
+                )?)?;
                 Ok(Value::Int(
                     value
                         .checked_abs()
@@ -343,15 +472,28 @@ fn eval_inner(
                 ))
             }
             "rel_acyclic" | "rel_functional" | "rel_injective" | "rel_domain" | "rel_range" => {
-                eval_relation_unary(name, eval(expr, state, bindings, model, old_state)?, model)
+                eval_relation_unary(
+                    name,
+                    eval_observing(expr, state, bindings, model, old_state, observed)?,
+                    model,
+                )
             }
             _ => Err(runtime_error(format!(
                 "unsupported unary expression '{name}'"
             ))),
         },
         Expr::BinaryNamed { name, left, right } => {
-            let left = as_int(eval(left, state, bindings, model, old_state)?)?;
-            let right = as_int(eval(right, state, bindings, model, old_state)?)?;
+            let left = as_int(eval_observing(
+                left,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?)?;
+            let right = as_int(eval_observing(
+                right, state, bindings, model, old_state, observed,
+            )?)?;
             Ok(Value::Int(if name == "min" {
                 left.min(right)
             } else if name == "max" {
@@ -368,9 +510,23 @@ fn eval_inner(
             second,
             third,
         } if name == "rel_reachable" => relation_reachable(
-            eval(first, state, bindings, model, old_state)?,
-            &eval(second, state, bindings, model, old_state)?,
-            &eval(third, state, bindings, model, old_state)?,
+            eval_observing(
+                first,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?,
+            &eval_observing(
+                second,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?,
+            &eval_observing(third, state, bindings, model, old_state, observed)?,
         ),
         Expr::TernaryNamed { name, .. } => Err(runtime_error(format!(
             "unsupported ternary function '{name}'"
@@ -394,6 +550,7 @@ fn eval_place(
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
 ) -> Result<Option<Value>, RuntimeError> {
     enum PlaceStep<'expr> {
         Index(&'expr Expr),
@@ -433,7 +590,14 @@ fn eval_place(
     for step in steps.into_iter().rev() {
         current = match step {
             PlaceStep::Index(index) => {
-                let index = eval(index, state, bindings, model, old_state)?;
+                let index = eval_observing(
+                    index,
+                    state,
+                    bindings,
+                    model,
+                    old_state,
+                    observed.as_deref_mut(),
+                )?;
                 index_place(current, index)?
             }
             PlaceStep::Field(field) => field_place(current, field)?,
@@ -490,11 +654,27 @@ pub fn violating_bindings(
             let mut bad = Vec::new();
             for (value, mut local) in binder_values(binder, state, bindings, model, None)? {
                 local.insert(binder_name(binder).to_owned(), value);
-                if !binder_where_holds(binder, state, &mut local, model, None)? {
+                let mut observed = local.clone();
+                if !binder_where_holds_observing(
+                    binder,
+                    state,
+                    &mut local,
+                    model,
+                    None,
+                    Some(&mut observed),
+                )? {
                     continue;
                 }
-                if !as_bool(eval(body, state, &mut local, model, None)?)? {
-                    bad.push(local);
+                // Filter and body share evidence, never their closed lexical exports.
+                if !as_bool(eval_observing(
+                    body,
+                    state,
+                    &mut local,
+                    model,
+                    None,
+                    Some(&mut observed),
+                )?)? {
+                    bad.push(observed);
                 }
             }
             return Ok((!bad.is_empty()).then_some(bad));
@@ -508,10 +688,18 @@ pub fn violating_bindings(
             return search(right, state, bindings, model);
         }
         let mut local = bindings.clone();
-        if as_bool(eval(expr, state, &mut local, model, None)?)? {
+        let mut observed = local.clone();
+        if as_bool(eval_observing(
+            expr,
+            state,
+            &mut local,
+            model,
+            None,
+            Some(&mut observed),
+        )?)? {
             Ok(None)
         } else {
-            Ok(Some(vec![local]))
+            Ok(Some(vec![observed]))
         }
     }
 
@@ -527,10 +715,20 @@ fn eval_method(
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
     let values = args
         .iter()
-        .map(|arg| eval(arg, state, bindings, model, old_state))
+        .map(|arg| {
+            eval_observing(
+                arg,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     match receiver {
         Value::Set(mut set) => match (name, values.as_slice()) {
@@ -598,33 +796,47 @@ fn eval_binary(
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
-    if op == "and" {
-        if !as_bool(eval(left, state, bindings, model, old_state)?)? {
-            return Ok(Value::Bool(false));
+    if matches!(op, "and" | "or" | "=>") {
+        let mut local = bindings.clone();
+        let left = as_bool(eval_with_bindings_observing(
+            left,
+            state,
+            &mut local,
+            model,
+            old_state,
+            observed.as_deref_mut(),
+        )?)?;
+        match (op, left) {
+            ("and", false) => {
+                // Retain reached conjunct evidence even when its RHS is skipped.
+                *bindings = local;
+                return Ok(Value::Bool(false));
+            }
+            ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
+            _ => {}
         }
-        return Ok(Value::Bool(as_bool(eval(
-            right, state, bindings, model, old_state,
-        )?)?));
-    }
-    if op == "or" {
-        if as_bool(eval(left, state, bindings, model, old_state)?)? {
-            return Ok(Value::Bool(true));
+        if !fsl_core::pattern_binding_flows(op, true) {
+            local.clone_from(bindings);
         }
-        return Ok(Value::Bool(as_bool(eval(
-            right, state, bindings, model, old_state,
-        )?)?));
-    }
-    if op == "=>" {
-        if !as_bool(eval(left, state, bindings, model, old_state)?)? {
-            return Ok(Value::Bool(true));
+        let right = as_bool(eval_with_bindings_observing(
+            right, state, &mut local, model, old_state, observed,
+        )?)?;
+        if fsl_core::pattern_binding_flows(op, false) {
+            *bindings = local;
         }
-        return Ok(Value::Bool(as_bool(eval(
-            right, state, bindings, model, old_state,
-        )?)?));
+        return Ok(Value::Bool(right));
     }
-    let left = eval(left, state, bindings, model, old_state)?;
-    let right = eval(right, state, bindings, model, old_state)?;
+    let left = eval_observing(
+        left,
+        state,
+        bindings,
+        model,
+        old_state,
+        observed.as_deref_mut(),
+    )?;
+    let right = eval_observing(right, state, bindings, model, old_state, observed)?;
     match op {
         "+" => checked_binary(left, right, i64::checked_add, "addition"),
         "-" => checked_binary(left, right, i64::checked_sub, "subtraction"),
@@ -716,13 +928,26 @@ fn binder_where_holds(
     model: &KernelModel,
     old_state: Option<&State>,
 ) -> Result<bool, RuntimeError> {
+    binder_where_holds_observing(binder, state, bindings, model, old_state, None)
+}
+
+fn binder_where_holds_observing(
+    binder: &Binder,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<bool, RuntimeError> {
     let condition = match binder {
         Binder::Typed { where_expr, .. }
         | Binder::Range { where_expr, .. }
         | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
     };
     condition.map_or(Ok(true), |condition| {
-        as_bool(eval(condition, state, bindings, model, old_state)?)
+        as_bool(eval_observing(
+            condition, state, bindings, model, old_state, observed,
+        )?)
     })
 }
 
@@ -1995,7 +2220,7 @@ fn refinement_action_instance(
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expr) => {
-                if !as_bool(eval(
+                if !as_bool(eval_with_bindings(
                     expr,
                     &monitor.state,
                     &mut bindings,
@@ -4360,7 +4585,7 @@ fn evaluate_action_guards_at(
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expression) => {
-                let value = eval(expression, state, &mut bindings, model, None)
+                let value = eval_with_bindings(expression, state, &mut bindings, model, None)
                     .and_then(as_bool)
                     .map_err(failed)?;
                 if !value {

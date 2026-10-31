@@ -250,6 +250,7 @@ wrappers.
 | `fsl-runtime/src/bin/fsl-explicit.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
 | `fsl-runtime/src/bin/fsl-refine.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
 | `fsl-runtime/src/bin/fsl-refine.rs` | `parse_refinement` | 1 | Definition | PARITY_TOOL |
+| `fsl-runtime/src/scope_tests.rs` | `parse_kernel_source` | 2 | Definition | FIXTURE |
 | `fsl-syntax/src/ai.rs` | `lex` | 1 | D8 | CAUSAL_AI |
 | `fsl-syntax/src/ai_project.rs` | `lex` | 1 | D8 | CAUSAL_AI |
 | `fsl-syntax/src/bin/fsl-parse-surface.rs` | `parse_surface_document` | 1 | Definition | PARITY_TOOL |
@@ -267,6 +268,7 @@ wrappers.
 | `fsl-tools/src/causal.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
 | `fsl-tools/src/document_project.rs` | `ParseOptions::stable` | 2 | Definition | STABLE_WRAPPER |
 | `fsl-tools/src/document_render.rs` | `ParseOptions::stable` | 1 | Definition | STABLE_WRAPPER |
+| `fsl-verifier/src/eval/scope_tests.rs` | `parse_kernel_source` | 1 | Definition | FIXTURE |
 | `fslc/src/bin/fsl-bmc.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
 | `fslc/src/bin/fsl-replay-actions.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
 | `fslc/src/causal.rs` | `parse_causal` | 2 | D8 | CAUSAL_AI |
@@ -280,6 +282,13 @@ wrappers.
 | `fslc/src/source_diagnostic.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
 | `fslc/src/verification.rs` | `is_causal_source` | 1 | D8 | CAUSAL_AI |
 | `fslc/src/verification.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
+
+The scope-test fixture rows count the private `model`/`witness_model` helpers in
+the runtime and `scope_model` in the verifier. Their parent modules are
+`#[cfg(test)]`; every caller supplies a fixed unit-test string or expression
+matrix to an inline published-language spec template. They never parse a user
+document or receive process parse options. These are `Definition`/`FIXTURE`
+references, not unrouted production parsers or exclusions from the scanner.
 
 The #1417 baseline adapter removes the duplicate causal preparse from `main.rs`;
 baseline verification now reaches the existing `verification.rs` entries above.
