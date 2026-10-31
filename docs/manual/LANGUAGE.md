@@ -2385,8 +2385,22 @@ verification result under `sweep.results`, and returns the first true failing
 scope under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the
 lower bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`).
 A passing sweep means "no counterexample in this grid", not an unbounded proof.
-A spec `error` (parse / type / semantics / io / vacuous / …) from any scope in
-the grid is not a counterexample: `sweep` returns that underlying error
+The normalized grid has a fixed limit of 10,000 cells: multiply the inclusive
+width of every `--instances` range, every `--values` range, and the depth range.
+An axis with no overrides contributes 1. Within each axis, the last range for
+each trimmed name wins. The checked count follows CLI option validation,
+literate-input restrictions, range validation, file loading, and edition
+admission (which may itself parse the source). It precedes both Cartesian-product
+allocations and every cell's parsing, type checks, and scope validation. An
+unrepresentable count or a count above 10,000 returns `kind:"semantics"`, exit 2,
+with `message:"sweep grid exceeds the maximum of 10000 cells"`; no partial sweep
+result is returned. Admitted grids retain their cell order, error propagation,
+verdicts, minimal counterexample, and per-scope aggregation. This limits the
+number of verification calls, not each cell's state count, elapsed time, or
+absolute depth value.
+
+Within an admitted grid, a spec `error` (parse / type / semantics / io /
+vacuous / …) from any scope is not a counterexample: `sweep` returns that underlying error
 envelope verbatim (`result`, `kind`, `message`, `loc`, exit code unchanged)
 instead of folding it into `sweep_passed`, `sweep_inconclusive`, or
 `sweep_failed`.

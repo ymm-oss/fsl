@@ -3337,6 +3337,25 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
     }
 }
 
+const MAX_SWEEP_CELLS: usize = 10_000;
+
+fn checked_sweep_cell_count(
+    depth_lo: usize,
+    depth_hi: usize,
+    instance_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
+    value_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Option<usize> {
+    let depth_count = depth_hi.checked_sub(depth_lo)?.checked_add(1)?;
+    let cells = instance_ranges
+        .values()
+        .chain(value_ranges.values())
+        .try_fold(depth_count, |cells, (lo, hi)| {
+            let width = usize::try_from(i128::from(*hi) - i128::from(*lo) + 1).ok()?;
+            cells.checked_mul(width)
+        })?;
+    (cells <= MAX_SWEEP_CELLS).then_some(cells)
+}
+
 fn integer_combinations(
     ranges: &std::collections::BTreeMap<String, (i64, i64)>,
 ) -> Vec<std::collections::BTreeMap<String, i64>> {
@@ -3470,6 +3489,15 @@ fn run_sweep_grid_from_source(
     instance_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
     value_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
 ) -> (Value, i32) {
+    if checked_sweep_cell_count(depth_lo, depth_hi, instance_ranges, value_ranges).is_none() {
+        return (
+            error_output(
+                "semantics",
+                &format!("sweep grid exceeds the maximum of {MAX_SWEEP_CELLS} cells"),
+            ),
+            2,
+        );
+    }
     let instance_combinations = integer_combinations(instance_ranges);
     let value_upper_combinations = integer_combinations(value_ranges);
     let mut results = Vec::new();

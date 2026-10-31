@@ -2199,7 +2199,22 @@ cache の読み書きを止めるには `FSLC_CACHE=off` を使います。
 失敗スコープを `sweep.minimal_counterexample` として返します。`--values` に
 ついては、sweep は下限を固定して上限を拡大します(`lo..lo`, `lo..lo+1`, ...,
 `lo..hi`)。sweep の合格は「このグリッドに反例がない」ことを意味し、非有界の証明
-ではありません。グリッド中のいずれかのスコープが spec `error`(parse / type /
+ではありません。
+
+正規化後のグリッドの上限は 10,000 セルです。各 `--instances` 範囲、各
+`--values` 範囲、深さ範囲の幅を、両端を含めて掛け合わせます。上書き指定のない
+軸は 1 と数えます。同じ軸で同じ名前を繰り返した場合は、前後の空白を除いた
+名前ごとに最後の範囲を使います。CLI オプション、literate 入力の制限、範囲、
+ファイル読み取り、edition の受け入れ検査を先に行い、その後でセル数を検査します。
+edition の受け入れ検査では、ソースを構文解析する場合もあります。セル数の検査は
+両方の直積の生成と、各セルの構文・型・scope の検査より前です。セル数を整数で
+表せない場合や 10,000 を超える場合は、`kind:"semantics"`、exit 2、
+`message:"sweep grid exceeds the maximum of 10000 cells"` を返し、部分的な
+sweep 結果は返しません。上限内のセル順序、既存エラーの返し方、判定、最小反例、
+スコープごとの集約は変わりません。この上限が制限するのは検証の呼び出し回数であり、
+各セルの状態数、経過時間、深さの値自体ではありません。
+
+上限内のグリッド中のいずれかのスコープが spec `error`(parse / type /
 semantics / io / vacuous / …)を返した場合、それは反例ではありません。`sweep` は
 その基盤のエラー envelope をそのまま返します(`result`、`kind`、`message`、
 `loc`、exit code は変更しません)。`sweep_passed`、`sweep_inconclusive`、
