@@ -822,6 +822,9 @@ pub fn internal_error(message: String) -> String {
 }
 
 #[cfg(test)]
+mod issue_1434_publication_tests;
+
+#[cfg(test)]
 mod tests {
     include!("issue_1517_sync_argument_locations_tests.rs");
     include!("issue_1531_tests.rs");

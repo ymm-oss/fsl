@@ -547,6 +547,101 @@ function rejectPending(error) {
 let details;
 let dependencyEnvelopes;
 const recursiveEnvelopes = [];
+// #1434: send whole request objects through the actual batch -> run boundary.
+// The single-request JS adapter destructures keys and cannot detect a typed
+// legacy Rust field. Never use normalizeEnvelope for these comparisons.
+async function publicationBoundary(socket) {
+  const body = "spec S { state { flag: Bool = false } action stay() { flag = false } invariant Safe { not flag } }\n";
+  const variants = [{}, { unstable: ["fsl5"] }, { unstable: ["later"] },
+    { unstable: 42 }, { unstable: { fsl5: true } }, { unrelated_unknown: { arbitrary: [42] } }];
+  const requests = [];
+  for (const header of ["", "fsl 4\n", "fsl 5\n"]) {
+    for (const extra of variants) {
+      requests.push({ cmd: "check", source: header + body, source_file: "model.fsl", ...extra });
+    }
+  }
+  const malformed = [
+    { cmd: 42 }, { source: {} }, { source_file: 42 }, { files: [] }, { options: 42 },
+    { options: { depth: "2" } }, { options: { deadlock: 42 } },
+  ];
+  for (const extra of malformed) {
+    requests.push({ cmd: "check", source: body, source_file: "model.fsl", ...extra });
+  }
+  // Real verify, not a host serde/check substitute. Preserve every raw value.
+  for (const extra of variants) {
+    requests.push({ cmd: "verify", source: "fsl 5\n" + body, source_file: "model.fsl",
+      options: { depth: 2, deadlock: "warn" }, ...extra });
+  }
+  const evaluated = await cdp(socket, "Runtime.evaluate", {
+    expression: `new Promise((resolve, reject) => {
+      const worker = new Worker('./worker.js');
+      const timer = setTimeout(() => { worker.terminate(); reject(new Error('publication boundary timeout')); }, 120000);
+      worker.onmessage = ({data}) => {
+        if (data.envelopes || data.envelope || data.transportError) {
+          clearTimeout(timer); worker.terminate();
+          if (data.envelopes) resolve(data.envelopes); else reject(new Error(JSON.stringify(data)));
+        }
+      };
+      worker.onerror = (event) => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message)); };
+      worker.postMessage({id:'publication-1434',batch:${JSON.stringify(requests)}});
+    })`, awaitPromise: true, returnByValue: true,
+  });
+  if (evaluated.exceptionDetails) throw new Error(JSON.stringify(evaluated.exceptionDetails));
+  const outputs = evaluated.result.value;
+  console.log(JSON.stringify({ publication1434: { requests, outputs } }));
+  if (!Array.isArray(outputs) || outputs.length !== requests.length) {
+    throw new Error("publication request population did not execute");
+  }
+  for (let header = 0; header < 3; header += 1) {
+    const reference = outputs[header * variants.length + 1];
+    if (reference.result !== "ok" || reference.spec !== "S" || reference.warnings?.length !== 0) {
+      throw new Error(`publication check oracle refused ${JSON.stringify(reference)}`);
+    }
+    const expected = { fsl: "1.0", result: "ok", spec: "S", warnings: [], versions: reference.versions };
+    if (header > 0) expected.fsl_edition = header === 1 ? 4 : 5;
+    if (header === 2) expected.edition = "next";
+    const oracleDrift = differences(reference, expected);
+    if (oracleDrift.length) throw new Error(`publication check literal packet drift ${JSON.stringify(oracleDrift)}`);
+    for (let variant = 0; variant < variants.length; variant += 1) {
+      const actual = outputs[header * variants.length + variant];
+      const drift = differences(actual, reference);
+      if (drift.length) throw new Error(`publication whole Worker packet drift ${JSON.stringify(drift)}`);
+    }
+  }
+  const knownStart = 3 * variants.length;
+  for (let index = 0; index < malformed.length; index += 1) {
+    const actual = outputs[knownStart + index];
+    if (actual.result !== "error" || actual.kind !== "io"
+        || !actual.message?.startsWith("invalid request JSON: invalid type:")) {
+      throw new Error(`malformed known Worker field was admitted ${JSON.stringify(actual)}`);
+    }
+  }
+  const verifies = outputs.slice(knownStart + malformed.length);
+  const stableVerify = (packet) => {
+    const stable = structuredClone(packet);
+    // These exact ten elapsed slots varied in two d83 native runs of this
+    // same model/depth. Real Worker calibration remains unexecuted until its
+    // dependencies exist; missing/extra/other changing cost slots FAIL closed.
+    // Time spent executing/checking a property is ambient, never its verdict.
+    const slots = [[stable.cost, "elapsed_s"], [stable.cost?.solver, "check_elapsed_s"],
+      ...Array.from({ length: 8 }, (_, index) => [stable.cost?.properties?.[index], "elapsed_s"])];
+    for (const [object, key] of slots) {
+      if (!object || !Number.isFinite(object[key]) || object[key] < 0) {
+        throw new Error(`missing/non-numeric live publication timing ${JSON.stringify(packet)}`);
+      }
+      object[key] = 0;
+    }
+    return stable;
+  };
+  for (const actual of verifies) {
+    if (actual.result !== "verified" || actual.completeness !== "bounded" || actual.checked_to_depth !== 2
+        || actual.fsl_edition !== 5 || actual.edition !== "next") {
+      throw new Error(`publication real verify refused/promoted ${JSON.stringify(actual)}`);
+    }
+    const drift = differences(stableVerify(actual), stableVerify(verifies[1]));
+    if (drift.length) throw new Error(`publication full verify packet drift ${JSON.stringify(drift)}`);
+  }
+}
 {
   const debugPort = await devtoolsPort();
   const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`).then((response) => response.json());
@@ -604,6 +699,7 @@ const recursiveEnvelopes = [];
     else recursiveEnvelopes.push(...evaluated.result.value);
     }
     await writeFile(join(dist, "issue-1467-worker-raw.json"), JSON.stringify({ cases: recursiveCases, envelopes: recursiveEnvelopes }, null, 2));
+    await publicationBoundary(socket);
   } finally {
     socket.close();
   }

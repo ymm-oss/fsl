@@ -178,6 +178,121 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
     test_executor::block_on_until(future, Instant::now() + Duration::from_secs(120))
 }
 
+// Independent #1434 controls. Keep the existing harness and every old body
+// intact; retain complete protocol messages as well as diagnostics.
+fn publication_transcript(texts: &[String], gate: Option<&str>) -> Vec<Value> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"));
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command.env_remove("FSLC_UNSTABLE");
+    command.env_remove("FSLC_LSP_ANALYSIS_DIAGNOSTICS");
+    if let Some(value) = gate {
+        command.env("FSLC_UNSTABLE", value);
+    }
+    let mut child = command.spawn().expect("publication LSP");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = LspReceiver::new(child.stdout.take().unwrap());
+    let mut transcript = Vec::new();
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":1,"method":"initialize",
+        "params":{"processId":null,"rootUri":null,"capabilities":{}}}),
+    );
+    transcript.push(receive(&mut stdout));
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    let uri = "file:///tmp/fsl-publication-1434.fsl";
+    for (index, text) in texts.iter().enumerate() {
+        if index == 0 {
+            send(
+                &mut stdin,
+                &json!({"jsonrpc":"2.0","method":"textDocument/didOpen",
+                "params":{"textDocument":{"uri":uri,"languageId":"fsl","version":1,"text":text}}}),
+            );
+        } else {
+            send(
+                &mut stdin,
+                &json!({"jsonrpc":"2.0","method":"textDocument/didChange",
+                "params":{"textDocument":{"uri":uri,"version":index+1},"contentChanges":[{"text":text}]}}),
+            );
+        }
+        let message = receive(&mut stdout);
+        assert_eq!(message["method"], "textDocument/publishDiagnostics");
+        assert_eq!(message["params"]["uri"], uri);
+        assert_eq!(message["params"]["version"], index + 1);
+        transcript.push(message);
+    }
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}),
+    );
+    transcript.push(receive(&mut stdout));
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"exit","params":null}),
+    );
+    drop(stdin);
+    let output = child.wait_with_output().expect("publication LSP exit");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    println!(
+        "{}",
+        json!({"gate":gate,"transcript":transcript,"exit":output.status.code(),"stderr":stderr})
+    );
+    assert!(output.status.success());
+    assert_eq!(stderr, "");
+    transcript
+}
+
+#[test]
+fn publication_lsp_is_unconditional_and_keeps_astral_operator_ranges() {
+    let body = "spec S { state { flag: Bool = false } invariant Safe { not flag } }\n";
+    let line = "  @requirement(\"REQ-1\", \"日本語😀\") invariant I { true || false }";
+    let texts = vec![
+        body.to_owned(),
+        format!("fsl 4\n{body}"),
+        format!("fsl 5\n{body}"),
+        format!("fsl 5\nspec S {{ state {{ flag: Bool = false }}\n{line}\n}}\n"),
+        format!("fsl 5\n{body}"),
+        "fsl 5\nrequirements R { glossary { Flag = 注文 } state { 注文: Bool = false } invariant Safe { not 注文 } }\n".to_owned(),
+    ];
+    // Execute every packet before asserting agreement so baseline RED does
+    // not hide unknown/empty legacy-environment or didChange clearing cells.
+    let transcripts: Vec<_> = [
+        Some("fsl5"),
+        None,
+        Some(""),
+        Some("later"),
+        Some("later,fsl5"),
+    ]
+    .into_iter()
+    .map(|gate| publication_transcript(&texts, gate))
+    .collect();
+    let reference = &transcripts[0];
+    for index in [1, 2, 3, 5, 6] {
+        assert_eq!(reference[index]["params"]["diagnostics"], json!([]));
+    }
+    let column = line[..line.find("||").unwrap()].encode_utf16().count();
+    assert_eq!(
+        reference[4]["params"]["diagnostics"],
+        json!([{
+            "range":{"start":{"line":2,"character":column},"end":{"line":2,"character":column+2}},
+            "severity":1,"code":"unsupported_in_edition","source":"fslc",
+        "message":"expression operator '||' is unsupported in this edition; use 'or' manually, then review fslc migrate <file> --edition next for remaining edits at 3:52",
+            "data":{"kind":"parse"}
+        }])
+    );
+    for transcript in &transcripts[1..] {
+        assert_eq!(
+            transcript, reference,
+            "complete LSP messages, no exclusions"
+        );
+    }
+}
+
 #[test]
 fn stdio_lifecycle_uses_latest_buffer_and_serves_symbols() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"))
