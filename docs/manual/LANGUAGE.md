@@ -3011,7 +3011,7 @@ property and `preserve progress`, rather than weakening either.
 
 Boundary audit: base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` → production head
 `2aab19f2b2d286c01c1aa79497c131df334aaff1`, each binary in its own tree, with
-`FSLC_UNSTABLE=fsl5 FSLC_CACHE=off`: `fslc check <path>` on 610 corpus forms
+next-edition parsing enabled and caching disabled: `fslc check <path>` on 610 corpus forms
 (23 specs/195 examples/392 fixtures) and 54 inline forms has **no ok→error
 transitions** and identical complete outputs. The 595-source inventory has
 0 rewritten-required-test inline forms; only two acceptance tests were added.

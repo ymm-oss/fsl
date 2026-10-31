@@ -2821,7 +2821,7 @@ map 全体の等値は全キーの一致、不等値は少なくとも一つの�
 
 境界監査: base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` → production head
 `2aab19f2b2d286c01c1aa79497c131df334aaff1`。各 binary を自身の tree で、
-`FSLC_UNSTABLE=fsl5 FSLC_CACHE=off` として実行しました。corpus610形
+次版の構文解析を有効、キャッシュを無効にして実行しました。corpus610形
 (specs23・examples195・fixtures392)と inline54形の `fslc check <path>` は、
 **ok→error が空集合**で、出力全体が一致します。595 source の inventory で、書き換えた
 required test の inline は0形、追加は受入テスト2本のみです。別枠の corpus `refine`

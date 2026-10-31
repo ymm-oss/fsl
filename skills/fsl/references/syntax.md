@@ -1026,7 +1026,7 @@ weaken the property/remove `preserve progress` to obtain a verdict.
 
 Audit: base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` → production head
 `2aab19f2b2d286c01c1aa79497c131df334aaff1`, own-tree binaries with
-`FSLC_UNSTABLE=fsl5 FSLC_CACHE=off`. `fslc check <path>`:610 corpus forms
+next-edition parsing enabled and caching disabled. `fslc check <path>`:610 corpus forms
 (23 specs/195 examples/392 fixtures)+54 inline forms, identical complete output,
 **empty ok→error set**. Inventory595 sources:0 rewritten-required-test inline
 forms, two added acceptance tests. Separately,28 live corpus refine commands
