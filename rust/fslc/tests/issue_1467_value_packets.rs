@@ -165,7 +165,7 @@ fn nested_absence_bindings_are_literal_json_not_debug_values() {
                             && r["violating_bindings"][0]["x"] == expected
                     };
                     support::require(&mut errors, ok, members, route, &r, exit);
-                    let packet = (stable_full_packet(r), exit);
+                    let packet = (stable_full_packet(r, route), exit);
                     if let Some(before) = previous.insert(route, packet.clone()) {
                         assert_eq!(before, packet);
                     }

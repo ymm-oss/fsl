@@ -259,7 +259,7 @@ fn matrix(name: &str) -> Vec<String> {
                             report["result"]
                         );
                         require(&mut errors, ok, &label, route, &report, exit);
-                        let stable = (stable_full_packet(report), exit);
+                        let stable = (stable_full_packet(report, route), exit);
                         if let Some(prior) = previous.insert(route, stable.clone())
                             && prior != stable
                         {

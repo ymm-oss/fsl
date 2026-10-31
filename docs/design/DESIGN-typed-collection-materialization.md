@@ -110,3 +110,15 @@ not an FSL fixture source. Both a52->cc7 and e201->cc7 measured empty ok->error
 sets for corpus and inline forms, with no corpus path additions/removals. These
 are acceptance observations, not 729-form engine agreement, product PASS or
 validation of later `b8dc1fdb46615fc3b40238af8f495d7a80e5da4f` integration.
+
+### Repeated native packet comparisons
+
+Identical CI BMC and induction packets differed only in
+`cost.solver.memory_mb` (18.12/18.02 and 17.91/17.92 MB). This is native solver
+allocation telemetry, so recursive-value tests validate its presence, numeric
+type and finite nonnegative value for queried native proof packets, then compare
+the remaining packet in full. Existing measured wall-clock exclusions remain.
+Solver counters, verdicts, assurance, locations, traces, versions and nested user
+fields remain exact. Explicit/no-solver and zero-check memory values are not
+excluded. Controls reject missing telemetry on either or both sides and changes
+to every retained evidence class; complete original packets are retained.

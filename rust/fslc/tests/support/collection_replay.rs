@@ -676,18 +676,47 @@ pub fn full_observe(directory: &std::path::Path, route: &str) -> (Value, i32) {
     )
 }
 
-/// Only measured wall-clock fields vary between identical early probe packets.
-/// Every exclusion is live/type-checked; all verdict/assurance/location data stay.
+/// Exclude measured wall clocks and native solver allocation telemetry only.
+/// CI repeated identical BMC/induction packets with different `memory_mb` values.
+/// Every exclusion is live/type-checked; semantic fields and counters stay exact.
 #[allow(dead_code)]
-pub fn stable_full_packet(mut report: Value) -> Value {
+pub fn stable_full_packet(mut report: Value, route: &str) -> Value {
+    let proof_route = matches!(route, "bmc" | "induction")
+        && matches!(
+            report["result"].as_str(),
+            Some("verified" | "proved" | "violated")
+        );
+    let native_cost = proof_route
+        && report["versions"]["solver"]["backend"]
+            .as_str()
+            .expect("proof packet must identify its solver backend")
+            == "native-z3";
+    if native_cost {
+        assert!(
+            report["cost"].is_object(),
+            "native proof cost must be present"
+        );
+    }
     if let Some(cost) = report.get_mut("cost") {
         assert!(cost["elapsed_s"].as_f64().is_some());
         cost.as_object_mut().unwrap().remove("elapsed_s");
-        assert!(cost["solver"]["check_elapsed_s"].as_f64().is_some());
-        cost["solver"]
+        let solver = cost["solver"]
             .as_object_mut()
-            .unwrap()
-            .remove("check_elapsed_s");
+            .expect("cost must contain solver statistics");
+        let checks = solver
+            .get("checks")
+            .and_then(Value::as_u64)
+            .expect("solver checks must be an unsigned integer");
+        assert!(solver["check_elapsed_s"].as_f64().is_some());
+        solver.remove("check_elapsed_s");
+        if native_cost && checks > 0 {
+            let memory = solver
+                .get("memory_mb")
+                .and_then(Value::as_f64)
+                .expect("queried native solver memory must be numeric and present");
+            assert!(memory.is_finite() && memory >= 0.0);
+            solver.remove("memory_mb");
+        }
         for property in cost["properties"].as_array_mut().unwrap() {
             assert!(property["elapsed_s"].as_f64().is_some());
             property.as_object_mut().unwrap().remove("elapsed_s");
@@ -828,7 +857,7 @@ pub fn continuation(label: &str, source: &str, oracle: &Oracle) -> Vec<String> {
                     );
                 }
             }
-            let stable = (stable_full_packet(r), exit);
+            let stable = (stable_full_packet(r, route), exit);
             if let Some(prior) = previous.insert(route, stable.clone())
                 && prior != stable
             {

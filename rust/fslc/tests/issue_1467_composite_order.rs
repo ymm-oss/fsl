@@ -96,7 +96,7 @@ fn exercise(label: &str, text: &str, outcome: &str, binding: Option<&Value>) -> 
                     );
                 }
             }
-            let stable = (stable_full_packet(r), exit);
+            let stable = (stable_full_packet(r, route), exit);
             if let Some(prior) = previous.insert(route, stable.clone()) {
                 assert_eq!(prior, stable, "full packet {label}/{route}");
             }
@@ -360,4 +360,110 @@ fn breaking_collection_constructor_migration_is_not_semantic_red() {
         statuses.iter().all(|ok| *ok),
         "PUBLIC API MIGRATION ONLY, never verifier semantic RED"
     );
+}
+
+fn telemetry_packet(route: &str) -> Value {
+    json!({
+        "fsl":"1.0", "result":if route == "induction" {"proved"} else {"violated"},
+        "loc":{"line":8,"column":3}, "assurance":"bounded",
+        "trace":[{"state":{"memory_mb":7}}], "versions":{"solver":{"backend":"native-z3"}},
+        "cost":{"elapsed_s":0.01,
+            "solver":{"checks":49,"check_elapsed_s":0.02,"memory_mb":18.12,
+                "conflicts":13,"decisions":18,"propagations":80},
+            "properties":[{"kind":"invariant","name":"Capture","checks":2,"elapsed_s":0.01}]}
+    })
+}
+
+#[test]
+fn native_memory_comparison_rejects_missing_or_invalid_telemetry() {
+    for route in ["bmc", "induction"] {
+        let base = telemetry_packet(route);
+        let mut varied = base.clone();
+        varied["cost"]["solver"]["memory_mb"] = json!(18.02);
+        assert_eq!(
+            stable_full_packet(base.clone(), route),
+            stable_full_packet(varied, route)
+        );
+        let mut missing = base.clone();
+        missing["cost"]["solver"]
+            .as_object_mut()
+            .unwrap()
+            .remove("memory_mb");
+        for (left, right) in [
+            (missing.clone(), base.clone()),
+            (base.clone(), missing.clone()),
+            (missing.clone(), missing),
+        ] {
+            assert!(
+                std::panic::catch_unwind(|| {
+                    (
+                        stable_full_packet(left, route),
+                        stable_full_packet(right, route),
+                    )
+                })
+                .is_err(),
+                "memory must remain live on either and both sides"
+            );
+        }
+        for invalid in [Value::Null, json!(true), json!("18.12"), json!(-1)] {
+            let mut packet = base.clone();
+            packet["cost"]["solver"]["memory_mb"] = invalid;
+            assert!(std::panic::catch_unwind(|| stable_full_packet(packet, route)).is_err());
+        }
+        for (parent, key) in [
+            ("", "cost"),
+            ("/cost", "solver"),
+            ("/cost/solver", "checks"),
+        ] {
+            let mut packet = base.clone();
+            packet
+                .pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(key);
+            assert!(std::panic::catch_unwind(|| stable_full_packet(packet, route)).is_err());
+        }
+        for invalid in [Value::Null, json!(true), json!("49"), json!(-1)] {
+            let mut packet = base.clone();
+            packet["cost"]["solver"]["checks"] = invalid;
+            assert!(std::panic::catch_unwind(|| stable_full_packet(packet, route)).is_err());
+        }
+    }
+}
+
+#[test]
+fn native_memory_comparison_preserves_every_other_evidence_field() {
+    for route in ["bmc", "induction"] {
+        let base = telemetry_packet(route);
+        let stable = stable_full_packet(base.clone(), route);
+        for (path, value) in [
+            ("/result", json!("verified")),
+            ("/loc/line", json!(9)),
+            ("/assurance", json!("unbounded")),
+            ("/trace/0/state/memory_mb", json!(99)),
+            ("/versions/solver/backend", json!("different")),
+            ("/cost/solver/checks", json!(50)),
+            ("/cost/solver/conflicts", json!(14)),
+            ("/cost/solver/decisions", json!(19)),
+            ("/cost/solver/propagations", json!(81)),
+        ] {
+            let mut changed = base.clone();
+            *changed.pointer_mut(path).unwrap() = value;
+            assert_ne!(stable, stable_full_packet(changed, route), "{path}");
+        }
+        let mut extra = base.clone();
+        extra["extra"] = json!(1);
+        assert_ne!(stable, stable_full_packet(extra, route));
+        for (outside, checks) in [("explicit", 49), (route, 0)] {
+            let mut left = base.clone();
+            left["cost"]["solver"]["checks"] = json!(checks);
+            let mut right = left.clone();
+            right["cost"]["solver"]["memory_mb"] = json!(18.02);
+            assert_ne!(
+                stable_full_packet(left, outside),
+                stable_full_packet(right, outside)
+            );
+        }
+    }
 }
