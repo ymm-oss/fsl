@@ -191,11 +191,8 @@ fn rows_for_type<S: SmtSolver>(
                 let (_, entries) = crate::value::collection_entries(solver, model, value)?;
                 for (entity, row) in values.iter().zip(rows.iter_mut()) {
                     let entity = concrete_value(solver, model, element_ty, entity)?;
-                    let present = crate::value::collection_contains(
-                        solver,
-                        &entries,
-                        &[int_term(&entity)?.clone()],
-                    )?;
+                    let present =
+                        crate::value::collection_contains(solver, model, &entries, &[entity])?;
                     row.push(coerce_int(solver, &present, &TypeRef::Bool)?);
                 }
             }

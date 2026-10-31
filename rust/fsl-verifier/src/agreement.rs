@@ -792,10 +792,13 @@ fn totalize_agreement_value<S: SmtSolver>(
         SymbolicValue::SetLiteral(values) | SymbolicValue::SeqLiteral(values) => values
             .iter_mut()
             .try_for_each(|value| totalize_agreement_value(solver, model, value)),
+        SymbolicValue::Collection { entries, .. } => entries
+            .iter_mut()
+            .flat_map(|(key, _)| key.iter_mut())
+            .try_for_each(|value| totalize_agreement_value(solver, model, value)),
         SymbolicValue::Scalar { .. }
         | SymbolicValue::None
         | SymbolicValue::Set { .. }
-        | SymbolicValue::Collection { .. }
         | SymbolicValue::Relation { .. } => Ok(()),
     }
 }

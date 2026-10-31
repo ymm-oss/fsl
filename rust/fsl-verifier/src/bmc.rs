@@ -2070,10 +2070,12 @@ fn collect_int_terms<S: SmtSolver>(
                 collect_int_terms(solver, item, out);
             }
         }
-        SymbolicValue::None
-        | SymbolicValue::Set { .. }
-        | SymbolicValue::Relation { .. }
-        | SymbolicValue::Collection { .. } => {}
+        SymbolicValue::Collection { entries, .. } => {
+            for value in entries.iter().flat_map(|(key, _)| key) {
+                collect_int_terms(solver, value, out);
+            }
+        }
+        SymbolicValue::None | SymbolicValue::Set { .. } | SymbolicValue::Relation { .. } => {}
     }
 }
 

@@ -540,12 +540,16 @@ fn extend_initial_collections<S: SmtSolver>(
                 .into_iter()
                 .enumerate()
                 .map(|(part, ty)| {
-                    Ok(solver.constant(&format!("{name}_{part}"), &solver_sort(model, ty)?)?)
+                    Ok(SymbolicValue::Scalar {
+                        ty: ty.clone(),
+                        term: solver
+                            .constant(&format!("{name}_{part}"), &solver_sort(model, ty)?)?,
+                    })
                 })
                 .collect::<Result<Vec<_>, VerifyError>>()?;
             let present = solver.and(&[
                 solver.constant(&name, &fsl_solver::Sort::Bool)?,
-                solver.not(&collection_contains(solver, &entries, &key)?)?,
+                solver.not(&collection_contains(solver, model, &entries, &key)?)?,
             ])?;
             entries.push((key, present));
         }
