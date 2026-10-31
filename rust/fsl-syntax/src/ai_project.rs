@@ -480,74 +480,75 @@ fn try_match_header(chars: &[char], start: usize) -> Option<BlockHeader> {
     None
 }
 
-fn find_block_header(chars: &[char], from: usize) -> Option<BlockHeader> {
+fn find_block_header(
+    chars: &[char],
+    from: usize,
+    state: &mut BlockScanState,
+) -> Option<BlockHeader> {
     let n = chars.len();
     let mut pos = from;
     while pos < n {
-        if is_ident_start(chars[pos])
+        if !state.in_comment
+            && !state.in_string
+            && is_ident_start(chars[pos])
             && (pos == 0 || !is_ident_continue(chars[pos - 1]))
             && let Some(header) = try_match_header(chars, pos)
         {
             return Some(header);
         }
+        state.advance(chars, pos);
         pos += 1;
     }
     None
 }
 
 fn matching_brace(chars: &[char], brace: usize) -> Option<usize> {
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (i, &ch) in chars.iter().enumerate().skip(brace) {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        if ch == '"' {
-            in_string = true;
-        } else if ch == '{' {
-            depth += 1;
-        } else if ch == '}' {
-            depth -= 1;
-            if depth == 0 {
-                return Some(i);
-            }
+    let mut state = BlockScanState::default();
+    for i in brace..chars.len() {
+        state.advance(chars, i);
+        if state.depth == 0 {
+            return Some(i);
         }
     }
     None
 }
 
-fn brace_depth(chars: &[char]) -> i32 {
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escaped = false;
-    for &ch in chars {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_string = false;
+/// Forward-only lexical state shared by header discovery and brace matching.
+/// Metadata strings retain their existing backslash-escape treatment; only
+/// actual `//` comments outside those strings hide braces and declarations.
+#[derive(Default)]
+struct BlockScanState {
+    depth: i32,
+    in_string: bool,
+    escaped: bool,
+    in_comment: bool,
+}
+
+impl BlockScanState {
+    fn advance(&mut self, chars: &[char], pos: usize) {
+        let ch = chars[pos];
+        if self.in_comment {
+            if ch == '\n' {
+                self.in_comment = false;
             }
-            continue;
-        }
-        if ch == '"' {
-            in_string = true;
+        } else if self.in_string {
+            if self.escaped {
+                self.escaped = false;
+            } else if ch == '\\' {
+                self.escaped = true;
+            } else if ch == '"' {
+                self.in_string = false;
+            }
+        } else if ch == '/' && chars.get(pos + 1) == Some(&'/') {
+            self.in_comment = true;
+        } else if ch == '"' {
+            self.in_string = true;
         } else if ch == '{' {
-            depth += 1;
+            self.depth += 1;
         } else if ch == '}' {
-            depth -= 1;
+            self.depth -= 1;
         }
     }
-    depth
 }
 
 fn top_blocks(
@@ -558,9 +559,10 @@ fn top_blocks(
     let chars: Vec<char> = source.chars().collect();
     let mut blocks = Vec::new();
     let mut i = 0usize;
+    let mut state = BlockScanState::default();
     let n = chars.len();
     while i < n {
-        let Some(header) = find_block_header(&chars, i) else {
+        let Some(header) = find_block_header(&chars, i, &mut state) else {
             break;
         };
         let known = PROJECT_BLOCKS.contains(&header.kind.as_str())
@@ -576,7 +578,9 @@ fn top_blocks(
                 format!("unterminated {} '{}' block", header.kind, header.name),
             ));
         };
-        if brace_depth(&chars[..header.start]) == 0 {
+        // A matched block is balanced, so skipping it leaves the incoming
+        // depth unchanged. Discovery never needs to rescan the source prefix.
+        if state.depth == 0 {
             blocks.push(RawBlock {
                 start: base + header.start,
                 text: chars[header.start..=end].iter().collect(),
