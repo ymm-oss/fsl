@@ -592,36 +592,47 @@ async function publicationBoundary(socket) {
   if (!Array.isArray(outputs) || outputs.length !== requests.length) {
     throw new Error("publication request population did not execute");
   }
+  const versions = { verifier: { name: "fsl-wasm", version: "4.12.0" },
+    core: { name: "fsl-core", version: "4.12.0" },
+    solver: { name: "z3", backend: "z3-solver-wasm", version: "Z3 4.16.0.0" } };
+  const failures = [];
   for (let header = 0; header < 3; header += 1) {
     const reference = outputs[header * variants.length + 1];
-    if (reference.result !== "ok" || reference.spec !== "S" || reference.warnings?.length !== 0) {
-      throw new Error(`publication check oracle refused ${JSON.stringify(reference)}`);
-    }
-    const expected = { fsl: "1.0", result: "ok", spec: "S", warnings: [], versions: reference.versions };
+    const expected = { fsl: "1.0", result: "ok", spec: "S", warnings: [], versions };
     if (header > 0) expected.fsl_edition = header === 1 ? 4 : 5;
     if (header === 2) expected.edition = "next";
     const oracleDrift = differences(reference, expected);
-    if (oracleDrift.length) throw new Error(`publication check literal packet drift ${JSON.stringify(oracleDrift)}`);
+    if (oracleDrift.length) failures.push({ header, oracleDrift });
     for (let variant = 0; variant < variants.length; variant += 1) {
       const actual = outputs[header * variants.length + variant];
       const drift = differences(actual, reference);
-      if (drift.length) throw new Error(`publication whole Worker packet drift ${JSON.stringify(drift)}`);
+      if (drift.length) failures.push({ header, variant, drift });
     }
   }
   const knownStart = 3 * variants.length;
+  // Literal messages/JSON offsets observed at the real run boundary on d83.
+  const knownMessages = [
+    "invalid type: integer `42`, expected a string at line 1 column 9",
+    "invalid type: map, expected a string at line 1 column 24",
+    "invalid type: integer `42`, expected a string at line 1 column 143",
+    "invalid type: sequence, expected a map at line 1 column 161",
+    "invalid type: integer `42`, expected struct Options at line 1 column 165",
+    "invalid type: string \"2\", expected usize at line 1 column 175",
+    "invalid type: integer `42`, expected a string at line 1 column 177",
+  ];
   for (let index = 0; index < malformed.length; index += 1) {
     const actual = outputs[knownStart + index];
-    if (actual.result !== "error" || actual.kind !== "io"
-        || !actual.message?.startsWith("invalid request JSON: invalid type:")) {
-      throw new Error(`malformed known Worker field was admitted ${JSON.stringify(actual)}`);
-    }
+    const expected = { fsl: "1.0", versions, result: "error", kind: "io",
+      message: `invalid request JSON: ${knownMessages[index]}` };
+    const drift = differences(actual, expected);
+    if (drift.length) failures.push({ knownField: index, drift });
   }
   const verifies = outputs.slice(knownStart + malformed.length);
   const stableVerify = (packet) => {
     const stable = structuredClone(packet);
-    // These exact ten elapsed slots varied in two d83 native runs of this
-    // same model/depth. Real Worker calibration remains unexecuted until its
-    // dependencies exist; missing/extra/other changing cost slots FAIL closed.
+    // These exact ten elapsed slots were observed on native and the actual
+    // d83 browser packet for this model/depth. Missing/extra/other changing
+    // cost slots FAIL closed; no new numeric paths are admitted here.
     // Time spent executing/checking a property is ambient, never its verdict.
     const slots = [[stable.cost, "elapsed_s"], [stable.cost?.solver, "check_elapsed_s"],
       ...Array.from({ length: 8 }, (_, index) => [stable.cost?.properties?.[index], "elapsed_s"])];
@@ -633,14 +644,30 @@ async function publicationBoundary(socket) {
     }
     return stable;
   };
-  for (const actual of verifies) {
-    if (actual.result !== "verified" || actual.completeness !== "bounded" || actual.checked_to_depth !== 2
-        || actual.fsl_edition !== 5 || actual.edition !== "next") {
-      throw new Error(`publication real verify refused/promoted ${JSON.stringify(actual)}`);
-    }
-    const drift = differences(stableVerify(actual), stableVerify(verifies[1]));
-    if (drift.length) throw new Error(`publication full verify packet drift ${JSON.stringify(drift)}`);
+  const properties = [["action_coverage", "stay", 1], ["deadlock", "deadlock", 3],
+    ["init", "initial_state", 1], ["invariant", "Safe", 3], ["partial_op", "Safe", 3],
+    ["partial_op", "actions", 2], ["type_bound", "_bounds_flag", 3], ["vacuity", "session", 1]]
+    .map(([kind, name, checks]) => ({ kind, name, checks, elapsed_s: 0 }));
+  // Observed real gate-on repeats used 8.84 and 8.85 MB with every semantic
+  // field/count identical. Keep exact memory equality WITHIN each batch as
+  // before; do not introduce a memory mask or freeze one ambient measurement.
+  const memory = verifies[1]?.cost?.solver?.memory_mb;
+  if (![8.84, 8.85].includes(memory)) {
+    throw new ParityViolationError(`unrecognized live browser memory observation ${JSON.stringify(memory)}`);
   }
+  const verified = { fsl: "1.0", versions, spec: "S", result: "verified", depth: 2,
+    checked_to_depth: 2, completeness: "bounded", invariants_checked: ["Safe"], transitions_checked: [],
+    reachables: {}, action_coverage: { stay: true }, deadlock: { found: false }, warnings: [],
+    note: "bounded verification: no violation within depth 2", edition: "next", fsl_edition: 5,
+    cost: { elapsed_s: 0, solver: { checks: 17, check_elapsed_s: 0, conflicts: 2,
+      decisions: 1, propagations: 4, memory_mb: memory }, properties } };
+  for (const [variant, actual] of verifies.entries()) {
+    // A baseline admission refusal stays semantic RED, not a missing-cost
+    // setup failure. Every key still participates in the literal comparison.
+    const drift = differences(actual.result === "verified" ? stableVerify(actual) : actual, verified);
+    if (drift.length) failures.push({ verifyVariant: variant, drift });
+  }
+  if (failures.length) throw new ParityViolationError(`publication packet drift ${JSON.stringify(failures)}`);
 }
 {
   const debugPort = await devtoolsPort();
