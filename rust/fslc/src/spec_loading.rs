@@ -45,6 +45,11 @@ pub(crate) fn admit_root_source(
     source: &str,
     requested: Option<fsl_syntax::Edition>,
 ) -> Result<SourceEdition, (Value, i32)> {
+    #[cfg(test)]
+    admission_observer::record(admission_observer::Event::Admission(
+        path.to_path_buf(),
+        source.to_owned(),
+    ));
     fslc_rust::migration::admit_source(
         source,
         &path.to_string_lossy(),
@@ -611,4 +616,40 @@ pub(crate) fn load_model_scoped_from_source(
     // lowering enumerated, and so the ones the solver is asked over.
     reject_refuted_requirements(source, &model)?;
     Ok(model)
+}
+
+// Binary-private root-owner census, not a census of library parsing/classification.
+#[cfg(test)]
+pub(crate) mod admission_observer {
+    use std::{
+        cell::RefCell,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+        thread::ThreadId,
+    };
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub(crate) enum Event {
+        Admission(PathBuf, String),
+        Hop(&'static str, String, ThreadId, usize, Vec<usize>),
+    }
+    pub(crate) type Handle = Arc<Mutex<Vec<Event>>>;
+    thread_local! { static CURRENT: RefCell<Option<Handle>> = const { RefCell::new(None) }; }
+    pub(crate) struct Guard(Option<Handle>);
+    pub(crate) fn current() -> Option<Handle> {
+        CURRENT.with(|slot| slot.borrow().clone())
+    }
+    pub(crate) fn install(handle: Option<Handle>) -> Guard {
+        Guard(CURRENT.with(|slot| slot.replace(handle)))
+    }
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            CURRENT.with(|slot| slot.replace(self.0.take()));
+        }
+    }
+    pub(crate) fn record(event: Event) {
+        if let Some(handle) = current() {
+            handle.lock().unwrap().push(event);
+        }
+    }
 }

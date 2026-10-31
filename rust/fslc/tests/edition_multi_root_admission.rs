@@ -1158,6 +1158,158 @@ fn sorted(value: Value) -> Value {
     }
 }
 
+fn report_findings(kind: &str, artifact: &str) -> Value {
+    if kind == "html" {
+        let marker = "<details><summary>verify JSON</summary><div><div class=\"code-block\"><pre>";
+        assert_eq!(
+            artifact.matches(marker).count(),
+            1,
+            "C1/html-section-cardinality"
+        );
+        let escaped = artifact
+            .split_once(marker)
+            .unwrap()
+            .1
+            .split_once("</pre>")
+            .unwrap()
+            .0;
+        let raw = escaped
+            .replace("&quot;", "\"")
+            .replace("&#x27;", "'")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&");
+        serde_json::from_str::<Value>(&raw).unwrap()["warnings"].clone()
+    } else {
+        let marker = "<details><summary>raw findings</summary>\n\n```json\n";
+        assert_eq!(
+            artifact.matches(marker).count(),
+            1,
+            "C1/ledger-section-cardinality"
+        );
+        serde_json::from_str(
+            artifact
+                .split_once(marker)
+                .unwrap()
+                .1
+                .split_once("\n```")
+                .unwrap()
+                .0,
+        )
+        .unwrap()
+    }
+}
+
+fn independent_report_diagnostics(kind: &str, artifact: &str, expected: &[Value]) {
+    let actual = report_findings(kind, artifact);
+    assert_eq!(actual, json!(expected), "C1/{kind}/complete-child-findings");
+    assert_eq!(
+        actual.as_array().unwrap().len(),
+        expected.len(),
+        "C1/{kind}/child-count"
+    );
+    if kind == "html" {
+        assert!(
+            artifact.contains(&format!(
+                "<span class=\"chip\">{} warning(s)</span>",
+                expected.len()
+            )),
+            "C1/html-visible-count"
+        );
+        let status = artifact
+            .split_once("id=\"status\"")
+            .unwrap()
+            .1
+            .split_once("</section>")
+            .unwrap()
+            .0;
+        assert_eq!(
+            status.matches("legacy_string_metadata").count(),
+            expected.len(),
+            "C1/html-visible-findings"
+        );
+        assert_eq!(
+            status.contains("No warnings reported."),
+            expected.is_empty(),
+            "C1/html-empty-presentation"
+        );
+    }
+}
+
+fn replace_once(text: &mut String, from: &str, to: &str) {
+    assert_eq!(text.matches(from).count(), 1, "C1/overlay-anchor {from:?}");
+    *text = text.replacen(from, to, 1);
+}
+
+// Fixture-bounded insertions onto a separately validated, unapproved ledger.
+// No first-overlay output is consulted to construct these expected bytes.
+fn independent_overlay(mut ledger: String, record: &Value, signed: bool, legacy: bool) -> String {
+    replace_once(
+        &mut ledger,
+        "\n## リスク一覧",
+        "- 承認照合: versioned approval record の spec/rendering digest を照合済み。\n\n## リスク一覧",
+    );
+    replace_once(
+        &mut ledger,
+        "| 状態 | 保証クラス |",
+        "| 状態 | 承認状態 | 保証クラス |",
+    );
+    replace_once(
+        &mut ledger,
+        "|---|---|---|---|---|---|---|---|\n",
+        "|---|---|---|---|---|---|---|---|---|\n",
+    );
+    let cell = format!(
+        "✅ approved ({})",
+        if signed { "signed" } else { "unsigned" }
+    );
+    let mut section = "## 承認照合\n\n| 要件ID | 承認状態 | 承認基準 digest | 承認対象 | drift理由 | semantic diff |\n|---|---|---|---|---|---|\n".to_owned();
+    for id in ["REQ-DEP-001", "REQ-APPROVAL-001"] {
+        let prefix = format!("| {id} |");
+        let rows = ledger
+            .lines()
+            .filter(|line| line.starts_with(&prefix))
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 1, "C1/requirement-cardinality/{id}");
+        let row = rows[0].to_owned();
+        let offset = row.match_indices('|').nth(3).unwrap().0;
+        let amended = format!("{} {cell} |{}", &row[..=offset], &row[offset + 1..]);
+        replace_once(&mut ledger, &row, &amended);
+        writeln!(
+            section,
+            "| {id} | {cell} | `{}` | {} | — | `—` |",
+            record["spec"]["digest"].as_str().unwrap(),
+            record["target"]["kind"].as_str().unwrap()
+        )
+        .unwrap();
+    }
+    let spec_rows = ledger
+        .lines()
+        .filter(|line| line.starts_with("| （仕様全体） | 要件ID未付与の検出 |"))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        spec_rows.len(),
+        usize::from(legacy),
+        "C1/spec-wide-cardinality"
+    );
+    if let Some(row) = spec_rows.first() {
+        let offset = row.match_indices('|').nth(3).unwrap().0;
+        replace_once(
+            &mut ledger,
+            row,
+            &format!("{} — unapproved |{}", &row[..=offset], &row[offset + 1..]),
+        );
+    }
+    section.push('\n');
+    replace_once(
+        &mut ledger,
+        "## 付録: 生 JSON 反例（証跡）",
+        &format!("{section}## 付録: 生 JSON 反例（証跡）"),
+    );
+    ledger
+}
+
 #[test]
 #[allow(clippy::too_many_lines, clippy::default_trait_access)]
 fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned() {
@@ -1229,6 +1381,13 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                     );
                 }
                 let artifact = bytes(&s, "artifact.out");
+                if matches!(kind, "html" | "ledger") {
+                    independent_report_diagnostics(
+                        kind,
+                        std::str::from_utf8(&artifact).unwrap(),
+                        &findings,
+                    );
+                }
                 // Fresh standalone bytes are supplied without stripping warnings.
                 // A nested renderer which loses diagnostics must fail this roundtrip.
                 let command = format!(
@@ -1315,7 +1474,7 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                         expected_check[field] = record["target"][target].clone();
                     }
                 }
-                let expected_check = admitted(expected_check, "", findings);
+                let expected_check = admitted(expected_check, "", findings.clone());
                 expect(
                     &mut r,
                     &format!("approval/{kind_label}/check-envelope"),
@@ -1327,11 +1486,47 @@ fn approval_distinct_artifacts_keep_standalone_diagnostics_signed_and_unsigned()
                     0,
                 );
                 if matches!(kind, "html" | "ledger") {
+                    let standalone = run(
+                        &s,
+                        "ledger root.fsl --depth 2 --deadlock warn -o standalone.md",
+                    );
+                    expect(
+                        &mut r,
+                        &format!("approval/{kind_label}/independent-ledger-envelope"),
+                        &standalone,
+                        admitted(
+                            json!({"fsl":"1.0","result":"generated","kind":"audit_ledger","spec":"C","output":"standalone.md"}),
+                            "",
+                            findings.clone(),
+                        ),
+                        0,
+                    );
+                    let standalone = String::from_utf8(bytes(&s, "standalone.md")).unwrap();
+                    independent_report_diagnostics("ledger", &standalone, &findings);
+                    let expected_overlay = independent_overlay(standalone, &record, signed, legacy);
+                    let expected_envelope = admitted(
+                        json!({"fsl":"1.0","result":"generated","kind":"audit_ledger","spec":"C","output":"overlay.md"}),
+                        "",
+                        findings.clone(),
+                    );
                     let command = format!(
                         "ledger root.fsl --depth 2 --approval record.json -o overlay.md {trust}"
                     );
                     let first = run(&s, &command);
+                    expect(
+                        &mut r,
+                        &format!("approval/{kind_label}/first-overlay-envelope"),
+                        &first,
+                        expected_envelope,
+                        0,
+                    );
                     let first_artifact = bytes(&s, "overlay.md");
+                    equal(
+                        &mut r,
+                        &format!("approval/{kind_label}/first-overlay-independent-artifact"),
+                        first_artifact.as_slice(),
+                        expected_overlay.as_bytes(),
+                    );
                     let second = run(&s, &command);
                     expect(
                         &mut r,
