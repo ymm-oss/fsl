@@ -152,6 +152,7 @@ enum Check {
 struct TraceDeclaration {
     forbidden: bool,
     id: String,
+    id_span: Span,
     text: String,
     steps: Vec<Step>,
     check: Option<(Check, Span)>,
@@ -872,6 +873,7 @@ impl Parser<'_> {
             Kw::Scenario
         });
         let id = self.req_id()?;
+        let id_span = self.ids.last().expect("req_id records its spelling").span;
         let (text, text_span) = self.expect_string_with_span()?;
         let span = join_span(start, text_span);
         let annotations = self.take_annotations()?;
@@ -913,6 +915,7 @@ impl Parser<'_> {
         Ok(TraceDeclaration {
             forbidden,
             id,
+            id_span,
             text,
             steps,
             check,
@@ -2032,6 +2035,7 @@ fn desugar_trace(
     if trace.forbidden {
         return Ok(RequirementsItem::Forbidden {
             id: trace.id,
+            id_span: trace.id_span,
             text: trace.text,
             steps,
             span: trace.span,
@@ -2067,6 +2071,7 @@ fn desugar_trace(
     };
     Ok(RequirementsItem::Acceptance {
         id: trace.id,
+        id_span: trace.id_span,
         text: trace.text,
         steps,
         expectation,

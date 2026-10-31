@@ -1221,6 +1221,7 @@ pub(in crate::parser) fn apply(
                 position,
                 RequirementsItem::Requirement {
                     id: rule.id,
+                    id_span: rule.id_span,
                     text: rule.text,
                     items: deadlines,
                     span: rule.span,
