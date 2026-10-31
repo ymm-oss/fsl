@@ -385,3 +385,6 @@ mod captured_jsonl_tests {
         assert!(parse_jsonl_records(" \r\n\n").unwrap().is_empty());
     }
 }
+
+#[cfg(test)]
+include!("issue_1422_mapping_neg_tests.rs");
