@@ -189,6 +189,10 @@ pub(crate) fn json_mismatches(expected: &Value, observed: &Value, path: &str) ->
 
 pub(crate) fn read_jsonl_records(path: &Path) -> Result<Vec<(usize, Value)>, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    parse_jsonl_records(&source)
+}
+
+pub(crate) fn parse_jsonl_records(source: &str) -> Result<Vec<(usize, Value)>, String> {
     source
         .lines()
         .enumerate()
@@ -347,5 +351,37 @@ pub(crate) fn parse_param_value(
             },
             _ => Err(format!("parameter '{}' has non-scalar type", param.name())),
         },
+    }
+}
+
+#[cfg(test)]
+mod captured_jsonl_tests {
+    use super::{parse_jsonl_records, read_jsonl_records};
+    use serde_json::json;
+
+    #[test]
+    fn captured_jsonl_preserves_lines_errors_and_path_wrapper() {
+        let path = std::env::temp_dir().join(format!("jsonl-wrapper-{}", std::process::id()));
+        let raw = "\r\n  \r\n{\"text\":\"日本語\"}\r\n\ntrue\n";
+        std::fs::write(&path, raw).unwrap();
+        let expected = vec![(3, json!({"text":"日本語"})), (5, json!(true))];
+        assert_eq!(parse_jsonl_records(raw).unwrap(), expected);
+        assert_eq!(read_jsonl_records(&path).unwrap(), expected);
+        let invalid = "\n{}\r\n\nnot json\n";
+        std::fs::write(&path, invalid).unwrap();
+        let error = parse_jsonl_records(invalid).unwrap_err();
+        assert!(error.starts_with("invalid JSONL at line 4:"), "{error}");
+        assert_eq!(read_jsonl_records(&path).unwrap_err(), error);
+        std::fs::write(&path, [0xff]).unwrap();
+        assert_eq!(
+            read_jsonl_records(&path).unwrap_err(),
+            std::fs::read_to_string(&path).unwrap_err().to_string()
+        );
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            read_jsonl_records(&path).unwrap_err(),
+            std::fs::read_to_string(&path).unwrap_err().to_string()
+        );
+        assert!(parse_jsonl_records(" \r\n\n").unwrap().is_empty());
     }
 }

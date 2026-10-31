@@ -10,7 +10,7 @@ use serde_json::{Map, Value, json};
 use crate::cli_options::{CommandArgs, required_option_value};
 use crate::cli_output::{envelope, error_output, located_error_output};
 use crate::log_replay::{
-    json_mismatches, log_action_matches, mapping_json_expr, parse_params, read_jsonl_records,
+    json_mismatches, log_action_matches, mapping_json_expr, parse_jsonl_records, parse_params,
     untyped_replay_enum_mapping_span,
 };
 use crate::process::{block_on_native, parse_options};
@@ -219,6 +219,7 @@ pub(super) fn causal_command(
                             &period_end,
                             out.as_deref(),
                             lifecycle_out.as_deref(),
+                            &|path| std::fs::read_to_string(path),
                         ),
                         editions,
                         false,
@@ -730,6 +731,7 @@ fn run_causal_observe_expectations(
     period_end: &str,
     out_path: Option<&Path>,
     lifecycle_out_path: Option<&Path>,
+    read_log: &dyn Fn(&Path) -> std::io::Result<String>,
 ) -> (Value, i32) {
     // ── Parse causal source and compile expectations ──────────────────
     let surface = match fsl_syntax::parse_causal(source) {
@@ -782,7 +784,11 @@ fn run_causal_observe_expectations(
             2,
         );
     }
-    let records = match read_jsonl_records(log_path) {
+    let log_raw = match read_log(log_path) {
+        Ok(raw) => raw,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let records = match parse_jsonl_records(&log_raw) {
         Ok(records) => records,
         Err(error) => return (error_output("io", &error), 2),
     };
@@ -805,10 +811,6 @@ fn run_causal_observe_expectations(
     // ── Provenance digests ───────────────────────────────────────────
     let model_digest = fsl_tools::canonical_json(&json!(source));
     let model_digest = sha256_digest(&model_digest);
-    let log_raw = match std::fs::read_to_string(log_path) {
-        Ok(raw) => raw,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
     let log_digest = sha256_digest(&log_raw);
     let mapping_digest = sha256_digest(mapping_source);
 
@@ -1592,4 +1594,226 @@ fn run_causal_diff(
         Err(error) => return error,
     };
     merge_causal_envelope(fsl_tools::causal_diff_json(&before_model, &after_model))
+}
+
+#[cfg(test)]
+mod captured_log_tests {
+    use super::{run_causal_observe_expectations, run_causal_verify_expectations};
+    use serde_json::{Value, json};
+    use sha2::{Digest, Sha256};
+    use std::path::{Path, PathBuf};
+
+    const SOURCE: &str = include_str!("../../../examples/causal/incident_response.fsl");
+    const LOG: &str =
+        include_str!("../../../examples/causal/evidence/incident-observation-log.jsonl");
+    const MAPPING: &str =
+        include_str!("../../../examples/causal/evidence/incident-log-mapping.fsl");
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("captured-log-{}-{name}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("incident_system.fsl"),
+                include_str!("../../../examples/causal/incident_system.fsl"),
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("scope.json"),
+                include_str!("../../../examples/causal/evidence/incident-replay-scope.json"),
+            )
+            .unwrap();
+            Self(dir)
+        }
+        fn observe(&self, read: &dyn Fn(&Path) -> std::io::Result<String>) -> (Value, i32) {
+            run_causal_observe_expectations(
+                &self.0.join("causal.fsl"),
+                SOURCE,
+                &self.0.join("log.jsonl"),
+                MAPPING,
+                &self.0.join("scope.json"),
+                "2026-01-01",
+                "2026-03-31",
+                Some(&self.0.join("evidence.json")),
+                Some(&self.0.join("lifecycle.json")),
+                read,
+            )
+        }
+        fn artifacts(&self) -> Vec<(PathBuf, Value)> {
+            let mut files: Vec<_> = std::fs::read_dir(&self.0)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .filter(|p| {
+                    p.file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .starts_with("evidence.")
+                        || p.file_name()
+                            .unwrap()
+                            .to_str()
+                            .unwrap()
+                            .starts_with("lifecycle.")
+                })
+                .map(|p| {
+                    let value =
+                        serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+                    (p, value)
+                })
+                .collect();
+            files.sort_by(|a, b| a.0.cmp(&b.0));
+            files
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    fn digest(bytes: &[u8]) -> String {
+        format!("sha256:{:x}", Sha256::digest(bytes))
+    }
+    fn canonical(value: &Value) -> String {
+        match value {
+            Value::Object(object) => {
+                let sorted: std::collections::BTreeMap<_, _> = object.iter().collect();
+                format!(
+                    "{{{}}}",
+                    sorted
+                        .into_iter()
+                        .map(|(k, v)| format!(
+                            "{}:{}",
+                            serde_json::to_string(k).unwrap(),
+                            canonical(v)
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            }
+            Value::Array(items) => format!(
+                "[{}]",
+                items.iter().map(canonical).collect::<Vec<_>>().join(",")
+            ),
+            scalar => scalar.to_string(),
+        }
+    }
+    fn check_links(files: &[(PathBuf, Value)]) {
+        for (_, artifact) in files.iter().filter(|(p, _)| {
+            p.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("evidence.")
+        }) {
+            assert_eq!(
+                artifact["observation"]["digests"]["log"],
+                digest(LOG.as_bytes())
+            );
+            let mut payload = artifact.clone();
+            payload.as_object_mut().unwrap().remove("artifact_digest");
+            assert_eq!(
+                artifact["artifact_digest"],
+                digest(canonical(&payload).as_bytes())
+            );
+            let chain = &files
+                .iter()
+                .find(|(_, c)| {
+                    c["evidence_id"] == artifact["evidence_id"] && c["records"].is_array()
+                })
+                .unwrap()
+                .1;
+            assert_eq!(chain["artifact_digest"], artifact["artifact_digest"]);
+            let mut record = chain["records"][0].clone();
+            let recorded = record
+                .as_object_mut()
+                .unwrap()
+                .remove("record_digest")
+                .unwrap();
+            record["evidence_id"] = artifact["evidence_id"].clone();
+            record["artifact_digest"] = artifact["artifact_digest"].clone();
+            assert_eq!(recorded, digest(canonical(&record).as_bytes()));
+        }
+        assert_eq!(files.len(), 4);
+    }
+    fn capture_control(name: &str, remove: bool) {
+        let f = Fixture::new(name);
+        std::fs::write(f.0.join("log.jsonl"), LOG).unwrap();
+        let baseline = f.observe(&|p| std::fs::read_to_string(p));
+        assert_eq!(baseline.1, 0, "{}", baseline.0);
+        let artifacts = f.artifacts();
+        check_links(&artifacts);
+        let actual = f.observe(&|p| {
+            let captured = std::fs::read_to_string(p)?;
+            if remove {
+                std::fs::remove_file(p)?;
+            } else {
+                std::fs::write(p, "\n")?;
+            }
+            Ok(captured)
+        });
+        assert_eq!(
+            actual, baseline,
+            "evaluation and provenance must use captured log"
+        );
+        assert_eq!(
+            f.artifacts(),
+            artifacts,
+            "full artifact/lifecycle preservation"
+        );
+        check_links(&f.artifacts());
+    }
+    #[test]
+    fn replaced_log_uses_capture_for_evaluation_and_digest() {
+        capture_control("replace", false);
+    }
+    #[test]
+    fn removed_log_uses_capture_for_evaluation_and_digest() {
+        capture_control("remove", true);
+    }
+    #[test]
+    fn log_errors_precede_scope_errors() {
+        let f = Fixture::new("errors");
+        std::fs::write(f.0.join("scope.json"), "invalid scope").unwrap();
+        let unreadable = f.observe(&|p| std::fs::read_to_string(p));
+        assert_eq!(unreadable.1, 2);
+        assert_eq!(unreadable.0["kind"], "io");
+        assert_eq!(
+            unreadable.0["message"],
+            std::fs::read_to_string(f.0.join("log.jsonl"))
+                .unwrap_err()
+                .to_string()
+        );
+        std::fs::write(f.0.join("log.jsonl"), "\r\n \r\nnot json\n").unwrap();
+        let malformed = f.observe(&|p| std::fs::read_to_string(p));
+        assert_eq!(malformed.1, 2);
+        assert_eq!(malformed.0["kind"], "io");
+        assert!(
+            malformed.0["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("invalid JSONL at line 3:")
+        );
+    }
+    #[test]
+    fn observe_and_verify_preserve_supplied_causal_source() {
+        let f = Fixture::new("source");
+        std::fs::write(f.0.join("log.jsonl"), LOG).unwrap();
+        let path = f.0.join("causal.fsl");
+        std::fs::write(&path, SOURCE).unwrap();
+        let observation = f.observe(&|p| std::fs::read_to_string(p));
+        let verify = run_causal_verify_expectations(&path, SOURCE, 1);
+        assert_eq!(observation.1, 0);
+        assert_eq!(verify.1, 0, "{}", verify.0);
+        for replacement in [Some("invalid causal source"), None] {
+            if let Some(raw) = replacement {
+                std::fs::write(&path, raw).unwrap();
+            } else {
+                std::fs::remove_file(&path).unwrap();
+            }
+            assert_eq!(f.observe(&|p| std::fs::read_to_string(p)), observation);
+            assert_eq!(run_causal_verify_expectations(&path, SOURCE, 1), verify);
+        }
+        assert_eq!(observation.0["formal_result"], json!("not_run"));
+    }
 }

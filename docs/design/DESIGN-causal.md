@@ -846,6 +846,15 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
   than `"inconclusive"` or `design` other than `"observational"` (AC 3/4).
   `observation.digests` carries sha256 digests of the causal source, JSONL
   log, and mapping file. Lifecycle records are sequence-1 active chains.
+- **Captured inputs (#1423).** Observation parses JSONL records and hashes the
+  same single UTF-8 capture, including original whitespace and line endings;
+  log read/parse failures still precede scope parsing. Replacing or removing
+  the log after capture cannot change evaluation or provenance. The replay
+  path reader retains the shared parser's line numbers and errors. Observe
+  and verify already load the causal model from the supplied source (the
+  historical issue's spec-reread premise no longer applies). Source/mapping
+  hashing and §13 artifact/lifecycle canonicalization are unchanged, as are
+  ordinary outputs, failure classifications, exit codes and assurance.
 - **File output.** `--out` and `--lifecycle-out` write one file per artifact
   (individually consumable by `fslc causal analyze --evidence`). Multiple
   expectations produce files with the evidence ID embedded in the filename.
