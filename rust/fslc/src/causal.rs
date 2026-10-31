@@ -1377,6 +1377,13 @@ fn run_causal_observe_expectations(
                 .as_object_mut()
                 .expect("artifact is object")
                 .insert("artifact_digest".to_owned(), json!(digest));
+            if let Err(error) = fsl_tools::parse_artifact(&artifact) {
+                let mut output = error_output("semantics", &error.message);
+                if let Some(object) = output.as_object_mut() {
+                    object.insert("diagnostic".to_owned(), json!(error.kind));
+                }
+                return (output, 2);
+            }
 
             // Build lifecycle record.
             let mut lifecycle_record = json!({

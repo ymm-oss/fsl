@@ -846,7 +846,9 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
   A nonconformant log record (action not enabled, state mismatch) aborts
   with `observation_replay_nonconformant`. A mapping failure (unknown
   action, parameter mismatch, missing state variable) aborts with
-  `observation_replay_failed`. All failure outputs carry `do_not_assume`.
+  `observation_replay_failed`. These record-mapping and conformance failures
+  carry `do_not_assume`. Non-record argument, schema, and I/O errors retain
+  their ordinary CLI error envelopes.
 - **Shared mapping arithmetic (#1422).** Negating a dynamic JSON-log integer
   at `i64::MIN` refuses with the existing `invalid mapping arithmetic` error
   instead of overflowing. `fslc replay --from-log --mapping` reports
@@ -862,6 +864,14 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
   than `"inconclusive"` or `design` other than `"observational"` (AC 3/4).
   `observation.digests` carries sha256 digests of the causal source, JSONL
   log, and mapping file. Lifecycle records are sequence-1 active chains.
+- **Generated artifact validation (#1422).** Observation checks each generated
+  evidence artifact with the ingestion parser after stamping its digest and
+  before writing any evidence or lifecycle file. Since the declared period end
+  is emitted as `valid_until`, an invalid generated freshness date returns a
+  `semantics` error with diagnostic `causal_evidence_schema_mismatch` and exit 2.
+  This refusal leaves existing output files unchanged. Invalid `period.start`
+  remains a soft timing exclusion; this adds no global date-order or `--as-of`
+  policy and does not remove declared freshness.
 - **Captured inputs (#1423).** Observation parses JSONL records and hashes the
   same single UTF-8 capture, including original whitespace and line endings;
   log read/parse failures still precede scope parsing. Replacing or removing
