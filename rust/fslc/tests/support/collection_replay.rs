@@ -638,6 +638,13 @@ pub fn full_observe(directory: &std::path::Path, route: &str) -> (Value, i32) {
     let digest =
         DIGEST.get_or_init(|| format!("{:x}", Sha256::digest(std::fs::read(binary).unwrap())));
     let gate = fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE;
+    let trace_digest = if route == "monitor" {
+        let trace = std::fs::read(directory.join("actions.json")).unwrap();
+        std::fs::write(file("trace.json"), &trace).unwrap();
+        Some(format!("{:x}", Sha256::digest(trace)))
+    } else {
+        None
+    };
     let output = Command::new(binary)
         .args(&args)
         .current_dir(directory)
@@ -654,7 +661,7 @@ pub fn full_observe(directory: &std::path::Path, route: &str) -> (Value, i32) {
         "exit": exit, "FSLC_CACHE": "off", "FSLC_CACHE_VERIFY": null,
         "gate_name": gate, "gate_present": false, "TMPDIR": directory,
         "source_sha256": format!("{:x}", Sha256::digest(std::fs::read(directory.join("input.fsl")).unwrap())),
-        "binary_sha256": digest});
+        "binary_sha256": digest, "trace_sha256": trace_digest});
     std::fs::write(
         file("command.json"),
         serde_json::to_vec_pretty(&metadata).unwrap(),
@@ -684,4 +691,157 @@ pub fn stable_full_packet(mut report: Value) -> Value {
         }
     }
     report
+}
+
+/// Acceptance continuation: expected semantics are supplied by each literal fixture.
+#[derive(Debug)]
+pub struct Oracle {
+    pub outcome: &'static str,
+    pub step: usize,
+    pub line: usize,
+    pub frozen: bool,
+    pub witness: Option<(&'static str, Value)>,
+}
+
+impl Oracle {
+    fn accepts(&self, r: &Value, exit: i32, route: &str) -> bool {
+        let positive = self.outcome == "pass";
+        let bound = self.outcome.starts_with("_bounds_");
+        let property = if bound {
+            self.outcome
+        } else if self.outcome == "partial_op" {
+            "_partial_property_Capture"
+        } else {
+            "Capture"
+        };
+        let kind = if bound {
+            "type_bound"
+        } else if positive {
+            "pass"
+        } else {
+            self.outcome
+        };
+        match route {
+            "check" => exit == 0 && r["result"] == "ok",
+            "kernel-v1" | "kernel-v2" => exit == 0 && r["result"] == "kernel",
+            "monitor" if positive => {
+                exit == 0 && r["result"] == "conformant" && r["steps_checked"] == 1
+            }
+            "monitor" => {
+                exit == 1
+                    && r["result"] == "nonconformant"
+                    && r["violation"]["kind"] == kind
+                    && r["violation"]["name"] == property
+                    && r["failed_at_event"] == 0
+            }
+            _ if positive => {
+                exit == 0
+                    && r["result"] == if route == "bmc" { "verified" } else { "proved" }
+                    && r["completeness"]
+                        == if route == "bmc" {
+                            "bounded"
+                        } else {
+                            "unbounded"
+                        }
+                    && r["trace"].is_null()
+                    && r["invariant"].is_null()
+            }
+            _ => {
+                exit == 1
+                    && r["result"] == "violated"
+                    && r["violation_kind"] == kind
+                    && r["invariant"] == property
+                    && r["violated_at_step"] == self.step
+                    && r["loc"]
+                        == if bound {
+                            Value::Null
+                        } else {
+                            json!({"line":self.line,"column":3})
+                        }
+            }
+        }
+    }
+}
+
+pub fn continuation(label: &str, source: &str, oracle: &Oracle) -> Vec<String> {
+    let mut errors = Vec::new();
+    let directory = full_fixture(label, source);
+    let mut previous = BTreeMap::new();
+    let positive = oracle.outcome == "pass";
+    std::fs::write(directory.join("oracle.txt"), format!("{oracle:#?}")).unwrap();
+    for repeat in 1..=2 {
+        for route in [
+            "check",
+            "monitor",
+            "bmc",
+            "induction",
+            "explicit",
+            "kernel-v1",
+            "kernel-v2",
+        ] {
+            let (r, exit) = full_observe(&directory, route);
+            let ok = oracle.accepts(&r, exit, route);
+            println!(
+                "CONTINUATION {label} repeat={repeat} route={route} exit={exit} result={} expected={} ok={ok}",
+                r["result"], oracle.outcome
+            );
+            require(&mut errors, ok, label, route, &r, exit);
+            if route == "check" && !ok {
+                errors.push(format!("NON-ADMISSION {label}: {r}"));
+                break;
+            }
+            if oracle.frozen && positive && route == "explicit" {
+                require(
+                    &mut errors,
+                    r["warnings"].as_array().is_some_and(|ws| {
+                        ws.iter()
+                            .any(|w| w["kind"] == "tautology_over_frozen" && w["name"] == "Capture")
+                    }),
+                    label,
+                    "live frozen warning",
+                    &r,
+                    exit,
+                );
+            }
+            if let Some((variable, expected)) = &oracle.witness {
+                let actual = if positive && route == "monitor" {
+                    Some(&r["final_state"][variable])
+                } else if !positive && matches!(route, "bmc" | "induction" | "explicit") {
+                    Some(&r["trace"][oracle.step]["state"][variable])
+                } else {
+                    None
+                };
+                if let Some(actual) = actual {
+                    require(
+                        &mut errors,
+                        actual == expected,
+                        label,
+                        "literal retained value",
+                        &r,
+                        exit,
+                    );
+                }
+            }
+            let stable = (stable_full_packet(r), exit);
+            if let Some(prior) = previous.insert(route, stable.clone())
+                && prior != stable
+            {
+                errors.push(format!(
+                    "FULL PACKET DRIFT {label}/{route}: {prior:?} != {stable:?}"
+                ));
+            }
+        }
+    }
+    errors
+}
+
+pub fn ready<F: std::future::Future>(future: F) -> F::Output {
+    use std::task::{Context, Poll, Waker};
+    match std::pin::pin!(future)
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+    {
+        Poll::Ready(value) => value,
+        Poll::Pending => panic!("native solver yielded"),
+    }
 }

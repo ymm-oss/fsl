@@ -2,6 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
+#[path = "issue_1467_relation_prefix_tests.rs"]
+mod issue_1467_relation_prefix_tests;
+
 use fsl_core::{FslValue, KernelModel, TypeDef, TypeRef};
 use fsl_solver::{ModelValue, SatResult, SmtSolver, Sort};
 

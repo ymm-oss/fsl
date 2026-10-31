@@ -177,7 +177,14 @@ fn recursive_order_matches_literal_first_observables() {
                         "forall x in {domain}: c or (x == ({first}) and Seq {{1}}.pop().head() == 0)"
                     ),
                 };
-                let text = TEMPLATE.replace("$P", &body);
+                let mut text = TEMPLATE.replace("$P", &body);
+                if name == "absent-payload-dedup" && outer == "Seq" && outcome == "pass" {
+                    // Independently proved by c0_auxiliary_is_inductive, not a changed Capture.
+                    text = text.replace(
+                        "\n}",
+                        "\n  invariant ReachableAbsence { c or (o0 is none and o1 is none) }\n}",
+                    );
+                }
                 errors.extend(exercise(
                     &format!("1467-order-{name}-{outer}-{outcome}"),
                     &text,

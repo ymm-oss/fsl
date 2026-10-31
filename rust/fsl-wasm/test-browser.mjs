@@ -75,6 +75,10 @@ async function nativeEnvelope(testCase) {
     ];
   const result = await command(nativeBinary, args, nativeCommandTimeoutMs,
     testCase.dependency_edition ? { ...process.env, FSLC_UNSTABLE: "fsl5", FSLC_CACHE: "off" } : process.env);
+  if (testCase.id?.startsWith("1467/")) {
+    await writeFile(join(dist, `issue-${testCase.id.replaceAll("/", "-")}-native-command.json`),
+      JSON.stringify({ binary: nativeBinary, args, cwd: repository, ...result }, null, 2));
+  }
   if (testCase.expected_status !== undefined && result.status !== testCase.expected_status) {
     throw new Error(
       `native CLI exit mismatch for ${testCase.path}: expected ${testCase.expected_status}, got ${result.status}`,
@@ -338,6 +342,30 @@ const dependencyVerify = JSON.parse(await readFile(join(repository, "rust/fsl-wa
 delete dependencyVerify._license;
 const dependencyLegacy = await readFile(join(repository, editionWarningCase), "utf8");
 const dependencyCases = [];
+// #1467: real JS Worker batch, independent literal recursive value witnesses.
+const recursiveCases = [];
+const recursiveSource = `spec RecursivePacket {
+  type K = 0..1
+  struct P { a: K, o: Option<Option<K>> }
+  state { c: Bool, p: P, absent: Option<Option<K>>, m: Map<K,P> }
+  init { c = true p = P {a:0,o:some(some(0))} absent = none forall k: K { m[k] = P {a:k,o:some(none)} } }
+  action go() { c = false p = P {a:1,o:some(none)} }
+  invariant Capture { $P }
+}
+`;
+for (const [variant, predicate] of [
+  ["pass", "c or p.o == some(none)"],
+  ["reject", "c or p.a == 0"],
+  ["materialize", "c or Seq {m}.head()[0].o == some(none)"],
+]) {
+  const source = recursiveSource.replace("$P", predicate);
+  const path = relative(repository, join(dist, `issue-1467-${variant}.fsl`)).split("\\").join("/");
+  await writeFile(join(repository, path), source, "utf8");
+  for (let repeat = 0; repeat < 2; repeat += 1) recursiveCases.push({
+    id: `1467/${variant}/${repeat}`, variant, repeat, cmd: "verify", path, source,
+    source_file: path, files: {}, options: { depth: 2, deadlock: "warn" },
+  });
+}
 for (const [variant, header, expected_status] of [["N", 5, 2], ["W", 4, 0]]) {
   const dependencyChild = `fsl ${header}\n${dependencyLegacy}`;
   const directory = await mkdtemp(join(dist, "dependency-edition-"));
@@ -518,6 +546,7 @@ function rejectPending(error) {
 }
 let details;
 let dependencyEnvelopes;
+const recursiveEnvelopes = [];
 {
   const debugPort = await devtoolsPort();
   const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`).then((response) => response.json());
@@ -551,7 +580,9 @@ let dependencyEnvelopes;
       },
     });
     logPhase("client-completion", `client=${details.phase ?? "unknown"}`);
-    const requests = dependencyCases.map(({ cmd, source, source_file, files, unstable, options }) => (
+    // A fresh Worker for each new repeat avoids shared-runtime solver history.
+    for (const [batchIndex, batch] of [dependencyCases, ...recursiveCases.map((testCase) => [testCase])].entries()) {
+    const requests = batch.map(({ cmd, source, source_file, files, unstable, options }) => (
       { cmd, source, source_file, files, unstable, options }
     ));
     const evaluated = await cdp(socket, "Runtime.evaluate", {
@@ -569,7 +600,10 @@ let dependencyEnvelopes;
       })`, awaitPromise: true, returnByValue: true,
     });
     if (evaluated.exceptionDetails) throw new Error(JSON.stringify(evaluated.exceptionDetails));
-    dependencyEnvelopes = evaluated.result.value;
+    if (batchIndex === 0) dependencyEnvelopes = evaluated.result.value;
+    else recursiveEnvelopes.push(...evaluated.result.value);
+    }
+    await writeFile(join(dist, "issue-1467-worker-raw.json"), JSON.stringify({ cases: recursiveCases, envelopes: recursiveEnvelopes }, null, 2));
   } finally {
     socket.close();
   }
@@ -584,6 +618,64 @@ for (const testCase of parityCases) {
   native.push(await nativeEnvelope(testCase));
 }
 const mismatches = [];
+const recursiveNative = [];
+for (const testCase of recursiveCases) recursiveNative.push(await nativeEnvelope(testCase));
+await writeFile(join(dist, "issue-1467-native-raw.json"), JSON.stringify({ cases: recursiveCases, envelopes: recursiveNative }, null, 2));
+// Observed in the first raw capture: wall clocks vary; all exclusions are live.
+function recursiveStable(packet) {
+  const value = structuredClone(packet);
+  const clock = (object, key) => {
+    if (!Object.hasOwn(object, key) || !Number.isFinite(object[key])) throw new Error(`missing clock ${key}`);
+    delete object[key];
+  };
+  if (value.cost) {
+    clock(value.cost, "elapsed_s"); clock(value.cost.solver, "check_elapsed_s");
+    for (const property of value.cost.properties) clock(property, "elapsed_s");
+  } else if (value.result !== "error") throw new Error("missing successful cost packet");
+  return value;
+}
+const recursiveComparisons = [];
+for (let index = 0; index < recursiveCases.length; index += 2) {
+  const nativeDrift = differences(recursiveStable(recursiveNative[index]), recursiveStable(recursiveNative[index + 1]));
+  const workerDrift = differences(recursiveStable(recursiveEnvelopes[index]), recursiveStable(recursiveEnvelopes[index + 1]));
+  const left = recursiveStable(recursiveNative[index]);
+  const right = recursiveStable(recursiveEnvelopes[index]);
+  // Observed runtime identity and allocator footprint differ, never semantic fields.
+  for (const [packet, name, backend] of [[left, "fslc-rust", "native-z3"], [right, "fsl-wasm", "z3-solver-wasm"]]) {
+    const metadata = { verifier: { name, version: "4.12.0" }, core: { name: "fsl-core", version: "4.12.0" },
+      solver: { name: "z3", backend, version: "Z3 4.16.0.0" } };
+    if (differences(packet.versions, metadata).length) throw new Error(`1467 runtime identity: ${name}`);
+    if (packet.cost) {
+      if (!Object.hasOwn(packet.cost.solver, "memory_mb") || !Number.isFinite(packet.cost.solver.memory_mb)
+        || packet.cost.solver.memory_mb <= 0) throw new Error("1467 missing positive allocator metric");
+      packet.cost.solver.memory_mb = 0; // Only cross-runtime; repeat comparisons retain it exactly.
+    }
+    packet.versions.verifier.name = "runtime"; packet.versions.solver.backend = "runtime";
+  }
+  recursiveComparisons.push({ id: recursiveCases[index].id, nativeDrift, workerDrift,
+    cross: differences(left, right) });
+}
+await writeFile(join(dist, "issue-1467-comparisons.json"), JSON.stringify(recursiveComparisons, null, 2));
+if (recursiveComparisons.some(({ nativeDrift, workerDrift, cross }) => nativeDrift.length || workerDrift.length || cross.length)) {
+  throw new ParityViolationError(`1467 full same-route drift: ${JSON.stringify(recursiveComparisons)}`);
+}
+const literalFinal = { c: false, p: { a: 1, o: { kind: "some", value: null } }, absent: null,
+  m: { "0": { a: 0, o: { kind: "some", value: null } }, "1": { a: 1, o: { kind: "some", value: null } } } };
+for (const [index, testCase] of recursiveCases.entries()) {
+  const nativeStatus = JSON.parse(await readFile(join(dist, `issue-${testCase.id.replaceAll("/", "-")}-native-command.json`), "utf8")).status;
+  if (nativeStatus !== (testCase.variant === "reject" ? 1 : 0)) throw new ParityViolationError(`${testCase.id}: native exit ${nativeStatus}`);
+  for (const envelope of [recursiveNative[index], recursiveEnvelopes[index]]) {
+    const expected = testCase.variant === "reject" ? "violated" : "verified";
+    if (envelope.result !== expected || envelope.completeness !== "bounded") {
+      throw new ParityViolationError(`${testCase.id}: expected ${expected}/bounded: ${JSON.stringify(envelope)}`);
+    }
+    if (testCase.variant === "reject" && (envelope.invariant !== "Capture" || envelope.violation_kind !== "invariant"
+      || envelope.violated_at_step !== 1 || envelope.loc.line !== 7 || envelope.loc.column !== 3
+      || differences(envelope.trace[1].state, literalFinal).length)) {
+      throw new ParityViolationError(`${testCase.id}: literal recursive witness drift`);
+    }
+  }
+}
 if (!Array.isArray(dependencyEnvelopes) || dependencyEnvelopes.length !== dependencyCases.length) {
   throw new ParityViolationError("dependency edition cases did not execute");
 }
