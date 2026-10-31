@@ -288,7 +288,14 @@ causal_evidence_graph` (or `--profile causal-review`). Artifacts
 closed `design` vocabulary, directed `support`, scope tokens, a period, and a
 digest over the canonical payload; lifecycle chains
 (`fsl-causal-evidence-lifecycle.v0`) are separate append-only, digest-linked
-records. Schema/digest/lifecycle violations fail closed (exit 2). The
+records. Schema/digest/lifecycle violations fail closed (exit 2). After
+artifact digest validation, a present `period.valid_until` must be a string
+with exactly the ASCII `YYYY-MM-DD` shape and a valid Gregorian date
+(including year `0000`); null, other types, malformed strings, and impossible
+dates fail with `causal_evidence_schema_mismatch`, even without `--as-of`.
+Digest mismatch retains precedence. Missing `valid_until` stays accepted as
+`unknown_freshness` and excludes current support; start/end date conversion
+continues to use soft timing exclusions. The
 deterministic per-claim `causal_support`
 (`untested | supported | challenged | inconclusive | mixed |
 unsupported_by_current_evidence`) counts only artifacts pinning the current

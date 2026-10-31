@@ -724,9 +724,18 @@ never contradict, the sections above.
   (version pin, scope, freshness, lifecycle status, window-vs-lag, lineage)
   are warnings: the artifact stays in history and in the graph but is
   excluded from current support.
+- **Declared freshness is validated.** After the artifact's declared digest
+  matches its canonical payload, a present `period.valid_until` must be a
+  string of exactly ten ASCII characters in `YYYY-MM-DD` form and a valid
+  Gregorian date, including year `0000` and Gregorian leap-year rules.
+  Null and other non-string values, malformed strings, and impossible dates
+  fail closed with `causal_evidence_schema_mismatch` and exit 2, with or
+  without `--as-of`. A digest mismatch retains precedence over this check.
+  Missing `valid_until` remains accepted with `unknown_freshness` and no
+  current support. This check does not tighten `period.start` or `period.end`.
 - **Staleness needs `--as-of`.** `stale_evidence` compares `valid_until`
   against an explicit `--as-of YYYY-MM-DD` only; without `--as-of`, a
-  declared `valid_until` is accepted as-declared (never the wall clock, so
+  valid declared `valid_until` is used as-declared (never the wall clock, so
   identical inputs always produce identical output). Missing `valid_until`
   is `unknown_freshness` and excludes the artifact regardless.
 - **Window conversion.** `period.end - period.start` converts to timebase
@@ -746,11 +755,11 @@ never contradict, the sections above.
   `period_start_missing`, `period_end_missing`, `period_date_unparsable`,
   `period_end_before_start`, `timebase_not_convertible`,
   `week_window_not_whole_weeks`; the lag side reports `claim_lag_unknown`.
-  A date is parsed as `YYYY-MM-DD` with a month in 1..12 and a day in 1..31 —
-  day-of-month validity against the month is **not** checked, so an impossible
-  date such as `2026-02-31` converts as its normalized value rather than
-  reporting `period_date_unparsable`. That is pre-existing `civil_days`
-  behaviour and also governs `valid_until` staleness.
+  The existing `civil_days` conversion checks Gregorian month lengths and
+  leap years: an impossible date such as `2026-02-31` reports
+  `period_date_unparsable` rather than being normalized. The same calendar
+  conversion also governs `valid_until` staleness. Unconvertible start/end
+  dates remain soft timing exclusions rather than artifact parse errors.
 - **Lineage.** The lineage root is the transitive `derived_from` root when
   present, else `source_study_id`, else the artifact itself. Roots sharing
   members emit `duplicate_evidence_source`; one root is one vote; support

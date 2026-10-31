@@ -327,6 +327,29 @@ pub fn parse_artifact(artifact: &Value) -> Result<EvidenceArtifact, EvidenceErro
             format!("{context}: declared artifact_digest does not match the canonical payload"),
         ));
     }
+    if let Some(valid_until) = period.and_then(|period| period.get("valid_until")) {
+        let valid_until = valid_until.as_str().ok_or_else(|| {
+            error(
+                "causal_evidence_schema_mismatch",
+                format!("{context}: period.valid_until must be a string"),
+            )
+        })?;
+        let bytes = valid_until.as_bytes();
+        if bytes.len() != 10
+            || !bytes.iter().enumerate().all(|(index, byte)| match index {
+                4 | 7 => *byte == b'-',
+                _ => byte.is_ascii_digit(),
+            })
+            || civil_days(valid_until).is_none()
+        {
+            return Err(error(
+                "causal_evidence_schema_mismatch",
+                format!(
+                    "{context}: period.valid_until must be a valid Gregorian date in YYYY-MM-DD format"
+                ),
+            ));
+        }
+    }
     Ok(EvidenceArtifact {
         evidence_id,
         design,
