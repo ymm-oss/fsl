@@ -18951,6 +18951,7 @@ mod exit_status_tests {
     use crate::property_selection::apply_vacuity_mode;
     use crate::refinement::preservation_refine_result;
     use crate::spec_loading::validate_specialized_document_from_source;
+    include!("issue_1422_sweep_budget_tests.rs");
 
     #[test]
     fn approval_ledger_rerender_returns_the_direct_verification_error() {
