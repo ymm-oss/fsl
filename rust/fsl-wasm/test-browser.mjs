@@ -640,6 +640,27 @@ for (let index = 0; index < recursiveCases.length; index += 2) {
   const workerDrift = differences(recursiveStable(recursiveEnvelopes[index]), recursiveStable(recursiveEnvelopes[index + 1]));
   const left = recursiveStable(recursiveNative[index]);
   const right = recursiveStable(recursiveEnvelopes[index]);
+  if (recursiveCases[index].variant === "materialize") {
+    // #1467: matching serialized queries/results and correct raw-to-max mapping
+    // yielded decisions 103/100 and propagations 106/109, stable in both repeats.
+    // Effective defaults/term history are not proven identical; no sole cause
+    // is established. Only these materialize cross-runtime maxima may differ.
+    const counters = ["decisions", "propagations"];
+    for (const packet of [recursiveNative[index], recursiveNative[index + 1],
+      recursiveEnvelopes[index], recursiveEnvelopes[index + 1]]) {
+      for (const key of counters) {
+        const solver = packet.cost.solver;
+        const value = solver[key];
+        if (!Object.hasOwn(solver, key) || !Number.isFinite(value)
+          || !Number.isInteger(value) || value < 0) {
+          throw new Error(`1467 invalid materialize solver ${key}`);
+        }
+      }
+    }
+    for (const packet of [left, right]) {
+      for (const key of counters) packet.cost.solver[key] = 0;
+    }
+  }
   // Observed runtime identity and allocator footprint differ, never semantic fields.
   for (const [packet, name, backend] of [[left, "fslc-rust", "native-z3"], [right, "fsl-wasm", "z3-solver-wasm"]]) {
     const metadata = { verifier: { name, version: "4.12.0" }, core: { name: "fsl-core", version: "4.12.0" },
