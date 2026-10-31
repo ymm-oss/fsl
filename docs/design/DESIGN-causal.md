@@ -847,6 +847,13 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
   with `observation_replay_nonconformant`. A mapping failure (unknown
   action, parameter mismatch, missing state variable) aborts with
   `observation_replay_failed`. All failure outputs carry `do_not_assume`.
+- **Shared mapping arithmetic (#1422).** Negating a dynamic JSON-log integer
+  at `i64::MIN` refuses with the existing `invalid mapping arithmetic` error
+  instead of overflowing. `fslc replay --from-log --mapping` reports
+  `nonconformant` with violation kind `log_mapping` and exit 1;
+  `causal observe-expectations` reports `observation_replay_failed` and exit 2.
+  Representable integer negation, non-integer type errors, and the other
+  arithmetic operators retain their existing behavior.
 - **Evidence artifacts.** Per-expectation `fsl-causal-evidence.v0` artifacts
   with the `observation` object filled in: `design: "observational"`,
   `support: "inconclusive"`, `observation.kind: "expectation_replay"`,
