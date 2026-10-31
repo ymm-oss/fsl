@@ -1035,6 +1035,35 @@ refinement <Name> {
 }
 ```
 
+For `preserve progress`, scalar and indexed maps substitute simultaneously
+(#1613). A source read `a[e]` under `map a[i: K] = expr` inserts the
+implementation expression with `i := pull(e)` exactly once; do not remap reads
+inside that inserted expression. Identity/swap no longer abort and the indexed
+chain no longer falsely refines; genuine stalls report `progress_lost`.
+
+**Breaking removal (#1613):** a free whole-map abstract read of an indexed state
+in the pulled property is `error/type`, exit 2, at `respond`, even if an impl
+state has that spelling. The `whole-same` acceptance case (`m[i]=n[i]`,
+`m == z ~> m != z`) changes false `refines`/0 to type/2 at 8:23. Renaming the
+unrelated impl state is not a repair. Locally bound source names and whole-map
+reads inside implementation templates remain legal; no blanket collection ban.
+Re-express the intended P/Q with element reads and preserve temporal structure:
+whole-map equality means all keys agree; inequality needs only one difference.
+Do not move `forall` across `~>` on the strength of the singleton witness, or
+weaken the property/remove `preserve progress` to obtain a verdict.
+
+Audit: base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` → production head
+`2aab19f2b2d286c01c1aa79497c131df334aaff1`, own-tree binaries with
+next-edition parsing enabled and caching disabled. `fslc check <path>`:610 corpus forms
+(23 specs/195 examples/392 fixtures)+54 inline forms, identical complete output,
+**empty ok→error set**. Inventory595 sources:0 rewritten-required-test inline
+forms, two added acceptance tests. Separately,28 live corpus refine commands
+are unchanged;18 inline `fslc refine impl.fsl abs.fsl map.fsl --depth 4` cases
+have9 unchanged/9 changed (5 abort→progress_lost,1 false-refines→progress_lost,
+2 already-error diagnostics,**1 admitted→error whole-map restriction**).
+All710 routes ran twice per SHA, no CLI masks. Full boundary evidence and
+migration cautions: `docs/design/DESIGN-refinement.md` §4 (#1613).
+
 Standalone action items, inline `implements` items, requirement-action `maps`,
 and auto/identity synthesis share one typed action-correspondence validator.
 Typed impl parameters, target arity/argument expressions, and auto actor
