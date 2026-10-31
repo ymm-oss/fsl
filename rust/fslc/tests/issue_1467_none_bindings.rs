@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! None-valued lexical binders retain type context without changing Set support.
+//! None-valued lexical binders retain type context for both admitted outer kinds.
 
 #[allow(dead_code)]
 #[path = "support/collection_replay.rs"]
@@ -8,7 +8,7 @@ mod collection_replay;
 use collection_replay::{ReplayCase, finish, require};
 
 #[test]
-fn none_bindings_preserve_verdicts_and_existing_set_restrictions() {
+fn none_bindings_preserve_verdicts_with_composite_set_support() {
     let mut errors = Vec::new();
     for (family, binder, left, right) in [
         ("seq-none-left", "x in Seq {some(n), none}", "x", "o"),
@@ -44,12 +44,6 @@ fn none_bindings_preserve_verdicts_and_existing_set_restrictions() {
                                 && r["violation"]["kind"] == "invariant"
                                 && r["violation"]["name"] == "Capture"
                                 && r["failed_at_event"] == 0
-                        }
-                        _ if family.starts_with("set-") => {
-                            exit == 2
-                                && r["result"] == "error"
-                                && r["kind"] == "semantics"
-                                && r["message"] == "Set literal binder requires scalar elements"
                         }
                         _ if tautology => {
                             exit == 0

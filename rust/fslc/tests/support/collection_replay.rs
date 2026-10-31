@@ -592,3 +592,96 @@ pub fn finish(errors: &[String]) {
         errors.join("\n")
     );
 }
+
+/// Full-packet counterpart for recursive-value tests; old scalar checks stay intact.
+pub fn full_fixture(label: &str, source: &str) -> PathBuf {
+    let parent = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    std::fs::create_dir_all(parent).unwrap();
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = parent.join(format!("{label}-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::write(directory.join("input.fsl"), source).unwrap();
+    std::fs::write(
+        directory.join("actions.json"),
+        r#"[{"action":"go","params":{}}]"#,
+    )
+    .unwrap();
+    println!("FULL_EVIDENCE {}", directory.display());
+    directory
+}
+
+pub fn full_observe(directory: &std::path::Path, route: &str) -> (Value, i32) {
+    use sha2::{Digest, Sha256};
+    static DIGEST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let file = |suffix| directory.join(format!("{route}-{id}.{suffix}"));
+    let args = match route {
+        "check" => vec!["check", "input.fsl"],
+        "monitor" => vec!["replay", "input.fsl", "--trace", "actions.json"],
+        "kernel-v1" => vec!["kernel", "input.fsl", "--kernel-version", "1"],
+        "kernel-v2" => vec!["kernel", "input.fsl", "--kernel-version", "2"],
+        _ => vec![
+            "verify",
+            "input.fsl",
+            "--engine",
+            route,
+            "--depth",
+            "4",
+            "--no-cache",
+        ],
+    };
+    let binary = env!("CARGO_BIN_EXE_fslc");
+    let digest =
+        DIGEST.get_or_init(|| format!("{:x}", Sha256::digest(std::fs::read(binary).unwrap())));
+    let gate = fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE;
+    let output = Command::new(binary)
+        .args(&args)
+        .current_dir(directory)
+        .env("FSLC_CACHE", "off")
+        .env_remove("FSLC_CACHE_VERIFY")
+        .env_remove(gate)
+        .env("TMPDIR", directory)
+        .output()
+        .unwrap();
+    std::fs::write(file("stdout.json"), &output.stdout).unwrap();
+    std::fs::write(file("stderr.txt"), &output.stderr).unwrap();
+    let exit = output.status.code().unwrap();
+    let metadata = json!({"binary": binary, "argv": args, "cwd": directory,
+        "exit": exit, "FSLC_CACHE": "off", "FSLC_CACHE_VERIFY": null,
+        "gate_name": gate, "gate_present": false, "TMPDIR": directory,
+        "source_sha256": format!("{:x}", Sha256::digest(std::fs::read(directory.join("input.fsl")).unwrap())),
+        "binary_sha256": digest});
+    std::fs::write(
+        file("command.json"),
+        serde_json::to_vec_pretty(&metadata).unwrap(),
+    )
+    .unwrap();
+    assert!(output.stderr.is_empty(), "{route}: {output:?}");
+    (
+        serde_json::from_slice(&output.stdout).expect("full CLI JSON"),
+        exit,
+    )
+}
+
+/// Only measured wall-clock fields vary between identical early probe packets.
+/// Every exclusion is live/type-checked; all verdict/assurance/location data stay.
+pub fn stable_full_packet(mut report: Value) -> Value {
+    if let Some(cost) = report.get_mut("cost") {
+        assert!(cost["elapsed_s"].as_f64().is_some());
+        cost.as_object_mut().unwrap().remove("elapsed_s");
+        assert!(cost["solver"]["check_elapsed_s"].as_f64().is_some());
+        cost["solver"]
+            .as_object_mut()
+            .unwrap()
+            .remove("check_elapsed_s");
+        for property in cost["properties"].as_array_mut().unwrap() {
+            assert!(property["elapsed_s"].as_f64().is_some());
+            property.as_object_mut().unwrap().remove("elapsed_s");
+        }
+    }
+    report
+}
