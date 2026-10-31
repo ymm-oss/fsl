@@ -198,11 +198,15 @@ pub fn lossless_document_with(source: &str, options: &ParseOptions) -> LosslessD
         }
     };
     let mut nodes = Vec::new();
-    let mut offset = 0;
+    let mut position = crate::SourcePos {
+        offset: 0,
+        line: 1,
+        column: 1,
+    };
     for token in tokens {
-        push_trivia(source, offset, token.span.start.offset, &mut nodes);
+        push_trivia(source, position, token.span.start.offset, &mut nodes);
         if matches!(token.kind, TokenKind::Eof) {
-            offset = token.span.end.offset;
+            position = token.span.end;
             continue;
         }
         nodes.push(LosslessNode {
@@ -210,9 +214,9 @@ pub fn lossless_document_with(source: &str, options: &ParseOptions) -> LosslessD
             text: source[token.span.start.offset..token.span.end.offset].to_owned(),
             span: token.span,
         });
-        offset = token.span.end.offset;
+        position = token.span.end;
     }
-    push_trivia(source, offset, source.len(), &mut nodes);
+    push_trivia(source, position, source.len(), &mut nodes);
     LosslessDocument {
         source: source.to_owned(),
         nodes,
@@ -220,40 +224,41 @@ pub fn lossless_document_with(source: &str, options: &ParseOptions) -> LosslessD
     }
 }
 
-fn push_trivia(source: &str, start: usize, end: usize, nodes: &mut Vec<LosslessNode>) {
-    let mut offset = start;
-    while offset < end {
-        let comment = source[offset..end].starts_with("//");
-        let node_start = offset;
-        if comment {
-            while offset < end && !source[offset..end].starts_with('\n') {
-                offset += source[offset..]
-                    .chars()
-                    .next()
-                    .expect("in bounds")
-                    .len_utf8();
+fn push_trivia(
+    source: &str,
+    mut position: crate::SourcePos,
+    end: usize,
+    nodes: &mut Vec<LosslessNode>,
+) {
+    while position.offset < end {
+        let comment = source[position.offset..end].starts_with("//");
+        let start = position;
+        while position.offset < end
+            && if comment {
+                !source[position.offset..end].starts_with('\n')
+            } else {
+                !source[position.offset..end].starts_with("//")
             }
-        } else {
-            while offset < end && !source[offset..end].starts_with("//") {
-                offset += source[offset..]
-                    .chars()
-                    .next()
-                    .expect("in bounds")
-                    .len_utf8();
+        {
+            let ch = source[position.offset..].chars().next().expect("in bounds");
+            position.offset += ch.len_utf8();
+            if ch == '\n' {
+                position.line += 1;
+                position.column = 1;
+            } else {
+                position.column += 1;
             }
         }
-        let start_pos = source_position(source, node_start);
-        let end_pos = source_position(source, offset);
         nodes.push(LosslessNode {
             kind: if comment {
                 LosslessKind::LineComment
             } else {
                 LosslessKind::Whitespace
             },
-            text: source[node_start..offset].to_owned(),
+            text: source[start.offset..position.offset].to_owned(),
             span: Span {
-                start: start_pos,
-                end: end_pos,
+                start,
+                end: position,
             },
         });
     }
