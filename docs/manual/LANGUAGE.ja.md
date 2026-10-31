@@ -912,15 +912,25 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   順序は定義されません。
 - struct: リテラル `Order { st: Open, qty: 0 }`、フィールド参照 `o.st`、
   `==` はフィールドごとの等値
-- Set/Seq 式の実体化 (Refs #1467): 受理されたスカラー・enum 要素のリテラルは、
-  記号的なメソッド・比較・binder・`let` で、検査済みモデルの推論型・期待型を使います。
-  条件式は値を構築する前に両方の腕へ文脈を渡し、等値比較は左側が空の場合も
-  反対側の項から文脈を得ます。推論された `Int` の一時値はメンバー・slot・長さを
-  保持し、以下の有限ドメイン・Seq 容量・格納時の境界規則は変えません。
-  state/格納型のホワイトリストは、複合式リテラル全体の拒否を意味しません。
-  `check` を通っても記号的実装が未完の形があります。既に判定できる複合 Seq の
-  経路は維持し、残る複合・relation 値の一時 collection の不足は #1467 で追跡します。
-  恒久的な engine の例外規則ではありません。
+- Set/Seq 式の実体化 (Refs #1467): 既に受理される再帰的な式は、構築・等値比較・
+  条件式の結合・メソッドとその連鎖・量化/集約 binder・`let` で、検査済みモデルの
+  推論型・期待型を使います。要素には Int、Bool、Enum、Struct、Option (Option<Enum> と
+  入れ子の不在)、入れ子の Set/Seq、Set-of-Seq、Seq-of-Set、relation、既存の Map 値を含みます。
+  評価前に両方の条件式の腕・入れ子の要素・`some`・`none`・空 collection へ文脈を渡します。
+  等値比較は左側が空の場合も反対側から不足する文脈を得て、項や腕の順序に依存しません。
+  Set は再帰的な論理等値で重複を除き、所属で等値を比較します。Seq は順序・重複・
+  生きた長さを保持します。不在 Option の隠れた payload と非活性 slot は等値や内部の
+  反復順序に影響しません。Set の決定的な反復順序は enum 宣言順でなく具象値の再帰的な
+  順序に従いますが、source の順序演算子は追加しません。relation の格納 grid 順序は保ちます。
+  推論された `Int` の一時値はドメイン外のメンバー・slot・容量超過の長さを切り詰めずに
+  保持します。別名への型の付け替えでは、境界検査・射影に対象型の文脈を再帰的に適用します。
+  同じ有限ドメイン・Seq 容量・Struct/Enum の名目的同一性・存在フラグ/生きた slot の
+  格納境界、容量 0 の Seq と到達した部分演算の規則は変えません。
+  文法や宣言/格納の受理範囲は変えません。Map 要素は既存の state 値や条件式による選択を
+  使うもので、新しい Map リテラル構文ではありません。エラー・位置・JSON 符号化
+  (入れ子の Option の区別を含む)・不正な enum の射影・assurance は変えません。
+  solver-free BFS の独立性と engine 固有の未対応/予算の境界も維持し、実体化によって
+  すべての spec が proved になるとは約束しません。
   [実体化の決定](../design/DESIGN-typed-collection-materialization.md)を参照してください。
   過去の各 SHA の固有 tree/cwd で `FSLC_CACHE=off <binary-for-SHA> check <form>` を実行し、
   corpus 606 形と書き換えた既存テストの固有 inline 3 形を各々検査しました:
@@ -961,7 +971,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
    同じ要素ドメインのSeq容量2→3です(すべて8:3)。単独・同じドメインの対照はcheckを通り、
    元のリテラル境界18形もbase/headで同じcheck出力を保ちます。コマンドと全除去の一覧は
   [単一のドメイン互換の決定](../design/DESIGN-finite-container-carriers.md)を参照してください。
-  リテラルの残る不足は #1467 で追跡します。
+  再帰的な実体化については上記の説明を参照してください。
   mutateでは、静的に型が不正なimplementsのmapをoracleの失敗でなく`invalid`として、
   checkで不正なmutantと同じ経路で分類します。入れ物全体のmapを持つspecの範囲変更mutantは、
   集計上`errored`から`invalid`へ移り、`kill_rate`から除かれ、gateに`oracle_errors`を
