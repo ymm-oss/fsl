@@ -670,6 +670,7 @@ pub enum RequirementsItem {
     },
     Requirement {
         id: String,
+        id_span: Span,
         text: String,
         items: Vec<RequirementBlockItem>,
         span: Span,
@@ -677,6 +678,7 @@ pub enum RequirementsItem {
     },
     Acceptance {
         id: String,
+        id_span: Span,
         text: String,
         steps: Vec<AcceptanceStep>,
         expectation: AcceptanceExpectation,
@@ -685,6 +687,7 @@ pub enum RequirementsItem {
     },
     Forbidden {
         id: String,
+        id_span: Span,
         text: String,
         steps: Vec<AcceptanceStep>,
         span: Span,

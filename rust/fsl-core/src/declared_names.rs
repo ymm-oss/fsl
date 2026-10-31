@@ -51,6 +51,15 @@ impl<'a> Walk<'a> {
         });
     }
 
+    fn located_name(&mut self, name: &'a str, position: &'static str, span: Span) {
+        self.names.push(Declared {
+            name,
+            position,
+            span: Some(span),
+            exact_span: true,
+        });
+    }
+
     fn params(&mut self, params: &'a [Param], span: Span) {
         for param in params {
             let (Param::Typed(name, _) | Param::Range(name, ..)) = param;
@@ -195,7 +204,11 @@ impl<'a> Walk<'a> {
         for item in &requirements.items {
             match item {
                 RequirementsItem::Requirement {
-                    id, items, span, ..
+                    id,
+                    id_span,
+                    items,
+                    span,
+                    ..
                 } => {
                     if !requirements.next.as_ref().is_some_and(|next| {
                         next.rule_headers.iter().any(|(rule_id, id_span)| {
@@ -204,7 +217,7 @@ impl<'a> Walk<'a> {
                                 && id_span.end.offset <= span.end.offset
                         })
                     }) {
-                        self.name(id, "requirement", Some(*span));
+                        self.located_name(id, "requirement", *id_span);
                     }
                     for item in items {
                         match item {
@@ -233,11 +246,11 @@ impl<'a> Walk<'a> {
                         self.name(&entry.alias, "glossary alias", Some(entry.alias_span));
                     }
                 }
-                RequirementsItem::Acceptance { id, span, .. } => {
-                    self.name(id, "scenario", Some(*span));
+                RequirementsItem::Acceptance { id, id_span, .. } => {
+                    self.located_name(id, "scenario", *id_span);
                 }
-                RequirementsItem::Forbidden { id, span, .. } => {
-                    self.name(id, "forbidden", Some(*span));
+                RequirementsItem::Forbidden { id, id_span, .. } => {
+                    self.located_name(id, "forbidden", *id_span);
                 }
                 RequirementsItem::Implements { .. } => {}
             }

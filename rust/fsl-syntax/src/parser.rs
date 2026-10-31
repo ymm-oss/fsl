@@ -693,6 +693,7 @@ impl<'a> Parser<'a> {
     fn requirement_block(&mut self) -> Result<RequirementsItem, ParseError> {
         let start = self.bump().span;
         let id = self.req_id()?;
+        let id_span = self.ids.last().expect("req_id records its spelling").span;
         let (text, text_span) = self.expect_string_with_span()?;
         let span = join_span(start, text_span);
         let annotations = self.take_annotations()?;
@@ -720,6 +721,7 @@ impl<'a> Parser<'a> {
         }
         Ok(RequirementsItem::Requirement {
             id,
+            id_span,
             text,
             items,
             span,
@@ -819,6 +821,7 @@ impl<'a> Parser<'a> {
     fn acceptance_block(&mut self) -> Result<RequirementsItem, ParseError> {
         let start = self.bump().span;
         let id = self.req_id()?;
+        let id_span = self.ids.last().expect("req_id records its spelling").span;
         let (text, text_span) = self.expect_string_with_span()?;
         let span = join_span(start, text_span);
         let annotations = self.take_annotations()?;
@@ -848,6 +851,7 @@ impl<'a> Parser<'a> {
         self.expect_symbol("}")?;
         Ok(RequirementsItem::Acceptance {
             id,
+            id_span,
             text,
             steps,
             expectation,
@@ -859,6 +863,7 @@ impl<'a> Parser<'a> {
     fn forbidden_block(&mut self) -> Result<RequirementsItem, ParseError> {
         let start = self.bump().span;
         let id = self.req_id()?;
+        let id_span = self.ids.last().expect("req_id records its spelling").span;
         let (text, text_span) = self.expect_string_with_span()?;
         let span = join_span(start, text_span);
         let annotations = self.take_annotations()?;
@@ -872,6 +877,7 @@ impl<'a> Parser<'a> {
         self.expect_symbol("}")?;
         Ok(RequirementsItem::Forbidden {
             id,
+            id_span,
             text,
             steps,
             span,

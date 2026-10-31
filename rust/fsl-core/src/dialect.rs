@@ -2816,6 +2816,7 @@ pub(crate) fn lower_resolved_requirements(
             items: declarations,
             span: requirement_span,
             annotations: block_annotations,
+            ..
         } = requirement
         else {
             unreachable!();
@@ -4161,6 +4162,7 @@ pub fn requirements_trace_contract_with_options(
                 expectation,
                 span,
                 annotations: surface_annotations,
+                ..
             } => {
                 if !acceptance_ids.insert(id.clone()) {
                     return Err(core_error(format!("duplicate acceptance id '{id}'"), span));
@@ -4198,6 +4200,7 @@ pub fn requirements_trace_contract_with_options(
                 steps,
                 span,
                 annotations: surface_annotations,
+                ..
             } => {
                 if !forbidden_ids.insert(id.clone()) {
                     return Err(core_error(format!("duplicate forbidden id '{id}'"), span));
