@@ -73,7 +73,7 @@ fn error_restores_outer_scope_and_short_circuit_stays_lazy() {
 }
 
 #[test]
-fn diagnostic_candidates_retain_only_body_continuation_payloads() {
+fn diagnostic_candidates_retain_reached_payloads_without_lexical_exports() {
     for (filter, body, payloads) in [
         (
             "",
@@ -87,16 +87,20 @@ fn diagnostic_candidates_retain_only_body_continuation_payloads() {
             Some(vec![(0, Some(1)), (1, Some(1))]),
         ),
         (" where o is some(w) and w == 2", "false", None),
-        ("", "not (o is some(v))", Some(vec![(0, None), (1, None)])),
+        (
+            "",
+            "not (o is some(v))",
+            Some(vec![(0, Some(1)), (1, Some(1))]),
+        ),
         (
             "",
             "(o is some(v)) => false",
-            Some(vec![(0, None), (1, None)]),
+            Some(vec![(0, Some(1)), (1, Some(1))]),
         ),
         (
             "",
             "if true then (o is some(v) and false) else true",
-            Some(vec![(0, None), (1, None)]),
+            Some(vec![(0, Some(1)), (1, Some(1))]),
         ),
         (
             "",
@@ -120,6 +124,9 @@ fn diagnostic_candidates_retain_only_body_continuation_payloads() {
                     let mut bindings = Bindings::from([("k".into(), Value::Int(k))]);
                     if let Some(v) = v {
                         bindings.insert("v".into(), Value::Int(v));
+                    }
+                    if filter.contains("w == 1") {
+                        bindings.insert("w".into(), Value::Int(1));
                     }
                     bindings
                 })
@@ -235,10 +242,13 @@ fn continuation_short_circuit_exports_only_conjunction_and_stays_lazy() {
 }
 
 #[test]
-fn diagnostic_conjunction_search_and_fallback_stay_closed() {
+fn diagnostic_conjunction_search_and_fallback_observe_closed_children() {
     for (expression, expected) in [
         ("false and true", Bindings::new()),
-        ("not (some(1) is some(v))", Bindings::new()),
+        (
+            "not (some(1) is some(v))",
+            Bindings::from([("v".into(), Value::Int(1))]),
+        ),
         (
             "(forall k in 0..0 { some(1) is some(v) and v == 2 }) and false",
             Bindings::from([("k".into(), Value::Int(0)), ("v".into(), Value::Int(1))]),
@@ -256,5 +266,50 @@ fn diagnostic_conjunction_search_and_fallback_stay_closed() {
             violating_bindings(expr, &monitor.state, &model).unwrap(),
             Some(vec![expected])
         );
+    }
+}
+
+#[test]
+fn private_old_observation_preserves_truth_caller_and_native_error() {
+    let model = witness_model("some(1)", "not (o is some(v))");
+    let state = Monitor::new(model.clone()).unwrap().state;
+    let old = State::from([("o".into(), Value::Some(Box::new(Value::Int(2))))]);
+    let expr = Expr::UnaryNamed {
+        name: "old".into(),
+        expr: Box::new(
+            model
+                .invariants
+                .iter()
+                .find(|p| p.name == "Q")
+                .unwrap()
+                .expr
+                .clone(),
+        ),
+        span: model.invariants[0].span,
+    };
+    let before = Bindings::from([("v".into(), Value::Int(9))]);
+    for old_state in [Some(&old), None] {
+        let mut ordinary = before.clone();
+        let expected = eval(&expr, &state, &mut ordinary, &model, old_state);
+        let mut caller = before.clone();
+        let mut observed = Bindings::new();
+        let actual = eval_observing(
+            &expr,
+            &state,
+            &mut caller,
+            &model,
+            old_state,
+            Some(&mut observed),
+        );
+        assert_eq!(actual, expected);
+        assert_eq!(ordinary, before);
+        assert_eq!(caller, before);
+        if old_state.is_some() {
+            assert_eq!(actual, Ok(Value::Bool(false)));
+            assert_eq!(observed, Bindings::from([("v".into(), Value::Int(2))]));
+        } else {
+            assert_eq!(actual, Err(runtime_error("old() used without old state")));
+            assert!(observed.is_empty());
+        }
     }
 }

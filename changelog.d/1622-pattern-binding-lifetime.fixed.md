@@ -3,7 +3,9 @@ in symbolic verification and concrete Monitor/solver-free BFS evaluation,
 including raw/expected-type conditionals, guards and composed initializers.
 Closed expressions restore outer values and declared binding types; legal
 conjunctive requires flow and all existing source collision refusals remain.
-Quantified diagnostic snapshots retain their matched continuation payloads in
-both top-level and blame witnesses without reopening ordinary evaluation.
-Reached payload evidence also survives nested conjunction short-circuit returns;
-skipped operands remain unevaluated and non-continuation scopes remain closed.
+Diagnostic evidence retains successful payload matches actually reached in selected
+candidate filters and closed bodies, including non-exporting children, eager
+arguments, optimized indices and nonquantified fallback, in both top-level and
+blame witnesses. Evidence never supplies identifier lookup; skipped children,
+other candidates and nested binder-local captures remain excluded. Original
+binder values and first-observed keys retain their diagnostic identity.

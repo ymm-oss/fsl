@@ -359,19 +359,26 @@ Separate CLI controls preserve impossible/reached progress outcomes and pin
 later-payload init values. No solver, substitution, public envelope or grammar
 change is part of this repair.
 
-Diagnostic snapshot lifetime is distinct from caller binding lifetime. For a
-quantified failed body, `violating_bindings` evaluates its candidate-local body
-as an explicit continuation, retaining matched conjunctive payloads in that
-snapshot (for example `{k: 0, v: 1}`). Ordinary evaluation, candidate filters,
-non-conjunctive children and sibling candidates remain closed. The public
-top-level and blame witness packets retain those payload keys; diagnostics do
-not collect historical out-of-continuation bindings.
-This includes arbitrarily nested conjunctions: when an `and` short-circuits
-after a false left subtree, it retains that subtree's reached candidate evidence
-without evaluating the right subtree. Both the early and reached-RHS return
-routes preserve the whole-exporting conjunction's local snapshot. `or` and
-implication still export no whole-result bindings, and ordinary closed evaluation
-discards the snapshot. Retention for diagnostics does not widen read visibility.
+Diagnostic observation lifetime is distinct from lexical binding lifetime.
+`violating_bindings` seeds a fresh evidence frame with each candidate's original
+binder assignments after enumerating its source, then observes its selected
+filter and closed body exactly once. A failed selected candidate publishes that
+frame; filtered and successful candidates discard it. Each successful `is some`
+records its payload directly, retaining the first value for each key, independently
+of lexical shadowing. Evidence is never identifier lookup or continuation authority.
+
+Every actually executed child shares the frame, including `not`, `or`, implication,
+conditional conditions/selected arms, eager operands/arguments and optimized access
+indices. Short-circuited operands and unselected arms are not evaluated or observed.
+Nested quantifier/aggregate sources, filters and bodies remain isolated; no nested
+local captures merge into the parent frame. Nonquantified diagnostic fallback also
+observes closed evaluation, while searched conjuncts have separate frames. Ordinary
+evaluation still closes its children and `or`/implication export no whole-result
+bindings. Top-level and blame packets preserve reached payloads without widening
+read visibility or changing truth/errors. Native projection remains one candidate
+level and blame renders a whole expression; historical descriptions of recursive
+nested-forall projection or conjunct splitting are not implemented by this repair
+(#1437).
 
 `fsl-core::pattern_binding_flows(op, right_operand)` is the single operator
 decision. The initial eight-consumer estimate omitted the separate free-name
