@@ -4,7 +4,7 @@
 mod issue_1422_mapping_neg {
     use super::*;
 
-    fn negate(value: Value, binding: bool) -> Result<Value, String> {
+    fn negate(value: &Value, binding: bool) -> Result<Value, String> {
         let model = crate::spec_loading::load_model_from_source(
             Path::new("mapping-unit.fsl"),
             "spec K { type Bit = 0..1 state { x: Bit } init { x = 0 } action put(v: Bit) { x = v } }",
@@ -31,7 +31,7 @@ mod issue_1422_mapping_neg {
     fn minimum_integer_is_rejected_from_raw_and_binding_variables() {
         for binding in [false, true] {
             assert_eq!(
-                negate(json!(i64::MIN), binding),
+                negate(&json!(i64::MIN), binding),
                 Err("invalid mapping arithmetic".to_owned())
             );
         }
@@ -47,7 +47,7 @@ mod issue_1422_mapping_neg {
             (1, -1),
         ] {
             for binding in [false, true] {
-                assert_eq!(negate(json!(input), binding), Ok(json!(expected)));
+                assert_eq!(negate(&json!(input), binding), Ok(json!(expected)));
             }
         }
     }
@@ -57,7 +57,7 @@ mod issue_1422_mapping_neg {
         for value in [Value::Null, json!(true), json!("0"), json!([]), json!({})] {
             for binding in [false, true] {
                 assert_eq!(
-                    negate(value.clone(), binding),
+                    negate(&value, binding),
                     Err("mapping negation requires integer".to_owned())
                 );
             }
