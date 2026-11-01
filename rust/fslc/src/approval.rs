@@ -822,7 +822,7 @@ fn is_canonical_utc_timestamp(value: &str) -> bool {
 pub fn write_record(path: &Path, record: &ApprovalRecord) -> Result<(), String> {
     let mut encoded = serde_json::to_string_pretty(record).map_err(|error| error.to_string())?;
     encoded.push('\n');
-    std::fs::write(path, encoded).map_err(|error| error.to_string())
+    crate::output_publication::publish(path, encoded).map_err(|error| error.to_string())
 }
 
 pub fn sign_record(record: ApprovalRecord, private_key: &Path) -> Result<ApprovalRecordV2, String> {
@@ -860,7 +860,7 @@ pub fn write_record_v2(path: &Path, record: &ApprovalRecordV2) -> Result<(), Str
     validate_record_v2(record)?;
     let mut encoded = serde_json::to_string_pretty(record).map_err(|error| error.to_string())?;
     encoded.push('\n');
-    std::fs::write(path, encoded).map_err(|error| error.to_string())
+    crate::output_publication::publish(path, encoded).map_err(|error| error.to_string())
 }
 
 #[must_use]

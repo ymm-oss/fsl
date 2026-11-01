@@ -1372,7 +1372,9 @@ fn run_causal_observe_expectations(
                 base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
             };
             let out_json = serde_json::to_string_pretty(artifact).expect("valid JSON");
-            if let Err(error) = std::fs::write(&file_path, format!("{out_json}\n")) {
+            if let Err(error) =
+                crate::output_publication::publish(&file_path, format!("{out_json}\n"))
+            {
                 return (
                     error_output(
                         "io",
@@ -1400,7 +1402,9 @@ fn run_causal_observe_expectations(
                 base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
             };
             let lifecycle_json = serde_json::to_string_pretty(lifecycle).expect("valid JSON");
-            if let Err(error) = std::fs::write(&file_path, format!("{lifecycle_json}\n")) {
+            if let Err(error) =
+                crate::output_publication::publish(&file_path, format!("{lifecycle_json}\n"))
+            {
                 return (
                     error_output(
                         "io",
