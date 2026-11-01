@@ -11,3 +11,5 @@ The debug exit check recognizes the existing `migrate_manual_required` result
 at exactly exit 1, preserving its JSON envelope and no-write behavior.
 Batch diff's debug exit check preserves its existing maximum child exit (0/1/2),
 separately from the semantic gate, including operational errors at exit 2.
+The design-citation CI scanner honors Git's declared binary/nontext attributes
+without ignoring malformed UTF-8 text or relaxing heading and tracked-target checks.

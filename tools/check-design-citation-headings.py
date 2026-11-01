@@ -9,6 +9,7 @@ import html
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -143,11 +144,43 @@ def tracked_files(root: Path) -> list[Path]:
         names = result.stdout.decode("utf-8").split("\0")
     except UnicodeDecodeError as error:
         raise AuditError(f"git returned a non-UTF-8 path: {error}") from error
-    return sorted(
+    files = sorted(
         Path(name)
         for name in names
         if name and Path(name) not in EXCLUDED_PATHS
     )
+    if not files:
+        return files
+    # Git's binary macro unsets text. Only an explicit -text declaration
+    # excludes input: text=auto/unspecified must still decode strictly as UTF-8.
+    try:
+        attributes = subprocess.run(
+            ["git", "check-attr", "-z", "--stdin", "text"],
+            input=b"".join(path.as_posix().encode("utf-8") + b"\0" for path in files),
+            cwd=root, check=False, capture_output=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise AuditError(f"cannot query Git text attributes: {error}") from error
+    if attributes.returncode != 0:
+        detail = attributes.stderr.decode("utf-8", errors="replace").strip()
+        raise AuditError(
+            f"git check-attr failed with exit {attributes.returncode}: "
+            f"{detail or '(no stderr)'}"
+        )
+    try:
+        records = attributes.stdout.decode("utf-8").split("\0")
+    except UnicodeDecodeError as error:
+        raise AuditError(f"git returned non-UTF-8 attributes: {error}") from error
+    if len(records) != 3 * len(files) + 1 or records[-1] != "":
+        raise AuditError("git check-attr returned malformed records")
+    text_files: list[Path] = []
+    for index, path in enumerate(files):
+        name, attribute, value = records[3 * index:3 * index + 3]
+        if name != path.as_posix() or attribute != "text":
+            raise AuditError("git check-attr returned unexpected path or attribute")
+        if value != "unset":
+            text_files.append(path)
+    return text_files
 
 
 def fixture_files(root: Path) -> list[Path]:
@@ -212,6 +245,68 @@ def assert_selftest(
         file=sys.stderr,
     )
     return False
+
+
+def binary_selftest(repository_root: Path) -> list[bool]:
+    """Exercise the real tracked-file/attribute/CLI path in an isolated index."""
+    scratch = repository_root / ".codex/tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    checks: list[bool] = []
+    with tempfile.TemporaryDirectory(prefix="design-citation-", dir=scratch) as temp:
+        root = Path(temp)
+        for directory in ("tools", "docs/design"):
+            (root / directory).mkdir(parents=True)
+        (root / ".gitattributes").write_text(
+            '* text=auto\n"tools/binary data\\nfixture" binary\n'
+            'tools/nontext -text\ntools/explicit-text text\n',
+            encoding="utf-8",
+        )
+        (root / "tools/binary data\nfixture").write_bytes(b"\xff\x00")
+        (root / "tools/nontext").write_bytes(b"\xff\x00")
+        design = "docs/design/DESIGN-selftest.md"
+        (root / design).write_text("## Existing heading\n", encoding="utf-8")
+        source = root / "tools/reference.zlib"
+        source.write_text(f'{design}: "Existing heading"\n', encoding="utf-8")
+        for name in ("unmarked", "explicit-text"):
+            (root / "tools" / name).write_text("plain text\n", encoding="utf-8")
+        for command in (["git", "init", "--quiet"], ["git", "add", "--", "."]):
+            result = subprocess.run(
+                command, cwd=root, check=False, capture_output=True, timeout=30
+            )
+            if result.returncode != 0:
+                raise AuditError(f"selftest Git setup failed: {result.stderr!r}")
+
+        def expect(label: str, code: int, detail: str) -> None:
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).resolve()), "check", str(root)],
+                check=False, capture_output=True, timeout=30,
+            )
+            output = (result.stdout + result.stderr).decode("utf-8")
+            checks.append(assert_selftest(label + " exit", result.returncode, code))
+            checks.append(assert_selftest(label + " diagnostic", detail in output, True))
+
+        expect("declared binary without UTF-8 decode", 0, "citations=1 findings=0")
+        for name in ("unmarked", "explicit-text"):
+            malformed = root / "tools" / name
+            malformed.write_bytes(b"\xff")
+            expect(name + " malformed UTF-8", 2, f"cannot read UTF-8 file tools/{name}")
+            malformed.write_text("plain text\n", encoding="utf-8")
+        # The same extension as the real binary fixtures is still citation prose
+        # unless Git explicitly declares it nontext.
+        source.write_text(f'{design}: "Missing heading"\n', encoding="utf-8")
+        expect("bad heading beside binary", 1, "quoted heading does not exist")
+        untracked_design = "docs/design/DESIGN-untracked.md"
+        source.write_text(f'{untracked_design}: "Ambient heading"\n', encoding="utf-8")
+        (root / untracked_design).write_text(
+            "## Ambient heading\n", encoding="utf-8"
+        )
+        expect("real untracked target beside binary", 1, "design document is not tracked")
+        source.unlink()
+        expect(
+            "missing tracked text beside binary", 2,
+            "cannot read UTF-8 file tools/reference.zlib",
+        )
+    return checks
 
 
 def selftest(repository_root: Path) -> int:
@@ -327,13 +422,15 @@ def selftest(repository_root: Path) -> int:
             produced_untracked_findings,
             expected_untracked_findings,
         ),
+        *binary_selftest(repository_root),
     )
     if not all(checks):
         return 1
     print(
         "selftest: PASS: produced=7 accepting/0 findings, "
         "3 issue citations/3 exact stale findings, 2 new-separator findings, "
-        "and 1 untracked-target finding; expected=same"
+        "and 1 untracked-target finding; expected=same; "
+        "6 Git binary/text/heading/target/I/O controls matched expected exits 0/2/2/1/1/2"
     )
     return 0
 
