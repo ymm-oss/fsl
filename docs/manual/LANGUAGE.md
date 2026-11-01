@@ -975,17 +975,31 @@ name in a `decreases` call. There are no unrelated breaking removals.
   quantifier/aggregate field shadowing is unchanged. Ordering is not defined.
 - struct: literal `Order { st: Open, qty: 0 }`, field reference `o.st`,
   `==` is field-by-field equality
-- Set/Seq expression materialization (Refs #1467): admitted scalar/enum-element
-  literals use the checked model's inferred/expected type in symbolic methods,
-  comparisons, binders and `let`. Context reaches both conditional arms before
-  construction; equality also obtains it from the opposite operand, including
-  empty-left forms. Inferred `Int` temporaries retain members, slots and length;
-  finite-carrier, Seq-capacity and storage-bound rules below are unchanged.
-  The state/storage whitelist is not a blanket rejection of composite expression
-  literals: some pass `check` while symbolic implementation remains incomplete.
-  Existing deciding composite Seq paths are preserved; remaining composite and
-  relation-valued temporary gaps stay tracked by #1467, not permanent engine
-  exceptions. See the [materialization decision](../design/DESIGN-typed-collection-materialization.md).
+- Set/Seq expression materialization (Refs #1467): already-admitted recursive
+  expressions use the checked model's inferred/expected type for construction,
+  equality, conditional joins, methods/chains, quantifier/aggregate binders and
+  `let`. Elements include Int, Bool, Enum, Struct, Option (`Option<Enum>` and nested
+  absence), nested Set/Seq, Set-of-Seq, Seq-of-Set, relation and existing Map values.
+  Context reaches both conditional arms, nested items, `some`, `none` and empty
+  collections before evaluation; equality obtains missing context from the
+  opposite operand, including empty-left forms, in either operand/arm order.
+  Sets deduplicate by recursive logical equality and compare by membership;
+  Seq preserves order, duplicates and live length. Hidden absent Option payloads
+  and inactive slots do not affect equality/internal iteration order. Deterministic
+  Set iteration follows concrete recursive value order, not enum declaration order;
+  it does not add source-level ordering operators. Relation storage-grid order stays fixed.
+  Inferred `Int` temporaries retain outside-carrier members, slots and overflow
+  length without clipping. Alias retagging applies target context recursively to
+  bounds/projection; equal finite carriers, Seq capacity, nominal Struct/Enum
+  identity and presence/live-slot storage bounds remain unchanged, as do
+  zero-capacity Seq and reached partial-operation rules.
+  This changes neither grammar nor declaration/storage admission; Map members
+  use existing state values/conditional selections, not new Map literal syntax.
+  Errors, locations, JSON encoding (including nested Option distinctions), invalid
+  enum projection and assurance remain unchanged. Solver-free BFS independence
+  and engine-specific unsupported/budget boundaries still apply; materialization
+  does not promise that every spec becomes proved. See the
+  [materialization decision](../design/DESIGN-typed-collection-materialization.md).
   Historical `FSLC_CACHE=off <binary-for-SHA> check <form>` in each own tree checked
   606 corpus forms and 3 unique rewritten-test inline forms at each of
   `a52bef4931adc67ea2b1fdca827e2318b4ae25ab`,
@@ -1032,7 +1046,7 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Seq capacity2→3 with equal element carrier (all 8:3). Standalone/same-carrier
   controls still check; the 18 original literal-boundary outputs are unchanged.
   See the [single carrier decision](../design/DESIGN-finite-container-carriers.md)
-  for commands and the full removal inventory. Remaining literal gaps stay tracked by #1467.
+  for commands and the full removal inventory; recursive materialization is described above.
   In mutate, a statically ill-typed implements map is `invalid`, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map
   mutants that change a numeric range move from `errored` to `invalid` in the

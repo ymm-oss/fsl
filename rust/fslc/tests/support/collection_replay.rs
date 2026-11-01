@@ -592,3 +592,292 @@ pub fn finish(errors: &[String]) {
         errors.join("\n")
     );
 }
+
+/// Full-packet counterpart for recursive-value tests; old scalar checks stay intact.
+#[allow(dead_code)]
+pub fn full_fixture(label: &str, source: &str) -> PathBuf {
+    let parent = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    std::fs::create_dir_all(parent).unwrap();
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let directory = parent.join(format!("{label}-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    std::fs::write(directory.join("input.fsl"), source).unwrap();
+    std::fs::write(
+        directory.join("actions.json"),
+        r#"[{"action":"go","params":{}}]"#,
+    )
+    .unwrap();
+    println!("FULL_EVIDENCE {}", directory.display());
+    directory
+}
+
+#[allow(dead_code)]
+pub fn full_observe(directory: &std::path::Path, route: &str) -> (Value, i32) {
+    use sha2::{Digest, Sha256};
+    static DIGEST: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let file = |suffix| directory.join(format!("{route}-{id}.{suffix}"));
+    let args = match route {
+        "check" => vec!["check", "input.fsl"],
+        "monitor" => vec!["replay", "input.fsl", "--trace", "actions.json"],
+        "kernel-v1" => vec!["kernel", "input.fsl", "--kernel-version", "1"],
+        "kernel-v2" => vec!["kernel", "input.fsl", "--kernel-version", "2"],
+        _ => vec![
+            "verify",
+            "input.fsl",
+            "--engine",
+            route,
+            "--depth",
+            "4",
+            "--no-cache",
+        ],
+    };
+    let binary = env!("CARGO_BIN_EXE_fslc");
+    let digest =
+        DIGEST.get_or_init(|| format!("{:x}", Sha256::digest(std::fs::read(binary).unwrap())));
+    let gate = fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE;
+    let trace_digest = if route == "monitor" {
+        let trace = std::fs::read(directory.join("actions.json")).unwrap();
+        std::fs::write(file("trace.json"), &trace).unwrap();
+        Some(format!("{:x}", Sha256::digest(trace)))
+    } else {
+        None
+    };
+    let output = Command::new(binary)
+        .args(&args)
+        .current_dir(directory)
+        .env("FSLC_CACHE", "off")
+        .env_remove("FSLC_CACHE_VERIFY")
+        .env_remove(gate)
+        .env("TMPDIR", directory)
+        .output()
+        .unwrap();
+    std::fs::write(file("stdout.json"), &output.stdout).unwrap();
+    std::fs::write(file("stderr.txt"), &output.stderr).unwrap();
+    let exit = output.status.code().unwrap();
+    let metadata = json!({"binary": binary, "argv": args, "cwd": directory,
+        "exit": exit, "FSLC_CACHE": "off", "FSLC_CACHE_VERIFY": null,
+        "gate_name": gate, "gate_present": false, "TMPDIR": directory,
+        "source_sha256": format!("{:x}", Sha256::digest(std::fs::read(directory.join("input.fsl")).unwrap())),
+        "binary_sha256": digest, "trace_sha256": trace_digest});
+    std::fs::write(
+        file("command.json"),
+        serde_json::to_vec_pretty(&metadata).unwrap(),
+    )
+    .unwrap();
+    assert!(output.stderr.is_empty(), "{route}: {output:?}");
+    (
+        serde_json::from_slice(&output.stdout).expect("full CLI JSON"),
+        exit,
+    )
+}
+
+/// Exclude measured wall clocks and native solver allocation telemetry only.
+/// CI repeated identical BMC/induction packets with different `memory_mb` values.
+/// Every exclusion is live/type-checked; semantic fields and counters stay exact.
+#[allow(dead_code)]
+pub fn stable_full_packet(mut report: Value, route: &str) -> Value {
+    let proof_route = matches!(route, "bmc" | "induction")
+        && matches!(
+            report["result"].as_str(),
+            Some("verified" | "proved" | "violated")
+        );
+    let native_cost = proof_route
+        && report["versions"]["solver"]["backend"]
+            .as_str()
+            .expect("proof packet must identify its solver backend")
+            == "native-z3";
+    if native_cost {
+        assert!(
+            report["cost"].is_object(),
+            "native proof cost must be present"
+        );
+    }
+    if let Some(cost) = report.get_mut("cost") {
+        assert!(cost["elapsed_s"].as_f64().is_some());
+        cost.as_object_mut().unwrap().remove("elapsed_s");
+        let solver = cost["solver"]
+            .as_object_mut()
+            .expect("cost must contain solver statistics");
+        let checks = solver
+            .get("checks")
+            .and_then(Value::as_u64)
+            .expect("solver checks must be an unsigned integer");
+        assert!(solver["check_elapsed_s"].as_f64().is_some());
+        solver.remove("check_elapsed_s");
+        if native_cost && checks > 0 {
+            let memory = solver
+                .get("memory_mb")
+                .and_then(Value::as_f64)
+                .expect("queried native solver memory must be numeric and present");
+            assert!(memory.is_finite() && memory >= 0.0);
+            solver.remove("memory_mb");
+        }
+        for property in cost["properties"].as_array_mut().unwrap() {
+            assert!(property["elapsed_s"].as_f64().is_some());
+            property.as_object_mut().unwrap().remove("elapsed_s");
+        }
+    }
+    report
+}
+
+/// Acceptance continuation: expected semantics are supplied by each literal fixture.
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct Oracle {
+    pub outcome: &'static str,
+    pub step: usize,
+    pub line: usize,
+    pub frozen: bool,
+    pub witness: Option<(&'static str, Value)>,
+}
+
+impl Oracle {
+    #[allow(dead_code)]
+    fn accepts(&self, r: &Value, exit: i32, route: &str) -> bool {
+        let positive = self.outcome == "pass";
+        let bound = self.outcome.starts_with("_bounds_");
+        let property = if bound {
+            self.outcome
+        } else if self.outcome == "partial_op" {
+            "_partial_property_Capture"
+        } else {
+            "Capture"
+        };
+        let kind = if bound {
+            "type_bound"
+        } else if positive {
+            "pass"
+        } else {
+            self.outcome
+        };
+        match route {
+            "check" => exit == 0 && r["result"] == "ok",
+            "kernel-v1" | "kernel-v2" => exit == 0 && r["result"] == "kernel",
+            "monitor" if positive => {
+                exit == 0 && r["result"] == "conformant" && r["steps_checked"] == 1
+            }
+            "monitor" => {
+                exit == 1
+                    && r["result"] == "nonconformant"
+                    && r["violation"]["kind"] == kind
+                    && r["violation"]["name"] == property
+                    && r["failed_at_event"] == 0
+            }
+            _ if positive => {
+                exit == 0
+                    && r["result"] == if route == "bmc" { "verified" } else { "proved" }
+                    && r["completeness"]
+                        == if route == "bmc" {
+                            "bounded"
+                        } else {
+                            "unbounded"
+                        }
+                    && r["trace"].is_null()
+                    && r["invariant"].is_null()
+            }
+            _ => {
+                exit == 1
+                    && r["result"] == "violated"
+                    && r["violation_kind"] == kind
+                    && r["invariant"] == property
+                    && r["violated_at_step"] == self.step
+                    && r["loc"]
+                        == if bound {
+                            Value::Null
+                        } else {
+                            json!({"line":self.line,"column":3})
+                        }
+            }
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub fn continuation(label: &str, source: &str, oracle: &Oracle) -> Vec<String> {
+    let mut errors = Vec::new();
+    let directory = full_fixture(label, source);
+    let mut previous = BTreeMap::new();
+    let positive = oracle.outcome == "pass";
+    std::fs::write(directory.join("oracle.txt"), format!("{oracle:#?}")).unwrap();
+    for repeat in 1..=2 {
+        for route in [
+            "check",
+            "monitor",
+            "bmc",
+            "induction",
+            "explicit",
+            "kernel-v1",
+            "kernel-v2",
+        ] {
+            let (r, exit) = full_observe(&directory, route);
+            let ok = oracle.accepts(&r, exit, route);
+            println!(
+                "CONTINUATION {label} repeat={repeat} route={route} exit={exit} result={} expected={} ok={ok}",
+                r["result"], oracle.outcome
+            );
+            require(&mut errors, ok, label, route, &r, exit);
+            if route == "check" && !ok {
+                errors.push(format!("NON-ADMISSION {label}: {r}"));
+                break;
+            }
+            if oracle.frozen && positive && route == "explicit" {
+                require(
+                    &mut errors,
+                    r["warnings"].as_array().is_some_and(|ws| {
+                        ws.iter()
+                            .any(|w| w["kind"] == "tautology_over_frozen" && w["name"] == "Capture")
+                    }),
+                    label,
+                    "live frozen warning",
+                    &r,
+                    exit,
+                );
+            }
+            if let Some((variable, expected)) = &oracle.witness {
+                let actual = if positive && route == "monitor" {
+                    Some(&r["final_state"][variable])
+                } else if !positive && matches!(route, "bmc" | "induction" | "explicit") {
+                    Some(&r["trace"][oracle.step]["state"][variable])
+                } else {
+                    None
+                };
+                if let Some(actual) = actual {
+                    require(
+                        &mut errors,
+                        actual == expected,
+                        label,
+                        "literal retained value",
+                        &r,
+                        exit,
+                    );
+                }
+            }
+            let stable = (stable_full_packet(r, route), exit);
+            if let Some(prior) = previous.insert(route, stable.clone())
+                && prior != stable
+            {
+                errors.push(format!(
+                    "FULL PACKET DRIFT {label}/{route}: {prior:?} != {stable:?}"
+                ));
+            }
+        }
+    }
+    errors
+}
+
+#[allow(dead_code)]
+pub fn ready<F: std::future::Future>(future: F) -> F::Output {
+    use std::task::{Context, Poll, Waker};
+    match std::pin::pin!(future)
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+    {
+        Poll::Ready(value) => value,
+        Poll::Pending => panic!("native solver yielded"),
+    }
+}

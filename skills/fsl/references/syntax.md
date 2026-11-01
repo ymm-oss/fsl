@@ -1409,17 +1409,30 @@ when checking a file, the message suffix changes from `at L:C` to
   Arithmetic and ordering on Option are type errors.
 - struct: literal `S { f: 0, o: none }`, `s.f`, `==` (field-wise equality; for an
   Option field, presence matches ∧ present ⇒ values match)
-- Set/Seq materialization (Refs #1467): admitted scalar/enum-element expressions
-  use shared checked-model inferred/expected types for symbolic receivers,
-  comparisons, binders and `let`. Context reaches both if arms before construction
-  and equality obtains missing context from the opposite operand, including an
-  empty left operand. Inferred `Int` temporaries retain values/slots/length;
-  equal finite carriers, Seq capacity, alias retagging and model-local bounds remain.
-  Private lexical metadata preserves types without forcing raw `none`/composites;
-  the public Rust `Bindings<T>` BTreeMap alias is unchanged. State/storage
-  restrictions do not reject all composite expression literals. Preserve existing
-  deciding composite Seq paths; remaining composite/relation gaps, including
-  symbolic Set<Option> literal binders, stay tracked by #1467, not engine policy.
+- Set/Seq materialization (Refs #1467): use shared checked-model inferred/expected
+  types for already-admitted recursive construction, equality, conditional joins,
+  methods/chains, quantifier/aggregate binders and `let`. Elements include Int,
+  Bool, Enum, Struct, Option (Option<Enum>/nested absence), nested Set/Seq,
+  Set-of-Seq, Seq-of-Set, relation and existing Map values. Context descends into
+  both if arms, nested items, `some`, `none` and empty collections before evaluation;
+  equality obtains missing context from either operand, including empty-left forms.
+  Set uses recursive logical deduplication/membership; Seq retains order, duplicates
+  and live length. Hidden absent payloads/inactive slots do not affect equality or
+  internal order. Set iteration uses concrete recursive value order, not enum
+  declaration order; this is not a new source ordering operator. Relation ordering
+  uses views without reordering its fixed storage-grid prefix.
+  Keep outside-carrier Int temporaries and overflow until the applicable bound,
+  without clipping. Alias retagging uses recursive target context for bounds and
+  projection. Equal finite carriers, Seq capacity, nominal Struct/Enum identity,
+  presence/live-slot bounds, zero-capacity Seq and reached partiality remain.
+  Private lexical metadata preserves raw bindings; the exact public Rust
+  `Bindings<T>` alias/root export and SymbolicValue variant census remain, but
+  Collection.entries/constructor shape breaks (see decision). Do not claim all
+  public APIs are unchanged. No grammar, admission or storage expansion, enum
+  payloads or Map literals: use existing state Map values/conditional selections.
+  Existing errors, locations, typed JSON/nested Option encoding, invalid-enum
+  projection and assurance remain. Solver-free BFS stays independent and its
+  engine-specific unsupported/budget boundaries remain; not every spec is proved.
   [Decision](../../../docs/design/DESIGN-typed-collection-materialization.md).
   Historical own-tree `FSLC_CACHE=off <binary-for-SHA> check <form>` covered
   606 corpus +3 unique rewritten-test inline forms at each of
@@ -1468,7 +1481,7 @@ when checking a file, the message suffix changes from `at L:C` to
    with capacity2, and Seq capacity2→3 with equal elements (all8:3).
    Standalone/same-carrier controls and the18 literal-boundary outputs remain
    accepted/unchanged. Use matching carriers, not weakened properties.
-  Remaining literal gaps stay tracked by #1467. Full commands/inventory:
+  Recursive materialization is described above. Full carrier commands/inventory:
   [carrier decision](../../../docs/design/DESIGN-finite-container-carriers.md).
   Symbolic init copies preserve introduced support in checked dependency order;
   repeated assignments remain relational equalities. In BMC, re-framing a root
