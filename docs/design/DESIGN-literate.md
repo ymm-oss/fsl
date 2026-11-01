@@ -186,3 +186,29 @@ without a separate code path).
   process IDs produce distinct materialization paths, and symlink-alias cache
   keys invalidate when a dependency beside the alias changes.
 - `examples/literate/toggle.md`: canonical literate example.
+
+### Fixture-scoped comparison of independent solver memory (#1420)
+
+CI 41347782003's three supplied failing comparison pairs have exactly one
+non-timing difference each, `/cost/solver/memory_mb`: `compose/verify`
+(17.67 → 17.24), `governance-ok/verify` (17.68 → 17.24), and
+`strict-tags/verify` (18.36 → 17.91). Their complete expected bodies map to
+those three BASE anchor IDs, not to every phase in the failing tests. The
+already-controlled timing differences cover 10, 10, and 8 paths respectively;
+the remaining JSON is identical. These observations demonstrate that literal
+memory equality across these independent measurements is not stable; they do
+not establish a product-semantic failure.
+
+`tests/support/literate_memory.rs` therefore adds only those three
+fixture/command dispositions in Rust policy, validating both memory values as
+present, numeric, finite and nonnegative before full comparison of everything
+else. This policy is separate from the five historical `numeric_memory`
+dispositions in the generated BASE anchors, which remain unchanged measurement
+records. No new allowance covers governance cache phases, strict-tags induction,
+or any other unobserved binding. Cold output must still equal its own published
+cache cost, and warm output its exact prebound cache cost; the two strict warm
+memory reconstructions remain unchanged. Verdicts, schema/versions, counters,
+locations, cache keys, process exits and raw stderr retain exact comparison.
+New/updated executable controls cover the observed memory changes, invalid or
+missing scalars on either/both sides, and rejecting stable-field mutations;
+their execution is a separate validation obligation, not implied by this note.

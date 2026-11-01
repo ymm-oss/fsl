@@ -314,9 +314,16 @@ fn equal_json(
             numeric_scalar(actual, pointer)?;
             *comparable.pointer_mut(pointer).unwrap() = expected.pointer(pointer).unwrap().clone();
         }
-        // Parent dispositions authorize the original four phases plus dependency cold ONLY.
+        // Frozen BASE metadata authorizes five historical independent phases.
+        // CI 41347782003 additionally observed independent memory drift in exactly
+        // these three fixture/verify bindings; no other phase inherits that evidence.
         // Local cold/private and warm/prebound full-cost equality are separate mandatory checks.
-        if anchor["numeric_memory"] == true {
+        if anchor["numeric_memory"] == true
+            || matches!(
+                (fixture, command),
+                ("compose" | "governance-ok" | "strict-tags", "verify")
+            )
+        {
             const MEMORY: &str = "/cost/solver/memory_mb";
             numeric_scalar(expected, MEMORY)?;
             numeric_scalar(actual, MEMORY)?;
@@ -603,7 +610,7 @@ mod comparison_controls {
         assert!(compare(&dependency, &other).is_err());
     }
     #[test]
-    fn memory_dispositions_are_numeric_live_and_only_five_independent_phases() {
+    fn memory_dispositions_are_numeric_live_and_only_observed_independent_phases() {
         const MEMORY: &str = "/cost/solver/memory_mb";
         for fixture in [
             "compose-cold",
@@ -611,6 +618,9 @@ mod comparison_controls {
             "compose-prose-cold",
             "compose-prose-warm",
             "compose-changed-cold",
+            "compose",
+            "governance-ok",
+            "strict-tags",
         ] {
             let seed = anchor_for(fixture, "verify").unwrap()["json"].clone();
             scalar_controls(fixture, "verify", &seed, MEMORY);
@@ -625,12 +635,57 @@ mod comparison_controls {
             "compose-changed-warm",
             "compose-unrelated-warm",
             "governance-cold",
+            "governance-warm",
+            "governance-cached-broken",
+            "strict-tags-lemma",
             "ordinary",
         ] {
             let seed = anchor_for(fixture, "verify").unwrap()["json"].clone();
             let mut changed = seed.clone();
             *changed.pointer_mut(MEMORY).unwrap() = json!(123.5);
             assert!(equal_json(fixture, "verify", &seed, &changed).is_err());
+        }
+    }
+    #[test]
+    fn ci_observed_memory_changes_pass_but_stable_fields_and_other_bindings_reject() {
+        const MEMORY: &str = "/cost/solver/memory_mb";
+        for (fixture, baseline, observed) in [
+            ("compose", 17.67, 17.24),
+            ("governance-ok", 17.68, 17.24),
+            ("strict-tags", 18.36, 17.91),
+        ] {
+            let seed = anchor_for(fixture, "verify").unwrap()["json"].clone();
+            assert_eq!(seed.pointer(MEMORY).unwrap(), &json!(baseline));
+            let mut measured = seed.clone();
+            *measured.pointer_mut(MEMORY).unwrap() = json!(observed);
+            assert!(equal_json(fixture, "verify", &seed, &measured).is_ok());
+            for command in ["check", "scenarios"] {
+                assert!(equal_json(fixture, command, &seed, &measured).is_err());
+            }
+            assert!(equal_json("unobserved-fixture", "verify", &seed, &measured).is_err());
+            for (pointer, replacement) in [
+                ("/result", json!("violated")),
+                ("/fsl", json!("drift")),
+                ("/versions/verifier/version", json!("drift")),
+                ("/checked_to_depth", json!(999)),
+                ("/cost/solver/checks", json!(999)),
+                ("/cost/solver/decisions", json!(999)),
+                ("/cost/solver/conflicts", json!(999)),
+                ("/cost/solver/propagations", json!(999)),
+                ("/cost/properties/0/checks", json!(999)),
+            ] {
+                let mut changed = measured.clone();
+                *changed.pointer_mut(pointer).unwrap() = replacement;
+                assert!(equal_json(fixture, "verify", &seed, &changed).is_err());
+            }
+            let mut location = measured.clone();
+            location["loc"] = json!({"file":"wrong","line":999,"column":999});
+            assert!(equal_json(fixture, "verify", &seed, &location).is_err());
+            if fixture == "strict-tags" {
+                let mut location = measured.clone();
+                location["warnings"][1]["loc"] = json!({"file":"wrong","line":999});
+                assert!(equal_json(fixture, "verify", &seed, &location).is_err());
+            }
         }
     }
     #[test]
