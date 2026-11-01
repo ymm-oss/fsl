@@ -122,3 +122,9 @@ Solver counters, verdicts, assurance, locations, traces, versions and nested use
 fields remain exact. Explicit/no-solver and zero-check memory values are not
 excluded. Controls reject missing telemetry on either or both sides and changes
 to every retained evidence class; complete original packets are retained.
+The bool-closure numeric-control BMC repeats likewise differed only at
+`memory_mb` after wall-clock normalization (17.68/17.67 MB). Its comparator uses
+the same validation for native-Z3, positive-check, `verified`/`bounded` BMC
+packets with depth and checked depth 2; all other memory stays exact, including
+`unknown_cti`. The reason is the observed allocation telemetry, not a semantic
+or solver-counter exclusion; this does not establish later product acceptance.
