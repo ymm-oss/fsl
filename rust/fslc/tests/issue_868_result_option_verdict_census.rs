@@ -667,7 +667,7 @@ const CLASSIFICATIONS: &[Classification] = &[
         Ordinary,
         "rust/fslc/src/literate_access.rs",
         111,
-        "materialize_literate",
+        "capture_literate",
         ResultOption
     ),
     entry!(

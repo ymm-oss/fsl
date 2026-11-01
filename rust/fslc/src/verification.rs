@@ -25,7 +25,7 @@ use crate::spec_loading::{
     load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
     load_state_snapshot, require_trace_gate, validate_specialized_document_from_source,
 };
-use crate::strict_tags::add_strict_tag_warnings;
+use crate::strict_tags::add_strict_tag_warnings_from_source;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum VerificationEngine {
@@ -2202,16 +2202,12 @@ fn suppressed_implements_section(source: &str, reasons: &[&'static str]) -> Opti
 /// (nested `from`/`use` reuses the same resolver instance all the way
 /// down), so the relative path is already unambiguous, and it matches what
 /// the pre-#1023 directory walk hashed for an in-parent dependency
-/// (`source.strip_prefix(base)`). A checked literate `.md` document is
-/// verified through a per-process `.{stem}.literate-{pid}.fsl`
-/// materialization (`literate_access.rs`) sitting beside it; that sibling
-/// was excluded from the old walk for exactly this reason
-/// (`is_literate_materialization`) and never reaches this resolver at all
-/// (its own root source is read directly, by content, never through a
-/// `from`/`use` clause) — but recording relative-to-base keeps that
-/// property true by construction rather than by a second exclusion list,
-/// instead of an absolute path that would embed a directory a symlinked
-/// alias resolves through.
+/// (`source.strip_prefix(base)`). A checked literate `.md` document uses a
+/// captured root source and a compatibility-only logical `.fsl` path beside
+/// it (`literate_access.rs`). That path never reaches this resolver as the
+/// root; recording relative to its lexical parent preserves symlink-alias
+/// dependency identity without a second exclusion list or an absolute path
+/// embedding the directory the alias resolves through.
 struct RecordingResolver {
     base: PathBuf,
     reads: std::cell::RefCell<Vec<(PathBuf, String)>>,
@@ -2378,7 +2374,7 @@ fn run_verify_cli_kernel_from_source(
                 Err(error) => return (implements_error_output(&error), 2),
             }
         }
-        return finalize_cli_verification(path, options, &prepared, None, output, status);
+        return finalize_cli_verification(source, options, &prepared, None, output, status);
     }
     // The inline `implements` seam's dependency is read here, before the
     // cache key below, rather than inside `execute_cli_verification`
@@ -2440,7 +2436,7 @@ fn run_verify_cli_kernel_from_source(
         suppressed_implements_section(source, &suppression),
     );
     let (output, status) = finalize_cli_verification(
-        path,
+        source,
         options,
         &prepared,
         cache_keys.as_ref(),
@@ -2952,7 +2948,7 @@ fn describe_scope_overrides(scope: &ScopeBounds) -> String {
 }
 
 fn finalize_cli_verification(
-    path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
     cache_keys: Option<&(String, String)>,
@@ -3004,7 +3000,7 @@ fn finalize_cli_verification(
     if status == 0
         && options.strict_tags
         && let Err(output) = add_cli_strict_tag_warnings(
-            path,
+            source,
             options,
             prepared
                 .model
@@ -3097,13 +3093,19 @@ fn add_snapshot_metadata(output: &mut Value, options: &CliVerifyOptions) {
 }
 
 fn add_cli_strict_tag_warnings(
-    path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
     model: &KernelModel,
     output: &mut Value,
 ) -> Result<(), CommandResult> {
-    add_strict_tag_warnings(output, model, path, true, options.requirements.as_deref())
-        .map_err(|error| (error_output("io", &error), 2))
+    add_strict_tag_warnings_from_source(
+        output,
+        model,
+        source,
+        true,
+        options.requirements.as_deref(),
+    )
+    .map_err(|error| (error_output("io", &error), 2))
 }
 #[cfg(test)]
 mod tests {

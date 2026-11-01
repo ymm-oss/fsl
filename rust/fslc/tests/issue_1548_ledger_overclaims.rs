@@ -71,7 +71,8 @@ struct Fixture {
 impl Fixture {
     fn new(label: &str, source: &str) -> Self {
         let id = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-        let directory = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        let directory = root()
+            .join("rust/target/tmp")
             .join(format!("issue-1548-{label}-{}-{id}", std::process::id()));
         fs::create_dir_all(&directory).expect("create repository-local scratch directory");
         let spec = directory.join("spec.fsl");

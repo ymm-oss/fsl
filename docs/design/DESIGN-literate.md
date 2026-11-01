@@ -26,29 +26,32 @@ The blanking function (`fsl_syntax::extract_literate_fsl`) returns `None`
 when no ` ```fsl ` fence is found, so non-literate `.md` files are never
 misidentified.
 
-### Materialization
+### Captured source and diagnostic context
 
-The native CLI (`fslc`) materializes the blanked text to a process-owned
-`.{stem}.literate-{pid}.fsl` sibling next to the original `.md`, passes that
-path to the existing check/verify pipeline, and removes its own sibling on
-completion (via a `Drop` guard). This design avoids modifying every independent
-`read_to_string` call site in the CLI — the blanked file is read from disk by
-all existing code paths, and positions are correct because blanking preserves
-line structure. The materialized path is used only to read source content;
-every user-visible label in the CLI's JSON output (`file` fields, migration
-and implicit-initial-value finding locations) is stamped with the original
-`.md` path instead, so machine-readable output never names the transient
-sibling.
+The native CLI (`fslc`) captures the blanked text in an owned `String` and
+passes it to the existing source-based check/verify/scenarios consumers.
+Root edition admission, requirement-tag validation (including verify's
+`--strict-tags`), and refinement/governance folds consume that extracted
+source, not raw Markdown or a second read of an extracted file. Blanking
+preserves the source line structure used by diagnostics.
 
-Process ownership is required: concurrent commands for one `.md` document must
-not write or delete another command's physical source. The original Markdown
-path is passed separately as the logical verify-cache identity, so PID-based
-physical isolation preserves cache hits across commands (see "Cache key"
-below). Cache dependency discovery still uses the physical sibling's directory,
-which is also the resolver base; this distinction keeps symlink aliases tied to
-the dependencies they actually resolve. The sibling still requires write
-access to the source directory. An in-memory buffer remains a possible future
-shared-source-loader refactoring, but is not required for concurrency safety.
+For compatibility, `.{stem}.literate-{pid}.fsl` is still calculated as a
+logical path beside the original `.md`. It is never created, read or unlinked
+as the extracted root. This preserves the existing scenarios root-admission
+labels: edition migration findings and implicit-initial-value warnings may
+name that synthetic path. Check and verify pass the original `.md` separately
+for their root admission/display labels; the earlier claim that every public
+label always named the Markdown file was not true of scenarios.
+
+Concurrent commands do not share a mutable extracted file, and abrupt
+termination cannot leave a newly materialized source sibling. Existing
+abandoned siblings are not removed or modified. Source-directory write
+access is no longer needed for extraction; verifier-cache writes remain
+independent. The original Markdown path remains the verify-cache identity
+input (see "Cache key" below). The logical path's lexical parent is still
+the resolver base, preserving dependencies beside a symlink alias rather
+than rebasing to the canonical target. Dependency files retain their
+existing independent read semantics; this is not an atomic filesystem snapshot.
 
 ### Multiple blocks
 
@@ -112,20 +115,21 @@ is not supported.
 
 ### Cache key
 
-`collect_fsl_sources` (verify cache-key computation) includes `.md` files
-in directory walks so that edits to literate Markdown specs invalidate the
-verification cache. Transient `.{stem}.literate-{pid}.fsl` materializations
-(see "Materialization" above) are excluded from that walk by filename suffix
-— their content is already represented by the `.md` file itself through this
-same function's Markdown branch, so including it too would double-count it
-and make a run-local sibling appear as an independent dependency. For literate
-input, the cache key's `path` field uses the canonicalized original `.md` path,
-not the process-owned physical read path, and the original Markdown bytes are
-hashed directly. Dependency collection starts at the physical read path's
-parent so it exactly matches the resolver base, including when the Markdown
-input is a symlink. Repeated and concurrent invocations therefore share one
-logical cache identity without sharing a mutable file or losing dependency
-invalidation.
+Verify hashes the original Markdown bytes, not just the extracted FSL, so
+prose-only edits also invalidate the cache. The entry path itself is not
+hashed or canonicalized into a key field. Dependency inputs are the paths
+relative to the lexical resolver base and contents actually read by the
+recording resolver during model preparation and an active inline `implements`
+seam. No directory walk collects unrelated siblings. Options, backend/solver,
+implementation fingerprint and optional requirements-file bytes remain key
+inputs as for ordinary specs.
+
+The synthetic diagnostic path and process ID do not enter the cache key.
+Repeated and concurrent invocations can therefore share cached kernel results
+without sharing a mutable extracted file. Governance preservations still fold
+outside the kernel cache, including on a hit. Dependencies beside a Markdown
+symlink alias remain recorded from that alias's lexical parent, not from the
+canonical target's directory.
 
 ## 3. Scope boundaries
 
