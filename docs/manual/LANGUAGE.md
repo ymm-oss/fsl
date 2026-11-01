@@ -2493,12 +2493,26 @@ replay error is not implementation-log evidence and must not be rendered as
 an empty ledger row — `docs/design/DESIGN-ledger.md`).
 
 `approval_check` and `approval_diff` are absent from this table because their
-exit code is not a function of `result`. `fslc approval check` reports the same
-`approval_check` for every outcome and carries the verdict in `status`: `0` for
-`approved` and for `drifted`, `1` for `signature-invalid`. Drift exits 0 because
-it is analysis output, as `diff` findings are (§12); `docs/design/DESIGN-approval.md`
-records why, and why `fslc document check`'s `document_drifted` differs. Gate on
-`status`, not on the exit code.
+exit code is not a function of `result`. A completed `fslc approval check`
+evaluation returns `approval_check` with `status`: `approved` and `drifted`
+exit 0, `signature-invalid` exits 1. Drift is analysis output, as ordinary nongating
+`diff` findings are (§12); explicit semantic/batch diff gates can exit 1.
+`docs/design/DESIGN-approval.md` records why document drift differs. A usable
+approval gate requires exit 0 AND `result:"approval_check"` AND `status:"approved"`.
+Input, baseline, record and trust-configuration errors retain their error envelope,
+exit 2 and no approval status. Aborted artifact evaluation preserves the complete
+downstream envelope and exit (verification 1, internal 3), without an approval
+status or new record. Failed HTML rerendering propagates `generated`/`html_report`
+with exit 1, inline content and default output metadata, without writing an HTML
+file. Approval-only ledger digest rendering retains its existing evaluation exit 0
+for violated/CTI baselines; direct failed HTML/ledger reports still generate with
+exit 1, and output-write errors take precedence with exit 2.
+
+Normal JSON delivery checks the command-aware envelope/exit invariant with a debug
+assertion after internal-error normalization and before serialization. A mismatch
+uses the existing panic exit 101 without a normal stdout JSON envelope; earlier
+producer artifacts remain. Release builds omit this assertion. Raw/source/schema,
+fmt, metadata/help/version and early argv delivery retain their existing contracts.
 
 ### Kinds of result
 

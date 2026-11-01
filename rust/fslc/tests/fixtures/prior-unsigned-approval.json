@@ -1,0 +1,29 @@
+{
+  "schema": "fslc.approval.v1",
+  "spec": {
+    "path": "spec.fsl",
+    "digest_algorithm": "fsl-kernel-ast-v1+sha256",
+    "digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+    "git_commit": "ee30d3c83e07541a93c7f68aa0e7cb817063027a"
+  },
+  "target": {
+    "kind": "scenarios",
+    "path": "review.json",
+    "digest_algorithm": "fsl-rendered-artifact-v1+sha256",
+    "digest": "sha256:ef2e880d98567185daa491e894cf626af57ff97279583c8c7992180490ed8f3c",
+    "generator": "fslc",
+    "generator_version": "4.12.0",
+    "inputs": {
+      "depth": 2,
+      "deadlock": "ignore",
+      "engine": "bmc"
+    }
+  },
+  "approval": {
+    "approver": "alice",
+    "approved_at": "2026-11-01T07:12:07Z",
+    "requirements": [
+      "REQ-190"
+    ]
+  }
+}

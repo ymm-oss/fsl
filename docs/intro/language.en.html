@@ -2583,12 +2583,25 @@ section, zero recognized sections, or an unparseable <code>depth</code>/<code>re
 replay error is not implementation-log evidence and must not be rendered as
 an empty ledger row — <code>docs/design/DESIGN-ledger.md</code>).</p>
 <p><code>approval_check</code> and <code>approval_diff</code> are absent from this table because their
-exit code is not a function of <code>result</code>. <code>fslc approval check</code> reports the same
-<code>approval_check</code> for every outcome and carries the verdict in <code>status</code>: <code>0</code> for
-<code>approved</code> and for <code>drifted</code>, <code>1</code> for <code>signature-invalid</code>. Drift exits 0 because
-it is analysis output, as <code>diff</code> findings are (§12); <code>docs/design/DESIGN-approval.md</code>
-records why, and why <code>fslc document check</code>'s <code>document_drifted</code> differs. Gate on
-<code>status</code>, not on the exit code.</p>
+exit code is not a function of <code>result</code>. A completed <code>fslc approval check</code>
+evaluation returns <code>approval_check</code> with <code>status</code>: <code>approved</code> and <code>drifted</code>
+exit 0, <code>signature-invalid</code> exits 1. Drift is analysis output, as ordinary nongating
+<code>diff</code> findings are (§12); explicit semantic/batch diff gates can exit 1.
+<code>docs/design/DESIGN-approval.md</code> records why document drift differs. A usable
+approval gate requires exit 0 AND <code>result:"approval_check"</code> AND <code>status:"approved"</code>.
+Input, baseline, record and trust-configuration errors retain their error envelope,
+exit 2 and no approval status. Aborted artifact evaluation preserves the complete
+downstream envelope and exit (verification 1, internal 3), without an approval
+status or new record. Failed HTML rerendering propagates <code>generated</code>/<code>html_report</code>
+with exit 1, inline content and default output metadata, without writing an HTML
+file. Approval-only ledger digest rendering retains its existing evaluation exit 0
+for violated/CTI baselines; direct failed HTML/ledger reports still generate with
+exit 1, and output-write errors take precedence with exit 2.</p>
+<p>Normal JSON delivery checks the command-aware envelope/exit invariant with a debug
+assertion after internal-error normalization and before serialization. A mismatch
+uses the existing panic exit 101 without a normal stdout JSON envelope; earlier
+producer artifacts remain. Release builds omit this assertion. Raw/source/schema,
+fmt, metadata/help/version and early argv delivery retain their existing contracts.</p>
 <h3 id="kinds-of-result">Kinds of result</h3>
 <table>
 <thead>

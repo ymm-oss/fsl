@@ -2306,12 +2306,26 @@ semantics error(exit 2)を返します。approval create の diagnostic の優�
 に適用されます。
 
 `approval_check` と `approval_diff` がこの表に無いのは、exit code が `result` の
-関数ではないからです。`fslc approval check` はどの結果でも同じ `approval_check` を
-返し、判定は `status` が担います: `approved` と `drifted` が `0`、
-`signature-invalid` が `1`。drift が 0 で終わるのは、`diff` の findings と同じく
-分析出力だからです(§12)。理由と、`fslc document check` の `document_drifted` が
-異なる扱いになる理由は `docs/design/DESIGN-approval.md` にあります。exit code ではなく
-`status` でゲートしてください。
+関数ではないからです。`fslc approval check` は評価が完了した場合に `approval_check` と
+`status` を返します。`approved` と `drifted` は exit 0、`signature-invalid` は exit 1 です。
+drift は通常のゲートなし `diff` の findings と同じ分析出力です(§12)。明示的な
+semantic/batch diff のゲートは失敗時に exit 1 を返します。document の drift と扱いが
+異なる理由は `docs/design/DESIGN-approval.md` にあります。承認を利用するゲートでは、
+exit 0 AND `result:"approval_check"` AND `status:"approved"` をすべて確認してください。
+入力、baseline、record、trust 設定のエラーは、元のエラー封筒と exit 2 を返し、承認の
+`status` は付きません。artifact 評価が中断した場合は、下流の完全な封筒と終了コード
+(検証失敗1、内部エラー3)を保持し、承認の status も新しい record も作りません。
+HTML の再描画で検証に失敗した場合は、`generated`/`html_report`、exit 1、インラインの
+content と既定の output メタデータを返し、HTML ファイルは書きません。承認専用の
+ledger digest 描画は、violated/CTI baseline でも従来どおり exit 0 で評価できます。
+直接の HTML/ledger は検証失敗時にも report を生成して exit 1 を返し、出力の書き込み
+エラーは baseline の判定より優先して exit 2 を返します。
+
+通常の JSON 出力は、内部エラーの終了コードを正規化した後、serialize より前に、
+コマンドを考慮した封筒と終了コードの整合性を debug assertion で確認します。
+不一致では既存の panic 経路で exit 101 となり、通常の stdout JSON 封筒は出しません。
+先に生成した artifact は保持します。release build にはこの assertion はありません。
+raw/source/schema、fmt、metadata/help/version、早期の argv 拒否は既存の契約を保ちます。
 
 ### 結果の種類
 

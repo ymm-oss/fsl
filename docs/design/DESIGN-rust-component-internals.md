@@ -878,8 +878,10 @@ a third delivery concern, or a real production follow-up contradicts the expecte
 
 #### Outcome classification (#537 C2)
 
-The Verdict Conservation Law — a failure-class `result` must not exit zero, and a success-class
-`result` must not exit non-zero — needs one definition of those two classes. The crate has 65
+The Verdict Conservation Law forbids a failure-class exit zero. Ordinary success-class
+outputs exit zero; generated HTML/ledger reports may exit one for a failed or unestablished
+verification baseline. This requires one envelope classifier plus the finite command-aware
+exit check specified below (#1418). The crate has 65
 distinct registered top-level `result` values: 5 sibling-field cases, 39 unconditional successes,
 and 21 unconditional failures, counted by deduplicating `rust/fslc/src/outcome.rs`'s match-arm
 literals as of 2026-07-30 at `9d7e623`. #596 recorded the consequence from inside: its
@@ -895,6 +897,35 @@ conservation check whose class definition lives in the test is the stale-check s
 enum OutcomeClass { Success, Failure }
 fn outcome_class(output: &Value) -> OutcomeClass
 ```
+
+`exit_status_matches(command, subcommand, output, status)` checks the final normal-JSON
+pair after the existing internal-error normalization and before serialization. Canonical
+`Verdict` exits are exact; approval checks accept only approved/drifted with exit 0 or
+signature-invalid with exit 1, and approval diff's signature-invalid envelope exits 1. Format/lint/diff/mutation use their
+existing sibling-field decisions; registered ordinary successes require exit 0, registered failures
+require nonzero, except `migrate_manual_required`, which requires exactly exit 1 and leaves
+all migration inputs unwritten. Missing or unknown results are rejected.
+
+Batch diff separates semantic classification from its operational exit. `outcome_class`
+continues to read the parent semantic `gate.passed`; a private exit predicate requires
+nonempty `comparisons`, with each child either `semantic_diff` with a boolean gate
+(exit 0/1) or `error` (exit 2). The parent boolean gate must agree with all semantic
+child gates; errors contribute no semantic gate violation. The batch exit is exactly
+the maximum child exit, so semantic failure plus error exits 2, and even a nested
+internal error exits 2, not 3. Empty/malformed/missing/unknown/nested-batch children
+or inconsistent parent gates are rejected. Top-level internal errors still exit 3.
+
+The generated-report exception permits only exits 0/1 and requires both dispatch context and kind:
+`html`/`html_report`, `ledger`/`audit_ledger`, approval create/check propagating `html_report`,
+or `ledger` approval overlay propagating `html_report`. Other generated artifacts require exit 0.
+Approval-only ledger digest rendering retains its existing successful artifact/evaluation exit 0,
+even for a violated/CTI baseline. There is no new schema or verification run.
+
+Normal `run` uses `debug_assert!`: a debug mismatch panics through the existing exit 101 path,
+before a normal stdout JSON envelope is emitted. Release builds have no assertion guarantee.
+Producer artifacts and earlier effects are retained. Raw/schema/source delivery, fmt,
+metadata/help/version, and early argv rejection keep their existing producer contracts and do
+not acquire new guards; the raw producer-status rule above is unchanged.
 
 The lib placement is forced by the requirement it exists to serve. `approval`, `causal`,
 `code_audit`, and `verification` are bin modules declared in `main.rs`, reachable only from the

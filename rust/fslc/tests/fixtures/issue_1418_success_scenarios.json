@@ -1,0 +1,100 @@
+{
+  "fsl": "1.0",
+  "result": "scenarios",
+  "spec": "ApprovalReview",
+  "depth": 2,
+  "convention": "set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]",
+  "scenarios": [
+    {
+      "steps": [
+        {
+          "action": "approve",
+          "params": {}
+        }
+      ],
+      "initial_state": {
+        "approved": false,
+        "ever_approved": false
+      },
+      "expected_states": [
+        {
+          "approved": true,
+          "ever_approved": true
+        }
+      ],
+      "name": "cover_approve",
+      "kind": "action_coverage",
+      "action": "approve",
+      "requirement": {
+        "id": "REQ-190",
+        "text": "a pending review can be approved"
+      },
+      "requirements": [
+        {
+          "id": "REQ-190",
+          "text": "a pending review can be approved"
+        }
+      ]
+    }
+  ],
+  "warnings": [
+    {
+      "code": "legacy_string_metadata",
+      "kind": "legacy_string_metadata",
+      "taxonomy": "deprecated",
+      "severity": "warning",
+      "edition": "current",
+      "message": "legacy string metadata is deprecated; use a typed annotation",
+      "loc": {
+        "file": "spec.fsl",
+        "line": 12,
+        "column": 20,
+        "end_line": 12,
+        "end_column": 63
+      },
+      "canonical_replacement": "@requirement(\"REQ-190\", \"a pending review can be approved\")",
+      "machine_applicable": true,
+      "edits": [
+        {
+          "start": 228,
+          "end": 228,
+          "replacement": "@requirement(\"REQ-190\", \"a pending review can be approved\")\n  "
+        },
+        {
+          "start": 245,
+          "end": 288,
+          "replacement": ""
+        }
+      ]
+    },
+    {
+      "code": "legacy_string_metadata",
+      "kind": "legacy_string_metadata",
+      "taxonomy": "deprecated",
+      "severity": "warning",
+      "edition": "current",
+      "message": "legacy string metadata is deprecated; use a typed annotation",
+      "loc": {
+        "file": "spec.fsl",
+        "line": 18,
+        "column": 30,
+        "end_line": 18,
+        "end_column": 76
+      },
+      "canonical_replacement": "@requirement(\"REQ-190\", \"an approved review remains approved\")",
+      "machine_applicable": true,
+      "edits": [
+        {
+          "start": 369,
+          "end": 369,
+          "replacement": "@requirement(\"REQ-190\", \"an approved review remains approved\")\n  "
+        },
+        {
+          "start": 396,
+          "end": 442,
+          "replacement": ""
+        }
+      ]
+    }
+  ]
+}

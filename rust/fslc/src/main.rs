@@ -12,8 +12,8 @@ use fsl_core::{
 };
 use fslc_rust::literate_access::literate_access;
 use fslc_rust::outcome::{
-    FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, is_error_exit,
-    outcome_class, sweep_cell_class,
+    FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, exit_status_matches,
+    is_error_exit, outcome_class, sweep_cell_class,
 };
 use fslc_rust::spec_load::{SpecLoadError, kernel_load_error, surface_parse_failure};
 use fslc_rust::verification_output::{
@@ -198,6 +198,15 @@ fn run() {
         Err(error) => (error_output("usage", &error), 2),
     };
     let status = normalized_exit_status(&output, reported_status);
+    debug_assert!(
+        exit_status_matches(
+            argv.first().map_or("", String::as_str),
+            argv.get(1).map(String::as_str),
+            &output,
+            status,
+        ),
+        "CLI output and exit status disagree: {output:?}, exit {status}",
+    );
     println!(
         "{}",
         serde_json::to_string_pretty(&output).expect("serialize CLI output")
@@ -13550,21 +13559,28 @@ fn approval_artifact(
     edition: &SourceEdition,
     kind: &str,
     inputs: &approval::GenerationInputs,
-) -> Result<(Vec<u8>, Option<String>), Value> {
+) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
     if kind == "requirements_document" {
         let approval::GenerationInputs::Document(document_inputs) = inputs else {
-            return Err(error_output(
-                "usage",
-                "requirements_document approval requires document generation inputs",
+            return Err((
+                error_output(
+                    "usage",
+                    "requirements_document approval requires document generation inputs",
+                ),
+                2,
             ));
         };
-        let (claims, markdown) = render_document_for_approval(path, source, document_inputs)?;
+        let (claims, markdown) = render_document_for_approval(path, source, document_inputs)
+            .map_err(|error| (error, 2))?;
         return Ok((markdown.into_bytes(), Some(claims.spec.claim_set_digest)));
     }
     let approval::GenerationInputs::Solver(inputs) = inputs else {
-        return Err(error_output(
-            "usage",
-            "ledger/html/scenarios approval requires solver generation inputs",
+        return Err((
+            error_output(
+                "usage",
+                "ledger/html/scenarios approval requires solver generation inputs",
+            ),
+            2,
         ));
     };
     let dependencies = fslc_rust::migration::DependencyScope::enter();
@@ -13592,31 +13608,41 @@ fn approval_artifact(
             false,
             Some(edition),
         ),
-        "scenarios" => edition.finish(run_scenarios_from_source(
-            path,
-            source,
-            inputs.depth,
-            &inputs.deadlock,
-        )),
+        "scenarios" => {
+            let result = run_scenarios_from_source(path, source, inputs.depth, &inputs.deadlock);
+            if result.1 == 0 {
+                // Canonical artifacts retain their existing finalized warning bytes.
+                edition.finish(result)
+            } else {
+                // Borrow the enclosing log, preserving refusal priority.
+                // The outer owner finalizes this escaping failure's warnings.
+                return Err(dependencies.finish(result, false));
+            }
+        }
         _ => {
-            return Err(error_output(
-                "usage",
-                &format!("unsupported approval target '{kind}'"),
+            return Err((
+                error_output("usage", &format!("unsupported approval target '{kind}'")),
+                2,
             ));
         }
     });
     if status != 0 {
-        return Err(result);
+        return Err((result, status));
     }
     let bytes = if matches!(kind, "ledger" | "html") {
         result
             .get("content")
             .and_then(Value::as_str)
             .map(|content| content.as_bytes().to_vec())
-            .ok_or_else(|| error_output("internal", "generated artifact has no content"))?
+            .ok_or_else(|| {
+                (
+                    error_output("internal", "generated artifact has no content"),
+                    3,
+                )
+            })?
     } else {
         let mut encoded = serde_json::to_vec_pretty(&result)
-            .map_err(|error| error_output("internal", &error.to_string()))?;
+            .map_err(|error| (error_output("internal", &error.to_string()), 3))?;
         encoded.push(b'\n');
         encoded
     };
@@ -13783,7 +13809,7 @@ fn run_approval_create_from_source(
             let (expected_artifact, _) =
                 match approval_artifact(path, source, edition, kind, inputs) {
                     Ok(artifact) => artifact,
-                    Err(error) => return (error, 2),
+                    Err(error) => return error,
                 };
             let reviewed_artifact = match std::fs::read(artifact_path) {
                 Ok(artifact) => artifact,
@@ -13916,15 +13942,15 @@ fn approval_evaluation(
     edition: &SourceEdition,
     record_path: &Path,
     trust: &approval::TrustStore,
-) -> Result<Value, Value> {
-    let versioned =
-        approval::read_versioned_record(record_path).map_err(|error| error_output("io", &error))?;
+) -> Result<Value, (Value, i32)> {
+    let versioned = approval::read_versioned_record(record_path)
+        .map_err(|error| (error_output("io", &error), 2))?;
     let (record, signature_status, key_id) = match &versioned {
         approval::VersionedApprovalRecord::V1(record) => (record.clone(), "unsigned", Value::Null),
         approval::VersionedApprovalRecord::V2(record) => {
             let verified = trust
                 .verify(record)
-                .map_err(|error| error_output("io", &error))?;
+                .map_err(|error| (error_output("io", &error), 2))?;
             if !verified {
                 return Ok(json!({
                     "status": "signature-invalid",
@@ -13947,20 +13973,23 @@ fn approval_evaluation(
         }
     };
     let (repo, relative_path, _head) =
-        approval::git_location(path).map_err(|error| error_output("io", &error))?;
+        approval::git_location(path).map_err(|error| (error_output("io", &error), 2))?;
     if record.spec.path != relative_path {
-        return Err(error_output(
-            "semantics",
-            &format!(
-                "approval record targets '{}' but current spec is '{relative_path}'",
-                record.spec.path
+        return Err((
+            error_output(
+                "semantics",
+                &format!(
+                    "approval record targets '{}' but current spec is '{relative_path}'",
+                    record.spec.path
+                ),
             ),
+            2,
         ));
     }
     approval::verify_git_baseline(&repo, &relative_path, &record.spec.git_commit)
-        .map_err(|error| error_output("io", &error))?;
+        .map_err(|error| (error_output("io", &error), 2))?;
     let current_spec_digest =
-        approval_spec_digest(path, source).map_err(|error| spec_load_error_output(&error))?;
+        approval_spec_digest(path, source).map_err(|error| (spec_load_error_output(&error), 2))?;
     let (artifact, current_claim_set_digest) = approval_artifact(
         path,
         source,
@@ -13969,10 +13998,10 @@ fn approval_evaluation(
         &record.target.inputs,
     )?;
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
-        .map_err(|error| error_output("internal", &error))?;
+        .map_err(|error| (error_output("internal", &error), 3))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
-    let current_reviewed_digest =
-        approval::reviewed_artifact_digest(&record).map_err(|error| error_output("io", &error))?;
+    let current_reviewed_digest = approval::reviewed_artifact_digest(&record)
+        .map_err(|error| (error_output("io", &error), 2))?;
     let mut evaluation = approval::evaluate(
         &record,
         record_path,
@@ -14024,7 +14053,7 @@ fn run_approval_check_from_source(
     };
     let evaluation = match approval_evaluation(path, source, edition, record_path, &trust) {
         Ok(evaluation) => evaluation,
-        Err(error) => return (error, 2),
+        Err(error) => return error,
     };
     let mut output = envelope();
     output.insert("result".to_owned(), json!("approval_check"));
@@ -14042,9 +14071,9 @@ fn approval_overlay(
     edition: &SourceEdition,
     record_paths: &[PathBuf],
     trust_keys: &[PathBuf],
-) -> Result<Value, Value> {
+) -> Result<Value, (Value, i32)> {
     let trust =
-        approval::TrustStore::load(trust_keys).map_err(|error| error_output("io", &error))?;
+        approval::TrustStore::load(trust_keys).map_err(|error| (error_output("io", &error), 2))?;
     let mut requirements = Map::new();
     let mut records = Vec::new();
     for record_path in record_paths {
@@ -14148,7 +14177,7 @@ fn run_ledger_report_admitted_from_source(
     } else {
         match approval_overlay(request.path, source, edition, approval_paths, trust_keys) {
             Ok(approvals) => Some(approvals),
-            Err(error) => return (error, 2),
+            Err(error) => return error,
         }
     };
     let (result, status) = render_ledger_report(request, &prepared, approvals.as_ref());
@@ -20504,4 +20533,22 @@ mod mutate_attribution_reuse_tests {
         assert_eq!(attribution_calls, 1, "one isolated invariant model");
         assert!(killers.contains(&"_bounds_x".to_owned()), "{killers:?}");
     }
+}
+
+// SPDX-License-Identifier: Apache-2.0
+
+#[test]
+fn internal_input_two_normalizes_to_three_before_exit_contract_check() {
+    let output = error_output("internal", "fixture fault");
+    assert!(!fslc_rust::outcome::exit_status_matches(
+        "check", None, &output, 2
+    ));
+    let final_status = normalized_exit_status(&output, 2);
+    assert_eq!(final_status, 3);
+    assert!(fslc_rust::outcome::exit_status_matches(
+        "check",
+        None,
+        &output,
+        final_status
+    ));
 }
