@@ -228,6 +228,112 @@ fn html_healthy_output_is_byte_identical_across_replacements() {
 
 #[cfg(target_os = "linux")]
 #[test]
+fn html_destination_matching_first_scratch_name_is_replaced_completely() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = scratch("html-name-collision");
+    let dir = home.join("out");
+    let ordinary = dir.join("artifact.html");
+    let (_, base_arguments, _) = families()
+        .into_iter()
+        .find(|(name, _, _)| *name == "html")
+        .unwrap();
+    let healthy = run(
+        &home,
+        &root(),
+        &args_with_output(&base_arguments, &ordinary),
+        None,
+    );
+    let mut expected_json = json(&healthy, 0);
+    assert_eq!(expected_json["output"], cli::text(&ordinary));
+    let expected = std::fs::read(&ordinary).unwrap();
+    assert!(!expected.is_empty());
+    std::fs::remove_file(&ordinary).unwrap();
+    std::fs::write(home.join("observations/old"), OLD).unwrap();
+    let mut argv = vec![cli::text(&dir).to_owned()];
+    argv.extend(base_arguments.iter().map(|arg| (*arg).to_owned()));
+    // exec retains the shell PID; this fresh CLI's first publication is sequence zero.
+    let published = run(
+        &home,
+        &root(),
+        &argv,
+        Some(
+            "set -e; binary=$1; dir=$2; shift 2; \
+             out=\"$dir/.fslc-output-$$-0.tmp\"; \
+             printf '%s' \"$out\" > \"$dir/../observations/destination\"; \
+             cp \"$dir/../observations/old\" \"$out\"; chmod 604 \"$out\"; \
+             exec \"$binary\" \"$@\" -o \"$out\"",
+        ),
+    );
+    let out = std::path::PathBuf::from(
+        std::fs::read_to_string(home.join("observations/destination")).unwrap(),
+    );
+    assert_eq!(out.parent(), Some(dir.as_path()));
+    expected_json["output"] = serde_json::json!(out);
+    // Base source must RED here: IO / File exists (os error 17), exit 2, not success.
+    assert_eq!(json(&published, 0), expected_json);
+    assert_eq!(published.stderr, healthy.stderr);
+    assert_eq!(std::fs::read(&out).unwrap(), expected);
+    assert_eq!(
+        std::fs::metadata(&out).unwrap().permissions().mode() & 0o7777,
+        0o604
+    );
+    assert_eq!(names(&dir), vec![out], "no owned scratch residue");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn html_missing_destination_matching_first_scratch_name_stays_absent_on_write_failure() {
+    let home = scratch("html-missing-name-collision");
+    let dir = home.join("out");
+    let ordinary = dir.join("artifact.html");
+    let (_, base_arguments, _) = families()
+        .into_iter()
+        .find(|(name, _, _)| *name == "html")
+        .unwrap();
+    let healthy = run(
+        &home,
+        &root(),
+        &args_with_output(&base_arguments, &ordinary),
+        None,
+    );
+    json(&healthy, 0);
+    assert!(
+        std::fs::read(&ordinary).unwrap().len() > 1024,
+        "healthy caller must exceed child filesize limit"
+    );
+    std::fs::remove_file(&ordinary).unwrap();
+    assert!(names(&dir).is_empty());
+    let before = cli::state(&dir);
+    let mut argv = vec![cli::text(&dir).to_owned()];
+    argv.extend(base_arguments.iter().map(|arg| (*arg).to_owned()));
+    let failure = run(
+        &home,
+        &root(),
+        &argv,
+        Some(
+            "set -e; binary=$1; dir=$2; shift 2; \
+             out=\"$dir/.fslc-output-$$-0.tmp\"; test ! -e \"$out\"; \
+             printf '%s' \"$out\" > \"$dir/../observations/destination\"; \
+             trap '' XFSZ; ulimit -f 1 || exit 97; \
+             exec \"$binary\" \"$@\" -o \"$out\"",
+        ),
+    );
+    let out = std::path::PathBuf::from(
+        std::fs::read_to_string(home.join("observations/destination")).unwrap(),
+    );
+    assert_eq!(out.parent(), Some(dir.as_path()));
+    let error = io(&failure);
+    assert!(
+        error["message"].as_str().unwrap().contains("os error 27"),
+        "must reach EFBIG write, not parser/early IO: {error}"
+    );
+    // Preservation control: observes post-failure state, not transient visibility.
+    assert!(!out.exists(), "failed new output is not partially visible");
+    assert_eq!(cli::state(&dir), before, "owned scratch cleaned");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
 fn html_actual_partial_write_failure_preserves_old_bytes_and_cleans_scratch() {
     let home = scratch("partial");
     let out = home.join("out/artifact.html");

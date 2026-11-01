@@ -37,10 +37,14 @@ pub(super) fn publish(path: &Path, content: impl AsRef<[u8]>) -> io::Result<()> 
 
     let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let temporary = parent.join(format!(
+    let mut temporary = parent.join(format!(
         ".fslc-output-{}-{sequence}.tmp",
         std::process::id()
     ));
+    // Never prepare bytes at the destination, even if its name matches ours.
+    if temporary.file_name() == path.file_name() {
+        temporary.as_mut_os_string().push(".tmp");
+    }
     // create_new establishes ownership: never remove a pre-existing entry if
     // creation fails. Default creation permissions retain the ordinary umask.
     let mut file = OpenOptions::new()

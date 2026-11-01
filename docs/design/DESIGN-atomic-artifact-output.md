@@ -24,8 +24,10 @@ the destination absent if it did not exist). Cleanup of a temporary file created
 by this call is best-effort. If cleanup also fails, that file may remain, but
 the original publication error is returned. Failure to create a temporary file
 does not authorize deleting a pre-existing entry at that temporary path.
-Temporary names use the process id and a per-process sequence; there is no
-automatic retry service.
+Temporary names use the process id and a per-process sequence. If the generated
+basename equals the destination basename, append one fixed `.tmp` suffix before
+`create_new` so preparation never writes at the destination. There is no
+filesystem probing or automatic retry service.
 
 ## Covered writers and preserved behavior
 
@@ -99,3 +101,8 @@ complete successful artifacts and caller JSON/exit behavior, including
 signatures and digests, rather than weakening expected values to fit the
 implementation. Runtime acceptance and performance evidence are separate from
 this design decision.
+
+Cover a destination basename equal to the generated temporary basename: existing
+output must be replaced successfully, and an initially absent destination must
+remain absent after a partial-write failure with owned-temporary cleanup. The
+latter is a post-failure preservation control, not a transient-visibility test.
