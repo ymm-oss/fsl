@@ -314,15 +314,15 @@ fn equal_json(
             numeric_scalar(actual, pointer)?;
             *comparable.pointer_mut(pointer).unwrap() = expected.pointer(pointer).unwrap().clone();
         }
-        // Frozen BASE metadata authorizes five historical independent phases.
-        // CI 41347782003 additionally observed independent memory drift in exactly
-        // these three fixture/verify bindings; no other phase inherits that evidence.
-        // Local cold/private and warm/prebound full-cost equality are separate mandatory checks.
-        if anchor["numeric_memory"] == true
-            || matches!(
-                (fixture, command),
-                ("compose" | "governance-ok" | "strict-tags", "verify")
-            )
+        // Classify only the immutable known BASE binding, never either comparison clone.
+        // Historical numeric_memory flags are measurements, not permission for warm drift.
+        // Queried native-Z3 allocation telemetry is independent only outside a prebound hit.
+        if command == "verify"
+            && anchor["warm"] == false
+            && anchor["json"]["versions"]["solver"]["backend"] == "native-z3"
+            && anchor["json"]["cost"]["solver"]["checks"]
+                .as_u64()
+                .is_some_and(|checks| checks > 0)
         {
             const MEMORY: &str = "/cost/solver/memory_mb";
             numeric_scalar(expected, MEMORY)?;
@@ -351,7 +351,13 @@ fn bind_warm_memory(
     expected: &mut Value,
     prebound_cost: &Value,
 ) -> Result<(), String> {
-    if matches!(fixture, "compose-changed-warm" | "compose-unrelated-warm") {
+    if let Some(anchor) = anchor_for(fixture, "verify")
+        && anchor["warm"] == true
+        && anchor["json"]["versions"]["solver"]["backend"] == "native-z3"
+        && anchor["json"]["cost"]["solver"]["checks"]
+            .as_u64()
+            .is_some_and(|checks| checks > 0)
+    {
         // This is exact expected-side reconstruction from the entry captured BEFORE
         // the warm CLI, not an independent warm-memory allowance or actual-output rewrite.
         numeric_scalar(expected, "/cost/solver/memory_mb")?;
@@ -512,6 +518,30 @@ impl Drop for ReadOnly {
 #[cfg(test)]
 mod comparison_controls {
     use super::*;
+    const INDEPENDENT: &[&str] = &[
+        "toggle",
+        "compose",
+        "strict-tags",
+        "strict-tags-lemma",
+        "root-edition4",
+        "dependency-edition4",
+        "governance-ok",
+        "implements-ok",
+        "implements-bad",
+        "ordinary",
+        "governance-cold",
+        "compose-cold",
+        "compose-prose-cold",
+        "compose-changed-cold",
+    ];
+    const PREBOUND: &[&str] = &[
+        "governance-warm",
+        "governance-cached-broken",
+        "compose-warm",
+        "compose-prose-warm",
+        "compose-changed-warm",
+        "compose-unrelated-warm",
+    ];
     fn remove_leaf(value: &mut Value, pointer: &str) {
         let (parent, key) = pointer.rsplit_once('/').unwrap();
         value
@@ -610,40 +640,68 @@ mod comparison_controls {
         assert!(compare(&dependency, &other).is_err());
     }
     #[test]
-    fn memory_dispositions_are_numeric_live_and_only_observed_independent_phases() {
+    fn memory_roles_are_disjoint_complete_and_live_for_all_base_bindings() {
         const MEMORY: &str = "/cost/solver/memory_mb";
-        for fixture in [
-            "compose-cold",
-            "compose-warm",
-            "compose-prose-cold",
-            "compose-prose-warm",
-            "compose-changed-cold",
-            "compose",
-            "governance-ok",
-            "strict-tags",
-        ] {
+        let independent: BTreeSet<_> = INDEPENDENT.iter().copied().collect();
+        let prebound: BTreeSet<_> = PREBOUND.iter().copied().collect();
+        assert_eq!(independent.len(), 14);
+        assert_eq!(prebound.len(), 6);
+        assert!(independent.is_disjoint(&prebound));
+        let data = anchor_data();
+        let bindings = data["bindings"].as_object().unwrap();
+        assert_eq!(bindings.len(), 62);
+        let mut counts = [0; 3];
+        for (binding, id) in bindings {
+            let (fixture, command) = binding.rsplit_once('/').unwrap();
+            let anchor = &data["anchors"][id.as_str().unwrap()];
+            let seed = &anchor["json"];
+            assert!(equal_json(fixture, command, seed, seed).is_ok());
+            let mut changed = seed.clone();
+            changed["cost"]["solver"]["memory_mb"] = json!(123.5);
+            if command == "verify" && independent.contains(fixture) {
+                counts[0] += 1;
+                assert_eq!(anchor["warm"], false);
+                assert_eq!(seed["versions"]["solver"]["backend"], "native-z3");
+                assert!(seed["cost"]["solver"]["checks"].as_u64().unwrap() > 0);
+                scalar_controls(fixture, command, seed, MEMORY);
+            } else {
+                if command == "verify" && prebound.contains(fixture) {
+                    counts[1] += 1;
+                    assert_eq!(anchor["warm"], true);
+                    assert_eq!(seed["versions"]["solver"]["backend"], "native-z3");
+                    assert!(seed["cost"]["solver"]["checks"].as_u64().unwrap() > 0);
+                } else {
+                    counts[2] += 1;
+                }
+                assert!(equal_json(fixture, command, seed, &changed).is_err());
+            }
+        }
+        assert_eq!(counts, [14, 6, 42]);
+        for &fixture in INDEPENDENT {
             let seed = anchor_for(fixture, "verify").unwrap()["json"].clone();
-            scalar_controls(fixture, "verify", &seed, MEMORY);
             let mut counter = seed.clone();
             counter["cost"]["solver"]["checks"] = json!(999);
             assert!(equal_json(fixture, "verify", &seed, &counter).is_err());
             let mut location = seed.clone();
             location["loc"] = json!({"file":"wrong","line":999,"column":999});
             assert!(equal_json(fixture, "verify", &seed, &location).is_err());
+            // Forging both clones cannot turn immutable independent eligibility off.
+            let mut disguised = seed.clone();
+            disguised["versions"]["solver"]["backend"] = json!("other");
+            disguised["cost"]["solver"]["checks"] = json!(0);
+            scalar_controls(fixture, "verify", &disguised, MEMORY);
         }
-        for fixture in [
-            "compose-changed-warm",
-            "compose-unrelated-warm",
-            "governance-cold",
-            "governance-warm",
-            "governance-cached-broken",
-            "strict-tags-lemma",
-            "ordinary",
+        // Nor can a queried native body opt unknown/unbound/nonqueried roles in.
+        let seed = toggle_verify();
+        let mut measured = seed.clone();
+        *measured.pointer_mut(MEMORY).unwrap() = json!(123.5);
+        for (fixture, command) in [
+            ("unobserved-fixture", "verify"),
+            ("root-edition5", "verify"),
+            ("parse", "verify"),
+            ("toggle", "check"),
         ] {
-            let seed = anchor_for(fixture, "verify").unwrap()["json"].clone();
-            let mut changed = seed.clone();
-            *changed.pointer_mut(MEMORY).unwrap() = json!(123.5);
-            assert!(equal_json(fixture, "verify", &seed, &changed).is_err());
+            assert!(equal_json(fixture, command, &seed, &measured).is_err());
         }
     }
     #[test]
@@ -653,8 +711,14 @@ mod comparison_controls {
             ("compose", 17.67, 17.24),
             ("governance-ok", 17.68, 17.24),
             ("strict-tags", 18.36, 17.91),
+            ("governance-cold", 17.68, 17.24),
+            ("root-edition4", 17.68, 17.24),
+            ("strict-tags-lemma", 18.35, 17.9),
         ] {
             let seed = anchor_for(fixture, "verify").unwrap()["json"].clone();
+            if fixture == "strict-tags-lemma" {
+                assert_eq!(seed["result"], "proved");
+            }
             assert_eq!(seed.pointer(MEMORY).unwrap(), &json!(baseline));
             let mut measured = seed.clone();
             *measured.pointer_mut(MEMORY).unwrap() = json!(observed);
@@ -698,6 +762,9 @@ mod comparison_controls {
             "compose-changed-cold",
             "compose-changed-warm",
             "compose-unrelated-warm",
+            "governance-cold",
+            "governance-warm",
+            "governance-cached-broken",
         ] {
             let public = anchor_for(fixture, "verify").unwrap()["json"].clone();
             let cached = public["cost"].clone();
@@ -719,12 +786,12 @@ mod comparison_controls {
         const MEMORY: &str = "/cost/solver/memory_mb";
         let cold_seed = anchor_for("compose-changed-cold", "verify").unwrap()["json"].clone();
         let mut measured_cold = cold_seed.clone();
-        *measured_cold.pointer_mut(MEMORY).unwrap() = json!(17.68);
+        *measured_cold.pointer_mut(MEMORY).unwrap() = json!(123.5);
         assert!(equal_json("compose-changed-cold", "verify", &cold_seed, &measured_cold).is_ok());
         assert!(check_own_cost(&measured_cold, &measured_cold["cost"]).is_ok());
         let cold_error = check_own_cost(&measured_cold, &cold_seed["cost"]).unwrap_err();
         assert!(cold_error.contains("public cost differs"));
-        for fixture in ["compose-changed-warm", "compose-unrelated-warm"] {
+        for &fixture in PREBOUND {
             let seed = anchor_for(fixture, "verify").unwrap()["json"].clone();
             let original_binding = CacheBinding {
                 key: seed["cache"]["key"].as_str().unwrap().into(),
@@ -735,14 +802,18 @@ mod comparison_controls {
             assert!(equal_json(fixture, "verify", &original_expected, &seed).is_ok());
             assert!(check_own_cost(&seed, &original_binding.cost).is_ok());
             let mut new_binding = original_binding.clone();
-            new_binding.cost["solver"]["memory_mb"] = json!(17.68);
+            new_binding.cost["solver"]["memory_mb"] =
+                measured_cold["cost"]["solver"]["memory_mb"].clone();
             let bound_case = keyed_case(fixture, &new_binding);
             let (_, bound_expected, _) = expected(&bound_case, 41);
             let mut actual = seed.clone();
-            *actual.pointer_mut(MEMORY).unwrap() = json!(17.68);
+            *actual.pointer_mut(MEMORY).unwrap() = measured_cold.pointer(MEMORY).unwrap().clone();
             assert!(equal_json(fixture, "verify", &bound_expected, &actual).is_ok());
             assert!(check_own_cost(&actual, &new_binding.cost).is_ok());
+            let current_cache_cost = actual["cost"].clone();
+            assert!(check_own_cost(&actual, &current_cache_cost).is_ok());
             // Against an UNCHANGED prebound context, the same drift must reject.
+            // Public/current-cache agreement above cannot replace the captured prior binding.
             assert!(
                 equal_json(fixture, "verify", &original_expected, &actual)
                     .unwrap_err()
@@ -770,6 +841,7 @@ mod comparison_controls {
                 bad_cost["solver"]["memory_mb"] = invalid;
                 let error = bind_warm_memory(fixture, &mut seed.clone(), &bad_cost).unwrap_err();
                 assert!(error.contains("observed scalar") || error.contains("nonfinite/negative"));
+                assert!(bind_warm_memory(fixture, &mut bad_expected, &bad_cost).is_err());
             }
             let mut missing_expected = seed.clone();
             remove_leaf(&mut missing_expected, MEMORY);
@@ -797,6 +869,21 @@ mod comparison_controls {
                     .unwrap_err()
                     .contains("full JSON mismatch")
             );
+            for (pointer, replacement) in [
+                ("/cache/key", json!("f".repeat(64))),
+                ("/cache/source", json!("other")),
+                ("/result", json!("drift")),
+                ("/fsl", json!("drift")),
+                ("/cost/solver/checks", json!(999)),
+                ("/cost/solver/decisions", json!(999)),
+            ] {
+                let mut changed = actual.clone();
+                *changed.pointer_mut(pointer).unwrap() = replacement;
+                assert!(equal_json(fixture, "verify", &bound_expected, &changed).is_err());
+            }
+            let mut location = actual.clone();
+            location["loc"] = json!({"file":"wrong","line":999});
+            assert!(equal_json(fixture, "verify", &bound_expected, &location).is_err());
         }
     }
     #[test]

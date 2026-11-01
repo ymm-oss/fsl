@@ -187,28 +187,37 @@ without a separate code path).
   keys invalidate when a dependency beside the alias changes.
 - `examples/literate/toggle.md`: canonical literate example.
 
-### Fixture-scoped comparison of independent solver memory (#1420)
+### Field-role comparison of solver memory (#1420)
 
 CI 41347782003's three supplied failing comparison pairs have exactly one
 non-timing difference each, `/cost/solver/memory_mb`: `compose/verify`
 (17.67 → 17.24), `governance-ok/verify` (17.68 → 17.24), and
 `strict-tags/verify` (18.36 → 17.91). Their complete expected bodies map to
-those three BASE anchor IDs, not to every phase in the failing tests. The
-already-controlled timing differences cover 10, 10, and 8 paths respectively;
-the remaining JSON is identical. These observations demonstrate that literal
-memory equality across these independent measurements is not stable; they do
-not establish a product-semantic failure.
+those three BASE anchor IDs, not to every phase in the failing tests. Newly
+supplied CI pairs additionally show `governance-cold/verify` and
+`root-edition4/verify` (both 17.68 → 17.24), and proved
+`strict-tags-lemma/verify` (18.35 → 17.9), again differing only in memory and
+existing elapsed leaves. These independent phases supersede the earlier
+per-ID comparison choice with field-family evidence, not a relaxed product
+contract or evidence of a product-semantic defect.
 
-`tests/support/literate_memory.rs` therefore adds only those three
-fixture/command dispositions in Rust policy, validating both memory values as
-present, numeric, finite and nonnegative before full comparison of everything
-else. This policy is separate from the five historical `numeric_memory`
-dispositions in the generated BASE anchors, which remain unchanged measurement
-records. No new allowance covers governance cache phases, strict-tags induction,
-or any other unobserved binding. Cold output must still equal its own published
-cache cost, and warm output its exact prebound cache cost; the two strict warm
-memory reconstructions remain unchanged. Verdicts, schema/versions, counters,
-locations, cache keys, process exits and raw stderr retain exact comparison.
-New/updated executable controls cover the observed memory changes, invalid or
-missing scalars on either/both sides, and rejecting stable-field mutations;
-their execution is a separate validation obligation, not implied by this note.
+`tests/support/literate_memory.rs` classifies only known immutable BASE
+bindings: command `verify`, backend `native-z3`, a positive unsigned solver
+check count, and the audited independent/prebound (`warm`) role. Neither
+mutable comparison body determines eligibility. Controls pin the disjoint
+census: 14 independent, 6 prebound and 42 other strict bindings. Independent
+allocation telemetry is validated as present, numeric, finite and nonnegative
+on both sides before excluding precisely `/cost/solver/memory_mb`. Unknown,
+unbound, nonqueried and nonnative roles stay strict. Historical `numeric_memory`
+flags remain unchanged measurements, not policy; in particular, the flags on
+`compose-warm` and `compose-prose-warm` do not authorize independent warm drift.
+
+All six prebound roles reconstruct only expected memory from the `CacheBinding`
+captured before the warm command. Actual full cost must equal that exact prior
+cost even if public output and a later cache entry agree with each other;
+cold output must equal its own published cost. Other JSON, counters, versions,
+locations, keys, cache source, exits, raw stderr and existing timing policy
+remain exact. Controls cover all roles, the six observed CI transitions,
+both-side invalid/missing scalars, cold-to-warm propagation and rejecting
+binding/stable-field drift. Their native execution remains a separate validation
+obligation, not implied by this note.
