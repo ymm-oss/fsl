@@ -27,6 +27,9 @@ pub(crate) struct RootActual {
     pub(crate) ordinal: usize,
     pub(crate) expr: Expr,
     pub(crate) formal: Param,
+    /// Component declaration ownership, separate from the root expression's span.
+    pub(crate) formal_action: String,
+    pub(crate) formal_span: Span,
     pub(crate) span: Span,
     pub(crate) source_file: Option<String>,
 }
@@ -1277,9 +1280,12 @@ impl ModelBuilder {
                 self.action_param(&actual.formal)
                     .map(|formal| (actual.clone(), formal.ty()))
                     .map_err(|error| {
-                        error
-                            .with_origin(Some(type_diagnostic_origin(actual.span)))
-                            .at(actual.span)
+                        let origin =
+                            self.origins
+                                .diagnostic_origin(&crate::origin::component_check_target(
+                                    &action_target(&actual.formal_action),
+                                ));
+                        error.at(actual.formal_span).with_origin(origin)
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;

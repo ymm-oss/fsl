@@ -2146,6 +2146,8 @@ fn sync_component_sources(
                     ordinal: actuals.len(),
                     expr: expr.clone(),
                     formal: param.clone(),
+                    formal_action: prefix(&component.alias, &reference.action),
+                    formal_span: source_span,
                     span: *span,
                     source_file: None,
                 });
