@@ -8,10 +8,8 @@
 //! declared structurally (domain bound coincides with the invariant bound
 //! by construction) before the mutation that breaks it runs.
 //!
-//! R6 additionally records the remaining confirmed cross-engine finding as a
-//! self-retiring exclusion for
-//! `head()` read from property context on an empty sequence (BMC finds a
-//! spurious `violated`/`invariant` while the concrete engines correctly error).
+//! R6 also pins reached empty-Seq property-head reads as uniform `partial_op`
+//! violations in Monitor BFS, explicit and BMC; no exclusion remains for that case.
 //! Action-context partial operations are a direct four-engine agreement anchor:
 //! Monitor BFS, explicit, the concrete boundary oracle, and raw
 //! `fsl_verifier::verify_bounded` must all classify the six named operations
@@ -492,9 +490,9 @@ fn r5_domain_size_boundary_verdict_change_matches_the_declared_structural_expect
 // "Partial operations" row scopes the *checked* class to action context; it
 // makes no totalization promise for `head`/`pop`/`at`/index the way S3
 // explicitly does for `/`/`%`, so this suite exercises the six named
-// operations in action context via the dedicated tests below and records the
-// property-context asymmetry as its own finding instead of assuming S3's
-// `/`/`%` guarantee extends to them.
+// operations in action context via the dedicated tests below. The #650 property-
+// context regression separately requires uniform `partial_op`; it does not extend
+// S3's numeric `/`/`%` totalization guarantee to Seq reads.
 // ---------------------------------------------------------------------
 
 #[test]

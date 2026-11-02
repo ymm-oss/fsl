@@ -863,6 +863,9 @@ pub struct SyncRef {
     pub alias: String,
     pub action: String,
     pub args: Vec<Expr>,
+    /// Complete authored actual ranges, including parentheses, in argument order.
+    /// Must have exactly the same cardinality as `args`.
+    pub arg_spans: Vec<Span>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

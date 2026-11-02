@@ -1259,3 +1259,5 @@ fn a_decision_table_gap_is_published_with_its_values() {
         "{gap:#}"
     );
 }
+#[path = "support/issue_1517_sync_argument_locations.rs"]
+mod issue_1517_sync_argument_locations;

@@ -359,7 +359,30 @@ constructor before export; it passes checked names/order plus the versioned
 single-path testgen trace into the same normalized target adapter and preserves
 compose support without weakening the public contract.
 
+### #1517 accepted amendment — source reviewed, bounded callers measured
+
+[Root-argument validation](DESIGN-sync-argument-root-validation.md) adopts typing
+of ALL used and unused actuals before substitution, in root header context only.
+It changes admission for unused Bool/relation-index actuals; numeric carrier/range
+behavior in §2.1 stays unchanged. Root diagnostics use authored whole half-open
+argument spans (legitimate within-argument inner precision allowed), not consuming
+component locations or retagged action/Kernel metadata. Immediate lowering errors,
+model assembly, queued typing, then init/component checks define precedence.
+The new public SyncRef metadata breaks Rust constructors; a fallible validated
+projection supplements explicitly raw/lossy conversions and migrates three CLI
+callers, adding one full core validation per call (whole-CLI measurements do not
+isolate its cost). The linked design records the measured11-context/9-pair/22-mode
+removal union. The seven-state caller cohort completed four builds/16CLI observations:
+R/I/M honestly survived fixed valid inputs, and all exact restores preserved output
+using fresh H0 bytes without rebuilding. Whole packets/exits/non-time stderr matched;
+only the observed, framing-validated mutate elapsed scalar was not compared literally.
+This is not semantic-kill or isolated incremental-cost evidence. Final issue/product
+acceptance and broader required gates remain open.
+
 ## 4. Implementation notes
+
+Historical frozen-Python reference only; native Rust under rust/ is authoritative.
+Remaining legacy implementation-note migration is tracked in #1437.
 
 - grammar.py: `compose_def` (use / internal / sync action). `alias.x` collides with the
   existing `field` syntax (same form as `o.st`) — during compose expansion, "field

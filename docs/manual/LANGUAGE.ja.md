@@ -2906,6 +2906,45 @@ compose OrderSystem {
   破壊的な削除 (#1334): 以前は `check` を通った `alias__x` のような物理名による部品の状態への追加文の代入も、位置付きエラーで拒否します。
   同期参照の引数が読めるのはヘッダのパラメータ・const・状態だけで、追加項目の `let` 束縛は読めません (破壊的な削除、#1442)。
   部品の自由な値の読みと更新先の根はマージ前の部品自身の宣言に対して解決するため、未宣言の参照を合成によって有効にはできません (破壊的な削除、#1442)；公開名は引き続き使用でき、所有する enum の保護が必要な読みも表示には元の member 名を使います。
+- **#1517 ルート実引数検査（ソース審査済み・限定呼出経路測定済み）:** 未使用の仮引数を含む
+  すべての同期実引数を置換前に型検査します。環境はルートのヘッダ引数・状態・定数・
+  enum であり、本体の let/requires 束縛は含みません。数値 carrier の互換性は維持し、
+  数値範囲の不一致は引き続き検証時に扱います。
+  ルートの診断は括弧を含む実引数全体の半開区間を使い、その実引数内の正当な内側の
+  span のみ保持します。CLI/Worker loc は先頭、LSP は UTF-16 の始点・終点です。
+  部品 wrapper ではなく裸のルート文言を使い、元の action/Kernel メタデータは変えません。
+  優先順位は即時 lowering、モデル組立、記述順の待機実引数検査、init/部品検査です。
+  測定済み check 削除の和集合は11完全コンテキスト・9ルート/部品組・22モード組です。
+  base c16cf35dc424619d1e1f43a340e6cf7cac23ebcb、candidate 78ffb38f714c0fd44e63148e20d34f9ebd5c4563
+  + seven-file patch dad156bf383f3d8907c5275bcb44cce189c899076123ad7b52d138b6c81461c1。
+  stable/FSL5-opt-in 各モード・各側2回、全件 check-ok/exit0 → semantics-error/exit2。
+  以下の全IDを保持します（分類・位置・正確なソース同一性は上記設計に記載）。
+
+  | ID | Exact complete-context key | Pair | Changed admission / candidate loc |
+  |---|---|---|---|
+  | R01 | `1cae9cf75cb49d332ab850296a1902db6e08971cbae68ab7229309b979632f05` | P01 | unused true + relation index, argument order; 5:16 |
+  | R02 | `456840abf00faf2844ad3223e80abab2efb03e62ec5c2fc4c6c5cef9daa45af4` | P02 | body-only x after let; 5:16 |
+  | R03 | `5aa3baefa078f9ddc0a1d5ed5157e9bd6295df700bf86536d7042d774e69e0d2` | P03 | true then later action index; 5:16 |
+  | R04 | `8d7b0467683a00853cc958fcf91c33e6e23d32c7cd5506d1401029e98338b5d9` | P04 | relation index; no good sibling; 5:16 |
+  | R05 | `a1760ef370b7c9164f0eda14b36c84dfa208b847c75fb6ecb8bfa8e5faa8df22` | P05 | unused true; no good sibling; 5:16 |
+  | R06 | `ab059cd5d0c142246d68ccb9ce2ea193e43ce9b4365e6a865e0a7b46c63942ac` | P06 | true then second reference index; 5:16 |
+  | R07 | `ab291946a038aa0e77692160e7516fa40a75b8781797c928405dddfd8949bbbe` | P04 | relation index + offered good sibling; 5:16 |
+  | R08 | `acc62ea03d44de4dd0ddbcd65d4f73e4737e914153f50bed7832a4bb4905da3b` | P07 | body-only x after let/requires; 5:16 |
+  | R09 | `cd076b93cba275c70735ba2a73731c1935fabcdb0fe16f3246b5ba615e720ded` | P08 | parenthesized unused true; 5:16 |
+  | R10 | `dd449ab57104f7c5a53e33d3f756937344e76161615f960cb821e2e62372adff` | P05 | unused true + offered good sibling; 5:16 |
+  | R11 | `91412ae303f1f1877fcdcea2e7e35912726e9832662e0c49d971d8ca09a9bc02` | P09 | second ref `(0), (true),`; 6:37 |
+
+  新たな9件の3ファイル check c.fsl は保存対照だけで、direct/API/verify の証拠ではありません。
+  これは測定範囲の和集合であり472件すべての実行や issue 完了の主張ではありません。
+  公開 Rust SyncRef に arg_spans が必須です。into_validated_syntax は消去前に検査し、
+  syntax/kernel_ast/into_syntax は未検査・情報を失う変換のままです。移行済みCLI3箇所は
+  各呼出しで完全コア検査が1回増えます。CLI全体の測定を追加検査単体の費用とは扱いません。
+  呼出経路は7状態・4ビルド・16CLI観測を固定した妥当入力で各2回測定済みです。
+  R/I/M は実際に生存し、正確なソース復元後は新規ビルドしたH0の同一バイトを再利用して
+  出力保存を確認しました（復元時の再ビルドなし）。stdout/JSON/終了コードとstderrの
+  非時間部分は全体一致し、実測されたmutate経過時間スカラーだけは診断書式を検査した上で
+  文字列の完全一致対象から外しました。呼出箇所固有の意味的killの証拠ではありません。
+  より広い実行ゲートとissue/productの最終承認は引き続き未完了です。
 - 公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な
   同期 action から参照されると、`check` / `verify` は JSON の `warnings` に
   `fair_not_inherited` 警告を出します。同期 action が fair でなければならないとき

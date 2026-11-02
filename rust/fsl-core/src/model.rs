@@ -19,6 +19,18 @@ use crate::{
 /// index distinctness across `forall` iterations could not be proved (issue #698).
 pub const WRITE_DISTINCTNESS_UNPROVED_CODE: &str = "FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED";
 
+/// Original root actual, retained independently of substituted component bodies.
+/// File identity is private metadata, never a component presentation origin.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RootActual {
+    pub(crate) action: String,
+    pub(crate) ordinal: usize,
+    pub(crate) expr: Expr,
+    pub(crate) formal: Param,
+    pub(crate) span: Span,
+    pub(crate) source_file: Option<String>,
+}
+
 /// Context shared by ordinary model validation and pre-prefix compose errors.
 pub(crate) enum ExpressionErrorContext<'a> {
     Model,
@@ -887,6 +899,7 @@ struct ModelBuilder {
     consts: BTreeMap<String, Value>,
     types: BTreeMap<String, TypeDef>,
     enum_members: BTreeMap<String, Value>,
+    root_actuals: Vec<RootActual>,
 }
 
 impl ModelBuilder {
@@ -899,6 +912,7 @@ impl ModelBuilder {
             projections,
             diagnostics: _,
             names,
+            root_actuals,
         } = kernel;
         Self {
             spec,
@@ -910,6 +924,7 @@ impl ModelBuilder {
             consts: BTreeMap::new(),
             types: BTreeMap::new(),
             enum_members: BTreeMap::new(),
+            root_actuals,
         }
     }
 
@@ -1253,6 +1268,21 @@ impl ModelBuilder {
         }
         inline_init.extend(init);
         let init = inline_init;
+        // Resolve every retained formal during declaration assembly, even when
+        // its component action is internal and absent from the public actions.
+        let root_actuals = self
+            .root_actuals
+            .iter()
+            .map(|actual| {
+                self.action_param(&actual.formal)
+                    .map(|formal| (actual.clone(), formal.ty()))
+                    .map_err(|error| {
+                        error
+                            .with_origin(Some(type_diagnostic_origin(actual.span)))
+                            .at(actual.span)
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         let mut model = KernelModel {
             instance_sources: self.instance_sources,
             name: self.spec.name,
@@ -1276,6 +1306,35 @@ impl ModelBuilder {
             traceability,
             names: self.names,
         };
+        // This queue was collected in authored action/reference/argument order.
+        // Only header params are bindings: body lets/requires cannot admit an
+        // original actual, and no partially assembled model is used here.
+        for (ordinal, (actual, expected)) in root_actuals.into_iter().enumerate() {
+            debug_assert_eq!(actual.ordinal, ordinal);
+            let header = model
+                .actions
+                .iter()
+                .find(|action| action.name == actual.action)
+                .ok_or_else(|| model_error("root actual has no synchronized action"))?;
+            let bindings = header
+                .params
+                .iter()
+                .map(|param| (param.name().to_owned(), param.ty()))
+                .collect::<Vec<_>>();
+            crate::typecheck::validate_authored_actual(
+                &actual.expr,
+                &model,
+                &bindings,
+                &expected,
+                actual.span,
+            )
+            .map_err(|error| {
+                let span = error.span.unwrap_or(actual.span);
+                model_error(ExpressionErrorContext::Model.message(error.message))
+                    .with_origin(Some(type_diagnostic_origin(span)))
+                    .at(span)
+            })?;
+        }
         let inline_initializers = inline_initializers
             .into_iter()
             .map(|(index, name, span)| (index, (name, span)))
