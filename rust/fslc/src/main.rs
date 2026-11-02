@@ -17235,25 +17235,35 @@ fn run_diff(
 }
 
 fn run_historical_diff(
-    old: &Path,
-    new: &Path,
+    [(old, old_label), (new, new_label)]: [(&Path, &Path); 2],
     depth: usize,
     mapping_source: Option<&str>,
     forbid: &[String],
 ) -> (Value, i32) {
-    let old_source = match read_unprefixed_spec_source(old) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let new_source = match read_unprefixed_spec_source(new) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_diff_from_sources(
-        [(old, &old_source), (new, &new_source)],
-        depth,
-        mapping_source,
-        forbid,
+    let mut sources = Vec::new();
+    let mut editions = Vec::new();
+    // Admit the explicit slots without introducing a historical dependency scope.
+    for (path, label) in [(old, old_label), (new, new_label)] {
+        let source = match read_unprefixed_spec_source(path) {
+            Ok(source) => source,
+            Err(error) => return (spec_load_error_output(&error), 2),
+        };
+        let edition = match admit_root_source(label, &source, None) {
+            Ok(edition) => edition,
+            Err(error) => return error,
+        };
+        sources.push(source);
+        editions.push(edition);
+    }
+    finish_admitted(
+        run_diff_from_sources(
+            [(old, &sources[0]), (new, &sources[1])],
+            depth,
+            mapping_source,
+            forbid,
+        ),
+        &editions,
+        false,
     )
 }
 
@@ -17679,35 +17689,39 @@ fn run_approval_diff_from_source(
             2,
         );
     }
-    let old_source = match read_unprefixed_spec_source(&old) {
-        Ok(source) => source,
-        Err(error) => {
-            let _ = std::fs::remove_dir_all(&root);
-            return (spec_load_error_output(&error), 2);
-        }
-    };
-    let (mut result, status) =
-        run_diff_from_sources([(&old, &old_source), (path, source)], depth, None, &[]);
-    if let Value::Object(output) = &mut result {
-        if let Some(Value::Object(old)) = output.get_mut("old") {
-            old.insert(
-                "file".to_owned(),
-                json!(format!("{}:{}", record.spec.git_commit, record.spec.path)),
-            );
-        }
-        output.insert(
-            "approval".to_owned(),
-            json!({
-                "record": record_path.display().to_string(),
-                "baseline_digest": record.spec.digest,
-                "baseline_commit": record.spec.git_commit,
-                "signature_status": signature_status,
-                "key_id": key_id,
-            }),
+    let baseline_label = PathBuf::from(format!("{}:{}", record.spec.git_commit, record.spec.path));
+    let result =
+        run_admitted_roots(
+            vec![(&baseline_label, read_unprefixed_spec_source(&old))],
+            None,
+            false,
+            |sources, editions| {
+                let (mut result, status) = editions[0].warnings_only().finish(
+                    run_diff_from_sources([(&old, &sources[0]), (path, source)], depth, None, &[]),
+                );
+                if let Value::Object(output) = &mut result {
+                    if let Some(Value::Object(old)) = output.get_mut("old") {
+                        old.insert(
+                            "file".to_owned(),
+                            json!(baseline_label.display().to_string()),
+                        );
+                    }
+                    output.insert(
+                        "approval".to_owned(),
+                        json!({
+                            "record": record_path.display().to_string(),
+                            "baseline_digest": record.spec.digest,
+                            "baseline_commit": record.spec.git_commit,
+                            "signature_status": signature_status,
+                            "key_id": key_id,
+                        }),
+                    );
+                }
+                (result, status)
+            },
         );
-    }
     let _ = std::fs::remove_dir_all(&root);
-    (result, status)
+    result
 }
 
 #[allow(clippy::too_many_lines)]
@@ -17817,6 +17831,12 @@ fn run_diff_git(
                 2,
             );
         }
+        let old_label = PathBuf::from(format!("{base_input}:{relative}"));
+        let new_label = PathBuf::from(format!("{head_input}:{relative}"));
+        let roots = [
+            (old.as_path(), old_label.as_path()),
+            (new.as_path(), new_label.as_path()),
+        ];
         let resolved_mapping = mapping.map(|path| {
             if path.is_absolute() {
                 path.to_path_buf()
@@ -17832,7 +17852,7 @@ fn run_diff_git(
         let (mut comparison, comparison_status) = if let Some(path) = resolved_mapping.as_deref() {
             if path.starts_with(&head_tree) {
                 match read_unprefixed_spec_source(path) {
-                    Ok(source) => run_historical_diff(&old, &new, depth, Some(&source), forbid),
+                    Ok(source) => run_historical_diff(roots, depth, Some(&source), forbid),
                     Err(error) => (spec_load_error_output(&error), 2),
                 }
             } else {
@@ -17846,8 +17866,7 @@ fn run_diff_git(
                     Ok((source, edition)) => {
                         run_prepared_roots(std::slice::from_ref(edition), false, || {
                             edition.warnings_only().finish(run_historical_diff(
-                                &old,
-                                &new,
+                                roots,
                                 depth,
                                 Some(source.as_str()),
                                 forbid,
@@ -17858,7 +17877,7 @@ fn run_diff_git(
                 }
             }
         } else {
-            run_historical_diff(&old, &new, depth, None, forbid)
+            run_historical_diff(roots, depth, None, forbid)
         };
         if comparison_status == 2
             && comparison.get("edition").is_some()

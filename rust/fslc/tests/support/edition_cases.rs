@@ -10,20 +10,7 @@ use serde_json::{Value, json};
 
 pub const DEFERRED_TO_SECOND_PR: &[(&str, &str, &str)] = &[];
 
-pub const OUT_OF_SCOPE_1513: &[(&str, &str)] = &[
-    (
-        "git/old",
-        "Historical Git revision root admission belongs to #1513.",
-    ),
-    (
-        "git/new",
-        "Historical Git revision root admission belongs to #1513.",
-    ),
-    (
-        "approval/old-root",
-        "Historical approval baseline root admission belongs to #1513.",
-    ),
-];
+pub const REQUIRED_HISTORICAL_ROOTS: &[&str] = &["git/old", "git/new", "approval/old-root"];
 
 fn belongs(label: &str, leaf: &str) -> bool {
     let command = if let Some(dialect) = label.strip_prefix("preserved/dialect/") {
@@ -70,10 +57,6 @@ pub fn deferred(label: &str) -> Option<(&'static str, &'static str)> {
     })
 }
 
-pub fn out_of_scope(label: &str) -> bool {
-    OUT_OF_SCOPE_1513.iter().any(|(cell, _)| *cell == label)
-}
-
 thread_local! {
     static CAPTURE: std::cell::RefCell<Option<Vec<(String, bool)>>> = const { std::cell::RefCell::new(None) };
 }
@@ -103,14 +86,9 @@ pub fn assert_complete_evidence(cells: &[(String, bool)]) {
         assert!(agrees, "preserved control failed: {label}");
     }
     for (label, agrees) in cells {
-        if out_of_scope(label) {
-            assert!(!agrees, "historical root unexpectedly admitted: {label}");
-            println!("HISTORICAL {label} agreement={agrees}");
-        } else {
-            assert!(agrees, "admission disagreement: {label}");
-        }
+        assert!(agrees, "admission disagreement: {label}");
     }
-    for &(label, _) in OUT_OF_SCOPE_1513 {
+    for &label in REQUIRED_HISTORICAL_ROOTS {
         assert!(
             cells.iter().any(|(observed, _)| observed == label),
             "unexecuted historical control: {label}"
@@ -595,16 +573,11 @@ impl Results {
                 cells.extend(self.observations);
             }
         });
-        let unexpected: Vec<_> = self
-            .failures
-            .iter()
-            .filter(|label| label.starts_with("preserved/") || !out_of_scope(label))
-            .collect();
         assert!(
-            unexpected.is_empty(),
+            self.failures.is_empty(),
             "{} failing cells: {:?}",
-            unexpected.len(),
-            unexpected
+            self.failures.len(),
+            self.failures
         );
     }
 }
