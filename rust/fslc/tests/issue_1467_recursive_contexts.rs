@@ -63,7 +63,7 @@ fn c0_auxiliary_is_inductive() {
 fn recursive_target_context_retains_outside_support_until_bounds() {
     let mut errors = Vec::new();
     for branch in [true, false] {
-        for (ty, initial, value, good, bad) in [
+        for (case_index, (ty, initial, value, good, bad)) in [
             (
                 "Set<L>",
                 "Set {}",
@@ -99,7 +99,10 @@ fn recursive_target_context_retains_outside_support_until_bounds() {
                 json!({"kind":"some","value":0}),
                 json!({"kind":"some","value":3}),
             ),
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             for (offset, expected) in [(0, good), (3, bad)] {
                 let value = value.replace('$', &offset.to_string());
                 let selected = if branch {
@@ -111,7 +114,7 @@ fn recursive_target_context_retains_outside_support_until_bounds() {
                     "spec Target {{\n  type K = 0..1\n  type L = 0..1\n  struct P {{ a: K }}\n  state {{ n: K, b: Bool, ys: {ty} }}\n  init {{ n = 0 b = {branch} ys = {initial} }}\n  action go() {{ ys = {selected} }}\n  invariant Capture {{ n == 0 }}\n}}\n"
                 );
                 errors.extend(continuation(
-                    &format!("1467-target-{ty}-{branch}-{offset}"),
+                    &format!("1467-target-{case_index}-{branch}-{offset}"),
                     &text,
                     &Oracle {
                         outcome: if offset == 0 { "pass" } else { "_bounds_ys" },
@@ -200,13 +203,16 @@ fn empty_opposites_contextual_none_aliases_and_live_lengths() {
     let header = "spec Context {\n  type K = 0..1\n  type L = 0..1\n  enum E { Zed, Able }\n  enum F { ZedF, AbleF }\n  struct P { a: K, e: E }\n  struct Q { a: K, e: E }\n  state { b: Bool, n: K, k: Seq<K, 2>, l: Seq<L, 2>, o: Option<Option<K>> }\n  init { b = true n = 0 k = Seq {0} l = Seq {0} o = some(none) }\n  action go() { b = false n = 1 }\n  invariant Capture { $P }\n}\n";
     let reachable = reachable_header(header, "ReachableOuterPresence", "not (o is none)", 11);
     for outer in ["Set", "Seq"] {
-        for item in [
+        for (case_index, item) in [
             "P {a:n,e:Able}",
             "some(none)",
             "Seq {n}",
             "Set {n}",
             "some(Able)",
-        ] {
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let typed = if item == "some(none)" { "o" } else { item };
             let other = match item {
                 "P {a:n,e:Able}" => "P {a:0,e:Zed}",
@@ -253,7 +259,7 @@ fn empty_opposites_contextual_none_aliases_and_live_lengths() {
                         predicate
                     };
                     errors.extend(continuation(
-                        &format!("1467-context-{outer}-{item}-{reverse}-{negative}"),
+                        &format!("1467-context-{outer}-{case_index}-{reverse}-{negative}"),
                         &if !negative && outer == "Set" && item == "some(none)" {
                             &reachable
                         } else {

@@ -162,6 +162,8 @@ pub(crate) fn approval_records_and_git_roots_refuse_before_output_writes() {
     .unwrap();
     scratch.write("spec.fsl", cases::WARNING_CASES[1].2);
     git(&scratch, &["init", "-q"]);
+    // Keep archived fixture bytes LF, including in production Git subprocesses.
+    git(&scratch, &["config", "--local", "core.autocrlf", "false"]);
     git(&scratch, &["add", "spec.fsl"]);
     git(&scratch, &["commit", "-qm", "canonical fixture"]);
     let canonical_sha = git(&scratch, &["rev-parse", "HEAD"]);
