@@ -71,7 +71,23 @@
 </tr>
 </tbody>
 </table></div></details>
-<details id="1-structure-of-a-specification"><summary>1. 仕様の構造<span class="tree-blurb"> — spec 宣言・状態・初期状態・アクションの基本構造。</span></summary><div class="tree-body"><pre><code class="language-fsl">spec &lt;Name&gt; [&quot;&lt;kind&gt;: &lt;intent&gt;&quot;] {   // optional spec-level tag → metadata badge (explain/html); never verified
+<details id="1-structure-of-a-specification"><summary>1. 仕様の構造<span class="tree-blurb"> — spec 宣言・状態・初期状態・アクションの基本構造。</span></summary><div class="tree-body"><p><a id="fsl-editions"></a></p>
+<h3 id="_1">エディションと読み始める場所</h3>
+<p>エディションはソース構文を選ぶもので、<code>fslc</code> 実行ファイルのバージョンとは別です。
+FSL 5 の要件は <strong>entity / lifecycle / event / rule / decide</strong> で記述します。
+新しく書く場合は <a href="#fsl5-requirements">§13.2</a>から
+読み始めてください。カーネルの <code>spec</code>、式、検証範囲、refinement は、本書の他の節で
+説明する共通の基盤です。§13.2 の <code>process</code> / <code>transition</code> の例は FSL 4 と移行入力の
+参照用に残しています。</p>
+<p>最初の宣言より前に、<code>fsl 5</code> を単独の行で書きます。その前に置けるのは空行と <code>//</code>
+コメントだけです（先頭の UTF-8 BOM も受理します）。Markdown の literate source では、
+最初の <code>fsl</code> フェンスの先頭行に書きます。ヘッダーは個々の requirements ブロックではなく、
+文書全体に適用されます。<code>fsl 4</code> は以前の構文を選び、ヘッダーがない文書も FSL 4 の
+ままです。<code>--edition current</code> は文書の指定に従います。明示的に指定したエディションと
+ヘッダーが食い違うと <code>edition_conflict</code>、未知の番号は <code>unsupported_edition</code> です。
+ヘッダーの追加だけでは旧形式の要件を変換できません。
+<a href="#fsl4-to-fsl5-migration">後述の移行手順</a>を使ってください。</p>
+<pre><code class="language-fsl">spec &lt;Name&gt; [&quot;&lt;kind&gt;: &lt;intent&gt;&quot;] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const &lt;NAME&gt; = &lt;constant expr&gt;
   type  &lt;Name&gt; = &lt;lo&gt;..&lt;hi&gt;            // domain type (bounded integer)
   symmetric type &lt;Name&gt; = &lt;lo&gt;..&lt;hi&gt;   // domain whose values are interchangeable identities
@@ -3939,6 +3955,411 @@ CTI を閉じるために存在する、あるいは実装のガードが抽象�
   文章をアノテーション引数に押し込むと、spec はかえって読みにくくなります。</li>
 </ul>
 <h3 id="132-requirementsfsl-req">13.2 要件レイヤー: <code>requirements</code>(fsl-req ダイアレクト)</h3>
+<p><a id="fsl5-requirements"></a></p>
+<h4 id="fsl-5">FSL 5: エンティティ、出来事、原文の要件</h4>
+<p>識別する対象を entity、その段階と許される辺を lifecycle、アクターの行為を event、
+原文が定める条件を rule または decide で記述します。ID と引用した原文によって、
+検証対象と要件を結び付けます。次は一つの完全な仕様です。この後の構文フェンスは、
+必要な宣言があることを前提とした断片です。</p>
+<pre><code class="language-fsl">fsl 5
+requirements Support {
+  actor Agent
+  entity Agent
+  entity Ticket {
+    lifecycle Open -&gt; Assigned -&gt; Closed
+    lifecycle Assigned -&gt; Escalated
+  }
+  Ticket belongs to Agent as assignee via take
+  resource desk_open: Bool = true
+
+  event take = Agent takes Ticket Open -&gt; Assigned
+  event close = Agent closes Ticket Assigned -&gt; Closed
+  event escalate = Agent escalates Ticket Assigned -&gt; Escalated
+    set desk_open = false
+
+  rule REQ-1 &quot;A ticket is taken only while the desk is open&quot; {
+    allow Agent takes Ticket only when desk_open
+  }
+  rule REQ-2 &quot;A taken ticket keeps the agent who took it&quot; {
+    always Ticket in Assigned, Closed, Escalated has assignee
+  }
+  policy Resolved &quot;Every assigned ticket is eventually closed or escalated&quot;
+    every Ticket in Assigned must eventually be Closed or Escalated
+  goal Closable &quot;A ticket can be closed&quot; some Ticket can reach Closed
+  measure closed_tickets = count Ticket in Closed
+
+  scenario AC-1 &quot;An agent takes and closes a ticket&quot; {
+    Agent takes t1 with assignee 1
+    Agent closes t1
+    then t1 is Closed
+  }
+  forbidden FB-DESK-CLOSED &quot;No ticket is taken once the desk has closed&quot; {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent takes t2 with assignee 0
+    then rejected
+  }
+}
+verify {
+  instances Ticket = 2
+  instances Agent = 2
+}
+</code></pre>
+<p><strong>エンティティと区分。</strong> <code>entity User</code> は段階を持たない識別対象を宣言します。
+<code>entity Order { qty: Qty = 0 lifecycle Empty -&gt; Placed }</code> のように本体を書く場合は、
+一つ以上の lifecycle 行と、すべてのフィールドの明示的な初期値が必要です。
+number のフィールドも省略できません。型は宣言済みの number、<code>Bool</code>、enum を使います。
+最初のパスの先頭段階が初期段階で、段階は初出順に生成 enum に入ります。
+lifecycle 行を追加すると別のパスを表せます。<code>number Qty</code> の有限範囲は
+<code>verify { values Qty = 0..2 }</code>、エンティティの個数は <code>instances</code> で指定します。
+検査結果が対象とする世界は、この範囲です。
+<code>concept Bulk = Order where qty &gt;= 2</code> と <code>concept Open = Order in Placed, Packed</code>
+は述語に名前を付けるもので、状態を追加しません。条件中ではフィールドを <code>qty</code> のように書きます。
+変換後のフィールド名は <code>order_qty</code>、<code>order_stage</code> など、正規名の <code>entity_field</code> です。
+設計と <code>implements</code> のマッピングでは、その名前を使います。</p>
+<p><strong>出来事。</strong> <code>event place = User places Order with qty Empty -&gt; Placed</code> は、
+正規の action 名 <code>place</code> と、アクター・動詞・エンティティの句を定めます。
+遷移は lifecycle の辺でなければなりません（<code>event_not_on_lifecycle</code>）。
+代わりに <code>in Placed</code> と書くと、同じ段階にとどまる出来事です。
+<code>with qty</code> は入力を同名フィールドに格納します。<code>with n: Qty</code> は型を明記した入力です。
+<code>n</code> と同名のフィールドがなければ、自動のフィールド代入は行いません。同名のフィールドが
+あれば、入力の型を明記していても代入します。入力も <code>set x = expr, y = expr</code> の更新も、
+複数ならカンマで区切ります。入力名とフィールド名が重なるときは <code>input qty</code> で入力を
+選びます（曖昧な裸の名前は <code>ambiguous_input_field</code>）。動詞を省くと event 名を使います。
+<code>covers REQ-ID "原文"</code> はトレーサビリティです。シナリオで使うものも含め、アクターを
+宣言してください（<code>actor_not_declared</code>）。通常の event は fair、<code>fault event</code> は
+fair ではありません。辺に対応する event がなければ <code>lifecycle_edge_without_event</code> の警告です。</p>
+<p><strong>規則。</strong> <code>rule ID "原文" { statement+ }</code> は内部の文をすべて論理積で組み合わせます。
+同じ出来事を制約する別の rule も論理積になります。使える文は次のとおりです。</p>
+<table>
+<thead>
+<tr>
+<th>文の断片</th>
+<th>検査する意味</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>allow Actor verb Entity only when condition</code></td>
+<td>条件を出来事のガードにします。</td>
+</tr>
+<tr>
+<td><code>allow Actor verb Entity only for Concept</code></td>
+<td>区分に属することをガードにします。</td>
+</tr>
+<tr>
+<td><code>never Actor verb Entity when condition</code> / <code>for Concept</code></td>
+<td>条件が偽であること／区分に属さないことをガードにします。</td>
+</tr>
+<tr>
+<td><code>Actor verb Entity only after Actor other Entity</code></td>
+<td>lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。</td>
+</tr>
+<tr>
+<td><code>Name: Entity enters Target only from Source, Other</code></td>
+<td>遷移元を制限する二状態の性質です。</td>
+</tr>
+<tr>
+<td><code>Name: always Concept1 is Concept2</code></td>
+<td>前者なら後者も成り立つという不変条件です。<code>Stage Entity</code> もケースとして使えます。</td>
+</tr>
+<tr>
+<td><code>Name: always Entity in S, T has condition</code></td>
+<td>指定段階でフィールド条件を要求する不変条件です。<code>not in</code> は指定段階の外を選びます。relation の役名だけなら、関係が設定済みであることを表します。</td>
+</tr>
+<tr>
+<td><code>deadline age &lt;= bound</code></td>
+<td><code>time</code> で宣言した age に対する期限です。時間と期限の検査は §13.4 を参照してください。</td>
+</tr>
+</tbody>
+</table>
+<p><code>always</code> と <code>enters</code> の文には名前を付けると、結果の性質名が安定します。
+出来事のガードを同時に満たせない場合、<code>check</code> は
+<code>rule_conflict_unsatisfiable_guard</code> で拒否します。<code>implied_by_lifecycle</code> は情報です。
+lifecycle が既に順序を保証する <code>only after</code> は、履歴の状態やガードを追加しません。
+lifecycle から導ける <code>enters</code> は、遷移の性質を引き続き宣言し、検査します。
+拒否を定める規則には forbidden trace を用意してください。ガード対象の出来事を試す
+trace がないと <code>never_rule_without_forbidden</code> が警告します。</p>
+<p><strong>決定表。</strong> 次の断片は、提出済み申請のケースごとにアクターと許される動詞を選びます。
+エンティティ、出来事、区分は別途宣言しておきます。</p>
+<pre><code class="language-fsl-fragment">decide REQ-2-3 &quot;Who handles a submitted claim&quot; for Submitted Claim {
+  SmallClaim =&gt; System approves
+    covers REQ-2 &quot;A small claim is auto-approved&quot;
+  LargeClaim =&gt; Manager approves or rejects
+    covers REQ-3 &quot;A large claim is approved or rejected by a manager&quot;
+} assuming amount &gt; 0
+</code></pre>
+<p>行の条件には区分、<code>and</code> で結んだ区分、<code>Stage Entity</code> を使えます。
+<code>otherwise =&gt; Actor verb</code> は他の行が成り立たない場合を受け持ちます。
+表の段階から出るすべての出来事を列挙する必要があります（<code>decide_event_not_listed</code>）。
+行はフィールドの範囲を網羅し（<code>decide_not_exhaustive</code> と未網羅の値）、互いに重なっては
+なりません（<code>decide_overlap</code> と重複する値）。ガードによって成立しなくなった行は
+<code>decide_row_emptied</code> の警告です。各出来事には、それを列挙する行の条件の論理和が
+一つのガードとして加わり、他の rule のガードも適用されます。
+<code>assuming Q</code> は表の検査を Q の範囲に絞ると同時に、<strong>その段階で Q が成り立つという
+不変条件を生成し、<code>verify</code> で証明させます</strong>。網羅性の検査を無条件に免除する指定ではありません。</p>
+<p><strong>関係、資源、射影。</strong> <code>Ticket belongs to Agent as assignee via take</code> は、各 ticket に
+最初は未設定の optional な役割を追加します。指定した event は最初の入力で相手を受け取り、
+記録します。シナリオの <code>with assignee 1</code> は Agent のインスタンス 1 を選びます。
+相手のエンティティに属する、シナリオ内のインスタンス名も入力できます。
+<code>resource stock: Qty = 2</code> はエンティティに属さない共有状態です。event は <code>set</code> で更新し、
+ガードからも参照できます。<code>measure m = count Concept</code> または <code>count Entity in S, T</code>
+は値の射影であり、新しいカウンター、履歴フィールド、自動の不変条件を作りません。
+<code>kpi</code> も同じ形式として受理します。goal の <code>some E can reach S</code> は到達可能性、policy の
+<code>every E in S must eventually be T or U</code> は fair な event の下での進行性です。
+どちらも ID と原文をトレーサビリティに残します。</p>
+<p><strong>シナリオと停止。</strong> アクターと動詞の句は event に対応します。対応がない、または曖昧なら
+<code>unknown_verb</code>、<code>unknown_event_phrase</code>、<code>ambiguous_step</code> で知らせます。
+<code>t1</code>、<code>t2</code> などのインスタンス名は trace 内だけの名前で、初出順に割り当てます。
+<code>verify</code> の個数を超えると <code>scenario_instance_overflow</code> です。
+<code>then t1 is Closed and t2 is Open</code> は最終段階を検査します。scenario は全ステップを実行し、
+最後の条件を満たす必要があります。失敗は <code>kind: "acceptance"</code>、ステップの失敗には
+<code>failed_step</code> が付きます。forbidden trace は途中まで実行でき、最後のステップだけを
+拒否する必要があります。最後が受理されると <code>kind: "forbidden"</code>、途中で拒否されると
+<code>kind: "forbidden_setup"</code> と <code>failed_step</code> です。<code>check</code> はこれらの trace を実行します。</p>
+<p><code>terminal</code> を書かない場合は、意図した停止状態を自動で導きます。lifecycle を持つ
+すべてのエンティティの全インスタンスが、<strong>出る lifecycle 辺のない段階</strong>にあることが条件です。
+event の欠落や無効化によって、途中の段階が最終段階になることはありません。
+識別だけの entity と relation の役割は停止条件を追加しません。
+明示的な <code>terminal { expression }</code> は、導出された条件を<strong>置き換えます</strong>。
+論理積で追加するのではありません。process から停止条件を導かない FSL 4 requirements
+との違いです。</p>
+<h4 id="_1">用語集と日本語の綴り</h4>
+<p>任意の <code>glossary</code> は requirements ブロックの最初の項目に、一つだけ置けます。
+ASCII の正規名と、空白を含まない一語の別名を対応させます。フィールドの左辺は
+<code>Entity.field</code> と書きます。次は断片です。</p>
+<pre><code class="language-fsl-fragment">glossary {
+  Employee = 従業員
+  Claim = 経費申請
+  Claim.amount = 申請金額
+  submits = 提出する
+}
+</code></pre>
+<p>以後は、宣言と参照、式、決定表の行、シナリオ、検証範囲、カーネルのメンバーで別名を
+使えます。正規名との混在も受理しますが、<code>lint --strict-names</code> は <code>mixed_names</code> で
+知らせます。重複した別名は <code>duplicate_alias</code>、別名の衝突は <code>alias_collision</code>、
+正規名と同じ別名は <code>alias_shadows_name</code>、英日どちらかのキーワードや助詞と同じ別名は
+<code>alias_shadows_keyword</code> で拒否します。別名の宣言なしに非 ASCII の正規名を使うと
+<code>canonical_name_not_ascii</code> です。spec 名、event の宣言、性質名、要件 ID は正規名で
+揃えておくと、コードとの境界を追いやすくなります。シナリオのインスタンス名は trace 内の名前です。
+<code>implements … from</code> のマッピングと refinement ファイルは正規名だけを使います
+（<code>alias_in_implements</code>）。生成する状態・action 名は <code>claim_amount</code>、<code>submit</code> のように
+正規名を保ち、読みやすい診断では別名も併記できます。</p>
+<p>日本語のキーワードは、次の<strong>文法上の文脈</strong>で使えます。全箇所を一律に置換する規則では
+ありません。英語と日本語は混在できます。ヘッダー、<code>implements … from</code> とマッピング、
+カーネルのメンバー（<code>terminal</code>、<code>time</code>、<code>state</code> など）、<code>and</code> / <code>or</code> 以外の演算子は
+英語のままです。</p>
+<table>
+<thead>
+<tr>
+<th>Context / 文脈</th>
+<th>English</th>
+<th>日本語</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>File blocks / ファイルのブロック</td>
+<td><code>requirements</code>; <code>glossary</code>; <code>verify</code></td>
+<td><code>要件</code>; <code>用語集</code>; <code>検証</code></td>
+</tr>
+<tr>
+<td>Verification world / 検証範囲</td>
+<td><code>instances</code>; <code>values</code></td>
+<td><code>個数</code>; <code>値域</code></td>
+</tr>
+<tr>
+<td>Requirements members / 要件の宣言</td>
+<td><code>type</code>; <code>enum</code>; <code>number</code>; <code>const</code>; <code>actor</code>; <code>entity</code>; <code>concept</code>; <code>resource</code></td>
+<td><code>型</code>; <code>列挙</code>; <code>数値</code>; <code>定数</code>; <code>アクター</code>; <code>エンティティ</code>; <code>区分</code>; <code>資源</code></td>
+</tr>
+<tr>
+<td>Requirements members / 要件の宣言</td>
+<td><code>event</code>; <code>rule</code>; <code>decide</code>; <code>goal</code>; <code>policy</code>; <code>measure</code>; <code>kpi</code>; <code>scenario</code>; <code>forbidden</code></td>
+<td><code>出来事</code>; <code>規則</code>; <code>決定表</code>; <code>目標</code>; <code>方針</code>; <code>指標</code>; <code>重要指標</code>; <code>シナリオ</code>; <code>拒否シナリオ</code></td>
+</tr>
+<tr>
+<td>Entity body / エンティティの本体</td>
+<td><code>lifecycle</code></td>
+<td><code>ライフサイクル</code></td>
+</tr>
+<tr>
+<td>Concept / 区分</td>
+<td><code>in</code>; <code>where</code></td>
+<td><code>段階</code>; <code>のうち</code></td>
+</tr>
+<tr>
+<td>Relation / 関係</td>
+<td><code>belongs to</code>; <code>as</code>; <code>via</code></td>
+<td><code>所属先</code>; <code>役名</code>; <code>契機</code></td>
+</tr>
+<tr>
+<td>Event / 出来事</td>
+<td><code>fault</code>; <code>in</code>; <code>set</code>; <code>covers</code></td>
+<td><code>異常</code>; <code>段階</code>; <code>更新</code>; <code>対応要件</code></td>
+</tr>
+<tr>
+<td>Event/rule expressions / 出来事・規則の式</td>
+<td><code>input</code></td>
+<td><code>入力</code></td>
+</tr>
+<tr>
+<td>Allow rule / 許可規則</td>
+<td><code>allow</code>; <code>only when</code>; <code>only for</code></td>
+<td><code>許可</code>; <code>条件</code>; <code>対象</code></td>
+</tr>
+<tr>
+<td>Never rule / 禁止規則</td>
+<td><code>never</code>; <code>when</code>; <code>for</code></td>
+<td><code>禁止</code>; <code>条件</code>; <code>対象</code></td>
+</tr>
+<tr>
+<td>Ordering / 順序</td>
+<td><code>only after</code></td>
+<td><code>先行条件</code></td>
+</tr>
+<tr>
+<td>Entry / 遷移元の制限</td>
+<td><code>enters</code>; <code>only from</code></td>
+<td><code>遷移先</code>; <code>遷移元</code></td>
+</tr>
+<tr>
+<td>Safety rule / 不変条件</td>
+<td><code>always</code>; <code>is</code>; <code>in</code>; <code>not in</code>; <code>has</code></td>
+<td><code>常に</code>; <code>は</code>; <code>段階</code>; <code>段階以外</code>; <code>必須</code></td>
+</tr>
+<tr>
+<td>Deadline / 期限</td>
+<td><code>deadline</code></td>
+<td><code>期限</code></td>
+</tr>
+<tr>
+<td>Decision table / 決定表</td>
+<td><code>for</code>; <code>otherwise</code>; <code>assuming</code></td>
+<td><code>対象</code>; <code>それ以外</code>; <code>仮定</code></td>
+</tr>
+<tr>
+<td>Decision outcome / 決定表の結果</td>
+<td><code>or</code></td>
+<td><code>または</code></td>
+</tr>
+<tr>
+<td>Goal / 目標</td>
+<td><code>some</code>; <code>can reach</code></td>
+<td><code>いずれかの</code>; <code>到達可能</code></td>
+</tr>
+<tr>
+<td>Policy / 方針</td>
+<td><code>every</code>; <code>in</code>; <code>must eventually be</code>; <code>or</code></td>
+<td><code>すべての</code>; <code>段階</code>; <code>いずれ必ず</code>; <code>または</code></td>
+</tr>
+<tr>
+<td>Measure / 指標</td>
+<td><code>count</code>; <code>in</code></td>
+<td><code>件数</code>; <code>段階</code></td>
+</tr>
+<tr>
+<td>Scenario/forbidden / シナリオ・拒否シナリオ</td>
+<td><code>then</code>; <code>is</code>; <code>and</code>; <code>rejected</code></td>
+<td><code>結果</code>; <code>は</code>; <code>かつ</code>; <code>拒否</code></td>
+</tr>
+<tr>
+<td>Boolean expressions / 論理式</td>
+<td><code>and</code>; <code>or</code></td>
+<td><code>かつ</code>; <code>または</code></td>
+</tr>
+<tr>
+<td>Inputs in events/steps / 出来事・ステップの入力</td>
+<td><code>with</code></td>
+<td><code>で</code> (after the input / 入力の後)</td>
+</tr>
+</tbody>
+</table>
+<p><code>assume</code> / <code>前提</code>、<code>out of scope</code> / <code>範囲外</code>、event の <code>environment</code> / <code>外部</code>、
+allow の <code>only as</code> / <code>立場</code>、never の <code>because</code> / <code>理由</code> は予約済みの綴りであり、
+使える構文ではありません。glossary の別名にも使えません。</p>
+<p>助詞は独立した語として書きます。<code>が</code> はアクター、<code>を</code> はエンティティ（ステップでは
+インスタンス）、<code>で</code> は入力、<code>は</code> は主題を表します。<code>に</code> は相手を示す印として
+認識しますが、このエディションにはその役割を受け取る句がありません。relation の入力を
+渡す書き方には使えません。
+例えば <code>従業員 が 経費申請 を 提出する 申請金額 で</code> は event の句、
+<code>従業員 が c1 を 提出する 申請金額 1 で</code> はシナリオのステップです。
+助詞を使う句では、動詞以外の各語に役割の印を付けると、語順を変えられます。
+一部だけに付けると <code>mixed_particles</code>、役割が違うと <code>particle_role_mismatch</code>、
+<code>従業員が</code> のように語につなげると <code>particle_needs_space</code> です。
+<code>fmt --lang ja|en</code> でキーワード、<code>--names alias|canonical</code> で用語の綴りを選びます。
+これは表記の変更であり、別の振る舞いを定めるものではありません。</p>
+<p><a id="fsl4-to-fsl5-migration"></a></p>
+<h4 id="fsl-4-fsl-5">FSL 4 から FSL 5 への移行</h4>
+<p>適用前に計画を確認し、移行後のファイルと refinement の接続を、check、verify、
+原文の意図を確かめる検査にかけ直します。</p>
+<pre><code class="language-bash">fslc lint requirements.fsl --edition 5
+fslc migrate requirements.fsl --edition 5
+fslc migrate requirements.fsl --edition 5 --write
+fslc check requirements.fsl
+fslc verify requirements.fsl --depth 8
+fslc verify requirements.fsl --engine induction
+</code></pre>
+<p><code>migrate</code> は <code>--write</code> がなければ dry run です。終了コードだけでなく、<code>findings[]</code>、
+<code>machine_applicable</code>、拒否ごとの <code>reason</code> を確認してください。既存の分類と原子的な
+書き込みの契約は、§7 と <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-migration.md">DESIGN-migration</a>を参照してください。</p>
+<table>
+<thead>
+<tr>
+<th>finding / 変換</th>
+<th>確認する点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>missing_edition_header</code></td>
+<td>選んだエディションのヘッダーを挿入します。要件は推測しません。</td>
+</tr>
+<tr>
+<td><code>legacy_process_form</code></td>
+<td>process を entity と lifecycle のパス、各 transition を event（動詞は event 名）、ガードのある要件を <code>allow … only when</code> の rule に変換します。</td>
+</tr>
+<tr>
+<td><code>implicit_initial_value</code></td>
+<td>選ばれていた既存のデフォルトを明記します。新しい entity 形式では各フィールドの初期値が必要です。</td>
+</tr>
+<tr>
+<td><code>legacy_string_metadata</code>, <code>legacy_quantifier_colon</code>, <code>inline_action_maps</code></td>
+<td>既存のメタデータ、量化子、安全なローカルマッピングの変換も適用します。正規の置換先と適用可否を確認します。</td>
+</tr>
+<tr>
+<td><code>derived_terminal_added</code></td>
+<td>入力 process に terminal がない場合、新しい lifecycle が導く停止条件を知らせます。dry run と書き込みの両方で情報として出し、機械適用できます。deadlock 警告が変わり得ます。</td>
+</tr>
+<tr>
+<td><code>migrate_manual_required</code></td>
+<td>変換を拒否して入力を保持します。人が判断する必要のある箇所を <code>reason</code> が示します。</td>
+</tr>
+</tbody>
+</table>
+<p>process の変換は段階 enum の順序と lifecycle の辺を保ちます。ガードから区分や決定表を
+推測することはありません。複数 process による entity の共有（<code>process_entity_shared</code>）、
+修飾された process 名（<code>qualified_process_name</code>）、transition のアノテーション
+（<code>transition_annotation</code>）、フィールドと同名の入力（<code>input_shares_field_name</code>）、
+range 型の入力（<code>range_typed_input</code>）、要件 ID のないガード（<code>guard_without_requirement</code>）、
+stages の先頭でない initial（<code>initial_not_first_stage</code>）、デフォルトの移行後も残る
+初期値の欠落（<code>field_without_initial_value</code>）は拒否します。認識できない配置、変換先の
+不正、その他の checked kernel の変化は、それぞれ <code>unrecognized_process_layout</code>、
+<code>converted_form_invalid</code>、<code>kernel_changed</code> です。意味を明示して修正し、計画をやり直して
+ください。拒否を捨てて書き込みを強行してはいけません。安全に移動できないコメントや
+ソースも引き続き拒否します。</p>
+<p>保存の検査には一つ例外があります。入力に<strong>明示の terminal がない場合</strong>は、上記の
+停止条件の導出を許します。そのため、無条件の kernel 同一性や deadlock 出力の同一性を
+保証する契約ではありません。入力に <code>terminal</code> があれば、その条件を保存して比較します。
+導出の finding は追加せず、明示した条件の変更は契約違反になります。
+finding は導出条件に相当する terminal 式を示すので、停止の意味の変化を確認できます。
+変換済み文書にもう一度 migration を実行しても、process の変換や停止条件の導出の finding
+は繰り返し追加しません。不正な式の <code>&amp;&amp;</code>、<code>||</code>、<code>-&gt;</code> は migration だけでは直りません。
+§7 に従って演算子を手修正してください。この変換で business、カーネル、設計、
+refinement の契約に区分や決定表が加わることはありません。</p>
+<h4 id="fsl-4">FSL 4 要件の参照と移行入力</h4>
+<p>次のヘッダーなしの例は、以前の process/transition と acceptance の形式です。
+FSL 5 の新しい要件には上記の形式を使ってください。</p>
 <pre><code class="language-fsl">requirements ExpenseRequirements {
   implements ExpenseToBe from &quot;1_business.fsl&quot; { }
 
@@ -4039,7 +4460,7 @@ corpus 全610形式 (specs 23、examples 195、CLI fixtures 392) は変更なし
 除外フィールドなしです。他の必須テストの元入力を改訂・省略していません。これは上記の測定
 head の証拠であり、後の統合コミットに対して未実施の sweep を行ったとの主張ではありません。</p>
 <ul>
-<li>process+data プロファイルは、単一エンティティのライフサイクルに対する第一の
+<li>FSL 4 の process+data プロファイルは、単一エンティティのライフサイクルに対する
   requirements 形式です。<code>process E with f: T { ... }</code> は、エンティティの stage
   マップと carried フィールドを作ります。transition は、入力(<code>with a: T</code>)、
   ガード(<code>when</code>)、フィールドの更新(<code>set f = expr</code>)、トレーサビリティ

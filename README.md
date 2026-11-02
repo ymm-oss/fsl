@@ -14,8 +14,13 @@ Specs can be written in **three layered dialects — consulting (business) / req
 chained via refinement so that requirement IDs propagate transparently across all diagnostics.
 Non-functional requirements are also supported, down to SLAs (discrete time).
 
-For the language specification, semantics, and output JSON see [`docs/manual/LANGUAGE.md`](docs/manual/LANGUAGE.md);
-for a map of all the documentation see [`docs/README.md`](docs/README.md).
+For new FSL 5 requirements, start with the [entity/event/rule and decision-table
+reference](docs/manual/LANGUAGE.md#fsl5-requirements)
+([日本語](docs/manual/LANGUAGE.ja.md#fsl5-requirements)).
+The [edition guide](docs/manual/LANGUAGE.md#fsl-editions) explains
+headers and retained FSL 4 input; the [migration guide](docs/manual/LANGUAGE.md#fsl4-to-fsl5-migration)
+explains conversion and refusals. The same manuals cover kernel/design semantics
+and output JSON. See [`docs/README.md`](docs/README.md) for the documentation map.
 
 > **A note on this repository's two implementations.** The native Rust workspace under
 > [`rust/`](rust/) is the authoritative implementation — it is what every command below

@@ -15,7 +15,9 @@ Regenerate after an intended change to LANGUAGE.md or the native CLI contract wi
 """
 from __future__ import annotations
 
+import html
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -148,3 +150,101 @@ def test_generated_reference_pages_are_fresh(page_id):
             f"docs/intro/{page_id}.{lang}.html is stale — run "
             "`python tools/build_site_reference.py` and commit the result."
         )
+
+
+@pytest.mark.parametrize("lang", ["en", "ja"])
+def test_checked_manual_example_keeps_following_prose_and_table_outside_code(lang):
+    """Detect the real checked fence becoming prose and swallowing the rules table."""
+    mod = _load_tool()
+    source = (mod.LANGUAGE_MD if lang == "en" else mod.LANGUAGE_MD_JA).read_text(
+        encoding="utf-8"
+    )
+    examples = re.findall(r"^```fsl check\n(.*?)^```$", source, flags=re.M | re.S)
+    assert len(examples) == 1
+    tree = mod.render_language_tree(lang)
+    escaped = html.escape(examples[0], quote=False).replace('"', "&quot;")
+    assert f'<pre><code class="language-fsl">{escaped}</code></pre>' in tree
+    outside_code = re.sub(r"<pre\b[^>]*>.*?</pre>", "", tree, flags=re.S)
+    label = "Entities and concepts." if lang == "en" else "エンティティと区分。"
+    assert f"<p><strong>{label}</strong>" in outside_code
+    assert "<td><code>allow Actor verb Entity only when condition</code></td>" in outside_code
+    for anchor in ("fsl-editions", "fsl5-requirements", "fsl4-to-fsl5-migration"):
+        assert outside_code.count(f'id="{anchor}"') == 1
+        assert f'href="#{anchor}"' in outside_code or anchor == "fsl-editions"
+
+
+def _render_fence_snippet(tmp_path, monkeypatch, snippet):
+    mod = _load_tool()
+    original = mod.LANGUAGE_MD.read_text(encoding="utf-8")
+    sections = mod.split_language_md(original)
+    lead = original.split("\n## ", 1)[0]
+    assert _rejoin_language_md(lead, sections) == original
+    heading, body = sections[0]
+    sections[0] = (heading, f"\n\n{snippet}\n\n{body}")
+    path = tmp_path / "LANGUAGE.fence.md"
+    path.write_text(_rejoin_language_md(lead, sections), encoding="utf-8")
+    monkeypatch.setattr(mod, "LANGUAGE_MD", path)
+    return mod.render_language_tree("en")
+
+
+@pytest.mark.parametrize("fence", ["```", "~~~"])
+def test_checked_fence_preserves_escaping_and_following_prose(tmp_path, monkeypatch, fence):
+    code = '#1234 <tag> & "quoted"\n'
+    tree = _render_fence_snippet(
+        tmp_path, monkeypatch, f"{fence}fsl check\n{code}{fence}\n\nAfter checked code."
+    )
+    assert (
+        '<pre><code class="language-fsl">#1234 &lt;tag&gt; &amp; &quot;quoted&quot;\n</code></pre>'
+        in tree
+    )
+    assert "<p>After checked code.</p>" in tree
+
+
+def test_fence_normalization_preserves_fragments_other_info_and_nested_markers(
+    tmp_path, monkeypatch
+):
+    """Preservation control: these render the same before the checked-fence fix."""
+    snippet = '''```fsl-fragment
+fragment <value>
+```
+
+```fsl
+ordinary <value>
+```
+
+```python
+print("<value>")
+```
+
+````text
+```fsl check
+literal <value>
+```
+````
+
+After ordinary fences.
+
+```python check
+Other info remains unsupported.
+```
+'''
+    tree = _render_fence_snippet(tmp_path, monkeypatch, snippet)
+    assert '<pre><code class="language-fsl-fragment">fragment &lt;value&gt;\n</code></pre>' in tree
+    assert '<pre><code class="language-fsl">ordinary &lt;value&gt;\n</code></pre>' in tree
+    assert '<pre><code class="language-python">print(&quot;&lt;value&gt;&quot;)\n</code></pre>' in tree
+    assert (
+        '<pre><code class="language-text">```fsl check\nliteral &lt;value&gt;\n```\n</code></pre>'
+        in tree
+    )
+    assert "<p>After ordinary fences.</p>" in tree
+    assert "<p><code>python check\nOther info remains unsupported.</code></p>" in tree
+
+
+def test_checked_fence_normalization_respects_literate_closing_delimiters():
+    # A shorter same-character run and a different delimiter do not end the
+    # outer block. A longer run does, so the following real marker is normalized.
+    literal = "````text\n```fsl check\n```\n~~~\n```fsl check\n`````\n"
+    checked = "~~~ fsl check\n<tag>\n~~~\n"
+    assert _load_tool()._renderable_fsl_fences(literal + checked) == (
+        literal + "~~~fsl\n<tag>\n~~~\n"
+    )
