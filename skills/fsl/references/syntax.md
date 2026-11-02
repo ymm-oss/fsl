@@ -1503,7 +1503,7 @@ when checking a file, the message suffix changes from `at L:C` to
   assignments is now a located check-time assignability error (`semantics`,
   exit 2), shared by verify/replay. Scalar Int/Range compatibility,
   nominal enums and declared self-relation identity are unchanged. Equal-bound
-  literals still check; #1467 owns their remaining engine support. The same gate
+  literals check and materialize relation elements under #1467. The same gate
   rejects action `r = q`, init `q = Set {} r = q`, `let x = q` followed by
   `r = x`, and mixed relation conditionals in a let; plain aliases remain valid.
   Even narrow-to-wide relation copies are refused in action assignment, init
