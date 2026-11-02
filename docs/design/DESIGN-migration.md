@@ -201,8 +201,8 @@ that label is not another path to read. Ordinary projection still follows label
 discovery. These two error-precedence changes are intentional.
 JSON traces, evidence, plans, records and trust keys are not FSL roots. The
 dependency extension below admits actually read compose, implements, causal and
-governance sources separately from these explicit root slots. Git-revision roots
-are tracked by #1513.
+governance sources separately from these explicit root slots. The #1513 correction
+also admits the explicitly selected Git old/new roots and approval baseline as below.
 
 The planner still owns complete finding identity and migration safety. Each
 result is moved to one warning-finalization site; a borrowed `SourceEdition` can
@@ -304,14 +304,25 @@ mapping-only control already errored at BASE and is not counted as a removal.
 Live-root coverage now also includes analyze batch/project, approval
 check/create/diff and ledger `--approval`, chain, live diff and direct/multi-link
 refine. `DEFERRED_TO_SECOND_PR` is empty. The complete-adapter inventory requires
-agreement for every nonhistorical observation, rejects a reintroduced deferral,
-and still executes all three `OUT_OF_SCOPE_1513` controls. Historical Git old/new
-and approval-baseline roots remain outside explicit admission; their consumed
-dependencies still pass the dependency boundary below.
+agreement for every observation, including the three required historical-root
+controls, and rejects a reintroduced deferral.
+
+The #1513 contract, delivered jointly with its source correction, admits both
+explicitly selected Git spec roots in single and batch diffs, old before new,
+and the approval baseline. Diagnostics identify the selected revision:path, not
+an archive directory. Each selected legacy-current slot contributes one complete
+warning; identical bytes/revisions remain distinct slots with duplicate warnings.
+Refusal stops the pair before comparison, not all batch pairs by global preflight;
+earlier valid pairs may already have run. Historical mapping selection and
+transitive dependency admission scope are unchanged; this adds no grammar or
+admission framework.
 
 Diff's old operand and refinement's first implementation supply primary metadata;
-approval diff's sole live root is primary. A live Git `--mapping` is a secondary
-slot, whereas a mapping selected from the materialized tree remains historical.
+Git pairs also use the old root as primary; approval diff's live root is primary,
+with baseline warnings only, never duplicate live metadata. Current live-root
+admission remains earlier than record/trust/signature/path checks and historical
+baseline digest validation; those checks still precede baseline admission.
+A live Git `--mapping` is secondary; a materialized mapping remains historical.
 The existing absolute/relative mapping selection is unchanged.
 
 One explicit live Git mapping is captured and classified at its first legitimate
@@ -322,7 +333,7 @@ mapping consumption. Mapping preparation uses the same canonical analysis-layer
 set as the consumer and requires both endpoint files: an ignored noncanonical
 target does not cause its unused mapping to be read, warned about or refused.
 
-Batch preserves its display sort and adjacent canonical deduplication before
+Analyze batch preserves its display sort and adjacent canonical deduplication before
 assigning slots. Every root is prepared before any file runs, but dependency
 execution and delivery remain file-local: a rejected child in one file cannot
 replace another file or the batch envelope. Project results carry direct-root
@@ -443,7 +454,7 @@ retained in all three required-test contexts:
 |---|---|---|
 | `edition_dialect_controls` | `actual_dialects_and_valid_sidecars_are_preserved_twice` | composed legacy child `ok`/0 → complete child refusal/2; canonical twin `ok`/0 |
 | `edition_dispatch_inventory` | `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` | same form and full rejection/canonical controls |
-| `edition_dispatch_inventory` | `all_nonhistorical_cells_agree_across_the_complete_native_adapters` | same helper's former bypass-preservation cell is now rejecting |
+| `edition_dispatch_inventory` | `all_cells_agree_across_the_complete_native_adapters` | same helper's former bypass-preservation cell is now rejecting |
 
 The materialized-tree comparison used base
 `bc14d8855963487185cbe2608970492ff8638ba7` and corrected Rust source/test

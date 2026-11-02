@@ -325,10 +325,55 @@ fn preserved_failure_is_not_deferred_evidence_even_with_a_red_route() {
     let mut results = cases::Results::default();
     results.check("preserved/ai check", false, true, false);
     assert!(std::panic::catch_unwind(|| results.finish()).is_err());
+    println!(
+        "HELPER preserved-false priority_rejection=true collector_rejection=true expected=true/true"
+    );
 }
 
 #[test]
-fn all_nonhistorical_cells_agree_across_the_complete_native_adapters() {
+fn promoted_historical_controls_require_all_three_agreements() {
+    // Independent literal roster: shrinking the helper table cannot weaken this.
+    let labels = ["git/old", "git/new", "approval/old-root"];
+    assert_eq!(cases::REQUIRED_HISTORICAL_ROOTS, labels);
+    let accepted: Vec<_> = labels.iter().map(|s| ((*s).to_owned(), true)).collect();
+    let check = |name: &str, cells: &[(String, bool)], expected_rejection: bool| {
+        let rejected = std::panic::catch_unwind(|| cases::assert_complete_evidence(cells)).is_err();
+        println!(
+            "HELPER {name} produced_rejection={rejected} expected_rejection={expected_rejection}"
+        );
+        assert_eq!(rejected, expected_rejection, "{name}");
+    };
+    check("all-three-true", &accepted, false);
+    let mut results = cases::Results::default();
+    for label in labels {
+        results.check(label, true, true, true);
+    }
+    let rejected = std::panic::catch_unwind(|| results.finish()).is_err();
+    println!(
+        "HELPER collector-all-three-true produced_rejection={rejected} expected_rejection=false"
+    );
+    assert!(!rejected);
+    for (index, label) in labels.iter().enumerate() {
+        let mut false_cell = accepted.clone();
+        false_cell[index].1 = false;
+        check(&format!("single-false/{label}"), &false_cell, true);
+        let mut missing = accepted.clone();
+        missing.remove(index);
+        check(&format!("single-missing/{label}"), &missing, true);
+        let mut results = cases::Results::default();
+        results.check(label, false, true, false);
+        let rejected = std::panic::catch_unwind(|| results.finish()).is_err();
+        println!(
+            "HELPER collector-single-false/{label} produced_rejection={rejected} expected_rejection=true"
+        );
+        assert!(rejected);
+    }
+    preserved_failure_is_not_deferred_evidence_even_with_a_red_route();
+    restoring_a_deferred_mode_is_rejected();
+}
+
+#[test]
+fn all_cells_agree_across_the_complete_native_adapters() {
     let mut cells = all_commands::cases::capture(|| {
         all_commands::every_registered_root_has_the_same_admission_before_dialect_or_sidecars();
         all_commands::four_warning_classes_and_refusals_finish_once_on_all_eight_verification_routes();

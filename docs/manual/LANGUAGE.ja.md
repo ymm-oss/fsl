@@ -1716,10 +1716,19 @@ control は BASE でも error だったため、受理済み入力の削除に�
 
 live な複数 root についても、analyze batch/project、approval check/create/diff と
 ledger `--approval`、chain、live diff、直接および multi-link の refine に対応します。
-延期の集合は空で、全 adapter の対照は履歴以外の全観測の一致を要求し、延期の再導入を
-拒みます。履歴 Git の old/new と approval baseline の対照は別に実行し続けます(#1513)。
+延期の集合は空で、全 adapter の対照は履歴 root の3対照を含む全観測の一致を要求し、
+延期の再導入を拒みます。source 修正と同時に届ける #1513 の契約では、単一・batch diff の
+選択した Git spec の両 root(old を先に判定)と approval baseline を admission の対象にします。
+診断の source は archive path ではなく論理的な revision:path です。現行 edition の legacy
+slot ごとに完全な警告を一つ届け、同じ bytes/revision の重複 slot も警告を省きません。
+拒否はその pair の比較より先で、Git batch 全体の事前判定ではありません。先の有効な pair は
+既に実行されている場合があります。
 diff の old、refine の最初の implementation、approval diff の唯一の live root が
-主 metadata を持ちます。同じ path の明示的な各出現は別 slot ですが、multi-link の
+主 metadata を持ちます。Git pair も old root が主です。approval baseline は警告だけを加え、
+live root の metadata を重複して仕上げません。現在の live root の admission は引き続き先で、
+record/trust/signature/path と履歴 baseline digest の検証は baseline admission より先です。
+履歴 mapping の選択と推移的な依存先の scope は変えず、文法や新しい admission framework は
+追加しません。同じ path の明示的な各出現は別 slot ですが、multi-link の
 中間 spec を link ごとに数え直しません。live Git mapping は secondary slot、
 materialize した mapping は履歴のままで、既存の絶対/相対 path の選択は変えません。
 
@@ -1729,7 +1738,7 @@ live Git mapping の明示的な1出現は、最初に消費できる位置で�
 project の mapping 準備は、file のある business/requirements/design の両端を要求します。
 投影で使わない external target の mapping は読まず判定せず、TOML の検証を追加しません。
 
-batch は既存の sort と隣接 deduplication の後、全 root を file consumer より先に準備し、
+analyze batch は既存の sort と隣接 deduplication の後、全 root を file consumer より先に準備し、
 依存先の scope と診断は file ごとに保ちます。子の拒否で別 file や batch envelope を
 置き換えません。project は直接 root の警告を受け取り、TOML の edition を作りません。
 空の project/batch の既存の成功も保ちます。chain は捕捉済み bytes でグループ分けし、
@@ -1747,7 +1756,7 @@ HTML と ledger の独立した baseline の固定は、どちらも今回には
 その強化と内部 seam の3対照は #1641 で扱います。report baseline と
 ledger の移行表示は維持します。移行 finding だけの行は vacuity/mutate の助言ではなく
 🟡 移行候補 / risk —、非移行 finding を含む行は 🔴 要確認 / 要確認 と表示します。
-依存先の admission は下記の拡張で扱い、履歴 Git root は #1513 の範囲です。修復の投影と
+依存先の admission は下記の拡張で扱い、上記の履歴 root 修正では変えません。修復の投影と
 終了コードは変えず、lint の既存の dialect 制限(#609)を維持します。公開 example の
 警告(#608)や、他の ledger warning の誤分類(#1497)を解消するものでもありません。
 
@@ -1802,7 +1811,7 @@ finding の message が `legacy colon quantifier syntax is deprecated` である
 `edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` と、
 `edition_dispatch_inventory` の
 `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`、
-`all_nonhistorical_cells_agree_across_the_complete_native_adapters` の各 context に残します。
+`all_cells_agree_across_the_complete_native_adapters` の各 context に残します。
 
 各 materialized tree の `fslc check <path>` による `bc14d885` から修正後の Rust
 source/test tree `a65eddd5` への比較では、**corpus の全603形を両 parser 設定で検査(各 tree 1206回)**し、

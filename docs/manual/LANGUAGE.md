@@ -1850,10 +1850,19 @@ control already errored at BASE and is not counted as a removal.
 Live multi-root coverage also includes analyze batch/project, approval
 check/create/diff and ledger `--approval`, chain, live diff and direct/multi-link
 refine. The deferred set is empty; complete-adapter controls require every
-nonhistorical observation to agree and reject a restored deferral. The historical
-Git old/new and approval-baseline controls still execute separately (#1513).
+observation to agree, including all three historical-root controls, and reject a
+restored deferral. The #1513 correction, shipped jointly with source, admits both
+selected Git spec roots in single/batch diffs (old first) and the approval baseline.
+Diagnostic sources are logical revision:path, not archive paths. Each selected
+legacy-current slot adds one complete warning, including duplicate slots with
+identical bytes/revisions. Refusal precedes comparison for that pair only; there
+is no global Git batch preflight, and earlier valid pairs may already have run.
 Diff's old root and refinement's first implementation supply primary metadata;
-approval diff's sole live root is primary. Repeated explicit occurrences remain
+Git pairs also use the old root; approval diff's live root remains primary, with
+baseline warnings only and no duplicate live metadata. Live-root admission stays
+earlier; record/trust/signature/path checks and baseline digest validation still
+precede baseline admission. Historical mapping and transitive dependency scope
+are unchanged; no grammar or new admission framework is added. Repeated occurrences remain
 distinct, but a multi-link intermediate spec is not counted again for each link.
 Live Git mappings are secondary slots; materialized mappings remain historical,
 with the existing absolute/relative selection unchanged.
@@ -1865,7 +1874,7 @@ operand precedence are unchanged. Project mapping preparation requires canonical
 business/requirements/design endpoints with files; a skipped external target's
 mapping is not read or classified, and no stricter TOML validation is introduced.
 
-All batch roots are prepared before any file consumer, after the existing sort
+Analyze batch roots are prepared before any file consumer, after the existing sort
 and adjacent deduplication, while dependency scope and diagnostics remain per
 file. A refused child cannot discard another file or replace the batch envelope.
 Project results receive direct-root warnings without a fabricated TOML edition;
@@ -1886,8 +1895,8 @@ Neither HTML nor ledger has independent baseline pinning in this completion;
 that strengthening and three internal seam controls are tracked in #1641.
 Report baselines and ledger migration rendering are retained; migration-only rows
 use 🟡 移行候補 / risk —, not vacuity/mutate advice. Mixed/non-migration rows remain
-🔴 要確認 / 要確認. Dependency admission is described below; historical Git roots
-remain #1513. Repair projections/exits stay unchanged, including lint's existing
+🔴 要確認 / 要確認. Dependency admission below is unchanged by the historical-root
+correction above. Repair projections/exits stay unchanged, including lint's existing
 dialect limits (#609); this does not remove public-example warnings (#608) or fix
 other ledger warning classifications (#1497).
 
@@ -1944,7 +1953,7 @@ check envelope (plus validated runtime versions). The inline shape is retained b
 `edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`
 and the `edition_dispatch_inventory` contexts
 `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
-`all_nonhistorical_cells_agree_across_the_complete_native_adapters`.
+`all_cells_agree_across_the_complete_native_adapters`.
 
 The materialized-tree `fslc check <path>` comparison from `bc14d885` to corrected
 Rust source/test tree `a65eddd5` checked all **603 corpus forms in both parser

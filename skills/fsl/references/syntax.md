@@ -444,10 +444,19 @@ A mapping-only control already errored at BASE and is not counted as a removal.
 Live-root coverage includes analyze batch/project, approval check/create/diff and
 captured-source ledger `--approval`, chain, live diff and direct/multi-link refine.
 The deferred set is empty; strict complete-adapter controls reject any
-nonhistorical disagreement and a restored deferral. All three historical-root
-controls still execute (#1513); their consumed dependencies are still checked.
+disagreement, including all three historical-root controls, and a restored deferral.
+The #1513 contract ships with its source correction: admit both selected Git spec
+roots in single/batch diffs (old first) and the approval baseline. Diagnostic
+identity is revision:path, never archive-temp paths. One complete current-edition
+legacy warning per selected slot retains duplicates for identical bytes/revisions.
+Refusal is pair-local before comparison, not global Git batch preflight; earlier
+valid pairs may already have run. Historical mappings and transitive dependency
+scope stay unchanged; no grammar or new admission framework is introduced.
 Diff old/refine first impl supply primary metadata; approval diff uses its sole
-live root. Repeated slots stay distinct; multi-link intermediate specs are not
+live root, with baseline warnings only and no duplicate live metadata. Git pairs
+also use old-root primary metadata. Current live admission remains earlier;
+record/trust/signature/path and baseline digest validation precede baseline admission.
+Repeated slots stay distinct; multi-link intermediate specs are not
 counted per link. Live Git mappings are secondary slots, materialized mappings
 stay historical, and mapping-path selection is unchanged.
 One explicit live Git mapping is captured at first legitimate use, once for all
@@ -455,7 +464,7 @@ comparisons, preserving comparison-local diagnostics and missing-operand/empty-
 range precedence. Project mapping preparation uses canonical file-bearing
 business/requirements/design endpoints only; ignored targets do not expose unused
 mapping IO or edition diagnostics. This adds neither a stream flag nor stricter TOML validation.
-Batch prepares every root before consumers but keeps dependency scopes and
+Analyze batch prepares every root before consumers but keeps dependency scopes and
 diagnostics per file; a refused child cannot replace another file or the batch.
 Project warnings add no TOML edition, and empty inputs retain success. Chain
 groups captured bytes, transports immutable tokens with the existing scheduler,
@@ -469,9 +478,9 @@ Neither HTML nor ledger has independent baseline pinning here; both renderer
 halves and three internal seam controls are tracked in #1641.
 Existing baselines and ledger migration rows are retained;
 migration-only rows use 🟡 移行候補 / risk —, mixed/non-migration rows 🔴 要確認 / 要確認.
-Actually read dependencies are admitted as described below. Git-revision roots (#1513), example
-warning cleanup (#608), lint dialect support (#609) and other ledger warning
-classifications (#1497) are separate; historical-root coverage is not implied.
+Actually read dependencies are admitted as described below, unchanged by the
+historical-root correction above. Example warning cleanup (#608), lint dialect
+support (#609) and other ledger warning classifications (#1497) remain separate.
 
 Multi-root audit: base `796876558b83f2dedd7dafdf04ef77fced3de033` versus Rust/source-test
 revision `8796f19d9646a4edffbac0719c3693a8f88c1405`, independently materialized/built;
@@ -519,7 +528,7 @@ the complete successful check envelope. This inline form remains in
 `edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`
 and the `edition_dispatch_inventory` contexts
 `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
-`all_nonhistorical_cells_agree_across_the_complete_native_adapters`;
+`all_cells_agree_across_the_complete_native_adapters`;
 it is a consumer removal, not new grammar.
 
 Materialized-tree `fslc check <path>` evidence (`bc14d885` → corrected Rust

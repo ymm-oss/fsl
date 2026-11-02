@@ -219,12 +219,11 @@ pub(crate) fn approval_records_and_git_roots_refuse_before_output_writes() {
             "unsupported_in_edition with complete finding",
             output.status.code() == Some(2)
                 && actual["kind"] == "unsupported_in_edition"
-                && full_materialized_finding(&actual, &rejected, &rejected_sha),
+                && full_revision_finding(&actual, &rejected, &rejected_sha),
         );
     }
-    // A v1 record is unsigned. Its baseline model digest is unchanged by the
-    // metadata/header spelling, so rebinding to that git root is a valid input
-    // for admission priority (not a fabricated missing/invalid record).
+    // This unsigned record was created on legacy bytes. Only the historical
+    // header changes, preserving its digest; canonical live bytes need not match.
     let mut record: Value =
         serde_json::from_str(&std::fs::read_to_string(scratch.0.join("record.json")).unwrap())
             .unwrap();
@@ -238,30 +237,18 @@ pub(crate) fn approval_records_and_git_roots_refuse_before_output_writes() {
     results.check(
         "approval/old-root",
         (output.status.code(), &actual),
-        "unsupported_in_edition before baseline digest/diff",
+        "unsupported_in_edition after baseline validation, before diff",
         output.status.code() == Some(2)
             && actual["kind"] == "unsupported_in_edition"
-            && full_materialized_finding(&actual, &rejected, &rejected_sha),
+            && full_revision_finding(&actual, &rejected, &rejected_sha),
     );
     results.finish();
 }
 
-fn full_materialized_finding(output: &Value, source: &str, commit: &str) -> bool {
-    // The git materialization directory is allocated per invocation. Its path
-    // is ambient, not discarded: validate the live locator, then compare every
-    // diagnostic field including its exact file identity within this result.
-    let Some(path) = output
-        .pointer("/findings/0/loc/file")
-        .and_then(Value::as_str)
-    else {
-        return false;
-    };
-    let materialized = path.starts_with(cases::root().join(".codex/tmp").to_str().unwrap())
-        && path.ends_with("/spec.fsl");
-    if path != format!("{commit}:spec.fsl") && !materialized {
-        return false;
-    }
-    let findings = cases::findings(source, path, fsl_syntax::Edition::Fsl5);
+fn full_revision_finding(output: &Value, source: &str, commit: &str) -> bool {
+    // Required revision identity, not an archive-temp-path alternative.
+    let path = format!("{commit}:spec.fsl");
+    let findings = cases::findings(source, &path, fsl_syntax::Edition::Fsl5);
     *output
         == json!({"fsl":"1.0","result":"error","kind":"unsupported_in_edition","edition":"next","fsl_edition":5,"findings":findings})
 }
