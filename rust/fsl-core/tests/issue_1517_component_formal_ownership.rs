@@ -76,7 +76,7 @@ fn component_error(reason: &str, root_file: Option<&str>) -> ModelError {
     )
 }
 
-fn assert_component_rejection(kernel: KernelSpec, reason: &str) {
+fn assert_component_rejection(kernel: &KernelSpec, reason: &str) {
     for root_file in [None, Some("root.fsl")] {
         let value = match root_file {
             Some(file) => kernel.clone().with_source_file(file),
@@ -107,7 +107,7 @@ fn assert_component_rejection(kernel: KernelSpec, reason: &str) {
 #[test]
 fn non_finite_typed_internal_formal_keeps_component_ownership() {
     assert_component_rejection(
-        kernel("a: Int", "part.put(0)"),
+        &kernel("a: Int", "part.put(0)"),
         "action parameter type is not a finite scalar",
     );
 }
@@ -115,7 +115,7 @@ fn non_finite_typed_internal_formal_keeps_component_ownership() {
 #[test]
 fn empty_inline_range_internal_formal_keeps_component_ownership() {
     assert_component_rejection(
-        kernel("a in 1..0", "part.put(0)"),
+        &kernel("a in 1..0", "part.put(0)"),
         "action parameter range is empty",
     );
 }
@@ -128,7 +128,7 @@ fn internal_formal_declarations_precede_even_an_earlier_invalid_actual() {
         ("a: Int", "action parameter type is not a finite scalar"),
         ("a in 1..0", "action parameter range is empty"),
     ] {
-        assert_component_rejection(kernel(formal, "part.good(true) || part.put(0)"), reason);
+        assert_component_rejection(&kernel(formal, "part.good(true) || part.put(0)"), reason);
     }
 }
 
