@@ -39,11 +39,7 @@ pub(crate) fn leadsto_bindings<S: SmtSolver>(
                     if type_name.namespace.is_some() {
                         static_binder_values(solver, model, binder)?;
                     }
-                    let ty = if type_name.name == "Bool" {
-                        TypeRef::Bool
-                    } else {
-                        TypeRef::Named(type_name.name.clone())
-                    };
+                    let ty = model.typed_binder_type(&type_name.name);
                     model.domain_contains(&ty, &FslValue::Int(0))?;
                     (name, ty)
                 }

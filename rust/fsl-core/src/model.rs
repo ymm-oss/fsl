@@ -222,6 +222,17 @@ pub struct KernelModel {
 }
 
 impl KernelModel {
+    /// The domain a typed binder enumerates. `Bool` is not a reserved word, so
+    /// a declared type of that name keeps its own values.
+    #[must_use]
+    pub fn typed_binder_type(&self, type_name: &str) -> TypeRef {
+        if type_name == "Bool" && !self.types.contains_key(type_name) {
+            TypeRef::Bool
+        } else {
+            TypeRef::Named(type_name.to_owned())
+        }
+    }
+
     /// Describe an integer range without enumerating candidates or executing state.
     ///
     /// Uses current lexical/state/constant provenance, full endpoint type validation
@@ -758,11 +769,7 @@ fn traverse_leadsto_bindings<E: From<ModelError>>(
             } => {
                 let type_name = crate::typecheck::qualified_name(type_name)
                     .map_err(|error| model_error(error.message))?;
-                let ty = if type_name == "Bool" {
-                    TypeRef::Bool
-                } else {
-                    TypeRef::Named(type_name)
-                };
+                let ty = model.typed_binder_type(&type_name);
                 model.domain_contains(&ty, &Value::Int(0))?;
                 if !expanded.is_empty() {
                     let values = model.domain_values(&ty)?;

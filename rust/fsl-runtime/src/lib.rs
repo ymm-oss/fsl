@@ -899,11 +899,7 @@ fn binder_values(
     let values = match binder {
         Binder::Typed { type_name, .. } => {
             let type_name = qualified_type(type_name)?;
-            let ty = if type_name == "Bool" {
-                TypeRef::Bool
-            } else {
-                TypeRef::Named(type_name)
-            };
+            let ty = model.typed_binder_type(&type_name);
             model.domain_values(&ty)?
         }
         Binder::Range { lo, hi, .. } => {

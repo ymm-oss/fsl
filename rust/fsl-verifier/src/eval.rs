@@ -2652,11 +2652,7 @@ pub(crate) fn static_binder_values<S: SmtSolver>(
             name, type_name, ..
         } => {
             let type_name = qualified_type(type_name.namespace.as_deref(), &type_name.name)?;
-            let ty = if type_name == "Bool" {
-                TypeRef::Bool
-            } else {
-                TypeRef::Named(type_name)
-            };
+            let ty = model.typed_binder_type(&type_name);
             model
                 .domain_values(&ty)?
                 .into_iter()

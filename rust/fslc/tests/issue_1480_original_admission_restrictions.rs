@@ -412,3 +412,41 @@ fn existing_supported_binders_rhs_ranges_and_struct_values_keep_admission() {
         );
     }
 }
+#[test]
+fn declared_bool_type_keeps_its_own_binder_domain() {
+    for (id, declaration, count) in [
+        ("declared-enum", "enum Bool { A, B, C }", 3),
+        ("declared-range", "type Bool = 0..5", 6),
+        ("builtin", "", 2),
+    ] {
+        let source = format!(
+            "spec Declared {{ {declaration} state {{ n: 0..9 }} init {{ n = count(b: Bool) }} action idle() {{ n = n }} invariant Two {{ n == 2 }} }}"
+        );
+        let case = Case {
+            id,
+            source: Box::leak(source.into_boxed_str()),
+            message: "",
+            rendered: "",
+            position: (0, 0, 1, 1, 1),
+            typed: true,
+            init: true,
+        };
+        let directory = fixture(&case);
+        let (exit, packet) = observe(&directory, "check");
+        assert_eq!(
+            (exit, &packet["result"]),
+            (0, &json!("ok")),
+            "{id}: {packet}"
+        );
+        for route in ["bmc", "induction", "explicit"] {
+            let (exit, packet) = observe(&directory, route);
+            if count == 2 {
+                assert_eq!(exit, 0, "{id} {route}: {packet}");
+            } else {
+                assert_eq!(exit, 1, "{id} {route}: {packet}");
+                assert_eq!(packet["result"], "violated", "{id} {route}");
+                assert_eq!(packet["invariant"], "Two", "{id} {route}");
+            }
+        }
+    }
+}
