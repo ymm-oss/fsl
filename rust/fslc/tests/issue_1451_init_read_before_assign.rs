@@ -93,6 +93,33 @@ fn read_refused(case: &forms::Case, actual: &(Value, i32), name: &str, composed:
             .any(|suffix| error(actual, Some(&format!("{message}{suffix}"))))
 }
 
+fn static_range_refused(case: &forms::Case, actual: &(Value, i32), composed: bool) -> bool {
+    let point = point(case);
+    // Component check diagnostics use the public name, not the merged `part__n`.
+    let message = format!(
+        "init forall range bounds must be compile-time constants; state variable '{}' is not allowed",
+        if composed { "part.n" } else { "n" }
+    );
+    let (message, location) = if composed {
+        (
+            format!(
+                "component \"a.fsl\" failed to check (part.init: {message} at a.fsl:{}:{}) at c.fsl:2:3",
+                point["line"], point["column"]
+            ),
+            json!({"line":2,"column":3}),
+        )
+    } else {
+        (message, point)
+    };
+    actual.1 == 2
+        && actual.0
+            == json!({"fsl":"1.0","result":"error","kind":"semantics","message":message,
+                "loc":location,"versions":{
+                    "verifier":{"name":"fslc-rust","version":env!("CARGO_PKG_VERSION")},
+                    "core":{"name":"fsl-core","version":env!("CARGO_PKG_VERSION")},
+                    "solver":{"name":"z3","backend":"native-z3","version":"Z3 4.16.0.0"}}})
+}
+
 fn point(case: &forms::Case) -> Value {
     let Some(marker) = &case.marker else {
         return Value::Null;
@@ -165,13 +192,7 @@ fn matches_oracle(
             )),
         ),
         Expected::Accepted | Expected::Free { .. } => accepted(actual, consumer),
-        Expected::StaticRange => error(
-            actual,
-            Some(&format!(
-                "init forall range bounds must be compile-time constants; state variable '{}' is not allowed",
-                root("n", composed)
-            )),
-        ),
+        Expected::StaticRange => static_range_refused(case, actual, composed),
         Expected::ExistingKeyRefusal => error(actual, None),
     }
 }
@@ -223,10 +244,9 @@ fn init_reads_preserve_the_explicit_assignment_contract() {
             let oracle_ok = matches_oracle(&case, &explicit, "explicit", composed);
             oracle_failures += usize::from(!oracle_ok);
             let consumers: &[&str] = match case.expected {
-                // This is an existing EXPLICIT domain rule, not a #1451 source
-                // acceptance/removal assertion. Source check is retained in calibration data.
-                Expected::StaticRange => &["explicit"],
                 Expected::ExistingKeyRefusal => &["explicit", "check"],
+                // Includes StaticRange: #1480 moves that engine rule into shared
+                // checked-source admission, so every entry keeps the located envelope.
                 _ => &["explicit", "check", "bmc", "induction", "default"],
             };
             let checked = if consumers.contains(&"check") {
@@ -248,7 +268,7 @@ fn init_reads_preserve_the_explicit_assignment_contract() {
                 }
                 // Once source check refuses, every verify entry must expose the
                 // SAME complete error envelope, not a solver judgment or drift.
-                let agreement = if before
+                let agreement = if (before || matches!(case.expected, Expected::StaticRange))
                     && consumer != "check"
                     && checked.as_ref().is_some_and(|c| c.1 == 2)
                 {

@@ -225,11 +225,7 @@ pub fn probe(src: &str, route: &str, trace: &Value) -> (i32, Value) {
     if route == "replay" {
         args.extend(["--trace", "trace.json"]);
     }
-    let environment = std::env::vars()
-        .chain([("FSLC_CACHE".into(), "off".into())])
-        .filter(|(k, _)| k != "FSLC_UNSTABLE")
-        .collect::<BTreeMap<_, _>>();
-    let request = json!({"source":src,"source_sha256":format!("{:x}",Sha256::digest(src.as_bytes())),"route":route,"argv":args,"trace":trace,"binary":binary,"binary_sha256":format!("{:x}",Sha256::digest(std::fs::read(binary).unwrap())),"cwd":dir,"environment":environment});
+    let request = json!({"source":src,"source_sha256":format!("{:x}",Sha256::digest(src.as_bytes())),"route":route,"argv":args,"trace":trace,"binary":binary,"binary_sha256":format!("{:x}",Sha256::digest(std::fs::read(binary).unwrap())),"cwd":dir,"environment_overrides":{"FSLC_CACHE":"off","FSLC_UNSTABLE":null}});
     std::fs::write(dir.join("request.json"), request.to_string()).unwrap();
     let out = Command::new(binary)
         .args(args)

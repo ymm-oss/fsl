@@ -328,7 +328,7 @@ fslc/src/migration.rs|kernel_contract|FsResolver
 fslc/src/refinement.rs|governance_result_from_source implements_result_from_source_with_bounds|DependencyResolver
 fslc/src/source_diagnostic.rs|diagnostics_with_model|DependencyResolver
 fslc/src/spec_loading.rs|dependency_resolver|DependencyResolver,FsResolver
-fslc/src/spec_loading.rs|load_declared_model_beside_scope load_kernel_model_from_source|DependencyResolver
+fslc/src/spec_loading.rs|load_declared_model_beside_scope load_kernel_model_from_source load_replay_model_from_source|DependencyResolver
 fslc/src/verification.rs|run_verify_cli_kernel_from_source|DependencyResolver,RecordingResolver"
     .lines().flat_map(|line| {
         let fields = line.split('|').collect::<Vec<_>>();

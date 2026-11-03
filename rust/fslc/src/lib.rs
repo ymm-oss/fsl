@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 // calls it too, so it is not behind `native-cli`; its specialized-document and
 // Agent stages are why `fsl-tools` is an unconditional dependency.
 pub mod check_stages;
+pub mod checked_build;
 pub mod coverage;
 pub mod frontend_output;
 pub mod junit_report;

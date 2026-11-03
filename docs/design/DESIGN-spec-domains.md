@@ -118,12 +118,20 @@ the requested depth.
 
 A typed binder such as `forall cell: Cell { ... }` does not enumerate a Struct,
 even when every field has a finite carrier. Current engines use the finite-scalar
-`domain_values` rule, so checked-model validation now rejects this form with its
+`domain_values` rule, so expression/action validation rejects this form with its
 existing `type 'Cell' is not a finite scalar` diagnostic and owning source location.
 This is a **breaking check-admission removal**, shared before engine dispatch.
 It does not restrict ordinary Struct values or collection binders that visit
 Struct elements, and preserves Bool, named Enum and integer Range domains.
 General Struct-domain enumeration is not implemented by this decision.
+
+Init-statement Typed-Struct domains were already refused by the ownership
+preflight. Preserve its complete unlocated finite-scalar error, without a new
+Core prefix or source location; this form is not a new check-admission removal.
+Bare Core construction and init revalidation defer only the statement-domain
+enumeration check. Expression binders inside init remain strict. The ordered
+checked-source preflight retains the original refusal before a pending domain
+diagnostic.
 
 The companion init-statement state-dependent-range refusal is recorded in
 [checked executable forms](DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains).

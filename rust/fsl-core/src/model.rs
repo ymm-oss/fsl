@@ -1546,7 +1546,7 @@ impl ModelBuilder {
             .into_iter()
             .map(|(index, name, span)| (index, (name, span)))
             .collect::<BTreeMap<_, _>>();
-        let mut init_phase = crate::typecheck::ValidationPhase::normalized();
+        let mut init_phase = crate::typecheck::ValidationPhase::init_statements();
         for (index, statement) in model.init.iter().enumerate() {
             let checked =
                 crate::typecheck::validate_statement_types(statement, &model, &mut init_phase);
@@ -1578,10 +1578,11 @@ impl ModelBuilder {
             model_error(ExpressionErrorContext::Model.message(error.message)).with_origin(origin)
         })?;
         for (index, statement) in model.init.iter().enumerate() {
-            check_init_collection_binders(
+            check_init_binders(
                 std::slice::from_ref(statement),
                 &model,
                 &BTreeSet::new(),
+                false,
             )
             .map_err(|error| {
                 error.with_origin(model.origins.diagnostic_origin(
@@ -2791,10 +2792,41 @@ pub fn check_init_collection_binder<'a>(
     Ok(())
 }
 
-fn check_init_collection_binders(
+/// Check deferred init-statement integer-range and finite-scalar domains.
+///
+/// Checked frontends apply this after their existing ownership/read preflight.
+/// `origins` must be captured from the Kernel spec before model construction
+/// discards component check targets.
+///
+/// # Errors
+/// Returns the first deferred domain diagnostic at its statement and component origin.
+pub fn check_init_statement_domains(
+    model: &KernelModel,
+    origins: &OriginRegistry,
+) -> Result<(), ModelError> {
+    for (index, statement) in model.init.iter().enumerate() {
+        check_init_binders(
+            std::slice::from_ref(statement),
+            model,
+            &BTreeSet::new(),
+            true,
+        )
+        .map_err(|error| {
+            error.with_origin(
+                origins.diagnostic_origin(&crate::origin::component_check_target(
+                    &init_statement_target(index),
+                )),
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn check_init_binders(
     statements: &[Statement],
     model: &KernelModel,
     bound_names: &BTreeSet<String>,
+    deferred_only: bool,
 ) -> Result<(), ModelError> {
     for statement in statements {
         match statement {
@@ -2803,7 +2835,7 @@ fn check_init_collection_binders(
                 statements,
                 span,
             } => {
-                if let Binder::Range { lo, hi, .. } = binder {
+                if deferred_only && let Binder::Range { lo, hi, .. } = binder {
                     let mut references =
                         state_references(lo, model, bound_names.iter().map(String::as_str));
                     references.extend(state_references(
@@ -2819,19 +2851,36 @@ fn check_init_collection_binders(
                         .at(*span));
                     }
                 }
-                check_init_collection_binder(model, binder, bound_names.iter().map(String::as_str))
+                if deferred_only
+                    && let Binder::Typed { type_name, .. } = binder
+                    && matches!(
+                        model.types.get(&type_name.name),
+                        Some(TypeDef::Struct { .. })
+                    )
+                {
+                    model
+                        .domain_values(&TypeRef::Named(type_name.name.clone()))
+                        .map_err(|error| error.at(*span))?;
+                }
+                if !deferred_only {
+                    check_init_collection_binder(
+                        model,
+                        binder,
+                        bound_names.iter().map(String::as_str),
+                    )
                     .map_err(|error| error.at(*span))?;
+                }
                 let mut local = bound_names.clone();
                 local.insert(binder_scope(binder).0.to_owned());
-                check_init_collection_binders(statements, model, &local)?;
+                check_init_binders(statements, model, &local, deferred_only)?;
             }
             Statement::If {
                 then_statements,
                 else_statements,
                 ..
             } => {
-                check_init_collection_binders(then_statements, model, bound_names)?;
-                check_init_collection_binders(else_statements, model, bound_names)?;
+                check_init_binders(then_statements, model, bound_names, deferred_only)?;
+                check_init_binders(else_statements, model, bound_names, deferred_only)?;
             }
             Statement::Assign { .. } => {}
         }

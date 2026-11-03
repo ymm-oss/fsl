@@ -231,13 +231,25 @@ The linked decision records the exact command, binary identities and limits.
 ## #1480: shared refusal for unsupported binder domains
 
 The original-issue policy selects early rejection for these existing engine
-restrictions, rather than adding execution support. Checked-model construction
-shares each rule across `check` and verification dispatch:
+restrictions, rather than adding execution support. Checked-source admission
+shares the range rule across `check`, verification dispatch, Worker and LSP:
 
 | Previously check-ok form | New boundary | Preserved sibling |
 |---|---|---|
 | Init statement `forall` with a free state read in either integer-range endpoint | Existing compile-time-constant diagnostic at the owning `forall` statement, including empty bodies and unreachable branches | Supported init RHS expressions and lexical locals; action/property conditional ranges |
-| Typed binder over a named Struct | Existing finite-scalar diagnostic through shared binder validation at the owning statement/expression | Bool, named Enum/Range binders, ordinary Struct values and collection-of-Struct binders |
+| Expression or action-statement typed binder over a named Struct | Existing finite-scalar diagnostic through shared binder validation at the owning statement/expression | Bool, named Enum/Range binders, ordinary Struct values and collection-of-Struct binders |
+
+When the range rule finds a refusal, existing init ownership and field-read
+checks run first. Their earlier diagnostics retain their message and location;
+in particular, a read of a partially initialized Struct is not replaced with a
+range-domain error. Bare `build_model` does not impose this checked-source range
+rule. Raw Runtime constructors retain their existing unlocated range refusal.
+Expression and action Typed-Struct validation remains in Core construction.
+An init-statement Typed-Struct binder was already refused by the ownership
+preflight: retain its complete unlocated finite-scalar error, without a new
+Core prefix or location. Only that statement-domain check is deferred;
+expressions inside init remain subject to the normal binder validation.
+Component range diagnostics retain the original checked-source provenance.
 
 These are **breaking check-admission removals**. No Struct-domain enumeration
 or new public Kernel form is added. Existing nested-init restrictions remain

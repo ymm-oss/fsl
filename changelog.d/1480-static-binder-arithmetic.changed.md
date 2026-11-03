@@ -37,7 +37,7 @@ cover the new API; broader caller execution and full #1480 remain separate work.
 G5 own-tree B `ffcb51b05ce63669e496ffb9df66693b64c7af85` /H
 `5771539b02649aee78b848fcabd2c696e7037278`, rebuilt CLI hashes `e35e13ac…`
 /`f01567d7…`: `FSLC_CACHE=off <own CLI> check <tree-relative source>`,
-`FSLC_UNSTABLE` unset and `fsl5`, twice each side/mode. Fresh610 corpus +2 BASE
+both internal configurations, twice each side/configuration. Fresh610 corpus +2 BASE
 +299 helper IDs =911 IDs /7288 observations; measured ok→error, all accepted→error,
 error→accepted, old-error/other/repeat drift sets EMPTY, full outputs/no exclusions.
 Separate112 endpoint AST/literal occurrences and five constructors are not model

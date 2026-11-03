@@ -67,8 +67,8 @@ use spec_loading::{
 };
 use spec_loading::{
     load_kernel_model_from_source, load_model_from_source, load_model_scoped_from_source,
-    load_snapshot_value_object, read_spec_source, require_trace_gate, snapshot_value,
-    validate_requirement_trace_source,
+    load_replay_model_from_source, load_snapshot_value_object, read_spec_source,
+    require_trace_gate, snapshot_value, validate_requirement_trace_source,
 };
 use strict_tags::strict_tag_warnings_from_source;
 use verification::{run_verify_cli_admitted, run_verify_cli_from_source};
@@ -4748,7 +4748,7 @@ fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
 /// Replay one trace against one caller-owned root-source snapshot.
 #[allow(clippy::too_many_lines)]
 fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Value, i32) {
-    let model = match load_model_from_source(path, source) {
+    let model = match load_replay_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };

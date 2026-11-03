@@ -197,22 +197,27 @@ fn captured_singleton_membership_is_not_permission_and_both_reducers_borrow() {
         capture(&solver, &m, &read, &mut scope, "top", "n+1");
         capture(&solver, &m, &read, &mut scope, "next", "top+1");
         let ledger = checked(&mut solver, &m, &read);
-        for (text, expected, body) in [
+        for (text, expected, body, legacy_bound) in [
             (
                 "i in top..top",
                 vec![(1, false), (2, true), (3, false)],
                 "i==2",
+                "top",
             ),
             (
                 "i in next..next",
                 vec![(2, false), (3, true), (4, false)],
                 "i==3",
+                "next",
             ),
         ] {
             let b = binder(text);
             let unbridged = binder_values(&solver, &m, &b, &read, &scope, None);
             eprintln!("U4_CAPTURED_UNBRIDGED actual={unbridged:?}");
-            refusal(unbridged, ELIGIBILITY);
+            refusal(
+                unbridged,
+                &format!("'{legacy_bound}' is not an integer const"),
+            );
             let prepared = prepare(&mut solver, &m, &b, &read, &scope, &ledger).unwrap();
             eprintln!("U4_CAPTURED repeat={repeat} source={text}");
             roster(&mut solver, &prepared, &expected);
@@ -221,6 +226,20 @@ fn captured_singleton_membership_is_not_permission_and_both_reducers_borrow() {
         }
     }
 }
+#[test]
+fn captured_refusal_preserves_successful_static_lower_folds() {
+    let mut solver = Z::new().unwrap();
+    let m = model();
+    let read = frame(&mut solver, &m, 0, 1);
+    let mut scope = Scope::new();
+    capture(&solver, &m, &read, &mut scope, "top", "n+1");
+    for lower in ["0", "abs(0)", "min(0,1)", "0/1", "if true then 0 else 1"] {
+        let b = binder(&format!("i in ({lower})..top"));
+        let actual = binder_values(&solver, &m, &b, &read, &scope, None);
+        refusal(actual, "'top' is not an integer const");
+    }
+}
+
 #[test]
 fn captures_use_original_frame_and_original_lexical_input_index() {
     for repeat in 0..2 {
@@ -731,7 +750,13 @@ fn bridge_selected_public_and_full_bound_priority_are_preserved() {
                 &expected,
             ));
             eprintln!("BRIDGE_PUBLIC state={state:?} expected={expected:?} actual={actual:?}");
-            assert_eq!(actual, Err(VerifyError::new(ELIGIBILITY)));
+            // Expression agreement establishes bounds for its own pinned read frame.
+            let wanted = if n == 0 {
+                Ok(expected == FslValue::Bool(true))
+            } else {
+                Err(VerifyError::new(ELIGIBILITY))
+            };
+            assert_eq!(actual, wanted);
         }
     }
     let state = BTreeMap::from([("n".into(), FslValue::Int(3))]);

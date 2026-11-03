@@ -199,17 +199,10 @@ fn build(
     // produced them, so they must be captured here rather than derived from
     // the checked KernelModel below.
     let diagnostics = kernel.diagnostics().to_vec();
-    let model = fsl_core::build_model(kernel).map_err(|failure| {
-        // The same span and classification the native CLI reports, so the
-        // Worker envelope does not diverge from `fslc` (issues 555, 565).
-        let diagnostic = fslc_rust::spec_load::SemanticDiagnostic::from_model_error(&failure);
-        fslc_rust::verification_output::render_semantic_error(
+    let model = fslc_rust::checked_build::build_checked_model(kernel).map_err(|failure| {
+        fslc_rust::spec_load::render_spec_load_error(
             envelope(solver_version),
-            &diagnostic.message,
-            diagnostic.loc,
-            &diagnostic.class,
-            diagnostic.diagnostic_code,
-            diagnostic.hint.as_deref(),
+            &failure.into_spec_load_error(),
         )
     })?;
     Ok((model, diagnostics))

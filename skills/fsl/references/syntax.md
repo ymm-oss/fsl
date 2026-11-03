@@ -1377,11 +1377,14 @@ when checking a file, the message suffix changes from `at L:C` to
   Do not treat arbitrary named types as builtin aliases or infer new support
   for struct or dynamic/outer-dependent domains from Bool enumeration alone.
   Liveness success JSON remains keyed by property, not by expanded binding.
-  **Breaking check-admission removal (#1480):** typed Named Struct binders fail
+  **Breaking check-admission removal (#1480):** expression/action typed Named Struct binders fail
   shared validation with the existing finite-scalar diagnostic at their owning
   source location. Finite fields do not authorize Struct enumeration. Bool,
   Enum/Range binders, ordinary Struct values and collection-of-Struct binders
-  remain unchanged. The actual base/head form count and `ok`→`error` list are
+  remain unchanged. Already-refused init-statement Typed-Struct domains keep
+  their exact unlocated finite-scalar error. Their statement-domain check is
+  deferred to checked-source admission; expressions inside init stay strict.
+  The actual base/head form count and `ok`→`error` list are
   pending the required sweep; see `DESIGN-spec-domains.md`.
   **Breaking admission removal (#1480):** negative constant `within` deadlines
   now fail `check` and all engines at the owning declaration before dispatch.
@@ -1412,7 +1415,7 @@ when checking a file, the message suffix changes from `at L:C` to
   Pure-API G5: own-tree B `ffcb51b05ce63669e496ffb9df66693b64c7af85` /H
   `5771539b02649aee78b848fcabd2c696e7037278`, rebuilt CLI hashes `e35e13ac…`
   /`f01567d7…`; `FSLC_CACHE=off <own CLI> check <tree-relative source>` with
-  `FSLC_UNSTABLE` unset and `fsl5`, twice per side/mode. **610 corpus +2 BASE
+  both internal configurations, twice per side/configuration. **610 corpus +2 BASE
   +299 fresh helper IDs =911 IDs /7288 observations**. Measured ok→error,
   accepted→error, error→accepted, old-error/other/repeat drift sets **EMPTY**;
   full stdout/stderr/exit/packets, no exclusions. The 112 endpoint AST/literal
@@ -1905,9 +1908,12 @@ old symbolic/explicit false refusal without narrowing check acceptance.
 
 **Breaking check-admission removal (#1480):** free state reads in init statement
 `forall` integer-range endpoints fail shared validation at the owning statement,
-even after assignment, with empty bodies or in unreachable branches. Preserve
-supported init RHS reads, enclosing lexical binding scopes and action/property
-conditional ranges; existing nested-init limits remain. Actual base/head input
+even after assignment, with empty bodies or in unreachable branches. Earlier
+init ownership/field-read diagnostics keep priority. The range rule is a
+checked-source boundary, not bare Core construction; raw Runtime errors remain
+unchanged. Supported init RHS reads, enclosing lexical binding scopes and
+action/property conditional ranges remain; existing nested-init limits remain.
+Actual base/head input
 counts and removal records are pending; see `DESIGN-check-executable-forms.md`.
 
 An init statement forall cannot read a root that the same forall writes,

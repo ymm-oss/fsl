@@ -2470,6 +2470,17 @@ fn parameter_range_values<S: SmtSolver>(
         }
     });
     if !eligible {
+        // Captured lexical values remain unsupported without their own discharge.
+        // Preserve their legacy bound diagnostic without approving any candidates
+        // or replacing a state-carrier eligibility refusal.
+        if prerequisites
+            .iter()
+            .all(|p| matches!(p, RangePrerequisite::LexicalFact { .. }))
+            && let Binder::Range { lo, hi, .. } = binder
+        {
+            static_int(lo, model)?;
+            static_int(hi, model)?;
+        }
         return Err(integer_range_error(&plan));
     }
     let status = property_range_source_status_in(solver, model, binder, state, bindings, ctx)?;

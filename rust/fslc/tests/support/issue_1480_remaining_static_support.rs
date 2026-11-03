@@ -4,7 +4,6 @@ use fsl_runtime::Monitor;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
     process::Command,
     sync::{
         OnceLock,
@@ -106,10 +105,6 @@ pub fn cli(src: &str, bad: bool, temporal: bool, errors: &mut Vec<String>) -> Ve
     let binary = env!("CARGO_BIN_EXE_fslc");
     let binary_hash =
         BINARY_HASH.get_or_init(|| format!("{:x}", Sha256::digest(std::fs::read(binary).unwrap())));
-    let environment = std::env::vars()
-        .chain([("FSLC_CACHE".into(), "off".into())])
-        .filter(|(k, _)| k != "FSLC_UNSTABLE")
-        .collect::<BTreeMap<_, _>>();
     let mut observations = Vec::new();
     let mut requests = Vec::new();
     for route in ["check", "bmc", "induction", "explicit", "replay"] {
@@ -128,7 +123,7 @@ pub fn cli(src: &str, bad: bool, temporal: bool, errors: &mut Vec<String>) -> Ve
         };
         requests.push(json!({"route":route,"argv":args}));
     }
-    let request = json!({"case":id,"source":src,"source_sha256":format!("{:x}",Sha256::digest(src.as_bytes())),"trace":trace,"binary":binary,"binary_sha256":binary_hash,"cwd":dir,"environment":environment,"requests":requests,"bad":bad,"temporal":temporal});
+    let request = json!({"case":id,"source":src,"source_sha256":format!("{:x}",Sha256::digest(src.as_bytes())),"trace":trace,"binary":binary,"binary_sha256":binary_hash,"cwd":dir,"environment_overrides":{"FSLC_CACHE":"off","FSLC_UNSTABLE":null},"requests":requests,"bad":bad,"temporal":temporal});
     // Independent request records precede CLI observations, outside observed dirs.
     let plans = std::env::temp_dir().join(format!("plans-{}", std::process::id()));
     std::fs::create_dir_all(&plans).unwrap();

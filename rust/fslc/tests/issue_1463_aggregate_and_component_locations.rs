@@ -85,14 +85,6 @@ fn run_cases(cases: &[forms::Case], label: &str) {
             } else if route == "check" {
                 assert_eq!(output.status.code(), Some(0), "{}: {report}", case.id);
                 assert_eq!(report["result"], "ok");
-            } else if case.id.starts_with("nested/set/") {
-                // Measured on 6e99702c and head, all 24 exact controls x2:
-                // check accepts, but this equality family has an existing engine limit.
-                assert_eq!(output.status.code(), Some(2), "{}: {report}", case.id);
-                assert_eq!(report["result"], "error");
-                assert_eq!(report["kind"], "semantics");
-                assert_eq!(report["message"], "'x' is not an integer const");
-                assert!(report["loc"].is_null());
             } else {
                 assert_eq!(
                     output.status.code(),
@@ -112,6 +104,12 @@ fn run_cases(cases: &[forms::Case], label: &str) {
                     "{} {route}: {report}",
                     case.id
                 );
+                if case.negative && case.id.starts_with("nested/set/") {
+                    assert_eq!(report["violation_kind"], "invariant");
+                    assert_eq!(report["invariant"], "Capture");
+                    assert_eq!(report["trace"].as_array().unwrap().len(), 1);
+                    assert_eq!(report["trace"][0]["step"], 0);
+                }
             }
         }
     }

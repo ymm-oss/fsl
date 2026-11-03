@@ -69,4 +69,54 @@ mod issue_1463 {
             "{} failing Worker cells:\n{}", failures.len(), failures.join("\n")
         );
     }
+
+    #[test]
+    fn issue_1480_worker_init_range_priority_matches_checked_native() {
+        for (source, message) in [
+            (
+                "spec FieldRange {type K=0..2 struct Cell {a:K,b:K} state {s:Cell} init {s.a=1 s.b=0 forall i in 0..s.a {}} action idle(){}}",
+                "init forall range bounds must be compile-time constants; state variable 's' is not allowed",
+            ),
+            (
+                "spec FieldRange {type K=0..2 struct Cell {a:K,b:K} state {s:Cell} init {s.a=1 forall i in 0..s.a {}} action idle(){}}",
+                "init forall range bounds must be compile-time constants; state variable 's' is not allowed",
+            ),
+            (
+                "spec FieldRange {type K=0..2 struct Cell {a:K,b:K} state {s:Cell} init {s.a=1 forall i in 0..s.a {} s.b=0} action idle(){}}",
+                "init cannot read 's.a' before state variable 's' is fully assigned",
+            ),
+        ] {
+            let mut request = Request {
+                cmd: "check".into(),
+                source: source.into(),
+                source_file: "priority.fsl".into(),
+                files: std::collections::BTreeMap::default(),
+                options: Options::default(),
+                unstable: Vec::new(),
+            };
+            let mut no_solver = || -> Result<fsl_solver_z3js::Z3JsSolver, String> {
+                panic!("init admission must precede solver creation")
+            };
+            let native = native_check_error(&request, TEST_SOLVER_VERSION);
+            assert_eq!(native["result"], "error");
+            assert_eq!(native["kind"], "semantics");
+            assert_eq!(native["message"], message);
+            assert_eq!(
+                native["loc"],
+                serde_json::json!({"line":1,"column":source.find("forall").unwrap()+1})
+            );
+            assert_eq!(
+                block_on(check_with(&request, TEST_SOLVER_VERSION, &mut no_solver)),
+                native
+            );
+            request.cmd = "verify".into();
+            assert_eq!(
+                block_on(verify_with(&request, TEST_SOLVER_VERSION, &mut no_solver)),
+                native
+            );
+            let built = build(&request, TEST_SOLVER_VERSION, &std::rc::Rc::default())
+                .expect_err("checked build must retain init refusal");
+            assert_eq!(built, native_check_error_unfinalized(&request, TEST_SOLVER_VERSION));
+        }
+    }
 }

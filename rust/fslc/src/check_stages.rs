@@ -271,17 +271,39 @@ pub fn load_kernel_model(
     resolver: &dyn FileResolver,
     options: &fsl_syntax::ParseOptions,
 ) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
-    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
-        source,
-        resolver,
-        source_path,
-        options,
-    )
-    .map_err(|error| kernel_load_error(source, &error, options))?;
-    let model = fsl_core::build_model(kernel.clone()).map_err(|error| {
-        SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
-    })?;
+    let kernel = parse_kernel(source, source_path, resolver, *options)?;
+    let model = crate::checked_build::build_checked_model(kernel.clone())
+        .map_err(crate::checked_build::CheckedBuildError::into_spec_load_error)?;
     Ok((kernel, model))
+}
+
+/// Lower and type-check a root source for `replay`, without the checked-source
+/// init preflight. The Monitor still refuses those init forms itself, and its
+/// unlocated runtime envelope and trace-error precedence are part of its contract.
+///
+/// # Errors
+///
+/// Returns the classified spec-load failure.
+pub fn load_replay_model(
+    source: &str,
+    source_path: &str,
+    resolver: &dyn FileResolver,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<KernelModel, SpecLoadError> {
+    let kernel = parse_kernel(source, source_path, resolver, *options)?;
+    fsl_core::build_model(kernel).map_err(|error| {
+        SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
+    })
+}
+
+fn parse_kernel(
+    source: &str,
+    source_path: &str,
+    resolver: &dyn FileResolver,
+    options: fsl_syntax::ParseOptions,
+) -> Result<KernelSpec, SpecLoadError> {
+    fsl_core::parse_kernel_source_with_file_with_options(source, resolver, source_path, &options)
+        .map_err(|error| kernel_load_error(source, &error, &options))
 }
 
 /// `check` on an Agent document is deliberately lenient: the top-level

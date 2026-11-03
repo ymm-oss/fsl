@@ -937,11 +937,14 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   quantifiers, init/action statement <code>forall</code>, and unfiltered static <code>leadsTo</code>
   wrappers. Bool enumeration alone does not extend struct or dynamic-range
   policy. Liveness success metadata remains one entry per property, not binding.
-  <strong>Breaking check-admission removal (#1480):</strong> typed binders over a named
-  Struct, such as <code>forall cell: Cell { ... }</code>, fail shared validation with the
+  <strong>Breaking check-admission removal (#1480):</strong> expression and action typed
+  binders over a named Struct, such as <code>forall cell: Cell { ... }</code>, fail shared
+  validation with the
   existing finite-scalar diagnostic at the owning source location. Finite Struct
   fields do not create a scalar domain. Bool, named Enum/Range binders, ordinary
   Struct values and collection binders over Struct elements are unaffected.
+  Init-statement Typed-Struct domains were already refused; their existing
+  unlocated finite-scalar error is preserved, without a new prefix or location.
   The required base/head form count and actual <code>ok</code>→<code>error</code> list are pending;
   see <a href="../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480">domain policy</a>.</li>
 <li>Static range bounds (#1480 Stage A) use the checked constant grammar when
@@ -969,7 +972,7 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   Pure-API G5 comparison: own-tree B <code>ffcb51b05ce63669e496ffb9df66693b64c7af85</code>
   /H <code>5771539b02649aee78b848fcabd2c696e7037278</code>, rebuilt CLIs <code>e35e13ac…</code>
   /<code>f01567d7…</code>, ran <code>FSLC_CACHE=off &lt;own CLI&gt; check &lt;tree-relative source&gt;</code> with
-  <code>FSLC_UNSTABLE</code> unset and <code>fsl5</code>, twice each side: <strong>610 corpus +2 BASE +299
+  both internal configurations, twice each side: <strong>610 corpus +2 BASE +299
   fresh helper IDs =911 IDs /7288 observations</strong>. Measured ok→error, all
   accepted→error, error→accepted, old-error, other-output and repeat drift sets
   are <strong>EMPTY</strong>, comparing full stdout/stderr/exit/packets with no exclusions.
@@ -1495,6 +1498,9 @@ shadowed names; that fix does not narrow <code>check</code> acceptance.</p>
 integer-range endpoint cannot read free state, even after that state was assigned,
 with an empty body or in an unreachable branch. Shared validation reports the
 existing compile-time-constant diagnostic at the owning <code>forall</code> statement.
+Earlier init ownership and field-read diagnostics keep priority. This range rule
+belongs to checked-source admission, not bare Core model construction; raw
+Runtime constructors retain their existing error contracts.
 This does not remove supported assigned-state reads in init RHS expressions or
 conditional ranges in actions/properties; enclosing lexical binders retain their
 scope. Existing nested-init restrictions remain. The actual base/head form count

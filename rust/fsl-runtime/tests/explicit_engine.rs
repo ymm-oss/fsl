@@ -189,44 +189,29 @@ fn explicit_bfs_rejects_underconstrained_or_order_dependent_init() {
 
 #[test]
 fn deterministic_init_rejects_state_dependent_forall_domains() {
-    for (source, index) in [
-        (
-            "spec UnassignedRange { type Slot = 0..2 state { n: Slot, m: Map<Slot, Bool> } \
-             init { forall i in 0..n { m[i] = true } n = 0 } \
-             action stay() { n = n } }",
-            0,
-        ),
-        (
-            "spec AssignedRange { type Slot = 0..2 state { n: Slot, m: Map<Slot, Bool> } \
-             init { n = 2 forall i in 0..n { m[i] = true } } \
-             action stay() { n = n } }",
-            1,
-        ),
-    ] {
-        let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse range");
-        let source_error = build_model(kernel).expect_err("source gate rejects the state range");
-        // Keep the unchecked-model guard covered after shared Core admission moved earlier.
-        // The one-character replacement preserves the authored forall span.
-        let mut unchecked = model(&source.replace("0..n", "0..2"));
-        let fsl_core::KernelStatement::ForAll {
-            binder: fsl_core::KernelBinder::Range { hi, .. },
-            span,
-            ..
-        } = &mut unchecked.init[index]
-        else {
-            panic!("range forall")
-        };
-        assert_eq!(source_error.span, Some(*span));
-        **hi = fsl_core::KernelExpr::Var("n".into());
-        let error = fsl_runtime::verify_explicit(unchecked, 2, 100)
-            .expect_err("assigned or unassigned state cannot bound an init range");
-        assert_eq!(error.message, source_error.message);
-        assert_eq!(error.span, None);
-        assert_eq!(
-            error.message,
-            "init forall range bounds must be compile-time constants; state variable 'n' is not allowed"
-        );
-    }
+    let unassigned_range = model(
+        "spec UnassignedRange { type Slot = 0..2 state { n: Slot, m: Map<Slot, Bool> } \
+         init { forall i in 0..n { m[i] = true } n = 0 } \
+         action stay() { n = n } }",
+    );
+    let error = fsl_runtime::verify_explicit(unassigned_range, 2, 100)
+        .expect_err("state-dependent init range rejected");
+    assert_eq!(
+        error.message,
+        "init forall range bounds must be compile-time constants; state variable 'n' is not allowed"
+    );
+
+    let assigned_range = model(
+        "spec AssignedRange { type Slot = 0..2 state { n: Slot, m: Map<Slot, Bool> } \
+         init { n = 2 forall i in 0..n { m[i] = true } } \
+         action stay() { n = n } }",
+    );
+    let error = fsl_runtime::verify_explicit(assigned_range, 2, 100)
+        .expect_err("assigned state still cannot bound an init range");
+    assert_eq!(
+        error.message,
+        "init forall range bounds must be compile-time constants; state variable 'n' is not allowed"
+    );
 
     let state_collection_source = "spec StateCollection { type Slot = 0..2 \
          state { s: Set<Slot>, m: Map<Slot, Bool> } \

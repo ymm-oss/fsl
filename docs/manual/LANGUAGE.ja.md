@@ -837,11 +837,13 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   init/action の文 `forall`、フィルターなしの静的 `leadsTo` wrapper が対象です。
   Bool の列挙だけで struct や動的範囲の方針は拡張しません。liveness の成功メタデータは
   束縛ごとではなく、性質ごとに 1 エントリーのままです。
-  **check 受理の破壊的な削除 (#1480):** `forall cell: Cell { ... }` のような
-  名前付き Struct の型バインダーは、共有検証で既存の有限スカラーの診断により、
+  **check 受理の破壊的な削除 (#1480):** 式や action の `forall cell: Cell { ... }`
+  のような名前付き Struct の型バインダーは、共有検証で既存の有限スカラーの診断により、
   所有するソース位置で拒否します。各フィールドが有限でもスカラーのドメインには
   なりません。Bool、名前付き Enum/Range のバインダー、通常の Struct 値、Struct
-  要素を訪れるコレクションバインダーは変わりません。必要な base/head の入力件数と
+  要素を訪れるコレクションバインダーは変わりません。init 文の型付き Struct ドメインは
+  以前から拒否しており、接頭辞や位置を追加せず、既存の位置なし診断を保ちます。
+  必要な base/head の入力件数と
   実際の `ok`→`error` 一覧は未計測です。
   [ドメイン方針](../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480)を参照してください。
 - 静的な範囲境界(#1480 Stage A)は、成功する場合に検査済みの定数文法で畳み込みます。
@@ -868,7 +870,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   pure API の G5 は各 tree の B `ffcb51b05ce63669e496ffb9df66693b64c7af85`
   /H `5771539b02649aee78b848fcabd2c696e7037278`、再 build した CLI `e35e13ac…`
   /`f01567d7…` で `FSLC_CACHE=off <own CLI> check <tree-relative source>` を実行しました。
-  `FSLC_UNSTABLE` 未設定と `fsl5` の両 mode、各側2回、**610 corpus +2 BASE
+  内部の2構成を各側2回実行し、**610 corpus +2 BASE
   +299 fresh helper ID =911 ID /7288観測**です。ok→error、全受理→error、
   error→受理、既存 error、その他全出力、反復の差分集合はすべて **EMPTY**。
   stdout/stderr/exit/packet 全体を、除外フィールドなしで比較しました。
@@ -1358,6 +1360,9 @@ symbolic/explicit が誤って拒否していた挙動も解消しますが、�
 **check 受理の破壊的な削除 (#1480):** init の**文** `forall` の整数範囲の境界は、
 自由な状態を読めません。状態への代入後、本体が空の場合、到達しない分岐も対象です。
 共有検証が、所有する `forall` 文の位置で既存のコンパイル時定数の診断を返します。
+既存の init 所有権・フィールド読み出しの診断を先に返します。この範囲規則は
+checked-source 受理の境界であり、Core のモデル構築だけには適用しません。
+Runtime の生のコンストラクターは、既存のエラー契約を保ちます。
 対応済みの init 右辺式での代入済み状態の読み出しや、action/性質の条件付き範囲は
 削除しません。外側の字句的バインダーのスコープと、既存の init 入れ子の制限は保ちます。
 必要な base/head の実際の入力件数と削除一覧は sweep 待ちです。

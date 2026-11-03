@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-//! Shared located admission for original engine restrictions; no binder support lift.
+//! Checked admission and preserved init-domain diagnostics; no binder support lift.
 #[path = "support/scratch_identity.rs"]
 mod scratch_identity;
 use fsl_core::{
@@ -87,8 +87,8 @@ const CASES: [Case; 4] = [
     Case {
         id: "struct-init",
         source: STRUCT_INIT,
-        message: "invalid init statement: type 'Cell' is not a finite scalar",
-        rendered: "invalid init statement: type 'Cell' is not a finite scalar at 6:5",
+        message: "type 'Cell' is not a finite scalar",
+        rendered: "type 'Cell' is not a finite scalar",
         position: (82, 88, 6, 5, 11),
         typed: true,
         init: true,
@@ -133,11 +133,14 @@ fn expected(case: &Case) -> ModelError {
     }
 }
 fn packet(case: &Case) -> Value {
-    json!({"fsl":"1.0","result":"error","kind":"semantics","message":case.rendered,
-        "loc":{"line":case.position.2,"column":case.position.3},
+    let mut packet = json!({"fsl":"1.0","result":"error","kind":"semantics","message":case.rendered,
         "versions":{"verifier":{"name":"fslc-rust","version":env!("CARGO_PKG_VERSION")},
         "core":{"name":"fsl-core","version":env!("CARGO_PKG_VERSION")},
-        "solver":{"name":"z3","backend":"native-z3","version":"Z3 4.16.0.0"}}})
+        "solver":{"name":"z3","backend":"native-z3","version":"Z3 4.16.0.0"}}});
+    if case.id != "struct-init" {
+        packet["loc"] = json!({"line":case.position.2,"column":case.position.3});
+    }
+    packet
 }
 fn fixture(case: &Case) -> PathBuf {
     let parent = Path::new(env!("CARGO_TARGET_TMPDIR")).join("1480-original-restrictions");
@@ -203,15 +206,73 @@ fn original_restrictions_are_complete_located_core_errors() {
                 "ORIGINAL_CORE_SOURCE id={} source={:?} parsed={parsed:#?}",
                 case.id, case.source
             );
-            let actual = build_model(parsed.unwrap());
+            let kernel = parsed.unwrap();
+            if case.init {
+                let model = build_model(kernel.clone()).expect("raw Core keeps init admission");
+                if case.id == "struct-init" {
+                    let expected = fsl_runtime::RuntimeError {
+                        message: case.message.into(),
+                        span: None,
+                        partial_operation: None,
+                        map_key_outside_domain: false,
+                    };
+                    assert_eq!(
+                        fsl_runtime::deterministic_initial_state(&model),
+                        Err(expected)
+                    );
+                    assert!(
+                        fsl_core::public_kernel_contract(&kernel, &model, "inline.fsl", "spec")
+                            .is_ok(),
+                        "init statement domain stays deferred during model revalidation"
+                    );
+                }
+            }
+            let actual = if case.init {
+                fslc_rust::checked_build::build_checked_model(kernel)
+            } else {
+                build_model(kernel).map_err(|error| {
+                    fslc_rust::checked_build::CheckedBuildError::Model(Box::new(error))
+                })
+            };
             eprintln!("ORIGINAL_CORE id={} actual={actual:#?}", case.id);
             (case, actual)
         })
         .collect::<Vec<_>>();
     for (case, actual) in outputs {
-        let actual = actual.expect_err(case.id);
-        assert_eq!(actual, expected(case));
-        assert_eq!(actual.to_string(), case.rendered);
+        match actual.expect_err(case.id) {
+            fslc_rust::checked_build::CheckedBuildError::Model(error) => {
+                assert_ne!(case.id, "struct-init");
+                assert_eq!(*error, expected(case));
+                assert_eq!(error.to_string(), case.rendered);
+            }
+            fslc_rust::checked_build::CheckedBuildError::InitOwnership(error) => {
+                assert_eq!(case.id, "struct-init");
+                assert_eq!(
+                    *error,
+                    fsl_runtime::RuntimeError {
+                        message: case.message.into(),
+                        span: None,
+                        partial_operation: None,
+                        map_key_outside_domain: false,
+                    }
+                );
+            }
+        }
+    }
+}
+#[test]
+fn init_statement_deferral_keeps_expression_binders_strict() {
+    for source in [
+        "spec Rhs {struct Cell {flag:Bool} state {done:Bool} init {done=forall c:Cell {c.flag}} action idle(){}}",
+        "spec Filter {struct Cell {flag:Bool} state {done:Bool} init {done=false forall b:Bool where (forall c:Cell {c.flag}) {}} action idle(){}}",
+    ] {
+        let actual = build_model(parse_kernel_source(source, &FsResolver::new(".")).unwrap())
+            .expect_err("expression Struct binder is still strict");
+        assert_eq!(
+            actual.message,
+            "invalid init statement: type 'Cell' is not a finite scalar"
+        );
+        assert!(actual.span.is_some());
     }
 }
 #[test]
@@ -237,6 +298,74 @@ fn check_and_all_three_engines_share_the_full_frontend_rejection() {
         assert_ne!(actual, (2, wrong));
     }
 }
+#[test]
+fn checked_struct_range_refusal_keeps_earlier_field_read_priority() {
+    for (id, source, message, domain_refusal) in [
+        (
+            "complete-struct-range",
+            "spec FieldRange {type K=0..2 struct Cell {a:K,b:K} state {s:Cell} init {s.a=1 s.b=0 forall i in 0..s.a {}} action idle(){}}",
+            "init forall range bounds must be compile-time constants; state variable 's' is not allowed",
+            true,
+        ),
+        (
+            // Never fully assigned, so no read-before-assign refusal applies.
+            "partial-struct-range",
+            "spec FieldRange {type K=0..2 struct Cell {a:K,b:K} state {s:Cell} init {s.a=1 forall i in 0..s.a {}} action idle(){}}",
+            "init forall range bounds must be compile-time constants; state variable 's' is not allowed",
+            true,
+        ),
+        (
+            "early-read-struct-range",
+            "spec FieldRange {type K=0..2 struct Cell {a:K,b:K} state {s:Cell} init {s.a=1 forall i in 0..s.a {} s.b=0} action idle(){}}",
+            "init cannot read 's.a' before state variable 's' is fully assigned",
+            false,
+        ),
+    ] {
+        let offset = source.find("forall").unwrap();
+        let column = u32::try_from(offset + 1).unwrap();
+        let case = Case {
+            id,
+            source,
+            message,
+            rendered: message,
+            position: (offset, offset + 6, 1, column, column + 6),
+            typed: false,
+            init: true,
+        };
+        let kernel = parse_kernel_source(source, &FsResolver::new(".")).unwrap();
+        assert!(build_model(kernel.clone()).is_ok());
+        let error = fslc_rust::checked_build::build_checked_model(kernel).unwrap_err();
+        match (domain_refusal, error) {
+            (true, fslc_rust::checked_build::CheckedBuildError::Model(error)) => {
+                assert_eq!(*error, expected(&case));
+                let supported = source.replace("0..s.a", "0..1");
+                assert!(
+                    fslc_rust::checked_build::build_checked_model(
+                        parse_kernel_source(&supported, &FsResolver::new(".")).unwrap()
+                    )
+                    .is_ok()
+                );
+            }
+            (false, fslc_rust::checked_build::CheckedBuildError::InitOwnership(error)) => {
+                assert_eq!(
+                    *error,
+                    fsl_runtime::RuntimeError {
+                        message: message.into(),
+                        span: expected(&case).span,
+                        partial_operation: None,
+                        map_key_outside_domain: false,
+                    }
+                );
+            }
+            (_, error) => panic!("wrong admission stage: {error:?}"),
+        }
+        let directory = fixture(&case);
+        for route in ["check", "bmc", "induction", "explicit"] {
+            assert_eq!(observe(&directory, route), (2, packet(&case)));
+        }
+    }
+}
+
 #[test]
 fn existing_supported_binders_rhs_ranges_and_struct_values_keep_admission() {
     let sources = [

@@ -1295,6 +1295,7 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
 pub(crate) struct ValidationPhase {
     normalize_aggregates: bool,
     aggregate_bounds_only: bool,
+    defer_init_statement_domain: bool,
     substituted: BTreeSet<String>,
     // Reserved by earlier evaluation, without making those names readable.
     pub(crate) collisions: HashSet<String>,
@@ -1308,8 +1309,16 @@ impl ValidationPhase {
         Self {
             normalize_aggregates: true,
             aggregate_bounds_only: false,
+            defer_init_statement_domain: false,
             substituted: BTreeSet::new(),
             collisions: HashSet::new(),
+        }
+    }
+
+    pub(crate) fn init_statements() -> Self {
+        Self {
+            defer_init_statement_domain: true,
+            ..Self::normalized()
         }
     }
 
@@ -1352,6 +1361,7 @@ impl ValidationPhase {
         Self {
             normalize_aggregates: self.normalize_aggregates && !expands,
             aggregate_bounds_only: self.aggregate_bounds_only,
+            defer_init_statement_domain: self.defer_init_statement_domain,
             substituted,
             collisions: self.collisions.clone(),
         }
@@ -1399,7 +1409,8 @@ fn validate_binder(
         }
     }
     let ty = binder_type(binder, env, model).map_err(|error| error.with_span(span))?;
-    if let (Binder::Typed { .. }, TypeRef::Named(name)) = (binder, &ty)
+    if !source_phase.defer_init_statement_domain
+        && let (Binder::Typed { .. }, TypeRef::Named(name)) = (binder, &ty)
         && matches!(model.types.get(name), Some(TypeDef::Struct { .. }))
     {
         model
@@ -1518,6 +1529,12 @@ fn validate_expression_in_phase(
     phase: &ValidationPhase,
     self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
+    // Statement-domain deferral never extends into RHS/filter expressions.
+    let expression_phase = phase.defer_init_statement_domain.then(|| ValidationPhase {
+        defer_init_statement_domain: false,
+        ..phase.clone()
+    });
+    let phase = expression_phase.as_ref().unwrap_or(phase);
     recursion::guard(|| {
         validate_expression_inner(expr, env, model, span, expected, phase, self_relations)
     })
@@ -2155,7 +2172,7 @@ fn validate_statement_assignments(
             span,
         } => {
             let name = binder_name(binder);
-            let phase = ValidationPhase::normalized();
+            let phase = ValidationPhase::init_statements();
             let ty = validate_binder(binder, env, model, *span, &phase, &phase, self_relations)?;
             let mut local = env.clone();
             local.insert(name.to_owned(), ty);
@@ -2309,7 +2326,7 @@ pub(crate) fn validate_statement_types(
 pub(crate) fn validate_checked_model_types(model: &KernelModel) -> Result<(), TypecheckError> {
     let env = base_env(model);
     let self_relations = SelfRelations::new();
-    let mut phase = ValidationPhase::normalized();
+    let mut phase = ValidationPhase::init_statements();
     for statement in &model.init {
         validate_statement(statement, &env, model, &phase, &self_relations)?;
         crate::compose::extend_statement_pattern_names(statement, &mut phase.collisions);
