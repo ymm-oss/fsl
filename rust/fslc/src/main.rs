@@ -12131,7 +12131,7 @@ fn run_mutate_from_source(
         Ok(model) => model,
         Err(error) => return mutate_error(spec_load_error_output(&error)),
     };
-    // The `verified` baseline already passed this gate on the same source and
+    // The accepted baseline already passed this gate on the same source and
     // model; it runs again because only the gate hands out the checked cases.
     let trace_contract = match require_trace_gate(&source, &model) {
         Ok(contract) => contract,
