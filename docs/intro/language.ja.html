@@ -5377,6 +5377,19 @@ claim 側または artifact 側の片方だけに存在する scope dimension �
 <strong><code>causal_support</code> と <code>formal_assurance</code> は直交する 2 軸</strong>です: evidence は
 <code>formal_assurance: "not_run"</code> を決して変えず、どの support 値も verdict では
 ありません。</p>
+<p><code>causal observe-expectations</code> は replay と artifact 構築の後、出力のシリアライズや
+書き込みの前に、実際の <code>--out</code>/<code>--lifecycle-out</code> 出力先をすべて計算します。
+artifact が1つなら指定パス、複数なら従来の <code>&lt;stem&gt;.&lt;evidence_id&gt;.&lt;extension&gt;</code>
+（既定の拡張子は <code>json</code>）を使います。衝突判定のキーは実行ディレクトリ基準の
+絶対パスから <code>.</code> だけを除いたものです。すべての <code>..</code> とその前のディレクトリを
+残し、canonicalize やファイルシステムの別名解決は行いません。artifact 順に
+evidence、lifecycle の順で調べ、最初の重複を <code>kind:"usage"</code>、exit 2 と
+<code>causal output destinations collide: &lt;first path&gt; and &lt;second path&gt;</code> で拒否します。
+この拒否では全出力先の既存バイト列と存在状態を保ちます。既存の model/input/replay
+エラーが先で、有効な衝突は出力先・公開の I/O エラーより先に拒否します。
+artifact が0なら、出力フラグが同じでも衝突にはなりません。異なる出力先への書き込みは
+従来どおり evidence/lifecycle の交互順です。後の書き込みに失敗しても先の書き込みは
+戻しません。それ以外の名前、バイト列、digest、assurance は変えません。</p>
 <p>人間は claim から観測可能な契約を <code>expectation</code> として切り出し、既存の
 verifier で検査できます — <strong>claim そのものは決して lowering されません</strong>:
 <code>expectation E { trigger action alias.name</code>(または <code>trigger predicate

@@ -5253,6 +5253,20 @@ claim 側または artifact 側の片方だけに存在する scope dimension �
 `formal_assurance: "not_run"` を決して変えず、どの support 値も verdict では
 ありません。
 
+`causal observe-expectations` は replay と artifact 構築の後、出力のシリアライズや
+書き込みの前に、実際の `--out`/`--lifecycle-out` 出力先をすべて計算します。
+artifact が1つなら指定パス、複数なら従来の `<stem>.<evidence_id>.<extension>`
+（既定の拡張子は `json`）を使います。衝突判定のキーは実行ディレクトリ基準の
+絶対パスから `.` だけを除いたものです。すべての `..` とその前のディレクトリを
+残し、canonicalize やファイルシステムの別名解決は行いません。artifact 順に
+evidence、lifecycle の順で調べ、最初の重複を `kind:"usage"`、exit 2 と
+`causal output destinations collide: <first path> and <second path>` で拒否します。
+この拒否では全出力先の既存バイト列と存在状態を保ちます。既存の model/input/replay
+エラーが先で、有効な衝突は出力先・公開の I/O エラーより先に拒否します。
+artifact が0なら、出力フラグが同じでも衝突にはなりません。異なる出力先への書き込みは
+従来どおり evidence/lifecycle の交互順です。後の書き込みに失敗しても先の書き込みは
+戻しません。それ以外の名前、バイト列、digest、assurance は変えません。
+
 人間は claim から観測可能な契約を `expectation` として切り出し、既存の
 verifier で検査できます — **claim そのものは決して lowering されません**:
 `expectation E { trigger action alias.name`(または `trigger predicate

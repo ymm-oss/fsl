@@ -15,3 +15,8 @@ file's directory. Absolute declarations and caller-relative `--records` override
 retain their behavior, with no fallback search. The documented support-quality
 example uses `support_eval_v3.jsonl`; existing repository-prefixed declarations
 need explicit migration or a records override.
+After replay and artifact construction, causal observation rejects repeated
+actual output destinations before serialization or writes. Keys are invocation-
+absolute with `.` removed and `..` retained; the existing usage error names the
+first repeated paths. Distinct output names, bytes, interleaving, partial failures
+and inconclusive assurance remain unchanged.

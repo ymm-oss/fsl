@@ -582,6 +582,16 @@ metadata and approval target digests are unchanged by this consolidation (#1417)
 retaining their old invalid-input precedence. Unknown AI tools return JSON `semantics`
 errors (exit 2); approval create's diagnostic precedence remains a separate issue.
 
+**Causal observation outputs.** After replay/artifact construction and before
+output serialization/writes, `causal observe-expectations` checks all actual
+`--out`/`--lifecycle-out` destinations in artifact order, evidence then lifecycle.
+Invocation-absolute keys remove `.` only, retaining `..` and preceding components;
+the first duplicate rejects usage/2 with
+`causal output destinations collide: <first path> and <second path>` and no writes.
+Earlier input/replay errors win; valid collisions beat publication I/O errors.
+Zero artifacts do not collide from equal flags. Distinct names/bytes/assurance,
+interleaved writes and later-error partial publication remain unchanged.
+
 Digest-bound approvals are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a
 clean tracked Git baseline and only accepts a reviewed artifact that matches a

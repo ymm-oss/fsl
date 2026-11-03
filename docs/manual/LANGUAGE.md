@@ -5561,6 +5561,21 @@ treated as universal. **`causal_support`
 and `formal_assurance` are orthogonal axes**: evidence never changes
 `formal_assurance: "not_run"`, and no support value is a verdict.
 
+`causal observe-expectations` plans every actual `--out`/`--lifecycle-out`
+destination after replay and artifact construction, before output serialization
+or writes. One artifact uses the supplied path; multiple artifacts retain
+`<stem>.<evidence_id>.<extension>` names (default extension `json`). Collision keys
+are invocation-absolute with `.` removed; every `..` and preceding directory
+component is retained, without canonicalization or filesystem-alias resolution.
+The first repeated key in artifact order, evidence then lifecycle, returns
+`kind:"usage"`, exit 2, with
+`causal output destinations collide: <first path> and <second path>`, preserving
+all destination bytes and existence. Existing model/input/replay errors still
+precede this check; a valid collision precedes destination/publication I/O errors.
+Zero artifacts create no collision from equal flags. Distinct outputs retain
+their evidence/lifecycle write interleaving; a later failure does not roll back
+earlier writes. Names, bytes, digests and assurance otherwise remain unchanged.
+
 A human can carve an observable contract out of a claim as an `expectation`
 and check it with the existing verifier — **the claim itself is never
 lowered**: `expectation E { trigger action alias.name` (or `trigger

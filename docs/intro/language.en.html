@@ -5684,6 +5684,20 @@ present on only the claim or artifact side is <code>unassessable</code>; absence
 treated as universal. <strong><code>causal_support</code>
 and <code>formal_assurance</code> are orthogonal axes</strong>: evidence never changes
 <code>formal_assurance: "not_run"</code>, and no support value is a verdict.</p>
+<p><code>causal observe-expectations</code> plans every actual <code>--out</code>/<code>--lifecycle-out</code>
+destination after replay and artifact construction, before output serialization
+or writes. One artifact uses the supplied path; multiple artifacts retain
+<code>&lt;stem&gt;.&lt;evidence_id&gt;.&lt;extension&gt;</code> names (default extension <code>json</code>). Collision keys
+are invocation-absolute with <code>.</code> removed; every <code>..</code> and preceding directory
+component is retained, without canonicalization or filesystem-alias resolution.
+The first repeated key in artifact order, evidence then lifecycle, returns
+<code>kind:"usage"</code>, exit 2, with
+<code>causal output destinations collide: &lt;first path&gt; and &lt;second path&gt;</code>, preserving
+all destination bytes and existence. Existing model/input/replay errors still
+precede this check; a valid collision precedes destination/publication I/O errors.
+Zero artifacts create no collision from equal flags. Distinct outputs retain
+their evidence/lifecycle write interleaving; a later failure does not roll back
+earlier writes. Names, bytes, digests and assurance otherwise remain unchanged.</p>
 <p>A human can carve an observable contract out of a claim as an <code>expectation</code>
 and check it with the existing verifier — <strong>the claim itself is never
 lowered</strong>: <code>expectation E { trigger action alias.name</code> (or <code>trigger
