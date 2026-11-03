@@ -3111,10 +3111,10 @@ compose OrderSystem {
   UTF-16 start/end. Bare root wording replaces the component wrapper; original
   action/Kernel metadata stays unchanged. Error phases: immediate lowering,
   model assembly, authored-order queued typing, then init/component checking.
+  A conditional's arms now check against the supplied expectation, not the inferred carrier: `m[if c then 0 else true]` with `m: Map<A, Bool>` now names `Named("A")` instead of `Range(0, 1)`. This arm change altered no measured admission result.
   Measured `check` removal union: **11 complete contexts /9 root-component pairs
-  /22 mode-context pairs**. Base `c16cf35dc424619d1e1f43a340e6cf7cac23ebcb`; candidate
-  `78ffb38f714c0fd44e63148e20d34f9ebd5c4563` plus seven-file source patch
-  `dad156bf383f3d8907c5275bcb44cce189c899076123ad7b52d138b6c81461c1`. Each mode is
+  /22 mode-context pairs**. Base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`;
+  head `7653cc784354bc562bd85bd888cf78d0091272f2`. Each mode is
   stable or FSL5-opt-in on unchanged source, twice per side. Every transition below
   is check-ok/exit0 → semantics-error/exit2. The nine new exact three-file `check c.fsl`
   contexts are preservation only; physical direct.fsl presence grants no direct/API/
@@ -3138,7 +3138,7 @@ compose OrderSystem {
   Public Rust SyncRef requires arg_spans; fallible into_validated_syntax validates
   before projection, unlike raw/lossy syntax/kernel_ast/into_syntax. The three CLI
   migrations add one full core validation per call; measured whole-CLI cost is
-  not isolated incremental cost. The seven-state caller cohort measured four builds/
+  not isolated incremental cost. The seven-state caller cohort, on an earlier candidate and not rerun on this head, measured four builds/
   16CLI observations, twice on fixed valid inputs: R/I/M honestly survived and all
   exact restores preserved output with fresh H0 bytes/no restore builds. Whole
   stdout/JSON/exits/non-time stderr matched; only the observed, framing-validated

@@ -2914,9 +2914,9 @@ compose OrderSystem {
   span のみ保持します。CLI/Worker loc は先頭、LSP は UTF-16 の始点・終点です。
   部品 wrapper ではなく裸のルート文言を使い、元の action/Kernel メタデータは変えません。
   優先順位は即時 lowering、モデル組立、記述順の待機実引数検査、init/部品検査です。
+  条件式の各 arm は推論した carrier ではなく与えられた期待型で検査します。`m: Map<A, Bool>` の `m[if c then 0 else true]` は `Range(0, 1)` ではなく `Named("A")` を示します。この arm の変更で、測定した入力の受理判定は変わっていません。
   測定済み check 削除の和集合は11完全コンテキスト・9ルート/部品組・22モード組です。
-  base c16cf35dc424619d1e1f43a340e6cf7cac23ebcb、candidate 78ffb38f714c0fd44e63148e20d34f9ebd5c4563
-  + seven-file patch dad156bf383f3d8907c5275bcb44cce189c899076123ad7b52d138b6c81461c1。
+  base 5564b25ccb37e3477311fde1dae5eb6298eb6b2d、head 7653cc784354bc562bd85bd888cf78d0091272f2。
   stable/FSL5-opt-in 各モード・各側2回、全件 check-ok/exit0 → semantics-error/exit2。
   以下の全IDを保持します（分類・位置・正確なソース同一性は上記設計に記載）。
 
@@ -2939,7 +2939,7 @@ compose OrderSystem {
   公開 Rust SyncRef に arg_spans が必須です。into_validated_syntax は消去前に検査し、
   syntax/kernel_ast/into_syntax は未検査・情報を失う変換のままです。移行済みCLI3箇所は
   各呼出しで完全コア検査が1回増えます。CLI全体の測定を追加検査単体の費用とは扱いません。
-  呼出経路は7状態・4ビルド・16CLI観測を固定した妥当入力で各2回測定済みです。
+  呼出経路は以前の候補で（この head では再実行せず）7状態・4ビルド・16CLI観測を固定した妥当入力で各2回測定済みです。
   R/I/M は実際に生存し、正確なソース復元後は新規ビルドしたH0の同一バイトを再利用して
   出力保存を確認しました（復元時の再ビルドなし）。stdout/JSON/終了コードとstderrの
   非時間部分は全体一致し、実測されたmutate経過時間スカラーだけは診断書式を検査した上で
