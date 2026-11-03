@@ -1,0 +1,7 @@
+spec DepthCut {
+  type N = 0..100
+  state { x: N }
+  init { x = 0 }
+  action inc() { requires x < 100  x = x + 1 }
+  invariant Safe { x <= 100 }
+}

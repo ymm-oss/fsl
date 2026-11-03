@@ -108,6 +108,39 @@ fn rbac_baseline_uses_explicit_and_keeps_legacy_verified_literal() {
 }
 
 #[test]
+fn baseline_claims_unbounded_only_on_explicit_closure() {
+    let closed = run(&[
+        "rust/fslc/tests/fixtures/issue_1281_closed.fsl",
+        "--depth",
+        "2",
+        "--max-mutants",
+        "0",
+    ]);
+    report(&closed, 0);
+    assert_eq!(
+        progress(&closed),
+        [("mutate baseline: proved", "explicit")],
+        "a closed state space is the only proved baseline"
+    );
+    assert!(!String::from_utf8_lossy(&closed.stdout).contains("proved"));
+
+    let cut = run(&[
+        "rust/fslc/tests/fixtures/issue_1281_depth_cut.fsl",
+        "--depth",
+        "3",
+        "--max-mutants",
+        "0",
+    ]);
+    report(&cut, 0);
+    assert_eq!(
+        progress(&cut),
+        [("mutate baseline: verified", "explicit")],
+        "a depth-cut explicit baseline must stay bounded"
+    );
+    assert!(!String::from_utf8_lossy(&cut.stdout).contains("proved"));
+}
+
+#[test]
 fn builtin_progress_uses_evaluated_count_not_the_larger_cap() {
     let output = run(BUILTIN);
     let value = report(&output, 0);

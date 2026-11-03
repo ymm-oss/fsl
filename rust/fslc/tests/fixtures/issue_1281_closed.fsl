@@ -1,0 +1,7 @@
+spec Closed {
+  type Small = 0..1
+  state { x: Small }
+  init { x = 0 }
+  action flip() { x = 1 - x }
+  invariant Safe { x <= 1 }
+}
