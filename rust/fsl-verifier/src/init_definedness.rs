@@ -28,9 +28,10 @@ use fsl_solver::SmtSolver;
 use crate::VerifyError;
 use crate::eval::{
     binder_source_expressions, binder_values, binder_where, binder_where_expression,
-    confine_binary_rhs, eval, eval_with_bindings, evaluation_status, i64_term_is_in_range,
-    index_accessible, method_definedness,
+    confine_binary_rhs, enumerated_binder_binding, eval, eval_with_bindings, evaluation_status,
+    i64_term_is_in_range, index_accessible, method_definedness,
 };
+use crate::transition::{InitRead, init_read_status, visit_init_reads};
 use crate::value::{SymbolicState, SymbolicValue, TypedBindings as Bindings, bool_term, int_term};
 
 /// One place an init evaluation can fail.
@@ -215,18 +216,26 @@ pub(crate) fn init_failure_sites<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
 ) -> Result<Vec<InitFailureSite<S::Term>>, VerifyError> {
     let mut sites = Vec::new();
-    let reached = solver.bool_value(true);
-    for statement in &model.init {
-        statement_sites(
-            solver,
-            model,
-            statement,
-            state,
-            &Bindings::new(),
-            &reached,
-            &mut sites,
-        )?;
-    }
+    visit_init_reads(
+        solver,
+        model,
+        state,
+        &mut |read, state, bindings, reached| {
+            let mut local = Vec::new();
+            let span = match read {
+                InitRead::Expression(expr, span) => {
+                    expression_sites(solver, model, expr, state, bindings, reached, &mut local)?;
+                    span
+                }
+                InitRead::Target(target, span) => {
+                    lvalue_sites(solver, model, target, state, bindings, reached, &mut local)?;
+                    span
+                }
+            };
+            extend_located_sites(&mut sites, local, span);
+            Ok(init_read_status(solver, model, read, state, bindings)?.fully_defined)
+        },
+    )?;
     Ok(sites)
 }
 
@@ -250,152 +259,6 @@ fn extend_located_sites<T>(
                 message: located(message, span),
             }),
     );
-}
-
-#[allow(clippy::too_many_lines)]
-fn statement_sites<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    statement: &Statement,
-    state: &SymbolicState<S::Term>,
-    bindings: &Bindings<S::Term>,
-    reached: &S::Term,
-    sites: &mut Vec<InitFailureSite<S::Term>>,
-) -> Result<(), VerifyError> {
-    match statement {
-        Statement::Assign {
-            target,
-            value,
-            span,
-        } => {
-            let mut local = Vec::new();
-            expression_sites(solver, model, value, state, bindings, reached, &mut local)?;
-            let value_defined =
-                evaluation_status(solver, model, value, state, bindings, None)?.fully_defined;
-            let target_reached = solver.and(&[reached.clone(), value_defined])?;
-            lvalue_sites(
-                solver,
-                model,
-                target,
-                state,
-                bindings,
-                &target_reached,
-                &mut local,
-            )?;
-            extend_located_sites(sites, local, *span);
-        }
-        Statement::If {
-            condition,
-            then_statements,
-            else_statements,
-            span,
-        } => {
-            let mut local = Vec::new();
-            expression_sites(
-                solver, model, condition, state, bindings, reached, &mut local,
-            )?;
-            extend_located_sites(sites, local, *span);
-            let condition_defined =
-                evaluation_status(solver, model, condition, state, bindings, None)?.fully_defined;
-            let value = eval(solver, model, condition, state, &mut bindings.clone(), None)?;
-            let value = bool_term(&value)?.clone();
-            let then_reached =
-                solver.and(&[reached.clone(), condition_defined.clone(), value.clone()])?;
-            for statement in then_statements {
-                statement_sites(
-                    solver,
-                    model,
-                    statement,
-                    state,
-                    bindings,
-                    &then_reached,
-                    sites,
-                )?;
-            }
-            let else_reached =
-                solver.and(&[reached.clone(), condition_defined, solver.not(&value)?])?;
-            for statement in else_statements {
-                statement_sites(
-                    solver,
-                    model,
-                    statement,
-                    state,
-                    bindings,
-                    &else_reached,
-                    sites,
-                )?;
-            }
-        }
-        Statement::ForAll {
-            binder,
-            statements,
-            span,
-        } => {
-            let source = binder_source_expressions(binder);
-            let mut source_sites = Vec::new();
-            ordered_sites(
-                solver,
-                model,
-                source.iter().copied(),
-                state,
-                bindings,
-                reached,
-                &mut source_sites,
-            )?;
-            extend_located_sites(sites, source_sites, *span);
-            let source_defined = solver.and(
-                &source
-                    .into_iter()
-                    .map(|expr| defined(solver, model, expr, state, bindings))
-                    .collect::<Result<Vec<_>, _>>()?,
-            )?;
-            let source_reached = solver.and(&[reached.clone(), source_defined])?;
-            let where_expr = binder_where_expression(binder);
-            for (name, value, membership) in
-                binder_values(solver, model, binder, state, bindings, None)?
-            {
-                let mut local = bindings.clone();
-                local.insert(name, value);
-                let where_reached = solver.and(&[
-                    source_reached.clone(),
-                    membership.unwrap_or_else(|| solver.bool_value(true)),
-                ])?;
-                let mut body_reached = where_reached.clone();
-                if let Some(where_expr) = where_expr {
-                    let mut where_sites = Vec::new();
-                    expression_sites(
-                        solver,
-                        model,
-                        where_expr,
-                        state,
-                        &local,
-                        &where_reached,
-                        &mut where_sites,
-                    )?;
-                    extend_located_sites(sites, where_sites, *span);
-                    let where_defined =
-                        evaluation_status(solver, model, where_expr, state, &local, None)?
-                            .fully_defined;
-                    let where_term =
-                        binder_where(solver, model, binder, state, &mut local.clone(), None)?
-                            .unwrap_or_else(|| solver.bool_value(true));
-                    body_reached = solver.and(&[body_reached, where_defined, where_term])?;
-                }
-                for statement in statements {
-                    statement_sites(
-                        solver,
-                        model,
-                        statement,
-                        state,
-                        &local,
-                        &body_reached,
-                        sites,
-                    )?;
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 fn lvalue_sites<S: SmtSolver>(
@@ -742,7 +605,7 @@ fn expression_sites_inner<S: SmtSolver>(
                 binder_values(solver, model, binder, state, bindings, None)?
             {
                 let mut local = bindings.clone();
-                local.insert(name, candidate);
+                local.insert(name, enumerated_binder_binding(solver, model, candidate));
                 // Symbolic candidates include absent members and non-live slots.
                 let membership = membership.unwrap_or_else(|| solver.bool_value(true));
                 let present = solver.and(&[active.clone(), membership.clone()])?;

@@ -87,8 +87,8 @@ impl fmt::Display for RuntimeError {
 impl std::error::Error for RuntimeError {}
 
 /// A `ModelError` is never a partial-operation failure. Its "division by
-/// zero"/"remainder by zero" come from constant folding while the model is built
-/// (`check` rejects them), not from evaluating an action, so the conversion
+/// zero"/"remainder by zero" come from constant folding during model construction
+/// or domain planning, not from evaluating an action, so the conversion
 /// deliberately sets `partial_operation: None` even though the messages match.
 impl From<ModelError> for RuntimeError {
     fn from(error: ModelError) -> Self {
@@ -898,7 +898,13 @@ fn binder_values(
 ) -> Result<Vec<(Value, Bindings)>, RuntimeError> {
     let values = match binder {
         Binder::Typed { type_name, .. } => {
-            model.domain_values(&TypeRef::Named(qualified_type(type_name)?))?
+            let type_name = qualified_type(type_name)?;
+            let ty = if type_name == "Bool" {
+                TypeRef::Bool
+            } else {
+                TypeRef::Named(type_name)
+            };
+            model.domain_values(&ty)?
         }
         Binder::Range { lo, hi, .. } => {
             let mut local = bindings.clone();

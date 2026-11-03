@@ -212,3 +212,35 @@ controls, not additional restrictions or implementation claims in #1463.
 #1459 closes the `X1/operand-method-types` row (`acyclic(done)` for Bool `done`),
 which now expects a located check rejection at 8:3 and outcomes
 `[Error, Error, Error, Error]` instead of `[Ok, Error, Error, Error]`.
+
+## #1480 Stage A: valid static arithmetic
+
+[Static binder constant expressions](DESIGN-static-binder-constant-expressions.md)
+adds successful checked integer folding to the three static binder adapters.
+It does not change the early wrapper/filter/init-source rejections above, nor
+add an invalid-static-expression admission rule. Failed folding retains each
+old helper and its recursive diagnostic precedence. The `X1/static-range`
+CURRENT row is `[Ok, Safe, Safe, Error]`; its historical source/table and
+`X1/dynamic-range` are preserved. Explicit liveness remains unsupported, and
+the later #1480 amendments have their own scope and qualification below.
+The Stage A own-tree inventory compares B `d11f32631f75afa64fa486cdf4f9b46c6e77d28e`
+with code H `c86f6bf4422b507f57862f830ad13726f8ce7734`: 610 corpus +299 actual
+inline IDs, **zero ok→error transitions** and no full check-output changes.
+The linked decision records the exact command, binary identities and limits.
+
+## #1480: shared refusal for unsupported binder domains
+
+The original-issue policy selects early rejection for these existing engine
+restrictions, rather than adding execution support. Checked-model construction
+shares each rule across `check` and verification dispatch:
+
+| Previously check-ok form | New boundary | Preserved sibling |
+|---|---|---|
+| Init statement `forall` with a free state read in either integer-range endpoint | Existing compile-time-constant diagnostic at the owning `forall` statement, including empty bodies and unreachable branches | Supported init RHS expressions and lexical locals; action/property conditional ranges |
+| Typed binder over a named Struct | Existing finite-scalar diagnostic through shared binder validation at the owning statement/expression | Bool, named Enum/Range binders, ordinary Struct values and collection-of-Struct binders |
+
+These are **breaking check-admission removals**. No Struct-domain enumeration
+or new public Kernel form is added. Existing nested-init restrictions remain
+separate. The actual own-tree base/head command, SHAs, form count and every
+`ok`→`error` transition are **pending the required sweep**; no empty transition
+set or whole-#1480 completion is claimed.

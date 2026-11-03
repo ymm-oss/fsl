@@ -33,6 +33,7 @@ pub use fsl_syntax::{
     Statement as KernelStatement, SymbolPath,
 };
 
+pub mod binder_range;
 mod compose;
 mod db;
 mod decision_table;
@@ -93,12 +94,14 @@ pub use finite_domain::{DOMAIN_BOUND, SolverObligation, solver_obligations};
 pub use model::{
     ActionDef, ActionGuard, DiagnosticEdit, KernelModel, LeadsToDef, ModelError, ParamDef,
     PropertyDef, TypeDef, TypeRef, Value as FslValue, WRITE_DISTINCTNESS_UNPROVED_CODE,
-    build_model, check_init_collection_binder, state_references, static_leadsto_bindings,
+    build_model, check_init_collection_binder, integer_range_state_references, state_references,
+    static_leadsto_bindings,
 };
 pub use naming::{
     AmbiguousName, ComposeName, Glossary, NameMap, PublicName, SyntheticName,
     unmapped_public_spelling,
 };
+pub use obligation::action_has_integer_range_binder;
 pub use origin::{
     INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
     TERMINAL_TARGET, TraceabilityRegistry, URGENT_ACTIONS_STEP, action_guard_target,

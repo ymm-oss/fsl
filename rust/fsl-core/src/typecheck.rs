@@ -125,6 +125,8 @@ pub(crate) fn unknown_span() -> Span {
 #[derive(Clone, Default)]
 pub(crate) struct TypeScope {
     types: BTreeMap<String, TypeRef>,
+    // Distinguish locals (even without a value fact) from state/constant entries.
+    lexical: BTreeSet<String>,
     /// Scalar candidate values captured when a collection let is evaluated.
     pub(crate) collections: HashMap<String, Vec<Vec<Expr>>>,
 }
@@ -158,12 +160,20 @@ impl TypeEnv {
     pub(crate) fn insert(&mut self, name: String, ty: TypeRef) -> Option<TypeRef> {
         // A binder or a subsequent binding must not inherit an alias it shadows.
         self.collections.remove(&name);
+        self.lexical.insert(name.clone());
         self.types.insert(name, ty)
     }
 
     pub(crate) fn remove(&mut self, name: &str) -> Option<TypeRef> {
         self.collections.remove(name);
+        self.lexical.remove(name);
         self.types.remove(name)
+    }
+
+    fn extend_lexical(&mut self, bindings: &[(String, TypeRef)]) {
+        self.lexical
+            .extend(bindings.iter().map(|(name, _)| name.clone()));
+        self.types.extend(bindings.iter().cloned());
     }
 
     pub(crate) fn collection_candidates(
@@ -221,7 +231,7 @@ pub(crate) fn base_env(model: &KernelModel) -> TypeEnv {
 
 pub(crate) fn expression_env(model: &KernelModel, bindings: &[(String, TypeRef)]) -> TypeEnv {
     let mut env = base_env(model);
-    env.extend(bindings.iter().cloned());
+    env.extend_lexical(bindings);
     env
 }
 
@@ -871,6 +881,65 @@ pub(crate) fn lvalue_type(
         .map_err(|model_error| error(model_error.message).with_span(span))
 }
 
+enum AggregateValidation {
+    Expanded(Expr),
+    Deferred,
+}
+
+fn aggregate_validation(
+    kind: AggregateKind,
+    binder: &Binder,
+    value: Option<&Expr>,
+    env: &TypeEnv,
+    model: &KernelModel,
+    expand: bool,
+) -> Result<AggregateValidation, TypecheckError> {
+    let mut deferred = !expand;
+    if let Binder::Range { lo, hi, .. } = binder {
+        use crate::binder_range::{RangeBinding, RangePlan, RangeUnknown};
+
+        let lexical = env
+            .lexical
+            .iter()
+            .map(|name| RangeBinding {
+                name,
+                semantic_ty: &env[name],
+                fact: None,
+            })
+            .collect::<Vec<_>>();
+        // Authored bounds/filter/value have passed. Neither a carrier nor a
+        // lexical value without its captured fact establishes execution eligibility.
+        // Check both endpoints in order even if the first needs deferral.
+        for bound in [lo.as_ref(), hi.as_ref()] {
+            match model.plan_integer_range(bound, bound, &lexical) {
+                RangePlan::Static { .. } => {}
+                RangePlan::Unknown(RangeUnknown::ConstantFoldFailed) => {
+                    // A closed child's failed fold does not make the whole bound closed.
+                    let mut dependent = false;
+                    crate::model::visit_free_names(bound, &BTreeSet::new(), &mut |name| {
+                        if env.lexical.contains(name)
+                            || model.state.iter().any(|(state, _)| state == name)
+                        {
+                            dependent = true;
+                        }
+                    });
+                    if dependent {
+                        deferred = true;
+                    } else {
+                        // Retain the strict owner's genuine failed-fold diagnostic.
+                        static_public_int(bound, model)?;
+                    }
+                }
+                _ => deferred = true,
+            }
+        }
+    }
+    if deferred {
+        return Ok(AggregateValidation::Deferred);
+    }
+    normalize_aggregate(kind, binder, value, env, model).map(AggregateValidation::Expanded)
+}
+
 pub(crate) fn normalize_aggregate(
     kind: AggregateKind,
     binder: &Binder,
@@ -1161,13 +1230,21 @@ fn aggregate_result(kind: AggregateKind, terms: Vec<Expr>) -> Expr {
 }
 
 fn static_public_int(expr: &Expr, model: &KernelModel) -> Result<i64, TypecheckError> {
+    if let Ok(value) = model.constant_integer(expr) {
+        return Ok(value);
+    }
+    legacy_static_public_int(expr, model)
+}
+
+// Do not fold children on the legacy failed-fold path.
+fn legacy_static_public_int(expr: &Expr, model: &KernelModel) -> Result<i64, TypecheckError> {
     match expr {
         Expr::Num(value) => Ok(*value),
         Expr::Var(name) => match model.consts.get(name) {
             Some(crate::FslValue::Int(value)) => Ok(*value),
             _ => Err(error(format!("'{}' is not an integer const", shown(name)))),
         },
-        Expr::Neg(value) => static_public_int(value, model)?
+        Expr::Neg(value) => legacy_static_public_int(value, model)?
             .checked_neg()
             .ok_or_else(|| error("integer overflow in range bound")),
         _ => Err(error(
@@ -1217,6 +1294,7 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
 #[derive(Clone)]
 pub(crate) struct ValidationPhase {
     normalize_aggregates: bool,
+    aggregate_bounds_only: bool,
     substituted: BTreeSet<String>,
     // Reserved by earlier evaluation, without making those names readable.
     pub(crate) collisions: HashSet<String>,
@@ -1229,6 +1307,7 @@ impl ValidationPhase {
     pub(crate) fn normalized() -> Self {
         Self {
             normalize_aggregates: true,
+            aggregate_bounds_only: false,
             substituted: BTreeSet::new(),
             collisions: HashSet::new(),
         }
@@ -1272,6 +1351,7 @@ impl ValidationPhase {
         }
         Self {
             normalize_aggregates: self.normalize_aggregates && !expands,
+            aggregate_bounds_only: self.aggregate_bounds_only,
             substituted,
             collisions: self.collisions.clone(),
         }
@@ -1319,6 +1399,13 @@ fn validate_binder(
         }
     }
     let ty = binder_type(binder, env, model).map_err(|error| error.with_span(span))?;
+    if let (Binder::Typed { .. }, TypeRef::Named(name)) = (binder, &ty)
+        && matches!(model.types.get(name), Some(TypeDef::Struct { .. }))
+    {
+        model
+            .domain_values(&ty)
+            .map_err(|failure| error(failure.message).with_span(span))?;
+    }
     let (name, where_expr) = match binder {
         Binder::Typed {
             name, where_expr, ..
@@ -1795,14 +1882,43 @@ fn validate_expression_inner(
                     &local_relations,
                 )?;
             }
-            if phase.normalize_aggregates && expands {
-                let normalized = normalize_aggregate(*kind, binder, value.as_deref(), env, model)
-                    .map_err(|error| error.with_span(span))?;
-                // Generated copies have already passed authored binding checks.
-                let mut generated = phase.clone();
-                crate::collect_pattern_names(&normalized, &mut generated.collisions);
-                generated.substituted.extend(generated.collisions.drain());
-                generated.check(&normalized, env, model, span, expected, self_relations)?;
+            if expands && (phase.normalize_aggregates || phase.aggregate_bounds_only) {
+                match aggregate_validation(
+                    *kind,
+                    binder,
+                    value.as_deref(),
+                    env,
+                    model,
+                    phase.normalize_aggregates,
+                )
+                .map_err(|error| error.with_span(span))?
+                {
+                    AggregateValidation::Expanded(normalized) => {
+                        // Generated copies have already passed authored binding checks.
+                        let mut generated = phase.clone();
+                        crate::collect_pattern_names(&normalized, &mut generated.collisions);
+                        generated.substituted.extend(generated.collisions.drain());
+                        generated.check(&normalized, env, model, span, expected, self_relations)?;
+                    }
+                    AggregateValidation::Deferred if !phase.aggregate_bounds_only => {
+                        // The complete authored typing pass has succeeded. Revisit
+                        // nested bounds without expansion or ordinary value folding;
+                        // this phase cannot request another authored-tree replay.
+                        let mut bounds = phase.clone();
+                        bounds.normalize_aggregates = false;
+                        bounds.aggregate_bounds_only = true;
+                        validate_expression_in_phase(
+                            expr,
+                            env,
+                            model,
+                            span,
+                            expected,
+                            &bounds,
+                            self_relations,
+                        )?;
+                    }
+                    AggregateValidation::Deferred => {}
+                }
             }
         }
         Expr::BinaryNamed { left, right, .. } => {
@@ -2076,8 +2192,37 @@ pub(crate) fn validate_expression_type_between(
     model: &KernelModel,
     expected_model: &KernelModel,
 ) -> Result<(), TypecheckError> {
+    validate_expression_type_in_phase(
+        expr,
+        expected,
+        bindings,
+        model,
+        expected_model,
+        &ValidationPhase::normalized(),
+    )
+}
+
+/// Full authored typing for the pure planner, without candidate enumeration.
+pub(crate) fn validate_planner_integer_endpoint(
+    expr: &Expr,
+    bindings: &[(String, TypeRef)],
+    model: &KernelModel,
+) -> Result<(), TypecheckError> {
+    let mut phase = ValidationPhase::normalized();
+    phase.normalize_aggregates = false;
+    validate_expression_type_in_phase(expr, &TypeRef::Int, bindings, model, model, &phase)
+}
+
+fn validate_expression_type_in_phase(
+    expr: &Expr,
+    expected: &TypeRef,
+    bindings: &[(String, TypeRef)],
+    model: &KernelModel,
+    expected_model: &KernelModel,
+    phase: &ValidationPhase,
+) -> Result<(), TypecheckError> {
     let mut env = base_env(model);
-    env.extend(bindings.iter().cloned());
+    env.extend_lexical(bindings);
     let span = unknown_span();
     let resolved = carrier_type(expected, expected_model).map_err(|error| error.with_span(span))?;
     let actual =
@@ -2085,15 +2230,16 @@ pub(crate) fn validate_expression_type_between(
     if !types_compatible(&actual, &resolved, model).map_err(|error| error.with_span(span))? {
         return Err(not_assignable(&actual, expected).with_span(span));
     }
-    validate_expression(
-        expr,
-        &env,
-        model,
-        span,
-        Some(&resolved),
-        &SelfRelations::new(),
-    )
-    .map_err(|error| error.with_span(span))
+    phase
+        .check(
+            expr,
+            &env,
+            model,
+            span,
+            Some(&resolved),
+            &SelfRelations::new(),
+        )
+        .map_err(|error| error.with_span(span))
 }
 
 /// Recursively type-check a standalone predicate against a built model, using
@@ -2187,6 +2333,13 @@ fn validate_leadsto_expression_types(
     env: &TypeEnv,
     model: &KernelModel,
 ) -> Result<(), TypecheckError> {
+    if leadsto.within.is_some_and(|within| within < 0) {
+        return Err(error(format!(
+            "leadsTo '{}' within must be non-negative",
+            shown(&leadsto.name)
+        ))
+        .with_span(leadsto.span));
+    }
     let mut local = env.clone();
     let self_relations = SelfRelations::new();
     for binder in &leadsto.binders {

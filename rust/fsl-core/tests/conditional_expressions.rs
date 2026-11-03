@@ -177,7 +177,7 @@ fn refinement_conditionals_use_the_shared_static_type_rules() {
 }
 
 #[test]
-fn refinement_rejects_dynamic_aggregate_ranges() {
+fn authored_refinement_dynamic_aggregate_preserves_ast_but_strict_projection_rejects_it() {
     let implementation = build(
         "spec Impl { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = 0 } action stay() { lo = lo hi = hi total = total } invariant I { true } }",
     )
@@ -187,13 +187,33 @@ fn refinement_rejects_dynamic_aggregate_ranges() {
     )
     .expect("abstraction");
 
-    let error = parse_refinement(
+    let refinement = parse_refinement(
         "refinement R { impl Impl abs Abs map total = count(i in lo..hi) action stay() -> stay() }",
         &implementation,
         &abstraction,
     )
-    .expect_err("dynamic refinement aggregate range must fail closed");
-    assert!(error.message.contains("'lo' is not an integer const"));
+    .expect("authored dynamic refinement aggregate is deferred");
+    let mapping = &refinement.state_maps["total"];
+    assert_eq!(mapping.name, "total");
+    assert!(mapping.binder.is_none());
+    assert_eq!(
+        mapping.expr,
+        fsl_syntax::parse_expr("count(i in lo..hi)").expect("unchanged authored mapping")
+    );
+    assert_eq!(
+        fsl_core::public_kernel_expression(
+            &mapping.expr,
+            &implementation,
+            "dynamic-refinement.fsl",
+            mapping.span.expect("authored mapping span"),
+            Some(&fsl_core::TypeRef::Int),
+        ),
+        Err(fsl_core::PublicKernelError {
+            message: "'lo' is not an integer const".into(),
+            span: None,
+        }),
+        "strict projection must retain its complete rejection"
+    );
 }
 
 #[test]

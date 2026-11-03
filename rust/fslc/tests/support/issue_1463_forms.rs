@@ -552,12 +552,23 @@ pub fn cases() -> Vec<Case> {
             [Ok, Violated, Violated, Violated],
         ),
     ] {
-        cases.push(case(
+        let mut c = case(
             format!("X1/{name}"),
             text,
             outcomes,
             (name == "operand-method-types").then_some("invariant Capture"),
-        ));
+        );
+        // CURRENT contract migration; historical baseline and source stay intact.
+        if name == "negative-within" {
+            c.expected = [Error; 4];
+            c.rejection = Some("leadsTo Capture");
+        } else if name == "typed-domain" {
+            c.expected = [Ok, Safe, Safe, Safe];
+        } else if name == "static-range" {
+            // CURRENT static arithmetic support; explicit leadsTo stays unsupported.
+            c.expected = [Ok, Safe, Safe, Error];
+        }
+        cases.push(c);
     }
     for expr in [
         "Seq { 1 }[0] == 1",

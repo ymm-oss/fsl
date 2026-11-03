@@ -391,20 +391,49 @@ spec AggregatePartialOperations {
 }
 
 #[test]
-fn checked_model_rejects_dynamic_aggregate_ranges_in_every_expression_position() {
+fn authored_dynamic_aggregate_ranges_preserve_ast_but_strict_projection_rejects_them() {
     let sources = [
         "spec DynamicInit { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = count(i in lo..hi) } action stay() { lo = lo hi = hi total = total } invariant I { true } }",
         "spec DynamicAction { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = 0 } action stay() { lo = lo hi = hi total = count(i in lo..hi) } invariant I { true } }",
         "spec DynamicProperty { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = 0 } action stay() { lo = lo hi = hi total = total } invariant I { count(i in lo..hi) >= 0 } }",
     ];
 
-    for source in sources {
+    for (position, source) in sources.into_iter().enumerate() {
         let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse source");
-        let error = build_model(kernel).expect_err("dynamic aggregate range must fail closed");
-        assert!(
-            error.message.contains("'lo' is not an integer const"),
-            "{}",
-            error.message
+        let model = build_model(kernel.clone()).expect("authored dynamic range is deferred");
+        let stored = if position < 2 {
+            let statements = if position == 0 {
+                &model.init
+            } else {
+                &model.actions[0].statements
+            };
+            let fsl_core::KernelStatement::Assign {
+                target: fsl_core::KernelLValue::Var(name),
+                value,
+                ..
+            } = &statements[2]
+            else {
+                panic!("third statement must remain the total assignment");
+            };
+            assert_eq!(name, "total");
+            value
+        } else {
+            &model.invariants[0].expr
+        };
+        let authored = fsl_syntax::parse_expr(if position == 2 {
+            "count(i in lo..hi) >= 0"
+        } else {
+            "count(i in lo..hi)"
+        })
+        .expect("parse unchanged authored expression");
+        assert_eq!(stored, &authored, "authored AST at position {position}");
+        assert_eq!(
+            public_kernel_contract(&kernel, &model, "dynamic-aggregate.fsl", "spec"),
+            Err(fsl_core::PublicKernelError {
+                message: "'lo' is not an integer const".into(),
+                span: None,
+            }),
+            "strict projection must retain its complete rejection at position {position}"
         );
     }
 }

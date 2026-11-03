@@ -245,6 +245,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Verdict,
+        "rust/fsl-verifier/src/agreement.rs",
+        549,
+        "validated_post_read_context",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
         "rust/fsl-verifier/src/bmc.rs",
         421,
         "check_definedness",
@@ -267,8 +274,50 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-verifier/src/bmc.rs",
+        633,
+        "checked_action_carriers",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        1399,
+        "check_state_properties_in",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
         498,
         "check_state_properties",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        1102,
+        "diagnostic_state_carriers",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        966,
+        "frozen_composite_condition",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        958,
+        "frozen_range_condition",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        1026,
+        "check_range_invariant",
         ResultOption
     ),
     entry!(
@@ -339,6 +388,20 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fsl-verifier/src/eval.rs",
         1843,
         "binder_where",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-verifier/src/eval.rs",
+        2668,
+        "binder_where_in",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-verifier/tests/issue_1480_temporal_outer_bindings.rs",
+        551,
+        "named_outer_identity",
         ResultOption
     ),
     entry!(
@@ -750,6 +813,20 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fsl-verifier/tests/support/composite_vacuity_fault.rs",
+        92,
+        "model_eval",
+        SolverResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-verifier/tests/support/induction_target_fault.rs",
+        92,
+        "model_eval",
+        SolverResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fslc/tests/solver_fail_closed.rs",
         193,
         "model_eval",
@@ -802,6 +879,37 @@ macro_rules! unresolved_ordinary {
 // shape. They are explicitly ordinary rather than silently omitted: a return
 // whose alias becomes relevant to optional verdicts must be reconsidered here.
 const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1480_temporal_outer_bindings.rs",
+        433,
+        "ints"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1480_temporal_outer_bindings.rs",
+        437,
+        "bool_int"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1480_temporal_outer_bindings.rs",
+        441,
+        "tag_bool"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1480_temporal_outer_bindings.rs",
+        649,
+        "literal_state"
+    ),
+    // U3 helpers return binding records/scopes, not fallible optional verdicts.
+    unresolved_ordinary!(
+        "rust/fsl-verifier/src/eval/range_metadata_tests.rs",
+        96,
+        "parameter"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/src/eval/range_metadata_tests.rs",
+        102,
+        "params"
+    ),
     // ProgressResult is Result<ProgressCheck, VerifyError>, not an optional carrier.
     unresolved_ordinary!(
         "rust/fsl-verifier/tests/refinement_progress.rs",

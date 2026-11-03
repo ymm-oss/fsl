@@ -3,25 +3,31 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use fsl_core::binder_range::{
+    InclusiveI64, RangeBinding, RangePlan, RangePrerequisite, RangeUnknown,
+};
 use fsl_core::{
     FslValue, KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelModel, Pattern, TypeDef, TypeRef,
 };
 use fsl_core::{pattern_binding_flows, recursion};
-use fsl_solver::SmtSolver;
+use fsl_solver::{ModelValue, SmtSolver};
 
 use crate::VerifyError;
+use crate::bmc::{CheckedStateCarriers, DischargedIntegerRange};
 use crate::value::TypedBindings as Bindings;
 use crate::value::{
-    SymbolicState, SymbolicValue, TypedBinding, bool_term, coerce, collection_contains,
-    collection_entries, collection_key_equal, concrete_value, distinct_entries, i64_index,
-    int_term, is_collection, ite_value, literal_key, logical_equal, ordered_collection_entries,
-    select_finite, solver_sort,
+    BindingRecord, RangeFact, SymbolicState, SymbolicValue, TypedBinding, bool_term, coerce,
+    collection_contains, collection_entries, collection_key_equal, concrete_value,
+    distinct_entries, i64_index, int_term, is_collection, ite_value, literal_key, logical_equal,
+    ordered_collection_entries, select_finite, solver_sort,
 };
 
 type BinderCandidates<T> = Vec<(String, SymbolicValue<T>)>;
 type SymbolicPair<T> = (SymbolicValue<T>, SymbolicValue<T>);
 
+#[cfg(test)]
+mod range_metadata_tests;
 #[cfg(test)]
 mod scope_tests;
 
@@ -48,8 +54,20 @@ pub(crate) fn eval<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    eval_in(solver, model, expr, state, bindings, old_state, None)
+}
+
+pub(crate) fn eval_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
     in_closed_scope(expr, bindings, |scope| {
-        eval_with_bindings(solver, model, expr, state, scope, old_state)
+        eval_with_bindings_in(solver, model, expr, state, scope, old_state, ctx)
     })
 }
 
@@ -77,7 +95,19 @@ pub(crate) fn eval_with_bindings<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
-    recursion::guard(|| eval_inner(solver, model, expr, state, bindings, old_state))
+    eval_with_bindings_in(solver, model, expr, state, bindings, old_state, None)
+}
+
+pub(crate) fn eval_with_bindings_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    recursion::guard(|| eval_inner(solver, model, expr, state, bindings, old_state, ctx))
 }
 
 /// Reaching an RHS (notably through `or`) does not imply binding visibility.
@@ -94,30 +124,139 @@ fn binding_types<T>(bindings: &Bindings<T>) -> Vec<(String, TypeRef)> {
         .collect()
 }
 
+/// Enumeration fixes a literal candidate's value independently of membership.
+/// Keep its semantic type, and do not infer facts for opaque terms or enum ordinals.
+pub(crate) fn enumerated_binder_binding<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binding: TypedBinding<S::Term>,
+) -> BindingRecord<S::Term> {
+    let integer = match binding.1.as_ref() {
+        Some(TypeRef::Int | TypeRef::Range(_, _)) => true,
+        Some(TypeRef::Named(name)) => matches!(model.types.get(name), Some(TypeDef::Domain { .. })),
+        _ => false,
+    };
+    let literal = integer
+        .then(|| int_term(&binding.0).ok())
+        .flatten()
+        .and_then(|term| solver.literal_value(term));
+    match literal {
+        Some(ModelValue::Int(value)) => {
+            BindingRecord::with_range_fact(binding, RangeFact::parameter(value))
+        }
+        _ => binding.into(),
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn eval_binding<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     expr: &Expr,
     state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
-) -> Result<TypedBinding<S::Term>, VerifyError> {
+    rhs_defined: Option<&S::Term>,
+) -> Result<BindingRecord<S::Term>, VerifyError> {
+    eval_binding_in(solver, model, expr, state, bindings, rhs_defined, None)
+}
+
+pub(crate) fn eval_binding_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    rhs_defined: Option<&S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<BindingRecord<S::Term>, VerifyError> {
     let ty = model
         .expression_type(expr, &binding_types(bindings), None)?
         .ok_or_else(|| VerifyError::new("binding requires an inferred type"))?;
-    let value = eval(solver, model, expr, state, bindings, None)?;
-    Ok(TypedBinding(value, Some(ty)))
+    let enclosing = bindings.clone();
+    let value = eval_in(solver, model, expr, state, bindings, None, ctx)?;
+    let binding = TypedBinding(value, Some(ty));
+    Ok(
+        match capture_let_range_fact(solver, model, expr, state, &enclosing, rhs_defined) {
+            Some(fact) => BindingRecord::with_range_fact(binding, fact),
+            None => binding.into(),
+        },
+    )
 }
 
-fn eval_raw<S: SmtSolver>(
+/// Capture eligibility against the original read frame, never assert or consume it.
+fn capture_let_range_fact<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    enclosing: &Bindings<S::Term>,
+    rhs_defined: Option<&S::Term>,
+) -> Option<RangeFact<S::Term>> {
+    let records: Vec<_> = enclosing.records().collect();
+    let lexical = records
+        .iter()
+        .map(|(name, record)| {
+            Some(RangeBinding {
+                name,
+                semantic_ty: record.binding.1.as_ref()?,
+                fact: record.range_fact.as_ref().map(RangeFact::envelope),
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let (envelope, prerequisites) = match model.plan_integer_range(expr, expr, &lexical) {
+        RangePlan::Static { lo, hi } => (InclusiveI64::new(lo, hi)?, Vec::new()),
+        RangePlan::Finite {
+            candidates,
+            prerequisites,
+        } => (candidates, prerequisites),
+        RangePlan::Empty { .. } | RangePlan::Unknown(_) => return None,
+    };
+    // Required classified status was already computed by the caller. Only the
+    // ordinary path adds optional status work, after successful value planning.
+    let defined = match rhs_defined {
+        Some(defined) => defined.clone(),
+        None => {
+            evaluation_status(solver, model, expr, state, enclosing, None)
+                .ok()?
+                .fully_defined
+        }
+    };
+    let mut conditions = vec![defined];
+    for prerequisite in prerequisites {
+        match prerequisite {
+            RangePrerequisite::StateCarrier { name, envelope } => {
+                let term = int_term(state.get(&name)?).ok()?;
+                conditions.push(
+                    solver
+                        .and(&[
+                            solver.ge(term, &solver.int_value(envelope.lo())).ok()?,
+                            solver.le(term, &solver.int_value(envelope.hi())).ok()?,
+                        ])
+                        .ok()?,
+                );
+            }
+            RangePrerequisite::LexicalFact { input_index } => {
+                let fact = records.get(input_index)?.1.range_fact.as_ref()?;
+                if let Some(valid_when) = fact.valid_when() {
+                    conditions.push(valid_when.clone());
+                }
+            }
+        }
+    }
+    Some(RangeFact::captured(envelope, solver.and(&conditions).ok()?))
+}
+
+fn eval_raw_in<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     expr: &Expr,
     state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
     in_closed_scope(expr, bindings, |scope| {
-        recursion::guard(|| eval_inner(solver, model, expr, state, scope, old_state))
+        recursion::guard(|| eval_inner(solver, model, expr, state, scope, old_state, ctx))
     })
 }
 
@@ -129,6 +268,7 @@ fn eval_inner<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
     match expr {
         Expr::Num(value) => Ok(SymbolicValue::Scalar {
@@ -144,10 +284,10 @@ fn eval_inner<S: SmtSolver>(
             let ty = model
                 .expression_type(expr, &binding_types(bindings), None)?
                 .ok_or_else(|| VerifyError::new("expression requires an expected type"))?;
-            eval_expected(solver, model, expr, &ty, state, bindings, old_state)
+            eval_expected_in(solver, model, expr, &ty, state, bindings, old_state, ctx)
         }
         Expr::Struct { name, fields } => {
-            eval_struct_literal(solver, model, name, fields, state, bindings, old_state)
+            eval_struct_literal(solver, model, name, fields, state, bindings, old_state, ctx)
         }
         Expr::Var(name) => lookup(solver, model, name, state, bindings),
         Expr::EnumMember {
@@ -166,12 +306,12 @@ fn eval_inner<S: SmtSolver>(
         ))),
         Expr::Stage { .. } => Err(VerifyError::new("unlowered stage access")),
         Expr::Index(base, index) => {
-            let base = eval(solver, model, base, state, bindings, old_state)?;
-            let index = eval(solver, model, index, state, bindings, old_state)?;
+            let base = eval_in(solver, model, base, state, bindings, old_state, ctx)?;
+            let index = eval_in(solver, model, index, state, bindings, old_state, ctx)?;
             eval_index(solver, model, &base, &index)
         }
         Expr::Field(base, field) => {
-            let base = eval(solver, model, base, state, bindings, old_state)?;
+            let base = eval_in(solver, model, base, state, bindings, old_state, ctx)?;
             let SymbolicValue::Struct { fields, .. } = base else {
                 return Err(VerifyError::new("field access requires a struct"));
             };
@@ -185,27 +325,27 @@ fn eval_inner<S: SmtSolver>(
             name,
             args,
         } => {
-            let receiver = eval(solver, model, receiver, state, bindings, old_state)?;
+            let receiver = eval_in(solver, model, receiver, state, bindings, old_state, ctx)?;
             eval_method(
-                solver, model, receiver, name, args, state, bindings, old_state,
+                solver, model, receiver, name, args, state, bindings, old_state, ctx,
             )
         }
-        Expr::Binary { op, left, right } => {
-            eval_binary(solver, model, op, left, right, state, bindings, old_state)
-        }
+        Expr::Binary { op, left, right } => eval_binary(
+            solver, model, op, left, right, state, bindings, old_state, ctx,
+        ),
         Expr::Neg(inner) => {
-            let value = eval(solver, model, inner, state, bindings, old_state)?;
+            let value = eval_in(solver, model, inner, state, bindings, old_state, ctx)?;
             Ok(SymbolicValue::Scalar {
                 ty: TypeRef::Int,
                 term: solver.neg(int_term(&value)?)?,
             })
         }
         Expr::Not(inner) => {
-            let value = eval(solver, model, inner, state, bindings, old_state)?;
+            let value = eval_in(solver, model, inner, state, bindings, old_state, ctx)?;
             Ok(bool_value(solver, solver.not(bool_term(&value)?)?))
         }
         Expr::Is { expr, pattern } => {
-            let value = eval(solver, model, expr, state, bindings, old_state)?;
+            let value = eval_in(solver, model, expr, state, bindings, old_state, ctx)?;
             eval_pattern(solver, model, value, pattern, state, bindings)
         }
         Expr::Quantified {
@@ -213,7 +353,7 @@ fn eval_inner<S: SmtSolver>(
             binder,
             body,
         } => eval_quantified(
-            solver, model, quantifier, binder, body, state, bindings, old_state,
+            solver, model, quantifier, binder, body, state, bindings, old_state, None, ctx,
         ),
         Expr::Aggregate {
             kind,
@@ -228,18 +368,20 @@ fn eval_inner<S: SmtSolver>(
             state,
             bindings,
             old_state,
+            ctx,
         ),
         Expr::UnaryNamed { name, expr, .. } => match name.as_str() {
-            "old" => eval(
+            "old" => eval_in(
                 solver,
                 model,
                 expr,
                 old_state.ok_or_else(|| VerifyError::new("old() used without old state"))?,
                 bindings,
                 None,
+                ctx,
             ),
             "abs" => {
-                let value = eval(solver, model, expr, state, bindings, old_state)?;
+                let value = eval_in(solver, model, expr, state, bindings, old_state, ctx)?;
                 let term = int_term(&value)?;
                 let nonnegative = solver.ge(term, &solver.int_value(0))?;
                 Ok(int_value(
@@ -248,7 +390,7 @@ fn eval_inner<S: SmtSolver>(
                 ))
             }
             "rel_functional" | "rel_injective" => {
-                let value = eval(solver, model, expr, state, bindings, old_state)?;
+                let value = eval_in(solver, model, expr, state, bindings, old_state, ctx)?;
                 let (_, entries) = collection_entries(solver, model, &value)?;
                 let (shared, distinct) = if name == "rel_functional" {
                     (0, 1)
@@ -276,7 +418,7 @@ fn eval_inner<S: SmtSolver>(
                 Ok(bool_value(solver, solver.and(&clauses)?))
             }
             "rel_domain" | "rel_range" => {
-                let value = eval(solver, model, expr, state, bindings, old_state)?;
+                let value = eval_in(solver, model, expr, state, bindings, old_state, ctx)?;
                 let (ty, entries) = collection_entries(solver, model, &value)?;
                 let TypeRef::Relation(source_ty, target_ty) = &ty else {
                     unreachable!();
@@ -300,7 +442,7 @@ fn eval_inner<S: SmtSolver>(
                 })
             }
             "rel_acyclic" => {
-                let value = eval(solver, model, expr, state, bindings, old_state)?;
+                let value = eval_in(solver, model, expr, state, bindings, old_state, ctx)?;
                 let (ty, entries) = collection_entries(solver, model, &value)?;
                 let TypeRef::Relation(source_ty, target_ty) = &ty else {
                     unreachable!();
@@ -323,8 +465,8 @@ fn eval_inner<S: SmtSolver>(
             ))),
         },
         Expr::BinaryNamed { name, left, right } => {
-            let left = eval(solver, model, left, state, bindings, old_state)?;
-            let right = eval(solver, model, right, state, bindings, old_state)?;
+            let left = eval_in(solver, model, left, state, bindings, old_state, ctx)?;
+            let right = eval_in(solver, model, right, state, bindings, old_state, ctx)?;
             let condition = match name.as_str() {
                 "min" => solver.le(int_term(&left)?, int_term(&right)?)?,
                 "max" => solver.ge(int_term(&left)?, int_term(&right)?)?,
@@ -345,7 +487,7 @@ fn eval_inner<S: SmtSolver>(
             second,
             third,
         } if name == "rel_reachable" => {
-            let relation = eval(solver, model, first, state, bindings, old_state)?;
+            let relation = eval_in(solver, model, first, state, bindings, old_state, ctx)?;
             let (ty, entries) = collection_entries(solver, model, &relation)?;
             let TypeRef::Relation(source_ty, target_ty) = &ty else {
                 unreachable!();
@@ -355,8 +497,8 @@ fn eval_inner<S: SmtSolver>(
                     "reachable() requires a self-relation (relation T -> T)",
                 ));
             }
-            let source = eval(solver, model, second, state, bindings, old_state)?;
-            let target = eval(solver, model, third, state, bindings, old_state)?;
+            let source = eval_in(solver, model, second, state, bindings, old_state, ctx)?;
+            let target = eval_in(solver, model, third, state, bindings, old_state, ctx)?;
             let reach = relation_reachability_table(solver, model, source_ty, &entries)?;
             let mut terms = Vec::new();
             for (from_index, from) in reach.vertices.iter().enumerate() {
@@ -470,7 +612,7 @@ pub(crate) fn definedness<S: SmtSolver>(
     Ok(evaluation_status(solver, model, expr, state, bindings, old_state)?.fully_defined)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct EvaluationStatus<T> {
     pub fully_defined: T,
     pub first_partial: T,
@@ -574,6 +716,7 @@ pub(crate) fn evaluation_status<S: SmtSolver>(
         bindings,
         old_state,
         ACTION_EVALUATION,
+        None,
     )
 }
 
@@ -588,6 +731,20 @@ pub(crate) fn classified_evaluation_status<S: SmtSolver>(
     old_state: Option<&SymbolicState<S::Term>>,
     class: FailureClass,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    classified_evaluation_status_in(solver, model, expr, state, bindings, old_state, class, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn classified_evaluation_status_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    class: FailureClass,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     evaluation_status_with_policy(
         solver,
         model,
@@ -599,12 +756,14 @@ pub(crate) fn classified_evaluation_status<S: SmtSolver>(
             classify: class,
             ..ACTION_EVALUATION
         },
+        ctx,
     )
 }
 
 /// [`property_evaluation_status`] (property context: `/` and `%` are total)
 /// with `first_partial` classifying `class`.
-pub(crate) fn classified_property_evaluation_status<S: SmtSolver>(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn classified_property_evaluation_status_in<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     expr: &Expr,
@@ -612,6 +771,7 @@ pub(crate) fn classified_property_evaluation_status<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
     class: FailureClass,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     evaluation_status_with_policy(
         solver,
@@ -624,6 +784,7 @@ pub(crate) fn classified_property_evaluation_status<S: SmtSolver>(
             classify: class,
             ..PROPERTY_EVALUATION
         },
+        ctx,
     )
 }
 
@@ -635,6 +796,18 @@ pub(crate) fn property_evaluation_status<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    property_evaluation_status_in(solver, model, expr, state, bindings, old_state, None)
+}
+
+pub(crate) fn property_evaluation_status_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     evaluation_status_with_policy(
         solver,
         model,
@@ -643,6 +816,7 @@ pub(crate) fn property_evaluation_status<S: SmtSolver>(
         bindings,
         old_state,
         PROPERTY_EVALUATION,
+        ctx,
     )
 }
 
@@ -667,9 +841,12 @@ fn evaluation_status_with_policy<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
     policy: EvaluationPolicy,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     recursion::guard(|| {
-        evaluation_status_with_policy_inner(solver, model, expr, state, bindings, old_state, policy)
+        evaluation_status_with_policy_inner(
+            solver, model, expr, state, bindings, old_state, policy, ctx,
+        )
     })
 }
 
@@ -682,6 +859,7 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
     policy: EvaluationPolicy,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match expr {
         Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {
@@ -697,13 +875,14 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
             bindings,
             None,
             policy,
+            ctx,
         ),
         Expr::Neg(inner) => {
             let mut local = bindings.clone();
             let inner_status = evaluation_status_with_policy(
-                solver, model, inner, state, &local, old_state, policy,
+                solver, model, inner, state, &local, old_state, policy, ctx,
             )?;
-            let inner = eval(solver, model, inner, state, &mut local, old_state)?;
+            let inner = eval_in(solver, model, inner, state, &mut local, old_state, ctx)?;
             sequence_statuses(
                 solver,
                 [
@@ -722,9 +901,9 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
         } if name == "abs" => {
             let mut local = bindings.clone();
             let inner_status = evaluation_status_with_policy(
-                solver, model, inner, state, &local, old_state, policy,
+                solver, model, inner, state, &local, old_state, policy, ctx,
             )?;
-            let inner = eval(solver, model, inner, state, &mut local, old_state)?;
+            let inner = eval_in(solver, model, inner, state, &mut local, old_state, ctx)?;
             sequence_statuses(
                 solver,
                 [
@@ -743,11 +922,13 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
         | Expr::Field(inner, _)
         | Expr::Is { expr: inner, .. }
         | Expr::Stage { entity: inner, .. }
-        | Expr::UnaryNamed { expr: inner, .. } => {
-            evaluation_status_with_policy(solver, model, inner, state, bindings, old_state, policy)
-        }
+        | Expr::UnaryNamed { expr: inner, .. } => evaluation_status_with_policy(
+            solver, model, inner, state, bindings, old_state, policy, ctx,
+        ),
         Expr::Set(items) | Expr::Seq(items) | Expr::Call { args: items, .. } => {
-            ordered_evaluation_status(solver, model, items, state, bindings, old_state, policy)
+            ordered_evaluation_status(
+                solver, model, items, state, bindings, old_state, policy, ctx,
+            )
         }
         Expr::Struct { name, fields } => {
             let TypeDef::Struct {
@@ -778,19 +959,19 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
                 )));
             }
             ordered_evaluation_status_refs(
-                solver, model, &items, state, bindings, old_state, policy,
+                solver, model, &items, state, bindings, old_state, policy, ctx,
             )
         }
         Expr::Index(base, index) => {
             let mut local = bindings.clone();
             let base_status = evaluation_status_with_policy(
-                solver, model, base, state, &local, old_state, policy,
+                solver, model, base, state, &local, old_state, policy, ctx,
             )?;
-            let base_value = eval(solver, model, base, state, &mut local, old_state)?;
+            let base_value = eval_in(solver, model, base, state, &mut local, old_state, ctx)?;
             let index_status = evaluation_status_with_policy(
-                solver, model, index, state, &local, old_state, policy,
+                solver, model, index, state, &local, old_state, policy, ctx,
             )?;
-            let index_value = eval(solver, model, index, state, &mut local, old_state)?;
+            let index_value = eval_in(solver, model, index, state, &mut local, old_state, ctx)?;
             let fully_accessible = index_accessible(solver, model, &base_value, &index_value)?;
             let access = index_access_status(
                 solver,
@@ -808,11 +989,13 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
         } => {
             let mut local = bindings.clone();
             let receiver_status = evaluation_status_with_policy(
-                solver, model, receiver, state, &local, old_state, policy,
+                solver, model, receiver, state, &local, old_state, policy, ctx,
             )?;
-            let receiver_value = eval(solver, model, receiver, state, &mut local, old_state)?;
-            let arguments_status =
-                ordered_evaluation_status(solver, model, args, state, &local, old_state, policy)?;
+            let receiver_value =
+                eval_in(solver, model, receiver, state, &mut local, old_state, ctx)?;
+            let arguments_status = ordered_evaluation_status(
+                solver, model, args, state, &local, old_state, policy, ctx,
+            )?;
             let argument_values = eval_method_arguments(
                 solver,
                 model,
@@ -822,6 +1005,7 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
                 state,
                 &mut local,
                 old_state,
+                ctx,
             )?;
             let operation_defined =
                 method_definedness(solver, name, &receiver_value, argument_values.as_slice())?;
@@ -853,24 +1037,26 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
         Expr::Binary { op, left, right } => {
             let mut local = bindings.clone();
             let left_status = evaluation_status_with_policy(
-                solver, model, left, state, &local, old_state, policy,
+                solver, model, left, state, &local, old_state, policy, ctx,
             )?;
             let reached_right = match op.as_str() {
                 "and" | "=>" => {
-                    let left_value =
-                        eval_with_bindings(solver, model, left, state, &mut local, old_state)?;
+                    let left_value = eval_with_bindings_in(
+                        solver, model, left, state, &mut local, old_state, ctx,
+                    )?;
                     bool_term(&left_value)?.clone()
                 }
                 "or" => {
-                    let left_value =
-                        eval_with_bindings(solver, model, left, state, &mut local, old_state)?;
+                    let left_value = eval_with_bindings_in(
+                        solver, model, left, state, &mut local, old_state, ctx,
+                    )?;
                     solver.not(bool_term(&left_value)?)?
                 }
                 _ => solver.bool_value(true),
             };
             confine_binary_rhs(op, bindings, &mut local);
             let right_status = evaluation_status_with_policy(
-                solver, model, right, state, &local, old_state, policy,
+                solver, model, right, state, &local, old_state, policy, ctx,
             )?;
             let first_partial = solver.or(&[
                 left_status.first_partial,
@@ -887,8 +1073,8 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
             let mut parts = vec![operands_defined.clone()];
             let mut operation_partial = solver.bool_value(false);
             if matches!(op.as_str(), "/" | "%") {
-                let left_value = eval(solver, model, left, state, &mut local, old_state)?;
-                let right_value = eval(solver, model, right, state, &mut local, old_state)?;
+                let left_value = eval_in(solver, model, left, state, &mut local, old_state, ctx)?;
+                let right_value = eval_in(solver, model, right, state, &mut local, old_state, ctx)?;
                 let zero = solver.equal(int_term(&right_value)?, &solver.int_value(0))?;
                 if !policy.total_division {
                     parts.push(solver.not(&zero)?);
@@ -905,8 +1091,8 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
                 ])?;
                 parts.push(solver.not(&overflow)?);
             } else if matches!(op.as_str(), "+" | "-" | "*") {
-                let left_value = eval(solver, model, left, state, &mut local, old_state)?;
-                let right_value = eval(solver, model, right, state, &mut local, old_state)?;
+                let left_value = eval_in(solver, model, left, state, &mut local, old_state, ctx)?;
+                let right_value = eval_in(solver, model, right, state, &mut local, old_state, ctx)?;
                 let result = match op.as_str() {
                     "+" => solver.add(int_term(&left_value)?, int_term(&right_value)?)?,
                     "-" => solver.sub(int_term(&left_value)?, int_term(&right_value)?)?,
@@ -935,14 +1121,15 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
         } => {
             let mut local = bindings.clone();
             let condition_status = evaluation_status_with_policy(
-                solver, model, condition, state, &local, old_state, policy,
+                solver, model, condition, state, &local, old_state, policy, ctx,
             )?;
-            let condition_value = eval(solver, model, condition, state, &mut local, old_state)?;
+            let condition_value =
+                eval_in(solver, model, condition, state, &mut local, old_state, ctx)?;
             let then_status = evaluation_status_with_policy(
-                solver, model, then_expr, state, &local, old_state, policy,
+                solver, model, then_expr, state, &local, old_state, policy, ctx,
             )?;
             let else_status = evaluation_status_with_policy(
-                solver, model, else_expr, state, &local, old_state, policy,
+                solver, model, else_expr, state, &local, old_state, policy, ctx,
             )?;
             let branch_defined = solver.ite(
                 bool_term(&condition_value)?,
@@ -971,7 +1158,7 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
             binder,
             body,
         } => quantified_evaluation_status(
-            solver, model, quantifier, binder, body, state, bindings, old_state, policy,
+            solver, model, quantifier, binder, body, state, bindings, old_state, policy, None, ctx,
         ),
         Expr::Aggregate {
             kind,
@@ -987,6 +1174,7 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
             bindings,
             old_state,
             policy,
+            ctx,
         ),
         Expr::BinaryNamed { left, right, .. } => ordered_evaluation_status_refs(
             solver,
@@ -996,6 +1184,7 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
             bindings,
             old_state,
             policy,
+            ctx,
         ),
         Expr::TernaryNamed {
             first,
@@ -1010,10 +1199,12 @@ fn evaluation_status_with_policy_inner<S: SmtSolver>(
             bindings,
             old_state,
             policy,
+            ctx,
         ),
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ordered_evaluation_status<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
@@ -1022,6 +1213,7 @@ fn ordered_evaluation_status<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
     policy: EvaluationPolicy,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     let expressions = expressions.iter().collect::<Vec<_>>();
     ordered_evaluation_status_refs(
@@ -1032,9 +1224,11 @@ fn ordered_evaluation_status<S: SmtSolver>(
         bindings,
         old_state,
         policy,
+        ctx,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn ordered_evaluation_status_refs<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
@@ -1043,12 +1237,13 @@ fn ordered_evaluation_status_refs<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
     policy: EvaluationPolicy,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     let local = bindings.clone();
     let mut statuses = Vec::new();
     for expression in expressions {
         statuses.push(evaluation_status_with_policy(
-            solver, model, expression, state, &local, old_state, policy,
+            solver, model, expression, state, &local, old_state, policy, ctx,
         )?);
     }
     sequence_statuses(solver, statuses)
@@ -1167,24 +1362,41 @@ fn quantified_evaluation_status<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
     policy: EvaluationPolicy,
+    prepared: Option<&DischargedIntegerRange<'_, S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
-    let source_status =
-        binder_source_evaluation_status(solver, model, binder, state, bindings, old_state, policy)?;
+    let source_status = match prepared {
+        Some(prepared) => prepared.draft().source_status.clone(),
+        None => binder_source_evaluation_status(
+            solver, model, binder, state, bindings, old_state, policy, ctx,
+        )?,
+    };
     let mut fully_defined = source_status.fully_defined.clone();
     let mut first_partial = source_status.first_partial;
     let mut has_partial_operation = source_status.has_partial_operation;
     let mut active = source_status.fully_defined;
+    let candidates = if prepared.is_none() {
+        binder_values_in(solver, model, binder, state, bindings, old_state, ctx)?
+    } else {
+        Vec::new()
+    };
     for (name, value, membership) in
-        binder_values(solver, model, binder, state, bindings, old_state)?
+        candidates
+            .into_iter()
+            .chain(prepared.into_iter().flat_map(|p| {
+                p.candidates()
+                    .iter()
+                    .map(|(n, v, m)| (n.clone(), v.clone(), Some(m.clone())))
+            }))
     {
         let mut local = bindings.clone();
-        local.insert(name, value);
+        local.insert(name, enumerated_binder_binding(solver, model, value));
         let membership = membership.unwrap_or_else(|| solver.bool_value(true));
         let where_status = binder_where_expression(binder).map_or_else(
             || Ok(safe_status(solver)),
             |where_expr| {
                 evaluation_status_with_policy(
-                    solver, model, where_expr, state, &local, old_state, policy,
+                    solver, model, where_expr, state, &local, old_state, policy, ctx,
                 )
             },
         )?;
@@ -1194,15 +1406,16 @@ fn quantified_evaluation_status<S: SmtSolver>(
             first_partial,
             solver.and(&[where_reached.clone(), where_status.first_partial])?,
         ])?;
-        let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?
+        let where_term = binder_where_in(solver, model, binder, state, &mut local, old_state, ctx)?
             .unwrap_or_else(|| solver.bool_value(true));
         let body_reached = solver.and(&[
             where_reached.clone(),
             where_status.fully_defined.clone(),
             where_term.clone(),
         ])?;
-        let body_status =
-            evaluation_status_with_policy(solver, model, body, state, &local, old_state, policy)?;
+        let body_status = evaluation_status_with_policy(
+            solver, model, body, state, &local, old_state, policy, ctx,
+        )?;
         has_partial_operation |= body_status.has_partial_operation;
         first_partial = solver.or(&[
             first_partial,
@@ -1212,7 +1425,7 @@ fn quantified_evaluation_status<S: SmtSolver>(
         let body_ok = solver.implies(&body_reached, &body_status.fully_defined)?;
         fully_defined = solver.and(&[fully_defined, where_ok, body_ok])?;
 
-        let body_value = eval(solver, model, body, state, &mut local, old_state)?;
+        let body_value = eval_in(solver, model, body, state, &mut local, old_state, ctx)?;
         let body_continues = if quantifier == "forall" {
             bool_term(&body_value)?.clone()
         } else {
@@ -1248,25 +1461,27 @@ fn aggregate_evaluation_status<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
     policy: EvaluationPolicy,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
-    let source_status =
-        binder_source_evaluation_status(solver, model, binder, state, bindings, old_state, policy)?;
+    let source_status = binder_source_evaluation_status(
+        solver, model, binder, state, bindings, old_state, policy, ctx,
+    )?;
     let mut fully_defined = source_status.fully_defined.clone();
     let mut first_partial = source_status.first_partial;
     let mut has_partial_operation = source_status.has_partial_operation;
     let mut active = source_status.fully_defined;
     let mut sum = solver.int_value(0);
     for (name, candidate, membership) in
-        binder_values(solver, model, binder, state, bindings, old_state)?
+        binder_values_in(solver, model, binder, state, bindings, old_state, ctx)?
     {
         let mut local = bindings.clone();
-        local.insert(name, candidate);
+        local.insert(name, enumerated_binder_binding(solver, model, candidate));
         let membership = membership.unwrap_or_else(|| solver.bool_value(true));
         let where_status = binder_where_expression(binder).map_or_else(
             || Ok(safe_status(solver)),
             |where_expr| {
                 evaluation_status_with_policy(
-                    solver, model, where_expr, state, &local, old_state, policy,
+                    solver, model, where_expr, state, &local, old_state, policy, ctx,
                 )
             },
         )?;
@@ -1276,14 +1491,14 @@ fn aggregate_evaluation_status<S: SmtSolver>(
             first_partial,
             solver.and(&[where_reached.clone(), where_status.first_partial])?,
         ])?;
-        let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?
+        let where_term = binder_where_in(solver, model, binder, state, &mut local, old_state, ctx)?
             .unwrap_or_else(|| solver.bool_value(true));
         let mut iteration_ok = solver.implies(&where_reached, &where_status.fully_defined)?;
         if let Some(value) = value {
             let value_reached =
                 solver.and(&[where_reached, where_status.fully_defined, where_term])?;
             let value_status = evaluation_status_with_policy(
-                solver, model, value, state, &local, old_state, policy,
+                solver, model, value, state, &local, old_state, policy, ctx,
             )?;
             has_partial_operation |= value_status.has_partial_operation;
             first_partial = solver.or(&[
@@ -1295,7 +1510,7 @@ fn aggregate_evaluation_status<S: SmtSolver>(
                 solver.implies(&value_reached, &value_status.fully_defined)?,
             ])?;
             if kind == AggregateKind::Sum {
-                let value = eval(solver, model, value, state, &mut local, old_state)?;
+                let value = eval_in(solver, model, value, state, &mut local, old_state, ctx)?;
                 let next_sum = solver.add(&sum, int_term(&value)?)?;
                 let sum_reached =
                     solver.and(&[value_reached.clone(), value_status.fully_defined])?;
@@ -1335,6 +1550,7 @@ fn binder_source_evaluation_status<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
     policy: EvaluationPolicy,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     ordered_evaluation_status_refs(
         solver,
@@ -1344,6 +1560,7 @@ fn binder_source_evaluation_status<S: SmtSolver>(
         bindings,
         old_state,
         policy,
+        ctx,
     )
 }
 
@@ -1372,6 +1589,7 @@ fn eval_struct_literal<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
     let Some(TypeDef::Struct { fields: expected }) = model.types.get(name) else {
         return Err(VerifyError::new(format!("unknown struct type '{name}'")));
@@ -1385,7 +1603,8 @@ fn eval_struct_literal<S: SmtSolver>(
                 let expr = expressions
                     .get(field)
                     .ok_or_else(|| VerifyError::new(format!("missing struct field '{field}'")))?;
-                let value = eval_expected(solver, model, expr, ty, state, bindings, old_state)?;
+                let value =
+                    eval_expected_in(solver, model, expr, ty, state, bindings, old_state, ctx)?;
                 Ok((field.clone(), value))
             })
             .collect::<Result<_, VerifyError>>()?,
@@ -1483,6 +1702,7 @@ fn eval_method_arguments<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<Vec<SymbolicValue<S::Term>>, VerifyError> {
     let argument_types = match receiver.ty() {
         Some(TypeRef::Set(element)) => vec![element.as_ref()],
@@ -1495,8 +1715,8 @@ fn eval_method_arguments<S: SmtSolver>(
     args.iter()
         .enumerate()
         .map(|(index, arg)| match argument_types.get(index) {
-            Some(ty) => eval_expected(solver, model, arg, ty, state, bindings, old_state),
-            None => eval(solver, model, arg, state, bindings, old_state),
+            Some(ty) => eval_expected_in(solver, model, arg, ty, state, bindings, old_state, ctx),
+            None => eval_in(solver, model, arg, state, bindings, old_state, ctx),
         })
         .collect()
 }
@@ -1511,9 +1731,10 @@ fn eval_method<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
     let values = eval_method_arguments(
-        solver, model, &receiver, name, args, state, bindings, old_state,
+        solver, model, &receiver, name, args, state, bindings, old_state, ctx,
     )?;
     if is_collection(&receiver) {
         let (ty, mut entries) = collection_entries(solver, model, &receiver)?;
@@ -1672,14 +1893,15 @@ fn eval_binary<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
     let (left, right) = if matches!(op, "==" | "!=") {
-        eval_equality_operands(solver, model, left, right, state, bindings, old_state)?
+        eval_equality_operands(solver, model, left, right, state, bindings, old_state, ctx)?
     } else {
         let mut local = bindings.clone();
-        let left = eval_with_bindings(solver, model, left, state, &mut local, old_state)?;
+        let left = eval_with_bindings_in(solver, model, left, state, &mut local, old_state, ctx)?;
         confine_binary_rhs(op, bindings, &mut local);
-        let right = eval_with_bindings(solver, model, right, state, &mut local, old_state)?;
+        let right = eval_with_bindings_in(solver, model, right, state, &mut local, old_state, ctx)?;
         if pattern_binding_flows(op, false) {
             *bindings = local;
         }
@@ -1743,11 +1965,12 @@ fn eval_equality_operands<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<SymbolicPair<S::Term>, VerifyError> {
     let ty = model.equality_operand_type(left, right, &binding_types(bindings))?;
     Ok((
-        eval_expected(solver, model, left, &ty, state, bindings, old_state)?,
-        eval_expected(solver, model, right, &ty, state, bindings, old_state)?,
+        eval_expected_in(solver, model, left, &ty, state, bindings, old_state, ctx)?,
+        eval_expected_in(solver, model, right, &ty, state, bindings, old_state, ctx)?,
     ))
 }
 
@@ -1761,6 +1984,22 @@ pub(crate) fn eval_expected<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    eval_expected_in(
+        solver, model, expr, expected, state, bindings, old_state, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn eval_expected_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    expected: &TypeRef,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
     if let Expr::Conditional {
         condition,
         then_expr,
@@ -1768,12 +2007,12 @@ pub(crate) fn eval_expected<S: SmtSolver>(
         ..
     } = expr
     {
-        let condition = eval(solver, model, condition, state, bindings, old_state)?;
-        let then_value = eval_expected(
-            solver, model, then_expr, expected, state, bindings, old_state,
+        let condition = eval_in(solver, model, condition, state, bindings, old_state, ctx)?;
+        let then_value = eval_expected_in(
+            solver, model, then_expr, expected, state, bindings, old_state, ctx,
         )?;
-        let else_value = eval_expected(
-            solver, model, else_expr, expected, state, bindings, old_state,
+        let else_value = eval_expected_in(
+            solver, model, else_expr, expected, state, bindings, old_state, ctx,
         )?;
         return ite_value(
             solver,
@@ -1787,8 +2026,8 @@ pub(crate) fn eval_expected<S: SmtSolver>(
         return Ok(SymbolicValue::Option {
             ty: expected.clone(),
             present: solver.bool_value(true),
-            value: Box::new(eval_expected(
-                solver, model, inner, inner_ty, state, bindings, old_state,
+            value: Box::new(eval_expected_in(
+                solver, model, inner, inner_ty, state, bindings, old_state, ctx,
             )?),
         });
     }
@@ -1797,7 +2036,11 @@ pub(crate) fn eval_expected<S: SmtSolver>(
         | (Expr::Seq(items), TypeRef::Seq(element, _)) => {
             let values = items
                 .iter()
-                .map(|item| eval_expected(solver, model, item, element, state, bindings, old_state))
+                .map(|item| {
+                    eval_expected_in(
+                        solver, model, item, element, state, bindings, old_state, ctx,
+                    )
+                })
                 .collect::<Result<_, _>>()?;
             if matches!(expr, Expr::Set(_)) {
                 SymbolicValue::SetLiteral(values)
@@ -1809,7 +2052,7 @@ pub(crate) fn eval_expected<S: SmtSolver>(
         (Expr::Set(items), TypeRef::Relation(_, _)) if items.is_empty() => {
             SymbolicValue::SetLiteral(Vec::new())
         }
-        _ => eval_raw(solver, model, expr, state, bindings, old_state)?,
+        _ => eval_raw_in(solver, model, expr, state, bindings, old_state, ctx)?,
     };
     coerce(solver, model, value, expected)
 }
@@ -1854,15 +2097,29 @@ fn eval_quantified<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    prepared: Option<&DischargedIntegerRange<'_, S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
-    let candidates = binder_values(solver, model, binder, state, bindings, old_state)?;
+    let candidates = if prepared.is_none() {
+        binder_values_in(solver, model, binder, state, bindings, old_state, ctx)?
+    } else {
+        Vec::new()
+    };
     let mut terms = Vec::new();
-    for (name, value, membership) in candidates {
+    for (name, value, membership) in
+        candidates
+            .into_iter()
+            .chain(prepared.into_iter().flat_map(|p| {
+                p.candidates()
+                    .iter()
+                    .map(|(n, v, m)| (n.clone(), v.clone(), Some(m.clone())))
+            }))
+    {
         let mut local = bindings.clone();
-        local.insert(name, value);
-        let body = eval(solver, model, body, state, &mut local, old_state)?;
+        local.insert(name, enumerated_binder_binding(solver, model, value));
+        let body = eval_in(solver, model, body, state, &mut local, old_state, ctx)?;
         let body = bool_term(&body)?.clone();
-        let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
+        let where_term = binder_where_in(solver, model, binder, state, &mut local, old_state, ctx)?;
         let condition = binder_condition(solver, membership, where_term)?;
         terms.push(if quantifier == "forall" {
             solver.implies(&condition, &body)?
@@ -1885,13 +2142,14 @@ fn binder_conditions<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<Vec<S::Term>, VerifyError> {
-    let candidates = binder_values(solver, model, binder, state, bindings, old_state)?;
+    let candidates = binder_values_in(solver, model, binder, state, bindings, old_state, ctx)?;
     let mut terms = Vec::new();
     for (name, value, membership) in candidates {
         let mut local = bindings.clone();
-        local.insert(name, value);
-        let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
+        local.insert(name, enumerated_binder_binding(solver, model, value));
+        let where_term = binder_where_in(solver, model, binder, state, &mut local, old_state, ctx)?;
         terms.push(binder_condition(solver, membership, where_term)?);
     }
     Ok(terms)
@@ -1907,9 +2165,10 @@ fn eval_aggregate<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
     if kind != AggregateKind::Sum {
-        let conditions = binder_conditions(solver, model, binder, state, bindings, old_state)?;
+        let conditions = binder_conditions(solver, model, binder, state, bindings, old_state, ctx)?;
         let counts = conditions
             .iter()
             .map(|condition| {
@@ -1932,12 +2191,12 @@ fn eval_aggregate<S: SmtSolver>(
     let value = value.ok_or_else(|| VerifyError::new("sum aggregate requires a value"))?;
     let mut terms = Vec::new();
     for (name, candidate, membership) in
-        binder_values(solver, model, binder, state, bindings, old_state)?
+        binder_values_in(solver, model, binder, state, bindings, old_state, ctx)?
     {
         let mut local = bindings.clone();
-        local.insert(name, candidate);
-        let value = eval(solver, model, value, state, &mut local, old_state)?;
-        let where_term = binder_where(solver, model, binder, state, &mut local, old_state)?;
+        local.insert(name, enumerated_binder_binding(solver, model, candidate));
+        let value = eval_in(solver, model, value, state, &mut local, old_state, ctx)?;
+        let where_term = binder_where_in(solver, model, binder, state, &mut local, old_state, ctx)?;
         let condition = binder_condition(solver, membership, where_term)?;
         terms.push(solver.ite(&condition, int_term(&value)?, &solver.int_value(0))?);
     }
@@ -1946,6 +2205,233 @@ fn eval_aggregate<S: SmtSolver>(
 
 type ConditionalBinderCandidates<T> = Vec<(String, SymbolicValue<T>, Option<T>)>;
 type TypedBinderCandidates<T> = Vec<(String, TypedBinding<T>, Option<T>)>;
+type IntegerRangeCandidates<T> = Vec<(String, TypedBinding<T>, T)>;
+
+pub(crate) struct IntegerRangeDraft<'f, T> {
+    pub(crate) binder: &'f Binder,
+    pub(crate) read_state: &'f SymbolicState<T>,
+    pub(crate) enclosing: &'f Bindings<T>,
+    pub(crate) actual: (T, T),
+    pub(crate) source_status: EvaluationStatus<T>,
+    pub(crate) plan: RangePlan,
+    pub(crate) captured_terms: Vec<(usize, &'f RangeFact<T>)>,
+}
+
+pub(crate) fn integer_range_plan<T>(
+    model: &KernelModel,
+    binder: &Binder,
+    enclosing: &Bindings<T>,
+) -> RangePlan {
+    let Binder::Range { lo, hi, .. } = binder else {
+        return RangePlan::Unknown(RangeUnknown::UnsupportedExpression);
+    };
+    let lexical: Option<Vec<_>> = enclosing
+        .records()
+        .map(|(name, record)| {
+            Some(RangeBinding {
+                name,
+                semantic_ty: record.binding.1.as_ref()?,
+                fact: record.range_fact.as_ref().map(RangeFact::envelope),
+            })
+        })
+        .collect();
+    lexical.map_or(
+        RangePlan::Unknown(RangeUnknown::MissingFiniteFact),
+        |lexical| model.plan_integer_range(lo, hi, &lexical),
+    )
+}
+
+pub(crate) fn integer_range_error(plan: &RangePlan) -> VerifyError {
+    let RangePlan::Unknown(reason) = plan else {
+        return VerifyError::new(
+            "unsupported integer range execution [eligibility]: prerequisites are not established for this evaluation scope",
+        );
+    };
+    let reason = match reason {
+        RangeUnknown::MissingFiniteFact => "missing-finite-fact",
+        RangeUnknown::UnsupportedExpression => "unsupported-expression",
+        RangeUnknown::EnvelopeUnrepresentable => "envelope-unrepresentable",
+        RangeUnknown::ConstantFoldFailed => "constant-fold-failed",
+    };
+    VerifyError::new(format!(
+        "unsupported integer range execution [planner]: {reason}"
+    ))
+}
+
+pub(crate) fn property_range_source_status<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binder: &Binder,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    property_range_source_status_in(solver, model, binder, state, bindings, None)
+}
+
+pub(crate) fn property_range_source_status_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binder: &Binder,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    binder_source_evaluation_status(
+        solver,
+        model,
+        binder,
+        state,
+        bindings,
+        None,
+        PROPERTY_EVALUATION,
+        ctx,
+    )
+}
+
+pub(crate) fn integer_range_draft<'f, S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binder: &'f Binder,
+    read_state: &'f SymbolicState<S::Term>,
+    enclosing: &'f Bindings<S::Term>,
+    planned_source: (RangePlan, EvaluationStatus<S::Term>),
+) -> Result<IntegerRangeDraft<'f, S::Term>, VerifyError> {
+    integer_range_draft_in(
+        solver,
+        model,
+        binder,
+        read_state,
+        enclosing,
+        planned_source,
+        None,
+    )
+}
+
+pub(crate) fn integer_range_draft_in<'f, S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binder: &'f Binder,
+    read_state: &'f SymbolicState<S::Term>,
+    enclosing: &'f Bindings<S::Term>,
+    planned_source: (RangePlan, EvaluationStatus<S::Term>),
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<IntegerRangeDraft<'f, S::Term>, VerifyError> {
+    let Binder::Range { lo, hi, .. } = binder else {
+        return Err(integer_range_error(&planned_source.0));
+    };
+    let mut local = enclosing.clone();
+    let lo = eval_in(solver, model, lo, read_state, &mut local, None, ctx)?;
+    let hi = eval_in(solver, model, hi, read_state, &mut local, None, ctx)?;
+    let captured_terms = enclosing
+        .records()
+        .enumerate()
+        .filter_map(|(i, (_, r))| r.range_fact.as_ref().map(|fact| (i, fact)))
+        .collect();
+    Ok(IntegerRangeDraft {
+        binder,
+        read_state,
+        enclosing,
+        actual: (int_term(&lo)?.clone(), int_term(&hi)?.clone()),
+        plan: planned_source.0,
+        source_status: planned_source.1,
+        captured_terms,
+    })
+}
+
+pub(crate) fn materialize_integer_range<S: SmtSolver>(
+    solver: &S,
+    draft: &IntegerRangeDraft<'_, S::Term>,
+) -> Result<IntegerRangeCandidates<S::Term>, VerifyError> {
+    let envelope = match &draft.plan {
+        RangePlan::Empty { .. } => return Ok(Vec::new()),
+        RangePlan::Finite { candidates, .. } => candidates,
+        _ => return Err(integer_range_error(&draft.plan)),
+    };
+    let Binder::Range { name, .. } = draft.binder else {
+        return Err(integer_range_error(&draft.plan));
+    };
+    (envelope.lo()..=envelope.hi())
+        .map(|z| {
+            let term = solver.int_value(z);
+            let membership = solver.and(&[
+                solver.le(&draft.actual.0, &term)?,
+                solver.le(&term, &draft.actual.1)?,
+            ])?;
+            Ok((
+                name.clone(),
+                TypedBinding(int_value(solver, term), Some(TypeRef::Int)),
+                membership,
+            ))
+        })
+        .collect()
+}
+
+pub(crate) fn prepared_quantified_status<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    quantifier: &str,
+    body: &Expr,
+    prepared: &DischargedIntegerRange<'_, S::Term>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    prepared_quantified_status_in(solver, model, quantifier, body, prepared, None)
+}
+
+pub(crate) fn prepared_quantified_status_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    quantifier: &str,
+    body: &Expr,
+    prepared: &DischargedIntegerRange<'_, S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    let d = prepared.draft();
+    quantified_evaluation_status(
+        solver,
+        model,
+        quantifier,
+        d.binder,
+        body,
+        d.read_state,
+        d.enclosing,
+        None,
+        PROPERTY_EVALUATION,
+        Some(prepared),
+        ctx,
+    )
+}
+
+pub(crate) fn prepared_quantified_value<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    quantifier: &str,
+    body: &Expr,
+    prepared: &DischargedIntegerRange<'_, S::Term>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    prepared_quantified_value_in(solver, model, quantifier, body, prepared, None)
+}
+
+pub(crate) fn prepared_quantified_value_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    quantifier: &str,
+    body: &Expr,
+    prepared: &DischargedIntegerRange<'_, S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    let d = prepared.draft();
+    eval_quantified(
+        solver,
+        model,
+        quantifier,
+        d.binder,
+        body,
+        d.read_state,
+        d.enclosing,
+        None,
+        Some(prepared),
+        ctx,
+    )
+}
 
 /// An unfiltered binder has condition true, the identity for conjunction.
 pub(crate) fn binder_condition<S: SmtSolver>(
@@ -1960,6 +2446,41 @@ pub(crate) fn binder_condition<S: SmtSolver>(
     })
 }
 
+fn parameter_range_values<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binder: &Binder,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    plan: RangePlan,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<TypedBinderCandidates<S::Term>, VerifyError> {
+    let (RangePlan::Finite { prerequisites, .. } | RangePlan::Empty { prerequisites }) = &plan
+    else {
+        return Err(integer_range_error(&plan));
+    };
+    let eligible = prerequisites.iter().all(|p| match p {
+        RangePrerequisite::LexicalFact { input_index } => bindings
+            .records()
+            .nth(*input_index)
+            .and_then(|(_, r)| r.range_fact.as_ref())
+            .is_some_and(|f| f.valid_when().is_none()),
+        RangePrerequisite::StateCarrier { name, .. } => {
+            ctx.is_some_and(|checked| checked.contains(state, name))
+        }
+    });
+    if !eligible {
+        return Err(integer_range_error(&plan));
+    }
+    let status = property_range_source_status_in(solver, model, binder, state, bindings, ctx)?;
+    let draft =
+        integer_range_draft_in(solver, model, binder, state, bindings, (plan, status), ctx)?;
+    Ok(materialize_integer_range(solver, &draft)?
+        .into_iter()
+        .map(|(n, v, m)| (n, v, Some(m)))
+        .collect())
+}
+
 pub(crate) fn binder_values<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
@@ -1968,6 +2489,33 @@ pub(crate) fn binder_values<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<TypedBinderCandidates<S::Term>, VerifyError> {
+    binder_values_in(solver, model, binder, state, bindings, old_state, None)
+}
+
+pub(crate) fn binder_values_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binder: &Binder,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<TypedBinderCandidates<S::Term>, VerifyError> {
+    if let Binder::Range { lo, hi, .. } = binder {
+        let plan = integer_range_plan(model, binder, bindings);
+        match &plan {
+            RangePlan::Static { .. } => {}
+            RangePlan::Unknown(RangeUnknown::ConstantFoldFailed) => {
+                static_int(lo, model)?;
+                static_int(hi, model)?;
+                return Err(integer_range_error(&plan));
+            }
+            RangePlan::Unknown(_) => return Err(integer_range_error(&plan)),
+            RangePlan::Finite { .. } | RangePlan::Empty { .. } => {
+                return parameter_range_values(solver, model, binder, state, bindings, plan, ctx);
+            }
+        }
+    }
     let Binder::Collection {
         name, collection, ..
     } = binder
@@ -1986,7 +2534,7 @@ pub(crate) fn binder_values<S: SmtSolver>(
         return Err(VerifyError::new("collection binder requires a Set or Seq"));
     };
     let mut local = bindings.clone();
-    let collection = eval(solver, model, collection, state, &mut local, old_state)?;
+    let collection = eval_in(solver, model, collection, state, &mut local, old_state, ctx)?;
     let candidates: ConditionalBinderCandidates<S::Term> = match collection {
         SymbolicValue::Collection { ty, entries } => {
             let TypeRef::Set(_) = ty else {
@@ -2093,7 +2641,11 @@ pub(crate) fn static_binder_values<S: SmtSolver>(
             name, type_name, ..
         } => {
             let type_name = qualified_type(type_name.namespace.as_deref(), &type_name.name)?;
-            let ty = TypeRef::Named(type_name);
+            let ty = if type_name == "Bool" {
+                TypeRef::Bool
+            } else {
+                TypeRef::Named(type_name)
+            };
             model
                 .domain_values(&ty)?
                 .into_iter()
@@ -2101,8 +2653,18 @@ pub(crate) fn static_binder_values<S: SmtSolver>(
                 .collect()
         }
         Binder::Range { name, lo, hi, .. } => {
+            let plan = integer_range_plan(model, binder, &Bindings::<S::Term>::new());
+            if !matches!(
+                plan,
+                RangePlan::Static { .. } | RangePlan::Unknown(RangeUnknown::ConstantFoldFailed)
+            ) {
+                return Err(integer_range_error(&plan));
+            }
             let lo = static_int(lo, model)?;
             let hi = static_int(hi, model)?;
+            if !matches!(plan, RangePlan::Static { .. }) {
+                return Err(integer_range_error(&plan));
+            }
             (lo..=hi)
                 .map(|value| {
                     Ok((
@@ -2129,15 +2691,35 @@ pub(crate) fn binder_where<S: SmtSolver>(
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
 ) -> Result<Option<S::Term>, VerifyError> {
+    binder_where_in(solver, model, binder, state, bindings, old_state, None)
+}
+
+pub(crate) fn binder_where_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binder: &Binder,
+    state: &SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<Option<S::Term>, VerifyError> {
     binder_where_expression(binder)
         .map(|expr| {
-            let value = eval(solver, model, expr, state, bindings, old_state)?;
+            let value = eval_in(solver, model, expr, state, bindings, old_state, ctx)?;
             Ok(bool_term(&value)?.clone())
         })
         .transpose()
 }
 
-fn static_int(expr: &Expr, model: &KernelModel) -> Result<i64, VerifyError> {
+pub(crate) fn static_int(expr: &Expr, model: &KernelModel) -> Result<i64, VerifyError> {
+    if let Ok(value) = model.constant_integer(expr) {
+        return Ok(value);
+    }
+    legacy_static_int(expr, model)
+}
+
+// A failed common fold must recurse only through the original adapter.
+fn legacy_static_int(expr: &Expr, model: &KernelModel) -> Result<i64, VerifyError> {
     match expr {
         Expr::Num(value) => Ok(*value),
         Expr::Var(name) => match model.consts.get(name) {
@@ -2146,12 +2728,12 @@ fn static_int(expr: &Expr, model: &KernelModel) -> Result<i64, VerifyError> {
                 "'{name}' is not an integer const"
             ))),
         },
-        Expr::Neg(inner) => static_int(inner, model)?
+        Expr::Neg(inner) => legacy_static_int(inner, model)?
             .checked_neg()
             .ok_or_else(|| VerifyError::new("integer overflow in static negation")),
         Expr::Binary { op, left, right } => {
-            let left = static_int(left, model)?;
-            let right = static_int(right, model)?;
+            let left = legacy_static_int(left, model)?;
+            let right = legacy_static_int(right, model)?;
             match op.as_str() {
                 "+" => left.checked_add(right),
                 "-" => left.checked_sub(right),

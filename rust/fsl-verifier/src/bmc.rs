@@ -2,26 +2,37 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use fsl_core::binder_range::{RangePlan, RangePrerequisite, RangeUnknown};
 use fsl_core::{FslValue, KernelModel, LeadsToDef, TraceAction, TraceStep, TypeRef};
 use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::eval::{eval, evaluation_status, property_evaluation_status};
+use crate::eval::{
+    FailureClass, IntegerRangeDraft, classified_evaluation_status_in, eval, eval_in,
+    evaluation_status, integer_range_draft, integer_range_draft_in, integer_range_error,
+    integer_range_plan, materialize_integer_range, prepared_quantified_status,
+    prepared_quantified_status_in, prepared_quantified_value, prepared_quantified_value_in,
+    property_evaluation_status, property_evaluation_status_in, property_range_source_status,
+    property_range_source_status_in,
+};
+use crate::induction::{InductionCti, partial_witness};
 use crate::init_definedness::{InitFailureSite, init_failure_sites, init_may_fail};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
-    ActionInstance, action_guard_definedness, action_guards,
-    action_has_partial_operation_candidate, action_instances, action_statements_evaluation_status,
-    init_constraints, init_evaluation_status, initial_state as symbolic_initial_state,
-    transition_constraint,
+    ActionInstance, action_guards, action_guards_in, action_has_partial_operation_candidate,
+    action_instances, classified_action_guard_definedness_in,
+    classified_action_statements_evaluation_status_in, init_constraints, init_evaluation_status,
+    initial_state as symbolic_initial_state, transition_constraint_in,
 };
-use crate::vacuity::{VacuityFinding, collect_assigned_roots, retain_covered, static_findings};
+use crate::vacuity::{
+    VacuityFinding, collect_assigned_roots, proven_unsat, retain_covered, static_findings,
+};
 use crate::value::{
-    SymbolicState, SymbolicValue, TypedBindings as Bindings, bool_term, bounds, concrete_value,
-    i64_index, logical_equal, reframe_collections, snapshot_collections, symbolic_state,
-    symbolic_state_with_suffix,
+    SymbolicState, SymbolicValue, TypedBinding, TypedBindings as Bindings, bool_term, bounds,
+    concrete_value, i64_index, logical_equal, reframe_collections, snapshot_collections,
+    symbolic_state, symbolic_state_with_suffix,
 };
 use crate::violation_kind;
 
@@ -497,6 +508,7 @@ async fn check_definedness<S: SmtSolver>(
         if step > 0 {
             assert_state_bounds(solver, model, checked_bounds, &states[step])?;
         }
+        let checked = checked_action_carriers(solver, model, &states[step], checked_bounds).await?;
         if check_action_partial_operations(
             solver,
             model,
@@ -505,12 +517,14 @@ async fn check_definedness<S: SmtSolver>(
             &instances,
             step,
             &mut range_lemmas,
+            checked.as_ref(),
         )
         .await?
         .is_some()
         {
             return Ok(Some(Undefined::Action(step)));
         }
+        drop(checked);
         if step + 1 < limit {
             unroll_step(
                 solver,
@@ -615,6 +629,55 @@ fn assert_snapshot_state<S: SmtSolver>(
     Ok(())
 }
 
+/// Certify selected bounds already established for this exact read frame.
+pub(crate) async fn checked_read_carriers<'f, S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    read_state: &'f SymbolicState<S::Term>,
+    selected: Option<&BTreeSet<String>>,
+) -> Result<CheckedStateCarriers<'f, S::Term>, VerifyError> {
+    let mut checked = CheckedStateCarriers {
+        read_state,
+        names: BTreeSet::new(),
+        old_frame: None,
+    };
+    for (name, value) in read_state {
+        let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();
+        if selected.is_some_and(|names| !names.contains(&property_name)) {
+            continue;
+        }
+        let valid = bounds(solver, model, value)?;
+        solver.set_query_context("type_bound", &property_name);
+        if probe_not(solver, &valid).await? {
+            return Err(VerifyError::new(
+                "unsupported integer range execution [eligibility]: prerequisites are not established for this evaluation scope",
+            ));
+        }
+        solver.assert(&valid)?;
+        checked.names.insert(name.clone());
+    }
+    Ok(checked)
+}
+
+/// Certify the actual read frame when the model contains an action range binder.
+pub(crate) async fn checked_action_carriers<'f, S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    read_state: &'f SymbolicState<S::Term>,
+    selected: Option<&BTreeSet<String>>,
+) -> Result<Option<CheckedStateCarriers<'f, S::Term>>, VerifyError> {
+    if !model
+        .actions
+        .iter()
+        .any(|action| fsl_core::action_has_integer_range_binder(model, action))
+    {
+        return Ok(None);
+    }
+    checked_read_carriers(solver, model, read_state, selected)
+        .await
+        .map(Some)
+}
+
 /// Unroll one transition out of `states[step]`: a fresh `step + 1` state and
 /// `__choice@step`, constrained to an action instance whose transition holds.
 async fn unroll_step<S: SmtSolver>(
@@ -640,8 +703,17 @@ async fn unroll_step<S: SmtSolver>(
     let upper = solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?;
     solver.assert(&lower)?;
     solver.assert(&upper)?;
-    let transition =
-        transition_constraint(solver, model, instances, &states[step], &mut next, &choice)?;
+    let checked = checked_action_carriers(solver, model, &states[step], checked_bounds).await?;
+    let transition = transition_constraint_in(
+        solver,
+        model,
+        instances,
+        &states[step],
+        &mut next,
+        &choice,
+        checked.as_ref(),
+    )?;
+    drop(checked);
     solver.assert(&transition)?;
     states.push(next);
     choices.push(choice);
@@ -723,7 +795,16 @@ async fn verify_bounded_config<S: SmtSolver>(
             step,
             actions_checked: false,
         };
-        if let Some(violation) = check_state_properties(
+        let mut action_carriers = model
+            .actions
+            .iter()
+            .any(|action| fsl_core::action_has_integer_range_binder(model, action))
+            .then(|| CheckedStateCarriers {
+                read_state: &states[step],
+                names: BTreeSet::new(),
+                old_frame: None,
+            });
+        let property_violation = check_state_properties_in(
             solver,
             model,
             &states,
@@ -731,9 +812,10 @@ async fn verify_bounded_config<S: SmtSolver>(
             &instances,
             step,
             property_checks,
+            action_carriers.as_mut(),
         )
-        .await?
-        {
+        .await?;
+        if let Some(violation) = property_violation {
             result.violation = Some(violation);
             return Ok(result);
         }
@@ -742,7 +824,13 @@ async fn verify_bounded_config<S: SmtSolver>(
         if step < depth
             && has_action_partial_operation_candidates
             && let Some(violation) = check_typed_action_partial_operations(
-                solver, model, &states, &choices, &instances, step,
+                solver,
+                model,
+                &states,
+                &choices,
+                &instances,
+                step,
+                action_carriers.as_ref(),
             )
             .await?
         {
@@ -762,7 +850,13 @@ async fn verify_bounded_config<S: SmtSolver>(
         )
         .await?;
 
-        let enabled = enabled_terms(solver, model, &instances, &states[step])?;
+        let enabled = enabled_terms(
+            solver,
+            model,
+            &instances,
+            &states[step],
+            action_carriers.as_ref(),
+        )?;
         record_coverage(solver, &instances, &enabled, step, &mut result).await?;
         if result.deadlock_step.is_none() {
             solver.set_query_context("deadlock", "deadlock");
@@ -839,6 +933,7 @@ async fn verify_bounded_config<S: SmtSolver>(
         if instances.is_empty() {
             break;
         }
+        drop(action_carriers);
         unroll_step(
             solver,
             model,
@@ -888,6 +983,416 @@ struct StatePropertyChecks<'a> {
     pending_reachables: &'a BTreeSet<String>,
 }
 
+#[derive(Clone)]
+pub(crate) struct CheckedStateCarriers<'f, T> {
+    read_state: &'f SymbolicState<T>,
+    names: BTreeSet<String>,
+    old_frame: Option<(&'f SymbolicState<T>, BTreeSet<String>)>,
+}
+
+impl<T> CheckedStateCarriers<'_, T> {
+    pub(crate) fn contains(&self, read_state: &SymbolicState<T>, name: &str) -> bool {
+        (std::ptr::eq(self.read_state, read_state) && self.names.contains(name))
+            || self.old_frame.as_ref().is_some_and(|(state, names)| {
+                std::ptr::eq(*state, read_state) && names.contains(name)
+            })
+    }
+
+    /// Combine only the primary frames of two independently issued certificates.
+    pub(crate) fn with_old(self, old: Self) -> Self {
+        Self {
+            read_state: self.read_state,
+            names: self.names,
+            old_frame: Some((old.read_state, old.names)),
+        }
+    }
+}
+
+/// Assert the induction hypothesis's existing bound premises before recording them.
+pub(crate) fn assume_induction_carriers<'f, S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    state: &'f SymbolicState<S::Term>,
+) -> Result<CheckedStateCarriers<'f, S::Term>, VerifyError> {
+    let mut checked = CheckedStateCarriers {
+        read_state: state,
+        names: BTreeSet::new(),
+        old_frame: None,
+    };
+    for (name, ty) in &model.state {
+        if !model.type_has_bounds(ty) {
+            continue;
+        }
+        let value = state
+            .get(name)
+            .ok_or_else(|| VerifyError::new(format!("missing state '{name}'")))?;
+        let valid = bounds(solver, model, value)?;
+        solver.assert(&valid)?;
+        checked.names.insert(name.clone());
+    }
+    Ok(checked)
+}
+
+/// Recheck actual target bounds; returned counterexamples never certify a name.
+pub(crate) async fn prove_induction_carriers<'f, S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    history: RangeHistory<'f, S::Term>,
+) -> Result<(CheckedStateCarriers<'f, S::Term>, Vec<InductionCti>), VerifyError> {
+    let (states, choices, instances, k) = history;
+    let state = &states[k];
+    let mut checked = CheckedStateCarriers {
+        read_state: state,
+        names: BTreeSet::new(),
+        old_frame: None,
+    };
+    let mut failures = Vec::new();
+    for (name, ty) in &model.state {
+        if !model.type_has_bounds(ty) {
+            continue;
+        }
+        let value = state
+            .get(name)
+            .ok_or_else(|| VerifyError::new(format!("missing state '{name}'")))?;
+        let valid = bounds(solver, model, value)?;
+        let property = fsl_core::SyntheticName::Bounds { state: name }.internal();
+        solver.set_query_context("type_bound", &property);
+        let invalid = solver.not(&valid)?;
+        if let Some(trace) =
+            partial_witness(solver, model, &invalid, states, choices, instances, k).await?
+        {
+            failures.push(InductionCti {
+                kind: violation_kind::INVARIANT.to_owned(),
+                name: property,
+                k,
+                trace,
+            });
+        } else {
+            solver.assert(&valid)?;
+            checked.names.insert(name.clone());
+        }
+    }
+    Ok((checked, failures))
+}
+
+pub(crate) struct DischargedIntegerRange<'f, T> {
+    draft: IntegerRangeDraft<'f, T>,
+    candidates: Vec<(String, TypedBinding<T>, T)>,
+}
+
+impl<'f, T> DischargedIntegerRange<'f, T> {
+    pub(crate) fn candidates(&self) -> &[(String, TypedBinding<T>, T)] {
+        &self.candidates
+    }
+    pub(crate) fn draft(&self) -> &IntegerRangeDraft<'f, T> {
+        &self.draft
+    }
+}
+
+async fn discharge_integer_range<'f, S: SmtSolver>(
+    solver: &mut S,
+    draft: IntegerRangeDraft<'f, S::Term>,
+    checked_carriers: &CheckedStateCarriers<'f, S::Term>,
+) -> Result<DischargedIntegerRange<'f, S::Term>, VerifyError> {
+    let (RangePlan::Finite { prerequisites, .. } | RangePlan::Empty { prerequisites }) =
+        &draft.plan
+    else {
+        return Err(integer_range_error(&draft.plan));
+    };
+    if !std::ptr::eq(draft.read_state, checked_carriers.read_state) {
+        return Err(integer_range_error(&draft.plan));
+    }
+    for prerequisite in prerequisites {
+        match prerequisite {
+            RangePrerequisite::StateCarrier { name, .. } => {
+                if !checked_carriers.names.contains(name) {
+                    return Err(integer_range_error(&draft.plan));
+                }
+            }
+            RangePrerequisite::LexicalFact { input_index } => {
+                let fact = draft
+                    .captured_terms
+                    .iter()
+                    .find(|(index, _)| index == input_index)
+                    .ok_or_else(|| integer_range_error(&draft.plan))?
+                    .1;
+                if let Some(valid_when) = fact.valid_when()
+                    && probe_not(solver, valid_when).await?
+                {
+                    return Err(integer_range_error(&draft.plan));
+                }
+            }
+        }
+    }
+    let candidates = materialize_integer_range(solver, &draft)?;
+    Ok(DischargedIntegerRange { draft, candidates })
+}
+
+/// Certify the actual bounds already established in this diagnostic query.
+pub(crate) async fn diagnostic_state_carriers<'f, S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    state: &'f SymbolicState<S::Term>,
+) -> Result<Option<CheckedStateCarriers<'f, S::Term>>, VerifyError> {
+    let mut ledger = CheckedStateCarriers {
+        read_state: state,
+        names: BTreeSet::new(),
+        old_frame: None,
+    };
+    for (name, _) in &model.state {
+        let value = state
+            .get(name)
+            .ok_or_else(|| VerifyError::new(format!("missing state '{name}'")))?;
+        let valid = bounds(solver, model, value)?;
+        let invalid = solver.not(&valid)?;
+        if !proven_unsat(solver, &[invalid]).await? {
+            return Ok(None);
+        }
+        solver.assert(&valid)?;
+        ledger.names.insert(name.clone());
+    }
+    Ok(Some(ledger))
+}
+
+/// Analyze a composite property inside the caller's fresh diagnostic query.
+/// Its asserted premises must establish the actual bounds of this exact frame.
+pub(crate) async fn frozen_composite_condition<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    property: &fsl_core::PropertyDef,
+    state: &SymbolicState<S::Term>,
+) -> Result<Option<S::Term>, VerifyError> {
+    let Some(ledger) = diagnostic_state_carriers(solver, model, state).await? else {
+        return Ok(None);
+    };
+    let ctx = Some(&ledger);
+    let mut bindings = Bindings::new();
+    let status =
+        property_evaluation_status_in(solver, model, &property.expr, state, &bindings, None, ctx)?;
+    let undefined = solver.not(&status.fully_defined)?;
+    if !proven_unsat(solver, &[undefined]).await? {
+        return Ok(None);
+    }
+    solver.assert(&status.fully_defined)?;
+    let value = eval_in(
+        solver,
+        model,
+        &property.expr,
+        state,
+        &mut bindings,
+        None,
+        ctx,
+    )?;
+    Ok(Some(bool_term(&value)?.clone()))
+}
+
+/// Diagnostic-only bridge; the caller owns the fresh frame's scoped premises.
+pub(crate) async fn frozen_range_condition<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    property: &fsl_core::PropertyDef,
+    state: &SymbolicState<S::Term>,
+) -> Result<Option<S::Term>, VerifyError> {
+    let fsl_core::KernelExpr::Quantified {
+        quantifier,
+        binder,
+        body,
+    } = &property.expr
+    else {
+        return Err(integer_range_error(&RangePlan::Unknown(
+            RangeUnknown::UnsupportedExpression,
+        )));
+    };
+    let mut bindings = Bindings::<S::Term>::new();
+    let plan = integer_range_plan(model, binder, &bindings);
+    if matches!(
+        plan,
+        RangePlan::Static { .. } | RangePlan::Unknown(RangeUnknown::ConstantFoldFailed)
+    ) {
+        let value = eval(solver, model, &property.expr, state, &mut bindings, None)?;
+        return Ok(Some(bool_term(&value)?.clone()));
+    }
+    let source = property_range_source_status(solver, model, binder, state, &bindings)?;
+    let undefined = solver.not(&source.fully_defined)?;
+    if !proven_unsat(solver, &[undefined]).await? {
+        return Ok(None);
+    }
+    solver.assert(&source.fully_defined)?;
+    let (RangePlan::Finite { prerequisites, .. } | RangePlan::Empty { prerequisites }) = &plan
+    else {
+        return Err(integer_range_error(&plan));
+    };
+    let mut ledger = CheckedStateCarriers {
+        read_state: state,
+        names: BTreeSet::new(),
+        old_frame: None,
+    };
+    for prerequisite in prerequisites {
+        let RangePrerequisite::StateCarrier { name, .. } = prerequisite else {
+            return Err(integer_range_error(&plan));
+        };
+        let value = state
+            .get(name)
+            .ok_or_else(|| VerifyError::new(format!("missing state '{name}'")))?;
+        let valid = bounds(solver, model, value)?;
+        let invalid = solver.not(&valid)?;
+        if !proven_unsat(solver, &[invalid]).await? {
+            return Ok(None);
+        }
+        solver.assert(&valid)?;
+        ledger.names.insert(name.clone());
+    }
+    let draft = integer_range_draft(solver, model, binder, state, &bindings, (plan, source))?;
+    let prepared = discharge_integer_range(solver, draft, &ledger).await?;
+    let status = prepared_quantified_status(solver, model, quantifier, body, &prepared)?;
+    let undefined = solver.not(&status.fully_defined)?;
+    if !proven_unsat(solver, &[undefined]).await? {
+        return Ok(None);
+    }
+    solver.assert(&status.fully_defined)?;
+    let value = prepared_quantified_value(solver, model, quantifier, body, &prepared)?;
+    Ok(Some(bool_term(&value)?.clone()))
+}
+
+type RangeHistory<'a, T> = (
+    &'a [SymbolicState<T>],
+    &'a [T],
+    &'a [ActionInstance<T>],
+    usize,
+);
+
+async fn range_partial_violation<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    property: &fsl_core::PropertyDef,
+    evaluation: &crate::eval::EvaluationStatus<S::Term>,
+    history: RangeHistory<'_, S::Term>,
+) -> Result<BmcViolation, VerifyError> {
+    let (states, choices, instances, step) = history;
+    make_violation(
+        solver,
+        model,
+        "partial_op",
+        fsl_core::SyntheticName::PartialProperty {
+            property: &property.name,
+        }
+        .internal(),
+        &evaluation.first_partial,
+        states,
+        choices,
+        instances,
+        step,
+    )
+    .await
+}
+
+async fn check_range_invariant<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    property: &fsl_core::PropertyDef,
+    history: RangeHistory<'_, S::Term>,
+    checked_carriers: &CheckedStateCarriers<'_, S::Term>,
+) -> Result<Option<BmcViolation>, VerifyError> {
+    let (states, choices, instances, step) = history;
+    let ctx = Some(checked_carriers);
+    let fsl_core::KernelExpr::Quantified {
+        quantifier,
+        binder,
+        body,
+    } = &property.expr
+    else {
+        return Err(integer_range_error(&RangePlan::Unknown(
+            RangeUnknown::UnsupportedExpression,
+        )));
+    };
+    let mut bindings = Bindings::new();
+    let plan = integer_range_plan(model, binder, &bindings);
+    let legacy = matches!(
+        plan,
+        RangePlan::Static { .. } | RangePlan::Unknown(RangeUnknown::ConstantFoldFailed)
+    );
+    let mut prepared = None;
+    let state = &states[step];
+    loop {
+        let evaluation = match &prepared {
+            Some(prepared) => {
+                prepared_quantified_status_in(solver, model, quantifier, body, prepared, ctx)?
+            }
+            None if legacy => property_evaluation_status_in(
+                solver,
+                model,
+                &property.expr,
+                state,
+                &bindings,
+                None,
+                ctx,
+            )?,
+            None => property_range_source_status_in(solver, model, binder, state, &bindings, ctx)?,
+        };
+        solver.set_query_context("partial_op", &property.name);
+        if evaluation.has_partial_operation && probe(solver, &evaluation.first_partial).await? {
+            return Ok(Some(
+                range_partial_violation(solver, model, property, &evaluation, history).await?,
+            ));
+        }
+        if probe_not(solver, &evaluation.fully_defined).await? {
+            return Err(VerifyError::new(format!(
+                "invariant '{}' is undefined for a reachable state",
+                property.name
+            )));
+        }
+        solver.assert(&evaluation.fully_defined)?;
+        if legacy || prepared.is_some() {
+            break;
+        }
+        let draft = integer_range_draft_in(
+            solver,
+            model,
+            binder,
+            state,
+            &bindings,
+            (plan.clone(), evaluation),
+            ctx,
+        )?;
+        prepared = Some(discharge_integer_range(solver, draft, checked_carriers).await?);
+    }
+    let value = match &prepared {
+        Some(prepared) => {
+            prepared_quantified_value_in(solver, model, quantifier, body, prepared, ctx)?
+        }
+        None => eval_in(
+            solver,
+            model,
+            &property.expr,
+            state,
+            &mut bindings,
+            None,
+            ctx,
+        )?,
+    };
+    let condition = bool_term(&value)?;
+    solver.set_query_context("invariant", &property.name);
+    if probe_not(solver, condition).await? {
+        let failure = solver.not(condition)?;
+        return Ok(Some(
+            make_violation(
+                solver,
+                model,
+                "invariant",
+                property.name.clone(),
+                &failure,
+                states,
+                choices,
+                instances,
+                step,
+            )
+            .await?,
+        ));
+    }
+    solver.assert(condition)?;
+    Ok(None)
+}
+
 async fn reject_unchecked_sequence_overflow<S: SmtSolver>(
     solver: &mut S,
     state: &SymbolicState<S::Term>,
@@ -917,6 +1422,7 @@ async fn reject_unchecked_sequence_overflow<S: SmtSolver>(
     Ok(())
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_lines)]
 async fn check_state_properties<S: SmtSolver>(
     solver: &mut S,
@@ -927,7 +1433,30 @@ async fn check_state_properties<S: SmtSolver>(
     step: usize,
     checks: StatePropertyChecks<'_>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
+    check_state_properties_in(
+        solver, model, states, choices, instances, step, checks, None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+async fn check_state_properties_in<'f, S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    states: &'f [SymbolicState<S::Term>],
+    choices: &[S::Term],
+    instances: &[ActionInstance<S::Term>],
+    step: usize,
+    checks: StatePropertyChecks<'_>,
+    action_carriers: Option<&mut CheckedStateCarriers<'f, S::Term>>,
+) -> Result<Option<BmcViolation>, VerifyError> {
     reject_unchecked_sequence_overflow(solver, &states[step], checks.checked_bounds).await?;
+    let mut checked_carriers = CheckedStateCarriers {
+        read_state: &states[step],
+        names: BTreeSet::new(),
+        old_frame: None,
+    };
+    let checked_carriers = action_carriers.unwrap_or(&mut checked_carriers);
     for (name, _) in &model.state {
         let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();
         if checks
@@ -962,16 +1491,38 @@ async fn check_state_properties<S: SmtSolver>(
             ));
         }
         solver.assert(&valid)?;
+        checked_carriers.names.insert(name.clone());
     }
     for property in &model.invariants {
+        if matches!(
+            &property.expr,
+            fsl_core::KernelExpr::Quantified {
+                binder: fsl_core::KernelBinder::Range { .. },
+                ..
+            }
+        ) {
+            if let Some(violation) = check_range_invariant(
+                solver,
+                model,
+                property,
+                (states, choices, instances, step),
+                checked_carriers,
+            )
+            .await?
+            {
+                return Ok(Some(violation));
+            }
+            continue;
+        }
         let mut bindings = Bindings::new();
-        let evaluation = property_evaluation_status(
+        let evaluation = property_evaluation_status_in(
             solver,
             model,
             &property.expr,
             &states[step],
             &bindings,
             None,
+            Some(&*checked_carriers),
         )?;
         solver.set_query_context("partial_op", &property.name);
         if evaluation.has_partial_operation && probe(solver, &evaluation.first_partial).await? {
@@ -1000,13 +1551,14 @@ async fn check_state_properties<S: SmtSolver>(
             )));
         }
         solver.assert(&evaluation.fully_defined)?;
-        let value = eval(
+        let value = eval_in(
             solver,
             model,
             &property.expr,
             &states[step],
             &mut bindings,
             None,
+            Some(&*checked_carriers),
         )?;
         let condition = bool_term(&value)?.clone();
         solver.set_query_context("invariant", &property.name);
@@ -1116,15 +1668,25 @@ async fn check_state_properties<S: SmtSolver>(
     if step == 0 {
         return Ok(None);
     }
+    let transition_context = if model.transitions.iter().any(|property| {
+        !fsl_core::integer_range_state_references(&property.expr, model, []).is_empty()
+    }) {
+        let old =
+            checked_read_carriers(solver, model, &states[step - 1], checks.checked_bounds).await?;
+        Some((*checked_carriers).clone().with_old(old))
+    } else {
+        None
+    };
     for property in &model.transitions {
         let mut bindings = Bindings::new();
-        let evaluation = property_evaluation_status(
+        let evaluation = property_evaluation_status_in(
             solver,
             model,
             &property.expr,
             &states[step],
             &bindings,
             Some(&states[step - 1]),
+            transition_context.as_ref(),
         )?;
         solver.set_query_context("partial_op", &property.name);
         if evaluation.has_partial_operation && probe(solver, &evaluation.first_partial).await? {
@@ -1153,13 +1715,14 @@ async fn check_state_properties<S: SmtSolver>(
             )));
         }
         solver.assert(&evaluation.fully_defined)?;
-        let value = eval(
+        let value = eval_in(
             solver,
             model,
             &property.expr,
             &states[step],
             &mut bindings,
             Some(&states[step - 1]),
+            transition_context.as_ref(),
         )?;
         let condition = bool_term(&value)?.clone();
         solver.set_query_context("trans", &property.name);
@@ -1182,20 +1745,39 @@ async fn check_state_properties<S: SmtSolver>(
         }
         solver.assert(&condition)?;
     }
+    let action_carriers = if model
+        .actions
+        .iter()
+        .any(|action| !action.ensures.is_empty())
+    {
+        checked_action_carriers(solver, model, &states[step - 1], checks.checked_bounds).await?
+    } else {
+        None
+    };
+    let ctx = action_carriers.as_ref();
     for (instance_index, instance) in instances.iter().enumerate() {
         let action = &model.actions[instance.action_index];
         if action.ensures.is_empty() {
             continue;
         }
-        let guard_status =
-            action_guard_definedness(solver, model, action, &states[step - 1], &instance.params)?;
+        let guard_status = classified_action_guard_definedness_in(
+            solver,
+            model,
+            action,
+            &states[step - 1],
+            &instance.params,
+            FailureClass::PartialOperation,
+            ctx,
+        )?;
         let mut bindings = guard_status.bindings;
-        let body_status = action_statements_evaluation_status(
+        let body_status = classified_action_statements_evaluation_status_in(
             solver,
             model,
             action,
             &states[step - 1],
             &bindings,
+            FailureClass::PartialOperation,
+            ctx,
         )?;
         let selected = solver.equal(
             &choices[step - 1],
@@ -1294,27 +1876,39 @@ async fn check_typed_action_partial_operations<S: SmtSolver>(
     choices: &[S::Term],
     instances: &[ActionInstance<S::Term>],
     step: usize,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
     for instance in instances {
         let action = &model.actions[instance.action_index];
-        let guard_evaluation =
-            action_guard_definedness(solver, model, action, &states[step], &instance.params)?;
-        let body_status = action_statements_evaluation_status(
+        let guard_evaluation = classified_action_guard_definedness_in(
+            solver,
+            model,
+            action,
+            &states[step],
+            &instance.params,
+            FailureClass::PartialOperation,
+            ctx,
+        )?;
+        let body_status = classified_action_statements_evaluation_status_in(
             solver,
             model,
             action,
             &states[step],
             &guard_evaluation.bindings,
+            FailureClass::PartialOperation,
+            ctx,
         )?;
         let mut ensures_have_partial_operation = false;
         for ensure in &action.ensures {
-            ensures_have_partial_operation |= evaluation_status(
+            ensures_have_partial_operation |= classified_evaluation_status_in(
                 solver,
                 model,
                 ensure,
                 &states[step],
                 &guard_evaluation.bindings,
                 Some(&states[step]),
+                FailureClass::PartialOperation,
+                ctx,
             )?
             .has_partial_operation;
         }
@@ -1395,10 +1989,8 @@ async fn check_action_partial_operations<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     step: usize,
     range_lemmas: &mut Vec<S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<Option<BmcViolation>, VerifyError> {
-    if instances.is_empty() {
-        return Ok(None);
-    }
     // Range lemmas are charged with the disjunctive probe they serve.
     solver.set_query_context("partial_op", "actions");
     extend_range_lemmas(solver, &states[step], step, range_lemmas).await?;
@@ -1406,22 +1998,30 @@ async fn check_action_partial_operations<S: SmtSolver>(
     let mut undefined = Vec::with_capacity(2 * instances.len());
     for instance in instances {
         let action = &model.actions[instance.action_index];
-        let guard_evaluation =
-            action_guard_definedness(solver, model, action, &states[step], &instance.params)?;
-        let body_status = action_statements_evaluation_status(
+        let guard_evaluation = classified_action_guard_definedness_in(
+            solver,
+            model,
+            action,
+            &states[step],
+            &instance.params,
+            FailureClass::PartialOperation,
+            ctx,
+        )?;
+        let body_status = classified_action_statements_evaluation_status_in(
             solver,
             model,
             action,
             &states[step],
             &guard_evaluation.bindings,
+            FailureClass::PartialOperation,
+            ctx,
         )?;
         let guard_undefined = solver.not(&guard_evaluation.defined)?;
         let body_undefined = solver.and(&[
             guard_evaluation.enabled.clone(),
             solver.not(&body_status.fully_defined)?,
         ])?;
-        undefined.push(guard_undefined.clone());
-        undefined.push(body_undefined.clone());
+        undefined.extend([guard_undefined.clone(), body_undefined.clone()]);
         evaluations.push((
             instance,
             guard_evaluation,
@@ -1436,11 +2036,8 @@ async fn check_action_partial_operations<S: SmtSolver>(
     // The entailed range lemmas (`extend_range_lemmas`) are conjoined to the
     // non-partial probes: the answers are unchanged, the solver no longer has
     // to rediscover the bounds on every unrolled path.
-    let any_undefined = probe(
-        solver,
-        &with_lemmas(solver, range_lemmas, solver.or(&undefined)?)?,
-    )
-    .await?;
+    let failure = with_lemmas(solver, range_lemmas, solver.or(&undefined)?)?;
+    let any_undefined = probe(solver, &failure).await?;
     for (instance, guard_evaluation, body_status, guard_undefined, body_undefined) in evaluations {
         let action = &model.actions[instance.action_index];
         let guard_failure = guard_evaluation.first_partial;
@@ -1599,12 +2196,14 @@ fn enabled_terms<S: SmtSolver>(
     model: &KernelModel,
     instances: &[ActionInstance<S::Term>],
     state: &SymbolicState<S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<Vec<S::Term>, VerifyError> {
     instances
         .iter()
         .map(|instance| {
             let action = &model.actions[instance.action_index];
-            let (guards, _) = action_guards(solver, model, action, state, &instance.params)?;
+            let (guards, _) =
+                action_guards_in(solver, model, action, state, &instance.params, ctx)?;
             Ok(solver.and(&guards)?)
         })
         .collect()
@@ -2230,3 +2829,5 @@ mod tests {
         assert_eq!(error.message, "init evaluation is undefined");
     }
 }
+#[cfg(test)]
+mod integer_range_tests;

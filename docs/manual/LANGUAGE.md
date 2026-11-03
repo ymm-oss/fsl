@@ -506,6 +506,14 @@ integer/Boolean literals, and integer `+`, `-`, `*` combinations (including unar
 `check` and BMC accept well-typed arguments that read state; induction refuses them.
 `within K` is a bounded deadline on a response; `K` must be a non-negative
 constant expression. It is checked by BMC, not by the ranked induction proof.
+**Breaking admission removal (#1480):** negative constant deadlines now fail
+`check` and every verification route at the owning `leadsTo` declaration,
+before engine dispatch; an earlier `check` could accept them. The measured
+removals are shared `X1/negative-within` (`-1`, 8:3) and the native deadline
+fixtures `-1`, `K` with `const K = -1`, and `(0 - 1)` (each 5:3).
+Zero and positive literal/named/arithmetic constants remain accepted. No check
+dispositions changed among the 610 corpus files; the complete own-tree comparison
+and all four removed inline forms are recorded in `DESIGN-spec-domains.md`.
 `decreases` is optional and must be an integer-valued expression. Under
 `fslc verify --engine induction`, the verifier proves the ranked response by
 checking, under the proved invariants, that whenever `P` is pending and `Q` is
@@ -878,6 +886,76 @@ name in a `decreases` call. There are no unrelated breaking removals.
   and `exists binder { expr }`. The 2.x legacy colon/no-braces spelling such as
   `forall i in lo..hi: expr` remains accepted but is non-canonical. A Seq binder
   visits its live prefix in position order and preserves duplicate values.
+  Builtin `Bool` binders enumerate `false`, then `true`, including ordinary
+  quantifiers, init/action statement `forall`, and unfiltered static `leadsTo`
+  wrappers. Bool enumeration alone does not extend struct or dynamic-range
+  policy. Liveness success metadata remains one entry per property, not binding.
+  **Breaking check-admission removal (#1480):** typed binders over a named
+  Struct, such as `forall cell: Cell { ... }`, fail shared validation with the
+  existing finite-scalar diagnostic at the owning source location. Finite Struct
+  fields do not create a scalar domain. Bool, named Enum/Range binders, ordinary
+  Struct values and collection binders over Struct elements are unaffected.
+  The required base/head form count and actual `ok`→`error` list are pending;
+  see [domain policy](../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480).
+- Static range bounds (#1480 Stage A) use the checked constant grammar when
+  folding succeeds: literals/constants, negation, `+ - * / %`, integer
+  `min`/`max`/`abs`, and `if ... then ... else ...`, including Boolean
+  literals/constants, `not`, `and`/`or`/`=>`, comparisons and same-type equality
+  in conditions. The final value must be integer, never a coerced Bool.
+  This applies to aggregate normalization, symbolic range expansion and
+  unfiltered static `leadsTo` wrappers; the concrete arithmetic paths are unchanged.
+  Signed i64 arithmetic is checked and `/`/`%` are Euclidean (`-5/2 == -3`,
+  `-5%2 == 1`). Both conditional arms are name/type-checked, but arithmetic is
+  evaluated only in the selected arm; binary Boolean operands remain eager.
+  Failed folds retain the previous consumer's refusal/diagnostic path, including
+  nested failures; Stage A adds no uniform invalid-static check rule or
+  dynamic/outer/struct support. The temporal-only amendment is described below.
+  The additive Rust method `KernelModel::constant_integer`
+  consults current `consts` without caching and treats free reads of current
+  model state as nonconstant, including names shared by a state and a const.
+  This does not add a global const/state collision rejection. See the
+  [design decision](../design/DESIGN-static-binder-constant-expressions.md).
+  The own-tree `FSLC_CACHE=off <own-binary> check <tree-relative-form>` sweep
+  from B `d11f32631f75afa64fa486cdf4f9b46c6e77d28e` to code H
+  `c86f6bf4422b507f57862f830ad13726f8ce7734` found **zero ok→error transitions**
+  and no full check-output differences across **610 corpus +299 actual inline IDs**.
+  Pure-API G5 comparison: own-tree B `ffcb51b05ce63669e496ffb9df66693b64c7af85`
+  /H `5771539b02649aee78b848fcabd2c696e7037278`, rebuilt CLIs `e35e13ac…`
+  /`f01567d7…`, ran `FSLC_CACHE=off <own CLI> check <tree-relative source>` with
+  `FSLC_UNSTABLE` unset and `fsl5`, twice each side: **610 corpus +2 BASE +299
+  fresh helper IDs =911 IDs /7288 observations**. Measured ok→error, all
+  accepted→error, error→accepted, old-error, other-output and repeat drift sets
+  are **EMPTY**, comparing full stdout/stderr/exit/packets with no exclusions.
+  The 112 endpoint AST/literal occurrences and five constructors are separate,
+  not model roots or huge-normalization projections. This is finite Source A
+  evidence only: full B/C/D, plain `0..n`, public-verifier, combined-policy/Bool
+  and product obligations remain **OPEN**; see the linked design for full hashes.
+- Fixed outer `leadsTo` ranges (#1480 temporal amendment): an unfiltered inner
+  range may use already bound wrapper locals with the checked grammar above.
+  `i in 0..1` then `j in 0..i` expands in order to `(0,0), (1,0), (1,1)`;
+  `b: Bool` then `j in 0..(if b then 1 else 0)` gives
+  `(false,0), (true,0), (true,1)`. Bounds remain integers; Bool is not coerced.
+  Named finite integers and enums retain their declared types. Existing domain
+  order, duplicates and shadowed bindings are preserved across properties.
+  A binder's own bounds see the enclosing binding; its body sees the new one.
+  Enclosing locals take priority; free state cannot use a same-spelled const or
+  a state initializer as a bound. Checked-source const-shadow refusals are unchanged.
+  Dependent bounds run in written binder order, lower before upper, on reachable
+  prefixes. Their first arithmetic failure precedes later static/type failures;
+  unreachable dependent arithmetic is skipped. Empty prefixes still do not mask
+  independent invalid-static, carrier, filter, collection or type errors.
+  All authored endpoint conditions and both arms remain name/type-checked with
+  prior declared wrapper types even after an empty prefix; this does not evaluate
+  arithmetic.
+  Legacy consumer-specific diagnostics retain their existing priority; checked
+  source and raw-Kernel validation keep their separate scopes.
+  `within` remains a nonnegative declaration constant and cannot use wrapper
+  locals. Collection/filtered wrappers, structs, P/Q quantifiers, init/action/
+  aggregate domains and explicit liveness gain no support from this amendment.
+  No syntax or public Kernel/JSON schema changes. See the
+  [temporal amendment](../design/DESIGN-static-binder-constant-expressions.md#proposed-fixed-outer-temporal-amendment-1480)
+  for its implementation in this branch and pending combined qualification and
+  publication; the Stage A/G5 figures above cover their historical scope only.
 - Aggregation: `count(binder)` and `sum(binder of value)`. Examples include
   `count(x: T where p)`, `count(x in queue where p)`,
   `sum(x in queue of x.amount where p)`, and range equivalents. Empty domains
@@ -888,6 +966,29 @@ name in a `decreases` call. There are no unrelated breaking removals.
   captures rather than enumerating only the declared carrier. Later shadowing
   or state updates do not change a let's captured candidates. `min`/`max` around
   a sum remain binary arithmetic; no new aggregate JSON shape is introduced.
+  Authored aggregate admission (#1480 U5) is distinct from execution and strict
+  public Kernel/static projection. After bound-name/type, Boolean filter and
+  integer sum-value checks, validation either checks an unconditional expansion
+  (`Expanded`) or retains the original aggregate without expansion (`Deferred`).
+  A state carrier or lexical type is not an execution premise: deferral neither
+  clips a range nor substitutes a guarded zero, and is not a new source rejection.
+  Both endpoints retain lower/upper checking order. A genuinely closed failed
+  endpoint such as `0..(1/0)` still fails with
+  `public Kernel requires static aggregate range bounds`; authored scope/type
+  errors retain their priority even in empty domains or inactive filters.
+  Bounds see the enclosing scope; filter and sum value see the binder's scope.
+  A bounds-only pass through deferred filter/value descendants still rejects
+  nested invalid closed endpoints and does not skip later failing siblings.
+  Ordinary unreached sum-value arithmetic is not folded as a bound:
+  `sum(i in 1..0 of (1/0)) == 0` remains accepted, while
+  `sum(i in 1..0 of true)` remains ill-typed. Stored authored AST is preserved;
+  no public Deferred node or JSON shape is added. Symbolic callers still require
+  same-frame eligibility or explicit refusal; direct concrete evaluation uses
+  actual endpoints, not declared-carrier clipping. This authored-validation
+  distinction does not claim new symbolic execution support or fresh validation
+  evidence on the integration candidate. Historical Stage A/G5 results above do
+  not transfer; see the [U5 contract](../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480-u5)
+  for carried controls and outstanding boundary/qualification/product obligations.
 - Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
   means at most one matching binding, while `exactlyOne` means exactly one.
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`.
@@ -1357,6 +1458,16 @@ in the enclosing scope, and only its filter/body/value uses the new local scope.
 State-independent collection literals remain allowed. Correcting this lexical
 distinction also removes the old symbolic/explicit false rejection of valid
 shadowed names; that fix does not narrow `check` acceptance.
+
+**Breaking check-admission removal (#1480):** an init **statement** `forall`
+integer-range endpoint cannot read free state, even after that state was assigned,
+with an empty body or in an unreachable branch. Shared validation reports the
+existing compile-time-constant diagnostic at the owning `forall` statement.
+This does not remove supported assigned-state reads in init RHS expressions or
+conditional ranges in actions/properties; enclosing lexical binders retain their
+scope. Existing nested-init restrictions remain. The actual base/head form count
+and removal list are pending the required sweep; see
+[checked executable forms](../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains).
 
 Within an init statement `forall`'s filter or body, reading a state root that
 the **same forall writes** is rejected (#1518), including assignment keys,
@@ -4907,7 +5018,8 @@ DESIGN-*.md).
   `vacuous_leadsto` (the trigger is unreachable), `always_true_requires`
   (a guard that is always true under the context of preceding clauses),
   `tautology_over_frozen` (a dynamically tautological invariant over state no
-  action changes), `urgency_freeze` (a generated deadline `tick` proven dead
+  action changes; the expression must be defined and true over the typed state
+  space with those frozen values fixed), `urgency_freeze` (a generated deadline `tick` proven dead
   because urgency freezes time), `vacuous_deadline` (a generated deadline
   whose age is proven to remain zero across every transition), and
   `vacuity_probe_truncated`†. `error` exits 2. →
