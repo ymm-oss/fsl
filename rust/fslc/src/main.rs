@@ -7158,7 +7158,14 @@ fn run_ai_eval_from_source(
                     2,
                 );
             }
-            Some(source) => PathBuf::from(source),
+            Some(source) => {
+                let source = Path::new(source);
+                if source.is_absolute() {
+                    source.to_path_buf()
+                } else {
+                    path.parent().unwrap_or_else(|| Path::new(".")).join(source)
+                }
+            }
             None => {
                 return (
                     semantic_error_output(&format!(

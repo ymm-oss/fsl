@@ -10,3 +10,8 @@ input-digest mismatch as an I/O error only when the complete existing evaluation
 would approve. Earlier errors and full ordered drift results keep precedence;
 the first mismatch follows glossary then recorded evidence order, using the
 same loaded bytes and literal paths.
+Relative declared AI `dataset.source` paths now resolve from the declaring FSL
+file's directory. Absolute declarations and caller-relative `--records` overrides
+retain their behavior, with no fallback search. The documented support-quality
+example uses `support_eval_v3.jsonl`; existing repository-prefixed declarations
+need explicit migration or a records override.

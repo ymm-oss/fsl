@@ -199,6 +199,8 @@ fslc ai replay <f> --logs events.jsonl                  # AI runtime replay evid
                                                         # check/compat/replay fail closed on invalid ai_component (exit 2)
 fslc ai eval <f> [--records <path>] [--dataset <Name>] [--slice <Name>] [--property <Name>]
                                                         # Wilson-bound check over precomputed eval JSONL
+                                                        # relative dataset.source uses the declaring FSL directory; absolute stays absolute
+                                                        # --records overrides the declaration and remains caller-relative; no path fallback
 fslc ai regress <f> [--migration <Name>] --before-records <p> --after-records <p> [--dataset <Name>]
                                                         # ai_migration.no_regression metric drop/increase check
 fslc ai compare --from <records> --to <records> [--from-label L] [--to-label L] [--dataset <Name>]

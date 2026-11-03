@@ -4910,7 +4910,17 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 選択された <code>statistical_property</code> が宣言する <code>slice</code>/<code>min_samples</code>/
 <code>ci_lower</code>/<code>ci_upper</code> の要件を、事前計算された JSONL（<code>--records</code>、または
 宣言された <code>dataset</code> の <code>source</code> ファイル）に対して Wilson 区間つきで検査
-します。<code>fslc ai regress</code> は選択された <code>ai_migration</code> が宣言する集約の
+します。</p>
+<p>宣言された <code>dataset.source</code> が相対パスなら、宣言元 FSL ファイルのディレクトリを
+基準に読み込みます。絶対パスはそのまま使います。明示した <code>--records</code> は宣言より
+優先し、実行ディレクトリを基準とします。宣言に source がない場合や、外部の source
+を指定した場合も同じです。property/dataset の選択は、引き続き records の読み込みより
+先に行います。上書き指定がなければ、source がない場合と外部の <code>://</code> source に対する
+既存の拒否を保ち、実行ディレクトリやリポジトリ、ファイルの有無による代替探索は
+行いません。そのため、文書の正例では <code>source "support_eval_v3.jsonl"</code> と宣言します。
+従来のリポジトリ接頭辞付き宣言は、表記を明示的に移行するか、実行ディレクトリ基準の
+<code>--records</code> を指定する必要があります。暗黙の付け替えは行いません。</p>
+<p><code>fslc ai regress</code> は選択された <code>ai_migration</code> が宣言する集約の
 <code>no_regression</code> メトリクス低下/増加の節を検査します。<code>fslc ai compare</code> は
 閾値の主張なしにメトリクスの差分を報告します。<code>fslc ai drift</code> は選択された
 <code>observed_property</code> が宣言する <code>observed</code>/<code>drift</code> の要件をランタイムの

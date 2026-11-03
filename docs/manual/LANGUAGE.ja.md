@@ -4756,7 +4756,19 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 選択された `statistical_property` が宣言する `slice`/`min_samples`/
 `ci_lower`/`ci_upper` の要件を、事前計算された JSONL（`--records`、または
 宣言された `dataset` の `source` ファイル）に対して Wilson 区間つきで検査
-します。`fslc ai regress` は選択された `ai_migration` が宣言する集約の
+します。
+
+宣言された `dataset.source` が相対パスなら、宣言元 FSL ファイルのディレクトリを
+基準に読み込みます。絶対パスはそのまま使います。明示した `--records` は宣言より
+優先し、実行ディレクトリを基準とします。宣言に source がない場合や、外部の source
+を指定した場合も同じです。property/dataset の選択は、引き続き records の読み込みより
+先に行います。上書き指定がなければ、source がない場合と外部の `://` source に対する
+既存の拒否を保ち、実行ディレクトリやリポジトリ、ファイルの有無による代替探索は
+行いません。そのため、文書の正例では `source "support_eval_v3.jsonl"` と宣言します。
+従来のリポジトリ接頭辞付き宣言は、表記を明示的に移行するか、実行ディレクトリ基準の
+`--records` を指定する必要があります。暗黙の付け替えは行いません。
+
+`fslc ai regress` は選択された `ai_migration` が宣言する集約の
 `no_regression` メトリクス低下/増加の節を検査します。`fslc ai compare` は
 閾値の主張なしにメトリクスの差分を報告します。`fslc ai drift` は選択された
 `observed_property` が宣言する `observed`/`drift` の要件をランタイムの

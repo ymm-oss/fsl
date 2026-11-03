@@ -5052,8 +5052,19 @@ the same parser the evidence commands run and returns `ai_project_analyzed`;
 `fslc ai eval` checks the selected
 `statistical_property`'s declared `slice`/`min_samples`/`ci_lower`/`ci_upper`
 requirements against precomputed JSONL (`--records`, or the declared
-`dataset`'s `source` file) with Wilson intervals; `fslc ai regress` checks the
-selected `ai_migration`'s declared aggregate `no_regression` metric
+`dataset`'s `source` file) with Wilson intervals.
+
+A relative declared `dataset.source` resolves against the declaring FSL file's
+directory; an absolute source remains absolute. Explicit `--records` wins and
+remains relative to the invocation directory, including when the declaration has
+no source or names an external source. Property/dataset selection still precedes
+records I/O. Without an override, missing sources and external `://` sources keep
+their existing refusal; no caller-directory, repository or existence fallback is
+tried. The documented example therefore declares `source "support_eval_v3.jsonl"`.
+Existing repository-prefixed declarations require an explicit spelling migration
+or caller-relative `--records`; they are not automatically rebased.
+
+`fslc ai regress` checks the selected `ai_migration`'s declared aggregate `no_regression` metric
 drop/increase clauses; `fslc ai compare` reports metric deltas without a
 threshold claim; `fslc ai drift` checks the selected `observed_property`'s
 declared `observed`/`drift` requirements over runtime telemetry
