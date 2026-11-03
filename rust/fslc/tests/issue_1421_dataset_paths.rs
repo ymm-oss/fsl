@@ -103,9 +103,9 @@ impl Inputs {
             negative,
         };
         inputs.declare(Some(BASENAME));
-        inputs.write(&inputs.directory.join(BASENAME), &inputs.positive);
-        inputs.write(&inputs.root.join(BASENAME), &inputs.negative);
-        inputs.write(&inputs.unrelated.join(BASENAME), &inputs.negative);
+        Inputs::write(&inputs.directory.join(BASENAME), &inputs.positive);
+        Inputs::write(&inputs.root.join(BASENAME), &inputs.negative);
+        Inputs::write(&inputs.unrelated.join(BASENAME), &inputs.negative);
         inputs
     }
 
@@ -131,7 +131,7 @@ impl Inputs {
             .expect("controlled declaration");
     }
 
-    fn write(&self, path: &Path, bytes: &[u8]) {
+    fn write(path: &Path, bytes: &[u8]) {
         std::fs::create_dir_all(path.parent().expect("parent")).expect("owned data parent");
         std::fs::write(path, bytes).expect("write controlled data");
     }
@@ -208,7 +208,7 @@ fn ai1_declared_relative_source_uses_its_file_directory_and_never_cwd_decoys() {
     );
     same(&quality(&inputs.unrelated, &inputs.spec, None), 2, &missing);
     assert_eq!(inventory(&inputs.root), without_actual);
-    inputs.write(&actual, &inputs.positive);
+    Inputs::write(&actual, &inputs.positive);
     same(
         &quality(&inputs.unrelated, &inputs.spec, None),
         0,
@@ -221,9 +221,9 @@ fn ai1_declared_relative_source_uses_its_file_directory_and_never_cwd_decoys() {
 fn ai1_absolute_declared_source_is_unchanged_and_has_no_missing_file_fallback() {
     let inputs = Inputs::new();
     let actual = inputs.root.join("absolute-data.jsonl");
-    inputs.write(&actual, &inputs.positive);
+    Inputs::write(&actual, &inputs.positive);
     inputs.declare(Some(actual.to_str().expect("absolute source")));
-    inputs.write(
+    Inputs::write(
         &inputs.unrelated.join("absolute-data.jsonl"),
         &inputs.negative,
     );
@@ -248,7 +248,7 @@ fn ai1_absolute_declared_source_is_unchanged_and_has_no_missing_file_fallback() 
     assert_eq!(missing["kind"], "parse");
     same(&quality(&inputs.unrelated, &inputs.spec, None), 2, &missing);
     assert_eq!(inventory(&inputs.root), without_actual);
-    inputs.write(&actual, &inputs.positive);
+    Inputs::write(&actual, &inputs.positive);
     assert_eq!(inventory(&inputs.root), before);
 }
 
@@ -256,7 +256,7 @@ fn ai1_absolute_declared_source_is_unchanged_and_has_no_missing_file_fallback() 
 fn ai2_unmigrated_repo_style_source_has_no_guessing_and_selects_its_exact_nested_path() {
     let inputs = Inputs::new();
     inputs.declare(Some(RECORDS));
-    inputs.write(&inputs.root.join(RECORDS), &inputs.positive);
+    Inputs::write(&inputs.root.join(RECORDS), &inputs.positive);
     let actual = inputs.directory.join(RECORDS);
     let before = inventory(&inputs.root);
     let decoy = checked(
@@ -268,7 +268,7 @@ fn ai2_unmigrated_repo_style_source_has_no_guessing_and_selects_its_exact_nested
     assert_eq!(missing["kind"], "parse");
     same(&quality(&inputs.root, &inputs.spec, None), 2, &missing);
     assert_eq!(inventory(&inputs.root), before);
-    inputs.write(&actual, &inputs.negative);
+    Inputs::write(&actual, &inputs.negative);
     let with_actual = inventory(&inputs.root);
     let expected = checked(&quality(&inputs.root, &inputs.spec, Some(&actual)), 1);
     assert_eq!(expected["result"], "statistically_unsupported");
@@ -299,9 +299,9 @@ fn larger_positive(bytes: &[u8]) -> Vec<u8> {
 #[test]
 fn ai2_explicit_records_stay_caller_relative_and_override_local_missing_and_external_sources() {
     let inputs = Inputs::new();
-    inputs.write(&inputs.root.join("override.jsonl"), &inputs.negative);
-    inputs.write(&inputs.unrelated.join("override.jsonl"), &inputs.positive);
-    inputs.write(
+    Inputs::write(&inputs.root.join("override.jsonl"), &inputs.negative);
+    Inputs::write(&inputs.unrelated.join("override.jsonl"), &inputs.positive);
+    Inputs::write(
         &inputs.directory.join("override.jsonl"),
         &larger_positive(&inputs.positive),
     );
@@ -430,7 +430,7 @@ fn ai1_documented_positive_example_survives_its_owner_migration_across_cwds() {
     let repo = repository();
     let spec = repo.join(EXAMPLE);
     let records = repo.join(RECORDS);
-    inputs.write(&inputs.root.join(RECORDS), &inputs.negative);
+    Inputs::write(&inputs.root.join(RECORDS), &inputs.negative);
     let before = inventory(&inputs.root);
     let source_bytes = std::fs::read(&spec).expect("readonly real example");
     let record_bytes = std::fs::read(&records).expect("readonly real records");
