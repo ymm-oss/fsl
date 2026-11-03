@@ -211,27 +211,56 @@ fn arithmetic_expression_per_value_rejecting_controls() {
 
 #[test]
 fn init_conservative_domains_and_read_order_preservation() {
-    for (initial, message) in [
+    for (initial, message, range_index) in [
         (
             "forall i in 0..n { m[i] = true } n = 0",
             "init forall range bounds must be compile-time constants; state variable 'n' is not allowed",
+            Some(0),
         ),
         (
             "n = 1 forall i in 0..n { m[i] = true }",
             "init forall range bounds must be compile-time constants; state variable 'n' is not allowed",
+            Some(1),
         ),
         (
             "forall i in 0..1 where n == 0 { m[i] = true } n = 0",
             "init references state variable 'n' before it is assigned",
+            None,
         ),
     ] {
         let source = format!(
             "spec C {{ type Key = 0..1 state {{ n: Key, m: Map<Key, Bool> }} init {{ {initial} }} action go() {{}} }}"
         );
-        let m = build_model(parse_kernel_source(&source, &FsResolver::new(".")).unwrap()).unwrap();
+        let kernel = parse_kernel_source(&source, &FsResolver::new(".")).unwrap();
+        let m = if let Some(index) = range_index {
+            let source_error = build_model(kernel).expect_err("shared init range admission");
+            assert_eq!(source_error.message, message);
+            // Preserve the independent unchecked-model guard after Core refuses the source.
+            let mut unchecked = build_model(
+                parse_kernel_source(&source.replace("0..n", "0..1"), &FsResolver::new("."))
+                    .unwrap(),
+            )
+            .unwrap();
+            let fsl_core::KernelStatement::ForAll {
+                binder: fsl_core::KernelBinder::Range { hi, .. },
+                span,
+                ..
+            } = &mut unchecked.init[index]
+            else {
+                panic!("range forall")
+            };
+            assert_eq!(source_error.span, Some(*span));
+            **hi = fsl_core::KernelExpr::Var("n".into());
+            unchecked
+        } else {
+            build_model(kernel).unwrap()
+        };
         let actual = verify_explicit(m, 2, 20).unwrap_err();
         eprintln!("PRESERVE source={source} expected={message} produced={actual:?}");
         assert_eq!(actual.message, message);
+        if range_index.is_some() {
+            assert_eq!(actual.span, None);
+        }
     }
     let outer = "spec O { struct T { a: Bool, b: Bool, c: Bool } state { s: T, free: Bool } init { s.a = true s.b = true forall limit in 0..0 { forall j in 1..limit { s.c = false } } } action idle() {} }";
     let admitted = build_model(parse_kernel_source(outer, &FsResolver::new(".")).unwrap());
