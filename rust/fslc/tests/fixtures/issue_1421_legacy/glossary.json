@@ -1,0 +1,7 @@
+{
+  "schema": "fslc.document-glossary.v1",
+  "locale": "ja",
+  "labels": {
+    "action:approve": "承認する"
+  }
+}
