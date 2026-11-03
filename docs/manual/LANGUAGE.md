@@ -974,7 +974,8 @@ name in a `decreases` call. There are no unrelated breaking removals.
   integer sum-value checks, validation either checks an unconditional expansion
   (`Expanded`) or retains the original aggregate without expansion (`Deferred`).
   A state carrier or lexical type is not an execution premise: deferral neither
-  clips a range nor substitutes a guarded zero, and is not a new source rejection.
+  clips a range nor substitutes a guarded zero, and does not itself reject source;
+  the range admission rule below decides whether the deferred bound can execute.
   Both endpoints retain lower/upper checking order. A genuinely closed failed
   endpoint such as `0..(1/0)` still fails with
   `public Kernel requires static aggregate range bounds`; authored scope/type
@@ -992,6 +993,47 @@ name in a `decreases` call. There are no unrelated breaking removals.
   evidence on the integration candidate. Historical Stage A/G5 results above do
   not transfer; see the [U5 contract](../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480-u5)
   for carried controls and outstanding boundary/qualification/product obligations.
+- **Breaking check-admission removal: range bounds the engines cannot execute (#1480).**
+  `check`, every `verify` engine, LSP diagnostics and Worker preflight refuse them
+  with one rule before any solver runs: a located `semantics` error, exit 2.
+  A bound is executable when it folds to a constant, or is built from constants,
+  integer names, unary minus and `+ - *` with an interval that fits `i64`, and
+  every name it reads is established in its scope:
+  - An enumerated value is established everywhere: an action parameter, a range or
+    named integer binder, and a binder over a Seq literal whose items are integer
+    literals, constants or such names.
+  - A state variable with a finite carrier is established only where the engines
+    certify the read frame: `invariant`, `trans`, `unless`, `requires`, `let`
+    right-hand sides, `if` conditions and assignments. It is not established in
+    `ensures`, `reachable`, `terminal`, `until`, leadsTo P/Q, `decreases` or
+    `helpful` arguments.
+  - In `init`, a completed assignment with a finite value is established for later
+    reads. An init statement `forall` source reads no completed assignment.
+  - A binder over a state Set of a finite integer element type is established in
+    `trans`, `unless`, `ensures` and `init` statements, and elsewhere when no `init`
+    path assigns that Set a value that may be non-empty; so are `.add` and `.remove`
+    of a literal or established item on it. A one-item Set literal is established
+    when its item is. A zero-capacity Seq has no candidates.
+  - Never established: a `let` name (even `let k = 2`), a pattern binding, Int-typed
+    state, an element of a Set literal with several items, of any other Seq, or of a
+    state Set outside the cases above.
+
+  Indexing, field access, `size()`, `if`, `min`, `/`, `%`, `old(...)` and aggregates
+  in a dependent bound are refused. Nothing in the filter or body of a binder with
+  no candidates (`forall o in 2..0`) is evaluated, so it is not refused. Evaluation
+  is eager: `false => count(i in 0..m[0]) >= 0` is refused. Aggregates report the
+  checked-model message (`'n' is not an integer const`,
+  `public Kernel requires static aggregate range bounds`) at their statement;
+  quantifiers and statement `forall` report the engine message
+  (`'n' is not an integer const`, `binder bound is not a static integer`) with the
+  same location. There is no size cap: `forall i in 0..(n * 100000)` stays admitted
+  and slow. Forms that used to report a verdict before reaching the refused bound
+  now report the refusal: an earlier violated property, `--property` or
+  `--exclude-property` stepping around the property, and `--depth 0`. Explicit-engine
+  verdicts on these forms are removed as well. Bare `build_model`, raw Runtime
+  constructors and `replay` keep their boundaries; see
+  [checked executable forms](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission).
+  [#1480 final sweep: the measured base/head form count and `ok`→`error` list are recorded here after the final sweep.]
 - Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
   means at most one matching binding, while `exactlyOne` means exactly one.
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`.
@@ -1469,9 +1511,9 @@ existing compile-time-constant diagnostic at the owning `forall` statement.
 Earlier init ownership and field-read diagnostics keep priority. This range rule
 belongs to checked-source admission, not bare Core model construction; raw
 Runtime constructors retain their existing error contracts.
-This does not remove supported assigned-state reads in init RHS expressions or
-conditional ranges in actions/properties; enclosing lexical binders retain their
-scope. Existing nested-init restrictions remain. The actual base/head form count
+This does not remove supported assigned-state reads in init RHS expressions;
+ranges in other positions follow the range admission rule; enclosing lexical
+binders retain their scope. Existing nested-init restrictions remain. The actual base/head form count
 and removal list are pending the required sweep; see
 [checked executable forms](../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains).
 

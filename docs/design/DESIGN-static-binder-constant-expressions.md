@@ -234,8 +234,11 @@ validation uses either `Expanded` (the existing unconditional expansion and its
 generated-copy checks) or validation-only `Deferred`. A state carrier or lexical
 type alone is not an established execution premise. A range requiring such a
 premise, or otherwise lacking an unconditional finite plan, retains its original
-aggregate AST rather than becoming a clipped sum, a guarded zero or a new source
-check rejection. No public Deferred node or Kernel/JSON schema is added.
+aggregate AST rather than becoming a clipped sum or a guarded zero. Deferral does
+not itself reject source. The later
+[checked range admission](DESIGN-check-executable-forms.md#1480-checked-range-admission)
+refuses a deferred bound the engines cannot execute, outside bare Core construction.
+No public Deferred node or Kernel/JSON schema is added.
 
 Deferral is not catch-all error suppression: both written endpoints are checked
 in lower/upper order. A genuinely closed endpoint whose checked fold fails, such

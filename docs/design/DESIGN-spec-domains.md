@@ -135,6 +135,9 @@ diagnostic.
 
 The companion init-statement state-dependent-range refusal is recorded in
 [checked executable forms](DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains).
+Ranges that read state, lets, patterns or collection elements are decided by
+[checked range admission](DESIGN-check-executable-forms.md#1480-checked-range-admission);
+`DOMAIN_BOUND` bounds enumerated requirement questions and does not limit range binders.
 The required own-tree base/head command, SHAs, form count and actual transition
 list are **pending**. Earlier finite-domain/Stage A sweep counts do not establish
 this amendment's transition set.

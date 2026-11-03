@@ -597,7 +597,8 @@ fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
     );
     assert_eq!(
         owner_refused.len(),
-        16,
+        // #1480: the 2 x 4 leadsTo wrapper bound shapes, now refused by their owner at `check`.
+        24,
         "standalone refusal inventory changed"
     );
     owner_refusal::assert_preserved(refusal_failures);
@@ -992,7 +993,8 @@ fn aggregate_pattern_and_owner_source_checks() {
     );
     assert_eq!(
         (owner_refused_old.len(), owner_refused_new.len()),
-        (16, 64),
+        // #1480: the 2 x 4 leadsTo wrapper bound shapes, now refused by their owner at `check`.
+        (24, 96),
         "standalone refusal inventory changed"
     );
     assert_eq!(false_refusals, 0, "owner accepted but compose refused");

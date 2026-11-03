@@ -71,6 +71,48 @@ mod issue_1463 {
     }
 
     #[test]
+    fn issue_1480_worker_range_admission_matches_checked_native_without_solver() {
+        for (source, message, column) in [
+            (
+                "spec R {type T=0..3 state {n:T} init {n=0} action go() {n=1 ensures count(i in 0..n)>=0}}",
+                "invalid model expression: 'n' is not an integer const at 1:44",
+                44,
+            ),
+            (
+                "spec R {type T=0..3 state {n:T} init {n=0} reachable P {forall i in 0..n {i>=0}}}",
+                "'n' is not an integer const",
+                44,
+            ),
+        ] {
+            let mut request = Request {
+                cmd: "check".into(),
+                source: source.into(),
+                source_file: "range.fsl".into(),
+                files: std::collections::BTreeMap::default(),
+                options: Options::default(),
+                unstable: Vec::new(),
+            };
+            let mut no_solver = || -> Result<fsl_solver_z3js::Z3JsSolver, String> {
+                panic!("range admission must precede solver creation")
+            };
+            let native = native_check_error(&request, TEST_SOLVER_VERSION);
+            assert_eq!(native["result"], "error");
+            assert_eq!(native["kind"], "semantics");
+            assert_eq!(native["message"], message);
+            assert_eq!(native["loc"], serde_json::json!({"line":1,"column":column}));
+            assert_eq!(
+                block_on(check_with(&request, TEST_SOLVER_VERSION, &mut no_solver)),
+                native
+            );
+            request.cmd = "verify".into();
+            assert_eq!(
+                block_on(verify_with(&request, TEST_SOLVER_VERSION, &mut no_solver)),
+                native
+            );
+        }
+    }
+
+    #[test]
     fn issue_1480_worker_init_range_priority_matches_checked_native() {
         for (source, message) in [
             (

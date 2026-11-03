@@ -36,12 +36,14 @@ impl CheckedBuildError {
 ///
 /// # Errors
 /// Returns the original Core error, an existing ownership/read failure ahead
-/// of the deferred init-domain refusal, or that located domain refusal.
+/// of a deferred refusal, or that located init-domain or range-bound refusal.
 pub fn build_checked_model(kernel: KernelSpec) -> Result<KernelModel, CheckedBuildError> {
     let origins = kernel.origins().clone();
-    let model =
+    let mut model =
         fsl_core::build_model(kernel).map_err(|error| CheckedBuildError::Model(Box::new(error)))?;
-    if let Err(pending) = fsl_core::check_init_statement_domains(&model, &origins) {
+    let pending = fsl_core::check_init_statement_domains(&model, &origins)
+        .and_then(|()| fsl_core::check_range_admission(&mut model, &origins));
+    if let Err(pending) = pending {
         fsl_runtime::check_init_write_ownership(&model)
             .map_err(|error| CheckedBuildError::InitOwnership(Box::new(error)))?;
         return Err(CheckedBuildError::Model(Box::new(pending)));

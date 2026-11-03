@@ -2459,7 +2459,7 @@ fn parameter_range_values<S: SmtSolver>(
     else {
         return Err(integer_range_error(&plan));
     };
-    let eligible = prerequisites.iter().all(|p| match p {
+    let eligible = plan.is_executable(|p| match p {
         RangePrerequisite::LexicalFact { input_index } => bindings
             .records()
             .nth(*input_index)
@@ -2719,38 +2719,9 @@ pub(crate) fn binder_where_in<S: SmtSolver>(
 }
 
 pub(crate) fn static_int(expr: &Expr, model: &KernelModel) -> Result<i64, VerifyError> {
-    if let Ok(value) = model.constant_integer(expr) {
-        return Ok(value);
-    }
-    legacy_static_int(expr, model)
-}
-
-// A failed common fold must recurse only through the original adapter.
-fn legacy_static_int(expr: &Expr, model: &KernelModel) -> Result<i64, VerifyError> {
-    match expr {
-        Expr::Num(value) => Ok(*value),
-        Expr::Var(name) => match model.consts.get(name) {
-            Some(FslValue::Int(value)) => Ok(*value),
-            _ => Err(VerifyError::new(format!(
-                "'{name}' is not an integer const"
-            ))),
-        },
-        Expr::Neg(inner) => legacy_static_int(inner, model)?
-            .checked_neg()
-            .ok_or_else(|| VerifyError::new("integer overflow in static negation")),
-        Expr::Binary { op, left, right } => {
-            let left = legacy_static_int(left, model)?;
-            let right = legacy_static_int(right, model)?;
-            match op.as_str() {
-                "+" => left.checked_add(right),
-                "-" => left.checked_sub(right),
-                "*" => left.checked_mul(right),
-                _ => None,
-            }
-            .ok_or_else(|| VerifyError::new("invalid static integer expression"))
-        }
-        _ => Err(VerifyError::new("binder bound is not a static integer")),
-    }
+    model
+        .static_binder_bound(expr, &mut str::to_owned)
+        .map_err(VerifyError::new)
 }
 
 fn qualified_type(namespace: Option<&str>, name: &str) -> Result<String, VerifyError> {

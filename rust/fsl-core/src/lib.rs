@@ -94,7 +94,7 @@ pub use finite_domain::{DOMAIN_BOUND, SolverObligation, solver_obligations};
 pub use model::{
     ActionDef, ActionGuard, DiagnosticEdit, KernelModel, LeadsToDef, ModelError, ParamDef,
     PropertyDef, TypeDef, TypeRef, Value as FslValue, WRITE_DISTINCTNESS_UNPROVED_CODE,
-    build_model, check_init_collection_binder, check_init_statement_domains,
+    build_model, check_init_collection_binder, check_init_statement_domains, check_range_admission,
     integer_range_state_references, state_references, static_leadsto_bindings,
 };
 pub use naming::{

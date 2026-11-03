@@ -240,12 +240,14 @@ review_cells! {
     r1_pattern_or: ("spec Impl { type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
         "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(x)) or y==3)} }",
         "map y=x map o=p action go()->step()", 2, Some(0), Some(PATTERN_CAPTURE), false, json!({})),
+    // #1480: these abstract specs have a bound no engine executes, so `refine`
+    // and `verify` now report the same located refusal of the abstract input.
     r1_pattern_const: ("spec Impl { type V=0..5 const N=1 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
         "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(N)) and (forall k in 0..N {k<=1}))} }",
-        "map y=x map o=p action go()->step()", 2, Some(2), None, false, json!({})),
+        "map y=x map o=p action go()->step()", 2, Some(2), None, true, json!({})),
     r1_ambiguous_const_state: ("spec Impl {state {x:Int=0} fair action go(){x=0}}",
         "spec Abs {const N=3 state {N:Int=1} fair action step(){N=1} leadsTo L {forall z in 0..N {true ~> z<=1}}}",
-        "map N=1 action go()->step()", 2, None, None, false, json!({})),
+        "map N=1 action go()->step()", 2, None, None, true, json!({})),
     r1_unused_map: ("spec Impl {state {x:Int=0} fair action go(){requires x==0 x=1}}",
         "spec Abs {state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall x in 0..3 {x==0 ~> x==0}}}",
         "map y=x action go()->step()", 0, Some(0), None, false, json!({})),

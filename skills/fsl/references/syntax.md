@@ -1451,8 +1451,9 @@ when checking a file, the message suffix changes from `at L:C` to
   Authored validation (#1480 U5) checks bound names/types, Boolean filters and
   integer sum values before choosing unconditional `Expanded` validation or
   validation-only `Deferred`. Deferred retains the original AST, not a clipped
-  domain, guarded zero, new check rejection or public JSON node. Declared carriers
-  and lexical types do not establish execution eligibility. Check both endpoints
+  domain, guarded zero or public JSON node, and does not itself reject source; the
+  range admission rule below decides. Declared carriers and lexical types do not
+  establish execution eligibility. Check both endpoints
   lower before upper; a genuinely closed failed fold (`0..(1/0)`) retains
   `public Kernel requires static aggregate range bounds`, not successful deferral.
   Preserve scope/type-error priority even for empty/inactive cases: bounds use
@@ -1465,6 +1466,37 @@ when checking a file, the message suffix changes from `at L:C` to
   clipping. This does not add general symbolic aggregate execution. The coupled
   design records carried controls and still-open base/head, qualification,
   calibration and product obligations; old Stage A/G5 results are not fresh proof.
+- **Breaking check-admission removal: range bounds the engines cannot execute (#1480).**
+  `check`, every `verify` engine, LSP and Worker refuse them before any solver runs
+  (located `semantics`, exit 2). A bound runs when it folds to a constant, or uses
+  only constants, integer names, unary minus and `+ - *` with an `i64` interval, and
+  each name is established in its scope. Enumerated values are established
+  everywhere: action parameters, range/named-integer binders, and binders over a Seq
+  literal of integer literals, constants or such names. Finite-carrier state is
+  established in `invariant`, `trans`, `unless`, `requires`, `let` RHS, `if`
+  conditions and assignments, but not in `ensures`, `reachable`, `terminal`, `until`,
+  leadsTo P/Q, `decreases` or `helpful` arguments. In `init`, a completed assignment
+  with a finite value is established for later reads, not for a statement `forall`
+  source. A binder over a finite-integer state Set is established in `trans`,
+  `unless`, `ensures` and `init` statements, and elsewhere when no `init` path may
+  assign it a non-empty value; a one-item Set literal when its item is; a
+  zero-capacity Seq has no candidates. Never established: `let` names (even
+  `let k = 2`), pattern bindings, Int state, elements of a several-item Set literal,
+  other Seq elements, other state Set elements. Indexing, fields, `size()`, `if`,
+  `min`, `/`, `%`, `old(...)` and aggregates in a dependent bound are refused. A
+  binder with no candidates (`forall o in 2..0`) never evaluates its filter or body,
+  so it is not refused; `false => count(i in 0..m[0]) >= 0` is, because evaluation is
+  eager. Aggregates report `'n' is not an integer const` or
+  `public Kernel requires static aggregate range bounds` with the checked-model
+  prefix; quantifiers and statement `forall` report `'n' is not an integer const`
+  or `binder bound is not a static integer`, same location. No size cap:
+  `forall i in 0..(n * 100000)` stays admitted and slow. Rewriting the bound is the
+  fix: bind a parameter or binder, or move the check to `invariant`/`requires`.
+  A verdict reached before the refused bound (earlier violation, `--property`,
+  `--exclude-property`, `--depth 0`) becomes the refusal, and explicit-engine verdicts
+  on these forms are removed. Bare `build_model`, raw Runtime constructors and
+  `replay` keep their boundaries.
+  [#1480 final sweep: the measured base/head form count and `ok`→`error` list are recorded here after the final sweep.]
 - Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
   means at most one match; `exactlyOne` means exactly one.
 - Option: `x == none` `x != none` `x == some(e)` `x != some(e)` use structural
@@ -1911,8 +1943,8 @@ old symbolic/explicit false refusal without narrowing check acceptance.
 even after assignment, with empty bodies or in unreachable branches. Earlier
 init ownership/field-read diagnostics keep priority. The range rule is a
 checked-source boundary, not bare Core construction; raw Runtime errors remain
-unchanged. Supported init RHS reads, enclosing lexical binding scopes and
-action/property conditional ranges remain; existing nested-init limits remain.
+unchanged. Supported init RHS reads and enclosing lexical binding scopes remain;
+ranges elsewhere follow the range admission rule; existing nested-init limits remain.
 Actual base/head input
 counts and removal records are pending; see `DESIGN-check-executable-forms.md`.
 

@@ -8,7 +8,8 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 const STATIC: &str = "invalid static integer expression";
-const ELIGIBILITY: &str = "unsupported integer range execution [eligibility]: prerequisites are not established for this evaluation scope";
+// #1480: a wrapper bound no engine executes is refused at `check`, with its location.
+const NOT_CONST: &str = "'n' is not an integer const";
 const EXPLICIT: &str = "the explicit engine does not support leadsTo properties; use --engine bmc or exclude the leadsTo property";
 const FILTER: &str = "leadsTo wrapper binders do not support where filters";
 const COLLECTION: &str = "leadsTo wrapper binders do not support collection domains";
@@ -63,9 +64,13 @@ const CASES: &[Case] = &[
     case!("constant-response", 6, Outcome::Response),
     case!("empty-dependent", 5, Outcome::Response),
     case!("empty-dependent-overflow", 5, Outcome::Response),
-    case!("empty-static-overflow", 5, Outcome::EngineError(STATIC)),
-    case!("overflow-low", 5, Outcome::EngineError(STATIC)),
-    case!("overflow-high", 5, Outcome::EngineError(STATIC)),
+    case!(
+        "empty-static-overflow",
+        5,
+        Outcome::Shared(STATIC, 5, 3, false)
+    ),
+    case!("overflow-low", 5, Outcome::Shared(STATIC, 5, 3, false)),
+    case!("overflow-high", 5, Outcome::Shared(STATIC, 5, 3, false)),
     case!("filter-range", 5, Outcome::Shared(FILTER, 5, 3, false)),
     case!(
         "filter-empty-typed",
@@ -82,11 +87,11 @@ const CASES: &[Case] = &[
         5,
         Outcome::Shared(COLLECTION, 5, 3, false)
     ),
-    case!("free-state", 5, Outcome::EngineError(ELIGIBILITY)),
+    case!("free-state", 5, Outcome::Shared(NOT_CONST, 5, 3, false)),
     case!(
         "const-state-collision",
         6,
-        Outcome::EngineError(ELIGIBILITY)
+        Outcome::Shared("binder bound is not a static integer", 6, 3, false)
     ),
     case!(
         "const-outer-collision",

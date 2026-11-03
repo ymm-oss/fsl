@@ -291,10 +291,12 @@ BMC); exceeding `--explicit-budget` returns `unknown_budget` (exit 1) — never
 a silent `verified`. Violations return the same shortest-counterexample trace
 schema as BMC. Results carry `states_explored`, `max_frontier_width`, and
 `depth_reached`. Fail-closed rejections (kind `semantics`, exit 2): `leadsTo`
-properties, nondeterministic `init` (every state variable must be definitely
-assigned), and `init forall` binder domains that reference state variables
-(range bounds and collections must be compile-time constants) — use
-`--engine bmc` for those specs. A definitely-assigned but contradictory
+properties and nondeterministic `init` (every state variable must be definitely
+assigned) — use `--engine bmc` for those specs. `init forall` binder domains that
+reference state variables (range bounds and collections must be compile-time
+constants) and the other range bounds in [syntax.md](syntax.md) are refused by
+`check` and every engine alike, so switching engines does not help: rewrite the
+bound. A definitely-assigned but contradictory
 `init` (an `init forall` that writes different concrete values to the same
 non-indexed location across binder values, e.g. `forall k: K { x = k }` with
 `|K| > 1`) is also rejected, matching BMC exactly: `result:"error"`,

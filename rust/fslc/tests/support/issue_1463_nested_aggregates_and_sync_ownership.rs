@@ -4,10 +4,13 @@ use super::forms::Case;
 
 pub fn assert_message(case: &Case, message: &str) {
     if case.id.starts_with("nested/") && case.rejection {
+        let shadowed = case.id.split('/').nth(3) == Some("true");
         assert!(
-            message.contains(
+            message.contains(if shadowed {
                 "local binding 'x' shadows a constant of the same name; rename the local binding"
-            ),
+            } else {
+                "'x' is not an integer const"
+            }),
             "{}: {message}",
             case.id
         );
@@ -72,9 +75,10 @@ pub fn cases() -> Vec<Case> {
                         cases.push(Case {
                             id: format!("nested/{domain}/{empty}/{shadow}/{mode}/{negative}"),
                             source: format!("spec Nested {{\n  {}\n  type K = 0..1\n  state {{ xs: Set<K>, done: Bool }}\n  init {{ xs = Set {{ {} }} done = false }}\n  action go() {{}}\n  invariant Capture {{ {expression} == {} }}\n}}\n", if shadow { "const x = false" } else { "" }, if empty { "" } else { "0, 1" }, expected + i32::from(negative)),
-                            // Const-shadow forms are now located refusal detectors;
-                            // fresh forms retain their original execution oracle.
-                            files: vec![], rejection: shadow, negative, public_name: None, marker: "invariant Capture",
+                            // Const-shadow forms are now located refusal detectors. #1480: so is an
+                            // inner bound over a Set that starts non-empty, which no symbolic
+                            // engine executes; the other fresh forms keep their execution oracle.
+                            files: vec![], rejection: shadow || (domain == "set" && !empty), negative, public_name: None, marker: "invariant Capture",
                         });
                     }
                 }

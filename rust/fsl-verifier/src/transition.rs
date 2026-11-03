@@ -2,15 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use fsl_core::binder_range::{
-    InclusiveI64, IntegerEnvelopeFact, RangeBinding, RangePlan, RangePrerequisite,
-};
+use fsl_core::binder_range::{InclusiveI64, IntegerEnvelopeFact, RangeBinding};
 use fsl_core::{
     ActionDef, ActionGuard, FslValue, KernelExpr as Expr, KernelLValue as LValue, KernelModel,
     KernelStatement as Statement, ParamDef, Span, TypeDef, TypeRef,
 };
 use fsl_solver::{ModelValue, SmtSolver};
-use fsl_syntax::{ConditionalSpans, SourcePos};
 
 use crate::VerifyError;
 use crate::bmc::CheckedStateCarriers;
@@ -629,29 +626,7 @@ fn init_known_condition<S: SmtSolver>(
     if bindings.keys().any(|name| model.consts.contains_key(name)) {
         return None;
     }
-    let position = SourcePos {
-        offset: 0,
-        line: 1,
-        column: 1,
-    };
-    let span = Span {
-        start: position,
-        end: position,
-    };
-    let selector = Expr::Conditional {
-        condition: Box::new(condition.clone()),
-        then_expr: Box::new(Expr::Num(1)),
-        else_expr: Box::new(Expr::Num(0)),
-        spans: Box::new(ConditionalSpans {
-            condition: span,
-            then_expr: span,
-            else_expr: span,
-        }),
-    };
-    model
-        .constant_integer(&selector)
-        .ok()
-        .map(|value| value == 1)
+    fsl_core::binder_range::constant_condition(model, condition)
 }
 
 /// Derive from the actual RHS and unconditional lexical facts, never a state carrier.
@@ -661,88 +636,8 @@ fn init_expression_envelope<S: SmtSolver>(
     expr: &Expr,
     bindings: &Bindings<S::Term>,
 ) -> Option<InclusiveI64> {
-    fsl_core::recursion::guard(|| {
-        if let Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } = expr
-        {
-            let selected = init_known_condition(solver, model, condition, bindings, None);
-            if let Some(selected) = selected {
-                let branch = if selected { then_expr } else { else_expr };
-                return init_expression_envelope(solver, model, branch, bindings);
-            }
-            let left = init_expression_envelope(solver, model, then_expr, bindings)?;
-            let right = init_expression_envelope(solver, model, else_expr, bindings)?;
-            return InclusiveI64::new(left.lo().min(right.lo()), left.hi().max(right.hi()));
-        }
-        if let Expr::Neg(inner) = expr {
-            let envelope =
-                IntegerEnvelopeFact::new(init_expression_envelope(solver, model, inner, bindings)?);
-            let expression = Expr::Neg(Box::new(Expr::Var("value".into())));
-            let lexical = [RangeBinding {
-                name: "value",
-                semantic_ty: &TypeRef::Int,
-                fact: Some(&envelope),
-            }];
-            return match model.plan_integer_range(&expression, &expression, &lexical) {
-                RangePlan::Finite { candidates, .. } => Some(candidates),
-                _ => None,
-            };
-        }
-        if let Expr::Binary { op, left, right } = expr {
-            let left = init_expression_envelope(solver, model, left, bindings)?;
-            let right = init_expression_envelope(solver, model, right, bindings)?;
-            // Exact operands reuse the constant owner, including checked / and %.
-            if left.lo() == left.hi() && right.lo() == right.hi() {
-                let folded = Expr::Binary {
-                    op: op.clone(),
-                    left: Box::new(Expr::Num(left.lo())),
-                    right: Box::new(Expr::Num(right.lo())),
-                };
-                let value = model.constant_integer(&folded).ok()?;
-                return InclusiveI64::new(value, value);
-            }
-            // Reuse the Core interval arithmetic for actual RHS operand envelopes.
-            // These lexical inputs exist only in this pure planning expression.
-            let expression = Expr::Binary {
-                op: op.clone(),
-                left: Box::new(Expr::Var("left".into())),
-                right: Box::new(Expr::Var("right".into())),
-            };
-            let left = IntegerEnvelopeFact::new(left);
-            let right = IntegerEnvelopeFact::new(right);
-            let lexical = [
-                RangeBinding {
-                    name: "left",
-                    semantic_ty: &TypeRef::Int,
-                    fact: Some(&left),
-                },
-                RangeBinding {
-                    name: "right",
-                    semantic_ty: &TypeRef::Int,
-                    fact: Some(&right),
-                },
-            ];
-            return match model.plan_integer_range(&expression, &expression, &lexical) {
-                RangePlan::Finite { candidates, .. } => Some(candidates),
-                _ => None,
-            };
-        }
-        init_planned_envelope(model, expr, bindings)
-    })
-}
-
-fn init_planned_envelope<T>(
-    model: &KernelModel,
-    expr: &Expr,
-    bindings: &Bindings<T>,
-) -> Option<InclusiveI64> {
-    let records: Vec<_> = bindings.records().collect();
-    let lexical: Option<Vec<_>> = records
-        .iter()
+    let lexical: Option<Vec<_>> = bindings
+        .records()
         .map(|(name, record)| {
             Some(RangeBinding {
                 name,
@@ -755,19 +650,12 @@ fn init_planned_envelope<T>(
             })
         })
         .collect();
-    match model.plan_integer_range(expr, expr, &lexical?) {
-        RangePlan::Static { lo, hi } => InclusiveI64::new(lo, hi),
-        RangePlan::Finite {
-            candidates,
-            prerequisites,
-        } if prerequisites
-            .iter()
-            .all(|p| matches!(p, RangePrerequisite::LexicalFact { .. })) =>
-        {
-            Some(candidates)
-        }
-        _ => None,
-    }
+    fsl_core::binder_range::init_expression_envelope(
+        model,
+        expr,
+        lexical.as_deref(),
+        &mut |condition| init_known_condition(solver, model, condition, bindings, None),
+    )
 }
 
 fn init_recipe<S: SmtSolver>(
@@ -789,12 +677,7 @@ fn init_recipe<S: SmtSolver>(
     if integer
         && !matches!(ty, TypeRef::Int)
         && record.range_fact.as_ref().is_some_and(|fact| {
-            let envelope = fact.envelope().envelope();
-            ![envelope.lo(), envelope.hi()].into_iter().all(|value| {
-                model
-                    .domain_contains(ty, &FslValue::Int(value))
-                    .is_ok_and(|contains| contains)
-            })
+            !fsl_core::binder_range::init_envelope_fits(model, ty, fact.envelope().envelope())
         })
     {
         record.range_fact = None;

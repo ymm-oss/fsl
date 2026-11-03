@@ -233,6 +233,55 @@ impl KernelModel {
         }
     }
 
+    /// The value of a static binder bound, or the engines' refusal of it.
+    ///
+    /// `spell` renders a name in the message: engines keep the Kernel name,
+    /// a checked diagnostic its public spelling.
+    ///
+    /// # Errors
+    /// Returns the legacy static-bound message.
+    pub fn static_binder_bound(
+        &self,
+        expr: &Expr,
+        spell: &mut dyn FnMut(&str) -> String,
+    ) -> Result<i64, String> {
+        if let Ok(value) = self.constant_integer(expr) {
+            return Ok(value);
+        }
+        self.legacy_static_binder_bound(expr, spell)
+    }
+
+    // A failed common fold must recurse only through the original adapter.
+    fn legacy_static_binder_bound(
+        &self,
+        expr: &Expr,
+        spell: &mut dyn FnMut(&str) -> String,
+    ) -> Result<i64, String> {
+        match expr {
+            Expr::Num(value) => Ok(*value),
+            Expr::Var(name) => match self.consts.get(name) {
+                Some(Value::Int(value)) => Ok(*value),
+                _ => Err(format!("'{}' is not an integer const", spell(name))),
+            },
+            Expr::Neg(inner) => self
+                .legacy_static_binder_bound(inner, spell)?
+                .checked_neg()
+                .ok_or_else(|| "integer overflow in static negation".to_owned()),
+            Expr::Binary { op, left, right } => {
+                let left = self.legacy_static_binder_bound(left, spell)?;
+                let right = self.legacy_static_binder_bound(right, spell)?;
+                match op.as_str() {
+                    "+" => left.checked_add(right),
+                    "-" => left.checked_sub(right),
+                    "*" => left.checked_mul(right),
+                    _ => None,
+                }
+                .ok_or_else(|| "invalid static integer expression".to_owned())
+            }
+            _ => Err("binder bound is not a static integer".to_owned()),
+        }
+    }
+
     /// Describe an integer range without enumerating candidates or executing state.
     ///
     /// Uses current lexical/state/constant provenance, full endpoint type validation
@@ -832,7 +881,7 @@ fn traverse_leadsto_bindings<E: From<ModelError>>(
     Ok(expanded)
 }
 
-fn leadsto_has_dependent_bounds(property: &LeadsToDef) -> bool {
+pub(crate) fn leadsto_has_dependent_bounds(property: &LeadsToDef) -> bool {
     let mut outer = BTreeSet::new();
     property.binders.iter().any(|binder| {
         let found = matches!(
@@ -2829,6 +2878,58 @@ pub fn check_init_statement_domains(
     Ok(())
 }
 
+/// Refuse every integer range bound the symbolic engines cannot execute.
+///
+/// This is checked-source admission, not model construction: `build_model` and
+/// raw Runtime constructors keep their own boundaries. Scopes, facts and spans
+/// come from the validation walk; eligibility is [`crate::binder_range::RangePlan::is_executable`].
+/// `origins` must be captured before model construction discards component
+/// check targets.
+///
+/// # Errors
+/// Returns the first refusal in init, action and property validation order.
+pub fn check_range_admission(
+    model: &mut KernelModel,
+    origins: &OriginRegistry,
+) -> Result<(), ModelError> {
+    let retained = std::mem::replace(&mut model.origins, origins.clone());
+    let init = crate::typecheck::admit_init_ranges(model).map_err(|(index, error)| {
+        let mut failure = range_refusal_error(error, ExpressionErrorContext::Init);
+        if let Some(component) = origins.diagnostic_origin(&crate::origin::component_check_target(
+            &init_statement_target(index),
+        )) {
+            failure = failure.with_origin(Some(component));
+        }
+        failure
+    });
+    let result = init.and_then(|()| {
+        crate::typecheck::admit_model_ranges(model)
+            .map_err(|error| range_refusal_error(error, ExpressionErrorContext::Model))
+    });
+    model.origins = retained;
+    result
+}
+
+/// An aggregate keeps the Core validation spelling; a quantifier or statement
+/// binder keeps the engine's message, now with its owning location.
+fn range_refusal_error(
+    error: crate::typecheck::TypecheckError,
+    context: ExpressionErrorContext<'_>,
+) -> ModelError {
+    if error.unprefixed_range_refusal {
+        let mut failure = model_error(error.message);
+        failure.span = error.span;
+        failure.origin = error.target_origin;
+        return failure;
+    }
+    let origin = error.span.map(type_diagnostic_origin);
+    let mut failure = model_error(context.message(error.message)).with_origin(origin);
+    if let Some(span) = error.span {
+        failure = failure.at(span);
+    }
+    failure
+}
+
 fn check_init_binders(
     statements: &[Statement],
     model: &KernelModel,
@@ -2916,7 +3017,7 @@ pub(crate) fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
     })
 }
 
-fn expr_children(expr: &Expr) -> Vec<&Expr> {
+pub(crate) fn expr_children(expr: &Expr) -> Vec<&Expr> {
     match expr {
         Expr::Some(expr)
         | Expr::Neg(expr)
@@ -3331,7 +3432,7 @@ pub(crate) fn unknown_update_target(name: &str) -> ModelError {
     model_error(format!("unknown update target '{}'", shown(name)))
 }
 
-fn model_error(message: impl Into<String>) -> ModelError {
+pub(crate) fn model_error(message: impl Into<String>) -> ModelError {
     ModelError {
         message: message.into(),
         origin: None,

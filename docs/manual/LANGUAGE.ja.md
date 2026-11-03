@@ -913,8 +913,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   と区別します。境界の名前・型、Bool の filter、Int の sum 値を検査した後、
   無条件に展開できれば展開結果も検査し (`Expanded`)、そうでなければ元の集約を
   展開せず保持します (`Deferred`)。状態の carrier や局所名の型だけでは実行の
-  前提は成立しません。保留を理由に範囲を切り詰めたり、条件付きのゼロへ置換したり、
-  新たな source 拒否にしたりしません。両端点は下限・上限の順に検査します。
+  前提は成立しません。保留を理由に範囲を切り詰めたり、条件付きのゼロへ置換したりせず、
+  保留自体は source を拒否しません。保留した境界を実行できるかは、後述の範囲受理規則が決めます。両端点は下限・上限の順に検査します。
   真に閉じた境界 `0..(1/0)` の fold 失敗は引き続き
   `public Kernel requires static aggregate range bounds` です。空ドメインや
   不活性な filter でも、記述されたスコープ・型エラーの優先順位を保ちます。
@@ -930,6 +930,43 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   できません。移送した対照と未完の境界比較・qualification・product の義務は
   [U5 契約](../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480-u5)
   を参照してください。
+- **check 受理の破壊的な削除: エンジンが実行できない範囲境界 (#1480)。**
+  `check`、すべての `verify` エンジン、LSP の診断、Worker の事前検査は、ソルバーの
+  起動前に同じ規則でこれを拒否します。位置つきの `semantics` エラーで、終了コードは 2 です。
+  境界を実行できるのは、定数に畳み込めるとき、または定数、整数の名前、単項マイナス、
+  `+ - *` だけからなり区間が `i64` に収まり、かつ読むすべての名前がそのスコープで
+  成立しているときです。
+  - 列挙された値はどこでも成立します。action のパラメーター、範囲または名前付き整数の
+    binder、項目が整数リテラル、定数、またはそれらの名前である Seq リテラル上の binder です。
+  - 有限の carrier を持つ状態変数は、エンジンが読み出しフレームを認証する場所でだけ
+    成立します。`invariant`、`trans`、`unless`、`requires`、`let` の右辺、`if` の条件、
+    代入です。`ensures`、`reachable`、`terminal`、`until`、leadsTo の P/Q、`decreases`、
+    `helpful` の引数では成立しません。
+  - `init` では、有限の値を持つ完了済みの代入が、その後の読み出しに対して成立します。
+    init の文 `forall` のソースは完了済みの代入を読みません。
+  - 有限の整数要素型を持つ状態 Set の binder は、`trans`、`unless`、`ensures`、`init`
+    文では成立し、それ以外では、その Set に空でない値を代入し得る `init` の経路がなければ
+    成立します。そこにリテラルか成立済みの項目を与える `.add` と `.remove` も同じです。
+    項目が 1 つの Set リテラルは、その項目が成立すれば成立します。容量 0 の Seq には
+    候補がありません。
+  - 成立しないもの: `let` の名前(`let k = 2` も同じ)、パターン束縛、Int 型の状態、
+    項目が複数の Set リテラルの要素、それ以外の Seq の要素、上記以外の状態 Set の要素。
+
+  依存する境界の添字、フィールド参照、`size()`、`if`、`min`、`/`、`%`、`old(...)`、
+  集約は拒否します。候補を持たない binder(`forall o in 2..0`)の filter と本体は
+  評価されないので拒否しません。評価は先行評価なので、
+  `false => count(i in 0..m[0]) >= 0` は拒否します。集約は検査済みモデルのメッセージ
+  (`'n' is not an integer const`、`public Kernel requires static aggregate range bounds`)
+  を文の位置で返し、量化子と文 `forall` はエンジンのメッセージ
+  (`'n' is not an integer const`、`binder bound is not a static integer`)を同じ位置で
+  返します。大きさの上限はありません。`forall i in 0..(n * 100000)` は受理されたままで、
+  遅いままです。拒否される境界に届く前に verdict を返していた形式は、拒否を返すように
+  なります。先に違反する別の性質、`--property` や `--exclude-property` での回避、
+  `--depth 0` が該当します。これらの形式での explicit エンジンの verdict も失われます。
+  `build_model` 単体、Runtime の生のコンストラクター、`replay` は既存の境界を保ちます。
+  [実行可能形式の境界](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission)を
+  参照してください。
+  [#1480 最終 sweep: 計測した base/head の形式数と `ok`→`error` の一覧は、最終 sweep の後にここへ記録します。]
 - 濃度の述語: `unique(binder)` / `exactlyOne(binder)`。`unique` は一致する束縛が
   高々 1 つ、`exactlyOne` はちょうど 1 つという意味です。
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`。
@@ -1363,8 +1400,8 @@ symbolic/explicit が誤って拒否していた挙動も解消しますが、�
 既存の init 所有権・フィールド読み出しの診断を先に返します。この範囲規則は
 checked-source 受理の境界であり、Core のモデル構築だけには適用しません。
 Runtime の生のコンストラクターは、既存のエラー契約を保ちます。
-対応済みの init 右辺式での代入済み状態の読み出しや、action/性質の条件付き範囲は
-削除しません。外側の字句的バインダーのスコープと、既存の init 入れ子の制限は保ちます。
+対応済みの init 右辺式での代入済み状態の読み出しは削除しません。他の位置の範囲は
+範囲受理規則に従います。外側の字句的バインダーのスコープと、既存の init 入れ子の制限は保ちます。
 必要な base/head の実際の入力件数と削除一覧は sweep 待ちです。
 [実行可能形式の境界](../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains)を参照してください。
 

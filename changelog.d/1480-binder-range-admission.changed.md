@@ -1,3 +1,35 @@
+Breaking check-admission removal: `check`, every `verify` engine, LSP and Worker now
+refuse every integer range bound the symbolic engines cannot execute, with one
+rule (`RangePlan::is_executable`) and a located `semantics` error, exit 2. Refused:
+unplanned dependent bounds (index, field, `size()`, `if`, `min`, `/`, `%`, `old`,
+aggregates); state-dependent bounds in `ensures`, `reachable`, `terminal`, `until`,
+leadsTo P/Q, `decreases` and `helpful` arguments; bounds reading a `let` (even
+literal), pattern binding, Int state, non-literal Seq element, several-item Set
+literal element, or element of a state Set that can start non-empty outside
+`trans`, `unless`, `ensures` and init statements; and intervals that do not fit `i64`. Forms that reported a verdict before reaching the
+bound lose it: an earlier violated property, `--property`/`--exclude-property`,
+`--depth 0`, and explicit-engine verdicts on these forms. No size cap is added.
+Bare `build_model`, raw Runtime constructors and `replay` keep their boundaries.
+[#1480 final sweep: the measured base/head form count and `ok`→`error` list are recorded here after the final sweep.]
+See `DESIGN-check-executable-forms.md`.
+
+Reject two previously check-admitted forms before engine dispatch: init statement
+`forall` integer-range bounds with free state reads, and expression/action typed
+Named Struct binder domains that engines already refuse as non-scalar. Diagnostics
+retain
+owning source locations. Supported init RHS reads, Bool/Enum/Range binders and
+ordinary/collection Struct values are unchanged.
+
+Checked-source range admission runs after existing init ownership/read checks,
+preserving their earlier diagnostics and component provenance. Bare Core model
+construction and raw Runtime constructors keep their separate contracts.
+Already-refused init-statement Typed-Struct domains retain their complete
+unlocated finite-scalar error; they are not new check-admission removals.
+
+This is a breaking check-admission removal. The required named-base/head sweep,
+actual form count and complete `ok`→`error` list remain pending; no empty removal
+set is claimed. See `DESIGN-check-executable-forms.md` and `DESIGN-spec-domains.md`.
+
 Static binder ranges now share successful checked constant folding across
 aggregate normalization, symbolic verification and static leadsTo/Monitor
 bindings, including Euclidean division/remainder, min/max/abs and typed
@@ -57,3 +89,9 @@ Deferred node/schema or general symbolic execution support is added. The
 historical measurements above remain bound to their named source/producer;
 fresh integration boundary comparisons, qualification/calibration, independent
 review, full B/C/D/original500 tenRED and product obligations remain open.
+
+Unfiltered outer `leadsTo` range binders can use already bound wrapper locals
+with checked integer arithmetic and typed Boolean conditions. Preserve declared
+binding types, expansion order and legacy diagnostics; refuse free state bounds
+even when a const shares the name. `within` remains a nonnegative declaration
+constant; collection/filtered wrappers and explicit liveness remain unsupported.

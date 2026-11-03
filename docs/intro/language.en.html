@@ -1021,7 +1021,8 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   integer sum-value checks, validation either checks an unconditional expansion
   (<code>Expanded</code>) or retains the original aggregate without expansion (<code>Deferred</code>).
   A state carrier or lexical type is not an execution premise: deferral neither
-  clips a range nor substitutes a guarded zero, and is not a new source rejection.
+  clips a range nor substitutes a guarded zero, and does not itself reject source;
+  the range admission rule below decides whether the deferred bound can execute.
   Both endpoints retain lower/upper checking order. A genuinely closed failed
   endpoint such as <code>0..(1/0)</code> still fails with
   <code>public Kernel requires static aggregate range bounds</code>; authored scope/type
@@ -1039,9 +1040,50 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   evidence on the integration candidate. Historical Stage A/G5 results above do
   not transfer; see the <a href="../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480-u5">U5 contract</a>
   for carried controls and outstanding boundary/qualification/product obligations.</li>
-<li>Cardinality predicates: <code>unique(binder)</code> / <code>exactlyOne(binder)</code>. <code>unique</code>
-  means at most one matching binding, while <code>exactlyOne</code> means exactly one.</li>
-<li>Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>.
+<li><strong>Breaking check-admission removal: range bounds the engines cannot execute (#1480).</strong>
+  <code>check</code>, every <code>verify</code> engine, LSP diagnostics and Worker preflight refuse them
+  with one rule before any solver runs: a located <code>semantics</code> error, exit 2.
+  A bound is executable when it folds to a constant, or is built from constants,
+  integer names, unary minus and <code>+ - *</code> with an interval that fits <code>i64</code>, and
+  every name it reads is established in its scope:</li>
+<li>An enumerated value is established everywhere: an action parameter, a range or
+    named integer binder, and a binder over a Seq literal whose items are integer
+    literals, constants or such names.</li>
+<li>A state variable with a finite carrier is established only where the engines
+    certify the read frame: <code>invariant</code>, <code>trans</code>, <code>unless</code>, <code>requires</code>, <code>let</code>
+    right-hand sides, <code>if</code> conditions and assignments. It is not established in
+    <code>ensures</code>, <code>reachable</code>, <code>terminal</code>, <code>until</code>, leadsTo P/Q, <code>decreases</code> or
+    <code>helpful</code> arguments.</li>
+<li>In <code>init</code>, a completed assignment with a finite value is established for later
+    reads. An init statement <code>forall</code> source reads no completed assignment.</li>
+<li>A binder over a state Set of a finite integer element type is established in
+    <code>trans</code>, <code>unless</code>, <code>ensures</code> and <code>init</code> statements, and elsewhere when no <code>init</code>
+    path assigns that Set a value that may be non-empty; so are <code>.add</code> and <code>.remove</code>
+    of a literal or established item on it. A one-item Set literal is established
+    when its item is. A zero-capacity Seq has no candidates.</li>
+<li>Never established: a <code>let</code> name (even <code>let k = 2</code>), a pattern binding, Int-typed
+    state, an element of a Set literal with several items, of any other Seq, or of a
+    state Set outside the cases above.</li>
+</ul>
+<p>Indexing, field access, <code>size()</code>, <code>if</code>, <code>min</code>, <code>/</code>, <code>%</code>, <code>old(...)</code> and aggregates
+  in a dependent bound are refused. Nothing in the filter or body of a binder with
+  no candidates (<code>forall o in 2..0</code>) is evaluated, so it is not refused. Evaluation
+  is eager: <code>false =&gt; count(i in 0..m[0]) &gt;= 0</code> is refused. Aggregates report the
+  checked-model message (<code>'n' is not an integer const</code>,
+  <code>public Kernel requires static aggregate range bounds</code>) at their statement;
+  quantifiers and statement <code>forall</code> report the engine message
+  (<code>'n' is not an integer const</code>, <code>binder bound is not a static integer</code>) with the
+  same location. There is no size cap: <code>forall i in 0..(n * 100000)</code> stays admitted
+  and slow. Forms that used to report a verdict before reaching the refused bound
+  now report the refusal: an earlier violated property, <code>--property</code> or
+  <code>--exclude-property</code> stepping around the property, and <code>--depth 0</code>. Explicit-engine
+  verdicts on these forms are removed as well. Bare <code>build_model</code>, raw Runtime
+  constructors and <code>replay</code> keep their boundaries; see
+  <a href="../design/DESIGN-check-executable-forms.md#1480-checked-range-admission">checked executable forms</a>.
+  [#1480 final sweep: the measured base/head form count and <code>ok</code>→<code>error</code> list are recorded here after the final sweep.]
+- Cardinality predicates: <code>unique(binder)</code> / <code>exactlyOne(binder)</code>. <code>unique</code>
+  means at most one matching binding, while <code>exactlyOne</code> means exactly one.
+- Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>.
   Equality is structural: <code>none</code> equals only <code>none</code>, while two <code>some</code> values are
   equal exactly when their payloads are equal. <code>x is some(v)</code> remains the form
   that binds <code>v</code>; equality never introduces a binding. The binding is available
@@ -1123,10 +1165,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   it. Requirements field-substitution contexts also reject a pattern name that
   equals an entity field or relation role, before lowering loses that spelling
   (#1561). Event inputs keep their existing field-shadowing exception; ordinary
-  quantifier/aggregate field shadowing is unchanged. Ordering is not defined.</li>
-<li>struct: literal <code>Order { st: Open, qty: 0 }</code>, field reference <code>o.st</code>,
-  <code>==</code> is field-by-field equality</li>
-<li>Set/Seq expression materialization (Refs #1467): already-admitted recursive
+  quantifier/aggregate field shadowing is unchanged. Ordering is not defined.
+- struct: literal <code>Order { st: Open, qty: 0 }</code>, field reference <code>o.st</code>,
+  <code>==</code> is field-by-field equality
+- Set/Seq expression materialization (Refs #1467): already-admitted recursive
   expressions use the checked model's inferred/expected type for construction,
   equality, conditional joins, methods/chains, quantifier/aggregate binders and
   <code>let</code>. Elements include Int, Bool, Enum, Struct, Option (<code>Option&lt;Enum&gt;</code> and nested
@@ -1156,8 +1198,8 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   <code>a52bef4931adc67ea2b1fdca827e2318b4ae25ab</code>,
   <code>e201c0d66834ed8c860be84e96876690487b11af</code> and
   <code>cc7a538c3b647c1c3bed5bf2088551806442c794</code>: both base-&gt;cc7 ok-&gt;error sets were
-  empty. This is not later b8 integration validation or whole-corpus engine agreement.</li>
-<li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>, <code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code>
+  empty. This is not later b8 integration validation or whole-corpus engine agreement.
+- Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>, <code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code>
   An accepted <code>add</code> retains a computed member outside the declared carrier:
   <code>contains</code>, <code>size</code>, removal and equality observe it in the temporary value.
   Assigning the result back to that bounded receiver reports <code>type_bound</code> /
@@ -1210,10 +1252,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   with sequential execution. In BMC, re-framing a root whose bound is omitted
   requires proof that no live key escapes the new frame's finite support; the
   re-framing check does not assume that omitted bound. Genuinely growing support
-  continues to be retained.</li>
-<li>Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>, <code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
-  <code>.contains(e)</code> <code>.size()</code>, <code>==</code> is equality of length and all elements</li>
-<li>Relation: <code>r.contains(a, b)</code>, <code>r.add(a, b)</code>, <code>r.remove(a, b)</code>,
+  continues to be retained.
+- Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>, <code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
+  <code>.contains(e)</code> <code>.size()</code>, <code>==</code> is equality of length and all elements
+- Relation: <code>r.contains(a, b)</code>, <code>r.add(a, b)</code>, <code>r.remove(a, b)</code>,
   <code>reachable(r, a, b)</code>, <code>acyclic(r)</code>, <code>functional(r)</code>, <code>injective(r)</code>,
   <code>domain(r)</code>, <code>range(r)</code>. <code>reachable</code> and <code>acyclic</code> require a self-relation
   (<code>relation T -&gt; T</code>); endpoint type/arity errors include repair hints.
@@ -1323,12 +1365,11 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   A relation is not a Map: <code>r[a]</code> and indexed assignment <code>r[a] = b</code> are rejected
   by <code>check</code>, even when <code>functional(r)</code> holds. Use the relation methods instead.
   This is a breaking removal (#1463) of previously accepted reads and writes
-  without executable index semantics; Map indexing is unchanged.</li>
-<li>Inside ensures / trans only: read the pre-transition state with <code>old(expr)</code></li>
-<li>Inside a leadsTo block only: <code>P ~&gt; Q</code> (response property. not part of the operator hierarchy of general expressions);
+  without executable index semantics; Map indexing is unchanged.
+- Inside ensures / trans only: read the pre-transition state with <code>old(expr)</code>
+- Inside a leadsTo block only: <code>P ~&gt; Q</code> (response property. not part of the operator hierarchy of general expressions);
   optional <code>within K</code> before Q for a bounded deadline, and optional
-  <code>decreases &lt;int expr&gt;</code> after the response body for induction ranking</li>
-</ul>
+  <code>decreases &lt;int expr&gt;</code> after the response body for induction ranking</p>
 <p>Static operand/signature checking (#1459, <strong>breaking</strong>) also visits unselected
 branches, action assignments, <code>requires</code>/<code>ensures</code>, and trace expressions:</p>
 <ul>
@@ -1501,9 +1542,9 @@ existing compile-time-constant diagnostic at the owning <code>forall</code> stat
 Earlier init ownership and field-read diagnostics keep priority. This range rule
 belongs to checked-source admission, not bare Core model construction; raw
 Runtime constructors retain their existing error contracts.
-This does not remove supported assigned-state reads in init RHS expressions or
-conditional ranges in actions/properties; enclosing lexical binders retain their
-scope. Existing nested-init restrictions remain. The actual base/head form count
+This does not remove supported assigned-state reads in init RHS expressions;
+ranges in other positions follow the range admission rule; enclosing lexical
+binders retain their scope. Existing nested-init restrictions remain. The actual base/head form count
 and removal list are pending the required sweep; see
 <a href="../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains">checked executable forms</a>.</p>
 <p>Within an init statement <code>forall</code>'s filter or body, reading a state root that

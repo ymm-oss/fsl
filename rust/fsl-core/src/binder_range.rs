@@ -314,3 +314,165 @@ pub(crate) fn plan(
         },
     }
 }
+
+impl RangePlan {
+    /// The one execution-eligibility rule for an integer range binder.
+    ///
+    /// Checked admission and the symbolic engines both ask this question. They
+    /// differ only in how `established` answers: admission from what the scope
+    /// statically provides, an engine from the facts of the current evaluation.
+    #[must_use]
+    pub fn is_executable(&self, established: impl FnMut(&RangePrerequisite) -> bool) -> bool {
+        match self {
+            Self::Static { .. } => true,
+            Self::Finite { prerequisites, .. } | Self::Empty { prerequisites } => {
+                prerequisites.iter().all(established)
+            }
+            Self::Unknown(_) => false,
+        }
+    }
+
+    /// The envelope holding every candidate, or `None` when none can exist.
+    #[must_use]
+    pub const fn candidates(&self) -> Option<InclusiveI64> {
+        match self {
+            Self::Static { lo, hi } => InclusiveI64::new(*lo, *hi),
+            Self::Finite { candidates, .. } => Some(*candidates),
+            Self::Empty { .. } | Self::Unknown(_) => None,
+        }
+    }
+}
+
+/// Select an init condition from a checked constant fold alone, never from state.
+#[must_use]
+pub fn constant_condition(model: &KernelModel, condition: &Expr) -> Option<bool> {
+    let position = fsl_syntax::SourcePos {
+        offset: 0,
+        line: 1,
+        column: 1,
+    };
+    let span = fsl_syntax::Span {
+        start: position,
+        end: position,
+    };
+    let selector = Expr::Conditional {
+        condition: Box::new(condition.clone()),
+        then_expr: Box::new(Expr::Num(1)),
+        else_expr: Box::new(Expr::Num(0)),
+        spans: Box::new(fsl_syntax::ConditionalSpans {
+            condition: span,
+            then_expr: span,
+            else_expr: span,
+        }),
+    };
+    model
+        .constant_integer(&selector)
+        .ok()
+        .map(|value| value == 1)
+}
+
+/// Whether a finite target carrier holds both endpoints of an init value envelope.
+#[must_use]
+pub fn init_envelope_fits(model: &KernelModel, ty: &TypeRef, envelope: InclusiveI64) -> bool {
+    matches!(ty, TypeRef::Int)
+        || [envelope.lo(), envelope.hi()].into_iter().all(|value| {
+            model
+                .domain_contains(ty, &crate::FslValue::Int(value))
+                .is_ok_and(|contains| contains)
+        })
+}
+
+/// The envelope of an init value, from unconditional lexical facts and no state carrier.
+///
+/// `lexical` is `None` when an enclosing binding has no semantic type. `known`
+/// selects a conditional arm exactly as the caller's init evaluation would.
+#[must_use]
+pub fn init_expression_envelope(
+    model: &KernelModel,
+    expr: &Expr,
+    lexical: Option<&[RangeBinding<'_>]>,
+    known: &mut dyn FnMut(&Expr) -> Option<bool>,
+) -> Option<InclusiveI64> {
+    crate::recursion::guard(|| match expr {
+        Expr::Conditional {
+            condition,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            if let Some(selected) = known(condition) {
+                let branch = if selected { then_expr } else { else_expr };
+                return init_expression_envelope(model, branch, lexical, known);
+            }
+            let left = init_expression_envelope(model, then_expr, lexical, known)?;
+            let right = init_expression_envelope(model, else_expr, lexical, known)?;
+            InclusiveI64::new(left.lo().min(right.lo()), left.hi().max(right.hi()))
+        }
+        Expr::Neg(inner) => {
+            let envelope =
+                IntegerEnvelopeFact::new(init_expression_envelope(model, inner, lexical, known)?);
+            let expression = Expr::Neg(Box::new(Expr::Var("value".into())));
+            let operand = [RangeBinding {
+                name: "value",
+                semantic_ty: &TypeRef::Int,
+                fact: Some(&envelope),
+            }];
+            match model.plan_integer_range(&expression, &expression, &operand) {
+                RangePlan::Finite { candidates, .. } => Some(candidates),
+                _ => None,
+            }
+        }
+        Expr::Binary { op, left, right } => {
+            let left = init_expression_envelope(model, left, lexical, known)?;
+            let right = init_expression_envelope(model, right, lexical, known)?;
+            // Exact operands reuse the constant owner, including checked / and %.
+            if left.lo() == left.hi() && right.lo() == right.hi() {
+                let folded = Expr::Binary {
+                    op: op.clone(),
+                    left: Box::new(Expr::Num(left.lo())),
+                    right: Box::new(Expr::Num(right.lo())),
+                };
+                let value = model.constant_integer(&folded).ok()?;
+                return InclusiveI64::new(value, value);
+            }
+            // Reuse the Core interval arithmetic for actual RHS operand envelopes.
+            // These lexical inputs exist only in this pure planning expression.
+            let expression = Expr::Binary {
+                op: op.clone(),
+                left: Box::new(Expr::Var("left".into())),
+                right: Box::new(Expr::Var("right".into())),
+            };
+            let left = IntegerEnvelopeFact::new(left);
+            let right = IntegerEnvelopeFact::new(right);
+            let operands = [
+                RangeBinding {
+                    name: "left",
+                    semantic_ty: &TypeRef::Int,
+                    fact: Some(&left),
+                },
+                RangeBinding {
+                    name: "right",
+                    semantic_ty: &TypeRef::Int,
+                    fact: Some(&right),
+                },
+            ];
+            match model.plan_integer_range(&expression, &expression, &operands) {
+                RangePlan::Finite { candidates, .. } => Some(candidates),
+                _ => None,
+            }
+        }
+        _ => match model.plan_integer_range(expr, expr, lexical?) {
+            RangePlan::Static { lo, hi } => InclusiveI64::new(lo, hi),
+            RangePlan::Finite {
+                candidates,
+                prerequisites,
+            } if prerequisites
+                .iter()
+                .all(|p| matches!(p, RangePrerequisite::LexicalFact { .. })) =>
+            {
+                Some(candidates)
+            }
+            _ => None,
+        },
+    })
+}
