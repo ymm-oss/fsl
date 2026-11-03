@@ -127,7 +127,7 @@ macro_rules! cases {
 }
 #[rustfmt::skip] // Keep the finite independent-test inventory compact.
 cases!(root_bool, root_index, root_pad_bool, root_pad_index, piece_pad_bool, piece_pad_index,
-    second_bool, second_index, second_actual_bool, second_actual_index, component_bool,
+    second_bool, second_index, second_actual_bool, second_actual_index, conditional_arm_bool, component_bool,
     component_index, component_alone, valid_zero, numeric_out_of_range, root_parameter,
     bounded_parameter, qualified_state, forward_constant, forward_root_state, nested_actual,
     unused_valid, forall_capture, parameter_range, let_capture, current_key);

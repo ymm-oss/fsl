@@ -161,5 +161,14 @@ pub fn cases() -> Vec<Case> {
     ] {
         cases.push(valid(id, source, piece));
     }
+    // The arm keeps the supplied formal type, not the inferred carrier Range(0, 1).
+    // Appended last: the core API tests select earlier entries by position.
+    let mut conditional = valid(
+        "conditional_arm_bool",
+        root("if true then 1 else true"),
+        PIECE.into(),
+    );
+    conditional.error = Some((5, 36, format!("invalid model expression: {BOOL} at 5:36")));
+    cases.push(conditional);
     cases
 }
