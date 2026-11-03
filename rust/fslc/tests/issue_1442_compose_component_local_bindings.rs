@@ -837,7 +837,8 @@ fn breaking_removal_sync_arguments_do_not_read_additional_lets() {
         "issue-1442-sync-argument-scope",
         &[("bv.fsl", part), ("s.fsl", source)],
     );
-    // The base binary accepted this input (exit 0); this branch rejects it.
+    // Rejected before #1517 too (exit 2), as a component failure at the use (2:3);
+    // the packet below pins the root owner.
     let rejected = check(&dir, "s.fsl");
     assert_eq!(rejected.1, 2, "{}", rejected.0);
     assert_eq!(rejected.0["result"], "error");
