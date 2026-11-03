@@ -81,12 +81,14 @@ remain the shared foundation described in the rest of this reference. The
 <code>process</code> / <code>transition</code> examples in §13.2 document FSL 4 and migration input.</p>
 <p>Put <code>fsl 5</code> on a line of its own before the first declaration. Only blank lines
 and <code>//</code> comments may precede it (a leading UTF-8 BOM is accepted). In a literate
-Markdown source it is the first line of the first <code>fsl</code> fence. The header applies
-to the document, not to an individual requirements block. <code>fsl 4</code> selects the
+Markdown source it goes at the start of the first <code>fsl</code> fence, under the same rule.
+The header applies to the document, not to an individual requirements block. <code>fsl 4</code> selects the
 earlier syntax; a headerless document retains FSL 4. <code>--edition current</code> follows
 the document; an explicitly requested edition conflicting with its header is
 <code>edition_conflict</code>, and an unknown header number is <code>unsupported_edition</code>.
-Adding a header alone does not convert a legacy requirements specification:
+Causal and AI-dialect documents take no header (<code>edition_header_not_accepted</code>).
+Adding a header alone does not convert a legacy requirements specification: a
+<code>process</code> under <code>fsl 5</code> is <code>mixed_requirements_forms</code>, so
 use <a href="#fsl4-to-fsl5-migration">the migration guide below</a>.</p>
 <pre><code class="language-fsl">spec &lt;Name&gt; [&quot;&lt;kind&gt;: &lt;intent&gt;&quot;] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const &lt;NAME&gt; = &lt;constant expr&gt;
@@ -4262,6 +4264,7 @@ requirements Support {
   entity Ticket {
     lifecycle Open -&gt; Assigned -&gt; Closed
     lifecycle Assigned -&gt; Escalated
+    lifecycle Open -&gt; Withdrawn
   }
   Ticket belongs to Agent as assignee via take
   resource desk_open: Bool = true
@@ -4270,27 +4273,41 @@ requirements Support {
   event close = Agent closes Ticket Assigned -&gt; Closed
   event escalate = Agent escalates Ticket Assigned -&gt; Escalated
     set desk_open = false
+  event withdraw = Agent withdraws Ticket Open -&gt; Withdrawn
 
-  rule REQ-1 &quot;A ticket is taken only while the desk is open&quot; {
+  rule REQ-DESK-001 &quot;A ticket is taken only while the desk is open&quot; {
     allow Agent takes Ticket only when desk_open
   }
-  rule REQ-2 &quot;A taken ticket keeps the agent who took it&quot; {
+  rule REQ-DESK-002 &quot;A ticket is withdrawn only after the desk has closed&quot; {
+    allow Agent withdraws Ticket only when not desk_open
+  }
+  rule REQ-TICKET-001 &quot;A taken ticket keeps the agent who took it&quot; {
     always Ticket in Assigned, Closed, Escalated has assignee
   }
-  policy Resolved &quot;Every assigned ticket is eventually closed or escalated&quot;
+  policy POL-TICKET-001 &quot;Every assigned ticket is eventually closed or escalated&quot;
     every Ticket in Assigned must eventually be Closed or Escalated
-  goal Closable &quot;A ticket can be closed&quot; some Ticket can reach Closed
+  goal GOAL-TICKET-001 &quot;A ticket can be closed&quot; some Ticket can reach Closed
   measure closed_tickets = count Ticket in Closed
 
-  scenario AC-1 &quot;An agent takes and closes a ticket&quot; {
+  scenario AC-TICKET-001 &quot;An agent takes and closes a ticket&quot; {
     Agent takes t1 with assignee 1
     Agent closes t1
     then t1 is Closed
   }
-  forbidden FB-DESK-CLOSED &quot;No ticket is taken once the desk has closed&quot; {
+  scenario AC-DESK-001 &quot;A ticket still open when the desk closes is withdrawn&quot; {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent withdraws t2
+    then t2 is Withdrawn
+  }
+  forbidden FB-DESK-001 &quot;No ticket is taken once the desk has closed&quot; {
     Agent takes t1 with assignee 0
     Agent escalates t1
     Agent takes t2 with assignee 0
+    then rejected
+  }
+  forbidden FB-DESK-002 &quot;No ticket is withdrawn while the desk is open&quot; {
+    Agent withdraws t1
     then rejected
   }
 }
@@ -4302,7 +4319,7 @@ verify {
 <p><strong>Entities and concepts.</strong> <code>entity User</code> declares an identity without stages.
 A body, as in <code>entity Order { qty: Qty = 0 lifecycle Empty -&gt; Placed }</code>, requires
 at least one lifecycle line and an explicit initializer for every field,
-including number fields. Fields use a declared number, <code>Bool</code>, or enum type.
+including number fields. A field's type is <code>Bool</code> or a declared <code>number</code>, <code>type</code>, or <code>enum</code>.
 The first stage of the first path is initial; stages enter the generated enum
 in order of first appearance. More lifecycle lines add paths. <code>number Qty</code>
 gets its finite range from <code>verify { values Qty = 0..2 }</code>; entity instance counts
@@ -4395,13 +4412,18 @@ conditions of rows listing it as one guard; its other rule guards still apply.
 <code>assuming Q</code> restricts table checking to Q <strong>and generates a stage-conditional
 invariant that <code>verify</code> must prove</strong>; it is not an unchecked escape from coverage.</p>
 <p><strong>Relations, resources, and projections.</strong> <code>Ticket belongs to Agent as assignee
-via take</code> adds an initially unset optional role to each ticket. The named event
-records its counterpart as its first input; the scenario spelling
-<code>with assignee 1</code> selects Agent instance 1. A role can also take a named scenario
-instance of the counterpart entity. <code>resource stock: Qty = 2</code> declares shared
+via take</code> adds an initially unset optional role to each ticket. The related entity
+must be declared with <code>entity</code>, and the <code>via</code> event's actor must be that entity,
+so <code>Agent</code> is declared as both <code>actor</code> and <code>entity</code>. The event records its
+counterpart as its first input, and every scenario step of that event must supply
+it: <code>with assignee 1</code> selects Agent instance 1. The value is an instance number;
+an instance label (<code>with assignee a1</code>) is refused. <code>resource stock: Qty = 2</code> declares shared
 state outside any entity; events update it with <code>set</code>, and guards may read it.
 <code>measure m = count Concept</code> or <code>count Entity in S, T</code> is a projection, not a new
-counter, history field, or automatic invariant. <code>kpi</code> is accepted as the same form.
+counter, history field, or automatic invariant. <code>kpi m = count Entity in S</code> is the
+same kind of projection, but it takes exactly one entity and one stage:
+<code>kpi m = count Concept</code> and <code>kpi m = count Entity in S, T</code> are refused, so use
+<code>measure</code> for those forms.
 Goals (<code>some E can reach S</code>) are reachability properties; policies
 (<code>every E in S must eventually be T or U</code>) are progress properties over fair events.
 Their IDs and quoted text remain part of traceability.</p>
@@ -4409,7 +4431,11 @@ Their IDs and quoted text remain part of traceability.</p>
 ambiguous matches report <code>unknown_verb</code>, <code>unknown_event_phrase</code>, or
 <code>ambiguous_step</code>. Instance labels (<code>t1</code>, <code>t2</code>) are local to a trace and allocated
 in order of first use; exceeding <code>verify</code> counts is <code>scenario_instance_overflow</code>.
-<code>then t1 is Closed and t2 is Open</code> checks the final stages. A scenario must execute
+<code>then t1 is Closed</code> checks one instance's final stage. To check more, write an
+expression over the lowered state, indexed by instance number (the first label used
+for an entity is 0): <code>then ticket_stage[0] == Closed and ticket_stage[1] == Open</code>.
+Labels cannot appear in that expression, and <code>then t1 is Closed and t2 is Open</code> is
+refused. A scenario must execute
 every step and satisfy its final check (<code>kind: "acceptance"</code>, <code>failed_step</code> for a
 failed step). A forbidden trace must execute its prefix and reject its last
 step: an accepted last step is <code>kind: "forbidden"</code>; a rejected prefix is
@@ -4423,7 +4449,7 @@ condition; it is not conjoined with it. This differs from FSL 4 requirements,
 which derive no terminal condition from a process.</p>
 <h4 id="glossaries-and-japanese-spellings">Glossaries and Japanese spellings</h4>
 <p>An optional <code>glossary</code> must be the first member of a requirements block, and
-there is at most one. It maps canonical ASCII names to single-word aliases;
+there is at most one (<code>misplaced_glossary</code>). It maps canonical ASCII names to single-word aliases;
 use <code>Entity.field</code> on the left for a field. For example (fragment):</p>
 <pre><code class="language-fsl-fragment">glossary {
   Employee = 従業員
@@ -4433,11 +4459,16 @@ use <code>Entity.field</code> on the left for a field. For example (fragment):</
 }
 </code></pre>
 <p>Afterward, aliases can name declarations and references, expressions, decision
-rows, scenarios, verification bounds and kernel members. Canonical and alias
-spellings may mix (<code>lint --strict-names</code> warns <code>mixed_names</code>). Reject duplicate
-aliases (<code>duplicate_alias</code>), collisions (<code>alias_collision</code>), shadowed canonical
-names (<code>alias_shadows_name</code>), and keywords or particles in either language
-(<code>alias_shadows_keyword</code>). A non-ASCII canonical name without an alias is
+rows, scenarios and verification bounds. In kernel members, entity and stage aliases
+resolve (<code>forall c: 経費申請</code>), but a field alias does not: write the lowered name
+(<code>claim_amount[c]</code>, not <code>申請金額[c]</code>). Canonical and alias spellings may mix
+(<code>lint --strict-names</code> warns <code>mixed_names</code> for a name written both ways).
+<code>duplicate_alias</code> is one canonical name with two aliases, and <code>alias_collision</code> is
+one alias on two canonical names. <code>alias_shadows_name</code> is an alias spelled like
+another glossary canonical name or a name the lowered specification declares; it
+does not cover actor or stage names, and other clashes can surface as ordinary
+declaration errors (<code>duplicate type</code>). Keywords and particles in either language
+are rejected (<code>alias_shadows_keyword</code>). A non-ASCII canonical name without an alias is
 <code>canonical_name_not_ascii</code>. Prefer canonical spellings for the spec name, event
 declarations, property names and requirement IDs so code boundaries remain easy
 to follow; scenario instance labels are local.
@@ -4559,8 +4590,8 @@ keywords can mix; the header, <code>implements … from</code> and mappings, ker
 </tr>
 <tr>
 <td>Scenario/forbidden / シナリオ・拒否シナリオ</td>
-<td><code>then</code>; <code>is</code>; <code>and</code>; <code>rejected</code></td>
-<td><code>結果</code>; <code>は</code>; <code>かつ</code>; <code>拒否</code></td>
+<td><code>then</code>; <code>is</code>; <code>rejected</code></td>
+<td><code>結果</code>; <code>は</code>; <code>拒否</code></td>
 </tr>
 <tr>
 <td>Boolean expressions / 論理式</td>
@@ -4599,9 +4630,15 @@ fslc check requirements.fsl
 fslc verify requirements.fsl --depth 8
 fslc verify requirements.fsl --engine induction
 </code></pre>
-<p><code>migrate</code> is a dry run unless <code>--write</code> is present. Inspect <code>findings[]</code>,
+<p><code>migrate</code> is a dry run unless <code>--write</code> is present; a dry run still reports
+<code>result: "migrated"</code>, with <code>written: false</code>. Inspect <code>files[].findings[]</code>,
 <code>machine_applicable</code>, and each refusal's <code>reason</code>, not only the command's exit
-status. The existing migration taxonomies and atomic-write contract are described
+status: <code>lint</code> exits 1 whenever it reports a finding, so the commands above are not
+an <code>&amp;&amp;</code> chain. A refused process conversion exits 1 with
+<code>result: "migrate_manual_required"</code>; the comment refusals below exit 2 with
+<code>result: "migration_refused"</code>. <code>legacy_process_form</code> and
+<code>derived_terminal_added</code> carry empty per-finding <code>edits</code>; the rewrite is in
+<code>files[].edits</code>. The existing migration taxonomies and atomic-write contract are described
 in §7 and <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-migration.md">DESIGN-migration</a>.</p>
 <table>
 <thead>
@@ -4641,14 +4678,17 @@ in §7 and <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-
 infer concepts or decision tables from guards. It refuses shared entities
 (<code>process_entity_shared</code>), qualified process names (<code>qualified_process_name</code>),
 transition annotations (<code>transition_annotation</code>), inputs sharing field names
-(<code>input_shares_field_name</code>), range-typed inputs (<code>range_typed_input</code>), guards
+(<code>input_shares_field_name</code>), range-typed inputs (<code>with n in 0..2</code>, <code>range_typed_input</code>), guards
 without a requirement ID (<code>guard_without_requirement</code>), an initial stage not
 first in the stage list (<code>initial_not_first_stage</code>), and missing initializers
 that remain after default migration (<code>field_without_initial_value</code>). Unrecognized
 layouts, invalid converted forms and other checked-kernel changes are refused
 as <code>unrecognized_process_layout</code>, <code>converted_form_invalid</code>, and <code>kernel_changed</code>.
 Correct the meaning explicitly, then re-plan; do not discard the refusal to
-force a write. Unsafe comment/source movement also remains a refusal.</p>
+force a write. Process conversion keeps <code>//</code> comments but can move them (a trailing
+comment becomes its own line beside the generated member), so review their
+placement. A comment that a string-metadata or inline-map rewrite would have to
+move is refused (<code>legacy_string_metadata</code>, <code>inline_action_maps</code>).</p>
 <p>The preservation check has one explicit exception: if the input has <strong>no authored
 terminal</strong>, the derived terminal described above may be added. Thus the contract
 is not unconditional kernel identity or identical deadlock output. If the input
@@ -4657,12 +4697,16 @@ finding is added, and changing the authored condition fails the contract.
 The finding shows the equivalent terminal expression so the changed stopping
 behavior can be reviewed. Re-running migration on the converted document adds
 neither another process conversion nor another derived-terminal finding.
+Conversion leaves <code>acceptance</code> and <code>kpi</code> declarations in place; <code>acceptance</code> stays
+valid in FSL 5. Converted rules can add warnings the input did not have, such as
+<code>never_rule_without_forbidden</code>, until forbidden traces probe the guarded events.
 Invalid expression <code>&amp;&amp;</code>, <code>||</code>, or <code>-&gt;</code> is not made safe by migration; follow §7's
 manual operator repairs. Business, kernel, design and refinement contracts do
 not acquire concepts or decision tables through this conversion.</p>
 <h4 id="fsl-4-requirements-reference-and-migration-input">FSL 4 requirements reference and migration input</h4>
-<p>The following headerless example uses the earlier process/transition and
-acceptance forms. Use the FSL 5 forms above for new FSL 5 requirements.</p>
+<p>The following headerless example uses the earlier process/transition form and
+<code>acceptance</code> blocks. <code>acceptance</code> stays valid in FSL 5; use the FSL 5 forms above for
+new FSL 5 requirements.</p>
 <pre><code class="language-fsl">requirements ExpenseRequirements {
   implements ExpenseToBe from &quot;1_business.fsl&quot; { }
 

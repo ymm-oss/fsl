@@ -31,12 +31,13 @@ FSL 5 の要件は **entity / lifecycle / event / rule / decide** で記述し�
 
 最初の宣言より前に、`fsl 5` を単独の行で書きます。その前に置けるのは空行と `//`
 コメントだけです（先頭の UTF-8 BOM も受理します）。Markdown の literate source では、
-最初の `fsl` フェンスの先頭行に書きます。ヘッダーは個々の requirements ブロックではなく、
+最初の `fsl` フェンスの先頭に、同じ規則で書きます。ヘッダーは個々の requirements ブロックではなく、
 文書全体に適用されます。`fsl 4` は以前の構文を選び、ヘッダーがない文書も FSL 4 の
 ままです。`--edition current` は文書の指定に従います。明示的に指定したエディションと
 ヘッダーが食い違うと `edition_conflict`、未知の番号は `unsupported_edition` です。
-ヘッダーの追加だけでは旧形式の要件を変換できません。
-[後述の移行手順](#fsl4-to-fsl5-migration)を使ってください。
+causal と AI ダイアレクトの文書はヘッダーを取りません（`edition_header_not_accepted`）。
+ヘッダーの追加だけでは旧形式の要件を変換できません。`fsl 5` の下の `process` は
+`mixed_requirements_forms` です。[後述の移行手順](#fsl4-to-fsl5-migration)を使ってください。
 
 ```fsl
 spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata badge (explain/html); never verified
@@ -3930,6 +3931,7 @@ requirements Support {
   entity Ticket {
     lifecycle Open -> Assigned -> Closed
     lifecycle Assigned -> Escalated
+    lifecycle Open -> Withdrawn
   }
   Ticket belongs to Agent as assignee via take
   resource desk_open: Bool = true
@@ -3938,27 +3940,41 @@ requirements Support {
   event close = Agent closes Ticket Assigned -> Closed
   event escalate = Agent escalates Ticket Assigned -> Escalated
     set desk_open = false
+  event withdraw = Agent withdraws Ticket Open -> Withdrawn
 
-  rule REQ-1 "A ticket is taken only while the desk is open" {
+  rule REQ-DESK-001 "A ticket is taken only while the desk is open" {
     allow Agent takes Ticket only when desk_open
   }
-  rule REQ-2 "A taken ticket keeps the agent who took it" {
+  rule REQ-DESK-002 "A ticket is withdrawn only after the desk has closed" {
+    allow Agent withdraws Ticket only when not desk_open
+  }
+  rule REQ-TICKET-001 "A taken ticket keeps the agent who took it" {
     always Ticket in Assigned, Closed, Escalated has assignee
   }
-  policy Resolved "Every assigned ticket is eventually closed or escalated"
+  policy POL-TICKET-001 "Every assigned ticket is eventually closed or escalated"
     every Ticket in Assigned must eventually be Closed or Escalated
-  goal Closable "A ticket can be closed" some Ticket can reach Closed
+  goal GOAL-TICKET-001 "A ticket can be closed" some Ticket can reach Closed
   measure closed_tickets = count Ticket in Closed
 
-  scenario AC-1 "An agent takes and closes a ticket" {
+  scenario AC-TICKET-001 "An agent takes and closes a ticket" {
     Agent takes t1 with assignee 1
     Agent closes t1
     then t1 is Closed
   }
-  forbidden FB-DESK-CLOSED "No ticket is taken once the desk has closed" {
+  scenario AC-DESK-001 "A ticket still open when the desk closes is withdrawn" {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent withdraws t2
+    then t2 is Withdrawn
+  }
+  forbidden FB-DESK-001 "No ticket is taken once the desk has closed" {
     Agent takes t1 with assignee 0
     Agent escalates t1
     Agent takes t2 with assignee 0
+    then rejected
+  }
+  forbidden FB-DESK-002 "No ticket is withdrawn while the desk is open" {
+    Agent withdraws t1
     then rejected
   }
 }
@@ -3971,7 +3987,7 @@ verify {
 **エンティティと区分。** `entity User` は段階を持たない識別対象を宣言します。
 `entity Order { qty: Qty = 0 lifecycle Empty -> Placed }` のように本体を書く場合は、
 一つ以上の lifecycle 行と、すべてのフィールドの明示的な初期値が必要です。
-number のフィールドも省略できません。型は宣言済みの number、`Bool`、enum を使います。
+number のフィールドも省略できません。型は `Bool` か、宣言済みの `number`、`type`、`enum` です。
 最初のパスの先頭段階が初期段階で、段階は初出順に生成 enum に入ります。
 lifecycle 行を追加すると別のパスを表せます。`number Qty` の有限範囲は
 `verify { values Qty = 0..2 }`、エンティティの個数は `instances` で指定します。
@@ -4039,13 +4055,17 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
 不変条件を生成し、`verify` で証明させます**。網羅性の検査を無条件に免除する指定ではありません。
 
 **関係、資源、射影。** `Ticket belongs to Agent as assignee via take` は、各 ticket に
-最初は未設定の optional な役割を追加します。指定した event は最初の入力で相手を受け取り、
-記録します。シナリオの `with assignee 1` は Agent のインスタンス 1 を選びます。
-相手のエンティティに属する、シナリオ内のインスタンス名も入力できます。
+最初は未設定の optional な役割を追加します。関係先は `entity` で宣言し、`via` の event の
+アクターはその関係先でなければなりません。そのため `Agent` は `actor` と `entity` の両方で
+宣言します。この event は最初の入力で相手を受け取って記録し、この event のシナリオの
+ステップでは必ず相手を指定します。`with assignee 1` は Agent のインスタンス 1 を選びます。
+値はインスタンス番号です。インスタンス名（`with assignee a1`）は拒否されます。
 `resource stock: Qty = 2` はエンティティに属さない共有状態です。event は `set` で更新し、
 ガードからも参照できます。`measure m = count Concept` または `count Entity in S, T`
 は値の射影であり、新しいカウンター、履歴フィールド、自動の不変条件を作りません。
-`kpi` も同じ形式として受理します。goal の `some E can reach S` は到達可能性、policy の
+`kpi m = count Entity in S` も同じ種類の射影ですが、受け取るのは一つのエンティティと
+一つの段階だけです。`kpi m = count Concept` と `kpi m = count Entity in S, T` は拒否される
+ので、これらには `measure` を使ってください。goal の `some E can reach S` は到達可能性、policy の
 `every E in S must eventually be T or U` は fair な event の下での進行性です。
 どちらも ID と原文をトレーサビリティに残します。
 
@@ -4053,7 +4073,10 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
 `unknown_verb`、`unknown_event_phrase`、`ambiguous_step` で知らせます。
 `t1`、`t2` などのインスタンス名は trace 内だけの名前で、初出順に割り当てます。
 `verify` の個数を超えると `scenario_instance_overflow` です。
-`then t1 is Closed and t2 is Open` は最終段階を検査します。scenario は全ステップを実行し、
+`then t1 is Closed` は一つのインスタンスの最終段階を検査します。複数を検査するには、
+変換後の状態をインスタンス番号で引く式を書きます（エンティティごとに最初の名前が 0 です）。
+例: `then ticket_stage[0] == Closed and ticket_stage[1] == Open`。この式ではインスタンス名を
+使えず、`then t1 is Closed and t2 is Open` は拒否されます。scenario は全ステップを実行し、
 最後の条件を満たす必要があります。失敗は `kind: "acceptance"`、ステップの失敗には
 `failed_step` が付きます。forbidden trace は途中まで実行でき、最後のステップだけを
 拒否する必要があります。最後が受理されると `kind: "forbidden"`、途中で拒否されると
@@ -4069,7 +4092,7 @@ event の欠落や無効化によって、途中の段階が最終段階にな�
 
 #### 用語集と日本語の綴り
 
-任意の `glossary` は requirements ブロックの最初の項目に、一つだけ置けます。
+任意の `glossary` は requirements ブロックの最初の項目に、一つだけ置けます（`misplaced_glossary`）。
 ASCII の正規名と、空白を含まない一語の別名を対応させます。フィールドの左辺は
 `Entity.field` と書きます。次は断片です。
 
@@ -4082,11 +4105,15 @@ glossary {
 }
 ```
 
-以後は、宣言と参照、式、決定表の行、シナリオ、検証範囲、カーネルのメンバーで別名を
-使えます。正規名との混在も受理しますが、`lint --strict-names` は `mixed_names` で
-知らせます。重複した別名は `duplicate_alias`、別名の衝突は `alias_collision`、
-正規名と同じ別名は `alias_shadows_name`、英日どちらかのキーワードや助詞と同じ別名は
-`alias_shadows_keyword` で拒否します。別名の宣言なしに非 ASCII の正規名を使うと
+以後は、宣言と参照、式、決定表の行、シナリオ、検証範囲で別名を使えます。カーネルの
+メンバーでは、エンティティと段階の別名は解決します（`forall c: 経費申請`）が、フィールドの
+別名は解決しません。変換後の名前を書いてください（`申請金額[c]` ではなく `claim_amount[c]`）。
+正規名との混在も受理しますが、同じ名前を両方の綴りで書くと `lint --strict-names` が
+`mixed_names` で知らせます。`duplicate_alias` は一つの正規名に二つの別名がある場合、
+`alias_collision` は一つの別名が二つの正規名を指す場合です。`alias_shadows_name` は、別名が
+glossary の別の正規名か、変換後の仕様が宣言する名前と同じ場合です。アクター名と段階名は
+対象外で、その他の衝突は通常の宣言エラー（`duplicate type`）になることがあります。
+英日どちらかのキーワードや助詞と同じ別名は `alias_shadows_keyword` で拒否します。別名の宣言なしに非 ASCII の正規名を使うと
 `canonical_name_not_ascii` です。spec 名、event の宣言、性質名、要件 ID は正規名で
 揃えておくと、コードとの境界を追いやすくなります。シナリオのインスタンス名は trace 内の名前です。
 `implements … from` のマッピングと refinement ファイルは正規名だけを使います
@@ -4120,7 +4147,7 @@ glossary {
 | Goal / 目標 | `some`; `can reach` | `いずれかの`; `到達可能` |
 | Policy / 方針 | `every`; `in`; `must eventually be`; `or` | `すべての`; `段階`; `いずれ必ず`; `または` |
 | Measure / 指標 | `count`; `in` | `件数`; `段階` |
-| Scenario/forbidden / シナリオ・拒否シナリオ | `then`; `is`; `and`; `rejected` | `結果`; `は`; `かつ`; `拒否` |
+| Scenario/forbidden / シナリオ・拒否シナリオ | `then`; `is`; `rejected` | `結果`; `は`; `拒否` |
 | Boolean expressions / 論理式 | `and`; `or` | `かつ`; `または` |
 | Inputs in events/steps / 出来事・ステップの入力 | `with` | `で` (after the input / 入力の後) |
 
@@ -4156,8 +4183,14 @@ fslc verify requirements.fsl --depth 8
 fslc verify requirements.fsl --engine induction
 ```
 
-`migrate` は `--write` がなければ dry run です。終了コードだけでなく、`findings[]`、
-`machine_applicable`、拒否ごとの `reason` を確認してください。既存の分類と原子的な
+`migrate` は `--write` がなければ dry run です。dry run でも `result: "migrated"` を返し、
+`written: false` になります。終了コードだけでなく、`files[].findings[]`、
+`machine_applicable`、拒否ごとの `reason` を確認してください。`lint` は finding があると
+終了コード 1 を返すので、上のコマンドは `&&` でつなげません。拒否された process の変換は
+`result: "migrate_manual_required"` で終了コード 1、後述のコメントによる拒否は
+`result: "migration_refused"` で終了コード 2 です。`legacy_process_form` と
+`derived_terminal_added` の finding ごとの `edits` は空で、書き換えは `files[].edits` にあります。
+既存の分類と原子的な
 書き込みの契約は、§7 と [DESIGN-migration](../design/DESIGN-migration.md)を参照してください。
 
 | finding / 変換 | 確認する点 |
@@ -4173,13 +4206,15 @@ process の変換は段階 enum の順序と lifecycle の辺を保ちます。�
 推測することはありません。複数 process による entity の共有（`process_entity_shared`）、
 修飾された process 名（`qualified_process_name`）、transition のアノテーション
 （`transition_annotation`）、フィールドと同名の入力（`input_shares_field_name`）、
-range 型の入力（`range_typed_input`）、要件 ID のないガード（`guard_without_requirement`）、
+range 型の入力（`with n in 0..2`、`range_typed_input`）、要件 ID のないガード（`guard_without_requirement`）、
 stages の先頭でない initial（`initial_not_first_stage`）、デフォルトの移行後も残る
 初期値の欠落（`field_without_initial_value`）は拒否します。認識できない配置、変換先の
 不正、その他の checked kernel の変化は、それぞれ `unrecognized_process_layout`、
 `converted_form_invalid`、`kernel_changed` です。意味を明示して修正し、計画をやり直して
-ください。拒否を捨てて書き込みを強行してはいけません。安全に移動できないコメントや
-ソースも引き続き拒否します。
+ください。拒否を捨てて書き込みを強行してはいけません。process の変換は `//` コメントを
+残しますが、移動することがあります（行末のコメントは生成した宣言のそばの独立した行に
+なります）。位置を確認してください。文字列メタデータやインラインのマッピングの書き換えで
+移動が必要になるコメントは拒否します（`legacy_string_metadata`、`inline_action_maps`）。
 
 保存の検査には一つ例外があります。入力に**明示の terminal がない場合**は、上記の
 停止条件の導出を許します。そのため、無条件の kernel 同一性や deadlock 出力の同一性を
@@ -4187,14 +4222,16 @@ stages の先頭でない initial（`initial_not_first_stage`）、デフォル�
 導出の finding は追加せず、明示した条件の変更は契約違反になります。
 finding は導出条件に相当する terminal 式を示すので、停止の意味の変化を確認できます。
 変換済み文書にもう一度 migration を実行しても、process の変換や停止条件の導出の finding
-は繰り返し追加しません。不正な式の `&&`、`||`、`->` は migration だけでは直りません。
+は繰り返し追加しません。変換は `acceptance` と `kpi` の宣言をそのまま残し、`acceptance` は
+FSL 5 でも有効です。変換後の rule によって、入力になかった警告（`never_rule_without_forbidden`
+など）が出ることがあります。ガード対象の出来事を forbidden trace で試すと解消します。不正な式の `&&`、`||`、`->` は migration だけでは直りません。
 §7 に従って演算子を手修正してください。この変換で business、カーネル、設計、
 refinement の契約に区分や決定表が加わることはありません。
 
 #### FSL 4 要件の参照と移行入力
 
-次のヘッダーなしの例は、以前の process/transition と acceptance の形式です。
-FSL 5 の新しい要件には上記の形式を使ってください。
+次のヘッダーなしの例は、以前の process/transition の形式と `acceptance` ブロックです。
+`acceptance` は FSL 5 でも有効です。FSL 5 の新しい要件には上記の形式を使ってください。
 
 ```fsl
 requirements ExpenseRequirements {

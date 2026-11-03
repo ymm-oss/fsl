@@ -81,12 +81,13 @@ FSL 5 の要件は <strong>entity / lifecycle / event / rule / decide</strong> �
 参照用に残しています。</p>
 <p>最初の宣言より前に、<code>fsl 5</code> を単独の行で書きます。その前に置けるのは空行と <code>//</code>
 コメントだけです（先頭の UTF-8 BOM も受理します）。Markdown の literate source では、
-最初の <code>fsl</code> フェンスの先頭行に書きます。ヘッダーは個々の requirements ブロックではなく、
+最初の <code>fsl</code> フェンスの先頭に、同じ規則で書きます。ヘッダーは個々の requirements ブロックではなく、
 文書全体に適用されます。<code>fsl 4</code> は以前の構文を選び、ヘッダーがない文書も FSL 4 の
 ままです。<code>--edition current</code> は文書の指定に従います。明示的に指定したエディションと
 ヘッダーが食い違うと <code>edition_conflict</code>、未知の番号は <code>unsupported_edition</code> です。
-ヘッダーの追加だけでは旧形式の要件を変換できません。
-<a href="#fsl4-to-fsl5-migration">後述の移行手順</a>を使ってください。</p>
+causal と AI ダイアレクトの文書はヘッダーを取りません（<code>edition_header_not_accepted</code>）。
+ヘッダーの追加だけでは旧形式の要件を変換できません。<code>fsl 5</code> の下の <code>process</code> は
+<code>mixed_requirements_forms</code> です。<a href="#fsl4-to-fsl5-migration">後述の移行手順</a>を使ってください。</p>
 <pre><code class="language-fsl">spec &lt;Name&gt; [&quot;&lt;kind&gt;: &lt;intent&gt;&quot;] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const &lt;NAME&gt; = &lt;constant expr&gt;
   type  &lt;Name&gt; = &lt;lo&gt;..&lt;hi&gt;            // domain type (bounded integer)
@@ -3968,6 +3969,7 @@ requirements Support {
   entity Ticket {
     lifecycle Open -&gt; Assigned -&gt; Closed
     lifecycle Assigned -&gt; Escalated
+    lifecycle Open -&gt; Withdrawn
   }
   Ticket belongs to Agent as assignee via take
   resource desk_open: Bool = true
@@ -3976,27 +3978,41 @@ requirements Support {
   event close = Agent closes Ticket Assigned -&gt; Closed
   event escalate = Agent escalates Ticket Assigned -&gt; Escalated
     set desk_open = false
+  event withdraw = Agent withdraws Ticket Open -&gt; Withdrawn
 
-  rule REQ-1 &quot;A ticket is taken only while the desk is open&quot; {
+  rule REQ-DESK-001 &quot;A ticket is taken only while the desk is open&quot; {
     allow Agent takes Ticket only when desk_open
   }
-  rule REQ-2 &quot;A taken ticket keeps the agent who took it&quot; {
+  rule REQ-DESK-002 &quot;A ticket is withdrawn only after the desk has closed&quot; {
+    allow Agent withdraws Ticket only when not desk_open
+  }
+  rule REQ-TICKET-001 &quot;A taken ticket keeps the agent who took it&quot; {
     always Ticket in Assigned, Closed, Escalated has assignee
   }
-  policy Resolved &quot;Every assigned ticket is eventually closed or escalated&quot;
+  policy POL-TICKET-001 &quot;Every assigned ticket is eventually closed or escalated&quot;
     every Ticket in Assigned must eventually be Closed or Escalated
-  goal Closable &quot;A ticket can be closed&quot; some Ticket can reach Closed
+  goal GOAL-TICKET-001 &quot;A ticket can be closed&quot; some Ticket can reach Closed
   measure closed_tickets = count Ticket in Closed
 
-  scenario AC-1 &quot;An agent takes and closes a ticket&quot; {
+  scenario AC-TICKET-001 &quot;An agent takes and closes a ticket&quot; {
     Agent takes t1 with assignee 1
     Agent closes t1
     then t1 is Closed
   }
-  forbidden FB-DESK-CLOSED &quot;No ticket is taken once the desk has closed&quot; {
+  scenario AC-DESK-001 &quot;A ticket still open when the desk closes is withdrawn&quot; {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent withdraws t2
+    then t2 is Withdrawn
+  }
+  forbidden FB-DESK-001 &quot;No ticket is taken once the desk has closed&quot; {
     Agent takes t1 with assignee 0
     Agent escalates t1
     Agent takes t2 with assignee 0
+    then rejected
+  }
+  forbidden FB-DESK-002 &quot;No ticket is withdrawn while the desk is open&quot; {
+    Agent withdraws t1
     then rejected
   }
 }
@@ -4008,7 +4024,7 @@ verify {
 <p><strong>エンティティと区分。</strong> <code>entity User</code> は段階を持たない識別対象を宣言します。
 <code>entity Order { qty: Qty = 0 lifecycle Empty -&gt; Placed }</code> のように本体を書く場合は、
 一つ以上の lifecycle 行と、すべてのフィールドの明示的な初期値が必要です。
-number のフィールドも省略できません。型は宣言済みの number、<code>Bool</code>、enum を使います。
+number のフィールドも省略できません。型は <code>Bool</code> か、宣言済みの <code>number</code>、<code>type</code>、<code>enum</code> です。
 最初のパスの先頭段階が初期段階で、段階は初出順に生成 enum に入ります。
 lifecycle 行を追加すると別のパスを表せます。<code>number Qty</code> の有限範囲は
 <code>verify { values Qty = 0..2 }</code>、エンティティの個数は <code>instances</code> で指定します。
@@ -4099,20 +4115,27 @@ trace がないと <code>never_rule_without_forbidden</code> が警告します�
 <code>assuming Q</code> は表の検査を Q の範囲に絞ると同時に、<strong>その段階で Q が成り立つという
 不変条件を生成し、<code>verify</code> で証明させます</strong>。網羅性の検査を無条件に免除する指定ではありません。</p>
 <p><strong>関係、資源、射影。</strong> <code>Ticket belongs to Agent as assignee via take</code> は、各 ticket に
-最初は未設定の optional な役割を追加します。指定した event は最初の入力で相手を受け取り、
-記録します。シナリオの <code>with assignee 1</code> は Agent のインスタンス 1 を選びます。
-相手のエンティティに属する、シナリオ内のインスタンス名も入力できます。
+最初は未設定の optional な役割を追加します。関係先は <code>entity</code> で宣言し、<code>via</code> の event の
+アクターはその関係先でなければなりません。そのため <code>Agent</code> は <code>actor</code> と <code>entity</code> の両方で
+宣言します。この event は最初の入力で相手を受け取って記録し、この event のシナリオの
+ステップでは必ず相手を指定します。<code>with assignee 1</code> は Agent のインスタンス 1 を選びます。
+値はインスタンス番号です。インスタンス名（<code>with assignee a1</code>）は拒否されます。
 <code>resource stock: Qty = 2</code> はエンティティに属さない共有状態です。event は <code>set</code> で更新し、
 ガードからも参照できます。<code>measure m = count Concept</code> または <code>count Entity in S, T</code>
 は値の射影であり、新しいカウンター、履歴フィールド、自動の不変条件を作りません。
-<code>kpi</code> も同じ形式として受理します。goal の <code>some E can reach S</code> は到達可能性、policy の
+<code>kpi m = count Entity in S</code> も同じ種類の射影ですが、受け取るのは一つのエンティティと
+一つの段階だけです。<code>kpi m = count Concept</code> と <code>kpi m = count Entity in S, T</code> は拒否される
+ので、これらには <code>measure</code> を使ってください。goal の <code>some E can reach S</code> は到達可能性、policy の
 <code>every E in S must eventually be T or U</code> は fair な event の下での進行性です。
 どちらも ID と原文をトレーサビリティに残します。</p>
 <p><strong>シナリオと停止。</strong> アクターと動詞の句は event に対応します。対応がない、または曖昧なら
 <code>unknown_verb</code>、<code>unknown_event_phrase</code>、<code>ambiguous_step</code> で知らせます。
 <code>t1</code>、<code>t2</code> などのインスタンス名は trace 内だけの名前で、初出順に割り当てます。
 <code>verify</code> の個数を超えると <code>scenario_instance_overflow</code> です。
-<code>then t1 is Closed and t2 is Open</code> は最終段階を検査します。scenario は全ステップを実行し、
+<code>then t1 is Closed</code> は一つのインスタンスの最終段階を検査します。複数を検査するには、
+変換後の状態をインスタンス番号で引く式を書きます（エンティティごとに最初の名前が 0 です）。
+例: <code>then ticket_stage[0] == Closed and ticket_stage[1] == Open</code>。この式ではインスタンス名を
+使えず、<code>then t1 is Closed and t2 is Open</code> は拒否されます。scenario は全ステップを実行し、
 最後の条件を満たす必要があります。失敗は <code>kind: "acceptance"</code>、ステップの失敗には
 <code>failed_step</code> が付きます。forbidden trace は途中まで実行でき、最後のステップだけを
 拒否する必要があります。最後が受理されると <code>kind: "forbidden"</code>、途中で拒否されると
@@ -4125,7 +4148,7 @@ event の欠落や無効化によって、途中の段階が最終段階にな�
 論理積で追加するのではありません。process から停止条件を導かない FSL 4 requirements
 との違いです。</p>
 <h4 id="_1">用語集と日本語の綴り</h4>
-<p>任意の <code>glossary</code> は requirements ブロックの最初の項目に、一つだけ置けます。
+<p>任意の <code>glossary</code> は requirements ブロックの最初の項目に、一つだけ置けます（<code>misplaced_glossary</code>）。
 ASCII の正規名と、空白を含まない一語の別名を対応させます。フィールドの左辺は
 <code>Entity.field</code> と書きます。次は断片です。</p>
 <pre><code class="language-fsl-fragment">glossary {
@@ -4135,11 +4158,15 @@ ASCII の正規名と、空白を含まない一語の別名を対応させま�
   submits = 提出する
 }
 </code></pre>
-<p>以後は、宣言と参照、式、決定表の行、シナリオ、検証範囲、カーネルのメンバーで別名を
-使えます。正規名との混在も受理しますが、<code>lint --strict-names</code> は <code>mixed_names</code> で
-知らせます。重複した別名は <code>duplicate_alias</code>、別名の衝突は <code>alias_collision</code>、
-正規名と同じ別名は <code>alias_shadows_name</code>、英日どちらかのキーワードや助詞と同じ別名は
-<code>alias_shadows_keyword</code> で拒否します。別名の宣言なしに非 ASCII の正規名を使うと
+<p>以後は、宣言と参照、式、決定表の行、シナリオ、検証範囲で別名を使えます。カーネルの
+メンバーでは、エンティティと段階の別名は解決します（<code>forall c: 経費申請</code>）が、フィールドの
+別名は解決しません。変換後の名前を書いてください（<code>申請金額[c]</code> ではなく <code>claim_amount[c]</code>）。
+正規名との混在も受理しますが、同じ名前を両方の綴りで書くと <code>lint --strict-names</code> が
+<code>mixed_names</code> で知らせます。<code>duplicate_alias</code> は一つの正規名に二つの別名がある場合、
+<code>alias_collision</code> は一つの別名が二つの正規名を指す場合です。<code>alias_shadows_name</code> は、別名が
+glossary の別の正規名か、変換後の仕様が宣言する名前と同じ場合です。アクター名と段階名は
+対象外で、その他の衝突は通常の宣言エラー（<code>duplicate type</code>）になることがあります。
+英日どちらかのキーワードや助詞と同じ別名は <code>alias_shadows_keyword</code> で拒否します。別名の宣言なしに非 ASCII の正規名を使うと
 <code>canonical_name_not_ascii</code> です。spec 名、event の宣言、性質名、要件 ID は正規名で
 揃えておくと、コードとの境界を追いやすくなります。シナリオのインスタンス名は trace 内の名前です。
 <code>implements … from</code> のマッピングと refinement ファイルは正規名だけを使います
@@ -4260,8 +4287,8 @@ ASCII の正規名と、空白を含まない一語の別名を対応させま�
 </tr>
 <tr>
 <td>Scenario/forbidden / シナリオ・拒否シナリオ</td>
-<td><code>then</code>; <code>is</code>; <code>and</code>; <code>rejected</code></td>
-<td><code>結果</code>; <code>は</code>; <code>かつ</code>; <code>拒否</code></td>
+<td><code>then</code>; <code>is</code>; <code>rejected</code></td>
+<td><code>結果</code>; <code>は</code>; <code>拒否</code></td>
 </tr>
 <tr>
 <td>Boolean expressions / 論理式</td>
@@ -4300,8 +4327,14 @@ fslc check requirements.fsl
 fslc verify requirements.fsl --depth 8
 fslc verify requirements.fsl --engine induction
 </code></pre>
-<p><code>migrate</code> は <code>--write</code> がなければ dry run です。終了コードだけでなく、<code>findings[]</code>、
-<code>machine_applicable</code>、拒否ごとの <code>reason</code> を確認してください。既存の分類と原子的な
+<p><code>migrate</code> は <code>--write</code> がなければ dry run です。dry run でも <code>result: "migrated"</code> を返し、
+<code>written: false</code> になります。終了コードだけでなく、<code>files[].findings[]</code>、
+<code>machine_applicable</code>、拒否ごとの <code>reason</code> を確認してください。<code>lint</code> は finding があると
+終了コード 1 を返すので、上のコマンドは <code>&amp;&amp;</code> でつなげません。拒否された process の変換は
+<code>result: "migrate_manual_required"</code> で終了コード 1、後述のコメントによる拒否は
+<code>result: "migration_refused"</code> で終了コード 2 です。<code>legacy_process_form</code> と
+<code>derived_terminal_added</code> の finding ごとの <code>edits</code> は空で、書き換えは <code>files[].edits</code> にあります。
+既存の分類と原子的な
 書き込みの契約は、§7 と <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-migration.md">DESIGN-migration</a>を参照してください。</p>
 <table>
 <thead>
@@ -4341,25 +4374,29 @@ fslc verify requirements.fsl --engine induction
 推測することはありません。複数 process による entity の共有（<code>process_entity_shared</code>）、
 修飾された process 名（<code>qualified_process_name</code>）、transition のアノテーション
 （<code>transition_annotation</code>）、フィールドと同名の入力（<code>input_shares_field_name</code>）、
-range 型の入力（<code>range_typed_input</code>）、要件 ID のないガード（<code>guard_without_requirement</code>）、
+range 型の入力（<code>with n in 0..2</code>、<code>range_typed_input</code>）、要件 ID のないガード（<code>guard_without_requirement</code>）、
 stages の先頭でない initial（<code>initial_not_first_stage</code>）、デフォルトの移行後も残る
 初期値の欠落（<code>field_without_initial_value</code>）は拒否します。認識できない配置、変換先の
 不正、その他の checked kernel の変化は、それぞれ <code>unrecognized_process_layout</code>、
 <code>converted_form_invalid</code>、<code>kernel_changed</code> です。意味を明示して修正し、計画をやり直して
-ください。拒否を捨てて書き込みを強行してはいけません。安全に移動できないコメントや
-ソースも引き続き拒否します。</p>
+ください。拒否を捨てて書き込みを強行してはいけません。process の変換は <code>//</code> コメントを
+残しますが、移動することがあります（行末のコメントは生成した宣言のそばの独立した行に
+なります）。位置を確認してください。文字列メタデータやインラインのマッピングの書き換えで
+移動が必要になるコメントは拒否します（<code>legacy_string_metadata</code>、<code>inline_action_maps</code>）。</p>
 <p>保存の検査には一つ例外があります。入力に<strong>明示の terminal がない場合</strong>は、上記の
 停止条件の導出を許します。そのため、無条件の kernel 同一性や deadlock 出力の同一性を
 保証する契約ではありません。入力に <code>terminal</code> があれば、その条件を保存して比較します。
 導出の finding は追加せず、明示した条件の変更は契約違反になります。
 finding は導出条件に相当する terminal 式を示すので、停止の意味の変化を確認できます。
 変換済み文書にもう一度 migration を実行しても、process の変換や停止条件の導出の finding
-は繰り返し追加しません。不正な式の <code>&amp;&amp;</code>、<code>||</code>、<code>-&gt;</code> は migration だけでは直りません。
+は繰り返し追加しません。変換は <code>acceptance</code> と <code>kpi</code> の宣言をそのまま残し、<code>acceptance</code> は
+FSL 5 でも有効です。変換後の rule によって、入力になかった警告（<code>never_rule_without_forbidden</code>
+など）が出ることがあります。ガード対象の出来事を forbidden trace で試すと解消します。不正な式の <code>&amp;&amp;</code>、<code>||</code>、<code>-&gt;</code> は migration だけでは直りません。
 §7 に従って演算子を手修正してください。この変換で business、カーネル、設計、
 refinement の契約に区分や決定表が加わることはありません。</p>
 <h4 id="fsl-4">FSL 4 要件の参照と移行入力</h4>
-<p>次のヘッダーなしの例は、以前の process/transition と acceptance の形式です。
-FSL 5 の新しい要件には上記の形式を使ってください。</p>
+<p>次のヘッダーなしの例は、以前の process/transition の形式と <code>acceptance</code> ブロックです。
+<code>acceptance</code> は FSL 5 でも有効です。FSL 5 の新しい要件には上記の形式を使ってください。</p>
 <pre><code class="language-fsl">requirements ExpenseRequirements {
   implements ExpenseToBe from &quot;1_business.fsl&quot; { }
 
