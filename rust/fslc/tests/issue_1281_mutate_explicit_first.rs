@@ -141,6 +141,95 @@ fn baseline_claims_unbounded_only_on_explicit_closure() {
 }
 
 #[test]
+fn builtin_kill_by_a_later_check_is_not_labelled_with_the_main_route() {
+    let forbidden = run(&[
+        "examples/gallery/valid/small_forbidden_guarded_cancel.fsl",
+        "--max-mutants",
+        "2",
+    ]);
+    let value = report(&forbidden, 0);
+    assert_report_progress(&forbidden, &value);
+    assert_eq!(
+        progress(&forbidden)[1..],
+        [
+            (
+                "mutate [1/2] type_bound_lo_minus1 type OrderId lo: survived",
+                "explicit"
+            ),
+            (
+                "mutate [2/2] type_bound_lo_plus1 type OrderId lo: killed forbidden",
+                "secondary"
+            ),
+        ]
+    );
+
+    let acceptance = run(&[
+        "examples/self/monitor_action_boundary.fsl",
+        "--max-mutants",
+        "3",
+    ]);
+    let value = report(&acceptance, 0);
+    assert_report_progress(&acceptance, &value);
+    assert_eq!(
+        progress(&acceptance)[3],
+        (
+            "mutate [3/3] type_bound_hi_minus1 type Count hi: killed acceptance",
+            "secondary"
+        )
+    );
+}
+
+#[test]
+fn external_kill_by_refinement_is_not_labelled_with_the_main_route() {
+    let output = run(&[
+        "examples/pm/cancel_system.fsl",
+        "--max-mutants",
+        "0",
+        "--from",
+        "rust/fslc/tests/fixtures/issue_1281_refinement_kill.jsonl",
+    ]);
+    let value = report(&output, 0);
+    assert_report_progress(&output, &value);
+    assert_eq!(
+        progress(&output)[1],
+        (
+            "mutate external [1/1] drop-cancel-guard: killed refinement",
+            "secondary"
+        )
+    );
+}
+
+#[test]
+fn main_oracle_verdicts_keep_their_route() {
+    let output = run(&[
+        "rust/fslc/tests/fixtures/issue_1281_main_kill.fsl",
+        "--depth",
+        "2",
+        "--max-mutants",
+        "1000",
+    ]);
+    let value = report(&output, 0);
+    assert_report_progress(&output, &value);
+    let lines = progress(&output);
+    assert!(
+        lines.iter().any(|(body, engine)| body
+            .ends_with("requires_remove step requires #1: killed Safe")
+            && *engine == "bmc"),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|(body, engine)| body.ends_with(": survived") && *engine == "explicit"),
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().all(|(_, engine)| *engine != "secondary"),
+        "this spec has no later check that can kill: {lines:?}"
+    );
+}
+
+#[test]
 fn builtin_progress_uses_evaluated_count_not_the_larger_cap() {
     let output = run(BUILTIN);
     let value = report(&output, 0);

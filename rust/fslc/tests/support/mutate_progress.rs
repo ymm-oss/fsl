@@ -19,7 +19,7 @@ pub fn progress(output: &Output) -> Vec<(&str, &str)> {
             let (body, timing) = line.split_once(" (engine=").expect("engine suffix");
             let (engine, seconds) = timing.split_once(", ").expect("duration separator");
             assert!(
-                matches!(engine, "explicit" | "bmc" | "probe" | "none"),
+                matches!(engine, "explicit" | "bmc" | "probe" | "none" | "secondary"),
                 "{line}"
             );
             let seconds: f64 = seconds
@@ -54,6 +54,15 @@ pub fn assert_report_progress(output: &Output, value: &Value) {
     let (mut builtin, mut external) = (0, 0);
     for ((body, engine), record) in lines[1..].iter().zip(mutants) {
         let status = record["status"].as_str().expect("status");
+        if *engine == "secondary" {
+            assert_eq!(status, "killed", "{body}");
+        }
+        if matches!(
+            record["killed_by"].as_str(),
+            Some("acceptance" | "forbidden" | "refinement")
+        ) {
+            assert_eq!(*engine, "secondary", "{body}");
+        }
         let killer = record["killed_by"]
             .as_str()
             .map_or_else(String::new, |name| format!(" {name}"));

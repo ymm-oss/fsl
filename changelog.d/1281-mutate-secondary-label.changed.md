@@ -1,0 +1,1 @@
+Changed (#1281): a `fslc mutate` progress line now reads `engine=secondary` when the main oracle was clean and a later check (requirements, implements, or the init-bounds override) killed the mutant. It used to name the main-oracle route, for example `killed acceptance (engine=explicit)`, which read as if explicit had produced the kill. Stderr only; stdout is unchanged.

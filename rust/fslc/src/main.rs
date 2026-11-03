@@ -10808,6 +10808,18 @@ struct MainOracle {
     engine: &'static str,
 }
 
+/// The `engine=` word on a mutant's progress line: the main oracle's route,
+/// unless the main oracle was clean and a later check (requirements,
+/// implements, the init-bounds override) killed the mutant. That kill did not
+/// come from the route, so the line must not read as if it had.
+fn mutation_progress_engine(main: &MainOracle, outcome: &MutationOracle) -> &'static str {
+    if main.outcome.is_clean() && matches!(outcome, MutationOracle::Killed { .. }) {
+        "secondary"
+    } else {
+        main.engine
+    }
+}
+
 const MUTATION_EXPLICIT_BUDGET: usize = fsl_runtime::CONCRETE_PROBE_BUDGET;
 
 /// A built-in mutant that does not lower/build never reaches the oracle: it is
@@ -12262,6 +12274,7 @@ fn run_mutate_from_source(
             outcome = apply_init_bounds_override(outcome, &root);
         }
         let (status, detail) = mutant_status(&outcome, inconclusive);
+        let progress_engine = mutation_progress_engine(&main, &outcome);
         let target = mutant
             .action
             .as_ref()
@@ -12367,7 +12380,7 @@ fn run_mutate_from_source(
             &public,
             index,
             discovered.min(max_mutants),
-            main.engine,
+            progress_engine,
             started,
         );
         public_mutants.push(public);
@@ -12491,7 +12504,13 @@ fn run_mutate_from_source(
                     }
                 }
             }
-            mutation_progress(&public, index, count, main.engine, started);
+            mutation_progress(
+                &public,
+                index,
+                count,
+                mutation_progress_engine(&main, &outcome),
+                started,
+            );
             public_mutants.push(public);
         }
     }
@@ -20293,6 +20312,34 @@ mod mutate_explicit_first_tests {
             native_mutation_bmc(model, depth)
         });
         (main, calls)
+    }
+
+    #[test]
+    fn progress_engine_names_a_later_check_kill_only() {
+        let main = |outcome, engine| MainOracle {
+            outcome,
+            boundary_killer: None,
+            engine,
+        };
+        let killed = || MutationOracle::killed("acceptance", Vec::new());
+        for route in ["explicit", "bmc"] {
+            let clean = main(MutationOracle::Clean, route);
+            assert_eq!(mutation_progress_engine(&clean, &killed()), "secondary");
+            assert_eq!(
+                mutation_progress_engine(&clean, &MutationOracle::Clean),
+                route
+            );
+        }
+        for route in ["bmc", "probe"] {
+            let main_kill = main(killed(), route);
+            assert_eq!(mutation_progress_engine(&main_kill, &killed()), route);
+        }
+        let later_error = MutationOracle::Error(OracleFailure::new("bmc", "unknown"));
+        assert_eq!(
+            mutation_progress_engine(&main(MutationOracle::Clean, "explicit"), &later_error),
+            "explicit",
+            "only a later kill replaces the route"
+        );
     }
 
     #[test]

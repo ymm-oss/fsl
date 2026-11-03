@@ -4659,8 +4659,9 @@ DESIGN-*.md があります)。
   K 以内で目撃されたときだけ clean を確定します。いずれでも決まらない場合は
   既存の BMC 経路が verdict と kill label を選びます。後続の検査も引き続き
   実行します。受理されたベースラインと評価した各ミュータントの
-  進捗は stderr に `engine=explicit|bmc|probe|none` と秒数で出ます。engine は
-  main oracle の経路であり、後続検査の判定元ではありません。stdout は
+  進捗は stderr に `engine=explicit|bmc|probe|none|secondary` と秒数で出ます。engine は
+  main oracle の経路です。ただし、main oracle が clean で後続検査が kill した
+  ミュータントは `secondary` と出ます。stdout は
   [`DESIGN-mutate` §3](../design/DESIGN-mutate.md#3-kill-oracle-and-baseline-gate) の
   encoding-only residual(BMC 単独では `build_spec` だったものが explicit-clean で
   生存し得る)を除いて変わりません。

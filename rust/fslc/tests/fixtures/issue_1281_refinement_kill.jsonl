@@ -1,0 +1,1 @@
+{"id":"drop-cancel-guard","replace":{"target":"requires scr[c].st == CancelForm","replacement":"requires true","occurrence":1}}

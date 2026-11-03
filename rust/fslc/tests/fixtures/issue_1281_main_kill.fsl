@@ -1,0 +1,7 @@
+spec MainKill {
+  type Small = 0..3
+  state { x: Small }
+  init { x = 0 }
+  action step() { requires x < 1  x = x + 1 }
+  invariant Safe { x <= 1 }
+}

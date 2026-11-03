@@ -305,12 +305,15 @@ Mutation reports emit live progress on stderr only:
 
 ```text
 mutate baseline: proved (engine=explicit, 0.100s)
-mutate [i/N] <op> <target>: <status>[ <killed_by>] (engine=explicit|bmc|probe|none, 0.100s)
-mutate external [i/M] <id>: <status>[ <killed_by>] (engine=explicit|bmc|probe|none, 0.100s)
+mutate [i/N] <op> <target>: <status>[ <killed_by>] (engine=explicit|bmc|probe|none|secondary, 0.100s)
+mutate external [i/M] <id>: <status>[ <killed_by>] (engine=explicit|bmc|probe|none|secondary, 0.100s)
 ```
 
-The engine label names the main-oracle route, not whichever later check decides
-the final status or killer. `none` means the record never reached the oracle.
+The engine label names the main-oracle route. `secondary` replaces it when the
+main oracle was clean and a later check (requirements, implements, the
+init-bounds override) killed the mutant; `killed_by` names that check. A later
+`error` or `inconclusive` keeps the route. `none` means the record never reached
+the oracle.
 N is the evaluated built-in count, not the cap or discovered count; M includes
 invalid external records. Timers include per-record materialization and later
 checks. External catalogs load before any progress (previously after built-ins),
