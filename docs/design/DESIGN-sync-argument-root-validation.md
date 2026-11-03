@@ -136,11 +136,8 @@ All other contexts retain all three files. Read roles and presence are distinct.
 The mandatory610 on-disk forms had zero removals; inline sources are not an empty set.
 Retained disk-sweep invocation (historical execution, not a new run):
 ```sh
-/usr/bin/lockf -k "/Users/rizumita/.cache/fsl-heavy.lock" \
-  "/Users/rizumita/workspace/fsl-worktrees/v5-1517-root-source/scripts/cx-log" \
-  1517-source-78ff-U7-corpus610-frozen47-2x -- \
-  /Applications/Xcode-26.6.0.app/Contents/Developer/usr/bin/python3 \
-  "/Users/rizumita/workspace/fsl-worktrees/v5-1517-root-source/.claude/work/1517-source-corpus.py"
+lockf -k <heavy-lock> scripts/cx-log 1517-source-78ff-U7-corpus610-frozen47-2x -- \
+  python3 <task-local corpus script, not retained in the repository>
 ```
 It ran from the named candidate worktree with `FSLC_CACHE=off`.
 The script unsets `FSLC_UNSTABLE` in stable mode and sets it to `fsl5` only
@@ -155,6 +152,27 @@ parentheses and the trailing comma are breaking acceptance removals,
 not new permission for body lets to bind originals. Historical Stage A identities
 above remain their own observations. Original per-cohort H binaries831ab0e2 and
 1caf9f0c are not relabeled as later d98f6ba9.
+
+Rebased re-measurement, superseding the identities above for the disk sweep: base
+`5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, head
+`7653cc784354bc562bd85bd888cf78d0091272f2`, each built from its own materialized
+tree with Rust 1.98 (`cargo build --manifest-path rust/Cargo.toml --workspace --locked`).
+Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (610 forms on
+both sides: 23/195/392) ran with `FSLC_CACHE=off` and the own tree as cwd, as
+`fslc check <path>` stable and with `FSLC_UNSTABLE=fsl5`, and as
+`fslc kernel <path> --kernel-version 1|2` stable, twice per side. All 2440 pairs had
+equal complete stdout, stderr and exit, with no field excluded: the disk transition
+set is empty. The eleven contexts above again go check-ok/exit0 to
+semantics-error/exit2 at the recorded locations in both modes, and the nine preservation
+contexts stay byte-identical. The inline `s.fsl` of the rewritten
+`breaking_removal_sync_arguments_do_not_read_additional_lets` stays an error and moves
+from the component wrapper at 2:3 to the root at 4:21; its other four inputs are
+byte-identical. This covers `check` and Kernel on these forms, not every verifier route.
+
+A conditional's arms now check against the supplied expectation instead of the
+inferred carrier. Across the corpus and 35 finite conditional probes this changed only
+the type named by a diagnostic (`Range(0, 1)` becomes the formal's named type),
+including direct specs such as `m[if c then 0 else true]`; no probe changed admission.
 
 Implementation evidence must also cover used/unused rejection and valid header/
 alias/forward const/state/numeric controls, missing/swapped metadata and queue
