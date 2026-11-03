@@ -33,6 +33,7 @@ use fsl_syntax::{
 
 use crate::document::RequirementClaimSet;
 use crate::document_glossary::markdown_label;
+use crate::document_markdown as md;
 use crate::document_presentation::Locale;
 
 /// One entity's lifecycle: its stages, initial stage and events.
@@ -385,7 +386,11 @@ impl<'a> RequirementsViews<'a> {
         table: &DecisionTable,
         result: Option<&DecisionTableResult>,
     ) -> String {
-        let head = format!("#### {}: {}", table.id, markdown_label(&table.text));
+        let head = format!(
+            "#### {}: {}",
+            table.id,
+            markdown_label(&table.text).replace('\r', "&#13;")
+        );
         let target = match self.locale {
             Locale::Ja => format!(
                 "{}: {} {}",
@@ -431,7 +436,11 @@ impl<'a> RequirementsViews<'a> {
             rows.push(format!(
                 "| {} | {} | {} |",
                 index + 1,
-                cell(condition),
+                if condition.contains("//") {
+                    md::prose(condition)
+                } else {
+                    cell(condition)
+                },
                 cell(&outcome.join(separator))
             ));
         }
@@ -606,7 +615,7 @@ impl<'a> RequirementsViews<'a> {
                 .find(|candidate| candidate.id == requirement)
                 .and_then(|candidate| candidate.statements.iter().find_map(|s| s.text.as_deref()))
             {
-                parts.push(format!("> {text}"));
+                parts.push(md::blockquote(text));
             }
             let items = statements
                 .iter()
@@ -624,9 +633,15 @@ impl<'a> RequirementsViews<'a> {
                         },
                         (None, None) => String::new(),
                     };
+                    // Identifiers/operators cannot contain backticks or HTML;
+                    // authored line comments retained in `written` can.
+                    let detail = if statement.detail.contains("//") {
+                        md::code(statement.detail)
+                    } else {
+                        format!("`{}`", statement.detail)
+                    };
                     format!(
-                        "- **{kind}**{subject}: `{}`\n\n  <details><summary>{lowered}</summary>\n\n  `{}`\n\n  </details>",
-                        statement.detail.replace('`', "'"),
+                        "- **{kind}**{subject}: {detail}\n\n  <details><summary>{lowered}</summary>\n\n  `{}`\n\n  </details>",
                         source_expr_text(self.model, statement.lowered).replace('`', "'")
                     )
                 })
@@ -833,7 +848,7 @@ impl<'a> RequirementsViews<'a> {
                 Locale::En => format!("**{}** (`{id}`)", markdown_label(&shown)),
             }
         };
-        let text = markdown_label(text);
+        let text = markdown_label(text).replace('\r', "&#13;");
         if statement.is_empty() {
             format!("- {name}: {text}")
         } else {

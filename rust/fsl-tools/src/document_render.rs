@@ -29,6 +29,7 @@ use serde_json::Value;
 use crate::document::{Claim, ClaimKind, RequirementClaimSet};
 use crate::document_evidence::{AppliedEvidence, requirement_assurance};
 use crate::document_glossary::AppliedGlossary;
+use crate::document_markdown::{blockquote, code, prose};
 use crate::document_markers::{parse_body, parse_frontmatter};
 use crate::document_presentation::Locale;
 use crate::document_project::project_renderer_contract;
@@ -201,8 +202,11 @@ pub fn render_requirements_document_with_options(
     if let Some(section) = glossary_section(glossary.map(|applied| applied.glossary), locale) {
         push_section(&mut out, &section);
     }
-    if let Some(section) = evidence_sources_section(claims, ctx.evidence, locale) {
-        push_section(&mut out, &section);
+    if !ctx.evidence.is_empty() {
+        push_section(
+            &mut out,
+            &evidence_sources_section(claims, ctx.evidence, locale)?,
+        );
     }
     if let Some(section) =
         approvals_section(approvals.map_or(&[], |applied| applied.records), locale)
@@ -440,7 +444,7 @@ fn requirement_block(
         .map(|statement| {
             let text = statement.text.as_deref().unwrap_or("");
             let quote = if statement.text.is_some() {
-                format!("> {text}")
+                blockquote(text)
             } else {
                 match ctx.locale {
                     Locale::Ja => "> （原文は記載されていない）".to_owned(),
@@ -450,14 +454,20 @@ fn requirement_block(
             match &statement.source {
                 Some(source) => match ctx.locale {
                     Locale::Ja => format!(
-                        "{quote}\n\n（出典: `{}:{}`）",
-                        source.path.as_deref().unwrap_or(""),
-                        source.line
+                        "{quote}\n\n（出典: {}）",
+                        code(&format!(
+                            "{}:{}",
+                            source.path.as_deref().unwrap_or(""),
+                            source.line
+                        ))
                     ),
                     Locale::En => format!(
-                        "{quote}\n\n(Source: `{}:{}`)",
-                        source.path.as_deref().unwrap_or(""),
-                        source.line
+                        "{quote}\n\n(Source: {})",
+                        code(&format!(
+                            "{}:{}",
+                            source.path.as_deref().unwrap_or(""),
+                            source.line
+                        ))
                     ),
                 },
                 None => quote,
@@ -568,18 +578,17 @@ fn assurance_dimension_line(
     let joined = entries
         .iter()
         .map(|entry| {
-            let result = entry.result.as_deref().unwrap_or("");
+            let result = code(entry.result.as_deref().unwrap_or(""));
+            let source = code(&entry.source);
             match locale {
-                Locale::Ja if entry.result.is_some() => format!(
-                    "`{}`（結果: `{result}`、出典: `{}`）",
-                    entry.label, entry.source
-                ),
-                Locale::Ja => format!("`{}`（出典: `{}`）", entry.label, entry.source),
-                Locale::En if entry.result.is_some() => format!(
-                    "`{}` (result: `{result}`, source: `{}`)",
-                    entry.label, entry.source
-                ),
-                Locale::En => format!("`{}` (source: `{}`)", entry.label, entry.source),
+                Locale::Ja if entry.result.is_some() => {
+                    format!("`{}`（結果: {result}、出典: {source}）", entry.label)
+                }
+                Locale::Ja => format!("`{}`（出典: {source}）", entry.label),
+                Locale::En if entry.result.is_some() => {
+                    format!("`{}` (result: {result}, source: {source})", entry.label)
+                }
+                Locale::En => format!("`{}` (source: {source})", entry.label),
             }
         })
         .collect::<Vec<_>>()
@@ -660,7 +669,7 @@ fn undecided_section(claims: &RequirementClaimSet, locale: Locale) -> String {
                     Locale::En => "(No reason is recorded.)".to_owned(),
                 }
             } else {
-                item.reason.clone()
+                prose(&item.reason)
             };
             let requirement_ids = if item.requirement_ids.is_empty() {
                 match locale {
@@ -676,9 +685,8 @@ fn undecided_section(claims: &RequirementClaimSet, locale: Locale) -> String {
             };
             let source_line = item.source.as_ref().map(|source| {
                 format!(
-                    "\n- {source_label}: `{}:{}`",
-                    source.path.as_deref().unwrap_or(""),
-                    source.line
+                    "\n- {source_label}: {}",
+                    code(&format!("{}:{}", source.path.as_deref().unwrap_or(""), source.line))
                 )
             });
             format!(
@@ -785,16 +793,13 @@ fn glossary_section(
 
 /// A reference section listing every `--evidence` file the assurance-class
 /// fields (issue #332) drew on, sorted by path so the same file set in a
-/// different CLI order still renders byte-identically. `None` (section
-/// omitted) when no evidence was supplied at all.
+/// different CLI order still renders byte-identically. The caller omits this
+/// section when no evidence was supplied at all.
 fn evidence_sources_section(
     claims: &RequirementClaimSet,
     evidence: &[(String, Value)],
     locale: Locale,
-) -> Option<String> {
-    if evidence.is_empty() {
-        return None;
-    }
+) -> Result<String, String> {
     let head = heading(
         locale,
         "##",
@@ -814,7 +819,7 @@ fn evidence_sources_section(
         .iter()
         .map(|requirement| requirement.id.as_str())
         .collect();
-    let mut rows: Vec<String> = evidence
+    let mut rows: Vec<(String, String)> = evidence
         .iter()
         .map(|(path, item)| {
             let result = item.get("result").and_then(Value::as_str).unwrap_or("");
@@ -845,16 +850,35 @@ fn evidence_sources_section(
             } else {
                 ids.join(", ")
             };
-            match locale {
-                Locale::Ja => format!("- `{path}`（結果: `{result}`、対象要件 ID: {matched}）"),
+            let row = |path: &str, result: &str| match locale {
+                Locale::Ja => format!("- {path}（結果: {result}、対象要件 ID: {matched}）"),
                 Locale::En => {
-                    format!("- `{path}` (result: `{result}`, matched requirement IDs: {matched})")
+                    format!("- {path} (result: {result}, matched requirement IDs: {matched})")
                 }
-            }
+            };
+            (
+                row(&format!("`{path}`"), &format!("`{result}`")),
+                row(&code(path), &code(result)),
+            )
         })
         .collect();
-    rows.sort();
-    Some(format!("{head}\n\n{intro}\n\n{}", rows.join("\n")))
+    // #1475 checked results inside these list rows, not as bare bodies:
+    // the first fragment is inline; later lines retain the old marker grammar,
+    // including the generated suffix on the last fragment. Validate together
+    // so marker blocks spanning evidence rows keep their former context.
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    let legacy = rows
+        .iter()
+        .map(|row| row.0.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    parse_body(&legacy).map_err(|issue| issue.to_string())?;
+    let display = rows
+        .iter()
+        .map(|row| row.1.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(format!("{head}\n\n{intro}\n\n{display}"))
 }
 
 /// The fixed intent-fidelity disclaimer (issue #333, acceptance criterion
@@ -899,15 +923,17 @@ fn approvals_section(records: &[AppliedApproval], locale: Locale) -> Option<Stri
                     Locale::En => "Signature: none".to_owned(),
                 },
             };
-            let requirements = record.requirements.join(", ");
+            let requirements = prose(&record.requirements.join(", "));
+            let approver = prose(&record.approver);
+            let approved_at = code(&record.approved_at);
+            let record_path = code(&record.record_path);
+            let artifact_digest = code(&record.artifact_digest);
             match locale {
                 Locale::Ja => format!(
-                    "- 承認者: {}\n  - 承認日時: `{}`\n  - 対象要件 ID: {}\n  - 記録: `{}`\n  - レビュー済み成果物ダイジェスト: `{}`\n  - {signature}",
-                    record.approver, record.approved_at, requirements, record.record_path, record.artifact_digest
+                    "- 承認者: {approver}\n  - 承認日時: {approved_at}\n  - 対象要件 ID: {requirements}\n  - 記録: {record_path}\n  - レビュー済み成果物ダイジェスト: {artifact_digest}\n  - {signature}"
                 ),
                 Locale::En => format!(
-                    "- Approver: {}\n  - Approved at: `{}`\n  - Requirement IDs: {}\n  - Record: `{}`\n  - Reviewed artifact digest: `{}`\n  - {signature}",
-                    record.approver, record.approved_at, requirements, record.record_path, record.artifact_digest
+                    "- Approver: {approver}\n  - Approved at: {approved_at}\n  - Requirement IDs: {requirements}\n  - Record: {record_path}\n  - Reviewed artifact digest: {artifact_digest}\n  - {signature}"
                 ),
             }
         })
@@ -919,7 +945,7 @@ fn approvals_section(records: &[AppliedApproval], locale: Locale) -> Option<Stri
 fn generation_section(claims: &RequirementClaimSet, fallback_count: u64, locale: Locale) -> String {
     let head = heading(locale, "##", "生成情報", "Generation info");
     let source_line = match &claims.spec.source {
-        Some(source) => format!("`{source}`"),
+        Some(source) => code(source),
         None => match locale {
             Locale::Ja => "（ソースパスなし）".to_owned(),
             Locale::En => "(no source path)".to_owned(),
@@ -1108,9 +1134,12 @@ fn metadata_header(
     lines.push(format!("- {id_label}: `{}`", claim.id));
     if let Some(source) = &claim.source {
         lines.push(format!(
-            "- {source_label}: `{}:{}`",
-            source.path.as_deref().unwrap_or(""),
-            source.line
+            "- {source_label}: {}",
+            code(&format!(
+                "{}:{}",
+                source.path.as_deref().unwrap_or(""),
+                source.line
+            ))
         ));
     }
     if !matches!(
@@ -1886,7 +1915,7 @@ fn render_acceptance(claim: &Claim, case: &RequirementsTraceCase, ctx: &mut Ctx<
     };
     format!(
         "{head}\n- {title_label}: {}\n\n{intro}\n\n{given}\n{when_label}\n{steps}\n{then_line}\n\n{tail}",
-        case.text
+        prose(&case.text)
     )
 }
 
@@ -1954,7 +1983,7 @@ fn render_forbidden(claim: &Claim, case: &RequirementsTraceCase, ctx: &mut Ctx<'
     };
     format!(
         "{head}\n- {title_label}: {}\n\n{intro}\n\n{given}\n{when_line}\n{then_line}\n\n{tail}",
-        case.text
+        prose(&case.text)
     )
 }
 

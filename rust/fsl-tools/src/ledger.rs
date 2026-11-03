@@ -804,64 +804,61 @@ fn forbidden_failure(raw: &Value) -> ForbiddenFailure<'_> {
 }
 
 fn escape(value: &str) -> String {
-    value.replace('|', "\\|").replace('\n', " ")
+    // These cells can contain fixed generated inline-code syntax. Escape the
+    // table/HTML boundary here; free-text inputs use prose at their own slots.
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('|', "\\|")
+        .replace('\r', "&#13;")
+        .replace('\n', "&#10;")
 }
 
 fn translate(finding: &Finding) -> String {
+    let name = crate::document_markdown::prose(&finding.name);
     if let Some(presentation) = finding.warning_presentation {
-        return presentation.translation.replace("{name}", &finding.name);
+        return presentation.translation.replace("{name}", &name);
     }
     match finding.trace_type.as_str() {
         "reachable" => format!(
-            "業務経路『{}』が仕様上到達できない。受入条件に到達 trace を追加し、責任者が期待経路を承認する（死経路でないことの確認）。",
-            finding.name
+            "業務経路『{name}』が仕様上到達できない。受入条件に到達 trace を追加し、責任者が期待経路を承認する（死経路でないことの確認）。"
         ),
         "forbidden" => match forbidden_failure(&finding.raw) {
             ForbiddenFailure::Accepted => format!(
-                "禁止フロー『{}』が許容されている。ガードを追加するか、許容するなら責任者がリスク受容を判断する。",
-                finding.name
+                "禁止フロー『{name}』が許容されている。ガードを追加するか、許容するなら責任者がリスク受容を判断する。"
             ),
             ForbiddenFailure::Violation(..) => format!(
-                "禁止フロー『{}』の最後の操作をガードが拒否せず、実行すると実行時違反になる。拒否すべきならガードを追加し、許容すべきなら違反を直して禁止フローを見直す。",
-                finding.name
+                "禁止フロー『{name}』の最後の操作をガードが拒否せず、実行すると実行時違反になる。拒否すべきならガードを追加し、許容すべきなら違反を直して禁止フローを見直す。"
             ),
             ForbiddenFailure::Unresolved(_) => format!(
-                "禁止フロー『{}』の最後の手順が仕様の action を指しておらず、禁止を判定できない。action 名か引数の数を直す。",
-                finding.name
+                "禁止フロー『{name}』の最後の手順が仕様の action を指しておらず、禁止を判定できない。action 名か引数の数を直す。"
             ),
             ForbiddenFailure::OutsideScope(_) => format!(
-                "禁止フロー『{}』の最後の手順の引数が検証の範囲（instances / values）の外にあり、ガードを試していないので禁止の証拠にならない。範囲を広げるか、引数を範囲の内側に直す。",
-                finding.name
+                "禁止フロー『{name}』の最後の手順の引数が検証の範囲（instances / values）の外にあり、ガードを試していないので禁止の証拠にならない。範囲を広げるか、引数を範囲の内側に直す。"
             ),
             ForbiddenFailure::WrongKind(_) => format!(
-                "禁止フロー『{}』の最後の手順の引数が宣言した型の値ではなく（種類が違う）、ガードを試していないので禁止の証拠にならない。引数をその型の値に直す。",
-                finding.name
+                "禁止フロー『{name}』の最後の手順の引数が宣言した型の値ではなく（種類が違う）、ガードを試していないので禁止の証拠にならない。引数をその型の値に直す。"
             ),
             ForbiddenFailure::Setup(_) => format!(
-                "禁止フロー『{}』の前提手順が実行できず、禁止の判定に至っていない。前提手順を直す。",
-                finding.name
+                "禁止フロー『{name}』の前提手順が実行できず、禁止の判定に至っていない。前提手順を直す。"
             ),
             ForbiddenFailure::Other => format!(
-                "禁止フロー『{}』の検査がエラーで止まった。付録の生 JSON を確認する。",
-                finding.name
+                "禁止フロー『{name}』の検査がエラーで止まった。付録の生 JSON を確認する。"
             ),
         },
         "acceptance" => format!(
-            "受入シナリオ『{}』が成立しない。仕様か受入条件のどちらが正かを責任者が確定する。",
-            finding.name
+            "受入シナリオ『{name}』が成立しない。仕様か受入条件のどちらが正かを責任者が確定する。"
         ),
         "sla" => "SLA 期限を超過しうる。スケジューリング前提（urgent）か期限値を見直し、責任者が承認する。".to_owned(),
         "leadsTo" => format!(
-            "応答性『{}』が保証されない経路がある。fair 指定または進行ロジックを見直す。",
-            finding.name
+            "応答性『{name}』が保証されない経路がある。fair 指定または進行ロジックを見直す。"
         ),
         "leadsTo_rank" => format!(
-            "応答性『{}』の停止性（ランキング）が示せない。進行が単調に進むことを確認する。",
-            finding.name
+            "応答性『{name}』の停止性（ランキング）が示せない。進行が単調に進むことを確認する。"
         ),
         "induction_cti" => format!(
-            "性質『{}』の帰納証明は未確立。補助不変条件やランキングを確認する。",
-            finding.name
+            "性質『{name}』の帰納証明は未確立。補助不変条件やランキングを確認する。"
         ),
         "implements" | "preservation" => if finding.raw["result"] == "unknown_budget" {
             "対応関係の探索が未完了。範囲と対応付けを見直す。".to_owned()
@@ -871,20 +868,16 @@ fn translate(finding: &Finding) -> String {
         "refinement" => "詳細仕様が上位契約から逸脱している。対応付け（mapping）かガードを修正する。".to_owned(),
         "conformance" => "実装ログが仕様に非適合。実装か仕様のどちらが正かを確定する。".to_owned(),
         "external_evidence" => format!(
-            "外部証跡『{}』が非適合/失敗を報告している。証跡（実装ログ・統計評価等）と仕様のどちらが正かを責任者が確認する。",
-            finding.name
+            "外部証跡『{name}』が非適合/失敗を報告している。証跡（実装ログ・統計評価等）と仕様のどちらが正かを責任者が確認する。"
         ),
         "coverage" => format!(
-            "アクション『{}』が一度も実行可能にならない（死アクション）。ガードを緩めるか前提アクションを追加する。",
-            finding.name
+            "アクション『{name}』が一度も実行可能にならない（死アクション）。ガードを緩めるか前提アクションを追加する。"
         ),
         "vacuity" => format!(
-            "性質『{}』が空虚に成立している疑い（中身がない可能性）。`fslc mutate` で実効性を確認する。",
-            finding.name
+            "性質『{name}』が空虚に成立している疑い（中身がない可能性）。`fslc mutate` で実効性を確認する。"
         ),
         "invariant" | "type_bound" | "trans" | "ensures" | "partial_op" | "deadlock" => format!(
-            "不変条件『{}』が破れる経路がある。ガード修正かルール見直しを責任者が承認する。",
-            finding.name
+            "不変条件『{name}』が破れる経路がある。ガード修正かルール見直しを責任者が承認する。"
         ),
         other => format!("検出種別 {other}（付録の生 JSON を参照）。"),
     }
@@ -1020,6 +1013,10 @@ fn replay_finding(replay: &Value) -> Option<Finding> {
     })
 }
 
+fn external_evidence_summary(source: &str, result: &str) -> String {
+    format!("外部証跡『{source}』が非適合/失敗を報告(result: {result})")
+}
+
 /// Turn every failing `--evidence` envelope into ledger [`Finding`]s (issue
 /// #508): a failing source must surface as a 🔴 要確認 row for every
 /// requirement it attaches to (root `requirements`/`requirement.id`, or
@@ -1037,7 +1034,7 @@ fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
             .get("result")
             .and_then(Value::as_str)
             .unwrap_or("unknown");
-        let summary = format!("外部証跡『{source}』が非適合/失敗を報告(result: {result})");
+        let summary = external_evidence_summary(source, result);
         let ids = evidence_attached_requirement_ids(item);
         if ids.is_empty() {
             findings.push(Finding {
@@ -1410,6 +1407,7 @@ pub fn render_ledger_with_approvals(
     approvals: Option<&Value>,
 ) -> String {
     let (mut requirement_order, registry) = requirement_registry(model);
+    let file = crate::document_markdown::code(file);
     let undecided = undecided_declarations(model);
     let findings = collect_findings(model, verification);
     let mut evidence_findings = collect_evidence_findings(evidence);
@@ -1476,7 +1474,7 @@ pub fn render_ledger_with_approvals(
     }
 
     let mut output = format!(
-        "# 意図ずれ監査台帳: {}\n\n- 対象: `{file}`\n- 保証限界: {}\n- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / `bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / `statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。詳細は `docs/design/DESIGN-assurance-classes.md`。\n- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。\n",
+        "# 意図ずれ監査台帳: {}\n\n- 対象: {file}\n- 保証限界: {}\n- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / `bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / `statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。詳細は `docs/design/DESIGN-assurance-classes.md`。\n- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。\n",
         model.name,
         guarantee_line(verification)
     );
@@ -1530,7 +1528,7 @@ pub fn render_ledger_with_approvals(
                 output,
                 "| `{}` | {} | {} |",
                 escape(item["declaration"].as_str().unwrap_or_default()),
-                escape(item["reason"].as_str().unwrap_or_default()),
+                crate::document_markdown::prose(item["reason"].as_str().unwrap_or_default()),
                 if ids.is_empty() {
                     "—".to_owned()
                 } else {
@@ -1623,7 +1621,7 @@ pub fn render_ledger_with_approvals(
                 output,
                 "| {} | {} | {status} | {} | {} | {} | {risk} | {owner} | {} |",
                 escape(requirement_id),
-                escape(purpose),
+                crate::document_markdown::prose(purpose),
                 escape(&approval_cell(approvals, requirement_id)),
                 escape(&assurance_cell(
                     requirement_id,
@@ -1640,7 +1638,7 @@ pub fn render_ledger_with_approvals(
                 output,
                 "| {} | {} | {status} | {} | {} | {risk} | {owner} | {} |",
                 escape(requirement_id),
-                escape(purpose),
+                crate::document_markdown::prose(purpose),
                 escape(&assurance_cell(
                     requirement_id,
                     &registry,
@@ -1712,7 +1710,10 @@ pub fn render_ledger_with_approvals(
         let _ = writeln!(
             output,
             "### {requirement_id}{}",
-            text.map_or_else(String::new, |text| format!(" — {text}"))
+            text.map_or_else(String::new, |text| format!(
+                " — {}",
+                crate::document_markdown::prose(text)
+            ))
         );
         if requirement_id != "（仕様全体）" {
             let _ = writeln!(
@@ -1737,10 +1738,23 @@ pub fn render_ledger_with_approvals(
                 output,
                 "- **検出**: `{}` — {}\n  - {summary_label}: {}\n  - 業務翻訳: {}\n  - 次アクション: {}",
                 finding.trace_type,
-                escape(&finding.name),
-                escape(&finding.summary),
+                crate::document_markdown::prose(&finding.name),
+                if finding.trace_type == "external_evidence" {
+                    external_evidence_summary(
+                        &crate::document_markdown::prose(&finding.name),
+                        &crate::document_markdown::prose(
+                            finding
+                                .raw
+                                .get("result")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown"),
+                        ),
+                    )
+                } else {
+                    escape(&finding.summary)
+                },
                 translate(finding),
-                escape(&next_action(finding)),
+                crate::document_markdown::prose(&next_action(finding)),
             );
         }
         output.push_str("- 判断: ☐ 承認　☐ 差戻し　☐ リスク受容　／　判断者: ____　期限: ____\n\n");
@@ -1774,13 +1788,13 @@ pub fn render_ledger_with_approvals(
                 .unwrap_or("—");
             let _ = writeln!(
                 output,
-                "| {} | {} | `{}` | {} | {} | `{}` |",
+                "| {} | {} | {} | {} | {} | {} |",
                 escape(requirement_id),
                 escape(&approval_cell(Some(approvals), requirement_id)),
-                escape(baseline),
+                crate::document_markdown::code(baseline),
                 escape(target),
                 escape(if reasons.is_empty() { "—" } else { &reasons }),
-                escape(command),
+                crate::document_markdown::code(command),
             );
         }
         output.push('\n');
@@ -1798,9 +1812,11 @@ pub fn render_ledger_with_approvals(
             };
             let _ = writeln!(
                 output,
-                "| `{}` | {} | {} | {} |",
-                escape(source),
-                escape(item.get("result").and_then(Value::as_str).unwrap_or("")),
+                "| {} | {} | {} | {} |",
+                crate::document_markdown::code(source),
+                crate::document_markdown::prose(
+                    item.get("result").and_then(Value::as_str).unwrap_or("")
+                ),
                 assurance_label(assurance_token(item), None),
                 escape(&ids),
             );
