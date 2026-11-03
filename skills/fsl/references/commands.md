@@ -617,6 +617,14 @@ reads retain their original closed formats, signatures and invocation-relative
 paths. No silent migration or rebasing of a moved checkout occurs; the original
 absolute directory must remain available for contextual I/O.
 
+For document records v3–v6, authoritative approval check and ledger compare raw
+input digests from the same loaded buffers used for rendering. Every earlier
+error and complete ordered drift result takes precedence. Only an
+otherwise-approved mismatch returns the existing I/O error/exit 2 with
+`approval input digest mismatch: <recorded path>`; choose glossary first, then
+evidence in recorded order. Generate remains lightweight with explicit inputs;
+structural document check and approval diff gain no stored-input reads.
+
 Every requirement id in the ledger (and every property row in `fslc html`)
 carries an **assurance class**: `proved(induction)` (k-induction,
 all depths) / `bounded(BMC depth k)` (BMC, depth k) / `replay-observed`

@@ -365,8 +365,30 @@ structural without trust verification or live reviewed-target admission;
 approval diff remains signature/spec-baseline-only. Reason ordering, envelopes,
 exit policies, artifact normalization and assurance are unchanged.
 
-This slice does not change raw input-digest enforcement, dataset-source
-resolution or causal output collision handling.
+### Raw document-input admission (#1421 AP4–7)
+
+Authoritative approval check and ledger evaluation compare every document
+`FileInput.digest` with the raw bytes actually loaded for reproduction, including
+legacy v3/v4 and contextual v5/v6 records. The glossary digest and each evidence
+digest come from the same buffer that is parsed, without a second read. Evidence
+hashes retain recorded order for mismatch selection; the existing sorted combined
+digest and rendering bytes remain unchanged.
+
+All existing record/trust/signature/spec/Git/input-read/parse/locale/rendering and
+reviewed-target errors keep their precedence. First compute the complete existing
+evaluation, with ordered reasons `spec_changed`, `rendering_changed`,
+`renderer_changed`, `claim_set_changed`, `artifact_changed`. If it is drifted,
+return the same complete result and exit policy even when an input digest differs.
+Only an otherwise-approved evaluation with a raw mismatch becomes the existing
+`result:error`, `kind:io`, exit 2, with message
+`approval input digest mismatch: <recorded path>`. Select the glossary first,
+then evidence in its recorded order, preserving the literal path in that message.
+
+Direct drift still exits 0. Ledger retains record order and its verification and
+publication exit rules. Document generate keeps its explicit invocation inputs
+and lightweight reviewed-target admission; document check remains structural and
+approval diff remains signature/spec-baseline-only. These consumers gain no new
+stored-input reads. Solver targets and record formats are unchanged.
 
 `approval create --kind requirements_document`'s conformance gate (rather than
 the byte-equality the other three kinds use) is exactly `fslc document
@@ -556,3 +578,10 @@ creation at root/subdirectory, literal source/input labels and reviewed bytes,
 cross-CWD checks with distinct valid decoys, missing actual inputs/targets without
 fallback, every solver kind without live-target reads, closed v5/v6 schema
 validation, required context, and v1–v4 rejection of added context fields.
+
+Issue #1421 AP4–7 adds controls for otherwise-approved raw mismatches in v3–v6,
+first-mismatch selection including reversed evidence order, all 31 combinations
+of the five existing drift reasons, earlier read/parse/trust/signature failures,
+editable-slot bindings, ledger record/exit order, and the lightweight generation,
+structural check and diff boundaries. The rejecting baseline distinguishes the
+raw-digest gap from the existing preservation controls.

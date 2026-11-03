@@ -2284,6 +2284,14 @@ spec を省略すると、変更されたすべての `.fsl` パスを比較し�
 元の絶対ディレクトリでの読み込みです。checkout を移動してもパスを付け替えず、
 元のディレクトリがなくなれば読み込みに失敗する場合があります。
 
+`requirements_document` の v3–v6 では、承認を検証する approval check と ledger が、
+記録された各入力の digest を、レンダリングに使ったものと同じ生のバイト列と照合します。
+既存の先行エラーと、順序を含む drift の完全な結果を優先します。それらに問題がなく、
+通常なら承認される評価で入力 digest だけが異なる場合に限り、`result:error`、
+`kind:io`、exit 2 と `approval input digest mismatch: <recorded path>` を返します。
+不一致の選択順は glossary、続いて記録順の evidence です。document generate、
+構造を照合する document check、approval diff に保存済み入力の読み込みは追加しません。
+
 署名付き承認を使う approval check、diff、ledger、document generate は、対応する
 SPKI PEM の `--trust-key` を要求します。document check は構造の照合にとどまります。
 v6 の分離署名は 2 つの文脈情報を含む完全な正準レコードをカバーし、

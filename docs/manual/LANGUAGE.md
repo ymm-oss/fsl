@@ -2469,6 +2469,14 @@ and invocation-relative path interpretation. Records are not silently migrated.
 New context preserves lookup at the original absolute directory; it does not
 rebase paths when a checkout moves, and a missing original directory can fail.
 
+For `requirements_document` v3–v6, authoritative approval check and ledger
+compare each recorded input digest with the same raw bytes used for rendering.
+Every earlier error and the complete ordered drift result keep precedence.
+Only an otherwise-approved mismatch becomes `result:error`, `kind:io`, exit 2,
+with `approval input digest mismatch: <recorded path>`. Selection follows the
+glossary first, then evidence in recorded order. This adds no stored-input read
+to document generate, structural document check, or approval diff.
+
 Signed approval check, diff, ledger, and document generation require the matching
 SPKI PEM `--trust-key`; document check remains structural. The v6 detached
 signature covers the full canonical record, including both context strings,

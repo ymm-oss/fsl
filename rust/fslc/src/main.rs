@@ -2169,6 +2169,13 @@ fn document_evidence_error(message: &str) -> Value {
 
 type EvidenceFiles = Vec<(String, Value)>;
 
+struct LoadedDocumentEvidence {
+    files: EvidenceFiles,
+    digest: String,
+    // Original input order, from the same buffers parsed into `files`.
+    input_digests: Vec<String>,
+}
+
 /// Load and parse every `--evidence` file (issue #332) — each must be a JSON
 /// object envelope in the same shape `fslc ledger --evidence` already
 /// accepts; this module classifies nothing itself (`fsl_tools::ledger`'s
@@ -2185,6 +2192,13 @@ fn load_evidence_with_base(
     paths: &[PathBuf],
     path_base: Option<&Path>,
 ) -> Result<Option<(EvidenceFiles, String)>, Value> {
+    Ok(load_document_evidence(paths, path_base)?.map(|loaded| (loaded.files, loaded.digest)))
+}
+
+fn load_document_evidence(
+    paths: &[PathBuf],
+    path_base: Option<&Path>,
+) -> Result<Option<LoadedDocumentEvidence>, Value> {
     if paths.is_empty() {
         return Ok(None);
     }
@@ -2207,9 +2221,14 @@ fn load_evidence_with_base(
         }
         files.push((path.display().to_string(), value));
     }
-    digests.sort();
-    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
-    Ok(Some((files, combined)))
+    let mut sorted_digests = digests.clone();
+    sorted_digests.sort();
+    let combined = approval::sha256_bytes(sorted_digests.join("\n").as_bytes());
+    Ok(Some(LoadedDocumentEvidence {
+        files,
+        digest: combined,
+        input_digests: digests,
+    }))
 }
 
 fn document_approval_error(message: &str) -> Value {
@@ -13538,6 +13557,12 @@ fn document_generation_inputs(
     ))
 }
 
+struct RenderedApprovalDocument {
+    claims: fsl_tools::RequirementClaimSet,
+    markdown: String,
+    input_digest_mismatch: Option<String>,
+}
+
 /// Re-render a `requirements` document deterministically from `(spec,
 /// inputs)` alone, with no `--strict` gate and no approval overlay — used by
 /// both `fslc approval create --kind requirements_document` (to build the
@@ -13553,7 +13578,7 @@ fn render_document_for_approval(
     inputs: &approval::DocumentGenerationInputs,
     path_base: Option<&Path>,
     render_source: Option<&str>,
-) -> Result<(fsl_tools::RequirementClaimSet, String), Value> {
+) -> Result<RenderedApprovalDocument, Value> {
     let locale = fsl_tools::Locale::parse(&inputs.lang).ok_or_else(|| {
         error_output(
             "document",
@@ -13578,7 +13603,7 @@ fn render_document_for_approval(
         .iter()
         .map(|file| PathBuf::from(&file.path))
         .collect();
-    let loaded_evidence = load_evidence_with_base(&evidence_paths, path_base)?;
+    let loaded_evidence = load_document_evidence(&evidence_paths, path_base)?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = dependency_resolver(base);
     let kernel =
@@ -13591,7 +13616,10 @@ fn render_document_for_approval(
         .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
     let applied_evidence = loaded_evidence
         .as_ref()
-        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
+        .map(|loaded| fsl_tools::AppliedEvidence {
+            files: &loaded.files,
+            digest: &loaded.digest,
+        });
     let rendered = fsl_tools::render_requirements_document_with_options(
         &claims,
         &kernel,
@@ -13604,7 +13632,26 @@ fn render_document_for_approval(
         crate::parse_options(),
     )
     .map_err(|error| error_output("document", &error))?;
-    Ok((claims, rendered.markdown))
+    // Retain a candidate only; authoritative evaluation owns its late admission.
+    let mut input_digest_mismatch = match (&inputs.glossary, &loaded_glossary) {
+        (Some(input), Some((_, observed))) if input.digest != *observed => Some(input.path.clone()),
+        _ => None,
+    };
+    if input_digest_mismatch.is_none()
+        && let Some(loaded) = &loaded_evidence
+    {
+        for (input, observed) in inputs.evidence.iter().zip(&loaded.input_digests) {
+            if input.digest != *observed {
+                input_digest_mismatch = Some(input.path.clone());
+                break;
+            }
+        }
+    }
+    Ok(RenderedApprovalDocument {
+        claims,
+        markdown: rendered.markdown,
+        input_digest_mismatch,
+    })
 }
 
 /// Reproduce a target's canonical rendering fresh from `(spec, inputs)` —
@@ -13642,10 +13689,13 @@ fn approval_artifact_with_context(
                 2,
             ));
         };
-        let (claims, markdown) =
+        let rendered =
             render_document_for_approval(path, source, document_inputs, path_base, render_source)
                 .map_err(|error| (error, 2))?;
-        return Ok((markdown.into_bytes(), Some(claims.spec.claim_set_digest)));
+        return Ok((
+            rendered.markdown.into_bytes(),
+            Some(rendered.claims.spec.claim_set_digest),
+        ));
     }
     let approval::GenerationInputs::Solver(inputs) = inputs else {
         return Err((
@@ -13870,7 +13920,11 @@ fn run_approval_create_from_source(
                 2,
             );
         };
-        let (claims, fresh_markdown) = match render_document_for_approval(
+        let RenderedApprovalDocument {
+            claims,
+            markdown: fresh_markdown,
+            ..
+        } = match render_document_for_approval(
             path,
             source,
             document_inputs,
@@ -14058,6 +14112,33 @@ fn run_approval_create_from_source(
     (Value::Object(output), 0)
 }
 
+fn solver_approval_artifact(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    record: &approval::ApprovalRecord,
+) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
+    if let Some(base) = &record.path_base {
+        approval_artifact_with_context(
+            path,
+            source,
+            edition,
+            &record.target.kind,
+            &record.target.inputs,
+            Some(Path::new(base)),
+            record.render_source.as_deref(),
+        )
+    } else {
+        approval_artifact(
+            path,
+            source,
+            edition,
+            &record.target.kind,
+            &record.target.inputs,
+        )
+    }
+}
+
 fn approval_evaluation(
     path: &Path,
     source: &str,
@@ -14112,25 +14193,26 @@ fn approval_evaluation(
         .map_err(|error| (error_output("io", &error), 2))?;
     let current_spec_digest =
         approval_spec_digest(path, source).map_err(|error| (spec_load_error_output(&error), 2))?;
-    let (artifact, current_claim_set_digest) = if let Some(base) = &record.path_base {
-        approval_artifact_with_context(
-            path,
-            source,
-            edition,
-            &record.target.kind,
-            &record.target.inputs,
-            Some(Path::new(base)),
-            record.render_source.as_deref(),
-        )
-    } else {
-        approval_artifact(
-            path,
-            source,
-            edition,
-            &record.target.kind,
-            &record.target.inputs,
-        )
-    }?;
+    let (artifact, current_claim_set_digest, input_digest_mismatch) =
+        if let approval::GenerationInputs::Document(inputs) = &record.target.inputs {
+            let rendered = render_document_for_approval(
+                path,
+                source,
+                inputs,
+                record.path_base.as_deref().map(Path::new),
+                record.render_source.as_deref(),
+            )
+            .map_err(|error| (error, 2))?;
+            (
+                rendered.markdown.into_bytes(),
+                Some(rendered.claims.spec.claim_set_digest),
+                rendered.input_digest_mismatch,
+            )
+        } else {
+            let (artifact, claim_set_digest) =
+                solver_approval_artifact(path, source, edition, &record)?;
+            (artifact, claim_set_digest, None)
+        };
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| (error_output("internal", &error), 3))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
@@ -14145,6 +14227,15 @@ fn approval_evaluation(
         current_claim_set_digest.as_deref(),
         current_reviewed_digest.as_deref(),
     );
+    // Every earlier error and every complete drift result takes precedence.
+    if evaluation["status"] == "approved"
+        && let Some(path) = input_digest_mismatch
+    {
+        return Err((
+            error_output("io", &format!("approval input digest mismatch: {path}")),
+            2,
+        ));
+    }
     let output = evaluation
         .as_object_mut()
         .expect("approval evaluation object");
