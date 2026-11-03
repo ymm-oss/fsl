@@ -25,6 +25,7 @@ mod document_coverage;
 mod document_digest;
 mod document_evidence;
 mod document_glossary;
+mod document_markdown;
 mod document_markers;
 mod document_presentation;
 mod document_project;
