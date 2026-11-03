@@ -3164,11 +3164,117 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   Breaking removal (#1334): additional statements assigning component state via physical names such as <code>alias__x</code>, which previously passed <code>check</code>, now produce a located error too.
   Reference arguments may read only header parameters, consts, and state, not additional-item <code>let</code> bindings (breaking removal, #1442).
   Component free value reads and update roots resolve against the component's original declarations before merging, so composition cannot rescue an otherwise undeclared reference (breaking removal, #1442); public names remain legal, and an enum read that needs its owner protected still displays the source member spelling.</li>
-<li>Fairness is not inherited through synchronization. If a fair component action
+<li><strong>#1517 root-argument validation (source reviewed; bounded callers measured):</strong> type ALL synchronized actuals,
+  including unused formals, before substitution, using root header parameters,
+  state, constants and enums, not body lets/requires bindings. Numeric carrier
+  compatibility remains; numeric range mismatch is still verification-time.
+  Root errors use the whole half-open actual (parentheses included), preserving
+  an inner span only within that actual; CLI/Worker loc is its start, LSP uses
+  UTF-16 start/end. Bare root wording replaces the component wrapper; original
+  action/Kernel metadata stays unchanged. Error phases: immediate lowering,
+  model assembly, authored-order queued typing, then init/component checking.
+  A conditional's arms now check against the supplied expectation, not the inferred carrier: <code>m[if c then 0 else true]</code> with <code>m: Map&lt;A, Bool&gt;</code> now names <code>Named("A")</code> instead of <code>Range(0, 1)</code>. This arm change altered no measured admission result.
+  Measured <code>check</code> removal union: <strong>11 complete contexts /9 root-component pairs
+  /22 mode-context pairs</strong>. Base <code>5564b25ccb37e3477311fde1dae5eb6298eb6b2d</code>;
+  head <code>7653cc784354bc562bd85bd888cf78d0091272f2</code>. Each mode is
+  stable or FSL5-opt-in on unchanged source, twice per side. Every transition below
+  is check-ok/exit0 → semantics-error/exit2. The nine new exact three-file <code>check c.fsl</code>
+  contexts are preservation only; physical direct.fsl presence grants no direct/API/
+  verify coverage. This finite measured union is not runtimefull472 or issue acceptance.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Exact complete-context key</th>
+<th>Pair</th>
+<th>Changed admission / candidate loc</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R01</td>
+<td><code>1cae9cf75cb49d332ab850296a1902db6e08971cbae68ab7229309b979632f05</code></td>
+<td>P01</td>
+<td>unused true + relation index, argument order; 5:16</td>
+</tr>
+<tr>
+<td>R02</td>
+<td><code>456840abf00faf2844ad3223e80abab2efb03e62ec5c2fc4c6c5cef9daa45af4</code></td>
+<td>P02</td>
+<td>body-only x after let; 5:16</td>
+</tr>
+<tr>
+<td>R03</td>
+<td><code>5aa3baefa078f9ddc0a1d5ed5157e9bd6295df700bf86536d7042d774e69e0d2</code></td>
+<td>P03</td>
+<td>true then later action index; 5:16</td>
+</tr>
+<tr>
+<td>R04</td>
+<td><code>8d7b0467683a00853cc958fcf91c33e6e23d32c7cd5506d1401029e98338b5d9</code></td>
+<td>P04</td>
+<td>relation index; no good sibling; 5:16</td>
+</tr>
+<tr>
+<td>R05</td>
+<td><code>a1760ef370b7c9164f0eda14b36c84dfa208b847c75fb6ecb8bfa8e5faa8df22</code></td>
+<td>P05</td>
+<td>unused true; no good sibling; 5:16</td>
+</tr>
+<tr>
+<td>R06</td>
+<td><code>ab059cd5d0c142246d68ccb9ce2ea193e43ce9b4365e6a865e0a7b46c63942ac</code></td>
+<td>P06</td>
+<td>true then second reference index; 5:16</td>
+</tr>
+<tr>
+<td>R07</td>
+<td><code>ab291946a038aa0e77692160e7516fa40a75b8781797c928405dddfd8949bbbe</code></td>
+<td>P04</td>
+<td>relation index + offered good sibling; 5:16</td>
+</tr>
+<tr>
+<td>R08</td>
+<td><code>acc62ea03d44de4dd0ddbcd65d4f73e4737e914153f50bed7832a4bb4905da3b</code></td>
+<td>P07</td>
+<td>body-only x after let/requires; 5:16</td>
+</tr>
+<tr>
+<td>R09</td>
+<td><code>cd076b93cba275c70735ba2a73731c1935fabcdb0fe16f3246b5ba615e720ded</code></td>
+<td>P08</td>
+<td>parenthesized unused true; 5:16</td>
+</tr>
+<tr>
+<td>R10</td>
+<td><code>dd449ab57104f7c5a53e33d3f756937344e76161615f960cb821e2e62372adff</code></td>
+<td>P05</td>
+<td>unused true + offered good sibling; 5:16</td>
+</tr>
+<tr>
+<td>R11</td>
+<td><code>91412ae303f1f1877fcdcea2e7e35912726e9832662e0c49d971d8ca09a9bc02</code></td>
+<td>P09</td>
+<td>second ref <code>(0), (true),</code>; 6:37</td>
+</tr>
+</tbody>
+</table>
+<p>Source identities/context roles are recorded in DESIGN-sync-argument-root-validation.md.
+  Public Rust SyncRef requires arg_spans; fallible into_validated_syntax validates
+  before projection, unlike raw/lossy syntax/kernel_ast/into_syntax. The three CLI
+  migrations add one full core validation per call; measured whole-CLI cost is
+  not isolated incremental cost. The seven-state caller cohort, on an earlier candidate and not rerun on this head, measured four builds/
+  16CLI observations, twice on fixed valid inputs: R/I/M honestly survived and all
+  exact restores preserved output with fresh H0 bytes/no restore builds. Whole
+  stdout/JSON/exits/non-time stderr matched; only the observed, framing-validated
+  mutate elapsed scalar was not compared literally. No caller-specific semantic
+  kill is claimed; broader execution gates and final issue/product acceptance remain open.
+- Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, <code>check</code> / <code>verify</code> emits a
   <code>fair_not_inherited</code> warning in JSON <code>warnings</code>; write
-  <code>fair action &lt;name&gt;(...) = ...</code> when the synchronized action must be fair.</li>
-<li>Synchronized action arguments are structurally compatible by bounded integer
+  <code>fair action &lt;name&gt;(...) = ...</code> when the synchronized action must be fair.
+- Synchronized action arguments are structurally compatible by bounded integer
   domain, not by declared type name. Passing a <code>core.TaskId</code> value to an action
   parameter declared as <code>NoteId</code> is valid when the underlying value range fits
   the target type. This is the intended compose behavior, not an incidental
@@ -3181,12 +3287,12 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   <code>sync(t: 2)</code>. Recommended idiom: use same-range component-local domain types
   for intentionally shared IDs; if a target domain is narrower, add an explicit
   <code>requires</code> guard on the synchronized action or model a conversion in one
-  component.</li>
-<li><code>internal &lt;alias&gt;.&lt;action&gt;</code> — excludes that action from interleaving.</li>
-<li>An ordinary <code>action</code> (without <code>=</code>) can also be written (a glue action).
+  component.
+- <code>internal &lt;alias&gt;.&lt;action&gt;</code> — excludes that action from interleaving.
+- An ordinary <code>action</code> (without <code>=</code>) can also be written (a glue action).
   A glue action reads and writes composition-side state and component state directly via <code>alias.var</code>.
-  Compose <code>init</code> can also initialize component state via <code>alias.var</code>; overlapping a component's own <code>init</code> assignment is rejected as duplicate initialization.</li>
-<li>Names and <code>__</code>: a name you declare in a <code>spec</code>, <code>requirements</code>, <code>business</code>, or
+  Compose <code>init</code> can also initialize component state via <code>alias.var</code>; overlapping a component's own <code>init</code> assignment is rejected as duplicate initialization.
+- Names and <code>__</code>: a name you declare in a <code>spec</code>, <code>requirements</code>, <code>business</code>, or
   <code>compose</code> document (a spec, action, parameter, <code>let</code>, state variable, property,
   type, const, enum member, struct field, process, stage, actor, or <code>use</code> alias)
   must not contain <code>__</code>. <code>fslc check</code> rejects one at the declaration
@@ -3228,8 +3334,8 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   <code>semantics</code> to <code>name</code>, with structured <code>loc</code> at the statement's start, not
   the label. Its diagnostic wording is unchanged; when checking a file, the
   message suffix changes from <code>at L:C</code> to <code>at &lt;source-file&gt;:L:C</code>, like other
-  located name errors.</li>
-<li>JSON display: a generated name is published with <code>.</code> in place of its <code>__</code>,
+  located name errors.
+- JSON display: a generated name is published with <code>.</code> in place of its <code>__</code>,
   in one spelling for every output: the physical name <code>alias__x</code> is <code>alias.x</code>,
   and a branch split <code>submit__b1</code> is <code>submit.b1</code> (state keys, action names,
   invariant / reachable names, diagnostics, traces, scenarios, and the Monitor —
@@ -3247,8 +3353,7 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   <code>submit__b1</code>); both name the same action (see
   <code>docs/design/DESIGN-replay-trace.md</code>). The native implementation owns all of
   these spellings, and the names the engines build such as <code>_partial_&lt;action&gt;</code>
-  and <code>_bounds_&lt;state&gt;</code>, in one module, <code>rust/fsl-core/src/naming.rs</code>.</li>
-</ul>
+  and <code>_bounds_&lt;state&gt;</code>, in one module, <code>rust/fsl-core/src/naming.rs</code>.</p>
 <pre><code class="language-bash">fslc check  specs/order_system.fsl
 fslc verify specs/order_system.fsl --depth 8
 fslc scenarios specs/order_system.fsl
