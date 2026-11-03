@@ -562,6 +562,9 @@ pub fn cases() -> Vec<Case> {
         if name == "negative-within" {
             c.expected = [Error; 4];
             c.rejection = Some("leadsTo Capture");
+        } else if name == "dynamic-range" {
+            c.expected = [Error; 4];
+            c.rejection = Some("forall z in 0..n");
         } else if name == "typed-domain" {
             c.expected = [Ok, Safe, Safe, Safe];
         } else if name == "static-range" {
