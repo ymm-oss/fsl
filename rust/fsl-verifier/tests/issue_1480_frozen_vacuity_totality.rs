@@ -67,3 +67,20 @@ fn defined_identity_remains_a_genuine_frozen_tautology() {
 fn an_unreached_partial_read_does_not_suppress_a_genuine_tautology() {
     check("flag or (q.head()==q.head())", true);
 }
+
+#[test]
+fn static_root_undefined_mutable_read_is_not_a_frozen_tautology() {
+    check("forall i in 0..0 {flag and (q.head()==q.head())}", false);
+}
+#[test]
+fn static_root_defined_identity_is_a_frozen_tautology() {
+    check("forall i in 0..0 {flag and (q==q)}", true);
+}
+#[test]
+fn static_root_unreached_partial_read_keeps_a_genuine_tautology() {
+    check("forall i in 0..0 {flag or (q.head()==q.head())}", true);
+}
+#[test]
+fn empty_static_root_keeps_a_genuine_tautology() {
+    check("forall i in 1..0 {flag and (q.head()==q.head())}", true);
+}

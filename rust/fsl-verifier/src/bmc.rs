@@ -1210,7 +1210,17 @@ pub(crate) async fn frozen_range_condition<S: SmtSolver>(
         RangePlan::Static { .. } | RangePlan::Unknown(RangeUnknown::ConstantFoldFailed)
     ) {
         let value = eval(solver, model, &property.expr, state, &mut bindings, None)?;
-        return Ok(Some(bool_term(&value)?.clone()));
+        let condition = bool_term(&value)?.clone();
+        let status = property_evaluation_status_in(
+            solver,
+            model,
+            &property.expr,
+            state,
+            &bindings,
+            None,
+            None,
+        )?;
+        return Ok(Some(solver.and(&[status.fully_defined, condition])?));
     }
     let source = property_range_source_status(solver, model, binder, state, &bindings)?;
     let undefined = solver.not(&source.fully_defined)?;
