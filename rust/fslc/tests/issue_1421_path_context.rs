@@ -17,6 +17,10 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 static NEXT_REPOSITORY: AtomicU64 = AtomicU64::new(0);
+const SPEC_GIT_PATH: &str = "review/spec.fsl";
+const ROOT_SOURCE: &str = "./review/./spec.fsl";
+const REVIEW_SOURCE: &str = "./spec.fsl";
+const DECOY_SOURCE: &str = "./decoy.fsl";
 const ARTIFACT: &str = "./requirements.md";
 const EVIDENCE: [&str; 2] = ["./evidence-b.json", "nested/../evidence-a.json"];
 const SLOT: &str = "（この節は自由に編集できる。規範的な効力はない。規範文はこの節の外の生成ブロックにのみ存在する。）";
@@ -110,7 +114,7 @@ impl ApprovalRepo {
         std::fs::create_dir_all(&unrelated).expect("create unrelated directory");
         let source = std::fs::read_to_string(repository_file("tests/fixtures/approval.fsl"))
             .expect("read approval fixture");
-        std::fs::write(root.join("spec.fsl"), source.replace("\r\n", "\n"))
+        std::fs::write(root.join(SPEC_GIT_PATH), source.replace("\r\n", "\n"))
             .expect("write approval fixture");
         git(&root, &["init", "-q"]);
         git(
@@ -120,7 +124,7 @@ impl ApprovalRepo {
         git(&root, &["config", "user.name", "Approval Test"]);
         git(&root, &["config", "commit.gpgsign", "false"]);
         git(&root, &["config", "core.autocrlf", "false"]);
-        git(&root, &["add", "spec.fsl"]);
+        git(&root, &["add", SPEC_GIT_PATH]);
         git(&root, &["commit", "-qm", "approval baseline"]);
         let (private, public) = write_signing_keys(&root);
         Self {
@@ -134,7 +138,7 @@ impl ApprovalRepo {
     }
 
     fn check_output(&self, cwd: &Path, record: &Path, signed: bool) -> Output {
-        let spec = self.root.join("spec.fsl");
+        let spec = self.root.join(SPEC_GIT_PATH);
         let mut args = vec![
             "approval",
             "check",
@@ -242,6 +246,13 @@ fn generate_document(cwd: &Path, source: &str) -> Value {
     )
 }
 
+fn generate_document_decoy(repo: &ApprovalRepo, cwd: &Path) {
+    std::fs::copy(repo.root.join(SPEC_GIT_PATH), cwd.join(DECOY_SOURCE))
+        .expect("copy caller-local document decoy spec");
+    write_inputs(cwd, true);
+    generate_document(cwd, DECOY_SOURCE);
+}
+
 fn create(
     repo: &ApprovalRepo,
     cwd: &Path,
@@ -326,7 +337,7 @@ fn assert_new_record(record: &Value, cwd: &Path, source: &str, artifact: &str, s
         cwd.to_str().expect("UTF-8 creation CWD")
     );
     assert_eq!(record["render_source"], source);
-    assert_eq!(record["spec"]["path"], "spec.fsl");
+    assert_eq!(record["spec"]["path"], SPEC_GIT_PATH);
     assert_eq!(record["target"]["path"], artifact);
     let validator = schema(if signed { 6 } else { 5 });
     let errors: Vec<String> = validator
@@ -428,9 +439,9 @@ fn document_cross_cwd(subdirectory: bool, signed: bool) {
         &repo.root
     };
     let source = if subdirectory {
-        ".././spec.fsl"
+        REVIEW_SOURCE
     } else {
-        "./spec.fsl"
+        ROOT_SOURCE
     };
     write_inputs(cwd, false);
     let generated = generate_document(cwd, source);
@@ -491,10 +502,10 @@ fn document_cross_cwd(subdirectory: bool, signed: bool) {
 
     // These are well-formed alternate artifacts and parseable alternate inputs,
     // rather than absent files that an accidental CWD read would reject anyway.
-    let spec = repo.root.join("spec.fsl");
+    let spec = repo.root.join(SPEC_GIT_PATH);
     for caller in [&repo.root, &repo.review, &repo.unrelated] {
         if caller != cwd {
-            write_inputs(caller, true);
+            generate_document_decoy(&repo, caller);
             for input in ["glossary.json", EVIDENCE[0], EVIDENCE[1]] {
                 assert_ne!(
                     std::fs::read(caller.join(input)).expect("read decoy input"),
@@ -502,7 +513,6 @@ fn document_cross_cwd(subdirectory: bool, signed: bool) {
                     "each offered decoy input is byte-distinct: {input}"
                 );
             }
-            generate_document(caller, spec.to_str().expect("UTF-8 absolute spec"));
             assert_ne!(
                 std::fs::read(caller.join(ARTIFACT)).expect("read decoy"),
                 text.as_bytes(),
@@ -518,6 +528,9 @@ fn document_cross_cwd(subdirectory: bool, signed: bool) {
     for directory in [&repo.root, &repo.review, &repo.unrelated] {
         for name in [ARTIFACT, "glossary.json", EVIDENCE[0], EVIDENCE[1]] {
             paths.push(directory.join(name));
+        }
+        if directory != cwd {
+            paths.push(directory.join(DECOY_SOURCE));
         }
     }
     let before = snapshot(&paths);
@@ -592,23 +605,76 @@ fn generate_solver(cwd: &Path, source: &str, kind: &str, artifact: &str) {
     }
 }
 
-fn solver_cross_cwd(signed: bool) {
-    let repo = ApprovalRepo::new();
-    let decoy_spec = repo.unrelated.join("decoy.fsl");
+fn generate_solver_decoy(repo: &ApprovalRepo, cwd: &Path, kind: &str, artifact: &str) {
     let source =
-        std::fs::read_to_string(repo.root.join("spec.fsl")).expect("read original solver spec");
+        std::fs::read_to_string(repo.root.join(SPEC_GIT_PATH)).expect("read original solver spec");
     std::fs::write(
-        &decoy_spec,
+        cwd.join(DECOY_SOURCE),
         source
+            .replace("spec ApprovalReview {", "spec DecoyApprovalReview {")
             .replace("action approve()", "action decoy_approve()")
             .replace("REQ-190", "REQ-1421-DECOY"),
     )
     .expect("write alternate solver spec");
+    generate_solver(cwd, DECOY_SOURCE, kind, artifact);
+}
+
+#[test]
+fn ap0_existing_generation_accepts_fixture_sources_and_distinct_decoys() {
+    // This positive control has no approval or future-schema assertions. It
+    // exposes setup/admission failures independently on the unchanged binary.
+    for subdirectory in [false, true] {
+        let repo = ApprovalRepo::new();
+        let (cwd, source) = if subdirectory {
+            (&repo.review, REVIEW_SOURCE)
+        } else {
+            (&repo.root, ROOT_SOURCE)
+        };
+        write_inputs(cwd, false);
+        generate_document(cwd, source);
+        let original = std::fs::read(cwd.join(ARTIFACT)).expect("read original document");
+        for caller in [&repo.root, &repo.review, &repo.unrelated] {
+            if caller != cwd {
+                generate_document_decoy(&repo, caller);
+                for input in ["glossary.json", EVIDENCE[0], EVIDENCE[1]] {
+                    assert_ne!(
+                        std::fs::read(caller.join(input)).expect("read document decoy input"),
+                        std::fs::read(cwd.join(input)).expect("read original document input"),
+                        "distinct input at {input}"
+                    );
+                }
+                assert_ne!(
+                    std::fs::read(caller.join(ARTIFACT)).expect("read document decoy"),
+                    original,
+                    "distinct document decoy"
+                );
+            }
+        }
+        for kind in ["ledger", "html", "scenarios"] {
+            let artifact = format!("./{kind}.fixture.review");
+            generate_solver(cwd, source, kind, &artifact);
+            let original = std::fs::read(cwd.join(&artifact)).expect("read original solver target");
+            for caller in [&repo.root, &repo.review, &repo.unrelated] {
+                if caller != cwd {
+                    generate_solver_decoy(&repo, caller, kind, &artifact);
+                    assert_ne!(
+                        std::fs::read(caller.join(&artifact)).expect("read solver decoy"),
+                        original,
+                        "distinct {kind} decoy"
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn solver_cross_cwd(signed: bool) {
+    let repo = ApprovalRepo::new();
     for kind in ["ledger", "html", "scenarios"] {
         let (cwd, source) = if kind == "ledger" {
-            (&repo.root, "./spec.fsl")
+            (&repo.root, ROOT_SOURCE)
         } else {
-            (&repo.review, ".././spec.fsl")
+            (&repo.review, REVIEW_SOURCE)
         };
         let artifact = format!("./{kind}.review");
         generate_solver(cwd, source, kind, &artifact);
@@ -623,22 +689,22 @@ fn solver_cross_cwd(signed: bool) {
             baseline["signature_status"],
             if signed { "signed" } else { "unsigned" }
         );
-        let mut paths = vec![artifact_path.clone(), record_path.clone()];
+        let mut paths = vec![
+            repo.root.join(SPEC_GIT_PATH),
+            artifact_path.clone(),
+            record_path.clone(),
+        ];
         let mut decoys = Vec::new();
         for caller in [&repo.root, &repo.review, &repo.unrelated] {
             if caller != cwd {
                 // Generate a valid, observably different solver target rather
                 // than relying on volatile metadata or the caller's pathname.
-                generate_solver(
-                    caller,
-                    decoy_spec.to_str().expect("UTF-8 decoy spec"),
-                    kind,
-                    &artifact,
-                );
+                generate_solver_decoy(&repo, caller, kind, &artifact);
                 let path = caller.join(&artifact);
                 let bytes = std::fs::read(&path).expect("read solver decoy");
                 assert_ne!(bytes, reviewed_bytes, "distinct {kind} decoy");
                 paths.push(path.clone());
+                paths.push(caller.join(DECOY_SOURCE));
                 decoys.push((path, bytes));
             }
         }
@@ -705,16 +771,16 @@ fn ap1_ap2_signed_solver_kinds_keep_their_creation_render_source() {
 fn ap2_legacy_v1_through_v4_reject_each_added_context_field_before_signature_checks() {
     let repo = ApprovalRepo::new();
     write_inputs(&repo.root, false);
-    generate_document(&repo.root, "./spec.fsl");
-    generate_solver(&repo.root, "./spec.fsl", "ledger", "./ledger.md");
+    generate_document(&repo.root, ROOT_SOURCE);
+    generate_solver(&repo.root, ROOT_SOURCE, "ledger", "./ledger.md");
     for (kind, artifact, signed, version) in [
         ("ledger", "./ledger.md", false, 1),
         ("ledger", "./ledger.md", true, 2),
         ("requirements_document", ARTIFACT, false, 3),
         ("requirements_document", ARTIFACT, true, 4),
     ] {
-        let (record, record_path) = create(&repo, &repo.root, "./spec.fsl", kind, artifact, signed);
-        assert_new_record(&record, &repo.root, "./spec.fsl", artifact, signed);
+        let (record, record_path) = create(&repo, &repo.root, ROOT_SOURCE, kind, artifact, signed);
+        assert_new_record(&record, &repo.root, ROOT_SOURCE, artifact, signed);
         let original_bytes = std::fs::read(&record_path).expect("read new record");
         let mut legacy = record.clone();
         legacy["schema"] = json!(format!("fslc.approval.v{version}"));
@@ -776,16 +842,16 @@ fn ap2_legacy_v1_through_v4_reject_each_added_context_field_before_signature_che
 fn ap2_new_context_is_required_by_the_authoritative_reader() {
     let repo = ApprovalRepo::new();
     write_inputs(&repo.root, false);
-    generate_document(&repo.root, "./spec.fsl");
+    generate_document(&repo.root, ROOT_SOURCE);
     let (record, record_path) = create(
         &repo,
         &repo.root,
-        "./spec.fsl",
+        ROOT_SOURCE,
         "requirements_document",
         ARTIFACT,
         false,
     );
-    assert_new_record(&record, &repo.root, "./spec.fsl", ARTIFACT, false);
+    assert_new_record(&record, &repo.root, ROOT_SOURCE, ARTIFACT, false);
     let baseline = repo.check(&repo.root, &record_path, false);
     assert_eq!(baseline["status"], "approved");
     for field in ["path_base", "render_source"] {
