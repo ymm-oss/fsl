@@ -2058,7 +2058,7 @@ fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.js
                                                   # fresh re-render; never interprets prose (§13)
 fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios|requirements_document --artifact &lt;reviewed&gt; --approver &lt;name&gt;
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
-                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
+                                                  # new records use v5/v6; requirements_document binds a claim_set_digest (§13)
 fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt; [--trust-key public.pem]
                                                   # approved (exit 0) | drifted (exit 0, analysis output)
                                                   # | signature-invalid (exit 1); see DESIGN-approval.md
@@ -2534,22 +2534,36 @@ and returns <code>semantic_diff_batch</code>; supplying one spec preserves
 <code>semantic_diff</code>. Both forms include <code>vcs.materialization:
 "git_archive_full_tree"</code>. The ordinary two-path form never invokes Git and
 works outside a repository.</p>
-<p><code>approval create</code> binds a reviewed <code>ledger</code>, <code>html</code>, or <code>scenarios</code> artifact to
+<p><code>approval create</code> binds a reviewed <code>ledger</code>, <code>html</code>, <code>scenarios</code>, or
+<code>requirements_document</code> artifact to
 the fully lowered, location-insensitive kernel digest and the current clean Git
 commit. The versioned JSON sidecar also records the normalized artifact digest,
 generator/version/options, approved requirement IDs, approver, and UTC time.
 Creation regenerates the artifact and rejects a stale review file. <code>approval
-check</code> returns <code>approved</code> only while the spec, rendering, and renderer bindings
-all match; otherwise it returns <code>drifted</code> with <code>spec_changed</code>,
-<code>rendering_changed</code>, and/or <code>renderer_changed</code>. <code>ledger --approval</code> adds the
+check</code> returns <code>approved</code> only while all applicable bindings match; otherwise
+it returns <code>drifted</code> with <code>spec_changed</code>, <code>rendering_changed</code>, and/or
+<code>renderer_changed</code>. A <code>requirements_document</code> also binds the claim set and exact
+reviewed bytes, with <code>claim_set_changed</code> and <code>artifact_changed</code> reasons.
+<code>ledger --approval</code> adds the
 same status per requirement and includes the full baseline digest. <code>approval
 diff</code> materializes the approved commit and invokes the ordinary bounded semantic
 diff against the current working file. See <code>docs/design/DESIGN-approval.md</code>.</p>
-<p>Without <code>--signing-key</code>, <code>approval create</code> emits the unchanged unsigned
-<code>fslc.approval.v1</code> record. With an Ed25519 PKCS#8 PEM signing key it emits
-<code>fslc.approval.v2</code>; every check, diff, or ledger use of that record requires the
-matching SPKI PEM <code>--trust-key</code>. The v2 detached signature covers the full
-canonical record, and a cryptographic mismatch is <code>signature-invalid</code> rather
+<p>For all four target kinds, <code>approval create</code> emits unsigned <code>fslc.approval.v5</code>
+without <code>--signing-key</code>, or signed <code>fslc.approval.v6</code> with an Ed25519 PKCS#8 PEM
+signing key. Both schemas require two nonempty strings: <code>path_base</code>, the absolute
+invocation directory at creation, and <code>render_source</code>, the original spec argument
+verbatim. <code>spec.path</code> remains Git-repository-relative. Relative target/input I/O
+resolves only against the stored <code>path_base</code>, preserving stored path spellings,
+input order, and rendered labels. <code>render_source</code> is a display label only; the
+explicit spec still supplies the actual bytes and dependency directory.</p>
+<p>Legacy v1–v4 records remain readable with their original formats, signatures,
+and invocation-relative path interpretation. Records are not silently migrated.
+New context preserves lookup at the original absolute directory; it does not
+rebase paths when a checkout moves, and a missing original directory can fail.</p>
+<p>Signed approval check, diff, ledger, and document generation require the matching
+SPKI PEM <code>--trust-key</code>; document check remains structural. The v6 detached
+signature covers the full canonical record, including both context strings,
+and a cryptographic mismatch is <code>signature-invalid</code> rather
 than an approval. Trust-key possession authenticates a signer but authorization
 remains an organizational policy. The exact canonicalization and key formats
 are specified in <code>docs/design/DESIGN-approval.md</code>.</p>

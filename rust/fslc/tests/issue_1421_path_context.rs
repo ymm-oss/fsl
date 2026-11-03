@@ -524,7 +524,18 @@ fn document_cross_cwd(subdirectory: bool, signed: bool) {
             );
         }
     }
-    let mut paths = vec![spec, record_path.clone()];
+    assert_document_checks_and_missing_files(&repo, cwd, &record_path, signed, &baseline, spec);
+}
+
+fn assert_document_checks_and_missing_files(
+    repo: &ApprovalRepo,
+    cwd: &Path,
+    record_path: &Path,
+    signed: bool,
+    baseline: &Value,
+    spec: PathBuf,
+) {
+    let mut paths = vec![spec, record_path.to_path_buf()];
     for directory in [&repo.root, &repo.review, &repo.unrelated] {
         for name in [ARTIFACT, "glossary.json", EVIDENCE[0], EVIDENCE[1]] {
             paths.push(directory.join(name));
@@ -536,8 +547,8 @@ fn document_cross_cwd(subdirectory: bool, signed: bool) {
     let before = snapshot(&paths);
     for caller in [&repo.root, &repo.review, &repo.unrelated] {
         assert_eq!(
-            repo.check(caller, &record_path, signed),
-            baseline,
+            repo.check(caller, record_path, signed),
+            *baseline,
             "full cross-CWD JSON"
         );
     }
@@ -552,11 +563,11 @@ fn document_cross_cwd(subdirectory: bool, signed: bool) {
         let path = cwd.join(name);
         let bytes = std::fs::read(&path).expect("read original file");
         std::fs::remove_file(&path).expect("remove original file");
-        assert_io(&repo.check_output(&repo.unrelated, &record_path, signed));
+        assert_io(&repo.check_output(&repo.unrelated, record_path, signed));
         std::fs::write(&path, bytes).expect("restore original file");
         assert_eq!(
-            repo.check(&repo.unrelated, &record_path, signed),
-            baseline,
+            repo.check(&repo.unrelated, record_path, signed),
+            *baseline,
             "restored positive control"
         );
     }

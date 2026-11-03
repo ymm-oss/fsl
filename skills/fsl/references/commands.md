@@ -180,7 +180,7 @@ fslc document check <f> <document.md> [--glossary glossary.json] [--evidence evi
 fslc approval create <f> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
                [--requirement ID]... [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
                                                         # bind the reviewed artifact to normalized spec + Git baseline;
-                                                        # requirements_document records schema v3/v4 with a claim_set_digest
+                                                        # new records use v5/v6; requirements_document binds a claim_set_digest
 fslc approval check <f> --record <record.json>          # approved | drifted with machine reasons
 fslc approval diff <f> --record <record.json> [--depth K]
                                                         # semantic diff from approved commit to current working spec
@@ -606,6 +606,16 @@ spec, rendering, and renderer changes. A drifted row carries the complete baseli
 `approval diff` command, which compares the approved commit to the current
 working spec. Treat `approver` as attribution; authenticity comes from the
 repository's signed-commit/review/branch-protection policy.
+
+New creates for all four target kinds use unsigned `fslc.approval.v5` or signed
+`fslc.approval.v6`. Both require a nonempty absolute creation-directory
+`path_base` and the nonempty original spec argument verbatim as `render_source`.
+Relative stored target/input I/O uses only `path_base`; path spellings, input
+order and rendered labels stay literal. `render_source` is only a label: the
+explicit spec supplies the actual bytes and dependency directory. Legacy v1–v4
+reads retain their original closed formats, signatures and invocation-relative
+paths. No silent migration or rebasing of a moved checkout occurs; the original
+absolute directory must remain available for contextual I/O.
 
 Every requirement id in the ledger (and every property row in `fslc html`)
 carries an **assurance class**: `proved(induction)` (k-induction,

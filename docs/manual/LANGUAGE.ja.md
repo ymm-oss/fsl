@@ -1797,7 +1797,7 @@ fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evide
                                                   # fresh re-render; never interprets prose (§13)
 fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
-                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
+                                                  # new records use v5/v6; requirements_document binds a claim_set_digest (§13)
 fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem]
                                                   # approved (exit 0) | drifted (exit 0、分析結果)
                                                   # | signature-invalid (exit 1); DESIGN-approval.md 参照
@@ -2253,24 +2253,41 @@ spec を省略すると、変更されたすべての `.fsl` パスを比較し�
 `vcs.materialization: "git_archive_full_tree"` を含みます。通常の 2 パス形式は
 決して Git を呼び出さず、リポジトリの外でも動作します。
 
-`approval create` は、レビュー済みの `ledger`、`html`、`scenarios` アーティファクト
+`approval create` は、レビュー済みの `ledger`、`html`、`scenarios`、
+`requirements_document` アーティファクト
 を、完全に lowering された位置非依存のカーネルダイジェストと、現在のクリーンな Git
 コミットに束縛します。バージョン付きの JSON サイドカーは、正規化された
 アーティファクトのダイジェスト、ジェネレータ/バージョン/オプション、承認された
 要件 ID、承認者、UTC 時刻も記録します。作成はアーティファクトを再生成し、古い
-レビューファイルを拒否します。`approval check` は、spec、レンダリング、レンダラの
-バインディングがすべて一致している間だけ `approved` を返します。そうでなければ
+レビューファイルを拒否します。`approval check` は、該当するすべてのバインディングが
+一致している間だけ `approved` を返します。そうでなければ
 `spec_changed`、`rendering_changed`、`renderer_changed` を伴う `drifted` を返します。
+`requirements_document` は claim set とレビュー済みのバイト列も別々に束縛し、
+それぞれの変更を `claim_set_changed`、`artifact_changed` で示します。
 `ledger --approval` は要件ごとに同じステータスを追加し、完全なベースラインの
 ダイジェストを含みます。`approval diff` は承認されたコミットを実体化し、現在の作業
 ファイルに対して通常の有界セマンティック diff を呼び出します。
 `docs/design/DESIGN-approval.md` を参照。
 
-`--signing-key` がなければ、`approval create` は従来どおり無署名の
-`fslc.approval.v1` レコードを出力します。Ed25519 PKCS#8 PEM の署名鍵があれば
-`fslc.approval.v2` を出力します。そのレコードを使うすべての check、diff、ledger は
-対応する SPKI PEM の `--trust-key` を要求します。v2 の分離署名は完全な正準レコード
-をカバーし、暗号的な不一致は承認ではなく `signature-invalid` です。trust-key の
+4 種類の target すべてで、`approval create` は `--signing-key` がなければ無署名の
+`fslc.approval.v5`、Ed25519 PKCS#8 PEM の署名鍵があれば署名付きの
+`fslc.approval.v6` レコードを出力します。両スキーマは、空でない 2 つの文字列を
+必須とします。`path_base` は作成時の実行ディレクトリの絶対パス、`render_source` は
+元の spec 引数をそのまま保存したものです。`spec.path` は Git リポジトリからの
+相対パスのままです。target と入力の相対パスを読み込む際は、保存済みの `path_base`
+だけを基準にします。保存したパスの表記、入力順、レンダリングのラベルは保ちます。
+`render_source` は表示用のラベルに限られ、実際のソースと依存先のディレクトリは
+明示された spec から取得します。
+
+従来の v1–v4 レコードは、形式、署名、実行ディレクトリを基準とする相対パスの
+解釈を変えずに読み込めます。暗黙の移行は行いません。新しい文脈情報が保つのは
+元の絶対ディレクトリでの読み込みです。checkout を移動してもパスを付け替えず、
+元のディレクトリがなくなれば読み込みに失敗する場合があります。
+
+署名付き承認を使う approval check、diff、ledger、document generate は、対応する
+SPKI PEM の `--trust-key` を要求します。document check は構造の照合にとどまります。
+v6 の分離署名は 2 つの文脈情報を含む完全な正準レコードをカバーし、
+暗号的な不一致は承認ではなく `signature-invalid` です。trust-key の
 所持は署名者を認証しますが、認可は依然として組織のポリシーの問題です。正確な正準化
 と鍵のフォーマットは `docs/design/DESIGN-approval.md` で規定されています。
 

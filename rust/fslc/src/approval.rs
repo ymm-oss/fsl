@@ -26,11 +26,16 @@ pub const APPROVAL_SCHEMA_V2: &str = "fslc.approval.v2";
 pub const APPROVAL_SCHEMA_V3: &str = "fslc.approval.v3";
 /// The signed counterpart of v3, mirroring how v2 is v1 plus `signature`.
 pub const APPROVAL_SCHEMA_V4: &str = "fslc.approval.v4";
+/// Creation-directory context for all four target kinds, preserving literal
+/// input paths and the original rendering label independently of I/O.
+pub const APPROVAL_SCHEMA_V5: &str = "fslc.approval.v5";
+/// The signed counterpart of v5. Both context strings are signed.
+pub const APPROVAL_SCHEMA_V6: &str = "fslc.approval.v6";
 pub const SIGNATURE_ALGORITHM: &str = "ed25519";
 pub const SPEC_DIGEST_ALGORITHM: &str = "fsl-kernel-ast-v1+sha256";
 pub const ARTIFACT_DIGEST_ALGORITHM: &str = "fsl-rendered-artifact-v1+sha256";
 /// The `target.digest_algorithm` for a `requirements_document` target
-/// (v3/v4 only): plain (unframed) `sha256` over the deterministically
+/// (v3/v4 and contextual v5/v6): plain (unframed) `sha256` over the deterministically
 /// rendered Markdown bytes — literally the same value `fslc document
 /// generate`'s own `artifact_digest` envelope field reports, so a caller can
 /// compare the two without any approval-specific machinery.
@@ -114,7 +119,7 @@ pub struct TargetBinding {
     pub reviewed_digest_algorithm: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewed_digest: Option<String>,
-    /// Present only for a `requirements_document` target (v3/v4): the RCIR
+    /// Present only for a `requirements_document` target: the RCIR
     /// claim-set digest (issue #325) alongside the rendered artifact's own
     /// digest, so drift in the requirements projection itself is
     /// distinguishable from drift elsewhere. `#[serde(default)]` lets a v1/v2
@@ -141,6 +146,10 @@ pub struct ApprovalMetadata {
 #[serde(deny_unknown_fields)]
 pub struct ApprovalRecord {
     pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_base: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_source: Option<String>,
     pub spec: SpecBinding,
     pub target: TargetBinding,
     pub approval: ApprovalMetadata,
@@ -158,10 +167,78 @@ pub struct DetachedSignature {
 #[serde(deny_unknown_fields)]
 pub struct ApprovalRecordV2 {
     pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_base: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_source: Option<String>,
     pub spec: SpecBinding,
     pub target: TargetBinding,
     pub approval: ApprovalMetadata,
     pub signature: DetachedSignature,
+}
+
+// Keep legacy wire decoding closed: optional fields on the shared in-memory
+// records must not make context fields legal in v1–v4, even when null.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyApprovalRecord {
+    schema: String,
+    spec: SpecBinding,
+    target: TargetBinding,
+    approval: ApprovalMetadata,
+}
+
+impl From<LegacyApprovalRecord> for ApprovalRecord {
+    fn from(record: LegacyApprovalRecord) -> Self {
+        Self {
+            schema: record.schema,
+            path_base: None,
+            render_source: None,
+            spec: record.spec,
+            target: record.target,
+            approval: record.approval,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyApprovalRecordV2 {
+    schema: String,
+    spec: SpecBinding,
+    target: TargetBinding,
+    approval: ApprovalMetadata,
+    signature: DetachedSignature,
+}
+
+impl From<LegacyApprovalRecordV2> for ApprovalRecordV2 {
+    fn from(record: LegacyApprovalRecordV2) -> Self {
+        Self {
+            schema: record.schema,
+            path_base: None,
+            render_source: None,
+            spec: record.spec,
+            target: record.target,
+            approval: record.approval,
+            signature: record.signature,
+        }
+    }
+}
+
+impl ApprovalRecord {
+    /// Resolve only filesystem access; the stored path remains its display label.
+    #[must_use]
+    pub fn io_path(&self, path: &str) -> PathBuf {
+        resolve_io_path(Path::new(path), self.path_base.as_deref().map(Path::new))
+    }
+}
+
+#[must_use]
+pub fn resolve_io_path(path: &Path, path_base: Option<&Path>) -> PathBuf {
+    match path_base {
+        Some(base) if path.is_relative() => base.join(path),
+        _ => path.to_path_buf(),
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -177,6 +254,8 @@ impl VersionedApprovalRecord {
             Self::V1(record) => record.clone(),
             Self::V2(record) => ApprovalRecord {
                 schema: unsigned_schema_for(&record.schema).to_owned(),
+                path_base: record.path_base.clone(),
+                render_source: record.render_source.clone(),
                 spec: record.spec.clone(),
                 target: record.target.clone(),
                 approval: record.approval.clone(),
@@ -186,13 +265,13 @@ impl VersionedApprovalRecord {
 }
 
 /// The unsigned schema a signed schema's own record binds to: v2 -> v1,
-/// v4 -> v3. Falls back to v1 for any other value (`validate_record_v2`
+/// v4 -> v3, v6 -> v5. Falls back to v1 for any other value (`validate_record_v2`
 /// rejects those before this is ever reached).
 fn unsigned_schema_for(signed_schema: &str) -> &'static str {
-    if signed_schema == APPROVAL_SCHEMA_V4 {
-        APPROVAL_SCHEMA_V3
-    } else {
-        APPROVAL_SCHEMA
+    match signed_schema {
+        APPROVAL_SCHEMA_V6 => APPROVAL_SCHEMA_V5,
+        APPROVAL_SCHEMA_V4 => APPROVAL_SCHEMA_V3,
+        _ => APPROVAL_SCHEMA,
     }
 }
 
@@ -273,7 +352,8 @@ pub fn reviewed_artifact_digest(record: &ApprovalRecord) -> Result<Option<String
     if record.target.kind != "requirements_document" {
         return Ok(None);
     }
-    let reviewed = std::fs::read(&record.target.path).map_err(|error| error.to_string())?;
+    let reviewed =
+        std::fs::read(record.io_path(&record.target.path)).map_err(|error| error.to_string())?;
     Ok(Some(sha256_bytes(&reviewed)))
 }
 
@@ -311,7 +391,7 @@ fn signature_payload(record: &ApprovalRecordV2) -> Result<Vec<u8>, String> {
         .and_then(Value::as_object_mut)
         .expect("serialized v2 signature is an object")
         .remove("value");
-    // Domain-separate by the record's own schema (v2 or v4) rather than a
+    // Domain-separate by the record's own schema (v2, v4 or v6) rather than a
     // hardcoded v2 constant, so a v4 signature can never verify against a v2
     // payload or vice versa. Byte-identical to before for existing v2
     // records, since `record.schema` is already `"fslc.approval.v2"` there.
@@ -566,8 +646,9 @@ pub fn verify_git_baseline(repo: &Path, relative_path: &str, commit: &str) -> Re
 
 pub fn read_record(path: &Path) -> Result<ApprovalRecord, String> {
     let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let record: ApprovalRecord = serde_json::from_str(&source)
+    let record: LegacyApprovalRecord = serde_json::from_str(&source)
         .map_err(|error| format!("invalid approval record: {error}"))?;
+    let record = record.into();
     validate_record(&record)?;
     Ok(record)
 }
@@ -583,7 +664,20 @@ pub fn read_versioned_record(path: &Path) -> Result<VersionedApprovalRecord, Str
         .map_err(|error| format!("invalid approval record: {error}"))?;
     match header.schema.as_str() {
         APPROVAL_SCHEMA | APPROVAL_SCHEMA_V3 => read_record(path).map(VersionedApprovalRecord::V1),
+        APPROVAL_SCHEMA_V5 => {
+            let record: ApprovalRecord = serde_json::from_str(&source)
+                .map_err(|error| format!("invalid approval record: {error}"))?;
+            validate_record(&record)?;
+            Ok(VersionedApprovalRecord::V1(record))
+        }
         APPROVAL_SCHEMA_V2 | APPROVAL_SCHEMA_V4 => {
+            let record: LegacyApprovalRecordV2 = serde_json::from_str(&source)
+                .map_err(|error| format!("invalid approval record: {error}"))?;
+            let record = record.into();
+            validate_record_v2(&record)?;
+            Ok(VersionedApprovalRecord::V2(record))
+        }
+        APPROVAL_SCHEMA_V6 => {
             let record: ApprovalRecordV2 = serde_json::from_str(&source)
                 .map_err(|error| format!("invalid approval record: {error}"))?;
             validate_record_v2(&record)?;
@@ -598,8 +692,23 @@ pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
     let is_document = match record.schema.as_str() {
         APPROVAL_SCHEMA => false,
         APPROVAL_SCHEMA_V3 => true,
+        APPROVAL_SCHEMA_V5 => record.target.kind == "requirements_document",
         schema => return Err(format!("unsupported approval schema '{schema}'")),
     };
+    if record.schema == APPROVAL_SCHEMA_V5 {
+        if !record
+            .path_base
+            .as_deref()
+            .is_some_and(|base| !base.is_empty() && Path::new(base).is_absolute())
+        {
+            return Err("approval record requires an absolute nonempty path_base".to_owned());
+        }
+        if record.render_source.as_deref().is_none_or(str::is_empty) {
+            return Err("approval record requires a nonempty render_source".to_owned());
+        }
+    } else if record.path_base.is_some() || record.render_source.is_some() {
+        return Err("legacy approval records must not carry path context".to_owned());
+    }
     if record.spec.digest_algorithm != SPEC_DIGEST_ALGORITHM {
         return Err(format!(
             "unsupported spec digest algorithm '{}'",
@@ -744,10 +853,13 @@ pub fn validate_record_v2(record: &ApprovalRecordV2) -> Result<(), String> {
     let unsigned_schema = match record.schema.as_str() {
         APPROVAL_SCHEMA_V2 => APPROVAL_SCHEMA,
         APPROVAL_SCHEMA_V4 => APPROVAL_SCHEMA_V3,
+        APPROVAL_SCHEMA_V6 => APPROVAL_SCHEMA_V5,
         schema => return Err(format!("unsupported approval schema '{schema}'")),
     };
     validate_record(&ApprovalRecord {
         schema: unsigned_schema.to_owned(),
+        path_base: record.path_base.clone(),
+        render_source: record.render_source.clone(),
         spec: record.spec.clone(),
         target: record.target.clone(),
         approval: record.approval.clone(),
@@ -834,13 +946,15 @@ pub fn sign_record(record: ApprovalRecord, private_key: &Path) -> Result<Approva
             private_key.display()
         )
     })?;
-    let signed_schema = if record.schema == APPROVAL_SCHEMA_V3 {
-        APPROVAL_SCHEMA_V4
-    } else {
-        APPROVAL_SCHEMA_V2
+    let signed_schema = match record.schema.as_str() {
+        APPROVAL_SCHEMA_V5 => APPROVAL_SCHEMA_V6,
+        APPROVAL_SCHEMA_V3 => APPROVAL_SCHEMA_V4,
+        _ => APPROVAL_SCHEMA_V2,
     };
     let mut signed = ApprovalRecordV2 {
         schema: signed_schema.to_owned(),
+        path_base: record.path_base,
+        render_source: record.render_source,
         spec: record.spec,
         target: record.target,
         approval: record.approval,

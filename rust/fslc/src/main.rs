@@ -2130,10 +2130,19 @@ fn load_glossary(
     path: Option<&Path>,
     expected_locale: fsl_tools::Locale,
 ) -> Result<Option<(fsl_tools::Glossary, String)>, Value> {
+    load_glossary_with_base(path, expected_locale, None)
+}
+
+fn load_glossary_with_base(
+    path: Option<&Path>,
+    expected_locale: fsl_tools::Locale,
+    path_base: Option<&Path>,
+) -> Result<Option<(fsl_tools::Glossary, String)>, Value> {
     let Some(path) = path else {
         return Ok(None);
     };
-    let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+    let bytes = std::fs::read(approval::resolve_io_path(path, path_base))
+        .map_err(|error| error_output("io", &error.to_string()))?;
     let digest = approval::sha256_bytes(&bytes);
     let text = String::from_utf8(bytes)
         .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
@@ -2169,13 +2178,21 @@ type EvidenceFiles = Vec<(String, Value)>;
 /// *set* given in a different `--evidence` order still yields the same
 /// `evidence_digest` frontmatter value.
 fn load_evidence(paths: &[PathBuf]) -> Result<Option<(EvidenceFiles, String)>, Value> {
+    load_evidence_with_base(paths, None)
+}
+
+fn load_evidence_with_base(
+    paths: &[PathBuf],
+    path_base: Option<&Path>,
+) -> Result<Option<(EvidenceFiles, String)>, Value> {
     if paths.is_empty() {
         return Ok(None);
     }
     let mut files = Vec::new();
     let mut digests = Vec::new();
     for path in paths {
-        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        let bytes = std::fs::read(approval::resolve_io_path(path, path_base))
+            .map_err(|error| error_output("io", &error.to_string()))?;
         digests.push(approval::sha256_bytes(&bytes));
         let text = String::from_utf8(bytes)
             .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
@@ -13354,7 +13371,32 @@ fn run_html_report_from_source_with_timing(
     no_timing: bool,
     edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
-    let (verification, verification_status) =
+    run_html_report_from_source_with_label(
+        path,
+        source,
+        depth,
+        deadlock_mode,
+        engine,
+        output_path,
+        no_timing,
+        edition,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_html_report_from_source_with_label(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    output_path: Option<&Path>,
+    no_timing: bool,
+    edition: Option<&SourceEdition>,
+    render_source: Option<&str>,
+) -> (Value, i32) {
+    let (mut verification, verification_status) =
         report_verification_from_source(path, source, depth, deadlock_mode, engine, edition);
     if let Some(error) = report_verification_error(&verification, verification_status) {
         return error;
@@ -13378,6 +13420,8 @@ fn run_html_report_from_source_with_timing(
             }
         }
     }
+    relabel_approval_rendering_warnings(&mut verification, path, render_source);
+    relabel_approval_rendering_warnings(&mut explained, path, render_source);
     let timing_free = no_timing.then(|| html_report_without_timing(&explained, &verification));
     let (explained_view, verification_view) = timing_free
         .as_ref()
@@ -13385,7 +13429,7 @@ fn run_html_report_from_source_with_timing(
             (explained, verification)
         });
     let html = fsl_tools::render_html_report(
-        &path.display().to_string(),
+        render_source.unwrap_or(&path.to_string_lossy()),
         source,
         &model,
         explained_view,
@@ -13498,14 +13542,17 @@ fn document_generation_inputs(
 /// inputs)` alone, with no `--strict` gate and no approval overlay — used by
 /// both `fslc approval create --kind requirements_document` (to build the
 /// canonical rendering a reviewed artifact must conform to) and `fslc
-/// approval check`/`fslc document generate --approval` (to reproduce the
-/// same rendering's digest at check time). Returns the claims (needed for
+/// approval check` (to reproduce the same rendering's digest at check time).
+/// The generate overlay compares its own invocation rendering instead.
+/// Returns the claims (needed for
 /// `fsl_tools::check_requirements_document`'s conformance gate at create
 /// time) alongside the canonical Markdown.
 fn render_document_for_approval(
     path: &Path,
     source: &str,
     inputs: &approval::DocumentGenerationInputs,
+    path_base: Option<&Path>,
+    render_source: Option<&str>,
 ) -> Result<(fsl_tools::RequirementClaimSet, String), Value> {
     let locale = fsl_tools::Locale::parse(&inputs.lang).ok_or_else(|| {
         error_output(
@@ -13513,20 +13560,25 @@ fn render_document_for_approval(
             &format!("unsupported document lang '{}'", inputs.lang),
         )
     })?;
-    let claims = load_document_claims_from_source(path, source, &path.to_string_lossy())?;
-    let loaded_glossary = load_glossary(
+    let claims = load_document_claims_from_source(
+        path,
+        source,
+        render_source.unwrap_or(&path.to_string_lossy()),
+    )?;
+    let loaded_glossary = load_glossary_with_base(
         inputs
             .glossary
             .as_ref()
             .map(|file| Path::new(file.path.as_str())),
         locale,
+        path_base,
     )?;
     let evidence_paths: Vec<PathBuf> = inputs
         .evidence
         .iter()
         .map(|file| PathBuf::from(&file.path))
         .collect();
-    let loaded_evidence = load_evidence(&evidence_paths)?;
+    let loaded_evidence = load_evidence_with_base(&evidence_paths, path_base)?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let resolver = dependency_resolver(base);
     let kernel =
@@ -13557,7 +13609,7 @@ fn render_document_for_approval(
 
 /// Reproduce a target's canonical rendering fresh from `(spec, inputs)` —
 /// the shared re-render dispatch `approval create`'s conformance gate and
-/// `approval check`/`approval diff`'s drift comparison both call. Returns the
+/// `approval check`'s drift comparison both call. Returns the
 /// rendered bytes plus, for `requirements_document` only, the RCIR claim-set
 /// digest that rendering used (`None` for the three solver-driven kinds,
 /// which have no RCIR concept at all).
@@ -13567,6 +13619,18 @@ fn approval_artifact(
     edition: &SourceEdition,
     kind: &str,
     inputs: &approval::GenerationInputs,
+) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
+    approval_artifact_with_context(path, source, edition, kind, inputs, None, None)
+}
+
+fn approval_artifact_with_context(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    kind: &str,
+    inputs: &approval::GenerationInputs,
+    path_base: Option<&Path>,
+    render_source: Option<&str>,
 ) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
     if kind == "requirements_document" {
         let approval::GenerationInputs::Document(document_inputs) = inputs else {
@@ -13578,8 +13642,9 @@ fn approval_artifact(
                 2,
             ));
         };
-        let (claims, markdown) = render_document_for_approval(path, source, document_inputs)
-            .map_err(|error| (error, 2))?;
+        let (claims, markdown) =
+            render_document_for_approval(path, source, document_inputs, path_base, render_source)
+                .map_err(|error| (error, 2))?;
         return Ok((markdown.into_bytes(), Some(claims.spec.claim_set_digest)));
     }
     let approval::GenerationInputs::Solver(inputs) = inputs else {
@@ -13592,9 +13657,9 @@ fn approval_artifact(
         ));
     };
     let dependencies = fslc_rust::migration::DependencyScope::enter();
-    let (result, status) = dependencies.finish_distinct(match kind {
-        "ledger" => generate_unapproved_ledger_report_from_source(
-            &LedgerReportRequest {
+    let (mut result, status) = dependencies.finish_distinct(match kind {
+        "ledger" => {
+            let request = LedgerReportRequest {
                 path,
                 depth: inputs.depth,
                 deadlock_mode: &inputs.deadlock,
@@ -13602,11 +13667,19 @@ fn approval_artifact(
                 impl_log: None,
                 evidence_paths: &[],
                 output_path: None,
-            },
-            source,
-            Some(edition),
-        ),
-        "html" => run_html_report_from_source_with_timing(
+            };
+            if render_source.is_some() {
+                generate_unapproved_ledger_report_from_source_with_label(
+                    &request,
+                    source,
+                    Some(edition),
+                    render_source,
+                )
+            } else {
+                generate_unapproved_ledger_report_from_source(&request, source, Some(edition))
+            }
+        }
+        "html" => run_html_report_from_source_with_label(
             path,
             source,
             inputs.depth,
@@ -13615,6 +13688,7 @@ fn approval_artifact(
             None,
             false,
             Some(edition),
+            render_source,
         ),
         "scenarios" => {
             let result = run_scenarios_from_source(path, source, inputs.depth, &inputs.deadlock);
@@ -13637,6 +13711,7 @@ fn approval_artifact(
     if status != 0 {
         return Err((result, status));
     }
+    relabel_approval_rendering_warnings(&mut result, path, render_source);
     let bytes = if matches!(kind, "ledger" | "html") {
         result
             .get("content")
@@ -13655,6 +13730,29 @@ fn approval_artifact(
         encoded
     };
     Ok((bytes, None))
+}
+
+/// Root migration warnings can themselves be rendered as evidence. Change only
+/// their display locations in approval-rendering copies, never the public
+/// diagnostic envelope or dependency-file locations.
+fn relabel_approval_rendering_warnings(
+    output: &mut Value,
+    path: &Path,
+    render_source: Option<&str>,
+) {
+    let Some(label) = render_source else {
+        return;
+    };
+    let Some(warnings) = output.get_mut("warnings").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for warning in warnings {
+        if let Some(file) = warning.get_mut("loc").and_then(|loc| loc.get_mut("file"))
+            && file.as_str() == Some(path.to_string_lossy().as_ref())
+        {
+            *file = json!(label);
+        }
+    }
 }
 
 fn approval_spec_digest(path: &Path, source: &str) -> Result<String, SpecLoadError> {
@@ -13742,6 +13840,11 @@ fn run_approval_create_from_source(
     output_path: Option<&Path>,
     signing_key: Option<&Path>,
 ) -> (Value, i32) {
+    let path_base = match std::env::current_dir() {
+        Ok(base) => base,
+        Err(error) => return (error_output("io", &error.to_string()), 2),
+    };
+    let render_source = path.to_string_lossy();
     let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
@@ -13755,101 +13858,110 @@ fn run_approval_create_from_source(
         Err(error) => return (semantic_error_output(&error), 2),
     };
 
-    let (target_digest_bytes, target_digest_algorithm, reviewed_digest, claim_set_digest, schema) =
-        if kind == "requirements_document" {
-            let approval::GenerationInputs::Document(document_inputs) = inputs else {
-                return (
-                    error_output(
-                        "usage",
-                        "--kind requirements_document requires document generation inputs",
-                    ),
-                    2,
-                );
-            };
-            let (claims, fresh_markdown) =
-                match render_document_for_approval(path, source, document_inputs) {
-                    Ok(result) => result,
-                    Err(error) => return (error, 2),
-                };
-            let reviewed_text = match std::fs::read_to_string(artifact_path) {
-                Ok(text) => text,
-                Err(error) => return (error_output("io", &error.to_string()), 2),
-            };
-            let report = match fsl_tools::check_requirements_document(
-                &reviewed_text,
-                &claims,
-                &fresh_markdown,
-            ) {
-                Ok(report) => report,
-                Err(error) => return (document_schema_error(&error.to_string()), 2),
-            };
-            if !report.is_conformant() {
-                let mut output = error_output(
-                    "semantics",
-                    "reviewed document does not conform to a fresh rendering with the recorded inputs",
-                );
-                output
-                    .as_object_mut()
-                    .expect("approval error envelope")
-                    .insert(
-                        "reasons".to_owned(),
-                        serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
-                    );
-                return (output, 2);
-            }
-            (
-                fresh_markdown.into_bytes(),
-                approval::REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM,
-                Some(approval::sha256_bytes(reviewed_text.as_bytes())),
-                Some(claims.spec.claim_set_digest),
-                approval::APPROVAL_SCHEMA_V3,
-            )
-        } else {
-            let approval::GenerationInputs::Solver(_) = inputs else {
-                return (
-                    error_output(
-                        "usage",
-                        "--kind ledger/html/scenarios requires solver generation inputs",
-                    ),
-                    2,
-                );
-            };
-            let (expected_artifact, _) =
-                match approval_artifact(path, source, edition, kind, inputs) {
-                    Ok(artifact) => artifact,
-                    Err(error) => return error,
-                };
-            let reviewed_artifact = match std::fs::read(artifact_path) {
-                Ok(artifact) => artifact,
-                Err(error) => return (error_output("io", &error.to_string()), 2),
-            };
-            let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact)
-            {
-                Ok(artifact) => artifact,
-                Err(error) => return (error_output("semantics", &error), 2),
-            };
-            let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact)
-            {
-                Ok(artifact) => artifact,
-                Err(error) => return (error_output("internal", &error), 3),
-            };
-            if normalized_reviewed != normalized_expected {
-                return (
-                    error_output(
-                        "semantics",
-                        "reviewed artifact does not match a fresh rendering with the recorded inputs",
-                    ),
-                    2,
-                );
-            }
-            (
-                normalized_reviewed,
-                approval::ARTIFACT_DIGEST_ALGORITHM,
-                None,
-                None,
-                approval::APPROVAL_SCHEMA,
-            )
+    let (target_digest_bytes, target_digest_algorithm, reviewed_digest, claim_set_digest) = if kind
+        == "requirements_document"
+    {
+        let approval::GenerationInputs::Document(document_inputs) = inputs else {
+            return (
+                error_output(
+                    "usage",
+                    "--kind requirements_document requires document generation inputs",
+                ),
+                2,
+            );
         };
+        let (claims, fresh_markdown) = match render_document_for_approval(
+            path,
+            source,
+            document_inputs,
+            Some(&path_base),
+            Some(&render_source),
+        ) {
+            Ok(result) => result,
+            Err(error) => return (error, 2),
+        };
+        let reviewed_text = match std::fs::read_to_string(artifact_path) {
+            Ok(text) => text,
+            Err(error) => return (error_output("io", &error.to_string()), 2),
+        };
+        let report = match fsl_tools::check_requirements_document(
+            &reviewed_text,
+            &claims,
+            &fresh_markdown,
+        ) {
+            Ok(report) => report,
+            Err(error) => return (document_schema_error(&error.to_string()), 2),
+        };
+        if !report.is_conformant() {
+            let mut output = error_output(
+                "semantics",
+                "reviewed document does not conform to a fresh rendering with the recorded inputs",
+            );
+            output
+                .as_object_mut()
+                .expect("approval error envelope")
+                .insert(
+                    "reasons".to_owned(),
+                    serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
+                );
+            return (output, 2);
+        }
+        (
+            fresh_markdown.into_bytes(),
+            approval::REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM,
+            Some(approval::sha256_bytes(reviewed_text.as_bytes())),
+            Some(claims.spec.claim_set_digest),
+        )
+    } else {
+        let approval::GenerationInputs::Solver(_) = inputs else {
+            return (
+                error_output(
+                    "usage",
+                    "--kind ledger/html/scenarios requires solver generation inputs",
+                ),
+                2,
+            );
+        };
+        let (expected_artifact, _) = match approval_artifact_with_context(
+            path,
+            source,
+            edition,
+            kind,
+            inputs,
+            Some(&path_base),
+            Some(&render_source),
+        ) {
+            Ok(artifact) => artifact,
+            Err(error) => return error,
+        };
+        let reviewed_artifact = match std::fs::read(artifact_path) {
+            Ok(artifact) => artifact,
+            Err(error) => return (error_output("io", &error.to_string()), 2),
+        };
+        let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
+            Ok(artifact) => artifact,
+            Err(error) => return (error_output("semantics", &error), 2),
+        };
+        let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact) {
+            Ok(artifact) => artifact,
+            Err(error) => return (error_output("internal", &error), 3),
+        };
+        if normalized_reviewed != normalized_expected {
+            return (
+                error_output(
+                    "semantics",
+                    "reviewed artifact does not match a fresh rendering with the recorded inputs",
+                ),
+                2,
+            );
+        }
+        (
+            normalized_reviewed,
+            approval::ARTIFACT_DIGEST_ALGORITHM,
+            None,
+            None,
+        )
+    };
 
     let available = approval::requirement_ids(&model);
     if available.is_empty() {
@@ -13881,7 +13993,9 @@ fn run_approval_create_from_source(
         );
     }
     let record = approval::ApprovalRecord {
-        schema: schema.to_owned(),
+        schema: approval::APPROVAL_SCHEMA_V5.to_owned(),
+        path_base: Some(path_base.to_string_lossy().into_owned()),
+        render_source: Some(render_source.into_owned()),
         spec: approval::SpecBinding {
             path: relative_path,
             digest_algorithm: approval::SPEC_DIGEST_ALGORITHM.to_owned(),
@@ -13998,13 +14112,25 @@ fn approval_evaluation(
         .map_err(|error| (error_output("io", &error), 2))?;
     let current_spec_digest =
         approval_spec_digest(path, source).map_err(|error| (spec_load_error_output(&error), 2))?;
-    let (artifact, current_claim_set_digest) = approval_artifact(
-        path,
-        source,
-        edition,
-        &record.target.kind,
-        &record.target.inputs,
-    )?;
+    let (artifact, current_claim_set_digest) = if let Some(base) = &record.path_base {
+        approval_artifact_with_context(
+            path,
+            source,
+            edition,
+            &record.target.kind,
+            &record.target.inputs,
+            Some(Path::new(base)),
+            record.render_source.as_deref(),
+        )
+    } else {
+        approval_artifact(
+            path,
+            source,
+            edition,
+            &record.target.kind,
+            &record.target.inputs,
+        )
+    }?;
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| (error_output("internal", &error), 3))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
@@ -14209,7 +14335,7 @@ fn run_ledger_report_admitted_from_source(
             Err(error) => return error,
         }
     };
-    let (result, status) = render_ledger_report(request, &prepared, approvals.as_ref());
+    let (result, status) = render_ledger_report(request, &prepared, approvals.as_ref(), None);
     if status != 0 {
         // An `io` failure writing `-o` (the only non-zero
         // `generated_content_result` can itself report) outranks the
@@ -14234,11 +14360,22 @@ fn generate_unapproved_ledger_report_from_source(
     source: &str,
     edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source, edition) {
+    generate_unapproved_ledger_report_from_source_with_label(request, source, edition, None)
+}
+
+fn generate_unapproved_ledger_report_from_source_with_label(
+    request: &LedgerReportRequest<'_>,
+    source: &str,
+    edition: Option<&SourceEdition>,
+    render_source: Option<&str>,
+) -> (Value, i32) {
+    let mut prepared = match prepare_ledger_report_from_source(request, source, edition) {
         Ok(prepared) => prepared,
         Err(error) => return error,
     };
-    render_ledger_report(request, &prepared, None)
+    relabel_approval_rendering_warnings(&mut prepared.verification, request.path, render_source);
+    relabel_approval_rendering_warnings(&mut prepared.scenarios, request.path, render_source);
+    render_ledger_report(request, &prepared, None, render_source)
 }
 
 fn prepare_ledger_report_from_source(
@@ -14324,9 +14461,10 @@ fn render_ledger_report(
     request: &LedgerReportRequest<'_>,
     prepared: &PreparedLedgerReport,
     approvals: Option<&Value>,
+    render_source: Option<&str>,
 ) -> (Value, i32) {
     let content = fsl_tools::render_ledger_with_approvals(
-        &request.path.display().to_string(),
+        render_source.unwrap_or(&request.path.to_string_lossy()),
         &prepared.model,
         &prepared.verification,
         &prepared.scenarios,

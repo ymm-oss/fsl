@@ -88,8 +88,9 @@ fslc approval check examples/e2e/2_requirements.fsl --record expense.approval.js
 fslc ledger examples/e2e/2_requirements.fsl --approval expense.approval.json
 ```
 
-`--signing-key` turns the same creation into a signed v2 record. Signed
-records then require an explicit trust anchor on *every* consuming command —
+`--signing-key` turns the same creation into a signed v6 record. Signed
+records require an explicit trust anchor for approval check, diff, ledger,
+and document generation (document check remains structural) —
 the examples below use an Ed25519 key pair the approver holds
 (`alice-private.pem` and its SPKI public half `alice-public.pem`):
 
@@ -169,7 +170,8 @@ again and must match the record's baseline digest.
 
 ## Record contract
 
-The committed sidecar follows
+New sidecars use v5 (unsigned) or v6 (signed), with creation-directory context
+as specified below. The retained legacy unsigned solver sidecar follows
 [`schemas/fslc/approval/approval-record.v1.schema.json`](../../schemas/fslc/approval/approval-record.v1.schema.json):
 
 ```json
@@ -199,12 +201,11 @@ The committed sidecar follows
 ```
 
 Supported target kinds for v1/v2 are `ledger`, `html`, and `scenarios`.
-Omitting `--signing-key` continues to produce this exact unsigned v1
-contract; **v1/v2 are unchanged by issue #333** — a `requirements_document`
+These retained legacy contracts remain unchanged — a `requirements_document`
 target is never admitted into v1/v2's closed `kind` enum, by design (see
 below).
 
-Signed records use
+Legacy signed solver records use
 [`schemas/fslc/approval/approval-record.v2.schema.json`](../../schemas/fslc/approval/approval-record.v2.schema.json).
 They preserve the v1 `spec`, `target`, and `approval` objects and add:
 
@@ -307,6 +308,65 @@ conditional branch inside v1/v2. `spec`/`approval` are byte-identical to v1's;
   v4 always carry this document-input shape — `fslc approval create` rejects
   `--depth`/`--deadlock`/`--engine` for `--kind requirements_document` and
   rejects `--glossary`/`--evidence` for the other three kinds.
+
+### Creation-directory context (v5 unsigned, v6 signed; #1421 AP1/AP2)
+
+All new `approval create` records use
+[`approval-record.v5.schema.json`](../../schemas/fslc/approval/approval-record.v5.schema.json)
+without a signing key and
+[`approval-record.v6.schema.json`](../../schemas/fslc/approval/approval-record.v6.schema.json)
+with one. Each admits the existing solver target shape (`ledger`, `html`,
+`scenarios`) or document target shape (`requirements_document`) as separate
+closed branches. The nested objects, document digests and input variants retain
+their existing contracts. Two required top-level strings add the context:
+
+- `path_base` is the nonempty absolute invocation directory captured before
+  create-time reproduction.
+- `render_source` is the nonempty original spec argument, verbatim, used only
+  as a rendering label. `spec.path` remains Git-repository-relative.
+
+For example, creation from a directory containing `spec.fsl` with the argument
+`./spec.fsl` preserves that exact label, a target such as `./requirements.md`,
+and input spellings such as `glossary.json` or `nested/../evidence.json`.
+Relative target/input I/O later uses `path_base / stored_path`; absolute stored
+paths remain absolute. The resolver does not canonicalize, collapse parent
+components, probe caller/sidecar/repository alternatives, or rebase a moved
+checkout. Deleting or moving the original directory can therefore fail.
+
+The current explicit spec still supplies the actual bytes and dependency
+directory. Reproduction uses the recorded source and evidence labels; resolved
+I/O strings never replace those labels in rendered content. Kernel source-label
+admission is unchanged: labels containing `..` or absolute source labels remain
+unsupported by current document generation. This context feature does not
+broaden that admission rule.
+
+Root migration-warning locations embedded in rendering copies also use the
+recorded source label. Public diagnostic locations and dependency-file labels
+retain their actual explicit paths; no recursive path substitution is applied.
+
+v6 covers both new strings with
+`b"fslc.approval.v6\0" || canonical_json(record_without_signature.value)`.
+Its unsigned binding is v5 with both strings retained. v2→v1 and v4→v3 bindings
+and their original signing payloads remain unchanged. v1–v4 readers retain
+their closed wire shapes, reject added context even when relabelled, and resolve
+their relative paths against the consuming invocation directory. No record is
+silently migrated, resigned, or downgraded. Older binaries reject v5/v6 as
+unsupported schemas through their existing I/O error envelope and exit 2;
+obtaining context behavior requires a new reproduction, review and approval.
+
+Authoritative approval check and ledger evaluation use contextual input I/O and,
+for documents, contextual reviewed-target I/O. Solver checks reproduce the
+canonical artifact from spec/inputs and never read the live target, while create
+still reads it. Document generation with `--approval` remains lightweight:
+only its reviewed-target read uses stored context; explicit glossary/evidence
+arguments and its rendering remain invocation-relative. It performs no extra
+rendering, stored-input reads or Git-baseline check. Document check remains
+structural without trust verification or live reviewed-target admission;
+approval diff remains signature/spec-baseline-only. Reason ordering, envelopes,
+exit policies, artifact normalization and assurance are unchanged.
+
+This slice does not change raw input-digest enforcement, dataset-source
+resolution or causal output collision handling.
 
 `approval create --kind requirements_document`'s conformance gate (rather than
 the byte-equality the other three kinds use) is exactly `fslc document
@@ -457,7 +517,8 @@ Native integration coverage proves:
 - tampering reports `signature-invalid` and never appears approved in a ledger;
 - signed checks, semantic diffs, and ledgers report the signature status.
 
-Issue #333 adds:
+Issue #333 established the following document-target coverage; its historical
+new-create v3/v4 assertions are superseded by #1421's v5/v6 creation contract:
 
 - `requirements_document` create + check round-trips as `approved`, records
   schema `fslc.approval.v3`, and validates against
@@ -489,3 +550,9 @@ Issue #333 adds:
   unverifiable signed record; `fslc document check --approval` reproduces the
   same section and reports `approval_changed` when the flag is omitted,
   without ever verifying a signature itself.
+
+Issue #1421 AP1/AP2 adds independent CLI controls for unsigned/signed document
+creation at root/subdirectory, literal source/input labels and reviewed bytes,
+cross-CWD checks with distinct valid decoys, missing actual inputs/targets without
+fallback, every solver kind without live-target reads, closed v5/v6 schema
+validation, required context, and v1–v4 rejection of added context fields.

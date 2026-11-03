@@ -1946,7 +1946,7 @@ fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evide
                                                   # fresh re-render; never interprets prose (§13)
 fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
-                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
+                                                  # new records use v5/v6; requirements_document binds a claim_set_digest (§13)
 fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem]
                                                   # approved (exit 0) | drifted (exit 0, analysis output)
                                                   # | signature-invalid (exit 1); see DESIGN-approval.md
@@ -2440,23 +2440,39 @@ and returns `semantic_diff_batch`; supplying one spec preserves
 "git_archive_full_tree"`. The ordinary two-path form never invokes Git and
 works outside a repository.
 
-`approval create` binds a reviewed `ledger`, `html`, or `scenarios` artifact to
+`approval create` binds a reviewed `ledger`, `html`, `scenarios`, or
+`requirements_document` artifact to
 the fully lowered, location-insensitive kernel digest and the current clean Git
 commit. The versioned JSON sidecar also records the normalized artifact digest,
 generator/version/options, approved requirement IDs, approver, and UTC time.
 Creation regenerates the artifact and rejects a stale review file. `approval
-check` returns `approved` only while the spec, rendering, and renderer bindings
-all match; otherwise it returns `drifted` with `spec_changed`,
-`rendering_changed`, and/or `renderer_changed`. `ledger --approval` adds the
+check` returns `approved` only while all applicable bindings match; otherwise
+it returns `drifted` with `spec_changed`, `rendering_changed`, and/or
+`renderer_changed`. A `requirements_document` also binds the claim set and exact
+reviewed bytes, with `claim_set_changed` and `artifact_changed` reasons.
+`ledger --approval` adds the
 same status per requirement and includes the full baseline digest. `approval
 diff` materializes the approved commit and invokes the ordinary bounded semantic
 diff against the current working file. See `docs/design/DESIGN-approval.md`.
 
-Without `--signing-key`, `approval create` emits the unchanged unsigned
-`fslc.approval.v1` record. With an Ed25519 PKCS#8 PEM signing key it emits
-`fslc.approval.v2`; every check, diff, or ledger use of that record requires the
-matching SPKI PEM `--trust-key`. The v2 detached signature covers the full
-canonical record, and a cryptographic mismatch is `signature-invalid` rather
+For all four target kinds, `approval create` emits unsigned `fslc.approval.v5`
+without `--signing-key`, or signed `fslc.approval.v6` with an Ed25519 PKCS#8 PEM
+signing key. Both schemas require two nonempty strings: `path_base`, the absolute
+invocation directory at creation, and `render_source`, the original spec argument
+verbatim. `spec.path` remains Git-repository-relative. Relative target/input I/O
+resolves only against the stored `path_base`, preserving stored path spellings,
+input order, and rendered labels. `render_source` is a display label only; the
+explicit spec still supplies the actual bytes and dependency directory.
+
+Legacy v1–v4 records remain readable with their original formats, signatures,
+and invocation-relative path interpretation. Records are not silently migrated.
+New context preserves lookup at the original absolute directory; it does not
+rebase paths when a checkout moves, and a missing original directory can fail.
+
+Signed approval check, diff, ledger, and document generation require the matching
+SPKI PEM `--trust-key`; document check remains structural. The v6 detached
+signature covers the full canonical record, including both context strings,
+and a cryptographic mismatch is `signature-invalid` rather
 than an approval. Trust-key possession authenticates a signer but authorization
 remains an organizational policy. The exact canonicalization and key formats
 are specified in `docs/design/DESIGN-approval.md`.
