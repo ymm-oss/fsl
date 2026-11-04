@@ -474,6 +474,7 @@ fn composed_kernel(
         projections: Vec::new(),
         diagnostics,
         names: NameMap::default(),
+        root_actuals: Vec::new(),
     };
     kernel.annotations.extend(crate::SPEC_TARGET, annotations);
     kernel
@@ -600,6 +601,7 @@ pub fn lower_compose_with_options(
     let mut instance_sources = BTreeMap::new();
     let mut origins = BTreeMap::new();
     let mut init_origins = Vec::new();
+    let mut root_actuals = Vec::new();
     for alias in &order {
         let component = &components[alias];
         for (name, source) in &component.instance_sources {
@@ -685,14 +687,19 @@ pub fn lower_compose_with_options(
                 static_items.push(rewrite_compose_item(item.clone(), &components)?);
             }
             ComposeItem::SyncAction(action) => {
-                actions.push(sync_action(
+                let (expanded, actuals) = sync_action(
                     action,
                     &components,
                     &composition_names,
                     &ambient,
                     &mut warnings,
                     &mut origins,
-                )?);
+                )?;
+                actions.push(expanded);
+                for mut actual in actuals {
+                    actual.ordinal = root_actuals.len();
+                    root_actuals.push(actual);
+                }
             }
             ComposeItem::Use { .. } | ComposeItem::Internal { .. } => {}
         }
@@ -723,6 +730,7 @@ pub fn lower_compose_with_options(
     let mut kernel = composed_kernel(compose.name, static_items, component_annotations, warnings);
     kernel.instance_sources = instance_sources;
     kernel.names = names;
+    kernel.root_actuals = root_actuals;
     kernel.names.pattern_scopes = composition_names.pattern_scopes.borrow().clone();
     for (target, origin) in origins {
         kernel
@@ -2061,14 +2069,23 @@ fn source_names(source: &SyncSource) -> Result<SourceNames, CoreError> {
     Ok(names)
 }
 
+type SyncComponentSources = (Vec<SyncSource>, Vec<String>, Vec<crate::model::RootActual>);
+
 fn sync_component_sources(
     action: &SyncAction,
     components: &BTreeMap<String, Component>,
     bound: &HashSet<String>,
-) -> Result<(Vec<SyncSource>, Vec<String>), CoreError> {
+) -> Result<SyncComponentSources, CoreError> {
     let mut sources = Vec::new();
     let mut fair_constituents = Vec::new();
+    let mut actuals = Vec::new();
     for reference in &action.refs {
+        if reference.args.len() != reference.arg_spans.len() {
+            return Err(error_at(
+                "sync reference argument/span cardinality mismatch",
+                action.span,
+            ));
+        }
         let mut component = components
             .get(&reference.alias)
             .ok_or_else(|| error_at(format!("unknown alias '{}'", reference.alias), action.span))?
@@ -2118,14 +2135,23 @@ fn sync_component_sources(
         let replacements = source_params
             .iter()
             .zip(&reference.args)
-            .map(|(param, arg)| {
+            .zip(&reference.arg_spans)
+            .map(|((param, arg), span)| {
                 let name = match param {
                     Param::Typed(name, _) | Param::Range(name, _, _) => name.clone(),
                 };
-                Ok((
-                    name,
-                    resolve_alias_expr_scoped(arg.clone(), components, action.span, bound)?,
-                ))
+                let expr = resolve_alias_expr_scoped(arg.clone(), components, action.span, bound)?;
+                actuals.push(crate::model::RootActual {
+                    action: action.name.clone(),
+                    ordinal: actuals.len(),
+                    expr: expr.clone(),
+                    formal: param.clone(),
+                    formal_action: prefix(&component.alias, &reference.action),
+                    formal_span: source_span,
+                    span: *span,
+                    source_file: None,
+                });
+                Ok((name, expr))
             })
             .collect::<Result<HashMap<_, _>, CoreError>>()?;
         let item_origins = source_items
@@ -2141,7 +2167,7 @@ fn sync_component_sources(
             span: source_span,
         });
     }
-    Ok((sources, fair_constituents))
+    Ok((sources, fair_constituents, actuals))
 }
 
 fn sync_action(
@@ -2151,7 +2177,7 @@ fn sync_action(
     ambient: &HashSet<String>,
     warnings: &mut Vec<Value>,
     origins: &mut BTreeMap<String, crate::OriginChain>,
-) -> Result<SpecItem, CoreError> {
+) -> Result<(SpecItem, Vec<crate::model::RootActual>), CoreError> {
     let (params, bound) = resolve_alias_params(action.params.clone(), components, action.span)?;
     let additional_source = SyncSource {
         items: resolve_alias_action_items(
@@ -2166,7 +2192,8 @@ fn sync_action(
         globals: composition_names.clone(),
         span: action.span,
     };
-    let (mut sources, fair_constituents) = sync_component_sources(action, components, &bound)?;
+    let (mut sources, fair_constituents, actuals) =
+        sync_component_sources(action, components, &bound)?;
     sources.push(additional_source);
     let inventories = sources
         .iter()
@@ -2236,16 +2263,19 @@ fn sync_action(
             "loc": action.span.python_loc(),
         }));
     }
-    Ok(SpecItem::Action {
-        name: action.name.clone(),
-        params,
-        items,
-        span: action.span,
-        fair: action.fair,
-        meta: action.meta.clone(),
-        sync: true,
-        annotations: action.annotations.clone(),
-    })
+    Ok((
+        SpecItem::Action {
+            name: action.name.clone(),
+            params,
+            items,
+            span: action.span,
+            fair: action.fair,
+            meta: action.meta.clone(),
+            sync: true,
+            annotations: action.annotations.clone(),
+        },
+        actuals,
+    ))
 }
 
 fn resolve_alias_params(

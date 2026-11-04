@@ -9537,7 +9537,10 @@ fn reachable_counterfactuals_from_source(
             ) else {
                 return json!([]);
             };
-            kernel.into_syntax()
+            let Ok(document) = kernel.into_validated_syntax() else {
+                return json!([]);
+            };
+            document
         }
         _ => return json!([]),
     };
@@ -9966,7 +9969,10 @@ fn invariant_counterfactuals_from_source(
             ) else {
                 return json!([]);
             };
-            kernel.into_syntax()
+            let Ok(document) = kernel.into_validated_syntax() else {
+                return json!([]);
+            };
+            document
         }
         _ => return json!([]),
     };
@@ -12155,7 +12161,10 @@ fn run_mutate_from_source(
                 &resolver,
                 crate::parse_options(),
             ) {
-                Ok(kernel) => kernel.into_syntax(),
+                Ok(kernel) => match kernel.into_validated_syntax() {
+                    Ok(spec) => spec,
+                    Err(error) => return mutate_error(model_error_output(&error)),
+                },
                 Err(error) => return mutate_error(core_error_output(&error)),
             }
         }

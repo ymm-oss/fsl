@@ -991,6 +991,36 @@ that previously passed `check` (breaking removal, #1334).
 
 Reference arguments may read only header parameters, consts, and state, not additional-item `let` bindings (breaking removal, #1442).
 
+**Root-authored synchronized arguments (breaking removal, #1517):** `check` types every
+synchronized argument against its formal before substitution, including an argument for a
+formal the component action never reads, in root header parameter, state, constant and enum
+context, not `let` or `requires` bindings. Numeric carriers stay compatible. A range mismatch is not
+a static error: verification reports it only when the component action reads the argument. These forms passed `check` before and are
+now semantic errors (exit 2):
+
+- Unused formal, bad argument: `true` or `part.h[0]` for `a: K`; an unresolved name
+  (`nosuch`), including one bound only by an additional-item `let`; `part.Red` or `Color.Red` (write `Red`);
+  another component's enum value (`other.tone`) for a `part.Color` formal; a non-Bool
+  condition (`if 1 then 0 else 0`); a root `def` with a badly typed argument (`rp(true)` for
+  `def rp(v: Int)`). Parentheses and later arguments, references or actions do not change this.
+- Used formal whose substituted body happened to type: `put(a in 0..1) { flag = a }` or
+  `put(a: K) { flag = a }` with `flag: Bool` and `true`; `put(a: K) { m[a] = true }` with
+  `m: Map<C, Bool>` and enum `R`.
+- Duplicate formals `(a: K, a: K)` with `true, 0`, where substitution erased the first argument.
+- `internal part.put` with `part.put(0)` where the component declares `a: Int`, `a in 1..0`,
+  `a: Nope` or a struct-typed `a: T`; its own `check` rejects these too.
+
+Migration: pass a value of the formal's type, using a header parameter when it comes from
+outside the root, or correct the component. There is no automatic migration. Root errors point
+at the whole argument including its parentheses, or an inner span within it, with a bare
+message and UTF-16 LSP endpoints. Error order: immediate lowering, model assembly, queued
+arguments in authored order, then init and component checks. A conditional with a Bool, ranged
+or named expected type checks its arms against that type, so `m[if c then 0 else true]` with
+`m: Map<A, Bool>` names `Named("A")` rather than `Range(0, 1)`; other conditionals, including an
+`Int` expectation, check arms against the first arm's type. This changed no admission result on the measured forms; see
+`docs/design/DESIGN-sync-argument-root-validation.md`. #1517 stays open until the product gate
+passes on merged `main`.
+
 Component free value reads and update roots resolve against the original component declarations before merging; composition cannot rescue an undeclared reference (breaking removal, #1442), while public names remain legal and protected enum reads display their source member spelling.
 
 A glue action reads and writes local and component state directly via `alias.var`.

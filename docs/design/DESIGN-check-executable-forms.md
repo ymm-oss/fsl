@@ -47,10 +47,13 @@ Imported-component diagnostics retain exact ownership through private check
 targets during lowering. A late model error uses the existing component-error
 policy: anchor the envelope at that component's root use declaration, retaining
 the component file/position and public declaration spelling in the cause.
-Root declarations are not rebound to a use, except that a root-authored sync
-argument substituted into a component item currently reports errors at that
-component's root use with the consuming item's component cause location (a known
-limitation, tracked in #1517). A second component is not mistaken for the first.
+Root declarations are not rebound to a use. A root-authored sync argument, used or not, is
+typed before substitution in root header context, and its error is reported at the argument
+with a bare message, not through a component wrapper
+([root-argument validation](DESIGN-sync-argument-root-validation.md)). This is a breaking
+removal for arguments that previously went unchecked (#1517); numeric ranges stay
+verification-time.
+A second component is not mistaken for the first.
 These diagnostic-only targets neither replace action trace origins nor appear in Public Kernel provenance
 or assurance counts.
 Ownership follows individual guards, lets, statements and ensures expanded into

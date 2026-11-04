@@ -3102,6 +3102,49 @@ compose OrderSystem {
   Breaking removal (#1334): additional statements assigning component state via physical names such as `alias__x`, which previously passed `check`, now produce a located error too.
   Reference arguments may read only header parameters, consts, and state, not additional-item `let` bindings (breaking removal, #1442).
   Component free value reads and update roots resolve against the component's original declarations before merging, so composition cannot rescue an otherwise undeclared reference (breaking removal, #1442); public names remain legal, and an enum read that needs its owner protected still displays the source member spelling.
+- **Root-authored synchronized arguments (breaking removal, #1517).** `check` types every
+  synchronized argument against its formal parameter before substitution, including an
+  argument whose formal the component action never reads. An argument can read root header
+  parameters, state, constants and enums, not `let` or `requires` bindings of the additional
+  items. Numeric carriers stay compatible whatever their type names, and a numeric range
+  mismatch is not a static error: verification reports it only when the component action
+  reads the argument, and an unread argument gets no result. These forms passed `check` before and are
+  now semantic errors (exit 2):
+  - **Unused formal, bad argument.** `true` or a relation index `part.h[0]` for `a: K`; an
+    unresolved name (`nosuch`), including one bound only by an additional-item `let`; a
+    qualified enum member (`part.Red` or `Color.Red`, write `Red`); a value of another component's enum
+    (`other.tone`, type `other.Tone`) for a `part.Color` formal; a conditional with a
+    non-Bool condition (`if 1 then 0 else 0`); a root `def` called with a badly typed
+    argument (`rp(true)` for `def rp(v: Int)`). Parentheses, a later argument, a later
+    reference and a later action do not change this.
+  - **Used formal whose substituted body happened to type.** `put(a in 0..1) { flag = a }` or
+    `put(a: K) { flag = a }` with `flag: Bool` and argument `true`;
+    `put(a: K) { m[a] = true }` with `m: Map<C, Bool>` and enum argument `R`.
+  - **Duplicate formals.** `(a: K, a: K)` with arguments `true, 0`, where substitution erased
+    the first argument.
+  - **Internal action with an invalid formal declaration.** `internal part.put` with
+    `part.put(0)` where the component declares `a: Int`, `a in 1..0`, `a: Nope` or a
+    struct-typed `a: T`. The component's own `check` rejects these declarations too.
+
+  Migration: pass a value of the formal's type, using a header parameter when it comes from
+  outside the root, or correct the component. There is no automatic migration. No form in
+  the 610-form on-disk corpus changed; messages and evidence are in
+  [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md).
+  A root argument error points at the whole argument, its own parentheses included, or at an
+  inner span within it; CLI and Worker `loc` is its start, and LSP reports UTF-16 start and
+  end. The message is bare, without a component wrapper, and action and Kernel metadata do
+  not change. Error order: immediate lowering, model assembly, queued arguments in authored
+  order, then init and component checks.
+  A conditional with a Bool, ranged or named expected type checks its arms against that type,
+  so `m[if c then 0 else true]` with `m: Map<A, Bool>` names `Named("A")` rather than
+  `Range(0, 1)`. Other conditionals, including an `Int` expectation, still check their arms
+  against the first arm's type. This changed no admission result on the measured forms (the
+  linked note states them).
+  Rust API: public `SyncRef` requires `arg_spans`. `into_validated_syntax` validates before
+  discarding private metadata; `syntax`, `kernel_ast_v1` and `into_syntax` stay raw and lossy.
+  The three migrated CLI callers each add one full core validation, with no observable change
+  in CLI output, because the same command has already validated that source.
+  #1517 stays open until the product gate passes on merged `main`.
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, `check` / `verify` emits a
   `fair_not_inherited` warning in JSON `warnings`; write

@@ -514,10 +514,27 @@ impl<'a> Parser<'a> {
         self.expect_symbol(".")?;
         let action = self.expect_ident()?;
         self.expect_symbol("(")?;
+        let mut args = Vec::new();
+        let mut arg_spans = Vec::new();
+        if !self.eat_symbol(")") {
+            loop {
+                let start = self.peek().span;
+                args.push(self.expression(0)?);
+                arg_spans.push(join_span(start, self.last_span()));
+                if self.eat_symbol(")") {
+                    break;
+                }
+                self.expect_symbol(",")?;
+                if self.eat_symbol(")") {
+                    break;
+                }
+            }
+        }
         Ok(SyncRef {
             alias,
             action,
-            args: self.expression_list(")")?,
+            args,
+            arg_spans,
         })
     }
 

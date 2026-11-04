@@ -73,10 +73,12 @@ compose OrderSystem {
     2. **New rejection:** `action s() = b.go(t) { let t = true }` no longer
        checks when the additional `let` is the only declaration of `t`.
        For the measured five-line component with
-       `action go(v: Bool) { flag = v }`, the exact diagnostic is exit 2,
+       `action go(v: Bool) { flag = v }`, the exact diagnostic since #1517 is exit 2,
        `result: "error"`, `kind: "semantics"`, message
-       `invalid model expression: public Kernel cannot type identifier 't' at 4:24`,
-       and `loc: {"line": 4, "column": 24}`. The location depends on the input;
+       `invalid model expression: public Kernel cannot type identifier 't' at 4:21`,
+       and `loc: {"line": 4, "column": 21}`, the argument in the compose. Before #1517
+       it was the component wrapper at 2:3, naming `bv.fsl:4:24`, the position of `t`
+       in the substituted component. The location depends on the input;
        it is not a fixed location for every rejected reference.
     3. **Rewrite:** declare a header parameter, for example
        `action s(t: Bool) = b.go(t) { }`, and supply the intended value at its
@@ -119,8 +121,12 @@ compose OrderSystem {
     retained. Its printer uses the source member spelling. Public header names
     remain legal; private capturers use the shared hygiene rules instead.
     Display-only provenance on the reified node distinguishes these bare reads
-    from conversion, abstraction, and user-qualified enum literals, whose owner
-    qualification is preserved; semantic Kernel AST/JSON output is unchanged.
+    from checker-generated enum members, such as enum conversion and abstraction
+    expansions, whose owner qualification is preserved; semantic Kernel AST/JSON
+    output is unchanged. There is no user-written qualified enum literal: `E.R` in
+    a spec, and `part.Red`, `Color.Red` or `part.Color.Red` in a compose, are
+    rejected as untypable identifiers, measured on `check` for root reads and
+    used-formal actuals. Since #1517 an unused-formal actual is rejected too.
     Pattern collisions follow the ordinary type checker's aggregate phase:
     a pattern sharing a normalized non-typed `count` or `sum` binder is accepted
     exactly as in the standalone component, while non-expanding `forall` and
@@ -282,10 +288,12 @@ Static checks (check stage, `kind: "type"`):
 Synchronized action arguments are matched **structurally**, not nominally. During
 compose expansion, component declarations are prefixed (`core__TaskId`,
 `note__NoteId`), then each synchronized action body is copied with its formal
-parameter substituted by the argument expression. There is no check that the
-argument's declared type name equals the callee's parameter type name; both are
-encoded as bounded integer values, and the callee state's implicit `_bounds_*`
-invariant enforces the target range during verification.
+parameter substituted by the argument expression. Before substitution, `check` types
+each argument against the formal (#1517). Numeric arguments are not matched by name: a
+numeric argument is accepted for a numeric formal whatever its type name, both are encoded
+as bounded integer values, and the callee state's implicit `_bounds_*` invariant enforces
+the target range during verification. Other kinds must match: a Bool or an enum value is
+rejected for a numeric formal, and an enum value is rejected for a formal of another enum.
 
 For example, this composition is accepted and verifies because both domains are
 `0..2`:
@@ -358,6 +366,26 @@ truthful. Native `testgen` therefore selects the documented explicit compose met
 constructor before export; it passes checked names/order plus the versioned
 single-path testgen trace into the same normalized target adapter and preserves
 compose support without weakening the public contract.
+
+### #1517 accepted amendment: root argument validation
+
+[Root-argument validation](DESIGN-sync-argument-root-validation.md) types ALL used and
+unused actuals before substitution, in root header context only.
+
+Breaking removal (#1517): forms that passed `check` are now semantic errors, as listed in
+that note. They are unused formals receiving a badly typed actual, used formals whose
+substituted body happened to type, duplicate formals with a badly typed erased actual, and
+internal actions with invalid formal declarations. The on-disk corpus has no such form.
+Numeric carrier and range behavior in section 2.1 stays unchanged. Root diagnostics use
+authored whole half-open argument spans, or an inner span within the argument, not consuming
+component locations or retagged action or Kernel metadata. Immediate lowering errors, model
+assembly, queued typing, then init and component checks define precedence.
+
+The new public `SyncRef` metadata breaks Rust constructors. A fallible validated projection
+supplements the raw, lossy conversions and migrates three CLI callers, adding one full core
+validation per call. Those callers add no CLI-observable rejection, because the same command
+has already validated the source, and their cost is not measured in isolation. #1517 stays
+open until the product gate passes on merged `main`.
 
 ## 4. Implementation notes
 

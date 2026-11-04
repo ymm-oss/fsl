@@ -322,6 +322,7 @@ pub struct KernelSpec {
     /// `check`/`verify` merge these with [`model_warnings`].
     diagnostics: Vec<Value>,
     names: naming::NameMap,
+    root_actuals: Vec<model::RootActual>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -337,6 +338,8 @@ pub struct ProjectionDef {
 ///
 /// This is used by native structural tools that clone and mutate the typed
 /// surface tree before re-running the ordinary semantic lowering gate.
+/// Checks only the supplied surface; it cannot recover obligations erased by
+/// a raw [`KernelSpec::into_syntax`] projection.
 ///
 /// # Errors
 ///
@@ -350,23 +353,41 @@ pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError>
         projections: Vec::new(),
         diagnostics: Vec::new(),
         names: naming::NameMap::default(),
+        root_actuals: Vec::new(),
     })
 }
 
 impl KernelSpec {
+    /// Raw, nonvalidating projection; does not serialize original-actual metadata.
     #[must_use]
     pub fn kernel_ast_v1(&self) -> Value {
         self.spec.kernel_ast_v1()
     }
 
+    /// Raw, nonvalidating surface view, without original-actual obligations.
     #[must_use]
     pub fn syntax(&self) -> &SurfaceSpec {
         &self.spec
     }
 
+    /// Raw, nonvalidating and lossy projection. Use
+    /// [`Self::into_validated_syntax`] to validate before discarding obligations.
     #[must_use]
     pub fn into_syntax(self) -> SurfaceSpec {
         self.spec
+    }
+
+    /// Validate the complete kernel before discarding private lowering metadata.
+    /// Returns the original surface, not a reconstruction of the checked model.
+    /// This performs one full core-model validation, without invoking a solver.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ModelError`] for any failure from [`build_model`], including
+    /// invalid original root actuals whose formals were unused.
+    pub fn into_validated_syntax(self) -> Result<SurfaceSpec, ModelError> {
+        build_model(self.clone())?;
+        Ok(self.spec)
     }
 
     #[must_use]
@@ -401,6 +422,9 @@ impl KernelSpec {
     #[must_use]
     pub fn with_source_file(mut self, source_file: impl AsRef<str>) -> Self {
         self.origins.set_source_file(source_file.as_ref());
+        for actual in &mut self.root_actuals {
+            actual.source_file = Some(source_file.as_ref().to_owned());
+        }
         self
     }
 }
@@ -958,6 +982,7 @@ fn lower_direct_spec_with_origins(
         projections: Vec::new(),
         diagnostics: Vec::new(),
         names: naming::NameMap::default(),
+        root_actuals: Vec::new(),
     })
 }
 

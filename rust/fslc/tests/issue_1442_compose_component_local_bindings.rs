@@ -837,7 +837,8 @@ fn breaking_removal_sync_arguments_do_not_read_additional_lets() {
         "issue-1442-sync-argument-scope",
         &[("bv.fsl", part), ("s.fsl", source)],
     );
-    // The base binary accepted this input (exit 0); this branch rejects it.
+    // Rejected before #1517 too (exit 2), as a component failure at the use (2:3);
+    // the packet below pins the root owner.
     let rejected = check(&dir, "s.fsl");
     assert_eq!(rejected.1, 2, "{}", rejected.0);
     assert_eq!(rejected.0["result"], "error");
@@ -856,8 +857,24 @@ fn breaking_removal_sync_arguments_do_not_read_additional_lets() {
         direct.0["message"],
         "invalid model expression: public Kernel cannot type identifier 't' at 4:24"
     );
-    let preserved = owner_refusal::checks(&direct, &rejected, "bv.fsl", "b.go", "s.fsl", (2, 3));
-    owner_refusal::assert_preserved(preserved.map(|passed| usize::from(!passed)));
+    // R2 owns this authored actual at the root, outside additional-body lets.
+    let versions = fsl_core::version_metadata(
+        "fslc-rust",
+        env!("CARGO_PKG_VERSION"),
+        "native-z3",
+        fsl_solver_z3::version(),
+    );
+    assert_eq!(
+        rejected,
+        (
+            json!({
+                "fsl":"1.0","result":"error","kind":"semantics",
+                "message":"invalid model expression: public Kernel cannot type identifier 't' at 4:21",
+                "loc":{"line":4,"column":21},"versions":versions
+            }),
+            2
+        )
+    );
 
     for (name, declarations, params) in [
         ("param", "", "h: Bool"),

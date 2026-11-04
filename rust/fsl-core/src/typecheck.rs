@@ -1387,6 +1387,41 @@ fn validate_expression(
     ValidationPhase::normalized().check(expr, env, model, span, expected, self_relations)
 }
 
+/// Check an original root actual with its authored fallback from the start.
+/// Expanded definitions can carry their own ranges; only an inner range inside
+/// this actual belongs to this diagnostic. Root file identity stays with the
+/// private obligation, separate from the bare presentation origin.
+pub(crate) fn validate_authored_actual(
+    expr: &Expr,
+    model: &KernelModel,
+    bindings: &[(String, TypeRef)],
+    expected: &TypeRef,
+    authored: Span,
+) -> Result<(), TypecheckError> {
+    let env = expression_env(model, bindings);
+    validate_expression(
+        expr,
+        &env,
+        model,
+        authored,
+        Some(expected),
+        &SelfRelations::new(),
+    )
+    .map_err(|mut error| {
+        error.span = Some(
+            error
+                .span
+                .filter(|inner| {
+                    authored.start.offset <= inner.start.offset
+                        && inner.start.offset <= inner.end.offset
+                        && inner.end.offset <= authored.end.offset
+                })
+                .unwrap_or(authored),
+        );
+        error
+    })
+}
+
 fn validate_expression_in_phase(
     expr: &Expr,
     env: &TypeEnv,
@@ -1643,11 +1678,28 @@ fn validate_expression_inner(
             validate(condition, env, spans.condition, Some(&TypeRef::Bool))?;
             let then_phase = phase.after_patterns(condition);
             let else_phase = then_phase.after_patterns(then_expr);
+            // Admission requires mutually compatible arms. Compatibility is an
+            // equivalence only over scalars: with `Int` inside a container, an
+            // arm can match the expectation but not its sibling, so a container
+            // conditional keeps the first arm's carrier. A Bool, ranged or named
+            // expectation admits the same arms and lets a diagnostic name the
+            // supplied type; `Int` would only hide a more specific first arm.
+            let branch_type = match expected {
+                Some(expected)
+                    if matches!(
+                        resolve(model, expected)?,
+                        TypeRef::Bool | TypeRef::Range(_, _) | TypeRef::Named(_)
+                    ) =>
+                {
+                    expected
+                }
+                _ => &ty,
+            };
             for (expr, span, phase) in [
                 (then_expr, spans.then_expr, &then_phase),
                 (else_expr, spans.else_expr, &else_phase),
             ] {
-                phase.check(expr, env, model, span, Some(&ty), self_relations)?;
+                phase.check(expr, env, model, span, Some(branch_type), self_relations)?;
             }
         }
         Expr::Is { expr, pattern } => {
