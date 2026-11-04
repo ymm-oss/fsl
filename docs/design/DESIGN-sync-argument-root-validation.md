@@ -109,12 +109,12 @@ test inputs.
 | Unused formal | `unusedColor(a: Color) { }` | `part.unusedColor(part.Red)` | `invalid model expression: public Kernel cannot type identifier 'part.Red' at 6:24` |
 | Unused formal | `unusedK(a: K) { last = 0 }` | `part.unusedK(if 1 then 0 else 0)` | `invalid model expression: expression of type Int is not assignable to Bool at 6:23` |
 | Unused formal | `unusedBool(a: Bool) { }`, root `def rp(v: Int) = v == part.last` | `part.unusedBool(rp(true))` | `invalid model expression: expression of type Named("part.K") is not assignable to Bool at 6:23` |
-| Duplicate formal | `put(a: K, a: K) { last = a }` | `part.put(true, 0)` | `invalid model expression: expression of type Bool is not assignable to Named("part.K") at 5:16` |
+| Duplicate formal | `put(a: K, a: K) { last = a }` | `part.put(true, 0)` | `invalid model expression: expression of type Bool is not assignable to Named("part.K") at 5:16`; since #1680, the repeated formal: see below |
 
 The internal-declaration and used-formal components also fail their own standalone `check`;
 the unused-formal components pass it, and only the root actual is wrong. The duplicate-formal
 row also fails standalone; its first actual is erased by substitution, and `part.put(0, 1)`
-for the same formals still passes `check`. The test also pins further unused spellings of
+for the same formals passed `check` until #1680. The test also pins further unused spellings of
 these classes: a root `def` whose result or body does not type (`rp(0)` for `a: K`, `rb(0)`
 reading a relation index), `Color.Red`, `part.Color.Red`, a name bound only by an additional
 `let`, a pattern binder (`if part.o is some(v) then v else 0`), a bare component state name
@@ -219,6 +219,122 @@ are errors on both, and 126 of those errors differ only in the type named at the
 location, for example `Range(0, 1)` to `Named("A")`. As a control, the same matrix on a binary
 that applies the expectation to every conditional shows 48 admission differences. This is a
 finite measurement, not an equivalence proof.
+
+## Repeated formal names (#1680)
+
+**Breaking removal (#1680).** A formal or input name that an earlier formal of the same action
+already took is refused on every route that loads the document (exit 2); the routes table below
+gives each one's kind and location. Substitution consumes a
+synchronized component action's formals and `internal` keeps an action from being lifted, so
+`build_model`'s check never saw them: `put(a: K, a: K)` with `part.put(0, 1)` kept the last
+actual only, and swapping the actuals flipped the verdict. Each form below passed `check` (exit
+0) on base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654` and is rejected (exit 2, `result: "error"`,
+`kind: "semantics"`) on head `a7e54a21b390dec8df9cfbfdf6a5f113186b454f`, loc `root.fsl` 2:3, each
+binary built from its own tree with Rust 1.98.0, with `FSLC_CACHE=off`.
+
+| Component action | Root | Base verdicts: bmc, explicit, induction, `fsl-bfs` | Head message |
+|---|---|---|---|
+| `put(a: K, a: K) { last = a }`, internal | `part.put(0, 1)` | violated on all four | `component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81) at root.fsl:2:3` |
+| `put(a: K, a: K) { last = a }`, internal | `part.put(1, 0)` | no violation on all four | the same |
+| `put(a in 0..1, a in 0..1) { last = a }`, internal | `part.put(0, 1)` | violated on all four | the same, at `piece.fsl:1:74` |
+| `put(a: K, b: K, a: K) { last = a }`, internal | `part.put(0, 1, 0)` | no violation on all four | the same, at `piece.fsl:1:87` |
+| `put(a: K, a: K) { last = 0 }`, internal and unreferenced, `idle` reachable | `part.idle()` | no violation on all four | the same as the first row |
+| `put(a: K, a: K) { last = a }`, internal and unreferenced, no other action | none | exit 2 on bmc, explicit and induction (bmc reports `spec has no actions`); `fsl-bfs` answers | the same as the first row |
+
+In the last two rows nothing reads the repeated formal, so no run could observe the defect. They
+are removed too because the requirement is refusal on every route.
+
+The refusal runs in compose lowering after every immediate lowering failure and before model
+assembly, so it sits between phases 1 and 2 of "Error phases" above. `part.put(0)` keeps its arity
+error at the root. `part.put(true, 0)` moves from the `Bool` actual at 5:16 to the repeated formal,
+because a declaration failure precedes typing the actuals. That is the one forced change to the
+`duplicate_formal_with_erased_bool` row of `issue_1517_breaking_removals.rs`.
+
+Other routes on the first two forms, with a component action `put(a: K, a: K) { last = a }`. Head
+is exit 2 with the same wrapper on each, `loc` 2:3 except that `lint`, `fmt` and `fmt --check` have none.
+
+| Route | Base, `part.put(0, 1)` | Base, `part.put(1, 0)` |
+|---|---|---|
+| `verify`, bmc, explicit, induction | exit 1, `violated` | exit 0, `verified` or `proved` |
+| `refine`, the root as implementation, mapped by `step` | exit 0, `refines` | exit 0, `refines` |
+| `replay --trace` | exit 1, `nonconformant` | exit 0, `conformant` |
+| `replay --from-log`, one `step` record | exit 1, `nonconformant` | exit 1, `nonconformant` |
+| `scenarios`, `mutate` | exit 1, `violated` | exit 0 |
+| `testgen`, `html`, `ledger` | exit 1 | exit 0 |
+| `diff` against the `part.put(1, 0)` root, either side | exit 1, `semantic_diff` | exit 0, `semantic_diff` |
+| `lint` | exit 0, `lint` | exit 0, `lint` |
+| `fmt` | exit 0 | exit 0 |
+| `fmt --check` | exit 1, `format_check` | exit 1, `format_check` |
+| `conformance` | exit 0, `conformance` | exit 0, `conformance` |
+| `explain` | exit 0, `explained` | exit 0, `explained` |
+| `analyze` | exit 0, `analyzed` | exit 0, `analyzed` |
+| `kernel`, `typestate` | exit 2, cannot preserve component filenames | exit 2, the same |
+
+| Route | Base | Head |
+|---|---|---|
+| `spec` action, requirements action, process transition input, synchronized root action, glue action | refused, `duplicate action parameter 'a'`, located at the first token spelled like the name | same message, located at the repeated name; a state or action declared earlier no longer takes the location |
+| FSL5 event input | refused, message `duplicate action parameter 'x' at root.fsl:6:3`, located at the event | `duplicate action parameter 'x'`, located at the repeated input |
+| Domain command input | refused, message `duplicate action parameter 'amount' at root.fsl:18:5; conflicting assignment at root.fsl:11:5`, located at the `decide` | `duplicate action parameter 'amount'`, located at the repeated input |
+| Domain event field an effect completion or a saga observe action takes as a formal | refused, located at the first token spelled like the name | same message, located at the repeated field |
+| Domain event field no action takes as a formal | accepted | accepted; see below |
+| `domain analyze`, `domain expand` on a repeated command input | exit 0 | exit 0: neither builds a model. `check` refuses what `expand` prints, at the printed formal |
+| `domain generate`, `domain testgen` on a repeated command input | refused, as `check` | refused, as `check` |
+| Inline `implements` abstraction's action | refused, `kind: "type"`, `duplicate action parameter 'x'`, located on the `implements` with no file or position | `implements "abs.fsl" failed to check (step: duplicate action parameter 'x' at abs.fsl:1:77)`, `kind: "type"`, located on the `implements` |
+| Inline `implements` of a compose abstraction whose component repeats a formal | accepted at this step | `component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81)`, `kind: "type"`, located on the `implements` |
+| `refine`, repeat in a standalone implementation or abstraction file | refused, no location | same message, `kind: "semantics"`, located at the repeated name; the packet does not name which file |
+| Lifted component action, referenced or not | refused, no location | the component wrapper above |
+| Internal component action, referenced or not | accepted | the component wrapper above |
+| `def` parameters, in a `spec`, a root or a component | refused, at the `def` | unchanged |
+| Action map parameters of a refinement | refused, `action map parameters for 'go' must match the impl action parameter names and order` | unchanged |
+| Log mapping `action ev(a, a) -> put(a)` under `replay --from-log` | accepted | accepted; see below |
+
+`def` is not the same defect: its refusal already ran on every route and no actual was dropped, so
+its `name` kind and its location at the `def` stay. An action map parameter list has to equal the
+implementation's, whose own repeat is refused above. A repeated `let` in an action body and a
+nested quantifier binder of the same name still check; both are sequential scoping and neither
+drops an actual. A lowered declaration's origin is not the repeated name, so a domain command's
+or an FSL5 event's message no longer cites it. A generated action with no authored formal, or one
+built by hand, has empty `param_spans` and the refusal points at the action. A domain action built
+from command inputs or event fields carries their name spans, and a formal only the lowering adds,
+an effect's correlation or a process binder, carries its declaration.
+
+`kind: "type"` on the inline `implements` rows is not specific to this refusal. Every failure of
+the other file on that path shares `RefinementErrorKind::Other`, so changing the kind would reach
+those failures too. Only the repeated formal's message is rewritten; `duplicate action 'step'` in
+the same file keeps its message.
+
+A log mapping's parameters are not formals. `replay --from-log` compares their names as a set with
+the keys of the record's `params` object and binds nothing by position, so `ev(a, a)` is `ev(a)`:
+one log field, no second value. Over a matching log, a mismatching log and a log with an extra
+field, the two mappings gave equal packets and exits, so this list stays accepted. A record's
+repeated JSON key is a matter of the log's JSON parser, not of the mapping, and was not measured.
+
+A domain event field is a formal only when an effect completion or a saga observe action lowers the
+event. Otherwise `event Added { amount: Bool  amount: Bool }` still checks, because no value is lost.
+`emits` takes no payload (`emits Added { amount = amount, amount = false }` is a parse error), and
+an `evolve` that reads `amount` needs a command input of that name, or it is `unknown domain symbol`. `check`, `verify` on explicit and bmc, `domain
+expand`, `domain analyze` and `domain testgen` gave the output of one field, and Kernel v1 and v2 gave
+it up to positions and, in v2, the provenance ids that embed them. Two things do differ. The first declared type is ignored:
+`amount: Int  amount: Bool` checks when the evolve needs `Bool`. `domain generate` writes the field
+twice in `types.ts` and `decide.ts`, both from the same command input, which [R] a TypeScript
+compiler refuses; running one would settle that. Neither loses a value, so the form stays accepted.
+
+Rust API: `SpecItem::Action`, `SyncAction` and `RequirementAction` require `param_spans`, and
+`ProcessTransition` requires `input_spans`. Both are parallel to the formals, and neither reaches
+Kernel projections.
+
+On-disk transition set (empty). Base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`, head
+`a7e54a21b390dec8df9cfbfdf6a5f113186b454f`, each built from its own materialized tree in its own
+target directory with `cargo +1.98.0 build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc
+--locked --offline`. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (617
+forms: 23/195/399) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable
+and with `FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All
+2468 pairs had equal complete stdout, stderr and exit, with no field excluded: 0 ok-to-error and 0
+error-to-ok transitions. Of the 30 inline inputs of the rewritten
+`issue_1517_breaking_removals.rs`, `duplicate_formal_with_erased_bool` stays an error with the
+message above and 29 are byte-identical. Of the 59 inline inputs of `issue_1680_duplicate_formals.rs`,
+checked the same way, 28 are byte-identical, 14 go from exit 0 to exit 2 and 17 stay exit 2 with a new
+message or location. Every one of the 31 that changed repeats a formal.
 
 ## Evidence and open gates
 

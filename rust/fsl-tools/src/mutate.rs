@@ -874,6 +874,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
             SpecItem::Action {
                 name,
                 params,
+                param_spans,
                 items,
                 span,
                 fair,
@@ -988,6 +989,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                     let replacement = SpecItem::Action {
                         name: name.clone(),
                         params: params.clone(),
+                        param_spans: param_spans.clone(),
                         items: items.clone(),
                         span: *span,
                         fair: false,

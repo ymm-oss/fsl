@@ -3336,6 +3336,48 @@ compose OrderSystem {
   The three migrated CLI callers each add one full core validation, with no observable change
   in CLI output, because the same command has already validated that source.
   #1517 stays open until the product gate passes on merged `main`.
+- **Repeated formal names (breaking removal, #1680).** `check` refuses a formal or input name
+  an earlier formal of the same action already took: an action, a requirements action, a process
+  transition, an event, a domain command input, an event field that an effect or saga action takes
+  as a formal, a synchronized root action, an action of an inline `implements` abstraction and
+  every action of a compose component. In a component this covers an action that is
+  lifted, synchronized or `internal` and never referenced, none of which `build_model` saw
+  once substitution or `internal` had removed it. These forms passed `check` before, and
+  `put(a: K, a: K)` read the last actual and dropped the first, so `part.put(0, 1)` and
+  `part.put(1, 0)` disagreed on the verdict:
+  - `internal part.put` with `part.put(0, 1)`, in either order, for `put(a: K, a: K)`,
+    `put(a in 0..1, a in 0..1)` or `put(a: K, b: K, a: K)`.
+  - `internal part.put` with no reference to it, whatever its body does.
+
+  The refusal exits 2 with `kind: "semantics"`, except through an inline `implements`, whose
+  failures in the other file are all `kind: "type"`. A component reports
+  `component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81) at root.fsl:2:3`,
+  with `loc` at the `use` like other component failures. An inline `implements` reports
+  `implements "abs.fsl" failed to check (step: duplicate action parameter 'x' at abs.fsl:1:77)`,
+  with `loc` on the `implements`. Elsewhere the message is `duplicate action parameter 'a'` and
+  `loc` is the repeated name; it used to be the first token spelled like the name, or for a
+  domain command the `decide` and for an event the event. `lint` and `fmt` give the same message
+  and may omit `loc`.
+
+  The refusal reaches every route that loads the document. For the component forms above
+  `verify` no longer returns a verdict, `refine` no longer returns `refines`, `replay` no longer
+  returns `conformant` or `nonconformant`, and `lint`, `fmt`, `conformance`, `explain` and
+  `analyze`, which exited with their own results, exit 2. `domain analyze` and `domain expand` build
+  no model and still exit 0 on a repeated command input; `check` refuses what `expand` prints.
+
+  It comes
+  before typing the actuals, so `part.put(true, 0)` now reports it instead of the `Bool`
+  actual, and after immediate lowering failures, so `part.put(0)` keeps its arity error.
+  `def` parameters were already refused on every route, at the `def`, and are unchanged. These
+  stay accepted because no actual is lost: a log mapping's `action ev(a, a) -> put(a)`, whose
+  parameters name one log field, and a domain event field that no action takes as a formal, since
+  `emits` takes no payload.
+  Migration: give each formal its own name, and pass each actual to the formal it belongs to.
+  Measured forms and the corpus sweep are in
+  [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md).
+  Rust API: `SpecItem::Action`, `SyncAction` and `RequirementAction` require `param_spans`, and
+  `ProcessTransition` requires `input_spans`. Empty means no authored formal: the refusal then
+  points at the action.
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, `check` / `verify` emits a
   `fair_not_inherited` warning in JSON `warnings`; write

@@ -720,6 +720,9 @@ pub fn lower_compose_with_options(
             ComposeItem::Use { .. } | ComposeItem::Internal { .. } => {}
         }
     }
+    for alias in &order {
+        reject_duplicate_component_formals(&components[alias])?;
+    }
     let inline_count = static_items
         .iter()
         .filter_map(|item| match item {
@@ -840,6 +843,43 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
         kind: CoreErrorKind::Semantics,
         diagnostic_code: None,
     }
+}
+
+/// Refuse a repeated formal in every action of a component, whether it is lifted,
+/// internal and synchronized, or internal and unreferenced. Substitution consumes
+/// a synchronized action's formals and an internal one is never lifted, so
+/// `build_model` sees neither, and a repeated name would keep only its last actual.
+fn reject_duplicate_component_formals(component: &Component) -> Result<(), CoreError> {
+    for item in &component.spec.items {
+        let SpecItem::Action {
+            name,
+            params,
+            param_spans,
+            span,
+            ..
+        } = item
+        else {
+            continue;
+        };
+        if let Some((formal, formal_span)) =
+            crate::model::duplicate_formal(params, param_spans, *span)
+        {
+            return Err(component_error(
+                &component.path,
+                component.use_span,
+                &error_at(
+                    format!(
+                        "{}.{name}: {}",
+                        component.alias,
+                        crate::model::duplicate_formal_message(formal)
+                    ),
+                    formal_span,
+                ),
+                "failed to check",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn component_rewrite_error(
@@ -1014,6 +1054,7 @@ fn rewrite_component_item_inner(
         SpecItem::Action {
             name,
             params,
+            param_spans,
             items,
             span,
             fair,
@@ -1030,6 +1071,7 @@ fn rewrite_component_item_inner(
             SpecItem::Action {
                 name: prefix(alias, &name),
                 params,
+                param_spans,
                 items: rewrite_action_items(items, component, &bound, span)?,
                 span,
                 fair,
@@ -1876,6 +1918,7 @@ fn resolve_alias_action(
     let SpecItem::Action {
         name,
         params,
+        param_spans,
         items,
         span,
         fair,
@@ -1890,6 +1933,7 @@ fn resolve_alias_action(
     Ok(SpecItem::Action {
         name,
         params,
+        param_spans,
         items: resolve_alias_action_items(items, components, &bound, ComposeWriteContext::Glue)?,
         span,
         fair,
@@ -2285,6 +2329,7 @@ fn sync_action(
         SpecItem::Action {
             name: action.name.clone(),
             params,
+            param_spans: action.param_spans.clone(),
             items,
             span: action.span,
             fair: action.fair,

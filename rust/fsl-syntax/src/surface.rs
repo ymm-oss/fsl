@@ -160,6 +160,12 @@ pub enum SpecItem {
     Action {
         name: String,
         params: Vec<Param>,
+        /// One span per formal, parallel to `params`: the name as written, also
+        /// when a dialect lowers it from a process input, a domain command input
+        /// or an event field, and the declaration for a formal only a dialect
+        /// adds. Empty when no formal was authored or the action is built by
+        /// hand, so a formal's diagnostic falls back to `span`.
+        param_spans: Vec<Span>,
         items: Vec<ActionItem>,
         span: Span,
         fair: bool,
@@ -332,6 +338,9 @@ pub struct ProcessTransition {
     pub target: String,
     pub actor: String,
     pub inputs: Vec<Param>,
+    /// One span per input name as written, parallel to `inputs`; see
+    /// `SpecItem::Action`'s `param_spans`.
+    pub input_spans: Vec<Span>,
     pub guard: Option<Expr>,
     pub assignments: Vec<(String, Expr)>,
     pub covers: Option<ProcessCover>,
@@ -611,6 +620,8 @@ pub enum RequirementActionItem {
 pub struct RequirementAction {
     pub name: String,
     pub params: Vec<Param>,
+    /// One span per formal name as written; see `SpecItem::Action`'s `param_spans`.
+    pub param_spans: Vec<Span>,
     pub items: Vec<RequirementActionItem>,
     pub span: Span,
     pub fair: bool,
@@ -874,6 +885,8 @@ pub struct SyncRef {
 pub struct SyncAction {
     pub name: String,
     pub params: Vec<Param>,
+    /// One span per formal name as written; see `SpecItem::Action`'s `param_spans`.
+    pub param_spans: Vec<Span>,
     pub refs: Vec<SyncRef>,
     pub items: Vec<ActionItem>,
     pub span: Span,

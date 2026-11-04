@@ -1408,6 +1408,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             items.push(SpecItem::Action {
                 name: transition.name.clone(),
                 params: vec![Param::Typed("c".to_owned(), qualified(&process.entity))],
+                param_spans: Vec::new(),
                 items: action_items,
                 span: transition.span,
                 fair: true,
@@ -1990,6 +1991,7 @@ fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
         SpecItem::Action {
             name,
             params,
+            param_spans,
             items,
             span,
             fair,
@@ -1999,6 +2001,7 @@ fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
         } => SpecItem::Action {
             name,
             params,
+            param_spans,
             items,
             span,
             fair,
@@ -2102,6 +2105,7 @@ fn lower_requirement_action(
             SpecItem::Action {
                 name: action.name.clone(),
                 params: action.params.clone(),
+                param_spans: action.param_spans.clone(),
                 items: ordinary,
                 span: action.span,
                 fair: action.fair,
@@ -2146,6 +2150,7 @@ fn lower_requirement_action(
                     SpecItem::Action {
                         name: branch_name,
                         params: action.params.clone(),
+                        param_spans: action.param_spans.clone(),
                         items,
                         span: action.span,
                         fair: action.fair,
@@ -2761,9 +2766,12 @@ pub(crate) fn lower_resolved_requirements(
                 qualified(&process.process.entity),
             )];
             params.extend(transition.inputs.clone());
+            let mut param_spans = vec![transition.span];
+            param_spans.extend(transition.input_spans.iter().copied());
             items.push(SpecItem::Action {
                 name: transition.name.clone(),
                 params,
+                param_spans,
                 items: body,
                 span: transition.span,
                 fair: event.is_none_or(|event| event.fair),
@@ -3107,6 +3115,7 @@ pub(crate) fn lower_resolved_requirements(
         items.push(SpecItem::Action {
             name: "tick".to_owned(),
             params: Vec::new(),
+            param_spans: Vec::new(),
             items: tick_items,
             span: time_span,
             fair: false,
@@ -3477,6 +3486,7 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
             SpecItem::Action {
                 name: "_governance_noop".to_owned(),
                 params: Vec::new(),
+                param_spans: Vec::new(),
                 items: vec![ActionItem::Requires(Expr::Bool(false), span)],
                 span,
                 fair: false,
@@ -3759,6 +3769,7 @@ fn ai_action(
     SpecItem::Action {
         name,
         params: Vec::new(),
+        param_spans: Vec::new(),
         items: vec![ActionItem::Statement(statement)],
         span,
         fair: false,
@@ -4011,6 +4022,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
         items.push(SpecItem::Action {
             name,
             params: Vec::new(),
+            param_spans: Vec::new(),
             items: action_items,
             span: tool_span(tool_name),
             fair: false,

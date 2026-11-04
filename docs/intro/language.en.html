@@ -3396,6 +3396,45 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   The three migrated CLI callers each add one full core validation, with no observable change
   in CLI output, because the same command has already validated that source.
   #1517 stays open until the product gate passes on merged <code>main</code>.
+- <strong>Repeated formal names (breaking removal, #1680).</strong> <code>check</code> refuses a formal or input name
+  an earlier formal of the same action already took: an action, a requirements action, a process
+  transition, an event, a domain command input, an event field that an effect or saga action takes
+  as a formal, a synchronized root action, an action of an inline <code>implements</code> abstraction and
+  every action of a compose component. In a component this covers an action that is
+  lifted, synchronized or <code>internal</code> and never referenced, none of which <code>build_model</code> saw
+  once substitution or <code>internal</code> had removed it. These forms passed <code>check</code> before, and
+  <code>put(a: K, a: K)</code> read the last actual and dropped the first, so <code>part.put(0, 1)</code> and
+  <code>part.put(1, 0)</code> disagreed on the verdict:
+  - <code>internal part.put</code> with <code>part.put(0, 1)</code>, in either order, for <code>put(a: K, a: K)</code>,
+    <code>put(a in 0..1, a in 0..1)</code> or <code>put(a: K, b: K, a: K)</code>.
+  - <code>internal part.put</code> with no reference to it, whatever its body does.</p>
+<p>The refusal exits 2 with <code>kind: "semantics"</code>, except through an inline <code>implements</code>, whose
+  failures in the other file are all <code>kind: "type"</code>. A component reports
+  <code>component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81) at root.fsl:2:3</code>,
+  with <code>loc</code> at the <code>use</code> like other component failures. An inline <code>implements</code> reports
+  <code>implements "abs.fsl" failed to check (step: duplicate action parameter 'x' at abs.fsl:1:77)</code>,
+  with <code>loc</code> on the <code>implements</code>. Elsewhere the message is <code>duplicate action parameter 'a'</code> and
+  <code>loc</code> is the repeated name; it used to be the first token spelled like the name, or for a
+  domain command the <code>decide</code> and for an event the event. <code>lint</code> and <code>fmt</code> give the same message
+  and may omit <code>loc</code>.</p>
+<p>The refusal reaches every route that loads the document. For the component forms above
+  <code>verify</code> no longer returns a verdict, <code>refine</code> no longer returns <code>refines</code>, <code>replay</code> no longer
+  returns <code>conformant</code> or <code>nonconformant</code>, and <code>lint</code>, <code>fmt</code>, <code>conformance</code>, <code>explain</code> and
+  <code>analyze</code>, which exited with their own results, exit 2. <code>domain analyze</code> and <code>domain expand</code> build
+  no model and still exit 0 on a repeated command input; <code>check</code> refuses what <code>expand</code> prints.</p>
+<p>It comes
+  before typing the actuals, so <code>part.put(true, 0)</code> now reports it instead of the <code>Bool</code>
+  actual, and after immediate lowering failures, so <code>part.put(0)</code> keeps its arity error.
+  <code>def</code> parameters were already refused on every route, at the <code>def</code>, and are unchanged. These
+  stay accepted because no actual is lost: a log mapping's <code>action ev(a, a) -&gt; put(a)</code>, whose
+  parameters name one log field, and a domain event field that no action takes as a formal, since
+  <code>emits</code> takes no payload.
+  Migration: give each formal its own name, and pass each actual to the formal it belongs to.
+  Measured forms and the corpus sweep are in
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-sync-argument-root-validation.md"><code>DESIGN-sync-argument-root-validation.md</code></a>.
+  Rust API: <code>SpecItem::Action</code>, <code>SyncAction</code> and <code>RequirementAction</code> require <code>param_spans</code>, and
+  <code>ProcessTransition</code> requires <code>input_spans</code>. Empty means no authored formal: the refusal then
+  points at the action.
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, <code>check</code> / <code>verify</code> emits a
   <code>fair_not_inherited</code> warning in JSON <code>warnings</code>; write

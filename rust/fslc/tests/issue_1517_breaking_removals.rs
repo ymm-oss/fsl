@@ -117,11 +117,18 @@ fn form(id: &str) -> Form {
                 16,
             )),
         ),
+        // #1680 refuses the repeated formal itself, and a declaration failure comes
+        // before typing the actuals (DESIGN-sync-argument-root-validation, "Error
+        // phases"), so the report moved from the erased actual to the formal.
         "duplicate_formal_with_erased_bool" => (
             narrow("true, 0"),
             "spec Piece { type K = 0..1 state { last: K } init { last = 0 } action put(a: K, a: K) { last = a } }\n"
                 .to_owned(),
-            Some((format!("{BOOL_TO_K} at 5:16"), 5, 16)),
+            Some((
+                component_rejection("duplicate action parameter 'a'", 81),
+                2,
+                3,
+            )),
         ),
         "unused_bool" => (
             narrow("true"),

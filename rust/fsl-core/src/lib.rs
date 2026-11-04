@@ -1347,6 +1347,7 @@ impl PredicateExpander {
             SpecItem::Action {
                 name,
                 params,
+                param_spans,
                 items,
                 span,
                 fair,
@@ -1360,6 +1361,7 @@ impl PredicateExpander {
                     .into_iter()
                     .map(|param| self.expand_param(param))
                     .collect::<Result<_, _>>()?,
+                param_spans,
                 span,
                 fair,
                 meta,

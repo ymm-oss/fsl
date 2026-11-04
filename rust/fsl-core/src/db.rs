@@ -639,6 +639,7 @@ pub(crate) fn lower_db_surface(
         items.push(SpecItem::Action {
             name: action_name,
             params: Vec::new(),
+            param_spans: Vec::new(),
             items: action_items,
             span: migration.span,
             fair: false,
@@ -688,6 +689,7 @@ pub(crate) fn lower_db_surface(
         items.push(SpecItem::Action {
             name: action_name,
             params: Vec::new(),
+            param_spans: Vec::new(),
             items: action_items,
             span: system.database.span,
             fair: false,
