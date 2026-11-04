@@ -1,1 +1,3 @@
 Changed (#1281): explicit decides clean mutant survivors first, the baseline uses auto, and progress lines go to stderr. The BMC fallback retains its kill labels; stdout is unchanged except for the encoding-only residual in DESIGN-mutate §3, where explicit-clean can survive a BMC-only `build_spec` rejection.
+
+A `fslc mutate` progress line now reads `engine=secondary` when the main oracle was clean and a later check (requirements, implements, or the init-bounds override) killed the mutant. It used to name the main-oracle route, for example `killed acceptance (engine=explicit)`, which read as if explicit had produced the kill. Stderr only; stdout is unchanged.
