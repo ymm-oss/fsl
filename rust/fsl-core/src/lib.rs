@@ -1059,6 +1059,7 @@ fn expand_spec_domains(mut spec: SurfaceSpec) -> Result<SurfaceSpec, CoreError> 
             lo: Box::new(Expr::Num(0)),
             hi: Box::new(Expr::Num(count - 1)),
             symmetric: false,
+            span: None,
         });
     }
     for (name, span) in &numbers {
@@ -1073,6 +1074,7 @@ fn expand_spec_domains(mut spec: SurfaceSpec) -> Result<SurfaceSpec, CoreError> 
             lo: Box::new(lo),
             hi: Box::new(hi),
             symmetric: false,
+            span: None,
         });
     }
     // Whatever is left names no declaration. Report the first such bound in
@@ -1300,11 +1302,13 @@ impl PredicateExpander {
                 lo,
                 hi,
                 symmetric,
+                span,
             } => SpecItem::Type {
                 name,
                 lo: Box::new(self.expand_expr(*lo, &mut Vec::new())?),
                 hi: Box::new(self.expand_expr(*hi, &mut Vec::new())?),
                 symmetric,
+                span,
             },
             SpecItem::Struct { name, fields, span } => SpecItem::Struct {
                 name,

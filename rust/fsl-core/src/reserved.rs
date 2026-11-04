@@ -331,7 +331,7 @@ pub(crate) fn check_reserved_names(spec: &SurfaceSpec) -> Result<(), ModelError>
 pub(crate) fn check_type_names(spec: &SurfaceSpec) -> Result<(), ModelError> {
     for item in &spec.items {
         let (name, span) = match item {
-            SpecItem::Type { name, .. } | SpecItem::Enum { name, .. } => (name, None),
+            SpecItem::Type { name, span, .. } | SpecItem::Enum { name, span, .. } => (name, *span),
             SpecItem::Struct { name, span, .. } => (name, Some(*span)),
             _ => continue,
         };

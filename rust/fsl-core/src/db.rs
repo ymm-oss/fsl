@@ -362,6 +362,7 @@ pub(crate) fn lower_db_surface(
             lo: Box::new(Expr::Num(schema_lo)),
             hi: Box::new(Expr::Num(schema_hi)),
             symmetric: false,
+            span: None,
         },
         SpecItem::Enum {
             name: "Column".to_owned(),

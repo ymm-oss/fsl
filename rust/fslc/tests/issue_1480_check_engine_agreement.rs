@@ -573,6 +573,105 @@ fn an_unbounded_typed_binder_is_refused_at_check() {
     assert_eq!(check(finite).0, 0);
 }
 
+fn check_tree(files: &[(&str, &str)], args: &[&str]) -> (i32, Value) {
+    let dir = std::env::temp_dir().join(format!(
+        "issue-1480-agreement-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, source) in files {
+        std::fs::write(dir.join(name), source).unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(args)
+        .current_dir(&dir)
+        .env("FSLC_CACHE", "off")
+        .output()
+        .unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    (
+        output.status.code().unwrap_or(-1),
+        serde_json::from_slice(&output.stdout).unwrap_or(Value::Null),
+    )
+}
+
+/// A declared `Bool` is refused where it is written: lowering prefixes a component's type
+/// names, so the composed model alone would read `p.Bool` and let the word mean the
+/// builtin in `state` and the declaration in a binder.
+#[test]
+fn a_component_cannot_declare_bool() {
+    const ROOT: &str = "compose S {\n  use P as p from \"c.fsl\"\n}\n";
+    for (declaration, column) in [
+        ("enum Bool { A, B, C }", 3),
+        ("type Bool = 0..5", 3),
+        ("symmetric type Bool = 0..5", 3),
+        ("struct Bool { f: 0..1 }", 3),
+    ] {
+        let component = format!(
+            "spec P {{\n  state {{ d: Bool, n: Int }}\n  init {{ d = false n = 0 }}\n  action a() {{ d = d }}\n  {declaration}\n}}\n"
+        );
+        // Standalone: at the declaration, not at the earlier `Bool` in `state`.
+        let alone = check(&component);
+        assert_eq!(alone.0, 2, "{declaration}: {}", alone.1);
+        assert_eq!(alone.1["kind"], "name", "{declaration}: {}", alone.1);
+        assert_eq!(alone.1["loc"]["line"], 5, "{declaration}: {}", alone.1);
+        assert_eq!(
+            alone.1["loc"]["column"], column,
+            "{declaration}: {}",
+            alone.1
+        );
+        for command in [
+            &["check", "root.fsl"][..],
+            &[
+                "verify",
+                "root.fsl",
+                "--engine",
+                "bmc",
+                "--depth",
+                "2",
+                "--no-cache",
+            ],
+        ] {
+            let refused = check_tree(&[("root.fsl", ROOT), ("c.fsl", &component)], command);
+            assert_eq!(refused.0, 2, "{declaration}: {}", refused.1);
+            let message = refused.1["message"].as_str().unwrap();
+            assert!(
+                message.starts_with(&format!(
+                    "component \"c.fsl\" failed to lower ('Bool' is a reserved FSL type name \
+                     and cannot be declared at c.fsl:5:{column})"
+                )),
+                "{declaration}: {message}"
+            );
+            assert_eq!(refused.1["loc"]["line"], 2, "{declaration}: {}", refused.1);
+        }
+    }
+    // Only a type declaration is reserved: these names mean nothing to a binder.
+    let plain = "spec P { state { n: 0..1 } init { n = 0 } action a() { n = n } }";
+    let state = "spec P { state { Bool: 0..1 } init { Bool = 0 } action a() { Bool = Bool } }";
+    let constant =
+        "spec P { const Bool = 1 state { n: 0..1 } init { n = Bool } action a() { n = n } }";
+    for (root, component) in [
+        ("compose S { use P as Bool from \"c.fsl\" }", plain),
+        ("compose S { use P as p from \"c.fsl\" }", state),
+        ("compose S { use P as p from \"c.fsl\" }", constant),
+    ] {
+        let accepted = check_tree(
+            &[("root.fsl", root), ("c.fsl", component)],
+            &["check", "root.fsl"],
+        );
+        assert_eq!(accepted.0, 0, "{root} {component}: {}", accepted.1);
+        assert_eq!(check(component).0, 0, "{component}");
+    }
+    let actor = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/consulting/tobe_expense.fsl"
+    ))
+    .unwrap()
+    .replace("Employee", "Bool");
+    assert_eq!(check(&actor).0, 0, "{}", check(&actor).1);
+}
+
 /// A Kernel projection failing on an aggregate bound still names where it is.
 #[test]
 fn projections_locate_the_aggregate_bound_they_cannot_fold() {

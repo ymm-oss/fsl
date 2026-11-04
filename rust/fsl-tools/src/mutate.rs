@@ -793,6 +793,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                 lo,
                 hi,
                 symmetric,
+                span,
             } => {
                 for (bound, value) in [("lo", lo.as_ref()), ("hi", hi.as_ref())] {
                     let Expr::Num(value) = value else {
@@ -805,6 +806,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                                 lo: Box::new(Expr::Num(candidate)),
                                 hi: hi.clone(),
                                 symmetric: *symmetric,
+                                span: *span,
                             }
                         } else {
                             SpecItem::Type {
@@ -812,6 +814,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                                 lo: lo.clone(),
                                 hi: Box::new(Expr::Num(candidate)),
                                 symmetric: *symmetric,
+                                span: *span,
                             }
                         };
                         output.push(BuiltinMutant {

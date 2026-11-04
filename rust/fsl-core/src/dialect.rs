@@ -1295,6 +1295,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             lo: Box::new(Expr::Num(0)),
             hi: Box::new(Expr::Num(*count - 1)),
             symmetric: false,
+            span: None,
         });
     }
     for process in &processes {
@@ -2504,6 +2505,7 @@ pub(crate) fn lower_resolved_requirements(
             lo: Box::new(Expr::Num(0)),
             hi: Box::new(Expr::Num(*count - 1)),
             symmetric: false,
+            span: None,
         });
     }
     for (name, span) in &numbers {
@@ -2518,6 +2520,7 @@ pub(crate) fn lower_resolved_requirements(
             lo: Box::new(lo.clone()),
             hi: Box::new(hi.clone()),
             symmetric: false,
+            span: None,
         });
     }
     items.extend(common);
@@ -2982,6 +2985,7 @@ pub(crate) fn lower_resolved_requirements(
                 lo: Box::new(Expr::Num(0)),
                 hi: Box::new(Expr::Num(cap)),
                 symmetric: false,
+                span: None,
             });
             let (state_type, init_statement, reference, target) = match &binder {
                 Some(binder) => {
@@ -3454,6 +3458,7 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
                 lo: Box::new(Expr::Num(0)),
                 hi: Box::new(Expr::Num(0)),
                 symmetric: false,
+                span: None,
             },
             SpecItem::State(vec![StateField::generated(
                 "_governance_ok",

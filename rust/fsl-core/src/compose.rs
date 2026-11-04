@@ -441,6 +441,22 @@ fn parse_component(
         .map_err(|error| component_error(path, use_span, &error, "failed to lower"))?;
     let spec = expand_spec_domains(spec)
         .map_err(|error| component_error(path, use_span, &error, "failed to lower"))?;
+    // Lowering prefixes every component type name, so the composed model cannot see this.
+    crate::reserved::check_type_names(&spec).map_err(|error| {
+        let (line, column) = error
+            .span
+            .map_or((0, 0), |span| (span.start.line, span.start.column));
+        let cause = CoreError {
+            message: error.message,
+            line,
+            column,
+            origin: None,
+            kind: CoreErrorKind::Semantics,
+            diagnostic_code: None,
+        }
+        .into_name_resolution();
+        component_error(path, use_span, &cause, "failed to lower")
+    })?;
     Ok((
         Component {
             alias: alias.to_owned(),
@@ -920,11 +936,13 @@ fn rewrite_component_item_inner(
             lo,
             hi,
             symmetric,
+            span,
         } => SpecItem::Type {
             name: prefix(alias, &name),
             lo: Box::new(rewrite_expr(*lo, component, &HashSet::new())?),
             hi: Box::new(rewrite_expr(*hi, component, &HashSet::new())?),
             symmetric,
+            span,
         },
         SpecItem::Enum {
             name,

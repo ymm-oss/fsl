@@ -1701,6 +1701,7 @@ impl ModelBuilder {
                     lo,
                     hi,
                     symmetric,
+                    ..
                 } => {
                     let origin = self.origins.diagnostic_origin(&type_target(name));
                     self.insert_type(

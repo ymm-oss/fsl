@@ -123,6 +123,8 @@ pub enum SpecItem {
         lo: Box<Expr>,
         hi: Box<Expr>,
         symmetric: bool,
+        /// Authored declaration location; generated types have no source.
+        span: Option<Span>,
     },
     Enum {
         name: String,
@@ -1118,6 +1120,7 @@ impl SpecItem {
                 lo,
                 hi,
                 symmetric,
+                span: _,
             } => {
                 let mut values = vec![
                     json!("type"),
