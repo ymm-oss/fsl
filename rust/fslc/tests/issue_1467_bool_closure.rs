@@ -23,15 +23,21 @@ fn validate_memory(memory: Option<f64>) {
 
 fn stable(mut value: Value, mode: &str) -> Value {
     // The retained numeric-control BMC pair differs at 17.68/17.67 MB after
-    // duration normalization. Follow collection_replay::stable_full_packet's
-    // live validation, restricted here to the actually observed proof class.
-    if mode == "bmc"
-        && value["result"] == "verified"
-        && value["completeness"] == "bounded"
-        && value["depth"] == 2
-        && value["checked_to_depth"] == 2
-        && value["versions"]["solver"]["backend"] == "native-z3"
-    {
+    // duration normalization, and the numeric-control induction pair differed
+    // at the same two values on the #1680 binary. Follow
+    // collection_replay::stable_full_packet's live validation, restricted here
+    // to the actually observed proof classes.
+    let observed_class = match mode {
+        "bmc" => {
+            value["result"] == "verified"
+                && value["completeness"] == "bounded"
+                && value["depth"] == 2
+                && value["checked_to_depth"] == 2
+        }
+        "induction" => value["result"] == "proved" && value["completeness"] == "unbounded",
+        _ => false,
+    };
+    if observed_class && value["versions"]["solver"]["backend"] == "native-z3" {
         let checks = value["cost"]["solver"]["checks"]
             .as_u64()
             .expect("solver checks must be an unsigned integer");
@@ -254,6 +260,44 @@ fn telemetry_accepts_observed_memory_difference() {
     varied["cost"]["solver"]["memory_mb"] = json!(17.67);
     assert_eq!(stable(original.clone(), "bmc"), stable(varied, "bmc"));
     assert_eq!(original["cost"]["solver"]["memory_mb"], 17.68);
+}
+
+#[test]
+fn telemetry_in_an_induction_proof_excludes_only_memory() {
+    let mut proved = telemetry_packet();
+    proved["engine"] = json!("induction");
+    proved["result"] = json!("proved");
+    proved["completeness"] = json!("unbounded");
+    proved["depth"] = Value::Null;
+    proved["checked_to_depth"] = json!(8);
+    let mut varied = proved.clone();
+    varied["cost"]["solver"]["memory_mb"] = json!(17.67);
+    assert_eq!(
+        stable(proved.clone(), "induction"),
+        stable(varied.clone(), "induction")
+    );
+    // The same difference still counts outside the observed class.
+    let mut violated = proved.clone();
+    violated["result"] = json!("violated");
+    let mut violated_varied = varied;
+    violated_varied["result"] = json!("violated");
+    assert_ne!(
+        stable(violated, "induction"),
+        stable(violated_varied, "induction")
+    );
+    // Other solver statistics stay compared, and memory must still be present.
+    let mut other = proved.clone();
+    other["cost"]["solver"]["conflicts"] = json!(3);
+    assert_ne!(
+        stable(proved.clone(), "induction"),
+        stable(other, "induction")
+    );
+    let mut missing = proved;
+    missing["cost"]["solver"]
+        .as_object_mut()
+        .unwrap()
+        .remove("memory_mb");
+    assert!(std::panic::catch_unwind(|| stable(missing, "induction")).is_err());
 }
 
 #[test]
