@@ -925,7 +925,9 @@ name in a `decreases` call. There are no unrelated breaking removals.
   This does not add a global const/state collision rejection. See the
   [design decision](../design/DESIGN-static-binder-constant-expressions.md).
   A plain `0..n` over a state that shares its name with a const reads the state, so
-  it reports the real violation on every engine.
+  it reports the real violation on every engine. A `leadsTo` wrapper bound reading such a
+  name is refused at `check` with `binder bound is not a static integer`. The base read
+  the const there and could return a verdict, so this is a breaking removal (#1480).
 - Fixed outer `leadsTo` ranges (#1480 temporal amendment): an unfiltered inner
   range may use already bound wrapper locals with the checked grammar above.
   `i in 0..1` then `j in 0..i` expands in order to `(0,0), (1,0), (1,1)`;

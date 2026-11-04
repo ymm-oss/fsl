@@ -866,6 +866,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   拒否する規則は追加しません。
   [設計決定](../design/DESIGN-static-binder-constant-expressions.md)も参照してください。
   const と同じ名前の状態に対する単純な `0..n` は状態を読むので、どのエンジンでも実際の違反を報告します。
+  そのような名前を読む `leadsTo` wrapper の境界は、`check` が
+  `binder bound is not a static integer` で拒否します。base はそこで const を読み、verdict を返す
+  ことがあったので、これは破壊的な削除です(#1480)。
 - 固定された外側 `leadsTo` の範囲(#1480 temporal 拡張): フィルターなしの内側の
   範囲では、既に束縛された wrapper の局所名を上記の検査付き文法で使えます。
   `i in 0..1`、次に `j in 0..i` なら `(0,0), (1,0), (1,1)` の順に展開します。

@@ -972,7 +972,9 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   This does not add a global const/state collision rejection. See the
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-static-binder-constant-expressions.md">design decision</a>.
   A plain <code>0..n</code> over a state that shares its name with a const reads the state, so
-  it reports the real violation on every engine.</li>
+  it reports the real violation on every engine. A <code>leadsTo</code> wrapper bound reading such a
+  name is refused at <code>check</code> with <code>binder bound is not a static integer</code>. The base read
+  the const there and could return a verdict, so this is a breaking removal (#1480).</li>
 <li>Fixed outer <code>leadsTo</code> ranges (#1480 temporal amendment): an unfiltered inner
   range may use already bound wrapper locals with the checked grammar above.
   <code>i in 0..1</code> then <code>j in 0..i</code> expands in order to <code>(0,0), (1,0), (1,1)</code>;

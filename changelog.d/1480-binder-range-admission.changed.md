@@ -24,7 +24,9 @@ the workspace tests on both sides. `ok`→`error`: 649, none under `specs/` or `
 overflow or do not fold, 16 init statement `forall` bounds reading state, 11 declared `Bool`,
 10 typed binders over the builtin `Int`, 8 over a Struct, 4 negative `within`. Corpus files:
 `explicit_init_range_assigned.fsl`, `explicit_init_range_unassigned.fsl`, and seven head-only
-files under `issue_1480_temporal_outer/`.
+files under `issue_1480_temporal_outer/`. Four of the 85 are a `leadsTo` wrapper bound reading
+a name that is both a state and a const, where the base read the const and returned `violated`
+on bmc and induction.
 
 Forms the engines used to refuse now run where the rule says they can: a dependent
 bound in a fair guard, in a sticky helpful guard, in a `trans` body with a partial

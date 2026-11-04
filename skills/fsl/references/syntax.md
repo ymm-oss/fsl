@@ -1512,6 +1512,8 @@ when checking a file, the message suffix changes from `at L:C` to
   `explicit_init_range_unassigned.fsl`, and seven head-only files under
   `issue_1480_temporal_outer/` (`const-state-collision`, `empty-static-overflow`,
   `free-state`, `overflow-high`, `overflow-low`, `struct-typed`, `unbounded-typed`).
+  A `leadsTo` wrapper bound reading a name that is both a state and a const is among the
+  85: the base read the const and could return a verdict, so it is a breaking removal.
   Classes and base verdicts: `DESIGN-check-executable-forms.md`, "Corpus transitions".
 - Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
   means at most one match; `exactlyOne` means exactly one.

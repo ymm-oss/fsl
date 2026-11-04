@@ -398,7 +398,9 @@ are refused and recorded here. They are an earlier violated property
 although a BMC verdict exists for them: the BMC encoding reads neither, and its ranking
 prepass (`ranked_leadsto_lasso_discharges`) evaluates the measure but withdraws on any
 error, so only induction reported the refusal. Base refused these aggregates at
-`check`. Explicit-engine verdicts on every refused form are removed.
+`check`. Explicit-engine verdicts on every refused form are removed. A `leadsTo` wrapper
+bound reading a name that is both a state and a const is the one further kind the final
+sweep found: see [corpus transitions](#corpus-transitions).
 
 **Refused forms that now return a verdict.** Several forms the base refused now run,
 because the engine gained what the rule assumed rather than the rule gaining a refusal:
