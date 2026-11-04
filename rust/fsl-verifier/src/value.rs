@@ -1358,9 +1358,11 @@ pub(crate) fn coerce<S: SmtSolver>(
             set_value_type(&mut value, ty.clone());
             Ok(value)
         }
-        // A let-bound collection is no longer a literal the expectation can type, so
-        // its nested `Int` elements are converted the way an element of `Int` is.
-        // After retagging, so only a value that had no coercion before reaches this.
+        // A collection holding `Int` below an element that no literal expectation typed:
+        // bound by `let` or `is`, a method's result or argument, or read back out of
+        // one, wherever the expression is written. Its nested `Int` elements are
+        // converted the way an element of `Int` is. After retagging, so only a value
+        // that had no coercion before reaches this.
         (value, ty)
             if value
                 .ty()

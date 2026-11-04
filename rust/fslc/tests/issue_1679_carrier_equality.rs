@@ -3,8 +3,9 @@
 //! #1679: a whole-container comparison, conditional or assignment whose carriers
 //! the symbolic engines cannot coerce used to pass `check` and fail later with
 //! `cannot coerce symbolic value`, while `fsl-bfs` answered. `check` now refuses
-//! them, and a let-bound collection holding `Int` below an element now coerces. The
-//! controls below keep the other forms, and pin the two routes that still report it.
+//! them, and a collection holding `Int` below an element that no literal expectation
+//! can type now coerces. The controls below keep the other forms, and pin the three
+//! routes that still report it.
 
 #[path = "support/issue_1517_scratch.rs"]
 mod scratch;
@@ -508,18 +509,29 @@ const REFINE_IMPL: &str = "spec Im { type K = 0..1 type A = 0..1\n  state { m: M
 const REFINE_ABS: &str = "spec Ab { state { same: Bool } init { same = true }\n  fair action go() { same = same }\n  leadsTo L { same ~> same }\n}\n";
 
 fn refine(id: &str, map: &str, progress: bool) -> (Value, i32) {
+    refine_specs(id, REFINE_IMPL, REFINE_ABS, map, "", progress)
+}
+
+fn refine_specs(
+    id: &str,
+    im: &str,
+    ab: &str,
+    map: &str,
+    actions: &str,
+    progress: bool,
+) -> (Value, i32) {
     let progress = if progress {
         "  preserve progress {\n    respond L by go\n  }\n"
     } else {
         ""
     };
     let mapping = format!(
-        "refinement R {{\n  impl Im\n  abs Ab\n  map same = {map}\n  action go() -> go()\n{progress}}}\n"
+        "refinement R {{\n  impl Im\n  abs Ab\n  map same = {map}\n  action go() -> go()\n{actions}{progress}}}\n"
     );
     let scratch = scratch::Scratch::new("FSLC_1679_INPUTS", id, &format!("1679-{id}-refine"));
     for (name, source) in [
-        ("im.fsl", REFINE_IMPL),
-        ("ab.fsl", REFINE_ABS),
+        ("im.fsl", im),
+        ("ab.fsl", ab),
         ("map.fsl", mapping.as_str()),
     ] {
         fs::write(scratch.path().join(name), source).expect("fixture");
@@ -944,4 +956,472 @@ fn lemma_candidate_with_unrelated_carriers_is_not_coerced() {
         "cannot coerce symbolic value Some(Seq(Named(\"B\"), 2)) to Seq(Named(\"A\"), 2)",
         "{packet}"
     );
+}
+
+/// `[bmc, explicit, induction, fsl-bfs]`, the last naming the violation it found.
+fn results(id: &str, source: &str) -> [String; 4] {
+    let verdict = |engine: &str| {
+        let (packet, _) = fslc(id, source, &["verify", "--engine", engine, "--depth", "2"]);
+        packet["result"].as_str().expect("result").to_owned()
+    };
+    let model = fsl_core::build_model(
+        fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new(".")).expect("lowers"),
+    )
+    .expect("model");
+    [
+        verdict("bmc"),
+        verdict("explicit"),
+        verdict("induction"),
+        fsl_runtime::bfs(model, 2)
+            .expect("bfs")
+            .violation
+            .map_or_else(|| "none".to_owned(), |found| found.name),
+    ]
+}
+
+const IDLE: &str = "action idle() { c = c }\n ";
+
+/// `(id, let, guard, state where it holds, state where it does not)`: a value that
+/// carries `Int` below an element with no `let` at the comparison, as a method's result
+/// or through an `is` binding, and a bound one as a method's argument.
+type RebuiltGuard = (
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+    &'static [(&'static str, &'static str)],
+);
+const REBUILT_GUARDS: [RebuiltGuard; 11] = [
+    (
+        "result_add",
+        "",
+        "Set { p, none } == Set { o }.add(none)",
+        &[("p", "some(1)"), ("o", "some(1)")],
+        &[("p", "some(0)"), ("o", "some(1)")],
+    ),
+    (
+        "result_remove",
+        "",
+        "Set { p }.remove(none) == Set { o }.remove(none)",
+        &[("p", "none"), ("o", "none")],
+        &[("p", "some(0)"), ("o", "some(1)")],
+    ),
+    (
+        "result_push",
+        "",
+        "Seq { p, p } == Seq { o }.push(some(1))",
+        &[("p", "some(1)"), ("o", "some(1)")],
+        &[("p", "some(0)"), ("o", "some(1)")],
+    ),
+    (
+        "result_head",
+        "",
+        "Seq { sa } == Seq { Seq { q } }.head()",
+        &[("sa", "Seq { 1 }"), ("q", "Seq { 1 }")],
+        &[("sa", "Seq { 0 }"), ("q", "Seq { 1 }")],
+    ),
+    (
+        "is_binding",
+        "",
+        "some(Set { some(1) }) is some(x) and Set { p } == x",
+        &[("p", "some(1)")],
+        &[("p", "some(0)")],
+    ),
+    (
+        "is_binding_argument",
+        "",
+        "some(Set { some(0) }) is some(t) and Set { Set { p } }.contains(t)",
+        &[("p", "some(0)")],
+        &[("p", "some(1)")],
+    ),
+    (
+        "argument_set_contains",
+        "let t = Set { some(0) }\n ",
+        "Set { Set { p } }.contains(t)",
+        &[("p", "some(0)")],
+        &[("p", "some(1)")],
+    ),
+    (
+        "argument_seq_contains",
+        "let t = Seq { some(0) }\n ",
+        "Seq { Seq { p } }.contains(t)",
+        &[("p", "some(0)")],
+        &[("p", "some(1)")],
+    ),
+    (
+        "argument_add",
+        "let t = Set { some(0) }\n ",
+        "Set { Set { p } }.add(t).size() == 1",
+        &[("p", "some(0)")],
+        &[("p", "some(1)")],
+    ),
+    (
+        "argument_remove",
+        "let t = Set { some(0) }\n ",
+        "Set { Set { p } }.remove(t).size() == 0",
+        &[("p", "some(0)")],
+        &[("p", "some(1)")],
+    ),
+    (
+        "argument_push",
+        "let t = Seq { some(1) }\n ",
+        "Seq { Seq { p } }.push(t).at(1).at(0) == p",
+        &[("p", "some(1)")],
+        &[("p", "some(0)")],
+    ),
+];
+
+#[test]
+fn rebuilt_value_decides_in_a_guard_on_every_engine() {
+    for (id, binding, guard, holds, differs) in REBUILT_GUARDS {
+        let body = format!("{binding}requires {guard}\n done = true");
+        let property = format!("{IDLE}invariant P {{ not done }}");
+        let source = wide_spec(holds, &body, &property);
+        assert_eq!(
+            results(&format!("{id}_holds"), &source),
+            ["violated", "violated", "violated", "P"],
+            "{id}\n{source}"
+        );
+        let source = wide_spec(differs, &body, &property);
+        assert_eq!(
+            results(&format!("{id}_differs"), &source),
+            ["verified", "proved", "unknown_cti", "none"],
+            "{id}\n{source}"
+        );
+    }
+}
+
+const ADD: &str = "Set { p, none } == Set { o }.add(none)";
+
+/// A read into state and each property position, passing and failing. Explicit refuses
+/// `leadsTo` whatever it holds, and `fsl-bfs` reports no violation for either failing
+/// `leadsTo` or `reachable`.
+#[test]
+fn rebuilt_value_decides_when_read_into_state_and_in_every_property() {
+    let read = "p = (if c then Seq { p } else t).head()\n done = true";
+    let differing = [("p", "some(0)"), ("o", "some(1)")];
+    let equal = [("p", "some(1)"), ("o", "some(1)")];
+    let copies = "p = o\n done = true";
+    let rows: [(&str, &[(&str, &str)], String, String, [&str; 4]); 12] = [
+        (
+            "read_holds",
+            &[],
+            format!("let t = Seq {{ some(1) }}\n {read}"),
+            "invariant Q { not done or p == some(1) }".to_owned(),
+            ["verified", "proved", "unknown_cti", "none"],
+        ),
+        (
+            "read_fails",
+            &[],
+            format!("let t = Seq {{ some(1) }}\n {read}"),
+            "invariant Q { not done or p == some(0) }".to_owned(),
+            ["violated", "violated", "violated", "Q"],
+        ),
+        (
+            "read_outside_carrier",
+            &[],
+            format!("let t = Seq {{ some(5) }}\n {read}"),
+            "invariant T { true }".to_owned(),
+            ["violated", "violated", "violated", "_bounds_p"],
+        ),
+        (
+            "read_set_outside_carrier",
+            &[],
+            "let t = Seq { Set { 5 } }\n a = (if c then Seq { a } else t).at(0)\n done = true"
+                .to_owned(),
+            "invariant T { true }".to_owned(),
+            ["violated", "violated", "violated", "_bounds_a"],
+        ),
+        (
+            "read_over_capacity",
+            &[],
+            "let t = Seq { Seq { 0, 0, 0 } }\n sa = (if c then Seq { sa } else t).head()\n done = true"
+                .to_owned(),
+            "invariant T { true }".to_owned(),
+            ["violated", "violated", "violated", "_bounds_sa"],
+        ),
+        (
+            "invariant_holds",
+            &differing,
+            "done = true".to_owned(),
+            format!("invariant Q {{ not ({ADD}) }}"),
+            ["verified", "proved", "proved", "none"],
+        ),
+        (
+            "invariant_fails",
+            &equal,
+            "done = true".to_owned(),
+            format!("invariant Q {{ not ({ADD}) }}"),
+            ["violated", "violated", "violated", "Q"],
+        ),
+        (
+            "reachable_holds",
+            &differing,
+            copies.to_owned(),
+            format!("reachable R {{ {ADD} }}"),
+            ["verified", "proved", "unknown_cti", "none"],
+        ),
+        (
+            "reachable_fails",
+            &differing,
+            "done = true".to_owned(),
+            format!("reachable R {{ {ADD} }}"),
+            [
+                "reachable_failed",
+                "reachable_failed",
+                "reachable_failed",
+                "none",
+            ],
+        ),
+        (
+            "trans_holds",
+            &differing,
+            copies.to_owned(),
+            format!(
+                "trans X {{ old(done) or not done or Set {{ p, none }} == Set {{ old(o) }}.add(none) }}"
+            ),
+            ["verified", "proved", "unknown_cti", "none"],
+        ),
+        (
+            "leadsto_holds",
+            &differing,
+            copies.to_owned(),
+            format!("leadsTo L {{ {ADD} ~> done }}"),
+            ["verified", "error", "unknown_cti", "none"],
+        ),
+        (
+            "leadsto_fails",
+            &equal,
+            "c = not c".to_owned(),
+            format!("leadsTo L {{ {ADD} ~> done }}"),
+            ["violated", "error", "violated", "none"],
+        ),
+    ];
+    for (id, init, body, property, expected) in rows {
+        let source = wide_spec(init, &body, &format!("{IDLE}{property}"));
+        assert_eq!(results(id, &source), expected, "{id}\n{source}");
+    }
+    // `trans` failing, with the post-state compared to the pre-state's rebuilt value.
+    let source = wide_spec(
+        &differing,
+        "done = true",
+        &format!(
+            "{IDLE}trans X {{ old(done) or not done or Set {{ p, none }} == Set {{ old(o) }}.add(none) }}"
+        ),
+    );
+    assert_eq!(
+        results("trans_fails", &source),
+        ["violated", "violated", "violated", "X"],
+        "{source}"
+    );
+    // The same step refused the same way as the direct read of an over-capacity literal
+    // when a property selection leaves the bound out.
+    for (id, body) in [
+        (
+            "rebuilt",
+            "let t = Seq { Seq { 0, 0, 0 } }\n sa = (if c then Seq { sa } else t).head()\n done = true",
+        ),
+        ("direct", "let t = Seq { 0, 0, 0 }\n sa = t\n done = true"),
+    ] {
+        let source = wide_spec(&[], body, &format!("{IDLE}invariant P {{ not done }}"));
+        for engine in ["bmc", "explicit"] {
+            let (packet, exit) = fslc(
+                &format!("selected_{id}"),
+                &source,
+                &["verify", "--engine", engine, "--property", "P"],
+            );
+            assert_eq!(
+                (exit, &packet["message"]),
+                (2, &json!("model sequence length exceeds capacity")),
+                "{id} {engine}: {packet}"
+            );
+        }
+    }
+}
+
+/// The third recorded route, not fixed here. A literal under `old(...)` is not typed
+/// against the expectation, so one holding a range-typed value keeps its own range and
+/// capacity, and only an `Int` element is rebuilt. It passes `check` and bmc and
+/// induction report it, while explicit evaluates it, as on base.
+#[test]
+fn range_typed_literal_under_old_is_the_recorded_third_route() {
+    let trans = |property: &str| wide_spec(&[], "c = not c", &format!("trans X {{ {property} }}"));
+    let rows = [
+        (
+            "set_range",
+            trans("a == old(Set { vb }) or true"),
+            "Set(Named(\"B\"))",
+            "Set(Named(\"A\"))",
+            "proved",
+        ),
+        (
+            "seq_range",
+            trans("sa == old(Seq { vb }) or true"),
+            "Seq(Named(\"B\"), 1)",
+            "Seq(Named(\"A\"), 2)",
+            "proved",
+        ),
+        (
+            "seq_arm",
+            trans("sa == old(if c then q else Seq { vb }) or true"),
+            "Seq(Named(\"B\"), 1)",
+            "Seq(Named(\"A\"), 2)",
+            "proved",
+        ),
+        (
+            "seq_over_capacity",
+            trans("sa == old(Seq { vb, vb, vb }) or true"),
+            "Seq(Named(\"B\"), 3)",
+            "Seq(Named(\"A\"), 2)",
+            "proved",
+        ),
+        (
+            "seq_capacity_same_range",
+            trans("sa == old(Seq { va }) or true"),
+            "Seq(Named(\"A\"), 1)",
+            "Seq(Named(\"A\"), 2)",
+            "proved",
+        ),
+        (
+            "explicit_finds_a_violation",
+            trans("a == old(Set { vb })"),
+            "Set(Named(\"B\"))",
+            "Set(Named(\"A\"))",
+            "violated",
+        ),
+        (
+            "ensures",
+            wide_spec(&[], "ensures a == old(Set { vb }) or true\n c = not c", ""),
+            "Set(Named(\"B\"))",
+            "Set(Named(\"A\"))",
+            "proved",
+        ),
+    ];
+    for (id, source, from, to, explicit) in rows {
+        assert_eq!(check(id, &source).1, 0, "{id}\n{source}");
+        let message = format!("cannot coerce symbolic value Some({from}) to {to}");
+        for engine in ["bmc", "induction"] {
+            let (packet, exit) = fslc(id, &source, &["verify", "--engine", engine]);
+            assert_eq!(
+                (exit, &packet["message"]),
+                (2, &json!(message)),
+                "{id} {engine}: {packet}"
+            );
+        }
+        let (packet, _) = fslc(id, &source, &["verify", "--engine", "explicit"]);
+        assert_eq!(packet["result"], explicit, "{id}: {packet}");
+    }
+    // A literal that keeps the expectation's carrier or holds `Int` still answers.
+    for (id, property) in [
+        ("same_range", "a == old(Set { va }) or true"),
+        ("full_capacity", "sa == old(Seq { va, va }) or true"),
+        ("int_scalar", "a == old(Set { n }) or true"),
+        ("option", "p == old(some(vb)) or true"),
+    ] {
+        let source = trans(property);
+        assert_eq!(
+            violations(id, &source),
+            (false, false, false, false),
+            "{id}\n{source}"
+        );
+    }
+}
+
+/// A rebuilt value is not one of the mismatches a candidate or a preserved map keeps
+/// reporting: it decides there, and a concrete run of the same spec agrees.
+#[test]
+fn rebuilt_value_decides_in_a_candidate_and_under_preserved_progress() {
+    let spec = |p: &str, y: &str, extra: &str| {
+        format!(
+            "spec D {{ type A = 0..1\n state {{ x: 0..1, y: 0..1, p: Option<A>, o: Option<Int>, c: Bool }}\n init {{ x = 0 y = {y} p = {p} o = some(1) c = false }}\n action go() {{ x = y y = x }}\n invariant P {{ x == 0 }}\n{extra}}}\n"
+        )
+    };
+    for (id, p, y, candidate, main, status, used, concrete) in [
+        (
+            "needed",
+            "some(1)",
+            "0",
+            format!("x == 0 and y == 0 and {ADD}"),
+            "proved",
+            "proved",
+            true,
+            "proved",
+        ),
+        (
+            "false_at_init",
+            "some(0)",
+            "0",
+            format!("x == 0 and y == 0 and {ADD}"),
+            "unknown_cti",
+            "rejected",
+            false,
+            "violated",
+        ),
+        (
+            "main_false",
+            "some(1)",
+            "1",
+            ADD.to_owned(),
+            "violated",
+            "proved",
+            false,
+            "proved",
+        ),
+    ] {
+        let source = spec(p, y, "");
+        let (packet, _) = fslc(
+            &format!("rebuilt_lemma_{id}"),
+            &source,
+            &["verify", "--engine", "induction", "--lemma", &candidate],
+        );
+        let entry = &packet["lemmas"][0];
+        assert_eq!(
+            (&packet["result"], &entry["status"], &entry["used"]),
+            (&json!(main), &json!(status), &json!(used)),
+            "{id}: {packet}"
+        );
+        assert!(
+            !packet.to_string().contains("cannot coerce"),
+            "{id}: {packet}"
+        );
+        // The candidate as an invariant, on explicit: a `proved` candidate holds there.
+        let oracle = spec(p, y, &format!(" invariant C {{ {candidate} }}\n"));
+        let (packet, _) = fslc(
+            &format!("rebuilt_lemma_{id}_oracle"),
+            &oracle,
+            &["verify", "--engine", "explicit", "--property", "C"],
+        );
+        assert_eq!(packet["result"], concrete, "{id}: {packet}");
+    }
+    let (packet, _) = fslc(
+        "rebuilt_lemma_main_oracle",
+        &spec("some(1)", "1", ""),
+        &["verify", "--engine", "explicit", "--property", "P"],
+    );
+    assert_eq!(packet["result"], "violated", "{packet}");
+
+    let ab = "spec Ab { state { same: Bool } init { same = false }\n fair action go() { same = true }\n leadsTo L { not same ~> same }\n}\n";
+    for (id, fairness, result, kind) in [
+        ("fair", "fair ", "refines", None),
+        ("unfair", "", "refinement_failed", Some("progress_lost")),
+    ] {
+        let im = format!(
+            "spec Im {{ type A = 0..1\n state {{ p: Option<A>, o: Option<Int>, c: Bool }}\n init {{ p = some(0) o = some(1) c = false }}\n {fairness}action go() {{ p = some(1) }}\n {fairness}action idle() {{ c = c }}\n}}\n"
+        );
+        // The rebuilt map and the same map written by hand, which needs no rebuilding.
+        for map in [ADD, "p == o"] {
+            let (packet, _) = refine_specs(
+                &format!("rebuilt_map_{id}"),
+                &im,
+                ab,
+                map,
+                "  action idle() -> stutter\n",
+                true,
+            );
+            assert_eq!(packet["result"], result, "{id} {map}: {packet}");
+            if let Some(kind) = kind {
+                assert_eq!(packet["kind"], kind, "{id} {map}: {packet}");
+            }
+        }
+    }
 }

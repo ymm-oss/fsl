@@ -1360,7 +1360,8 @@ pub(crate) struct ValidationPhase {
     /// Present only in the checked-admission walk; ordinary validation ignores it.
     range_rule: Option<RangeRule>,
     // The model's own expressions reach symbolic evaluation, so their whole
-    // container values must be coercible (#1679). A refinement map, a scenario
+    // container values must be coercible (#1679), except for the range-typed literal
+    // under `old(...)` that the amendment records. A refinement map, a scenario
     // expectation and a lemma candidate keep the assignable rule. An expectation
     // is evaluated concretely, and so is a map, except that `preserve progress`
     // evaluates a map symbolically: a Map comparison there still reports
