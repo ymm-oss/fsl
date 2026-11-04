@@ -467,7 +467,7 @@ impl<'a> Parser<'a> {
         self.expect_ident_value("action")?;
         let name = self.expect_ident()?;
         self.expect_symbol("(")?;
-        let params = self.params()?;
+        let (params, param_spans) = self.params()?;
         self.expect_symbol("=")?;
         let mut refs = vec![self.sync_ref()?];
         while self.eat_symbol("||") {
@@ -500,6 +500,7 @@ impl<'a> Parser<'a> {
         Ok(SyncAction {
             name,
             params,
+            param_spans,
             refs,
             items,
             span,
@@ -752,7 +753,7 @@ impl<'a> Parser<'a> {
         self.expect_ident_value("action")?;
         let name = self.expect_ident()?;
         self.expect_symbol("(")?;
-        let params = self.params()?;
+        let (params, param_spans) = self.params()?;
         let maps = if self.peek_ident("maps") {
             Some(self.maps_clause()?)
         } else {
@@ -793,6 +794,7 @@ impl<'a> Parser<'a> {
         Ok(RequirementAction {
             name,
             params,
+            param_spans,
             items,
             span,
             fair,
@@ -1250,8 +1252,10 @@ impl<'a> Parser<'a> {
         let actor = self.expect_ident()?;
 
         let mut inputs = Vec::new();
+        let mut input_spans = Vec::new();
         if self.eat_ident("with") {
             loop {
+                input_spans.push(self.peek().span);
                 inputs.push(self.param()?);
                 if !self.eat_symbol(",") {
                     break;
@@ -1296,6 +1300,7 @@ impl<'a> Parser<'a> {
             target,
             actor,
             inputs,
+            input_spans,
             guard,
             assignments,
             covers,
@@ -1859,7 +1864,7 @@ impl<'a> Parser<'a> {
         self.expect_ident_value("action")?;
         let name = self.expect_ident()?;
         self.expect_symbol("(")?;
-        let params = self.params()?;
+        let (params, param_spans) = self.params()?;
         let meta = self.take_meta();
         let annotations = self.take_annotations()?;
         self.expect_symbol("{")?;
@@ -1887,6 +1892,7 @@ impl<'a> Parser<'a> {
         Ok(SpecItem::Action {
             name,
             params,
+            param_spans,
             items,
             span,
             fair,
@@ -1896,15 +1902,18 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn params(&mut self) -> Result<Vec<Param>, ParseError> {
+    /// The formals up to the closing parenthesis, with each name's span.
+    fn params(&mut self) -> Result<(Vec<Param>, Vec<Span>), ParseError> {
         let mut params = Vec::new();
+        let mut spans = Vec::new();
         if self.eat_symbol(")") {
-            return Ok(params);
+            return Ok((params, spans));
         }
         loop {
+            spans.push(self.peek().span);
             params.push(self.param()?);
             if self.eat_symbol(")") {
-                return Ok(params);
+                return Ok((params, spans));
             }
             self.expect_symbol(",")?;
         }

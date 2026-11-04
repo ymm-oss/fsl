@@ -34,6 +34,25 @@ pub(crate) struct RootActual {
     pub(crate) source_file: Option<String>,
 }
 
+/// The first formal whose name an earlier formal already took, at that formal's
+/// own span, or at `fallback` for a list without authored spans.
+pub(crate) fn duplicate_formal<'a>(
+    params: &'a [Param],
+    spans: &[Span],
+    fallback: Span,
+) -> Option<(&'a str, Span)> {
+    let mut names = BTreeSet::new();
+    params.iter().enumerate().find_map(|(index, param)| {
+        let (Param::Typed(name, _) | Param::Range(name, _, _)) = param;
+        (!names.insert(name))
+            .then(|| (name.as_str(), spans.get(index).copied().unwrap_or(fallback)))
+    })
+}
+
+pub(crate) fn duplicate_formal_message(formal: &str) -> String {
+    format!("duplicate action parameter '{formal}'")
+}
+
 /// Context shared by ordinary model validation and pre-prefix compose errors.
 pub(crate) enum ExpressionErrorContext<'a> {
     Model,
@@ -1094,6 +1113,7 @@ impl ModelBuilder {
                 SpecItem::Action {
                     name,
                     params,
+                    param_spans,
                     items,
                     fair,
                     meta,
@@ -1107,7 +1127,14 @@ impl ModelBuilder {
                             .with_origin(origin));
                     }
                     let mut action = self
-                        .action(name, params, items, *span, *fair, meta.clone())
+                        .action(
+                            name,
+                            (params, param_spans),
+                            items,
+                            *span,
+                            *fair,
+                            meta.clone(),
+                        )
                         .map_err(|error| error.with_origin(origin))?;
                     // Carried outside `action` so its argument list stays
                     // within the workspace Clippy budget; `sync` is a compose
@@ -1641,7 +1668,7 @@ impl ModelBuilder {
     fn action(
         &self,
         name: &str,
-        params: &[Param],
+        (params, param_spans): (&[Param], &[Span]),
         items: &[ActionItem],
         span: Span,
         fair: bool,
@@ -1650,14 +1677,14 @@ impl ModelBuilder {
         let mut parameter_names = BTreeSet::new();
         let params = params
             .iter()
-            .map(|param| {
+            .enumerate()
+            .map(|(index, param)| {
                 let parameter_name = match param {
                     Param::Typed(name, _) | Param::Range(name, _, _) => name,
                 };
                 if !parameter_names.insert(parameter_name) {
-                    return Err(model_error(format!(
-                        "duplicate action parameter '{parameter_name}'"
-                    )));
+                    return Err(model_error(duplicate_formal_message(parameter_name))
+                        .at(param_spans.get(index).copied().unwrap_or(span)));
                 }
                 self.action_param(param)
             })

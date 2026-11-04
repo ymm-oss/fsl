@@ -1413,6 +1413,7 @@ impl Pending {
                 }
             };
             let mut params = Vec::new();
+            let mut input_spans = Vec::new();
             let mut assignments = Vec::new();
             let mut input_names = Vec::new();
             for (input, type_name, _) in &event.inputs {
@@ -1441,6 +1442,7 @@ impl Pending {
                     assignments.push((input.text.clone(), Expr::Var(input.text.clone())));
                 }
                 params.push(Param::Typed(input.text.clone(), type_name));
+                input_spans.push(input.span);
                 input_names.push(input.text.clone());
             }
             let mut roles = Vec::new();
@@ -1484,6 +1486,7 @@ impl Pending {
                         },
                     ),
                 );
+                input_spans.insert(index, event.span);
                 assignments.push((role.clone(), Expr::Some(Box::new(Expr::Var(binder)))));
                 roles.push(role.clone());
             }
@@ -1546,6 +1549,7 @@ impl Pending {
                     target: to,
                     actor: event.actor.text,
                     inputs: params,
+                    input_spans,
                     guard: None,
                     assignments,
                     covers: cover,

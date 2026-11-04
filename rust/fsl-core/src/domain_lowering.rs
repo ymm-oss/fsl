@@ -2130,6 +2130,7 @@ fn action(
     SpecItem::Action {
         name,
         params,
+        param_spans: Vec::new(),
         items,
         span,
         fair: false,
