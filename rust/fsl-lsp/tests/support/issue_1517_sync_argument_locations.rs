@@ -2,6 +2,8 @@
 
 #[path = "../../../fslc/tests/support/issue_1517_sync_argument_cases.rs"]
 mod forms;
+#[path = "../../../fslc/tests/support/issue_1517_scratch.rs"]
+mod scratch;
 
 use super::{Session, json, send};
 use serde_json::Value;
@@ -69,14 +71,12 @@ fn matching(session: &mut Session, uri: &str, version: i32, frames: &mut Vec<Val
 fn run(id: &str) {
     let (case, (line, start, end)) = fixture(id);
     assert_eq!(case.spec, "Root");
-    let inputs = std::env::var_os("FSLC_1517_D_INPUTS")
-        .map_or_else(
-            || std::env::temp_dir().join(format!("issue-1517-lsp-{}", std::process::id())),
-            PathBuf::from,
-        )
-        .join("lsp")
-        .join(id);
-    fs::create_dir_all(&inputs).unwrap();
+    let scratch = scratch::Scratch::new(
+        "FSLC_1517_D_INPUTS",
+        &format!("lsp/{id}"),
+        &format!("lsp-{id}"),
+    );
+    let inputs = scratch.path();
     for (name, text) in [
         ("root.fsl", case.source.as_str()),
         ("piece.fsl", &case.piece),

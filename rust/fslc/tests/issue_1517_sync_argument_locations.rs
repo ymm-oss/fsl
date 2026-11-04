@@ -2,6 +2,8 @@
 
 #[path = "support/issue_1517_sync_argument_cases.rs"]
 mod forms;
+#[path = "support/issue_1517_scratch.rs"]
+mod scratch;
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -17,13 +19,8 @@ fn run(id: &str) {
         .into_iter()
         .find(|c| c.id == id)
         .expect("case");
-    let root = std::env::var_os("FSLC_1517_RECEIPTS")
-        .map_or_else(
-            || std::env::temp_dir().join(format!("issue-1517-{}", std::process::id())),
-            std::path::PathBuf::from,
-        )
-        .join(id);
-    fs::create_dir_all(&root).expect("scratch");
+    let scratch = scratch::Scratch::new("FSLC_1517_RECEIPTS", id, &format!("locations-{id}"));
+    let root = scratch.path();
     for (file, source) in [
         ("root.fsl", &case.source),
         ("piece.fsl", &case.piece),
@@ -67,7 +64,7 @@ fn run(id: &str) {
         let binary = Path::new(env!("CARGO_BIN_EXE_fslc"));
         let output = Command::new(binary)
             .args(&args)
-            .current_dir(&root)
+            .current_dir(root)
             .env("FSLC_CACHE", "off")
             .env_remove("FSLC_UNSTABLE")
             .output()
@@ -100,7 +97,7 @@ fn run(id: &str) {
         }
     }
     if case.error.is_none() {
-        let kernel = fsl_core::parse_kernel_source(&case.source, &fsl_core::FsResolver::new(&root))
+        let kernel = fsl_core::parse_kernel_source(&case.source, &fsl_core::FsResolver::new(root))
             .expect("kernel");
         fs::write(
             root.join("kernel-ast-v1.json"),

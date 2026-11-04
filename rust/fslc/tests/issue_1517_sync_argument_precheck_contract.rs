@@ -2,6 +2,8 @@
 
 #[path = "support/issue_1517_sync_argument_cases.rs"]
 mod forms;
+#[path = "support/issue_1517_scratch.rs"]
+mod scratch;
 
 use serde_json::{Value, json};
 use std::{fs, path::PathBuf, process::Command};
@@ -44,14 +46,12 @@ fn fixture(id: &str) -> (forms::Case, Option<&'static str>) {
 
 fn run(id: &str) {
     let (case, phase) = fixture(id);
-    let inputs = std::env::var_os("FSLC_1517_D_INPUTS")
-        .map_or_else(
-            || std::env::temp_dir().join(format!("issue-1517-precheck-{}", std::process::id())),
-            PathBuf::from,
-        )
-        .join("native")
-        .join(id);
-    fs::create_dir_all(&inputs).unwrap();
+    let scratch = scratch::Scratch::new(
+        "FSLC_1517_D_INPUTS",
+        &format!("native/{id}"),
+        &format!("precheck-{id}"),
+    );
+    let inputs = scratch.path();
     for (name, text) in [
         ("root.fsl", case.source.as_str()),
         ("piece.fsl", &case.piece),
@@ -99,7 +99,7 @@ fn run(id: &str) {
         };
         let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
             .args(&args)
-            .current_dir(&inputs)
+            .current_dir(inputs)
             .env("FSLC_CACHE", "off")
             .env_remove("FSLC_UNSTABLE")
             .output()
