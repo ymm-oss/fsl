@@ -10808,6 +10808,19 @@ struct MainOracle {
     engine: &'static str,
 }
 
+/// The `engine=` text on a mutant's progress line: the main oracle's route,
+/// unless the main oracle was clean and a later check (requirements,
+/// implements, the init-bounds override) decided the published `status`. That
+/// status did not come from the route, so the line says `secondary` and keeps
+/// the route visible beside it.
+fn mutation_progress_engine(main: &MainOracle, status: &str) -> String {
+    if main.outcome.is_clean() && status != "survived" {
+        format!("secondary, oracle={}", main.engine)
+    } else {
+        main.engine.to_owned()
+    }
+}
+
 const MUTATION_EXPLICIT_BUDGET: usize = fsl_runtime::CONCRETE_PROBE_BUDGET;
 
 /// A built-in mutant that does not lower/build never reaches the oracle: it is
@@ -12119,7 +12132,7 @@ fn run_mutate_from_source(
         Ok(model) => model,
         Err(error) => return mutate_error(spec_load_error_output(&error)),
     };
-    // The `verified` baseline already passed this gate on the same source and
+    // The accepted baseline already passed this gate on the same source and
     // model; it runs again because only the gate hands out the checked cases.
     let trace_contract = match require_trace_gate(&source, &model) {
         Ok(contract) => contract,
@@ -12262,6 +12275,7 @@ fn run_mutate_from_source(
             outcome = apply_init_bounds_override(outcome, &root);
         }
         let (status, detail) = mutant_status(&outcome, inconclusive);
+        let progress_engine = mutation_progress_engine(&main, status);
         let target = mutant
             .action
             .as_ref()
@@ -12367,7 +12381,7 @@ fn run_mutate_from_source(
             &public,
             index,
             discovered.min(max_mutants),
-            main.engine,
+            &progress_engine,
             started,
         );
         public_mutants.push(public);
@@ -12491,7 +12505,13 @@ fn run_mutate_from_source(
                     }
                 }
             }
-            mutation_progress(&public, index, count, main.engine, started);
+            mutation_progress(
+                &public,
+                index,
+                count,
+                &mutation_progress_engine(&main, status),
+                started,
+            );
             public_mutants.push(public);
         }
     }
@@ -20293,6 +20313,37 @@ mod mutate_explicit_first_tests {
             native_mutation_bmc(model, depth)
         });
         (main, calls)
+    }
+
+    #[test]
+    fn progress_engine_keeps_the_route_beside_a_later_decision() {
+        let main = |outcome, engine| MainOracle {
+            outcome,
+            boundary_killer: None,
+            engine,
+        };
+        for route in ["explicit", "bmc"] {
+            let clean = main(MutationOracle::Clean, route);
+            assert_eq!(mutation_progress_engine(&clean, "survived"), route);
+            for later in ["killed", "inconclusive", "error"] {
+                assert_eq!(
+                    mutation_progress_engine(&clean, later),
+                    format!("secondary, oracle={route}")
+                );
+            }
+        }
+        let killed = || MutationOracle::killed("Safe", Vec::new());
+        for route in ["bmc", "probe"] {
+            assert_eq!(
+                mutation_progress_engine(&main(killed(), route), "killed"),
+                route
+            );
+        }
+        let failed = MutationOracle::Error(OracleFailure::new("bmc", "unknown"));
+        assert_eq!(
+            mutation_progress_engine(&main(failed, "bmc"), "error"),
+            "bmc"
+        );
     }
 
     #[test]

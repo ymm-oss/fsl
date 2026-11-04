@@ -1566,7 +1566,7 @@ fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
                                                  # manifest-driven cross-layer report (§10)
-fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutants N]
+fslc mutate    <file.fsl> [--depth K] [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
                                                  # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
@@ -4660,7 +4660,9 @@ DESIGN-*.md があります)。
   既存の BMC 経路が verdict と kill label を選びます。後続の検査も引き続き
   実行します。受理されたベースラインと評価した各ミュータントの
   進捗は stderr に `engine=explicit|bmc|probe|none` と秒数で出ます。engine は
-  main oracle の経路であり、後続検査の判定元ではありません。stdout は
+  main oracle の経路です。main oracle が clean で後続検査が `killed`・`inconclusive`・
+  `error` を決めたミュータントは `engine=secondary, oracle=explicit|bmc` と出て、
+  その経路も読み取れます。stdout は
   [`DESIGN-mutate` §3](../design/DESIGN-mutate.md#3-kill-oracle-and-baseline-gate) の
   encoding-only residual(BMC 単独では `build_spec` だったものが explicit-clean で
   生存し得る)を除いて変わりません。

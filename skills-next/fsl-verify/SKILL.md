@@ -163,7 +163,8 @@ after a completed empty probe, explicit can certify clean (50,000 states, all
 reachables witnessed through K); if neither decides, existing BMC chooses the
 verdict/killer. Secondary checks remain.
 Stderr progress shows baseline and per-mutant time plus the main-oracle route
-(`explicit`, `bmc`, `probe`, `none`), not the later check deciding final status.
+(`explicit`, `bmc`, `probe`, `none`), or `secondary, oracle=<route>` when the
+main oracle was clean and a later check decided killed, inconclusive or error.
 Stdout is unchanged except for the encoding-only residual in DESIGN-mutate §3:
 explicit-clean can survive where BMC alone reported `build_spec`.
 Refused baselines and command errors have no progress.

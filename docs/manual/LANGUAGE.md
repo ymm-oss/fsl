@@ -1686,7 +1686,7 @@ fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
                                                  # manifest-driven cross-layer report (§10)
-fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutants N]
+fslc mutate    <file.fsl> [--depth K] [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
                                                  # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
@@ -4907,7 +4907,9 @@ DESIGN-*.md).
   decides, the existing BMC path chooses the verdict/killer. Secondary checks
   still run. Stderr reports the accepted baseline and each evaluated mutant,
   with `engine=explicit|bmc|probe|none`
-  and elapsed seconds; the engine names the main-oracle route, not later checks.
+  and elapsed seconds; the engine names the main-oracle route. If the main oracle
+  was clean and a later check decided `killed`, `inconclusive` or `error`, the
+  label is `engine=secondary, oracle=explicit|bmc`, which keeps that route visible.
   Stdout is unchanged except for the encoding-only residual in
   [`DESIGN-mutate` §3](../design/DESIGN-mutate.md#3-kill-oracle-and-baseline-gate):
   explicit-clean can survive where BMC alone reported `build_spec`.

@@ -306,11 +306,20 @@ Mutation reports emit live progress on stderr only:
 ```text
 mutate baseline: proved (engine=explicit, 0.100s)
 mutate [i/N] <op> <target>: <status>[ <killed_by>] (engine=explicit|bmc|probe|none, 0.100s)
-mutate external [i/M] <id>: <status>[ <killed_by>] (engine=explicit|bmc|probe|none, 0.100s)
+mutate [i/N] <op> <target>: <status>[ <killed_by>] (engine=secondary, oracle=explicit|bmc, 0.100s)
+mutate external [i/M] <id>: <status>[ <killed_by>] (either engine form, 0.100s)
 ```
 
-The engine label names the main-oracle route, not whichever later check decides
-the final status or killer. `none` means the record never reached the oracle.
+The engine label names the main-oracle route. When the main oracle was clean and
+a later check (requirements, implements, the init-bounds override) decided the
+published status (`killed`, `inconclusive` or `error`), the label is
+`engine=secondary, oracle=<route>`: `secondary` says a later check decided, and
+`oracle` keeps the clean main route visible. There, `killed_by` is
+`acceptance`/`forbidden`, `refinement` or `_bounds_<state>` respectively. The
+init-bounds override can also rewrite a main-oracle kill: `killed _bounds_<state>
+(engine=bmc)` can mean BMC found another property and the override chose the
+name, so `engine=bmc` then vouches for the kill, not for that killer. `none`
+means the record never reached the oracle.
 N is the evaluated built-in count, not the cap or discovered count; M includes
 invalid external records. Timers include per-record materialization and later
 checks. External catalogs load before any progress (previously after built-ins),

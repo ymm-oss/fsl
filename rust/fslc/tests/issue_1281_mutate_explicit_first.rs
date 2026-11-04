@@ -108,6 +108,234 @@ fn rbac_baseline_uses_explicit_and_keeps_legacy_verified_literal() {
 }
 
 #[test]
+fn baseline_claims_unbounded_only_on_explicit_closure() {
+    let closed = run(&[
+        "rust/fslc/tests/fixtures/issue_1281_closed.fsl",
+        "--depth",
+        "2",
+        "--max-mutants",
+        "0",
+    ]);
+    report(&closed, 0);
+    assert_eq!(
+        progress(&closed),
+        [("mutate baseline: proved", "explicit")],
+        "a closed state space is the only proved baseline"
+    );
+    assert!(!String::from_utf8_lossy(&closed.stdout).contains("proved"));
+
+    let cut = run(&[
+        "rust/fslc/tests/fixtures/issue_1281_depth_cut.fsl",
+        "--depth",
+        "3",
+        "--max-mutants",
+        "0",
+    ]);
+    report(&cut, 0);
+    assert_eq!(
+        progress(&cut),
+        [("mutate baseline: verified", "explicit")],
+        "a depth-cut explicit baseline must stay bounded"
+    );
+    assert!(!String::from_utf8_lossy(&cut.stdout).contains("proved"));
+}
+
+#[test]
+fn builtin_kill_by_a_later_check_is_not_labelled_with_the_main_route() {
+    let forbidden = run(&[
+        "examples/gallery/valid/small_forbidden_guarded_cancel.fsl",
+        "--max-mutants",
+        "2",
+    ]);
+    let value = report(&forbidden, 0);
+    assert_report_progress(&forbidden, &value);
+    assert_eq!(
+        progress(&forbidden)[1..],
+        [
+            (
+                "mutate [1/2] type_bound_lo_minus1 type OrderId lo: survived",
+                "explicit"
+            ),
+            (
+                "mutate [2/2] type_bound_lo_plus1 type OrderId lo: killed forbidden",
+                "secondary, oracle=explicit"
+            ),
+        ]
+    );
+
+    let acceptance = run(&[
+        "examples/self/monitor_action_boundary.fsl",
+        "--max-mutants",
+        "3",
+    ]);
+    let value = report(&acceptance, 0);
+    assert_report_progress(&acceptance, &value);
+    assert_eq!(
+        progress(&acceptance)[3],
+        (
+            "mutate [3/3] type_bound_hi_minus1 type Count hi: killed acceptance",
+            "secondary, oracle=explicit"
+        )
+    );
+}
+
+#[test]
+fn external_kill_by_refinement_is_not_labelled_with_the_main_route() {
+    let output = run(&[
+        "examples/pm/cancel_system.fsl",
+        "--max-mutants",
+        "0",
+        "--from",
+        "rust/fslc/tests/fixtures/issue_1281_refinement_kill.jsonl",
+    ]);
+    let value = report(&output, 0);
+    assert_report_progress(&output, &value);
+    assert_eq!(
+        progress(&output)[1],
+        (
+            "mutate external [1/1] drop-cancel-guard: killed refinement",
+            "secondary, oracle=explicit"
+        )
+    );
+}
+
+/// The budget belongs to the implements walk, so `inconclusive` is the later
+/// check's status, not the route's (#1262).
+#[test]
+fn later_inconclusive_is_not_labelled_as_the_main_route() {
+    let builtin = run(&[
+        "rust/fslc/tests/fixtures/issue_1281_budget_req.fsl",
+        "--depth",
+        "6",
+        "--max-mutants",
+        "6",
+    ]);
+    let value = report(&builtin, 0);
+    assert_report_progress(&builtin, &value);
+    assert_eq!(value["mutants"][5]["status"], "inconclusive", "{value}");
+    assert_eq!(
+        progress(&builtin)[6],
+        (
+            "mutate [6/6] requires_remove push requires #1: inconclusive",
+            "secondary, oracle=bmc"
+        )
+    );
+
+    let external = run(&[
+        "rust/fslc/tests/fixtures/issue_1281_budget_req.fsl",
+        "--depth",
+        "6",
+        "--max-mutants",
+        "0",
+        "--from",
+        "rust/fslc/tests/fixtures/issue_1281_budget_external.jsonl",
+    ]);
+    let value = report(&external, 0);
+    assert_report_progress(&external, &value);
+    assert_eq!(
+        progress(&external)[1],
+        (
+            "mutate external [1/1] widen: inconclusive",
+            "secondary, oracle=bmc"
+        )
+    );
+}
+
+/// BMC accepts the removed `Set` init, then the implements walk refuses the
+/// incomplete concrete init, so `error` is the later check's status.
+#[test]
+fn later_error_is_not_labelled_as_the_main_route() {
+    let output = run(&[
+        "rust/fslc/tests/fixtures/issue_1281_later_error_req.fsl",
+        "--depth",
+        "2",
+    ]);
+    let value = report(&output, 0);
+    assert_report_progress(&output, &value);
+    assert_eq!(value["mutants"][4]["status"], "error", "{value}");
+    assert_eq!(
+        value["mutants"][4]["error"]["stage"], "implements",
+        "{value}"
+    );
+    assert_eq!(
+        progress(&output)[5],
+        (
+            "mutate [5/6] assignment_remove init assignment: error",
+            "secondary, oracle=bmc"
+        )
+    );
+}
+
+/// The override runs after the main oracle: [14/37] was clean there, while
+/// [11/37] and [15/37] were main BMC kills of the same bound.
+#[test]
+fn init_bounds_override_after_a_clean_main_oracle_is_a_later_decision() {
+    let output = run(&[
+        "examples/gallery/adversarial/option_struct_set_seq_combo.fsl",
+        "--depth",
+        "3",
+        "--max-mutants",
+        "40",
+    ]);
+    let value = report(&output, 0);
+    assert_report_progress(&output, &value);
+    let lines = progress(&output);
+    assert_eq!(
+        lines[14],
+        (
+            "mutate [14/37] assignment_remove init assignment: killed _bounds_active",
+            "secondary, oracle=bmc"
+        )
+    );
+    assert_eq!(
+        lines[11],
+        (
+            "mutate [11/37] assignment_remove init assignment: killed _bounds_jobs",
+            "bmc"
+        )
+    );
+    assert_eq!(
+        lines[15],
+        (
+            "mutate [15/37] assignment_remove init assignment: killed _bounds_q",
+            "bmc"
+        )
+    );
+}
+
+#[test]
+fn main_oracle_verdicts_keep_their_route() {
+    let output = run(&[
+        "rust/fslc/tests/fixtures/issue_1281_main_kill.fsl",
+        "--depth",
+        "2",
+        "--max-mutants",
+        "1000",
+    ]);
+    let value = report(&output, 0);
+    assert_report_progress(&output, &value);
+    let lines = progress(&output);
+    assert!(
+        lines.iter().any(|(body, engine)| body
+            .ends_with("requires_remove step requires #1: killed Safe")
+            && *engine == "bmc"),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|(body, engine)| body.ends_with(": survived") && *engine == "explicit"),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .all(|(_, engine)| !engine.starts_with("secondary")),
+        "this spec has no later check that can kill: {lines:?}"
+    );
+}
+
+#[test]
 fn builtin_progress_uses_evaluated_count_not_the_larger_cap() {
     let output = run(BUILTIN);
     let value = report(&output, 0);
