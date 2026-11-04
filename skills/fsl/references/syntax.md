@@ -1641,13 +1641,18 @@ when checking a file, the message suffix changes from `at L:C` to
    (`a == (if c then t else b)` with `let t = Set { 0 }`, `a: Set<A>`, `b: Set<B>`; the same
    for Seq, capacity, `old(...)`, and inside `some(...)`, `Seq { ... }`, `Set { ... }`). Both now fail
    at check with the located assignability error rather than `cannot coerce symbolic value` on bmc and
-   induction, wherever written: a mismatch never evaluated (an empty-domain `forall` or `exists`, an
+   induction, evaluated or not: a mismatch never evaluated (an empty-domain `forall` or `exists`, an
    action over an empty range, a property left out by `--exclude-property` or `--property`) returned
    a verdict before and is refused too. Other forms keep their verdicts (`a == t`, `q == a`,
-   `Option<Int>` with `Option<A>`), and a let-bound collection holding `Int` below an element now
-   returns a result. A refinement map, a scenario `expect` and a `--lemma` candidate keep the prior rule;
-   `preserve progress` evaluates a map symbolically, so a Map comparison there still reports
-   `cannot coerce`, and such a candidate is `rejected` with it.
+   `Option<Int>` with `Option<A>`), and a collection holding `Int` below an element that no literal
+   expectation types now returns a result: a `let` or `is` binding, a method's result or argument
+   (`Set { p, none } == Set { o }.add(none)`, `Set { Set { p } }.contains(t)`), or a read into state, in
+   any position an engine evaluates, including a `--lemma` candidate and a map under `preserve progress`.
+   A refinement map, a scenario `expect` and a `--lemma` candidate keep the prior rule. Three routes still
+   pass check and report `cannot coerce`: a Map comparison in a map under `preserve progress`, which
+   evaluates a map symbolically; such a candidate, which is `rejected` with it; and a range-typed literal
+   under `old(...)`, which keeps its own range and capacity (`a == old(Set { vb })`,
+   `sa == old(Seq { va })` for `sa: Seq<A, 2>`), as before this change.
    Migration: one carrier, or compare entries. Set/Seq conditional inference retains
    an already known finite arm's carrier/capacity through let in either arm order;
    that inference alone does not materialize literals. Refinement resolves numeric types separately;

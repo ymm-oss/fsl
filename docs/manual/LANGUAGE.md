@@ -1223,11 +1223,12 @@ name in a `decreases` call. There are no unrelated breaking removals.
   controls still check; the 18 original literal-boundary outputs are unchanged.
   See the [single carrier decision](../design/DESIGN-finite-container-carriers.md)
   for commands and the full removal inventory; recursive materialization is described above.
-  **Breaking removal (#1679):** a model expression whose container carriers symbolic
-  evaluation cannot coerce now fails `check` with the existing located assignability error
+  **Breaking removal (#1679):** the model expressions listed here, whose container carriers
+  symbolic evaluation cannot coerce, now fail `check` with the existing located assignability error
   (`semantics`, exit 2) instead of `cannot coerce symbolic value` on bmc and induction. The
   refusal is located at the arm when one is at fault, otherwise at the enclosing guard, statement
-  or property, and it applies wherever the expression is written, evaluated or not. A Map whose
+  or property, and it applies whether the expression is evaluated or not. Three routes still pass
+  `check` and report it; they are at the end of this paragraph. A Map whose
   value is `Int` or `Option<Int>` is refused against one with a range, for `m0: Map<K, Int>`,
   `m1: Map<K, A>`: `m0 == m1`, `m0 != m1`, `m0 = m1`, a conditional arm, `m0 == old(m1)` and
   `(if c then m0 else m1)[0]`; inside a literal (`some(m0) == some(m1)`,
@@ -1245,17 +1246,26 @@ name in a `decreases` call. There are no unrelated breaking removals.
   other removed forms, such as an unused `let u = m0 == m1`; the measured losses are in the
   [carrier decision](../design/DESIGN-finite-container-carriers.md). Other forms keep their verdicts,
   including `a == t`, `q == a` with a differing range or capacity, `some(t) == some(a)`,
-  `Option<Int>` against `Option<A>`, and Maps of equal carriers or equal-range aliases. A let-bound
-  collection holding `Int` below an element, such as `let t = Set { some(0) }` against
-  `Set { p }` for `p: Option<A>`, used to check and then report `cannot coerce`; it now returns a
-  result on every engine. A refinement map (`map m = m`, `map same = m == y`,
+  `Option<Int>` against `Option<A>`, and Maps of equal carriers or equal-range aliases. A collection
+  holding `Int` below an element that no literal expectation types used to check and then report
+  `cannot coerce`, and it now returns a result: a `let` or `is` binding (`let t = Set { some(0) }`
+  against `Set { p }` for `p: Option<A>`, `some(Set { some(1) }) is some(x) and Set { p } == x`), a
+  method's result or argument (`Set { p, none } == Set { o }.add(none)`,
+  `Set { Set { p } }.contains(t)`, `.add(t)`, `.remove(t)`, `Seq { Seq { p } }.push(t)`) and a read
+  into state (`p = (if c then Seq { p } else t).head()`), in a guard and in an `invariant`,
+  `reachable`, `trans` or `leadsTo`, as far as each engine evaluates that position, and inside a
+  `--lemma` candidate or a map under `preserve progress`. A refinement map (`map m = m`, `map same = m == y`,
   `map s = if c then x else y`) and a scenario `expect` keep the rule above. An `expect` is evaluated
   concretely, and so is a map on the refinement step, but `preserve progress` evaluates a map
   symbolically, so `map same = m == y` for those Maps gives `cannot coerce`, exit 2, under
   `preserve progress` while the same map without it refines. That gap is recorded in the carrier
   decision. A `--lemma` candidate keeps the rule above as well: with such a mismatch it is
   `rejected` with `cannot coerce`, `used` is false and the main result does not change, and a
-  mismatch it never evaluates leaves it usable.
+  mismatch it never evaluates leaves it usable. The third route predates this change and is
+  recorded in the same decision: a literal under `old(...)` is not typed against what surrounds
+  it, so a range-typed one keeps its own range and capacity. `a == old(Set { vb })`,
+  `sa == old(Seq { vb })` and `sa == old(Seq { va })` for `vb: 0..2`, `a: Set<A>`, `sa: Seq<A, 2>` pass
+  `check`, exit 2 on bmc and induction, and explicit answers.
   Migration: declare the two values with one carrier, or compare the entries (`m0[k] == m1[k]`).
   In mutate, a statically ill-typed implements map is `invalid`, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map

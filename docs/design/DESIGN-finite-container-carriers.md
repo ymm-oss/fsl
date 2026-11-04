@@ -77,9 +77,9 @@ with `cannot coerce symbolic value`, while `fsl-bfs` answered:
   expectation, which changed admission in both directions; this does not replace it.
 
 Both apply to the model's own expressions: action guards, lets, statements, `ensures`, `old(...)`,
-init and every property kind, wherever they are written, evaluated or not. `old(...)` keeps its
-operand's type, and its operand's arms answer to what surrounds it without its literals being typed
-against that.
+init and every property kind, evaluated or not. `old(...)` keeps its operand's type, and its
+operand's arms answer to what surrounds it without its literals being typed against that. So this
+does not reach every expression symbolic evaluation cannot coerce: see the recorded routes below.
 
 **Keeping the prior rule.** A refinement map, a scenario `expect` and a `--lemma` candidate stay on
 the prior rule through `ValidationPhase::concrete_only`. The name is older than what it covers:
@@ -99,12 +99,23 @@ candidate keeps the prior rule.
 `coerce` both ask. `check` refuses its `MapMismatch`; `coerce` rebuilds a value on its `RebuildInt`.
 `types_compatible`, `can_retag` and `inferred_collection_element` still answer separately.
 
-**Let-bound collections.** A let-bound collection holding `Int` below an element, such as
-`let t = Set { some(0) }` against `Set { p }` for `p: Option<A>`, checked and then reported
-`cannot coerce` on bmc, explicit and induction, while `fsl-bfs` answered. It is no longer a literal the
-expectation can type, and `coerce` converted only an element that was itself `Int`. `coerce` now
-converts these after retagging fails, so a value that had any coercion before is unaffected. No
-verdict is lost, where refusing them at `check` would have lost `fsl-bfs` answers on each.
+**Collections no literal expectation types.** A collection holding `Int` below an element checked
+and then reported `cannot coerce` on bmc and induction, and on explicit except in a `trans` or a read
+into state, while `fsl-bfs` answered, whenever it reached the comparison as anything but a literal the
+expectation can type, because `coerce` converted only an element that was itself `Int`. That covers:
+
+- a `let` binding: `let t = Set { some(0) }` against `Set { p }` for `p: Option<A>`;
+- an `is` binding: `some(Set { some(1) }) is some(x) and Set { p } == x`;
+- a method's result: `Set { p, none } == Set { o }.add(none)`, `.remove`, `.push`, `.head()`;
+- a method's argument: `Set { Set { p } }.contains(t)`, `.add(t)`, `.remove(t)`, and
+  `Seq { Seq { p } }.push(t)`;
+- a read into state: `p = (if c then Seq { p } else t).head()`;
+
+in a guard and in an `invariant`, `reachable`, `trans` or `leadsTo`. `coerce` now converts these after
+retagging fails, so a value that had any coercion before is unaffected. No verdict is lost, where
+refusing them at `check` would have lost `fsl-bfs` answers on each. `fsl-bfs` reports no
+violation for a failing `leadsTo` or `reachable`, and explicit refuses `leadsTo`, so those two positions
+have fewer engines.
 
 A Seq holding `Int` keeps prior compatibility, including a differing capacity: `q == a` and
 `q == d` for `q: Seq<Int, 2>`, `a: Seq<A, 2>`, `d: Seq<A, 3>` return a verdict on every engine.
@@ -157,9 +168,24 @@ engines refused. Explicit's include an unused `let u = m0 == m1`, `if false { m0
 `requires false` followed by `m0 = m1`.
 
 Of the forms still accepted, none reports `cannot coerce` on bmc, explicit or induction, and bmc,
-explicit and `fsl-bfs` agree wherever all three give a verdict. Outside these grids two routes still
-report it, both recorded above: a Map comparison in a refinement map under `preserve progress`, and
-a rejected `--lemma` candidate. 22 forms that reported `cannot coerce` now return a result.
+explicit and `fsl-bfs` agree wherever all three give a verdict. Outside these grids three routes
+still report it: a Map comparison in a refinement map under `preserve progress` and a rejected
+`--lemma` candidate, both recorded above, and a range-typed literal under `old(...)`, which
+predates this change. A literal there is not typed against the expectation, so it keeps its own range
+and capacity: `a == old(Set { vb })`, `sa == old(Seq { vb })` and `sa == old(Seq { vb, vb, vb })` with
+`vb: 0..2`, `a: Set<A>`, `sa: Seq<A, 2>`, and with the same range `sa == old(Seq { va })`, whose
+capacity differs. These pass `check`, exit 2 on bmc and induction, and explicit answers. A sweep of
+480 `old(...)` forms found 18 of them, each Set or Seq; the controls with a literal holding `Int`, or
+of the expectation's own carrier, answer on every engine. 22 forms that reported `cannot coerce` now return
+a result.
+A rebuilt value is not one of the mismatches the other two routes report. In 144 `--lemma` runs with
+one in the candidate, each `rejected` with `cannot coerce` on base, none reports it now. All 21
+`proved` candidates held as an invariant on explicit and `fsl-bfs`, all 7 `proved` main results and
+all 72 `violated` ones matched explicit, and the other 123 candidates were `rejected`, 99 of them
+violated on explicit and 24 true there but not inductive. In 20 refinement maps with one under
+`preserve progress`, the result equalled that of the same map written by hand as `p == o` or
+`p == some(1)`, 4 `refines` and 16 `refinement_failed`, and the two maps' values were equal on explicit
+and `fsl-bfs`. No concrete engine evaluates the pulled `leadsTo`, so that is the comparison available.
 For the let-bound collections, each form ran with the compared state matching and differing: bmc,
 explicit and `fsl-bfs` gave a violation exactly when it matched, induction gave `violated` or
 `proved` or `unknown_cti`, and a literal outside the carrier (`some(5)` against `Option<A>`) was never
@@ -177,8 +203,9 @@ error-to-ok transitions. Of the 7 inline inputs of the rewritten
 `issue_1517_conditional_arm_admission`, `f1` goes from ok to the refusal at 6:37 (the test is
 renamed `f1_set_arm_outside_the_expectation_is_rejected_at_the_arm`) and 6 are byte-identical,
 including `f4`, whose first arm is also a new refusal but whose second arm is still reported first.
-Of the 104 inline inputs of `issue_1679_carrier_equality`, checked the same way, 46 go from exit 0 to
-exit 2 and 58 are byte-identical, including every control and let-bound form.
+Of the 159 inline inputs of `issue_1679_carrier_equality`, checked the same way at
+`e6288cebf`, 46 go from exit 0 to exit 2 and 113 are byte-identical, including every control, rebuilt
+value and third-route form.
 
 ## Mutation classification
 
