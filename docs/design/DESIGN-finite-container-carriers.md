@@ -76,44 +76,98 @@ with `cannot coerce symbolic value`, while `fsl-bfs` answered:
   only. DESIGN-sync-argument-root-validation rejected replacing the first-arm check with the
   expectation, which changed admission in both directions; this does not replace it.
 
-Both apply to the model's own expressions: action guards, lets, statements, `ensures`, init and
-every property kind. They do not apply to a refinement map or a scenario `expect`, which
-`ValidationPhase::concrete_only` keeps on the prior rule. Those are evaluated concretely and
-return a verdict on every engine: refusing `map m = m`, `map same = m == y`,
-`map s = if c then x else y` or `expect l == r` would lose verdicts on bmc and induction.
+Both apply to the model's own expressions: action guards, lets, statements, `ensures`, `old(...)`,
+init and every property kind, wherever they are written, evaluated or not. `old(...)` keeps its
+operand's type, and its operand's arms answer to what surrounds it without its literals being typed
+against that.
+
+**Keeping the prior rule.** A refinement map, a scenario `expect` and a `--lemma` candidate stay on
+the prior rule through `ValidationPhase::concrete_only`. The name is older than what it covers:
+
+| Position | Evaluation | Result with `Map<K, A>` against `Map<K, Int>` |
+|---|---|---|
+| Scenario `expect` | concrete | `expect l == r` verifies on every engine, and `expect l != r` fails acceptance |
+| Refinement map, refinement step | concrete | `map m = m` and `map same = m == y` refine, `map same = m != y` is `refinement_failed` |
+| Refinement map under `preserve progress` | symbolic | **Recorded gap.** `map same = m == y` is exit 2, `cannot coerce`, on `refine`, and refines without `preserve progress`. `map m = m` and a Seq arm map still refine |
+| `--lemma` candidate | symbolic | `rejected` with `cannot coerce`, `used` false, main result unchanged. A mismatch never evaluated leaves the candidate usable: `x == 0 and y == 0 and forall i: E { m0 == m1 }` is `proved`, `used`, and the main property it supports is `proved` |
+
+Refusing a map's comparison would lose verdicts on the first refinement-step row. Giving a candidate
+an invariant's check would change the last row's main result from `proved` to `unknown_cti`, so a
+candidate keeps the prior rule.
+
+**One rule.** `CarrierCoercion`, through `KernelModel::carrier_coercion`, is the rule `check` and
+`coerce` both ask. `check` refuses its `MapMismatch`; `coerce` rebuilds a value on its `RebuildInt`.
+`types_compatible`, `can_retag` and `inferred_collection_element` still answer separately.
+
+**Let-bound collections.** A let-bound collection holding `Int` below an element, such as
+`let t = Set { some(0) }` against `Set { p }` for `p: Option<A>`, checked and then reported
+`cannot coerce` on bmc, explicit and induction, while `fsl-bfs` answered. It is no longer a literal the
+expectation can type, and `coerce` converted only an element that was itself `Int`. `coerce` now
+converts these after retagging fails, so a value that had any coercion before is unaffected. No
+verdict is lost, where refusing them at `check` would have lost `fsl-bfs` answers on each.
 
 A Seq holding `Int` keeps prior compatibility, including a differing capacity: `q == a` and
 `q == d` for `q: Seq<Int, 2>`, `a: Seq<A, 2>`, `d: Seq<A, 3>` return a verdict on every engine.
 So do `some(t) == some(a)`, `Seq { t } == Seq { a }` and `Option<Int>` against `Option<A>`. This
 is narrower than "whole finite containers require equal carriers": `Int` has no finite carrier.
 
-Audit: 672 forms, base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654` against head
-`0622a2a18362255845bb143fcd47232dacdf20e1`, each built from its own tree with Rust 1.98.0, run as
-`fslc check`, `fslc verify --engine bmc --depth 2`, `--engine explicit --depth 2`,
-`--engine induction` and `fsl-bfs <spec> 2`. Shapes were Set, Seq, Map and Option, nested through
-literals, with `Int` against range carriers and equal-range aliases, in `==`, `!=`, conditional
-arms in either order and operand side, assignment, `let`, guards behind a dead `false and`,
-`ensures`, invariant, reachable, trans, terminal, leadsTo, until and unless. A declared nested
-carrier such as `Map<K, Seq<A, 2>>` is `unsupported state type` on both sides, so it is reachable
-only through literals.
+Audit: 1794 forms, base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654` against head
+`644278436fe0a94af236bd8aaa1207c58fedbe4f`, each built from its own tree with Rust 1.98.0, run as `fslc check`,
+`fslc verify --engine bmc --depth 2`, `--engine explicit --depth 2`, `--engine induction` and
+`fsl-bfs <spec> 2`. Shapes were Set, Seq, Map and Option, nested through literals and lets, with `Int`
+against range carriers and equal-range aliases, in `==`, `!=`, conditional arms in either order and
+operand side, assignment, `let`, `old(...)`, guards behind a dead `false and`, `ensures`, invariant,
+reachable, trans, terminal, leadsTo, until and unless. A declared nested carrier such as
+`Map<K, Seq<A, 2>>` is `unsupported state type` on both sides, so it is reachable only through
+literals.
 
-| Result, base to head | Forms | bmc | induction | explicit | fsl-bfs |
-|---|---|---|---|---|---|
-| ok to error | 131 | exit 2 | exit 2 | exit 2 | answered |
-| ok to error | 67 | exit 2 | exit 2 | verdict | answered |
-| ok to ok | 191 | unchanged | unchanged | unchanged | unchanged |
-| error to error, same packet | 283 | | | | |
-| error to ok | 0 | | | | |
+| Grid | Forms | ok to error | of which bmc and induction verdict | Explicit lost | `fsl-bfs` lost | ok to ok | error to error, same message |
+|---|---|---|---|---|---|---|---|
+| Original matrix | 672 | 198 | 0 | 67 | 198 | 191 | 283 |
+| Wider positions, sibling literals, methods | 67 | 24 | 1 | 6 | 23 | 29 | 14 |
+| Never-evaluated positions, ignored properties, nesting | 36 | 18 | 10 | 4 | 8 | 6 | 12 |
+| Let-bound and literal nesting | 648 | 0 | 0 | 0 | 0 | 156 | 492 |
+| Literal reads | 315 | 0 | 0 | 0 | 0 | 315 | 0 |
+| `old(...)` | 16 | 5 | 0 | 5 | 5 | 4 | 7 |
+| Let-bound, state matching and differing | 40 | 0 | 0 | 0 | 0 | 40 | 0 |
 
-No removed form returned a verdict on bmc or on induction. The verdict losses are explicit on 67
-forms and `fsl-bfs` on all 198, where those solver-free routes evaluated a form the symbolic
-engines refused. Of the 191 forms still accepted, none reports `cannot coerce` and bmc, explicit
-and `fsl-bfs` agree wherever all three give a verdict. Explicit's own `leadsTo` refusal is
-unchanged. The matrix is a finite measurement and was not retained;
-`rust/fslc/tests/issue_1679_carrier_equality.rs` pins representative forms of each row.
+No form went from error to ok. The explicit and `fsl-bfs` columns count only the forms outside the
+never-evaluated column.
+
+**Removed with a verdict on bmc and induction: 11 forms, all never evaluated.** Each returned a
+verdict on bmc, explicit, induction and `fsl-bfs` on base and is refused on head, by decision: a
+mismatch stays refused where it is written.
+
+| Form | Flag | Base bmc, explicit, induction, `fsl-bfs` |
+|---|---|---|
+| `invariant P { forall i: E { m0 == m1 } }`, `type E = 1..0` (two grids) | | verified, proved, proved, no violation |
+| `invariant P { not (exists i: E { m0 == m1 }) }` | | the same |
+| `invariant P { forall i: E { sa == (if c then q else sb) } }` | | the same |
+| `requires forall i: E { m0 == m1 }` | | the same |
+| `action go(i: E) { requires m0 == m1 ... }` | | the same |
+| `action go(i: E) { m0 = m1 }` | | the same |
+| `invariant Bad { m0 == m1 }` | `--exclude-property Bad` | the same |
+| `reachable Bad { m0 == m1 }` | `--exclude-property Bad` | the same |
+| `trans Bad { old(m0) == m1 }` | `--exclude-property Bad` | the same |
+| `invariant Bad { m0 == m1 }` | `--property Q` | the same |
+
+The other removed forms returned no verdict on bmc or on induction. Their losses are explicit on
+82 forms and `fsl-bfs` on 234, where those solver-free routes evaluated a form the symbolic
+engines refused. Explicit's include an unused `let u = m0 == m1`, `if false { m0 = m1 }` and
+`requires false` followed by `m0 = m1`.
+
+Of the forms still accepted, none reports `cannot coerce` on bmc, explicit or induction, and bmc,
+explicit and `fsl-bfs` agree wherever all three give a verdict. Outside these grids two routes still
+report it, both recorded above: a Map comparison in a refinement map under `preserve progress`, and
+a rejected `--lemma` candidate. 22 forms that reported `cannot coerce` now return a result.
+For the let-bound collections, each form ran with the compared state matching and differing: bmc,
+explicit and `fsl-bfs` gave a violation exactly when it matched, induction gave `violated` or
+`proved` or `unknown_cti`, and a literal outside the carrier (`some(5)` against `Option<A>`) was never
+equal. Explicit's own `leadsTo` refusal is unchanged. The grids are a finite measurement and were
+not retained; `rust/fslc/tests/issue_1679_carrier_equality.rs` pins representative forms of each row.
 
 On-disk transition set (empty). Base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`, head
-`0622a2a18362255845bb143fcd47232dacdf20e1`, each built from its own materialized tree in its own
+`644278436fe0a94af236bd8aaa1207c58fedbe4f`, each built from its own materialized tree in its own
 target directory with `cargo +1.98.0 build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc
 --locked --offline`. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (617
 forms: 23/195/399) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable
@@ -123,6 +177,8 @@ error-to-ok transitions. Of the 7 inline inputs of the rewritten
 `issue_1517_conditional_arm_admission`, `f1` goes from ok to the refusal at 6:37 (the test is
 renamed `f1_set_arm_outside_the_expectation_is_rejected_at_the_arm`) and 6 are byte-identical,
 including `f4`, whose first arm is also a new refusal but whose second arm is still reported first.
+Of the 104 inline inputs of `issue_1679_carrier_equality`, checked the same way, 46 go from exit 0 to
+exit 2 and 58 are byte-identical, including every control and let-bound form.
 
 ## Mutation classification
 

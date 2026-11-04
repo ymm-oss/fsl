@@ -1131,21 +1131,31 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   再帰的な実体化については上記の説明を参照してください。
   **破壊的な受理範囲の縮小(#1679):** 記号評価で変換できないコンテナのドメインを持つモデルの式は、bmc と
   induction の `cannot coerce symbolic value` ではなく、`check` が既存の位置付き代入可能性エラー
-  (`semantics`、終了コード2)で拒否します。次の形はこれまで `check` を通っていました。
-  - 値が `Int` または `Option<Int>` の Map と、値が範囲の Map を `==`、`!=`、条件式の分岐、代入で組み合わせる形。
-    `m0: Map<K, Int>`、`m1: Map<K, A>` に対する `m0 == m1`、`m0 = m1` です。リテラルの中
-    (`some(m0) == some(m1)`、`Seq { m0 } == Seq { m1 }`、`Set { m0 } == Set { m1 }`)、メソッド引数
-    (`Seq { m0 }.contains(m1)`)、リテラルから読み出した値(`Seq { m0 }.head() == m1`)も同じです。
-  - `Int` の兄弟の分岐だけが期待型とつないでいた条件式の分岐。`let t = Set { 0 }`、`a: Set<A>`、`b: Set<B>` に対する
-    `a == (if c then t else b)` です。`Seq` リテラル、宣言された `q: Seq<Int, 2>`、異なる容量でも同じで、
-    `some(...)`、`Seq { ... }`、`Set { ... }`、メソッド引数の中の分岐も含みます。
-
-  拒否の位置は、原因の分岐があればその分岐、なければ囲んでいるガード、文、プロパティです。全エンジンが判定を返す形は
-  変わりません。`a == t`、範囲や容量が異なる `q == a`、`some(t) == some(a)`、`Option<Int>` と `Option<A>`、ドメインが
-  同じ Map や範囲が同じ別名の Map です。具象評価だけを受ける位置も変わりません。refinement の map
-  (`map m = m`、`map same = m == y`、`map s = if c then x else y`)とシナリオの `expect` は上記の規則のままです。
-  削除された形の一部には explicit と `fsl-bfs` が答えていました。計測した判定の喪失は
-  [ドメイン互換の決定](../design/DESIGN-finite-container-carriers.md)にあります。
+  (`semantics`、終了コード2)で拒否します。拒否の位置は、原因の分岐があればその分岐、なければ囲んでいるガード、
+  文、プロパティです。式が評価されるかどうかにかかわらず拒否します。`m0: Map<K, Int>`、`m1: Map<K, A>` のように、
+  値が `Int` または `Option<Int>` の Map と値が範囲の Map を組み合わせる形を拒否します。`m0 == m1`、`m0 != m1`、
+  `m0 = m1`、条件式の分岐、`m0 == old(m1)`、`(if c then m0 else m1)[0]` です。リテラルの中
+  (`some(m0) == some(m1)`、`Seq { m0 } == Seq { m1 }`、`Set { m0 } == Set { m1 }`)、兄弟の要素
+  (`Seq { m0, m1 }`、`Set { m0, m1 }`)、メソッド引数(`Seq { m0 }.contains(m1)`、`Set { m0 }.add(m1)`、
+  `Set { m0 }.remove(m1)`、`Seq { m0 }.push(m1)`)、リテラルから読み出した値(`Seq { m0 }.head() == m1`)も
+  同じです。`Int` の兄弟の分岐だけが期待型とつないでいた条件式の分岐も拒否します。`let t = Set { 0 }`、
+  `a: Set<A>`、`b: Set<B>` に対する `a == (if c then t else b)` です。`Seq` リテラル、宣言された
+  `q: Seq<Int, 2>`、異なる容量でも同じで、`sa == old(if c then q else sb)`、`some(...)`、`Seq { ... }`、
+  `Set { ... }`、メソッド引数の中の分岐も含みます。この削除で失われる判定があります。評価されない位置の不一致は
+  全エンジンが判定を返していましたが、拒否します。`type E = 1..0` のような空のドメインの `forall` と `exists`、
+  空の範囲を仮引数に持つ action、`--exclude-property` や `--property` で外れるプロパティです。使われない
+  `let u = m0 == m1` など、削除された他の形にも explicit と `fsl-bfs` が答えていました。計測した判定の喪失は
+  [ドメイン互換の決定](../design/DESIGN-finite-container-carriers.md)にあります。他の形は判定を保ちます。
+  `a == t`、範囲や容量が異なる `q == a`、`some(t) == some(a)`、`Option<Int>` と `Option<A>`、ドメインが同じ Map や
+  範囲が同じ別名の Map です。`p: Option<A>` に対する `Set { p }` と `let t = Set { some(0) }` のように、要素の下に
+  `Int` を持つ let 束縛のコレクションは、`check` を通った後に `cannot coerce` を報告していましたが、今は全エンジンが
+  結果を返します。refinement の map(`map m = m`、`map same = m == y`、`map s = if c then x else y`)とシナリオの
+  `expect` は上記の規則のままです。`expect` は具象評価を受け、map も refinement の遷移では具象評価を受けますが、
+  `preserve progress` は map を記号評価します。そのため、これらの Map に対する `map same = m == y` は
+  `preserve progress` のもとでは `cannot coerce`(終了コード2)になり、それがなければ refines です。この差は
+  ドメイン互換の決定に記録しています。`--lemma` の候補も上記の規則のままです。このような不一致を持つ候補は
+  `cannot coerce` で `rejected`、`used` は false で、主の結果は変わりません。評価されない不一致を持つ候補は
+  使えるままです。
   移行: 2つの値を同じドメインで宣言するか、要素を比較してください(`m0[k] == m1[k]`)。
   mutateでは、静的に型が不正なimplementsのmapをoracleの失敗でなく`invalid`として、
   checkで不正なmutantと同じ経路で分類します。入れ物全体のmapを持つspecの範囲変更mutantは、

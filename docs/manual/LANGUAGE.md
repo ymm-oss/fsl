@@ -1225,26 +1225,37 @@ name in a `decreases` call. There are no unrelated breaking removals.
   for commands and the full removal inventory; recursive materialization is described above.
   **Breaking removal (#1679):** a model expression whose container carriers symbolic
   evaluation cannot coerce now fails `check` with the existing located assignability error
-  (`semantics`, exit 2) instead of `cannot coerce symbolic value` on bmc and induction. These
-  passed `check` before:
-  - A Map whose value is `Int` or `Option<Int>` against one with a range, in `==`, `!=`, a
-    conditional arm and assignment: `m0 == m1` and `m0 = m1` for `m0: Map<K, Int>`,
-    `m1: Map<K, A>`, also inside a literal (`some(m0) == some(m1)`, `Seq { m0 } == Seq { m1 }`,
-    `Set { m0 } == Set { m1 }`), as a method argument (`Seq { m0 }.contains(m1)`) and read
-    back out of one (`Seq { m0 }.head() == m1`).
-  - A conditional arm that only an `Int` sibling related to the expectation:
-    `a == (if c then t else b)` with `let t = Set { 0 }`, `a: Set<A>`, `b: Set<B>`; the same
-    with a `Seq` literal or a declared `q: Seq<Int, 2>`, or a differing capacity; and such an
-    arm inside `some(...)`, `Seq { ... }`, `Set { ... }` or a method argument.
-
-  A refusal is located at the arm when one is at fault, otherwise at the enclosing guard,
-  statement or property. Forms that return a verdict on every engine are unchanged, including
-  `a == t`, `q == a` with a differing range or capacity, `some(t) == some(a)`, `Option<Int>`
-  against `Option<A>`, and Maps of equal carriers or equal-range aliases. So are the positions
-  evaluated only concretely: a refinement map (`map m = m`, `map same = m == y`,
-  `map s = if c then x else y`) and a scenario `expect`, which keep the rule above. Explicit and
-  `fsl-bfs` answered some of the removed forms; the measured losses are in the
-  [carrier decision](../design/DESIGN-finite-container-carriers.md).
+  (`semantics`, exit 2) instead of `cannot coerce symbolic value` on bmc and induction. The
+  refusal is located at the arm when one is at fault, otherwise at the enclosing guard, statement
+  or property, and it applies wherever the expression is written, evaluated or not. A Map whose
+  value is `Int` or `Option<Int>` is refused against one with a range, for `m0: Map<K, Int>`,
+  `m1: Map<K, A>`: `m0 == m1`, `m0 != m1`, `m0 = m1`, a conditional arm, `m0 == old(m1)` and
+  `(if c then m0 else m1)[0]`; inside a literal (`some(m0) == some(m1)`,
+  `Seq { m0 } == Seq { m1 }`, `Set { m0 } == Set { m1 }`) and between sibling elements
+  (`Seq { m0, m1 }`, `Set { m0, m1 }`); as a method argument (`Seq { m0 }.contains(m1)`,
+  `Set { m0 }.add(m1)`, `Set { m0 }.remove(m1)`, `Seq { m0 }.push(m1)`); and read back out of a
+  literal (`Seq { m0 }.head() == m1`). A conditional arm that only an `Int` sibling related to the
+  expectation is refused too: `a == (if c then t else b)` with `let t = Set { 0 }`, `a: Set<A>`,
+  `b: Set<B>`; the same with a `Seq` literal, a declared `q: Seq<Int, 2>` or a differing capacity;
+  `sa == old(if c then q else sb)`; and such an arm inside `some(...)`, `Seq { ... }`, `Set { ... }`
+  or a method argument. These removals take verdicts away. A mismatch in a position that is never
+  evaluated returned a verdict on every engine and is refused all the same: a `forall` or `exists`
+  over an empty domain such as `type E = 1..0`, an action with a parameter over an empty range, and a
+  property that `--exclude-property` or `--property` leaves out. Explicit and `fsl-bfs` also answered
+  other removed forms, such as an unused `let u = m0 == m1`; the measured losses are in the
+  [carrier decision](../design/DESIGN-finite-container-carriers.md). Other forms keep their verdicts,
+  including `a == t`, `q == a` with a differing range or capacity, `some(t) == some(a)`,
+  `Option<Int>` against `Option<A>`, and Maps of equal carriers or equal-range aliases. A let-bound
+  collection holding `Int` below an element, such as `let t = Set { some(0) }` against
+  `Set { p }` for `p: Option<A>`, used to check and then report `cannot coerce`; it now returns a
+  result on every engine. A refinement map (`map m = m`, `map same = m == y`,
+  `map s = if c then x else y`) and a scenario `expect` keep the rule above. An `expect` is evaluated
+  concretely, and so is a map on the refinement step, but `preserve progress` evaluates a map
+  symbolically, so `map same = m == y` for those Maps gives `cannot coerce`, exit 2, under
+  `preserve progress` while the same map without it refines. That gap is recorded in the carrier
+  decision. A `--lemma` candidate keeps the rule above as well: with such a mismatch it is
+  `rejected` with `cannot coerce`, `used` is false and the main result does not change, and a
+  mismatch it never evaluates leaves it usable.
   Migration: declare the two values with one carrier, or compare the entries (`m0[k] == m1[k]`).
   In mutate, a statically ill-typed implements map is `invalid`, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map
