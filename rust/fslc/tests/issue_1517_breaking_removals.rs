@@ -47,7 +47,11 @@ fn component_rejection(reason: &str, column: u32) -> String {
 }
 
 /// `(root, piece, Some((complete message, line, column)))`; `None` must pass.
-type Form = (String, String, Option<(String, u32, u32)>);
+struct Form {
+    root: String,
+    piece: String,
+    expected: Option<(String, u32, u32)>,
+}
 
 #[allow(clippy::too_many_lines)] // One literal row per recorded removal form.
 fn form(id: &str) -> Form {
@@ -279,11 +283,19 @@ fn form(id: &str) -> Form {
         ),
         _ => panic!("unknown finite form {id}"),
     };
-    (root, piece, expected)
+    Form {
+        root,
+        piece,
+        expected,
+    }
 }
 
 fn run(id: &str) {
-    let (root, piece, expected) = form(id);
+    let Form {
+        root,
+        piece,
+        expected,
+    } = form(id);
     let scratch = scratch::Scratch::new("FSLC_1517_REMOVAL_INPUTS", id, &format!("removal-{id}"));
     for (name, source) in [
         ("root.fsl", root.as_str()),
