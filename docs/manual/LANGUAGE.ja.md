@@ -1111,7 +1111,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
    移行した4つのソースアンカーはruntimeの1:40/1:45 (`map`)、単独の4:3 (`map`)、
    inlineの2:3 (`implements`)で、以前は1:1でした。
   `Int`は有限のドメインを持ちません。リテラルから推論した要素型も含め、これを含む
-  Set/Seq/Mapは従来の再帰的な型互換(Seqリテラルの推論容量も含む)を保ちます。
+  Set/Seqは従来の再帰的な型互換(Seqリテラルの推論容量も含む)を保ちます。Mapにはリテラルが
+  ないので、モデルの式では片方が`Int`を持つ場合もドメインの一致が必要です(後述の#1679)。
+  refinement の map とシナリオの `expect` では、Map も従来の互換を保ちます。
    文脈の無いSet/Seq条件式は、既知の有限な腕のドメインと容量を両方の腕の順でletを通して保ちます。
    #1472 のドメイン推論自体はリテラルを実体化しません。base `79687655` とhead `3c99c93b` を各archiveでbuildし、
    606 corpus形、元のinline16形、リテラル境界18形、bridge18形を各2回checkしました。
@@ -1127,6 +1129,24 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
    元のリテラル境界18形もbase/headで同じcheck出力を保ちます。コマンドと全除去の一覧は
   [単一のドメイン互換の決定](../design/DESIGN-finite-container-carriers.md)を参照してください。
   再帰的な実体化については上記の説明を参照してください。
+  **破壊的な受理範囲の縮小(#1679):** 記号評価で変換できないコンテナのドメインを持つモデルの式は、bmc と
+  induction の `cannot coerce symbolic value` ではなく、`check` が既存の位置付き代入可能性エラー
+  (`semantics`、終了コード2)で拒否します。次の形はこれまで `check` を通っていました。
+  - 値が `Int` または `Option<Int>` の Map と、値が範囲の Map を `==`、`!=`、条件式の分岐、代入で組み合わせる形。
+    `m0: Map<K, Int>`、`m1: Map<K, A>` に対する `m0 == m1`、`m0 = m1` です。リテラルの中
+    (`some(m0) == some(m1)`、`Seq { m0 } == Seq { m1 }`、`Set { m0 } == Set { m1 }`)、メソッド引数
+    (`Seq { m0 }.contains(m1)`)、リテラルから読み出した値(`Seq { m0 }.head() == m1`)も同じです。
+  - `Int` の兄弟の分岐だけが期待型とつないでいた条件式の分岐。`let t = Set { 0 }`、`a: Set<A>`、`b: Set<B>` に対する
+    `a == (if c then t else b)` です。`Seq` リテラル、宣言された `q: Seq<Int, 2>`、異なる容量でも同じで、
+    `some(...)`、`Seq { ... }`、`Set { ... }`、メソッド引数の中の分岐も含みます。
+
+  拒否の位置は、原因の分岐があればその分岐、なければ囲んでいるガード、文、プロパティです。全エンジンが判定を返す形は
+  変わりません。`a == t`、範囲や容量が異なる `q == a`、`some(t) == some(a)`、`Option<Int>` と `Option<A>`、ドメインが
+  同じ Map や範囲が同じ別名の Map です。具象評価だけを受ける位置も変わりません。refinement の map
+  (`map m = m`、`map same = m == y`、`map s = if c then x else y`)とシナリオの `expect` は上記の規則のままです。
+  削除された形の一部には explicit と `fsl-bfs` が答えていました。計測した判定の喪失は
+  [ドメイン互換の決定](../design/DESIGN-finite-container-carriers.md)にあります。
+  移行: 2つの値を同じドメインで宣言するか、要素を比較してください(`m0[k] == m1[k]`)。
   mutateでは、静的に型が不正なimplementsのmapをoracleの失敗でなく`invalid`として、
   checkで不正なmutantと同じ経路で分類します。入れ物全体のmapを持つspecの範囲変更mutantは、
   集計上`errored`から`invalid`へ移り、`kill_rate`から除かれ、gateに`oracle_errors`を

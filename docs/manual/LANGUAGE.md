@@ -1196,8 +1196,10 @@ name in a `decreases` call. There are no unrelated breaking removals.
   shared by every verify engine, rather than failing later in symbolic coercion.
   Scalar/Option numeric compatibility and add/contains/push arguments remain
   unchanged. `Int` has no finite carrier, including an inferred literal element:
-  Set/Seq/Map uses involving it retain prior recursive compatibility (and inferred
-  Seq capacity). An uncontextualized Set/Seq conditional retains an already
+  Set/Seq uses involving it retain prior recursive compatibility (and inferred
+  Seq capacity). A Map has no literal, so in a model expression its carriers must
+  agree even when one holds `Int`; see #1679 below. A refinement map and a scenario
+  `expect` keep prior compatibility for a Map too. An uncontextualized Set/Seq conditional retains an already
   known finite arm's carrier/capacity through a `let`, in either arm order;
   that inference alone does not materialize literals. Refinement resolves numeric types in each
   model independently. #1599's shared Type-kind gate rejects same-name declarations
@@ -1221,6 +1223,29 @@ name in a `decreases` call. There are no unrelated breaking removals.
   controls still check; the 18 original literal-boundary outputs are unchanged.
   See the [single carrier decision](../design/DESIGN-finite-container-carriers.md)
   for commands and the full removal inventory; recursive materialization is described above.
+  **Breaking removal (#1679):** a model expression whose container carriers symbolic
+  evaluation cannot coerce now fails `check` with the existing located assignability error
+  (`semantics`, exit 2) instead of `cannot coerce symbolic value` on bmc and induction. These
+  passed `check` before:
+  - A Map whose value is `Int` or `Option<Int>` against one with a range, in `==`, `!=`, a
+    conditional arm and assignment: `m0 == m1` and `m0 = m1` for `m0: Map<K, Int>`,
+    `m1: Map<K, A>`, also inside a literal (`some(m0) == some(m1)`, `Seq { m0 } == Seq { m1 }`,
+    `Set { m0 } == Set { m1 }`), as a method argument (`Seq { m0 }.contains(m1)`) and read
+    back out of one (`Seq { m0 }.head() == m1`).
+  - A conditional arm that only an `Int` sibling related to the expectation:
+    `a == (if c then t else b)` with `let t = Set { 0 }`, `a: Set<A>`, `b: Set<B>`; the same
+    with a `Seq` literal or a declared `q: Seq<Int, 2>`, or a differing capacity; and such an
+    arm inside `some(...)`, `Seq { ... }`, `Set { ... }` or a method argument.
+
+  A refusal is located at the arm when one is at fault, otherwise at the enclosing guard,
+  statement or property. Forms that return a verdict on every engine are unchanged, including
+  `a == t`, `q == a` with a differing range or capacity, `some(t) == some(a)`, `Option<Int>`
+  against `Option<A>`, and Maps of equal carriers or equal-range aliases. So are the positions
+  evaluated only concretely: a refinement map (`map m = m`, `map same = m == y`,
+  `map s = if c then x else y`) and a scenario `expect`, which keep the rule above. Explicit and
+  `fsl-bfs` answered some of the removed forms; the measured losses are in the
+  [carrier decision](../design/DESIGN-finite-container-carriers.md).
+  Migration: declare the two values with one carrier, or compare the entries (`m0[k] == m1[k]`).
   In mutate, a statically ill-typed implements map is `invalid`, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map
   mutants that change a numeric range move from `errored` to `invalid` in the

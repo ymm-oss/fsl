@@ -16,7 +16,8 @@ carriers to agree; relation requires both endpoint carriers to agree. Nested
 container carriers are compared recursively. Enums and structs remain nominal.
 The Set/Seq/Map gate is scoped to finite carriers. `Int`, including an inferred
 literal element type, has no finite carrier: when either corresponding type
-contains `Int`, the prior recursive compatibility is retained. Inferred Seq
+contains `Int`, the prior recursive compatibility is retained, except as amended
+for a model expression by #1679 below. Inferred Seq
 literal capacity follows that prior rule as well. This preserves both orders of
 `s == Set { 1 }` and `s == Seq { 1 }`, empty literals and contextual conditional
 assignments; it does not implement the literal semantics deferred to #1467.
@@ -57,6 +58,71 @@ existing paths. No syntax or literal materialization is added; composite literal
 their remaining semantics belong to #1467, including #1524's admitted literal
 examples. This decision resolves the Set disagreement in #1627 rather than
 documenting symbolic refusal as a supported engine difference.
+
+## Amendment (#1679): carriers symbolic evaluation cannot coerce
+
+**Breaking removal (#1679).** The Decision above keeps prior recursive compatibility for any
+type containing `Int`. That admitted two forms `check` passed and bmc and induction then refused
+with `cannot coerce symbolic value`, while `fsl-bfs` answered:
+
+- **A Map holding `Int`.** `Map<K, Int>` against `Map<K, A>`. Coercion rebuilds a Set, Seq or
+  Option value but can only retag a Map, and no literal or inference produces a Map, so the
+  retained compatibility never had a working Map case. A Map's carriers must now agree in a
+  model expression, including a Map inside `Option`, `Set` or `Seq`.
+- **An arm related to the expectation only through `Int`.** With `let t = Set { 0 }`,
+  `a == (if c then t else b)` checked `t` against `a` and `b` against `t`, and never `b` against
+  `a`; a literal in that arm is contextual and was already refused. Every arm now also answers to
+  a Set, Seq or Option expectation, in addition to the first-arm check. This narrows admission
+  only. DESIGN-sync-argument-root-validation rejected replacing the first-arm check with the
+  expectation, which changed admission in both directions; this does not replace it.
+
+Both apply to the model's own expressions: action guards, lets, statements, `ensures`, init and
+every property kind. They do not apply to a refinement map or a scenario `expect`, which
+`ValidationPhase::concrete_only` keeps on the prior rule. Those are evaluated concretely and
+return a verdict on every engine: refusing `map m = m`, `map same = m == y`,
+`map s = if c then x else y` or `expect l == r` would lose verdicts on bmc and induction.
+
+A Seq holding `Int` keeps prior compatibility, including a differing capacity: `q == a` and
+`q == d` for `q: Seq<Int, 2>`, `a: Seq<A, 2>`, `d: Seq<A, 3>` return a verdict on every engine.
+So do `some(t) == some(a)`, `Seq { t } == Seq { a }` and `Option<Int>` against `Option<A>`. This
+is narrower than "whole finite containers require equal carriers": `Int` has no finite carrier.
+
+Audit: 672 forms, base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654` against head
+`0622a2a18362255845bb143fcd47232dacdf20e1`, each built from its own tree with Rust 1.98.0, run as
+`fslc check`, `fslc verify --engine bmc --depth 2`, `--engine explicit --depth 2`,
+`--engine induction` and `fsl-bfs <spec> 2`. Shapes were Set, Seq, Map and Option, nested through
+literals, with `Int` against range carriers and equal-range aliases, in `==`, `!=`, conditional
+arms in either order and operand side, assignment, `let`, guards behind a dead `false and`,
+`ensures`, invariant, reachable, trans, terminal, leadsTo, until and unless. A declared nested
+carrier such as `Map<K, Seq<A, 2>>` is `unsupported state type` on both sides, so it is reachable
+only through literals.
+
+| Result, base to head | Forms | bmc | induction | explicit | fsl-bfs |
+|---|---|---|---|---|---|
+| ok to error | 131 | exit 2 | exit 2 | exit 2 | answered |
+| ok to error | 67 | exit 2 | exit 2 | verdict | answered |
+| ok to ok | 191 | unchanged | unchanged | unchanged | unchanged |
+| error to error, same packet | 283 | | | | |
+| error to ok | 0 | | | | |
+
+No removed form returned a verdict on bmc or on induction. The verdict losses are explicit on 67
+forms and `fsl-bfs` on all 198, where those solver-free routes evaluated a form the symbolic
+engines refused. Of the 191 forms still accepted, none reports `cannot coerce` and bmc, explicit
+and `fsl-bfs` agree wherever all three give a verdict. Explicit's own `leadsTo` refusal is
+unchanged. The matrix is a finite measurement and was not retained;
+`rust/fslc/tests/issue_1679_carrier_equality.rs` pins representative forms of each row.
+
+On-disk transition set (empty). Base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`, head
+`0622a2a18362255845bb143fcd47232dacdf20e1`, each built from its own materialized tree in its own
+target directory with `cargo +1.98.0 build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc
+--locked --offline`. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (617
+forms: 23/195/399) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable
+and with `FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All
+2468 pairs had equal complete stdout, stderr and exit, with no field excluded: 0 ok-to-error and 0
+error-to-ok transitions. Of the 7 inline inputs of the rewritten
+`issue_1517_conditional_arm_admission`, `f1` goes from ok to the refusal at 6:37 (the test is
+renamed `f1_set_arm_outside_the_expectation_is_rejected_at_the_arm`) and 6 are byte-identical,
+including `f4`, whose first arm is also a new refusal but whose second arm is still reported first.
 
 ## Mutation classification
 

@@ -1243,8 +1243,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   shared by every verify engine, rather than failing later in symbolic coercion.
   Scalar/Option numeric compatibility and add/contains/push arguments remain
   unchanged. <code>Int</code> has no finite carrier, including an inferred literal element:
-  Set/Seq/Map uses involving it retain prior recursive compatibility (and inferred
-  Seq capacity). An uncontextualized Set/Seq conditional retains an already
+  Set/Seq uses involving it retain prior recursive compatibility (and inferred
+  Seq capacity). A Map has no literal, so in a model expression its carriers must
+  agree even when one holds <code>Int</code>; see #1679 below. A refinement map and a scenario
+  <code>expect</code> keep prior compatibility for a Map too. An uncontextualized Set/Seq conditional retains an already
   known finite arm's carrier/capacity through a <code>let</code>, in either arm order;
   that inference alone does not materialize literals. Refinement resolves numeric types in each
   model independently. #1599's shared Type-kind gate rejects same-name declarations
@@ -1268,6 +1270,29 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   controls still check; the 18 original literal-boundary outputs are unchanged.
   See the <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-finite-container-carriers.md">single carrier decision</a>
   for commands and the full removal inventory; recursive materialization is described above.
+  <strong>Breaking removal (#1679):</strong> a model expression whose container carriers symbolic
+  evaluation cannot coerce now fails <code>check</code> with the existing located assignability error
+  (<code>semantics</code>, exit 2) instead of <code>cannot coerce symbolic value</code> on bmc and induction. These
+  passed <code>check</code> before:</li>
+<li>A Map whose value is <code>Int</code> or <code>Option&lt;Int&gt;</code> against one with a range, in <code>==</code>, <code>!=</code>, a
+    conditional arm and assignment: <code>m0 == m1</code> and <code>m0 = m1</code> for <code>m0: Map&lt;K, Int&gt;</code>,
+    <code>m1: Map&lt;K, A&gt;</code>, also inside a literal (<code>some(m0) == some(m1)</code>, <code>Seq { m0 } == Seq { m1 }</code>,
+    <code>Set { m0 } == Set { m1 }</code>), as a method argument (<code>Seq { m0 }.contains(m1)</code>) and read
+    back out of one (<code>Seq { m0 }.head() == m1</code>).</li>
+<li>A conditional arm that only an <code>Int</code> sibling related to the expectation:
+    <code>a == (if c then t else b)</code> with <code>let t = Set { 0 }</code>, <code>a: Set&lt;A&gt;</code>, <code>b: Set&lt;B&gt;</code>; the same
+    with a <code>Seq</code> literal or a declared <code>q: Seq&lt;Int, 2&gt;</code>, or a differing capacity; and such an
+    arm inside <code>some(...)</code>, <code>Seq { ... }</code>, <code>Set { ... }</code> or a method argument.</li>
+</ul>
+<p>A refusal is located at the arm when one is at fault, otherwise at the enclosing guard,
+  statement or property. Forms that return a verdict on every engine are unchanged, including
+  <code>a == t</code>, <code>q == a</code> with a differing range or capacity, <code>some(t) == some(a)</code>, <code>Option&lt;Int&gt;</code>
+  against <code>Option&lt;A&gt;</code>, and Maps of equal carriers or equal-range aliases. So are the positions
+  evaluated only concretely: a refinement map (<code>map m = m</code>, <code>map same = m == y</code>,
+  <code>map s = if c then x else y</code>) and a scenario <code>expect</code>, which keep the rule above. Explicit and
+  <code>fsl-bfs</code> answered some of the removed forms; the measured losses are in the
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-finite-container-carriers.md">carrier decision</a>.
+  Migration: declare the two values with one carrier, or compare the entries (<code>m0[k] == m1[k]</code>).
   In mutate, a statically ill-typed implements map is <code>invalid</code>, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map
   mutants that change a numeric range move from <code>errored</code> to <code>invalid</code> in the

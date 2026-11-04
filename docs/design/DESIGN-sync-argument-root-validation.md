@@ -208,7 +208,8 @@ expectation, where the supplied type would only hide a more specific first arm, 
 container. Compatibility is an equivalence over scalars but not over containers holding
 `Int`: `Set { 0 }` is compatible with both `Set<A>` and `Set<B>`, which are not compatible
 with each other. Applying the expectation to container arms changed admission in both
-directions, so it is not done.
+directions, so it is not done. #1679 later added the expectation beside the first-arm check,
+which only narrows admission; see DESIGN-finite-container-carriers, "Amendment (#1679)".
 
 This does not change admission on the measured forms. Against base on the head above: the
 four forms pinned in `issue_1517_conditional_arm_admission.rs` give equal results on `check`,
