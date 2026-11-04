@@ -1271,7 +1271,7 @@ aggregate binder, or an `is some(x)` pattern binding. They always resolve to the
 literal, so such a declaration is unreadable from every expression and the
 misreading would be silent (`invariant AlwaysHolds { true }` reads the literal,
 never a state variable named `true`), so the declaration is rejected. `Bool` is reserved
-as a type name: `enum Bool`, `type Bool` and `struct Bool` are refused at the declaration
+as a type name, in a composed component too: `enum Bool`, `type Bool` and `struct Bool` are refused at the declaration
 (breaking removal, #1480). No other word is reserved — `count`, `sum`, `stage`, `in`,
 `is`, `where`, `old`, `abs`, `and`, `or` are contextual and stay valid names.
 
@@ -1386,8 +1386,8 @@ when checking a file, the message suffix changes from `at L:C` to
   remain unchanged. Already-refused init-statement Typed-Struct domains keep
   their exact unlocated finite-scalar error. Their statement-domain check is
   deferred to checked-source admission; expressions inside init stay strict.
-  The actual base/head form count and `ok`→`error` list are
-  pending the required sweep; see `DESIGN-spec-domains.md`.
+  The #1480 sweep measured 8 `ok`→`error` forms for these binders, base `5564b25ccb37`,
+  head `45db5cb85c15`; see `DESIGN-spec-domains.md`.
   **Breaking admission removal (#1480):** negative constant `within` deadlines
   now fail `check` and all engines at the owning declaration before dispatch.
   The removed inline forms are `X1/negative-within` (`-1`, 8:3) and native
@@ -1478,7 +1478,9 @@ when checking a file, the message suffix changes from `at L:C` to
   established: `let` names (even `let k = 2`), pattern bindings, Int state, non-literal
   Set or Seq literal items, other Seq elements. Indexing, fields, `size()`, `if`,
   `min`, `/`, `%`, `old(...)` and aggregates in a dependent bound are refused, and so is
-  a typed binder over `Int` (`type 'Int' is not a finite scalar`), also as a `leadsTo`
+  a typed binder over the builtin `Int` (`type 'Int' is not a finite scalar`, a breaking
+  removal of a form every engine already refused; a declared `type Int` or `enum Int`
+  keeps its binder), also as a `leadsTo`
   wrapper. A binder with no candidates (`forall o in 2..0`) never evaluates its filter
   or body, so it is not refused; `false => count(i in 0..m[0]) >= 0` is, because
   evaluation is eager. Aggregates report `invalid model expression: 'n' is not an
@@ -1493,9 +1495,24 @@ when checking a file, the message suffix changes from `at L:C` to
   `invariant`/`requires`. A verdict reached before the refused bound (earlier violation,
   `--property`, `--exclude-property`, `--depth 0`) becomes the refusal, and
   explicit-engine verdicts on these forms are removed. Selecting properties does not
-  assume an unselected state bound: the read frame proves it, or the read refuses
-  `[eligibility]`. Bare `build_model` and raw Runtime constructors keep their boundaries.
-  [#1480 final sweep: the measured base/head form count and `ok`→`error` list are recorded here after the final sweep.]
+  assume an unselected state bound. On state that really escapes, bmc refuses a read
+  that needs the bound `[eligibility]`, and a binder over a state Set whose frame could
+  not be rebuilt `[planner]: missing-finite-fact`; with no such read it reports the
+  selected property. Induction reports the escape as `violated`; explicit reads concrete
+  values and reports the selected property. Bare `build_model` and raw Runtime constructors keep their boundaries.
+  Breaking-removal sweep (#1480): `fslc check <form>` with binaries built by Rust 1.98.0,
+  each in its own `git archive` tree, base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`,
+  head `45db5cb85c153adaf14b6fb074e3ab227ddef720`, over 20,067 forms: 639 `.fsl`
+  files (`specs/` 23, `examples/` 195, `rust/fslc/tests/fixtures/` 421) and 19,428 models
+  captured while running the workspace tests on both sides. `ok`→`error`: 649, none under
+  `specs/` or `examples/`: 495 `'x' is not an integer const`, 85 `binder bound is not a
+  static integer`, 20 bounds that overflow or do not fold, 16 init statement `forall` bounds
+  reading state, 11 declared `Bool`, 10 typed binders over the builtin `Int`, 8 over a
+  Struct, 4 negative `within`. Corpus files: `explicit_init_range_assigned.fsl`,
+  `explicit_init_range_unassigned.fsl`, and seven head-only files under
+  `issue_1480_temporal_outer/` (`const-state-collision`, `empty-static-overflow`,
+  `free-state`, `overflow-high`, `overflow-low`, `struct-typed`, `unbounded-typed`).
+  Classes and base verdicts: `DESIGN-check-executable-forms.md`, "Corpus transitions".
 - Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
   means at most one match; `exactlyOne` means exactly one.
 - Option: `x == none` `x != none` `x == some(e)` `x != some(e)` use structural
@@ -1944,8 +1961,9 @@ init ownership/field-read diagnostics keep priority. The range rule is a
 checked-source boundary, not bare Core construction; raw Runtime errors remain
 unchanged. Supported init RHS reads and enclosing lexical binding scopes remain;
 ranges elsewhere follow the range admission rule; existing nested-init limits remain.
-Actual base/head input
-counts and removal records are pending; see `DESIGN-check-executable-forms.md`.
+The #1480 sweep measured 16 `ok`→`error` forms for this rule, base `5564b25ccb37`, head
+`45db5cb85c15`, among them the corpus files `explicit_init_range_assigned.fsl` and
+`explicit_init_range_unassigned.fsl`; see `DESIGN-check-executable-forms.md`.
 
 An init statement forall cannot read a root that the same forall writes,
 including in its filter, assignment keys/RHS, or if conditions (#1518).

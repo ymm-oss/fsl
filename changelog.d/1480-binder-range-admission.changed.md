@@ -15,7 +15,16 @@ No size cap is added. `conformance`, `analyze`, `explain`, `diff`, `refine`, `te
 `lint`, `migrate`, `fmt` and `document claims` do not, and `replay` keeps loading them
 by design, including a dynamic aggregate form it used to refuse. See
 `DESIGN-check-executable-forms.md`.
-[#1480 final sweep: the measured base/head form count and `ok`→`error` list are recorded here after the final sweep.]
+Breaking-removal sweep: `fslc check <form>` with binaries built by Rust 1.98.0, each in its
+own `git archive` tree, base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, head
+`45db5cb85c153adaf14b6fb074e3ab227ddef720`, over 20,067 forms: 639 `.fsl` files (`specs/` 23,
+`examples/` 195, `rust/fslc/tests/fixtures/` 421) and 19,428 models captured while running
+the workspace tests on both sides. `ok`→`error`: 649, none under `specs/` or `examples/`:
+495 `'x' is not an integer const`, 85 `binder bound is not a static integer`, 20 bounds that
+overflow or do not fold, 16 init statement `forall` bounds reading state, 11 declared `Bool`,
+10 typed binders over the builtin `Int`, 8 over a Struct, 4 negative `within`. Corpus files:
+`explicit_init_range_assigned.fsl`, `explicit_init_range_unassigned.fsl`, and seven head-only
+files under `issue_1480_temporal_outer/`.
 
 Forms the engines used to refuse now run where the rule says they can: a dependent
 bound in a fair guard, in a sticky helpful guard, in a `trans` body with a partial
@@ -25,9 +34,16 @@ or written values; and a run with `--property` whose read frame proves the unsel
 bound. A frame that cannot prove it still refuses.
 
 `Bool` is now a reserved type name. Breaking removal: `enum Bool`, `type Bool` and
-`struct Bool` are refused at the declaration, where a typed binder and an expression
-used to read the name differently. A typed binder over `Int`, including a `leadsTo`
-wrapper, is refused at `check` with `type 'Int' is not a finite scalar`.
+`struct Bool` are refused at the declaration, standalone or in a composed component,
+where a typed binder and an expression used to read the name differently. Breaking
+removal: a typed binder over the builtin `Int`, including a `leadsTo` wrapper, is refused
+at `check` with `type 'Int' is not a finite scalar`, where every engine already refused
+it. A spec that declares `type Int` or `enum Int` keeps its binder in every scope.
+
+With `--property` on state that really escapes, bmc refuses a read that needs the bound
+with `[eligibility]`, and a binder over a state Set whose frame could not be rebuilt with
+`[planner]: missing-finite-fact`; induction reports the escape, and explicit reports the
+selected property.
 
 A form that runs out of memory enumerating a range now refuses with a `[resource]` error,
 exit 2, instead of a panic with empty stdout. A panic in the Z3 bindings, which is what

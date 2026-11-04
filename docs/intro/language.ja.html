@@ -727,7 +727,7 @@ struct とそのフィールド、状態変数、アクションとその引数�
 これらの名前を持つ宣言はどの式からも読めなくなり、しかもその読み違えは沈黙する。
 検査が入る前は、<code>state { true: Bool }</code> と <code>invariant AlwaysHolds { true }</code> は
 <code>proved</code> を返し、<code>init { true = false }</code> は何からも読めない変数への代入になっていた。
-<code>Bool</code> は型名として予約されている。<code>enum Bool</code>、<code>type Bool</code>、<code>struct Bool</code> は宣言の位置で
+<code>Bool</code> は型名として予約されている(合成するコンポーネントの中でも同じ)。<code>enum Bool</code>、<code>type Bool</code>、<code>struct Bool</code> は宣言の位置で
 拒否する(<strong>破壊的な削除、#1480</strong>)。型付き binder と式がこの名前を別々に読むためである。
 予約語はこれ以外にない。<code>count</code>、<code>sum</code>、<code>stage</code>、<code>in</code>、<code>is</code>、<code>where</code>、<code>old</code>、
 <code>abs</code>、<code>and</code>、<code>or</code> は文脈依存であり、名前として引き続き有効である。<code>some</code>、<code>Set</code>、
@@ -893,8 +893,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   なりません。Bool、名前付き Enum/Range のバインダー、通常の Struct 値、Struct
   要素を訪れるコレクションバインダーは変わりません。init 文の型付き Struct ドメインは
   以前から拒否しており、接頭辞や位置を追加せず、既存の位置なし診断を保ちます。
-  必要な base/head の入力件数と
-  実際の <code>ok</code>→<code>error</code> 一覧は未計測です。
+  #1480 の sweep では、これらの binder について <code>ok</code>→<code>error</code> を 8 件測定しました。base は
+  <code>5564b25ccb37e3477311fde1dae5eb6298eb6b2d</code>、head は
+  <code>45db5cb85c153adaf14b6fb074e3ab227ddef720</code> です。<a href="../design/DESIGN-check-executable-forms.md#corpus-transitions">コーパスの遷移</a>と
   <a href="../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480">ドメイン方針</a>を参照してください。</li>
 <li>静的な範囲境界(#1480)は、成功する場合に検査済みの定数文法で畳み込みます。
   リテラル・定数、符号反転、<code>+ - * / %</code>、整数の <code>min</code>/<code>max</code>/<code>abs</code>、
@@ -996,8 +997,10 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
     リテラルのリテラルでない項目、それ以外の Seq の要素。</li>
 </ul>
 <p>依存する境界の添字、フィールド参照、<code>size()</code>、<code>if</code>、<code>min</code>、<code>/</code>、<code>%</code>、<code>old(...)</code>、
-  集約は拒否します。<code>Int</code> の型付き binder は <code>leadsTo</code> wrapper でも
-  <code>type 'Int' is not a finite scalar</code> で拒否します。候補を持たない binder
+  集約は拒否します。組み込みの <code>Int</code> の型付き binder は <code>leadsTo</code> wrapper でも
+  <code>type 'Int' is not a finite scalar</code> で拒否します。すべてのエンジンがすでに拒否していた形式の
+  破壊的な削除です。<code>type Int</code> や <code>enum Int</code> を宣言した spec の binder は、その宣言のまま
+  残ります。候補を持たない binder
   (<code>forall o in 2..0</code>)の filter と本体は評価されないので拒否しません。評価は先行評価なので、
   <code>false =&gt; count(i in 0..m[0]) &gt;= 0</code> は拒否します。集約は検査済みモデルのメッセージ
   (<code>invalid model expression: 'n' is not an integer const at 8:3</code>、
@@ -1011,12 +1014,27 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   あり、原因ではありません。拒否される境界に届く前に verdict を返していた形式は、拒否を
   返すようになります。先に違反する別の性質、<code>--property</code> や <code>--exclude-property</code> での回避、
   <code>--depth 0</code> が該当します。これらの形式での explicit エンジンの verdict も失われます。
-  性質の選択は、選択外の状態の境界を仮定しません。読み出しフレームが証明するか、読み出しが
-  <code>[eligibility]</code> で拒否します。<code>build_model</code> 単体と Runtime の生のコンストラクターは既存の
+  性質の選択は、選択外の状態の境界を仮定しません。状態が実際に範囲を超える場合、bmc は境界を
+  必要とする読み出しを <code>[eligibility]</code> で拒否し、フレームを再構成できなかった状態 Set の binder を
+  <code>[planner]: missing-finite-fact</code> で拒否します。そのような読み出しがなければ、選択した性質の
+  結果を返します。induction は範囲の逸脱を <code>violated</code> として返し、explicit は具体値を読んで
+  選択した性質の結果を返します。<code>build_model</code> 単体と Runtime の生のコンストラクターは既存の
   境界を保ちます。
   <a href="../design/DESIGN-check-executable-forms.md#1480-checked-range-admission">実行可能形式の境界</a>を
   参照してください。
-  [#1480 最終 sweep: 計測した base/head の形式数と <code>ok</code>→<code>error</code> の一覧は、最終 sweep の後にここへ記録します。]
+  破壊的な削除の sweep(#1480): Rust 1.98.0 で各 SHA の <code>git archive</code> ツリーごとにビルドした
+  バイナリで <code>fslc check &lt;form&gt;</code> を実行しました。base は <code>5564b25ccb37e3477311fde1dae5eb6298eb6b2d</code>、
+  head は <code>45db5cb85c153adaf14b6fb074e3ab227ddef720</code>、対象は 20,067 形式です。内訳は <code>.fsl</code>
+  ファイル 639 件(<code>specs/</code> 23、<code>examples/</code> 195、<code>rust/fslc/tests/fixtures/</code> 421)と、両側で
+  ワークスペースのテストを実行して取得したモデル 19,428 件です。<code>ok</code>→<code>error</code> は 649 件で、
+  <code>specs/</code> と <code>examples/</code> にはありません。内訳は <code>'x' is not an integer const</code> 495、
+  <code>binder bound is not a static integer</code> 85、オーバーフローまたは畳み込めない境界 20、状態を読む
+  init 文 <code>forall</code> の境界 16、宣言した <code>Bool</code> 11、組み込み <code>Int</code> の型付き binder 10、Struct の
+  型付き binder 8、負の <code>within</code> 4 です。コーパスのファイルは <code>explicit_init_range_assigned.fsl</code>、
+  <code>explicit_init_range_unassigned.fsl</code> と、head だけにある <code>issue_1480_temporal_outer/</code> の 7 件
+  (<code>const-state-collision</code>、<code>empty-static-overflow</code>、<code>free-state</code>、<code>overflow-high</code>、
+  <code>overflow-low</code>、<code>struct-typed</code>、<code>unbounded-typed</code>)です。分類、base の verdict、到達できなかった
+  範囲は<a href="../design/DESIGN-check-executable-forms.md#corpus-transitions">コーパスの遷移</a>を参照してください。
 - 濃度の述語: <code>unique(binder)</code> / <code>exactlyOne(binder)</code>。<code>unique</code> は一致する束縛が
   高々 1 つ、<code>exactlyOne</code> はちょうど 1 つという意味です。
 - Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>。
@@ -1436,7 +1454,10 @@ checked-source 受理の境界であり、Core のモデル構築だけには適
 Runtime の生のコンストラクターは、既存のエラー契約を保ちます。
 対応済みの init 右辺式での代入済み状態の読み出しは削除しません。他の位置の範囲は
 範囲受理規則に従います。外側の字句的バインダーのスコープと、既存の init 入れ子の制限は保ちます。
-必要な base/head の実際の入力件数と削除一覧は sweep 待ちです。
+#1480 の sweep では、この規則について <code>ok</code>→<code>error</code> を 16 件測定しました。base は
+<code>5564b25ccb37e3477311fde1dae5eb6298eb6b2d</code>、head は
+<code>45db5cb85c153adaf14b6fb074e3ab227ddef720</code> で、コーパスの
+<code>explicit_init_range_assigned.fsl</code> と <code>explicit_init_range_unassigned.fsl</code> を含みます。
 <a href="../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains">実行可能形式の境界</a>を参照してください。</p>
 <p>init の文 <code>forall</code> のフィルターまたは本体では、<strong>同じ forall が書く状態ルート</strong>を
 読むことを拒否します (#1518)。代入先の key 式、右辺、<code>if</code> の条件も対象です。

@@ -670,7 +670,7 @@ struct とそのフィールド、状態変数、アクションとその引数�
 これらの名前を持つ宣言はどの式からも読めなくなり、しかもその読み違えは沈黙する。
 検査が入る前は、`state { true: Bool }` と `invariant AlwaysHolds { true }` は
 `proved` を返し、`init { true = false }` は何からも読めない変数への代入になっていた。
-`Bool` は型名として予約されている。`enum Bool`、`type Bool`、`struct Bool` は宣言の位置で
+`Bool` は型名として予約されている(合成するコンポーネントの中でも同じ)。`enum Bool`、`type Bool`、`struct Bool` は宣言の位置で
 拒否する(**破壊的な削除、#1480**)。型付き binder と式がこの名前を別々に読むためである。
 予約語はこれ以外にない。`count`、`sum`、`stage`、`in`、`is`、`where`、`old`、
 `abs`、`and`、`or` は文脈依存であり、名前として引き続き有効である。`some`、`Set`、
@@ -845,8 +845,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   なりません。Bool、名前付き Enum/Range のバインダー、通常の Struct 値、Struct
   要素を訪れるコレクションバインダーは変わりません。init 文の型付き Struct ドメインは
   以前から拒否しており、接頭辞や位置を追加せず、既存の位置なし診断を保ちます。
-  必要な base/head の入力件数と
-  実際の `ok`→`error` 一覧は未計測です。
+  #1480 の sweep では、これらの binder について `ok`→`error` を 8 件測定しました。base は
+  `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`、head は
+  `45db5cb85c153adaf14b6fb074e3ab227ddef720` です。[コーパスの遷移](../design/DESIGN-check-executable-forms.md#corpus-transitions)と
   [ドメイン方針](../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480)を参照してください。
 - 静的な範囲境界(#1480)は、成功する場合に検査済みの定数文法で畳み込みます。
   リテラル・定数、符号反転、`+ - * / %`、整数の `min`/`max`/`abs`、
@@ -948,8 +949,10 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
     リテラルのリテラルでない項目、それ以外の Seq の要素。
 
   依存する境界の添字、フィールド参照、`size()`、`if`、`min`、`/`、`%`、`old(...)`、
-  集約は拒否します。`Int` の型付き binder は `leadsTo` wrapper でも
-  `type 'Int' is not a finite scalar` で拒否します。候補を持たない binder
+  集約は拒否します。組み込みの `Int` の型付き binder は `leadsTo` wrapper でも
+  `type 'Int' is not a finite scalar` で拒否します。すべてのエンジンがすでに拒否していた形式の
+  破壊的な削除です。`type Int` や `enum Int` を宣言した spec の binder は、その宣言のまま
+  残ります。候補を持たない binder
   (`forall o in 2..0`)の filter と本体は評価されないので拒否しません。評価は先行評価なので、
   `false => count(i in 0..m[0]) >= 0` は拒否します。集約は検査済みモデルのメッセージ
   (`invalid model expression: 'n' is not an integer const at 8:3`、
@@ -963,12 +966,27 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   あり、原因ではありません。拒否される境界に届く前に verdict を返していた形式は、拒否を
   返すようになります。先に違反する別の性質、`--property` や `--exclude-property` での回避、
   `--depth 0` が該当します。これらの形式での explicit エンジンの verdict も失われます。
-  性質の選択は、選択外の状態の境界を仮定しません。読み出しフレームが証明するか、読み出しが
-  `[eligibility]` で拒否します。`build_model` 単体と Runtime の生のコンストラクターは既存の
+  性質の選択は、選択外の状態の境界を仮定しません。状態が実際に範囲を超える場合、bmc は境界を
+  必要とする読み出しを `[eligibility]` で拒否し、フレームを再構成できなかった状態 Set の binder を
+  `[planner]: missing-finite-fact` で拒否します。そのような読み出しがなければ、選択した性質の
+  結果を返します。induction は範囲の逸脱を `violated` として返し、explicit は具体値を読んで
+  選択した性質の結果を返します。`build_model` 単体と Runtime の生のコンストラクターは既存の
   境界を保ちます。
   [実行可能形式の境界](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission)を
   参照してください。
-  [#1480 最終 sweep: 計測した base/head の形式数と `ok`→`error` の一覧は、最終 sweep の後にここへ記録します。]
+  破壊的な削除の sweep(#1480): Rust 1.98.0 で各 SHA の `git archive` ツリーごとにビルドした
+  バイナリで `fslc check <form>` を実行しました。base は `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`、
+  head は `45db5cb85c153adaf14b6fb074e3ab227ddef720`、対象は 20,067 形式です。内訳は `.fsl`
+  ファイル 639 件(`specs/` 23、`examples/` 195、`rust/fslc/tests/fixtures/` 421)と、両側で
+  ワークスペースのテストを実行して取得したモデル 19,428 件です。`ok`→`error` は 649 件で、
+  `specs/` と `examples/` にはありません。内訳は `'x' is not an integer const` 495、
+  `binder bound is not a static integer` 85、オーバーフローまたは畳み込めない境界 20、状態を読む
+  init 文 `forall` の境界 16、宣言した `Bool` 11、組み込み `Int` の型付き binder 10、Struct の
+  型付き binder 8、負の `within` 4 です。コーパスのファイルは `explicit_init_range_assigned.fsl`、
+  `explicit_init_range_unassigned.fsl` と、head だけにある `issue_1480_temporal_outer/` の 7 件
+  (`const-state-collision`、`empty-static-overflow`、`free-state`、`overflow-high`、
+  `overflow-low`、`struct-typed`、`unbounded-typed`)です。分類、base の verdict、到達できなかった
+  範囲は[コーパスの遷移](../design/DESIGN-check-executable-forms.md#corpus-transitions)を参照してください。
 - 濃度の述語: `unique(binder)` / `exactlyOne(binder)`。`unique` は一致する束縛が
   高々 1 つ、`exactlyOne` はちょうど 1 つという意味です。
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`。
@@ -1404,7 +1422,10 @@ checked-source 受理の境界であり、Core のモデル構築だけには適
 Runtime の生のコンストラクターは、既存のエラー契約を保ちます。
 対応済みの init 右辺式での代入済み状態の読み出しは削除しません。他の位置の範囲は
 範囲受理規則に従います。外側の字句的バインダーのスコープと、既存の init 入れ子の制限は保ちます。
-必要な base/head の実際の入力件数と削除一覧は sweep 待ちです。
+#1480 の sweep では、この規則について `ok`→`error` を 16 件測定しました。base は
+`5564b25ccb37e3477311fde1dae5eb6298eb6b2d`、head は
+`45db5cb85c153adaf14b6fb074e3ab227ddef720` で、コーパスの
+`explicit_init_range_assigned.fsl` と `explicit_init_range_unassigned.fsl` を含みます。
 [実行可能形式の境界](../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains)を参照してください。
 
 init の文 `forall` のフィルターまたは本体では、**同じ forall が書く状態ルート**を

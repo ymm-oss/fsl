@@ -73,7 +73,7 @@ arbitrary domains. Ordinary symbolic/concrete quantifiers, concrete statement
 `forall` coverage, and static `leadsTo` wrappers preserve builtin type identity
 and enumerate `false`, then `true`. Named enums/ranges remain named domains.
 `Bool` is a reserved type name: **breaking removal**, `enum Bool`, `type Bool` and
-`struct Bool` are refused at the declaration, because a typed binder and an expression
+`struct Bool` are refused at the declaration, standalone or in a composed component, because a typed binder and an expression
 read that name differently (`forall b: Bool { b != true }` was `proved` on explicit and
 refused on BMC and induction). Qualified names still require lowering.
 Aggregate Bool normalization and existing init/action binding lifetimes remain
@@ -141,6 +141,8 @@ The companion init-statement state-dependent-range refusal is recorded in
 Ranges that read state, lets, patterns or collection elements are decided by
 [checked range admission](DESIGN-check-executable-forms.md#1480-checked-range-admission);
 `DOMAIN_BOUND` bounds enumerated requirement questions and does not limit range binders.
-The required own-tree base/head command, SHAs, form count and actual transition
-list are **pending**. Earlier sweep counts do not establish this amendment's
-transition set.
+The own-tree sweep is recorded in
+[corpus transitions](DESIGN-check-executable-forms.md#corpus-transitions): base
+`5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, head
+`45db5cb85c153adaf14b6fb074e3ab227ddef720`, 20,067 forms, 649 `ok`→`error`, of which 8
+are typed binders over a Struct.

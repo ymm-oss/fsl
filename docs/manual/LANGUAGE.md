@@ -700,7 +700,7 @@ some(x)` pattern binding. A declaration with one of those names would be
 unreadable from every expression, and the misreading is silent: before this was
 checked, `state { true: Bool }` with `invariant AlwaysHolds { true }` returned
 `proved` while `init { true = false }` assigned a variable nothing could read.
-`Bool` is reserved as a type name: `enum Bool`, `type Bool` and `struct Bool` are
+`Bool` is reserved as a type name, in a composed component as well: `enum Bool`, `type Bool` and `struct Bool` are
 refused at the declaration (**breaking removal, #1480**), because a typed binder and
 an expression would read that name differently.
 No other word is reserved. `count`, `sum`, `stage`, `in`, `is`, `where`, `old`,
@@ -902,8 +902,11 @@ name in a `decreases` call. There are no unrelated breaking removals.
   Struct values and collection binders over Struct elements are unaffected.
   Init-statement Typed-Struct domains were already refused; their existing
   unlocated finite-scalar error is preserved, without a new prefix or location.
-  The required base/head form count and actual `ok`→`error` list are pending;
-  see [domain policy](../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480).
+  The #1480 sweep below measured 8 `ok`→`error` forms for these binders, base
+  `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, head
+  `45db5cb85c153adaf14b6fb074e3ab227ddef720`; see
+  [domain policy](../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480) and
+  [corpus transitions](../design/DESIGN-check-executable-forms.md#corpus-transitions).
 - Static range bounds (#1480) use the checked constant grammar when
   folding succeeds: literals/constants, negation, `+ - * / %`, integer
   `min`/`max`/`abs`, and `if ... then ... else ...`, including Boolean
@@ -1017,8 +1020,10 @@ name in a `decreases` call. There are no unrelated breaking removals.
     state, a non-literal item of a Set or Seq literal, or an element of any other Seq.
 
   Indexing, field access, `size()`, `if`, `min`, `/`, `%`, `old(...)` and aggregates
-  in a dependent bound are refused. A typed binder over `Int` is refused with
-  `type 'Int' is not a finite scalar`, in a `leadsTo` wrapper as well. Nothing in the
+  in a dependent bound are refused. A typed binder over the builtin `Int` is refused with
+  `type 'Int' is not a finite scalar`, in a `leadsTo` wrapper as well, which is a breaking
+  removal of a form every engine already refused; a spec that declares `type Int` or
+  `enum Int` keeps its binder over that declaration. Nothing in the
   filter or body of a binder with no candidates (`forall o in 2..0`) is evaluated, so
   it is not refused. Evaluation is eager: `false => count(i in 0..m[0]) >= 0` is
   refused. Aggregates report the checked-model message
@@ -1034,11 +1039,27 @@ name in a `decreases` call. There are no unrelated breaking removals.
   verdict before reaching the refused bound now report the refusal: an earlier violated
   property, `--property` or `--exclude-property` stepping around the property, and
   `--depth 0`. Explicit-engine verdicts on these forms are removed as well. Selecting
-  properties does not assume an unselected state bound: the read frame proves it, or
-  the read refuses `[eligibility]`. Bare `build_model` and raw Runtime constructors keep
+  properties does not assume an unselected state bound. On state that really escapes,
+  bmc refuses a read that needs the bound with `[eligibility]`, and a binder over a state
+  Set whose frame could not be rebuilt with `[planner]: missing-finite-fact`; with no such
+  read it reports the selected property. Induction reports the escape as `violated`, and
+  explicit reads concrete values and reports the selected property. Bare `build_model` and raw Runtime constructors keep
   their boundaries; see
   [checked executable forms](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission).
-  [#1480 final sweep: the measured base/head form count and `ok`→`error` list are recorded here after the final sweep.]
+  Breaking-removal sweep (#1480): `fslc check <form>` with binaries built by Rust 1.98.0,
+  each in its own `git archive` tree, base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`,
+  head `45db5cb85c153adaf14b6fb074e3ab227ddef720`, over 20,067 forms: 639 `.fsl`
+  files (`specs/` 23, `examples/` 195, `rust/fslc/tests/fixtures/` 421) and 19,428 models
+  captured while running the workspace tests on both sides. `ok`→`error`: 649, none under
+  `specs/` or `examples/`: 495 `'x' is not an integer const`, 85 `binder bound is not a
+  static integer`, 20 bounds that overflow or do not fold, 16 init statement `forall` bounds
+  reading state, 11 declared `Bool`, 10 typed binders over the builtin `Int`, 8 over a
+  Struct, 4 negative `within`. Corpus files: `explicit_init_range_assigned.fsl`,
+  `explicit_init_range_unassigned.fsl`, and seven head-only files under
+  `issue_1480_temporal_outer/` (`const-state-collision`, `empty-static-overflow`,
+  `free-state`, `overflow-high`, `overflow-low`, `struct-typed`, `unbounded-typed`).
+  Classes, base verdicts and what was not reached are in
+  [corpus transitions](../design/DESIGN-check-executable-forms.md#corpus-transitions).
 - Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
   means at most one matching binding, while `exactlyOne` means exactly one.
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`.
@@ -1518,8 +1539,11 @@ belongs to checked-source admission, not bare Core model construction; raw
 Runtime constructors retain their existing error contracts.
 This does not remove supported assigned-state reads in init RHS expressions;
 ranges in other positions follow the range admission rule; enclosing lexical
-binders retain their scope. Existing nested-init restrictions remain. The actual base/head form count
-and removal list are pending the required sweep; see
+binders retain their scope. Existing nested-init restrictions remain. The #1480 sweep
+measured 16 `ok`→`error` forms for this rule, base
+`5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, head
+`45db5cb85c153adaf14b6fb074e3ab227ddef720`, among them the corpus files
+`explicit_init_range_assigned.fsl` and `explicit_init_range_unassigned.fsl`; see
 [checked executable forms](../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains).
 
 Within an init statement `forall`'s filter or body, reading a state root that
