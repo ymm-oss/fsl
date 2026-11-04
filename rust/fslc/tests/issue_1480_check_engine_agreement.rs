@@ -763,6 +763,27 @@ fn a_binder_over_a_declared_int_runs_in_every_scope() {
     }
 }
 
+/// A dependent wrapper with no complete binding never evaluates its body, so `check`
+/// does not refuse a read there. One complete binding makes the same read count.
+#[test]
+fn a_wrapper_with_no_complete_binding_has_a_dead_body() {
+    let form = |inner: &str| {
+        format!(
+            "spec M {{ state {{ d: Bool, n: 0..1 }} init {{ d = false n = 0 }} \
+             fair action f() {{ requires not d d = true }} \
+             leadsTo L {{ forall a in 0..1 {{ forall b in {inner} {{ \
+             (forall i in 0..n {{ i >= 0 }}) ~> d }} }} }} }}"
+        )
+    };
+    let dead = form("a..(a-1)");
+    assert_eq!(check(&dead).0, 0, "{}", check(&dead).1);
+    assert_eq!(result(&verify(&dead, "bmc", &[])), "verified");
+    assert_eq!(result(&verify(&dead, "induction", &[])), "proved");
+    let live = check(&form("a..a"));
+    assert_eq!(live.0, 2, "{}", live.1);
+    assert_eq!(live.1["message"], "'n' is not an integer const");
+}
+
 /// A Kernel projection failing on an aggregate bound still names where it is.
 #[test]
 fn projections_locate_the_aggregate_bound_they_cannot_fold() {
