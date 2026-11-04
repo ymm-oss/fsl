@@ -443,6 +443,14 @@ fn push_action(rows: &mut Rows, model: &KernelModel, action: &ActionDef) {
     }
 }
 
+/// Whether an action contains an integer range binder in any evaluation context.
+#[must_use]
+pub fn action_has_integer_range_binder(model: &KernelModel, action: &ActionDef) -> bool {
+    action_found(&Scope::new(model), action)
+        .iter()
+        .any(|found| found.integer_ranges)
+}
+
 /// The candidates of an action's guard, body and each `ensures`, in that
 /// order. They are one evaluation context: parameters, then each `let` in
 /// clause order, and every pattern binding reaches the clauses, statements
@@ -585,6 +593,7 @@ fn has_bounds(ty: &TypeRef) -> bool {
 /// of each `is some(v)` pattern it evaluates (`None` when not bounded).
 #[derive(Clone, Default)]
 struct Found {
+    integer_ranges: bool,
     overflow: bool,
     key: bool,
     patterns: BTreeMap<String, Option<TypeRef>>,
@@ -806,6 +815,7 @@ impl<'m> Scope<'m> {
             Binder::Range {
                 lo, hi, where_expr, ..
             } => {
+                found.integer_ranges = true;
                 self.expr(lo, found);
                 self.expr(hi, found);
                 where_expr

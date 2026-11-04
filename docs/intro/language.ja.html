@@ -500,6 +500,13 @@ induction はさらに、引数が状態に依存しないことを求めます�
 型が正しく状態を読む引数は <code>check</code> と BMC が受け入れ、induction は拒否します。
 <code>within K</code> は応答に対する有界の締め切りで、<code>K</code> は非負の定数式でなければなりません。
 これは BMC によって検査され、ランク付き induction 証明では検査されません。
+<strong>破壊的な受理の削除 (#1480):</strong> 負の定数の締め切りは、エンジンへの分岐前に、所有する
+<code>leadsTo</code> 宣言の位置で <code>check</code> と全検証経路が拒否します。従来の <code>check</code> は受理する
+ことがありました。実測した削除は共有 <code>X1/negative-within</code> (<code>-1</code>、8:3) と、native の
+締め切り fixture の <code>-1</code>、<code>const K = -1</code> に対する <code>K</code>、<code>(0 - 1)</code> (各 5:3) です。
+ゼロと正のリテラル・名前付き・算術定数は受理を維持します。この変更の比較では 610 個の
+コーパスファイルの check 判定は不変で、後述の範囲受理が 2 つの fixture を動かします。
+比較と削除した全 4 inline 形式は <code>DESIGN-spec-domains.md</code> に記録しています。
 <code>decreases</code> は省略可能で、整数値の式でなければなりません。
 <code>fslc verify --engine induction</code> の下では、検証器は、証明済みの invariant の下で、
 <code>P</code> が pending かつ <code>Q</code> が偽であるときには常に、測度が非負であること、進行が可能で
@@ -720,7 +727,9 @@ struct とそのフィールド、状態変数、アクションとその引数�
 これらの名前を持つ宣言はどの式からも読めなくなり、しかもその読み違えは沈黙する。
 検査が入る前は、<code>state { true: Bool }</code> と <code>invariant AlwaysHolds { true }</code> は
 <code>proved</code> を返し、<code>init { true = false }</code> は何からも読めない変数への代入になっていた。
-予約語はこの 3 語のみである。<code>count</code>、<code>sum</code>、<code>stage</code>、<code>in</code>、<code>is</code>、<code>where</code>、<code>old</code>、
+<code>Bool</code> は型名として予約されている(合成するコンポーネントの中でも同じ)。<code>enum Bool</code>、<code>type Bool</code>、<code>struct Bool</code> は宣言の位置で
+拒否する(<strong>破壊的な削除、#1480</strong>)。型付き binder と式がこの名前を別々に読むためである。
+予約語はこれ以外にない。<code>count</code>、<code>sum</code>、<code>stage</code>、<code>in</code>、<code>is</code>、<code>where</code>、<code>old</code>、
 <code>abs</code>、<code>and</code>、<code>or</code> は文脈依存であり、名前として引き続き有効である。<code>some</code>、<code>Set</code>、
 <code>Seq</code>、<code>unique</code>、<code>exactlyOne</code>、<code>forall</code>、<code>exists</code> は後続の構文がある場合にのみ
 認識されるため、名前として誤用してもリテラルへの沈黙した解決ではなくパースエラーになる。</p>
@@ -873,7 +882,62 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
 <li>量化(有界): 正準形は <code>forall binder { expr }</code> と <code>exists binder { expr }</code>
   です。<code>forall i in lo..hi: expr</code> のような 2.x レガシーのコロン/中括弧なしの記法
   は引き続き受理されますが、非正準です。Seq のバインダーはその live なプレフィックス
-  を位置順に訪れ、重複した値を保存します。</li>
+  を位置順に訪れ、重複した値を保存します。
+  組み込み <code>Bool</code> のバインダーは <code>false</code>、<code>true</code> の順に列挙します。通常の量化式、
+  init/action の文 <code>forall</code>、フィルターなしの静的 <code>leadsTo</code> wrapper が対象です。
+  Bool の列挙だけで struct や動的範囲の方針は拡張しません。liveness の成功メタデータは
+  束縛ごとではなく、性質ごとに 1 エントリーのままです。
+  <strong>check 受理の破壊的な削除 (#1480):</strong> 式、action、<code>leadsTo</code> wrapper の <code>forall cell: Cell { ... }</code>
+  のような名前付き Struct の型バインダーは、共有検証で既存の有限スカラーの診断により、
+  所有するソース位置で拒否します。各フィールドが有限でもスカラーのドメインには
+  なりません。Bool、名前付き Enum/Range のバインダー、通常の Struct 値、Struct
+  要素を訪れるコレクションバインダーは変わりません。init 文の型付き Struct ドメインは
+  以前から拒否しており、接頭辞や位置を追加せず、既存の位置なし診断を保ちます。
+  #1480 の sweep では、これらの binder について <code>ok</code>→<code>error</code> を 8 件測定しました。base は
+  <code>e3c19a39c9c3bf5c315c6002fd18114aa22cd654</code>、head は
+  <code>f101e7a93cbb50ad85e3531a1d27314559735311</code> です。<a href="../design/DESIGN-check-executable-forms.md#corpus-transitions">コーパスの遷移</a>と
+  <a href="../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480">ドメイン方針</a>を参照してください。</li>
+<li>静的な範囲境界(#1480)は、成功する場合に検査済みの定数文法で畳み込みます。
+  リテラル・定数、符号反転、<code>+ - * / %</code>、整数の <code>min</code>/<code>max</code>/<code>abs</code>、
+  <code>if ... then ... else ...</code> に対応し、条件では Bool のリテラル・定数、<code>not</code>、
+  <code>and</code>/<code>or</code>/<code>=&gt;</code>、比較、同じ型の等値も使えます。最終値は整数であり、Bool を
+  整数へ変換しません。集約の正規化、symbolic な範囲展開、フィルターなしの静的
+  <code>leadsTo</code> wrapper が対象で、既存の concrete な算術経路は変えません。
+  符号付き i64 の算術は検査付きで、<code>/</code>/<code>%</code> は Euclidean です(<code>-5/2 == -3</code>、
+  <code>-5%2 == 1</code>)。条件式の両腕を名前・型検査しますが、算術を評価するのは選ばれた
+  腕だけです。二項の Bool 演算子は引き続き両 operand を評価します。
+  畳み込みの失敗時は入れ子の失敗も含めて各 consumer の従来の拒否・診断経路を
+  保ちます。temporal 限定の拡張は後述します。追加の Rust メソッド
+  <code>KernelModel::constant_integer</code> は現在の
+  <code>consts</code> を参照し、キャッシュしません。現在の model state への自由な読み取りは、
+  const と同じ名前であっても定数とは扱いません。const/state の同名宣言を一律に
+  拒否する規則は追加しません。
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-static-binder-constant-expressions.md">設計決定</a>も参照してください。
+  const と同じ名前の状態に対する単純な <code>0..n</code> は状態を読むので、どのエンジンでも実際の違反を報告します。
+  そのような名前を読む <code>leadsTo</code> wrapper の境界は、<code>check</code> が
+  <code>binder bound is not a static integer</code> で拒否します。base はそこで const を読み、verdict を返す
+  ことがあったので、これは破壊的な削除です(#1480)。</li>
+<li>固定された外側 <code>leadsTo</code> の範囲(#1480 temporal 拡張): フィルターなしの内側の
+  範囲では、既に束縛された wrapper の局所名を上記の検査付き文法で使えます。
+  <code>i in 0..1</code>、次に <code>j in 0..i</code> なら <code>(0,0), (1,0), (1,1)</code> の順に展開します。
+  <code>b: Bool</code>、次に <code>j in 0..(if b then 1 else 0)</code> なら
+  <code>(false,0), (true,0), (true,1)</code> です。境界は整数であり、Bool を整数へ変換しません。
+  名前付きの有限整数型と enum は宣言された型を保ちます。既存の列挙順、重複、
+  隠された束縛の復元を性質間でも維持します。バインダー自身の境界は囲む束縛を、
+  本体は新しい束縛を参照します。囲む局所名を優先し、自由な状態参照を同名の const
+  や状態の初期値で置き換えません。checked source の const-shadow 拒否は変えません。
+  依存する境界は到達可能なプレフィックスで記述順に、下限から上限へ評価します。
+  最初の算術エラーは後続の静的・型エラーより先に返します。到達しない依存算術は
+  実行しません。空のプレフィックスでも、それと独立した不正な静的式・carrier・
+  filter・collection・型のエラーは隠しません。空のプレフィックスでも、記述された
+  境界の条件と両腕を、先行する wrapper の宣言型で名前・型検査します。この検査は
+  算術を実行しません。consumer ごとの従来の診断と優先順位を
+  保ち、checked source と raw Kernel の検査範囲は区別したままです。
+  <code>within</code> は非負の宣言定数のままで、wrapper の局所名は使えません。collection/
+  filtered wrapper、struct、P/Q の量化式、init/action/集約のドメイン、explicit の
+  liveness はこの拡張の対象外です。構文や公開 Kernel/JSON schema は変えません。
+  <a href="../design/DESIGN-static-binder-constant-expressions.md#fixed-outer-temporal-amendment-1480">temporal 拡張</a>
+  を参照してください。</li>
 <li>集約: <code>count(binder)</code> と <code>sum(binder of value)</code>。例は
   <code>count(x: T where p)</code>、<code>count(x in queue where p)</code>、
   <code>sum(x in queue of x.amount where p)</code> と、それらの範囲の等価形。空のドメインは
@@ -882,10 +946,101 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   Public Kernel v1/v2 の export も、<code>add</code>、関係の射影、コレクションの <code>let</code> alias を
   通じて実際の候補を保持します。宣言されたドメインだけを列挙するのではなく、既存の
   スカラー値の capture を使うため、後続の shadowing や状態更新で束縛済みの候補は
-  変わりません。sum を包む <code>min</code>/<code>max</code> は二項算術のままで、集約 JSON の形は増やしません。</li>
-<li>濃度の述語: <code>unique(binder)</code> / <code>exactlyOne(binder)</code>。<code>unique</code> は一致する束縛が
-  高々 1 つ、<code>exactlyOne</code> はちょうど 1 つという意味です。</li>
-<li>Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>。
+  変わりません。sum を包む <code>min</code>/<code>max</code> は二項算術のままで、集約 JSON の形は増やしません。
+  記述された集約の受理 (#1480) は、実行や厳密な public Kernel/static projection
+  と区別します。境界の名前・型、Bool の filter、Int の sum 値を検査した後、
+  無条件に展開できれば展開結果も検査し (<code>Expanded</code>)、そうでなければ元の集約を
+  展開せず保持します (<code>Deferred</code>)。状態の carrier や局所名の型だけでは実行の
+  前提は成立しません。保留を理由に範囲を切り詰めたり、条件付きのゼロへ置換したりせず、
+  保留自体は source を拒否しません。保留した境界を実行できるかは、後述の範囲受理規則が決めます。両端点は下限・上限の順に検査します。
+  真に閉じた境界 <code>0..(1/0)</code> の fold 失敗は引き続き
+  <code>public Kernel requires static aggregate range bounds</code> です。空ドメインや
+  不活性な filter でも、記述されたスコープ・型エラーの優先順位を保ちます。
+  境界は囲むスコープ、filter と sum 値は新しい binder のスコープを参照します。
+  保留した filter/値の子孫にも境界だけを検査する pass を行い、入れ子の不正な
+  閉じた境界や、後続の sibling の失敗を見逃しません。到達しない通常の sum 値の
+  算術は境界として fold しません。<code>sum(i in 1..0 of (1/0)) == 0</code> は受理を保ち、
+  <code>sum(i in 1..0 of true)</code> は型エラーのままです。保存される記述 AST を保ち、
+  公開 Deferred node や JSON の形を増やしません。symbolic caller は同じ frame の
+  eligibility を成立させるか明示的に実行を拒否し、直接の concrete 評価は宣言 carrier
+  で切り詰めず実際の端点を使います。
+  <a href="../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480">記述された集約の受理の契約</a>
+  を参照してください。</li>
+<li><strong>check 受理の破壊的な削除: エンジンが実行できない範囲境界 (#1480)。</strong>
+  <code>check</code>、すべての <code>verify</code> エンジン、LSP の診断、Worker の事前検査、検査済みモデルを読む
+  すべてのコマンドは、ソルバーの起動前に同じ規則でこれを拒否します。位置つきの <code>semantics</code>
+  エラーで、終了コードは 2 です。<code>conformance</code>、<code>analyze</code>、<code>explain</code>、<code>diff</code>、<code>refine</code>、<code>testgen</code>、
+  <code>mutate</code>、<code>sweep</code>、<code>scenarios</code>、<code>html</code>、<code>ledger</code> がそのコマンドに含まれます。<code>kernel</code>、
+  <code>typestate</code>、<code>lint</code>、<code>migrate</code>、<code>fmt</code>、<code>document claims</code> は含まれず、<code>replay</code> はこれらの
+  形式を読み込み続けます(文書化した例外です)。
+  境界を実行できるのは、定数に畳み込めるとき、または定数、整数の名前、単項マイナス、
+  <code>+ - *</code> だけからなり区間が <code>i64</code> に収まり、かつ読むすべての名前がそのスコープで
+  成立しているときです。</li>
+<li>列挙された値はどこでも成立します。action のパラメーター、範囲または名前付き整数の
+    binder、項目が整数リテラル、定数、またはそれらの名前である Set・Seq リテラル上の binder
+    です。そのリテラルを持つ <code>let</code> を経由しても同じです。</li>
+<li>有限の carrier を持つ状態変数は、エンジンが読み出しフレームを認証する場所でだけ
+    成立します。<code>invariant</code>、<code>trans</code>、<code>unless</code>、<code>requires</code>、<code>let</code> の右辺、<code>if</code> の条件、
+    代入です。<code>ensures</code>、<code>reachable</code>、<code>terminal</code>、<code>until</code>、leadsTo の P/Q、<code>decreases</code>、
+    <code>helpful</code> の引数では成立しません。</li>
+<li><code>init</code> では、有限の値を持つ完了済みの代入が、その後の読み出しに対して成立します。
+    init の文 <code>forall</code> のソースは完了済みの代入を読みません。</li>
+<li>有限の整数要素型を持つ状態 Set の binder は、状態が成立する場所で成立します。<code>trans</code> と
+    <code>ensures</code> の <code>old(xs)</code> 上の binder も同じです。それ以外では、その Set へのすべての書き込みが
+    キーをリテラルのまま保つ間だけ成立します。成立する項目の Set リテラル、その <code>.add</code>、任意の
+    <code>.remove</code>、それらの複製、それらに対する <code>if</code> が該当し、状態を読む <code>st.add(n)</code> と <code>Set { n }</code>
+    は該当しません。<code>init</code> の複製は <code>init</code> が代入した内容を引き継ぎます。action の複製はキーが
+    リテラルのフレームを読むので、<code>xs = xs.add(n)</code> と並ぶ <code>ys = xs</code> の <code>ys</code> はリテラルのままです。
+    <code>ensures</code> は action の後の状態だけを読むので、<code>init</code> の書き込みを数えません。binder のソースの
+    <code>.add</code> と <code>.remove</code> も同じ基準です。容量 0 の Seq には候補がありません。</li>
+<li>読むフレームが残っていない <code>old(...)</code> の下では何も成立しません。2 つ目の <code>old</code> と、<code>trans</code> と
+    <code>ensures</code> の外の <code>old</code> が該当します。<code>P unless Q</code> は <code>P</code> を <code>old</code> で包むので、<code>P</code> の中の <code>old</code>
+    は 2 つ目です。<code>(forall x in old(xs) { count(y in 0..x) &gt;= 0 }) unless b</code> は拒否します。</li>
+<li>成立しないもの: <code>let</code> の名前(<code>let k = 2</code> も同じ)、パターン束縛、Int 型の状態、Set・Seq
+    リテラルのリテラルでない項目、それ以外の Seq の要素。</li>
+</ul>
+<p>依存する境界の添字、フィールド参照、<code>size()</code>、<code>if</code>、<code>min</code>、<code>/</code>、<code>%</code>、<code>old(...)</code>、
+  集約は拒否します。組み込みの <code>Int</code> の型付き binder は <code>leadsTo</code> wrapper でも
+  <code>type 'Int' is not a finite scalar</code> で拒否します。すべてのエンジンがすでに拒否していた形式の
+  破壊的な削除です。<code>type Int</code> や <code>enum Int</code> を宣言した spec の binder は、その宣言のまま
+  残ります。候補を持たない binder
+  (<code>forall o in 2..0</code>)の filter と本体は評価されないので拒否しません。評価は先行評価なので、
+  <code>false =&gt; count(i in 0..m[0]) &gt;= 0</code> は拒否します。集約は検査済みモデルのメッセージ
+  (<code>invalid model expression: 'n' is not an integer const at 8:3</code>、
+  <code>invalid model expression: public Kernel requires static aggregate range bounds at 8:3</code>)
+  を文の位置で返し、量化子と文 <code>forall</code> はエンジンのメッセージ
+  (<code>'n' is not an integer const</code>、<code>binder bound is not a static integer</code>)を同じ位置で
+  返します。大きさの上限はありません。<code>forall i in 0..(n * 100000)</code> は受理されたままで
+  遅いままです。範囲の列挙でメモリーが尽きる形式は <code>[resource]</code> のエラー、終了コード 2 で
+  拒否します。ソルバーの項の構築中に尽きると Z3 のバインディングが panic し、panic の文面を
+  含む <code>[solver-panic]</code> のエラー、終了コード 2 で拒否します。このエラーが示すのは panic で
+  あり、原因ではありません。拒否される境界に届く前に verdict を返していた形式は、拒否を
+  返すようになります。先に違反する別の性質、<code>--property</code> や <code>--exclude-property</code> での回避、
+  <code>--depth 0</code> が該当します。これらの形式での explicit エンジンの verdict も失われます。
+  性質の選択は、選択外の状態の境界を仮定しません。状態が実際に範囲を超える場合、bmc は境界を
+  必要とする読み出しを <code>[eligibility]</code> で拒否し、フレームを再構成できなかった状態 Set の binder を
+  <code>[planner]: missing-finite-fact</code> で拒否します。そのような読み出しがなければ、選択した性質の
+  結果を返します。induction は範囲の逸脱を <code>violated</code> として返し、explicit は具体値を読んで
+  選択した性質の結果を返します。<code>build_model</code> 単体と Runtime の生のコンストラクターは既存の
+  境界を保ちます。
+  <a href="../design/DESIGN-check-executable-forms.md#1480-checked-range-admission">実行可能形式の境界</a>を
+  参照してください。
+  破壊的な削除の sweep(#1480): Rust 1.98.0 で各 SHA の <code>git archive</code> ツリーごとにビルドした
+  バイナリで <code>fslc check &lt;form&gt;</code> を実行しました。base は <code>e3c19a39c9c3bf5c315c6002fd18114aa22cd654</code>、
+  head は <code>f101e7a93cbb50ad85e3531a1d27314559735311</code>、対象は 20,179 形式です。内訳は <code>.fsl</code>
+  ファイル 646 件(<code>specs/</code> 23、<code>examples/</code> 195、<code>rust/fslc/tests/fixtures/</code> 428)と、両側で
+  ワークスペースのテストを実行して取得したモデル 19,533 件です。<code>ok</code>→<code>error</code> は 649 件で、
+  <code>specs/</code> と <code>examples/</code> にはありません。内訳は <code>'x' is not an integer const</code> 495、
+  <code>binder bound is not a static integer</code> 85、オーバーフローまたは畳み込めない境界 20、状態を読む
+  init 文 <code>forall</code> の境界 16、宣言した <code>Bool</code> 11、組み込み <code>Int</code> の型付き binder 10、Struct の
+  型付き binder 8、負の <code>within</code> 4 です。コーパスのファイルは <code>explicit_init_range_assigned.fsl</code>、
+  <code>explicit_init_range_unassigned.fsl</code> と、head だけにある <code>issue_1480_temporal_outer/</code> の 7 件
+  (<code>const-state-collision</code>、<code>empty-static-overflow</code>、<code>free-state</code>、<code>overflow-high</code>、
+  <code>overflow-low</code>、<code>struct-typed</code>、<code>unbounded-typed</code>)です。分類、base の verdict、到達できなかった
+  範囲は<a href="../design/DESIGN-check-executable-forms.md#corpus-transitions">コーパスの遷移</a>を参照してください。
+- 濃度の述語: <code>unique(binder)</code> / <code>exactlyOne(binder)</code>。<code>unique</code> は一致する束縛が
+  高々 1 つ、<code>exactlyOne</code> はちょうど 1 つという意味です。
+- Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>。
   等値は構造的です: <code>none</code> は <code>none</code> とだけ等しく、2 つの <code>some</code> 値はペイロードが
   等しいときにちょうど等しくなります。<code>v</code> を束縛する形は引き続き <code>x is some(v)</code>
   であり、等値が束縛を導入することはありません。束縛が有効なのは match が真である
@@ -957,10 +1112,10 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   requirements のフィールド置換文脈では、エンティティのフィールドや relation role と
   同名のパターンも、lowering が元の綴りを失う前に拒否します (#1561)。event input の
   既存の例外と、量化子・集約の合法なフィールド隠蔽は維持します。
-  順序は定義されません。</li>
-<li>struct: リテラル <code>Order { st: Open, qty: 0 }</code>、フィールド参照 <code>o.st</code>、
-  <code>==</code> はフィールドごとの等値</li>
-<li>Set/Seq 式の実体化 (Refs #1467): 既に受理される再帰的な式は、構築・等値比較・
+  順序は定義されません。
+- struct: リテラル <code>Order { st: Open, qty: 0 }</code>、フィールド参照 <code>o.st</code>、
+  <code>==</code> はフィールドごとの等値
+- Set/Seq 式の実体化 (Refs #1467): 既に受理される再帰的な式は、構築・等値比較・
   条件式の結合・メソッドとその連鎖・量化/集約 binder・<code>let</code> で、検査済みモデルの
   推論型・期待型を使います。要素には Int、Bool、Enum、Struct、Option (<code>Option&lt;Enum&gt;</code> と
   入れ子の不在)、入れ子の Set/Seq、Set-of-Seq、Seq-of-Set、relation、既存の Map 値を含みます。
@@ -985,8 +1140,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   <code>a52bef4931adc67ea2b1fdca827e2318b4ae25ab</code>、
   <code>e201c0d66834ed8c860be84e96876690487b11af</code>、
   <code>cc7a538c3b647c1c3bed5bf2088551806442c794</code>。両 base-&gt;cc7 の ok-&gt;error 集合は空でした。
-  これは後続 b8 統合の検証でも、corpus 全体の engine 一致の証明でもありません。</li>
-<li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>、<code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code>
+  これは後続 b8 統合の検証でも、corpus 全体の engine 一致の証明でもありません。
+- Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>、<code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code>
   受理された <code>add</code> は、計算結果が宣言されたドメインの外でもメンバーを保持します。
   一時値の <code>contains</code>、<code>size</code>、削除、等値比較はその値を参照し、add の結果を元の有界 receiver へ戻すと
   メンバーや遷移を消さずに <code>type_bound</code> / <code>_bounds_&lt;var&gt;</code> を報告します。スカラー引数の
@@ -1029,10 +1184,10 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   保持しますが、関係としての init を逐次実行に置き換えません。BMC で境界を選ばない
   ルートを re-frame するには、新しい frame の有限の support の外に生きたキーがない
   ことの証明が必要です。この re-frame の検査は省いた境界を仮定せず、本当に増え続ける
-  support は保持します。</li>
-<li>Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>、<code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
-  <code>.contains(e)</code> <code>.size()</code>、<code>==</code> は長さとすべての要素の等値</li>
-<li>Relation: <code>r.contains(a, b)</code>、<code>r.add(a, b)</code>、<code>r.remove(a, b)</code>、
+  support は保持します。
+- Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>、<code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
+  <code>.contains(e)</code> <code>.size()</code>、<code>==</code> は長さとすべての要素の等値
+- Relation: <code>r.contains(a, b)</code>、<code>r.add(a, b)</code>、<code>r.remove(a, b)</code>、
   <code>reachable(r, a, b)</code>、<code>acyclic(r)</code>、<code>functional(r)</code>、<code>injective(r)</code>、
   <code>domain(r)</code>、<code>range(r)</code>。<code>reachable</code> と <code>acyclic</code> は自己関係
   (<code>relation T -&gt; T</code>)を要求します。端点の型/アリティのエラーは修復ヒントを
@@ -1136,12 +1291,11 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   relation は Map ではありません。<code>r[a]</code> と <code>r[a] = b</code> は、<code>functional(r)</code> が真でも
   <code>check</code> が拒否するため、relation のメソッドを使います。これは実行可能な index の
   意味がないまま受理していた読み・書きの breaking removal (#1463) です。
-  Map のインデックス操作は変えません。</li>
-<li>ensures / trans の内側のみ: <code>old(expr)</code> で遷移前の状態を読む</li>
-<li>leadsTo ブロックの内側のみ: <code>P ~&gt; Q</code>(応答プロパティ。一般式の演算子階層の一部ではありません)。
+  Map のインデックス操作は変えません。
+- ensures / trans の内側のみ: <code>old(expr)</code> で遷移前の状態を読む
+- leadsTo ブロックの内側のみ: <code>P ~&gt; Q</code>(応答プロパティ。一般式の演算子階層の一部ではありません)。
   Q の前に有界の締め切り <code>within K</code> を、応答本体の後に induction のランキング用の
-  <code>decreases &lt;int expr&gt;</code> を置けます</li>
-</ul>
+  <code>decreases &lt;int expr&gt;</code> を置けます</p>
 <p>静的なオペランド・シグネチャ検査(#1459、<strong>破壊的変更</strong>)は、選択されない分岐、
 action の代入、<code>requires</code>/<code>ensures</code>、trace 内の式も検査します:</p>
 <ul>
@@ -1295,6 +1449,19 @@ coverage の3形 × 2 で、他の出力の変化はありません。
 フィルター・本体・集約値だけは新しいローカルスコープで読みます。状態に依存しない
 コレクションリテラルは引き続き使えます。この字句的区別の修正により、有効な shadow を
 symbolic/explicit が誤って拒否していた挙動も解消しますが、こちらは check の受理の縮小ではありません。</p>
+<p><strong>check 受理の破壊的な削除 (#1480):</strong> init の<strong>文</strong> <code>forall</code> の整数範囲の境界は、
+自由な状態を読めません。状態への代入後、本体が空の場合、到達しない分岐も対象です。
+共有検証が、所有する <code>forall</code> 文の位置で既存のコンパイル時定数の診断を返します。
+既存の init 所有権・フィールド読み出しの診断を先に返します。この範囲規則は
+checked-source 受理の境界であり、Core のモデル構築だけには適用しません。
+Runtime の生のコンストラクターは、既存のエラー契約を保ちます。
+対応済みの init 右辺式での代入済み状態の読み出しは削除しません。他の位置の範囲は
+範囲受理規則に従います。外側の字句的バインダーのスコープと、既存の init 入れ子の制限は保ちます。
+#1480 の sweep では、この規則について <code>ok</code>→<code>error</code> を 16 件測定しました。base は
+<code>e3c19a39c9c3bf5c315c6002fd18114aa22cd654</code>、head は
+<code>f101e7a93cbb50ad85e3531a1d27314559735311</code> で、コーパスの
+<code>explicit_init_range_assigned.fsl</code> と <code>explicit_init_range_unassigned.fsl</code> を含みます。
+<a href="../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains">実行可能形式の境界</a>を参照してください。</p>
 <p>init の文 <code>forall</code> のフィルターまたは本体では、<strong>同じ forall が書く状態ルート</strong>を
 読むことを拒否します (#1518)。代入先の key 式、右辺、<code>if</code> の条件も対象です。
 例外は、今の iteration の binder の key で、本体の中で先に書いた場所です。
@@ -1477,7 +1644,8 @@ model-expression の型エラーは、base の check envelope にすでに loc �
 所有する宣言の位置を示します。既存のものを含む component の型エラーは原因を保って
 所有する root use に anchor します。
 inline ID は #1457、集約/component・入れ子/sync の実際の出力、固定受入、書き換えた guard/constructor
-入力に由来します。残る範囲・ドメインの制限は #1480 です。#1481 cell 1 は
+入力に由来します。範囲・ドメインの制限は
+<a href="../design/DESIGN-check-executable-forms.md#1480-checked-range-admission">#1480</a> で決定しました。#1481 cell 1 は
 Map Struct のフィールド別 init を扱い、cell 2 は空の容量 0 の Seq の
 <code>head()</code>、<code>at(i)</code>、index 読み出しを修正します。通常の action/property 文脈では
 到達した読み出しは <code>partial_op</code> です。ranked decreases は、新しい slot の値が
@@ -4783,7 +4951,8 @@ DESIGN-*.md があります)。</p>
   <code>vacuous_leadsto</code>(トリガーが到達不能)、<code>always_true_requires</code>
   (先行する節の文脈の下で常に真であるガード)、
   <code>tautology_over_frozen</code>(どの action も変えない状態の上の、動的に
-  トートロジーである invariant)、<code>urgency_freeze</code>(urgency が時間を凍結するために
+  トートロジーである invariant。固定した値の下で、型が許す状態全体について
+  式が定義され、真である必要がある)、<code>urgency_freeze</code>(urgency が時間を凍結するために
   死んでいると証明された、生成された deadline の <code>tick</code>)、
   <code>vacuous_deadline</code>(生成 deadline の age が全遷移で 0 のままと証明される)、
   <code>vacuity_probe_truncated</code>†を警告します。

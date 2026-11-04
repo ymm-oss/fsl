@@ -277,9 +277,23 @@ pub(crate) fn diagnostics_admitted(
         Ok(kernel) => kernel,
         Err(error) => return (vec![core_diagnostic(source, &error)], None),
     };
-    match fsl_core::build_model(kernel) {
+    match crate::checked_build::build_checked_model(kernel) {
         Ok(model) => (migration_diagnostics(source, options), Some(model)),
-        Err(error) => (vec![model_diagnostic(source, &error, options)], None),
+        Err(crate::checked_build::CheckedBuildError::Model(error)) => {
+            (vec![model_diagnostic(source, &error, options)], None)
+        }
+        Err(crate::checked_build::CheckedBuildError::InitOwnership(error)) => {
+            let class = DiagnosticClass::Message;
+            let kind = crate::verification_output::diagnostic_kind(&error.message, &class);
+            let mut diagnostic = message_diagnostic(
+                kind,
+                "FSL-SEMANTIC",
+                error.message,
+                error.span.unwrap_or_else(|| point_span(source, 1, 1)),
+            );
+            diagnostic.located = error.span.is_some();
+            (vec![diagnostic], None)
+        }
     }
 }
 

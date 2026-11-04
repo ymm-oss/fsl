@@ -222,6 +222,100 @@ pub struct KernelModel {
 }
 
 impl KernelModel {
+    /// The domain a typed binder enumerates. A binder names its type as text, and
+    /// `Bool` is the builtin: declaring a type of that name is refused.
+    #[must_use]
+    pub fn typed_binder_type(&self, type_name: &str) -> TypeRef {
+        if type_name == "Bool" {
+            TypeRef::Bool
+        } else {
+            TypeRef::Named(type_name.to_owned())
+        }
+    }
+
+    /// The value of a static binder bound, or the engines' refusal of it.
+    ///
+    /// `spell` renders a name in the message: engines keep the Kernel name,
+    /// a checked diagnostic its public spelling.
+    ///
+    /// # Errors
+    /// Returns the legacy static-bound message.
+    pub fn static_binder_bound(
+        &self,
+        expr: &Expr,
+        spell: &mut dyn FnMut(&str) -> String,
+    ) -> Result<i64, String> {
+        if let Ok(value) = self.constant_integer(expr) {
+            return Ok(value);
+        }
+        self.legacy_static_binder_bound(expr, spell)
+    }
+
+    // A failed common fold must recurse only through the original adapter.
+    fn legacy_static_binder_bound(
+        &self,
+        expr: &Expr,
+        spell: &mut dyn FnMut(&str) -> String,
+    ) -> Result<i64, String> {
+        match expr {
+            Expr::Num(value) => Ok(*value),
+            Expr::Var(name) => match self.consts.get(name) {
+                Some(Value::Int(value)) => Ok(*value),
+                _ => Err(format!("'{}' is not an integer const", spell(name))),
+            },
+            Expr::Neg(inner) => self
+                .legacy_static_binder_bound(inner, spell)?
+                .checked_neg()
+                .ok_or_else(|| "integer overflow in static negation".to_owned()),
+            Expr::Binary { op, left, right } => {
+                let left = self.legacy_static_binder_bound(left, spell)?;
+                let right = self.legacy_static_binder_bound(right, spell)?;
+                match op.as_str() {
+                    "+" => left.checked_add(right),
+                    "-" => left.checked_sub(right),
+                    "*" => left.checked_mul(right),
+                    _ => None,
+                }
+                .ok_or_else(|| "invalid static integer expression".to_owned())
+            }
+            _ => Err("binder bound is not a static integer".to_owned()),
+        }
+    }
+
+    /// Describe an integer range without enumerating candidates or executing state.
+    ///
+    /// Uses current lexical/state/constant provenance, full endpoint type validation
+    /// and checked compact envelopes. Returned prerequisites are caller eligibility,
+    /// never membership or established facts. Unknown plans change no admission or
+    /// execution policy; even empty plans retain endpoint-status obligations.
+    #[must_use]
+    pub fn plan_integer_range(
+        &self,
+        lo: &Expr,
+        hi: &Expr,
+        lexical: &[crate::binder_range::RangeBinding<'_>],
+    ) -> crate::binder_range::RangePlan {
+        crate::binder_range::plan(self, lo, hi, lexical)
+    }
+
+    /// Evaluate a checked constant expression as an integer using current `consts`.
+    ///
+    /// Uses the same typed, checked arithmetic as constant declarations, including
+    /// Euclidean division/remainder. Both conditional arms are type-checked, but
+    /// only the selected arm's arithmetic is evaluated. No state or lexical
+    /// bindings are substituted and no result is cached. Free reads of current
+    /// model state are nonconstant, even when a constant has the same name.
+    ///
+    /// # Errors
+    /// Returns [`ModelError`] for a nonconstant or noninteger result, invalid
+    /// types/names, division by zero, or checked arithmetic overflow.
+    pub fn constant_integer(&self, expr: &Expr) -> Result<i64, ModelError> {
+        if !state_references(expr, self, []).is_empty() {
+            return Err(model_error("expression is not constant"));
+        }
+        const_int(expr, &self.consts)
+    }
+
     /// Infer an expression using the checked model and its current lexical bindings.
     /// Returns `None` when the expression requires an expected type.
     ///
@@ -652,40 +746,189 @@ impl KernelModel {
 ///
 /// # Errors
 ///
-/// Returns [`ModelError`] for dynamic/filtering binders or unsupported
+/// Returns [`ModelError`] for free-state/filtering binders or unsupported
 /// collection domains.
 pub fn static_leadsto_bindings(
     model: &KernelModel,
     property: &LeadsToDef,
 ) -> Result<Vec<BTreeMap<String, Value>>, ModelError> {
+    model.static_leadsto_bindings_with(property, |_, _, _| Ok(()), |_, _, _| Ok(()))
+}
+
+impl KernelModel {
+    /// Enumerate fixed temporal bindings with additional read-only rejection checks.
+    ///
+    /// For wholly independent properties, binder checks retain the legacy prepass;
+    /// otherwise they precede Core's own guards at each written binder. Their
+    /// optional pair borrows a range's two independent bounds for legacy checks.
+    /// Bound checks precede reachable lower/upper folds; `Some` borrows the actual
+    /// enclosing row for a dependent bound; `None` denotes an independent bound.
+    /// Empty prefixes still validate dependent endpoint types without evaluating
+    /// their arithmetic, and visit independent bounds and written binder checks.
+    /// Hooks cannot approve an input that Core rejects or rewrite its rows.
+    ///
+    /// # Errors
+    /// Propagates hook errors unchanged and Core errors through `E::from`.
+    pub fn static_leadsto_bindings_with<E: From<ModelError>>(
+        &self,
+        property: &LeadsToDef,
+        check_binder: impl FnMut(usize, &Binder, Option<(&Expr, &Expr)>) -> Result<(), E>,
+        check_bound: impl FnMut(usize, &Expr, Option<&BTreeMap<String, Value>>) -> Result<(), E>,
+    ) -> Result<Vec<BTreeMap<String, Value>>, E> {
+        traverse_leadsto_bindings(self, property, check_binder, check_bound)
+    }
+}
+
+fn traverse_leadsto_bindings<E: From<ModelError>>(
+    model: &KernelModel,
+    property: &LeadsToDef,
+    mut check_binder: impl FnMut(usize, &Binder, Option<(&Expr, &Expr)>) -> Result<(), E>,
+    mut check_bound: impl FnMut(usize, &Expr, Option<&BTreeMap<String, Value>>) -> Result<(), E>,
+) -> Result<Vec<BTreeMap<String, Value>>, E> {
     let mut expanded = vec![BTreeMap::new()];
-    for binder in &property.binders {
+    let dependent = leadsto_has_dependent_bounds(property);
+    let mut outer = BTreeSet::new();
+    let mut locals = Vec::new();
+    if !dependent {
+        for (index, binder) in property.binders.iter().enumerate() {
+            let bounds = match binder {
+                Binder::Range { lo, hi, .. } => Some((lo.as_ref(), hi.as_ref())),
+                _ => None,
+            };
+            check_binder(index, binder, bounds)?;
+        }
+    }
+    for (index, binder) in property.binders.iter().enumerate() {
+        if dependent {
+            let bounds = match binder {
+                Binder::Range { lo, hi, .. }
+                    if !leadsto_uses_outer(lo, &outer) && !leadsto_uses_outer(hi, &outer) =>
+                {
+                    Some((lo.as_ref(), hi.as_ref()))
+                }
+                _ => None,
+            };
+            check_binder(index, binder, bounds)?;
+        }
         check_leadsto_binder(binder)?;
-        let (name, values) = match binder {
+        let mut next = Vec::new();
+        match binder {
             Binder::Typed {
                 name, type_name, ..
-            } => (
-                name,
-                model.domain_values(&TypeRef::Named(type_name.name.clone()))?,
-            ),
+            } => {
+                let type_name = crate::typecheck::qualified_name(type_name)
+                    .map_err(|error| model_error(error.message))?;
+                let ty = model.typed_binder_type(&type_name);
+                model.domain_contains(&ty, &Value::Int(0))?;
+                if !expanded.is_empty() {
+                    let values = model.domain_values(&ty)?;
+                    for binding in &expanded {
+                        for value in &values {
+                            let mut candidate = binding.clone();
+                            candidate.insert(name.clone(), value.clone());
+                            next.push(candidate);
+                        }
+                    }
+                }
+                locals.push((name.clone(), ty));
+            }
             Binder::Range { name, lo, hi, .. } => {
-                let lo = static_leadsto_int(lo, model)?;
-                let hi = static_leadsto_int(hi, model)?;
-                (name, (lo..=hi).map(Value::Int).collect())
+                if expanded.is_empty() {
+                    for endpoint in [lo, hi] {
+                        if leadsto_uses_outer(endpoint, &outer) {
+                            crate::typecheck::validate_planner_integer_endpoint(
+                                endpoint, &locals, model,
+                            )
+                            .map_err(|error| model_error(error.message))?;
+                        } else {
+                            check_bound(index, endpoint, None)?;
+                            static_leadsto_int(endpoint, model)?;
+                        }
+                    }
+                }
+                for binding in &expanded {
+                    let lo = scoped_leadsto_int(
+                        lo,
+                        model,
+                        &outer,
+                        &locals,
+                        binding,
+                        index,
+                        &mut check_bound,
+                    )?;
+                    let hi = scoped_leadsto_int(
+                        hi,
+                        model,
+                        &outer,
+                        &locals,
+                        binding,
+                        index,
+                        &mut check_bound,
+                    )?;
+                    for value in lo..=hi {
+                        let mut candidate = binding.clone();
+                        candidate.insert(name.clone(), Value::Int(value));
+                        next.push(candidate);
+                    }
+                }
+                locals.push((name.clone(), TypeRef::Int));
             }
             Binder::Collection { .. } => unreachable!("leadsTo binder was checked"),
-        };
-        let mut next = Vec::new();
-        for binding in expanded {
-            for value in &values {
-                let mut candidate = binding.clone();
-                candidate.insert(name.clone(), value.clone());
-                next.push(candidate);
-            }
         }
+        outer.insert(binder_scope(binder).0.to_owned());
         expanded = next;
     }
     Ok(expanded)
+}
+
+pub(crate) fn leadsto_has_dependent_bounds(property: &LeadsToDef) -> bool {
+    let mut outer = BTreeSet::new();
+    property.binders.iter().any(|binder| {
+        let found = matches!(
+            binder,
+            Binder::Range { lo, hi, .. }
+                if leadsto_uses_outer(lo, &outer) || leadsto_uses_outer(hi, &outer)
+        );
+        outer.insert(binder_scope(binder).0.to_owned());
+        found
+    })
+}
+
+pub(crate) fn leadsto_uses_outer(expr: &Expr, outer: &BTreeSet<String>) -> bool {
+    let mut dependent = false;
+    visit_free_names(expr, &BTreeSet::new(), &mut |name| {
+        dependent |= outer.contains(name);
+    });
+    dependent
+}
+
+pub(crate) fn scoped_leadsto_int<E: From<ModelError>>(
+    expr: &Expr,
+    model: &KernelModel,
+    outer: &BTreeSet<String>,
+    locals: &[(String, TypeRef)],
+    binding: &BTreeMap<String, Value>,
+    index: usize,
+    check_bound: &mut impl FnMut(usize, &Expr, Option<&BTreeMap<String, Value>>) -> Result<(), E>,
+) -> Result<i64, E> {
+    let dependent = leadsto_uses_outer(expr, outer);
+    check_bound(index, expr, dependent.then_some(binding))?;
+    if !dependent {
+        return Ok(static_leadsto_int(expr, model)?);
+    }
+    crate::typecheck::validate_planner_integer_endpoint(expr, locals, model)
+        .map_err(|error| model_error(error.message))?;
+    if let Some(name) = state_references(expr, model, binding.keys().map(String::as_str)).first() {
+        let error = model_error(format!("'{}' is not an integer constant", shown(name)));
+        return Err(error.into());
+    }
+    let mut constants = model.consts.clone();
+    constants.extend(
+        binding
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
+    Ok(const_int(expr, &constants)?)
 }
 
 fn check_leadsto_binder(binder: &Binder) -> Result<(), ModelError> {
@@ -703,6 +946,20 @@ fn check_leadsto_binder(binder: &Binder) -> Result<(), ModelError> {
 }
 
 fn static_leadsto_int(expr: &Expr, model: &KernelModel) -> Result<i64, ModelError> {
+    if let Some(name) = state_references(expr, model, []).first() {
+        return Err(model_error(format!(
+            "'{}' is not an integer constant",
+            shown(name)
+        )));
+    }
+    if let Ok(value) = model.constant_integer(expr) {
+        return Ok(value);
+    }
+    legacy_static_leadsto_int(expr, model)
+}
+
+// Failed folds retain the original recursion and diagnostic precedence.
+fn legacy_static_leadsto_int(expr: &Expr, model: &KernelModel) -> Result<i64, ModelError> {
     match expr {
         Expr::Num(value) => Ok(*value),
         Expr::Var(name) => match model.consts.get(name) {
@@ -712,7 +969,7 @@ fn static_leadsto_int(expr: &Expr, model: &KernelModel) -> Result<i64, ModelErro
                 shown(name)
             ))),
         },
-        Expr::Neg(value) => static_leadsto_int(value, model)?
+        Expr::Neg(value) => legacy_static_leadsto_int(value, model)?
             .checked_neg()
             .ok_or_else(|| model_error("integer overflow in leadsTo binder")),
         _ => Err(model_error(
@@ -937,6 +1194,7 @@ impl ModelBuilder {
         // `none` is unreadable from every expression, and the misreading is
         // silent rather than an error (issue #570).
         crate::reserved::check_reserved_names(&self.spec)?;
+        crate::reserved::check_type_names(&self.spec)?;
         reject_duplicate_property_names(&self.spec)?;
         self.collect_consts()?;
         self.collect_types()?;
@@ -1345,7 +1603,7 @@ impl ModelBuilder {
             .into_iter()
             .map(|(index, name, span)| (index, (name, span)))
             .collect::<BTreeMap<_, _>>();
-        let mut init_phase = crate::typecheck::ValidationPhase::normalized();
+        let mut init_phase = crate::typecheck::ValidationPhase::init_statements();
         for (index, statement) in model.init.iter().enumerate() {
             let checked =
                 crate::typecheck::validate_statement_types(statement, &model, &mut init_phase);
@@ -1377,10 +1635,11 @@ impl ModelBuilder {
             model_error(ExpressionErrorContext::Model.message(error.message)).with_origin(origin)
         })?;
         for (index, statement) in model.init.iter().enumerate() {
-            check_init_collection_binders(
+            check_init_binders(
                 std::slice::from_ref(statement),
                 &model,
                 &BTreeSet::new(),
+                false,
             )
             .map_err(|error| {
                 error.with_origin(model.origins.diagnostic_origin(
@@ -1442,6 +1701,7 @@ impl ModelBuilder {
                     lo,
                     hi,
                     symmetric,
+                    ..
                 } => {
                     let origin = self.origins.diagnostic_origin(&type_target(name));
                     self.insert_type(
@@ -2431,25 +2691,39 @@ pub(crate) fn visit_free_names(
     bound: &BTreeSet<String>,
     visit: &mut impl FnMut(&str),
 ) {
-    crate::recursion::guard(|| visit_free_names_inner(expr, bound, visit));
+    visit_scoped_free_names(expr, bound, false, &mut |name, _| visit(name));
 }
 
-fn visit_free_names_inner(expr: &Expr, bound: &BTreeSet<String>, visit: &mut impl FnMut(&str)) {
+fn visit_scoped_free_names(
+    expr: &Expr,
+    bound: &BTreeSet<String>,
+    in_range_source: bool,
+    visit: &mut impl FnMut(&str, bool),
+) {
+    crate::recursion::guard(|| visit_free_names_inner(expr, bound, in_range_source, visit));
+}
+
+fn visit_free_names_inner(
+    expr: &Expr,
+    bound: &BTreeSet<String>,
+    in_range_source: bool,
+    visit: &mut impl FnMut(&str, bool),
+) {
     if let Expr::Binary { op, left, right } = expr {
-        visit_free_names(left, bound, visit);
+        visit_scoped_free_names(left, bound, in_range_source, visit);
         let local = crate::compose::pattern_scope(
             left,
             &bound.iter().cloned().collect(),
             &std::collections::HashSet::new(),
             Some(op),
         );
-        visit_free_names(right, &local.into_iter().collect(), visit);
+        visit_scoped_free_names(right, &local.into_iter().collect(), in_range_source, visit);
         return;
     }
     if let Expr::Var(name) = expr
         && !bound.contains(name)
     {
-        visit(name);
+        visit(name, in_range_source);
     }
     let scoped = match expr {
         Expr::Quantified { binder, body, .. } => Some((binder, Some(body.as_ref()))),
@@ -2457,13 +2731,13 @@ fn visit_free_names_inner(expr: &Expr, bound: &BTreeSet<String>, visit: &mut imp
         _ => None,
     };
     if let Some((binder, body)) = scoped {
-        let local = visit_free_binder_names(binder, bound, visit);
+        let local = visit_free_binder_names_inner(binder, bound, in_range_source, visit);
         if let Some(body) = body {
-            visit_free_names(body, &local, visit);
+            visit_scoped_free_names(body, &local, in_range_source, visit);
         }
     } else {
         for child in expr_children(expr) {
-            visit_free_names(child, bound, visit);
+            visit_scoped_free_names(child, bound, in_range_source, visit);
         }
     }
 }
@@ -2473,18 +2747,32 @@ pub(crate) fn visit_free_binder_names(
     bound: &BTreeSet<String>,
     visit: &mut impl FnMut(&str),
 ) -> BTreeSet<String> {
+    visit_free_binder_names_inner(binder, bound, false, &mut |name, _| visit(name))
+}
+
+fn visit_free_binder_names_inner(
+    binder: &Binder,
+    bound: &BTreeSet<String>,
+    in_range_source: bool,
+    visit: &mut impl FnMut(&str, bool),
+) -> BTreeSet<String> {
     let (name, filter) = binder_scope(binder);
     let mut sources = binder_exprs(binder);
     if filter.is_some() {
         sources.pop();
     }
     for source in sources {
-        visit_free_names(source, bound, visit);
+        visit_scoped_free_names(
+            source,
+            bound,
+            in_range_source || matches!(binder, Binder::Range { .. }),
+            visit,
+        );
     }
     let mut local = bound.clone();
     local.insert(name.to_owned());
     if let Some(filter) = filter {
-        visit_free_names(filter, &local, visit);
+        visit_scoped_free_names(filter, &local, in_range_source, visit);
     }
     local
 }
@@ -2507,6 +2795,80 @@ pub fn state_references<'a>(
     let mut references = Vec::new();
     collect_state_references(expr, &state_names, &mut references);
     references.into_iter().collect()
+}
+
+/// Direct free bounded-integer state references within integer Range sources.
+///
+/// This syntactic projection carries no eligibility or runtime evidence.
+#[must_use]
+pub fn integer_range_state_references<'a>(
+    expr: &Expr,
+    model: &KernelModel,
+    bound_names: impl IntoIterator<Item = &'a str>,
+) -> BTreeSet<String> {
+    let bounded_states = model
+        .state
+        .iter()
+        .filter(|(_, ty)| {
+            matches!(
+                crate::typecheck::resolve(model, ty),
+                Ok(TypeRef::Range(_, _))
+            )
+        })
+        .map(|(name, _)| name.as_str())
+        .collect::<BTreeSet<_>>();
+    let bound = bound_names.into_iter().map(str::to_owned).collect();
+    let mut references = BTreeSet::new();
+    visit_scoped_free_names(expr, &bound, false, &mut |name, in_source| {
+        if in_source && bounded_states.contains(name) {
+            references.insert(name.to_owned());
+        }
+    });
+    collect_set_binder_references(expr, model, &bound, &mut references);
+    references
+}
+
+/// A binder over a state Set feeds a nested range through its certified carrier.
+fn collect_set_binder_references(
+    expr: &Expr,
+    model: &KernelModel,
+    bound: &BTreeSet<String>,
+    references: &mut BTreeSet<String>,
+) {
+    crate::recursion::guard(|| {
+        let scoped = match expr {
+            Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => Some(binder),
+            _ => None,
+        };
+        if let Some(Binder::Collection { collection, .. }) = scoped
+            && let Some((_, name)) = crate::binder_range::state_set_source(collection)
+            && !bound.contains(name)
+            && crate::binder_range::state_set_element_envelope(model, name).is_some()
+            && expr_children(expr)
+                .into_iter()
+                .any(|child| !std::ptr::eq(child, collection.as_ref()) && has_range_binder(child))
+        {
+            references.insert(name.to_owned());
+        }
+        for child in expr_children(expr) {
+            collect_set_binder_references(child, model, bound, references);
+        }
+    });
+}
+
+fn has_range_binder(expr: &Expr) -> bool {
+    crate::recursion::guard(|| {
+        matches!(
+            expr,
+            Expr::Quantified {
+                binder: Binder::Range { .. },
+                ..
+            } | Expr::Aggregate {
+                binder: Binder::Range { .. },
+                ..
+            }
+        ) || expr_children(expr).into_iter().any(has_range_binder)
+    })
 }
 
 /// Reject state-dependent collection domains in an init statement's `forall`.
@@ -2532,10 +2894,105 @@ pub fn check_init_collection_binder<'a>(
     Ok(())
 }
 
-fn check_init_collection_binders(
+/// Check deferred init-statement integer-range and finite-scalar domains.
+///
+/// Checked frontends apply this after their existing ownership/read preflight.
+/// `origins` must be captured from the Kernel spec before model construction
+/// discards component check targets.
+///
+/// # Errors
+/// Returns the first deferred domain diagnostic at its statement and component origin.
+pub fn check_init_statement_domains(
+    model: &KernelModel,
+    origins: &OriginRegistry,
+) -> Result<(), ModelError> {
+    for (index, statement) in model.init.iter().enumerate() {
+        check_init_binders(
+            std::slice::from_ref(statement),
+            model,
+            &BTreeSet::new(),
+            true,
+        )
+        .map_err(|error| {
+            error.with_origin(
+                origins.diagnostic_origin(&crate::origin::component_check_target(
+                    &init_statement_target(index),
+                )),
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// Refuse every integer range bound the symbolic engines cannot execute.
+///
+/// This is checked-source admission, not model construction: `build_model` and
+/// raw Runtime constructors keep their own boundaries. Scopes, facts and spans
+/// come from the validation walk; eligibility is [`crate::binder_range::RangePlan::is_executable`].
+/// `origins` must be captured before model construction discards component
+/// check targets.
+///
+/// # Errors
+/// Returns the first refusal in init, action and property validation order.
+pub fn check_range_admission(
+    model: &mut KernelModel,
+    origins: &OriginRegistry,
+) -> Result<(), ModelError> {
+    let retained = std::mem::replace(&mut model.origins, origins.clone());
+    let init = crate::typecheck::admit_init_ranges(model).map_err(|(index, error)| {
+        let mut failure = range_refusal_error(error, ExpressionErrorContext::Init);
+        if let Some(component) = origins.diagnostic_origin(&crate::origin::component_check_target(
+            &init_statement_target(index),
+        )) {
+            failure = failure.with_origin(Some(component));
+        }
+        failure
+    });
+    let result = init.and_then(|()| {
+        crate::typecheck::admit_model_ranges(model)
+            .map_err(|error| range_refusal_error(error, ExpressionErrorContext::Model))
+    });
+    model.origins = retained;
+    result
+}
+
+/// Locate the aggregate bound a Kernel projection could not fold.
+///
+/// `build_model` leaves such a bound to admission and execution, so a projection
+/// of a model reads it unlocated. This names its source position again.
+///
+/// # Errors
+/// Returns the first expanding aggregate whose bound does not fold, located.
+pub fn locate_unfolded_aggregate(model: &KernelModel) -> Result<(), ModelError> {
+    crate::typecheck::locate_unfolded_aggregate(model)
+        .map_err(|error| range_refusal_error(error, ExpressionErrorContext::Model))
+}
+
+/// An aggregate keeps the Core validation spelling; a quantifier or statement
+/// binder keeps the engine's message, now with its owning location.
+fn range_refusal_error(
+    error: crate::typecheck::TypecheckError,
+    context: ExpressionErrorContext<'_>,
+) -> ModelError {
+    if error.unprefixed_range_refusal {
+        let mut failure = model_error(error.message);
+        failure.span = error.span;
+        failure.origin = error.target_origin;
+        return failure;
+    }
+    let origin = error.span.map(type_diagnostic_origin);
+    let mut failure = model_error(context.message(error.message)).with_origin(origin);
+    if let Some(span) = error.span {
+        failure = failure.at(span);
+    }
+    failure
+}
+
+fn check_init_binders(
     statements: &[Statement],
     model: &KernelModel,
     bound_names: &BTreeSet<String>,
+    deferred_only: bool,
 ) -> Result<(), ModelError> {
     for statement in statements {
         match statement {
@@ -2544,19 +3001,52 @@ fn check_init_collection_binders(
                 statements,
                 span,
             } => {
-                check_init_collection_binder(model, binder, bound_names.iter().map(String::as_str))
+                if deferred_only && let Binder::Range { lo, hi, .. } = binder {
+                    let mut references =
+                        state_references(lo, model, bound_names.iter().map(String::as_str));
+                    references.extend(state_references(
+                        hi,
+                        model,
+                        bound_names.iter().map(String::as_str),
+                    ));
+                    if let Some(name) = references.first() {
+                        return Err(model_error(format!(
+                            "init forall range bounds must be compile-time constants; state variable '{}' is not allowed",
+                            shown(name)
+                        ))
+                        .at(*span));
+                    }
+                }
+                if deferred_only
+                    && let Binder::Typed { type_name, .. } = binder
+                    && matches!(
+                        model.types.get(&type_name.name),
+                        Some(TypeDef::Struct { .. })
+                    )
+                {
+                    model
+                        .domain_values(&TypeRef::Named(type_name.name.clone()))
+                        .map_err(|error| error.at(*span))?;
+                }
+                if !deferred_only {
+                    check_init_collection_binder(
+                        model,
+                        binder,
+                        bound_names.iter().map(String::as_str),
+                    )
                     .map_err(|error| error.at(*span))?;
+                }
                 let mut local = bound_names.clone();
                 local.insert(binder_scope(binder).0.to_owned());
-                check_init_collection_binders(statements, model, &local)?;
+                check_init_binders(statements, model, &local, deferred_only)?;
             }
             Statement::If {
                 then_statements,
                 else_statements,
                 ..
             } => {
-                check_init_collection_binders(then_statements, model, bound_names)?;
-                check_init_collection_binders(else_statements, model, bound_names)?;
+                check_init_binders(then_statements, model, bound_names, deferred_only)?;
+                check_init_binders(else_statements, model, bound_names, deferred_only)?;
             }
             Statement::Assign { .. } => {}
         }
@@ -2585,7 +3075,7 @@ pub(crate) fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
     })
 }
 
-fn expr_children(expr: &Expr) -> Vec<&Expr> {
+pub(crate) fn expr_children(expr: &Expr) -> Vec<&Expr> {
     match expr {
         Expr::Some(expr)
         | Expr::Neg(expr)
@@ -3000,7 +3490,7 @@ pub(crate) fn unknown_update_target(name: &str) -> ModelError {
     model_error(format!("unknown update target '{}'", shown(name)))
 }
 
-fn model_error(message: impl Into<String>) -> ModelError {
+pub(crate) fn model_error(message: impl Into<String>) -> ModelError {
     ModelError {
         message: message.into(),
         origin: None,
@@ -3543,5 +4033,124 @@ mod tests {
                 .state_lvalue_type(&LValue::Index("h".into(), Expr::Bool(false)))
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod static_constant_integer_tests {
+    use super::*;
+
+    fn binary(op: &str, left: Expr, right: Expr) -> Expr {
+        Expr::Binary {
+            op: op.into(),
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+
+    fn conditional(selected: bool, then_expr: Expr, else_expr: Expr) -> Expr {
+        Expr::Conditional {
+            condition: Box::new(Expr::Bool(selected)),
+            then_expr: Box::new(then_expr),
+            else_expr: Box::new(else_expr),
+            spans: Box::new(fsl_syntax::ConditionalSpans {
+                condition: synthetic_span(),
+                then_expr: synthetic_span(),
+                else_expr: synthetic_span(),
+            }),
+        }
+    }
+
+    #[test]
+    fn integer_api_uses_current_constants_and_rejects_nonintegers() {
+        let kernel = crate::parse_direct_kernel_spec(
+            "spec A { const N = 1 state { d: Bool = false } action go() {} }",
+        )
+        .unwrap();
+        let mut model = build_model(kernel).unwrap();
+        let expression = binary("+", Expr::Var("N".into()), Expr::Num(1));
+        assert_eq!(model.constant_integer(&expression).unwrap(), 2);
+        model.consts.insert("N".into(), Value::Int(2));
+        assert_eq!(model.constant_integer(&expression).unwrap(), 3);
+        assert_eq!(
+            model
+                .constant_integer(&Expr::Bool(false))
+                .unwrap_err()
+                .message,
+            "constant expression must be an integer"
+        );
+        assert_eq!(
+            model
+                .constant_integer(&Expr::Var("missing".into()))
+                .unwrap_err()
+                .message,
+            "unknown constant 'missing'"
+        );
+        let zero = binary("/", Expr::Num(1), Expr::Num(0));
+        assert_eq!(
+            model
+                .constant_integer(&conditional(false, zero.clone(), Expr::Num(1)))
+                .unwrap(),
+            1
+        );
+        assert!(
+            model
+                .constant_integer(&conditional(true, zero, Expr::Num(1)))
+                .is_err()
+        );
+        assert!(
+            model
+                .constant_integer(&conditional(true, Expr::Num(1), Expr::Bool(false)))
+                .is_err()
+        );
+        let eager = binary(
+            "and",
+            Expr::Bool(false),
+            binary("==", binary("/", Expr::Num(1), Expr::Num(0)), Expr::Num(0)),
+        );
+        assert!(
+            model
+                .constant_integer(&conditional(true, Expr::Num(1), eager))
+                .is_err()
+        );
+        for (op, expected) in [("/", -3), ("%", 1)] {
+            assert_eq!(
+                model
+                    .constant_integer(&binary(op, Expr::Num(-5), Expr::Num(2)))
+                    .unwrap(),
+                expected
+            );
+        }
+        let overflow = Expr::Neg(Box::new(conditional(
+            true,
+            Expr::Num(i64::MIN),
+            Expr::Num(0),
+        )));
+        assert!(model.constant_integer(&overflow).is_err());
+        assert_eq!(
+            static_leadsto_int(&overflow, &model).unwrap_err().message,
+            "leadsTo range binder must use static integer bounds"
+        );
+    }
+
+    #[test]
+    fn integer_api_does_not_substitute_a_state_shadowed_constant() {
+        let source = "spec A { const n = 0 type K = 0..1 state { n: K } init { n=1 } action go() { n=1 } invariant P { forall i in 0..abs(n) { i==0 } } }";
+        let mut model = build_model(crate::parse_direct_kernel_spec(source).unwrap()).unwrap();
+        let Expr::Quantified {
+            binder: Binder::Range { hi, .. },
+            ..
+        } = &model.invariants[0].expr
+        else {
+            panic!("reviewer range")
+        };
+        let bound = hi.clone();
+        assert_eq!(model.consts["n"], Value::Int(0));
+        assert_eq!(
+            model.constant_integer(&bound).unwrap_err().message,
+            "expression is not constant"
+        );
+        model.state.clear();
+        assert_eq!(model.constant_integer(&bound).unwrap(), 0);
     }
 }

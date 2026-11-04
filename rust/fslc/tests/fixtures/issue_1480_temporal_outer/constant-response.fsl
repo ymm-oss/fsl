@@ -1,0 +1,9 @@
+spec TemporalOuter {
+  const TOP = 1 + 0
+  state { tick: Bool }
+  init { tick = false }
+  action idle() { tick = tick }
+  leadsTo Responds {
+    forall i in 0..TOP { true ~> within 1 true }
+  }
+}

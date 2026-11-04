@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[path = "issue_1467_relation_prefix_tests.rs"]
 mod issue_1467_relation_prefix_tests;
 
+use fsl_core::binder_range::{InclusiveI64, IntegerEnvelopeFact};
 use fsl_core::{FslValue, KernelModel, TypeDef, TypeRef};
 use fsl_solver::{ModelValue, SatResult, SmtSolver, Sort};
 
@@ -25,19 +26,91 @@ impl<T> From<SymbolicValue<T>> for TypedBinding<T> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct TypedBindings<T>(BTreeMap<String, TypedBinding<T>>);
+pub(crate) enum RangeFact<T> {
+    ParameterValue(IntegerEnvelopeFact),
+    CapturedLet {
+        envelope: IntegerEnvelopeFact,
+        valid_when: T,
+    },
+}
+
+impl<T> RangeFact<T> {
+    pub(crate) fn parameter(value: i64) -> Self {
+        Self::ParameterValue(IntegerEnvelopeFact::new(
+            InclusiveI64::new(value, value).expect("singleton interval"),
+        ))
+    }
+
+    /// A candidate of a state Set whose carrier is certified on this read frame.
+    pub(crate) const fn certified(envelope: InclusiveI64) -> Self {
+        Self::ParameterValue(IntegerEnvelopeFact::new(envelope))
+    }
+
+    pub(crate) fn captured(envelope: InclusiveI64, valid_when: T) -> Self {
+        Self::CapturedLet {
+            envelope: IntegerEnvelopeFact::new(envelope),
+            valid_when,
+        }
+    }
+
+    pub(crate) fn envelope(&self) -> &IntegerEnvelopeFact {
+        match self {
+            Self::ParameterValue(envelope) | Self::CapturedLet { envelope, .. } => envelope,
+        }
+    }
+
+    pub(crate) fn valid_when(&self) -> Option<&T> {
+        match self {
+            Self::ParameterValue(_) => None,
+            Self::CapturedLet { valid_when, .. } => Some(valid_when),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BindingRecord<T> {
+    pub(crate) binding: TypedBinding<T>,
+    pub(crate) range_fact: Option<RangeFact<T>>,
+}
+
+impl<T> BindingRecord<T> {
+    pub(crate) fn with_range_fact(binding: TypedBinding<T>, fact: RangeFact<T>) -> Self {
+        Self {
+            binding,
+            range_fact: Some(fact),
+        }
+    }
+}
+
+impl<T> From<TypedBinding<T>> for BindingRecord<T> {
+    fn from(binding: TypedBinding<T>) -> Self {
+        Self {
+            binding,
+            range_fact: None,
+        }
+    }
+}
+
+impl<T> From<SymbolicValue<T>> for BindingRecord<T> {
+    fn from(value: SymbolicValue<T>) -> Self {
+        TypedBinding::from(value).into()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TypedBindings<T>(BTreeMap<String, BindingRecord<T>>);
 
 impl<T> TypedBindings<T> {
     pub(crate) fn new() -> Self {
         Self(BTreeMap::new())
     }
 
-    pub(crate) fn insert(&mut self, name: String, value: impl Into<TypedBinding<T>>) {
+    pub(crate) fn insert(&mut self, name: String, value: impl Into<BindingRecord<T>>) {
         self.0.insert(name, value.into());
     }
 
     pub(crate) fn get(&self, name: &str) -> Option<&SymbolicValue<T>> {
-        self.0.get(name).map(|binding| &binding.0)
+        self.0.get(name).map(|record| &record.binding.0)
     }
 
     pub(crate) fn keys(&self) -> impl Iterator<Item = &String> {
@@ -45,13 +118,19 @@ impl<T> TypedBindings<T> {
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &SymbolicValue<T>)> {
-        self.0.iter().map(|(name, binding)| (name, &binding.0))
+        self.0
+            .iter()
+            .map(|(name, record)| (name, &record.binding.0))
+    }
+
+    pub(crate) fn records(&self) -> impl Iterator<Item = (&String, &BindingRecord<T>)> {
+        self.0.iter()
     }
 
     pub(crate) fn types(&self) -> impl Iterator<Item = (&String, &TypeRef)> {
         self.0
             .iter()
-            .filter_map(|(name, binding)| binding.1.as_ref().map(|ty| (name, ty)))
+            .filter_map(|(name, record)| record.binding.1.as_ref().map(|ty| (name, ty)))
     }
 }
 

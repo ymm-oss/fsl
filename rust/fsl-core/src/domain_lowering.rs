@@ -2223,6 +2223,7 @@ pub(crate) fn lower_domain_surface(
                     lo: Box::new(lo),
                     hi: Box::new(hi),
                     symmetric: false,
+                    span: None,
                 });
             }
             "value_object" => items.push(SpecItem::Struct {
@@ -2273,6 +2274,7 @@ pub(crate) fn lower_domain_surface(
             lo: Box::new(Expr::Num(0)),
             hi: Box::new(Expr::Num(effect.retry.max_attempts.unwrap_or(1))),
             symmetric: false,
+            span: None,
         });
     }
 

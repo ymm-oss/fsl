@@ -11,7 +11,7 @@
   "generic_functions": [
     "verify_bounded_config",
     "reject_unchecked_sequence_overflow",
-    "check_state_properties",
+    "check_state_properties_in",
     "make_violation",
     "probe",
     "project_trace",
@@ -82,8 +82,8 @@
     {
       "id": "p2.bmc.state-property-evaluation",
       "path": "rust/fsl-verifier/src/bmc.rs",
-      "function": "check_state_properties",
-      "anchor": "for property in &model.invariants {",
+      "function": "check_state_properties_in",
+      "anchor": "solver.set_query_context(\"invariant\", &property.name);\n        if probe_not(solver, &condition).await? {",
       "fault_classes": ["violation_kind_name_substitution", "failure_result_fold_to_success"]
     },
     {

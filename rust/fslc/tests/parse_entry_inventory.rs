@@ -318,6 +318,20 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         STABLE_WRAPPER,
     ),
     (
+        "fsl-verifier/src/bmc/integer_range_tests.rs",
+        "parse_kernel_source",
+        2,
+        Owner::Definition,
+        FIXTURE,
+    ),
+    (
+        "fsl-verifier/src/eval/range_metadata_tests.rs",
+        "parse_kernel_source",
+        1,
+        Owner::Definition,
+        FIXTURE,
+    ),
+    (
         "fsl-verifier/src/eval/scope_tests.rs",
         "parse_kernel_source",
         1,

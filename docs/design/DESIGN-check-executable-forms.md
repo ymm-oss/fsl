@@ -170,6 +170,9 @@ eleven sync-expanded or appended-root relation-index forms (read, write, require
 let and ensures). None is a nested-aggregate or pattern-name removal: all 66
 nested/pattern check controls remain accepted with identical complete
 base/head envelopes, including empty/nonempty and positive/negative forms.
+Those controls were later narrowed by
+[checked range admission](#1480-checked-range-admission), which refuses a
+dependent bound the engines cannot execute; this inventory is the #1463 measurement.
 
 There were 128 full-output differences: the 110 removals and exactly 18 intended
 diagnostic changes to inputs already rejected with error/semantics, exit 2:
@@ -197,8 +200,8 @@ component cause.
 
 ## Explicitly separate follow-ups
 
-\#1480 owns static/dynamic range bounds, negative within, and typed-domain
-enumeration; #1481 cell 1 owns Map Struct per-field init coverage.
+\#1480 decided static/dynamic range bounds, negative within, and typed-domain
+enumeration, recorded in the sections below; #1481 cell 1 owns Map Struct per-field init coverage.
 Head, `at(i)`, and index reads of empty zero-capacity Seqs are fixed by #1481
 cell 2 in ordinary action/property contexts: supported engines report
 `partial_op` when reached. Ranked decreases narrowly refuses fresh-value cases
@@ -212,3 +215,334 @@ controls, not additional restrictions or implementation claims in #1463.
 #1459 closes the `X1/operand-method-types` row (`acyclic(done)` for Bool `done`),
 which now expects a located check rejection at 8:3 and outcomes
 `[Error, Error, Error, Error]` instead of `[Ok, Error, Error, Error]`.
+
+## #1480: valid static arithmetic
+
+[Static binder constant expressions](DESIGN-static-binder-constant-expressions.md)
+adds successful checked integer folding to the three static binder adapters.
+It does not change the early wrapper/filter/init-source rejections above.
+Failed folding retains each old helper and its recursive diagnostic precedence.
+`X1/static-range` is `[Ok, Safe, Safe, Error]`, and the
+[checked range admission](#1480-checked-range-admission) changes `X1/dynamic-range`.
+Explicit liveness remains unsupported.
+The own-tree inventory of that change compares B `d11f32631f75afa64fa486cdf4f9b46c6e77d28e`
+with code H `c86f6bf4422b507f57862f830ad13726f8ce7734`: 610 corpus +299 actual
+inline IDs, **zero ok→error transitions** and no full check-output changes.
+The linked decision records the exact command, binary identities and limits.
+
+## #1480: shared refusal for unsupported binder domains
+
+The original-issue policy selects early rejection for these existing engine
+restrictions, rather than adding execution support. Checked-source admission
+shares the range rule with every command in the
+[command scope](#which-commands-refuse) below:
+
+| Previously check-ok form | New boundary | Preserved sibling |
+|---|---|---|
+| Init statement `forall` with a free state read in either integer-range endpoint | Existing compile-time-constant diagnostic at the owning `forall` statement, including empty bodies and unreachable branches | Supported init RHS expressions and lexical locals; ranges elsewhere follow the [range admission](#1480-checked-range-admission) |
+| Expression, action-statement or leadsTo-wrapper typed binder over a named Struct | Existing finite-scalar diagnostic through shared binder validation at the owning statement, expression or `leadsTo` | Bool, named Enum/Range binders, ordinary Struct values and collection-of-Struct binders |
+
+When the range rule finds a refusal, existing init ownership and field-read
+checks run first. Their earlier diagnostics retain their message and location;
+in particular, a read of a partially initialized Struct is not replaced with a
+range-domain error. Bare `build_model` does not impose this checked-source range
+rule. Raw Runtime constructors retain their existing unlocated range refusal.
+Expression and action Typed-Struct validation remains in Core construction.
+An init-statement Typed-Struct binder was already refused by the ownership
+preflight: retain its complete unlocated finite-scalar error, without a new
+Core prefix or location. Only that statement-domain check is deferred;
+expressions inside init remain subject to the normal binder validation.
+Component range diagnostics retain the original checked-source provenance.
+
+These are **breaking check-admission removals**. No Struct-domain enumeration
+or new public Kernel form is added. Existing nested-init restrictions remain
+separate. The own-tree sweep is in [corpus transitions](#corpus-transitions): 8 `ok`→`error`
+forms are typed binders over a Struct and 16 are init statement `forall` bounds reading
+state.
+
+## #1480: checked range admission
+
+Status: accepted by the maintainer's decision on #1480: `check` refuses every
+integer range bound the symbolic engines cannot execute, with one rule.
+
+**Rule and owner.** `RangePlan::is_executable` in `fsl_core::binder_range` is the only
+eligibility question about a bound; `KernelModel::plan_integer_range` remains the only
+grammar. The engines' `parameter_range_values` answers it from the current evaluation.
+`fsl_core::check_range_admission` answers it statically, called from
+`rust/fslc/src/checked_build.rs` after `check_init_statement_domains`. It reuses the
+validation walk (`validate_binder`) with a `RangeRule` on the phase, so scopes,
+pattern bindings, spans and component wrappers are those of Core validation, in the
+same order: init, actions, invariants, transitions, reachable, leadsTo, terminal.
+One rule is stricter and separate: `check_init_statement_domains` refuses any state
+read in the bounds of an init **statement** `forall`, including a state already
+assigned, at the owning statement (the free-state rule in `model.rs`).
+
+**What a scope establishes.** A state carrier prerequisite holds in `invariant`,
+`trans`, `unless`, action guards, `let` right-hand sides, `if` conditions and
+statements, where the engines certify the read frame; not in `ensures`, `reachable`,
+`terminal`, `until`, or leadsTo P, Q, `decreases` and `helpful`. A lexical prerequisite
+holds only for enumerated values: action parameters, range and named-integer binders,
+and binders over a Set or Seq literal of any length whose items are solver literals
+(integer literals, constants, or such names, including through a `let`). `let` names
+and pattern bindings carry no fact, even when bound to a literal. A zero-capacity Seq
+has no candidates, and other state Seq elements carry no fact.
+
+**State Sets.** A binder over a state Set of a finite integer element type, or over
+`old(xs)` where `old` reads a frame, takes the element type as its envelope wherever
+a read frame is certified. That is the same prerequisite as a state name in a bound,
+and both sides read it from `binder_range::state_set_element_envelope` and
+`state_set_source`: an engine grants the fact only when the frame's certificate holds
+that name. In a scope with no certified frame, an element has a fact only if it stays
+a solver literal, which depends on what can be written to the Set.
+`state_sets_with_symbolic_keys` judges each write: it keeps the keys literal when it is
+a Set literal of literal items, `.add` of a literal item on such a Set, `.remove` of
+anything from one, a copy of one, or an `if` over two of them; `st.add(n)` and
+`Set { n }` reading state do not. The engines keep those keys literal because
+`ordered_set_candidates` orders known integer keys without solver terms.
+
+Where a copy carries a key depends on when it runs. Init runs once and in order, so an
+init copy carries what init assigned: init is a fixed point, and a state assigned a
+literal reads as that literal. An action starts from a frame that
+`reframe_collections` has rebuilt over the element domain, so reading a state Set there
+gives literal keys whatever earlier steps wrote: `ys = xs` beside `xs = xs.add(n)`
+keeps `ys` literal, and only the action's own expression can add a key. `old(xs)` reads
+that same frame, so it is literal in `ensures` for any write to `xs`. A postcondition
+reads only the state an action left, so init's writes do not count for it; `reachable`,
+`leadsTo` and `terminal` can read the initial state, so they do. The one case the frame
+does not cover is `--property` on a state that really escapes: the frame then cannot be
+rebuilt, its keys stay as written, and the read refuses at run time with
+`unsupported integer range execution [planner]: missing-finite-fact`.
+
+**`old` with no frame left.** The engines read `old(...)` from one frame and have none
+below it, so a second `old`, or one in a scope with no old frame, stops every engine
+with `old() used without old state`. `P unless Q` lowers to a transition that wraps `P`
+in `old`, so an `old` inside `P` is a second one. A range read under such an `old` is
+refused at `check` with the base's message and location:
+`(forall x in old(xs) { count(y in 0..x) >= 0 }) unless b` reports
+`invalid model expression: 'x' is not an integer const at 7:28`. No name carries a fact
+there, so a state, a parameter and a binder bound alike are refused, while a literal
+bound is not.
+
+Out of scope: an `old` with no frame left that no dependent range reads under.
+`old(b) unless b`, `(forall e in old(xs) { e >= 0 }) unless b` and
+`invariant W { old(count(i in 0..2) >= 0) }` pass `check`, and every engine stops with
+that same message, on the base as here. That mismatch has nothing to do with range
+admission, and refusing it would be a separate decision about `old`.
+
+The engines record a captured fact for a let but never accept it here. A let holding a
+collection is classified where it is bound, so a later binder cannot change what it
+means. Init uses the pure `init_expression_envelope` shared with the engine's init
+recipes; a condition is known only when it is a literal or a named constant, as the
+engine's `init_known_condition` reads it, so a folded `z = (1 < 2)` selects no branch.
+LeadsTo wrappers fold each binding's bounds with the engine's `scoped_leadsto_int`,
+holding one row at a time. Past 65,536 visited bindings, complete or not
+(`WRAPPER_ADMISSION_BINDINGS`), the walk stops and later binders take the planner's
+interval over what is known, so admission never holds that product in memory; a binder
+the planner cannot bound then has no fact and is refused. The cap is a planner detail:
+it limits how much admission walks, not the language, and the engines enumerate past it.
+Every visit spends the budget because an always-empty inner binder completes no binding:
+`forall a in 0..1000000000000 { forall b in 1..(a*0) { not d ~> d } }` returns from
+`check` in under a second, exit 0 as on the base, while bmc and induction still enumerate
+the outer range and had not finished after 40 seconds, on the base and here.
+A binder with no candidates makes its filter and body dead, as the engines never
+evaluate them.
+
+**A known limit of the walk.** `check` judges only the rows the walk reaches, so where an
+overflowing row falls decides who reports it. With `const K = 140737488355328`,
+`forall a in 65534..65536 { forall b in (a*K)..(a*K) { not d ~> d } }` is refused at
+`check` with `integer overflow in multiplication`, because the walk reaches `a = 65536`.
+`forall a in 0..70000` stops before that row: `check` exits 0, as on the base, and bmc and
+induction exit 2 with the same message. It fails closed, with no verdict, so no limit is
+added for it. `an_overflow_past_the_wrapper_walk_is_left_to_the_engines` pins both forms.
+
+**Why they cannot drift silently.** Carrier scopes and state Set binders now share one
+prerequisite and one eligibility function, so they cannot disagree on what a certified
+frame establishes. The write analysis for scopes with no frame is still a static mirror
+of how values stay literal; removing it would need an evaluator run over every path. It
+fails closed, because a mismatch in the safe direction is a refusal, and a mismatch in
+the other direction is an engine refusal rather than a verdict.
+`rust/fslc/tests/issue_1480_check_engine_agreement.rs` is the gate on it: over a grid of
+scope, source shape and Set write, every form `check` accepts must not reach an engine
+range refusal, an overflow in a bound included. The wrapper walk is the known exception
+above: its overflow past the budget lies outside the grid, and that test pins it so the
+gate reports it instead of missing it.
+
+| Previously check-ok form | New boundary | Preserved sibling |
+|---|---|---|
+| Unplanned dependent bound: index, field, `size()`, `if`, `min`, `/`, `%`, `old`, aggregate | Refused, message by binder site below | Closed constant folds, `count(i in (if C > 1 then 0 else 1)..n)` |
+| State-dependent bound in `ensures`, `reachable`, `terminal`, `until`, leadsTo P/Q, `decreases`, `helpful` | Refused | The same bound in `invariant`, `trans`, `unless`, `requires`, RHS |
+| Bound reading a `let`, pattern binding, Int state, non-literal Seq element, non-literal Set literal item, or, in a scope with no certified frame, an element of a state Set some write gives a non-literal key | Refused | Action parameters, enumerated binders, Set and Seq literal items, state Set binders in a certified frame |
+| Interval that does not fit `i64` | Refused | Any representable interval; there is no size cap |
+| Typed binder over `Int`, including a leadsTo wrapper. The base's `check` exited 0 and every engine refused it, so no verdict is lost | `type 'Int' is not a finite scalar`, located | Typed binders over `Bool`, named Enum and Range. A spec that declares `type Int` or `enum Int` keeps its binder over that declaration in every scope, as on the base; a `struct Int` has no domain and is refused the same way |
+| A `type`, `enum` or `struct` named `Bool`, standalone or in a component. The base returned verdicts, so they are removed | `'Bool' is a reserved FSL type name and cannot be declared` at the declaration; a component reports `component "c.fsl" failed to lower (... at c.fsl:5:3)` at its `use` | `actor Bool`, `use P as Bool`, a state or const named `Bool` |
+
+**Diagnostics.** Each form had a refusal on the named base, and keeps its text.
+Aggregates use the Core validation wrapper and `static_public_int`:
+`invalid model expression: 'n' is not an integer const at 8:3`, or
+`invalid init statement: ...` in init. A bound `static_public_int` cannot read at all,
+such as `count(i in 0..abs(n))`, reports `invalid model expression: public Kernel
+requires static aggregate range bounds at 8:3`, as on the base. Quantifiers and statement `forall` use the
+engine's `KernelModel::static_binder_bound` text with a location added:
+`'n' is not an integer const`, `binder bound is not a static integer`,
+`invalid static integer expression`. A dependent aggregate inside a bound reports the
+aggregate's own refusal. LeadsTo wrappers use the same quantifier text at the
+property's location. A component form gets the existing component wrapper. As in the #1480 refusals above, init ownership and field-read
+checks report first.
+
+**Breaking removals of verdicts.** The rule is static, so it also refuses forms where
+an engine returned a verdict without reaching the bound. Maintainer decision: these
+are refused and recorded here. They are an earlier violated property
+(`invariant Q { false } reachable R { forall i in 0..n { i >= 0 } }`), selection by
+`--property` or `--exclude-property` around the property, and `--depth 0` for
+`ensures` or transition bounds. `decreases` and `helpful` arguments are refused
+although a BMC verdict exists for them: the BMC encoding reads neither, and its ranking
+prepass (`ranked_leadsto_lasso_discharges`) evaluates the measure but withdraws on any
+error, so only induction reported the refusal. Base refused these aggregates at
+`check`. Explicit-engine verdicts on every refused form are removed. A `leadsTo` wrapper
+bound reading a name that is both a state and a const is the one further kind the final
+sweep found: see [corpus transitions](#corpus-transitions).
+
+**Refused forms that now return a verdict.** Several forms the base refused now run,
+because the engine gained what the rule assumed rather than the rule gaining a refusal:
+a dependent bound in a fair guard or sticky helpful guard; a `trans` body with a partial
+operation; an invariant reached by `reachable` diagnosis; a static outer binder around a
+dependent inner one on explicit's vacuity lane; several-item Set literals and non-empty
+state Set initializers; `--property` selecting away a bound the frame proves.
+
+### Which commands refuse
+
+Measured with `reachable R { forall i in 0..n { i >= 0 } }` beside
+`invariant Q { n > 0 }`, which the state violates, base `5564b25cc` against this change,
+each exit recorded:
+
+| Route | Commands | Base | This change |
+|---|---|---|---|
+| Checked load, reports the refusal | `verify`, `testgen`, `mutate`, `sweep`, `scenarios`, `html`, `ledger`, `diff`, `refine` | 1 | 2 |
+| Checked load, reports the refusal | `conformance`, `analyze`, `explain` | 0 | 2 |
+| Bare load, not refused | `kernel`, `typestate`, `lint`, `migrate`, `document claims` | 0 | 0 |
+| Bare load, not refused | `fmt --check` on an unformatted file | 1 | 1 |
+
+`approval` and log and domain replay load through the checked path by reading the code,
+and were not measured against a refused form. `coverage` and `causal` load a bare model,
+also by reading. These new refusals are breaking removals on the same terms.
+
+Bare `build_model` defers a dependent aggregate bound, so `kernel` and `typestate`,
+which project a bare model, reach it in their projection. They report it as base did,
+through `locate_unfolded_aggregate`: `invalid model expression: 'n' is not an integer
+const at 1:66`, exit 2, with `loc`.
+
+`fmt` is the one command that refuses less: it validates through bare `build_model`,
+which now defers that form, so where the base exited 2 this change exits 0. It stays
+that way on purpose. `fmt` rewrites text and judges nothing, adopting checked admission
+would make it refuse forms the base formats, and `check` still reports the bound.
+
+**`replay` is an exception.** It keeps loading through `load_replay_model`, including
+the forms `check` refuses and the dynamic aggregate form the base refused (base exit 2,
+this change exit 0), by user decision. It checks the observed prefix through the Monitor,
+which evaluates each bound concretely, so a bound refused here can replay as conformant.
+Replay reports what happened on that trace; it does not admit the specification.
+
+**Out of this rule.** Bare `build_model` and raw Runtime constructors keep their
+boundaries, so `[planner]` and `[eligibility]` remain reachable there. Eligibility that
+depends on solver facts stays dynamic: `checked_read_carriers` and the induction
+`deferred` refusal in `bmc.rs` and `induction.rs`. Selecting properties does not assume
+an unselected bound, and what a run with `--property` reports when the state really
+escapes depends on the engine, measured on `n = n + 1` from the top of `0..3`:
+
+- bmc refuses only a read that needs the bound: `[eligibility]`, exit 2, or
+  `[planner]: missing-finite-fact` for a binder over a state Set whose frame could not be
+  rebuilt. With no such read it reports the selected property: `verified`, exit 0, or
+  `violated`, exit 1.
+- induction does not select bounds and reports `_bounds_n` `violated`, exit 1, as on the
+  base.
+- explicit reads concrete values and reports the selected property, exit 0 or 1, even
+  where bmc refuses.
+
+There is no execution cap: `DOMAIN_BOUND` bounds enumerated requirement questions before they go to
+the solver, not range candidates. A candidate list too long to allocate refuses with
+`unsupported integer range execution [resource]`, exit 2. Running out while Z3 builds
+terms makes the `z3` bindings panic on the null Z3 returns, and `main` turns a panic in
+that crate alone into `solver execution stopped [solver-panic]`, exit 2, in JSON. The
+message says the bindings panicked and no verdict was reached, and carries the panic
+text and location, which also stay on stderr. It does not say `[resource]` because a
+binding defect panics the same way and nothing here tells them apart: memory is the
+usual cause, not an established one. A panic that a caller catches and survives, as
+`ranked_leadsto_lasso_discharges`'s thread does by falling back to the full lasso
+search, is forgotten and cannot label a later crash; any other panic stays exit 101. An
+allocation failure elsewhere in Rust or inside Z3 can still end the process with exit
+134.
+
+**Issue close note.** The issue's row 1 reads "all engines agree". The explicit engine
+does not support `leadsTo`, so for that row explicit reports that refusal rather than a
+verdict, on base and here alike.
+
+### Corpus transitions
+
+Sweep at base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654` and head
+`f101e7a93cbb50ad85e3531a1d27314559735311`, the last code commit. `fslc check <form>` ran
+twice with binaries built by Rust 1.98.0, each from a `git archive` of its SHA, with no
+difference between the two runs on either side and no timeout at 30 seconds. Every compared
+output is whole stdout and the exit code; nothing is excluded.
+
+The forms are 20,179, the union of both sides:
+
+- 646 `.fsl` files: `specs/` 23, `examples/` 195, `rust/fslc/tests/fixtures/` 428. Each runs
+  in each tree, the 29 head-only files copied into the base tree beside the fixtures they
+  read.
+- 19,533 models captured from the tests. A temporary patch in each tree, not in this
+  repository, writes every source reaching `parse_document_with` or `parse_surface_spec`,
+  with the components a compose root reads, while `cargo test --workspace` runs. That
+  reaches every required test the branch rewrites (under `tests/`, 15 modified files, 69 added, none
+  removed or renamed) and every `format!` template by its real expansion, in the base's
+  version of a test and in the head's.
+
+| Base → head | Corpus | Captured |
+|---|---|---|
+| Same exit and stdout | 637 | 17,807 |
+| `ok`→`error` | 9 | 640 |
+| `error`→`ok` | 0 | 1,079 |
+| `error`→`error`, other text | 0 | 7 |
+| `ok`→`ok`, other output | 0 | 0 |
+
+A sweep of the same branch against base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, before
+#1677 and #1678 merged, found the same 649, 1,079 and 7 forms by content hash; the forms
+those two merges added to the tests and fixtures all report the same on both sides.
+
+Every `ok`→`error` is a breaking removal, 649 in all and none under `specs/` or `examples/`.
+The corpus files are `rust/fslc/tests/fixtures/explicit_init_range_assigned.fsl` and
+`explicit_init_range_unassigned.fsl`, then seven head-only files under
+`issue_1480_temporal_outer/`: `const-state-collision`, `empty-static-overflow`, `free-state`,
+`overflow-high`, `overflow-low`, `struct-typed`, `unbounded-typed`. By class, with the forms
+on which the base's engines returned a verdict:
+
+| Refusal | Forms | From the base's tests | bmc and induction verdict on base | explicit verdict on base |
+|---|---|---|---|---|
+| `'x' is not an integer const`, also inside `invalid model expression:` or a component wrapper | 495 | 5 | 3 | 150 |
+| `binder bound is not a static integer` | 85 | 72 | 4 | 3 |
+| Bound that overflows or does not fold | 20 | 0 | 0 | 0 |
+| Init statement `forall` bound reading state | 16 | 7 | 0 | 0 |
+| Declared `Bool` | 11 | 0 | 11 | 11 |
+| Typed binder over the builtin `Int` | 10 | 1 | 0 | 0 |
+| Typed binder over a Struct | 8 | 0 | 0 | 0 |
+| Negative `within` | 4 | 1 | 0 | 0 |
+
+The 18 forms with a bmc and induction verdict are 11 declared `Bool`, 3 with an earlier
+violated property, and 4 where a state shares its name with a const and a leadsTo wrapper
+bound reads that name, as in `const n = 1 state { n: 0..2 } leadsTo L { forall i in 0..n
+{ ... } }`: the base read the const and reported `violated`, and that bound now reads a state,
+so it is refused.
+
+The 7 `error`→`error` forms all come from tests only the head has. Five report `public Kernel
+requires static aggregate range bounds` where the base named `'n'`, because the other endpoint
+cannot be folded either (`count(i in n..count(j in 0..0))`, `count(i in n..(1/0))`). Two report
+`init references state variable 'n' before it is assigned` where the base said `invalid init
+statement: 'n' is not an integer const` (`init { q = count(i in 0..n) == 1 n = 0 }`).
+
+What this does not reach: a model built in Rust without parsing; `parse_refinement` mappings,
+which `check` does not read (at an earlier head, `map total = count(i in lo..hi)` went from an
+error to accepted); two tests `#[ignore]`d on both sides as one-time captures; and the remainder of
+`edition_dependency_routes` and `kernel_contract::native_cli_kernel_v2_output_matches_the_origin_golden_contract`,
+which stop at their first failed assertion in the patched trees on both sides and pass on this
+tree. Of the 64 `format!` sites naming a model in the 24 test files an earlier sweep could not
+expand, 62 have a captured expansion, and the other 2 are assertion messages
+(`issue_1480_bool_domains.rs:184`, `support/issue_1480_dynamic_range_support.rs:181`).

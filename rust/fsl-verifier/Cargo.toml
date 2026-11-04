@@ -12,6 +12,7 @@ fsl-core = { path = "../fsl-core" }
 fsl-solver = { path = "../fsl-solver" }
 
 [dev-dependencies]
+fsl-syntax = { path = "../fsl-syntax" }
 fsl-runtime = { path = "../fsl-runtime" }
 fsl-solver-z3 = { path = "../fsl-solver-z3" }
 

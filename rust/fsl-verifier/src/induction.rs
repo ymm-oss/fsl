@@ -4,21 +4,29 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::obligation::{ObligationKind, Site, SiteRef, catalog};
 use fsl_core::recursion;
-use fsl_core::{FslValue, HelpfulAction, KernelExpr, KernelModel, LeadsToDef};
+use fsl_core::{
+    FslValue, HelpfulAction, KernelBinder, KernelExpr, KernelModel, LeadsToDef,
+    integer_range_state_references,
+};
 use fsl_solver::{ModelValue, SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::eval::{
-    FailureClass, binder_source_expressions, binder_values, binder_where, binder_where_expression,
-    classified_evaluation_status, classified_property_evaluation_status, confine_binary_rhs, eval,
-    eval_with_bindings, evaluation_status, property_evaluation_status,
+use crate::bmc::{
+    CheckedStateCarriers, assume_induction_carriers, checked_action_carriers,
+    checked_read_carriers, premised_state_carriers, prove_induction_carriers,
 };
-use crate::liveness::{leadsto_bindings, leadsto_condition};
+use crate::eval::{
+    FailureClass, binder_candidate_binding, binder_source_expressions, binder_values_in,
+    binder_where_expression, binder_where_in, classified_evaluation_status,
+    classified_property_evaluation_status_in, confine_binary_rhs, eval, eval_in,
+    eval_with_bindings_in, evaluation_status, property_evaluation_status_in,
+};
+use crate::liveness::{leadsto_bindings, leadsto_condition, leadsto_condition_in};
 use crate::trace::{has_missing_sequence_slots, project_trace};
 use crate::transition::{
-    ActionInstance, action_guard_definedness, action_has_partial_operation_candidate,
-    action_instances, action_statements_evaluation_status, classified_action_guard_definedness,
-    classified_action_statements_evaluation_status, transition_constraint,
+    ActionInstance, action_has_partial_operation_candidate, action_instances,
+    classified_action_guard_definedness_in, classified_action_statements_evaluation_status_in,
+    transition_constraint_in,
 };
 use crate::value::{
     SymbolicState, SymbolicValue, TypedBindings as Bindings, bool_term, bounds, i64_index,
@@ -122,12 +130,13 @@ fn properties(model: &KernelModel) -> Vec<Property<'_>> {
     properties
 }
 
-fn property_condition<S: SmtSolver>(
+fn property_condition_in<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     property: Property<'_>,
     state: &SymbolicState<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    checked: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<S::Term, VerifyError> {
     match property {
         Property::Bound(name) => Ok(bounds(
@@ -139,14 +148,20 @@ fn property_condition<S: SmtSolver>(
         )?),
         Property::Invariant(index) => {
             let mut bindings = Bindings::new();
-            let value = eval(
-                solver,
-                model,
-                &model.invariants[index].expr,
-                state,
-                &mut bindings,
-                old_state,
-            )?;
+            let expr = &model.invariants[index].expr;
+            let value = if integer_range_state_references(expr, model, []).is_empty() {
+                eval(solver, model, expr, state, &mut bindings, old_state)?
+            } else {
+                eval_in(
+                    solver,
+                    model,
+                    expr,
+                    state,
+                    &mut bindings,
+                    old_state,
+                    checked,
+                )?
+            };
             Ok(bool_term(&value)?.clone())
         }
     }
@@ -158,8 +173,18 @@ fn attributed_property_condition<S: SmtSolver>(
     property: Property<'_>,
     state: &SymbolicState<S::Term>,
 ) -> Result<S::Term, VerifyError> {
+    attributed_property_condition_in(solver, model, property, state, None)
+}
+
+fn attributed_property_condition_in<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    property: Property<'_>,
+    state: &SymbolicState<S::Term>,
+    checked: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<S::Term, VerifyError> {
     solver.set_query_context(property.kind(), &property.name(model));
-    property_condition(solver, model, property, state, None)
+    property_condition_in(solver, model, property, state, None, checked)
 }
 
 /// Prove kernel invariants and transitions by k-induction after a successful
@@ -229,6 +254,13 @@ async fn prove_induction_scoped<S: SmtSolver>(
         return Err(VerifyError::new("spec declares no action instances"));
     }
     let properties = properties(model);
+    let needs_carriers = model
+        .invariants
+        .iter()
+        .chain(&model.transitions)
+        .any(|property| !integer_range_state_references(&property.expr, model, []).is_empty());
+    let mut pending_transitions = model.transitions.iter().collect::<Vec<_>>();
+    let mut deferred = false;
     let mut remaining = properties.clone();
     let mut k_used = BTreeMap::new();
     let mut last_cti = None;
@@ -236,12 +268,28 @@ async fn prove_induction_scoped<S: SmtSolver>(
     let mut choices = Vec::new();
 
     for k in 1..=k_ind {
+        deferred = false;
         if k == 1 {
             states.push(symbolic_state_with_suffix(solver, model, "ind0")?);
         }
-        for property in &properties {
-            let assumption = property_condition(solver, model, *property, &states[k - 1], None)?;
-            solver.assert(&assumption)?;
+        {
+            let prior = needs_carriers
+                .then(|| assume_induction_carriers(solver, model, &states[k - 1]))
+                .transpose()?;
+            for property in &properties {
+                if prior.is_some() && matches!(property, Property::Bound(_)) {
+                    continue;
+                }
+                let assumption = property_condition_in(
+                    solver,
+                    model,
+                    *property,
+                    &states[k - 1],
+                    None,
+                    prior.as_ref(),
+                )?;
+                solver.assert(&assumption)?;
+            }
         }
         reframe_collections(
             solver,
@@ -256,15 +304,69 @@ async fn prove_induction_scoped<S: SmtSolver>(
         let choice = solver.constant(&format!("__ind_choice@{}", k - 1), &fsl_solver::Sort::Int)?;
         solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
         solver.assert(&solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?)?;
-        solver.assert(&transition_constraint(
-            solver, model, &instances, previous, &mut next, &choice,
+        let action_context = checked_action_carriers(solver, model, previous, None).await?;
+        solver.assert(&transition_constraint_in(
+            solver,
+            model,
+            &instances,
+            previous,
+            &mut next,
+            &choice,
+            action_context.as_ref(),
         )?)?;
+        drop(action_context);
         states.push(next);
         choices.push(choice);
 
+        let (target, mut failures) = if needs_carriers {
+            let (checked, failures) =
+                prove_induction_carriers(solver, model, (&states, &choices, &instances, k)).await?;
+            (
+                Some(checked),
+                failures
+                    .into_iter()
+                    .map(|cti| (cti.name.clone(), cti))
+                    .collect::<BTreeMap<_, _>>(),
+            )
+        } else {
+            (None, BTreeMap::new())
+        };
         let mut still_remaining = Vec::new();
         for property in remaining {
-            let condition = attributed_property_condition(solver, model, property, &states[k])?;
+            if let Some(checked) = &target {
+                match property {
+                    Property::Bound(_) => {
+                        if let Some(cti) = failures.remove(&property.name(model)) {
+                            last_cti = Some(cti);
+                            still_remaining.push(property);
+                        } else {
+                            k_used.insert(property.name(model), k);
+                        }
+                        continue;
+                    }
+                    Property::Invariant(index) => {
+                        if integer_range_state_references(&model.invariants[index].expr, model, [])
+                            .iter()
+                            .any(|name| !checked.contains(&states[k], name))
+                        {
+                            deferred = true;
+                            still_remaining.push(property);
+                            continue;
+                        }
+                    }
+                }
+            }
+            let condition = if target.is_some() {
+                attributed_property_condition_in(
+                    solver,
+                    model,
+                    property,
+                    &states[k],
+                    target.as_ref(),
+                )?
+            } else {
+                attributed_property_condition(solver, model, property, &states[k])?
+            };
             solver.push();
             solver.assert(&solver.not(&condition)?)?;
             match solver.check().await? {
@@ -299,57 +401,80 @@ async fn prove_induction_scoped<S: SmtSolver>(
             solver.pop(1)?;
         }
 
-        if k == 1 {
-            for transition in &model.transitions {
-                solver.set_query_context("trans", &transition.name);
-                let mut bindings = Bindings::new();
-                let value = eval(
-                    solver,
-                    model,
-                    &transition.expr,
-                    &states[1],
-                    &mut bindings,
-                    Some(&states[0]),
-                )?;
-                solver.push();
-                solver.assert(&solver.not(bool_term(&value)?)?)?;
-                match solver.check().await? {
-                    SatResult::Sat => {
-                        for state in &states {
-                            if has_missing_sequence_slots(solver, state)? {
-                                solver.pop(1)?;
-                                return Err(VerifyError::new(
-                                    "model sequence length exceeds capacity",
-                                ));
-                            }
+        let mut still_pending_transitions = Vec::new();
+        let mut transition_context = None;
+        for transition in pending_transitions {
+            let required = integer_range_state_references(&transition.expr, model, []);
+            // Keep T pending while any conservatively referenced target carrier is unproved.
+            if target.as_ref().is_some_and(|current| {
+                required
+                    .iter()
+                    .any(|name| !current.contains(&states[k], name))
+            }) {
+                deferred = true;
+                still_pending_transitions.push(transition);
+                continue;
+            }
+            if !required.is_empty() && transition_context.is_none() {
+                let old = checked_read_carriers(solver, model, &states[k - 1], None).await?;
+                transition_context = target
+                    .as_ref()
+                    .map(|current| (*current).clone().with_old(old));
+            }
+            solver.set_query_context("trans", &transition.name);
+            let mut bindings = Bindings::new();
+            let value = eval_in(
+                solver,
+                model,
+                &transition.expr,
+                &states[k],
+                &mut bindings,
+                Some(&states[k - 1]),
+                transition_context.as_ref(),
+            )?;
+            solver.push();
+            solver.assert(&solver.not(bool_term(&value)?)?)?;
+            match solver.check().await? {
+                SatResult::Sat => {
+                    for state in &states {
+                        if has_missing_sequence_slots(solver, state)? {
+                            solver.pop(1)?;
+                            return Err(VerifyError::new("model sequence length exceeds capacity"));
                         }
-                        let trace = project_trace(solver, model, &states, &choices, &instances, 1)?;
-                        solver.pop(1)?;
-                        return Ok(InductionResult {
-                            k_used,
-                            cti: Some(InductionCti {
-                                kind: violation_kind::TRANS.to_owned(),
-                                name: transition.name.clone(),
-                                k: 1,
-                                trace,
-                            }),
-                        });
                     }
-                    SatResult::Unsat => solver.pop(1)?,
-                    SatResult::Unknown => {
-                        solver.pop(1)?;
-                        return Err(VerifyError::solver("solver returned unknown in induction"));
-                    }
+                    let trace = project_trace(solver, model, &states, &choices, &instances, k)?;
+                    solver.pop(1)?;
+                    return Ok(InductionResult {
+                        k_used,
+                        cti: Some(InductionCti {
+                            kind: violation_kind::TRANS.to_owned(),
+                            name: transition.name.clone(),
+                            k,
+                            trace,
+                        }),
+                    });
+                }
+                SatResult::Unsat => solver.pop(1)?,
+                SatResult::Unknown => {
+                    solver.pop(1)?;
+                    return Err(VerifyError::solver("solver returned unknown in induction"));
                 }
             }
         }
+        pending_transitions = still_pending_transitions;
 
         remaining = still_remaining;
-        if remaining.is_empty() {
+        if remaining.is_empty() && pending_transitions.is_empty() {
             return Ok(InductionResult { k_used, cti: None });
         }
     }
 
+    if deferred && (!remaining.is_empty() || !pending_transitions.is_empty()) && last_cti.is_none()
+    {
+        return Err(VerifyError::new(
+            "unsupported integer range execution [eligibility]: prerequisites are not established for this evaluation scope",
+        ));
+    }
     Ok(InductionResult {
         k_used,
         cti: last_cti,
@@ -358,7 +483,7 @@ async fn prove_induction_scoped<S: SmtSolver>(
 
 /// Probe one partial-operation condition; on `sat`, project the witness
 /// trace over `states[..=upto]` before the scope is popped.
-async fn partial_witness<S: SmtSolver>(
+pub(crate) async fn partial_witness<S: SmtSolver>(
     solver: &mut S,
     model: &KernelModel,
     condition: &S::Term,
@@ -462,6 +587,23 @@ fn site_ref(name: &str, span: fsl_core::Span) -> SiteRef {
     }
 }
 
+fn leadsto_expression_needs_context(
+    model: &KernelModel,
+    property: &LeadsToDef,
+    expression: &KernelExpr,
+) -> bool {
+    !integer_range_state_references(
+        expression,
+        model,
+        property.binders.iter().map(|binder| match binder {
+            KernelBinder::Typed { name, .. }
+            | KernelBinder::Range { name, .. }
+            | KernelBinder::Collection { name, .. } => name.as_str(),
+        }),
+    )
+    .is_empty()
+}
+
 /// Key-domain obligation of the induction step (#1221).
 ///
 /// BMC and the explicit engine stop with an error when a reachable state
@@ -513,16 +655,42 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
 
     solver.push();
     let result = async {
+        let needs_current_context =
+            model.invariants.iter().any(|property| {
+                !integer_range_state_references(&property.expr, model, []).is_empty()
+            }) || model.leadstos.iter().any(|property| {
+                [&property.before, &property.after]
+                    .into_iter()
+                    .any(|expr| leadsto_expression_needs_context(model, property, expr))
+            });
+        let mut key_context = None;
         for property in &properties {
-            let assumption = property_condition(solver, model, *property, &key_states[0], None)?;
+            if needs_current_context
+                && key_context.is_none()
+                && matches!(property, Property::Invariant(_))
+            {
+                key_context =
+                    Some(checked_read_carriers(solver, model, &key_states[0], None).await?);
+            }
+            let assumption = property_condition_in(
+                solver,
+                model,
+                *property,
+                &key_states[0],
+                None,
+                key_context.as_ref(),
+            )?;
             solver.assert(&assumption)?;
+        }
+        if needs_current_context && key_context.is_none() {
+            key_context = Some(checked_read_carriers(solver, model, &key_states[0], None).await?);
         }
 
         for property in &model.invariants {
             if !sites.contains(&Site::Invariant(site_ref(&property.name, property.span))) {
                 continue;
             }
-            let status = classified_property_evaluation_status(
+            let status = classified_property_evaluation_status_in(
                 solver,
                 model,
                 &property.expr,
@@ -530,6 +698,7 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
                 &Bindings::new(),
                 None,
                 class,
+                key_context.as_ref(),
             )?;
             if !status.has_partial_operation {
                 continue;
@@ -572,7 +741,7 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
                     if !asked {
                         continue;
                     }
-                    let status = classified_property_evaluation_status(
+                    let status = classified_property_evaluation_status_in(
                         solver,
                         model,
                         expression,
@@ -580,6 +749,7 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
                         &binding.symbolic,
                         None,
                         class,
+                        key_context.as_ref(),
                     )?;
                     if !status.has_partial_operation {
                         continue;
@@ -609,27 +779,32 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
             }
         }
 
+        drop(key_context);
+        let current = key_states[0].clone();
+        let action_context = checked_action_carriers(solver, model, &current, None).await?;
         for instance in instances {
             let action = &model.actions[instance.action_index];
             let at = site_ref(&action.name, action.span);
             if !sites.contains(&Site::Guard(at.clone())) && !sites.contains(&Site::Body(at)) {
                 continue;
             }
-            let guard = classified_action_guard_definedness(
+            let guard = classified_action_guard_definedness_in(
                 solver,
                 model,
                 action,
-                &key_states[0],
+                &current,
                 &instance.params,
                 class,
+                action_context.as_ref(),
             )?;
-            let body = classified_action_statements_evaluation_status(
+            let body = classified_action_statements_evaluation_status_in(
                 solver,
                 model,
                 action,
-                &key_states[0],
+                &current,
                 &guard.bindings,
                 class,
+                action_context.as_ref(),
             )?;
             if !guard.has_partial_operation && !body.has_partial_operation {
                 continue;
@@ -673,32 +848,68 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
         }
         solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
         solver.assert(&solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?)?;
-        let current = key_states[0].clone();
-        solver.assert(&transition_constraint(
+        solver.assert(&transition_constraint_in(
             solver,
             model,
             instances,
             &current,
             &mut key_states[1],
             &choice,
+            action_context.as_ref(),
         )?)?;
+        let needs_next_context = model
+            .invariants
+            .iter()
+            .chain(&model.transitions)
+            .any(|property| !integer_range_state_references(&property.expr, model, []).is_empty());
+        let mut key_next_context = None;
         for property in &properties {
-            let assumption = property_condition(solver, model, *property, &key_states[1], None)?;
+            if needs_next_context
+                && key_next_context.is_none()
+                && matches!(property, Property::Invariant(_))
+            {
+                key_next_context =
+                    Some(checked_read_carriers(solver, model, &key_states[1], None).await?);
+            }
+            let assumption = property_condition_in(
+                solver,
+                model,
+                *property,
+                &key_states[1],
+                None,
+                key_next_context.as_ref(),
+            )?;
             solver.assert(&assumption)?;
         }
+        if needs_next_context && key_next_context.is_none() {
+            key_next_context =
+                Some(checked_read_carriers(solver, model, &key_states[1], None).await?);
+        }
+        let key_transition_context =
+            if model.transitions.iter().any(|property| {
+                !integer_range_state_references(&property.expr, model, []).is_empty()
+            }) {
+                let old = checked_read_carriers(solver, model, &key_states[0], None).await?;
+                key_next_context
+                    .as_ref()
+                    .map(|current| (*current).clone().with_old(old))
+            } else {
+                None
+            };
         for transition in &model.transitions {
-            let value = eval(
+            let value = eval_in(
                 solver,
                 model,
                 &transition.expr,
                 &key_states[1],
                 &mut Bindings::new(),
                 Some(&key_states[0]),
+                key_transition_context.as_ref(),
             )?;
             solver.assert(bool_term(&value)?)?;
         }
         for property in transitions {
-            let status = classified_property_evaluation_status(
+            let status = classified_property_evaluation_status_in(
                 solver,
                 model,
                 &property.expr,
@@ -706,6 +917,7 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
                 &Bindings::new(),
                 Some(&key_states[0]),
                 class,
+                key_transition_context.as_ref(),
             )?;
             if !status.has_partial_operation {
                 continue;
@@ -746,15 +958,24 @@ async fn key_domain_obligation_cti<S: SmtSolver>(
             }) {
                 continue;
             }
-            let guard =
-                action_guard_definedness(solver, model, action, &key_states[0], &instance.params)?;
-            let mut bindings = guard.bindings;
-            let body = action_statements_evaluation_status(
+            let guard = classified_action_guard_definedness_in(
                 solver,
                 model,
                 action,
-                &key_states[0],
+                &current,
+                &instance.params,
+                FailureClass::PartialOperation,
+                action_context.as_ref(),
+            )?;
+            let mut bindings = guard.bindings;
+            let body = classified_action_statements_evaluation_status_in(
+                solver,
+                model,
+                action,
+                &current,
                 &bindings,
+                FailureClass::PartialOperation,
+                action_context.as_ref(),
             )?;
             let selected = solver.equal(&choice, &solver.int_value(i64_index(instance_index)?))?;
             // `reached` is BMC's: an earlier ensures that fails or is false
@@ -853,7 +1074,7 @@ fn with_attempted_action<T>(
 ///
 /// - `Inv(s) ∧ first_partial(P, s)` for every invariant and every `leadsTo`
 ///   trigger/goal (property context: division is total, sequence access is
-///   not — the same `property_evaluation_status` BMC uses);
+///   not — the same `property_evaluation_status_in` BMC uses);
 /// - `Inv(s) ∧ first_partial(guards_a, s)` for every action instance;
 /// - `Inv(s) ∧ enabled_a(s) ∧ first_partial(body_a, s)`;
 /// - `Inv(s) ∧ T(s, s') ∧ Inv(s') ∧ Trans(s, s') ∧ first_partial(Q, s, s')`
@@ -912,20 +1133,47 @@ async fn step_obligation_cti<S: SmtSolver>(
 
     solver.push();
     let result = async {
+        let needs_context =
+            model.invariants.iter().any(|property| {
+                !integer_range_state_references(&property.expr, model, []).is_empty()
+            }) || model.leadstos.iter().any(|property| {
+                let bound = property
+                    .binders
+                    .iter()
+                    .map(|binder| match binder {
+                        KernelBinder::Typed { name, .. }
+                        | KernelBinder::Range { name, .. }
+                        | KernelBinder::Collection { name, .. } => name.as_str(),
+                    })
+                    .collect::<Vec<_>>();
+                [&property.before, &property.after].into_iter().any(|expr| {
+                    !integer_range_state_references(expr, model, bound.iter().copied()).is_empty()
+                })
+            });
+        let d0 = needs_context
+            .then(|| assume_induction_carriers(solver, model, &def_states[0]))
+            .transpose()?;
         for property in &properties {
-            let assumption = property_condition(solver, model, *property, &def_states[0], None)?;
+            if d0.is_some() && matches!(property, Property::Bound(_)) {
+                continue;
+            }
+            let assumption =
+                property_condition_in(solver, model, *property, &def_states[0], None, d0.as_ref())?;
             solver.assert(&assumption)?;
         }
 
         // State-level property definedness.
         for property in &model.invariants {
-            let status = property_evaluation_status(
+            let status = property_evaluation_status_in(
                 solver,
                 model,
                 &property.expr,
                 &def_states[0],
                 &Bindings::new(),
                 None,
+                d0.as_ref().filter(|_| {
+                    !integer_range_state_references(&property.expr, model, []).is_empty()
+                }),
             )?;
             if !status.has_partial_operation {
                 continue;
@@ -955,13 +1203,21 @@ async fn step_obligation_cti<S: SmtSolver>(
         for property in &model.leadstos {
             for binding in leadsto_bindings(solver, model, property)? {
                 for expression in [&property.before, &property.after] {
-                    let status = property_evaluation_status(
+                    let status = property_evaluation_status_in(
                         solver,
                         model,
                         expression,
                         &def_states[0],
                         &binding.symbolic,
                         None,
+                        d0.as_ref().filter(|_| {
+                            !integer_range_state_references(
+                                expression,
+                                model,
+                                binding.symbolic.keys().map(String::as_str),
+                            )
+                            .is_empty()
+                        }),
                     )?;
                     if !status.has_partial_operation {
                         continue;
@@ -991,23 +1247,31 @@ async fn step_obligation_cti<S: SmtSolver>(
             }
         }
 
+        drop(d0);
+        let current = def_states[0].clone();
+        let action_context = checked_action_carriers(solver, model, &current, None).await?;
+
         // Action guard and body definedness in the pre-state.
         if has_action_candidates {
             for instance in instances {
                 let action = &model.actions[instance.action_index];
-                let guard = action_guard_definedness(
+                let guard = classified_action_guard_definedness_in(
                     solver,
                     model,
                     action,
-                    &def_states[0],
+                    &current,
                     &instance.params,
+                    FailureClass::PartialOperation,
+                    action_context.as_ref(),
                 )?;
-                let body = action_statements_evaluation_status(
+                let body = classified_action_statements_evaluation_status_in(
                     solver,
                     model,
                     action,
-                    &def_states[0],
+                    &current,
                     &guard.bindings,
+                    FailureClass::PartialOperation,
+                    action_context.as_ref(),
                 )?;
                 if !guard.has_partial_operation && !body.has_partial_operation {
                     continue;
@@ -1041,24 +1305,40 @@ async fn step_obligation_cti<S: SmtSolver>(
 
         // Two-state obligations: transition-property definedness, and
         // reached-ensures definedness and truth (#1217).
-        let current = def_states[0].clone();
-        let transition = transition_constraint(
+        let transition = transition_constraint_in(
             solver,
             model,
             instances,
             &current,
             &mut def_states[1],
             &choice,
+            action_context.as_ref(),
         )?;
+        let mut def_old_context = None;
         let mut transition_statuses = Vec::new();
         for property in &model.transitions {
-            let status = property_evaluation_status(
+            if !fsl_core::expression_has_partial_operation_candidate(&property.expr) {
+                continue;
+            }
+            let needs_old_context =
+                !integer_range_state_references(&property.expr, model, []).is_empty();
+            if needs_old_context && def_old_context.is_none() {
+                def_old_context =
+                    Some(checked_read_carriers(solver, model, &def_states[0], None).await?);
+            }
+            // Only terms: the next frame is certified below before a query reads them.
+            let frame = def_old_context
+                .as_ref()
+                .filter(|_| needs_old_context)
+                .map(|old| premised_state_carriers(model, &def_states[1]).with_old(old.clone()));
+            let status = property_evaluation_status_in(
                 solver,
                 model,
                 &property.expr,
                 &def_states[1],
                 &Bindings::new(),
                 Some(&def_states[0]),
+                frame.as_ref(),
             )?;
             if status.has_partial_operation {
                 transition_statuses.push((property.name.clone(), status.first_partial));
@@ -1070,18 +1350,57 @@ async fn step_obligation_cti<S: SmtSolver>(
         solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
         solver.assert(&solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?)?;
         solver.assert(&transition)?;
+        let needs_next_context = model
+            .invariants
+            .iter()
+            .chain(&model.transitions)
+            .any(|property| !integer_range_state_references(&property.expr, model, []).is_empty());
+        let mut def_next_context = None;
         for property in &properties {
-            let assumption = property_condition(solver, model, *property, &def_states[1], None)?;
+            if needs_next_context
+                && def_next_context.is_none()
+                && matches!(property, Property::Invariant(_))
+            {
+                def_next_context =
+                    Some(checked_read_carriers(solver, model, &def_states[1], None).await?);
+            }
+            let assumption = property_condition_in(
+                solver,
+                model,
+                *property,
+                &def_states[1],
+                None,
+                def_next_context.as_ref(),
+            )?;
             solver.assert(&assumption)?;
         }
+        if needs_next_context && def_next_context.is_none() {
+            def_next_context =
+                Some(checked_read_carriers(solver, model, &def_states[1], None).await?);
+        }
+        let def_transition_context =
+            if model.transitions.iter().any(|property| {
+                !integer_range_state_references(&property.expr, model, []).is_empty()
+            }) {
+                let old = match def_old_context.take() {
+                    Some(old) => old,
+                    None => checked_read_carriers(solver, model, &def_states[0], None).await?,
+                };
+                def_next_context
+                    .as_ref()
+                    .map(|current| (*current).clone().with_old(old))
+            } else {
+                None
+            };
         for transition in &model.transitions {
-            let value = eval(
+            let value = eval_in(
                 solver,
                 model,
                 &transition.expr,
                 &def_states[1],
                 &mut Bindings::new(),
                 Some(&def_states[0]),
+                def_transition_context.as_ref(),
             )?;
             solver.assert(bool_term(&value)?)?;
         }
@@ -1113,15 +1432,24 @@ async fn step_obligation_cti<S: SmtSolver>(
             if action.ensures.is_empty() {
                 continue;
             }
-            let guard =
-                action_guard_definedness(solver, model, action, &def_states[0], &instance.params)?;
-            let mut bindings = guard.bindings;
-            let body = action_statements_evaluation_status(
+            let guard = classified_action_guard_definedness_in(
                 solver,
                 model,
                 action,
-                &def_states[0],
+                &current,
+                &instance.params,
+                FailureClass::PartialOperation,
+                action_context.as_ref(),
+            )?;
+            let mut bindings = guard.bindings;
+            let body = classified_action_statements_evaluation_status_in(
+                solver,
+                model,
+                action,
+                &current,
                 &bindings,
+                FailureClass::PartialOperation,
+                action_context.as_ref(),
             )?;
             let selected = solver.equal(&choice, &solver.int_value(i64_index(instance_index)?))?;
             let mut reached = solver.and(&[selected, guard.enabled, body.fully_defined])?;
@@ -1479,8 +1807,22 @@ fn reject_zero_slot_measure_reads<'a, S: SmtSolver>(
     old_state: Option<&'a SymbolicState<S::Term>>,
     path: S::Term,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), VerifyError>> + 'a>> {
+    reject_zero_slot_measure_reads_in(solver, model, expr, state, bindings, old_state, path, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn reject_zero_slot_measure_reads_in<'a, S: SmtSolver>(
+    solver: &'a mut S,
+    model: &'a KernelModel,
+    expr: &'a KernelExpr,
+    state: &'a SymbolicState<S::Term>,
+    bindings: &'a Bindings<S::Term>,
+    old_state: Option<&'a SymbolicState<S::Term>>,
+    path: S::Term,
+    ctx: Option<&'a CheckedStateCarriers<'_, S::Term>>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), VerifyError>> + 'a>> {
     let mut future = Box::pin(zero_slot_measure_reads_inner(
-        solver, model, expr, state, bindings, old_state, path,
+        solver, model, expr, state, bindings, old_state, path, ctx,
     ));
     Box::pin(std::future::poll_fn(move |cx| {
         recursion::guard(|| future.as_mut().poll(cx))
@@ -1496,13 +1838,14 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
     path: S::Term,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<(), VerifyError> {
     let mut local = bindings.clone();
     let mut children: Vec<&KernelExpr> = Vec::new();
     match expr {
         KernelExpr::Index(receiver, index) => {
             for operand in [receiver.as_ref(), index.as_ref()] {
-                reject_zero_slot_measure_reads(
+                reject_zero_slot_measure_reads_in(
                     solver,
                     model,
                     operand,
@@ -1510,10 +1853,11 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                     &local,
                     old_state,
                     path.clone(),
+                    ctx,
                 )
                 .await?;
             }
-            if matches!(eval(solver, model, receiver, state, &mut local, old_state)?, SymbolicValue::Seq { slots, .. } if slots.is_empty())
+            if matches!(eval_in(solver, model, receiver, state, &mut local, old_state, ctx)?, SymbolicValue::Seq { slots, .. } if slots.is_empty())
                 && rank_measure_path_is_reachable(solver, &path).await?
             {
                 return Err(VerifyError::new(
@@ -1526,7 +1870,7 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
             name,
             args,
         } => {
-            reject_zero_slot_measure_reads(
+            reject_zero_slot_measure_reads_in(
                 solver,
                 model,
                 receiver,
@@ -1534,10 +1878,11 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                 &local,
                 old_state,
                 path.clone(),
+                ctx,
             )
             .await?;
             for argument in args {
-                reject_zero_slot_measure_reads(
+                reject_zero_slot_measure_reads_in(
                     solver,
                     model,
                     argument,
@@ -1545,11 +1890,12 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                     &local,
                     old_state,
                     path.clone(),
+                    ctx,
                 )
                 .await?;
             }
             if matches!(name.as_str(), "head" | "at")
-                && matches!(eval(solver, model, receiver, state, &mut local, old_state)?, SymbolicValue::Seq { slots, .. } if slots.is_empty())
+                && matches!(eval_in(solver, model, receiver, state, &mut local, old_state, ctx)?, SymbolicValue::Seq { slots, .. } if slots.is_empty())
                 && rank_measure_path_is_reachable(solver, &path).await?
             {
                 return Err(VerifyError::new(if name == "head" {
@@ -1565,7 +1911,7 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
             else_expr,
             ..
         } => {
-            reject_zero_slot_measure_reads(
+            reject_zero_slot_measure_reads_in(
                 solver,
                 model,
                 condition,
@@ -1573,22 +1919,23 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                 &local,
                 old_state,
                 path.clone(),
+                ctx,
             )
             .await?;
-            let condition = eval(solver, model, condition, state, &mut local, old_state)?;
+            let condition = eval_in(solver, model, condition, state, &mut local, old_state, ctx)?;
             let then_path = solver.and(&[path.clone(), bool_term(&condition)?.clone()])?;
             let else_path = solver.and(&[path.clone(), solver.not(bool_term(&condition)?)?])?;
-            reject_zero_slot_measure_reads(
-                solver, model, then_expr, state, &local, old_state, then_path,
+            reject_zero_slot_measure_reads_in(
+                solver, model, then_expr, state, &local, old_state, then_path, ctx,
             )
             .await?;
-            reject_zero_slot_measure_reads(
-                solver, model, else_expr, state, &local, old_state, else_path,
+            reject_zero_slot_measure_reads_in(
+                solver, model, else_expr, state, &local, old_state, else_path, ctx,
             )
             .await?;
         }
         KernelExpr::Binary { op, left, right } => {
-            reject_zero_slot_measure_reads(
+            reject_zero_slot_measure_reads_in(
                 solver,
                 model,
                 left,
@@ -1596,10 +1943,12 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                 &local,
                 old_state,
                 path.clone(),
+                ctx,
             )
             .await?;
             let right_path = if matches!(op.as_str(), "and" | "or" | "=>") {
-                let left = eval_with_bindings(solver, model, left, state, &mut local, old_state)?;
+                let left =
+                    eval_with_bindings_in(solver, model, left, state, &mut local, old_state, ctx)?;
                 let reached = if op == "or" {
                     solver.not(bool_term(&left)?)?
                 } else {
@@ -1610,14 +1959,14 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                 path.clone()
             };
             confine_binary_rhs(op, bindings, &mut local);
-            reject_zero_slot_measure_reads(
-                solver, model, right, state, &local, old_state, right_path,
+            reject_zero_slot_measure_reads_in(
+                solver, model, right, state, &local, old_state, right_path, ctx,
             )
             .await?;
         }
         KernelExpr::Quantified { binder, .. } | KernelExpr::Aggregate { binder, .. } => {
             for source in binder_source_expressions(binder) {
-                reject_zero_slot_measure_reads(
+                reject_zero_slot_measure_reads_in(
                     solver,
                     model,
                     source,
@@ -1625,21 +1974,25 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                     &local,
                     old_state,
                     path.clone(),
+                    ctx,
                 )
                 .await?;
             }
             let mut active = path.clone();
             for (name, value, membership) in
-                binder_values(solver, model, binder, state, &local, old_state)?
+                binder_values_in(solver, model, binder, state, &local, old_state, ctx)?
             {
                 let mut candidate = local.clone();
-                candidate.insert(name, value);
+                let record = binder_candidate_binding(
+                    solver, model, binder, value, state, old_state, &local, ctx,
+                );
+                candidate.insert(name, record);
                 let reached = solver.and(&[
                     active.clone(),
                     membership.unwrap_or_else(|| solver.bool_value(true)),
                 ])?;
                 if let Some(filter) = binder_where_expression(binder) {
-                    reject_zero_slot_measure_reads(
+                    reject_zero_slot_measure_reads_in(
                         solver,
                         model,
                         filter,
@@ -1647,11 +2000,13 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                         &candidate,
                         old_state,
                         reached.clone(),
+                        ctx,
                     )
                     .await?;
                 }
-                let filter = binder_where(solver, model, binder, state, &mut candidate, old_state)?
-                    .unwrap_or_else(|| solver.bool_value(true));
+                let filter =
+                    binder_where_in(solver, model, binder, state, &mut candidate, old_state, ctx)?
+                        .unwrap_or_else(|| solver.bool_value(true));
                 let body_path = solver.and(&[reached, filter])?;
                 let (KernelExpr::Quantified { body, .. }
                 | KernelExpr::Aggregate {
@@ -1660,7 +2015,7 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                 else {
                     continue;
                 };
-                reject_zero_slot_measure_reads(
+                reject_zero_slot_measure_reads_in(
                     solver,
                     model,
                     body,
@@ -1668,10 +2023,12 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                     &candidate,
                     old_state,
                     body_path.clone(),
+                    ctx,
                 )
                 .await?;
                 if let KernelExpr::Quantified { quantifier, .. } = expr {
-                    let value = eval(solver, model, body, state, &mut candidate, old_state)?;
+                    let value =
+                        eval_in(solver, model, body, state, &mut candidate, old_state, ctx)?;
                     let stops = if quantifier == "forall" {
                         solver.not(bool_term(&value)?)?
                     } else {
@@ -1683,7 +2040,7 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
             }
         }
         KernelExpr::UnaryNamed { name, expr, .. } if name == "old" => {
-            reject_zero_slot_measure_reads(
+            reject_zero_slot_measure_reads_in(
                 solver,
                 model,
                 expr,
@@ -1691,6 +2048,7 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                 &local,
                 None,
                 path.clone(),
+                None,
             )
             .await?;
         }
@@ -1721,7 +2079,7 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
         | KernelExpr::EnumMember { .. } => {}
     }
     for child in children {
-        reject_zero_slot_measure_reads(
+        reject_zero_slot_measure_reads_in(
             solver,
             model,
             child,
@@ -1729,6 +2087,7 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
             &local,
             old_state,
             path.clone(),
+            ctx,
         )
         .await?;
     }
@@ -1747,8 +2106,20 @@ async fn reject_partial_rank_measure<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     pending: &S::Term,
 ) -> Result<(), VerifyError> {
+    reject_partial_rank_measure_in(solver, model, property, state, bindings, pending, None).await
+}
+
+async fn reject_partial_rank_measure_in<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    property: &LeadsToDef,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    pending: &S::Term,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<(), VerifyError> {
     let expr = property.decreases.as_ref().expect("ranked property");
-    let status = property_evaluation_status(solver, model, expr, state, bindings, None)?;
+    let status = property_evaluation_status_in(solver, model, expr, state, bindings, None, ctx)?;
     if !status.has_partial_operation {
         return Ok(());
     }
@@ -1759,7 +2130,7 @@ async fn reject_partial_rank_measure<S: SmtSolver>(
     // Attribute the refusal using the same first-failure/short-circuit walk,
     // not a syntactic candidate that may be guarded or follow another failure.
     for operation in fsl_core::PartialOperation::ALL {
-        let status = classified_property_evaluation_status(
+        let status = classified_property_evaluation_status_in(
             solver,
             model,
             expr,
@@ -1767,6 +2138,7 @@ async fn reject_partial_rank_measure<S: SmtSolver>(
             bindings,
             None,
             FailureClass::PartialOperationKind(operation),
+            ctx,
         )?;
         if !status.has_partial_operation {
             continue;
@@ -1799,6 +2171,16 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
     solver: &mut S,
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<RankedLeadstoResult, VerifyError> {
+    if !model
+        .leadstos
+        .iter()
+        .any(|property| property.decreases.is_some())
+    {
+        return Ok(RankedLeadstoResult {
+            proofs: Vec::new(),
+            failure: None,
+        });
+    }
     let instances = action_instances(solver, model)?;
     let state0 = symbolic_state_with_suffix(solver, model, "rank0")?;
     let mut state1 = symbolic_state_with_suffix(solver, model, "rank1")?;
@@ -1807,31 +2189,81 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
     // always has its selected action enabled, which would hide exactly the
     // pending states in which nothing is enabled (#1189).
     let deadlock_state = symbolic_state_with_suffix(solver, model, "rank_deadlock")?;
+    let needs_property_context = model
+        .invariants
+        .iter()
+        .any(|property| !integer_range_state_references(&property.expr, model, []).is_empty())
+        || model
+            .leadstos
+            .iter()
+            .filter(|property| property.decreases.is_some())
+            .any(|property| {
+                [&property.before, &property.after]
+                    .into_iter()
+                    .chain(property.decreases.iter())
+                    .any(|expr| leadsto_expression_needs_context(model, property, expr))
+            });
+    let mut property_read_context = None;
+    let mut property_deadlock_context = None;
     for property in properties(model) {
         if let (Property::Bound(_), Some(selected)) = (property, checked_bounds)
             && !selected.contains(&property.name(model))
         {
             continue;
         }
-        solver.assert(&property_condition(solver, model, property, &state0, None)?)?;
-        solver.assert(&property_condition(
+        if needs_property_context
+            && property_read_context.is_none()
+            && matches!(property, Property::Invariant(_))
+        {
+            property_read_context =
+                Some(checked_read_carriers(solver, model, &state0, checked_bounds).await?);
+            property_deadlock_context =
+                Some(checked_read_carriers(solver, model, &deadlock_state, checked_bounds).await?);
+        }
+        solver.assert(&property_condition_in(
+            solver,
+            model,
+            property,
+            &state0,
+            None,
+            property_read_context.as_ref(),
+        )?)?;
+        solver.assert(&property_condition_in(
             solver,
             model,
             property,
             &deadlock_state,
             None,
+            property_deadlock_context.as_ref(),
         )?)?;
     }
+    if needs_property_context && property_read_context.is_none() {
+        property_read_context =
+            Some(checked_read_carriers(solver, model, &state0, checked_bounds).await?);
+        property_deadlock_context =
+            Some(checked_read_carriers(solver, model, &deadlock_state, checked_bounds).await?);
+    }
+    let read_context = if property_read_context.is_some() {
+        property_read_context
+    } else {
+        checked_action_carriers(solver, model, &state0, checked_bounds).await?
+    };
+    let deadlock_context = if property_deadlock_context.is_some() {
+        property_deadlock_context
+    } else {
+        checked_action_carriers(solver, model, &deadlock_state, checked_bounds).await?
+    };
     let choice = solver.constant("__rank_choice", &fsl_solver::Sort::Int)?;
     solver.assert(&solver.ge(&choice, &solver.int_value(0))?)?;
     solver.assert(&solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?)?;
-    solver.assert(&transition_constraint(
+    solver.assert(&transition_constraint_in(
         solver,
         model,
         &instances,
         &state0,
         &mut state1,
         &choice,
+        read_context.as_ref(),
     )?)?;
 
     let mut proofs = Vec::new();
@@ -1841,12 +2273,25 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
         };
         solver.set_query_context("leadsTo_rank", &property.name);
         for binding in leadsto_bindings(solver, model, property)? {
-            let p0 =
-                leadsto_condition(solver, model, &property.before, &state0, &binding.symbolic)?;
-            let q0 = leadsto_condition(solver, model, &property.after, &state0, &binding.symbolic)?;
+            let p0 = leadsto_condition_in(
+                solver,
+                model,
+                &property.before,
+                &state0,
+                &binding.symbolic,
+                read_context.as_ref(),
+            )?;
+            let q0 = leadsto_condition_in(
+                solver,
+                model,
+                &property.after,
+                &state0,
+                &binding.symbolic,
+                read_context.as_ref(),
+            )?;
             let pending = solver.and(&[p0, solver.not(&q0)?])?;
             let mut measure_bindings = binding.symbolic.clone();
-            reject_zero_slot_measure_reads(
+            reject_zero_slot_measure_reads_in(
                 solver,
                 model,
                 measure_expr,
@@ -1854,24 +2299,27 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 &measure_bindings,
                 None,
                 solver.bool_value(true),
+                read_context.as_ref(),
             )
             .await?;
-            reject_partial_rank_measure(
+            reject_partial_rank_measure_in(
                 solver,
                 model,
                 property,
                 &state0,
                 &measure_bindings,
                 &pending,
+                read_context.as_ref(),
             )
             .await?;
-            let measure0 = eval(
+            let measure0 = eval_in(
                 solver,
                 model,
                 measure_expr,
                 &state0,
                 &mut measure_bindings,
                 None,
+                read_context.as_ref(),
             )?;
             let measure0 = int_term(&measure0)?.clone();
 
@@ -2013,20 +2461,24 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
             if helpful_idx.len() >= 2 {
                 for &sticky_index in &helpful_idx {
                     let action = &model.actions[instances[sticky_index].action_index];
-                    let (guards0, _) = crate::transition::action_guards(
+                    let (guards0, _) = crate::transition::action_guards_in(
                         solver,
                         model,
                         action,
                         &state0,
                         &instances[sticky_index].params,
+                        read_context.as_ref(),
                     )?;
                     let enabled0 = solver.and(&guards0)?;
-                    let (guards1, _) = crate::transition::action_guards(
+                    let next_context =
+                        checked_action_carriers(solver, model, &state1, checked_bounds).await?;
+                    let (guards1, _) = crate::transition::action_guards_in(
                         solver,
                         model,
                         action,
                         &state1,
                         &instances[sticky_index].params,
+                        next_context.as_ref(),
                     )?;
                     let enabled1 = solver.and(&guards1)?;
                     let not_selected = solver.not(
@@ -2110,19 +2562,21 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
             // enabled -- nothing is then obligated to fire, so the ranking
             // argument never runs. Mirrors the frozen Python reference's
             // `_prove_leadsto_rank_no_deadlock`.
-            let p_dl = leadsto_condition(
+            let p_dl = leadsto_condition_in(
                 solver,
                 model,
                 &property.before,
                 &deadlock_state,
                 &binding.symbolic,
+                deadlock_context.as_ref(),
             )?;
-            let q_dl = leadsto_condition(
+            let q_dl = leadsto_condition_in(
                 solver,
                 model,
                 &property.after,
                 &deadlock_state,
                 &binding.symbolic,
+                deadlock_context.as_ref(),
             )?;
             let enabled_candidates = if property.helpful.is_empty() {
                 (0..instances.len()).collect::<Vec<_>>()
@@ -2132,12 +2586,13 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
             let mut enabled_terms = Vec::with_capacity(enabled_candidates.len());
             for &deadlock_index in &enabled_candidates {
                 let action = &model.actions[instances[deadlock_index].action_index];
-                let (guards, _) = crate::transition::action_guards(
+                let (guards, _) = crate::transition::action_guards_in(
                     solver,
                     model,
                     action,
                     &deadlock_state,
                     &instances[deadlock_index].params,
+                    deadlock_context.as_ref(),
                 )?;
                 enabled_terms.push(solver.and(&guards)?);
             }
@@ -2147,7 +2602,7 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 solver.or(&enabled_terms)?
             };
             let mut deadlock_bindings = binding.symbolic.clone();
-            reject_zero_slot_measure_reads(
+            reject_zero_slot_measure_reads_in(
                 solver,
                 model,
                 measure_expr,
@@ -2155,25 +2610,28 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                 &deadlock_bindings,
                 None,
                 solver.bool_value(true),
+                deadlock_context.as_ref(),
             )
             .await?;
             let pending_dl = solver.and(&[p_dl.clone(), solver.not(&q_dl)?])?;
-            reject_partial_rank_measure(
+            reject_partial_rank_measure_in(
                 solver,
                 model,
                 property,
                 &deadlock_state,
                 &deadlock_bindings,
                 &pending_dl,
+                deadlock_context.as_ref(),
             )
             .await?;
-            let measure_dl = eval(
+            let measure_dl = eval_in(
                 solver,
                 model,
                 measure_expr,
                 &deadlock_state,
                 &mut deadlock_bindings,
                 None,
+                deadlock_context.as_ref(),
             )?;
             let measure_dl = int_term(&measure_dl)?.clone();
             solver.push();

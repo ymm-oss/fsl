@@ -33,6 +33,7 @@ pub use fsl_syntax::{
     Statement as KernelStatement, SymbolPath,
 };
 
+pub mod binder_range;
 mod compose;
 mod db;
 mod decision_table;
@@ -93,12 +94,15 @@ pub use finite_domain::{DOMAIN_BOUND, SolverObligation, solver_obligations};
 pub use model::{
     ActionDef, ActionGuard, DiagnosticEdit, KernelModel, LeadsToDef, ModelError, ParamDef,
     PropertyDef, TypeDef, TypeRef, Value as FslValue, WRITE_DISTINCTNESS_UNPROVED_CODE,
-    build_model, check_init_collection_binder, state_references, static_leadsto_bindings,
+    build_model, check_init_collection_binder, check_init_statement_domains, check_range_admission,
+    integer_range_state_references, locate_unfolded_aggregate, state_references,
+    static_leadsto_bindings,
 };
 pub use naming::{
     AmbiguousName, ComposeName, Glossary, NameMap, PublicName, SyntheticName,
     unmapped_public_spelling,
 };
+pub use obligation::action_has_integer_range_binder;
 pub use origin::{
     INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
     TERMINAL_TARGET, TraceabilityRegistry, URGENT_ACTIONS_STEP, action_guard_target,
@@ -1055,6 +1059,7 @@ fn expand_spec_domains(mut spec: SurfaceSpec) -> Result<SurfaceSpec, CoreError> 
             lo: Box::new(Expr::Num(0)),
             hi: Box::new(Expr::Num(count - 1)),
             symmetric: false,
+            span: None,
         });
     }
     for (name, span) in &numbers {
@@ -1069,6 +1074,7 @@ fn expand_spec_domains(mut spec: SurfaceSpec) -> Result<SurfaceSpec, CoreError> 
             lo: Box::new(lo),
             hi: Box::new(hi),
             symmetric: false,
+            span: None,
         });
     }
     // Whatever is left names no declaration. Report the first such bound in
@@ -1296,11 +1302,13 @@ impl PredicateExpander {
                 lo,
                 hi,
                 symmetric,
+                span,
             } => SpecItem::Type {
                 name,
                 lo: Box::new(self.expand_expr(*lo, &mut Vec::new())?),
                 hi: Box::new(self.expand_expr(*hi, &mut Vec::new())?),
                 symmetric,
+                span,
             },
             SpecItem::Struct { name, fields, span } => SpecItem::Struct {
                 name,

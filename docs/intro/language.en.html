@@ -519,6 +519,15 @@ integer/Boolean literals, and integer <code>+</code>, <code>-</code>, <code>*</c
 <code>check</code> and BMC accept well-typed arguments that read state; induction refuses them.
 <code>within K</code> is a bounded deadline on a response; <code>K</code> must be a non-negative
 constant expression. It is checked by BMC, not by the ranked induction proof.
+<strong>Breaking admission removal (#1480):</strong> negative constant deadlines now fail
+<code>check</code> and every verification route at the owning <code>leadsTo</code> declaration,
+before engine dispatch; an earlier <code>check</code> could accept them. The measured
+removals are shared <code>X1/negative-within</code> (<code>-1</code>, 8:3) and the native deadline
+fixtures <code>-1</code>, <code>K</code> with <code>const K = -1</code>, and <code>(0 - 1)</code> (each 5:3).
+Zero and positive literal/named/arithmetic constants remain accepted. That change
+moved no check disposition among the 610 corpus files of its own comparison; the later
+range admission below moves two fixtures. The comparison and all four removed inline
+forms are recorded in <code>DESIGN-spec-domains.md</code>.
 <code>decreases</code> is optional and must be an integer-valued expression. Under
 <code>fslc verify --engine induction</code>, the verifier proves the ranked response by
 checking, under the proved invariants, that whenever <code>P</code> is pending and <code>Q</code> is
@@ -746,6 +755,9 @@ some(x)</code> pattern binding. A declaration with one of those names would be
 unreadable from every expression, and the misreading is silent: before this was
 checked, <code>state { true: Bool }</code> with <code>invariant AlwaysHolds { true }</code> returned
 <code>proved</code> while <code>init { true = false }</code> assigned a variable nothing could read.
+<code>Bool</code> is reserved as a type name, in a composed component as well: <code>enum Bool</code>, <code>type Bool</code> and <code>struct Bool</code> are
+refused at the declaration (<strong>breaking removal, #1480</strong>), because a typed binder and
+an expression would read that name differently.
 No other word is reserved. <code>count</code>, <code>sum</code>, <code>stage</code>, <code>in</code>, <code>is</code>, <code>where</code>, <code>old</code>,
 <code>abs</code>, <code>and</code>, and <code>or</code> are contextual and remain valid names; <code>some</code>, <code>Set</code>,
 <code>Seq</code>, <code>unique</code>, <code>exactlyOne</code>, <code>forall</code>, and <code>exists</code> are only recognized before
@@ -924,7 +936,69 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
 <li>Quantification (bounded): the canonical forms are <code>forall binder { expr }</code>
   and <code>exists binder { expr }</code>. The 2.x legacy colon/no-braces spelling such as
   <code>forall i in lo..hi: expr</code> remains accepted but is non-canonical. A Seq binder
-  visits its live prefix in position order and preserves duplicate values.</li>
+  visits its live prefix in position order and preserves duplicate values.
+  Builtin <code>Bool</code> binders enumerate <code>false</code>, then <code>true</code>, including ordinary
+  quantifiers, init/action statement <code>forall</code>, and unfiltered static <code>leadsTo</code>
+  wrappers. Bool enumeration alone does not extend struct or dynamic-range
+  policy. Liveness success metadata remains one entry per property, not binding.
+  <strong>Breaking check-admission removal (#1480):</strong> expression, action and <code>leadsTo</code>
+  wrapper typed binders over a named Struct, such as <code>forall cell: Cell { ... }</code>,
+  fail shared validation with the
+  existing finite-scalar diagnostic at the owning source location. Finite Struct
+  fields do not create a scalar domain. Bool, named Enum/Range binders, ordinary
+  Struct values and collection binders over Struct elements are unaffected.
+  Init-statement Typed-Struct domains were already refused; their existing
+  unlocated finite-scalar error is preserved, without a new prefix or location.
+  The #1480 sweep below measured 8 <code>ok</code>→<code>error</code> forms for these binders, base
+  <code>e3c19a39c9c3bf5c315c6002fd18114aa22cd654</code>, head
+  <code>f101e7a93cbb50ad85e3531a1d27314559735311</code>; see
+  <a href="../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480">domain policy</a> and
+  <a href="../design/DESIGN-check-executable-forms.md#corpus-transitions">corpus transitions</a>.</li>
+<li>Static range bounds (#1480) use the checked constant grammar when
+  folding succeeds: literals/constants, negation, <code>+ - * / %</code>, integer
+  <code>min</code>/<code>max</code>/<code>abs</code>, and <code>if ... then ... else ...</code>, including Boolean
+  literals/constants, <code>not</code>, <code>and</code>/<code>or</code>/<code>=&gt;</code>, comparisons and same-type equality
+  in conditions. The final value must be integer, never a coerced Bool.
+  This applies to aggregate normalization, symbolic range expansion and
+  unfiltered static <code>leadsTo</code> wrappers; the concrete arithmetic paths are unchanged.
+  Signed i64 arithmetic is checked and <code>/</code>/<code>%</code> are Euclidean (<code>-5/2 == -3</code>,
+  <code>-5%2 == 1</code>). Both conditional arms are name/type-checked, but arithmetic is
+  evaluated only in the selected arm; binary Boolean operands remain eager.
+  Failed folds retain the previous consumer's refusal/diagnostic path, including
+  nested failures. The temporal-only amendment is described below.
+  The additive Rust method <code>KernelModel::constant_integer</code>
+  consults current <code>consts</code> without caching and treats free reads of current
+  model state as nonconstant, including names shared by a state and a const.
+  This does not add a global const/state collision rejection. See the
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-static-binder-constant-expressions.md">design decision</a>.
+  A plain <code>0..n</code> over a state that shares its name with a const reads the state, so
+  it reports the real violation on every engine. A <code>leadsTo</code> wrapper bound reading such a
+  name is refused at <code>check</code> with <code>binder bound is not a static integer</code>. The base read
+  the const there and could return a verdict, so this is a breaking removal (#1480).</li>
+<li>Fixed outer <code>leadsTo</code> ranges (#1480 temporal amendment): an unfiltered inner
+  range may use already bound wrapper locals with the checked grammar above.
+  <code>i in 0..1</code> then <code>j in 0..i</code> expands in order to <code>(0,0), (1,0), (1,1)</code>;
+  <code>b: Bool</code> then <code>j in 0..(if b then 1 else 0)</code> gives
+  <code>(false,0), (true,0), (true,1)</code>. Bounds remain integers; Bool is not coerced.
+  Named finite integers and enums retain their declared types. Existing domain
+  order, duplicates and shadowed bindings are preserved across properties.
+  A binder's own bounds see the enclosing binding; its body sees the new one.
+  Enclosing locals take priority; free state cannot use a same-spelled const or
+  a state initializer as a bound. Checked-source const-shadow refusals are unchanged.
+  Dependent bounds run in written binder order, lower before upper, on reachable
+  prefixes. Their first arithmetic failure precedes later static/type failures;
+  unreachable dependent arithmetic is skipped. Empty prefixes still do not mask
+  independent invalid-static, carrier, filter, collection or type errors.
+  All authored endpoint conditions and both arms remain name/type-checked with
+  prior declared wrapper types even after an empty prefix; this does not evaluate
+  arithmetic.
+  Legacy consumer-specific diagnostics retain their existing priority; checked
+  source and raw-Kernel validation keep their separate scopes.
+  <code>within</code> remains a nonnegative declaration constant and cannot use wrapper
+  locals. Collection/filtered wrappers, structs, P/Q quantifiers, init/action/
+  aggregate domains and explicit liveness gain no support from this amendment.
+  No syntax or public Kernel/JSON schema changes. See the
+  <a href="../design/DESIGN-static-binder-constant-expressions.md#fixed-outer-temporal-amendment-1480">temporal amendment</a></li>
 <li>Aggregation: <code>count(binder)</code> and <code>sum(binder of value)</code>. Examples include
   <code>count(x: T where p)</code>, <code>count(x in queue where p)</code>,
   <code>sum(x in queue of x.amount where p)</code>, and range equivalents. Empty domains
@@ -934,10 +1008,110 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   relation projections and collection <code>let</code> aliases, using existing scalar
   captures rather than enumerating only the declared carrier. Later shadowing
   or state updates do not change a let's captured candidates. <code>min</code>/<code>max</code> around
-  a sum remain binary arithmetic; no new aggregate JSON shape is introduced.</li>
-<li>Cardinality predicates: <code>unique(binder)</code> / <code>exactlyOne(binder)</code>. <code>unique</code>
-  means at most one matching binding, while <code>exactlyOne</code> means exactly one.</li>
-<li>Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>.
+  a sum remain binary arithmetic; no new aggregate JSON shape is introduced.
+  Authored aggregate admission (#1480) is distinct from execution and strict
+  public Kernel/static projection. After bound-name/type, Boolean filter and
+  integer sum-value checks, validation either checks an unconditional expansion
+  (<code>Expanded</code>) or retains the original aggregate without expansion (<code>Deferred</code>).
+  A state carrier or lexical type is not an execution premise: deferral neither
+  clips a range nor substitutes a guarded zero, and does not itself reject source;
+  the range admission rule below decides whether the deferred bound can execute.
+  Both endpoints retain lower/upper checking order. A genuinely closed failed
+  endpoint such as <code>0..(1/0)</code> still fails with
+  <code>public Kernel requires static aggregate range bounds</code>; authored scope/type
+  errors retain their priority even in empty domains or inactive filters.
+  Bounds see the enclosing scope; filter and sum value see the binder's scope.
+  A bounds-only pass through deferred filter/value descendants still rejects
+  nested invalid closed endpoints and does not skip later failing siblings.
+  Ordinary unreached sum-value arithmetic is not folded as a bound:
+  <code>sum(i in 1..0 of (1/0)) == 0</code> remains accepted, while
+  <code>sum(i in 1..0 of true)</code> remains ill-typed. Stored authored AST is preserved;
+  no public Deferred node or JSON shape is added. Symbolic callers still require
+  same-frame eligibility or explicit refusal; direct concrete evaluation uses
+  actual endpoints, not declared-carrier clipping. See the
+  <a href="../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480">authored admission contract</a>.</li>
+<li><strong>Breaking check-admission removal: range bounds the engines cannot execute (#1480).</strong>
+  <code>check</code>, every <code>verify</code> engine, LSP diagnostics, Worker preflight and every command
+  that reads a checked model refuse them with one rule before any solver runs: a
+  located <code>semantics</code> error, exit 2. <code>conformance</code>, <code>analyze</code>, <code>explain</code>, <code>diff</code>,
+  <code>refine</code>, <code>testgen</code>, <code>mutate</code>, <code>sweep</code>, <code>scenarios</code>, <code>html</code> and <code>ledger</code> are among those
+  commands; <code>kernel</code>, <code>typestate</code>, <code>lint</code>, <code>migrate</code>, <code>fmt</code> and <code>document claims</code> are
+  not, and <code>replay</code> keeps loading these forms as a documented exception.
+  A bound is executable when it folds to a constant, or is built from constants,
+  integer names, unary minus and <code>+ - *</code> with an interval that fits <code>i64</code>, and
+  every name it reads is established in its scope:</li>
+<li>An enumerated value is established everywhere: an action parameter, a range or
+    named integer binder, and a binder over a Set or Seq literal whose items are
+    integer literals, constants or such names, including through a <code>let</code> holding
+    that literal.</li>
+<li>A state variable with a finite carrier is established only where the engines
+    certify the read frame: <code>invariant</code>, <code>trans</code>, <code>unless</code>, <code>requires</code>, <code>let</code>
+    right-hand sides, <code>if</code> conditions and assignments. It is not established in
+    <code>ensures</code>, <code>reachable</code>, <code>terminal</code>, <code>until</code>, leadsTo P/Q, <code>decreases</code> or
+    <code>helpful</code> arguments.</li>
+<li>In <code>init</code>, a completed assignment with a finite value is established for later
+    reads. An init statement <code>forall</code> source reads no completed assignment.</li>
+<li>A binder over a state Set of a finite integer element type is established where
+    state is, and so is a binder over <code>old(xs)</code> in <code>trans</code> and <code>ensures</code>. Elsewhere
+    it is established while every write to that Set keeps its keys literal: a Set
+    literal of established items, <code>.add</code> of one, <code>.remove</code> of anything, a copy, or an
+    <code>if</code> over those. <code>st.add(n)</code> and <code>Set { n }</code> reading state are not. A copy in <code>init</code>
+    carries what <code>init</code> assigned; a copy in an action reads a frame whose keys are
+    literal, so <code>ys = xs</code> beside <code>xs = xs.add(n)</code> keeps <code>ys</code> literal. <code>ensures</code> reads
+    only the state an action left, so it does not count <code>init</code>'s writes. <code>.add</code> and
+    <code>.remove</code> of a binder source follow the same test. A zero-capacity Seq has no
+    candidates.</li>
+<li>Under an <code>old(...)</code> with no frame left, nothing is established. That is a second
+    <code>old</code>, or one outside <code>trans</code> and <code>ensures</code>. <code>P unless Q</code> wraps <code>P</code> in <code>old</code>, so an
+    <code>old</code> inside <code>P</code> is a second one: <code>(forall x in old(xs) { count(y in 0..x) &gt;= 0 })
+    unless b</code> is refused.</li>
+<li>Never established: a <code>let</code> name (even <code>let k = 2</code>), a pattern binding, Int-typed
+    state, a non-literal item of a Set or Seq literal, or an element of any other Seq.</li>
+</ul>
+<p>Indexing, field access, <code>size()</code>, <code>if</code>, <code>min</code>, <code>/</code>, <code>%</code>, <code>old(...)</code> and aggregates
+  in a dependent bound are refused. A typed binder over the builtin <code>Int</code> is refused with
+  <code>type 'Int' is not a finite scalar</code>, in a <code>leadsTo</code> wrapper as well, which is a breaking
+  removal of a form every engine already refused; a spec that declares <code>type Int</code> or
+  <code>enum Int</code> keeps its binder over that declaration. Nothing in the
+  filter or body of a binder with no candidates (<code>forall o in 2..0</code>) is evaluated, so
+  it is not refused. Evaluation is eager: <code>false =&gt; count(i in 0..m[0]) &gt;= 0</code> is
+  refused. Aggregates report the checked-model message
+  (<code>invalid model expression: 'n' is not an integer const at 8:3</code>,
+  <code>invalid model expression: public Kernel requires static aggregate range bounds at 8:3</code>)
+  at their statement; quantifiers and statement <code>forall</code> report the engine message
+  (<code>'n' is not an integer const</code>, <code>binder bound is not a static integer</code>) with the
+  same location. There is no size cap: <code>forall i in 0..(n * 100000)</code> stays admitted
+  and slow. A form that runs out of memory enumerating a range refuses with a
+  <code>[resource]</code> error, exit 2. Running out while building solver terms makes the Z3
+  bindings panic, which refuses with a <code>[solver-panic]</code> error carrying the panic text,
+  exit 2; that error names the panic, not a cause. Forms that used to report a
+  verdict before reaching the refused bound now report the refusal: an earlier violated
+  property, <code>--property</code> or <code>--exclude-property</code> stepping around the property, and
+  <code>--depth 0</code>. Explicit-engine verdicts on these forms are removed as well. Selecting
+  properties does not assume an unselected state bound. On state that really escapes,
+  bmc refuses a read that needs the bound with <code>[eligibility]</code>, and a binder over a state
+  Set whose frame could not be rebuilt with <code>[planner]: missing-finite-fact</code>; with no such
+  read it reports the selected property. Induction reports the escape as <code>violated</code>, and
+  explicit reads concrete values and reports the selected property. Bare <code>build_model</code> and raw Runtime constructors keep
+  their boundaries; see
+  <a href="../design/DESIGN-check-executable-forms.md#1480-checked-range-admission">checked executable forms</a>.
+  Breaking-removal sweep (#1480): <code>fslc check &lt;form&gt;</code> with binaries built by Rust 1.98.0,
+  each in its own <code>git archive</code> tree, base <code>e3c19a39c9c3bf5c315c6002fd18114aa22cd654</code>,
+  head <code>f101e7a93cbb50ad85e3531a1d27314559735311</code>, over 20,179 forms: 646 <code>.fsl</code>
+  files (<code>specs/</code> 23, <code>examples/</code> 195, <code>rust/fslc/tests/fixtures/</code> 428) and 19,533 models
+  captured while running the workspace tests on both sides. <code>ok</code>→<code>error</code>: 649, none under
+  <code>specs/</code> or <code>examples/</code>: 495 <code>'x' is not an integer const</code>, 85 <code>binder bound is not a
+  static integer</code>, 20 bounds that overflow or do not fold, 16 init statement <code>forall</code> bounds
+  reading state, 11 declared <code>Bool</code>, 10 typed binders over the builtin <code>Int</code>, 8 over a
+  Struct, 4 negative <code>within</code>. Corpus files: <code>explicit_init_range_assigned.fsl</code>,
+  <code>explicit_init_range_unassigned.fsl</code>, and seven head-only files under
+  <code>issue_1480_temporal_outer/</code> (<code>const-state-collision</code>, <code>empty-static-overflow</code>,
+  <code>free-state</code>, <code>overflow-high</code>, <code>overflow-low</code>, <code>struct-typed</code>, <code>unbounded-typed</code>).
+  Classes, base verdicts and what was not reached are in
+  <a href="../design/DESIGN-check-executable-forms.md#corpus-transitions">corpus transitions</a>.
+- Cardinality predicates: <code>unique(binder)</code> / <code>exactlyOne(binder)</code>. <code>unique</code>
+  means at most one matching binding, while <code>exactlyOne</code> means exactly one.
+- Option: <code>x == none</code> / <code>x != none</code> / <code>x == some(e)</code> / <code>x != some(e)</code>.
   Equality is structural: <code>none</code> equals only <code>none</code>, while two <code>some</code> values are
   equal exactly when their payloads are equal. <code>x is some(v)</code> remains the form
   that binds <code>v</code>; equality never introduces a binding. The binding is available
@@ -1019,10 +1193,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   it. Requirements field-substitution contexts also reject a pattern name that
   equals an entity field or relation role, before lowering loses that spelling
   (#1561). Event inputs keep their existing field-shadowing exception; ordinary
-  quantifier/aggregate field shadowing is unchanged. Ordering is not defined.</li>
-<li>struct: literal <code>Order { st: Open, qty: 0 }</code>, field reference <code>o.st</code>,
-  <code>==</code> is field-by-field equality</li>
-<li>Set/Seq expression materialization (Refs #1467): already-admitted recursive
+  quantifier/aggregate field shadowing is unchanged. Ordering is not defined.
+- struct: literal <code>Order { st: Open, qty: 0 }</code>, field reference <code>o.st</code>,
+  <code>==</code> is field-by-field equality
+- Set/Seq expression materialization (Refs #1467): already-admitted recursive
   expressions use the checked model's inferred/expected type for construction,
   equality, conditional joins, methods/chains, quantifier/aggregate binders and
   <code>let</code>. Elements include Int, Bool, Enum, Struct, Option (<code>Option&lt;Enum&gt;</code> and nested
@@ -1052,8 +1226,8 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   <code>a52bef4931adc67ea2b1fdca827e2318b4ae25ab</code>,
   <code>e201c0d66834ed8c860be84e96876690487b11af</code> and
   <code>cc7a538c3b647c1c3bed5bf2088551806442c794</code>: both base-&gt;cc7 ok-&gt;error sets were
-  empty. This is not later b8 integration validation or whole-corpus engine agreement.</li>
-<li>Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>, <code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code>
+  empty. This is not later b8 integration validation or whole-corpus engine agreement.
+- Set: <code>Set {}</code> / <code>Set { 1, 2 }</code>, <code>.add(e)</code> <code>.remove(e)</code> <code>.contains(e)</code> <code>.size()</code>
   An accepted <code>add</code> retains a computed member outside the declared carrier:
   <code>contains</code>, <code>size</code>, removal and equality observe it in the temporary value.
   Assigning the result back to that bounded receiver reports <code>type_bound</code> /
@@ -1106,10 +1280,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   with sequential execution. In BMC, re-framing a root whose bound is omitted
   requires proof that no live key escapes the new frame's finite support; the
   re-framing check does not assume that omitted bound. Genuinely growing support
-  continues to be retained.</li>
-<li>Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>, <code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
-  <code>.contains(e)</code> <code>.size()</code>, <code>==</code> is equality of length and all elements</li>
-<li>Relation: <code>r.contains(a, b)</code>, <code>r.add(a, b)</code>, <code>r.remove(a, b)</code>,
+  continues to be retained.
+- Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>, <code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
+  <code>.contains(e)</code> <code>.size()</code>, <code>==</code> is equality of length and all elements
+- Relation: <code>r.contains(a, b)</code>, <code>r.add(a, b)</code>, <code>r.remove(a, b)</code>,
   <code>reachable(r, a, b)</code>, <code>acyclic(r)</code>, <code>functional(r)</code>, <code>injective(r)</code>,
   <code>domain(r)</code>, <code>range(r)</code>. <code>reachable</code> and <code>acyclic</code> require a self-relation
   (<code>relation T -&gt; T</code>); endpoint type/arity errors include repair hints.
@@ -1219,12 +1393,11 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   A relation is not a Map: <code>r[a]</code> and indexed assignment <code>r[a] = b</code> are rejected
   by <code>check</code>, even when <code>functional(r)</code> holds. Use the relation methods instead.
   This is a breaking removal (#1463) of previously accepted reads and writes
-  without executable index semantics; Map indexing is unchanged.</li>
-<li>Inside ensures / trans only: read the pre-transition state with <code>old(expr)</code></li>
-<li>Inside a leadsTo block only: <code>P ~&gt; Q</code> (response property. not part of the operator hierarchy of general expressions);
+  without executable index semantics; Map indexing is unchanged.
+- Inside ensures / trans only: read the pre-transition state with <code>old(expr)</code>
+- Inside a leadsTo block only: <code>P ~&gt; Q</code> (response property. not part of the operator hierarchy of general expressions);
   optional <code>within K</code> before Q for a bounded deadline, and optional
-  <code>decreases &lt;int expr&gt;</code> after the response body for induction ranking</li>
-</ul>
+  <code>decreases &lt;int expr&gt;</code> after the response body for induction ranking</p>
 <p>Static operand/signature checking (#1459, <strong>breaking</strong>) also visits unselected
 branches, action assignments, <code>requires</code>/<code>ensures</code>, and trace expressions:</p>
 <ul>
@@ -1390,6 +1563,21 @@ in the enclosing scope, and only its filter/body/value uses the new local scope.
 State-independent collection literals remain allowed. Correcting this lexical
 distinction also removes the old symbolic/explicit false rejection of valid
 shadowed names; that fix does not narrow <code>check</code> acceptance.</p>
+<p><strong>Breaking check-admission removal (#1480):</strong> an init <strong>statement</strong> <code>forall</code>
+integer-range endpoint cannot read free state, even after that state was assigned,
+with an empty body or in an unreachable branch. Shared validation reports the
+existing compile-time-constant diagnostic at the owning <code>forall</code> statement.
+Earlier init ownership and field-read diagnostics keep priority. This range rule
+belongs to checked-source admission, not bare Core model construction; raw
+Runtime constructors retain their existing error contracts.
+This does not remove supported assigned-state reads in init RHS expressions;
+ranges in other positions follow the range admission rule; enclosing lexical
+binders retain their scope. Existing nested-init restrictions remain. The #1480 sweep
+measured 16 <code>ok</code>→<code>error</code> forms for this rule, base
+<code>e3c19a39c9c3bf5c315c6002fd18114aa22cd654</code>, head
+<code>f101e7a93cbb50ad85e3531a1d27314559735311</code>, among them the corpus files
+<code>explicit_init_range_assigned.fsl</code> and <code>explicit_init_range_unassigned.fsl</code>; see
+<a href="../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains">checked executable forms</a>.</p>
 <p>Within an init statement <code>forall</code>'s filter or body, reading a state root that
 the <strong>same forall writes</strong> is rejected (#1518), including assignment keys,
 right-hand sides, and <code>if</code> conditions. The exception is a location at the
@@ -1587,8 +1775,9 @@ errors whose base check envelope already had a loc; component type errors,
 including pre-existing ones, anchor at the owning root use and retain their
 component cause.
 The inline IDs include actual #1457, aggregate/component and nested/sync emissions, fixed acceptance,
-and rewritten guard/constructor inputs. Remaining range/domain limitations
-are #1480; #1481 cell 1 covers Map Struct per-field init and cell 2 fixes
+and rewritten guard/constructor inputs. Range and domain limits were decided by
+<a href="../design/DESIGN-check-executable-forms.md#1480-checked-range-admission">#1480</a>;
+#1481 cell 1 covers Map Struct per-field init and cell 2 fixes
 <code>head()</code>, <code>at(i)</code>, and index reads of empty zero-capacity Seqs. Reached reads
 report <code>partial_op</code> in ordinary action/property contexts. Ranked decreases
 narrowly refuses reached zero-slot reads with the base semantics error, before
@@ -5057,7 +5246,8 @@ DESIGN-*.md).</p>
   <code>vacuous_leadsto</code> (the trigger is unreachable), <code>always_true_requires</code>
   (a guard that is always true under the context of preceding clauses),
   <code>tautology_over_frozen</code> (a dynamically tautological invariant over state no
-  action changes), <code>urgency_freeze</code> (a generated deadline <code>tick</code> proven dead
+  action changes; the expression must be defined and true over the typed state
+  space with those frozen values fixed), <code>urgency_freeze</code> (a generated deadline <code>tick</code> proven dead
   because urgency freezes time), <code>vacuous_deadline</code> (a generated deadline
   whose age is proven to remain zero across every transition), and
   <code>vacuity_probe_truncated</code>†. <code>error</code> exits 2. →

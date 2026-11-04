@@ -9,6 +9,9 @@ use fsl_syntax::{
     AggregateKind, Binder, ConditionalSpans, Expr, LValue, Pattern, SourcePos, Span, Statement,
 };
 
+use crate::binder_range::{
+    InclusiveI64, IntegerEnvelopeFact, RangeBinding, RangePlan, RangePrerequisite,
+};
 use crate::recursion;
 use crate::{ActionGuard, KernelModel, TypeDef, TypeRef};
 
@@ -18,6 +21,10 @@ pub(crate) struct TypecheckError {
     pub(crate) span: Option<Span>,
     pub(crate) needs_context: bool,
     pub(crate) constant_shadow: bool,
+    /// A statement or quantifier refusal keeps the engine's unprefixed message.
+    pub(crate) unprefixed_range_refusal: bool,
+    /// The located target's origin, for a refusal rendered without a context prefix.
+    pub(crate) target_origin: Option<Box<crate::OriginChain>>,
 }
 
 impl TypecheckError {
@@ -31,6 +38,7 @@ impl TypecheckError {
         Self {
             message: located.message,
             span: located.span,
+            target_origin: located.origin.or(self.target_origin),
             ..self
         }
     }
@@ -58,6 +66,8 @@ pub(crate) fn error(message: impl Into<String>) -> TypecheckError {
         span: None,
         needs_context: false,
         constant_shadow: false,
+        unprefixed_range_refusal: false,
+        target_origin: None,
     }
 }
 
@@ -125,6 +135,8 @@ pub(crate) fn unknown_span() -> Span {
 #[derive(Clone, Default)]
 pub(crate) struct TypeScope {
     types: BTreeMap<String, TypeRef>,
+    // Distinguish locals (even without a value fact) from state/constant entries.
+    lexical: BTreeSet<String>,
     /// Scalar candidate values captured when a collection let is evaluated.
     pub(crate) collections: HashMap<String, Vec<Vec<Expr>>>,
 }
@@ -158,12 +170,20 @@ impl TypeEnv {
     pub(crate) fn insert(&mut self, name: String, ty: TypeRef) -> Option<TypeRef> {
         // A binder or a subsequent binding must not inherit an alias it shadows.
         self.collections.remove(&name);
+        self.lexical.insert(name.clone());
         self.types.insert(name, ty)
     }
 
     pub(crate) fn remove(&mut self, name: &str) -> Option<TypeRef> {
         self.collections.remove(name);
+        self.lexical.remove(name);
         self.types.remove(name)
+    }
+
+    fn extend_lexical(&mut self, bindings: &[(String, TypeRef)]) {
+        self.lexical
+            .extend(bindings.iter().map(|(name, _)| name.clone()));
+        self.types.extend(bindings.iter().cloned());
     }
 
     pub(crate) fn collection_candidates(
@@ -221,7 +241,7 @@ pub(crate) fn base_env(model: &KernelModel) -> TypeEnv {
 
 pub(crate) fn expression_env(model: &KernelModel, bindings: &[(String, TypeRef)]) -> TypeEnv {
     let mut env = base_env(model);
-    env.extend(bindings.iter().cloned());
+    env.extend_lexical(bindings);
     env
 }
 
@@ -800,6 +820,10 @@ fn reject_colliding_pattern_binding(
     span: Span,
     phase: &ValidationPhase,
 ) -> Result<(), TypecheckError> {
+    // Ordinary validation already judged these names; admission only judges ranges.
+    if phase.range_rule.is_some() {
+        return Ok(());
+    }
     reject_pattern_binding_name(
         phase,
         model.names().pattern_scopes.get(binding),
@@ -869,6 +893,65 @@ pub(crate) fn lvalue_type(
     model
         .state_lvalue_type(target)
         .map_err(|model_error| error(model_error.message).with_span(span))
+}
+
+enum AggregateValidation {
+    Expanded(Expr),
+    Deferred,
+}
+
+fn aggregate_validation(
+    kind: AggregateKind,
+    binder: &Binder,
+    value: Option<&Expr>,
+    env: &TypeEnv,
+    model: &KernelModel,
+    expand: bool,
+) -> Result<AggregateValidation, TypecheckError> {
+    let mut deferred = !expand;
+    if let Binder::Range { lo, hi, .. } = binder {
+        use crate::binder_range::RangeUnknown;
+
+        let lexical = env
+            .lexical
+            .iter()
+            .map(|name| RangeBinding {
+                name,
+                semantic_ty: &env[name],
+                fact: None,
+            })
+            .collect::<Vec<_>>();
+        // Authored bounds/filter/value have passed. Neither a carrier nor a
+        // lexical value without its captured fact establishes execution eligibility.
+        // Check both endpoints in order even if the first needs deferral.
+        for bound in [lo.as_ref(), hi.as_ref()] {
+            match model.plan_integer_range(bound, bound, &lexical) {
+                RangePlan::Static { .. } => {}
+                RangePlan::Unknown(RangeUnknown::ConstantFoldFailed) => {
+                    // A closed child's failed fold does not make the whole bound closed.
+                    let mut dependent = false;
+                    crate::model::visit_free_names(bound, &BTreeSet::new(), &mut |name| {
+                        if env.lexical.contains(name)
+                            || model.state.iter().any(|(state, _)| state == name)
+                        {
+                            dependent = true;
+                        }
+                    });
+                    if dependent {
+                        deferred = true;
+                    } else {
+                        // Retain the strict owner's genuine failed-fold diagnostic.
+                        static_public_int(bound, model)?;
+                    }
+                }
+                _ => deferred = true,
+            }
+        }
+    }
+    if deferred {
+        return Ok(AggregateValidation::Deferred);
+    }
+    normalize_aggregate(kind, binder, value, env, model).map(AggregateValidation::Expanded)
 }
 
 pub(crate) fn normalize_aggregate(
@@ -1161,13 +1244,21 @@ fn aggregate_result(kind: AggregateKind, terms: Vec<Expr>) -> Expr {
 }
 
 fn static_public_int(expr: &Expr, model: &KernelModel) -> Result<i64, TypecheckError> {
+    if let Ok(value) = model.constant_integer(expr) {
+        return Ok(value);
+    }
+    legacy_static_public_int(expr, model)
+}
+
+// Do not fold children on the legacy failed-fold path.
+fn legacy_static_public_int(expr: &Expr, model: &KernelModel) -> Result<i64, TypecheckError> {
     match expr {
         Expr::Num(value) => Ok(*value),
         Expr::Var(name) => match model.consts.get(name) {
             Some(crate::FslValue::Int(value)) => Ok(*value),
             _ => Err(error(format!("'{}' is not an integer const", shown(name)))),
         },
-        Expr::Neg(value) => static_public_int(value, model)?
+        Expr::Neg(value) => legacy_static_public_int(value, model)?
             .checked_neg()
             .ok_or_else(|| error("integer overflow in range bound")),
         _ => Err(error(
@@ -1217,9 +1308,13 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
 #[derive(Clone)]
 pub(crate) struct ValidationPhase {
     normalize_aggregates: bool,
+    aggregate_bounds_only: bool,
+    defer_init_statement_domain: bool,
     substituted: BTreeSet<String>,
     // Reserved by earlier evaluation, without making those names readable.
     pub(crate) collisions: HashSet<String>,
+    /// Present only in the checked-admission walk; ordinary validation ignores it.
+    range_rule: Option<RangeRule>,
 }
 
 impl ValidationPhase {
@@ -1229,8 +1324,18 @@ impl ValidationPhase {
     pub(crate) fn normalized() -> Self {
         Self {
             normalize_aggregates: true,
+            aggregate_bounds_only: false,
+            defer_init_statement_domain: false,
             substituted: BTreeSet::new(),
             collisions: HashSet::new(),
+            range_rule: None,
+        }
+    }
+
+    pub(crate) fn init_statements() -> Self {
+        Self {
+            defer_init_statement_domain: true,
+            ..Self::normalized()
         }
     }
 
@@ -1272,9 +1377,75 @@ impl ValidationPhase {
         }
         Self {
             normalize_aggregates: self.normalize_aggregates && !expands,
+            aggregate_bounds_only: self.aggregate_bounds_only,
+            defer_init_statement_domain: self.defer_init_statement_domain,
             substituted,
             collisions: self.collisions.clone(),
+            range_rule: self.range_rule.clone(),
         }
+    }
+
+    /// The raw walk checked admission uses: no expansion, one scope's carriers.
+    fn range_admission(carriers: bool, admission: &Admission) -> Self {
+        Self {
+            normalize_aggregates: false,
+            range_rule: Some(RangeRule {
+                carriers,
+                symbolic_sets: admission.symbolic_sets.clone(),
+                static_aggregates_only: admission.static_aggregates_only,
+                ..RangeRule::default()
+            }),
+            ..Self::normalized()
+        }
+    }
+
+    /// The phase of one evaluation scope, in ordinary validation or in admission.
+    fn for_scope(admission: Option<&Admission>, carriers: bool) -> Self {
+        admission.map_or_else(Self::normalized, |admission| {
+            Self::range_admission(carriers, admission)
+        })
+    }
+
+    /// A transition property or postcondition reads `old(...)` from a frame.
+    fn with_old_frame(mut self) -> Self {
+        if let Some(rule) = &mut self.range_rule {
+            rule.old_frame = true;
+        }
+        self
+    }
+
+    /// The engines read `old(...)` from a frame and have none below it, so a second
+    /// `old`, or one in a scope with no old frame, stops every engine at evaluation. The
+    /// lowered `P unless Q` wraps `P` in `old`, which makes an `old` in `P` the second one.
+    fn inside_old(&self) -> Self {
+        let mut phase = self.clone();
+        if let Some(rule) = &mut phase.range_rule {
+            if rule.old_frame {
+                rule.old_frame = false;
+            } else {
+                rule.carriers = false;
+                rule.frameless = true;
+            }
+        }
+        phase
+    }
+
+    /// A postcondition keeps every lexical fact but has no certified read frame.
+    fn for_postcondition(&self) -> Self {
+        let mut phase = self.clone();
+        if let Some(rule) = &mut phase.range_rule {
+            rule.carriers = false;
+            rule.after_action = true;
+        }
+        phase
+    }
+
+    /// The scope of a binder's filter and body, with the fact its candidates carry.
+    fn bound_by(mut self, binder: &Binder, env: &TypeEnv, model: &KernelModel) -> Self {
+        if let Some(rule) = &mut self.range_rule {
+            *rule = rule.under_binder(binder, env, model);
+        }
+        self
     }
 }
 
@@ -1293,6 +1464,7 @@ pub(crate) fn reject_constant_shadow<'a>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_binder(
     binder: &Binder,
     env: &TypeEnv,
@@ -1300,6 +1472,7 @@ fn validate_binder(
     span: Span,
     source_phase: &ValidationPhase,
     child_phase: &ValidationPhase,
+    site: BinderSite,
     self_relations: &SelfRelations,
 ) -> Result<TypeRef, TypecheckError> {
     reject_constant_shadow(binder_name(binder), model.consts.keys())
@@ -1317,8 +1490,43 @@ fn validate_binder(
                 self_relations,
             )?;
         }
+        if let Some(rule) = &source_phase.range_rule {
+            if rule.static_aggregates_only {
+                let substituted = |endpoint: &Expr| {
+                    let mut found = false;
+                    crate::model::visit_free_names(endpoint, &BTreeSet::new(), &mut |name| {
+                        found |= source_phase.substitutes(name);
+                    });
+                    found
+                };
+                if matches!(site, BinderSite::Aggregate)
+                    && [lo, hi].iter().any(|endpoint| {
+                        !substituted(endpoint) && static_public_int(endpoint, model).is_err()
+                    })
+                {
+                    return Err(range_refusal(lo, hi, model, site).with_span(span));
+                }
+            } else {
+                admit_range_binder((lo, hi), env, model, span, rule, site)?;
+            }
+        }
     }
     let ty = binder_type(binder, env, model).map_err(|error| error.with_span(span))?;
+    if source_phase.range_rule.is_some()
+        && matches!(binder, Binder::Typed { .. })
+        && matches!(resolve(model, &ty), Ok(TypeRef::Int))
+        && !declares_finite_int(model)
+    {
+        return Err(unbounded_typed_refusal(&ty).with_span(span));
+    }
+    if !source_phase.defer_init_statement_domain
+        && let (Binder::Typed { .. }, TypeRef::Named(name)) = (binder, &ty)
+        && matches!(model.types.get(name), Some(TypeDef::Struct { .. }))
+    {
+        model
+            .domain_values(&ty)
+            .map_err(|failure| error(failure.message).with_span(span))?;
+    }
     let (name, where_expr) = match binder {
         Binder::Typed {
             name, where_expr, ..
@@ -1359,6 +1567,709 @@ fn validate_binder(
         )?;
     }
     Ok(ty)
+}
+
+/// How the engine's refusal of a range binder was spelled before admission.
+#[derive(Clone, Copy)]
+enum BinderSite {
+    Aggregate,
+    Quantifier,
+    Statement,
+}
+
+/// One assigned state's readable init value, as the engine's init recipes hold it.
+#[derive(Clone)]
+struct InitRecipe {
+    ty: TypeRef,
+    fact: Option<IntegerEnvelopeFact>,
+    literal: Option<i64>,
+    known: Option<bool>,
+}
+
+/// What one evaluation scope gives the shared range rule. Nothing here calls a solver or
+/// evaluates a body; a leadsTo wrapper's bounds are folded one binding at a time, within
+/// `WRAPPER_ADMISSION_BINDINGS`, and no binding row outlives its visit.
+#[derive(Clone, Default)]
+#[allow(clippy::struct_excessive_bools)]
+struct RangeRule {
+    /// The engines certify this scope's read frame before evaluating it.
+    carriers: bool,
+    /// No candidate reaches this scope, so the engines never evaluate it.
+    dead: bool,
+    /// Unconditional values from enumerated binders and action parameters.
+    facts: BTreeMap<String, IntegerEnvelopeFact>,
+    /// Literal lets: unusable as a bound, but literal once placed in a Seq literal.
+    literal_lets: BTreeMap<String, InclusiveI64>,
+    /// Lets holding a collection, with the candidates it had where it was bound.
+    collection_lets: BTreeMap<String, CollectionCandidates>,
+    /// `old(...)` reads a frame in this scope.
+    old_frame: bool,
+    /// Under an `old(...)` with no frame to read: no name here carries a fact.
+    frameless: bool,
+    /// State Sets that can hold a key the engines do not read as a solver literal.
+    symbolic_sets: SymbolicSets,
+    /// A postcondition: it reads the state an action left, and no initial state.
+    after_action: bool,
+    /// Report only an expanding aggregate whose bound does not fold.
+    static_aggregates_only: bool,
+    /// Init only: completed assignments, readable as locals.
+    recipes: BTreeMap<String, InitRecipe>,
+}
+
+/// The candidates a collection binder gets, as far as they stay solver literals.
+#[derive(Clone, Copy)]
+enum CollectionCandidates {
+    Empty,
+    Literal(InclusiveI64),
+    Opaque,
+}
+
+/// How many leadsTo wrapper bindings admission visits, complete or not. It stops walking
+/// past this, and is no limit on the language or on what the engines enumerate.
+const WRAPPER_ADMISSION_BINDINGS: usize = 1 << 16;
+
+fn join_envelope(left: InclusiveI64, right: InclusiveI64) -> Option<InclusiveI64> {
+    InclusiveI64::new(left.lo().min(right.lo()), left.hi().max(right.hi()))
+}
+
+impl RangeRule {
+    /// Planner input in the shape an engine builds from its bindings.
+    fn lexical<'a>(&'a self, env: &'a TypeEnv) -> Vec<RangeBinding<'a>> {
+        self.recipes
+            .iter()
+            .filter(|(name, _)| !env.lexical.contains(*name))
+            .map(|(name, recipe)| RangeBinding {
+                name,
+                semantic_ty: &recipe.ty,
+                fact: recipe.fact.as_ref().filter(|_| !self.frameless),
+            })
+            .chain(env.lexical.iter().map(|name| RangeBinding {
+                name,
+                semantic_ty: &env[name],
+                fact: self.facts.get(name).filter(|_| !self.frameless),
+            }))
+            .collect()
+    }
+
+    fn forget(&mut self, name: &str) {
+        self.facts.remove(name);
+        self.literal_lets.remove(name);
+        self.collection_lets.remove(name);
+    }
+
+    fn bind_fact(&mut self, name: &str, envelope: Option<InclusiveI64>) {
+        self.forget(name);
+        match envelope {
+            Some(envelope) => {
+                self.facts
+                    .insert(name.to_owned(), IntegerEnvelopeFact::new(envelope));
+            }
+            None => self.dead = true,
+        }
+    }
+
+    /// An integer item the engines evaluate to a solver literal, not merely in value.
+    fn literal_item(
+        &self,
+        item: &Expr,
+        env: &TypeEnv,
+        model: &KernelModel,
+    ) -> Option<InclusiveI64> {
+        match item {
+            Expr::Num(value) => InclusiveI64::new(*value, *value),
+            Expr::Var(name) if env.lexical.contains(name) => self
+                .facts
+                .get(name)
+                .map(IntegerEnvelopeFact::envelope)
+                .or_else(|| self.literal_lets.get(name).copied()),
+            Expr::Var(name) if self.recipes.contains_key(name) => self.recipes[name]
+                .literal
+                .and_then(|value| InclusiveI64::new(value, value)),
+            Expr::Var(name) if model.state.iter().any(|(state, _)| state == name) => None,
+            Expr::Var(name) => match model.consts.get(name) {
+                Some(crate::FslValue::Int(value)) => InclusiveI64::new(*value, *value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The fact a collection binder's candidates carry. A binder over a state Set rests
+    /// on the carrier the engines certify on the read frame, the same prerequisite as a
+    /// state name in a bound. Elsewhere only a solver literal has a fact.
+    fn collection_candidates(
+        &self,
+        collection: &Expr,
+        env: &TypeEnv,
+        model: &KernelModel,
+    ) -> CollectionCandidates {
+        if self.carriers
+            && let Some((frame, name)) = crate::binder_range::state_set_source(collection)
+            && (frame == crate::binder_range::SetFrame::Current || self.old_frame)
+            && !env.lexical.contains(name)
+            && let Some(envelope) = crate::binder_range::state_set_element_envelope(model, name)
+        {
+            return CollectionCandidates::Literal(envelope);
+        }
+        self.literal_candidates(collection, env, model)
+    }
+
+    /// The candidates that stay solver literals, whatever the read frame certifies.
+    /// Keys decide it: the engines order known keys without solver terms.
+    fn literal_candidates(
+        &self,
+        collection: &Expr,
+        env: &TypeEnv,
+        model: &KernelModel,
+    ) -> CollectionCandidates {
+        use CollectionCandidates::{Empty, Literal, Opaque};
+        match collection {
+            Expr::Seq(items) | Expr::Set(items) => {
+                let mut joined: Option<InclusiveI64> = None;
+                for item in items {
+                    let Some(envelope) = self.literal_item(item, env, model) else {
+                        return Opaque;
+                    };
+                    joined = match joined {
+                        Some(previous) => join_envelope(previous, envelope),
+                        None => Some(envelope),
+                    };
+                }
+                joined.map_or(Empty, Literal)
+            }
+            Expr::Var(name) if env.lexical.contains(name) => {
+                self.collection_lets.get(name).copied().unwrap_or(Opaque)
+            }
+            Expr::Var(name) => match model.state.iter().find(|(state, _)| state == name) {
+                Some((_, TypeRef::Seq(_, 0))) => Empty,
+                Some((_, TypeRef::Set(_)))
+                    if !(if self.after_action {
+                        &self.symbolic_sets.after_action
+                    } else {
+                        &self.symbolic_sets.in_any_state
+                    })
+                    .contains(name) =>
+                {
+                    crate::binder_range::state_set_element_envelope(model, name)
+                        .map_or(Opaque, Literal)
+                }
+                _ => Opaque,
+            },
+            // `old` reads a reframed frame, so no write has added a key there.
+            Expr::UnaryNamed { name, expr, .. } if name == "old" && self.old_frame => Self {
+                old_frame: false,
+                symbolic_sets: SymbolicSets::default(),
+                ..self.clone()
+            }
+            .literal_candidates(expr, env, model),
+            Expr::Method {
+                receiver,
+                name,
+                args,
+            } if name == "add" || name == "remove" => {
+                let Literal(envelope) = self.literal_candidates(receiver, env, model) else {
+                    return Opaque;
+                };
+                match (name.as_str(), args.as_slice()) {
+                    ("remove", _) => Literal(envelope),
+                    (_, [item]) => self
+                        .literal_item(item, env, model)
+                        .and_then(|item| join_envelope(envelope, item))
+                        .map_or(Opaque, Literal),
+                    _ => Opaque,
+                }
+            }
+            _ => Opaque,
+        }
+    }
+
+    fn under_binder(&self, binder: &Binder, env: &TypeEnv, model: &KernelModel) -> Self {
+        let mut child = self.clone();
+        let name = binder_name(binder);
+        child.forget(name);
+        match binder {
+            Binder::Range { lo, hi, .. } => {
+                let plan = model.plan_integer_range(lo, hi, &self.lexical(env));
+                if !matches!(plan, RangePlan::Unknown(_)) {
+                    child.bind_fact(name, plan.candidates());
+                }
+            }
+            Binder::Typed { .. } => {
+                if let Ok(ty) = binder_type(binder, env, model)
+                    && let Ok(TypeRef::Range(lo, hi)) = resolve(model, &ty)
+                {
+                    child.bind_fact(name, InclusiveI64::new(lo, hi));
+                }
+            }
+            Binder::Collection { collection, .. } => {
+                match self.collection_candidates(collection, env, model) {
+                    CollectionCandidates::Empty => child.dead = true,
+                    CollectionCandidates::Literal(envelope) => {
+                        child.bind_fact(name, Some(envelope));
+                    }
+                    CollectionCandidates::Opaque => {}
+                }
+            }
+        }
+        child
+    }
+
+    fn bind_param(&mut self, param: &crate::ParamDef, model: &KernelModel) {
+        self.forget(param.name());
+        if let Ok(TypeRef::Range(lo, hi)) = resolve(model, &param.ty()) {
+            self.bind_fact(param.name(), InclusiveI64::new(lo, hi));
+        }
+    }
+
+    fn bind_let(&mut self, name: &str, value: &Expr, env: &TypeEnv, model: &KernelModel) {
+        let literal = self.literal_item(value, env, model);
+        let candidates = self.literal_candidates(value, env, model);
+        self.forget(name);
+        if let Some(literal) = literal {
+            self.literal_lets.insert(name.to_owned(), literal);
+        }
+        self.collection_lets.insert(name.to_owned(), candidates);
+    }
+
+    fn known_condition(
+        &self,
+        condition: &Expr,
+        env: &TypeEnv,
+        model: &KernelModel,
+    ) -> Option<bool> {
+        match condition {
+            Expr::Bool(value) => return Some(*value),
+            Expr::Var(name) if !env.lexical.contains(name) => {
+                if let Some(known) = self.recipes.get(name).and_then(|recipe| recipe.known) {
+                    return Some(known);
+                }
+            }
+            _ => {}
+        }
+        if env
+            .lexical
+            .iter()
+            .any(|name| model.consts.contains_key(name))
+            || self
+                .recipes
+                .keys()
+                .any(|name| model.consts.contains_key(name))
+        {
+            return None;
+        }
+        crate::binder_range::constant_condition(model, condition)
+    }
+
+    /// Mirror the engine's recipe after `name = value`, from Core facts alone.
+    fn record_init_assignment(
+        &mut self,
+        name: &str,
+        value: &Expr,
+        env: &TypeEnv,
+        model: &KernelModel,
+    ) {
+        let Ok(ty) = model.state_lvalue_type(&LValue::Var(name.to_owned())) else {
+            return;
+        };
+        let literal = match self.literal_item(value, env, model) {
+            Some(envelope) if envelope.lo() == envelope.hi() => Some(envelope.lo()),
+            _ => None,
+        };
+        // The engines read the assigned term: only a literal or a named constant is known,
+        // not a condition they can fold but do not rewrite.
+        let known = matches!(value, Expr::Bool(_) | Expr::Var(_))
+            .then(|| self.known_condition(value, env, model))
+            .flatten();
+        let integer = matches!(resolve(model, &ty), Ok(TypeRef::Int | TypeRef::Range(_, _)));
+        let fact = {
+            let lexical = self.lexical(env);
+            let mut selector = |condition: &Expr| self.known_condition(condition, env, model);
+            crate::binder_range::init_expression_envelope(
+                model,
+                value,
+                Some(&lexical),
+                &mut selector,
+            )
+        }
+        .filter(|envelope| {
+            !integer || crate::binder_range::init_envelope_fits(model, &ty, *envelope)
+        })
+        .map(IntegerEnvelopeFact::new);
+        self.recipes.remove(name);
+        if !integer || fact.is_some() {
+            self.recipes.insert(
+                name.to_owned(),
+                InitRecipe {
+                    ty,
+                    fact,
+                    literal,
+                    known,
+                },
+            );
+        }
+    }
+
+    /// Join two init paths when the engine cannot select one of them.
+    fn join_recipes(
+        left: &BTreeMap<String, InitRecipe>,
+        right: &BTreeMap<String, InitRecipe>,
+    ) -> BTreeMap<String, InitRecipe> {
+        left.iter()
+            .filter_map(|(name, recipe)| {
+                let other = right.get(name)?;
+                let fact = recipe.fact.zip(other.fact).and_then(|(left, right)| {
+                    join_envelope(left.envelope(), right.envelope()).map(IntegerEnvelopeFact::new)
+                });
+                Some((
+                    name.clone(),
+                    InitRecipe {
+                        ty: recipe.ty.clone(),
+                        fact,
+                        literal: None,
+                        known: None,
+                    },
+                ))
+            })
+            .collect()
+    }
+}
+
+/// No engine enumerates an unbounded typed binder, with the engines' spelling.
+/// A declared `Int` gives a typed binder its domain, as on the base. A struct so named
+/// has none, and the engines refuse it as they refuse the builtin.
+fn declares_finite_int(model: &KernelModel) -> bool {
+    matches!(
+        model.types.get("Int"),
+        Some(TypeDef::Domain { .. } | TypeDef::Enum { .. })
+    )
+}
+
+fn unbounded_typed_refusal(ty: &TypeRef) -> TypecheckError {
+    let name = match ty {
+        TypeRef::Named(name) => shown(name),
+        _ => "Int".to_owned(),
+    };
+    TypecheckError {
+        unprefixed_range_refusal: true,
+        ..error(format!("type '{name}' is not a finite scalar"))
+    }
+}
+
+/// Refuse a range binder that this scope cannot execute, with the existing spelling.
+fn admit_range_binder(
+    (lo, hi): (&Expr, &Expr),
+    env: &TypeEnv,
+    model: &KernelModel,
+    span: Span,
+    rule: &RangeRule,
+    site: BinderSite,
+) -> Result<(), TypecheckError> {
+    if rule.dead {
+        return Ok(());
+    }
+    let plan = model.plan_integer_range(lo, hi, &rule.lexical(env));
+    // Every supplied lexical fact is an unconditional enumerated value here.
+    let executable = plan.is_executable(|prerequisite| match prerequisite {
+        RangePrerequisite::StateCarrier { .. } => rule.carriers,
+        RangePrerequisite::LexicalFact { .. } => true,
+    });
+    if executable {
+        return Ok(());
+    }
+    Err(range_refusal(lo, hi, model, site).with_span(span))
+}
+
+/// The first expanding aggregate in a bound whose own bound is not static.
+fn nested_aggregate_refusal(expr: &Expr, model: &KernelModel) -> Option<TypecheckError> {
+    recursion::guard(|| {
+        if let Expr::Aggregate {
+            kind,
+            binder: binder @ Binder::Range { lo, hi, .. },
+            ..
+        } = expr
+            && ValidationPhase::expands_aggregate(*kind, binder)
+        {
+            return [lo.as_ref(), hi.as_ref()].into_iter().find_map(|endpoint| {
+                nested_aggregate_refusal(endpoint, model)
+                    .or_else(|| static_public_int(endpoint, model).err())
+            });
+        }
+        crate::model::expr_children(expr)
+            .into_iter()
+            .find_map(|child| nested_aggregate_refusal(child, model))
+    })
+}
+
+fn range_refusal(lo: &Expr, hi: &Expr, model: &KernelModel, site: BinderSite) -> TypecheckError {
+    let endpoints = [lo, hi];
+    // A dependent aggregate inside the bound is the refusal the bound always had.
+    if let Some(refusal) = endpoints
+        .into_iter()
+        .find_map(|endpoint| nested_aggregate_refusal(endpoint, model))
+    {
+        return refusal;
+    }
+    if matches!(site, BinderSite::Aggregate) {
+        return endpoints
+            .into_iter()
+            .find_map(|endpoint| static_public_int(endpoint, model).err())
+            .unwrap_or_else(|| error("public Kernel requires static aggregate range bounds"));
+    }
+    let message = endpoints
+        .into_iter()
+        .find_map(|endpoint| {
+            model
+                .static_binder_bound(endpoint, &mut |name| shown(name))
+                .err()
+        })
+        .unwrap_or_else(|| "binder bound is not a static integer".to_owned());
+    TypecheckError {
+        unprefixed_range_refusal: true,
+        ..error(message)
+    }
+}
+
+/// Walks a dependent leadsTo wrapper one binding at a time, holding one row only.
+struct WrapperWalk<'a> {
+    leadsto: &'a crate::LeadsToDef,
+    model: &'a KernelModel,
+    remaining: usize,
+    completed: bool,
+    reached: Vec<bool>,
+    facts: BTreeMap<String, InclusiveI64>,
+    binding: BTreeMap<String, crate::FslValue>,
+    outer: BTreeSet<String>,
+    locals: Vec<(String, TypeRef)>,
+}
+
+impl WrapperWalk<'_> {
+    fn note(&mut self, name: &str, value: i64) {
+        let Some(point) = InclusiveI64::new(value, value) else {
+            return;
+        };
+        let joined = match self.facts.get(name) {
+            Some(fact) => join_envelope(*fact, point),
+            None => Some(point),
+        };
+        if let Some(joined) = joined {
+            self.facts.insert(name.to_owned(), joined);
+        }
+    }
+
+    /// `false` once the walk stops at its budget. Every visit spends it, whether or not
+    /// it completes a binding: an always-empty inner binder completes none.
+    fn visit(&mut self, index: usize) -> Result<bool, TypecheckError> {
+        self.remaining = self.remaining.saturating_sub(1);
+        if self.remaining == 0 {
+            return Ok(false);
+        }
+        let leadsto = self.leadsto;
+        let Some(binder) = leadsto.binders.get(index) else {
+            self.completed = true;
+            return Ok(true);
+        };
+        self.reached[index] = true;
+        let name = binder_name(binder).to_owned();
+        let (lo, hi) = match binder {
+            Binder::Range { lo, hi, .. } => {
+                let mut no_check = |_: usize, _: &Expr, _: Option<&BTreeMap<_, _>>| Ok(());
+                let mut fold = |endpoint: &Expr, walk: &Self| {
+                    crate::model::scoped_leadsto_int::<crate::ModelError>(
+                        endpoint,
+                        walk.model,
+                        &walk.outer,
+                        &walk.locals,
+                        &walk.binding,
+                        index,
+                        &mut no_check,
+                    )
+                    .map_err(|failure| TypecheckError {
+                        unprefixed_range_refusal: true,
+                        span: Some(leadsto.span),
+                        ..error(failure.message)
+                    })
+                };
+                let lo = fold(lo, self)?;
+                let hi = fold(hi, self)?;
+                self.locals.push((name.clone(), TypeRef::Int));
+                (lo, hi)
+            }
+            Binder::Typed { type_name, .. } => {
+                let ty = self.model.typed_binder_type(&qualified_name(type_name)?);
+                self.locals.push((name.clone(), ty.clone()));
+                if let Ok(TypeRef::Range(lo, hi)) = resolve(self.model, &ty) {
+                    (lo, hi)
+                } else {
+                    let values = self
+                        .model
+                        .domain_values(&ty)
+                        .map_err(|failure| error(failure.message))?;
+                    let inserted = self.outer.insert(name.clone());
+                    for value in values {
+                        self.binding.insert(name.clone(), value);
+                        if !self.visit(index + 1)? {
+                            return Ok(false);
+                        }
+                    }
+                    if inserted {
+                        self.outer.remove(&name);
+                    }
+                    self.locals.pop();
+                    self.binding.remove(&name);
+                    return Ok(true);
+                }
+            }
+            Binder::Collection { .. } => return Ok(true),
+        };
+        let inserted = self.outer.insert(name.clone());
+        for value in lo..=hi {
+            self.note(&name, value);
+            self.binding
+                .insert(name.clone(), crate::FslValue::Int(value));
+            if !self.visit(index + 1)? {
+                return Ok(false);
+            }
+        }
+        if inserted {
+            self.outer.remove(&name);
+        }
+        self.locals.pop();
+        self.binding.remove(&name);
+        Ok(true)
+    }
+}
+
+/// Bounds and values of a leadsTo wrapper, with the engines' scoping and refusals.
+///
+/// Facts come from folding each binding's bounds, as the engines do, with no row kept.
+/// Past [`WRAPPER_ADMISSION_BINDINGS`] the walk stops, and later binders take the
+/// planner's interval over what is known: admission must not enumerate the product.
+#[allow(clippy::too_many_lines)]
+fn admit_leadsto_binders(
+    leadsto: &crate::LeadsToDef,
+    model: &KernelModel,
+) -> Result<RangeRule, TypecheckError> {
+    let mut rule = RangeRule::default();
+    let refused = |lo: &Expr, hi: &Expr| {
+        let mut refusal = range_refusal(lo, hi, model, BinderSite::Quantifier);
+        refusal.span = Some(leadsto.span);
+        refusal
+    };
+    // Bounds without an outer binder are checked once, as the engines' prepass does.
+    let mut outer = BTreeSet::new();
+    let mut locals = Vec::new();
+    for binder in &leadsto.binders {
+        match binder {
+            Binder::Range { lo, hi, .. } => {
+                for endpoint in [lo, hi] {
+                    if crate::model::leadsto_uses_outer(endpoint, &outer) {
+                        crate::typecheck::validate_planner_integer_endpoint(
+                            endpoint, &locals, model,
+                        )
+                        .map_err(|failure| TypecheckError {
+                            unprefixed_range_refusal: true,
+                            span: Some(leadsto.span),
+                            ..error(failure.message)
+                        })?;
+                    } else if !model
+                        .plan_integer_range(endpoint, endpoint, &[])
+                        .is_executable(|_| false)
+                    {
+                        return Err(refused(lo, hi));
+                    }
+                }
+                locals.push((binder_name(binder).to_owned(), TypeRef::Int));
+            }
+            Binder::Typed { type_name, .. } => {
+                let written = qualified_name(type_name)?;
+                let ty = model.typed_binder_type(&written);
+                let undeclared_int = written == "Int" && !declares_finite_int(model);
+                if undeclared_int || matches!(resolve(model, &ty), Ok(TypeRef::Int)) {
+                    return Err(unbounded_typed_refusal(&ty).with_span(leadsto.span));
+                }
+                locals.push((binder_name(binder).to_owned(), ty));
+            }
+            Binder::Collection { .. } => {}
+        }
+        outer.insert(binder_name(binder).to_owned());
+    }
+    if !crate::model::leadsto_has_dependent_bounds(leadsto) {
+        // Independent bounds need no enumeration of the wrapper's product.
+        for binder in &leadsto.binders {
+            match binder {
+                Binder::Range { name, lo, hi, .. } => {
+                    rule.bind_fact(name, model.plan_integer_range(lo, hi, &[]).candidates());
+                }
+                Binder::Typed {
+                    name, type_name, ..
+                } => {
+                    let ty = model.typed_binder_type(&qualified_name(type_name)?);
+                    if let Ok(TypeRef::Range(lo, hi)) = resolve(model, &ty) {
+                        rule.bind_fact(name, InclusiveI64::new(lo, hi));
+                    }
+                }
+                Binder::Collection { .. } => {}
+            }
+        }
+        return Ok(rule);
+    }
+    let mut walk = WrapperWalk {
+        leadsto,
+        model,
+        remaining: WRAPPER_ADMISSION_BINDINGS,
+        completed: false,
+        reached: vec![false; leadsto.binders.len()],
+        facts: BTreeMap::new(),
+        binding: BTreeMap::new(),
+        outer: BTreeSet::new(),
+        locals: Vec::new(),
+    };
+    let complete = walk.visit(0)?;
+    if complete {
+        rule.dead = !walk.completed;
+    } else {
+        for binder in &leadsto.binders {
+            if let Binder::Typed {
+                name, type_name, ..
+            } = binder
+            {
+                let ty = model.typed_binder_type(&qualified_name(type_name)?);
+                if let Ok(TypeRef::Range(lo, hi)) = resolve(model, &ty)
+                    && let Some(envelope) = InclusiveI64::new(lo, hi)
+                {
+                    walk.facts.insert(name.clone(), envelope);
+                }
+            }
+            if let Binder::Range { name, lo, hi, .. } = binder {
+                let lexical: Vec<_> = leadsto
+                    .binders
+                    .iter()
+                    .take_while(|prior| binder_name(prior) != name)
+                    .filter_map(|prior| {
+                        let name = binder_name(prior);
+                        Some((name, IntegerEnvelopeFact::new(*walk.facts.get(name)?)))
+                    })
+                    .collect();
+                let bindings: Vec<_> = lexical
+                    .iter()
+                    .map(|(name, fact)| crate::binder_range::RangeBinding {
+                        name,
+                        semantic_ty: &TypeRef::Int,
+                        fact: Some(fact),
+                    })
+                    .collect();
+                // A partial walk's values do not bound the rest: no plan, no fact.
+                match model.plan_integer_range(lo, hi, &bindings).candidates() {
+                    Some(envelope) => walk.facts.insert(name.clone(), envelope),
+                    None => walk.facts.remove(name),
+                };
+            }
+        }
+    }
+    for (name, envelope) in walk.facts {
+        rule.facts.insert(name, IntegerEnvelopeFact::new(envelope));
+    }
+    Ok(rule)
 }
 
 fn binder_name(binder: &Binder) -> &str {
@@ -1431,6 +2342,12 @@ fn validate_expression_in_phase(
     phase: &ValidationPhase,
     self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
+    // Statement-domain deferral never extends into RHS/filter expressions.
+    let expression_phase = phase.defer_init_statement_domain.then(|| ValidationPhase {
+        defer_init_statement_domain: false,
+        ..phase.clone()
+    });
+    let phase = expression_phase.as_ref().unwrap_or(phase);
     recursion::guard(|| {
         validate_expression_inner(expr, env, model, span, expected, phase, self_relations)
     })
@@ -1714,6 +2631,17 @@ fn validate_expression_inner(
                 return Err(error("'is none/some' requires an Option expression").with_span(span));
             }
         }
+        Expr::UnaryNamed { name, expr, .. } if name == "old" => {
+            validate_expression_in_phase(
+                expr,
+                env,
+                model,
+                span,
+                None,
+                &phase.inside_old(),
+                self_relations,
+            )?;
+        }
         Expr::UnaryNamed { name, expr, .. } => {
             let expected = (name == "abs").then_some(TypeRef::Int);
             validate(expr, env, span, expected.as_ref())?;
@@ -1738,7 +2666,9 @@ fn validate_expression_inner(
             }
         }
         Expr::Quantified { binder, body, .. } => {
-            let child_phase = phase.under_binder(binder, None);
+            let child_phase = phase
+                .under_binder(binder, None)
+                .bound_by(binder, env, model);
             let binder_ty = validate_binder(
                 binder,
                 env,
@@ -1746,6 +2676,7 @@ fn validate_expression_inner(
                 span,
                 phase,
                 &child_phase,
+                BinderSite::Quantifier,
                 self_relations,
             )?;
             let mut local = env.clone();
@@ -1770,7 +2701,9 @@ fn validate_expression_inner(
             let expands = ValidationPhase::expands_aggregate(*kind, binder);
             // Raw descendants share all typing rules, but must not enumerate
             // ranges containing locals before the outer substitution happens.
-            let child_phase = phase.under_binder(binder, Some(*kind));
+            let child_phase = phase
+                .under_binder(binder, Some(*kind))
+                .bound_by(binder, env, model);
             let binder_ty = validate_binder(
                 binder,
                 env,
@@ -1778,6 +2711,11 @@ fn validate_expression_inner(
                 span,
                 phase,
                 &child_phase,
+                if expands {
+                    BinderSite::Aggregate
+                } else {
+                    BinderSite::Quantifier
+                },
                 self_relations,
             )?;
             let mut local = env.clone();
@@ -1795,14 +2733,43 @@ fn validate_expression_inner(
                     &local_relations,
                 )?;
             }
-            if phase.normalize_aggregates && expands {
-                let normalized = normalize_aggregate(*kind, binder, value.as_deref(), env, model)
-                    .map_err(|error| error.with_span(span))?;
-                // Generated copies have already passed authored binding checks.
-                let mut generated = phase.clone();
-                crate::collect_pattern_names(&normalized, &mut generated.collisions);
-                generated.substituted.extend(generated.collisions.drain());
-                generated.check(&normalized, env, model, span, expected, self_relations)?;
+            if expands && (phase.normalize_aggregates || phase.aggregate_bounds_only) {
+                match aggregate_validation(
+                    *kind,
+                    binder,
+                    value.as_deref(),
+                    env,
+                    model,
+                    phase.normalize_aggregates,
+                )
+                .map_err(|error| error.with_span(span))?
+                {
+                    AggregateValidation::Expanded(normalized) => {
+                        // Generated copies have already passed authored binding checks.
+                        let mut generated = phase.clone();
+                        crate::collect_pattern_names(&normalized, &mut generated.collisions);
+                        generated.substituted.extend(generated.collisions.drain());
+                        generated.check(&normalized, env, model, span, expected, self_relations)?;
+                    }
+                    AggregateValidation::Deferred if !phase.aggregate_bounds_only => {
+                        // The complete authored typing pass has succeeded. Revisit
+                        // nested bounds without expansion or ordinary value folding;
+                        // this phase cannot request another authored-tree replay.
+                        let mut bounds = phase.clone();
+                        bounds.normalize_aggregates = false;
+                        bounds.aggregate_bounds_only = true;
+                        validate_expression_in_phase(
+                            expr,
+                            env,
+                            model,
+                            span,
+                            expected,
+                            &bounds,
+                            self_relations,
+                        )?;
+                    }
+                    AggregateValidation::Deferred => {}
+                }
             }
         }
         Expr::BinaryNamed { left, right, .. } => {
@@ -1904,12 +2871,22 @@ fn validate_statement(
             statements,
             span,
         } => {
-            let ty = validate_binder(binder, env, model, *span, phase, phase, self_relations)?;
+            let child = phase.clone().bound_by(binder, env, model);
+            let ty = validate_binder(
+                binder,
+                env,
+                model,
+                *span,
+                phase,
+                &child,
+                BinderSite::Statement,
+                self_relations,
+            )?;
             let mut local = env.clone();
             local.insert(binder_name(binder).to_owned(), ty);
             let mut local_relations = self_relations.clone();
             local_relations.remove(binder_name(binder));
-            let phase = phase.after_where(binder);
+            let phase = child.after_where(binder);
             validate_statements(statements, &local, model, &phase, &local_relations)
         }
     }
@@ -2039,8 +3016,17 @@ fn validate_statement_assignments(
             span,
         } => {
             let name = binder_name(binder);
-            let phase = ValidationPhase::normalized();
-            let ty = validate_binder(binder, env, model, *span, &phase, &phase, self_relations)?;
+            let phase = ValidationPhase::init_statements();
+            let ty = validate_binder(
+                binder,
+                env,
+                model,
+                *span,
+                &phase,
+                &phase,
+                BinderSite::Statement,
+                self_relations,
+            )?;
             let mut local = env.clone();
             local.insert(name.to_owned(), ty);
             let mut local_relations = self_relations.clone();
@@ -2076,8 +3062,37 @@ pub(crate) fn validate_expression_type_between(
     model: &KernelModel,
     expected_model: &KernelModel,
 ) -> Result<(), TypecheckError> {
+    validate_expression_type_in_phase(
+        expr,
+        expected,
+        bindings,
+        model,
+        expected_model,
+        &ValidationPhase::normalized(),
+    )
+}
+
+/// Full authored typing for the pure planner, without candidate enumeration.
+pub(crate) fn validate_planner_integer_endpoint(
+    expr: &Expr,
+    bindings: &[(String, TypeRef)],
+    model: &KernelModel,
+) -> Result<(), TypecheckError> {
+    let mut phase = ValidationPhase::normalized();
+    phase.normalize_aggregates = false;
+    validate_expression_type_in_phase(expr, &TypeRef::Int, bindings, model, model, &phase)
+}
+
+fn validate_expression_type_in_phase(
+    expr: &Expr,
+    expected: &TypeRef,
+    bindings: &[(String, TypeRef)],
+    model: &KernelModel,
+    expected_model: &KernelModel,
+    phase: &ValidationPhase,
+) -> Result<(), TypecheckError> {
     let mut env = base_env(model);
-    env.extend(bindings.iter().cloned());
+    env.extend_lexical(bindings);
     let span = unknown_span();
     let resolved = carrier_type(expected, expected_model).map_err(|error| error.with_span(span))?;
     let actual =
@@ -2085,15 +3100,16 @@ pub(crate) fn validate_expression_type_between(
     if !types_compatible(&actual, &resolved, model).map_err(|error| error.with_span(span))? {
         return Err(not_assignable(&actual, expected).with_span(span));
     }
-    validate_expression(
-        expr,
-        &env,
-        model,
-        span,
-        Some(&resolved),
-        &SelfRelations::new(),
-    )
-    .map_err(|error| error.with_span(span))
+    phase
+        .check(
+            expr,
+            &env,
+            model,
+            span,
+            Some(&resolved),
+            &SelfRelations::new(),
+        )
+        .map_err(|error| error.with_span(span))
 }
 
 /// Recursively type-check a standalone predicate against a built model, using
@@ -2163,7 +3179,7 @@ pub(crate) fn validate_statement_types(
 pub(crate) fn validate_checked_model_types(model: &KernelModel) -> Result<(), TypecheckError> {
     let env = base_env(model);
     let self_relations = SelfRelations::new();
-    let mut phase = ValidationPhase::normalized();
+    let mut phase = ValidationPhase::init_statements();
     for statement in &model.init {
         validate_statement(statement, &env, model, &phase, &self_relations)?;
         crate::compose::extend_statement_pattern_names(statement, &mut phase.collisions);
@@ -2186,9 +3202,25 @@ fn validate_leadsto_expression_types(
     leadsto: &crate::LeadsToDef,
     env: &TypeEnv,
     model: &KernelModel,
+    admission: Option<&Admission>,
 ) -> Result<(), TypecheckError> {
+    if leadsto.within.is_some_and(|within| within < 0) {
+        return Err(error(format!(
+            "leadsTo '{}' within must be non-negative",
+            shown(&leadsto.name)
+        ))
+        .with_span(leadsto.span));
+    }
     let mut local = env.clone();
     let self_relations = SelfRelations::new();
+    let mut body_phase = ValidationPhase::normalized();
+    if let Some(admission) = admission {
+        let mut rule = admit_leadsto_binders(leadsto, model)?;
+        rule.symbolic_sets.clone_from(&admission.symbolic_sets);
+        rule.static_aggregates_only = admission.static_aggregates_only;
+        body_phase = ValidationPhase::range_admission(false, admission);
+        body_phase.range_rule = Some(rule);
+    }
     for binder in &leadsto.binders {
         let phase = ValidationPhase::normalized();
         let ty = validate_binder(
@@ -2198,12 +3230,13 @@ fn validate_leadsto_expression_types(
             leadsto.span,
             &phase,
             &phase,
+            BinderSite::Quantifier,
             &self_relations,
         )?;
         local.insert(binder_name(binder).to_owned(), ty);
     }
     for expr in [&leadsto.before, &leadsto.after] {
-        validate_expression(
+        body_phase.check(
             expr,
             &local,
             model,
@@ -2213,7 +3246,7 @@ fn validate_leadsto_expression_types(
         )?;
     }
     if let Some(expr) = &leadsto.decreases {
-        validate_expression(
+        body_phase.check(
             expr,
             &local,
             model,
@@ -2246,7 +3279,7 @@ fn validate_leadsto_expression_types(
             .with_span(helper.span));
         }
         for (argument, param) in helper.args.iter().zip(&action.params) {
-            validate_expression(
+            body_phase.check(
                 argument,
                 &local,
                 model,
@@ -2261,17 +3294,235 @@ fn validate_leadsto_expression_types(
 
 #[allow(clippy::too_many_lines)]
 pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(), TypecheckError> {
+    validate_model_expressions(model, None)
+}
+
+/// Apply the shared range rule to every action and property scope.
+pub(crate) fn admit_model_ranges(model: &KernelModel) -> Result<(), TypecheckError> {
+    validate_model_expressions(model, Some(&Admission::new(model, false)))
+}
+
+/// Where a projection stops on an aggregate bound it cannot fold, if it does.
+pub(crate) fn locate_unfolded_aggregate(model: &KernelModel) -> Result<(), TypecheckError> {
+    validate_model_expressions(model, Some(&Admission::new(model, true)))
+}
+
+/// State Sets that can hold a key the engines do not read as a solver literal.
+#[derive(Clone, Default)]
+struct SymbolicSets {
+    /// In some state, the initial one included.
+    in_any_state: BTreeSet<String>,
+    /// In the state an action leaves, which is all a postcondition reads.
+    after_action: BTreeSet<String>,
+}
+
+/// What one admission walk judges.
+struct Admission {
+    symbolic_sets: SymbolicSets,
+    static_aggregates_only: bool,
+}
+
+impl Admission {
+    fn new(model: &KernelModel, static_aggregates_only: bool) -> Self {
+        Self {
+            symbolic_sets: state_sets_with_symbolic_keys(model),
+            static_aggregates_only,
+        }
+    }
+}
+
+/// One assignment to a state Set, with the local names that hold solver literals there.
+struct SetWrite<'a> {
+    target: &'a str,
+    value: &'a Expr,
+    literals: BTreeSet<String>,
+    aliases: BTreeMap<String, &'a Expr>,
+}
+
+fn collect_set_writes<'a>(
+    statements: &'a [Statement],
+    scope: &(BTreeSet<String>, BTreeMap<String, &'a Expr>),
+    model: &KernelModel,
+    writes: &mut Vec<SetWrite<'a>>,
+) {
+    for statement in statements {
+        match statement {
+            Statement::Assign {
+                target: LValue::Var(name),
+                value,
+                ..
+            } if model
+                .state
+                .iter()
+                .any(|(state, ty)| state == name && matches!(ty, TypeRef::Set(_))) =>
+            {
+                writes.push(SetWrite {
+                    target: name,
+                    value,
+                    literals: scope.0.clone(),
+                    aliases: scope.1.clone(),
+                });
+            }
+            Statement::Assign { .. } => {}
+            Statement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                collect_set_writes(then_statements, scope, model, writes);
+                collect_set_writes(else_statements, scope, model, writes);
+            }
+            Statement::ForAll {
+                binder, statements, ..
+            } => {
+                let mut inner = scope.clone();
+                inner.1.remove(binder_name(binder));
+                if matches!(binder, Binder::Collection { .. }) {
+                    inner.0.remove(binder_name(binder));
+                } else {
+                    inner.0.insert(binder_name(binder).to_owned());
+                }
+                collect_set_writes(statements, &inner, model, writes);
+            }
+        }
+    }
+}
+
+/// Whether every key of an assigned value is a solver literal, given the Sets known not to be.
+fn writes_literal_keys(
+    value: &Expr,
+    write: &SetWrite<'_>,
+    symbolic: &BTreeSet<String>,
+    model: &KernelModel,
+) -> bool {
+    recursion::guard(|| {
+        let literal = |item: &Expr| match item {
+            Expr::Num(_) => true,
+            Expr::Var(name) if write.literals.contains(name) => true,
+            Expr::Var(name) => {
+                !model.state.iter().any(|(state, _)| state == name)
+                    && matches!(model.consts.get(name), Some(crate::FslValue::Int(_)))
+            }
+            _ => false,
+        };
+        match value {
+            Expr::Set(items) => items.iter().all(literal),
+            Expr::Var(name) => write.aliases.get(name).map_or_else(
+                || !symbolic.contains(name),
+                |alias| writes_literal_keys(alias, write, symbolic, model),
+            ),
+            Expr::UnaryNamed { name, expr, .. } if name == "old" => {
+                writes_literal_keys(expr, write, symbolic, model)
+            }
+            Expr::Method {
+                receiver,
+                name,
+                args,
+            } if name == "add" || name == "remove" => {
+                writes_literal_keys(receiver, write, symbolic, model)
+                    && (name == "remove" || args.iter().all(literal))
+            }
+            Expr::Conditional {
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                writes_literal_keys(then_expr, write, symbolic, model)
+                    && writes_literal_keys(else_expr, write, symbolic, model)
+            }
+            _ => false,
+        }
+    })
+}
+
+/// The state Sets a write can give a key the engines do not read as a solver literal.
+/// Init is a fixed point, because an init copy carries what init assigned. An action
+/// reads every state from a reframed frame, whose keys are the element domain's, so a
+/// copy there carries nothing and only the action's own expression decides.
+fn state_sets_with_symbolic_keys(model: &KernelModel) -> SymbolicSets {
+    let mut init_writes = Vec::new();
+    // Init rewrites a state read after a literal assignment to that literal.
+    let mut init_scope: (BTreeSet<String>, BTreeMap<String, &Expr>) = Default::default();
+    for statement in &model.init {
+        collect_set_writes(
+            std::slice::from_ref(statement),
+            &init_scope,
+            model,
+            &mut init_writes,
+        );
+        if let Statement::Assign {
+            target: LValue::Var(name),
+            value,
+            ..
+        } = statement
+        {
+            if matches!(value, Expr::Num(_)) {
+                init_scope.0.insert(name.clone());
+            } else {
+                init_scope.0.remove(name);
+            }
+        }
+    }
+    let mut action_writes = Vec::new();
+    for action in &model.actions {
+        let mut scope: (BTreeSet<String>, BTreeMap<String, &Expr>) = Default::default();
+        scope
+            .0
+            .extend(action.params.iter().map(|param| param.name().to_owned()));
+        for guard in &action.guards {
+            if let crate::ActionGuard::Let(name, value) = guard {
+                scope.0.remove(name);
+                scope.1.insert(name.clone(), value);
+                if matches!(value, Expr::Num(_)) {
+                    scope.0.insert(name.clone());
+                }
+            }
+        }
+        collect_set_writes(&action.statements, &scope, model, &mut action_writes);
+    }
+    let mut in_any_state = BTreeSet::new();
+    loop {
+        let before = in_any_state.len();
+        for write in &init_writes {
+            if !writes_literal_keys(write.value, write, &in_any_state, model) {
+                in_any_state.insert(write.target.to_owned());
+            }
+        }
+        if in_any_state.len() == before {
+            break;
+        }
+    }
+    let after_action: BTreeSet<String> = action_writes
+        .iter()
+        .filter(|write| !writes_literal_keys(write.value, write, &BTreeSet::new(), model))
+        .map(|write| write.target.to_owned())
+        .collect();
+    in_any_state.extend(after_action.iter().cloned());
+    SymbolicSets {
+        in_any_state,
+        after_action,
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn validate_model_expressions(
+    model: &KernelModel,
+    admission: Option<&Admission>,
+) -> Result<(), TypecheckError> {
     let env = base_env(model);
     let self_relations = SelfRelations::new();
     for action in &model.actions {
         let checked = (|| {
             let mut local = env.clone();
             let mut local_relations = SelfRelations::new();
+            let mut phase = ValidationPhase::for_scope(admission, true);
             for param in &action.params {
                 reject_constant_shadow(param.name(), model.consts.keys())?;
                 local.insert(param.name().to_owned(), param.ty());
+                if let Some(rule) = &mut phase.range_rule {
+                    rule.bind_param(param, model);
+                }
             }
-            let mut phase = ValidationPhase::normalized();
             for (index, guard) in action.guards.iter().enumerate() {
                 let target = crate::action_guard_target(&action.name, index);
                 let span = model.component_item_span(&target).unwrap_or(action.span);
@@ -2309,6 +3560,9 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
                             } else {
                                 local_relations.remove(name);
                             }
+                            if let Some(rule) = &mut phase.range_rule {
+                                rule.bind_let(name, expr, &local, model);
+                            }
                             local.insert(name.clone(), ty);
                         }
                     }
@@ -2332,6 +3586,8 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
                 let target = crate::origin::action_ensure_target(&action.name, index);
                 let span = model.component_item_span(&target).unwrap_or(action.span);
                 phase
+                    .for_postcondition()
+                    .with_old_frame()
                     .check(
                         expr,
                         &local,
@@ -2348,31 +3604,38 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
             error.in_target(model, &crate::action_target(&action.name), action.span)
         })?;
     }
-    for (kind, properties) in [
-        ("invariant", &model.invariants),
-        ("trans", &model.transitions),
-        ("reachable", &model.reachables),
+    for (kind, properties, carriers) in [
+        ("invariant", &model.invariants, true),
+        ("trans", &model.transitions, true),
+        ("reachable", &model.reachables, false),
     ] {
         for property in properties {
-            validate_expression(
-                &property.expr,
-                &env,
-                model,
-                property.span,
-                Some(&TypeRef::Bool),
-                &self_relations,
-            )
-            .map_err(|error| {
-                error.in_target(
+            let phase = ValidationPhase::for_scope(admission, carriers);
+            let phase = if kind == "trans" {
+                phase.with_old_frame()
+            } else {
+                phase
+            };
+            phase
+                .check(
+                    &property.expr,
+                    &env,
                     model,
-                    &crate::property_target(kind, &property.name),
                     property.span,
+                    Some(&TypeRef::Bool),
+                    &self_relations,
                 )
-            })?;
+                .map_err(|error| {
+                    error.in_target(
+                        model,
+                        &crate::property_target(kind, &property.name),
+                        property.span,
+                    )
+                })?;
         }
     }
     for leadsto in &model.leadstos {
-        validate_leadsto_expression_types(leadsto, &env, model).map_err(|error| {
+        validate_leadsto_expression_types(leadsto, &env, model, admission).map_err(|error| {
             error.in_target(
                 model,
                 &crate::property_target("leadsTo", &leadsto.name),
@@ -2382,15 +3645,165 @@ pub(crate) fn validate_model_expression_types(model: &KernelModel) -> Result<(),
     }
     if let Some(expr) = &model.terminal {
         let span = model.terminal_span.unwrap_or_else(unknown_span);
-        validate_expression(
-            expr,
-            &env,
-            model,
+        ValidationPhase::for_scope(admission, false)
+            .check(
+                expr,
+                &env,
+                model,
+                span,
+                Some(&TypeRef::Bool),
+                &self_relations,
+            )
+            .map_err(|error| error.in_target(model, crate::TERMINAL_TARGET, span))?;
+    }
+    Ok(())
+}
+
+/// Apply the shared range rule to one init statement, updating completed assignments.
+fn admit_init_statement(
+    statement: &Statement,
+    env: &TypeEnv,
+    model: &KernelModel,
+    phase: &mut ValidationPhase,
+    self_relations: &SelfRelations,
+) -> Result<(), TypecheckError> {
+    recursion::guard(|| admit_init_statement_inner(statement, env, model, phase, self_relations))
+}
+
+fn admit_init_statement_inner(
+    statement: &Statement,
+    env: &TypeEnv,
+    model: &KernelModel,
+    phase: &mut ValidationPhase,
+    self_relations: &SelfRelations,
+) -> Result<(), TypecheckError> {
+    let rule = |phase: &ValidationPhase| phase.range_rule.clone().unwrap_or_default();
+    match statement {
+        Statement::Assign { target, value, .. } => {
+            validate_statement(statement, env, model, phase, self_relations)?;
+            if let (LValue::Var(name), Some(rule)) = (target, &mut phase.range_rule) {
+                rule.record_init_assignment(name, value, env, model);
+            }
+        }
+        Statement::If {
+            condition,
+            then_statements,
+            else_statements,
             span,
-            Some(&TypeRef::Bool),
-            &self_relations,
-        )
-        .map_err(|error| error.in_target(model, crate::TERMINAL_TARGET, span))?;
+        } => {
+            phase.check(
+                condition,
+                env,
+                model,
+                *span,
+                Some(&TypeRef::Bool),
+                self_relations,
+            )?;
+            let known = rule(phase).known_condition(condition, env, model);
+            let mut then_phase = phase.after_patterns(condition);
+            let mut else_phase = then_phase.clone();
+            for statement in then_statements {
+                admit_init_statement(statement, env, model, &mut then_phase, self_relations)?;
+            }
+            for statement in else_statements {
+                admit_init_statement(statement, env, model, &mut else_phase, self_relations)?;
+            }
+            let then_recipes = rule(&then_phase).recipes;
+            let else_recipes = rule(&else_phase).recipes;
+            if let Some(rule) = &mut phase.range_rule {
+                rule.recipes = match known {
+                    Some(true) => then_recipes,
+                    Some(false) => else_recipes,
+                    None => RangeRule::join_recipes(&then_recipes, &else_recipes),
+                };
+            }
+        }
+        Statement::ForAll {
+            binder,
+            statements,
+            span,
+        } => {
+            // Statement binder sources read no completed assignment; the filter and body do.
+            let mut source = phase.clone();
+            if let Some(rule) = &mut source.range_rule {
+                rule.recipes.clear();
+            }
+            let mut child = source.clone().bound_by(binder, env, model);
+            if let (Some(rule), Some(outer)) = (&mut child.range_rule, &phase.range_rule) {
+                rule.recipes.clone_from(&outer.recipes);
+            }
+            let ty = validate_binder(
+                binder,
+                env,
+                model,
+                *span,
+                &source,
+                &child,
+                BinderSite::Statement,
+                self_relations,
+            )?;
+            let mut local = env.clone();
+            local.insert(binder_name(binder).to_owned(), ty);
+            let mut local_relations = self_relations.clone();
+            local_relations.remove(binder_name(binder));
+            let dead = rule(&child).dead;
+            let mut body = child.after_where(binder);
+            for statement in statements {
+                admit_init_statement(statement, &local, model, &mut body, &local_relations)?;
+            }
+            let unconditional = binder_scope_is_unconditional(binder, &rule(&source), env, model);
+            let body_recipes = rule(&body).recipes;
+            if !dead && let Some(rule) = &mut phase.range_rule {
+                rule.recipes = if unconditional {
+                    body_recipes
+                } else {
+                    RangeRule::join_recipes(&body_recipes, &rule.recipes)
+                };
+            }
+        }
+    }
+    crate::compose::extend_statement_pattern_names(statement, &mut phase.collisions);
+    Ok(())
+}
+
+/// Whether every candidate of a statement binder reaches its body without a guard.
+fn binder_scope_is_unconditional(
+    binder: &Binder,
+    rule: &RangeRule,
+    env: &TypeEnv,
+    model: &KernelModel,
+) -> bool {
+    if crate::model::binder_scope(binder).1.is_some() {
+        return false;
+    }
+    match binder {
+        Binder::Typed { .. } => true,
+        Binder::Range { lo, hi, .. } => matches!(
+            model.plan_integer_range(lo, hi, &rule.lexical(env)),
+            RangePlan::Static { .. }
+        ),
+        Binder::Collection { collection, .. } => {
+            // A Set candidate is guarded by its membership, a Seq literal item is not.
+            matches!(collection.as_ref(), Expr::Seq(_))
+                && matches!(
+                    rule.collection_candidates(collection, env, model),
+                    CollectionCandidates::Literal(_)
+                )
+        }
+    }
+}
+
+/// Apply the shared range rule to the init statements in execution order.
+///
+/// # Errors
+/// Returns the first refusal with the statement index that owns it.
+pub(crate) fn admit_init_ranges(model: &KernelModel) -> Result<(), (usize, TypecheckError)> {
+    let env = base_env(model);
+    let self_relations = SelfRelations::new();
+    let mut phase = ValidationPhase::range_admission(false, &Admission::new(model, false));
+    for (index, statement) in model.init.iter().enumerate() {
+        admit_init_statement(statement, &env, model, &mut phase, &self_relations)
+            .map_err(|error| (index, error))?;
     }
     Ok(())
 }

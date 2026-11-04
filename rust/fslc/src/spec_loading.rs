@@ -274,6 +274,22 @@ pub(crate) fn load_model_from_source(
     load_kernel_model_from_source(path, source).map(|(_, model)| model)
 }
 
+/// `load_model_from_source` for `replay`; see `check_stages::load_replay_model`.
+pub(crate) fn load_replay_model_from_source(
+    path: &Path,
+    source: &str,
+) -> Result<KernelModel, SpecLoadError> {
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let model = fslc_rust::check_stages::load_replay_model(
+        source,
+        &path.to_string_lossy(),
+        &dependency_resolver(base),
+        crate::process::parse_options(),
+    )?;
+    reject_refuted_requirements(source, &model)?;
+    Ok(model)
+}
+
 pub(crate) fn load_kernel_model(
     path: &Path,
 ) -> Result<(String, KernelSpec, KernelModel), SpecLoadError> {
@@ -609,9 +625,8 @@ pub(crate) fn load_model_scoped_from_source(
             ));
         }
     };
-    let model = fsl_core::build_model(kernel).map_err(|error| {
-        SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
-    })?;
+    let model = fslc_rust::checked_build::build_checked_model(kernel)
+        .map_err(fslc_rust::checked_build::CheckedBuildError::into_spec_load_error)?;
     // Asked of the scoped model: the overrides narrow the domains the
     // lowering enumerated, and so the ones the solver is asked over.
     reject_refuted_requirements(source, &model)?;

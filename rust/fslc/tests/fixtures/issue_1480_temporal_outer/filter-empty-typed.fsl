@@ -1,0 +1,10 @@
+spec TemporalOuter {
+  state { tick: Bool }
+  init { tick = false }
+  action idle() { tick = tick }
+  leadsTo Responds {
+    forall i in 1..0 {
+      forall b: Bool where b { true ~> within 1 true }
+    }
+  }
+}

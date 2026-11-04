@@ -100,9 +100,9 @@ impl Drop for Fixture {
 enum Expected {
     Lost(Value),
     Located(&'static str),
-    StaticBound,
+    LocatedWithAbstractViolation(&'static str, Value),
 }
-use Expected::{Located, Lost, StaticBound};
+use Expected::{Located, LocatedWithAbstractViolation, Lost};
 
 fn assert_error(actual: &Value, exit: i32, kind: &str) {
     assert_eq!(exit, 2, "{actual:#}");
@@ -121,19 +121,12 @@ fn assert_lost(actual: &Value, exit: i32, result: &str, bindings: &Value) {
 fn run(cell: &str, impl_const: &str, abs_const: &str, property: &str, expected: &Expected) {
     let fixture = Fixture::new(impl_const, abs_const, property);
     let observations = fixture.observations(cell);
-    let static_bound = "'N' is not an integer const";
     for (_, (abs, exit)) in &observations {
-        if matches!(expected, StaticBound | Located("N")) {
-            assert_error(abs, *exit, "semantics");
-            assert_eq!(abs["message"], static_bound, "{abs:#}");
-        } else {
-            let bindings = match expected {
-                Lost(bindings) => bindings.clone(),
-                Located(name) => json!({*name: 2}),
-                StaticBound => unreachable!(),
-            };
-            assert_lost(abs, *exit, "violated", &bindings);
-        }
+        let bindings = match expected {
+            Lost(bindings) | LocatedWithAbstractViolation(_, bindings) => bindings.clone(),
+            Located(name) => json!({*name: 2}),
+        };
+        assert_lost(abs, *exit, "violated", &bindings);
     }
     for ((actual, exit), (abs, abs_exit)) in &observations {
         match expected {
@@ -143,20 +136,11 @@ fn run(cell: &str, impl_const: &str, abs_const: &str, property: &str, expected: 
                 assert_eq!(actual["bindings"], abs["bindings"]);
                 assert_eq!(exit, abs_exit);
             }
-            Located(name) => {
+            Located(name) | LocatedWithAbstractViolation(name, _) => {
                 assert_error(actual, *exit, "type");
                 assert!(actual["loc"].is_object(), "{actual:#}");
                 let message = actual["message"].as_str().expect("located error message");
                 assert!(message.contains(name), "{actual:#}");
-                if *name == "N" {
-                    assert_eq!(exit, abs_exit);
-                }
-            }
-            StaticBound => {
-                assert_error(actual, *exit, "semantics");
-                assert_eq!(actual["message"], static_bound, "{actual:#}");
-                assert_eq!(actual["message"], abs["message"]);
-                assert_eq!(exit, abs_exit);
             }
         }
     }
@@ -175,12 +159,12 @@ cells! {
     f1: ("const N = 1", "const N = 3",
         "forall z in 0..N { y == 0 ~> z <= 1 }", Lost(json!({"z": 2}))),
     f2: ("const N = 1", "",
-        "forall N in 0..3 { forall z in 0..N { y == 0 ~> z <= 1 } }", Located("N")),
+        "forall N in 0..3 { forall z in 0..N { y == 0 ~> z <= 1 } }", LocatedWithAbstractViolation("N", json!({"N":2,"z":2}))),
     c1: ("const M = 1", "const N = 3",
         "forall z in 0..N { y == 0 ~> z <= 1 }", Lost(json!({"z": 2}))),
     s1c: ("const M = 1", "const N = 3", "y == 0 ~> y >= N", Lost(json!({}))),
     c2: ("const M = 1", "",
-        "forall N in 0..3 { forall z in 0..N { y == 0 ~> z <= 1 } }", StaticBound),
+        "forall N in 0..3 { forall z in 0..N { y == 0 ~> z <= 1 } }", Lost(json!({"N":2,"z":2}))),
     c3: ("const N = 1", "",
         "forall K in 0..3 { forall z in 0..3 { (y == 0 and z <= K) ~> z <= 1 } }",
         Lost(json!({"K": 2, "z": 2}))),
@@ -256,12 +240,14 @@ review_cells! {
     r1_pattern_or: ("spec Impl { type V=0..5 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
         "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(x)) or y==3)} }",
         "map y=x map o=p action go()->step()", 2, Some(0), Some(PATTERN_CAPTURE), false, json!({})),
+    // #1480: these abstract specs have a bound no engine executes, so `refine`
+    // and `verify` now report the same located refusal of the abstract input.
     r1_pattern_const: ("spec Impl { type V=0..5 const N=1 state {x:Int=0,p:Option<V> = some(3)} fair action go(){requires x==0 x=1} }",
         "spec Abs { type V=0..5 state {y:Int=0,o:Option<V> = some(3)} fair action step(){requires y==0 y=1} leadsTo L {y==0 ~> ((o is some(N)) and (forall k in 0..N {k<=1}))} }",
-        "map y=x map o=p action go()->step()", 2, Some(2), None, false, json!({})),
+        "map y=x map o=p action go()->step()", 2, Some(2), None, true, json!({})),
     r1_ambiguous_const_state: ("spec Impl {state {x:Int=0} fair action go(){x=0}}",
         "spec Abs {const N=3 state {N:Int=1} fair action step(){N=1} leadsTo L {forall z in 0..N {true ~> z<=1}}}",
-        "map N=1 action go()->step()", 2, None, None, false, json!({})),
+        "map N=1 action go()->step()", 2, None, None, true, json!({})),
     r1_unused_map: ("spec Impl {state {x:Int=0} fair action go(){requires x==0 x=1}}",
         "spec Abs {state {y:Int=0} fair action step(){requires y==0 y=1} leadsTo L {forall x in 0..3 {x==0 ~> x==0}}}",
         "map y=x action go()->step()", 0, Some(0), None, false, json!({})),

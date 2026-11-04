@@ -199,17 +199,10 @@ fn build(
     // produced them, so they must be captured here rather than derived from
     // the checked KernelModel below.
     let diagnostics = kernel.diagnostics().to_vec();
-    let model = fsl_core::build_model(kernel).map_err(|failure| {
-        // The same span and classification the native CLI reports, so the
-        // Worker envelope does not diverge from `fslc` (issues 555, 565).
-        let diagnostic = fslc_rust::spec_load::SemanticDiagnostic::from_model_error(&failure);
-        fslc_rust::verification_output::render_semantic_error(
+    let model = fslc_rust::checked_build::build_checked_model(kernel).map_err(|failure| {
+        fslc_rust::spec_load::render_spec_load_error(
             envelope(solver_version),
-            &diagnostic.message,
-            diagnostic.loc,
-            &diagnostic.class,
-            diagnostic.diagnostic_code,
-            diagnostic.hint.as_deref(),
+            &failure.into_spec_load_error(),
         )
     })?;
     Ok((model, diagnostics))
@@ -395,7 +388,7 @@ async fn governance_output(
                 let mapping_source = resolver
                     .read(&preservation.refinement_path)
                     .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
-                let implementation = fsl_core::build_model(
+                let implementation = fslc_rust::checked_build::build_checked_model(
                     fsl_core::parse_kernel_source_with_file_with_options(
                         &implementation_source,
                         resolver,
@@ -404,8 +397,13 @@ async fn governance_output(
                     )
                     .map_err(|failure| governance_error(failure.to_string(), preservation.span))?,
                 )
-                .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
-                let abstraction = fsl_core::build_model(
+                .map_err(|failure| {
+                    governance_error(
+                        failure.into_spec_load_error().to_string(),
+                        preservation.span,
+                    )
+                })?;
+                let abstraction = fslc_rust::checked_build::build_checked_model(
                     fsl_core::parse_kernel_source_with_file_with_options(
                         &abstraction_source,
                         resolver,
@@ -414,7 +412,12 @@ async fn governance_output(
                     )
                     .map_err(|failure| governance_error(failure.to_string(), preservation.span))?,
                 )
-                .map_err(|failure| governance_error(failure.to_string(), preservation.span))?;
+                .map_err(|failure| {
+                    governance_error(
+                        failure.into_spec_load_error().to_string(),
+                        preservation.span,
+                    )
+                })?;
                 let mapping = fsl_core::parse_refinement_with_options(
                     &mapping_source,
                     &implementation,
@@ -2687,6 +2690,23 @@ mod tests {
         );
 
         assert_eq!(worker_preservation_result(&request), json!("refines"));
+    }
+
+    /// #1480: a preserved side the engines cannot execute is refused, with the
+    /// envelope `issue_1480_check_engine_agreement.rs` pins for native `fslc check`.
+    #[test]
+    fn issue_1480_governance_refuses_an_unexecutable_preserved_side() {
+        let refused = governance_request(
+            "SmallImpl",
+            "spec SmallImpl { type IQty = 0..3 state { n: IQty } init { n = 0 } \
+             action bump() { requires n < 3  n = n + 1 } \
+             reachable R { forall i in 0..n { i >= 0 } } }\n",
+        );
+        let worker = block_on(check(&refused, TEST_SOLVER_VERSION));
+        assert_eq!(worker["result"], "error", "{worker}");
+        assert_eq!(worker["kind"], "type", "{worker}");
+        assert_eq!(worker["message"], "'n' is not an integer const", "{worker}");
+        assert_eq!(worker["loc"], json!({"line": 4, "column": 3}), "{worker}");
     }
 
     /// The native `check`/`verify` rejection of an init that writes `m` from

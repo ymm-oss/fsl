@@ -707,7 +707,8 @@ fn compute_binder_values(
             where_expr: None,
             ..
         } => {
-            let ty = TypeRef::Named(super::qualified_type(type_name)?);
+            let type_name = super::qualified_type(type_name)?;
+            let ty = model.typed_binder_type(&type_name);
             Ok(Some(model.domain_values(&ty)?))
         }
         Binder::Range {

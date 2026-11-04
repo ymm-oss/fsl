@@ -794,38 +794,34 @@ fn preservation_unused_ambient_state_keeps_downstream_diagnostic_name() {
             "issue-1442-unused-ambient",
             &[("b.fsl", part), ("s.fsl", &system)],
         );
-        for file in ["b.fsl", "s.fsl"] {
-            assert_eq!(check(&dir, file).1, 0);
-        }
-        let direct = run(
-            &dir,
-            &[
-                "verify",
-                "b.fsl",
-                "--engine",
-                "bmc",
-                "--depth",
-                "2",
-                "--no-cache",
-            ],
-        );
+        // #1480: `check` now refuses the let-named bound, and the component wrapper
+        // still names the author's local `x`, not the composed ambient `x`.
+        let direct = check(&dir, "b.fsl");
         assert_eq!(direct.1, 2, "{}", direct.0);
         assert_eq!(direct.0["message"], "'x' is not an integer const");
+        assert_eq!(direct.0["loc"], json!({"line": 1, "column": 77}));
+        let composed = check(&dir, "s.fsl");
+        assert_eq!(composed.1, 2, "{}", composed.0);
         assert_eq!(
-            run(
+            composed.0["message"],
+            "component \"b.fsl\" failed to check (b.go: 'x' is not an integer const at b.fsl:1:77) at s.fsl:1:13"
+        );
+        assert_eq!(composed.0["loc"], json!({"line": 1, "column": 13}));
+        for (file, checked) in [("b.fsl", &direct), ("s.fsl", &composed)] {
+            let verified = run(
                 &dir,
                 &[
                     "verify",
-                    "s.fsl",
+                    file,
                     "--engine",
                     "bmc",
                     "--depth",
                     "2",
-                    "--no-cache"
-                ]
-            ),
-            direct
-        );
+                    "--no-cache",
+                ],
+            );
+            assert_eq!(&verified, checked, "{file}");
+        }
     }
 }
 

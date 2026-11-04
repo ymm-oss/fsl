@@ -55,13 +55,14 @@ fn declared_prefix_and_appended_support_survive_alias_transition_and_order_view(
             .collect();
         let initial = keys(&solver, &model, &current["r"]);
         assert_eq!(initial, expected[..4]);
-        let next = crate::transition::compute_updates(
+        let next = crate::transition::compute_updates_in(
             &solver,
             &model,
             &model.actions[0].statements,
             &current,
             current.clone(),
             &mut TypedBindings::new(),
+            None,
         )
         .unwrap();
         let before = keys(&solver, &model, &next["r"]);

@@ -8,7 +8,8 @@ use fsl_core::{FslValue, KernelModel, TraceAction, TraceChange, TraceStep};
 use fsl_solver::{ModelValue, SmtSolver};
 
 use crate::VerifyError;
-use crate::transition::{ActionInstance, action_guards, compute_updates};
+use crate::bmc::premised_state_carriers;
+use crate::transition::{ActionInstance, action_guards_in, compute_updates_in};
 use crate::value::{SymbolicState, SymbolicValue, i64_index, project_state, project_value};
 
 pub(crate) fn project_trace<S: SmtSolver>(
@@ -34,15 +35,24 @@ pub(crate) fn project_trace<S: SmtSolver>(
             // selected action, never from padding or a clamped frame length.
             let previous = &states[step - 1];
             let action = &model.actions[instance.action_index];
-            let (_, mut bindings) =
-                action_guards(solver, model, action, previous, &instance.params)?;
-            let attempted = compute_updates(
+            // The unrolled step read these guards and updates through its certificate.
+            let frame = premised_state_carriers(model, previous);
+            let (_, mut bindings) = action_guards_in(
+                solver,
+                model,
+                action,
+                previous,
+                &instance.params,
+                Some(&frame),
+            )?;
+            let attempted = compute_updates_in(
                 solver,
                 model,
                 &action.statements,
                 previous,
                 previous.clone(),
                 &mut bindings,
+                Some(&frame),
             )?;
             project_state(solver, model, &attempted)?
         } else {

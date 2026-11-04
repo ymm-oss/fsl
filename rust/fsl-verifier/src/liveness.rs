@@ -4,12 +4,18 @@
 
 use std::collections::BTreeMap;
 
-use fsl_core::{FslValue, KernelBinder, KernelModel, LeadsToDef, static_leadsto_bindings};
+use fsl_core::binder_range::{RangePlan, RangeUnknown};
+use fsl_core::{FslValue, KernelBinder, KernelModel, LeadsToDef, TypeRef};
 use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
-use crate::eval::{eval, static_binder_values};
-use crate::value::{SymbolicState, TypedBindings as Bindings, bool_term};
+use crate::bmc::CheckedStateCarriers;
+use crate::eval::{
+    enumerated_binder_binding, eval_in, integer_range_error, static_binder_values, static_int,
+};
+use crate::value::{
+    SymbolicState, TypedBinding, TypedBindings as Bindings, bool_term, concrete_value,
+};
 
 #[derive(Clone)]
 pub(crate) struct LeadstoBinding<T> {
@@ -22,33 +28,82 @@ pub(crate) fn leadsto_bindings<S: SmtSolver>(
     model: &KernelModel,
     property: &LeadsToDef,
 ) -> Result<Vec<LeadstoBinding<S::Term>>, VerifyError> {
-    let mut expanded = vec![Bindings::new()];
-    for binder in &property.binders {
-        let symbolic = static_binder_values(solver, model, binder)?;
-        let name = match binder {
-            KernelBinder::Typed { name, .. }
-            | KernelBinder::Range { name, .. }
-            | KernelBinder::Collection { name, .. } => name,
-        };
-        let mut next = Vec::new();
-        for binding in expanded {
-            for (_, term) in &symbolic {
-                let mut candidate = binding.clone();
-                candidate.insert(name.clone(), term.clone());
-                next.push(candidate);
+    let mut types = BTreeMap::new();
+    let concrete = model.static_leadsto_bindings_with::<VerifyError>(
+        property,
+        |_, binder, bounds| {
+            let (name, ty) = match binder {
+                KernelBinder::Typed {
+                    name, type_name, ..
+                } => {
+                    if type_name.namespace.is_some() {
+                        static_binder_values(solver, model, binder)?;
+                    }
+                    let ty = model.typed_binder_type(&type_name.name);
+                    model.domain_contains(&ty, &FslValue::Int(0))?;
+                    (name, ty)
+                }
+                KernelBinder::Range { name, .. } => {
+                    if let Some((lo, hi)) = bounds {
+                        validate_static_leadsto_range(model, lo, hi)?;
+                    }
+                    (name, TypeRef::Int)
+                }
+                KernelBinder::Collection { .. } => {
+                    static_binder_values(solver, model, binder)?;
+                    return Ok(());
+                }
+            };
+            types.insert(name.clone(), ty);
+            Ok(())
+        },
+        |_, endpoint, prefix| {
+            if prefix.is_some() {
+                return Ok(());
             }
-        }
-        expanded = next;
-    }
-    let concrete = static_leadsto_bindings(model, property)?;
-    if concrete.len() != expanded.len() {
-        return Err(VerifyError::new("leadsTo binder expansion mismatch"));
-    }
-    Ok(concrete
+            validate_static_leadsto_range(model, endpoint, endpoint)
+        },
+    )?;
+    concrete
         .into_iter()
-        .zip(expanded)
-        .map(|(concrete, symbolic)| LeadstoBinding { concrete, symbolic })
-        .collect())
+        .map(|concrete| {
+            let mut symbolic = Bindings::new();
+            for (name, value) in &concrete {
+                symbolic.insert(
+                    name.clone(),
+                    enumerated_binder_binding(
+                        solver,
+                        model,
+                        TypedBinding(
+                            concrete_value(solver, model, &types[name], value)?,
+                            Some(types[name].clone()),
+                        ),
+                    ),
+                );
+            }
+            Ok(LeadstoBinding { concrete, symbolic })
+        })
+        .collect()
+}
+
+fn validate_static_leadsto_range(
+    model: &KernelModel,
+    lo: &fsl_core::KernelExpr,
+    hi: &fsl_core::KernelExpr,
+) -> Result<(), VerifyError> {
+    let plan = model.plan_integer_range(lo, hi, &[]);
+    if !matches!(
+        plan,
+        RangePlan::Static { .. } | RangePlan::Unknown(RangeUnknown::ConstantFoldFailed)
+    ) {
+        return Err(integer_range_error(&plan));
+    }
+    static_int(lo, model)?;
+    static_int(hi, model)?;
+    if !matches!(plan, RangePlan::Static { .. }) {
+        return Err(integer_range_error(&plan));
+    }
+    Ok(())
 }
 
 pub(crate) fn leadsto_condition<S: SmtSolver>(
@@ -58,7 +113,18 @@ pub(crate) fn leadsto_condition<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     binding: &Bindings<S::Term>,
 ) -> Result<S::Term, VerifyError> {
+    leadsto_condition_in(solver, model, expr, state, binding, None)
+}
+
+pub(crate) fn leadsto_condition_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &fsl_core::KernelExpr,
+    state: &SymbolicState<S::Term>,
+    binding: &Bindings<S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<S::Term, VerifyError> {
     let mut binding = binding.clone();
-    let value = eval(solver, model, expr, state, &mut binding, None)?;
+    let value = eval_in(solver, model, expr, state, &mut binding, None, ctx)?;
     Ok(bool_term(&value)?.clone())
 }

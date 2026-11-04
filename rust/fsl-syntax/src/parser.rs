@@ -1628,6 +1628,7 @@ impl<'a> Parser<'a> {
                 lo: Box::new(lo),
                 hi: Box::new(hi),
                 symmetric,
+                span: Some(declaration_span),
             });
         }
         if self.peek_kw(Kw::Enum) {

@@ -1,0 +1,11 @@
+spec TemporalOuter {
+  enum Tag { Red, Blue }
+  state { tick: Bool }
+  init { tick = false }
+  action idle() { tick = tick }
+  leadsTo Responds {
+    forall tag: Tag {
+      forall b: Bool { true ~> within 1 true }
+    }
+  }
+}

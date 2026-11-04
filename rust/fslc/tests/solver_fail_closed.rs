@@ -277,6 +277,30 @@ spec SolverFailClosed {
     build_model(kernel).expect("build fail-closed fixture")
 }
 
+/// The violation, as `(kind, name, step)`, of a bounded run with the given selected bounds.
+fn bounded_violation(
+    source: &str,
+    depth: usize,
+    selected: Option<&BTreeSet<String>>,
+) -> Option<(String, String, usize)> {
+    let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse range fixture");
+    let model = build_model(kernel).expect("build range fixture");
+    let mut solver = fsl_solver_z3::Z3Solver::new().expect("create solver");
+    block_on(fsl_verifier::verify_bounded_selected(
+        &model,
+        &mut solver,
+        depth,
+        selected,
+    ))
+    .expect("a range over a certified frame must execute")
+    .violation
+    .map(|violation| (violation.kind, violation.name, violation.step))
+}
+
+fn trans_violation(step: usize) -> (String, String, usize) {
+    ("trans".to_owned(), "Range".to_owned(), step)
+}
+
 #[test]
 fn bmc_rejects_unknown_initial_solver_result() {
     let mut solver = FirstCheckFault::new(InjectedCheck::Unknown);
@@ -453,6 +477,35 @@ spec TransitionOldStateBoundary {
         result.violation.is_none(),
         "old(queue) was non-empty even though the current queue is empty: {result:?}"
     );
+
+    // A range under `old(...)` reads the frame before the step, certified on its own: a
+    // post-state past its unselected bound neither stops the read nor supplies its value.
+    let range = |start: i64, write: &str, body: &str| {
+        format!(
+            "spec OldTransitionRange {{
+  state {{ n: 0..3 }}
+  init {{ n = {start} }}
+  action step() {{ {write} }}
+  trans Range {{ old(forall i in 0..n {{ {body} }}) }}
+}}"
+        )
+    };
+    let grow = "requires n == 2 n = 3";
+    assert_eq!(bounded_violation(&range(2, grow, "i <= 2"), 1, None), None);
+    assert_eq!(
+        bounded_violation(&range(2, grow, "i <= 1"), 1, None),
+        Some(trans_violation(1))
+    );
+    let escape = "n = n + 1";
+    let unselected = BTreeSet::new();
+    assert_eq!(
+        bounded_violation(&range(3, escape, "i <= 3"), 1, Some(&unselected)),
+        None
+    );
+    assert_eq!(
+        bounded_violation(&range(3, escape, "i <= 2"), 1, Some(&unselected)),
+        Some(trans_violation(1))
+    );
 }
 
 #[test]
@@ -509,6 +562,24 @@ spec TransitionBoundary {
         ("trans", "NeverIncrease")
     );
     assert_eq!(violation.step, 1);
+
+    // A range bound reading state needs the frame certified at this step, and takes
+    // the state's value there.
+    let range = |body: &str| {
+        format!(
+            "spec TransitionRange {{
+  state {{ n: 0..3 }}
+  init {{ n = 2 }}
+  action grow() {{ requires n == 2 n = 3 }}
+  trans Range {{ forall i in 0..n {{ {body} }} }}
+}}"
+        )
+    };
+    assert_eq!(bounded_violation(&range("i <= 3"), 1, None), None);
+    assert_eq!(
+        bounded_violation(&range("i <= 2"), 1, None),
+        Some(trans_violation(1))
+    );
 }
 
 #[test]
@@ -553,6 +624,29 @@ spec EnsuresBoundary {
     let replay_error = fslc_rust::verification_output::replay_bmc_witnesses(&model, &result, None)
         .expect_err("a corrupted symbolic witness must fail concrete replay");
     assert!(!replay_error.is_empty());
+
+    // When every action has `ensures`, this pass still evaluates each action's guard and
+    // body, so a range there needs the frame certified before the step.
+    let range = |ensure: &str| {
+        format!(
+            "spec EnsuresRange {{
+  type K = 0..3
+  state {{ n: 0..3, m: Map<K, Bool> }}
+  init {{ n = 2 forall k: K {{ m[k] = false }} }}
+  action fill() {{
+    requires count(i in 0..n) == 3
+    forall i in 0..n {{ m[i] = true }}
+    n = 0
+    ensures {ensure}
+  }}
+}}"
+        )
+    };
+    assert_eq!(bounded_violation(&range("m[2]"), 1, None), None);
+    assert_eq!(
+        bounded_violation(&range("m[3]"), 1, None),
+        Some(("ensures".to_owned(), "fill".to_owned(), 1))
+    );
 }
 
 /// The decided part of a BMC result: what was violated or reached and at which
