@@ -1820,10 +1820,24 @@ pub fn requirements_implements_with_bounds_with_options(
         span: Some(span),
         kind: RefinementErrorKind::Other,
     })?;
-    let abstraction = build_model(kernel).map_err(|error| RefinementError {
-        message: error.message,
-        span: Some(span),
-        kind: RefinementErrorKind::Other,
+    let repeated = crate::model::duplicate_formals(&kernel);
+    let abstraction = build_model(kernel).map_err(|error| {
+        // `loc` stays on the `implements`, so a repeated formal in the other
+        // file has to name its own place, as a compose wrapper does.
+        let located = repeated
+            .iter()
+            .find(|(_, message, at)| error.message == *message && error.span == Some(*at))
+            .map(|(action, message, at)| {
+                format!(
+                    "implements \"{path}\" failed to check ({action}: {message} at {path}:{}:{})",
+                    at.start.line, at.start.column
+                )
+            });
+        RefinementError {
+            message: located.unwrap_or(error.message),
+            span: Some(span),
+            kind: RefinementErrorKind::Other,
+        }
     })?;
     if abstraction.name != *abs_name {
         return Err(refinement_error(

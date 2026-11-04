@@ -53,6 +53,42 @@ pub(crate) fn duplicate_formal_message(formal: &str) -> String {
     format!("duplicate action parameter '{formal}'")
 }
 
+/// Whether `error` is the refusal `duplicate_formal` describes for these formals.
+fn is_duplicate_formal_refusal(
+    error: &ModelError,
+    params: &[Param],
+    spans: &[Span],
+    fallback: Span,
+) -> bool {
+    duplicate_formal(params, spans, fallback).is_some_and(|(formal, at)| {
+        error.span == Some(at) && error.message == duplicate_formal_message(formal)
+    })
+}
+
+/// Each action's repeated formal in `kernel`, as the action's public name, the
+/// refusal's message and the repeated name's span.
+pub(crate) fn duplicate_formals(kernel: &crate::KernelSpec) -> Vec<(String, String, Span)> {
+    kernel
+        .spec
+        .items
+        .iter()
+        .filter_map(|item| {
+            let SpecItem::Action {
+                name,
+                params,
+                param_spans,
+                span,
+                ..
+            } = item
+            else {
+                return None;
+            };
+            duplicate_formal(params, param_spans, *span)
+                .map(|(formal, at)| (shown(name), duplicate_formal_message(formal), at))
+        })
+        .collect()
+}
+
 /// Context shared by ordinary model validation and pre-prefix compose errors.
 pub(crate) enum ExpressionErrorContext<'a> {
     Model,
@@ -1135,7 +1171,15 @@ impl ModelBuilder {
                             *fair,
                             meta.clone(),
                         )
-                        .map_err(|error| error.with_origin(origin))?;
+                        .map_err(|error| {
+                            // The origin names the declaration the action was
+                            // lowered from, not the repeated name `span` holds.
+                            if is_duplicate_formal_refusal(&error, params, param_spans, *span) {
+                                error
+                            } else {
+                                error.with_origin(origin)
+                            }
+                        })?;
                     // Carried outside `action` so its argument list stays
                     // within the workspace Clippy budget; `sync` is a compose
                     // marker, not part of the action's own lowering.

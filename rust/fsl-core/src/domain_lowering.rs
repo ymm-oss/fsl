@@ -2127,10 +2127,22 @@ fn action(
     span: Span,
     annotations: Annotations,
 ) -> SpecItem {
+    authored_action(name, params, Vec::new(), items, span, annotations)
+}
+
+/// An action whose formals are authored domain fields, spans parallel to `params`.
+fn authored_action(
+    name: String,
+    params: Vec<Param>,
+    param_spans: Vec<Span>,
+    items: Vec<ActionItem>,
+    span: Span,
+    annotations: Annotations,
+) -> SpecItem {
     SpecItem::Action {
         name,
         params,
-        param_spans: Vec::new(),
+        param_spans,
         items,
         span,
         fair: false,
@@ -2162,6 +2174,10 @@ fn field_params(resolver: &Resolver<'_>, fields: &[DomainField]) -> Result<Vec<P
             )),
         })
         .collect()
+}
+
+fn field_spans(fields: &[DomainField]) -> Vec<Span> {
+    fields.iter().map(|field| field.name.span).collect()
 }
 
 /// Resolve a parsed domain document and lower it directly into Kernel surface AST.
@@ -2550,13 +2566,14 @@ fn lower_aggregate_actions(
                         .cloned(),
                 );
             }
-            items.push(action(
+            items.push(authored_action(
                 format!(
                     "{}_{}",
                     lower_name(&aggregate.name),
                     lower_name(&command.name)
                 ),
                 field_params(resolver, &command.inputs)?,
+                field_spans(&command.inputs),
                 action_items,
                 span,
                 annotations,
@@ -2638,13 +2655,14 @@ fn lower_effect_actions(
                     .iter()
                     .cloned(),
             );
-            items.push(action(
+            items.push(authored_action(
                 format!(
                     "{}_complete_{}",
                     lower_name(&effect.name),
                     lower_name(event_name)
                 ),
                 field_params(resolver, &params)?,
+                field_spans(&params),
                 action_items,
                 span,
                 annotations,
@@ -2804,13 +2822,14 @@ fn lower_saga_actions(
                 .collect::<Vec<_>>();
             action_items.extend(resolver.evolve_items(aggregate, &event_name, &scope)?);
             let annotations = evolve_annotations(aggregate, &event_name);
-            items.push(action(
+            items.push(authored_action(
                 format!(
                     "saga_{}_observe_{}",
                     lower_name(&saga.name),
                     lower_name(&event_name)
                 ),
                 field_params(resolver, &event.fields)?,
+                field_spans(&event.fields),
                 action_items,
                 span,
                 annotations,

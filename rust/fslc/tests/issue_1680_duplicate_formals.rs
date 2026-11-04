@@ -81,6 +81,26 @@ fn assert_refused(id: &str, files: &[(&str, &str)], message: &str, line: u32, co
     );
 }
 
+/// For a packet that carries more than a plain refusal: an edition, warnings or a span.
+fn assert_located(run: &Run, kind: &str, message: &str, line: u32, column: u32) {
+    assert_eq!(
+        (
+            run.exit,
+            &run.packet["kind"],
+            &run.packet["message"],
+            &run.packet["loc"]
+        ),
+        (
+            2,
+            &json!(kind),
+            &json!(message),
+            &json!({"line":line,"column":column})
+        ),
+        "{}",
+        run.packet
+    );
+}
+
 fn assert_checks(id: &str, files: &[(&str, &str)]) {
     let run = fslc(id, files, &["check", "root.fsl"], false);
     assert_eq!(
@@ -322,19 +342,292 @@ fn next_edition_event_input_points_at_the_repeated_name() {
         &["check", "root.fsl"],
         true,
     );
-    assert_eq!(run.exit, 2, "{}", run.packet);
-    assert_eq!(run.packet["kind"], "semantics", "{}", run.packet);
-    // The event's origin keeps its own place in the message; `loc` is the input.
-    assert_eq!(
-        run.packet["message"], "duplicate action parameter 'x' at root.fsl:6:3",
-        "{}",
-        run.packet
+    // The event's origin is not the repeated name, so the message does not cite it.
+    assert_located(&run, "semantics", "duplicate action parameter 'x'", 6, 57);
+}
+
+fn domain(inputs: &str, fields: &str, evolve: &str) -> String {
+    format!(
+        "domain D {{\n  implementation_profile functional_ddd\n\n  aggregate Order {{\n    id OrderId\n\n    state {{\n      flag: Bool = false;\n    }}\n\n    command Add {{\n      {inputs}\n    }}\n\n    event Added {{\n      {fields}\n    }}\n\n    decide Add {{\n      emits Added\n    }}\n\n    evolve Added {{\n      {evolve}\n    }}\n  }}\n}}\n"
+    )
+}
+
+#[test]
+fn domain_command_input_points_at_the_repeated_name() {
+    let form = domain(
+        "input amount: Bool\n      input amount: Bool",
+        "",
+        "flag = true",
+    );
+    assert_refused(
+        "domain-command",
+        &[("root.fsl", &form)],
+        "duplicate action parameter 'amount'",
+        13,
+        13,
+    );
+    let distinct = domain(
+        "input amount: Bool\n      input other: Bool",
+        "",
+        "flag = true",
+    );
+    assert_checks("domain-distinct", &[("root.fsl", &distinct)]);
+}
+
+/// A saga observe action and an effect completion take an event's fields as formals.
+#[test]
+fn domain_event_field_behind_an_action_points_at_the_repeated_name() {
+    let saga = |fields: &str| {
+        format!(
+            "domain D {{\n  implementation_profile functional_ddd\n  type OrderId = 0..1\n  aggregate Order {{\n    id OrderId\n    state {{ flag: Bool = false; }}\n    command Start {{}}\n    command Done {{}}\n    event Started {{}}\n    event Finished {{ {fields} }}\n    decide Start {{ emits Started }}\n    decide Done {{ emits Finished }}\n    evolve Started {{ flag = true }}\n    evolve Finished {{ flag = false }}\n  }}\n  saga Flow {{\n    starts_on Started\n    step Wait {{\n      async\n      requires Started\n      awaits one_of [Finished]\n    }}\n  }}\n}}\n"
+        )
+    };
+    assert_refused(
+        "domain-saga",
+        &[("root.fsl", &saga("note: Bool  note: Bool"))],
+        "duplicate action parameter 'note'",
+        10,
+        34,
+    );
+    assert_checks("domain-saga-one", &[("root.fsl", &saga("note: Bool"))]);
+
+    let effect = include_str!("fixtures/domain_characterization/effect_saga_valid.fsl");
+    let event = "event PaymentCaptured { payment_request_id: PaymentRequestId }";
+    assert!(effect.contains(event));
+    let with_fields = |fields: &str| {
+        effect.replace(
+            event,
+            &format!("event PaymentCaptured {{ payment_request_id: PaymentRequestId{fields} }}"),
+        )
+    };
+    // This fixture also carries a deprecation warning.
+    let refused_at = |id: &str, fields: &str, formal: &str, column: u32| {
+        let source = with_fields(fields);
+        let run = fslc(id, &[("root.fsl", &source)], &["check", "root.fsl"], false);
+        let message = format!("duplicate action parameter '{formal}'");
+        assert_located(&run, "semantics", &message, 18, column);
+    };
+    refused_at("domain-effect", "  note: Bool  note: Bool", "note", 79);
+    // The name an effect correlates on is its own formal when the event declares it.
+    refused_at(
+        "domain-effect-correlation",
+        "  payment_request_id: PaymentRequestId",
+        "payment_request_id",
+        67,
+    );
+    assert_checks("domain-effect-one", &[("root.fsl", &with_fields(""))]);
+}
+
+/// `emits` takes no payload, so a field no action takes as a formal has no actual
+/// to lose: checking and verifying give what one field gives. Accepted as on base.
+#[test]
+fn domain_event_field_no_action_takes_is_not_a_formal() {
+    let repeated = domain(
+        "input amount: Bool",
+        "amount: Bool\n      amount: Bool",
+        "flag = amount",
+    );
+    let once = domain("input amount: Bool", "amount: Bool\n", "flag = amount");
+    for (engine, depth) in [("explicit", "2"), ("bmc", "2")] {
+        let arguments = ["verify", "root.fsl", "--engine", engine, "--depth", depth];
+        let left = fslc(
+            "domain-event-twice",
+            &[("root.fsl", &repeated)],
+            &arguments,
+            false,
+        );
+        let right = fslc(
+            "domain-event-once",
+            &[("root.fsl", &once)],
+            &arguments,
+            false,
+        );
+        assert_eq!(left.exit, 0, "{}", left.packet);
+        assert_eq!(right.exit, 0, "{}", right.packet);
+        for field in ["result", "invariants_checked", "action_coverage"] {
+            assert_eq!(left.packet[field], right.packet[field], "{engine} {field}");
+        }
+    }
+    assert_checks("domain-event-check", &[("root.fsl", &repeated)]);
+}
+
+const INLINE_IMPL: &str = "requirements Impl {\n  implements AbsI from \"abs.fsl\" {\n    map done = done\n    action step() -> step(false, false)\n  }\n  state { done: Bool }\n  init { done = false }\n  action step() { done = false }\n}\n";
+/// The repeated `x` is at 1:77.
+const INLINE_ABS: &str = "spec AbsI { state { done: Bool } init { done = false } action step(x: Bool, x: Bool) { done = false } }\n";
+
+/// `loc` stays on the `implements`, so the message names the other file's position.
+/// `kind` is `type` because every inline `implements` failure of the other file shares it.
+#[test]
+fn inline_implements_names_the_repeated_formal() {
+    let run = fslc(
+        "inline",
+        &[("root.fsl", INLINE_IMPL), ("abs.fsl", INLINE_ABS)],
+        &["check", "root.fsl"],
+        false,
+    );
+    assert_located(
+        &run,
+        "type",
+        "implements \"abs.fsl\" failed to check (step: duplicate action parameter 'x' at abs.fsl:1:77)",
+        2,
+        3,
+    );
+    let distinct = INLINE_ABS.replace("step(x: Bool, x: Bool)", "step(x: Bool, y: Bool)");
+    assert_checks(
+        "inline-distinct",
+        &[("root.fsl", INLINE_IMPL), ("abs.fsl", &distinct)],
+    );
+}
+
+/// Only the repeated formal's refusal is wrapped.
+#[test]
+fn inline_implements_other_failure_keeps_its_message() {
+    let abs = "spec AbsI { state { done: Bool } init { done = false } action step() { done = false } action step() { done = false } }\n";
+    let run = fslc(
+        "inline-other",
+        &[("root.fsl", INLINE_IMPL), ("abs.fsl", abs)],
+        &["check", "root.fsl"],
+        false,
+    );
+    assert_located(&run, "type", "duplicate action 'step'", 2, 3);
+}
+
+/// A log mapping's parameters name fields of a JSON object and bind nothing by
+/// position, so `ev(a, a)` is `ev(a)`: one field, no value to lose. Accepted as on base.
+#[test]
+fn log_mapping_repeated_name_is_one_log_field() {
+    const TARGET: &str = "spec Target { type K = 0..1 state { last: K } init { last = 0 } action put(v: K) { last = v } }\n";
+    let mapping = |params: &str| {
+        format!(
+            "refinement LM {{\n  impl Log\n  abs Target\n  map last = last\n  action ev({params}) -> put(a)\n}}\n"
+        )
+    };
+    for (id, log, exit) in [
+        (
+            "match",
+            "{\"action\":\"ev\",\"params\":{\"a\":1},\"state\":{\"last\":1}}\n",
+            0,
+        ),
+        (
+            "mismatch",
+            "{\"action\":\"ev\",\"params\":{\"a\":0},\"state\":{\"last\":1}}\n",
+            1,
+        ),
+        (
+            "extra",
+            "{\"action\":\"ev\",\"params\":{\"a\":1,\"b\":0},\"state\":{\"last\":1}}\n",
+            1,
+        ),
+    ] {
+        let run = |params: &str, label: &str| {
+            let map = mapping(params);
+            fslc(
+                &format!("log-{id}-{label}"),
+                &[("root.fsl", TARGET), ("map.fsl", &map), ("log.jsonl", log)],
+                &[
+                    "replay",
+                    "root.fsl",
+                    "--from-log",
+                    "log.jsonl",
+                    "--mapping",
+                    "map.fsl",
+                ],
+                false,
+            )
+        };
+        let (twice, once) = (run("a, a", "twice"), run("a", "once"));
+        assert_eq!(twice.exit, exit, "{id}: {}", twice.packet);
+        assert_eq!(
+            (twice.exit, &twice.packet),
+            (once.exit, &once.packet),
+            "{id}"
+        );
+    }
+}
+
+/// Base returned a result on these routes for the composed form; see the removal
+/// table in the design note. Each control with distinct formals keeps its route's result.
+#[test]
+fn composed_refusal_reaches_the_routes_besides_check_and_verify() {
+    let form = internal("part.put(0, 1)");
+    let trace = "[{\"action\":\"step\",\"params\":{}}]";
+    let files = [
+        ("root.fsl", form.as_str()),
+        ("piece.fsl", PIECE),
+        ("trace.json", trace),
+    ];
+    let control_form = internal("part.put(0, 0)");
+    let control = [
+        ("root.fsl", control_form.as_str()),
+        ("piece.fsl", DISTINCT),
+        ("trace.json", trace),
+    ];
+    for (route, arguments, control_result) in [
+        ("lint", &["lint", "root.fsl"][..], "lint"),
+        ("fmt", &["fmt", "--check", "root.fsl"][..], "format_check"),
+        (
+            "conformance",
+            &["conformance", "root.fsl"][..],
+            "conformance",
+        ),
+        ("explain", &["explain", "root.fsl"][..], "explained"),
+        ("analyze", &["analyze", "root.fsl"][..], "analyzed"),
+        (
+            "replay",
+            &["replay", "root.fsl", "--trace", "trace.json"][..],
+            "conformant",
+        ),
+    ] {
+        let refused = fslc(&format!("route-{route}"), &files, arguments, false);
+        assert_eq!(refused.exit, 2, "{route}: {}", refused.packet);
+        assert_eq!(refused.packet["kind"], "semantics", "{route}");
+        assert_eq!(refused.packet["message"], AT_PIECE, "{route}");
+        let kept = fslc(
+            &format!("route-{route}-control"),
+            &control,
+            arguments,
+            false,
+        );
+        assert_eq!(
+            kept.packet["result"], control_result,
+            "{route}: {}",
+            kept.packet
+        );
+    }
+
+    let abstraction =
+        "spec Abs { state { done: Bool } init { done = false } action step() { done = false } }\n";
+    let map = "refinement R {\n  impl Root\n  abs Abs\n  map done = false\n  action step() -> step()\n}\n";
+    let arguments = ["refine", "root.fsl", "abs.fsl", "map.fsl", "--depth", "3"];
+    let refine = fslc(
+        "route-refine",
+        &[
+            ("root.fsl", form.as_str()),
+            ("piece.fsl", PIECE),
+            ("abs.fsl", abstraction),
+            ("map.fsl", map),
+        ],
+        &arguments,
+        false,
+    );
+    assert_eq!(refine.exit, 2, "{}", refine.packet);
+    assert_eq!(refine.packet["message"], AT_PIECE);
+    let kept = fslc(
+        "route-refine-control",
+        &[
+            ("root.fsl", control_form.as_str()),
+            ("piece.fsl", DISTINCT),
+            ("abs.fsl", abstraction),
+            ("map.fsl", map),
+        ],
+        &arguments,
+        false,
     );
     assert_eq!(
-        run.packet["loc"],
-        json!({"line":6,"column":57}),
+        (kept.exit, &kept.packet["result"]),
+        (0, &json!("refines")),
         "{}",
-        run.packet
+        kept.packet
     );
 }
 
