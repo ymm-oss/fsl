@@ -2920,6 +2920,30 @@ compose OrderSystem {
   Bool・範囲・名前付きの期待型がある条件式は各 arm をその型で検査します。そのため `m: Map<A, Bool>` の `m[if c then 0 else true]` は `Range(0, 1)` ではなく `Named("A")` を示します。`Int` の期待型を含むそれ以外の条件式は、引き続き各 arm を最初の arm の型で検査します。測定した入力の受理判定は変わっていません (入力は上記の設計ノートに記載)。
   Rust API: 公開 `SyncRef` に `arg_spans` が必須です。`into_validated_syntax` は非公開メタデータを捨てる前に検査し、`syntax`・`kernel_ast_v1`・`into_syntax` は未検査で情報を失う変換のままです。移行した CLI の 3 箇所は呼び出しごとに完全なコア検査が 1 回増えますが、同じコマンドがすでに同じソースを検査しているため CLI の出力は変わりません。
   #1517 は、マージ後の `main` で製品ゲートが通るまで開いたままです。
+- **重複した仮引数名(破壊的な削除、#1680)。** 同じ action の先行する仮引数がすでに使った名前を仮引数や入力に
+  書くと、`check` はその繰り返された名前の位置で拒否します。対象の経路は、action、requirements の action、
+  process の transition、event、同期されたルート action、compose の部品のすべての action です。部品では、
+  持ち上げられた action、同期された action、`internal` で参照されない action を含みます。これらは置換や
+  `internal` で取り除かれた後は `build_model` に届いていませんでした。次の形はこれまで `check` を通り、
+  `put(a: K, a: K)` は最後の実引数を読んで最初の実引数を捨てていたため、`part.put(0, 1)` と `part.put(1, 0)` で
+  判定が食い違いました。
+  - `put(a: K, a: K)`、`put(a in 0..1, a in 0..1)`、`put(a: K, b: K, a: K)` に対する、`internal part.put` と
+    `part.put(0, 1)`(順序は問いません)。
+  - 参照のない `internal part.put`(本体の内容は問いません)。
+
+  拒否は `kind: "semantics"`、終了コード 2 です。部品では、他の部品の失敗と同じく `use` を起点に
+  `component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81) at root.fsl:2:3`
+  と報告します。部品の外ではメッセージは `duplicate action parameter 'a'` のままで、`loc` が繰り返された名前を
+  指すようになりました。以前は名前と同じ綴りの最初のトークンを指していて、無関係な宣言を指すこともありました。
+  event のメッセージは名前の後に event の位置を保ち、`loc` は入力を指します。実引数の型検査より先に
+  報告するので、`part.put(true, 0)` は `Bool` の実引数ではなくこの拒否を報告します。即時の lowering 失敗より
+  後なので、`part.put(0)` は引数の数のエラーのままです。`def` の仮引数はすでにすべての経路で `def` の位置で
+  拒否されており、変わりません。
+  移行: 仮引数にそれぞれ別の名前を付け、各実引数を対応する仮引数に渡してください。
+  計測した形とコーパスの比較は
+  [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md) にあります。
+  Rust API: `SpecItem::Action`、`SyncAction`、`RequirementAction` に `param_spans`、`ProcessTransition` に
+  `input_spans` が必須です。空は記述された仮引数がないことを表し、拒否は action を指します。
 - 公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な
   同期 action から参照されると、`check` / `verify` は JSON の `warnings` に
   `fair_not_inherited` 警告を出します。同期 action が fair でなければならないとき

@@ -3145,6 +3145,33 @@ compose OrderSystem {
   The three migrated CLI callers each add one full core validation, with no observable change
   in CLI output, because the same command has already validated that source.
   #1517 stays open until the product gate passes on merged `main`.
+- **Repeated formal names (breaking removal, #1680).** `check` refuses a formal or input name
+  an earlier formal of the same action already took, at the repeated name, on every route: an
+  action, a requirements action, a process transition, an event, a synchronized root action
+  and every action of a compose component. In a component this covers an action that is
+  lifted, synchronized or `internal` and never referenced, none of which `build_model` saw
+  once substitution or `internal` had removed it. These forms passed `check` before, and
+  `put(a: K, a: K)` read the last actual and dropped the first, so `part.put(0, 1)` and
+  `part.put(1, 0)` disagreed on the verdict:
+  - `internal part.put` with `part.put(0, 1)`, in either order, for `put(a: K, a: K)`,
+    `put(a in 0..1, a in 0..1)` or `put(a: K, b: K, a: K)`.
+  - `internal part.put` with no reference to it, whatever its body does.
+
+  The refusal is `kind: "semantics"`, exit 2. A component reports
+  `component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81) at root.fsl:2:3`,
+  anchored at the `use` like other component failures. Outside a component the message is
+  still `duplicate action parameter 'a'`, and its `loc` is now the repeated name. It used to be
+  the first token spelled like the name, which could be an unrelated declaration. An event's
+  message keeps the event's position after the name, while its `loc` is the input. It comes
+  before typing the actuals, so `part.put(true, 0)` now reports it instead of the `Bool`
+  actual, and after immediate lowering failures, so `part.put(0)` keeps its arity error.
+  `def` parameters were already refused on every route, at the `def`, and are unchanged.
+  Migration: give each formal its own name, and pass each actual to the formal it belongs to.
+  Measured forms and the corpus sweep are in
+  [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md).
+  Rust API: `SpecItem::Action`, `SyncAction` and `RequirementAction` require `param_spans`, and
+  `ProcessTransition` requires `input_spans`. Empty means no authored formal: the refusal then
+  points at the action.
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, `check` / `verify` emits a
   `fair_not_inherited` warning in JSON `warnings`; write

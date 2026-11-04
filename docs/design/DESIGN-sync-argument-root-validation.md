@@ -109,12 +109,12 @@ test inputs.
 | Unused formal | `unusedColor(a: Color) { }` | `part.unusedColor(part.Red)` | `invalid model expression: public Kernel cannot type identifier 'part.Red' at 6:24` |
 | Unused formal | `unusedK(a: K) { last = 0 }` | `part.unusedK(if 1 then 0 else 0)` | `invalid model expression: expression of type Int is not assignable to Bool at 6:23` |
 | Unused formal | `unusedBool(a: Bool) { }`, root `def rp(v: Int) = v == part.last` | `part.unusedBool(rp(true))` | `invalid model expression: expression of type Named("part.K") is not assignable to Bool at 6:23` |
-| Duplicate formal | `put(a: K, a: K) { last = a }` | `part.put(true, 0)` | `invalid model expression: expression of type Bool is not assignable to Named("part.K") at 5:16` |
+| Duplicate formal | `put(a: K, a: K) { last = a }` | `part.put(true, 0)` | `invalid model expression: expression of type Bool is not assignable to Named("part.K") at 5:16`; since #1680, the repeated formal: see below |
 
 The internal-declaration and used-formal components also fail their own standalone `check`;
 the unused-formal components pass it, and only the root actual is wrong. The duplicate-formal
 row also fails standalone; its first actual is erased by substitution, and `part.put(0, 1)`
-for the same formals still passes `check`. The test also pins further unused spellings of
+for the same formals passed `check` until #1680. The test also pins further unused spellings of
 these classes: a root `def` whose result or body does not type (`rp(0)` for `a: K`, `rb(0)`
 reading a relation index), `Color.Red`, `part.Color.Red`, a name bound only by an additional
 `let`, a pattern binder (`if part.o is some(v) then v else 0`), a bare component state name
@@ -219,6 +219,67 @@ are errors on both, and 126 of those errors differ only in the type named at the
 location, for example `Range(0, 1)` to `Named("A")`. As a control, the same matrix on a binary
 that applies the expectation to every conditional shows 48 admission differences. This is a
 finite measurement, not an equivalence proof.
+
+## Repeated formal names (#1680)
+
+**Breaking removal (#1680).** A formal or input name that an earlier formal of the same action
+already took is a semantics error at the repeated name, on every route. Substitution consumes a
+synchronized component action's formals and `internal` keeps an action from being lifted, so
+`build_model`'s check never saw them: `put(a: K, a: K)` with `part.put(0, 1)` kept the last
+actual only, and swapping the actuals flipped the verdict. Each form below passed `check` (exit
+0) on base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654` and is rejected (exit 2, `result: "error"`,
+`kind: "semantics"`) on head `e973194e888d7a9f34686c96ae8da579b3de933b`, loc `root.fsl` 2:3, each
+binary built from its own tree with Rust 1.98.0, with `FSLC_CACHE=off`.
+
+| Component action | Root | Base verdicts: bmc, explicit, induction, `fsl-bfs` | Head message |
+|---|---|---|---|
+| `put(a: K, a: K) { last = a }`, internal | `part.put(0, 1)` | violated on all four | `component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81) at root.fsl:2:3` |
+| `put(a: K, a: K) { last = a }`, internal | `part.put(1, 0)` | no violation on all four | the same |
+| `put(a in 0..1, a in 0..1) { last = a }`, internal | `part.put(0, 1)` | violated on all four | the same, at `piece.fsl:1:74` |
+| `put(a: K, b: K, a: K) { last = a }`, internal | `part.put(0, 1, 0)` | no violation on all four | the same, at `piece.fsl:1:87` |
+| `put(a: K, a: K) { last = 0 }`, internal and unreferenced, `idle` reachable | `part.idle()` | no violation on all four | the same as the first row |
+| `put(a: K, a: K) { last = a }`, internal and unreferenced, no other action | none | exit 2 on bmc, explicit and induction (bmc reports `spec has no actions`); `fsl-bfs` answers | the same as the first row |
+
+In the last two rows nothing reads the repeated formal, so no run could observe the defect. They
+are removed too because the requirement is refusal on every route.
+
+The refusal runs in compose lowering after every immediate lowering failure and before model
+assembly, so it sits between phases 1 and 2 of "Error phases" above. `part.put(0)` keeps its arity
+error at the root. `part.put(true, 0)` moves from the `Bool` actual at 5:16 to the repeated formal,
+because a declaration failure precedes typing the actuals. That is the one forced change to the
+`duplicate_formal_with_erased_bool` row of `issue_1517_breaking_removals.rs`.
+
+| Route | Base | Head |
+|---|---|---|
+| `spec` action, requirements action, process transition input, synchronized root action, glue action | refused, `duplicate action parameter 'a'`, located at the first token spelled like the name | same message, located at the repeated name; a state or action declared earlier no longer takes the location |
+| FSL5 event input | refused, located at the event | same message, located at the repeated input |
+| Lifted component action, referenced or not | refused, no location | the component wrapper above |
+| Internal component action, referenced or not | accepted | the component wrapper above |
+| `def` parameters, in a `spec`, a root or a component | refused, at the `def` | unchanged |
+| Action map parameters of a refinement | refused, `action map parameters for 'go' must match the impl action parameter names and order` | unchanged |
+
+`def` is not the same defect: its refusal already ran on every route and no actual was dropped, so
+its `name` kind and its location at the `def` stay. An action map parameter list has to equal the
+implementation's, whose own repeat is refused above. A repeated `let` in an action body and a
+nested quantifier binder of the same name still check; both are sequential scoping and neither
+drops an actual. An FSL5 event's message still ends with the event's position, from its origin,
+while `loc` is the repeated input. A generated action, or one built by hand, has no authored
+formal: `param_spans` is empty and the refusal points at the action.
+
+Rust API: `SpecItem::Action`, `SyncAction` and `RequirementAction` require `param_spans`, and
+`ProcessTransition` requires `input_spans`. Both are parallel to the formals, and neither reaches
+Kernel projections.
+
+On-disk transition set (empty). Base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`, head
+`e973194e888d7a9f34686c96ae8da579b3de933b`, each built from its own materialized tree in its own
+target directory with `cargo +1.98.0 build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc
+--locked --offline`. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (617
+forms: 23/195/399) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable
+and with `FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All
+2468 pairs had equal complete stdout, stderr and exit, with no field excluded: 0 ok-to-error and 0
+error-to-ok transitions. Of the 30 inline inputs of the rewritten
+`issue_1517_breaking_removals.rs`, `duplicate_formal_with_erased_bool` stays an error with the
+message above and 29 are byte-identical.
 
 ## Evidence and open gates
 

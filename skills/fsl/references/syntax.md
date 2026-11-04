@@ -1021,6 +1021,22 @@ or named expected type checks its arms against that type, so `m[if c then 0 else
 `docs/design/DESIGN-sync-argument-root-validation.md`. #1517 stays open until the product gate
 passes on merged `main`.
 
+Breaking removal (#1680): `check` refuses a formal or input name an earlier formal of the same
+action took, at the repeated name, for an action, requirements action, process transition, event,
+synchronized root action and every compose component action (`kind: "semantics"`, exit 2). These
+passed before and dropped all but the last actual, so swapping arguments flipped the verdict:
+
+- `internal part.put` with `part.put(0, 1)`, either order, for `put(a: K, a: K)`,
+  `put(a in 0..1, a in 0..1)` or `put(a: K, b: K, a: K)`.
+- `internal part.put` with no reference to it.
+
+A component reports `component "piece.fsl" failed to check (part.put: duplicate action parameter
+'a' at piece.fsl:1:81) at root.fsl:2:3`; elsewhere the message stays `duplicate action parameter
+'a'` and `loc` is the repeated name, not the first token spelled like it. It precedes typing the actuals, so `part.put(true, 0)` reports it, and follows
+immediate lowering failures, so `part.put(0)` keeps its arity error. `def` parameters were already
+refused at the `def`. Migration: give each formal its own name. See
+`docs/design/DESIGN-sync-argument-root-validation.md`.
+
 Component free value reads and update roots resolve against the original component declarations before merging; composition cannot rescue an undeclared reference (breaking removal, #1442), while public names remain legal and protected enum reads display their source member spelling.
 
 A glue action reads and writes local and component state directly via `alias.var`.
