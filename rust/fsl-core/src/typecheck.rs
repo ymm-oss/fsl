@@ -1515,6 +1515,7 @@ fn validate_binder(
     if source_phase.range_rule.is_some()
         && matches!(binder, Binder::Typed { .. })
         && matches!(resolve(model, &ty), Ok(TypeRef::Int))
+        && !declares_finite_int(model)
     {
         return Err(unbounded_typed_refusal(&ty).with_span(span));
     }
@@ -1934,6 +1935,15 @@ impl RangeRule {
 }
 
 /// No engine enumerates an unbounded typed binder, with the engines' spelling.
+/// A declared `Int` gives a typed binder its domain, as on the base. A struct so named
+/// has none, and the engines refuse it as they refuse the builtin.
+fn declares_finite_int(model: &KernelModel) -> bool {
+    matches!(
+        model.types.get("Int"),
+        Some(TypeDef::Domain { .. } | TypeDef::Enum { .. })
+    )
+}
+
 fn unbounded_typed_refusal(ty: &TypeRef) -> TypecheckError {
     let name = match ty {
         TypeRef::Named(name) => shown(name),
@@ -2173,7 +2183,7 @@ fn admit_leadsto_binders(
             Binder::Typed { type_name, .. } => {
                 let written = qualified_name(type_name)?;
                 let ty = model.typed_binder_type(&written);
-                let undeclared_int = written == "Int" && !model.types.contains_key(&written);
+                let undeclared_int = written == "Int" && !declares_finite_int(model);
                 if undeclared_int || matches!(resolve(model, &ty), Ok(TypeRef::Int)) {
                     return Err(unbounded_typed_refusal(&ty).with_span(leadsto.span));
                 }

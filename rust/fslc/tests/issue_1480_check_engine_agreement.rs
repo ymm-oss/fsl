@@ -698,6 +698,71 @@ fn an_overflow_past_the_wrapper_walk_is_left_to_the_engines() {
     assert_eq!(within.1["message"], "integer overflow in multiplication");
 }
 
+/// A spec may declare a type named `Int`: a typed binder then enumerates it, as on the
+/// base, in every scope. Only the undeclared builtin has no finite domain.
+#[test]
+fn a_binder_over_a_declared_int_runs_in_every_scope() {
+    const PREFIX: &str = "spec M { type Int = 0..1 state { d: Bool } init { d = false } ";
+    let spec = |body: &str| format!("{PREFIX}{body} }}");
+    for (body, expected) in [
+        (
+            "action f() { d = true } invariant Q { forall i: Int { i <= 1 } }",
+            ["verified", "proved", "proved"],
+        ),
+        (
+            "action f() { d = true } invariant Q { count(i: Int) == 2 }",
+            ["verified", "proved", "proved"],
+        ),
+        (
+            "action f() { d = true } trans Q { forall i: Int { i <= 1 } }",
+            ["verified", "proved", "proved"],
+        ),
+        (
+            "action f() { requires forall i: Int { i <= 1 } d = true }",
+            ["verified", "proved", "proved"],
+        ),
+        (
+            "action f() { d = true } reachable R { exists i: Int { i == 1 } }",
+            ["verified", "proved", "proved"],
+        ),
+        // The domain really is the declared one.
+        (
+            "action f() { d = true } invariant Q { forall i: Int { i == 0 } }",
+            ["violated", "violated", "violated"],
+        ),
+        (
+            "fair action f() { requires not d d = true } leadsTo L { forall i: Int { not d ~> d } }",
+            ["verified", "proved", ""],
+        ),
+    ] {
+        let source = spec(body);
+        assert_eq!(check(&source).0, 0, "{body}: {}", check(&source).1);
+        for (engine, expected) in ["bmc", "induction", "explicit"].iter().zip(expected) {
+            if !expected.is_empty() {
+                let run = verify(&source, engine, &[]);
+                assert_eq!(result(&run), expected, "{body} {engine}: {}", run.1);
+            }
+        }
+    }
+    // An enum gives the same word a domain; a struct gives it none, and `check` says so.
+    let enumerated = "spec M { enum Int { A, B } state { d: Bool } init { d = false } action f() { d = true } invariant Q { count(i: Int) == 2 } }";
+    assert_eq!(result(&verify(enumerated, "bmc", &[])), "verified");
+    for body in [
+        "action f() { d = true } invariant Q { forall i: Int { true } }",
+        "fair action f() { requires not d d = true } leadsTo L { forall i: Int { not d ~> d } }",
+    ] {
+        let source = format!(
+            "spec M {{ struct Int {{ f: 0..1 }} state {{ d: Bool }} init {{ d = false }} {body} }}"
+        );
+        let refused = check(&source);
+        assert_eq!(refused.0, 2, "{body}: {}", refused.1);
+        assert_eq!(
+            refused.1["message"], "type 'Int' is not a finite scalar",
+            "{body}"
+        );
+    }
+}
+
 /// A Kernel projection failing on an aggregate bound still names where it is.
 #[test]
 fn projections_locate_the_aggregate_bound_they_cannot_fold() {
