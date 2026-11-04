@@ -126,6 +126,58 @@ fn binding_types<T>(bindings: &Bindings<T>) -> Vec<(String, TypeRef)> {
 
 /// Enumeration fixes a literal candidate's value independently of membership.
 /// Keep its semantic type, and do not infer facts for opaque terms or enum ordinals.
+/// The record for one binder candidate: a literal value, or a member of a state
+/// Set whose carrier this read frame certified, which is the prerequisite
+/// `fsl_core`'s admission rule states for such a binder. Without the certificate a
+/// symbolic candidate has no fact, because an unchecked member may escape the type.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn binder_candidate_binding<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    binder: &Binder,
+    candidate: TypedBinding<S::Term>,
+    state: &SymbolicState<S::Term>,
+    old_state: Option<&SymbolicState<S::Term>>,
+    bindings: &Bindings<S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> BindingRecord<S::Term> {
+    let record = enumerated_binder_binding(solver, model, candidate);
+    if record.range_fact.is_some() {
+        return record;
+    }
+    match certified_set_element_envelope(model, binder, state, old_state, bindings, ctx) {
+        Some(envelope) => {
+            BindingRecord::with_range_fact(record.binding, RangeFact::certified(envelope))
+        }
+        None => record,
+    }
+}
+
+fn certified_set_element_envelope<T>(
+    model: &KernelModel,
+    binder: &Binder,
+    state: &SymbolicState<T>,
+    old_state: Option<&SymbolicState<T>>,
+    bindings: &Bindings<T>,
+    ctx: Option<&CheckedStateCarriers<'_, T>>,
+) -> Option<InclusiveI64> {
+    let Binder::Collection { collection, .. } = binder else {
+        return None;
+    };
+    let (frame, name) = fsl_core::binder_range::state_set_source(collection)?;
+    if bindings.records().any(|(bound, _)| bound == name) {
+        return None;
+    }
+    let frame = match frame {
+        fsl_core::binder_range::SetFrame::Current => state,
+        fsl_core::binder_range::SetFrame::Old => old_state?,
+    };
+    if !ctx?.contains(frame, name) {
+        return None;
+    }
+    fsl_core::binder_range::state_set_element_envelope(model, name)
+}
+
 pub(crate) fn enumerated_binder_binding<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
@@ -1390,7 +1442,10 @@ fn quantified_evaluation_status<S: SmtSolver>(
             }))
     {
         let mut local = bindings.clone();
-        local.insert(name, enumerated_binder_binding(solver, model, value));
+        let record = binder_candidate_binding(
+            solver, model, binder, value, state, old_state, bindings, ctx,
+        );
+        local.insert(name, record);
         let membership = membership.unwrap_or_else(|| solver.bool_value(true));
         let where_status = binder_where_expression(binder).map_or_else(
             || Ok(safe_status(solver)),
@@ -1475,7 +1530,10 @@ fn aggregate_evaluation_status<S: SmtSolver>(
         binder_values_in(solver, model, binder, state, bindings, old_state, ctx)?
     {
         let mut local = bindings.clone();
-        local.insert(name, enumerated_binder_binding(solver, model, candidate));
+        let record = binder_candidate_binding(
+            solver, model, binder, candidate, state, old_state, bindings, ctx,
+        );
+        local.insert(name, record);
         let membership = membership.unwrap_or_else(|| solver.bool_value(true));
         let where_status = binder_where_expression(binder).map_or_else(
             || Ok(safe_status(solver)),
@@ -2116,7 +2174,10 @@ fn eval_quantified<S: SmtSolver>(
             }))
     {
         let mut local = bindings.clone();
-        local.insert(name, enumerated_binder_binding(solver, model, value));
+        let record = binder_candidate_binding(
+            solver, model, binder, value, state, old_state, bindings, ctx,
+        );
+        local.insert(name, record);
         let body = eval_in(solver, model, body, state, &mut local, old_state, ctx)?;
         let body = bool_term(&body)?.clone();
         let where_term = binder_where_in(solver, model, binder, state, &mut local, old_state, ctx)?;
@@ -2148,7 +2209,10 @@ fn binder_conditions<S: SmtSolver>(
     let mut terms = Vec::new();
     for (name, value, membership) in candidates {
         let mut local = bindings.clone();
-        local.insert(name, enumerated_binder_binding(solver, model, value));
+        let record = binder_candidate_binding(
+            solver, model, binder, value, state, old_state, bindings, ctx,
+        );
+        local.insert(name, record);
         let where_term = binder_where_in(solver, model, binder, state, &mut local, old_state, ctx)?;
         terms.push(binder_condition(solver, membership, where_term)?);
     }
@@ -2194,7 +2258,10 @@ fn eval_aggregate<S: SmtSolver>(
         binder_values_in(solver, model, binder, state, bindings, old_state, ctx)?
     {
         let mut local = bindings.clone();
-        local.insert(name, enumerated_binder_binding(solver, model, candidate));
+        let record = binder_candidate_binding(
+            solver, model, binder, candidate, state, old_state, bindings, ctx,
+        );
+        local.insert(name, record);
         let value = eval_in(solver, model, value, state, &mut local, old_state, ctx)?;
         let where_term = binder_where_in(solver, model, binder, state, &mut local, old_state, ctx)?;
         let condition = binder_condition(solver, membership, where_term)?;
@@ -2350,20 +2417,32 @@ pub(crate) fn materialize_integer_range<S: SmtSolver>(
     let Binder::Range { name, .. } = draft.binder else {
         return Err(integer_range_error(&draft.plan));
     };
-    (envelope.lo()..=envelope.hi())
-        .map(|z| {
-            let term = solver.int_value(z);
-            let membership = solver.and(&[
-                solver.le(&draft.actual.0, &term)?,
-                solver.le(&term, &draft.actual.1)?,
-            ])?;
-            Ok((
-                name.clone(),
-                TypedBinding(int_value(solver, term), Some(TypeRef::Int)),
-                membership,
-            ))
-        })
-        .collect()
+    // There is no size cap, but a list this long cannot be allocated: refuse rather than
+    // abort. Running out while allocating solver terms is the native CLI's refusal.
+    let width = usize::try_from(i128::from(envelope.hi()) - i128::from(envelope.lo()) + 1);
+    let mut candidates = Vec::new();
+    width
+        .ok()
+        .and_then(|width| candidates.try_reserve_exact(width).ok())
+        .ok_or_else(|| {
+            VerifyError::new(
+                "unsupported integer range execution [resource]: not enough memory to \
+                 enumerate this range's candidates",
+            )
+        })?;
+    for z in envelope.lo()..=envelope.hi() {
+        let term = solver.int_value(z);
+        let membership = solver.and(&[
+            solver.le(&draft.actual.0, &term)?,
+            solver.le(&term, &draft.actual.1)?,
+        ])?;
+        candidates.push((
+            name.clone(),
+            TypedBinding(int_value(solver, term), Some(TypeRef::Int)),
+            membership,
+        ));
+    }
+    Ok(candidates)
 }
 
 pub(crate) fn prepared_quantified_status<S: SmtSolver>(
@@ -2632,11 +2711,37 @@ fn ordered_set_candidates<S: SmtSolver>(
     name: &str,
     items: Vec<(SymbolicValue<S::Term>, S::Term)>,
 ) -> Result<ConditionalBinderCandidates<S::Term>, VerifyError> {
-    let entries = items
+    let entries: Vec<_> = items
         .into_iter()
         .map(|(value, present)| (vec![value], present))
         .collect();
-    Ok(ordered_collection_entries(solver, model, entries)?
+    // Known integers need no solver terms to order, so a candidate stays the literal it is.
+    // Membership gates every candidate, so absent keys need not sort behind present ones.
+    let known: Option<Vec<i64>> = entries
+        .iter()
+        .map(
+            |(key, _)| match (key.as_slice(), literal_key(solver, key)?.as_slice()) {
+                ([SymbolicValue::Scalar { ty, .. }], [ModelValue::Int(value)])
+                    if !matches!(ty, TypeRef::Named(name)
+                    if matches!(model.types.get(name), Some(TypeDef::Enum { .. }))) =>
+                {
+                    Some(*value)
+                }
+                _ => None,
+            },
+        )
+        .collect();
+    let ordered = if let Some(known) = known {
+        let mut keyed: Vec<_> = known
+            .into_iter()
+            .zip(distinct_entries(solver, model, entries)?)
+            .collect();
+        keyed.sort_by_key(|(value, _)| *value);
+        keyed.into_iter().map(|(_, entry)| entry).collect()
+    } else {
+        ordered_collection_entries(solver, model, entries)?
+    };
+    Ok(ordered
         .into_iter()
         .map(|(key, present)| (name.to_owned(), key[0].clone(), Some(present)))
         .collect())

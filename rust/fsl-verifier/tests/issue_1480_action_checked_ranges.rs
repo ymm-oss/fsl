@@ -173,10 +173,10 @@ fn invalid_actual_state_has_type_bound_priority_before_action_partiality() {
 #[test]
 fn excluded_bounds_refuse_and_validated_agreement_checks_candidate_two() {
     let body = "forall i in 0..n {m[i]=i}";
-    let excluded = [0, 3].map(|n| run(body, n, true));
-    for actual in excluded {
-        assert_eq!(actual, Err(VerifyError::new(ELIGIBILITY)));
-    }
+    // An excluded bound reports nothing, but the frame still has to prove what it reads.
+    let in_bounds = run(body, 0, true).unwrap();
+    assert_eq!(in_bounds.violation, None);
+    assert_eq!(run(body, 3, true), Err(VerifyError::new(ELIGIBILITY)));
     let model = model(body);
     let initial = state(2, [0, 0, 0]);
     let next = state(2, [0, 1, 2]);

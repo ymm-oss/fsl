@@ -343,6 +343,43 @@ impl RangePlan {
     }
 }
 
+/// Which frame a binder over a state Set reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SetFrame {
+    Current,
+    Old,
+}
+
+/// The state read of a binder source: a name, or `old(name)`. The caller checks that
+/// the name is not lexically bound. This is the one shape the engines may certify.
+#[must_use]
+pub fn state_set_source(collection: &Expr) -> Option<(SetFrame, &str)> {
+    match collection {
+        Expr::Var(name) => Some((SetFrame::Current, name)),
+        Expr::UnaryNamed { name, expr, .. } if name == "old" => match expr.as_ref() {
+            Expr::Var(name) => Some((SetFrame::Old, name)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The element envelope of a state Set with a finite integer element type.
+///
+/// A certified carrier keeps every member inside it, so both the engines and the
+/// admission rule take the fact for a binder over the Set from this one place.
+#[must_use]
+pub fn state_set_element_envelope(model: &KernelModel, name: &str) -> Option<InclusiveI64> {
+    let (_, ty) = model.state.iter().find(|(state, _)| state == name)?;
+    let TypeRef::Set(element) = ty else {
+        return None;
+    };
+    match crate::typecheck::resolve(model, element) {
+        Ok(TypeRef::Range(lo, hi)) => InclusiveI64::new(lo, hi),
+        _ => None,
+    }
+}
+
 /// Select an init condition from a checked constant fold alone, never from state.
 #[must_use]
 pub fn constant_condition(model: &KernelModel, condition: &Expr) -> Option<bool> {

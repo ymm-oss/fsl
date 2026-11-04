@@ -13,13 +13,13 @@ use fsl_solver::{ModelValue, SatResult, SmtSolver};
 use crate::VerifyError;
 use crate::bmc::{
     CheckedStateCarriers, assume_induction_carriers, checked_action_carriers,
-    checked_read_carriers, prove_induction_carriers,
+    checked_read_carriers, premised_state_carriers, prove_induction_carriers,
 };
 use crate::eval::{
-    FailureClass, binder_source_expressions, binder_values_in, binder_where_expression,
-    binder_where_in, classified_evaluation_status, classified_property_evaluation_status_in,
-    confine_binary_rhs, enumerated_binder_binding, eval, eval_in, eval_with_bindings_in,
-    evaluation_status, property_evaluation_status_in,
+    FailureClass, binder_candidate_binding, binder_source_expressions, binder_values_in,
+    binder_where_expression, binder_where_in, classified_evaluation_status,
+    classified_property_evaluation_status_in, confine_binary_rhs, eval, eval_in,
+    eval_with_bindings_in, evaluation_status, property_evaluation_status_in,
 };
 use crate::liveness::{leadsto_bindings, leadsto_condition, leadsto_condition_in};
 use crate::trace::{has_missing_sequence_slots, project_trace};
@@ -1326,6 +1326,11 @@ async fn step_obligation_cti<S: SmtSolver>(
                 def_old_context =
                     Some(checked_read_carriers(solver, model, &def_states[0], None).await?);
             }
+            // Only terms: the next frame is certified below before a query reads them.
+            let frame = def_old_context
+                .as_ref()
+                .filter(|_| needs_old_context)
+                .map(|old| premised_state_carriers(model, &def_states[1]).with_old(old.clone()));
             let status = property_evaluation_status_in(
                 solver,
                 model,
@@ -1333,7 +1338,7 @@ async fn step_obligation_cti<S: SmtSolver>(
                 &def_states[1],
                 &Bindings::new(),
                 Some(&def_states[0]),
-                def_old_context.as_ref().filter(|_| needs_old_context),
+                frame.as_ref(),
             )?;
             if status.has_partial_operation {
                 transition_statuses.push((property.name.clone(), status.first_partial));
@@ -1978,7 +1983,10 @@ async fn zero_slot_measure_reads_inner<S: SmtSolver>(
                 binder_values_in(solver, model, binder, state, &local, old_state, ctx)?
             {
                 let mut candidate = local.clone();
-                candidate.insert(name, enumerated_binder_binding(solver, model, value));
+                let record = binder_candidate_binding(
+                    solver, model, binder, value, state, old_state, &local, ctx,
+                );
+                candidate.insert(name, record);
                 let reached = solver.and(&[
                     active.clone(),
                     membership.unwrap_or_else(|| solver.bool_value(true)),
@@ -2462,12 +2470,15 @@ async fn prove_ranked_leadstos_assuming<S: SmtSolver>(
                         read_context.as_ref(),
                     )?;
                     let enabled0 = solver.and(&guards0)?;
-                    let (guards1, _) = crate::transition::action_guards(
+                    let next_context =
+                        checked_action_carriers(solver, model, &state1, checked_bounds).await?;
+                    let (guards1, _) = crate::transition::action_guards_in(
                         solver,
                         model,
                         action,
                         &state1,
                         &instances[sticky_index].params,
+                        next_context.as_ref(),
                     )?;
                     let enabled1 = solver.and(&guards1)?;
                     let not_selected = solver.not(

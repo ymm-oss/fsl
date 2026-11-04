@@ -41,6 +41,11 @@ impl<T> RangeFact<T> {
         ))
     }
 
+    /// A candidate of a state Set whose carrier is certified on this read frame.
+    pub(crate) const fn certified(envelope: InclusiveI64) -> Self {
+        Self::ParameterValue(IntegerEnvelopeFact::new(envelope))
+    }
+
     pub(crate) fn captured(envelope: InclusiveI64, valid_when: T) -> Self {
         Self::CapturedLet {
             envelope: IntegerEnvelopeFact::new(envelope),

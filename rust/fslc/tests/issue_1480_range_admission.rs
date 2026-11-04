@@ -203,9 +203,8 @@ fn class_d_names_without_a_finite_fact_are_refused() {
     );
     let bound_x = "'x' is not an integer const";
     for collection in [
-        "st",
         "q",
-        "Set { 1, 2 }",
+        "Set { n, 2 }",
         "Seq { n, 1 }",
         "Seq { 1 + 1 }",
         "Seq { -1 }",
@@ -510,18 +509,38 @@ fn state_set_binders_follow_the_candidates_the_engines_read_as_literals() {
     const SET: &str = "xs: Set<K>";
     const OVER_XS: &str = "invariant C { forall x in xs { count(y in 0..x) >= 0 } }";
     const IDLE: &str = "action go() {}";
-    // A non-empty init literal reaches the first state's invariant, requires and body.
-    assert_set_binder(SET, "xs = Set { 1 }", &format!("{IDLE} {OVER_XS}"), None);
+    const IN_REACHABLE: &str = "reachable C { forall x in xs { count(y in 0..x) >= 0 } }";
+    // A non-empty init literal is certified on the first state like any other carrier.
+    assert_set_binder(SET, "xs = Set { 1 }", &format!("{IDLE} {OVER_XS}"), HOLDS);
+    assert_set_binder(
+        SET,
+        "xs = Set { 1 }",
+        "action go() {} invariant C { forall x in xs { count(y in 0..x) == 9 } }",
+        FAILS,
+    );
     assert_set_binder(
         SET,
         "xs = Set { 1 }",
         "action go() { requires forall x in xs { count(y in 0..x) >= 0 } done = true }",
-        None,
+        HOLDS,
     );
     assert_set_binder(
         SET,
         "if done { xs = Set { 1 } } else { xs = Set { } }",
         &format!("{IDLE} {OVER_XS}"),
+        HOLDS,
+    );
+    // Where no frame is certified the keys decide, and a key read from state has no fact.
+    assert_set_binder(
+        SET,
+        "xs = Set { 1 }",
+        &format!("{IDLE} {IN_REACHABLE}"),
+        Some((0, "verified", "proved")),
+    );
+    assert_set_binder(
+        "xs: Set<K>, v: K",
+        "v = 0 xs = Set { v }",
+        &format!("action go() {{ xs = xs.add(v) }} {IN_REACHABLE}"),
         None,
     );
     // An empty or unassigned init keeps the invariant executable and its verdict.
@@ -546,7 +565,7 @@ fn state_set_binders_follow_the_candidates_the_engines_read_as_literals() {
         "action go() { done = true ensures forall x in old(xs).add(0) { count(y in 0..x) >= 0 } }",
         HOLDS,
     );
-    // Literal candidates: one item stays literal, an ordered pair does not.
+    // Literal candidates stay literal at any length, and a pair keeps its values.
     assert_set_binder(
         SET,
         "xs = Set { }",
@@ -557,7 +576,13 @@ fn state_set_binders_follow_the_candidates_the_engines_read_as_literals() {
         SET,
         "xs = Set { }",
         "action go() {} invariant C { forall x in Set { 0, 1 } { count(y in 0..x) >= 0 } }",
-        None,
+        HOLDS,
+    );
+    assert_set_binder(
+        SET,
+        "xs = Set { }",
+        "action go() {} invariant C { forall x in Set { 0, 1 } { count(y in 0..x) == 9 } }",
+        FAILS,
     );
     // A state item has no literal value; a zero-capacity Seq has no candidate.
     assert_set_binder(

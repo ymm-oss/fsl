@@ -118,7 +118,12 @@ fn selection_public_agreement_and_raw_aggregates_cannot_inherit_eligibility() {
                 &state(input),
             ));
             eprintln!("U4_SELECTED repeat={repeat} source={text:?} actual={actual:?}");
-            assert_eq!(actual, Err(VerifyError::new(ELIGIBILITY)));
+            // An unselected bound is not assumed: the frame proves it, or the read refuses.
+            if domain == "0..2" && input == 2 {
+                assert_eq!(actual.unwrap().violation, None);
+            } else {
+                assert_eq!(actual, Err(VerifyError::new(ELIGIBILITY)));
+            }
             for (query, value) in [
                 (text, V::Bool(false)),
                 (text, V::Bool(true)),

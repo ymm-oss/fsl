@@ -33,9 +33,9 @@ examine_re = [
 # and `delete ! in verify_bounded_config` at each of the first two anchors, so
 # line-free exclude_re patterns cannot preserve this exact three-exclusion scope.
 exclude_re = [
-  "^fsl-verifier/src/bmc\\.rs:918:.* in verify_bounded_config$",
-  "^fsl-verifier/src/bmc\\.rs:925:.* in verify_bounded_config$",
-  "^fsl-verifier/src/bmc\\.rs:949:.* in verify_bounded_config$",
+  "^fsl-verifier/src/bmc\\.rs:940:.* in verify_bounded_config$",
+  "^fsl-verifier/src/bmc\\.rs:947:.* in verify_bounded_config$",
+  "^fsl-verifier/src/bmc\\.rs:971:.* in verify_bounded_config$",
 ]
 
 # Changed-mode diff filtering may select only fsl-verifier as the mutated

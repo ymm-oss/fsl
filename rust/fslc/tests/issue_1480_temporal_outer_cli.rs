@@ -20,7 +20,6 @@ const TYPE_ERROR: &str =
 enum Outcome {
     Response,
     Witness(&'static str),
-    EngineError(&'static str),
     Shared(&'static str, u32, u32, bool),
 }
 struct Case {
@@ -128,7 +127,7 @@ const CASES: &[Case] = &[
     case!(
         "unbounded-typed",
         5,
-        Outcome::EngineError("type 'Int' is not a finite scalar")
+        Outcome::Shared("type 'Int' is not a finite scalar", 5, 3, false)
     ),
     case!(
         "struct-typed",
@@ -196,7 +195,6 @@ fn contract(case: &Case, route: &str, exit: Option<i32>, packet: &Value) -> bool
         return exit == Some(0) && packet["result"] == "ok" && packet["spec"] == "TemporalOuter";
     }
     match case.outcome {
-        Outcome::EngineError(message) => exit == Some(2) && packet == &error_packet(message),
         Outcome::Witness(bindings) => {
             exit == Some(1) && packet["spec"] == "TemporalOuter" && witness(case, packet, bindings)
         }

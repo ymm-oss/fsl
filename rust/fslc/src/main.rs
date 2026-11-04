@@ -133,9 +133,27 @@ fn parse_optional_output(
     Ok(output)
 }
 
+static Z3_BINDING_PANICKED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The `z3` crate's own source, not this workspace's `fsl-solver-z3`.
+fn is_z3_binding_source(file: &str) -> bool {
+    file.contains("/z3-") || file.contains("\\z3-")
+}
+
 fn main() {
     // Read the unstable gate once, before the worker thread parses anything.
     parse_options();
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if info
+            .location()
+            .is_some_and(|location| is_z3_binding_source(location.file()))
+        {
+            Z3_BINDING_PANICKED.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        default_hook(info);
+    }));
     // `run` on an explicitly sized thread rather than the process's main
     // thread, whose size the OS picks.
     let worker = std::thread::Builder::new()
@@ -144,6 +162,19 @@ fn main() {
         .spawn(run)
         .expect("spawn the fslc worker thread");
     if worker.join().is_err() {
+        // The bindings unwrap the null Z3 returns when it cannot allocate a term. No limit
+        // keeps a wide range from getting there, so that is a refusal and not a crash.
+        if Z3_BINDING_PANICKED.load(std::sync::atomic::Ordering::SeqCst) {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&semantic_error_output(
+                    "solver execution stopped [resource]: Z3 returned no term, \
+                     usually because memory ran out"
+                ))
+                .expect("serialize solver resource error")
+            );
+            std::process::exit(2);
+        }
         // The panic message has already been printed by the default hook.
         // Exit as a panicking `main` would, so a crash is never mistaken for
         // a verdict.
@@ -6260,7 +6291,15 @@ fn run_kernel_contract_from_source(
             object.insert("result".to_owned(), json!("kernel"));
             (contract, 0)
         }
-        Err(error) => (semantic_error_output(&error.to_string()), 2),
+        Err(error) => (projection_error_output(&model, &error), 2),
+    }
+}
+
+/// A projection failure on an aggregate bound keeps that bound's source location.
+fn projection_error_output(model: &fsl_core::KernelModel, error: &impl std::fmt::Display) -> Value {
+    match fsl_core::locate_unfolded_aggregate(model) {
+        Err(refusal) => model_error_output(&refusal),
+        Ok(()) => semantic_error_output(&error.to_string()),
     }
 }
 
@@ -12681,7 +12720,7 @@ fn run_typestate_from_source(path: &Path, source: &str) -> (Value, i32) {
         match fsl_core::public_kernel_contract(&kernel, &model, &path_text, source_dialect(source))
         {
             Ok(contract) => contract,
-            Err(error) => return (semantic_error_output(&error.to_string()), 2),
+            Err(error) => return (projection_error_output(&model, &error), 2),
         };
     let report = match fsl_tools::analyze_typestate(&contract) {
         Ok(report) => report,

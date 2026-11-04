@@ -413,14 +413,14 @@ fn existing_supported_binders_rhs_ranges_and_struct_values_keep_admission() {
     }
 }
 #[test]
-fn declared_bool_type_keeps_its_own_binder_domain() {
-    for (id, declaration, count) in [
-        ("declared-enum", "enum Bool { A, B, C }", 3),
-        ("declared-range", "type Bool = 0..5", 6),
-        ("builtin", "", 2),
+fn a_type_named_bool_is_reserved_and_the_builtin_binder_enumerates_two_values() {
+    for (id, declaration) in [
+        ("declared-enum", "enum Bool { A, B, C }"),
+        ("declared-range", "type Bool = 0..5"),
+        ("declared-struct", "struct Bool { flag: 0..1 }"),
     ] {
         let source = format!(
-            "spec Declared {{ {declaration} state {{ n: 0..9 }} init {{ n = count(b: Bool) }} action idle() {{ n = n }} invariant Two {{ n == 2 }} }}"
+            "spec Declared {{ {declaration} state {{ n: 0..9 }} init {{ n = 0 }} action idle() {{}} }}"
         );
         let case = Case {
             id,
@@ -433,20 +433,27 @@ fn declared_bool_type_keeps_its_own_binder_domain() {
         };
         let directory = fixture(&case);
         let (exit, packet) = observe(&directory, "check");
+        assert_eq!(exit, 2, "{id}: {packet}");
+        assert_eq!(packet["kind"], "name", "{id}: {packet}");
         assert_eq!(
-            (exit, &packet["result"]),
-            (0, &json!("ok")),
+            packet["message"], "'Bool' is a reserved FSL type name and cannot be declared",
             "{id}: {packet}"
         );
-        for route in ["bmc", "induction", "explicit"] {
-            let (exit, packet) = observe(&directory, route);
-            if count == 2 {
-                assert_eq!(exit, 0, "{id} {route}: {packet}");
-            } else {
-                assert_eq!(exit, 1, "{id} {route}: {packet}");
-                assert_eq!(packet["result"], "violated", "{id} {route}");
-                assert_eq!(packet["invariant"], "Two", "{id} {route}");
-            }
-        }
+    }
+    let source = "spec Builtin { state { n: 0..9 } init { n = count(b: Bool) } action idle() {} invariant Two { n == 2 } }";
+    let case = Case {
+        id: "builtin",
+        source,
+        message: "",
+        rendered: "",
+        position: (0, 0, 1, 1, 1),
+        typed: true,
+        init: true,
+    };
+    let directory = fixture(&case);
+    assert_eq!(observe(&directory, "check").0, 0);
+    for route in ["bmc", "induction", "explicit"] {
+        let (exit, packet) = observe(&directory, route);
+        assert_eq!(exit, 0, "builtin {route}: {packet}");
     }
 }

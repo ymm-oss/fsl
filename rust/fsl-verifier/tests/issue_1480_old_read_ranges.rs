@@ -128,7 +128,7 @@ fn conditional_induction_proves_the_relation_and_keeps_complete_abstract_ctis() 
 fn selecting_bounds_is_not_permission_to_skip_the_old_read_prerequisite() {
     let model = model(1);
     let included = BTreeSet::from(["_bounds_n".into()]);
-    let omitted = BTreeSet::new();
+    let omitted: BTreeSet<String> = BTreeSet::new();
     let outputs = [&included, &omitted].map(|selected| {
         let mut solver = fsl_solver_z3::Z3Solver::new().unwrap();
         let actual = block_on(verify_bounded_selected(
@@ -141,8 +141,21 @@ fn selecting_bounds_is_not_permission_to_skip_the_old_read_prerequisite() {
         actual
     });
     assert_eq!(outputs[0], Ok(packet(None)));
-    assert_eq!(outputs[1], Err(VerifyError::new(ELIGIBILITY)));
-    assert_ne!(outputs[1], Ok(packet(None)));
+    // An omitted bound is not assumed: these frames prove it, so the reads run.
+    assert_eq!(outputs[1], Ok(packet(None)));
+    // A frame that cannot prove it still refuses instead of reading an escaped value.
+    let escapes = literal_model(
+        "spec OldRead {state {n:0..2} init {n=2} action inc(){n=n+1} trans T {count(i in 0..n)>=old(n)}}",
+    );
+    let mut solver = fsl_solver_z3::Z3Solver::new().unwrap();
+    let actual = block_on(verify_bounded_selected(
+        &escapes,
+        &mut solver,
+        1,
+        Some(&omitted),
+    ));
+    eprintln!("OLD_READ_ESCAPE actual={actual:#?}");
+    assert_eq!(actual, Err(VerifyError::new(ELIGIBILITY)));
 }
 
 fn literal_model(source: &str) -> KernelModel {

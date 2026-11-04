@@ -21,10 +21,10 @@ use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
-    ActionInstance, action_guards, action_guards_in, action_has_partial_operation_candidate,
-    action_instances, classified_action_guard_definedness_in,
-    classified_action_statements_evaluation_status_in, init_constraints, init_evaluation_status,
-    initial_state as symbolic_initial_state, transition_constraint_in,
+    ActionInstance, action_guards_in, action_has_partial_operation_candidate, action_instances,
+    classified_action_guard_definedness_in, classified_action_statements_evaluation_status_in,
+    init_constraints, init_evaluation_status, initial_state as symbolic_initial_state,
+    transition_constraint_in,
 };
 use crate::vacuity::{
     VacuityFinding, collect_assigned_roots, proven_unsat, retain_covered, static_findings,
@@ -145,15 +145,34 @@ pub async fn diagnose_reachables<S: SmtSolver>(
             )?,
         });
     }
+    // An invariant's range reads rest on the frame's bounds, so a blocker carries them.
+    let frame = premised_state_carriers(model, &state);
+    let frame_bounds = model
+        .state
+        .iter()
+        .map(|(name, _)| bounds(solver, model, &state[name]))
+        .collect::<Result<Vec<_>, _>>()?;
     for invariant in &model.invariants {
         let mut bindings = Bindings::new();
-        let value = eval(solver, model, &invariant.expr, &state, &mut bindings, None)?;
+        let value = eval_in(
+            solver,
+            model,
+            &invariant.expr,
+            &state,
+            &mut bindings,
+            None,
+            Some(&frame),
+        )?;
+        let mut term = vec![bool_term(&value)?.clone()];
+        if !fsl_core::integer_range_state_references(&invariant.expr, model, []).is_empty() {
+            term.extend(frame_bounds.iter().cloned());
+        }
         constraints.push(StaticReachableConstraint {
             blocker: ReachableBlocker {
                 kind: "invariant".to_owned(),
                 name: invariant.name.clone(),
             },
-            term: bool_term(&value)?.clone(),
+            term: solver.and(&term)?,
         });
     }
 
@@ -643,12 +662,15 @@ pub(crate) async fn checked_read_carriers<'f, S: SmtSolver>(
     };
     for (name, value) in read_state {
         let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();
-        if selected.is_some_and(|names| !names.contains(&property_name)) {
-            continue;
-        }
         let valid = bounds(solver, model, value)?;
         solver.set_query_context("type_bound", &property_name);
-        if probe_not(solver, &valid).await? {
+        let escapes = probe_not(solver, &valid).await?;
+        // An unselected bound is not checked or assumed, but a range may still read
+        // the state once this frame proves the bound. If it cannot, the read refuses.
+        if escapes && selected.is_some_and(|names| !names.contains(&property_name)) {
+            continue;
+        }
+        if escapes {
             return Err(VerifyError::new(
                 "unsupported integer range execution [eligibility]: prerequisites are not established for this evaluation scope",
             ));
@@ -1008,6 +1030,20 @@ impl<T> CheckedStateCarriers<'_, T> {
     }
 }
 
+/// Name every state on a frame whose bounds the caller already certified or states
+/// as a premise of the terms it builds. It proves nothing itself: reuse a frame an
+/// unrolled step certified for the same guards, or conjoin the bounds to the result.
+pub(crate) fn premised_state_carriers<'f, T>(
+    model: &KernelModel,
+    read_state: &'f SymbolicState<T>,
+) -> CheckedStateCarriers<'f, T> {
+    CheckedStateCarriers {
+        read_state,
+        names: model.state.iter().map(|(name, _)| name.clone()).collect(),
+        old_frame: None,
+    }
+}
+
 /// Assert the induction hypothesis's existing bound premises before recording them.
 pub(crate) fn assume_induction_carriers<'f, S: SmtSolver>(
     solver: &mut S,
@@ -1209,6 +1245,10 @@ pub(crate) async fn frozen_range_condition<S: SmtSolver>(
         plan,
         RangePlan::Static { .. } | RangePlan::Unknown(RangeUnknown::ConstantFoldFailed)
     ) {
+        // A static outer binder can still hold a nested bound that reads this frame.
+        if !fsl_core::integer_range_state_references(&property.expr, model, []).is_empty() {
+            return Box::pin(frozen_composite_condition(solver, model, property, state)).await;
+        }
         let value = eval(solver, model, &property.expr, state, &mut bindings, None)?;
         let condition = bool_term(&value)?.clone();
         let status = property_evaluation_status_in(
@@ -1469,12 +1509,6 @@ async fn check_state_properties_in<'f, S: SmtSolver>(
     let checked_carriers = action_carriers.unwrap_or(&mut checked_carriers);
     for (name, _) in &model.state {
         let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();
-        if checks
-            .checked_bounds
-            .is_some_and(|selected| !selected.contains(&property_name))
-        {
-            continue;
-        }
         let valid = bounds(
             solver,
             model,
@@ -1483,7 +1517,16 @@ async fn check_state_properties_in<'f, S: SmtSolver>(
                 .ok_or_else(|| VerifyError::new(format!("missing state '{name}'")))?,
         )?;
         solver.set_query_context("type_bound", &property_name);
-        if probe_not(solver, &valid).await? {
+        let escapes = probe_not(solver, &valid).await?;
+        // An unselected bound reports nothing, but a range may read a state it proves.
+        if escapes
+            && checks
+                .checked_bounds
+                .is_some_and(|selected| !selected.contains(&property_name))
+        {
+            continue;
+        }
+        if escapes {
             let failure = solver.not(&valid)?;
             return Ok(Some(
                 make_violation(
@@ -2335,8 +2378,16 @@ fn fairness_condition<S: SmtSolver>(
         }
         let disabled = (start..end)
             .map(|step| {
-                let (guards, _) =
-                    action_guards(solver, model, action, &states[step], &instance.params)?;
+                // `unroll_step` read these guards on this frame through its certificate.
+                let frame = premised_state_carriers(model, &states[step]);
+                let (guards, _) = action_guards_in(
+                    solver,
+                    model,
+                    action,
+                    &states[step],
+                    &instance.params,
+                    Some(&frame),
+                )?;
                 Ok(solver.not(&solver.and(&guards)?)?)
             })
             .collect::<Result<Vec<_>, VerifyError>>()?;

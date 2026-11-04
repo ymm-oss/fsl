@@ -222,11 +222,11 @@ pub struct KernelModel {
 }
 
 impl KernelModel {
-    /// The domain a typed binder enumerates. `Bool` is not a reserved word, so
-    /// a declared type of that name keeps its own values.
+    /// The domain a typed binder enumerates. A binder names its type as text, and
+    /// `Bool` is the builtin: declaring a type of that name is refused.
     #[must_use]
     pub fn typed_binder_type(&self, type_name: &str) -> TypeRef {
-        if type_name == "Bool" && !self.types.contains_key(type_name) {
+        if type_name == "Bool" {
             TypeRef::Bool
         } else {
             TypeRef::Named(type_name.to_owned())
@@ -894,7 +894,7 @@ pub(crate) fn leadsto_has_dependent_bounds(property: &LeadsToDef) -> bool {
     })
 }
 
-fn leadsto_uses_outer(expr: &Expr, outer: &BTreeSet<String>) -> bool {
+pub(crate) fn leadsto_uses_outer(expr: &Expr, outer: &BTreeSet<String>) -> bool {
     let mut dependent = false;
     visit_free_names(expr, &BTreeSet::new(), &mut |name| {
         dependent |= outer.contains(name);
@@ -902,7 +902,7 @@ fn leadsto_uses_outer(expr: &Expr, outer: &BTreeSet<String>) -> bool {
     dependent
 }
 
-fn scoped_leadsto_int<E: From<ModelError>>(
+pub(crate) fn scoped_leadsto_int<E: From<ModelError>>(
     expr: &Expr,
     model: &KernelModel,
     outer: &BTreeSet<String>,
@@ -1194,6 +1194,7 @@ impl ModelBuilder {
         // `none` is unreadable from every expression, and the misreading is
         // silent rather than an error (issue #570).
         crate::reserved::check_reserved_names(&self.spec)?;
+        crate::reserved::check_type_names(&self.spec)?;
         reject_duplicate_property_names(&self.spec)?;
         self.collect_consts()?;
         self.collect_types()?;
@@ -2822,7 +2823,51 @@ pub fn integer_range_state_references<'a>(
             references.insert(name.to_owned());
         }
     });
+    collect_set_binder_references(expr, model, &bound, &mut references);
     references
+}
+
+/// A binder over a state Set feeds a nested range through its certified carrier.
+fn collect_set_binder_references(
+    expr: &Expr,
+    model: &KernelModel,
+    bound: &BTreeSet<String>,
+    references: &mut BTreeSet<String>,
+) {
+    crate::recursion::guard(|| {
+        let scoped = match expr {
+            Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => Some(binder),
+            _ => None,
+        };
+        if let Some(Binder::Collection { collection, .. }) = scoped
+            && let Some((_, name)) = crate::binder_range::state_set_source(collection)
+            && !bound.contains(name)
+            && crate::binder_range::state_set_element_envelope(model, name).is_some()
+            && expr_children(expr)
+                .into_iter()
+                .any(|child| !std::ptr::eq(child, collection.as_ref()) && has_range_binder(child))
+        {
+            references.insert(name.to_owned());
+        }
+        for child in expr_children(expr) {
+            collect_set_binder_references(child, model, bound, references);
+        }
+    });
+}
+
+fn has_range_binder(expr: &Expr) -> bool {
+    crate::recursion::guard(|| {
+        matches!(
+            expr,
+            Expr::Quantified {
+                binder: Binder::Range { .. },
+                ..
+            } | Expr::Aggregate {
+                binder: Binder::Range { .. },
+                ..
+            }
+        ) || expr_children(expr).into_iter().any(has_range_binder)
+    })
 }
 
 /// Reject state-dependent collection domains in an init statement's `forall`.
@@ -2908,6 +2953,18 @@ pub fn check_range_admission(
     });
     model.origins = retained;
     result
+}
+
+/// Locate the aggregate bound a Kernel projection could not fold.
+///
+/// `build_model` leaves such a bound to admission and execution, so a projection
+/// of a model reads it unlocated. This names its source position again.
+///
+/// # Errors
+/// Returns the first expanding aggregate whose bound does not fold, located.
+pub fn locate_unfolded_aggregate(model: &KernelModel) -> Result<(), ModelError> {
+    crate::typecheck::locate_unfolded_aggregate(model)
+        .map_err(|error| range_refusal_error(error, ExpressionErrorContext::Model))
 }
 
 /// An aggregate keeps the Core validation spelling; a quantifier or statement

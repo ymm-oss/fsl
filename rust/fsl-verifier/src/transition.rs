@@ -12,11 +12,11 @@ use fsl_solver::{ModelValue, SmtSolver};
 use crate::VerifyError;
 use crate::bmc::CheckedStateCarriers;
 use crate::eval::{
-    EvaluationStatus, FailureClass, binder_condition, binder_source_expressions, binder_values,
-    binder_values_in, binder_where, binder_where_expression, binder_where_in,
-    classified_evaluation_status_in, enumerated_binder_binding, eval, eval_binding_in,
-    eval_expected, eval_expected_in, eval_in, eval_with_bindings_in, index_access_status,
-    index_accessible, safe_status, sequence_statuses,
+    EvaluationStatus, FailureClass, binder_candidate_binding, binder_condition,
+    binder_source_expressions, binder_values, binder_values_in, binder_where,
+    binder_where_expression, binder_where_in, classified_evaluation_status_in,
+    enumerated_binder_binding, eval, eval_binding_in, eval_expected, eval_expected_in, eval_in,
+    eval_with_bindings_in, index_access_status, index_accessible, safe_status, sequence_statuses,
 };
 use crate::value::TypedBindings as Bindings;
 use crate::value::{
@@ -415,7 +415,10 @@ fn statement_evaluation_status<S: SmtSolver>(
                 binder_values_in(solver, model, binder, read_state, bindings, None, ctx)?
             {
                 let mut local = bindings.clone();
-                local.insert(name, enumerated_binder_binding(solver, model, value));
+                let record = binder_candidate_binding(
+                    solver, model, binder, value, read_state, None, bindings, ctx,
+                );
+                local.insert(name, record);
                 let where_reached = solver.and(&[
                     active.clone(),
                     membership.unwrap_or_else(|| solver.bool_value(true)),
@@ -1275,19 +1278,6 @@ fn retain_collections<S: SmtSolver>(
     })
 }
 
-pub(crate) fn compute_updates<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    statements: &[Statement],
-    read_state: &SymbolicState<S::Term>,
-    pending: SymbolicState<S::Term>,
-    bindings: &mut Bindings<S::Term>,
-) -> Result<SymbolicState<S::Term>, VerifyError> {
-    compute_updates_in(
-        solver, model, statements, read_state, pending, bindings, None,
-    )
-}
-
 pub(crate) fn compute_updates_in<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
@@ -1372,7 +1362,10 @@ fn compute_statement<S: SmtSolver>(
                 binder_values_in(solver, model, binder, read_state, bindings, None, ctx)?
             {
                 let mut local = bindings.clone();
-                local.insert(name, enumerated_binder_binding(solver, model, value));
+                let record = binder_candidate_binding(
+                    solver, model, binder, value, read_state, None, bindings, ctx,
+                );
+                local.insert(name, record);
                 let where_term =
                     binder_where_in(solver, model, binder, read_state, &mut local, None, ctx)?;
                 let condition = binder_condition(solver, membership, where_term)?;

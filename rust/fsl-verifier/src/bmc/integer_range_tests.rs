@@ -739,7 +739,12 @@ fn bridge_selected_public_and_full_bound_priority_are_preserved() {
             &state,
         ));
         eprintln!("BRIDGE_SELECTED state={state:?} actual={actual:?}");
-        assert_eq!(actual, Err(VerifyError::new(ELIGIBILITY)));
+        // An unselected bound is not assumed: this frame proves n=0, and cannot prove n=3.
+        if n == 0 {
+            assert_eq!(actual.unwrap().violation, None);
+        } else {
+            assert_eq!(actual, Err(VerifyError::new(ELIGIBILITY)));
+        }
         for expected in [FslValue::Bool(false), FslValue::Bool(true)] {
             let mut solver = Z::new().unwrap();
             let actual = block_on(crate::expression_matches_value(
