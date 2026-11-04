@@ -381,9 +381,6 @@ acceptance and broader required gates remain open.
 
 ## 4. Implementation notes
 
-Historical frozen-Python reference only; native Rust under rust/ is authoritative.
-Remaining legacy implementation-note migration is tracked in #1437.
-
 - grammar.py: `compose_def` (use / internal / sync action). `alias.x` collides with the
   existing `field` syntax (same form as `o.st`) — during compose expansion, "field
   access to a name in the alias set" is rewritten as a namespace reference, and otherwise
