@@ -1651,7 +1651,7 @@ impl Pending {
                 &signatures,
                 &entities,
                 &instance_bounds,
-                &mut next.spellings.phrases,
+                &mut next,
             )?;
             generated.push((position, item));
         }
@@ -1806,7 +1806,7 @@ fn desugar_trace(
     events: &[EventSignature],
     entities: &BTreeMap<String, Entity>,
     instance_bounds: &BTreeMap<String, i64>,
-    phrases: &mut Vec<PhraseSpelling>,
+    next: &mut NextEditionRequirements,
 ) -> Result<RequirementsItem, ParseError> {
     let verbs = events
         .iter()
@@ -1867,7 +1867,7 @@ fn desugar_trace(
                 first.span,
             ));
         };
-        phrases.push(PhraseSpelling {
+        next.spellings.phrases.push(PhraseSpelling {
             kind: PhraseKind::Step,
             span: phrase_span,
             particles,
@@ -1993,10 +1993,13 @@ fn desugar_trace(
         if chosen.from == state.stage {
             state.stage.clone_from(&chosen.to);
         }
-        let mut given = inputs
-            .into_iter()
-            .map(|(name, value, _)| (name.text.clone(), (name, value)))
-            .collect::<BTreeMap<_, _>>();
+        let mut given = BTreeMap::new();
+        for (name, value, _) in inputs {
+            let (text, at) = (name.text.clone(), name.span);
+            if given.insert(text.clone(), (name, value)).is_some() {
+                next.repeated_step_inputs.push((text, at));
+            }
+        }
         let mut args = vec![Expr::Num(state.number)];
         for role in &chosen.roles {
             let Some((_, value)) = given.remove(role) else {

@@ -2427,6 +2427,46 @@ fn event_requirement(
         })
 }
 
+/// The origin id prefix of a refusal of a repeated scenario step input.
+const REPEATED_STEP_INPUT: &str = "requirements:step-input:";
+
+/// Whether `error` refuses a repeated scenario step input.
+pub(crate) fn is_repeated_step_input(error: &CoreError) -> bool {
+    error
+        .origin
+        .as_ref()
+        .is_some_and(|origin| origin.id.0.starts_with(REPEATED_STEP_INPUT))
+}
+
+/// Refuse the first input a scenario or forbidden step names again.
+pub(crate) fn reject_repeated_step_input(
+    requirements: &SurfaceRequirements,
+) -> Result<(), CoreError> {
+    let first = requirements
+        .next
+        .iter()
+        .flat_map(|next| &next.repeated_step_inputs)
+        .next();
+    let Some((input, at)) = first else {
+        return Ok(());
+    };
+    let mut error = core_error(format!("duplicate step input '{input}'"), *at);
+    error.origin = Some(Box::new(OriginChain {
+        id: OriginId(format!("{REPEATED_STEP_INPUT}{}", at.start.offset)),
+        dialect: "requirements".to_owned(),
+        primary: Some(OriginSite {
+            source_file: None,
+            span: Some(*at),
+            dialect: "requirements".to_owned(),
+            declaration_path: Vec::new(),
+        }),
+        secondary: Vec::new(),
+        lowering_steps: Vec::new(),
+        generated: false,
+    }));
+    Err(error)
+}
+
 /// Lower the requirements dialect into the shared kernel, after name
 /// resolution ([`crate::lower_requirements`]) replaced every glossary alias.
 ///
