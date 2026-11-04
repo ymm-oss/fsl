@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+requirements SetReq {
+  implements SetAbs from "issue_1281_later_error_abs.fsl" {
+    maps auto
+    action add(j) -> add(j)
+  }
+
+  type Job = 0..1
+  state { active: Set<Job> }
+  init { active = Set {} }
+  action add(j: Job) { active = active.add(j) }
+}

@@ -5,7 +5,8 @@ use std::process::Output;
 use serde_json::Value;
 
 /// Validate every raw stderr line, including finite nonnegative seconds and
-/// the closed set of private route labels. Return the body and engine.
+/// the closed set of private route labels, including the later-check form
+/// `secondary, oracle=<route>`. Return the body and that whole label.
 pub fn progress(output: &Output) -> Vec<(&str, &str)> {
     let stderr = std::str::from_utf8(&output.stderr).expect("UTF-8 stderr");
     assert!(
@@ -17,9 +18,17 @@ pub fn progress(output: &Output) -> Vec<(&str, &str)> {
         .map(|line| {
             assert!(line.starts_with("mutate "), "{line:?}");
             let (body, timing) = line.split_once(" (engine=").expect("engine suffix");
-            let (engine, seconds) = timing.split_once(", ").expect("duration separator");
+            let (engine, seconds) = timing.rsplit_once(", ").expect("duration separator");
             assert!(
-                matches!(engine, "explicit" | "bmc" | "probe" | "none" | "secondary"),
+                matches!(
+                    engine,
+                    "explicit"
+                        | "bmc"
+                        | "probe"
+                        | "none"
+                        | "secondary, oracle=explicit"
+                        | "secondary, oracle=bmc"
+                ),
                 "{line}"
             );
             let seconds: f64 = seconds
@@ -54,14 +63,32 @@ pub fn assert_report_progress(output: &Output, value: &Value) {
     let (mut builtin, mut external) = (0, 0);
     for ((body, engine), record) in lines[1..].iter().zip(mutants) {
         let status = record["status"].as_str().expect("status");
-        if *engine == "secondary" {
-            assert_eq!(status, "killed", "{body}");
+        let later = engine.starts_with("secondary, ");
+        if later {
+            assert!(
+                matches!(status, "killed" | "inconclusive" | "error"),
+                "{body}"
+            );
         }
-        if matches!(
-            record["killed_by"].as_str(),
-            Some("acceptance" | "forbidden" | "refinement")
-        ) {
-            assert_eq!(*engine, "secondary", "{body}");
+        if status == "inconclusive"
+            || matches!(
+                record["killed_by"].as_str(),
+                Some("acceptance" | "forbidden" | "refinement")
+            )
+        {
+            assert!(later, "{body} (engine={engine})");
+        }
+        // A `_bounds_*` killer has three honest routes: the boundary probe,
+        // a main BMC kill, or the init-bounds override after a clean main
+        // oracle. Explicit only ever certifies clean, so it never kills.
+        if status == "killed" {
+            assert_ne!(*engine, "explicit", "{body}");
+        }
+        if record["killed_by"]
+            .as_str()
+            .is_some_and(|killer| killer.starts_with("_bounds_"))
+        {
+            assert!(later || matches!(*engine, "probe" | "bmc"), "{body}");
         }
         let killer = record["killed_by"]
             .as_str()

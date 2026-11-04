@@ -107,7 +107,12 @@ fn stable_mutate_progress(stderr: &[u8], report: &Value) -> Vec<u8> {
         let (body, engine) = prefix.rsplit_once(" (engine=").expect("progress engine");
         assert!(matches!(
             engine,
-            "explicit" | "bmc" | "probe" | "none" | "secondary"
+            "explicit"
+                | "bmc"
+                | "probe"
+                | "none"
+                | "secondary, oracle=explicit"
+                | "secondary, oracle=bmc"
         ));
         if index == 0 {
             assert!(matches!(

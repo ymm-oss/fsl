@@ -10808,15 +10808,16 @@ struct MainOracle {
     engine: &'static str,
 }
 
-/// The `engine=` word on a mutant's progress line: the main oracle's route,
+/// The `engine=` text on a mutant's progress line: the main oracle's route,
 /// unless the main oracle was clean and a later check (requirements,
-/// implements, the init-bounds override) killed the mutant. That kill did not
-/// come from the route, so the line must not read as if it had.
-fn mutation_progress_engine(main: &MainOracle, outcome: &MutationOracle) -> &'static str {
-    if main.outcome.is_clean() && matches!(outcome, MutationOracle::Killed { .. }) {
-        "secondary"
+/// implements, the init-bounds override) decided the published `status`. That
+/// status did not come from the route, so the line says `secondary` and keeps
+/// the route visible beside it.
+fn mutation_progress_engine(main: &MainOracle, status: &str) -> String {
+    if main.outcome.is_clean() && status != "survived" {
+        format!("secondary, oracle={}", main.engine)
     } else {
-        main.engine
+        main.engine.to_owned()
     }
 }
 
@@ -12274,7 +12275,7 @@ fn run_mutate_from_source(
             outcome = apply_init_bounds_override(outcome, &root);
         }
         let (status, detail) = mutant_status(&outcome, inconclusive);
-        let progress_engine = mutation_progress_engine(&main, &outcome);
+        let progress_engine = mutation_progress_engine(&main, status);
         let target = mutant
             .action
             .as_ref()
@@ -12380,7 +12381,7 @@ fn run_mutate_from_source(
             &public,
             index,
             discovered.min(max_mutants),
-            progress_engine,
+            &progress_engine,
             started,
         );
         public_mutants.push(public);
@@ -12508,7 +12509,7 @@ fn run_mutate_from_source(
                 &public,
                 index,
                 count,
-                mutation_progress_engine(&main, &outcome),
+                &mutation_progress_engine(&main, status),
                 started,
             );
             public_mutants.push(public);
@@ -20315,30 +20316,33 @@ mod mutate_explicit_first_tests {
     }
 
     #[test]
-    fn progress_engine_names_a_later_check_kill_only() {
+    fn progress_engine_keeps_the_route_beside_a_later_decision() {
         let main = |outcome, engine| MainOracle {
             outcome,
             boundary_killer: None,
             engine,
         };
-        let killed = || MutationOracle::killed("acceptance", Vec::new());
         for route in ["explicit", "bmc"] {
             let clean = main(MutationOracle::Clean, route);
-            assert_eq!(mutation_progress_engine(&clean, &killed()), "secondary");
+            assert_eq!(mutation_progress_engine(&clean, "survived"), route);
+            for later in ["killed", "inconclusive", "error"] {
+                assert_eq!(
+                    mutation_progress_engine(&clean, later),
+                    format!("secondary, oracle={route}")
+                );
+            }
+        }
+        let killed = || MutationOracle::killed("Safe", Vec::new());
+        for route in ["bmc", "probe"] {
             assert_eq!(
-                mutation_progress_engine(&clean, &MutationOracle::Clean),
+                mutation_progress_engine(&main(killed(), route), "killed"),
                 route
             );
         }
-        for route in ["bmc", "probe"] {
-            let main_kill = main(killed(), route);
-            assert_eq!(mutation_progress_engine(&main_kill, &killed()), route);
-        }
-        let later_error = MutationOracle::Error(OracleFailure::new("bmc", "unknown"));
+        let failed = MutationOracle::Error(OracleFailure::new("bmc", "unknown"));
         assert_eq!(
-            mutation_progress_engine(&main(MutationOracle::Clean, "explicit"), &later_error),
-            "explicit",
-            "only a later kill replaces the route"
+            mutation_progress_engine(&main(failed, "bmc"), "error"),
+            "bmc"
         );
     }
 

@@ -5056,9 +5056,10 @@ DESIGN-*.md).</p>
   certify clean through K only when every reachable is witnessed; if neither
   decides, the existing BMC path chooses the verdict/killer. Secondary checks
   still run. Stderr reports the accepted baseline and each evaluated mutant,
-  with <code>engine=explicit|bmc|probe|none|secondary</code>
-  and elapsed seconds; the engine names the main-oracle route, except that
-  <code>secondary</code> marks a mutant the main oracle left clean and a later check killed.
+  with <code>engine=explicit|bmc|probe|none</code>
+  and elapsed seconds; the engine names the main-oracle route. If the main oracle
+  was clean and a later check decided <code>killed</code>, <code>inconclusive</code> or <code>error</code>, the
+  label is <code>engine=secondary, oracle=explicit|bmc</code>, which keeps that route visible.
   Stdout is unchanged except for the encoding-only residual in
   <a href="../design/DESIGN-mutate.md#3-kill-oracle-and-baseline-gate"><code>DESIGN-mutate</code> §3</a>:
   explicit-clean can survive where BMC alone reported <code>build_spec</code>.

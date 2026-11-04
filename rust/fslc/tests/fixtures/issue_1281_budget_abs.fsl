@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+spec WideAbs {
+  type V = 0..5
+  state { seq: Seq<V, 6> }
+  init { seq = Seq {} }
+  action push(v: V) {
+    requires seq.size() < 6
+    seq = seq.push(v)
+  }
+}

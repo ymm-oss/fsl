@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+spec SetAbs {
+  type Job = 0..1
+  state { active: Set<Job> }
+  init { active = Set {} }
+  action add(j: Job) { active = active.add(j) }
+}

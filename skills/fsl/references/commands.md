@@ -637,8 +637,10 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `mutate baseline: <verdict> (engine=<route>, <seconds>s)`, then
   `mutate [i/N] <op> <target>: <status>[ <killer>] (engine=<route>, <seconds>s)`
   or `mutate external [i/M] <id>: ...`. Routes are explicit, bmc, probe, none,
-  naming the main oracle; `secondary` replaces the route when the main oracle
-  was clean and a later check killed the mutant. Counts cover evaluated records,
+  naming the main oracle. If the main oracle was clean and a later check decided
+  killed, inconclusive or error, the label is
+  `(engine=secondary, oracle=<route>, <seconds>s)`, with route explicit or bmc.
+  Counts cover evaluated records,
   including invalid externals. No progress on command/baseline errors. Stdout is
   unchanged except for the encoding-only residual in DESIGN-mutate §3:
   explicit-clean can survive where BMC alone reported `build_spec`.
