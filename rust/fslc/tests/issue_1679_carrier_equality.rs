@@ -1093,16 +1093,25 @@ fn rebuilt_value_decides_in_a_guard_on_every_engine() {
 
 const ADD: &str = "Set { p, none } == Set { o }.add(none)";
 
-/// A read into state and each property position, passing and failing. Explicit refuses
-/// `leadsTo` whatever it holds, and `fsl-bfs` reports no violation for either failing
-/// `leadsTo` or `reachable`.
-#[test]
-fn rebuilt_value_decides_when_read_into_state_and_in_every_property() {
+/// `(id, init, body, property, expected results)`.
+type RebuiltRow = (
+    &'static str,
+    &'static [(&'static str, &'static str)],
+    String,
+    String,
+    [&'static str; 4],
+);
+
+const DIFFERING: [(&str, &str); 2] = [("p", "some(0)"), ("o", "some(1)")];
+const EQUAL: [(&str, &str); 2] = [("p", "some(1)"), ("o", "some(1)")];
+const CHECKED_TRANS: &str =
+    "trans X { old(done) or not done or Set { p, none } == Set { old(o) }.add(none) }";
+
+#[allow(clippy::too_many_lines)] // One literal row per form.
+fn rebuilt_rows() -> [RebuiltRow; 12] {
     let read = "p = (if c then Seq { p } else t).head()\n done = true";
-    let differing = [("p", "some(0)"), ("o", "some(1)")];
-    let equal = [("p", "some(1)"), ("o", "some(1)")];
     let copies = "p = o\n done = true";
-    let rows: [(&str, &[(&str, &str)], String, String, [&str; 4]); 12] = [
+    [
         (
             "read_holds",
             &[],
@@ -1142,28 +1151,28 @@ fn rebuilt_value_decides_when_read_into_state_and_in_every_property() {
         ),
         (
             "invariant_holds",
-            &differing,
+            &DIFFERING,
             "done = true".to_owned(),
             format!("invariant Q {{ not ({ADD}) }}"),
             ["verified", "proved", "proved", "none"],
         ),
         (
             "invariant_fails",
-            &equal,
+            &EQUAL,
             "done = true".to_owned(),
             format!("invariant Q {{ not ({ADD}) }}"),
             ["violated", "violated", "violated", "Q"],
         ),
         (
             "reachable_holds",
-            &differing,
+            &DIFFERING,
             copies.to_owned(),
             format!("reachable R {{ {ADD} }}"),
             ["verified", "proved", "unknown_cti", "none"],
         ),
         (
             "reachable_fails",
-            &differing,
+            &DIFFERING,
             "done = true".to_owned(),
             format!("reachable R {{ {ADD} }}"),
             [
@@ -1175,40 +1184,40 @@ fn rebuilt_value_decides_when_read_into_state_and_in_every_property() {
         ),
         (
             "trans_holds",
-            &differing,
+            &DIFFERING,
             copies.to_owned(),
-            format!(
-                "trans X {{ old(done) or not done or Set {{ p, none }} == Set {{ old(o) }}.add(none) }}"
-            ),
+            CHECKED_TRANS.to_owned(),
             ["verified", "proved", "unknown_cti", "none"],
         ),
         (
             "leadsto_holds",
-            &differing,
+            &DIFFERING,
             copies.to_owned(),
             format!("leadsTo L {{ {ADD} ~> done }}"),
             ["verified", "error", "unknown_cti", "none"],
         ),
         (
             "leadsto_fails",
-            &equal,
+            &EQUAL,
             "c = not c".to_owned(),
             format!("leadsTo L {{ {ADD} ~> done }}"),
             ["violated", "error", "violated", "none"],
         ),
-    ];
+    ]
+}
+
+/// A read into state and each property position, passing and failing. Explicit refuses
+/// `leadsTo` whatever it holds, and `fsl-bfs` reports no violation for either failing
+/// `leadsTo` or `reachable`.
+#[test]
+fn rebuilt_value_decides_when_read_into_state_and_in_every_property() {
+    let rows = rebuilt_rows();
     for (id, init, body, property, expected) in rows {
         let source = wide_spec(init, &body, &format!("{IDLE}{property}"));
         assert_eq!(results(id, &source), expected, "{id}\n{source}");
     }
     // `trans` failing, with the post-state compared to the pre-state's rebuilt value.
-    let source = wide_spec(
-        &differing,
-        "done = true",
-        &format!(
-            "{IDLE}trans X {{ old(done) or not done or Set {{ p, none }} == Set {{ old(o) }}.add(none) }}"
-        ),
-    );
+    let source = wide_spec(&DIFFERING, "done = true", &format!("{IDLE}{CHECKED_TRANS}"));
     assert_eq!(
         results("trans_fails", &source),
         ["violated", "violated", "violated", "X"],
