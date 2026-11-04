@@ -126,7 +126,7 @@ poststate and temporal expectations. The new direct API control checks mutation
 of the public constant map, noninteger/unbound errors and nested failed folding.
 Shared folding is not an independent semantic lineage or an assurance promotion.
 The single CURRENT `X1/static-range` expectation becomes
-`[Ok, Safe, Safe, Error]`, while its historical source/table and dynamic sibling
+`[Ok, Safe, Safe, Error]`, while its source table and dynamic sibling
 remain unchanged. Required own-tree corpus/inline transition evidence is recorded
 with the measured implementation identity; no new removal policy is authorized.
 

@@ -363,10 +363,10 @@ state Set initializers; `--property` selecting away a bound the frame proves.
 ### Which commands refuse
 
 Measured with `reachable R { forall i in 0..n { i >= 0 } }` beside
-`invariant Q { n > 0 }`, which the state violates, base `5564b25cc` against this branch,
+`invariant Q { n > 0 }`, which the state violates, base `5564b25cc` against this change,
 each exit recorded:
 
-| Route | Commands | Base | This branch |
+| Route | Commands | Base | This change |
 |---|---|---|---|
 | Checked load, reports the refusal | `verify`, `testgen`, `mutate`, `sweep`, `scenarios`, `html`, `ledger`, `diff`, `refine` | 1 | 2 |
 | Checked load, reports the refusal | `conformance`, `analyze`, `explain` | 0 | 2 |
@@ -381,13 +381,13 @@ Bare `build_model` defers a dependent aggregate bound, so `kernel` and `typestat
 which project a bare model, reach it in their projection. They report it as base did,
 through `locate_unfolded_aggregate`: `invalid model expression: 'n' is not an integer
 const at 1:66`, exit 2, with `loc`. `fmt` validates through bare `build_model` and no
-longer refuses that form: base exited 2, this branch exits 0. It is kept that way
+longer refuses that form: base exited 2, this change exits 0. It is kept that way
 because `fmt` rewrites text and judges nothing, and adopting checked admission would
 make it refuse forms the base formats; `check` reports the bound.
 
 **`replay` is an exception.** It keeps loading through `load_replay_model`, including
 the forms `check` refuses and the dynamic aggregate form the base refused (base exit 2,
-this branch exit 0), by user decision. It checks the observed prefix through the Monitor,
+this change exit 0), by user decision. It checks the observed prefix through the Monitor,
 which evaluates each bound concretely, so a bound refused here can replay as conformant.
 Replay reports what happened on that trace; it does not admit the specification.
 
