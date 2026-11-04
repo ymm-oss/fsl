@@ -859,6 +859,37 @@ mod limited {
         )
     }
 
+    /// A real panic in the `z3` bindings, reached end to end with no test hook: Z3 returns
+    /// no term once the address space is gone.
+    #[test]
+    fn a_binding_panic_reaches_the_envelope_with_exit_2() {
+        let source = "spec Z { type W = 0..12000000 state { n: W } init { n = 1 } action a() { n = 1 } invariant P { forall i in 0..n { i >= 0 } } }";
+        for engine in ["bmc", "induction"] {
+            let (exit, output, stderr) = limited(
+                source,
+                &format!("verify m.fsl --engine {engine} --depth 2 --no-cache"),
+            );
+            assert_eq!(exit, 2, "{engine}: {output}");
+            assert_eq!(output["fsl"], "1.0", "{engine}: {output}");
+            assert_eq!(output["result"], "error", "{engine}: {output}");
+            assert_eq!(output["kind"], "semantics", "{engine}: {output}");
+            let message = output["message"].as_str().unwrap();
+            assert!(
+                message.starts_with(
+                    "solver execution stopped [solver-panic]: the z3 bindings panicked, \
+                     so no verdict was reached: called `Option::unwrap()` on a `None` value at z3-"
+                ),
+                "{engine}: {message}"
+            );
+            assert!(
+                message.ends_with("but this run did not establish it"),
+                "{message}"
+            );
+            let printed = String::from_utf8_lossy(&stderr);
+            assert!(printed.contains("panicked at"), "{printed}");
+        }
+    }
+
     /// A wrapper whose inner binder is always empty completes no binding, and every row
     /// it visits still spends the walk's budget. The engines enumerate it, as on the base.
     #[test]
