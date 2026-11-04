@@ -1415,10 +1415,11 @@ impl ValidationPhase {
     }
 
     /// A postcondition keeps every lexical fact but has no certified read frame.
-    fn without_carriers(&self) -> Self {
+    fn for_postcondition(&self) -> Self {
         let mut phase = self.clone();
         if let Some(rule) = &mut phase.range_rule {
             rule.carriers = false;
+            rule.after_action = true;
         }
         phase
     }
@@ -1587,7 +1588,9 @@ struct RangeRule {
     /// `old(...)` reads a frame in this scope.
     old_frame: bool,
     /// State Sets that can hold a key the engines do not read as a solver literal.
-    symbolic_sets: BTreeSet<String>,
+    symbolic_sets: SymbolicSets,
+    /// A postcondition: it reads the state an action left, and no initial state.
+    after_action: bool,
     /// Report only an expanding aggregate whose bound does not fold.
     static_aggregates_only: bool,
     /// Init only: completed assignments, readable as locals.
@@ -1720,15 +1723,26 @@ impl RangeRule {
             }
             Expr::Var(name) => match model.state.iter().find(|(state, _)| state == name) {
                 Some((_, TypeRef::Seq(_, 0))) => Empty,
-                Some((_, TypeRef::Set(_))) if !self.symbolic_sets.contains(name) => {
+                Some((_, TypeRef::Set(_)))
+                    if !(if self.after_action {
+                        &self.symbolic_sets.after_action
+                    } else {
+                        &self.symbolic_sets.in_any_state
+                    })
+                    .contains(name) =>
+                {
                     crate::binder_range::state_set_element_envelope(model, name)
                         .map_or(Opaque, Literal)
                 }
                 _ => Opaque,
             },
-            Expr::UnaryNamed { name, expr, .. } if name == "old" && self.old_frame => {
-                self.literal_candidates(expr, env, model)
+            // `old` reads a reframed frame, so no write has added a key there.
+            Expr::UnaryNamed { name, expr, .. } if name == "old" && self.old_frame => Self {
+                old_frame: false,
+                symbolic_sets: SymbolicSets::default(),
+                ..self.clone()
             }
+            .literal_candidates(expr, env, model),
             Expr::Method {
                 receiver,
                 name,
@@ -3247,9 +3261,18 @@ pub(crate) fn locate_unfolded_aggregate(model: &KernelModel) -> Result<(), Typec
     validate_model_expressions(model, Some(&Admission::new(model, true)))
 }
 
+/// State Sets that can hold a key the engines do not read as a solver literal.
+#[derive(Clone, Default)]
+struct SymbolicSets {
+    /// In some state, the initial one included.
+    in_any_state: BTreeSet<String>,
+    /// In the state an action leaves, which is all a postcondition reads.
+    after_action: BTreeSet<String>,
+}
+
 /// What one admission walk judges.
 struct Admission {
-    symbolic_sets: BTreeSet<String>,
+    symbolic_sets: SymbolicSets,
     static_aggregates_only: bool,
 }
 
@@ -3366,10 +3389,12 @@ fn writes_literal_keys(
     })
 }
 
-/// The state Sets some write can give a key the engines do not read as a solver
-/// literal: a fixed point over init and every action, because a copy carries the key.
-fn state_sets_with_symbolic_keys(model: &KernelModel) -> BTreeSet<String> {
-    let mut writes = Vec::new();
+/// The state Sets a write can give a key the engines do not read as a solver literal.
+/// Init is a fixed point, because an init copy carries what init assigned. An action
+/// reads every state from a reframed frame, whose keys are the element domain's, so a
+/// copy there carries nothing and only the action's own expression decides.
+fn state_sets_with_symbolic_keys(model: &KernelModel) -> SymbolicSets {
+    let mut init_writes = Vec::new();
     // Init rewrites a state read after a literal assignment to that literal.
     let mut init_scope: (BTreeSet<String>, BTreeMap<String, &Expr>) = Default::default();
     for statement in &model.init {
@@ -3377,7 +3402,7 @@ fn state_sets_with_symbolic_keys(model: &KernelModel) -> BTreeSet<String> {
             std::slice::from_ref(statement),
             &init_scope,
             model,
-            &mut writes,
+            &mut init_writes,
         );
         if let Statement::Assign {
             target: LValue::Var(name),
@@ -3392,6 +3417,7 @@ fn state_sets_with_symbolic_keys(model: &KernelModel) -> BTreeSet<String> {
             }
         }
     }
+    let mut action_writes = Vec::new();
     for action in &model.actions {
         let mut scope: (BTreeSet<String>, BTreeMap<String, &Expr>) = Default::default();
         scope
@@ -3406,19 +3432,29 @@ fn state_sets_with_symbolic_keys(model: &KernelModel) -> BTreeSet<String> {
                 }
             }
         }
-        collect_set_writes(&action.statements, &scope, model, &mut writes);
+        collect_set_writes(&action.statements, &scope, model, &mut action_writes);
     }
-    let mut symbolic = BTreeSet::new();
+    let mut in_any_state = BTreeSet::new();
     loop {
-        let before = symbolic.len();
-        for write in &writes {
-            if !writes_literal_keys(write.value, write, &symbolic, model) {
-                symbolic.insert(write.target.to_owned());
+        let before = in_any_state.len();
+        for write in &init_writes {
+            if !writes_literal_keys(write.value, write, &in_any_state, model) {
+                in_any_state.insert(write.target.to_owned());
             }
         }
-        if symbolic.len() == before {
-            return symbolic;
+        if in_any_state.len() == before {
+            break;
         }
+    }
+    let after_action: BTreeSet<String> = action_writes
+        .iter()
+        .filter(|write| !writes_literal_keys(write.value, write, &BTreeSet::new(), model))
+        .map(|write| write.target.to_owned())
+        .collect();
+    in_any_state.extend(after_action.iter().cloned());
+    SymbolicSets {
+        in_any_state,
+        after_action,
     }
 }
 
@@ -3504,7 +3540,7 @@ fn validate_model_expressions(
                 let target = crate::origin::action_ensure_target(&action.name, index);
                 let span = model.component_item_span(&target).unwrap_or(action.span);
                 phase
-                    .without_carriers()
+                    .for_postcondition()
                     .with_old_frame()
                     .check(
                         expr,

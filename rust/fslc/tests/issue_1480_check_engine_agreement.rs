@@ -51,12 +51,15 @@ const WRITES: &[&str] = &[
     "xs = xs.remove(n) ys = ys.add(1)",
     "xs = Set { n } n = 0",
     "if b { xs = ys } else { xs = xs.add(2) }",
+    "xs = xs.add(n) ys = xs",
+    "ys = xs xs = xs.add(n)",
 ];
 
 const INITS: &[&str] = &[
     "xs = Set { 1 } ys = Set { }",
     "xs = Set { 0, 2 } ys = xs",
     "xs = Set { n } ys = Set { y }",
+    "xs = Set { n } ys = xs",
 ];
 
 const SOURCES: &[&str] = &[
@@ -265,6 +268,72 @@ fn a_symbolic_key_is_opaque_without_a_certified_frame() {
         // The carrier is certified here whatever the key was.
         assert_eq!(check(&set(write, &inv)).0, 0, "{write}");
     }
+}
+
+/// Only init's writes and an action's own expression give a Set a key the engines cannot
+/// order. A copy made in init, or read from an action's frame, runs in all three engines.
+#[test]
+fn a_copy_carries_a_key_only_in_init() {
+    const STATE: &str = "state { n: T, y: T, b: Bool, xs: Set<T>, ys: Set<T> }";
+    const ENSURES: &str = "ensures forall e in ys { forall j in 0..e { j >= 0 } }";
+    const REACHES: &str = "reachable R { forall e in ys { count(j in 0..e) >= 0 } }";
+    let copied = "init { n = 1 y = 0 b = true xs = Set { 0, 2 } ys = xs }";
+    let spec = |init: &str, body: &str| form(&format!("{STATE} {init} {body}"));
+    // ca66ca948d7c: the init copy, then a later write to the Set it copied.
+    for body in [
+        format!("action go() {{ xs = xs.add(n) b = true {ENSURES} }}"),
+        format!("action go() {{ xs = xs.add(n) ys = ys.add(1) {ENSURES} }}"),
+        format!("action go() {{ ys = xs xs = xs.add(n) b = true {ENSURES} }}"),
+        format!("action go() {{ xs = xs.add(n) if b {{ ys = xs }} b = false {ENSURES} }}"),
+        format!("action go() {{ xs = xs.add(n) b = true }} action h() {{ ys = xs {ENSURES} }}"),
+        format!("action go() {{ xs = xs.add(n) b = true }} {REACHES}"),
+        format!("action go() {{ xs = xs.add(n) ys = xs }} {REACHES}"),
+        // `old` reads the frame the action started from, before its own write.
+        "action go() { xs = xs.add(n) ensures forall e in old(xs) { forall j in 0..e { j >= 0 } } }"
+            .to_owned(),
+    ] {
+        let source = spec(copied, &body);
+        assert_eq!(check(&source).0, 0, "{source}: {}", check(&source).1);
+        assert_eq!(result(&verify(&source, "bmc", &[])), "verified", "{source}");
+        assert_eq!(
+            result(&verify(&source, "induction", &[])),
+            "proved",
+            "{source}"
+        );
+        assert_eq!(
+            result(&verify(&source, "explicit", &[])),
+            "proved",
+            "{source}"
+        );
+    }
+    // Writing the key directly still leaves it symbolic in the next state.
+    for body in [
+        format!("action go() {{ ys = ys.add(n) {ENSURES} }}"),
+        format!("action go() {{ ys = xs.add(n) {ENSURES} }}"),
+        format!("action go() {{ let s = xs.add(n) ys = s {ENSURES} }}"),
+        format!("action go() {{ b = true {ENSURES} }} action h() {{ ys = Set {{ n }} }}"),
+        format!("action go() {{ ys = ys.add(n) }} {REACHES}"),
+    ] {
+        let source = spec(copied, &body);
+        let refused = check(&source);
+        assert_eq!(refused.0, 2, "{source}: {}", refused.1);
+        assert!(
+            refused.1["message"]
+                .as_str()
+                .unwrap()
+                .contains("'e' is not an integer const"),
+            "{source}: {}",
+            refused.1
+        );
+    }
+    // An initial key that is not a literal reaches an initial state and no postcondition.
+    let initial = "init { y = 0 n = y b = true xs = Set { n } ys = xs }";
+    let reaches = spec(initial, &format!("action go() {{ b = true }} {REACHES}"));
+    assert_eq!(check(&reaches).0, 2, "{}", check(&reaches).1);
+    let postcondition = spec(initial, &format!("action go() {{ b = true {ENSURES} }}"));
+    assert_eq!(check(&postcondition).0, 0, "{}", check(&postcondition).1);
+    assert_eq!(result(&verify(&postcondition, "bmc", &[])), "verified");
+    assert_eq!(result(&verify(&postcondition, "induction", &[])), "proved");
 }
 
 /// `--property` no longer refuses a range whose frame proves the unselected bound.
