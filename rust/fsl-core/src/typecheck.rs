@@ -1678,10 +1678,22 @@ fn validate_expression_inner(
             validate(condition, env, spans.condition, Some(&TypeRef::Bool))?;
             let then_phase = phase.after_patterns(condition);
             let else_phase = then_phase.after_patterns(then_expr);
-            // The inferred carrier can resolve a named numeric expectation.
-            // Keep the supplied context for both arms (and their diagnostics);
-            // only an uncontextualized conditional uses the inferred arm type.
-            let branch_type = expected.unwrap_or(&ty);
+            // Admission requires mutually compatible arms. Compatibility is an
+            // equivalence only over scalars: with `Int` inside a container, an
+            // arm can match the expectation but not its sibling, so a container
+            // conditional keeps the first arm's carrier. A scalar expectation
+            // admits the same arms and lets a diagnostic name the supplied type.
+            let branch_type = match expected {
+                Some(expected)
+                    if matches!(
+                        resolve(model, expected)?,
+                        TypeRef::Int | TypeRef::Bool | TypeRef::Range(_, _) | TypeRef::Named(_)
+                    ) =>
+                {
+                    expected
+                }
+                _ => &ty,
+            };
             for (expr, span, phase) in [
                 (then_expr, spans.then_expr, &then_phase),
                 (else_expr, spans.else_expr, &else_phase),
