@@ -950,8 +950,8 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   Init-statement Typed-Struct domains were already refused; their existing
   unlocated finite-scalar error is preserved, without a new prefix or location.
   The #1480 sweep below measured 8 <code>ok</code>→<code>error</code> forms for these binders, base
-  <code>5564b25ccb37e3477311fde1dae5eb6298eb6b2d</code>, head
-  <code>45db5cb85c153adaf14b6fb074e3ab227ddef720</code>; see
+  <code>e3c19a39c9c3bf5c315c6002fd18114aa22cd654</code>, head
+  <code>f101e7a93cbb50ad85e3531a1d27314559735311</code>; see
   <a href="../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480">domain policy</a> and
   <a href="../design/DESIGN-check-executable-forms.md#corpus-transitions">corpus transitions</a>.</li>
 <li>Static range bounds (#1480) use the checked constant grammar when
@@ -1096,9 +1096,9 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   their boundaries; see
   <a href="../design/DESIGN-check-executable-forms.md#1480-checked-range-admission">checked executable forms</a>.
   Breaking-removal sweep (#1480): <code>fslc check &lt;form&gt;</code> with binaries built by Rust 1.98.0,
-  each in its own <code>git archive</code> tree, base <code>5564b25ccb37e3477311fde1dae5eb6298eb6b2d</code>,
-  head <code>45db5cb85c153adaf14b6fb074e3ab227ddef720</code>, over 20,067 forms: 639 <code>.fsl</code>
-  files (<code>specs/</code> 23, <code>examples/</code> 195, <code>rust/fslc/tests/fixtures/</code> 421) and 19,428 models
+  each in its own <code>git archive</code> tree, base <code>e3c19a39c9c3bf5c315c6002fd18114aa22cd654</code>,
+  head <code>f101e7a93cbb50ad85e3531a1d27314559735311</code>, over 20,179 forms: 646 <code>.fsl</code>
+  files (<code>specs/</code> 23, <code>examples/</code> 195, <code>rust/fslc/tests/fixtures/</code> 428) and 19,533 models
   captured while running the workspace tests on both sides. <code>ok</code>→<code>error</code>: 649, none under
   <code>specs/</code> or <code>examples/</code>: 495 <code>'x' is not an integer const</code>, 85 <code>binder bound is not a
   static integer</code>, 20 bounds that overflow or do not fold, 16 init statement <code>forall</code> bounds
@@ -1574,8 +1574,8 @@ This does not remove supported assigned-state reads in init RHS expressions;
 ranges in other positions follow the range admission rule; enclosing lexical
 binders retain their scope. Existing nested-init restrictions remain. The #1480 sweep
 measured 16 <code>ok</code>→<code>error</code> forms for this rule, base
-<code>5564b25ccb37e3477311fde1dae5eb6298eb6b2d</code>, head
-<code>45db5cb85c153adaf14b6fb074e3ab227ddef720</code>, among them the corpus files
+<code>e3c19a39c9c3bf5c315c6002fd18114aa22cd654</code>, head
+<code>f101e7a93cbb50ad85e3531a1d27314559735311</code>, among them the corpus files
 <code>explicit_init_range_assigned.fsl</code> and <code>explicit_init_range_unassigned.fsl</code>; see
 <a href="../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains">checked executable forms</a>.</p>
 <p>Within an init statement <code>forall</code>'s filter or body, reading a state root that

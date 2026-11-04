@@ -16,9 +16,9 @@ No size cap is added. `conformance`, `analyze`, `explain`, `diff`, `refine`, `te
 by design, including a dynamic aggregate form it used to refuse. See
 `DESIGN-check-executable-forms.md`.
 Breaking-removal sweep: `fslc check <form>` with binaries built by Rust 1.98.0, each in its
-own `git archive` tree, base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, head
-`45db5cb85c153adaf14b6fb074e3ab227ddef720`, over 20,067 forms: 639 `.fsl` files (`specs/` 23,
-`examples/` 195, `rust/fslc/tests/fixtures/` 421) and 19,428 models captured while running
+own `git archive` tree, base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`, head
+`f101e7a93cbb50ad85e3531a1d27314559735311`, over 20,179 forms: 646 `.fsl` files (`specs/` 23,
+`examples/` 195, `rust/fslc/tests/fixtures/` 428) and 19,533 models captured while running
 the workspace tests on both sides. `ok`→`error`: 649, none under `specs/` or `examples/`:
 495 `'x' is not an integer const`, 85 `binder bound is not a static integer`, 20 bounds that
 overflow or do not fold, 16 init statement `forall` bounds reading state, 11 declared `Bool`,

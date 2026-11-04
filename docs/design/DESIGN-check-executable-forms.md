@@ -478,18 +478,18 @@ verdict, on base and here alike.
 
 ### Corpus transitions
 
-Sweep at base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d` and head
-`45db5cb85c153adaf14b6fb074e3ab227ddef720`, the last code commit. `fslc check <form>` ran
+Sweep at base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654` and head
+`f101e7a93cbb50ad85e3531a1d27314559735311`, the last code commit. `fslc check <form>` ran
 twice with binaries built by Rust 1.98.0, each from a `git archive` of its SHA, with no
 difference between the two runs on either side and no timeout at 30 seconds. Every compared
 output is whole stdout and the exit code; nothing is excluded.
 
-The forms are 20,067, the union of both sides:
+The forms are 20,179, the union of both sides:
 
-- 639 `.fsl` files: `specs/` 23, `examples/` 195, `rust/fslc/tests/fixtures/` 421. Each runs
+- 646 `.fsl` files: `specs/` 23, `examples/` 195, `rust/fslc/tests/fixtures/` 428. Each runs
   in each tree, the 29 head-only files copied into the base tree beside the fixtures they
   read.
-- 19,428 models captured from the tests. A temporary patch in each tree, not in this
+- 19,533 models captured from the tests. A temporary patch in each tree, not in this
   repository, writes every source reaching `parse_document_with` or `parse_surface_spec`,
   with the components a compose root reads, while `cargo test --workspace` runs. That
   reaches every required test the branch rewrites (under `tests/`, 15 modified files, 69 added, none
@@ -498,11 +498,15 @@ The forms are 20,067, the union of both sides:
 
 | Base → head | Corpus | Captured |
 |---|---|---|
-| Same exit and stdout | 630 | 17,702 |
+| Same exit and stdout | 637 | 17,807 |
 | `ok`→`error` | 9 | 640 |
 | `error`→`ok` | 0 | 1,079 |
 | `error`→`error`, other text | 0 | 7 |
 | `ok`→`ok`, other output | 0 | 0 |
+
+A sweep of the same branch against base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, before
+#1677 and #1678 merged, found the same 649, 1,079 and 7 forms by content hash; the forms
+those two merges added to the tests and fixtures all report the same on both sides.
 
 Every `ok`→`error` is a breaking removal, 649 in all and none under `specs/` or `examples/`.
 The corpus files are `rust/fslc/tests/fixtures/explicit_init_range_assigned.fsl` and

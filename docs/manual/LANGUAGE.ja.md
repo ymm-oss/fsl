@@ -846,8 +846,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   要素を訪れるコレクションバインダーは変わりません。init 文の型付き Struct ドメインは
   以前から拒否しており、接頭辞や位置を追加せず、既存の位置なし診断を保ちます。
   #1480 の sweep では、これらの binder について `ok`→`error` を 8 件測定しました。base は
-  `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`、head は
-  `45db5cb85c153adaf14b6fb074e3ab227ddef720` です。[コーパスの遷移](../design/DESIGN-check-executable-forms.md#corpus-transitions)と
+  `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`、head は
+  `f101e7a93cbb50ad85e3531a1d27314559735311` です。[コーパスの遷移](../design/DESIGN-check-executable-forms.md#corpus-transitions)と
   [ドメイン方針](../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480)を参照してください。
 - 静的な範囲境界(#1480)は、成功する場合に検査済みの定数文法で畳み込みます。
   リテラル・定数、符号反転、`+ - * / %`、整数の `min`/`max`/`abs`、
@@ -978,10 +978,10 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   [実行可能形式の境界](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission)を
   参照してください。
   破壊的な削除の sweep(#1480): Rust 1.98.0 で各 SHA の `git archive` ツリーごとにビルドした
-  バイナリで `fslc check <form>` を実行しました。base は `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`、
-  head は `45db5cb85c153adaf14b6fb074e3ab227ddef720`、対象は 20,067 形式です。内訳は `.fsl`
-  ファイル 639 件(`specs/` 23、`examples/` 195、`rust/fslc/tests/fixtures/` 421)と、両側で
-  ワークスペースのテストを実行して取得したモデル 19,428 件です。`ok`→`error` は 649 件で、
+  バイナリで `fslc check <form>` を実行しました。base は `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`、
+  head は `f101e7a93cbb50ad85e3531a1d27314559735311`、対象は 20,179 形式です。内訳は `.fsl`
+  ファイル 646 件(`specs/` 23、`examples/` 195、`rust/fslc/tests/fixtures/` 428)と、両側で
+  ワークスペースのテストを実行して取得したモデル 19,533 件です。`ok`→`error` は 649 件で、
   `specs/` と `examples/` にはありません。内訳は `'x' is not an integer const` 495、
   `binder bound is not a static integer` 85、オーバーフローまたは畳み込めない境界 20、状態を読む
   init 文 `forall` の境界 16、宣言した `Bool` 11、組み込み `Int` の型付き binder 10、Struct の
@@ -1426,8 +1426,8 @@ Runtime の生のコンストラクターは、既存のエラー契約を保ち
 対応済みの init 右辺式での代入済み状態の読み出しは削除しません。他の位置の範囲は
 範囲受理規則に従います。外側の字句的バインダーのスコープと、既存の init 入れ子の制限は保ちます。
 #1480 の sweep では、この規則について `ok`→`error` を 16 件測定しました。base は
-`5564b25ccb37e3477311fde1dae5eb6298eb6b2d`、head は
-`45db5cb85c153adaf14b6fb074e3ab227ddef720` で、コーパスの
+`e3c19a39c9c3bf5c315c6002fd18114aa22cd654`、head は
+`f101e7a93cbb50ad85e3531a1d27314559735311` で、コーパスの
 `explicit_init_range_assigned.fsl` と `explicit_init_range_unassigned.fsl` を含みます。
 [実行可能形式の境界](../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains)を参照してください。
 

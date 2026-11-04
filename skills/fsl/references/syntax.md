@@ -1386,8 +1386,8 @@ when checking a file, the message suffix changes from `at L:C` to
   remain unchanged. Already-refused init-statement Typed-Struct domains keep
   their exact unlocated finite-scalar error. Their statement-domain check is
   deferred to checked-source admission; expressions inside init stay strict.
-  The #1480 sweep measured 8 `ok`→`error` forms for these binders, base `5564b25ccb37`,
-  head `45db5cb85c15`; see `DESIGN-spec-domains.md`.
+  The #1480 sweep measured 8 `ok`→`error` forms for these binders, base `e3c19a39c9c3`,
+  head `f101e7a93cbb`; see `DESIGN-spec-domains.md`.
   **Breaking admission removal (#1480):** negative constant `within` deadlines
   now fail `check` and all engines at the owning declaration before dispatch.
   The removed inline forms are `X1/negative-within` (`-1`, 8:3) and native
@@ -1501,9 +1501,9 @@ when checking a file, the message suffix changes from `at L:C` to
   selected property. Induction reports the escape as `violated`; explicit reads concrete
   values and reports the selected property. Bare `build_model` and raw Runtime constructors keep their boundaries.
   Breaking-removal sweep (#1480): `fslc check <form>` with binaries built by Rust 1.98.0,
-  each in its own `git archive` tree, base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`,
-  head `45db5cb85c153adaf14b6fb074e3ab227ddef720`, over 20,067 forms: 639 `.fsl`
-  files (`specs/` 23, `examples/` 195, `rust/fslc/tests/fixtures/` 421) and 19,428 models
+  each in its own `git archive` tree, base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`,
+  head `f101e7a93cbb50ad85e3531a1d27314559735311`, over 20,179 forms: 646 `.fsl`
+  files (`specs/` 23, `examples/` 195, `rust/fslc/tests/fixtures/` 428) and 19,533 models
   captured while running the workspace tests on both sides. `ok`→`error`: 649, none under
   `specs/` or `examples/`: 495 `'x' is not an integer const`, 85 `binder bound is not a
   static integer`, 20 bounds that overflow or do not fold, 16 init statement `forall` bounds
@@ -1963,8 +1963,8 @@ init ownership/field-read diagnostics keep priority. The range rule is a
 checked-source boundary, not bare Core construction; raw Runtime errors remain
 unchanged. Supported init RHS reads and enclosing lexical binding scopes remain;
 ranges elsewhere follow the range admission rule; existing nested-init limits remain.
-The #1480 sweep measured 16 `ok`→`error` forms for this rule, base `5564b25ccb37`, head
-`45db5cb85c15`, among them the corpus files `explicit_init_range_assigned.fsl` and
+The #1480 sweep measured 16 `ok`→`error` forms for this rule, base `e3c19a39c9c3`, head
+`f101e7a93cbb`, among them the corpus files `explicit_init_range_assigned.fsl` and
 `explicit_init_range_unassigned.fsl`; see `DESIGN-check-executable-forms.md`.
 
 An init statement forall cannot read a root that the same forall writes,

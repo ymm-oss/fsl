@@ -143,6 +143,6 @@ Ranges that read state, lets, patterns or collection elements are decided by
 `DOMAIN_BOUND` bounds enumerated requirement questions and does not limit range binders.
 The own-tree sweep is recorded in
 [corpus transitions](DESIGN-check-executable-forms.md#corpus-transitions): base
-`5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, head
-`45db5cb85c153adaf14b6fb074e3ab227ddef720`, 20,067 forms, 649 `ok`→`error`, of which 8
+`e3c19a39c9c3bf5c315c6002fd18114aa22cd654`, head
+`f101e7a93cbb50ad85e3531a1d27314559735311`, 20,179 forms, 649 `ok`→`error`, of which 8
 are typed binders over a Struct.
