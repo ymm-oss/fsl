@@ -468,6 +468,57 @@ fn a_selected_property_proves_the_bound_it_reads() {
     }
 }
 
+/// A read whose carrier bound only the unselected properties would establish. The state
+/// past the escape is where the selected property fails, so the explicit engine reports it
+/// and bmc must refuse the read: assuming the bound would prune that state and prove `Q`.
+#[test]
+fn a_read_past_an_unselected_bound_is_never_assumed_in_bounds() {
+    const SPEC: &str = "state { n: T, y: Int, b: Bool } init { n = 3 y = 0 b = false }";
+    let selected = &["--property", "Q"][..];
+    for body in [
+        // The action's own read, reached only by the unrolling after the checked step.
+        "action inc() { y = if count(i in 0..n) == 5 then 1 else 0 n = n + 1 } invariant Q { y == 0 }",
+        "action inc() { if count(i in 0..n) == 5 { y = 1 } n = n + 1 } invariant Q { y == 0 }",
+        // The selected property's read of the frame before the step.
+        "action inc() { n = n + 1 y = y + 1 } trans Q { old(count(i in 0..n)) <= 4 }",
+        "action inc() { n = n + 1 y = y + 1 } trans Q { old(forall i in 0..n { i <= 3 }) }",
+    ] {
+        let source = form(&format!("{SPEC} {body}"));
+        assert_eq!(check(&source).0, 0, "{body}: {}", check(&source).1);
+        let truth = verify(&source, "explicit", selected);
+        assert_eq!(result(&truth), "violated", "{body}: {}", truth.1);
+        let refused = verify(&source, "bmc", selected);
+        assert_eq!(refused.0, 2, "{body}: {}", refused.1);
+        assert!(
+            refused.1["message"]
+                .as_str()
+                .unwrap()
+                .contains("[eligibility]"),
+            "{body}: {}",
+            refused.1
+        );
+        // With the bound selected, the escape is the finding.
+        let whole = verify(&source, "bmc", &[]);
+        assert_eq!(result(&whole), "violated", "{body}: {}", whole.1);
+        assert_eq!(
+            whole.1["violation_kind"], "type_bound",
+            "{body}: {}",
+            whole.1
+        );
+    }
+    // No state escapes, so the frame proves the bound and the same reads run.
+    for body in [
+        "action inc() { requires n < 3 y = if count(i in 0..n) == 5 then 1 else 0 n = n + 1 } invariant Q { y == 0 }",
+        "action inc() { requires n < 3 n = n + 1 } trans Q { old(count(i in 0..n)) <= 4 }",
+    ] {
+        let source = form(&format!(
+            "state {{ n: T, y: Int, b: Bool }} init {{ n = 0 y = 0 b = false }} {body}"
+        ));
+        let run = verify(&source, "bmc", selected);
+        assert_eq!(result(&run), "verified", "{body}: {}", run.1);
+    }
+}
+
 #[test]
 fn the_plain_named_bound_reports_its_real_violation() {
     let source = "spec M { const n = 0 type T = 0..3 state { n: T } init { n = 1 } action a() { n = n } invariant P { forall i in 0..n { i == 0 } } }";
