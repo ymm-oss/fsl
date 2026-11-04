@@ -123,9 +123,9 @@ violation_stutter := ∃ j ≤ K, ∃ p ≤ j:
 checked **independently for each binding** (if even one has a counterexample it
 is violated; the counterexample JSON includes `bindings`).
 
-The proposed #1480 fixed-outer amendment permits an unfiltered inner range to
+The #1480 fixed-outer amendment permits an unfiltered inner range to
 use prior wrapper locals with checked integer arithmetic and typed Boolean
-conditions (see [the coupled decision](DESIGN-static-binder-constant-expressions.md#proposed-fixed-outer-temporal-amendment-1480)).
+conditions (see [the coupled decision](DESIGN-static-binder-constant-expressions.md#fixed-outer-temporal-amendment-1480)).
 For `i in 0..1` then `j in 0..i`, instance order is `(0,0), (1,0), (1,1)`;
 Bool order is `false`, then `true`. Each assignment retains declared types and
 restores shadowed bindings before another property. Free state cannot supply a
@@ -139,13 +139,7 @@ prefix. Endpoint conditions and both arms still require name/type checks with
 prior declared wrapper types after an empty prefix; these checks do not execute
 arithmetic. Existing consumer-specific legacy errors retain their priority.
 Collection/filtered wrappers, P/Q quantifiers, action/init/aggregate domains and
-explicit liveness are not extended. This amendment remains unpublished. The
-"unapplied source patch" status belongs to its historical proposal checkpoint,
-and the unwired U1/U2 status in the coupled decision belongs to that pure-API
-measurement boundary, not to the current private carry. The integration carries
-code and controls but has not qualified engines, placements, full B/C/D or G5;
-fresh B/H measurements, calibration, independent review and product gates remain
-pending. Historical results retain their original source/producer binding. It
+explicit liveness are not extended. It
 makes no new unbounded temporal proof or assurance claim: bounded
 liveness metadata remains property-keyed, and an overall induction `proved`
 result alone does not establish unbounded response for a depth-bounded entry.

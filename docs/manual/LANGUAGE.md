@@ -511,9 +511,10 @@ constant expression. It is checked by BMC, not by the ranked induction proof.
 before engine dispatch; an earlier `check` could accept them. The measured
 removals are shared `X1/negative-within` (`-1`, 8:3) and the native deadline
 fixtures `-1`, `K` with `const K = -1`, and `(0 - 1)` (each 5:3).
-Zero and positive literal/named/arithmetic constants remain accepted. No check
-dispositions changed among the 610 corpus files; the complete own-tree comparison
-and all four removed inline forms are recorded in `DESIGN-spec-domains.md`.
+Zero and positive literal/named/arithmetic constants remain accepted. That change
+moved no check disposition among the 610 corpus files of its own comparison; the later
+range admission below moves two fixtures. The comparison and all four removed inline
+forms are recorded in `DESIGN-spec-domains.md`.
 `decreases` is optional and must be an integer-valued expression. Under
 `fslc verify --engine induction`, the verifier proves the ranked response by
 checking, under the proved invariants, that whenever `P` is pending and `Q` is
@@ -699,6 +700,9 @@ some(x)` pattern binding. A declaration with one of those names would be
 unreadable from every expression, and the misreading is silent: before this was
 checked, `state { true: Bool }` with `invariant AlwaysHolds { true }` returned
 `proved` while `init { true = false }` assigned a variable nothing could read.
+`Bool` is reserved as a type name: `enum Bool`, `type Bool` and `struct Bool` are
+refused at the declaration (**breaking removal, #1480**), because a typed binder and
+an expression would read that name differently.
 No other word is reserved. `count`, `sum`, `stage`, `in`, `is`, `where`, `old`,
 `abs`, `and`, and `or` are contextual and remain valid names; `some`, `Set`,
 `Seq`, `unique`, `exactlyOne`, `forall`, and `exists` are only recognized before
@@ -890,9 +894,9 @@ name in a `decreases` call. There are no unrelated breaking removals.
   quantifiers, init/action statement `forall`, and unfiltered static `leadsTo`
   wrappers. Bool enumeration alone does not extend struct or dynamic-range
   policy. Liveness success metadata remains one entry per property, not binding.
-  **Breaking check-admission removal (#1480):** expression and action typed
-  binders over a named Struct, such as `forall cell: Cell { ... }`, fail shared
-  validation with the
+  **Breaking check-admission removal (#1480):** expression, action and `leadsTo`
+  wrapper typed binders over a named Struct, such as `forall cell: Cell { ... }`,
+  fail shared validation with the
   existing finite-scalar diagnostic at the owning source location. Finite Struct
   fields do not create a scalar domain. Bool, named Enum/Range binders, ordinary
   Struct values and collection binders over Struct elements are unaffected.
@@ -900,7 +904,7 @@ name in a `decreases` call. There are no unrelated breaking removals.
   unlocated finite-scalar error is preserved, without a new prefix or location.
   The required base/head form count and actual `ok`→`error` list are pending;
   see [domain policy](../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480).
-- Static range bounds (#1480 Stage A) use the checked constant grammar when
+- Static range bounds (#1480) use the checked constant grammar when
   folding succeeds: literals/constants, negation, `+ - * / %`, integer
   `min`/`max`/`abs`, and `if ... then ... else ...`, including Boolean
   literals/constants, `not`, `and`/`or`/`=>`, comparisons and same-type equality
@@ -911,28 +915,14 @@ name in a `decreases` call. There are no unrelated breaking removals.
   `-5%2 == 1`). Both conditional arms are name/type-checked, but arithmetic is
   evaluated only in the selected arm; binary Boolean operands remain eager.
   Failed folds retain the previous consumer's refusal/diagnostic path, including
-  nested failures; Stage A adds no uniform invalid-static check rule or
-  dynamic/outer/struct support. The temporal-only amendment is described below.
+  nested failures. The temporal-only amendment is described below.
   The additive Rust method `KernelModel::constant_integer`
   consults current `consts` without caching and treats free reads of current
   model state as nonconstant, including names shared by a state and a const.
   This does not add a global const/state collision rejection. See the
   [design decision](../design/DESIGN-static-binder-constant-expressions.md).
-  The own-tree `FSLC_CACHE=off <own-binary> check <tree-relative-form>` sweep
-  from B `d11f32631f75afa64fa486cdf4f9b46c6e77d28e` to code H
-  `c86f6bf4422b507f57862f830ad13726f8ce7734` found **zero ok→error transitions**
-  and no full check-output differences across **610 corpus +299 actual inline IDs**.
-  Pure-API G5 comparison: own-tree B `ffcb51b05ce63669e496ffb9df66693b64c7af85`
-  /H `5771539b02649aee78b848fcabd2c696e7037278`, rebuilt CLIs `e35e13ac…`
-  /`f01567d7…`, ran `FSLC_CACHE=off <own CLI> check <tree-relative source>` with
-  both internal configurations, twice each side: **610 corpus +2 BASE +299
-  fresh helper IDs =911 IDs /7288 observations**. Measured ok→error, all
-  accepted→error, error→accepted, old-error, other-output and repeat drift sets
-  are **EMPTY**, comparing full stdout/stderr/exit/packets with no exclusions.
-  The 112 endpoint AST/literal occurrences and five constructors are separate,
-  not model roots or huge-normalization projections. This is finite Source A
-  evidence only: full B/C/D, plain `0..n`, public-verifier, combined-policy/Bool
-  and product obligations remain **OPEN**; see the linked design for full hashes.
+  A plain `0..n` over a state that shares its name with a const reads the state, so
+  it reports the real violation on every engine.
 - Fixed outer `leadsTo` ranges (#1480 temporal amendment): an unfiltered inner
   range may use already bound wrapper locals with the checked grammar above.
   `i in 0..1` then `j in 0..i` expands in order to `(0,0), (1,0), (1,1)`;
@@ -956,9 +946,7 @@ name in a `decreases` call. There are no unrelated breaking removals.
   locals. Collection/filtered wrappers, structs, P/Q quantifiers, init/action/
   aggregate domains and explicit liveness gain no support from this amendment.
   No syntax or public Kernel/JSON schema changes. See the
-  [temporal amendment](../design/DESIGN-static-binder-constant-expressions.md#proposed-fixed-outer-temporal-amendment-1480)
-  for its implementation in this branch and pending combined qualification and
-  publication; the Stage A/G5 figures above cover their historical scope only.
+  [temporal amendment](../design/DESIGN-static-binder-constant-expressions.md#fixed-outer-temporal-amendment-1480)
 - Aggregation: `count(binder)` and `sum(binder of value)`. Examples include
   `count(x: T where p)`, `count(x in queue where p)`,
   `sum(x in queue of x.amount where p)`, and range equivalents. Empty domains
@@ -969,7 +957,7 @@ name in a `decreases` call. There are no unrelated breaking removals.
   captures rather than enumerating only the declared carrier. Later shadowing
   or state updates do not change a let's captured candidates. `min`/`max` around
   a sum remain binary arithmetic; no new aggregate JSON shape is introduced.
-  Authored aggregate admission (#1480 U5) is distinct from execution and strict
+  Authored aggregate admission (#1480) is distinct from execution and strict
   public Kernel/static projection. After bound-name/type, Boolean filter and
   integer sum-value checks, validation either checks an unconditional expansion
   (`Expanded`) or retains the original aggregate without expansion (`Deferred`).
@@ -988,20 +976,22 @@ name in a `decreases` call. There are no unrelated breaking removals.
   `sum(i in 1..0 of true)` remains ill-typed. Stored authored AST is preserved;
   no public Deferred node or JSON shape is added. Symbolic callers still require
   same-frame eligibility or explicit refusal; direct concrete evaluation uses
-  actual endpoints, not declared-carrier clipping. This authored-validation
-  distinction does not claim new symbolic execution support or fresh validation
-  evidence on the integration candidate. Historical Stage A/G5 results above do
-  not transfer; see the [U5 contract](../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480-u5)
-  for carried controls and outstanding boundary/qualification/product obligations.
+  actual endpoints, not declared-carrier clipping. See the
+  [authored admission contract](../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480).
 - **Breaking check-admission removal: range bounds the engines cannot execute (#1480).**
-  `check`, every `verify` engine, LSP diagnostics and Worker preflight refuse them
-  with one rule before any solver runs: a located `semantics` error, exit 2.
+  `check`, every `verify` engine, LSP diagnostics, Worker preflight and every command
+  that reads a checked model refuse them with one rule before any solver runs: a
+  located `semantics` error, exit 2. `conformance`, `analyze`, `explain`, `diff`,
+  `refine`, `testgen`, `mutate`, `sweep`, `scenarios`, `html` and `ledger` are among those
+  commands; `kernel`, `typestate`, `lint`, `migrate`, `fmt` and `document claims` are
+  not, and `replay` keeps loading these forms as a documented exception.
   A bound is executable when it folds to a constant, or is built from constants,
   integer names, unary minus and `+ - *` with an interval that fits `i64`, and
   every name it reads is established in its scope:
   - An enumerated value is established everywhere: an action parameter, a range or
-    named integer binder, and a binder over a Seq literal whose items are integer
-    literals, constants or such names.
+    named integer binder, and a binder over a Set or Seq literal whose items are
+    integer literals, constants or such names, including through a `let` holding
+    that literal.
   - A state variable with a finite carrier is established only where the engines
     certify the read frame: `invariant`, `trans`, `unless`, `requires`, `let`
     right-hand sides, `if` conditions and assignments. It is not established in
@@ -1009,29 +999,35 @@ name in a `decreases` call. There are no unrelated breaking removals.
     `helpful` arguments.
   - In `init`, a completed assignment with a finite value is established for later
     reads. An init statement `forall` source reads no completed assignment.
-  - A binder over a state Set of a finite integer element type is established in
-    `trans`, `unless`, `ensures` and `init` statements, and elsewhere when no `init`
-    path assigns that Set a value that may be non-empty; so are `.add` and `.remove`
-    of a literal or established item on it. A one-item Set literal is established
-    when its item is. A zero-capacity Seq has no candidates.
+  - A binder over a state Set of a finite integer element type is established where
+    state is, and so is a binder over `old(xs)` in `trans` and `ensures`. Elsewhere
+    it is established while every write to that Set keeps its keys literal: a Set
+    literal of established items, `.add` of one, `.remove` of anything, a copy, or an
+    `if` over those. `st.add(n)` and `Set { n }` reading state are not. `.add` and
+    `.remove` of a binder source follow the same test. A zero-capacity Seq has no
+    candidates.
   - Never established: a `let` name (even `let k = 2`), a pattern binding, Int-typed
-    state, an element of a Set literal with several items, of any other Seq, or of a
-    state Set outside the cases above.
+    state, a non-literal item of a Set or Seq literal, or an element of any other Seq.
 
   Indexing, field access, `size()`, `if`, `min`, `/`, `%`, `old(...)` and aggregates
-  in a dependent bound are refused. Nothing in the filter or body of a binder with
-  no candidates (`forall o in 2..0`) is evaluated, so it is not refused. Evaluation
-  is eager: `false => count(i in 0..m[0]) >= 0` is refused. Aggregates report the
-  checked-model message (`'n' is not an integer const`,
-  `public Kernel requires static aggregate range bounds`) at their statement;
-  quantifiers and statement `forall` report the engine message
+  in a dependent bound are refused. A typed binder over `Int` is refused with
+  `type 'Int' is not a finite scalar`, in a `leadsTo` wrapper as well. Nothing in the
+  filter or body of a binder with no candidates (`forall o in 2..0`) is evaluated, so
+  it is not refused. Evaluation is eager: `false => count(i in 0..m[0]) >= 0` is
+  refused. Aggregates report the checked-model message
+  (`invalid model expression: 'n' is not an integer const at 8:3`,
+  `invalid model expression: public Kernel requires static aggregate range bounds at 8:3`)
+  at their statement; quantifiers and statement `forall` report the engine message
   (`'n' is not an integer const`, `binder bound is not a static integer`) with the
   same location. There is no size cap: `forall i in 0..(n * 100000)` stays admitted
-  and slow. Forms that used to report a verdict before reaching the refused bound
-  now report the refusal: an earlier violated property, `--property` or
-  `--exclude-property` stepping around the property, and `--depth 0`. Explicit-engine
-  verdicts on these forms are removed as well. Bare `build_model`, raw Runtime
-  constructors and `replay` keep their boundaries; see
+  and slow, and a form that runs out of memory enumerating or building solver terms
+  refuses with a `[resource]` error, exit 2. Forms that used to report a
+  verdict before reaching the refused bound now report the refusal: an earlier violated
+  property, `--property` or `--exclude-property` stepping around the property, and
+  `--depth 0`. Explicit-engine verdicts on these forms are removed as well. Selecting
+  properties does not assume an unselected state bound: the read frame proves it, or
+  the read refuses `[eligibility]`. Bare `build_model` and raw Runtime constructors keep
+  their boundaries; see
   [checked executable forms](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission).
   [#1480 final sweep: the measured base/head form count and `ok`→`error` list are recorded here after the final sweep.]
 - Cardinality predicates: `unique(binder)` / `exactlyOne(binder)`. `unique`
@@ -1659,8 +1655,9 @@ errors whose base check envelope already had a loc; component type errors,
 including pre-existing ones, anchor at the owning root use and retain their
 component cause.
 The inline IDs include actual #1457, aggregate/component and nested/sync emissions, fixed acceptance,
-and rewritten guard/constructor inputs. Remaining range/domain limitations
-are #1480; #1481 cell 1 covers Map Struct per-field init and cell 2 fixes
+and rewritten guard/constructor inputs. Range and domain limits were decided by
+[#1480](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission);
+#1481 cell 1 covers Map Struct per-field init and cell 2 fixes
 `head()`, `at(i)`, and index reads of empty zero-capacity Seqs. Reached reads
 report `partial_op` in ordinary action/property contexts. Ranked decreases
 narrowly refuses reached zero-slot reads with the base semantics error, before

@@ -1,11 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# Static binder constant expressions (#1480 Stage A)
+# Static binder constant expressions (#1480)
 
-Status: Stage A is accepted for valid static arithmetic. The fixed-outer temporal
-amendment below is implemented in this branch; combined qualification and
-publication remain pending. Its historical proposal boundary does not describe
-the current source. This note does not certify full #1480 B/C/D completion.
+Status: Accepted. What `check` then refuses is decided by
+[checked range admission](DESIGN-check-executable-forms.md#1480-checked-range-admission).
 The original init-statement/Typed Struct refusal policies are recorded in
 [checked executable forms](DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains).
 
@@ -14,7 +12,7 @@ The original init-statement/Typed Struct refusal policies are recorded in
 Use the existing typed checked constant evaluator for successful integer folds
 in three consumers: public Kernel aggregate normalization, symbolic finite
 range expansion and static `leadsTo` wrapper expansion (also used by Monitor).
-Stage A does not introduce another evaluator or change concrete/runtime execution.
+This does not introduce another evaluator or change concrete/runtime execution.
 
 The additive native Rust API is
 `KernelModel::constant_integer(&KernelExpr) -> Result<i64, ModelError>`.
@@ -28,13 +26,12 @@ name. Ordinary const/state names can coexist; this is not a new collision rule.
 For example, with const `n=0` but state `n=1`, `0..abs(n)` must not newly expand
 as `0..0`: it retains the old symbolic unsupported-bound refusal while explicit
 execution can exhibit the violation at step 0. The private declaration constant
-checker is unchanged. Legacy folding of plain state/const names outside temporal
-wrappers remains separate #1480 work, not a claim of general domain agreement.
-The plain `0..n` sibling was measured twice on both named B and H below:
-`check` is ok and BMC reports verified while explicit violates at step 0.
-This existing legacy const/state substitution defect remains explicitly tracked
-under #1480 B/C/D; Stage A preserves its old fallback rather than silently
-adopting a new admission or general dependent-bound execution policy.
+checker is unchanged. The plain `0..n` sibling used to take the const's value
+under a same-named state, so BMC reported verified and induction proved while
+explicit violated at step 0. The planner now reads the state: with const `n=0` and
+state `n=1`, `forall i in 0..n { i == 0 }` is `violated` on BMC, induction and
+explicit (measured against base `5564b25cc`, which reports verified, proved and
+violated).
 
 ## Successful grammar and arithmetic
 
@@ -62,16 +59,12 @@ legacy helper rather than through fold-enabled children. For example,
 instead of exposing a new negation-overflow diagnostic from a folded child.
 Errors never become empty candidate lists.
 
-Stage A does not install a uniform invalid-static check gate, propagate the new
-API's errors indiscriminately, reject dynamic siblings, or implement dependent
-ranges. The implemented temporal-only extension is specified below. Existing typed
+Folding does not install a uniform invalid-static check gate or propagate the new
+API's errors indiscriminately. The temporal-only extension is specified below. Existing typed
 binding validation and constant-shadowing rejection own name provenance. No outer
 lexical name is replaced with an initial state value or a same-spelled model constant.
 
-## Proposed fixed-outer temporal amendment (#1480)
-
-Implementation status: implemented in this branch, with combined qualification
-and publication pending; the historical proposal heading/anchor is retained.
+## Fixed-outer temporal amendment (#1480)
 
 For unfiltered outer `leadsTo` wrappers only, an inner integer range may use
 already bound enclosing wrapper locals with the checked grammar above. Each
@@ -118,11 +111,6 @@ and verifier `is_solver_failure: false`.
 Domain planning is not an action partial operation. Existing legacy errors are
 unchanged.
 
-These are intended contract changes, not measured completion claims. New own-tree
-B/H transition evidence, independent controls/calibration, engine checks and the
-complete product gate remain pending. Historical measurements below retain their
-original Stage A/pure-API scope and do not establish this amendment.
-
 ## Preserved boundaries and evidence
 
 The #1463 wrapper/filter/collection and init-source guards remain unchanged.
@@ -163,15 +151,13 @@ measured RED twice and exactly restored GREEN twice on this code H, not
 transferred from the superseded pre-state-shadow candidate. Broad integration
 gates remain separate from this finite source handoff.
 
-## Pure integer-range planning API — U1/U2 candidate
+## Pure integer-range planning API
 
-The additive Rust-only candidate surface is the public `fsl_core::binder_range`
+The additive Rust-only surface is the public `fsl_core::binder_range`
 module and inherent `KernelModel::plan_integer_range(lo, hi, lexical)` method;
 there are no root re-exports of the new types or changes to existing public
-`TypeRef`, symbolic values or binding meanings. At the U1/U2 measurement boundary
-it was not wired into any checker, engine, runtime, normalization policy or public
-gate. Stage A's old failed-fold
-helpers and recursive error precedence above are unchanged.
+`TypeRef`, symbolic values or binding meanings. The old failed-fold helpers and
+recursive error precedence above are unchanged.
 
 `InclusiveI64` has private endpoints and a validating constructor. Its checked
 u128 cardinality describes the envelope, including 2^64 for MIN..MAX, without
@@ -200,13 +186,8 @@ ill-typed inactive aggregate filter is rejected by full authored validation.
 Safe validation-omission calibration distinguishes that refusal from constant
 fold failure without enabling normalization. No wide aggregate was executed
 through the old normalizing entry, and no OOM experiment is a detector.
-Parent callgraph/noninterference review and any applicable named corpus evidence
-remain separate; no empty transition set is assumed from pure unit results.
-Caller eligibility/aggregate deferral and B/C/D, including the plain-name legacy
-discrepancy, were outside those pure-API measurements. The authored-validation
-distinction below does not extend their evidence to the integration candidate.
 
-## G5: measured empty boundary-transition set for the pure API
+## Measured empty boundary-transition set for the pure API
 
 Own-tree B `ffcb51b05ce63669e496ffb9df66693b64c7af85` and H
 `5771539b02649aee78b848fcabd2c696e7037278` rebuilt native CLIs with SHA256
@@ -222,11 +203,10 @@ stdout/stderr/exit/packet comparisons excluded no fields.
 
 The separately inventoried **112 endpoint-literal/AST occurrences and five
 constructor cases are not complete model roots**; huge aggregate endpoints were
-never wrapped, projected or sent through the old normalizer. This is finite
-Source A evidence only, not full B/C/D, plain `0..n` false-proof repair, public
-verifier, combined-policy/Bool or product qualification; those remain **OPEN**.
+never wrapped, projected or sent through the old normalizer. This measured the
+pure API alone, before any caller used it.
 
-## Authored aggregate admission: Expanded versus Deferred (#1480 U5)
+## Authored aggregate admission: Expanded versus Deferred (#1480)
 
 Authored validation and value-producing normalization are separate. After the
 existing bound-name/type, Boolean filter and integer sum-value checks succeed,
@@ -267,10 +247,5 @@ do not infer symbolic eligibility from a Monitor result or from source admission
 
 Executable anchors are `core_authored_aggregate_validation.rs`,
 `issue_1480_nested_deferred_bounds.rs`, `concrete_aggregate_values.rs`, and the
-unchanged U4 admission/public-API controls under `rust/fsl-verifier/tests/`.
-They are carried controls, not fresh results. All historical Stage A/G5 numbers
-above retain their named source/producer binding. Own-tree base/head corpus and
-inline boundary comparisons, new qualification/calibration, full B/C/D and the
-original500 tenRED obligations, independent review and product gates remain open
-for this integration; no new empty transition set or whole-#1480 completion is
-claimed.
+admission and public-API controls under `rust/fsl-verifier/tests/`. The numbers
+above are bound to the commits they name.

@@ -71,8 +71,11 @@ the authoritative native implementation is the Rust workspace. This amendment
 repairs existing builtin `Bool` binders, not the syntax or admission policy for
 arbitrary domains. Ordinary symbolic/concrete quantifiers, concrete statement
 `forall` coverage, and static `leadsTo` wrappers preserve builtin type identity
-and enumerate `false`, then `true`. Named enums/ranges remain named domains;
-`Named("Bool")` is not a new type alias. Qualified names still require lowering.
+and enumerate `false`, then `true`. Named enums/ranges remain named domains.
+`Bool` is a reserved type name: **breaking removal**, `enum Bool`, `type Bool` and
+`struct Bool` are refused at the declaration, because a typed binder and an expression
+read that name differently (`forall b: Bool { b != true }` was `proved` on explicit and
+refused on BMC and induction). Qualified names still require lowering.
 Aggregate Bool normalization and existing init/action binding lifetimes remain
 unchanged. Success JSON remains keyed by property, not by expanded binding.
 
@@ -118,7 +121,7 @@ the requested depth.
 
 A typed binder such as `forall cell: Cell { ... }` does not enumerate a Struct,
 even when every field has a finite carrier. Current engines use the finite-scalar
-`domain_values` rule, so expression/action validation rejects this form with its
+`domain_values` rule, so expression, action and `leadsTo` wrapper validation rejects this form with its
 existing `type 'Cell' is not a finite scalar` diagnostic and owning source location.
 This is a **breaking check-admission removal**, shared before engine dispatch.
 It does not restrict ordinary Struct values or collection binders that visit
@@ -139,5 +142,5 @@ Ranges that read state, lets, patterns or collection elements are decided by
 [checked range admission](DESIGN-check-executable-forms.md#1480-checked-range-admission);
 `DOMAIN_BOUND` bounds enumerated requirement questions and does not limit range binders.
 The required own-tree base/head command, SHAs, form count and actual transition
-list are **pending**. Earlier finite-domain/Stage A sweep counts do not establish
-this amendment's transition set.
+list are **pending**. Earlier sweep counts do not establish this amendment's
+transition set.

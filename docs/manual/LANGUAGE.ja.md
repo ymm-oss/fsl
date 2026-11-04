@@ -489,9 +489,9 @@ induction はさらに、引数が状態に依存しないことを求めます�
 `leadsTo` 宣言の位置で `check` と全検証経路が拒否します。従来の `check` は受理する
 ことがありました。実測した削除は共有 `X1/negative-within` (`-1`、8:3) と、native の
 締め切り fixture の `-1`、`const K = -1` に対する `K`、`(0 - 1)` (各 5:3) です。
-ゼロと正のリテラル・名前付き・算術定数は受理を維持します。610 個のコーパスファイルの
-check 判定は不変です。own-tree 比較と削除した全 4 inline 形式は
-`DESIGN-spec-domains.md` に記録しています。
+ゼロと正のリテラル・名前付き・算術定数は受理を維持します。この変更の比較では 610 個の
+コーパスファイルの check 判定は不変で、後述の範囲受理が 2 つの fixture を動かします。
+比較と削除した全 4 inline 形式は `DESIGN-spec-domains.md` に記録しています。
 `decreases` は省略可能で、整数値の式でなければなりません。
 `fslc verify --engine induction` の下では、検証器は、証明済みの invariant の下で、
 `P` が pending かつ `Q` が偽であるときには常に、測度が非負であること、進行が可能で
@@ -670,7 +670,9 @@ struct とそのフィールド、状態変数、アクションとその引数�
 これらの名前を持つ宣言はどの式からも読めなくなり、しかもその読み違えは沈黙する。
 検査が入る前は、`state { true: Bool }` と `invariant AlwaysHolds { true }` は
 `proved` を返し、`init { true = false }` は何からも読めない変数への代入になっていた。
-予約語はこの 3 語のみである。`count`、`sum`、`stage`、`in`、`is`、`where`、`old`、
+`Bool` は型名として予約されている。`enum Bool`、`type Bool`、`struct Bool` は宣言の位置で
+拒否する(**破壊的な削除、#1480**)。型付き binder と式がこの名前を別々に読むためである。
+予約語はこれ以外にない。`count`、`sum`、`stage`、`in`、`is`、`where`、`old`、
 `abs`、`and`、`or` は文脈依存であり、名前として引き続き有効である。`some`、`Set`、
 `Seq`、`unique`、`exactlyOne`、`forall`、`exists` は後続の構文がある場合にのみ
 認識されるため、名前として誤用してもリテラルへの沈黙した解決ではなくパースエラーになる。
@@ -837,7 +839,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   init/action の文 `forall`、フィルターなしの静的 `leadsTo` wrapper が対象です。
   Bool の列挙だけで struct や動的範囲の方針は拡張しません。liveness の成功メタデータは
   束縛ごとではなく、性質ごとに 1 エントリーのままです。
-  **check 受理の破壊的な削除 (#1480):** 式や action の `forall cell: Cell { ... }`
+  **check 受理の破壊的な削除 (#1480):** 式、action、`leadsTo` wrapper の `forall cell: Cell { ... }`
   のような名前付き Struct の型バインダーは、共有検証で既存の有限スカラーの診断により、
   所有するソース位置で拒否します。各フィールドが有限でもスカラーのドメインには
   なりません。Bool、名前付き Enum/Range のバインダー、通常の Struct 値、Struct
@@ -846,7 +848,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   必要な base/head の入力件数と
   実際の `ok`→`error` 一覧は未計測です。
   [ドメイン方針](../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480)を参照してください。
-- 静的な範囲境界(#1480 Stage A)は、成功する場合に検査済みの定数文法で畳み込みます。
+- 静的な範囲境界(#1480)は、成功する場合に検査済みの定数文法で畳み込みます。
   リテラル・定数、符号反転、`+ - * / %`、整数の `min`/`max`/`abs`、
   `if ... then ... else ...` に対応し、条件では Bool のリテラル・定数、`not`、
   `and`/`or`/`=>`、比較、同じ型の等値も使えます。最終値は整数であり、Bool を
@@ -856,28 +858,13 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `-5%2 == 1`)。条件式の両腕を名前・型検査しますが、算術を評価するのは選ばれた
   腕だけです。二項の Bool 演算子は引き続き両 operand を評価します。
   畳み込みの失敗時は入れ子の失敗も含めて各 consumer の従来の拒否・診断経路を
-  保ちます。Stage A では、不正な静的式の一律の check 規則や、動的・外側束縛・
-  struct の対応は追加しません。temporal 限定の拡張は後述します。追加の Rust メソッド
+  保ちます。temporal 限定の拡張は後述します。追加の Rust メソッド
   `KernelModel::constant_integer` は現在の
   `consts` を参照し、キャッシュしません。現在の model state への自由な読み取りは、
   const と同じ名前であっても定数とは扱いません。const/state の同名宣言を一律に
   拒否する規則は追加しません。
   [設計決定](../design/DESIGN-static-binder-constant-expressions.md)も参照してください。
-  各 tree 内で `FSLC_CACHE=off <own-binary> check <tree-relative-form>` を実行し、
-  B `d11f32631f75afa64fa486cdf4f9b46c6e77d28e` と code H
-  `c86f6bf4422b507f57862f830ad13726f8ce7734` の **610 corpus +299 実際の inline ID**
-  を比較しました。**ok→error は 0 件**で、check の全出力にも差分はありません。
-  pure API の G5 は各 tree の B `ffcb51b05ce63669e496ffb9df66693b64c7af85`
-  /H `5771539b02649aee78b848fcabd2c696e7037278`、再 build した CLI `e35e13ac…`
-  /`f01567d7…` で `FSLC_CACHE=off <own CLI> check <tree-relative source>` を実行しました。
-  内部の2構成を各側2回実行し、**610 corpus +2 BASE
-  +299 fresh helper ID =911 ID /7288観測**です。ok→error、全受理→error、
-  error→受理、既存 error、その他全出力、反復の差分集合はすべて **EMPTY**。
-  stdout/stderr/exit/packet 全体を、除外フィールドなしで比較しました。
-  別に整理した112件の endpoint AST/リテラルと5件の constructor は完全な model
-  root ではなく、巨大な範囲を正規化する入力へ投影していません。有限の Source A
-  証拠に限り、full B/C/D、plain `0..n`、public verifier、combined-policy/Bool、
-  product の義務は **OPEN** のままです。全 hash はリンク先の設計に記録しています。
+  const と同じ名前の状態に対する単純な `0..n` は状態を読むので、どのエンジンでも実際の違反を報告します。
 - 固定された外側 `leadsTo` の範囲(#1480 temporal 拡張): フィルターなしの内側の
   範囲では、既に束縛された wrapper の局所名を上記の検査付き文法で使えます。
   `i in 0..1`、次に `j in 0..i` なら `(0,0), (1,0), (1,1)` の順に展開します。
@@ -897,9 +884,8 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `within` は非負の宣言定数のままで、wrapper の局所名は使えません。collection/
   filtered wrapper、struct、P/Q の量化式、init/action/集約のドメイン、explicit の
   liveness はこの拡張の対象外です。構文や公開 Kernel/JSON schema は変えません。
-  [temporal 拡張](../design/DESIGN-static-binder-constant-expressions.md#proposed-fixed-outer-temporal-amendment-1480)
-  に、このブランチでの実装済み範囲と、統合検証・公開が未完了であることを記録しています。
-  上の Stage A/G5 の数値は当時の対象範囲に限った証拠です。
+  [temporal 拡張](../design/DESIGN-static-binder-constant-expressions.md#fixed-outer-temporal-amendment-1480)
+  を参照してください。
 - 集約: `count(binder)` と `sum(binder of value)`。例は
   `count(x: T where p)`、`count(x in queue where p)`、
   `sum(x in queue of x.amount where p)` と、それらの範囲の等価形。空のドメインは
@@ -909,7 +895,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   通じて実際の候補を保持します。宣言されたドメインだけを列挙するのではなく、既存の
   スカラー値の capture を使うため、後続の shadowing や状態更新で束縛済みの候補は
   変わりません。sum を包む `min`/`max` は二項算術のままで、集約 JSON の形は増やしません。
-  記述された集約の受理 (#1480 U5) は、実行や厳密な public Kernel/static projection
+  記述された集約の受理 (#1480) は、実行や厳密な public Kernel/static projection
   と区別します。境界の名前・型、Bool の filter、Int の sum 値を検査した後、
   無条件に展開できれば展開結果も検査し (`Expanded`)、そうでなければ元の集約を
   展開せず保持します (`Deferred`)。状態の carrier や局所名の型だけでは実行の
@@ -925,45 +911,54 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `sum(i in 1..0 of true)` は型エラーのままです。保存される記述 AST を保ち、
   公開 Deferred node や JSON の形を増やしません。symbolic caller は同じ frame の
   eligibility を成立させるか明示的に実行を拒否し、直接の concrete 評価は宣言 carrier
-  で切り詰めず実際の端点を使います。この受理上の区別は、新たな symbolic 実行対応や
-  統合候補での新しい検証結果を主張しません。上の Stage A/G5 の過去の結果は移転
-  できません。移送した対照と未完の境界比較・qualification・product の義務は
-  [U5 契約](../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480-u5)
+  で切り詰めず実際の端点を使います。
+  [記述された集約の受理の契約](../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480)
   を参照してください。
 - **check 受理の破壊的な削除: エンジンが実行できない範囲境界 (#1480)。**
-  `check`、すべての `verify` エンジン、LSP の診断、Worker の事前検査は、ソルバーの
-  起動前に同じ規則でこれを拒否します。位置つきの `semantics` エラーで、終了コードは 2 です。
+  `check`、すべての `verify` エンジン、LSP の診断、Worker の事前検査、検査済みモデルを読む
+  すべてのコマンドは、ソルバーの起動前に同じ規則でこれを拒否します。位置つきの `semantics`
+  エラーで、終了コードは 2 です。`conformance`、`analyze`、`explain`、`diff`、`refine`、`testgen`、
+  `mutate`、`sweep`、`scenarios`、`html`、`ledger` がそのコマンドに含まれます。`kernel`、
+  `typestate`、`lint`、`migrate`、`fmt`、`document claims` は含まれず、`replay` はこれらの
+  形式を読み込み続けます(文書化した例外です)。
   境界を実行できるのは、定数に畳み込めるとき、または定数、整数の名前、単項マイナス、
   `+ - *` だけからなり区間が `i64` に収まり、かつ読むすべての名前がそのスコープで
   成立しているときです。
   - 列挙された値はどこでも成立します。action のパラメーター、範囲または名前付き整数の
-    binder、項目が整数リテラル、定数、またはそれらの名前である Seq リテラル上の binder です。
+    binder、項目が整数リテラル、定数、またはそれらの名前である Set・Seq リテラル上の binder
+    です。そのリテラルを持つ `let` を経由しても同じです。
   - 有限の carrier を持つ状態変数は、エンジンが読み出しフレームを認証する場所でだけ
     成立します。`invariant`、`trans`、`unless`、`requires`、`let` の右辺、`if` の条件、
     代入です。`ensures`、`reachable`、`terminal`、`until`、leadsTo の P/Q、`decreases`、
     `helpful` の引数では成立しません。
   - `init` では、有限の値を持つ完了済みの代入が、その後の読み出しに対して成立します。
     init の文 `forall` のソースは完了済みの代入を読みません。
-  - 有限の整数要素型を持つ状態 Set の binder は、`trans`、`unless`、`ensures`、`init`
-    文では成立し、それ以外では、その Set に空でない値を代入し得る `init` の経路がなければ
-    成立します。そこにリテラルか成立済みの項目を与える `.add` と `.remove` も同じです。
-    項目が 1 つの Set リテラルは、その項目が成立すれば成立します。容量 0 の Seq には
+  - 有限の整数要素型を持つ状態 Set の binder は、状態が成立する場所で成立します。`trans` と
+    `ensures` の `old(xs)` 上の binder も同じです。それ以外では、その Set へのすべての書き込みが
+    キーをリテラルのまま保つ間だけ成立します。成立する項目の Set リテラル、その `.add`、任意の
+    `.remove`、それらの複製、それらに対する `if` が該当し、状態を読む `st.add(n)` と `Set { n }`
+    は該当しません。binder のソースの `.add` と `.remove` も同じ基準です。容量 0 の Seq には
     候補がありません。
-  - 成立しないもの: `let` の名前(`let k = 2` も同じ)、パターン束縛、Int 型の状態、
-    項目が複数の Set リテラルの要素、それ以外の Seq の要素、上記以外の状態 Set の要素。
+  - 成立しないもの: `let` の名前(`let k = 2` も同じ)、パターン束縛、Int 型の状態、Set・Seq
+    リテラルのリテラルでない項目、それ以外の Seq の要素。
 
   依存する境界の添字、フィールド参照、`size()`、`if`、`min`、`/`、`%`、`old(...)`、
-  集約は拒否します。候補を持たない binder(`forall o in 2..0`)の filter と本体は
-  評価されないので拒否しません。評価は先行評価なので、
+  集約は拒否します。`Int` の型付き binder は `leadsTo` wrapper でも
+  `type 'Int' is not a finite scalar` で拒否します。候補を持たない binder
+  (`forall o in 2..0`)の filter と本体は評価されないので拒否しません。評価は先行評価なので、
   `false => count(i in 0..m[0]) >= 0` は拒否します。集約は検査済みモデルのメッセージ
-  (`'n' is not an integer const`、`public Kernel requires static aggregate range bounds`)
+  (`invalid model expression: 'n' is not an integer const at 8:3`、
+  `invalid model expression: public Kernel requires static aggregate range bounds at 8:3`)
   を文の位置で返し、量化子と文 `forall` はエンジンのメッセージ
   (`'n' is not an integer const`、`binder bound is not a static integer`)を同じ位置で
-  返します。大きさの上限はありません。`forall i in 0..(n * 100000)` は受理されたままで、
-  遅いままです。拒否される境界に届く前に verdict を返していた形式は、拒否を返すように
-  なります。先に違反する別の性質、`--property` や `--exclude-property` での回避、
+  返します。大きさの上限はありません。`forall i in 0..(n * 100000)` は受理されたままで
+  遅いままです。列挙やソルバーの項の構築でメモリーが尽きる形式は `[resource]` のエラー、
+  終了コード 2 で拒否します。拒否される境界に届く前に verdict を返していた形式は、拒否を
+  返すようになります。先に違反する別の性質、`--property` や `--exclude-property` での回避、
   `--depth 0` が該当します。これらの形式での explicit エンジンの verdict も失われます。
-  `build_model` 単体、Runtime の生のコンストラクター、`replay` は既存の境界を保ちます。
+  性質の選択は、選択外の状態の境界を仮定しません。読み出しフレームが証明するか、読み出しが
+  `[eligibility]` で拒否します。`build_model` 単体と Runtime の生のコンストラクターは既存の
+  境界を保ちます。
   [実行可能形式の境界](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission)を
   参照してください。
   [#1480 最終 sweep: 計測した base/head の形式数と `ok`→`error` の一覧は、最終 sweep の後にここへ記録します。]
@@ -1532,7 +1527,8 @@ model-expression の型エラーは、base の check envelope にすでに loc �
 所有する宣言の位置を示します。既存のものを含む component の型エラーは原因を保って
 所有する root use に anchor します。
 inline ID は #1457、集約/component・入れ子/sync の実際の出力、固定受入、書き換えた guard/constructor
-入力に由来します。残る範囲・ドメインの制限は #1480 です。#1481 cell 1 は
+入力に由来します。範囲・ドメインの制限は
+[#1480](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission) で決定しました。#1481 cell 1 は
 Map Struct のフィールド別 init を扱い、cell 2 は空の容量 0 の Seq の
 `head()`、`at(i)`、index 読み出しを修正します。通常の action/property 文脈では
 到達した読み出しは `partial_op` です。ranked decreases は、新しい slot の値が
