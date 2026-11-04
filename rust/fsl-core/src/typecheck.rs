@@ -1414,6 +1414,22 @@ impl ValidationPhase {
         self
     }
 
+    /// The engines read `old(...)` from a frame and have none below it, so a second
+    /// `old`, or one in a scope with no old frame, stops every engine at evaluation. The
+    /// lowered `P unless Q` wraps `P` in `old`, which makes an `old` in `P` the second one.
+    fn inside_old(&self) -> Self {
+        let mut phase = self.clone();
+        if let Some(rule) = &mut phase.range_rule {
+            if rule.old_frame {
+                rule.old_frame = false;
+            } else {
+                rule.carriers = false;
+                rule.frameless = true;
+            }
+        }
+        phase
+    }
+
     /// A postcondition keeps every lexical fact but has no certified read frame.
     fn for_postcondition(&self) -> Self {
         let mut phase = self.clone();
@@ -1587,6 +1603,8 @@ struct RangeRule {
     collection_lets: BTreeMap<String, CollectionCandidates>,
     /// `old(...)` reads a frame in this scope.
     old_frame: bool,
+    /// Under an `old(...)` with no frame to read: no name here carries a fact.
+    frameless: bool,
     /// State Sets that can hold a key the engines do not read as a solver literal.
     symbolic_sets: SymbolicSets,
     /// A postcondition: it reads the state an action left, and no initial state.
@@ -1622,12 +1640,12 @@ impl RangeRule {
             .map(|(name, recipe)| RangeBinding {
                 name,
                 semantic_ty: &recipe.ty,
-                fact: recipe.fact.as_ref(),
+                fact: recipe.fact.as_ref().filter(|_| !self.frameless),
             })
             .chain(env.lexical.iter().map(|name| RangeBinding {
                 name,
                 semantic_ty: &env[name],
-                fact: self.facts.get(name),
+                fact: self.facts.get(name).filter(|_| !self.frameless),
             }))
             .collect()
     }
@@ -2595,6 +2613,17 @@ fn validate_expression_inner(
             ) {
                 return Err(error("'is none/some' requires an Option expression").with_span(span));
             }
+        }
+        Expr::UnaryNamed { name, expr, .. } if name == "old" => {
+            validate_expression_in_phase(
+                expr,
+                env,
+                model,
+                span,
+                None,
+                &phase.inside_old(),
+                self_relations,
+            )?;
         }
         Expr::UnaryNamed { name, expr, .. } => {
             let expected = (name == "abs").then_some(TypeRef::Int);

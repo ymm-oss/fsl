@@ -336,6 +336,100 @@ fn a_copy_carries_a_key_only_in_init() {
     assert_eq!(result(&verify(&postcondition, "induction", &[])), "proved");
 }
 
+/// The engines read `old(...)` from one frame and have none below it. A range there is
+/// refused at `check`, as the base refused it, and not left for every engine to stop on.
+#[test]
+fn a_range_under_old_with_no_frame_left_is_refused_at_check() {
+    const STATE: &str =
+        "state { n: T, y: T, b: Bool, xs: Set<T> } init { n = 1 y = 0 b = true xs = Set { 0, 2 } }";
+    let spec = |body: &str| form(&format!("{STATE} {body}"));
+    for (body, name) in [
+        (
+            "action go() { b = true } unless U { (forall x in old(xs) { count(y in 0..x) >= 0 }) unless b }",
+            "x",
+        ),
+        (
+            "action go() { b = true } unless U { (old(count(i in 0..n) >= 0)) unless b }",
+            "n",
+        ),
+        (
+            "action go() { b = true } invariant W { old(count(i in 0..n) >= 0) }",
+            "n",
+        ),
+        (
+            "action go() { b = true } trans W { old(old(count(i in 0..n) >= 0)) }",
+            "n",
+        ),
+        (
+            "action go() { requires old(count(i in 0..n) >= 0) b = true }",
+            "n",
+        ),
+        (
+            "action go() { let g = old(count(i in 0..n) >= 0) b = true ensures g }",
+            "n",
+        ),
+        (
+            "action go(k: T) { let g = old(count(i in 0..k) >= 0) b = true ensures g }",
+            "k",
+        ),
+        (
+            "action go() { b = true } invariant W { old(forall x in 0..2 { count(j in 0..x) >= 0 }) }",
+            "x",
+        ),
+    ] {
+        let source = spec(body);
+        let refused = check(&source);
+        assert_eq!(refused.0, 2, "{body}: {}", refused.1);
+        let message = refused.1["message"].as_str().unwrap();
+        assert!(
+            message.starts_with(&format!(
+                "invalid model expression: '{name}' is not an integer const at "
+            )),
+            "{body}: {message}"
+        );
+    }
+    // One `old` with a frame stays admitted, and every engine runs it.
+    for body in [
+        "action go() { b = true } trans W { old(count(i in 0..n)) >= 0 }",
+        "action go() { b = true } trans W { forall x in old(xs) { count(y in 0..x) >= 0 } }",
+        "action go() { b = true } trans W { old(forall x in 0..2 { count(j in 0..x) >= 0 }) }",
+        "action go() { b = true } trans W { forall x in xs { old(count(j in 0..x) >= 0) } }",
+        "action go() { b = true } unless U { (forall x in xs { count(y in 0..x) >= 0 }) unless b }",
+        "action go() { b = true } unless U { (count(y in 0..n) >= 0) unless b }",
+    ] {
+        let source = spec(body);
+        assert_eq!(check(&source).0, 0, "{body}: {}", check(&source).1);
+        assert_eq!(result(&verify(&source, "bmc", &[])), "verified", "{body}");
+        assert_eq!(
+            result(&verify(&source, "induction", &[])),
+            "proved",
+            "{body}"
+        );
+        assert_eq!(
+            result(&verify(&source, "explicit", &[])),
+            "proved",
+            "{body}"
+        );
+    }
+    // An `old` no range reads under stays with the engines, on the base as well.
+    for body in [
+        "action go() { b = true } unless U { old(b) unless b }",
+        "action go() { b = true } unless U { (forall e in old(xs) { e >= 0 }) unless b }",
+        "action go() { b = true } invariant W { old(count(i in 0..2) >= 0) }",
+    ] {
+        let source = spec(body);
+        assert_eq!(check(&source).0, 0, "{body}: {}", check(&source).1);
+        for engine in ["bmc", "induction", "explicit"] {
+            let stopped = verify(&source, engine, &[]);
+            assert_eq!(stopped.0, 2, "{body} {engine}: {}", stopped.1);
+            assert_eq!(
+                stopped.1["message"], "old() used without old state",
+                "{body} {engine}"
+            );
+        }
+    }
+}
+
 /// `--property` no longer refuses a range whose frame proves the unselected bound.
 #[test]
 fn a_selected_property_proves_the_bound_it_reads() {
