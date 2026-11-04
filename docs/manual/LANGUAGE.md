@@ -1003,9 +1003,16 @@ name in a `decreases` call. There are no unrelated breaking removals.
     state is, and so is a binder over `old(xs)` in `trans` and `ensures`. Elsewhere
     it is established while every write to that Set keeps its keys literal: a Set
     literal of established items, `.add` of one, `.remove` of anything, a copy, or an
-    `if` over those. `st.add(n)` and `Set { n }` reading state are not. `.add` and
+    `if` over those. `st.add(n)` and `Set { n }` reading state are not. A copy in `init`
+    carries what `init` assigned; a copy in an action reads a frame whose keys are
+    literal, so `ys = xs` beside `xs = xs.add(n)` keeps `ys` literal. `ensures` reads
+    only the state an action left, so it does not count `init`'s writes. `.add` and
     `.remove` of a binder source follow the same test. A zero-capacity Seq has no
     candidates.
+  - Under an `old(...)` with no frame left, nothing is established. That is a second
+    `old`, or one outside `trans` and `ensures`. `P unless Q` wraps `P` in `old`, so an
+    `old` inside `P` is a second one: `(forall x in old(xs) { count(y in 0..x) >= 0 })
+    unless b` is refused.
   - Never established: a `let` name (even `let k = 2`), a pattern binding, Int-typed
     state, a non-literal item of a Set or Seq literal, or an element of any other Seq.
 
@@ -1020,8 +1027,10 @@ name in a `decreases` call. There are no unrelated breaking removals.
   at their statement; quantifiers and statement `forall` report the engine message
   (`'n' is not an integer const`, `binder bound is not a static integer`) with the
   same location. There is no size cap: `forall i in 0..(n * 100000)` stays admitted
-  and slow, and a form that runs out of memory enumerating or building solver terms
-  refuses with a `[resource]` error, exit 2. Forms that used to report a
+  and slow. A form that runs out of memory enumerating a range refuses with a
+  `[resource]` error, exit 2. Running out while building solver terms makes the Z3
+  bindings panic, which refuses with a `[solver-panic]` error carrying the panic text,
+  exit 2; that error names the panic, not a cause. Forms that used to report a
   verdict before reaching the refused bound now report the refusal: an earlier violated
   property, `--property` or `--exclude-property` stepping around the property, and
   `--depth 0`. Explicit-engine verdicts on these forms are removed as well. Selecting

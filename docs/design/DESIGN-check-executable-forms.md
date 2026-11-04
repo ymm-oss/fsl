@@ -294,12 +294,40 @@ and both sides read it from `binder_range::state_set_element_envelope` and
 `state_set_source`: an engine grants the fact only when the frame's certificate holds
 that name. In a scope with no certified frame, an element has a fact only if it stays
 a solver literal, which depends on what can be written to the Set.
-`state_sets_with_symbolic_keys` computes a fixed point over init and every action: a
-write keeps the keys literal when it is a Set literal of literal items, `.add` of a
-literal item on such a Set, `.remove` of anything from one, a copy of one, or an `if`
-over two of them; `st.add(n)` and `Set { n }` reading state do not. In init a state
-assigned a literal reads as that literal. The engines keep those keys literal because
+`state_sets_with_symbolic_keys` judges each write: it keeps the keys literal when it is
+a Set literal of literal items, `.add` of a literal item on such a Set, `.remove` of
+anything from one, a copy of one, or an `if` over two of them; `st.add(n)` and
+`Set { n }` reading state do not. The engines keep those keys literal because
 `ordered_set_candidates` orders known integer keys without solver terms.
+
+Where a copy carries a key depends on when it runs. Init runs once and in order, so an
+init copy carries what init assigned: init is a fixed point, and a state assigned a
+literal reads as that literal. An action starts from a frame that
+`reframe_collections` has rebuilt over the element domain, so reading a state Set there
+gives literal keys whatever earlier steps wrote: `ys = xs` beside `xs = xs.add(n)`
+keeps `ys` literal, and only the action's own expression can add a key. `old(xs)` reads
+that same frame, so it is literal in `ensures` for any write to `xs`. A postcondition
+reads only the state an action left, so init's writes do not count for it; `reachable`,
+`leadsTo` and `terminal` can read the initial state, so they do. The one case the frame
+does not cover is `--property` on a state that really escapes: the frame then cannot be
+rebuilt, its keys stay as written, and the read refuses at run time with
+`unsupported integer range execution [planner]: missing-finite-fact`.
+
+**`old` with no frame left.** The engines read `old(...)` from one frame and have none
+below it, so a second `old`, or one in a scope with no old frame, stops every engine
+with `old() used without old state`. `P unless Q` lowers to a transition that wraps `P`
+in `old`, so an `old` inside `P` is a second one. A range read under such an `old` is
+refused at `check` with the base's message and location:
+`(forall x in old(xs) { count(y in 0..x) >= 0 }) unless b` reports
+`invalid model expression: 'x' is not an integer const at 7:28`. No name carries a fact
+there, so a state, a parameter and a binder bound alike are refused, while a literal
+bound is not.
+
+Out of scope: an `old` with no frame left that no dependent range reads under.
+`old(b) unless b`, `(forall e in old(xs) { e >= 0 }) unless b` and
+`invariant W { old(count(i in 0..2) >= 0) }` pass `check`, and every engine stops with
+that same message, on the base as here. That mismatch has nothing to do with range
+admission, and refusing it would be a separate decision about `old`.
 
 The engines record a captured fact for a let but never accept it here. A let holding a
 collection is classified where it is bound, so a later binder cannot change what it
@@ -307,9 +335,11 @@ means. Init uses the pure `init_expression_envelope` shared with the engine's in
 recipes; a condition is known only when it is a literal or a named constant, as the
 engine's `init_known_condition` reads it, so a folded `z = (1 < 2)` selects no branch.
 LeadsTo wrappers fold each binding's bounds with the engine's `scoped_leadsto_int`,
-holding one row at a time. Past 65,536 complete bindings the walk stops and later
-binders take the planner's interval over what is known, so admission never holds that
-product in memory; a binder the planner cannot bound then has no fact and is refused.
+holding one row at a time. Past 65,536 complete bindings
+(`WRAPPER_ADMISSION_BINDINGS`) the walk stops and later binders take the planner's
+interval over what is known, so admission never holds that product in memory; a binder
+the planner cannot bound then has no fact and is refused. The cap is a planner detail:
+it limits how much admission walks, not the language, and the engines enumerate past it.
 A binder with no candidates makes its filter and body dead, as the engines never
 evaluate them.
 
@@ -380,10 +410,12 @@ also by reading. These new refusals are breaking removals on the same terms.
 Bare `build_model` defers a dependent aggregate bound, so `kernel` and `typestate`,
 which project a bare model, reach it in their projection. They report it as base did,
 through `locate_unfolded_aggregate`: `invalid model expression: 'n' is not an integer
-const at 1:66`, exit 2, with `loc`. `fmt` validates through bare `build_model` and no
-longer refuses that form: base exited 2, this change exits 0. It is kept that way
-because `fmt` rewrites text and judges nothing, and adopting checked admission would
-make it refuse forms the base formats; `check` reports the bound.
+const at 1:66`, exit 2, with `loc`.
+
+`fmt` is the one command that refuses less: it validates through bare `build_model`,
+which now defers that form, so where the base exited 2 this change exits 0. It stays
+that way on purpose. `fmt` rewrites text and judges nothing, adopting checked admission
+would make it refuse forms the base formats, and `check` still reports the bound.
 
 **`replay` is an exception.** It keeps loading through `load_replay_model`, including
 the forms `check` refuses and the dynamic aggregate form the base refused (base exit 2,
@@ -400,10 +432,16 @@ run with `--property` on a spec whose state really escapes still refuses. There 
 execution cap: `DOMAIN_BOUND` bounds enumerated requirement questions before they go to
 the solver, not range candidates. A candidate list too long to allocate refuses with
 `unsupported integer range execution [resource]`, exit 2. Running out while Z3 builds
-terms refuses from the native CLI with `solver execution stopped [resource]`, exit 2,
-in JSON, because the `z3` bindings panic on the null Z3 returns and `main` turns that
-panic alone into a refusal; its text stays on stderr. An allocation failure elsewhere
-in Rust or inside Z3 can still end the process with exit 134.
+terms makes the `z3` bindings panic on the null Z3 returns, and `main` turns a panic in
+that crate alone into `solver execution stopped [solver-panic]`, exit 2, in JSON. The
+message says the bindings panicked and no verdict was reached, and carries the panic
+text and location, which also stay on stderr. It does not say `[resource]` because a
+binding defect panics the same way and nothing here tells them apart: memory is the
+usual cause, not an established one. A panic that a caller catches and survives, as
+`ranked_leadsto_lasso_discharges`'s thread does by falling back to the full lasso
+search, is forgotten and cannot label a later crash; any other panic stays exit 101. An
+allocation failure elsewhere in Rust or inside Z3 can still end the process with exit
+134.
 
 **Issue close note.** The issue's row 1 reads "all engines agree". The explicit engine
 does not support `leadsTo`, so for that row explicit reports that refusal rather than a

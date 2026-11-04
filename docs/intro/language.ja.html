@@ -985,8 +985,13 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
     <code>ensures</code> の <code>old(xs)</code> 上の binder も同じです。それ以外では、その Set へのすべての書き込みが
     キーをリテラルのまま保つ間だけ成立します。成立する項目の Set リテラル、その <code>.add</code>、任意の
     <code>.remove</code>、それらの複製、それらに対する <code>if</code> が該当し、状態を読む <code>st.add(n)</code> と <code>Set { n }</code>
-    は該当しません。binder のソースの <code>.add</code> と <code>.remove</code> も同じ基準です。容量 0 の Seq には
-    候補がありません。</li>
+    は該当しません。<code>init</code> の複製は <code>init</code> が代入した内容を引き継ぎます。action の複製はキーが
+    リテラルのフレームを読むので、<code>xs = xs.add(n)</code> と並ぶ <code>ys = xs</code> の <code>ys</code> はリテラルのままです。
+    <code>ensures</code> は action の後の状態だけを読むので、<code>init</code> の書き込みを数えません。binder のソースの
+    <code>.add</code> と <code>.remove</code> も同じ基準です。容量 0 の Seq には候補がありません。</li>
+<li>読むフレームが残っていない <code>old(...)</code> の下では何も成立しません。2 つ目の <code>old</code> と、<code>trans</code> と
+    <code>ensures</code> の外の <code>old</code> が該当します。<code>P unless Q</code> は <code>P</code> を <code>old</code> で包むので、<code>P</code> の中の <code>old</code>
+    は 2 つ目です。<code>(forall x in old(xs) { count(y in 0..x) &gt;= 0 }) unless b</code> は拒否します。</li>
 <li>成立しないもの: <code>let</code> の名前(<code>let k = 2</code> も同じ)、パターン束縛、Int 型の状態、Set・Seq
     リテラルのリテラルでない項目、それ以外の Seq の要素。</li>
 </ul>
@@ -1000,8 +1005,10 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   を文の位置で返し、量化子と文 <code>forall</code> はエンジンのメッセージ
   (<code>'n' is not an integer const</code>、<code>binder bound is not a static integer</code>)を同じ位置で
   返します。大きさの上限はありません。<code>forall i in 0..(n * 100000)</code> は受理されたままで
-  遅いままです。列挙やソルバーの項の構築でメモリーが尽きる形式は <code>[resource]</code> のエラー、
-  終了コード 2 で拒否します。拒否される境界に届く前に verdict を返していた形式は、拒否を
+  遅いままです。範囲の列挙でメモリーが尽きる形式は <code>[resource]</code> のエラー、終了コード 2 で
+  拒否します。ソルバーの項の構築中に尽きると Z3 のバインディングが panic し、panic の文面を
+  含む <code>[solver-panic]</code> のエラー、終了コード 2 で拒否します。このエラーが示すのは panic で
+  あり、原因ではありません。拒否される境界に届く前に verdict を返していた形式は、拒否を
   返すようになります。先に違反する別の性質、<code>--property</code> や <code>--exclude-property</code> での回避、
   <code>--depth 0</code> が該当します。これらの形式での explicit エンジンの verdict も失われます。
   性質の選択は、選択外の状態の境界を仮定しません。読み出しフレームが証明するか、読み出しが

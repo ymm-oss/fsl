@@ -1050,9 +1050,16 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
     state is, and so is a binder over <code>old(xs)</code> in <code>trans</code> and <code>ensures</code>. Elsewhere
     it is established while every write to that Set keeps its keys literal: a Set
     literal of established items, <code>.add</code> of one, <code>.remove</code> of anything, a copy, or an
-    <code>if</code> over those. <code>st.add(n)</code> and <code>Set { n }</code> reading state are not. <code>.add</code> and
+    <code>if</code> over those. <code>st.add(n)</code> and <code>Set { n }</code> reading state are not. A copy in <code>init</code>
+    carries what <code>init</code> assigned; a copy in an action reads a frame whose keys are
+    literal, so <code>ys = xs</code> beside <code>xs = xs.add(n)</code> keeps <code>ys</code> literal. <code>ensures</code> reads
+    only the state an action left, so it does not count <code>init</code>'s writes. <code>.add</code> and
     <code>.remove</code> of a binder source follow the same test. A zero-capacity Seq has no
     candidates.</li>
+<li>Under an <code>old(...)</code> with no frame left, nothing is established. That is a second
+    <code>old</code>, or one outside <code>trans</code> and <code>ensures</code>. <code>P unless Q</code> wraps <code>P</code> in <code>old</code>, so an
+    <code>old</code> inside <code>P</code> is a second one: <code>(forall x in old(xs) { count(y in 0..x) &gt;= 0 })
+    unless b</code> is refused.</li>
 <li>Never established: a <code>let</code> name (even <code>let k = 2</code>), a pattern binding, Int-typed
     state, a non-literal item of a Set or Seq literal, or an element of any other Seq.</li>
 </ul>
@@ -1067,8 +1074,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   at their statement; quantifiers and statement <code>forall</code> report the engine message
   (<code>'n' is not an integer const</code>, <code>binder bound is not a static integer</code>) with the
   same location. There is no size cap: <code>forall i in 0..(n * 100000)</code> stays admitted
-  and slow, and a form that runs out of memory enumerating or building solver terms
-  refuses with a <code>[resource]</code> error, exit 2. Forms that used to report a
+  and slow. A form that runs out of memory enumerating a range refuses with a
+  <code>[resource]</code> error, exit 2. Running out while building solver terms makes the Z3
+  bindings panic, which refuses with a <code>[solver-panic]</code> error carrying the panic text,
+  exit 2; that error names the panic, not a cause. Forms that used to report a
   verdict before reaching the refused bound now report the refusal: an earlier violated
   property, <code>--property</code> or <code>--exclude-property</code> stepping around the property, and
   <code>--depth 0</code>. Explicit-engine verdicts on these forms are removed as well. Selecting

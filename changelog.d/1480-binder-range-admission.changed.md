@@ -6,7 +6,8 @@ refuse every integer range bound the symbolic engines cannot execute, with a loc
 bounds reading a `let` (even literal), pattern binding, Int state, non-literal Seq
 element or non-literal Set literal item; in a scope with no certified read frame,
 bounds reading an element of a state Set that some write can give a key read from
-state; and intervals that do not fit `i64`. Forms that reported a verdict before
+state; a dependent range under an `old(...)` with no frame left, which includes an `old`
+inside `P` of `P unless Q`; and intervals that do not fit `i64`. Forms that reported a verdict before
 reaching the bound lose it: an earlier violated property, `--property` or
 `--exclude-property`, `--depth 0`, and explicit-engine verdicts on these forms.
 No size cap is added. `conformance`, `analyze`, `explain`, `diff`, `refine`, `testgen`,
@@ -28,9 +29,11 @@ bound. A frame that cannot prove it still refuses.
 used to read the name differently. A typed binder over `Int`, including a `leadsTo`
 wrapper, is refused at `check` with `type 'Int' is not a finite scalar`.
 
-A form that runs out of memory enumerating a range or building solver terms now refuses
-with a `[resource]` error, exit 2, instead of a panic with empty stdout. No size limit is
-added.
+A form that runs out of memory enumerating a range now refuses with a `[resource]` error,
+exit 2, instead of a panic with empty stdout. A panic in the Z3 bindings, which is what
+running out while building solver terms produces, refuses with a `[solver-panic]` error
+carrying the panic text, exit 2; it says no verdict was reached and does not claim a
+cause. No size limit is added.
 
 Reject two previously check-admitted forms before engine dispatch: init statement
 `forall` integer-range bounds with free state reads, and typed binders over a named

@@ -1468,8 +1468,13 @@ when checking a file, the message suffix changes from `at L:C` to
   state Set is established where state is, as is one over `old(xs)` in `trans` and
   `ensures`. Elsewhere it is established while every write keeps its keys literal: a
   Set literal of established items, `.add` of one, `.remove` of anything, a copy, or an
-  `if` over those; `st.add(n)` and `Set { n }` reading state are not. `.add`/`.remove`
-  of a binder source follow the same test. A zero-capacity Seq has no candidates. Never
+  `if` over those; `st.add(n)` and `Set { n }` reading state are not. A copy in `init`
+  carries what `init` assigned; a copy in an action reads a frame with literal keys, so
+  `ys = xs` beside `xs = xs.add(n)` keeps `ys` literal. `ensures` does not count `init`'s
+  writes. `.add`/`.remove` of a binder source follow the same test. Under an `old(...)`
+  with no frame left (a second `old`, or one outside `trans`/`ensures`) nothing is
+  established; `P unless Q` wraps `P` in `old`, so `(forall x in old(xs) { count(y in
+  0..x) >= 0 }) unless b` is refused. A zero-capacity Seq has no candidates. Never
   established: `let` names (even `let k = 2`), pattern bindings, Int state, non-literal
   Set or Seq literal items, other Seq elements. Indexing, fields, `size()`, `if`,
   `min`, `/`, `%`, `old(...)` and aggregates in a dependent bound are refused, and so is
@@ -1480,8 +1485,10 @@ when checking a file, the message suffix changes from `at L:C` to
   integer const at 8:3` or `invalid model expression: public Kernel requires static
   aggregate range bounds at 8:3`; quantifiers and statement `forall` report
   `'n' is not an integer const` or `binder bound is not a static integer`, same
-  location. No size cap: `forall i in 0..(n * 100000)` stays admitted and slow; a form
-  that runs out of memory enumerating or building solver terms refuses `[resource]`, exit 2.
+  location. No size cap: `forall i in 0..(n * 100000)` stays admitted and slow. Out of
+  memory enumerating a range refuses `[resource]`, exit 2; building solver terms panics
+  the Z3 bindings, which refuses `[solver-panic]` with the panic text, exit 2, naming
+  the panic and not a cause.
   Rewriting the bound is the fix: bind a parameter or binder, or move the check to
   `invariant`/`requires`. A verdict reached before the refused bound (earlier violation,
   `--property`, `--exclude-property`, `--depth 0`) becomes the refusal, and
