@@ -28,7 +28,7 @@ use fsl_core::{
 use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::eval::eval;
+use crate::eval::{eval, property_evaluation_status};
 use crate::transition::{
     ActionInstance, action_guards, init_constraints, initial_state, transition_constraint,
 };
@@ -308,8 +308,12 @@ async fn frozen_tautologies<S: SmtSolver>(
         }
         terms.extend(bound_terms.iter().cloned());
         let mut bindings = Bindings::new();
+        // A warning claims every dynamics, so an undefined read must not count as true.
+        let status =
+            property_evaluation_status(solver, model, &property.expr, &state, &bindings, None)?;
         let value = eval(solver, model, &property.expr, &state, &mut bindings, None)?;
-        terms.push(solver.not(bool_term(&value)?)?);
+        let condition = solver.and(&[status.fully_defined, bool_term(&value)?.clone()])?;
+        terms.push(solver.not(&condition)?);
         solver.set_query_context("vacuity", &property.name);
         if proven_unsat(solver, &terms).await? {
             findings.push(VacuityFinding::TautologyOverFrozen {
