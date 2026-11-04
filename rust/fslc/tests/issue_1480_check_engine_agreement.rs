@@ -685,6 +685,7 @@ mod limited {
     /// out: reserving the candidate list, enumerating, or building terms over candidates.
     #[test]
     fn enumeration_out_of_memory_is_a_refusal() {
+        let mut solver_panics = 0;
         for domain in ["1000000000", "12000000", "300000"] {
             for body in [
                 "action a() { n = 1 } invariant P { forall i in 0..n { i >= 0 } }",
@@ -694,20 +695,36 @@ mod limited {
                     "spec Z {{ type W = 0..{domain} state {{ n: W }} init {{ n = 1 }} {body} }}"
                 );
                 for engine in ["bmc", "induction"] {
-                    let (exit, output, _) = limited(
+                    let (exit, output, stderr) = limited(
                         &source,
                         &format!("verify m.fsl --engine {engine} --depth 2 --no-cache"),
                     );
                     assert_eq!(exit, 2, "{domain} {engine}: {output}");
-                    assert!(
-                        output["message"]
-                            .as_str()
-                            .unwrap_or("")
-                            .contains("[resource]"),
-                        "{domain} {engine}: {output}"
-                    );
+                    let message = output["message"].as_str().unwrap_or("");
+                    if message.contains("[solver-panic]") {
+                        // The panic is named and not read as resource exhaustion.
+                        solver_panics += 1;
+                        assert!(!message.contains("[resource]"), "{message}");
+                        assert!(message.contains("the z3 bindings panicked"), "{message}");
+                        assert!(message.contains("no verdict"), "{message}");
+                        assert!(message.contains(" at z3-"), "{message}");
+                        // The text and location the default hook prints are in the JSON too.
+                        let printed = String::from_utf8_lossy(&stderr);
+                        assert!(printed.contains("panicked at"), "{printed}");
+                        assert!(printed.contains("/z3-"), "{printed}");
+                        assert!(
+                            message.contains("called `Option::unwrap()` on a `None` value"),
+                            "{message}"
+                        );
+                    } else {
+                        assert!(
+                            message.contains("unsupported integer range execution [resource]"),
+                            "{domain} {engine}: {output}"
+                        );
+                    }
                 }
             }
         }
+        assert!(solver_panics > 0, "no case reached the solver panic");
     }
 }

@@ -1331,7 +1331,13 @@ fn ranked_lasso_discharges(
             });
         worker
             .ok()
-            .and_then(|worker| worker.join().ok())
+            .and_then(|worker| {
+                let joined = worker.join();
+                if joined.is_err() {
+                    crate::z3_panic::forget();
+                }
+                joined.ok()
+            })
             .unwrap_or_else(|| (std::collections::BTreeSet::new(), None))
     })
 }

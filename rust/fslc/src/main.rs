@@ -36,6 +36,7 @@ mod refinement;
 mod spec_loading;
 mod strict_tags;
 mod verification;
+mod z3_panic;
 
 use causal::{causal_command, run_causal_check};
 use cli_options::{
@@ -133,25 +134,12 @@ fn parse_optional_output(
     Ok(output)
 }
 
-static Z3_BINDING_PANICKED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-
-/// The `z3` crate's own source, not this workspace's `fsl-solver-z3`.
-fn is_z3_binding_source(file: &str) -> bool {
-    file.contains("/z3-") || file.contains("\\z3-")
-}
-
 fn main() {
     // Read the unstable gate once, before the worker thread parses anything.
     parse_options();
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        if info
-            .location()
-            .is_some_and(|location| is_z3_binding_source(location.file()))
-        {
-            Z3_BINDING_PANICKED.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
+        z3_panic::record(info);
         default_hook(info);
     }));
     // `run` on an explicitly sized thread rather than the process's main
@@ -164,14 +152,11 @@ fn main() {
     if worker.join().is_err() {
         // The bindings unwrap the null Z3 returns when it cannot allocate a term. No limit
         // keeps a wide range from getting there, so that is a refusal and not a crash.
-        if Z3_BINDING_PANICKED.load(std::sync::atomic::Ordering::SeqCst) {
+        if let Some(message) = z3_panic::take_refusal() {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&semantic_error_output(
-                    "solver execution stopped [resource]: Z3 returned no term, \
-                     usually because memory ran out"
-                ))
-                .expect("serialize solver resource error")
+                serde_json::to_string_pretty(&semantic_error_output(&message))
+                    .expect("serialize solver panic error")
             );
             std::process::exit(2);
         }
