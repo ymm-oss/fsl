@@ -760,6 +760,26 @@ fn ensure_assignable_inner(
     }
 }
 
+/// Whether symbolic evaluation can read every Map in `actual` as `expected`. `Int`
+/// stays compatible with a range elsewhere, where a literal can infer it and
+/// coercion rebuilds the value. No literal or inference produces a Map, whose
+/// coercion can only retag it, so its carriers must agree.
+fn map_carriers_agree(
+    actual: &TypeRef,
+    expected: &TypeRef,
+    model: &KernelModel,
+) -> Result<bool, TypecheckError> {
+    match (resolve(model, actual)?, resolve(model, expected)?) {
+        (TypeRef::Map(_, _), TypeRef::Map(_, _)) => same_carrier(actual, expected, model),
+        (TypeRef::Option(actual), TypeRef::Option(expected))
+        | (TypeRef::Set(actual), TypeRef::Set(expected))
+        | (TypeRef::Seq(actual, _), TypeRef::Seq(expected, _)) => {
+            map_carriers_agree(&actual, &expected, model)
+        }
+        _ => Ok(true),
+    }
+}
+
 /// Extend readable payload bindings from a true expression result.
 /// Only conjunctions recurse through both operands. This traversal has its own
 /// recursion guard: a nested `and` chain consumes one frame per level without
@@ -1315,6 +1335,10 @@ pub(crate) struct ValidationPhase {
     pub(crate) collisions: HashSet<String>,
     /// Present only in the checked-admission walk; ordinary validation ignores it.
     range_rule: Option<RangeRule>,
+    // The model's own expressions reach symbolic evaluation, so their whole
+    // container values must be coercible (#1679). A refinement map or a scenario
+    // expectation is only evaluated concretely, and keeps the assignable rule.
+    symbolic: bool,
 }
 
 impl ValidationPhase {
@@ -1329,12 +1353,20 @@ impl ValidationPhase {
             substituted: BTreeSet::new(),
             collisions: HashSet::new(),
             range_rule: None,
+            symbolic: true,
         }
     }
 
     pub(crate) fn init_statements() -> Self {
         Self {
             defer_init_statement_domain: true,
+            ..Self::normalized()
+        }
+    }
+
+    fn concrete_only() -> Self {
+        Self {
+            symbolic: false,
             ..Self::normalized()
         }
     }
@@ -1382,6 +1414,7 @@ impl ValidationPhase {
             substituted,
             collisions: self.collisions.clone(),
             range_rule: self.range_rule.clone(),
+            symbolic: self.symbolic,
         }
     }
 
@@ -2617,6 +2650,18 @@ fn validate_expression_inner(
                 (else_expr, spans.else_expr, &else_phase),
             ] {
                 phase.check(expr, env, model, span, Some(branch_type), self_relations)?;
+                // An `Int` first arm is compatible with both its sibling and the
+                // expectation without relating them, and symbolic evaluation
+                // coerces every arm to the expectation (#1679).
+                if phase.symbolic
+                    && let Some(expected) = expected
+                    && matches!(
+                        resolve(model, expected)?,
+                        TypeRef::Set(_) | TypeRef::Seq(_, _) | TypeRef::Option(_)
+                    )
+                {
+                    ensure_assignable(expr, expected, env, model, span)?;
+                }
             }
         }
         Expr::Is { expr, pattern } => {
@@ -2811,6 +2856,13 @@ fn validate_expression_inner(
                 validate(third, env, span, None)?;
             }
         }
+    }
+    // After its parts, so that a conditional reports the arm at fault.
+    if phase.symbolic
+        && let Some(expected) = expected
+        && !map_carriers_agree(&ty, expected, model).map_err(|error| error.with_span(span))?
+    {
+        return Err(not_assignable(&ty, expected).with_span(span));
     }
     Ok(())
 }
@@ -3068,7 +3120,7 @@ pub(crate) fn validate_expression_type_between(
         bindings,
         model,
         expected_model,
-        &ValidationPhase::normalized(),
+        &ValidationPhase::concrete_only(),
     )
 }
 
@@ -3078,7 +3130,10 @@ pub(crate) fn validate_planner_integer_endpoint(
     bindings: &[(String, TypeRef)],
     model: &KernelModel,
 ) -> Result<(), TypecheckError> {
-    let mut phase = ValidationPhase::normalized();
+    // The planner evaluates an endpoint itself and reaches no symbolic coercion, and it
+    // serves concretely evaluated positions too. A model's own binder answers to the
+    // carrier rule in its ordinary walk (#1679).
+    let mut phase = ValidationPhase::concrete_only();
     phase.normalize_aggregates = false;
     validate_expression_type_in_phase(expr, &TypeRef::Int, bindings, model, model, &phase)
 }
@@ -3130,7 +3185,7 @@ pub(crate) fn validate_public_expression(
     span: Span,
     expected: Option<&TypeRef>,
 ) -> Result<(), TypecheckError> {
-    validate_expression(
+    ValidationPhase::concrete_only().check(
         expr,
         &base_env(model),
         model,
