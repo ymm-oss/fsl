@@ -3173,7 +3173,7 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   now semantic errors (exit 2):</li>
 <li><strong>Unused formal, bad argument.</strong> <code>true</code> or a relation index <code>part.h[0]</code> for <code>a: K</code>; an
     unresolved name (<code>nosuch</code>), including one bound only by an additional-item <code>let</code>; a
-    qualified enum member (<code>part.Red</code>, write <code>Red</code>); a value of another component's enum
+    qualified enum member (<code>part.Red</code> or <code>Color.Red</code>, write <code>Red</code>); a value of another component's enum
     (<code>other.tone</code>, type <code>other.Tone</code>) for a <code>part.Color</code> formal; a conditional with a
     non-Bool condition (<code>if 1 then 0 else 0</code>); a root <code>def</code> called with a badly typed
     argument (<code>rp(true)</code> for <code>def rp(v: Int)</code>). Parentheses, a later argument, a later
@@ -3196,10 +3196,11 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   end. The message is bare, without a component wrapper, and action and Kernel metadata do
   not change. Error order: immediate lowering, model assembly, queued arguments in authored
   order, then init and component checks.
-  A conditional with a scalar expected type checks its arms against that type, so
-  <code>m[if c then 0 else true]</code> with <code>m: Map&lt;A, Bool&gt;</code> names <code>Named("A")</code> rather than
-  <code>Range(0, 1)</code>. Other conditionals still check their arms against the first arm's type. This
-  changed no admission result on the measured forms (the linked note states them).
+  A conditional with a Bool, ranged or named expected type checks its arms against that type,
+  so <code>m[if c then 0 else true]</code> with <code>m: Map&lt;A, Bool&gt;</code> names <code>Named("A")</code> rather than
+  <code>Range(0, 1)</code>. Other conditionals, including an <code>Int</code> expectation, still check their arms
+  against the first arm's type. This changed no admission result on the measured forms (the
+  linked note states them).
   Rust API: public <code>SyncRef</code> requires <code>arg_spans</code>. <code>into_validated_syntax</code> validates before
   discarding private metadata; <code>syntax</code>, <code>kernel_ast_v1</code> and <code>into_syntax</code> stay raw and lossy.
   The three migrated CLI callers each add one full core validation, with no observable change
