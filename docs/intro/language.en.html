@@ -3164,112 +3164,47 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   Breaking removal (#1334): additional statements assigning component state via physical names such as <code>alias__x</code>, which previously passed <code>check</code>, now produce a located error too.
   Reference arguments may read only header parameters, consts, and state, not additional-item <code>let</code> bindings (breaking removal, #1442).
   Component free value reads and update roots resolve against the component's original declarations before merging, so composition cannot rescue an otherwise undeclared reference (breaking removal, #1442); public names remain legal, and an enum read that needs its owner protected still displays the source member spelling.</li>
-<li><strong>#1517 root-argument validation (source reviewed; bounded callers measured):</strong> type ALL synchronized actuals,
-  including unused formals, before substitution, using root header parameters,
-  state, constants and enums, not body lets/requires bindings. Numeric carrier
-  compatibility remains; numeric range mismatch is still verification-time.
-  Root errors use the whole half-open actual (parentheses included), preserving
-  an inner span only within that actual; CLI/Worker loc is its start, LSP uses
-  UTF-16 start/end. Bare root wording replaces the component wrapper; original
-  action/Kernel metadata stays unchanged. Error phases: immediate lowering,
-  model assembly, authored-order queued typing, then init/component checking.
-  A conditional's arms now check against the supplied expectation, not the inferred carrier: <code>m[if c then 0 else true]</code> with <code>m: Map&lt;A, Bool&gt;</code> now names <code>Named("A")</code> instead of <code>Range(0, 1)</code>. This arm change altered no measured admission result.
-  Measured <code>check</code> removal union: <strong>11 complete contexts /9 root-component pairs
-  /22 mode-context pairs</strong>. Base <code>5564b25ccb37e3477311fde1dae5eb6298eb6b2d</code>;
-  head <code>7653cc784354bc562bd85bd888cf78d0091272f2</code>. Each mode is
-  stable or FSL5-opt-in on unchanged source, twice per side. Every transition below
-  is check-ok/exit0 → semantics-error/exit2. The nine new exact three-file <code>check c.fsl</code>
-  contexts are preservation only; physical direct.fsl presence grants no direct/API/
-  verify coverage. This finite measured union is not runtimefull472 or issue acceptance.</li>
+<li><strong>Root-authored synchronized arguments (breaking removal, #1517).</strong> <code>check</code> types every
+  synchronized argument against its formal parameter before substitution, including an
+  argument whose formal the component action never reads. An argument can read root header
+  parameters, state, constants and enums, not <code>let</code> or <code>requires</code> bindings of the additional
+  items. Numeric carriers stay compatible whatever their type names, and a numeric range
+  mismatch is still a verification-time result. These forms passed <code>check</code> before and are
+  now semantic errors (exit 2):</li>
+<li><strong>Unused formal, bad argument.</strong> <code>true</code> or a relation index <code>part.h[0]</code> for <code>a: K</code>; an
+    unresolved name (<code>nosuch</code>), including one bound only by an additional-item <code>let</code>; a
+    qualified enum member (<code>part.Red</code>, write <code>Red</code>); a value of another component's enum
+    (<code>other.tone</code>, type <code>other.Tone</code>) for a <code>part.Color</code> formal; a conditional with a
+    non-Bool condition (<code>if 1 then 0 else 0</code>); a root <code>def</code> called with a badly typed
+    argument (<code>rp(true)</code> for <code>def rp(v: Int)</code>). Parentheses, a later argument, a later
+    reference and a later action do not change this.</li>
+<li><strong>Used formal whose substituted body happened to type.</strong> <code>put(a in 0..1) { flag = a }</code> or
+    <code>put(a: K) { flag = a }</code> with <code>flag: Bool</code> and argument <code>true</code>;
+    <code>put(a: K) { m[a] = true }</code> with <code>m: Map&lt;C, Bool&gt;</code> and enum argument <code>R</code>.</li>
+<li><strong>Duplicate formals.</strong> <code>(a: K, a: K)</code> with arguments <code>true, 0</code>, where substitution erased
+    the first argument.</li>
+<li><strong>Internal action with an invalid formal declaration.</strong> <code>internal part.put</code> with
+    <code>part.put(0)</code> where the component declares <code>a: Int</code>, <code>a in 1..0</code>, <code>a: Nope</code> or a
+    struct-typed <code>a: T</code>. The component's own <code>check</code> rejects these declarations too.</li>
 </ul>
-<table>
-<thead>
-<tr>
-<th>ID</th>
-<th>Exact complete-context key</th>
-<th>Pair</th>
-<th>Changed admission / candidate loc</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>R01</td>
-<td><code>1cae9cf75cb49d332ab850296a1902db6e08971cbae68ab7229309b979632f05</code></td>
-<td>P01</td>
-<td>unused true + relation index, argument order; 5:16</td>
-</tr>
-<tr>
-<td>R02</td>
-<td><code>456840abf00faf2844ad3223e80abab2efb03e62ec5c2fc4c6c5cef9daa45af4</code></td>
-<td>P02</td>
-<td>body-only x after let; 5:16</td>
-</tr>
-<tr>
-<td>R03</td>
-<td><code>5aa3baefa078f9ddc0a1d5ed5157e9bd6295df700bf86536d7042d774e69e0d2</code></td>
-<td>P03</td>
-<td>true then later action index; 5:16</td>
-</tr>
-<tr>
-<td>R04</td>
-<td><code>8d7b0467683a00853cc958fcf91c33e6e23d32c7cd5506d1401029e98338b5d9</code></td>
-<td>P04</td>
-<td>relation index; no good sibling; 5:16</td>
-</tr>
-<tr>
-<td>R05</td>
-<td><code>a1760ef370b7c9164f0eda14b36c84dfa208b847c75fb6ecb8bfa8e5faa8df22</code></td>
-<td>P05</td>
-<td>unused true; no good sibling; 5:16</td>
-</tr>
-<tr>
-<td>R06</td>
-<td><code>ab059cd5d0c142246d68ccb9ce2ea193e43ce9b4365e6a865e0a7b46c63942ac</code></td>
-<td>P06</td>
-<td>true then second reference index; 5:16</td>
-</tr>
-<tr>
-<td>R07</td>
-<td><code>ab291946a038aa0e77692160e7516fa40a75b8781797c928405dddfd8949bbbe</code></td>
-<td>P04</td>
-<td>relation index + offered good sibling; 5:16</td>
-</tr>
-<tr>
-<td>R08</td>
-<td><code>acc62ea03d44de4dd0ddbcd65d4f73e4737e914153f50bed7832a4bb4905da3b</code></td>
-<td>P07</td>
-<td>body-only x after let/requires; 5:16</td>
-</tr>
-<tr>
-<td>R09</td>
-<td><code>cd076b93cba275c70735ba2a73731c1935fabcdb0fe16f3246b5ba615e720ded</code></td>
-<td>P08</td>
-<td>parenthesized unused true; 5:16</td>
-</tr>
-<tr>
-<td>R10</td>
-<td><code>dd449ab57104f7c5a53e33d3f756937344e76161615f960cb821e2e62372adff</code></td>
-<td>P05</td>
-<td>unused true + offered good sibling; 5:16</td>
-</tr>
-<tr>
-<td>R11</td>
-<td><code>91412ae303f1f1877fcdcea2e7e35912726e9832662e0c49d971d8ca09a9bc02</code></td>
-<td>P09</td>
-<td>second ref <code>(0), (true),</code>; 6:37</td>
-</tr>
-</tbody>
-</table>
-<p>Source identities/context roles are recorded in DESIGN-sync-argument-root-validation.md.
-  Public Rust SyncRef requires arg_spans; fallible into_validated_syntax validates
-  before projection, unlike raw/lossy syntax/kernel_ast/into_syntax. The three CLI
-  migrations add one full core validation per call; measured whole-CLI cost is
-  not isolated incremental cost. The seven-state caller cohort, on an earlier candidate and not rerun on this head, measured four builds/
-  16CLI observations, twice on fixed valid inputs: R/I/M honestly survived and all
-  exact restores preserved output with fresh H0 bytes/no restore builds. Whole
-  stdout/JSON/exits/non-time stderr matched; only the observed, framing-validated
-  mutate elapsed scalar was not compared literally. No caller-specific semantic
-  kill is claimed; broader execution gates and final issue/product acceptance remain open.
+<p>Migration: pass a value of the formal's type, using a header parameter when it comes from
+  outside the root, or correct the component. There is no automatic migration. No form in
+  the 610-form on-disk corpus changed; messages and evidence are in
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-sync-argument-root-validation.md"><code>DESIGN-sync-argument-root-validation.md</code></a>.
+  A root argument error points at the whole argument, its own parentheses included, or at an
+  inner span within it; CLI and Worker <code>loc</code> is its start, and LSP reports UTF-16 start and
+  end. The message is bare, without a component wrapper, and action and Kernel metadata do
+  not change. Error order: immediate lowering, model assembly, queued arguments in authored
+  order, then init and component checks.
+  A conditional with a scalar expected type checks its arms against that type, so
+  <code>m[if c then 0 else true]</code> with <code>m: Map&lt;A, Bool&gt;</code> names <code>Named("A")</code> rather than
+  <code>Range(0, 1)</code>. Other conditionals still check their arms against the first arm's type. This
+  changed no admission result on the measured forms (the linked note states them).
+  Rust API: public <code>SyncRef</code> requires <code>arg_spans</code>. <code>into_validated_syntax</code> validates before
+  discarding private metadata; <code>syntax</code>, <code>kernel_ast_v1</code> and <code>into_syntax</code> stay raw and lossy.
+  The three migrated CLI callers each add one full core validation, with no observable change
+  in CLI output, because the same command has already validated that source.
+  #1517 stays open until the product gate passes on merged <code>main</code>.
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, <code>check</code> / <code>verify</code> emits a
   <code>fair_not_inherited</code> warning in JSON <code>warnings</code>; write

@@ -2969,109 +2969,20 @@ CLI field の mask はありません。scope・移行・反復の証拠は
   破壊的な削除 (#1334): 以前は <code>check</code> を通った <code>alias__x</code> のような物理名による部品の状態への追加文の代入も、位置付きエラーで拒否します。
   同期参照の引数が読めるのはヘッダのパラメータ・const・状態だけで、追加項目の <code>let</code> 束縛は読めません (破壊的な削除、#1442)。
   部品の自由な値の読みと更新先の根はマージ前の部品自身の宣言に対して解決するため、未宣言の参照を合成によって有効にはできません (破壊的な削除、#1442)；公開名は引き続き使用でき、所有する enum の保護が必要な読みも表示には元の member 名を使います。</li>
-<li><strong>#1517 ルート実引数検査（ソース審査済み・限定呼出経路測定済み）:</strong> 未使用の仮引数を含む
-  すべての同期実引数を置換前に型検査します。環境はルートのヘッダ引数・状態・定数・
-  enum であり、本体の let/requires 束縛は含みません。数値 carrier の互換性は維持し、
-  数値範囲の不一致は引き続き検証時に扱います。
-  ルートの診断は括弧を含む実引数全体の半開区間を使い、その実引数内の正当な内側の
-  span のみ保持します。CLI/Worker loc は先頭、LSP は UTF-16 の始点・終点です。
-  部品 wrapper ではなく裸のルート文言を使い、元の action/Kernel メタデータは変えません。
-  優先順位は即時 lowering、モデル組立、記述順の待機実引数検査、init/部品検査です。
-  条件式の各 arm は推論した carrier ではなく与えられた期待型で検査します。<code>m: Map&lt;A, Bool&gt;</code> の <code>m[if c then 0 else true]</code> は <code>Range(0, 1)</code> ではなく <code>Named("A")</code> を示します。この arm の変更で、測定した入力の受理判定は変わっていません。
-  測定済み check 削除の和集合は11完全コンテキスト・9ルート/部品組・22モード組です。
-  base 5564b25ccb37e3477311fde1dae5eb6298eb6b2d、head 7653cc784354bc562bd85bd888cf78d0091272f2。
-  stable/FSL5-opt-in 各モード・各側2回、全件 check-ok/exit0 → semantics-error/exit2。
-  以下の全IDを保持します（分類・位置・正確なソース同一性は上記設計に記載）。</li>
+<li><strong>ルートの同期実引数の検査 (破壊的な削除、#1517):</strong> <code>check</code> は、部品の action が読まない仮引数への実引数も含め、すべての同期実引数を置換前に仮引数の型で検査します。
+  実引数が読めるのはルートのヘッダ引数・状態・定数・enum だけで、追加項目の <code>let</code> や <code>requires</code> の束縛は読めません。
+  数値 carrier は型名にかかわらず互換のままで、数値範囲の不一致は引き続き検証時に扱います。
+  次の形は以前 <code>check</code> を通っていましたが、現在は意味エラー (終了コード 2) です。</li>
+<li><strong>未使用の仮引数への不正な実引数:</strong> <code>a: K</code> への <code>true</code> や関係の添字 <code>part.h[0]</code>。未解決の名前 (<code>nosuch</code>)。追加項目の <code>let</code> だけが束縛する名前を含みます。修飾した enum member (<code>part.Red</code>。<code>Red</code> と書きます)。<code>part.Color</code> の仮引数への他の部品の enum の値 (<code>other.tone</code>、型 <code>other.Tone</code>)。条件が Bool でない条件式 (<code>if 1 then 0 else 0</code>)。不正な型の引数で呼ぶルートの <code>def</code> (<code>def rp(v: Int)</code> への <code>rp(true)</code>)。括弧、後ろの実引数、後ろの参照、後ろの action でも同じです。</li>
+<li><strong>置換後の本体だけ型が合っていた使用中の仮引数:</strong> <code>flag: Bool</code> で実引数 <code>true</code> を渡す <code>put(a in 0..1) { flag = a }</code> や <code>put(a: K) { flag = a }</code>。<code>m: Map&lt;C, Bool&gt;</code> で enum の実引数 <code>R</code> を渡す <code>put(a: K) { m[a] = true }</code>。</li>
+<li><strong>重複した仮引数:</strong> <code>(a: K, a: K)</code> に実引数 <code>true, 0</code> を渡す形。置換で最初の実引数が消えていました。</li>
+<li><strong>仮引数の宣言が不正な internal action:</strong> 部品が <code>a: Int</code>、<code>a in 1..0</code>、<code>a: Nope</code>、struct 型の <code>a: T</code> を宣言し、<code>internal part.put</code> と <code>part.put(0)</code> を使う形。これらの宣言は部品単体の <code>check</code> でも拒否されます。</li>
 </ul>
-<table>
-<thead>
-<tr>
-<th>ID</th>
-<th>Exact complete-context key</th>
-<th>Pair</th>
-<th>Changed admission / candidate loc</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>R01</td>
-<td><code>1cae9cf75cb49d332ab850296a1902db6e08971cbae68ab7229309b979632f05</code></td>
-<td>P01</td>
-<td>unused true + relation index, argument order; 5:16</td>
-</tr>
-<tr>
-<td>R02</td>
-<td><code>456840abf00faf2844ad3223e80abab2efb03e62ec5c2fc4c6c5cef9daa45af4</code></td>
-<td>P02</td>
-<td>body-only x after let; 5:16</td>
-</tr>
-<tr>
-<td>R03</td>
-<td><code>5aa3baefa078f9ddc0a1d5ed5157e9bd6295df700bf86536d7042d774e69e0d2</code></td>
-<td>P03</td>
-<td>true then later action index; 5:16</td>
-</tr>
-<tr>
-<td>R04</td>
-<td><code>8d7b0467683a00853cc958fcf91c33e6e23d32c7cd5506d1401029e98338b5d9</code></td>
-<td>P04</td>
-<td>relation index; no good sibling; 5:16</td>
-</tr>
-<tr>
-<td>R05</td>
-<td><code>a1760ef370b7c9164f0eda14b36c84dfa208b847c75fb6ecb8bfa8e5faa8df22</code></td>
-<td>P05</td>
-<td>unused true; no good sibling; 5:16</td>
-</tr>
-<tr>
-<td>R06</td>
-<td><code>ab059cd5d0c142246d68ccb9ce2ea193e43ce9b4365e6a865e0a7b46c63942ac</code></td>
-<td>P06</td>
-<td>true then second reference index; 5:16</td>
-</tr>
-<tr>
-<td>R07</td>
-<td><code>ab291946a038aa0e77692160e7516fa40a75b8781797c928405dddfd8949bbbe</code></td>
-<td>P04</td>
-<td>relation index + offered good sibling; 5:16</td>
-</tr>
-<tr>
-<td>R08</td>
-<td><code>acc62ea03d44de4dd0ddbcd65d4f73e4737e914153f50bed7832a4bb4905da3b</code></td>
-<td>P07</td>
-<td>body-only x after let/requires; 5:16</td>
-</tr>
-<tr>
-<td>R09</td>
-<td><code>cd076b93cba275c70735ba2a73731c1935fabcdb0fe16f3246b5ba615e720ded</code></td>
-<td>P08</td>
-<td>parenthesized unused true; 5:16</td>
-</tr>
-<tr>
-<td>R10</td>
-<td><code>dd449ab57104f7c5a53e33d3f756937344e76161615f960cb821e2e62372adff</code></td>
-<td>P05</td>
-<td>unused true + offered good sibling; 5:16</td>
-</tr>
-<tr>
-<td>R11</td>
-<td><code>91412ae303f1f1877fcdcea2e7e35912726e9832662e0c49d971d8ca09a9bc02</code></td>
-<td>P09</td>
-<td>second ref <code>(0), (true),</code>; 6:37</td>
-</tr>
-</tbody>
-</table>
-<p>新たな9件の3ファイル check c.fsl は保存対照だけで、direct/API/verify の証拠ではありません。
-  これは測定範囲の和集合であり472件すべての実行や issue 完了の主張ではありません。
-  公開 Rust SyncRef に arg_spans が必須です。into_validated_syntax は消去前に検査し、
-  syntax/kernel_ast/into_syntax は未検査・情報を失う変換のままです。移行済みCLI3箇所は
-  各呼出しで完全コア検査が1回増えます。CLI全体の測定を追加検査単体の費用とは扱いません。
-  呼出経路は以前の候補で（この head では再実行せず）7状態・4ビルド・16CLI観測を固定した妥当入力で各2回測定済みです。
-  R/I/M は実際に生存し、正確なソース復元後は新規ビルドしたH0の同一バイトを再利用して
-  出力保存を確認しました（復元時の再ビルドなし）。stdout/JSON/終了コードとstderrの
-  非時間部分は全体一致し、実測されたmutate経過時間スカラーだけは診断書式を検査した上で
-  文字列の完全一致対象から外しました。呼出箇所固有の意味的killの証拠ではありません。
-  より広い実行ゲートとissue/productの最終承認は引き続き未完了です。
+<p>移行: 仮引数の型の値を渡します。ルートの外から来る値にはヘッダ引数を使います。または部品を直します。自動移行はありません。ディスク上の 610 件のコーパスに変化はありません。文言と根拠は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-sync-argument-root-validation.md"><code>DESIGN-sync-argument-root-validation.md</code></a> にあります。
+  ルートの実引数エラーは、括弧を含む実引数全体か、その内側の span を指します。CLI と Worker の <code>loc</code> は先頭で、LSP は UTF-16 の始点と終点を返します。文言に部品 wrapper は付かず、action と Kernel のメタデータは変わりません。エラーの順序は、即時 lowering、モデル組立、記述順の待機実引数、init と部品の検査です。
+  スカラーの期待型がある条件式は各 arm をその型で検査します。そのため <code>m: Map&lt;A, Bool&gt;</code> の <code>m[if c then 0 else true]</code> は <code>Range(0, 1)</code> ではなく <code>Named("A")</code> を示します。それ以外の条件式は引き続き各 arm を最初の arm の型で検査します。測定した入力の受理判定は変わっていません (入力は上記の設計ノートに記載)。
+  Rust API: 公開 <code>SyncRef</code> に <code>arg_spans</code> が必須です。<code>into_validated_syntax</code> は非公開メタデータを捨てる前に検査し、<code>syntax</code>・<code>kernel_ast_v1</code>・<code>into_syntax</code> は未検査で情報を失う変換のままです。移行した CLI の 3 箇所は呼び出しごとに完全なコア検査が 1 回増えますが、同じコマンドがすでに同じソースを検査しているため CLI の出力は変わりません。
+  #1517 は、マージ後の <code>main</code> で製品ゲートが通るまで開いたままです。
 - 公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な
   同期 action から参照されると、<code>check</code> / <code>verify</code> は JSON の <code>warnings</code> に
   <code>fair_not_inherited</code> 警告を出します。同期 action が fair でなければならないとき
