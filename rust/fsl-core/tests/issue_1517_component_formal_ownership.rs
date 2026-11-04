@@ -105,7 +105,7 @@ fn assert_component_rejection(kernel: &KernelSpec, reason: &str) {
 }
 
 #[test]
-fn non_finite_typed_internal_formal_keeps_component_ownership() {
+fn non_finite_typed_internal_formal_is_rejected_with_component_ownership() {
     assert_component_rejection(
         &kernel("a: Int", "part.put(0)"),
         "action parameter type is not a finite scalar",
@@ -113,7 +113,7 @@ fn non_finite_typed_internal_formal_keeps_component_ownership() {
 }
 
 #[test]
-fn empty_inline_range_internal_formal_keeps_component_ownership() {
+fn empty_inline_range_internal_formal_is_rejected_with_component_ownership() {
     assert_component_rejection(
         &kernel("a in 1..0", "part.put(0)"),
         "action parameter range is empty",

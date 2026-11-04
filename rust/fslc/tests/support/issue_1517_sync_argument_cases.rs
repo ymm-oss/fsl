@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! #1517 Stage A draft. Unused bad actuals are deliberately NOT policy tests.
+//! #1517 finite actual matrix. Unused bad actuals are pinned as rejections by the
+//! precheck contract test.
 //! Coordinates below are literal authored positions, never production spans.
 
 pub const PIECE: &str = "spec Piece {\n  type K = 0..1\n  state { h: relation K -> K, last: K }\n  init { h = Set {}  last = 0 }\n  // padding\n  // padding\n  action put(a: K) {\n    last = a\n  }\n}\n";

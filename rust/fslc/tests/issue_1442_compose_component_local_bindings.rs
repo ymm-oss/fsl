@@ -858,11 +858,12 @@ fn breaking_removal_sync_arguments_do_not_read_additional_lets() {
         "invalid model expression: public Kernel cannot type identifier 't' at 4:24"
     );
     // R2 owns this authored actual at the root, outside additional-body lets.
-    let versions = json!({
-        "verifier":{"name":"fslc-rust","version":env!("CARGO_PKG_VERSION")},
-        "core":{"name":"fsl-core","version":env!("CARGO_PKG_VERSION")},
-        "solver":{"name":"z3","backend":"native-z3","version":"Z3 4.16.0.0"}
-    });
+    let versions = fsl_core::version_metadata(
+        "fslc-rust",
+        env!("CARGO_PKG_VERSION"),
+        "native-z3",
+        fsl_solver_z3::version(),
+    );
     assert_eq!(
         rejected,
         (
@@ -870,18 +871,6 @@ fn breaking_removal_sync_arguments_do_not_read_additional_lets() {
                 "fsl":"1.0","result":"error","kind":"semantics",
                 "message":"invalid model expression: public Kernel cannot type identifier 't' at 4:21",
                 "loc":{"line":4,"column":21},"versions":versions
-            }),
-            2
-        )
-    );
-    // The old component-owner packet is a distinct, rejected control.
-    assert_ne!(
-        rejected,
-        (
-            json!({
-                "fsl":"1.0","result":"error","kind":"semantics",
-                "message":"invalid model expression: component \"bv.fsl\" failed to check (b.go: public Kernel cannot type identifier 't' at bv.fsl:4:24) at 2:3",
-                "loc":{"line":2,"column":3},"versions":versions
             }),
             2
         )
