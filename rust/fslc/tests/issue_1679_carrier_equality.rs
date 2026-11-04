@@ -280,6 +280,7 @@ fn every_engine_reports_the_same_refusal() {
 
 /// `(violation expected, spec)`: each must check and return that verdict on bmc,
 /// explicit and BFS, and a verdict rather than an error on induction.
+#[allow(clippy::too_many_lines)] // One literal row per preserved form.
 fn preserved_forms() -> Vec<(&'static str, bool, String)> {
     let with = |state: (&str, &str), action: &str, property: &str| {
         format!(
@@ -462,9 +463,8 @@ fn concretely_evaluated_positions_keep_their_verdicts() {
         ),
         (
             "expectation",
-            format!(
-                "requirements R {{\n  type K = 0..1\n  type A = 0..1\n  state {{ l: Map<K, Int>, r: Map<K, A>, c: Bool }}\n  init {{ forall k: K {{ l[k] = 0 r[k] = 0 }} c = false }}\n  requirement REQ-1 \"go\" {{\n    action go() {{ c = not c }}\n  }}\n  acceptance AC-1 \"same\" {{\n    go()\n    expect l == r\n  }}\n}}\n"
-            ),
+            "requirements R {\n  type K = 0..1\n  type A = 0..1\n  state { l: Map<K, Int>, r: Map<K, A>, c: Bool }\n  init { forall k: K { l[k] = 0 r[k] = 0 } c = false }\n  requirement REQ-1 \"go\" {\n    action go() { c = not c }\n  }\n  acceptance AC-1 \"same\" {\n    go()\n    expect l == r\n  }\n}\n"
+                .to_owned(),
             same_abs,
         ),
     ];
