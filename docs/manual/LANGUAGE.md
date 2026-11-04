@@ -3107,7 +3107,8 @@ compose OrderSystem {
   argument whose formal the component action never reads. An argument can read root header
   parameters, state, constants and enums, not `let` or `requires` bindings of the additional
   items. Numeric carriers stay compatible whatever their type names, and a numeric range
-  mismatch is still a verification-time result. These forms passed `check` before and are
+  mismatch is not a static error: verification reports it only when the component action
+  reads the argument, and an unread argument gets no result. These forms passed `check` before and are
   now semantic errors (exit 2):
   - **Unused formal, bad argument.** `true` or a relation index `part.h[0]` for `a: K`; an
     unresolved name (`nosuch`), including one bound only by an additional-item `let`; a

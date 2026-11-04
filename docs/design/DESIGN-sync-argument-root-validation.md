@@ -4,8 +4,8 @@
 
 Status: **Accepted contract; implemented, product gate open (#1517).**
 This amends DESIGN-compose and DESIGN-check-executable-forms. Independent review of
-PR #1677 covered head `bf0f55d2c`; the fixes for its findings came after that head and
-have not been independently reviewed. Neither review nor the evidence below establishes
+PR #1677 covered head `bf0f55d2c`, and a second review covered the fixes through
+`d14dcc0b6`. Neither review nor the evidence below establishes
 merge, product or full-v5 completion: #1517 stays open until the product gate passes on
 merged `main`.
 
@@ -19,8 +19,9 @@ obligation queue. Type it using the complete model and ROOT HEADER parameter,
 state, constant and enum context, never additional-body lets/requires bindings.
 Reuse the existing checker and action-parameter machinery, with authored fallback
 available from the beginning: no second validator, partial model or synthetic action.
-Compatible numeric carriers remain accepted; numeric range mismatch remains a
-verification-time type-bound concern, not a new static range gate.
+Compatible numeric carriers remain accepted; numeric range mismatch is not a new static range gate.
+Verification reports it as a type bound only when the component action reads the argument:
+`part.useK(5)` gives `violated`, `part.unusedK(5)` gives `verified`, on base and head.
 
 ## Ownership and ranges
 
@@ -237,7 +238,6 @@ elapsed-time values. An earlier candidate measured the same on fixed valid input
 restoration preserved its output. Together these show preservation only: no caller-specific
 rejection and no isolated cost of the added validation.
 
-Still open before issue or product completion: independent review of the fixes after
-`bf0f55d2c`, the required workspace and product gates on merged `main`, and #1254/#1622
+Still open before issue or product completion: the required workspace and product gates on merged `main`, and #1254/#1622
 preservation on that state. Not measured here: repeated isolated core faults and verifier
 routes other than those named above.

@@ -3169,7 +3169,8 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   argument whose formal the component action never reads. An argument can read root header
   parameters, state, constants and enums, not <code>let</code> or <code>requires</code> bindings of the additional
   items. Numeric carriers stay compatible whatever their type names, and a numeric range
-  mismatch is still a verification-time result. These forms passed <code>check</code> before and are
+  mismatch is not a static error: verification reports it only when the component action
+  reads the argument, and an unread argument gets no result. These forms passed <code>check</code> before and are
   now semantic errors (exit 2):</li>
 <li><strong>Unused formal, bad argument.</strong> <code>true</code> or a relation index <code>part.h[0]</code> for <code>a: K</code>; an
     unresolved name (<code>nosuch</code>), including one bound only by an additional-item <code>let</code>; a

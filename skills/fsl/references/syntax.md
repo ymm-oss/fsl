@@ -994,8 +994,8 @@ Reference arguments may read only header parameters, consts, and state, not addi
 **Root-authored synchronized arguments (breaking removal, #1517):** `check` types every
 synchronized argument against its formal before substitution, including an argument for a
 formal the component action never reads, in root header parameter, state, constant and enum
-context, not `let` or `requires` bindings. Numeric carriers stay compatible, and range
-mismatches stay verification-time results below. These forms passed `check` before and are
+context, not `let` or `requires` bindings. Numeric carriers stay compatible. A range mismatch is not
+a static error: verification reports it only when the component action reads the argument. These forms passed `check` before and are
 now semantic errors (exit 2):
 
 - Unused formal, bad argument: `true` or `part.h[0]` for `a: K`; an unresolved name
