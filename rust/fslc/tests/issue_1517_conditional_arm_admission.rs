@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! #1517 names a scalar conditional's supplied type in its diagnostics. That must
-//! not change admission: `Int` inside a container makes compatibility
-//! non-transitive, so a container conditional keeps its mutual arm check.
+//! #1517 names a conditional's supplied Bool, ranged or named type in its
+//! diagnostics. That must not change admission: `Int` inside a container makes
+//! compatibility non-transitive, so a container conditional keeps its mutual arm
+//! check. An `Int` expectation keeps the first arm's more specific type.
 //! The f1-f4 packets are the ones the base before #1517 produced; the scalar
 //! rejection differs from that base only in naming the supplied type.
 
@@ -19,7 +20,7 @@ const ARM_MAP: &str = "spec ArmMap { type A = 0..1 type B = 0..2 type K = 0..1\n
 
 fn direct(statement: &str) -> String {
     format!(
-        "spec Direct {{\n  type A = 0..1\n  state {{ c: Bool, d: Bool, m: Map<A, Bool> }}\n  init {{ c = false d = false forall k: A {{ m[k] = false }} }}\n  action go() {{\n    {statement}\n  }}\n}}\n"
+        "spec Direct {{\n  type A = 0..1\n  state {{ a: A, c: Bool, d: Bool, m: Map<A, Bool> }}\n  init {{ a = 0 c = false d = false forall k: A {{ m[k] = false }} }}\n  action go() {{\n    {statement}\n  }}\n}}\n"
     )
 }
 
@@ -132,4 +133,15 @@ fn scalar_read_key_arm_names_the_supplied_map_key_type() {
 fn scalar_read_key_arms_stay_admitted() {
     let (packet, exit) = check("scalar_valid", &direct("d = m[if c then 0 else 1]"));
     assert_eq!((exit, &packet["result"]), (0, &json!("ok")), "{packet}");
+}
+
+#[test]
+fn int_expectation_keeps_naming_the_first_arm_type() {
+    assert_rejected(
+        "int_expectation",
+        &direct("d = (if c then a else true) + 1 == 0"),
+        "expression of type Bool is not assignable to Named(\"A\")",
+        6,
+        27,
+    );
 }

@@ -1681,13 +1681,14 @@ fn validate_expression_inner(
             // Admission requires mutually compatible arms. Compatibility is an
             // equivalence only over scalars: with `Int` inside a container, an
             // arm can match the expectation but not its sibling, so a container
-            // conditional keeps the first arm's carrier. A scalar expectation
-            // admits the same arms and lets a diagnostic name the supplied type.
+            // conditional keeps the first arm's carrier. A Bool, ranged or named
+            // expectation admits the same arms and lets a diagnostic name the
+            // supplied type; `Int` would only hide a more specific first arm.
             let branch_type = match expected {
                 Some(expected)
                     if matches!(
                         resolve(model, expected)?,
-                        TypeRef::Int | TypeRef::Bool | TypeRef::Range(_, _) | TypeRef::Named(_)
+                        TypeRef::Bool | TypeRef::Range(_, _) | TypeRef::Named(_)
                     ) =>
                 {
                     expected
