@@ -999,7 +999,7 @@ mismatches stay verification-time results below. These forms passed `check` befo
 now semantic errors (exit 2):
 
 - Unused formal, bad argument: `true` or `part.h[0]` for `a: K`; an unresolved name
-  (`nosuch`), including one bound only by an additional-item `let`; `part.Red` (write `Red`);
+  (`nosuch`), including one bound only by an additional-item `let`; `part.Red` or `Color.Red` (write `Red`);
   another component's enum value (`other.tone`) for a `part.Color` formal; a non-Bool
   condition (`if 1 then 0 else 0`); a root `def` with a badly typed argument (`rp(true)` for
   `def rp(v: Int)`). Parentheses and later arguments, references or actions do not change this.
@@ -1014,10 +1014,10 @@ Migration: pass a value of the formal's type, using a header parameter when it c
 outside the root, or correct the component. There is no automatic migration. Root errors point
 at the whole argument including its parentheses, or an inner span within it, with a bare
 message and UTF-16 LSP endpoints. Error order: immediate lowering, model assembly, queued
-arguments in authored order, then init and component checks. A conditional with a scalar
-expected type checks its arms against that type, so `m[if c then 0 else true]` with
-`m: Map<A, Bool>` names `Named("A")` rather than `Range(0, 1)`; other conditionals check arms
-against the first arm's type. This changed no admission result on the measured forms; see
+arguments in authored order, then init and component checks. A conditional with a Bool, ranged
+or named expected type checks its arms against that type, so `m[if c then 0 else true]` with
+`m: Map<A, Bool>` names `Named("A")` rather than `Range(0, 1)`; other conditionals, including an
+`Int` expectation, check arms against the first arm's type. This changed no admission result on the measured forms; see
 `docs/design/DESIGN-sync-argument-root-validation.md`. #1517 stays open until the product gate
 passes on merged `main`.
 

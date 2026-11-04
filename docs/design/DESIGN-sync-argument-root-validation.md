@@ -85,16 +85,19 @@ from these callers.
 semantics error, whether or not the formal is used. Each form below passed `check` (exit 0)
 on base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d` and is rejected (exit 2,
 `result: "error"`, `kind: "semantics"`) on head
-`c5f48d81b93234db86a83119d16e27bce6ae70de`, each binary built from its own tree, one
-stable run per side with `FSLC_CACHE=off`. The rule defines the removal; this table is the
-measured sample of it. Locations belong to the measured fixture layout.
+`d19e9939d8079042ddc768afe8550c4f402743dc`, each binary built from its own tree with Rust 1.98.0, with
+`FSLC_CACHE=off`. `rust/fslc/tests/issue_1517_breaking_removals.rs` pins each form by name
+with its complete packet; its exact inputs all pass on base, and skipping root validation
+makes all 27 removal tests fail while the 3 migration-target tests keep passing. The rule
+defines the removal; this table is the measured sample of it. Locations belong to those
+test inputs.
 
 | Group | Component action | Root reference | Head message |
 |---|---|---|---|
-| Internal declaration | `put(a: Int) { last = a }` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: action parameter type is not a finite scalar at piece.fsl:1:52) at root.fsl:2:3` |
-| Internal declaration | `put(a in 1..0) { last = a }` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: action parameter range is empty at piece.fsl:1:52) at root.fsl:2:3` |
-| Internal declaration | `put(a: Nope) { }` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: unknown type 'Nope' at piece.fsl:1:52) at root.fsl:2:3` |
-| Internal declaration | `put(a: T) { }`, struct `T` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: action parameter type is not a finite scalar at piece.fsl:1:73) at root.fsl:2:3` |
+| Internal declaration | `put(a: Int) { last = a }` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: action parameter type is not a finite scalar at piece.fsl:1:78) at root.fsl:2:3` |
+| Internal declaration | `put(a in 1..0) { last = a }` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: action parameter range is empty at piece.fsl:1:78) at root.fsl:2:3` |
+| Internal declaration | `put(a: Nope) { }` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: unknown type 'Nope' at piece.fsl:1:78) at root.fsl:2:3` |
+| Internal declaration | `put(a: T) { }`, struct `T` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: action parameter type is not a finite scalar at piece.fsl:1:98) at root.fsl:2:3` |
 | Used formal | `put(a in 0..1) { flag = a }` | `part.put(true)` | `invalid model expression: expression of type Bool is not assignable to Range(0, 1) at 5:16` |
 | Used formal | `put(a: K) { flag = a }` | `part.put(true)` | `invalid model expression: expression of type Bool is not assignable to Named("part.K") at 5:16` |
 | Used formal | `put(a: K) { m[a] = true }`, enum `C`, `m: Map<C, Bool>` | `part.put(R)` | `invalid model expression: expression of type Named("part.C") is not assignable to Named("part.K") at 5:16` |
@@ -110,12 +113,19 @@ measured sample of it. Locations belong to the measured fixture layout.
 The internal-declaration and used-formal components also fail their own standalone `check`;
 the unused-formal components pass it, and only the root actual is wrong. The duplicate-formal
 row also fails standalone; its first actual is erased by substitution, and `part.put(0, 1)`
-for the same formals still passes `check`. The same run found further unused spellings of
+for the same formals still passes `check`. The test also pins further unused spellings of
 these classes: a root `def` whose result or body does not type (`rp(0)` for `a: K`, `rb(0)`
-reading a relation index), `part.Color.Red`, a pattern binder
-(`if part.o is some(v) then v else 0`), a bare component state name (`last`), the formal's
-own name (`a`), a root Bool state (`rb`) and an integer for an enum formal (`0` for
-`a: Color`). No measured form went from error to ok.
+reading a relation index), `Color.Red`, `part.Color.Red`, a name bound only by an additional
+`let`, a pattern binder (`if part.o is some(v) then v else 0`), a bare component state name
+(`last`), the formal's own name (`a`), a root Bool state (`rb`), an integer for an enum
+formal (`0` for `a: Color`), and parenthesized and multi-line `true`. No measured form went
+from error to ok.
+
+FSL has no owner-qualified enum literal in source. `part.Red`, `Color.Red` and
+`part.Color.Red` are rejected as untypable identifiers in a root actual for a used formal, a
+root `requires` and a root invariant on both base and head, as `E.R` is in a direct spec and
+`St.Open` in a refinement map. Base accepted them only as an erased actual for an unused formal, so this removal takes
+away no valid enum spelling. The bare member (`Red`) stays valid.
 
 Migration: pass a value of the formal's type, using a header parameter when it comes from
 outside the root, or correct the component. There is no automatic migration, and an
@@ -172,40 +182,42 @@ R04/R07 and R05/R10 each share root and piece bytes but differ in the offered go
 all eleven contexts stay separate.
 
 On-disk transition set (empty). Base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d` and head
-`c5f48d81b93234db86a83119d16e27bce6ae70de`, each built from its own materialized tree with Rust 1.99.1
-(`cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked`). Every
+`d19e9939d8079042ddc768afe8550c4f402743dc`, each built from its own materialized tree with Rust 1.98.0, the CI toolchain
+(`cargo +1.98.0 build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked`). Every
 `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (610 forms on both
 sides: 23/195/392) ran with `FSLC_CACHE=off` and the own tree as cwd, as
 `fslc check <path>` stable and with `FSLC_UNSTABLE=fsl5`, and as
 `fslc kernel <path> --kernel-version 1|2` stable, twice per side. All 4880 pairs had equal
 complete stdout, stderr and exit, with no field excluded: 0 ok-to-error and 0 error-to-ok
-transitions. Kernel version 2 records span paths relative to the repository root, so the
-base tree needs a repository root too: without one, 428 forms differ only in that path. The
-inline `s.fsl` of the rewritten `breaking_removal_sync_arguments_do_not_read_additional_lets`
-stays an error and moves from the component wrapper at 2:3 to the root at 4:21; its other
-four inputs are byte-identical. This covers `check` and Kernel on these forms, not every
-verifier route.
+transitions. Kernel version 2 records span paths relative to the repository root, so a
+materialized base tree needs a repository root too: without one, 428 forms differ only in
+that path. The inline `s.fsl` of the rewritten
+`breaking_removal_sync_arguments_do_not_read_additional_lets` stays an error and moves from
+the component wrapper at 2:3 to the root at 4:21; its other four inputs are byte-identical.
+This covers `check` and Kernel on these forms, not every verifier route.
 
 Multiple actual, reference and action order, body-only `x`, parentheses and the trailing
 comma are part of the removal; they give additional-body lets no permission to bind actuals.
 
-A conditional with a scalar expectation (Int, Bool, a numeric range or domain, an enum or
-struct) checks its arms against that expectation, so `m[if c then 0 else true]` with
-`m: Map<A, Bool>` names `Named("A")` rather than `Range(0, 1)`. Every other conditional
-keeps the base check of its arms against the first arm's inferred type. Compatibility is an
-equivalence over scalars but not over containers holding `Int`: `Set { 0 }` is compatible
-with both `Set<A>` and `Set<B>`, which are not compatible with each other. Applying the
-expectation to container arms changed admission in both directions, so it is not done.
+A conditional with a Bool, ranged or named expectation (a numeric domain, an enum or a struct)
+checks its arms against that expectation, so `m[if c then 0 else true]` with
+`m: Map<A, Bool>` names `Named("A")` rather than `Range(0, 1)`. Every other conditional keeps
+the base check of its arms against the first arm's inferred type. That includes an `Int`
+expectation, where the supplied type would only hide a more specific first arm, and every
+container. Compatibility is an equivalence over scalars but not over containers holding
+`Int`: `Set { 0 }` is compatible with both `Set<A>` and `Set<B>`, which are not compatible
+with each other. Applying the expectation to container arms changed admission in both
+directions, so it is not done.
 
 This does not change admission on the measured forms. Against base on the head above: the
-four forms pinned in `issue_1517_conditional_arm_admission.rs` give equal packets; of 79
-finite conditional probes, 77 give equal packets and 2 differ only in the named type; of a
-5917-form matrix of Set, Seq, Map, Option, relation and scalar arms in `requires`,
-assignment, index, method and operator positions, 1870 are ok on both sides, 4047 are errors
-on both, and 174 of those errors differ only in the type named at the same location, for
-example `Range(0, 1)` to `Named("A")` or `Named("A")` to `Int`. As a control, the same
-matrix on a binary that applies the expectation to every conditional shows 48 admission
-differences. This is a finite measurement, not an equivalence proof.
+four forms pinned in `issue_1517_conditional_arm_admission.rs` give equal results on `check`,
+bmc and explicit; of 79 finite conditional probes, 77 give equal packets and 2 differ only in
+the named type; of a 5917-form matrix of Set, Seq, Map, Option, relation and scalar arms in
+`requires`, assignment, index, method and operator positions, 1870 are ok on both sides, 4047
+are errors on both, and 126 of those errors differ only in the type named at the same
+location, for example `Range(0, 1)` to `Named("A")`. As a control, the same matrix on a binary
+that applies the expectation to every conditional shows 48 admission differences. This is a
+finite measurement, not an equivalence proof.
 
 ## Evidence and open gates
 
@@ -216,13 +228,14 @@ parentheses, inner spans, UTF-16 over real stdio, complete native and Worker pac
 model, manual-AST and Kernel preservation or exact refusal. The tests written for this are
 the `issue_1517*` tests of `fsl-core`, `fslc-rust`, `fsl-wasm` and `fsl-lsp`; with all
 `fsl-core`, `fsl-wasm` and `fsl-lsp` stdio tests and the `issue_1442*` tests of
-`fslc-rust`, they pass on head `c5f48d81b93234db86a83119d16e27bce6ae70de`.
+`fslc-rust`, they pass on head `d19e9939d8079042ddc768afe8550c4f402743dc` with Rust 1.98.0.
 
-Replacing the three migrated callers with raw conversion and rebuilding changed nothing the
-CLI shows on one bad and one valid compose through `check`, `verify`, `explain` and `mutate`,
-apart from elapsed-time values. An earlier candidate measured the same on fixed valid inputs,
-and exact restoration preserved its output. Together these show preservation only: no
-caller-specific rejection and no isolated cost of the added validation.
+On `c5f48d81b`, before the `Int` exclusion and built with Rust 1.99.1, replacing the three
+migrated callers with raw conversion and rebuilding changed nothing the CLI shows on one bad
+and one valid compose through `check`, `verify`, `explain` and `mutate`, apart from
+elapsed-time values. An earlier candidate measured the same on fixed valid inputs, and exact
+restoration preserved its output. Together these show preservation only: no caller-specific
+rejection and no isolated cost of the added validation.
 
 Still open before issue or product completion: independent review of the fixes after
 `bf0f55d2c`, the required workspace and product gates on merged `main`, and #1254/#1622

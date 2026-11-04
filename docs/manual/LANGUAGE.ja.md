@@ -2910,14 +2910,14 @@ compose OrderSystem {
   実引数が読めるのはルートのヘッダ引数・状態・定数・enum だけで、追加項目の `let` や `requires` の束縛は読めません。
   数値 carrier は型名にかかわらず互換のままで、数値範囲の不一致は引き続き検証時に扱います。
   次の形は以前 `check` を通っていましたが、現在は意味エラー (終了コード 2) です。
-  - **未使用の仮引数への不正な実引数:** `a: K` への `true` や関係の添字 `part.h[0]`。未解決の名前 (`nosuch`)。追加項目の `let` だけが束縛する名前を含みます。修飾した enum member (`part.Red`。`Red` と書きます)。`part.Color` の仮引数への他の部品の enum の値 (`other.tone`、型 `other.Tone`)。条件が Bool でない条件式 (`if 1 then 0 else 0`)。不正な型の引数で呼ぶルートの `def` (`def rp(v: Int)` への `rp(true)`)。括弧、後ろの実引数、後ろの参照、後ろの action でも同じです。
+  - **未使用の仮引数への不正な実引数:** `a: K` への `true` や関係の添字 `part.h[0]`。未解決の名前 (`nosuch`)。追加項目の `let` だけが束縛する名前を含みます。修飾した enum member (`part.Red` や `Color.Red`。`Red` と書きます)。`part.Color` の仮引数への他の部品の enum の値 (`other.tone`、型 `other.Tone`)。条件が Bool でない条件式 (`if 1 then 0 else 0`)。不正な型の引数で呼ぶルートの `def` (`def rp(v: Int)` への `rp(true)`)。括弧、後ろの実引数、後ろの参照、後ろの action でも同じです。
   - **置換後の本体だけ型が合っていた使用中の仮引数:** `flag: Bool` で実引数 `true` を渡す `put(a in 0..1) { flag = a }` や `put(a: K) { flag = a }`。`m: Map<C, Bool>` で enum の実引数 `R` を渡す `put(a: K) { m[a] = true }`。
   - **重複した仮引数:** `(a: K, a: K)` に実引数 `true, 0` を渡す形。置換で最初の実引数が消えていました。
   - **仮引数の宣言が不正な internal action:** 部品が `a: Int`、`a in 1..0`、`a: Nope`、struct 型の `a: T` を宣言し、`internal part.put` と `part.put(0)` を使う形。これらの宣言は部品単体の `check` でも拒否されます。
 
   移行: 仮引数の型の値を渡します。ルートの外から来る値にはヘッダ引数を使います。または部品を直します。自動移行はありません。ディスク上の 610 件のコーパスに変化はありません。文言と根拠は [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md) にあります。
   ルートの実引数エラーは、括弧を含む実引数全体か、その内側の span を指します。CLI と Worker の `loc` は先頭で、LSP は UTF-16 の始点と終点を返します。文言に部品 wrapper は付かず、action と Kernel のメタデータは変わりません。エラーの順序は、即時 lowering、モデル組立、記述順の待機実引数、init と部品の検査です。
-  スカラーの期待型がある条件式は各 arm をその型で検査します。そのため `m: Map<A, Bool>` の `m[if c then 0 else true]` は `Range(0, 1)` ではなく `Named("A")` を示します。それ以外の条件式は引き続き各 arm を最初の arm の型で検査します。測定した入力の受理判定は変わっていません (入力は上記の設計ノートに記載)。
+  Bool・範囲・名前付きの期待型がある条件式は各 arm をその型で検査します。そのため `m: Map<A, Bool>` の `m[if c then 0 else true]` は `Range(0, 1)` ではなく `Named("A")` を示します。`Int` の期待型を含むそれ以外の条件式は、引き続き各 arm を最初の arm の型で検査します。測定した入力の受理判定は変わっていません (入力は上記の設計ノートに記載)。
   Rust API: 公開 `SyncRef` に `arg_spans` が必須です。`into_validated_syntax` は非公開メタデータを捨てる前に検査し、`syntax`・`kernel_ast_v1`・`into_syntax` は未検査で情報を失う変換のままです。移行した CLI の 3 箇所は呼び出しごとに完全なコア検査が 1 回増えますが、同じコマンドがすでに同じソースを検査しているため CLI の出力は変わりません。
   #1517 は、マージ後の `main` で製品ゲートが通るまで開いたままです。
 - 公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な

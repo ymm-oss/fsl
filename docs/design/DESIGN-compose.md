@@ -121,8 +121,12 @@ compose OrderSystem {
     retained. Its printer uses the source member spelling. Public header names
     remain legal; private capturers use the shared hygiene rules instead.
     Display-only provenance on the reified node distinguishes these bare reads
-    from conversion, abstraction, and user-qualified enum literals, whose owner
-    qualification is preserved; semantic Kernel AST/JSON output is unchanged.
+    from checker-generated enum members, such as enum conversion and abstraction
+    expansions, whose owner qualification is preserved; semantic Kernel AST/JSON
+    output is unchanged. There is no user-written qualified enum literal: `E.R` in
+    a spec, and `part.Red`, `Color.Red` or `part.Color.Red` in a compose, are
+    rejected as untypable identifiers, measured on `check` for root reads and
+    used-formal actuals. Since #1517 an unused-formal actual is rejected too.
     Pattern collisions follow the ordinary type checker's aggregate phase:
     a pattern sharing a normalized non-typed `count` or `sum` binder is accepted
     exactly as in the standalone component, while non-expanding `forall` and

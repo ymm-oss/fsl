@@ -3111,7 +3111,7 @@ compose OrderSystem {
   now semantic errors (exit 2):
   - **Unused formal, bad argument.** `true` or a relation index `part.h[0]` for `a: K`; an
     unresolved name (`nosuch`), including one bound only by an additional-item `let`; a
-    qualified enum member (`part.Red`, write `Red`); a value of another component's enum
+    qualified enum member (`part.Red` or `Color.Red`, write `Red`); a value of another component's enum
     (`other.tone`, type `other.Tone`) for a `part.Color` formal; a conditional with a
     non-Bool condition (`if 1 then 0 else 0`); a root `def` called with a badly typed
     argument (`rp(true)` for `def rp(v: Int)`). Parentheses, a later argument, a later
@@ -3134,10 +3134,11 @@ compose OrderSystem {
   end. The message is bare, without a component wrapper, and action and Kernel metadata do
   not change. Error order: immediate lowering, model assembly, queued arguments in authored
   order, then init and component checks.
-  A conditional with a scalar expected type checks its arms against that type, so
-  `m[if c then 0 else true]` with `m: Map<A, Bool>` names `Named("A")` rather than
-  `Range(0, 1)`. Other conditionals still check their arms against the first arm's type. This
-  changed no admission result on the measured forms (the linked note states them).
+  A conditional with a Bool, ranged or named expected type checks its arms against that type,
+  so `m[if c then 0 else true]` with `m: Map<A, Bool>` names `Named("A")` rather than
+  `Range(0, 1)`. Other conditionals, including an `Int` expectation, still check their arms
+  against the first arm's type. This changed no admission result on the measured forms (the
+  linked note states them).
   Rust API: public `SyncRef` requires `arg_spans`. `into_validated_syntax` validates before
   discarding private metadata; `syntax`, `kernel_ast_v1` and `into_syntax` stay raw and lossy.
   The three migrated CLI callers each add one full core validation, with no observable change
