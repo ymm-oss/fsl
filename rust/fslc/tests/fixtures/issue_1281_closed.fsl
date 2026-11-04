@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 spec Closed {
   type Small = 0..1
   state { x: Small }

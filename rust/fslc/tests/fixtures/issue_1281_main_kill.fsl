@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 spec MainKill {
   type Small = 0..3
   state { x: Small }

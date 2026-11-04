@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 spec DepthCut {
   type N = 0..100
   state { x: N }
