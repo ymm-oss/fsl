@@ -807,21 +807,21 @@ fn preservation_unused_ambient_state_keeps_downstream_diagnostic_name() {
             "component \"b.fsl\" failed to check (b.go: 'x' is not an integer const at b.fsl:1:77) at s.fsl:1:13"
         );
         assert_eq!(composed.0["loc"], json!({"line": 1, "column": 13}));
-        let verified = run(
-            &dir,
-            &[
-                "verify",
-                "s.fsl",
-                "--engine",
-                "bmc",
-                "--depth",
-                "2",
-                "--no-cache",
-            ],
-        );
-        assert_eq!(verified.1, 2, "{}", verified.0);
-        assert_eq!(verified.0["message"], composed.0["message"]);
-        assert_eq!(verified.0["loc"], composed.0["loc"]);
+        for (file, checked) in [("b.fsl", &direct), ("s.fsl", &composed)] {
+            let verified = run(
+                &dir,
+                &[
+                    "verify",
+                    file,
+                    "--engine",
+                    "bmc",
+                    "--depth",
+                    "2",
+                    "--no-cache",
+                ],
+            );
+            assert_eq!(&verified, checked, "{file}");
+        }
     }
 }
 

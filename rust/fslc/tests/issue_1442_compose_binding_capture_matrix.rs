@@ -597,7 +597,8 @@ fn all_compose_and_sync_binding_sources_preserve_alpha_equivalence() {
     );
     assert_eq!(
         owner_refused.len(),
-        // #1480: the 2 x 4 leadsTo wrapper bound shapes, now refused by their owner at `check`.
+        // #1480: +8. The leads-range-lo and leads-range-hi roots, each over the four
+        // namespace and compose columns, are now refused by their owner at `check`.
         24,
         "standalone refusal inventory changed"
     );
@@ -993,7 +994,8 @@ fn aggregate_pattern_and_owner_source_checks() {
     );
     assert_eq!(
         (owner_refused_old.len(), owner_refused_new.len()),
-        // #1480: the 2 x 4 leadsTo wrapper bound shapes, now refused by their owner at `check`.
+        // #1480: the same two leadsTo roots. +8 old shapes as above, and +32 new cells:
+        // 2 roots x Count and Sum x 8 empty, present and negative combinations.
         (24, 96),
         "standalone refusal inventory changed"
     );
