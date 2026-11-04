@@ -288,16 +288,21 @@ fn a_selected_property_proves_the_bound_it_reads() {
     let escaped = form(
         "state { n: T, y: T } init { n = 3 y = 0 } action inc() { n = n + 1 } invariant P { forall i in 0..n { i <= 3 } } invariant Q { y == 0 }",
     );
-    let refused = verify(&escaped, "bmc", &["--property", "P"]);
-    assert_eq!(refused.0, 2, "{}", refused.1);
-    assert!(
-        refused.1["message"]
-            .as_str()
-            .unwrap()
-            .contains("[eligibility]"),
-        "{}",
-        refused.1
+    let guard_read = form(
+        "state { n: T, y: T } init { n = 3 y = 0 } action inc() { requires count(i in 0..n) >= 0 n = n + 1 } invariant Q { y == 0 }",
     );
+    for (source, property) in [(&escaped, "P"), (&guard_read, "Q")] {
+        let refused = verify(source, "bmc", &["--property", property]);
+        assert_eq!(refused.0, 2, "{source}: {}", refused.1);
+        assert!(
+            refused.1["message"]
+                .as_str()
+                .unwrap()
+                .contains("[eligibility]"),
+            "{source}: {}",
+            refused.1
+        );
+    }
 }
 
 #[test]
