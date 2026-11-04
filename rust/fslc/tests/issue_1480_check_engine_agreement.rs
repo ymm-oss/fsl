@@ -115,6 +115,7 @@ fn refused(run: &(i32, Value)) -> bool {
         message.contains("[planner]")
             || message.contains("[eligibility]")
             || message.contains("is not an integer const")
+            || message.contains("integer overflow")
     })
 }
 
@@ -672,6 +673,31 @@ fn a_component_cannot_declare_bool() {
     assert_eq!(check(&actor).0, 0, "{}", check(&actor).1);
 }
 
+/// A known limit of the wrapper walk: past its budget it stops, so an overflow in a later
+/// row is the engines' to report. That fails closed, and the gate sees it as a refusal.
+#[test]
+fn an_overflow_past_the_wrapper_walk_is_left_to_the_engines() {
+    let form = |range: &str| {
+        format!(
+            "spec M {{ const K = 140737488355328 state {{ d: Bool }} init {{ d = false }} \
+             fair action f() {{ requires not d d = true }} \
+             leadsTo L {{ forall a in {range} {{ forall b in (a*K)..(a*K) {{ not d ~> d }} }} }} }}"
+        )
+    };
+    let beyond = form("0..70000");
+    assert_eq!(check(&beyond).0, 0, "{}", check(&beyond).1);
+    for engine in ["bmc", "induction"] {
+        let run = verify(&beyond, engine, &[]);
+        assert_eq!(run.0, 2, "{engine}: {}", run.1);
+        assert_eq!(run.1["message"], "integer overflow in multiplication");
+        assert!(refused(&run), "the gate must report this: {}", run.1);
+    }
+    // Inside the budget, `check` reaches the overflowing row itself.
+    let within = check(&form("65534..65536"));
+    assert_eq!(within.0, 2, "{}", within.1);
+    assert_eq!(within.1["message"], "integer overflow in multiplication");
+}
+
 /// A Kernel projection failing on an aggregate bound still names where it is.
 #[test]
 fn projections_locate_the_aggregate_bound_they_cannot_fold() {
@@ -766,6 +792,41 @@ mod limited {
             serde_json::from_slice(&output.stdout).unwrap_or(Value::Null),
             output.stderr,
         )
+    }
+
+    /// A wrapper whose inner binder is always empty completes no binding, and every row
+    /// it visits still spends the walk's budget. The engines enumerate it, as on the base.
+    #[test]
+    fn an_always_empty_inner_binder_cannot_hang_check() {
+        let source = "spec M { state { d: Bool } init { d = false } fair action f() { requires not d d = true } leadsTo L { forall a in 0..1000000000000 { forall b in 1..(a*0) { not d ~> d } } } }";
+        let dir = std::env::temp_dir().join(format!(
+            "issue-1480-limited-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("m.fsl"), source).unwrap();
+        let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(["check", "m.fsl"])
+            .current_dir(&dir)
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let start = std::time::Instant::now();
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break Some(status);
+            }
+            if start.elapsed() > std::time::Duration::from_secs(60) {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        std::fs::remove_dir_all(&dir).unwrap();
+        let status = status.expect("check did not finish within 60s");
+        assert_eq!(status.code(), Some(0));
     }
 
     /// Admission does not enumerate a wrapper's product, however wide.

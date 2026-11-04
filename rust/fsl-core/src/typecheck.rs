@@ -1623,8 +1623,8 @@ enum CollectionCandidates {
     Opaque,
 }
 
-/// How many complete leadsTo wrapper bindings admission walks. It stops walking past
-/// this, and is no limit on the language or on what the engines enumerate.
+/// How many leadsTo wrapper bindings admission visits, complete or not. It stops walking
+/// past this, and is no limit on the language or on what the engines enumerate.
 const WRAPPER_ADMISSION_BINDINGS: usize = 1 << 16;
 
 fn join_envelope(left: InclusiveI64, right: InclusiveI64) -> Option<InclusiveI64> {
@@ -2024,6 +2024,7 @@ struct WrapperWalk<'a> {
     leadsto: &'a crate::LeadsToDef,
     model: &'a KernelModel,
     remaining: usize,
+    completed: bool,
     reached: Vec<bool>,
     facts: BTreeMap<String, InclusiveI64>,
     binding: BTreeMap<String, crate::FslValue>,
@@ -2045,12 +2046,17 @@ impl WrapperWalk<'_> {
         }
     }
 
-    /// `false` once the walk stops at its budget.
+    /// `false` once the walk stops at its budget. Every visit spends it, whether or not
+    /// it completes a binding: an always-empty inner binder completes none.
     fn visit(&mut self, index: usize) -> Result<bool, TypecheckError> {
+        self.remaining = self.remaining.saturating_sub(1);
+        if self.remaining == 0 {
+            return Ok(false);
+        }
         let leadsto = self.leadsto;
         let Some(binder) = leadsto.binders.get(index) else {
-            self.remaining = self.remaining.saturating_sub(1);
-            return Ok(self.remaining > 0);
+            self.completed = true;
+            return Ok(true);
         };
         self.reached[index] = true;
         let name = binder_name(binder).to_owned();
@@ -2201,6 +2207,7 @@ fn admit_leadsto_binders(
         leadsto,
         model,
         remaining: WRAPPER_ADMISSION_BINDINGS,
+        completed: false,
         reached: vec![false; leadsto.binders.len()],
         facts: BTreeMap::new(),
         binding: BTreeMap::new(),
@@ -2209,7 +2216,7 @@ fn admit_leadsto_binders(
     };
     let complete = walk.visit(0)?;
     if complete {
-        rule.dead = walk.remaining == WRAPPER_ADMISSION_BINDINGS;
+        rule.dead = !walk.completed;
     } else {
         for binder in &leadsto.binders {
             if let Binder::Typed {
