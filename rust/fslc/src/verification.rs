@@ -1633,8 +1633,9 @@ fn run_induction_with_lemmas(
     let mut proved_candidates = Vec::new();
     let (mut auxiliary, mut auxiliary_sources) = (Vec::new(), Vec::new());
     let mut exclusions = Vec::new();
-    // Finish parsing and invariant-equivalent type validation for every
-    // candidate before any candidate proof or concrete CTI evaluation.
+    // Finish parsing and type validation for every candidate before any candidate
+    // proof or concrete CTI evaluation. This is an invariant's expected type without
+    // its #1679 carrier rule; see `validate_boolean_expression`.
     let candidates = prepare_lemma_candidates(&options.lemmas, &model, occupied_names);
     for candidate in candidates {
         let (name, expression, source) = match candidate {

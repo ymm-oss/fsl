@@ -760,24 +760,48 @@ fn ensure_assignable_inner(
     }
 }
 
-/// Whether symbolic evaluation can read every Map in `actual` as `expected`. `Int`
-/// stays compatible with a range elsewhere, where a literal can infer it and
-/// coercion rebuilds the value. No literal or inference produces a Map, whose
-/// coercion can only retag it, so its carriers must agree.
-fn map_carriers_agree(
+/// What reading a value of one container type as another takes. `check` refuses a
+/// `MapMismatch`, and symbolic evaluation rebuilds a value on `RebuildInt`, so both
+/// sides answer from this one rule (#1679).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CarrierCoercion {
+    /// `Int` stands for a scalar below any Option, Set or Seq: a literal can infer it,
+    /// and coercion rebuilds the value element by element.
+    RebuildInt,
+    /// Two Maps of different carriers. No literal or inference produces a Map, and its
+    /// coercion can only retag it, so its carriers must agree.
+    MapMismatch,
+    /// Neither of those; the compatibility rule and retagging decide.
+    Other,
+}
+
+pub(crate) fn carrier_coercion(
     actual: &TypeRef,
     expected: &TypeRef,
     model: &KernelModel,
-) -> Result<bool, TypecheckError> {
-    match (resolve(model, actual)?, resolve(model, expected)?) {
-        (TypeRef::Map(_, _), TypeRef::Map(_, _)) => same_carrier(actual, expected, model),
+) -> Result<CarrierCoercion, TypecheckError> {
+    Ok(match (resolve(model, actual)?, resolve(model, expected)?) {
+        (TypeRef::Int, TypeRef::Int | TypeRef::Range(_, _))
+        | (TypeRef::Range(_, _), TypeRef::Int) => CarrierCoercion::RebuildInt,
+        (TypeRef::Map(_, _), TypeRef::Map(_, _)) if !same_carrier(actual, expected, model)? => {
+            CarrierCoercion::MapMismatch
+        }
         (TypeRef::Option(actual), TypeRef::Option(expected))
         | (TypeRef::Set(actual), TypeRef::Set(expected))
         | (TypeRef::Seq(actual, _), TypeRef::Seq(expected, _)) => {
-            map_carriers_agree(&actual, &expected, model)
+            carrier_coercion(&actual, &expected, model)?
         }
-        _ => Ok(true),
-    }
+        _ => CarrierCoercion::Other,
+    })
+}
+
+/// The containers whose every conditional arm symbolic evaluation coerces, where
+/// `Int` compatibility does not relate two arms that are each compatible with `Int`.
+fn is_coerced_container(ty: &TypeRef, model: &KernelModel) -> Result<bool, TypecheckError> {
+    Ok(matches!(
+        resolve(model, ty)?,
+        TypeRef::Set(_) | TypeRef::Seq(_, _) | TypeRef::Option(_)
+    ))
 }
 
 /// Extend readable payload bindings from a true expression result.
@@ -1336,8 +1360,11 @@ pub(crate) struct ValidationPhase {
     /// Present only in the checked-admission walk; ordinary validation ignores it.
     range_rule: Option<RangeRule>,
     // The model's own expressions reach symbolic evaluation, so their whole
-    // container values must be coercible (#1679). A refinement map or a scenario
-    // expectation is only evaluated concretely, and keeps the assignable rule.
+    // container values must be coercible (#1679). A refinement map, a scenario
+    // expectation and a lemma candidate keep the assignable rule. An expectation
+    // is evaluated concretely, and so is a map, except that `preserve progress`
+    // evaluates a map symbolically: a Map comparison there still reports
+    // `cannot coerce`, as a rejected candidate does (see the #1679 amendment).
     symbolic: bool,
 }
 
@@ -2655,10 +2682,7 @@ fn validate_expression_inner(
                 // coerces every arm to the expectation (#1679).
                 if phase.symbolic
                     && let Some(expected) = expected
-                    && matches!(
-                        resolve(model, expected)?,
-                        TypeRef::Set(_) | TypeRef::Seq(_, _) | TypeRef::Option(_)
-                    )
+                    && is_coerced_container(expected, model)?
                 {
                     ensure_assignable(expr, expected, env, model, span)?;
                 }
@@ -2688,8 +2712,18 @@ fn validate_expression_inner(
             )?;
         }
         Expr::UnaryNamed { name, expr, .. } => {
-            let expected = (name == "abs").then_some(TypeRef::Int);
-            validate(expr, env, span, expected.as_ref())?;
+            let inner_expected = (name == "abs").then_some(TypeRef::Int);
+            validate(expr, env, span, inner_expected.as_ref())?;
+            // `old` keeps its operand's type, and symbolic evaluation coerces the
+            // operand's arms to what surrounds it (#1679). This is the arm rule
+            // above, without typing the operand's literals against that expectation.
+            if name == "old"
+                && phase.symbolic
+                && let Some(expected) = expected
+                && is_coerced_container(expected, model)?
+            {
+                ensure_assignable(expr, expected, env, model, span)?;
+            }
             if matches!(
                 name.as_str(),
                 "rel_acyclic" | "rel_functional" | "rel_injective" | "rel_domain" | "rel_range"
@@ -2860,7 +2894,8 @@ fn validate_expression_inner(
     // After its parts, so that a conditional reports the arm at fault.
     if phase.symbolic
         && let Some(expected) = expected
-        && !map_carriers_agree(&ty, expected, model).map_err(|error| error.with_span(span))?
+        && carrier_coercion(&ty, expected, model).map_err(|error| error.with_span(span))?
+            == CarrierCoercion::MapMismatch
     {
         return Err(not_assignable(&ty, expected).with_span(span));
     }
@@ -3168,8 +3203,11 @@ fn validate_expression_type_in_phase(
 }
 
 /// Recursively type-check a standalone predicate against a built model, using
-/// the same expected Boolean type as an invariant. Returns the checker message
-/// without a source location: callers may be validating an argv expression.
+/// the same expected Boolean type as an invariant but not its #1679 carrier rule:
+/// a mismatch that evaluation reaches is rejected at the proof stage with
+/// `cannot coerce`, and one it never reaches can still be proved and used. Returns
+/// the checker message without a source location: callers may be validating an
+/// argv expression.
 ///
 /// # Errors
 /// Returns the recursive checker's diagnostic if the expression is ill-typed

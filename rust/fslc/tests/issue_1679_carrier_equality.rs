@@ -3,7 +3,8 @@
 //! #1679: a whole-container comparison, conditional or assignment whose carriers
 //! the symbolic engines cannot coerce used to pass `check` and fail later with
 //! `cannot coerce symbolic value`, while `fsl-bfs` answered. `check` now refuses
-//! them. The controls below keep the forms that return a verdict on every engine.
+//! them, and a let-bound collection holding `Int` below an element now coerces. The
+//! controls below keep the other forms, and pin the two routes that still report it.
 
 #[path = "support/issue_1517_scratch.rs"]
 mod scratch;
@@ -426,9 +427,9 @@ fn forms_with_a_verdict_on_every_engine_keep_checking_and_agree() {
     }
 }
 
-/// A refinement map and a scenario expectation are evaluated concretely. These
-/// forms return a verdict on every engine and must keep it: they still check
-/// `Int` against a range through the assignable rule.
+/// A refinement map and a scenario expectation keep the assignable rule, so these
+/// forms still check `Int` against a range and return a verdict on every engine.
+/// The negations decide, so these positions are evaluated rather than skipped.
 #[test]
 fn concretely_evaluated_positions_keep_their_verdicts() {
     let whole_abs = "spec Ab { type K = 0..1 state { m: Map<K, Int> } init { forall k: K { m[k] = 0 } } action go() { m[0] = 0 } }\n";
@@ -482,4 +483,465 @@ fn concretely_evaluated_positions_keep_their_verdicts() {
             assert_eq!(exit, 0, "{id} {engine}: {packet}");
         }
     }
+    let map_negation = implementing(maps.0, maps.1, "same = m != y");
+    for engine in ["bmc", "explicit", "induction"] {
+        let arguments = ["verify", "--engine", engine, "--depth", "2"];
+        let others = [("abs.fsl", same_abs)];
+        let (packet, exit) = fslc_with("map_negation", &map_negation, &others, &arguments);
+        assert_eq!(
+            (exit, &packet["result"]),
+            (1, &json!("refinement_failed")),
+            "{engine}: {packet}"
+        );
+    }
+    let expectation_negation = forms[3].1.replace("expect l == r", "expect l != r");
+    assert_ne!(expectation_negation, forms[3].1);
+    let (packet, exit) = fslc("expectation_negation", &expectation_negation, &["check"]);
+    assert_eq!(
+        (exit, &packet["kind"]),
+        (2, &json!("acceptance")),
+        "{packet}"
+    );
+}
+
+const REFINE_IMPL: &str = "spec Im { type K = 0..1 type A = 0..1\n  state { m: Map<K, A>, y: Map<K, Int>, c: Bool }\n  init { forall k: K { m[k] = 0 y[k] = 0 } c = false }\n  fair action go() { c = not c }\n}\n";
+const REFINE_ABS: &str = "spec Ab { state { same: Bool } init { same = true }\n  fair action go() { same = same }\n  leadsTo L { same ~> same }\n}\n";
+
+fn refine(id: &str, map: &str, progress: bool) -> (Value, i32) {
+    let progress = if progress {
+        "  preserve progress {\n    respond L by go\n  }\n"
+    } else {
+        ""
+    };
+    let mapping = format!(
+        "refinement R {{\n  impl Im\n  abs Ab\n  map same = {map}\n  action go() -> go()\n{progress}}}\n"
+    );
+    let scratch = scratch::Scratch::new("FSLC_1679_INPUTS", id, &format!("1679-{id}-refine"));
+    for (name, source) in [
+        ("im.fsl", REFINE_IMPL),
+        ("ab.fsl", REFINE_ABS),
+        ("map.fsl", mapping.as_str()),
+    ] {
+        fs::write(scratch.path().join(name), source).expect("fixture");
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(["refine", "im.fsl", "ab.fsl", "map.fsl", "--depth", "2"])
+        .current_dir(scratch.path())
+        .env("FSLC_CACHE", "off")
+        .env_remove("FSLC_UNSTABLE")
+        .output()
+        .expect("CLI");
+    (
+        serde_json::from_slice(&output.stdout).expect("JSON packet"),
+        output.status.code().expect("exit"),
+    )
+}
+
+/// The refinement step is concrete and decides either way. `preserve progress`
+/// evaluates the same map symbolically, which is the recorded gap in this rule.
+#[test]
+fn refinement_map_comparison_decides_and_preserved_progress_is_the_recorded_gap() {
+    let (packet, exit) = refine("refine_same", "m == y", false);
+    assert_eq!(
+        (exit, &packet["result"]),
+        (0, &json!("refines")),
+        "{packet}"
+    );
+    let (packet, exit) = refine("refine_differs", "m != y", false);
+    assert_eq!(
+        (exit, &packet["result"]),
+        (1, &json!("refinement_failed")),
+        "{packet}"
+    );
+    let (packet, exit) = refine("refine_progress", "m == y", true);
+    assert_eq!(
+        (exit, &packet["kind"]),
+        (2, &json!("semantics")),
+        "{packet}"
+    );
+    assert!(
+        packet["message"]
+            .as_str()
+            .is_some_and(|message| message.starts_with("cannot coerce symbolic value")),
+        "{packet}"
+    );
+}
+
+const WIDE_STATE: &str = "m0: Map<K, Int>, m1: Map<K, A>, a: Set<A>, q: Seq<Int, 2>, sa: Seq<A, 2>, sb: Seq<B, 2>, o: Option<Int>, p: Option<A>, r: Option<B>, n: Int, va: A, vb: B, c: Bool, done: Bool";
+
+/// Line 1 declares types, 2 state, 3 init, 4 opens `go`, and `body` starts at 5.
+fn wide_spec(init: &[(&str, &str)], body: &str, properties: &str) -> String {
+    let defaults = [
+        ("a", "Set {}"),
+        ("q", "Seq {}"),
+        ("sa", "Seq {}"),
+        ("sb", "Seq {}"),
+        ("o", "none"),
+        ("p", "none"),
+        ("r", "none"),
+        ("n", "0"),
+        ("va", "0"),
+        ("vb", "0"),
+        ("c", "false"),
+        ("done", "false"),
+    ];
+    let init = defaults
+        .iter()
+        .map(|(name, value)| {
+            let value = init
+                .iter()
+                .find(|(chosen, _)| chosen == name)
+                .map_or(*value, |(_, chosen)| *chosen);
+            format!("{name} = {value}")
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "spec S {{ {TYPES} type E = 1..0\n state {{ {WIDE_STATE} }}\n init {{ forall k: K {{ m0[k] = 0 m1[k] = 0 }} {init} }}\n action go() {{\n {body}\n }}\n {properties}\n}}\n"
+    )
+}
+
+/// `(violation, bmc and explicit and induction verdicts, BFS)` on one spec.
+fn violations(id: &str, source: &str) -> (bool, bool, bool, bool) {
+    let verdict = |engine: &str| {
+        let (packet, exit) = fslc(id, source, &["verify", "--engine", engine, "--depth", "2"]);
+        assert!(exit < 2, "{id} {engine}: {packet}\n{source}");
+        packet["result"] == "violated"
+    };
+    let model = fsl_core::build_model(
+        fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new(".")).expect("lowers"),
+    )
+    .expect("model");
+    (
+        verdict("bmc"),
+        verdict("explicit"),
+        verdict("induction"),
+        fsl_runtime::bfs(model, 2).expect("bfs").violation.is_some(),
+    )
+}
+
+/// `(id, let, guard, state to match, value that matches)`: a let-bound collection
+/// holding `Int` below an element, both directions, in Set and Seq and through
+/// Option, Set and Seq elements. It used to pass `check` and report `cannot coerce`.
+const LET_BOUND: [(&str, &str, &str, &str, &str); 8] = [
+    (
+        "set_of_some",
+        "Set { some(0) }",
+        "Set { p } == t",
+        "p",
+        "some(0)",
+    ),
+    (
+        "seq_of_some",
+        "Seq { some(0) }",
+        "Seq { p } == t",
+        "p",
+        "some(0)",
+    ),
+    (
+        "set_of_seq_capacity",
+        "Set { Seq { 0 } }",
+        "Set { q } == t",
+        "q",
+        "Seq { 0 }",
+    ),
+    (
+        "seq_of_seq",
+        "Seq { Seq { 0 } }",
+        "Seq { sa } == t",
+        "sa",
+        "Seq { 0 }",
+    ),
+    (
+        "set_of_set",
+        "Set { Set { 0 } }",
+        "Set { a } == t",
+        "a",
+        "Set { 0 }",
+    ),
+    (
+        "seq_of_set",
+        "Seq { Set { 0 } }",
+        "Seq { a } == t",
+        "a",
+        "Set { 0 }",
+    ),
+    (
+        "set_range_to_int",
+        "Set { p }",
+        "Set { o } == t",
+        "o",
+        "some(0)",
+    ),
+    (
+        "seq_range_to_int",
+        "Seq { p }",
+        "Seq { o } == t",
+        "o",
+        "some(0)",
+    ),
+];
+
+#[test]
+fn let_bound_nested_int_collection_decides_on_every_engine() {
+    for (id, bound, guard, state, matching) in LET_BOUND {
+        let body = format!("let t = {bound}\n requires {guard}\n done = true");
+        let property = "action idle() { c = c }\n invariant P { not done }";
+        let init = if bound.contains('p') {
+            vec![("p", "some(0)"), (state, matching)]
+        } else {
+            vec![(state, matching)]
+        };
+        let source = wide_spec(&init, &body, property);
+        assert_eq!(
+            violations(&format!("{id}_matches"), &source),
+            (true, true, true, true),
+            "{id}\n{source}"
+        );
+        let differing = if bound.contains('p') {
+            vec![("p", "some(1)"), (state, matching)]
+        } else {
+            vec![]
+        };
+        let source = wide_spec(&differing, &body, property);
+        assert_eq!(
+            {
+                let (bmc, explicit, _, bfs) = violations(&format!("{id}_differs"), &source);
+                (bmc, explicit, bfs)
+            },
+            (false, false, false),
+            "{id}\n{source}"
+        );
+    }
+    // A literal outside the carrier never equals a value inside it.
+    let source = wide_spec(
+        &[("p", "some(0)")],
+        "let t = Set { some(5) }\n requires Set { p } == t\n done = true",
+        "action idle() { c = c }\n invariant P { not done }",
+    );
+    assert_eq!(
+        violations("out_of_carrier", &source),
+        (false, false, false, false)
+    );
+}
+
+#[test]
+fn old_operand_arm_answers_to_what_surrounds_it() {
+    let arm = not_assignable("Seq(Named(\"B\"), 2)", "Seq(Named(\"A\"), 2)");
+    let trans = wide_spec(
+        &[],
+        "c = not c",
+        "trans T { sa == old(if c then q else sb) or true }",
+    );
+    assert_rejected("old_arm_trans", &trans, &arm, 7, 39);
+    let ensures = wide_spec(
+        &[],
+        "ensures sa == old(if c then q else sb) or true\n c = not c",
+        "",
+    );
+    assert_rejected("old_arm_ensures", &ensures, &arm, 5, 37);
+    // Compatible, and the expectation does not type the operand's literals or scalars.
+    for (id, property) in [
+        (
+            "old_int_arm",
+            "trans T { sa == old(if c then q else sa) or true }",
+        ),
+        ("old_literal", "trans T { sa == old(Seq { 5 }) or true }"),
+        (
+            "old_option_arm",
+            "trans T { p == old(if c then o else r) or true }",
+        ),
+        (
+            "old_scalar_arm",
+            "trans T { va == old(if c then n else vb) or true }",
+        ),
+        (
+            "old_scalar_literal",
+            "trans T { va == old(if c then 5 else 0) or true }",
+        ),
+    ] {
+        let source = wide_spec(&[], "c = not c", property);
+        assert_eq!(
+            violations(id, &source),
+            (false, false, false, false),
+            "{id}\n{source}"
+        );
+    }
+}
+
+/// Decided by the user: a mismatch in a position that is never evaluated stays
+/// refused, although each of these returned a verdict on every engine on base.
+#[test]
+fn never_evaluated_mismatch_stays_refused() {
+    let map = not_assignable("Map(Named(\"K\"), Named(\"A\"))", "Map(Named(\"K\"), Int)");
+    let good = "c = not c";
+    for (id, body, property, flags, line, column) in [
+        (
+            "forall_empty",
+            good,
+            "invariant P { forall i: E { m0 == m1 } }",
+            &[][..],
+            7,
+            2,
+        ),
+        (
+            "exists_empty",
+            good,
+            "invariant P { not (exists i: E { m0 == m1 }) }",
+            &[][..],
+            7,
+            2,
+        ),
+        (
+            "forall_guard_empty",
+            "requires forall i: E { m0 == m1 }\n c = not c",
+            "",
+            &[][..],
+            4,
+            2,
+        ),
+        (
+            "param_empty",
+            good,
+            "action h(i: E) { requires m0 == m1\n c = not c }",
+            &[][..],
+            7,
+            2,
+        ),
+        (
+            "param_empty_assign",
+            good,
+            "action h(i: E) { m0 = m1 }",
+            &[][..],
+            7,
+            19,
+        ),
+        (
+            "exclude_invariant",
+            good,
+            "invariant Bad { m0 == m1 }\n invariant Q { true }",
+            &["--exclude-property", "Bad"][..],
+            7,
+            2,
+        ),
+        (
+            "exclude_reachable",
+            good,
+            "reachable Bad { m0 == m1 }\n invariant Q { true }",
+            &["--exclude-property", "Bad"][..],
+            7,
+            2,
+        ),
+        (
+            "exclude_trans",
+            good,
+            "trans Bad { old(m0) == m1 }\n invariant Q { true }",
+            &["--exclude-property", "Bad"][..],
+            7,
+            2,
+        ),
+        (
+            "select_other",
+            good,
+            "invariant Bad { m0 == m1 }\n invariant Q { true }",
+            &["--property", "Q"][..],
+            7,
+            2,
+        ),
+    ] {
+        let source = wide_spec(&[], body, property);
+        assert_rejected(id, &source, &map, line, column);
+        let mut arguments = vec!["verify", "--engine", "bmc", "--depth", "2"];
+        arguments.extend_from_slice(flags);
+        let (packet, exit) = fslc(id, &source, &arguments);
+        assert_eq!(
+            (exit, &packet["kind"]),
+            (2, &json!("semantics")),
+            "{id}: {packet}"
+        );
+    }
+    let arm = wide_spec(
+        &[],
+        good,
+        "invariant P { forall i: E { sa == (if c then q else sb) } }",
+    );
+    let (packet, exit) = check("forall_empty_arm", &arm);
+    assert_eq!(exit, 2, "{packet}");
+}
+
+const LEMMA_SPEC: &str = "spec D { type K = 0..1 type A = 0..1 type E = 1..0\n  state { x: 0..1, y: 0..1, m0: Map<K, Int>, m1: Map<K, A>, q: Seq<Int, 2>, sa: Seq<A, 2>, sb: Seq<A, 3> }\n  init { x = 0 y = 0 forall k: K { m0[k] = 0 m1[k] = 0 } q = Seq {} sa = Seq {} sb = Seq {} }\n  action go() { x = y y = x }\n  invariant P { x == 0 }\n}\n";
+const NEEDED: &str = "x == 0 and y == 0";
+
+/// A candidate keeps the assignable rule. The main property needs `NEEDED`, so these
+/// show a mismatching candidate is rejected and unused, and a mismatch it never
+/// evaluates leaves a candidate usable, which an invariant's check would have changed.
+#[test]
+fn lemma_candidate_keeps_the_assignable_rule_and_the_main_result() {
+    let cases = [
+        (
+            "alone",
+            "m0 == m1".to_owned(),
+            "unknown_cti",
+            "rejected",
+            false,
+        ),
+        (
+            "mismatch",
+            format!("{NEEDED} and m0 == m1"),
+            "unknown_cti",
+            "rejected",
+            false,
+        ),
+        ("needed", NEEDED.to_owned(), "proved", "proved", true),
+        (
+            "int_seq",
+            format!("{NEEDED} and (q == sa or true)"),
+            "proved",
+            "proved",
+            true,
+        ),
+        (
+            "never_evaluated",
+            format!("{NEEDED} and forall i: E {{ m0 == m1 }}"),
+            "proved",
+            "proved",
+            true,
+        ),
+    ];
+    for (id, lemma, main, status, used) in cases {
+        let arguments = ["verify", "--engine", "induction", "--lemma", lemma.as_str()];
+        let (packet, _) = fslc(&format!("lemma_{id}"), LEMMA_SPEC, &arguments);
+        let entry = packet["lemmas"][0].clone();
+        assert_eq!(
+            (&packet["result"], &entry["status"], &entry["used"]),
+            (&json!(main), &json!(status), &json!(used)),
+            "{id}: {packet}"
+        );
+        if status == "rejected" {
+            assert!(
+                entry["proof"]["message"]
+                    .as_str()
+                    .is_some_and(|message| message.starts_with("cannot coerce symbolic value")),
+                "{id}: {packet}"
+            );
+        }
+    }
+}
+
+/// A value no rule converts stays an error: the rule does not extend to a sibling
+/// that only an `Int` first arm related to the expectation.
+#[test]
+fn lemma_candidate_with_unrelated_carriers_is_not_coerced() {
+    let spec = "spec L { type A = 0..1 type B = 0..2\n state { q: Seq<Int, 2>, sa: Seq<A, 2>, sb: Seq<B, 2>, c: Bool }\n init { q = Seq {} sa = Seq {} sb = Seq {} c = false }\n action go() { c = not c }\n invariant P { c or not c }\n}\n";
+    let lemma = "sa == (if c then q else sb)";
+    let (packet, _) = fslc(
+        "lemma_arm",
+        spec,
+        &["verify", "--engine", "induction", "--lemma", lemma],
+    );
+    assert_eq!(
+        packet["lemmas"][0]["proof"]["message"],
+        "cannot coerce symbolic value Some(Seq(Named(\"B\"), 2)) to Seq(Named(\"A\"), 2)",
+        "{packet}"
+    );
 }
