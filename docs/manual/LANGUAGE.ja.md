@@ -2906,45 +2906,20 @@ compose OrderSystem {
   破壊的な削除 (#1334): 以前は `check` を通った `alias__x` のような物理名による部品の状態への追加文の代入も、位置付きエラーで拒否します。
   同期参照の引数が読めるのはヘッダのパラメータ・const・状態だけで、追加項目の `let` 束縛は読めません (破壊的な削除、#1442)。
   部品の自由な値の読みと更新先の根はマージ前の部品自身の宣言に対して解決するため、未宣言の参照を合成によって有効にはできません (破壊的な削除、#1442)；公開名は引き続き使用でき、所有する enum の保護が必要な読みも表示には元の member 名を使います。
-- **#1517 ルート実引数検査（ソース審査済み・限定呼出経路測定済み）:** 未使用の仮引数を含む
-  すべての同期実引数を置換前に型検査します。環境はルートのヘッダ引数・状態・定数・
-  enum であり、本体の let/requires 束縛は含みません。数値 carrier の互換性は維持し、
-  数値範囲の不一致は引き続き検証時に扱います。
-  ルートの診断は括弧を含む実引数全体の半開区間を使い、その実引数内の正当な内側の
-  span のみ保持します。CLI/Worker loc は先頭、LSP は UTF-16 の始点・終点です。
-  部品 wrapper ではなく裸のルート文言を使い、元の action/Kernel メタデータは変えません。
-  優先順位は即時 lowering、モデル組立、記述順の待機実引数検査、init/部品検査です。
-  条件式の各 arm は推論した carrier ではなく与えられた期待型で検査します。`m: Map<A, Bool>` の `m[if c then 0 else true]` は `Range(0, 1)` ではなく `Named("A")` を示します。この arm の変更で、測定した入力の受理判定は変わっていません。
-  測定済み check 削除の和集合は11完全コンテキスト・9ルート/部品組・22モード組です。
-  base 5564b25ccb37e3477311fde1dae5eb6298eb6b2d、head 7653cc784354bc562bd85bd888cf78d0091272f2。
-  stable/FSL5-opt-in 各モード・各側2回、全件 check-ok/exit0 → semantics-error/exit2。
-  以下の全IDを保持します（分類・位置・正確なソース同一性は上記設計に記載）。
+- **ルートの同期実引数の検査 (破壊的な削除、#1517):** `check` は、部品の action が読まない仮引数への実引数も含め、すべての同期実引数を置換前に仮引数の型で検査します。
+  実引数が読めるのはルートのヘッダ引数・状態・定数・enum だけで、追加項目の `let` や `requires` の束縛は読めません。
+  数値 carrier は型名にかかわらず互換のままで、数値範囲の不一致は引き続き検証時に扱います。
+  次の形は以前 `check` を通っていましたが、現在は意味エラー (終了コード 2) です。
+  - **未使用の仮引数への不正な実引数:** `a: K` への `true` や関係の添字 `part.h[0]`。未解決の名前 (`nosuch`)。追加項目の `let` だけが束縛する名前を含みます。修飾した enum member (`part.Red`。`Red` と書きます)。`part.Color` の仮引数への他の部品の enum の値 (`other.tone`、型 `other.Tone`)。条件が Bool でない条件式 (`if 1 then 0 else 0`)。不正な型の引数で呼ぶルートの `def` (`def rp(v: Int)` への `rp(true)`)。括弧、後ろの実引数、後ろの参照、後ろの action でも同じです。
+  - **置換後の本体だけ型が合っていた使用中の仮引数:** `flag: Bool` で実引数 `true` を渡す `put(a in 0..1) { flag = a }` や `put(a: K) { flag = a }`。`m: Map<C, Bool>` で enum の実引数 `R` を渡す `put(a: K) { m[a] = true }`。
+  - **重複した仮引数:** `(a: K, a: K)` に実引数 `true, 0` を渡す形。置換で最初の実引数が消えていました。
+  - **仮引数の宣言が不正な internal action:** 部品が `a: Int`、`a in 1..0`、`a: Nope`、struct 型の `a: T` を宣言し、`internal part.put` と `part.put(0)` を使う形。これらの宣言は部品単体の `check` でも拒否されます。
 
-  | ID | Exact complete-context key | Pair | Changed admission / candidate loc |
-  |---|---|---|---|
-  | R01 | `1cae9cf75cb49d332ab850296a1902db6e08971cbae68ab7229309b979632f05` | P01 | unused true + relation index, argument order; 5:16 |
-  | R02 | `456840abf00faf2844ad3223e80abab2efb03e62ec5c2fc4c6c5cef9daa45af4` | P02 | body-only x after let; 5:16 |
-  | R03 | `5aa3baefa078f9ddc0a1d5ed5157e9bd6295df700bf86536d7042d774e69e0d2` | P03 | true then later action index; 5:16 |
-  | R04 | `8d7b0467683a00853cc958fcf91c33e6e23d32c7cd5506d1401029e98338b5d9` | P04 | relation index; no good sibling; 5:16 |
-  | R05 | `a1760ef370b7c9164f0eda14b36c84dfa208b847c75fb6ecb8bfa8e5faa8df22` | P05 | unused true; no good sibling; 5:16 |
-  | R06 | `ab059cd5d0c142246d68ccb9ce2ea193e43ce9b4365e6a865e0a7b46c63942ac` | P06 | true then second reference index; 5:16 |
-  | R07 | `ab291946a038aa0e77692160e7516fa40a75b8781797c928405dddfd8949bbbe` | P04 | relation index + offered good sibling; 5:16 |
-  | R08 | `acc62ea03d44de4dd0ddbcd65d4f73e4737e914153f50bed7832a4bb4905da3b` | P07 | body-only x after let/requires; 5:16 |
-  | R09 | `cd076b93cba275c70735ba2a73731c1935fabcdb0fe16f3246b5ba615e720ded` | P08 | parenthesized unused true; 5:16 |
-  | R10 | `dd449ab57104f7c5a53e33d3f756937344e76161615f960cb821e2e62372adff` | P05 | unused true + offered good sibling; 5:16 |
-  | R11 | `91412ae303f1f1877fcdcea2e7e35912726e9832662e0c49d971d8ca09a9bc02` | P09 | second ref `(0), (true),`; 6:37 |
-
-  新たな9件の3ファイル check c.fsl は保存対照だけで、direct/API/verify の証拠ではありません。
-  これは測定範囲の和集合であり472件すべての実行や issue 完了の主張ではありません。
-  公開 Rust SyncRef に arg_spans が必須です。into_validated_syntax は消去前に検査し、
-  syntax/kernel_ast/into_syntax は未検査・情報を失う変換のままです。移行済みCLI3箇所は
-  各呼出しで完全コア検査が1回増えます。CLI全体の測定を追加検査単体の費用とは扱いません。
-  呼出経路は以前の候補で（この head では再実行せず）7状態・4ビルド・16CLI観測を固定した妥当入力で各2回測定済みです。
-  R/I/M は実際に生存し、正確なソース復元後は新規ビルドしたH0の同一バイトを再利用して
-  出力保存を確認しました（復元時の再ビルドなし）。stdout/JSON/終了コードとstderrの
-  非時間部分は全体一致し、実測されたmutate経過時間スカラーだけは診断書式を検査した上で
-  文字列の完全一致対象から外しました。呼出箇所固有の意味的killの証拠ではありません。
-  より広い実行ゲートとissue/productの最終承認は引き続き未完了です。
+  移行: 仮引数の型の値を渡します。ルートの外から来る値にはヘッダ引数を使います。または部品を直します。自動移行はありません。ディスク上の 610 件のコーパスに変化はありません。文言と根拠は [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md) にあります。
+  ルートの実引数エラーは、括弧を含む実引数全体か、その内側の span を指します。CLI と Worker の `loc` は先頭で、LSP は UTF-16 の始点と終点を返します。文言に部品 wrapper は付かず、action と Kernel のメタデータは変わりません。エラーの順序は、即時 lowering、モデル組立、記述順の待機実引数、init と部品の検査です。
+  スカラーの期待型がある条件式は各 arm をその型で検査します。そのため `m: Map<A, Bool>` の `m[if c then 0 else true]` は `Range(0, 1)` ではなく `Named("A")` を示します。それ以外の条件式は引き続き各 arm を最初の arm の型で検査します。測定した入力の受理判定は変わっていません (入力は上記の設計ノートに記載)。
+  Rust API: 公開 `SyncRef` に `arg_spans` が必須です。`into_validated_syntax` は非公開メタデータを捨てる前に検査し、`syntax`・`kernel_ast_v1`・`into_syntax` は未検査で情報を失う変換のままです。移行した CLI の 3 箇所は呼び出しごとに完全なコア検査が 1 回増えますが、同じコマンドがすでに同じソースを検査しているため CLI の出力は変わりません。
+  #1517 は、マージ後の `main` で製品ゲートが通るまで開いたままです。
 - 公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な
   同期 action から参照されると、`check` / `verify` は JSON の `warnings` に
   `fair_not_inherited` 警告を出します。同期 action が fair でなければならないとき

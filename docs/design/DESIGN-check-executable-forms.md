@@ -47,14 +47,12 @@ Imported-component diagnostics retain exact ownership through private check
 targets during lowering. A late model error uses the existing component-error
 policy: anchor the envelope at that component's root use declaration, retaining
 the component file/position and public declaration spelling in the cause.
-Root declarations are not rebound to a use. The #1517 accepted target is specified
-in [root-argument validation](DESIGN-sync-argument-root-validation.md): type ALL
-used/unused actuals before substitution, in root header context; report a root
-argument span/bare message rather than a component wrapper. The reviewed source
-checks unused originals before erasure; the amendment changes admission, not just
-diagnostics. Numeric ranges stay verification-time. The linked design records the
-measured11-context/9-pair/22-mode removal union; source review is not execution of
-all472 source witnesses or final issue/product acceptance.
+Root declarations are not rebound to a use. A root-authored sync argument, used or not, is
+typed before substitution in root header context, and its error is reported at the argument
+with a bare message, not through a component wrapper
+([root-argument validation](DESIGN-sync-argument-root-validation.md)). This is a breaking
+removal for arguments that previously went unchecked (#1517); numeric ranges stay
+verification-time.
 A second component is not mistaken for the first.
 These diagnostic-only targets neither replace action trace origins nor appear in Public Kernel provenance
 or assurance counts.

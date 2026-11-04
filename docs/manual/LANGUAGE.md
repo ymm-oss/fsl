@@ -3102,48 +3102,47 @@ compose OrderSystem {
   Breaking removal (#1334): additional statements assigning component state via physical names such as `alias__x`, which previously passed `check`, now produce a located error too.
   Reference arguments may read only header parameters, consts, and state, not additional-item `let` bindings (breaking removal, #1442).
   Component free value reads and update roots resolve against the component's original declarations before merging, so composition cannot rescue an otherwise undeclared reference (breaking removal, #1442); public names remain legal, and an enum read that needs its owner protected still displays the source member spelling.
-- **#1517 root-argument validation (source reviewed; bounded callers measured):** type ALL synchronized actuals,
-  including unused formals, before substitution, using root header parameters,
-  state, constants and enums, not body lets/requires bindings. Numeric carrier
-  compatibility remains; numeric range mismatch is still verification-time.
-  Root errors use the whole half-open actual (parentheses included), preserving
-  an inner span only within that actual; CLI/Worker loc is its start, LSP uses
-  UTF-16 start/end. Bare root wording replaces the component wrapper; original
-  action/Kernel metadata stays unchanged. Error phases: immediate lowering,
-  model assembly, authored-order queued typing, then init/component checking.
-  A conditional's arms now check against the supplied expectation, not the inferred carrier: `m[if c then 0 else true]` with `m: Map<A, Bool>` now names `Named("A")` instead of `Range(0, 1)`. This arm change altered no measured admission result.
-  Measured `check` removal union: **11 complete contexts /9 root-component pairs
-  /22 mode-context pairs**. Base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`;
-  head `7653cc784354bc562bd85bd888cf78d0091272f2`. Each mode is
-  stable or FSL5-opt-in on unchanged source, twice per side. Every transition below
-  is check-ok/exit0 → semantics-error/exit2. The nine new exact three-file `check c.fsl`
-  contexts are preservation only; physical direct.fsl presence grants no direct/API/
-  verify coverage. This finite measured union is not runtimefull472 or issue acceptance.
+- **Root-authored synchronized arguments (breaking removal, #1517).** `check` types every
+  synchronized argument against its formal parameter before substitution, including an
+  argument whose formal the component action never reads. An argument can read root header
+  parameters, state, constants and enums, not `let` or `requires` bindings of the additional
+  items. Numeric carriers stay compatible whatever their type names, and a numeric range
+  mismatch is still a verification-time result. These forms passed `check` before and are
+  now semantic errors (exit 2):
+  - **Unused formal, bad argument.** `true` or a relation index `part.h[0]` for `a: K`; an
+    unresolved name (`nosuch`), including one bound only by an additional-item `let`; a
+    qualified enum member (`part.Red`, write `Red`); a value of another component's enum
+    (`other.tone`, type `other.Tone`) for a `part.Color` formal; a conditional with a
+    non-Bool condition (`if 1 then 0 else 0`); a root `def` called with a badly typed
+    argument (`rp(true)` for `def rp(v: Int)`). Parentheses, a later argument, a later
+    reference and a later action do not change this.
+  - **Used formal whose substituted body happened to type.** `put(a in 0..1) { flag = a }` or
+    `put(a: K) { flag = a }` with `flag: Bool` and argument `true`;
+    `put(a: K) { m[a] = true }` with `m: Map<C, Bool>` and enum argument `R`.
+  - **Duplicate formals.** `(a: K, a: K)` with arguments `true, 0`, where substitution erased
+    the first argument.
+  - **Internal action with an invalid formal declaration.** `internal part.put` with
+    `part.put(0)` where the component declares `a: Int`, `a in 1..0`, `a: Nope` or a
+    struct-typed `a: T`. The component's own `check` rejects these declarations too.
 
-  | ID | Exact complete-context key | Pair | Changed admission / candidate loc |
-  |---|---|---|---|
-  | R01 | `1cae9cf75cb49d332ab850296a1902db6e08971cbae68ab7229309b979632f05` | P01 | unused true + relation index, argument order; 5:16 |
-  | R02 | `456840abf00faf2844ad3223e80abab2efb03e62ec5c2fc4c6c5cef9daa45af4` | P02 | body-only x after let; 5:16 |
-  | R03 | `5aa3baefa078f9ddc0a1d5ed5157e9bd6295df700bf86536d7042d774e69e0d2` | P03 | true then later action index; 5:16 |
-  | R04 | `8d7b0467683a00853cc958fcf91c33e6e23d32c7cd5506d1401029e98338b5d9` | P04 | relation index; no good sibling; 5:16 |
-  | R05 | `a1760ef370b7c9164f0eda14b36c84dfa208b847c75fb6ecb8bfa8e5faa8df22` | P05 | unused true; no good sibling; 5:16 |
-  | R06 | `ab059cd5d0c142246d68ccb9ce2ea193e43ce9b4365e6a865e0a7b46c63942ac` | P06 | true then second reference index; 5:16 |
-  | R07 | `ab291946a038aa0e77692160e7516fa40a75b8781797c928405dddfd8949bbbe` | P04 | relation index + offered good sibling; 5:16 |
-  | R08 | `acc62ea03d44de4dd0ddbcd65d4f73e4737e914153f50bed7832a4bb4905da3b` | P07 | body-only x after let/requires; 5:16 |
-  | R09 | `cd076b93cba275c70735ba2a73731c1935fabcdb0fe16f3246b5ba615e720ded` | P08 | parenthesized unused true; 5:16 |
-  | R10 | `dd449ab57104f7c5a53e33d3f756937344e76161615f960cb821e2e62372adff` | P05 | unused true + offered good sibling; 5:16 |
-  | R11 | `91412ae303f1f1877fcdcea2e7e35912726e9832662e0c49d971d8ca09a9bc02` | P09 | second ref `(0), (true),`; 6:37 |
-
-  Source identities/context roles are recorded in DESIGN-sync-argument-root-validation.md.
-  Public Rust SyncRef requires arg_spans; fallible into_validated_syntax validates
-  before projection, unlike raw/lossy syntax/kernel_ast/into_syntax. The three CLI
-  migrations add one full core validation per call; measured whole-CLI cost is
-  not isolated incremental cost. The seven-state caller cohort, on an earlier candidate and not rerun on this head, measured four builds/
-  16CLI observations, twice on fixed valid inputs: R/I/M honestly survived and all
-  exact restores preserved output with fresh H0 bytes/no restore builds. Whole
-  stdout/JSON/exits/non-time stderr matched; only the observed, framing-validated
-  mutate elapsed scalar was not compared literally. No caller-specific semantic
-  kill is claimed; broader execution gates and final issue/product acceptance remain open.
+  Migration: pass a value of the formal's type, using a header parameter when it comes from
+  outside the root, or correct the component. There is no automatic migration. No form in
+  the 610-form on-disk corpus changed; messages and evidence are in
+  [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md).
+  A root argument error points at the whole argument, its own parentheses included, or at an
+  inner span within it; CLI and Worker `loc` is its start, and LSP reports UTF-16 start and
+  end. The message is bare, without a component wrapper, and action and Kernel metadata do
+  not change. Error order: immediate lowering, model assembly, queued arguments in authored
+  order, then init and component checks.
+  A conditional with a scalar expected type checks its arms against that type, so
+  `m[if c then 0 else true]` with `m: Map<A, Bool>` names `Named("A")` rather than
+  `Range(0, 1)`. Other conditionals still check their arms against the first arm's type. This
+  changed no admission result on the measured forms (the linked note states them).
+  Rust API: public `SyncRef` requires `arg_spans`. `into_validated_syntax` validates before
+  discarding private metadata; `syntax`, `kernel_ast_v1` and `into_syntax` stay raw and lossy.
+  The three migrated CLI callers each add one full core validation, with no observable change
+  in CLI output, because the same command has already validated that source.
+  #1517 stays open until the product gate passes on merged `main`.
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, `check` / `verify` emits a
   `fair_not_inherited` warning in JSON `warnings`; write

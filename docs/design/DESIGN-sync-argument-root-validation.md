@@ -2,9 +2,12 @@
 
 # Root-authored synchronized arguments (#1517)
 
-Status: **Accepted contract; source implementation reviewed, execution gates open (#1517).**
-This amends DESIGN-compose and DESIGN-check-executable-forms. Review of the
-78ff +dad source does not establish product, merge or full-v5 completion.
+Status: **Accepted contract; implemented, product gate open (#1517).**
+This amends DESIGN-compose and DESIGN-check-executable-forms. Independent review of
+PR #1677 covered head `bf0f55d2c`; the fixes for its findings came after that head and
+have not been independently reviewed. Neither review nor the evidence below establishes
+merge, product or full-v5 completion: #1517 stays open until the product gate passes on
+merged `main`.
 
 ## Admission and context
 
@@ -58,7 +61,7 @@ There is no global authored-order promise across phases; retain competing contro
 
 Add fallible public `KernelSpec::into_validated_syntax(self) -> Result<SurfaceSpec,
 ModelError>`: validate an exact clone through the existing FULL build_model, then
-return the ORIGINAL surface only on success. `syntax`, `kernel_ast`, `into_syntax`
+return the ORIGINAL surface only on success. `syntax`, `kernel_ast_v1`, `into_syntax`
 remain raw, nonvalidating, lossy projections. `build_surface_model` checks ONLY its
 supplied SurfaceSpec; it cannot recover erased unused actuals. Successful raw
 projection bytes remain unchanged; intentional raw-projection tests remain raw.
@@ -71,29 +74,61 @@ MODEL VALIDATION, no extra solver. Representative actual-caller cost measurement
 is recorded only at whole-CLI scope, not as isolated incremental cost or free work. The seven source owners are syntax surface.rs/parser.rs,
 core compose.rs/lib.rs/model.rs/typecheck.rs and fslc/src/main.rs.
 
-## Breaking removals and pending evidence
+These migrations are defensive: their rejection is not observable from the CLI. Each one
+runs after the same command has already built the model from the same source, so that
+earlier build reports a bad actual first. Evidence for the removal comes from `check`, not
+from these callers.
 
-Two ACTUAL known check-ok forms become check-error under this adopted target:
-`part.put(true)` and `part.put(part.h[0])` when Piece.put(a: K) never uses a
-(body `last = 0`, K=0..1, h: relation K -> K). Both checked ok twice on own
-17eb2b2be8f1cd8f7856ad1ae9d40cabe38e1588 pristine CLI SHA256
-`ad05c1349bc794feb4b728d1877cff2991f3906ba76a22449fd8005f06b85bd1`.
-Exact Stage A characterization root SHA256 identities:
+## Breaking removals
 
-| Form | Root SHA256 |
-|---|---|
-| unused Bool | `0e713efcd02ef1e3e3d6a9c3619d8e0ffa7db26196b6b7182b2e5982e12a4907` |
-| unused relation index | `73e678576bcc1d25cb475911a1406a08cc8dceaf2344fb9af5b1b5d90eb52038` |
+**Breaking removal (#1517).** Any root actual that fails typing against its formal is now a
+semantics error, whether or not the formal is used. Each form below passed `check` (exit 0)
+on base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d` and is rejected (exit 2,
+`result: "error"`, `kind: "semantics"`) on head
+`c5f48d81b93234db86a83119d16e27bce6ae70de`, each binary built from its own tree, one
+stable run per side with `FSLC_CACHE=off`. The rule defines the removal; this table is the
+measured sample of it. Locations belong to the measured fixture layout.
 
-Both use piece SHA256 `063f8279d8588f2f3c3b56d285a578b14504691c021700ec59d1f7a2d40cef70`.
-Measured `check` removal union: **11 complete contexts /9 root-component pairs
-/22 mode-context pairs**. Base `c16cf35dc424619d1e1f43a340e6cf7cac23ebcb`; candidate
-`78ffb38f714c0fd44e63148e20d34f9ebd5c4563` plus seven-file source patch
-`dad156bf383f3d8907c5275bcb44cce189c899076123ad7b52d138b6c81461c1`. Each mode is
-stable or FSL5-opt-in on unchanged source, twice per side. Every transition below
-is check-ok/exit0 → semantics-error/exit2. The nine new exact three-file `check c.fsl`
-contexts are preservation only; physical direct.fsl presence grants no direct/API/
-verify coverage. This finite measured union is not runtimefull472 or issue acceptance.
+| Group | Component action | Root reference | Head message |
+|---|---|---|---|
+| Internal declaration | `put(a: Int) { last = a }` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: action parameter type is not a finite scalar at piece.fsl:1:52) at root.fsl:2:3` |
+| Internal declaration | `put(a in 1..0) { last = a }` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: action parameter range is empty at piece.fsl:1:52) at root.fsl:2:3` |
+| Internal declaration | `put(a: Nope) { }` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: unknown type 'Nope' at piece.fsl:1:52) at root.fsl:2:3` |
+| Internal declaration | `put(a: T) { }`, struct `T` | `part.put(0)` | `component "piece.fsl" failed to check (part.put: action parameter type is not a finite scalar at piece.fsl:1:73) at root.fsl:2:3` |
+| Used formal | `put(a in 0..1) { flag = a }` | `part.put(true)` | `invalid model expression: expression of type Bool is not assignable to Range(0, 1) at 5:16` |
+| Used formal | `put(a: K) { flag = a }` | `part.put(true)` | `invalid model expression: expression of type Bool is not assignable to Named("part.K") at 5:16` |
+| Used formal | `put(a: K) { m[a] = true }`, enum `C`, `m: Map<C, Bool>` | `part.put(R)` | `invalid model expression: expression of type Named("part.C") is not assignable to Named("part.K") at 5:16` |
+| Unused formal | `put(a: K) { last = 0 }` | `part.put(true)` | `invalid model expression: expression of type Bool is not assignable to Named("part.K") at 5:16` |
+| Unused formal | `unusedK(a: K) { last = 0 }` | `part.unusedK(part.h[0])` | `invalid model expression: public Kernel index requires Map or Seq at 6:20` |
+| Unused formal | `unusedK(a: K) { last = 0 }` | `part.unusedK(nosuch)` | `invalid model expression: public Kernel cannot type identifier 'nosuch' at 6:20` |
+| Unused formal | `unusedColor(a: Color) { }` | `part.unusedColor(other.tone)` | `invalid model expression: expression of type Named("other.Tone") is not assignable to Named("part.Color") at 6:24` |
+| Unused formal | `unusedColor(a: Color) { }` | `part.unusedColor(part.Red)` | `invalid model expression: public Kernel cannot type identifier 'part.Red' at 6:24` |
+| Unused formal | `unusedK(a: K) { last = 0 }` | `part.unusedK(if 1 then 0 else 0)` | `invalid model expression: expression of type Int is not assignable to Bool at 6:23` |
+| Unused formal | `unusedBool(a: Bool) { }`, root `def rp(v: Int) = v == part.last` | `part.unusedBool(rp(true))` | `invalid model expression: expression of type Named("part.K") is not assignable to Bool at 6:23` |
+| Duplicate formal | `put(a: K, a: K) { last = a }` | `part.put(true, 0)` | `invalid model expression: expression of type Bool is not assignable to Named("part.K") at 5:16` |
+
+The internal-declaration and used-formal components also fail their own standalone `check`;
+the unused-formal components pass it, and only the root actual is wrong. The duplicate-formal
+row also fails standalone; its first actual is erased by substitution, and `part.put(0, 1)`
+for the same formals still passes `check`. The same run found further unused spellings of
+these classes: a root `def` whose result or body does not type (`rp(0)` for `a: K`, `rb(0)`
+reading a relation index), `part.Color.Red`, a pattern binder
+(`if part.o is some(v) then v else 0`), a bare component state name (`last`), the formal's
+own name (`a`), a root Bool state (`rb`) and an integer for an enum formal (`0` for
+`a: Color`). No measured form went from error to ok.
+
+Migration: pass a value of the formal's type, using a header parameter when it comes from
+outside the root, or correct the component. There is no automatic migration, and an
+additional-body `let` still cannot bind an actual.
+
+Earlier characterization pinned eleven exact byte contexts over nine root/component file
+pairs, in both stable and FSL5 opt-in modes (22 results), all exit 0 to semantics error exit
+2. The nine exact three-file `check c.fsl` contexts measured with them show preservation
+only: a `direct.fsl` file's presence there gives no direct, API or verify coverage. These
+are a finite sample, not every witness in the issue and not issue acceptance. Their bytes
+are identified by hash and were not retained, so they were last measured on base
+`5564b25ccb37e3477311fde1dae5eb6298eb6b2d` and head
+`7653cc784354bc562bd85bd888cf78d0091272f2` and not rerun on the head above.
 
 | ID | Exact complete-context key | Pair | Changed admission / candidate loc |
 |---|---|---|---|
@@ -110,8 +145,8 @@ verify coverage. This finite measured union is not runtimefull472 or issue accep
 | R11 | `91412ae303f1f1877fcdcea2e7e35912726e9832662e0c49d971d8ca09a9bc02` | P09 | second ref `(0), (true),`; 6:37 |
 
 All entries are `root.fsl` declaring compose Root, with `piece.fsl` declaring
-spec Piece, K=0..1, h:relation K->K, last:K initialized0 and unused put formal(s)
-whose body is last=0. P01/P09 have two formals; P06 adds second(a:K) {}; the
+spec Piece, K=0..1, `h: relation K -> K`, `last: K` initialized to 0, and unused put formal(s)
+whose body is `last = 0`. P01/P09 have two formals; P06 adds second(a:K) {}; the
 others have one formal. Other declaration/spacing differences remain identified
 by these exact byte hashes, not normalized away.
 
@@ -128,67 +163,68 @@ by these exact byte hashes, not normalized away.
 | P09 | `fb95cf70d9a759ada865a3d83260f867dbfea4634ef12129c7699399eaff8fd9` | `f5d9050744bb33c195afa70fad64c390583898565507c62144df19cf750afa86` |
 
 The exact good.fsl SHA is `7a79980377068e1567fd3394a3f214323e76297897906dba63a7cbcfa532889c`,
-declaring spec Good with seen:Bool initializedfalse and idle() {}. It is offered
+declaring spec Good with `seen: Bool` initialized to false and `idle() {}`. It is offered
 but unreferenced in R01/R02/R03/R06/R07/R08/R09/R10; R11 references it as first
 and calls first.idle() before part.put. R04/R05 contain only root.fsl+piece.fsl.
 All other contexts retain all three files. Read roles and presence are distinct.
 
-The mandatory610 on-disk forms had zero removals; inline sources are not an empty set.
-Retained disk-sweep invocation (historical execution, not a new run):
-```sh
-lockf -k <heavy-lock> scripts/cx-log 1517-source-78ff-U7-corpus610-frozen47-2x -- \
-  python3 <task-local corpus script, not retained in the repository>
-```
-It ran from the named candidate worktree with `FSLC_CACHE=off`.
-The script unsets `FSLC_UNSTABLE` in stable mode and sets it to `fsl5` only
-for FSL5-opt-in, without changing any source header. In each mode it invokes
-each own-tree binary as `fslc check <original roster path>` twice, with each
-binary's own materialized tree as cwd. The recorded wrapper uses Rust1.98,
-`CARGO_NET_OFFLINE=true`, jobs4/threads4, and own H target/TMP. The base/head
-SHAs and seven-source candidate patch identity are stated above; form count is610.
-R04/R07 andR05/R10 each share root/piece bytes but differ in offered good.fsl, so
-all11 full contexts remain. Multiple actual/reference/action order, body-only x,
-parentheses and the trailing comma are breaking acceptance removals,
-not new permission for body lets to bind originals. Historical Stage A identities
-above remain their own observations. Original per-cohort H binaries831ab0e2 and
-1caf9f0c are not relabeled as later d98f6ba9.
+R04/R07 and R05/R10 each share root and piece bytes but differ in the offered good.fsl, so
+all eleven contexts stay separate.
 
-Rebased re-measurement, superseding the identities above for the disk sweep: base
-`5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, head
-`7653cc784354bc562bd85bd888cf78d0091272f2`, each built from its own materialized
-tree with Rust 1.98 (`cargo build --manifest-path rust/Cargo.toml --workspace --locked`).
-Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (610 forms on
-both sides: 23/195/392) ran with `FSLC_CACHE=off` and the own tree as cwd, as
+On-disk transition set (empty). Base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d` and head
+`c5f48d81b93234db86a83119d16e27bce6ae70de`, each built from its own materialized tree with Rust 1.99.1
+(`cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked`). Every
+`.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (610 forms on both
+sides: 23/195/392) ran with `FSLC_CACHE=off` and the own tree as cwd, as
 `fslc check <path>` stable and with `FSLC_UNSTABLE=fsl5`, and as
-`fslc kernel <path> --kernel-version 1|2` stable, twice per side. All 2440 pairs had
-equal complete stdout, stderr and exit, with no field excluded: the disk transition
-set is empty. The eleven contexts above again go check-ok/exit0 to
-semantics-error/exit2 at the recorded locations in both modes, and the nine preservation
-contexts stay byte-identical. The inline `s.fsl` of the rewritten
-`breaking_removal_sync_arguments_do_not_read_additional_lets` stays an error and moves
-from the component wrapper at 2:3 to the root at 4:21; its other four inputs are
-byte-identical. This covers `check` and Kernel on these forms, not every verifier route.
+`fslc kernel <path> --kernel-version 1|2` stable, twice per side. All 4880 pairs had equal
+complete stdout, stderr and exit, with no field excluded: 0 ok-to-error and 0 error-to-ok
+transitions. Kernel version 2 records span paths relative to the repository root, so the
+base tree needs a repository root too: without one, 428 forms differ only in that path. The
+inline `s.fsl` of the rewritten `breaking_removal_sync_arguments_do_not_read_additional_lets`
+stays an error and moves from the component wrapper at 2:3 to the root at 4:21; its other
+four inputs are byte-identical. This covers `check` and Kernel on these forms, not every
+verifier route.
 
-A conditional's arms now check against the supplied expectation instead of the
-inferred carrier. Across the corpus and 35 finite conditional probes this changed only
-the type named by a diagnostic (`Range(0, 1)` becomes the formal's named type),
-including direct specs such as `m[if c then 0 else true]`; no probe changed admission.
+Multiple actual, reference and action order, body-only `x`, parentheses and the trailing
+comma are part of the removal; they give additional-body lets no permission to bind actuals.
 
-Implementation evidence must also cover used/unused rejection and valid header/
-alias/forward const/state/numeric controls, missing/swapped metadata and queue
-omission, Clone/stamping/rebinding, validated conversion accept/reject and all
-three callers, phase competition, parentheses/inner/UTF-16 real stdio, complete
-native/Worker packets and model/manual-AST/Kernel preservation or exact refusal.
-The six direct API controls, including validated/raw conversion controls, compiled
-and passed on78ff+dad in the retained workspace run; this is not compile-RED
-evidence. The three caller bypasses were measured in seven states
-H0/R/RR/I/IR/M/MR with four builds and16CLI observations, two repetitions on fixed
-valid inputs. R/I/M honestly survived; RR/IR/MR preserved output after exact source
-restoration and reuse of the freshly built H0 binary, without restore builds.
-Complete stdout/JSON/exits and all non-time stderr bytes matched; only the observed
-mutate elapsed scalar was excluded from literal stderr equality and still required
-its exact diagnostic framing. These are stable-input preservation measurements,
-not caller-specific semantic kills or isolated incremental validation costs;
-earlier-owner rejection is not a late-caller kill. Isolated core faults twice, exact restore twice,
-#1254/#1622 preservation, required focused/workspace/product gates and independent
-implementation review remain mandatory before issue/product completion.
+A conditional with a scalar expectation (Int, Bool, a numeric range or domain, an enum or
+struct) checks its arms against that expectation, so `m[if c then 0 else true]` with
+`m: Map<A, Bool>` names `Named("A")` rather than `Range(0, 1)`. Every other conditional
+keeps the base check of its arms against the first arm's inferred type. Compatibility is an
+equivalence over scalars but not over containers holding `Int`: `Set { 0 }` is compatible
+with both `Set<A>` and `Set<B>`, which are not compatible with each other. Applying the
+expectation to container arms changed admission in both directions, so it is not done.
+
+This does not change admission on the measured forms. Against base on the head above: the
+four forms pinned in `issue_1517_conditional_arm_admission.rs` give equal packets; of 79
+finite conditional probes, 77 give equal packets and 2 differ only in the named type; of a
+5917-form matrix of Set, Seq, Map, Option, relation and scalar arms in `requires`,
+assignment, index, method and operator positions, 1870 are ok on both sides, 4047 are errors
+on both, and 174 of those errors differ only in the type named at the same location, for
+example `Range(0, 1)` to `Named("A")` or `Named("A")` to `Int`. As a control, the same
+matrix on a binary that applies the expectation to every conditional shows 48 admission
+differences. This is a finite measurement, not an equivalence proof.
+
+## Evidence and open gates
+
+Implementation evidence must cover used and unused rejection, valid header, alias, forward
+const, state and numeric controls, missing or swapped metadata and queue omission, Clone,
+stamping and rebinding, validated conversion accept and reject, phase competition,
+parentheses, inner spans, UTF-16 over real stdio, complete native and Worker packets, and
+model, manual-AST and Kernel preservation or exact refusal. The tests written for this are
+the `issue_1517*` tests of `fsl-core`, `fslc-rust`, `fsl-wasm` and `fsl-lsp`; with all
+`fsl-core`, `fsl-wasm` and `fsl-lsp` stdio tests and the `issue_1442*` tests of
+`fslc-rust`, they pass on head `c5f48d81b93234db86a83119d16e27bce6ae70de`.
+
+Replacing the three migrated callers with raw conversion and rebuilding changed nothing the
+CLI shows on one bad and one valid compose through `check`, `verify`, `explain` and `mutate`,
+apart from elapsed-time values. An earlier candidate measured the same on fixed valid inputs,
+and exact restoration preserved its output. Together these show preservation only: no
+caller-specific rejection and no isolated cost of the added validation.
+
+Still open before issue or product completion: independent review of the fixes after
+`bf0f55d2c`, the required workspace and product gates on merged `main`, and #1254/#1622
+preservation on that state. Not measured here: repeated isolated core faults and verifier
+routes other than those named above.
