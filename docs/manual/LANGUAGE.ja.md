@@ -2921,8 +2921,9 @@ compose OrderSystem {
   Rust API: 公開 `SyncRef` に `arg_spans` が必須です。`into_validated_syntax` は非公開メタデータを捨てる前に検査し、`syntax`・`kernel_ast_v1`・`into_syntax` は未検査で情報を失う変換のままです。移行した CLI の 3 箇所は呼び出しごとに完全なコア検査が 1 回増えますが、同じコマンドがすでに同じソースを検査しているため CLI の出力は変わりません。
   #1517 は、マージ後の `main` で製品ゲートが通るまで開いたままです。
 - **重複した仮引数名(破壊的な削除、#1680)。** 同じ action の先行する仮引数がすでに使った名前を仮引数や入力に
-  書くと、`check` はその繰り返された名前の位置で拒否します。対象の経路は、action、requirements の action、
-  process の transition、event、同期されたルート action、compose の部品のすべての action です。部品では、
+  書くと、`check` は拒否します。対象は、action、requirements の action、process の transition、event、
+  domain の command の入力、effect や saga の action が仮引数として受け取る event のフィールド、同期された
+  ルート action、インライン `implements` の抽象側の action、compose の部品のすべての action です。部品では、
   持ち上げられた action、同期された action、`internal` で参照されない action を含みます。これらは置換や
   `internal` で取り除かれた後は `build_model` に届いていませんでした。次の形はこれまで `check` を通り、
   `put(a: K, a: K)` は最後の実引数を読んで最初の実引数を捨てていたため、`part.put(0, 1)` と `part.put(1, 0)` で
@@ -2931,14 +2932,26 @@ compose OrderSystem {
     `part.put(0, 1)`(順序は問いません)。
   - 参照のない `internal part.put`(本体の内容は問いません)。
 
-  拒否は `kind: "semantics"`、終了コード 2 です。部品では、他の部品の失敗と同じく `use` を起点に
+  拒否は終了コード 2、`kind: "semantics"` です。ただしインライン `implements` では、もう一方のファイルの失敗は
+  すべて `kind: "type"` です。部品では `loc` を他の部品の失敗と同じく `use` に置いて
   `component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81) at root.fsl:2:3`
-  と報告します。部品の外ではメッセージは `duplicate action parameter 'a'` のままで、`loc` が繰り返された名前を
-  指すようになりました。以前は名前と同じ綴りの最初のトークンを指していて、無関係な宣言を指すこともありました。
-  event のメッセージは名前の後に event の位置を保ち、`loc` は入力を指します。実引数の型検査より先に
-  報告するので、`part.put(true, 0)` は `Bool` の実引数ではなくこの拒否を報告します。即時の lowering 失敗より
+  と報告します。インライン `implements` では `loc` を `implements` に置いて
+  `implements "abs.fsl" failed to check (step: duplicate action parameter 'x' at abs.fsl:1:77)` と報告します。
+  それ以外ではメッセージは `duplicate action parameter 'a'` で、`loc` は繰り返された名前を指します。以前は名前と
+  同じ綴りの最初のトークン、domain の command では `decide`、event では event を指していました。`lint` と
+  `fmt` のメッセージも同じで、`loc` を省くことがあります。
+
+  この拒否は文書を読み込むすべての経路に届きます。上の部品の形では、`verify` は判定を返さず、`refine` は
+  `refines` を、`replay` は `conformant` も `nonconformant` も返さなくなります。それぞれの結果で終了していた
+  `lint`、`fmt`、`conformance`、`explain`、`analyze` は終了コード 2 になります。`domain analyze` と `domain expand` は
+  モデルを組み立てないので、繰り返された command の入力でも終了コード 0 のままです。`expand` の出力は `check` が
+  拒否します。
+
+  実引数の型検査より先に報告するので、`part.put(true, 0)` は `Bool` の実引数ではなくこの拒否を報告します。即時の lowering 失敗より
   後なので、`part.put(0)` は引数の数のエラーのままです。`def` の仮引数はすでにすべての経路で `def` の位置で
-  拒否されており、変わりません。
+  拒否されており、変わりません。次は実引数が失われないので受理されたままです。ログのマッピング
+  `action ev(a, a) -> put(a)` の仮引数は 1 つのログのフィールドを指します。どの action も仮引数として受け取らない
+  domain の event のフィールドは、`emits` がペイロードを取らないので値を持ちません。
   移行: 仮引数にそれぞれ別の名前を付け、各実引数を対応する仮引数に渡してください。
   計測した形とコーパスの比較は
   [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md) にあります。

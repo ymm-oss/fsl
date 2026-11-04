@@ -2984,8 +2984,9 @@ CLI field の mask はありません。scope・移行・反復の証拠は
   Rust API: 公開 <code>SyncRef</code> に <code>arg_spans</code> が必須です。<code>into_validated_syntax</code> は非公開メタデータを捨てる前に検査し、<code>syntax</code>・<code>kernel_ast_v1</code>・<code>into_syntax</code> は未検査で情報を失う変換のままです。移行した CLI の 3 箇所は呼び出しごとに完全なコア検査が 1 回増えますが、同じコマンドがすでに同じソースを検査しているため CLI の出力は変わりません。
   #1517 は、マージ後の <code>main</code> で製品ゲートが通るまで開いたままです。
 - <strong>重複した仮引数名(破壊的な削除、#1680)。</strong> 同じ action の先行する仮引数がすでに使った名前を仮引数や入力に
-  書くと、<code>check</code> はその繰り返された名前の位置で拒否します。対象の経路は、action、requirements の action、
-  process の transition、event、同期されたルート action、compose の部品のすべての action です。部品では、
+  書くと、<code>check</code> は拒否します。対象は、action、requirements の action、process の transition、event、
+  domain の command の入力、effect や saga の action が仮引数として受け取る event のフィールド、同期された
+  ルート action、インライン <code>implements</code> の抽象側の action、compose の部品のすべての action です。部品では、
   持ち上げられた action、同期された action、<code>internal</code> で参照されない action を含みます。これらは置換や
   <code>internal</code> で取り除かれた後は <code>build_model</code> に届いていませんでした。次の形はこれまで <code>check</code> を通り、
   <code>put(a: K, a: K)</code> は最後の実引数を読んで最初の実引数を捨てていたため、<code>part.put(0, 1)</code> と <code>part.put(1, 0)</code> で
@@ -2993,14 +2994,24 @@ CLI field の mask はありません。scope・移行・反復の証拠は
   - <code>put(a: K, a: K)</code>、<code>put(a in 0..1, a in 0..1)</code>、<code>put(a: K, b: K, a: K)</code> に対する、<code>internal part.put</code> と
     <code>part.put(0, 1)</code>(順序は問いません)。
   - 参照のない <code>internal part.put</code>(本体の内容は問いません)。</p>
-<p>拒否は <code>kind: "semantics"</code>、終了コード 2 です。部品では、他の部品の失敗と同じく <code>use</code> を起点に
+<p>拒否は終了コード 2、<code>kind: "semantics"</code> です。ただしインライン <code>implements</code> では、もう一方のファイルの失敗は
+  すべて <code>kind: "type"</code> です。部品では <code>loc</code> を他の部品の失敗と同じく <code>use</code> に置いて
   <code>component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81) at root.fsl:2:3</code>
-  と報告します。部品の外ではメッセージは <code>duplicate action parameter 'a'</code> のままで、<code>loc</code> が繰り返された名前を
-  指すようになりました。以前は名前と同じ綴りの最初のトークンを指していて、無関係な宣言を指すこともありました。
-  event のメッセージは名前の後に event の位置を保ち、<code>loc</code> は入力を指します。実引数の型検査より先に
-  報告するので、<code>part.put(true, 0)</code> は <code>Bool</code> の実引数ではなくこの拒否を報告します。即時の lowering 失敗より
+  と報告します。インライン <code>implements</code> では <code>loc</code> を <code>implements</code> に置いて
+  <code>implements "abs.fsl" failed to check (step: duplicate action parameter 'x' at abs.fsl:1:77)</code> と報告します。
+  それ以外ではメッセージは <code>duplicate action parameter 'a'</code> で、<code>loc</code> は繰り返された名前を指します。以前は名前と
+  同じ綴りの最初のトークン、domain の command では <code>decide</code>、event では event を指していました。<code>lint</code> と
+  <code>fmt</code> のメッセージも同じで、<code>loc</code> を省くことがあります。</p>
+<p>この拒否は文書を読み込むすべての経路に届きます。上の部品の形では、<code>verify</code> は判定を返さず、<code>refine</code> は
+  <code>refines</code> を、<code>replay</code> は <code>conformant</code> も <code>nonconformant</code> も返さなくなります。それぞれの結果で終了していた
+  <code>lint</code>、<code>fmt</code>、<code>conformance</code>、<code>explain</code>、<code>analyze</code> は終了コード 2 になります。<code>domain analyze</code> と <code>domain expand</code> は
+  モデルを組み立てないので、繰り返された command の入力でも終了コード 0 のままです。<code>expand</code> の出力は <code>check</code> が
+  拒否します。</p>
+<p>実引数の型検査より先に報告するので、<code>part.put(true, 0)</code> は <code>Bool</code> の実引数ではなくこの拒否を報告します。即時の lowering 失敗より
   後なので、<code>part.put(0)</code> は引数の数のエラーのままです。<code>def</code> の仮引数はすでにすべての経路で <code>def</code> の位置で
-  拒否されており、変わりません。
+  拒否されており、変わりません。次は実引数が失われないので受理されたままです。ログのマッピング
+  <code>action ev(a, a) -&gt; put(a)</code> の仮引数は 1 つのログのフィールドを指します。どの action も仮引数として受け取らない
+  domain の event のフィールドは、<code>emits</code> がペイロードを取らないので値を持ちません。
   移行: 仮引数にそれぞれ別の名前を付け、各実引数を対応する仮引数に渡してください。
   計測した形とコーパスの比較は
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-sync-argument-root-validation.md"><code>DESIGN-sync-argument-root-validation.md</code></a> にあります。
