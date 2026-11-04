@@ -10,9 +10,9 @@ publish.workspace = true
 [dependencies]
 fsl-core = { path = "../fsl-core" }
 fsl-solver = { path = "../fsl-solver" }
-fsl-syntax = { path = "../fsl-syntax" }
 
 [dev-dependencies]
+fsl-syntax = { path = "../fsl-syntax" }
 fsl-runtime = { path = "../fsl-runtime" }
 fsl-solver-z3 = { path = "../fsl-solver-z3" }
 
