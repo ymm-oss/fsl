@@ -332,11 +332,15 @@ On `with amount 2, amount 1`, base and head on these routes:
 | `kernel` versions 1 and 2, `typestate` | exit 0 | exit 2; version 1 and `typestate` omit the file from the message, version 2 names it by a longer path |
 | `explain`, `analyze`, `conformance`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`, `fmt` | exit 0 | exit 2 |
 | `lint`, `fmt --check` | exit 1 | exit 2 |
+| `sweep --depth 0..1` | exit 0, `sweep_passed` | exit 2 |
+| `migrate` | exit 0, `migrated` | exit 2, no `loc` |
+| `document claims`, `document generate` | exit 0 | exit 2, no `loc` and no file in the message |
 | `refine` with the document as implementation or abstraction | exit 0, `refines` | exit 2, `loc` in the document |
 | `replay --trace` | exit 2, `io`, the trace was malformed | exit 2, `semantics`: the document is loaded first |
 | `check` of an inline `implements` of the document | exit 0 | exit 2, `kind: "type"`, `loc` on the `implements`, `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)` |
 
-`lint`, `fmt` and `fmt --check` report the same message with no `loc`. `kind: "type"` on the
+`lint`, `fmt`, `fmt --check` and `migrate` report the same message with no `loc`. `document` omits
+the file name as well. `kind: "type"` on the
 inline `implements` is the kind of every failure of the other file on that path. A
 `compose` cannot `use` a requirements document (`compose use must reference a spec`, base
 and head), so no component route exists to refuse. The step form is read only in an
@@ -365,8 +369,8 @@ Migration: keep the one value you mean. There is no automatic migration.
 Rust API: `NextEditionRequirements` gains `repeated_step_inputs`. Nothing outside the
 parser constructs that struct.
 
-On-disk transition set (empty). Base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head
-`6dd96a59f9ab19a546d59703e34d742920f2bc88`, each binary built from its own tree in its own target
+On-disk transition set (empty). Base `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head
+`596881fc5e944a2548eedfe1b55d52fbea8ee344`, each binary built from its own tree in its own target
 directory with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and
 `rust/fslc/tests/fixtures/` (646 forms: 23/195/428) ran with `FSLC_CACHE=off` and its own
 tree as cwd, as `fslc check <path>` stable and with `FSLC_UNSTABLE=fsl5`, and as
@@ -382,8 +386,8 @@ carry it yet. When #1437 writes the `fsl 5` reference, those three owe this text
 `docs/intro/language.{en,ja}.html`: a `scenario` or `forbidden` step that names an input twice is
 refused with exit 2, `kind: "semantics"`, `duplicate step input 'amount' at doc.fsl:43:44` and `loc` at
 the repeated name, covering `with`, instance first, a `で` list, two `で` groups, an alias with its
-canonical name, and a relation role. `lint` and `fmt` omit `loc`. `kernel` version 1 and `typestate`
-omit the file from the message, and `kernel` version 2 prints a longer path. An inline `implements`
+canonical name, and a relation role. `lint`, `fmt` and `migrate` omit `loc`. `document` omits `loc` and
+the file. `kernel` version 1 and `typestate` omit the file from the message, and `kernel` version 2 prints a longer path. An inline `implements`
 reports `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)`, `kind:
 "type"`, with `loc` on the `implements`. A step with a parse error keeps that error. Different inputs
 in any order, and the same input in a later step, stay accepted. Migration: keep the one value you

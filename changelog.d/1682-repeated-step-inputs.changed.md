@@ -6,11 +6,11 @@ These forms passed `check` before and kept only the last value, so swapping the 
 - `従業員 が 申請1 を 申請金額 2, 申請金額 1 で 提出する`, the same input in two `で` groups, or an alias with its canonical name.
 - `Agent takes t1 with assignee 0, assignee 1`, the role of a relation event.
 
-On those forms `verify`, `refine`, `kernel`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`, `explain`, `analyze`, `conformance`, `typestate`, `lint` and `fmt` exit 2 instead of their own results. A step with a parse error keeps that error, different inputs may come in any order, and a later step may name the same input again.
+On those forms `verify`, `sweep`, `refine`, `kernel`, `migrate`, `document claims`, `document generate`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`, `explain`, `analyze`, `conformance`, `typestate`, `lint` and `fmt` exit 2 instead of their own results. A step with a parse error keeps that error, different inputs may come in any order, and a later step may name the same input again.
 
 Migration: keep the one value you mean. There is no automatic migration.
 
-The 646-form on-disk corpus has an empty transition set: base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `6dd96a59f9ab19a546d59703e34d742920f2bc88`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
+The 646-form on-disk corpus has an empty transition set: base `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `596881fc5e944a2548eedfe1b55d52fbea8ee344`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
 
 Rust API: `NextEditionRequirements` gains `repeated_step_inputs`.
 

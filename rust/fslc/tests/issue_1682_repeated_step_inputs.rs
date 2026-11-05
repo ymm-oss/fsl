@@ -354,6 +354,40 @@ fn an_earlier_parse_error_keeps_its_report() {
     }
 }
 
+/// `document` reports the refusal with no `loc` and no file in the message.
+#[test]
+fn document_refuses_without_a_location() {
+    let source = fixture(EN);
+    let scratch = Scratch::new("document", Some("e2e"));
+    scratch.write("one.fsl", &source);
+    scratch.write(
+        "doc.fsl",
+        &edit(
+            &source,
+            EN_STEP,
+            "Employee submits claim1 with amount 2, amount 1",
+        ),
+    );
+    for command in ["claims", "generate"] {
+        let (exit, packet) = scratch.fslc(&["document", command, "doc.fsl"]);
+        assert_eq!(
+            (exit, &packet["kind"], &packet["message"], &packet["loc"]),
+            (
+                2,
+                &json!("semantics"),
+                &json!("duplicate step input 'amount' at 43:44"),
+                &Value::Null
+            ),
+            "{command}: {packet:#}"
+        );
+        assert_eq!(
+            scratch.fslc(&["document", command, "one.fsl"]).0,
+            0,
+            "{command}"
+        );
+    }
+}
+
 /// Every route that loads the document gives the same refusal, and accepts the
 /// same document with one value per input.
 #[test]
@@ -380,6 +414,7 @@ fn every_route_that_loads_the_document_refuses() {
         &["scenarios", "--depth", "3"],
         &["testgen", "--depth", "3"],
         &["mutate", "--depth", "3"],
+        &["sweep", "--depth", "0..1"],
         &["html"],
         &["ledger"],
     ] {
@@ -423,8 +458,8 @@ fn every_route_that_loads_the_document_refuses() {
         one[1] = "one.fsl";
         assert_eq!(scratch.fslc(&one).0, 0, "{args:?}");
     }
-    // These two report the refusal with no `loc`; the message keeps the place.
-    for command in ["lint", "fmt"] {
+    // These report the refusal with no `loc`; the message keeps the place.
+    for command in ["lint", "fmt", "migrate"] {
         let (exit, packet) = scratch.fslc(&[command, "doc.fsl"]);
         assert_eq!(
             (exit, &packet["kind"], &packet["message"]),
