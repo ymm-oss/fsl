@@ -201,7 +201,7 @@ fn concurrent_literate_commands_keep_their_materializations_isolated() {
 }
 
 #[test]
-fn materialized_file_is_cleaned_up_after_check_and_verify() {
+fn no_literate_sibling_exists_after_check_and_verify() {
     let dir = std::env::temp_dir().join(format!("fslc-literate-cleanup-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let doc = dir.join("cleanup_test.md");
@@ -215,13 +215,13 @@ fn materialized_file_is_cleaned_up_after_check_and_verify() {
     let _ = run_cli(&["check", doc_str]);
     assert!(
         !has_literate_sibling(&dir),
-        "materialized file leaked after check"
+        "check created a literate sibling"
     );
 
     let _ = run_cli(&["verify", doc_str, "--depth", "2", "--no-cache"]);
     assert!(
         !has_literate_sibling(&dir),
-        "materialized file leaked after verify"
+        "verify created a literate sibling"
     );
 
     let _ = std::fs::remove_dir_all(&dir);

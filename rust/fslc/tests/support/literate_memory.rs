@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
-//! Generated BASE-only complete acceptance anchors; see anchors-r2/prepare_anchors.py.
+//! Complete acceptance anchors captured from the CLI before the in-memory change.
+//! The verifier and core versions are filled from the package when loaded; the Z3
+//! version and solver counts stay pinned.
 #![allow(dead_code)]
 
 #[path = "fifo_snapshot.rs"]
@@ -269,8 +271,17 @@ fn warm_packet(mut semantic_body: Value, key: &str) -> Value {
 }
 
 fn anchor_data() -> Value {
-    serde_json::from_str(include_str!("literate_memory_anchors.json"))
-        .expect("generated BASE-only anchors")
+    let mut data: Value = serde_json::from_str(include_str!("literate_memory_anchors.json"))
+        .expect("generated BASE-only anchors");
+    for anchor in data["anchors"].as_object_mut().unwrap().values_mut() {
+        let Some(versions) = anchor["json"].get_mut("versions") else {
+            continue;
+        };
+        for component in ["verifier", "core"] {
+            versions[component]["version"] = json!(env!("CARGO_PKG_VERSION"));
+        }
+    }
+    data
 }
 fn anchor_for(fixture: &str, command: &str) -> Option<Value> {
     let data = anchor_data();
@@ -731,6 +742,8 @@ mod comparison_controls {
                 ("/result", json!("violated")),
                 ("/fsl", json!("drift")),
                 ("/versions/verifier/version", json!("drift")),
+                ("/versions/core/version", json!("drift")),
+                ("/versions/solver/version", json!("drift")),
                 ("/checked_to_depth", json!(999)),
                 ("/cost/solver/checks", json!(999)),
                 ("/cost/solver/decisions", json!(999)),

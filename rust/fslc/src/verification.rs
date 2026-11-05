@@ -3669,19 +3669,15 @@ mod tests {
         assert_ne!(current, updated);
     }
 
-    /// Preservation control (issue #1023, not a detector): the per-process
-    /// literate materialization (`literate_access.rs`, `.{stem}.literate-
-    /// {pid}.fsl`) sitting beside the checked `.md` document is never read
-    /// through `RecordingResolver` (it is the checked document's own root
-    /// source, read directly by content, never a `from`/`use` target), so
-    /// its run-local PID-bearing name cannot enter the key's dependency set
-    /// by construction. This already passes before #1023 (the pre-existing
-    /// `is_literate_materialization` exclusion, now removed as dead code,
-    /// covered the same case for the directory walk), and must keep passing
-    /// after: a literate document verified twice must hit the cache the
-    /// second time.
+    /// Preservation control (issue #1023, not a detector): the logical
+    /// `.{stem}.literate-{pid}.fsl` path (`literate_access.rs`) beside the
+    /// checked `.md` document is never read through `RecordingResolver`,
+    /// because the root source is captured by content and is never a
+    /// `from`/`use` target. Its run-local PID-bearing name cannot enter the
+    /// key's dependency set: a literate document verified twice must reach the
+    /// same key. A file left at that path by an older version changes nothing.
     #[test]
-    fn literate_materialization_never_enters_the_cache_key_dependency_set() {
+    fn literate_logical_path_never_enters_the_cache_key_dependency_set() {
         const SOURCE: &str = "spec Example { state { x: Int } init { x = 0 } }\n";
         let root = std::env::temp_dir().join(format!(
             "fslc-literate-materialization-cache-{}",
@@ -3707,7 +3703,7 @@ mod tests {
         assert_eq!(
             first, second,
             "re-verifying the same literate document must reach the same key \
-             (a run-local PID in the materialization's name must not leak in): {first:?} vs {second:?}"
+             (a run-local PID in the logical path must not leak in): {first:?} vs {second:?}"
         );
 
         let _ = std::fs::remove_dir_all(root);

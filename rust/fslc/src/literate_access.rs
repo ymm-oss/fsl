@@ -157,7 +157,7 @@ pub const LITERATE_SUPPORTED_COMMANDS: &[&str] = &["check", "verify", "scenarios
 /// through `main.rs`'s top-level `command()` dispatch (including the `compat`
 /// arm), `fmt_command()`, `document_command`'s shared `path` prelude,
 /// `db_command`, `ai_command`, `domain_command`, or `causal::causal_command`
-/// -- the same textual seams `materialize_literate`'s original two call sites
+/// -- the same textual seams the literate extractor's original two call sites
 /// (`check`, and the combined `verify`/`scenarios` arm) already sat in.
 ///
 /// A nested command's key is its space-joined path (`"document generate"`),

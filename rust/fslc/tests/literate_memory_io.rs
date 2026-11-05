@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
-//! A1–A3/A8 draft. Fixed fixture anchors, real child PIDs, no external oracle directory.
+//! Read-only, abrupt-death and concurrency behaviour of captured literate source,
+//! compared with fixed fixture anchors using real child PIDs.
 #![cfg(unix)]
 #[path = "support/literate_memory.rs"]
 mod support;

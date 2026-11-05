@@ -40,8 +40,11 @@ logical path beside the original `.md`. It is never created, read or unlinked
 as the extracted root. This preserves the existing scenarios root-admission
 labels: edition migration findings and implicit-initial-value warnings may
 name that synthetic path. Check and verify pass the original `.md` separately
-for their root admission/display labels; the earlier claim that every public
-label always named the Markdown file was not true of scenarios.
+for their root admission/display labels, but `verify` still names the synthetic path
+in `/message` and, for domain documents, in the `source_file` of `/origin`,
+`/last_action/origin`, `/trace/*/action/origin` and `/deadlock/trace/*/action/origin`.
+The earlier claim that every public label always named the Markdown file was not true
+of scenarios or of those `verify` fields.
 
 Concurrent commands do not share a mutable extracted file, and abrupt
 termination cannot leave a newly materialized source sibling. Existing
@@ -178,12 +181,12 @@ without a separate code path).
   run with trailing text staying content inside an fsl block).
 - `rust/fslc/tests/literate_markdown.rs`: 12 CLI integration tests (check,
   verify, scenarios, parse-error loc mapping, no-fsl rejection, non-fsl
-  rejection, multi-block = single-block verdict, materialized-file cleanup,
+  rejection, multi-block = single-block verdict, no literate sibling after a run,
   verify-cache hit on a second run, edition-finding `file` field naming the
   `.md` document, four-backtick fence repro verifying as `violated`, and
   concurrent check/verify/scenarios isolation on one Markdown source).
 - `rust/fslc/src/main.rs` and `rust/fslc/src/verification.rs` unit tests:
-  process IDs produce distinct materialization paths, and symlink-alias cache
+  process IDs produce distinct logical paths, and symlink-alias cache
   keys invalidate when a dependency beside the alias changes.
 - `examples/literate/toggle.md`: canonical literate example.
 
@@ -221,3 +224,10 @@ remain exact. Controls cover all roles, the six observed CI transitions,
 both-side invalid/missing scalars, cold-to-warm propagation and rejecting
 binding/stable-field drift. Their native execution remains a separate validation
 obligation, not implied by this note.
+
+The anchors take the verifier and core versions from `CARGO_PKG_VERSION` when loaded,
+so a version bump does not rewrite them, and a wrong version is still rejected. The Z3
+version and the exact solver counts, including `decisions` and `propagations`, stay
+pinned. These tests also run on macOS. While optimistic CI is enabled, the macOS native Z3
+job does not run on pull requests or in the merge queue, so a change here should run it
+through `workflow_dispatch` on the branch before merge.
