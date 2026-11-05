@@ -1102,8 +1102,10 @@ fn command() -> Result<(Value, i32), String> {
             };
             let path = literate_guard
                 .as_ref()
-                .map_or(&display_path, |state| &state.path);
-            let source = match read_spec_source(path) {
+                .map_or_else(|| display_path.clone(), |state| state.path.clone());
+            let source = match literate_guard
+                .map_or_else(|| read_spec_source(&path), |state| Ok(state.source))
+            {
                 Ok(source) => source,
                 Err(error) => return Ok((spec_load_error_output(&error), 2)),
             };
@@ -1121,11 +1123,11 @@ fn command() -> Result<(Value, i32), String> {
                     Ok(source),
                     None,
                     false,
-                    |source| run_causal_check(path, source),
+                    |source| run_causal_check(&path, source),
                 ));
             }
             Ok(with_version_metadata(run_check_with_tags_from_source(
-                path,
+                &path,
                 &display_path,
                 &source,
                 options.strict_tags,
@@ -1487,14 +1489,16 @@ fn command() -> Result<(Value, i32), String> {
             };
             let path = literate_guard
                 .as_ref()
-                .map_or(&display_path, |state| &state.path);
+                .map_or_else(|| display_path.clone(), |state| state.path.clone());
             Ok(if command == "verify" {
-                let source = match read_spec_source(path) {
+                let source = match literate_guard
+                    .map_or_else(|| read_spec_source(&path), |state| Ok(state.source))
+                {
                     Ok(source) => source,
                     Err(error) => return Ok((spec_load_error_output(&error), 2)),
                 };
                 with_version_metadata(run_verify_cli_from_source(
-                    path,
+                    &path,
                     &display_path,
                     &source,
                     &options,
@@ -1503,7 +1507,9 @@ fn command() -> Result<(Value, i32), String> {
                 if !options.only_depth_and_deadlock() {
                     return Err("scenarios accepts only --depth and --deadlock".to_owned());
                 }
-                run_scenarios(path, options.depth, &options.deadlock)
+                let source = literate_guard
+                    .map_or_else(|| read_spec_source(&path), |state| Ok(state.source));
+                run_scenarios(&path, source, options.depth, &options.deadlock)
             })
         }
         _ => Err(format!("unknown command '{command}'")),
@@ -5505,20 +5511,21 @@ fn replay_failure_with_state(
     (Value::Object(output), 1)
 }
 
-#[allow(clippy::too_many_lines)]
-fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
-        None,
-        false,
-        |sources, editions| {
-            finish_admitted(
-                run_scenarios_from_source(path, &sources[0], depth, deadlock_mode),
-                editions,
-                false,
-            )
-        },
-    )
+// `path` is the existing logical diagnostic/resolver context; `source` owns
+// the extracted root for literate input, without reading a synthetic sibling.
+fn run_scenarios(
+    path: &Path,
+    source: Result<String, SpecLoadError>,
+    depth: usize,
+    deadlock_mode: &str,
+) -> (Value, i32) {
+    run_admitted_roots(vec![(path, source)], None, false, |sources, editions| {
+        finish_admitted(
+            run_scenarios_from_source(path, &sources[0], depth, deadlock_mode),
+            editions,
+            false,
+        )
+    })
 }
 
 fn run_scenarios_from_source(
@@ -6123,7 +6130,7 @@ fn format_bindings(binding: &fsl_runtime::Bindings) -> String {
 /// Check one caller-owned root-source snapshot.
 ///
 /// The displayed path intentionally remains independent of the path used to
-/// resolve imports, including for materialized literate sources.
+/// resolve imports, including for captured literate sources.
 fn run_check_from_source(
     path: &Path,
     display_path: &Path,

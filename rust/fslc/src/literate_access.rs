@@ -13,14 +13,14 @@
 //! exit code (2, the spec-error class) but not about the cause: the command
 //! does not understand the input's *kind*, not the spec's syntax.
 //!
-//! [`materialize_literate`] used to live in `main.rs` with exactly two call
+//! The literate extractor used to live in `main.rs` with exactly two call
 //! sites (`check`, and the shared `verify`/`scenarios` arm). A third command
 //! would have reached the surface parser unfixed by simply not knowing this
 //! function existed -- a helper called from N arms is not ownership, because
 //! arm N+1 is written without it. [`literate_access`] is now the one
 //! function every arm that reads a spec path calls immediately after
-//! resolving its command key: it materializes for [`LiterateSupport::Supported`]
-//! commands exactly as before, and fails closed with
+//! resolving its command key: it captures extracted source for
+//! [`LiterateSupport::Supported`] commands, and fails closed with
 //! [`LITERATE_UNSUPPORTED_CODE`] for [`LiterateSupport::Unsupported`] ones
 //! instead of ever reaching the parser. [`LITERATE_REGISTRY`] is the
 //! enumeration that *is* the registry (following `outcome::outcome_class`'s
@@ -90,24 +90,18 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-/// A `.md` input materialized into a process-owned `.fsl` sibling. Dropping
-/// it removes the sibling file.
+/// A captured `.md` input and its compatibility-only logical `.fsl` path.
 ///
-/// Each CLI process owns its own materialization; the original Markdown path
-/// is used separately as the stable verify-cache identity, so physical
-/// isolation does not trade away cache hits across invocations.
+/// The path preserves existing diagnostic labels and the lexical resolver base;
+/// no file is created or removed there. The original Markdown path is passed
+/// separately as the display path and verify-cache identity.
 pub struct LiterateState {
     pub path: PathBuf,
+    pub source: String,
 }
 
-impl Drop for LiterateState {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-/// Extract literate Markdown FSL's ```` ```fsl ```` fences from `path` into a
-/// temporary `.fsl` sibling, when `path`'s extension is `.md`.
+/// Capture literate Markdown FSL's ```` ```fsl ```` fences from `path` in
+/// memory, when `path`'s extension is `.md`.
 ///
 /// Returns `Ok(None)` when `path` is not a `.md` path at all, so callers use
 /// `path` unchanged in that case.
@@ -116,7 +110,7 @@ impl Drop for LiterateState {
 ///
 /// Returns a message when `path` cannot be read or contains no ```` ```fsl ````
 /// fenced code blocks.
-pub fn materialize_literate(path: &Path) -> Result<Option<LiterateState>, String> {
+fn capture_literate(path: &Path) -> Result<Option<LiterateState>, String> {
     if path.extension().and_then(std::ffi::OsStr::to_str) != Some("md") {
         return Ok(None);
     }
@@ -132,11 +126,13 @@ pub fn materialize_literate(path: &Path) -> Result<Option<LiterateState>, String
         .file_stem()
         .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("literate");
-    let materialized = literate_materialization_path(path, stem, std::process::id());
-    std::fs::write(&materialized, &blanked).map_err(|error| error.to_string())?;
-    Ok(Some(LiterateState { path: materialized }))
+    Ok(Some(LiterateState {
+        path: literate_materialization_path(path, stem, std::process::id()),
+        source: blanked,
+    }))
 }
 
+// Retain the historical name/shape for diagnostic compatibility, not filesystem I/O.
 fn literate_materialization_path(path: &Path, stem: &str, process_id: u32) -> PathBuf {
     path.with_file_name(format!(".{stem}.literate-{process_id}.fsl"))
 }
@@ -145,7 +141,7 @@ fn literate_materialization_path(path: &Path, stem: &str, process_id: u32) -> Pa
 /// input, or fails closed instead of handing raw Markdown to the parser.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LiterateSupport {
-    /// Materializes the `.md` input exactly as `check` does.
+    /// Captures the `.md` input's extracted source exactly as `check` does.
     Supported,
     /// Fails closed with [`LITERATE_UNSUPPORTED_CODE`] naming the commands
     /// that do support it, instead of reaching the surface parser.
@@ -161,7 +157,7 @@ pub const LITERATE_SUPPORTED_COMMANDS: &[&str] = &["check", "verify", "scenarios
 /// through `main.rs`'s top-level `command()` dispatch (including the `compat`
 /// arm), `fmt_command()`, `document_command`'s shared `path` prelude,
 /// `db_command`, `ai_command`, `domain_command`, or `causal::causal_command`
-/// -- the same textual seams `materialize_literate`'s original two call sites
+/// -- the same textual seams the literate extractor's original two call sites
 /// (`check`, and the combined `verify`/`scenarios` arm) already sat in.
 ///
 /// A nested command's key is its space-joined path (`"document generate"`),
@@ -296,14 +292,14 @@ pub fn literate_unsupported_output(command_key: &str, path: &Path) -> Value {
 }
 
 /// The single call every arm that reads a spec path makes immediately after
-/// resolving `command_key`, in place of calling [`materialize_literate`]
+/// resolving `command_key`, in place of calling the literate extractor
 /// directly.
 ///
 /// Returns `Ok(None)` when `display_path` is not literate input at all (any
 /// extension other than `.md`) -- callers use `display_path` unchanged, as
 /// `check` and `verify`/`scenarios` already did before this function
-/// existed. A supported command's `.md` input still materializes exactly as
-/// before; an unsupported one's fails closed with the envelope
+/// existed. A supported command's `.md` input is captured in memory;
+/// an unsupported one's fails closed with the envelope
 /// [`literate_unsupported_output`] renders, ready to return directly as the
 /// command's own `(Value, i32)` result.
 ///
@@ -318,7 +314,7 @@ pub fn literate_unsupported_output(command_key: &str, path: &Path) -> Value {
 /// # Errors
 ///
 /// Returns the `(Value, i32)` envelope and exit code the caller should
-/// return verbatim: an IO failure materializing a supported command's input,
+/// return verbatim: an IO failure capturing a supported command's input,
 /// or the unsupported-command diagnostic.
 pub fn literate_access(
     command_key: &str,
@@ -328,7 +324,7 @@ pub fn literate_access(
         return Ok(None);
     }
     match literate_support(command_key) {
-        Some(LiterateSupport::Supported) => materialize_literate(display_path).map_err(|message| {
+        Some(LiterateSupport::Supported) => capture_literate(display_path).map_err(|message| {
             (
                 json!({"fsl":"1.0","result":"error","kind":"io","message":message}),
                 2,

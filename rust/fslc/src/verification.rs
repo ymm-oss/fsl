@@ -25,7 +25,7 @@ use crate::spec_loading::{
     load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
     load_state_snapshot, require_trace_gate, validate_specialized_document_from_source,
 };
-use crate::strict_tags::add_strict_tag_warnings;
+use crate::strict_tags::add_strict_tag_warnings_from_source;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum VerificationEngine {
@@ -2202,16 +2202,12 @@ fn suppressed_implements_section(source: &str, reasons: &[&'static str]) -> Opti
 /// (nested `from`/`use` reuses the same resolver instance all the way
 /// down), so the relative path is already unambiguous, and it matches what
 /// the pre-#1023 directory walk hashed for an in-parent dependency
-/// (`source.strip_prefix(base)`). A checked literate `.md` document is
-/// verified through a per-process `.{stem}.literate-{pid}.fsl`
-/// materialization (`literate_access.rs`) sitting beside it; that sibling
-/// was excluded from the old walk for exactly this reason
-/// (`is_literate_materialization`) and never reaches this resolver at all
-/// (its own root source is read directly, by content, never through a
-/// `from`/`use` clause) — but recording relative-to-base keeps that
-/// property true by construction rather than by a second exclusion list,
-/// instead of an absolute path that would embed a directory a symlinked
-/// alias resolves through.
+/// (`source.strip_prefix(base)`). A checked literate `.md` document uses a
+/// captured root source and a compatibility-only logical `.fsl` path beside
+/// it (`literate_access.rs`). That path never reaches this resolver as the
+/// root; recording relative to its lexical parent preserves symlink-alias
+/// dependency identity without a second exclusion list or an absolute path
+/// embedding the directory the alias resolves through.
 struct RecordingResolver {
     base: PathBuf,
     reads: std::cell::RefCell<Vec<(PathBuf, String)>>,
@@ -2378,7 +2374,7 @@ fn run_verify_cli_kernel_from_source(
                 Err(error) => return (implements_error_output(&error), 2),
             }
         }
-        return finalize_cli_verification(path, options, &prepared, None, output, status);
+        return finalize_cli_verification(source, options, &prepared, None, output, status);
     }
     // The inline `implements` seam's dependency is read here, before the
     // cache key below, rather than inside `execute_cli_verification`
@@ -2440,7 +2436,7 @@ fn run_verify_cli_kernel_from_source(
         suppressed_implements_section(source, &suppression),
     );
     let (output, status) = finalize_cli_verification(
-        path,
+        source,
         options,
         &prepared,
         cache_keys.as_ref(),
@@ -2952,7 +2948,7 @@ fn describe_scope_overrides(scope: &ScopeBounds) -> String {
 }
 
 fn finalize_cli_verification(
-    path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
     cache_keys: Option<&(String, String)>,
@@ -3004,7 +3000,7 @@ fn finalize_cli_verification(
     if status == 0
         && options.strict_tags
         && let Err(output) = add_cli_strict_tag_warnings(
-            path,
+            source,
             options,
             prepared
                 .model
@@ -3097,13 +3093,19 @@ fn add_snapshot_metadata(output: &mut Value, options: &CliVerifyOptions) {
 }
 
 fn add_cli_strict_tag_warnings(
-    path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
     model: &KernelModel,
     output: &mut Value,
 ) -> Result<(), CommandResult> {
-    add_strict_tag_warnings(output, model, path, true, options.requirements.as_deref())
-        .map_err(|error| (error_output("io", &error), 2))
+    add_strict_tag_warnings_from_source(
+        output,
+        model,
+        source,
+        true,
+        options.requirements.as_deref(),
+    )
+    .map_err(|error| (error_output("io", &error), 2))
 }
 #[cfg(test)]
 mod tests {
@@ -3667,19 +3669,15 @@ mod tests {
         assert_ne!(current, updated);
     }
 
-    /// Preservation control (issue #1023, not a detector): the per-process
-    /// literate materialization (`literate_access.rs`, `.{stem}.literate-
-    /// {pid}.fsl`) sitting beside the checked `.md` document is never read
-    /// through `RecordingResolver` (it is the checked document's own root
-    /// source, read directly by content, never a `from`/`use` target), so
-    /// its run-local PID-bearing name cannot enter the key's dependency set
-    /// by construction. This already passes before #1023 (the pre-existing
-    /// `is_literate_materialization` exclusion, now removed as dead code,
-    /// covered the same case for the directory walk), and must keep passing
-    /// after: a literate document verified twice must hit the cache the
-    /// second time.
+    /// Preservation control (issue #1023, not a detector): the logical
+    /// `.{stem}.literate-{pid}.fsl` path (`literate_access.rs`) beside the
+    /// checked `.md` document is never read through `RecordingResolver`,
+    /// because the root source is captured by content and is never a
+    /// `from`/`use` target. Its run-local PID-bearing name cannot enter the
+    /// key's dependency set: a literate document verified twice must reach the
+    /// same key. A file left at that path by an older version changes nothing.
     #[test]
-    fn literate_materialization_never_enters_the_cache_key_dependency_set() {
+    fn literate_logical_path_never_enters_the_cache_key_dependency_set() {
         const SOURCE: &str = "spec Example { state { x: Int } init { x = 0 } }\n";
         let root = std::env::temp_dir().join(format!(
             "fslc-literate-materialization-cache-{}",
@@ -3705,7 +3703,7 @@ mod tests {
         assert_eq!(
             first, second,
             "re-verifying the same literate document must reach the same key \
-             (a run-local PID in the materialization's name must not leak in): {first:?} vs {second:?}"
+             (a run-local PID in the logical path must not leak in): {first:?} vs {second:?}"
         );
 
         let _ = std::fs::remove_dir_all(root);

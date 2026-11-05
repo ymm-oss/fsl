@@ -161,7 +161,7 @@ spec Toggle {
 }
 
 #[test]
-fn concurrent_literate_commands_keep_their_materializations_isolated() {
+fn concurrent_literate_commands_leave_no_literate_sibling() {
     let dir = std::env::temp_dir().join(format!("fslc-literate-concurrent-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let document = dir.join("literate_toggle.md");
@@ -195,13 +195,13 @@ fn concurrent_literate_commands_keep_their_materializations_isolated() {
     }
     assert!(
         !has_literate_sibling(&dir),
-        "concurrent commands leaked a materialized source"
+        "concurrent commands left a literate sibling"
     );
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-fn materialized_file_is_cleaned_up_after_check_and_verify() {
+fn no_literate_sibling_exists_after_check_and_verify() {
     let dir = std::env::temp_dir().join(format!("fslc-literate-cleanup-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let doc = dir.join("cleanup_test.md");
@@ -215,13 +215,13 @@ fn materialized_file_is_cleaned_up_after_check_and_verify() {
     let _ = run_cli(&["check", doc_str]);
     assert!(
         !has_literate_sibling(&dir),
-        "materialized file leaked after check"
+        "check created a literate sibling"
     );
 
     let _ = run_cli(&["verify", doc_str, "--depth", "2", "--no-cache"]);
     assert!(
         !has_literate_sibling(&dir),
-        "materialized file leaked after verify"
+        "verify created a literate sibling"
     );
 
     let _ = std::fs::remove_dir_all(&dir);
@@ -297,9 +297,9 @@ impl Drop for LiterateCacheDir {
 
 #[test]
 fn literate_verify_cache_hits_on_the_second_run() {
-    // The physical materialization is process-owned, but the cache identity is
-    // the original Markdown path and transient siblings are excluded from the
-    // dependency walk. The fsl content below embeds a fresh nonce so this test's
+    // The synthetic logical path changes with the process id, but the cache
+    // identity is the original Markdown path and that synthetic path never enters
+    // the dependency set. The fsl content below embeds a fresh nonce so this test's
     // cache entry cannot collide with any other test's.
     let cache = LiterateCacheDir::new("hit");
     let dir = std::env::temp_dir().join(format!("fslc-literate-cache-doc-{}", std::process::id()));
@@ -353,8 +353,7 @@ fn literate_check_edition_finding_names_the_markdown_file_not_the_materializatio
     // `deprecated_domain_enum_union` warning under the default "current"
     // edition — see `issue_244_domain_enum.rs`) in a literate `.md` fence and
     // asserts the finding's `loc.file` names the `.md` path, never the
-    // transient `.literate.fsl` materialization `apply_domain_edition` reads
-    // from.
+    // synthetic `.literate-*.fsl` logical path, which is never a file on disk.
     let dir = std::env::temp_dir().join(format!("fslc-literate-edition-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let inner = std::fs::read_to_string(

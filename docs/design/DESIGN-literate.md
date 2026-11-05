@@ -26,29 +26,35 @@ The blanking function (`fsl_syntax::extract_literate_fsl`) returns `None`
 when no ` ```fsl ` fence is found, so non-literate `.md` files are never
 misidentified.
 
-### Materialization
+### Captured source and diagnostic context
 
-The native CLI (`fslc`) materializes the blanked text to a process-owned
-`.{stem}.literate-{pid}.fsl` sibling next to the original `.md`, passes that
-path to the existing check/verify pipeline, and removes its own sibling on
-completion (via a `Drop` guard). This design avoids modifying every independent
-`read_to_string` call site in the CLI — the blanked file is read from disk by
-all existing code paths, and positions are correct because blanking preserves
-line structure. The materialized path is used only to read source content;
-every user-visible label in the CLI's JSON output (`file` fields, migration
-and implicit-initial-value finding locations) is stamped with the original
-`.md` path instead, so machine-readable output never names the transient
-sibling.
+The native CLI (`fslc`) captures the blanked text in an owned `String` and
+passes it to the existing source-based check/verify/scenarios consumers.
+Root edition admission, requirement-tag validation (including verify's
+`--strict-tags`), and refinement/governance folds consume that extracted
+source, not raw Markdown or a second read of an extracted file. Blanking
+preserves the source line structure used by diagnostics.
 
-Process ownership is required: concurrent commands for one `.md` document must
-not write or delete another command's physical source. The original Markdown
-path is passed separately as the logical verify-cache identity, so PID-based
-physical isolation preserves cache hits across commands (see "Cache key"
-below). Cache dependency discovery still uses the physical sibling's directory,
-which is also the resolver base; this distinction keeps symlink aliases tied to
-the dependencies they actually resolve. The sibling still requires write
-access to the source directory. An in-memory buffer remains a possible future
-shared-source-loader refactoring, but is not required for concurrency safety.
+For compatibility, `.{stem}.literate-{pid}.fsl` is still calculated as a
+logical path beside the original `.md`. It is never created, read or unlinked
+as the extracted root. This preserves the existing scenarios root-admission
+labels: edition migration findings and implicit-initial-value warnings may
+name that synthetic path. Check and verify pass the original `.md` separately
+for their root admission/display labels, but `verify` still names the synthetic path
+in `/message` and, for domain documents, in the `source_file` of `/origin`,
+`/last_action/origin`, `/trace/*/action/origin` and `/deadlock/trace/*/action/origin`.
+The earlier claim that every public label always named the Markdown file was not true
+of scenarios or of those `verify` fields.
+
+Concurrent commands do not share a mutable extracted file, and abrupt
+termination cannot leave a newly materialized source sibling. Existing
+abandoned siblings are not removed or modified. Source-directory write
+access is no longer needed for extraction; verifier-cache writes remain
+independent. The original Markdown path remains the verify-cache identity
+input (see "Cache key" below). The logical path's lexical parent is still
+the resolver base, preserving dependencies beside a symlink alias rather
+than rebasing to the canonical target. Dependency files retain their
+existing independent read semantics; this is not an atomic filesystem snapshot.
 
 ### Multiple blocks
 
@@ -112,20 +118,21 @@ is not supported.
 
 ### Cache key
 
-`collect_fsl_sources` (verify cache-key computation) includes `.md` files
-in directory walks so that edits to literate Markdown specs invalidate the
-verification cache. Transient `.{stem}.literate-{pid}.fsl` materializations
-(see "Materialization" above) are excluded from that walk by filename suffix
-— their content is already represented by the `.md` file itself through this
-same function's Markdown branch, so including it too would double-count it
-and make a run-local sibling appear as an independent dependency. For literate
-input, the cache key's `path` field uses the canonicalized original `.md` path,
-not the process-owned physical read path, and the original Markdown bytes are
-hashed directly. Dependency collection starts at the physical read path's
-parent so it exactly matches the resolver base, including when the Markdown
-input is a symlink. Repeated and concurrent invocations therefore share one
-logical cache identity without sharing a mutable file or losing dependency
-invalidation.
+Verify hashes the original Markdown bytes, not just the extracted FSL, so
+prose-only edits also invalidate the cache. The entry path itself is not
+hashed or canonicalized into a key field. Dependency inputs are the paths
+relative to the lexical resolver base and contents actually read by the
+recording resolver during model preparation and an active inline `implements`
+seam. No directory walk collects unrelated siblings. Options, backend/solver,
+implementation fingerprint and optional requirements-file bytes remain key
+inputs as for ordinary specs.
+
+The synthetic diagnostic path and process ID do not enter the cache key.
+Repeated and concurrent invocations can therefore share cached kernel results
+without sharing a mutable extracted file. Governance preservations still fold
+outside the kernel cache, including on a hit. Dependencies beside a Markdown
+symlink alias remain recorded from that alias's lexical parent, not from the
+canonical target's directory.
 
 ## 3. Scope boundaries
 
@@ -174,11 +181,53 @@ without a separate code path).
   run with trailing text staying content inside an fsl block).
 - `rust/fslc/tests/literate_markdown.rs`: 12 CLI integration tests (check,
   verify, scenarios, parse-error loc mapping, no-fsl rejection, non-fsl
-  rejection, multi-block = single-block verdict, materialized-file cleanup,
+  rejection, multi-block = single-block verdict, no literate sibling after a run,
   verify-cache hit on a second run, edition-finding `file` field naming the
   `.md` document, four-backtick fence repro verifying as `violated`, and
   concurrent check/verify/scenarios isolation on one Markdown source).
 - `rust/fslc/src/main.rs` and `rust/fslc/src/verification.rs` unit tests:
-  process IDs produce distinct materialization paths, and symlink-alias cache
+  process IDs produce distinct logical paths, and symlink-alias cache
   keys invalidate when a dependency beside the alias changes.
 - `examples/literate/toggle.md`: canonical literate example.
+
+### Field-role comparison of solver memory (#1420)
+
+CI 41347782003's three supplied failing comparison pairs have exactly one
+non-timing difference each, `/cost/solver/memory_mb`: `compose/verify`
+(17.67 → 17.24), `governance-ok/verify` (17.68 → 17.24), and
+`strict-tags/verify` (18.36 → 17.91). Their complete expected bodies map to
+those three BASE anchor IDs, not to every phase in the failing tests. Newly
+supplied CI pairs additionally show `governance-cold/verify` and
+`root-edition4/verify` (both 17.68 → 17.24), and proved
+`strict-tags-lemma/verify` (18.35 → 17.9), again differing only in memory and
+existing elapsed leaves. These independent phases supersede the earlier
+per-ID comparison choice with field-family evidence, not a relaxed product
+contract or evidence of a product-semantic defect.
+
+`tests/support/literate_memory.rs` classifies only known immutable BASE
+bindings: command `verify`, backend `native-z3`, a positive unsigned solver
+check count, and the audited independent/prebound (`warm`) role. Neither
+mutable comparison body determines eligibility. Controls pin the disjoint
+census: 14 independent, 6 prebound and 42 other strict bindings. Independent
+allocation telemetry is validated as present, numeric, finite and nonnegative
+on both sides before excluding precisely `/cost/solver/memory_mb`. Unknown,
+unbound, nonqueried and nonnative roles stay strict. Historical `numeric_memory`
+flags remain unchanged measurements, not policy; in particular, the flags on
+`compose-warm` and `compose-prose-warm` do not authorize independent warm drift.
+
+All six prebound roles reconstruct only expected memory from the `CacheBinding`
+captured before the warm command. Actual full cost must equal that exact prior
+cost even if public output and a later cache entry agree with each other;
+cold output must equal its own published cost. Other JSON, counters, versions,
+locations, keys, cache source, exits, raw stderr and existing timing policy
+remain exact. Controls cover all roles, the six observed CI transitions,
+both-side invalid/missing scalars, cold-to-warm propagation and rejecting
+binding/stable-field drift. Their native execution remains a separate validation
+obligation, not implied by this note.
+
+The anchors take the verifier and core versions from `CARGO_PKG_VERSION` when loaded,
+so a version bump does not rewrite them, and a wrong version is still rejected. The Z3
+version and the exact solver counts, including `decisions` and `propagations`, stay
+pinned. These tests also run on macOS. While optimistic CI is enabled, the macOS native Z3
+job does not run on pull requests or in the merge queue, so a change here should run it
+through `workflow_dispatch` on the branch before merge.

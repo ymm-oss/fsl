@@ -8,16 +8,6 @@ use std::path::Path;
 use fsl_core::KernelModel;
 use serde_json::{Value, json};
 
-#[allow(clippy::too_many_lines)]
-pub(crate) fn strict_tag_warnings(
-    model: &KernelModel,
-    source_path: &Path,
-    requirements: Option<&Path>,
-) -> Result<Vec<Value>, String> {
-    let source = std::fs::read_to_string(source_path).map_err(|error| error.to_string())?;
-    strict_tag_warnings_from_source(model, &source, requirements)
-}
-
 /// Collect every requirement ID that some declaration or trace case references.
 ///
 /// The two halves are not the same shape. The first enumerates the `KernelModel` collections
@@ -190,10 +180,10 @@ pub(crate) fn strict_tag_warnings_from_source(
     Ok(warnings)
 }
 
-pub(crate) fn add_strict_tag_warnings(
+pub(crate) fn add_strict_tag_warnings_from_source(
     output: &mut Value,
     model: &KernelModel,
-    source_path: &Path,
+    source: &str,
     strict_tags: bool,
     requirements: Option<&Path>,
 ) -> Result<(), String> {
@@ -205,7 +195,7 @@ pub(crate) fn add_strict_tag_warnings(
     {
         return Ok(());
     }
-    let additions = strict_tag_warnings(model, source_path, requirements)?;
+    let additions = strict_tag_warnings_from_source(model, source, requirements)?;
     let Some(envelope) = output.as_object_mut() else {
         return Ok(());
     };

@@ -66,9 +66,9 @@ publishes files in its existing iteration order. Causal output still publishes
 evidence before the corresponding lifecycle file. A later file's failure does
 not roll back earlier completed outputs; this is not a file-set transaction.
 
-Literate extraction, development mutants configuration, migration write-set
-rollback, and verification cache publication are separate responsibilities and
-are not routed through this helper. Frozen Python, Worker, public Kernel,
+Development mutants configuration, migration write-set rollback, and
+verification cache publication are separate responsibilities and are not routed
+through this helper. Frozen Python, Worker, public Kernel,
 schemas, and language semantics are unchanged.
 
 ## Permissions and intentional compatibility boundaries

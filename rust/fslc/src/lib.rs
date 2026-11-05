@@ -17,7 +17,7 @@ pub mod junit_report;
 // (issue #665). Declared on the library side for the same reason `outcome`
 // is: integration tests under `tests/` link the library, not the binary, and
 // need to gate the registry against `cli-contract.json` directly. Native-CLI
-// filesystem materialization is not meaningful to `fsl-lsp`/`fsl-wasm`, which
+// filesystem access is not meaningful to `fsl-lsp`/`fsl-wasm`, which
 // depend on this crate with `default-features = false`.
 #[cfg(feature = "native-cli")]
 pub mod literate_access;

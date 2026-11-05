@@ -1,0 +1,4911 @@
+{
+  "anchors": {
+    "toggle/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "ok",
+        "spec": "Toggle",
+        "warnings": [],
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590550,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "toggle",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "toggle/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "scenarios",
+        "spec": "Toggle",
+        "depth": 4,
+        "convention": "set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]",
+        "scenarios": [
+          {
+            "steps": [
+              {
+                "action": "toggle",
+                "params": {}
+              }
+            ],
+            "initial_state": {
+              "active": false
+            },
+            "expected_states": [
+              {
+                "active": true
+              }
+            ],
+            "name": "cover_toggle",
+            "kind": "action_coverage",
+            "action": "toggle"
+          }
+        ],
+        "warnings": []
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590554,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "toggle",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "compose/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "ok",
+        "spec": "C",
+        "warnings": [],
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590559,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "compose",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "compose/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "C",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "s.Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "s.finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008035484,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.00045270399999999985,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 8,
+            "memory_mb": 17.67
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "s.finish",
+              "checks": 1,
+              "elapsed_s": 2.9465e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 2.624e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000382699
+            },
+            {
+              "kind": "invariant",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.404e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 6.5410000000000006e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.803e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_s.done",
+              "checks": 5,
+              "elapsed_s": 9.998e-06
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 1.617e-05
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590563,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "compose",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "compose/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "scenarios",
+        "spec": "C",
+        "depth": 4,
+        "convention": "set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]",
+        "scenarios": [
+          {
+            "steps": [
+              {
+                "action": "s.finish",
+                "params": {}
+              }
+            ],
+            "initial_state": {
+              "s.done": false
+            },
+            "expected_states": [
+              {
+                "s.done": true
+              }
+            ],
+            "name": "cover_s.finish",
+            "kind": "action_coverage",
+            "action": "s.finish"
+          }
+        ],
+        "warnings": []
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590569,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "compose",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "bad-dependency/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "component \"dep.fsl\" failed to parse (expected kernel spec declaration at dep.fsl:1:9) at src/doc.md:4:13",
+        "loc": {
+          "line": 4,
+          "column": 13
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590573,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "bad-dependency",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "bad-dependency/verify": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "component \"dep.fsl\" failed to parse (expected kernel spec declaration at dep.fsl:1:9) at src/.doc.literate-590577.fsl:4:13",
+        "loc": {
+          "line": 4,
+          "column": 13
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590577,
+      "pid_fields": [
+        {
+          "pointer": "/message",
+          "prefix": "component \"dep.fsl\" failed to parse (expected kernel spec declaration at dep.fsl:1:9) at ",
+          "suffix": ":4:13"
+        }
+      ],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "bad-dependency",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "bad-dependency/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "component \"dep.fsl\" failed to parse (expected kernel spec declaration at dep.fsl:1:9) at src/.doc.literate-590581.fsl:4:13",
+        "loc": {
+          "line": 4,
+          "column": 13
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590581,
+      "pid_fields": [
+        {
+          "pointer": "/message",
+          "prefix": "component \"dep.fsl\" failed to parse (expected kernel spec declaration at dep.fsl:1:9) at ",
+          "suffix": ":4:13"
+        }
+      ],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "bad-dependency",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "wrong-parent/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "component \"dep.fsl\" could not be read (No such file or directory (os error 2)) at real/doc.md:4:13",
+        "loc": {
+          "line": 4,
+          "column": 13
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "real/doc.md",
+      "base_child_pid": 590585,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "wrong-parent",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "wrong-parent/verify": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "component \"dep.fsl\" could not be read (No such file or directory (os error 2)) at real/.doc.literate-590589.fsl:4:13",
+        "loc": {
+          "line": 4,
+          "column": 13
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "real/doc.md",
+      "base_child_pid": 590589,
+      "pid_fields": [
+        {
+          "pointer": "/message",
+          "prefix": "component \"dep.fsl\" could not be read (No such file or directory (os error 2)) at ",
+          "suffix": ":4:13"
+        }
+      ],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "wrong-parent",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "wrong-parent/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "component \"dep.fsl\" could not be read (No such file or directory (os error 2)) at real/.doc.literate-590593.fsl:4:13",
+        "loc": {
+          "line": 4,
+          "column": 13
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "real/doc.md",
+      "base_child_pid": 590593,
+      "pid_fields": [
+        {
+          "pointer": "/message",
+          "prefix": "component \"dep.fsl\" could not be read (No such file or directory (os error 2)) at ",
+          "suffix": ":4:13"
+        }
+      ],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "wrong-parent",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "strict-tags/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "ok",
+        "spec": "EmptyRequirementBlockDeclared",
+        "warnings": [
+          {
+            "kind": "no_user_invariants",
+            "message": "spec declares no user invariants (only implicit type bounds are checked)"
+          },
+          {
+            "kind": "unreferenced_requirement",
+            "element": "requirement",
+            "name": "REQ-EMPTY",
+            "loc": null,
+            "hint": "no declaration tag, acceptance, or forbidden block references this requirement ID"
+          }
+        ],
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590604,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "strict-tags",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "strict-tags/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "EmptyRequirementBlockDeclared",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "_bounds_n"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "bump": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [
+          {
+            "kind": "no_user_invariants",
+            "message": "spec declares no user invariants (only implicit type bounds are checked)"
+          },
+          {
+            "kind": "unreferenced_requirement",
+            "element": "requirement",
+            "name": "REQ-EMPTY",
+            "loc": null,
+            "hint": "no declaration tag, acceptance, or forbidden block references this requirement ID"
+          }
+        ],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.010895513,
+          "solver": {
+            "checks": 21,
+            "check_elapsed_s": 0.0018731059999999998,
+            "conflicts": 10,
+            "decisions": 2,
+            "propagations": 18,
+            "memory_mb": 18.36
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "bump",
+              "checks": 1,
+              "elapsed_s": 6.3679e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 6.1858e-05
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.001232684
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 8,
+              "elapsed_s": 0.00037612699999999997
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_n",
+              "checks": 5,
+              "elapsed_s": 0.000127367
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 1.1391e-05
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590608,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "strict-tags",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "strict-tags-lemma/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "EmptyRequirementBlockDeclared",
+        "result": "proved",
+        "engine": "induction",
+        "completeness": "unbounded",
+        "not_covered": [
+          "int_overflow"
+        ],
+        "checked_to_depth": 4,
+        "k_used": {
+          "_bounds_n": 1
+        },
+        "base_depth": 4,
+        "invariants_checked": [
+          "_bounds_n"
+        ],
+        "transitions_checked": [],
+        "action_coverage": {
+          "bump": true
+        },
+        "reachables": {},
+        "warnings": [
+          {
+            "kind": "no_user_invariants",
+            "message": "spec declares no user invariants (only implicit type bounds are checked)"
+          },
+          {
+            "kind": "unreferenced_requirement",
+            "element": "requirement",
+            "name": "REQ-EMPTY",
+            "loc": null,
+            "hint": "no declaration tag, acceptance, or forbidden block references this requirement ID"
+          }
+        ],
+        "cost": {
+          "elapsed_s": 0.007296698,
+          "solver": {
+            "checks": 22,
+            "check_elapsed_s": 0.0009333909999999999,
+            "conflicts": 10,
+            "decisions": 2,
+            "propagations": 18,
+            "memory_mb": 18.35
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "bump",
+              "checks": 1,
+              "elapsed_s": 2.0528e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 5.034500000000001e-05
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000496222
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 8,
+              "elapsed_s": 0.00020159800000000002
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_n",
+              "checks": 6,
+              "elapsed_s": 0.000128891
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 3.5807e-05
+            }
+          ]
+        },
+        "lemmas": [
+          {
+            "expression": "true",
+            "name": "AuxiliaryLemma1",
+            "status": "proved",
+            "used": false,
+            "proof": {
+              "result": "proved",
+              "k": 1,
+              "checked_to_depth": 4,
+              "completeness": "unbounded"
+            }
+          }
+        ],
+        "lemma_cti_exclusions": [],
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590614,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "strict-tags-lemma",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "root-edition4/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "ok",
+        "spec": "S",
+        "warnings": [
+          {
+            "code": "legacy_string_metadata",
+            "kind": "legacy_string_metadata",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "legacy string metadata is deprecated; use a typed annotation",
+            "loc": {
+              "file": "src/doc.md",
+              "line": 5,
+              "column": 87,
+              "end_line": 5,
+              "end_column": 106
+            },
+            "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 79,
+                "end": 79,
+                "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+              },
+              {
+                "start": 95,
+                "end": 123,
+                "replacement": ""
+              }
+            ]
+          }
+        ],
+        "fsl_edition": 4,
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590620,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "root-edition4",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "root-edition4/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "S",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [
+          {
+            "code": "legacy_string_metadata",
+            "kind": "legacy_string_metadata",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "legacy string metadata is deprecated; use a typed annotation",
+            "loc": {
+              "file": "src/doc.md",
+              "line": 5,
+              "column": 87,
+              "end_line": 5,
+              "end_column": 106
+            },
+            "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 79,
+                "end": 79,
+                "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+              },
+              {
+                "start": 95,
+                "end": 123,
+                "replacement": ""
+              }
+            ]
+          }
+        ],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008556613,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.00047354699999999994,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 8,
+            "memory_mb": 17.68
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "finish",
+              "checks": 1,
+              "elapsed_s": 2.9266e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 5.518e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000385513
+            },
+            {
+              "kind": "invariant",
+              "name": "Typed",
+              "checks": 5,
+              "elapsed_s": 2.956e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "Typed",
+              "checks": 5,
+              "elapsed_s": 6.001e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 1.0520000000000001e-05
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_done",
+              "checks": 5,
+              "elapsed_s": 1.3445e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 2.0328e-05
+            }
+          ]
+        },
+        "fsl_edition": 4,
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590624,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "root-edition4",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "root-edition4/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "scenarios",
+        "spec": "S",
+        "depth": 4,
+        "convention": "set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]",
+        "scenarios": [
+          {
+            "steps": [
+              {
+                "action": "finish",
+                "params": {}
+              }
+            ],
+            "initial_state": {
+              "done": false
+            },
+            "expected_states": [
+              {
+                "done": true
+              }
+            ],
+            "name": "cover_finish",
+            "kind": "action_coverage",
+            "action": "finish"
+          }
+        ],
+        "warnings": [
+          {
+            "code": "legacy_string_metadata",
+            "kind": "legacy_string_metadata",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "legacy string metadata is deprecated; use a typed annotation",
+            "loc": {
+              "file": "src/.doc.literate-590630.fsl",
+              "line": 5,
+              "column": 87,
+              "end_line": 5,
+              "end_column": 106
+            },
+            "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 79,
+                "end": 79,
+                "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+              },
+              {
+                "start": 95,
+                "end": 123,
+                "replacement": ""
+              }
+            ]
+          }
+        ],
+        "fsl_edition": 4
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590630,
+      "pid_fields": [
+        {
+          "pointer": "/warnings/0/loc/file",
+          "prefix": "",
+          "suffix": ""
+        }
+      ],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "root-edition4",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "dependency-edition4/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "ok",
+        "spec": "C",
+        "warnings": [
+          {
+            "code": "legacy_string_metadata",
+            "kind": "legacy_string_metadata",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "legacy string metadata is deprecated; use a typed annotation",
+            "loc": {
+              "file": "dep.fsl",
+              "line": 2,
+              "column": 87,
+              "end_line": 2,
+              "end_column": 106
+            },
+            "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 76,
+                "end": 76,
+                "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+              },
+              {
+                "start": 92,
+                "end": 120,
+                "replacement": ""
+              }
+            ]
+          }
+        ],
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590634,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "dependency-edition4",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "dependency-edition4/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "C",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "s.Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "s.finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [
+          {
+            "code": "legacy_string_metadata",
+            "kind": "legacy_string_metadata",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "legacy string metadata is deprecated; use a typed annotation",
+            "loc": {
+              "file": "dep.fsl",
+              "line": 2,
+              "column": 87,
+              "end_line": 2,
+              "end_column": 106
+            },
+            "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 76,
+                "end": 76,
+                "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+              },
+              {
+                "start": 92,
+                "end": 120,
+                "replacement": ""
+              }
+            ]
+          }
+        ],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.00688216,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.000428461,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 8,
+            "memory_mb": 17.67
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "s.finish",
+              "checks": 1,
+              "elapsed_s": 2.3083e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 2.395e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000359454
+            },
+            {
+              "kind": "invariant",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.333e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 9.408e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.8850000000000003e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_s.done",
+              "checks": 5,
+              "elapsed_s": 1.0739e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 1.8164e-05
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590638,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "dependency-edition4",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "dependency-edition4/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "scenarios",
+        "spec": "C",
+        "depth": 4,
+        "convention": "set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]",
+        "scenarios": [
+          {
+            "steps": [
+              {
+                "action": "s.finish",
+                "params": {}
+              }
+            ],
+            "initial_state": {
+              "s.done": false
+            },
+            "expected_states": [
+              {
+                "s.done": true
+              }
+            ],
+            "name": "cover_s.finish",
+            "kind": "action_coverage",
+            "action": "s.finish"
+          }
+        ],
+        "warnings": [
+          {
+            "code": "legacy_string_metadata",
+            "kind": "legacy_string_metadata",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "legacy string metadata is deprecated; use a typed annotation",
+            "loc": {
+              "file": "dep.fsl",
+              "line": 2,
+              "column": 87,
+              "end_line": 2,
+              "end_column": 106
+            },
+            "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 76,
+                "end": 76,
+                "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+              },
+              {
+                "start": 92,
+                "end": 120,
+                "replacement": ""
+              }
+            ]
+          }
+        ]
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590644,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "dependency-edition4",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "dependency-edition5/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "unsupported_in_edition",
+        "edition": "next",
+        "findings": [
+          {
+            "code": "legacy_string_metadata",
+            "kind": "legacy_string_metadata",
+            "taxonomy": "deprecated",
+            "severity": "error",
+            "edition": "next",
+            "message": "legacy string metadata is deprecated; use a typed annotation",
+            "loc": {
+              "file": "dep.fsl",
+              "line": 2,
+              "column": 87,
+              "end_line": 2,
+              "end_column": 106
+            },
+            "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 76,
+                "end": 76,
+                "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+              },
+              {
+                "start": 92,
+                "end": 120,
+                "replacement": ""
+              }
+            ]
+          }
+        ],
+        "fsl_edition": 5,
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590648,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "dependency-edition5",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "dependency-edition5/verify": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "unsupported_in_edition",
+        "edition": "next",
+        "findings": [
+          {
+            "code": "legacy_string_metadata",
+            "kind": "legacy_string_metadata",
+            "taxonomy": "deprecated",
+            "severity": "error",
+            "edition": "next",
+            "message": "legacy string metadata is deprecated; use a typed annotation",
+            "loc": {
+              "file": "dep.fsl",
+              "line": 2,
+              "column": 87,
+              "end_line": 2,
+              "end_column": 106
+            },
+            "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 76,
+                "end": 76,
+                "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+              },
+              {
+                "start": 92,
+                "end": 120,
+                "replacement": ""
+              }
+            ]
+          }
+        ],
+        "fsl_edition": 5,
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590652,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "dependency-edition5",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "dependency-edition5/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "unsupported_in_edition",
+        "edition": "next",
+        "findings": [
+          {
+            "code": "legacy_string_metadata",
+            "kind": "legacy_string_metadata",
+            "taxonomy": "deprecated",
+            "severity": "error",
+            "edition": "next",
+            "message": "legacy string metadata is deprecated; use a typed annotation",
+            "loc": {
+              "file": "dep.fsl",
+              "line": 2,
+              "column": 87,
+              "end_line": 2,
+              "end_column": 106
+            },
+            "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 76,
+                "end": 76,
+                "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+              },
+              {
+                "start": 92,
+                "end": 120,
+                "replacement": ""
+              }
+            ]
+          }
+        ],
+        "fsl_edition": 5
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590656,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "dependency-edition5",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "parse/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "parse",
+        "message": "unexpected character '$' at 11:3",
+        "diagnostic_code": "FSL-PARSE",
+        "loc": {
+          "line": 11,
+          "column": 3
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590660,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "parse",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "parse/verify": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "parse",
+        "message": "unexpected character '$' at 11:3",
+        "diagnostic_code": "FSL-PARSE",
+        "loc": {
+          "line": 11,
+          "column": 3
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590664,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "parse",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "parse/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "parse",
+        "message": "unexpected character '$' at 11:3",
+        "diagnostic_code": "FSL-PARSE",
+        "loc": {
+          "line": 11,
+          "column": 3
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590668,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "parse",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "type/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "invalid model expression: public Kernel cannot type identifier 'unknown' at 11:3",
+        "loc": {
+          "line": 11,
+          "column": 3
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590672,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "type",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "type/verify": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "invalid model expression: public Kernel cannot type identifier 'unknown' at 11:3",
+        "loc": {
+          "line": 11,
+          "column": 3
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590676,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "type",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "type/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "invalid model expression: public Kernel cannot type identifier 'unknown' at 11:3",
+        "loc": {
+          "line": 11,
+          "column": 3
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590680,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "type",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "causal/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "parse",
+        "message": "unexpected end of causal model",
+        "diagnostic_code": "FSL-PARSE",
+        "loc": {
+          "line": 6,
+          "column": 1
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590684,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "causal",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "causal/verify": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "parse",
+        "message": "unexpected end of causal model at 6:1",
+        "diagnostic_code": "FSL-PARSE",
+        "loc": {
+          "line": 6,
+          "column": 1
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590688,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "causal",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "causal/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "parse",
+        "message": "unsupported top-level declaration 'causal'; supported dialect keywords: spec, refinement, compose, business, governance, requirements, domain, dbsystem, ai_component, agent at 4:1",
+        "diagnostic_code": "FSL-DIALECT-UNKNOWN",
+        "loc": {
+          "line": 4,
+          "column": 1
+        },
+        "supported_dialects": [
+          "spec",
+          "refinement",
+          "compose",
+          "business",
+          "governance",
+          "requirements",
+          "domain",
+          "dbsystem",
+          "ai_component",
+          "agent"
+        ]
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590692,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "causal",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "missing/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "io",
+        "message": "src/missing.md: No such file or directory (os error 2)"
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/missing.md",
+      "base_child_pid": 590696,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "missing",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "domain-warning/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "ok",
+        "spec": "CanonicalEnum",
+        "warnings": [
+          {
+            "code": "deprecated_domain_enum_union",
+            "kind": "deprecated_domain_enum_union",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "legacy domain enum union syntax is deprecated",
+            "loc": {
+              "file": "src/doc.md",
+              "line": 6,
+              "column": 3,
+              "end_line": 6,
+              "end_column": 35
+            },
+            "canonical_replacement": "enum Status { Pending, Approved }",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 157,
+                "end": 189,
+                "replacement": "enum Status { Pending, Approved }"
+              }
+            ],
+            "suggestion": {
+              "kind": "replace",
+              "replacement": "enum Status { Pending, Approved }",
+              "span": {
+                "start": 157,
+                "end": 189
+              },
+              "machine_applicable": true
+            }
+          }
+        ],
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590700,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "domain-warning",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "scenarios-option/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "usage",
+        "message": "unknown scenarios option '--strict-tags'"
+      },
+      "exit": 2,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590704,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "scenarios-option",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "governance-ok/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "ok",
+        "spec": "G",
+        "warnings": [],
+        "governance": {
+          "name": "G",
+          "controls": [
+            "CTRL-1"
+          ],
+          "delegates": [],
+          "preservations": [
+            {
+              "name": "P",
+              "before": "A",
+              "after": "I",
+              "preserve": [
+                "CTRL-1"
+              ],
+              "result": "refines"
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590708,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "governance-ok",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "governance-ok/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "G",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "_governance_catalog_ok"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "_governance_noop": {
+            "covered": false,
+            "blocking_requires": [],
+            "hint": "these requires clauses are unsatisfiable at every step up to depth 4; weaken one of them, add an action that establishes them, or increase --depth",
+            "faithfulness_class": "intent_unexercised",
+            "recommended_action": "add a single-shot reachable for the action / raise --depth",
+            "requirement": {
+              "id": "GOV",
+              "text": "governance catalog G"
+            },
+            "requirements": [
+              {
+                "id": "GOV",
+                "text": "governance catalog G"
+              }
+            ]
+          }
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.009465078,
+          "solver": {
+            "checks": 36,
+            "check_elapsed_s": 0.000531739,
+            "conflicts": 6,
+            "decisions": 1,
+            "propagations": 1,
+            "memory_mb": 17.68
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "_governance_noop",
+              "checks": 5,
+              "elapsed_s": 6.521000000000001e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000401182
+            },
+            {
+              "kind": "invariant",
+              "name": "_governance_catalog_ok",
+              "checks": 5,
+              "elapsed_s": 7.6705e-05
+            },
+            {
+              "kind": "partial_op",
+              "name": "_governance_catalog_ok",
+              "checks": 5,
+              "elapsed_s": 7.2929999999999995e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 6.604e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "terminal",
+              "checks": 10,
+              "elapsed_s": 1.6159000000000002e-05
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds__governance_ok",
+              "checks": 5,
+              "elapsed_s": 1.6553000000000002e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 7.22e-07
+            }
+          ]
+        },
+        "governance": {
+          "name": "G",
+          "controls": [
+            "CTRL-1"
+          ],
+          "delegates": [],
+          "preservations": [
+            {
+              "name": "P",
+              "before": "A",
+              "after": "I",
+              "preserve": [
+                "CTRL-1"
+              ],
+              "result": "refines"
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590712,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "governance-ok",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "governance-ok/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "scenarios",
+        "spec": "G",
+        "depth": 4,
+        "convention": "set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]",
+        "scenarios": [],
+        "warnings": [],
+        "governance": {
+          "name": "G",
+          "controls": [
+            "CTRL-1"
+          ],
+          "delegates": [],
+          "preservations": [
+            {
+              "name": "P",
+              "before": "A",
+              "after": "I",
+              "preserve": [
+                "CTRL-1"
+              ],
+              "result": "refines"
+            }
+          ]
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590718,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "governance-ok",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "governance-bad/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "refinement_failed",
+        "spec": "G",
+        "warnings": [],
+        "governance": {
+          "name": "G",
+          "controls": [
+            "CTRL-1"
+          ],
+          "delegates": [],
+          "preservations": [
+            {
+              "name": "P",
+              "before": "A",
+              "after": "I",
+              "preserve": [
+                "CTRL-1"
+              ],
+              "result": "refinement_failed"
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 1,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590722,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "governance-bad",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "governance-bad/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "refinement_failed",
+        "spec": "G",
+        "depth": 4,
+        "convention": "set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]",
+        "scenarios": [],
+        "warnings": [],
+        "governance": {
+          "name": "G",
+          "controls": [
+            "CTRL-1"
+          ],
+          "delegates": [],
+          "preservations": [
+            {
+              "name": "P",
+              "before": "A",
+              "after": "I",
+              "preserve": [
+                "CTRL-1"
+              ],
+              "result": "refinement_failed"
+            }
+          ]
+        }
+      },
+      "exit": 1,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590726,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "governance-bad",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "implements-ok/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "ok",
+        "spec": "ChainRequirements",
+        "warnings": [
+          {
+            "code": "inline_action_maps",
+            "kind": "inline_action_maps",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "inline maps are deprecated; use an explicit action correspondence",
+            "loc": {
+              "file": "src/doc.md",
+              "line": 20,
+              "column": 28,
+              "end_line": 20,
+              "end_column": 42
+            },
+            "canonical_replacement": "action finish(i: Item) -> finish(i)",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 363,
+                "end": 377,
+                "replacement": ""
+              },
+              {
+                "start": 150,
+                "end": 150,
+                "replacement": "    action finish(i: Item) -> finish(i)\n"
+              }
+            ]
+          }
+        ],
+        "implements": {
+          "abs": "ChainBusiness",
+          "result": "refines"
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590730,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "implements-ok",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "implements-ok/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "ChainRequirements",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "_bounds_req"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "finish": true
+        },
+        "deadlock": {
+          "found": true,
+          "at_step": 1,
+          "trace": [
+            {
+              "step": 0,
+              "state": {
+                "req": {
+                  "0": "RDraft"
+                }
+              }
+            },
+            {
+              "step": 1,
+              "state": {
+                "req": {
+                  "0": "RDone"
+                }
+              },
+              "action": {
+                "name": "finish",
+                "params": {
+                  "i": 0
+                },
+                "loc": {
+                  "line": 20,
+                  "column": 5
+                }
+              },
+              "changes": {
+                "req[0]": {
+                  "from": "RDraft",
+                  "to": "RDone"
+                }
+              }
+            }
+          ]
+        },
+        "warnings": [
+          {
+            "kind": "deadlock",
+            "message": "deadlock reachable at step 1 (state: req={0: RDone})",
+            "hint": "add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional"
+          },
+          {
+            "code": "inline_action_maps",
+            "kind": "inline_action_maps",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "inline maps are deprecated; use an explicit action correspondence",
+            "loc": {
+              "file": "src/doc.md",
+              "line": 20,
+              "column": 28,
+              "end_line": 20,
+              "end_column": 42
+            },
+            "canonical_replacement": "action finish(i: Item) -> finish(i)",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 363,
+                "end": 377,
+                "replacement": ""
+              },
+              {
+                "start": 150,
+                "end": 150,
+                "replacement": "    action finish(i: Item) -> finish(i)\n"
+              }
+            ]
+          }
+        ],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.010509499,
+          "solver": {
+            "checks": 19,
+            "check_elapsed_s": 0.001144406,
+            "conflicts": 6,
+            "decisions": null,
+            "propagations": 5,
+            "memory_mb": 18.27
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "finish",
+              "checks": 1,
+              "elapsed_s": 6.6335e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 3,
+              "elapsed_s": 4.341e-05
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000834256
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 8,
+              "elapsed_s": 8.8807e-05
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_req",
+              "checks": 5,
+              "elapsed_s": 0.00010020599999999998
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 1.1392e-05
+            }
+          ]
+        },
+        "implements": {
+          "abs": "ChainBusiness",
+          "result": "refines"
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590736,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "implements-ok",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "implements-ok/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "scenarios",
+        "spec": "ChainRequirements",
+        "depth": 4,
+        "convention": "set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]",
+        "scenarios": [
+          {
+            "steps": [
+              {
+                "action": "finish",
+                "params": {
+                  "i": 0
+                }
+              }
+            ],
+            "initial_state": {
+              "req": {
+                "0": "RDraft"
+              }
+            },
+            "expected_states": [
+              {
+                "req": {
+                  "0": "RDone"
+                }
+              }
+            ],
+            "name": "cover_finish",
+            "kind": "action_coverage",
+            "action": "finish",
+            "requirement": {
+              "id": "REQ-1",
+              "text": "an item can finish"
+            },
+            "requirements": [
+              {
+                "id": "REQ-1",
+                "text": "an item can finish"
+              }
+            ]
+          },
+          {
+            "steps": [
+              {
+                "action": "finish",
+                "params": {
+                  "i": 0
+                }
+              }
+            ],
+            "initial_state": {
+              "req": {
+                "0": "RDraft"
+              }
+            },
+            "expected_states": [
+              {
+                "req": {
+                  "0": "RDone"
+                }
+              }
+            ],
+            "name": "deadlock_terminal",
+            "kind": "deadlock",
+            "note": "after these steps no action is enabled"
+          }
+        ],
+        "warnings": [
+          {
+            "code": "inline_action_maps",
+            "kind": "inline_action_maps",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "inline maps are deprecated; use an explicit action correspondence",
+            "loc": {
+              "file": "src/.doc.literate-590742.fsl",
+              "line": 20,
+              "column": 28,
+              "end_line": 20,
+              "end_column": 42
+            },
+            "canonical_replacement": "action finish(i: Item) -> finish(i)",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 363,
+                "end": 377,
+                "replacement": ""
+              },
+              {
+                "start": 150,
+                "end": 150,
+                "replacement": "    action finish(i: Item) -> finish(i)\n"
+              }
+            ]
+          }
+        ],
+        "implements": {
+          "abs": "ChainBusiness",
+          "result": "refines"
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590742,
+      "pid_fields": [
+        {
+          "pointer": "/warnings/0/loc/file",
+          "prefix": "",
+          "suffix": ""
+        }
+      ],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "implements-ok",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "implements-bad/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "refinement_failed",
+        "spec": "ChainRequirementsBrokenImplements",
+        "warnings": [
+          {
+            "code": "inline_action_maps",
+            "kind": "inline_action_maps",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "inline maps are deprecated; use an explicit action correspondence",
+            "loc": {
+              "file": "src/doc.md",
+              "line": 22,
+              "column": 28,
+              "end_line": 22,
+              "end_column": 42
+            },
+            "canonical_replacement": "action finish(i: Item) -> finish(i)",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 518,
+                "end": 532,
+                "replacement": ""
+              },
+              {
+                "start": 305,
+                "end": 305,
+                "replacement": "    action finish(i: Item) -> finish(i)\n"
+              }
+            ]
+          }
+        ],
+        "implements": {
+          "abs": "ChainBusiness",
+          "result": "refinement_failed",
+          "violation": {
+            "result": "refinement_failed",
+            "kind": "abs_state_mismatch"
+          }
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 1,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590746,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "implements-bad",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "implements-bad/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "ChainRequirementsBrokenImplements",
+        "result": "refinement_failed",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "_bounds_req"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "finish": true
+        },
+        "deadlock": {
+          "found": true,
+          "at_step": 1,
+          "trace": [
+            {
+              "step": 0,
+              "state": {
+                "req": {
+                  "0": "RDraft"
+                }
+              }
+            },
+            {
+              "step": 1,
+              "state": {
+                "req": {
+                  "0": "RDone"
+                }
+              },
+              "action": {
+                "name": "finish",
+                "params": {
+                  "i": 0
+                },
+                "loc": {
+                  "line": 22,
+                  "column": 5
+                }
+              },
+              "changes": {
+                "req[0]": {
+                  "from": "RDraft",
+                  "to": "RDone"
+                }
+              }
+            }
+          ]
+        },
+        "warnings": [
+          {
+            "kind": "deadlock",
+            "message": "deadlock reachable at step 1 (state: req={0: RDone})",
+            "hint": "add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional"
+          },
+          {
+            "code": "inline_action_maps",
+            "kind": "inline_action_maps",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "inline maps are deprecated; use an explicit action correspondence",
+            "loc": {
+              "file": "src/doc.md",
+              "line": 22,
+              "column": 28,
+              "end_line": 22,
+              "end_column": 42
+            },
+            "canonical_replacement": "action finish(i: Item) -> finish(i)",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 518,
+                "end": 532,
+                "replacement": ""
+              },
+              {
+                "start": 305,
+                "end": 305,
+                "replacement": "    action finish(i: Item) -> finish(i)\n"
+              }
+            ]
+          }
+        ],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.012256377,
+          "solver": {
+            "checks": 19,
+            "check_elapsed_s": 0.0013577090000000003,
+            "conflicts": 6,
+            "decisions": null,
+            "propagations": 5,
+            "memory_mb": 18.27
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "finish",
+              "checks": 1,
+              "elapsed_s": 7.2797e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 3,
+              "elapsed_s": 4.2239e-05
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.001036436
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 8,
+              "elapsed_s": 9.4477e-05
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_req",
+              "checks": 5,
+              "elapsed_s": 9.8565e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 1.3195e-05
+            }
+          ]
+        },
+        "implements": {
+          "abs": "ChainBusiness",
+          "result": "refinement_failed",
+          "violation": {
+            "result": "refinement_failed",
+            "kind": "abs_state_mismatch"
+          }
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 1,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590750,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "implements-bad",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "implements-bad/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "refinement_failed",
+        "spec": "ChainRequirementsBrokenImplements",
+        "depth": 4,
+        "convention": "set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]",
+        "scenarios": [
+          {
+            "steps": [
+              {
+                "action": "finish",
+                "params": {
+                  "i": 0
+                }
+              }
+            ],
+            "initial_state": {
+              "req": {
+                "0": "RDraft"
+              }
+            },
+            "expected_states": [
+              {
+                "req": {
+                  "0": "RDone"
+                }
+              }
+            ],
+            "name": "cover_finish",
+            "kind": "action_coverage",
+            "action": "finish",
+            "requirement": {
+              "id": "REQ-1",
+              "text": "an item can finish"
+            },
+            "requirements": [
+              {
+                "id": "REQ-1",
+                "text": "an item can finish"
+              }
+            ]
+          },
+          {
+            "steps": [
+              {
+                "action": "finish",
+                "params": {
+                  "i": 0
+                }
+              }
+            ],
+            "initial_state": {
+              "req": {
+                "0": "RDraft"
+              }
+            },
+            "expected_states": [
+              {
+                "req": {
+                  "0": "RDone"
+                }
+              }
+            ],
+            "name": "deadlock_terminal",
+            "kind": "deadlock",
+            "note": "after these steps no action is enabled"
+          }
+        ],
+        "warnings": [
+          {
+            "code": "inline_action_maps",
+            "kind": "inline_action_maps",
+            "taxonomy": "deprecated",
+            "severity": "warning",
+            "edition": "current",
+            "message": "inline maps are deprecated; use an explicit action correspondence",
+            "loc": {
+              "file": "src/.doc.literate-590757.fsl",
+              "line": 22,
+              "column": 28,
+              "end_line": 22,
+              "end_column": 42
+            },
+            "canonical_replacement": "action finish(i: Item) -> finish(i)",
+            "machine_applicable": true,
+            "edits": [
+              {
+                "start": 518,
+                "end": 532,
+                "replacement": ""
+              },
+              {
+                "start": 305,
+                "end": 305,
+                "replacement": "    action finish(i: Item) -> finish(i)\n"
+              }
+            ]
+          }
+        ],
+        "implements": {
+          "abs": "ChainBusiness",
+          "result": "refinement_failed",
+          "violation": {
+            "result": "refinement_failed",
+            "kind": "abs_state_mismatch"
+          }
+        }
+      },
+      "exit": 1,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590757,
+      "pid_fields": [
+        {
+          "pointer": "/warnings/0/loc/file",
+          "prefix": "",
+          "suffix": ""
+        }
+      ],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "implements-bad",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "ordinary/check": {
+      "json": {
+        "fsl": "1.0",
+        "result": "ok",
+        "spec": "S",
+        "warnings": [],
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/plain.fsl",
+      "base_child_pid": 590761,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "ordinary",
+        "phase": "check",
+        "repetition": 1
+      }
+    },
+    "ordinary/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "S",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.007582084,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.00046812799999999995,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 8,
+            "memory_mb": 17.68
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "finish",
+              "checks": 1,
+              "elapsed_s": 3.1509e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 2.735e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000379323
+            },
+            {
+              "kind": "invariant",
+              "name": "Typed",
+              "checks": 5,
+              "elapsed_s": 3.005e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "Typed",
+              "checks": 5,
+              "elapsed_s": 5.971000000000001e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 5.479999999999999e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_done",
+              "checks": 5,
+              "elapsed_s": 1.4748e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 2.5357e-05
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/plain.fsl",
+      "base_child_pid": 590765,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "ordinary",
+        "phase": "verify",
+        "repetition": 1
+      }
+    },
+    "ordinary/scenarios": {
+      "json": {
+        "fsl": "1.0",
+        "result": "scenarios",
+        "spec": "S",
+        "depth": 4,
+        "convention": "set up initial_state, invoke each step as an API call, and after step i assert only the fields mentioned in expected_states[i]",
+        "scenarios": [
+          {
+            "steps": [
+              {
+                "action": "finish",
+                "params": {}
+              }
+            ],
+            "initial_state": {
+              "done": false
+            },
+            "expected_states": [
+              {
+                "done": true
+              }
+            ],
+            "name": "cover_finish",
+            "kind": "action_coverage",
+            "action": "finish"
+          }
+        ],
+        "warnings": []
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/plain.fsl",
+      "base_child_pid": 590771,
+      "pid_fields": [],
+      "times": [],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "ordinary",
+        "phase": "scenarios",
+        "repetition": 1
+      }
+    },
+    "governance-cold/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "G",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "_governance_catalog_ok"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "_governance_noop": {
+            "covered": false,
+            "blocking_requires": [],
+            "hint": "these requires clauses are unsatisfiable at every step up to depth 4; weaken one of them, add an action that establishes them, or increase --depth",
+            "faithfulness_class": "intent_unexercised",
+            "recommended_action": "add a single-shot reachable for the action / raise --depth",
+            "requirement": {
+              "id": "GOV",
+              "text": "governance catalog G"
+            },
+            "requirements": [
+              {
+                "id": "GOV",
+                "text": "governance catalog G"
+              }
+            ]
+          }
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008212267,
+          "solver": {
+            "checks": 36,
+            "check_elapsed_s": 0.0004397429999999999,
+            "conflicts": 6,
+            "decisions": 1,
+            "propagations": 1,
+            "memory_mb": 17.68
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "_governance_noop",
+              "checks": 5,
+              "elapsed_s": 2.6229999999999997e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000366318
+            },
+            {
+              "kind": "invariant",
+              "name": "_governance_catalog_ok",
+              "checks": 5,
+              "elapsed_s": 4.316e-05
+            },
+            {
+              "kind": "partial_op",
+              "name": "_governance_catalog_ok",
+              "checks": 5,
+              "elapsed_s": 3.2970000000000004e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 6.001000000000001e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "terminal",
+              "checks": 10,
+              "elapsed_s": 4.7399999999999995e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds__governance_ok",
+              "checks": 5,
+              "elapsed_s": 1.2933e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 6.71e-07
+            }
+          ]
+        },
+        "governance": {
+          "name": "G",
+          "controls": [
+            "CTRL-1"
+          ],
+          "delegates": [],
+          "preservations": [
+            {
+              "name": "P",
+              "before": "A",
+              "after": "I",
+              "preserve": [
+                "CTRL-1"
+              ],
+              "result": "refines"
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590778,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "fixture": "governance-cache",
+        "phase": "cold",
+        "repetition": 1
+      }
+    },
+    "governance-warm/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "G",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "_governance_catalog_ok"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "_governance_noop": {
+            "covered": false,
+            "blocking_requires": [],
+            "hint": "these requires clauses are unsatisfiable at every step up to depth 4; weaken one of them, add an action that establishes them, or increase --depth",
+            "faithfulness_class": "intent_unexercised",
+            "recommended_action": "add a single-shot reachable for the action / raise --depth",
+            "requirement": {
+              "id": "GOV",
+              "text": "governance catalog G"
+            },
+            "requirements": [
+              {
+                "id": "GOV",
+                "text": "governance catalog G"
+              }
+            ]
+          }
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008212267,
+          "solver": {
+            "checks": 36,
+            "check_elapsed_s": 0.0004397429999999999,
+            "conflicts": 6,
+            "decisions": 1,
+            "propagations": 1,
+            "memory_mb": 17.68
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "_governance_noop",
+              "checks": 5,
+              "elapsed_s": 2.6229999999999997e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000366318
+            },
+            {
+              "kind": "invariant",
+              "name": "_governance_catalog_ok",
+              "checks": 5,
+              "elapsed_s": 4.316e-05
+            },
+            {
+              "kind": "partial_op",
+              "name": "_governance_catalog_ok",
+              "checks": 5,
+              "elapsed_s": 3.2970000000000004e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 6.001000000000001e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "terminal",
+              "checks": 10,
+              "elapsed_s": 4.7399999999999995e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds__governance_ok",
+              "checks": 5,
+              "elapsed_s": 1.2933e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 6.71e-07
+            }
+          ]
+        },
+        "cache": {
+          "hit": true,
+          "key": "46350ad96f1c20c191aed782a608134ee14560fc9ff9d14ad174154c2b9f6a32",
+          "source": "exact"
+        },
+        "governance": {
+          "name": "G",
+          "controls": [
+            "CTRL-1"
+          ],
+          "delegates": [],
+          "preservations": [
+            {
+              "name": "P",
+              "before": "A",
+              "after": "I",
+              "preserve": [
+                "CTRL-1"
+              ],
+              "result": "refines"
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590784,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": true,
+      "source_binding": {
+        "fixture": "governance-cache",
+        "phase": "warm",
+        "repetition": 1
+      }
+    },
+    "governance-cached-broken/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "G",
+        "result": "refinement_failed",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "_governance_catalog_ok"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "_governance_noop": {
+            "covered": false,
+            "blocking_requires": [],
+            "hint": "these requires clauses are unsatisfiable at every step up to depth 4; weaken one of them, add an action that establishes them, or increase --depth",
+            "faithfulness_class": "intent_unexercised",
+            "recommended_action": "add a single-shot reachable for the action / raise --depth",
+            "requirement": {
+              "id": "GOV",
+              "text": "governance catalog G"
+            },
+            "requirements": [
+              {
+                "id": "GOV",
+                "text": "governance catalog G"
+              }
+            ]
+          }
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008212267,
+          "solver": {
+            "checks": 36,
+            "check_elapsed_s": 0.0004397429999999999,
+            "conflicts": 6,
+            "decisions": 1,
+            "propagations": 1,
+            "memory_mb": 17.68
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "_governance_noop",
+              "checks": 5,
+              "elapsed_s": 2.6229999999999997e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000366318
+            },
+            {
+              "kind": "invariant",
+              "name": "_governance_catalog_ok",
+              "checks": 5,
+              "elapsed_s": 4.316e-05
+            },
+            {
+              "kind": "partial_op",
+              "name": "_governance_catalog_ok",
+              "checks": 5,
+              "elapsed_s": 3.2970000000000004e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 6.001000000000001e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "terminal",
+              "checks": 10,
+              "elapsed_s": 4.7399999999999995e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds__governance_ok",
+              "checks": 5,
+              "elapsed_s": 1.2933e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 6.71e-07
+            }
+          ]
+        },
+        "cache": {
+          "hit": true,
+          "key": "46350ad96f1c20c191aed782a608134ee14560fc9ff9d14ad174154c2b9f6a32",
+          "source": "exact"
+        },
+        "governance": {
+          "name": "G",
+          "controls": [
+            "CTRL-1"
+          ],
+          "delegates": [],
+          "preservations": [
+            {
+              "name": "P",
+              "before": "A",
+              "after": "I",
+              "preserve": [
+                "CTRL-1"
+              ],
+              "result": "refinement_failed"
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 1,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590786,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": true,
+      "source_binding": {
+        "fixture": "governance-cache",
+        "phase": "broken",
+        "repetition": 1
+      }
+    },
+    "compose-cold/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "C",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "s.Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "s.finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008140152,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.00056027,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 8,
+            "memory_mb": 17.68
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "s.finish",
+              "checks": 1,
+              "elapsed_s": 3.1239e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 6.0720000000000005e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000435177
+            },
+            {
+              "kind": "invariant",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 5.959e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 1.2434e-05
+            },
+            {
+              "kind": "partial_op",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 7.102e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_s.done",
+              "checks": 5,
+              "elapsed_s": 2.2853e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 3.9434e-05
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590795,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": true,
+      "warm": false,
+      "source_binding": {
+        "fixture": "compose-cache",
+        "phase": "cold",
+        "repetition": 1
+      }
+    },
+    "compose-warm/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "C",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "s.Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "s.finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008140152,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.00056027,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 8,
+            "memory_mb": 17.68
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "s.finish",
+              "checks": 1,
+              "elapsed_s": 3.1239e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 6.0720000000000005e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000435177
+            },
+            {
+              "kind": "invariant",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 5.959e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 1.2434e-05
+            },
+            {
+              "kind": "partial_op",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 7.102e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_s.done",
+              "checks": 5,
+              "elapsed_s": 2.2853e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 3.9434e-05
+            }
+          ]
+        },
+        "cache": {
+          "hit": true,
+          "key": "4df53755c0d53b977d0872a6a56d91e92e3f47053a6412acbdab6b02c0f20e05",
+          "source": "exact"
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590798,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": true,
+      "warm": true,
+      "source_binding": {
+        "fixture": "compose-cache",
+        "phase": "warm",
+        "repetition": 1
+      }
+    },
+    "compose-prose-cold/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "C",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "s.Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "s.finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008937909,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.0005429960000000001,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 8,
+            "memory_mb": 17.68
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "s.finish",
+              "checks": 1,
+              "elapsed_s": 2.8124e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 2.5340000000000002e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000476775
+            },
+            {
+              "kind": "invariant",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.3859999999999997e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 7.325e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.7560000000000004e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_s.done",
+              "checks": 5,
+              "elapsed_s": 9.9e-06
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 1.3196e-05
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590800,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": true,
+      "warm": false,
+      "source_binding": {
+        "fixture": "compose-cache",
+        "phase": "root-edit",
+        "repetition": 1
+      }
+    },
+    "compose-prose-warm/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "C",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "s.Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "s.finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008937909,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.0005429960000000001,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 8,
+            "memory_mb": 17.68
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "s.finish",
+              "checks": 1,
+              "elapsed_s": 2.8124e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 2.5340000000000002e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000476775
+            },
+            {
+              "kind": "invariant",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.3859999999999997e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 7.325e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.7560000000000004e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_s.done",
+              "checks": 5,
+              "elapsed_s": 9.9e-06
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 1.3196e-05
+            }
+          ]
+        },
+        "cache": {
+          "hit": true,
+          "key": "2779868b864afbfcc542f5bdcbd9bc48b1d3f24b59ca0a2ebb53454d573435bd",
+          "source": "exact"
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590803,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": true,
+      "warm": true,
+      "source_binding": {
+        "fixture": "compose-cache",
+        "phase": "root-warm",
+        "repetition": 1
+      }
+    },
+    "compose-changed-cold/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "C",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "s.Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "s.finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008357509,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.0004908979999999997,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 11,
+            "memory_mb": 17.67
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "s.finish",
+              "checks": 1,
+              "elapsed_s": 2.6109e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 6.8720000000000004e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000412213
+            },
+            {
+              "kind": "invariant",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.444e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 7.814e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 3.0250000000000003e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_s.done",
+              "checks": 5,
+              "elapsed_s": 1.3065e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 1.9356e-05
+            }
+          ]
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590805,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": true,
+      "warm": false,
+      "source_binding": {
+        "fixture": "compose-cache",
+        "phase": "dependency-edit",
+        "repetition": 1
+      }
+    },
+    "compose-changed-warm/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "C",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "s.Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "s.finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008357509,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.0004908979999999997,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 11,
+            "memory_mb": 17.67
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "s.finish",
+              "checks": 1,
+              "elapsed_s": 2.6109e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 6.8720000000000004e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000412213
+            },
+            {
+              "kind": "invariant",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.444e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 7.814e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 3.0250000000000003e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_s.done",
+              "checks": 5,
+              "elapsed_s": 1.3065e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 1.9356e-05
+            }
+          ]
+        },
+        "cache": {
+          "hit": true,
+          "key": "8e0fee241bfaef11c3b1bf9ca6ca77176017dca06785d5f1da002dcb0bb398e6",
+          "source": "exact"
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590811,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": true,
+      "source_binding": {
+        "fixture": "compose-cache",
+        "phase": "dependency-warm",
+        "repetition": 1
+      }
+    },
+    "compose-unrelated-warm/verify": {
+      "json": {
+        "fsl": "1.0",
+        "spec": "C",
+        "result": "verified",
+        "depth": 4,
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "invariants_checked": [
+          "s.Typed"
+        ],
+        "transitions_checked": [],
+        "reachables": {},
+        "action_coverage": {
+          "s.finish": true
+        },
+        "deadlock": {
+          "found": false
+        },
+        "warnings": [],
+        "note": "bounded verification: no violation within depth 4",
+        "cost": {
+          "elapsed_s": 0.008357509,
+          "solver": {
+            "checks": 27,
+            "check_elapsed_s": 0.0004908979999999997,
+            "conflicts": null,
+            "decisions": 1,
+            "propagations": 11,
+            "memory_mb": 17.67
+          },
+          "properties": [
+            {
+              "kind": "action_coverage",
+              "name": "s.finish",
+              "checks": 1,
+              "elapsed_s": 2.6109e-05
+            },
+            {
+              "kind": "deadlock",
+              "name": "deadlock",
+              "checks": 5,
+              "elapsed_s": 6.8720000000000004e-06
+            },
+            {
+              "kind": "init",
+              "name": "initial_state",
+              "checks": 1,
+              "elapsed_s": 0.000412213
+            },
+            {
+              "kind": "invariant",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 2.444e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "actions",
+              "checks": 4,
+              "elapsed_s": 7.814e-06
+            },
+            {
+              "kind": "partial_op",
+              "name": "s.Typed",
+              "checks": 5,
+              "elapsed_s": 3.0250000000000003e-06
+            },
+            {
+              "kind": "type_bound",
+              "name": "_bounds_s.done",
+              "checks": 5,
+              "elapsed_s": 1.3065e-05
+            },
+            {
+              "kind": "vacuity",
+              "name": "session",
+              "checks": 1,
+              "elapsed_s": 1.9356e-05
+            }
+          ]
+        },
+        "cache": {
+          "hit": true,
+          "key": "8e0fee241bfaef11c3b1bf9ca6ca77176017dca06785d5f1da002dcb0bb398e6",
+          "source": "exact"
+        },
+        "versions": {
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          },
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "name": "z3",
+            "backend": "native-z3",
+            "version": "Z3 4.16.0.0"
+          }
+        }
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": 590813,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": true,
+      "source_binding": {
+        "fixture": "compose-cache",
+        "phase": "unrelated",
+        "repetition": 1
+      }
+    },
+    "toggle/verify": {
+      "json": {
+        "action_coverage": {
+          "toggle": true
+        },
+        "checked_to_depth": 4,
+        "completeness": "bounded",
+        "cost": {
+          "elapsed_s": 0.015947777,
+          "properties": [
+            {
+              "checks": 1,
+              "elapsed_s": 4.283e-05,
+              "kind": "action_coverage",
+              "name": "toggle"
+            },
+            {
+              "checks": 5,
+              "elapsed_s": 6.973e-06,
+              "kind": "deadlock",
+              "name": "deadlock"
+            },
+            {
+              "checks": 1,
+              "elapsed_s": 0.000419976,
+              "kind": "init",
+              "name": "initial_state"
+            },
+            {
+              "checks": 5,
+              "elapsed_s": 4.007e-06,
+              "kind": "invariant",
+              "name": "AlwaysBool"
+            },
+            {
+              "checks": 5,
+              "elapsed_s": 1.057e-05,
+              "kind": "partial_op",
+              "name": "AlwaysBool"
+            },
+            {
+              "checks": 4,
+              "elapsed_s": 7.024e-06,
+              "kind": "partial_op",
+              "name": "actions"
+            },
+            {
+              "checks": 5,
+              "elapsed_s": 1.9065999999999997e-05,
+              "kind": "type_bound",
+              "name": "_bounds_active"
+            },
+            {
+              "checks": 1,
+              "elapsed_s": 2.9575e-05,
+              "kind": "vacuity",
+              "name": "session"
+            }
+          ],
+          "solver": {
+            "check_elapsed_s": 0.000540021,
+            "checks": 27,
+            "conflicts": null,
+            "decisions": 1,
+            "memory_mb": 17.68,
+            "propagations": 11
+          }
+        },
+        "deadlock": {
+          "found": false
+        },
+        "depth": 4,
+        "fsl": "1.0",
+        "invariants_checked": [
+          "AlwaysBool"
+        ],
+        "note": "bounded verification: no violation within depth 4",
+        "reachables": {},
+        "result": "verified",
+        "spec": "Toggle",
+        "transitions_checked": [],
+        "versions": {
+          "core": {
+            "name": "fsl-core",
+            "version": "4.12.0"
+          },
+          "solver": {
+            "backend": "native-z3",
+            "name": "z3",
+            "version": "Z3 4.16.0.0"
+          },
+          "verifier": {
+            "name": "fslc-rust",
+            "version": "4.12.0"
+          }
+        },
+        "warnings": []
+      },
+      "exit": 0,
+      "stderr_bytes": [],
+      "input": "src/doc.md",
+      "base_child_pid": null,
+      "pid_fields": [],
+      "times": [
+        "/cost/elapsed_s",
+        "/cost/solver/check_elapsed_s",
+        "/cost/properties/0/elapsed_s",
+        "/cost/properties/1/elapsed_s",
+        "/cost/properties/2/elapsed_s",
+        "/cost/properties/3/elapsed_s",
+        "/cost/properties/4/elapsed_s",
+        "/cost/properties/5/elapsed_s",
+        "/cost/properties/6/elapsed_s",
+        "/cost/properties/7/elapsed_s"
+      ],
+      "numeric_memory": false,
+      "warm": false,
+      "source_binding": {
+        "file": ".claude/work/1420-base-calibration/02-readonly-verify-1/raw-CLI-packets.json",
+        "id": "writable-verify"
+      }
+    }
+  },
+  "bindings": {
+    "toggle/check": "toggle/check",
+    "toggle/scenarios": "toggle/scenarios",
+    "compose/check": "compose/check",
+    "compose/verify": "compose/verify",
+    "compose/scenarios": "compose/scenarios",
+    "bad-dependency/check": "bad-dependency/check",
+    "bad-dependency/verify": "bad-dependency/verify",
+    "bad-dependency/scenarios": "bad-dependency/scenarios",
+    "wrong-parent/check": "wrong-parent/check",
+    "wrong-parent/verify": "wrong-parent/verify",
+    "wrong-parent/scenarios": "wrong-parent/scenarios",
+    "strict-tags/check": "strict-tags/check",
+    "strict-tags/verify": "strict-tags/verify",
+    "strict-tags-lemma/verify": "strict-tags-lemma/verify",
+    "root-edition4/check": "root-edition4/check",
+    "root-edition4/verify": "root-edition4/verify",
+    "root-edition4/scenarios": "root-edition4/scenarios",
+    "dependency-edition4/check": "dependency-edition4/check",
+    "dependency-edition4/verify": "dependency-edition4/verify",
+    "dependency-edition4/scenarios": "dependency-edition4/scenarios",
+    "dependency-edition5/check": "dependency-edition5/check",
+    "dependency-edition5/verify": "dependency-edition5/verify",
+    "dependency-edition5/scenarios": "dependency-edition5/scenarios",
+    "parse/check": "parse/check",
+    "parse/verify": "parse/verify",
+    "parse/scenarios": "parse/scenarios",
+    "type/check": "type/check",
+    "type/verify": "type/verify",
+    "type/scenarios": "type/scenarios",
+    "causal/check": "causal/check",
+    "causal/verify": "causal/verify",
+    "causal/scenarios": "causal/scenarios",
+    "missing/check": "missing/check",
+    "domain-warning/check": "domain-warning/check",
+    "scenarios-option/scenarios": "scenarios-option/scenarios",
+    "governance-ok/check": "governance-ok/check",
+    "governance-ok/verify": "governance-ok/verify",
+    "governance-ok/scenarios": "governance-ok/scenarios",
+    "governance-bad/check": "governance-bad/check",
+    "governance-bad/scenarios": "governance-bad/scenarios",
+    "implements-ok/check": "implements-ok/check",
+    "implements-ok/verify": "implements-ok/verify",
+    "implements-ok/scenarios": "implements-ok/scenarios",
+    "implements-bad/check": "implements-bad/check",
+    "implements-bad/verify": "implements-bad/verify",
+    "implements-bad/scenarios": "implements-bad/scenarios",
+    "ordinary/check": "ordinary/check",
+    "ordinary/verify": "ordinary/verify",
+    "ordinary/scenarios": "ordinary/scenarios",
+    "governance-cold/verify": "governance-cold/verify",
+    "governance-warm/verify": "governance-warm/verify",
+    "governance-cached-broken/verify": "governance-cached-broken/verify",
+    "compose-cold/verify": "compose-cold/verify",
+    "compose-warm/verify": "compose-warm/verify",
+    "compose-prose-cold/verify": "compose-prose-cold/verify",
+    "compose-prose-warm/verify": "compose-prose-warm/verify",
+    "compose-changed-cold/verify": "compose-changed-cold/verify",
+    "compose-changed-warm/verify": "compose-changed-warm/verify",
+    "compose-unrelated-warm/verify": "compose-unrelated-warm/verify",
+    "toggle/verify": "toggle/verify",
+    "missing/verify": "missing/check",
+    "missing/scenarios": "missing/check"
+  }
+}
