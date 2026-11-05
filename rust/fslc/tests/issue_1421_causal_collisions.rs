@@ -613,13 +613,10 @@ fn co3_distinct_publication_failure_keeps_interleaving_and_does_not_roll_back_pr
         std::fs::create_dir(&failed).expect("deterministic lifecycle publication failure");
         std::fs::write(failed.join("keep.txt"), b"preserved child sentinel\n")
             .expect("child sentinel");
-        let error = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&failed)
-            .expect_err("a directory is not a file destination");
         let mut expected_tree = inventory(&fixture.root);
+        // Publication refuses a non-regular target itself, on every platform.
         let expected = json!({"fsl":"1.0", "result":"error", "kind":"io",
-            "message":format!("cannot write {}: {error}", first_lifecycle.display())});
+            "message":format!("cannot write {}: output target is not a regular file", first_lifecycle.display())});
         same(&fixture.observe(Some(out), Some(lifecycle)), 2, &expected);
         expected_tree.insert(first_evidence, Node::File(reference.evidence[0].clone()));
         assert_eq!(
