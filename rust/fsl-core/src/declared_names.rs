@@ -98,7 +98,9 @@ impl<'a> Walk<'a> {
                     self.name(member, "enum member", member_spans.get(index).copied());
                 }
             }
-            SpecItem::Struct { name, fields, span } => {
+            SpecItem::Struct {
+                name, fields, span, ..
+            } => {
                 self.name(name, "struct", Some(*span));
                 for (field, _) in fields {
                     self.name(field, "struct field", Some(*span));

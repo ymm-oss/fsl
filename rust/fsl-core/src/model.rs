@@ -49,6 +49,52 @@ pub(crate) fn duplicate_formal<'a>(
     })
 }
 
+/// The first struct field whose name an earlier field already took, at that
+/// field's own span, or at `fallback` for a list without authored spans (#1692).
+pub(crate) fn repeated_struct_field<'a>(
+    fields: &'a [(String, TypeExpr)],
+    spans: &[Span],
+    fallback: Span,
+) -> Option<(&'a str, Span)> {
+    let mut names = BTreeSet::new();
+    fields.iter().enumerate().find_map(|(index, (name, _))| {
+        (!names.insert(name))
+            .then(|| (name.as_str(), spans.get(index).copied().unwrap_or(fallback)))
+    })
+}
+
+pub(crate) fn repeated_struct_field_message(name: &str, field: &str) -> String {
+    format!("duplicate struct field '{name}.{field}'")
+}
+
+/// Whether `message` is the refusal `repeated_struct_field_message` writes.
+pub(crate) fn is_repeated_struct_field_message(message: &str) -> bool {
+    message.starts_with("duplicate struct field '")
+}
+
+/// Each struct's repeated field in `kernel`, as the refusal's message and the
+/// repeated name's span.
+pub(crate) fn repeated_struct_fields(kernel: &crate::KernelSpec) -> Vec<(String, Span)> {
+    kernel
+        .spec
+        .items
+        .iter()
+        .filter_map(|item| {
+            let SpecItem::Struct {
+                name,
+                fields,
+                field_spans,
+                span,
+            } = item
+            else {
+                return None;
+            };
+            repeated_struct_field(fields, field_spans, *span)
+                .map(|(field, at)| (repeated_struct_field_message(name, field), at))
+        })
+        .collect()
+}
+
 pub(crate) fn duplicate_formal_message(formal: &str) -> String {
     format!("duplicate action parameter '{formal}'")
 }
@@ -1862,8 +1908,20 @@ impl ModelBuilder {
             }
         }
         for item in &items {
-            if let SpecItem::Struct { name, fields, span } = item {
+            if let SpecItem::Struct {
+                name,
+                fields,
+                field_spans,
+                span,
+            } = item
+            {
                 let origin = self.origins.diagnostic_origin(&type_target(name));
+                if let Some((field, at)) = repeated_struct_field(fields, field_spans, *span) {
+                    return Err(model_error(repeated_struct_field_message(name, field))
+                        .with_origin(origin)
+                        .into_name_resolution()
+                        .at(at));
+                }
                 // `TypeExpr` carries no span of its own, so the declaration's
                 // span is the closest true location a field-level type
                 // diagnostic can report (issue 555).

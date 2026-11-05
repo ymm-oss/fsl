@@ -72,6 +72,28 @@ fn error_at(message: impl Into<String>, span: Span) -> CoreError {
     }
 }
 
+/// Refuse a value object that declares a field twice, at the repeated field. It
+/// sits on the path every domain route shares: `domain expand` and `domain analyze`
+/// build no model, so the struct's own refusal would not reach them (#1692).
+fn reject_repeated_value_object_fields(domain: &DomainSpec) -> Result<(), CoreError> {
+    for ty in domain.types.iter().filter(|ty| ty.kind == "value_object") {
+        let mut seen = BTreeSet::new();
+        if let Some(field) = ty
+            .fields
+            .iter()
+            .find(|field| !seen.insert(&field.name.text))
+        {
+            let mut error = error_at(
+                crate::model::repeated_struct_field_message(&ty.name, &field.name.text),
+                field.name.span,
+            );
+            error.kind = crate::CoreErrorKind::NameResolution;
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_domain_enums(types: &[DomainType]) -> Result<(), CoreError> {
     for ty in types {
         if ty.kind != "enum" {
@@ -112,6 +134,7 @@ fn span_at(loc: DomainLoc) -> Span {
 /// are `semantics`-class diagnostics (an accepted-but-unlowerable construct),
 /// not name-resolution failures.
 pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), CoreError> {
+    reject_repeated_value_object_fields(domain)?;
     if let Some(awaited) = domain.awaits.first() {
         return Err(error_at(
             format!(
@@ -2255,6 +2278,7 @@ pub(crate) fn lower_domain_surface(
                         ))
                     })
                     .collect::<Result<Vec<_>, CoreError>>()?,
+                field_spans: ty.fields.iter().map(|field| field.name.span).collect(),
                 span: span_at(ty.loc),
             }),
             other => {

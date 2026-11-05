@@ -730,6 +730,22 @@ scalar | nested <code>Option&lt;scalar&gt;</code> | struct (scalar / nested <cod
   and <code>Option&lt;Set/Map/Seq/struct&gt;</code> are not allowed
   (rejected at check time with a hint). Optional scalar fields can be written
   directly inside a struct as of v2.1.</li>
+<li><strong>Breaking removal (#1692):</strong> a <code>struct</code> or <code>value_object</code> that declares a field
+  twice is refused at the repeated field, whether or not the two types agree and
+  whether or not anything reads the struct: exit 2, <code>kind: "name"</code>,
+  <code>duplicate struct field 'P.x'</code>, <code>loc</code> at the second <code>x</code>. <code>check</code> admitted a value by
+  the first type and the bounds refused it, so <code>struct P { x: K, x: Bool }</code> passed <code>check</code>
+  and <code>verify</code> returned <code>violated</code> on a value <code>x: K</code> alone accepts. <code>verify</code>, <code>sweep</code>,
+  <code>refine</code>, <code>replay</code>, <code>scenarios</code>, <code>testgen</code>, <code>mutate</code>, <code>html</code>, <code>ledger</code>, <code>diff</code>,
+  <code>migrate</code>, <code>document</code>, <code>kernel</code>, <code>typestate</code>, <code>lint</code>, <code>explain</code>, <code>analyze</code>,
+  <code>conformance</code>, <code>domain expand</code> and <code>domain analyze</code> no longer return their results on
+  them. <code>fmt</code> reports the same message as <code>kind: "semantics"</code> with no <code>loc</code>. A component
+  reports <code>component "piece.fsl" failed to check (duplicate struct field 'P.x' at
+  piece.fsl:3:20) at root.fsl:2:3</code>, <code>kind: "semantics"</code>, <code>loc</code> at the <code>use</code>. An inline
+  <code>implements</code> reports <code>implements "abs.fsl" failed to check (duplicate struct field
+  'P.x' at abs.fsl:3:20)</code>, <code>kind: "type"</code>, <code>loc</code> on the <code>implements</code>. Migration: keep the
+  one field you mean. There is no automatic migration. See
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-option-struct.md"><code>DESIGN-option-struct.md</code></a>, §1.</li>
 <li>A Map value may be a scalar, nested <code>Option&lt;scalar&gt;</code>, or a struct with those
   fields; nested Map/Set/Seq/relation values are rejected. In particular,
   <code>Map&lt;Id, Map&lt;K, Bool&gt;&gt;</code> is rejected because explicit-state execution cannot

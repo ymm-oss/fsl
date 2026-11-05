@@ -1816,9 +1816,12 @@ pub fn requirements_implements_with_bounds_with_options(
         options,
     )
     .map_err(|error| RefinementError {
-        // `loc` stays on the `implements`, so a repeated step input in the
-        // other file has to name its own place.
-        message: if crate::dialect::is_repeated_step_input(&error) {
+        // `loc` stays on the `implements`, so a repeated step input in the other
+        // file has to name its own place. So does a repeated value object field,
+        // which a domain refuses while it lowers, before `build_model`.
+        message: if crate::dialect::is_repeated_step_input(&error)
+            || crate::model::is_repeated_struct_field_message(&error.message)
+        {
             format!(
                 "implements \"{path}\" failed to check ({} at {path}:{}:{})",
                 error.message, error.line, error.column
@@ -1830,6 +1833,7 @@ pub fn requirements_implements_with_bounds_with_options(
         kind: RefinementErrorKind::Other,
     })?;
     let repeated = crate::model::duplicate_formals(&kernel);
+    let repeated_fields = crate::model::repeated_struct_fields(&kernel);
     let abstraction = build_model(kernel).map_err(|error| {
         // `loc` stays on the `implements`, so a repeated formal in the other
         // file has to name its own place, as a compose wrapper does.
@@ -1841,6 +1845,17 @@ pub fn requirements_implements_with_bounds_with_options(
                     "implements \"{path}\" failed to check ({action}: {message} at {path}:{}:{})",
                     at.start.line, at.start.column
                 )
+            })
+            .or_else(|| {
+                repeated_fields
+                    .iter()
+                    .find(|(message, at)| error.message == *message && error.span == Some(*at))
+                    .map(|(message, at)| {
+                        format!(
+                            "implements \"{path}\" failed to check ({message} at {path}:{}:{})",
+                            at.start.line, at.start.column
+                        )
+                    })
             });
         RefinementError {
             message: located.unwrap_or(error.message),

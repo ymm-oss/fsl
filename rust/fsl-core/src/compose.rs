@@ -722,6 +722,7 @@ pub fn lower_compose_with_options(
     }
     for alias in &order {
         reject_duplicate_component_formals(&components[alias])?;
+        reject_repeated_component_struct_fields(&components[alias])?;
     }
     let inline_count = static_items
         .iter()
@@ -843,6 +844,31 @@ fn error_at(message: impl Into<String>, span: fsl_syntax::Span) -> CoreError {
         kind: CoreErrorKind::Semantics,
         diagnostic_code: None,
     }
+}
+
+/// Refuse a repeated field in every struct of a component before its names are
+/// prefixed, so the report names the struct as written and the component's file.
+fn reject_repeated_component_struct_fields(component: &Component) -> Result<(), CoreError> {
+    for item in &component.spec.items {
+        let SpecItem::Struct {
+            name,
+            fields,
+            field_spans,
+            span,
+        } = item
+        else {
+            continue;
+        };
+        if let Some((field, at)) = crate::model::repeated_struct_field(fields, field_spans, *span) {
+            return Err(component_error(
+                &component.path,
+                component.use_span,
+                &error_at(crate::model::repeated_struct_field_message(name, field), at),
+                "failed to check",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Refuse a repeated formal in every action of a component, whether it is lifted,
@@ -997,9 +1023,15 @@ fn rewrite_component_item_inner(
             span,
             symmetric,
         },
-        SpecItem::Struct { name, fields, span } => SpecItem::Struct {
+        SpecItem::Struct {
+            name,
+            fields,
+            field_spans,
+            span,
+        } => SpecItem::Struct {
             name: prefix(alias, &name),
             span,
+            field_spans,
             fields: fields
                 .into_iter()
                 .map(|(name, ty)| {

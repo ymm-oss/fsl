@@ -61,6 +61,9 @@ pub struct ParseError {
     code: &'static str,
 }
 
+/// A struct's fields, and the span of each field's name.
+type StructFields = (Vec<(String, TypeExpr)>, Vec<Span>);
+
 impl ParseError {
     #[must_use]
     pub fn new(message: impl Into<String>, span: Span) -> Self {
@@ -1682,8 +1685,13 @@ impl<'a> Parser<'a> {
             let span = self.bump().span;
             let name = self.expect_ident()?;
             self.expect_symbol("{")?;
-            let fields = self.field_list()?;
-            return Ok(SpecItem::Struct { name, fields, span });
+            let (fields, field_spans) = self.field_list()?;
+            return Ok(SpecItem::Struct {
+                name,
+                fields,
+                field_spans,
+                span,
+            });
         }
         if self.peek_kw(Kw::Entity) || self.peek_kw(Kw::Number) {
             let entity = self.peek_kw(Kw::Entity);
@@ -1768,21 +1776,23 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn field_list(&mut self) -> Result<Vec<(String, TypeExpr)>, ParseError> {
+    fn field_list(&mut self) -> Result<StructFields, ParseError> {
         let mut fields = Vec::new();
+        let mut spans = Vec::new();
         if self.eat_symbol("}") {
-            return Ok(fields);
+            return Ok((fields, spans));
         }
         loop {
+            spans.push(self.peek().span);
             let name = self.expect_ident()?;
             self.expect_symbol(":")?;
             fields.push((name, self.type_expr()?));
             if self.eat_symbol("}") {
-                return Ok(fields);
+                return Ok((fields, spans));
             }
             self.expect_symbol(",")?;
             if self.eat_symbol("}") {
-                return Ok(fields);
+                return Ok((fields, spans));
             }
         }
     }
