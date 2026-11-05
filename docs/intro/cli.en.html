@@ -37,10 +37,12 @@ typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
-indeterminate (`chain` when its `[impl]` layer has no evidence that a test executed),
+migrate_manual_required / indeterminate (`chain` when its `[impl]` layer has no evidence that a test executed),
 `2` = input error (usage for invalid argv / parse / type / semantics / io / vacuous / acceptance / forbidden /
-`--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`&#x27;s
-result; `imported`/`imported_with_warnings` is `fslc db import`&#x27;s. `impl_violated` is listed
+`--vacuity error`) / migration_refused, `3` = internal error. `observed_*` is `fslc db observe`&#x27;s
+result; `imported`/`imported_with_warnings` is `fslc db import`&#x27;s.
+`migrate_manual_required` (a form it cannot rewrite) and `migration_refused` are
+`fslc migrate`&#x27;s results when it writes no input. `impl_violated` is listed
 because inline `implements` propagates that seam verdict to the top-level `result`; a failed
 governance `preservation` folds into `check`/`verify`/`scenarios`/`testgen` through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to `check` and
@@ -83,7 +85,8 @@ JSON error envelope and exit 2/3, before rendering or writing an artifact;
 direct `ledger` stops before ancillary replay, evidence loading, and witness preparation
 (`html` also stops before explain). With `-o`, no artifact is created. Other
 failed/unestablished verdicts still generate reports with their nonzero exit.
-Approval-only ledger rerendering for digest comparison is separate from this gate.
+Approval-only ledger rerendering for digest comparison stops at the same `result:&quot;error&quot;`;
+other verdicts still render so their digests can be compared.
 All native full-verification callers share one stage owner; baseline adapters
 disable caching and retain default vacuity warnings.
 Direct reports verify and check for errors before loading the presentation model or

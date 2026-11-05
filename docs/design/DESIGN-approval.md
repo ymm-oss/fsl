@@ -107,21 +107,51 @@ fslc ledger examples/e2e/2_requirements.fsl --approval expense-signed.approval.j
   --trust-key alice-public.pem
 ```
 
-The direct result is `approval_check` with `status:"approved"` or
+A completed check returns `approval_check` with `status:"approved"` or
 `status:"drifted"`. A signed record can instead report
 `status:"signature-invalid"`, which exits 1 and never grants approval. Drift
-remains an analysis result and exits 0, for the same reason `diff` findings do
-(`docs/manual/LANGUAGE.md` §12): drift is the expected state during development — you
+remains an analysis result and exits 0, as ordinary nongating `diff` findings do
+(`docs/manual/LANGUAGE.md` §12). Explicit semantic/batch diff gates instead exit 1 when
+their gate fails. Drift is the expected state during development — you
 approved at one commit and kept working — and the command's job is to report
 what changed and hand you `fslc approval diff`, not to fail a build. The ledger
 renders it `⚠` accordingly, distinct from the `❌` it gives
 `signature-invalid`. This differs deliberately from `fslc document check`,
 whose `document_drifted` exits 1: there, drift means a document contradicts the
 spec it documents, which is a state to correct, not a normal step in the loop.
-Gate on drift by reading `status` from the JSON, not the exit code. A malformed,
+`status:"approved"` confirms digest binding, not a verification pass: the record binds
+digests, and the envelope carries no verification verdict. A `--kind ledger` record can be
+created and then checked `approved` at exit 0 on a failed or unestablished baseline, including
+`violated`, `unknown_cti`, `reachable_failed`, `refinement_failed` and `unknown_budget`. Approving a red
+ledger stays allowed (`docs/design/DESIGN-ledger.md`), so `fslc verify` must be gated
+separately. An approval gate requires exit 0 AND `result:"approval_check"` AND
+`status:"approved"`. `drifted` is not approval despite exit 0. A malformed,
 unsupported, wrong-spec, or locally unavailable Git-baseline record is an error
 and exits 2. A signed record without its matching trust key is also a
-configuration error and exits 2. Unknown sidecar fields are rejected so schema
+configuration error and exits 2. These errors have no approval status. Artifact evaluation
+in `approval create` and `approval check` that aborts preserves its complete downstream envelope and exit: scenarios violations exit 1,
+internal failures exit 3, and failed HTML reports retain `generated`/`html_report` and exit 1.
+A verification `result:"error"` during `--kind ledger` rerendering returns that envelope and
+its exit (2, or 3 for internal) in place of `drifted` or an artifact mismatch.
+No approval record is written and no digest-based status is invented after such a failure.
+An aborted scenarios artifact leaves root and dependency-warning finalization to
+its outer approval/report owner. Each distinct root finding and each finding from
+one distinct dependency resource is attached once, preserving complete values,
+order and locations. Dependency-edition refusals retain priority over the underlying
+artifact result. Successful scenarios artifacts retain their existing finalized root
+and dependency warnings before canonical serialization, preserving existing artifact
+digests and approval signatures.
+`fslc ledger --approval` does not propagate that envelope. When an `html` or `scenarios`
+record's rerender stops on a failed verification baseline, it returns `result:"error"`, exit 2,
+naming the record, and leaves the `-o` file untouched: passing exit 1 through would read as the
+ledger's own verdict while a stale file stayed in place. `ledger` and `requirements_document`
+records still complete, so the ledger is written and shows them `drifted`.
+Approval HTML rerendering uses no output path: inline content and default output metadata
+remain in memory, without an HTML file. Direct `html -o` instead writes its report even for a
+failed verification baseline; a write error exits 2 and outranks the baseline verdict.
+Approval-only ledger rerendering still produces a digest/evaluation at exit 0 for those failed
+or unestablished baselines, distinct from direct ledger's generated report and exit 1.
+Unknown sidecar fields are rejected so schema
 changes cannot be silently ignored.
 
 When drift is reported, compare the approved commit to the current working tree

@@ -12,8 +12,8 @@ use fsl_core::{
 };
 use fslc_rust::literate_access::literate_access;
 use fslc_rust::outcome::{
-    FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, is_error_exit,
-    outcome_class, sweep_cell_class,
+    FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, exit_status_matches,
+    is_error_exit, outcome_class, sweep_cell_class,
 };
 use fslc_rust::spec_load::{SpecLoadError, kernel_load_error, surface_parse_failure};
 use fslc_rust::verification_output::{
@@ -198,6 +198,15 @@ fn run() {
         Err(error) => (error_output("usage", &error), 2),
     };
     let status = normalized_exit_status(&output, reported_status);
+    debug_assert!(
+        exit_status_matches(
+            argv.first().map_or("", String::as_str),
+            argv.get(1).map(String::as_str),
+            &output,
+            status,
+        ),
+        "CLI output and exit status disagree: {output:?}, exit {status}",
+    );
     println!(
         "{}",
         serde_json::to_string_pretty(&output).expect("serialize CLI output")
@@ -13550,21 +13559,28 @@ fn approval_artifact(
     edition: &SourceEdition,
     kind: &str,
     inputs: &approval::GenerationInputs,
-) -> Result<(Vec<u8>, Option<String>), Value> {
+) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
     if kind == "requirements_document" {
         let approval::GenerationInputs::Document(document_inputs) = inputs else {
-            return Err(error_output(
-                "usage",
-                "requirements_document approval requires document generation inputs",
+            return Err((
+                error_output(
+                    "usage",
+                    "requirements_document approval requires document generation inputs",
+                ),
+                2,
             ));
         };
-        let (claims, markdown) = render_document_for_approval(path, source, document_inputs)?;
+        let (claims, markdown) = render_document_for_approval(path, source, document_inputs)
+            .map_err(|error| (error, 2))?;
         return Ok((markdown.into_bytes(), Some(claims.spec.claim_set_digest)));
     }
     let approval::GenerationInputs::Solver(inputs) = inputs else {
-        return Err(error_output(
-            "usage",
-            "ledger/html/scenarios approval requires solver generation inputs",
+        return Err((
+            error_output(
+                "usage",
+                "ledger/html/scenarios approval requires solver generation inputs",
+            ),
+            2,
         ));
     };
     let dependencies = fslc_rust::migration::DependencyScope::enter();
@@ -13592,31 +13608,41 @@ fn approval_artifact(
             false,
             Some(edition),
         ),
-        "scenarios" => edition.finish(run_scenarios_from_source(
-            path,
-            source,
-            inputs.depth,
-            &inputs.deadlock,
-        )),
+        "scenarios" => {
+            let result = run_scenarios_from_source(path, source, inputs.depth, &inputs.deadlock);
+            if result.1 == 0 {
+                // Canonical artifacts retain their existing finalized warning bytes.
+                edition.finish(result)
+            } else {
+                // Borrow the enclosing log, preserving refusal priority.
+                // The outer owner finalizes this escaping failure's warnings.
+                return Err(dependencies.finish(result, false));
+            }
+        }
         _ => {
-            return Err(error_output(
-                "usage",
-                &format!("unsupported approval target '{kind}'"),
+            return Err((
+                error_output("usage", &format!("unsupported approval target '{kind}'")),
+                2,
             ));
         }
     });
     if status != 0 {
-        return Err(result);
+        return Err((result, status));
     }
     let bytes = if matches!(kind, "ledger" | "html") {
         result
             .get("content")
             .and_then(Value::as_str)
             .map(|content| content.as_bytes().to_vec())
-            .ok_or_else(|| error_output("internal", "generated artifact has no content"))?
+            .ok_or_else(|| {
+                (
+                    error_output("internal", "generated artifact has no content"),
+                    3,
+                )
+            })?
     } else {
         let mut encoded = serde_json::to_vec_pretty(&result)
-            .map_err(|error| error_output("internal", &error.to_string()))?;
+            .map_err(|error| (error_output("internal", &error.to_string()), 3))?;
         encoded.push(b'\n');
         encoded
     };
@@ -13783,7 +13809,7 @@ fn run_approval_create_from_source(
             let (expected_artifact, _) =
                 match approval_artifact(path, source, edition, kind, inputs) {
                     Ok(artifact) => artifact,
-                    Err(error) => return (error, 2),
+                    Err(error) => return error,
                 };
             let reviewed_artifact = match std::fs::read(artifact_path) {
                 Ok(artifact) => artifact,
@@ -13916,15 +13942,15 @@ fn approval_evaluation(
     edition: &SourceEdition,
     record_path: &Path,
     trust: &approval::TrustStore,
-) -> Result<Value, Value> {
-    let versioned =
-        approval::read_versioned_record(record_path).map_err(|error| error_output("io", &error))?;
+) -> Result<Value, (Value, i32)> {
+    let versioned = approval::read_versioned_record(record_path)
+        .map_err(|error| (error_output("io", &error), 2))?;
     let (record, signature_status, key_id) = match &versioned {
         approval::VersionedApprovalRecord::V1(record) => (record.clone(), "unsigned", Value::Null),
         approval::VersionedApprovalRecord::V2(record) => {
             let verified = trust
                 .verify(record)
-                .map_err(|error| error_output("io", &error))?;
+                .map_err(|error| (error_output("io", &error), 2))?;
             if !verified {
                 return Ok(json!({
                     "status": "signature-invalid",
@@ -13947,20 +13973,23 @@ fn approval_evaluation(
         }
     };
     let (repo, relative_path, _head) =
-        approval::git_location(path).map_err(|error| error_output("io", &error))?;
+        approval::git_location(path).map_err(|error| (error_output("io", &error), 2))?;
     if record.spec.path != relative_path {
-        return Err(error_output(
-            "semantics",
-            &format!(
-                "approval record targets '{}' but current spec is '{relative_path}'",
-                record.spec.path
+        return Err((
+            error_output(
+                "semantics",
+                &format!(
+                    "approval record targets '{}' but current spec is '{relative_path}'",
+                    record.spec.path
+                ),
             ),
+            2,
         ));
     }
     approval::verify_git_baseline(&repo, &relative_path, &record.spec.git_commit)
-        .map_err(|error| error_output("io", &error))?;
+        .map_err(|error| (error_output("io", &error), 2))?;
     let current_spec_digest =
-        approval_spec_digest(path, source).map_err(|error| spec_load_error_output(&error))?;
+        approval_spec_digest(path, source).map_err(|error| (spec_load_error_output(&error), 2))?;
     let (artifact, current_claim_set_digest) = approval_artifact(
         path,
         source,
@@ -13969,10 +13998,10 @@ fn approval_evaluation(
         &record.target.inputs,
     )?;
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
-        .map_err(|error| error_output("internal", &error))?;
+        .map_err(|error| (error_output("internal", &error), 3))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
-    let current_reviewed_digest =
-        approval::reviewed_artifact_digest(&record).map_err(|error| error_output("io", &error))?;
+    let current_reviewed_digest = approval::reviewed_artifact_digest(&record)
+        .map_err(|error| (error_output("io", &error), 2))?;
     let mut evaluation = approval::evaluate(
         &record,
         record_path,
@@ -14024,7 +14053,7 @@ fn run_approval_check_from_source(
     };
     let evaluation = match approval_evaluation(path, source, edition, record_path, &trust) {
         Ok(evaluation) => evaluation,
-        Err(error) => return (error, 2),
+        Err(error) => return error,
     };
     let mut output = envelope();
     output.insert("result".to_owned(), json!("approval_check"));
@@ -14042,13 +14071,14 @@ fn approval_overlay(
     edition: &SourceEdition,
     record_paths: &[PathBuf],
     trust_keys: &[PathBuf],
-) -> Result<Value, Value> {
+) -> Result<Value, (Value, i32)> {
     let trust =
-        approval::TrustStore::load(trust_keys).map_err(|error| error_output("io", &error))?;
+        approval::TrustStore::load(trust_keys).map_err(|error| (error_output("io", &error), 2))?;
     let mut requirements = Map::new();
     let mut records = Vec::new();
     for record_path in record_paths {
-        let evaluation = approval_evaluation(path, source, edition, record_path, &trust)?;
+        let evaluation = approval_evaluation(path, source, edition, record_path, &trust)
+            .map_err(|failure| overlay_evaluation_error(record_path, failure))?;
         for requirement in evaluation
             .get("requirements")
             .and_then(Value::as_array)
@@ -14061,6 +14091,25 @@ fn approval_overlay(
         records.push(evaluation);
     }
     Ok(json!({"requirements": requirements, "records": records}))
+}
+
+/// A record's artifact rerender can stop on a failed verification baseline with
+/// a non-error envelope and exit 1. Passing that through would read as the ledger's
+/// own exit 1 although no ledger was written, so it is refused here instead.
+fn overlay_evaluation_error(record_path: &Path, failure: (Value, i32)) -> (Value, i32) {
+    if failure.0["result"] == "error" {
+        return failure;
+    }
+    (
+        error_output(
+            "semantics",
+            &format!(
+                "approval record '{}' cannot be evaluated: rerendering its artifact stopped on a failed verification baseline, so no ledger was written",
+                record_path.display()
+            ),
+        ),
+        2,
+    )
 }
 
 struct LedgerReportRequest<'a> {
@@ -14086,7 +14135,8 @@ struct PreparedLedgerReport {
 /// `generate_unapproved_ledger_report_from_source` (which `approval_artifact` also calls
 /// to reproduce a target's canonical rendering purely for a digest
 /// comparison -- a verdict mismatch there is legitimate drift evidence for
-/// `approval check`/`create`, not a hard error), this is the command a user
+/// `approval check`/`create`, not a hard error, although a verification
+/// `result:"error"` still is), this is the command a user
 /// or CI gate actually runs and reads the exit code of, so it must not hide
 /// a violated/unknown verification baseline behind the unconditional exit 0
 /// `generated_content_result` gives every generated artifact (issue #592).
@@ -14139,7 +14189,7 @@ fn run_ledger_report_admitted_from_source(
     trust_keys: &[PathBuf],
     edition: &SourceEdition,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source, true, Some(edition)) {
+    let prepared = match prepare_ledger_report_from_source(request, source, Some(edition)) {
         Ok(prepared) => prepared,
         Err(error) => return error,
     };
@@ -14148,7 +14198,7 @@ fn run_ledger_report_admitted_from_source(
     } else {
         match approval_overlay(request.path, source, edition, approval_paths, trust_keys) {
             Ok(approvals) => Some(approvals),
-            Err(error) => return (error, 2),
+            Err(error) => return error,
         }
     };
     let (result, status) = render_ledger_report(request, &prepared, approvals.as_ref());
@@ -14176,7 +14226,7 @@ fn generate_unapproved_ledger_report_from_source(
     source: &str,
     edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source, false, edition) {
+    let prepared = match prepare_ledger_report_from_source(request, source, edition) {
         Ok(prepared) => prepared,
         Err(error) => return error,
     };
@@ -14186,7 +14236,6 @@ fn generate_unapproved_ledger_report_from_source(
 fn prepare_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
-    direct_report: bool,
     edition: Option<&SourceEdition>,
 ) -> Result<PreparedLedgerReport, (Value, i32)> {
     let (verification, verification_status) = report_verification_from_source(
@@ -14197,11 +14246,10 @@ fn prepare_ledger_report_from_source(
         request.engine,
         edition,
     );
-    // Approval-only rerendering deliberately keeps processing ancillary inputs.
-    // Direct reports must preserve this error before replay, evidence or witnesses.
-    if direct_report
-        && let Some(error) = report_verification_error(&verification, verification_status)
-    {
+    // Preserve this error before replay, evidence or witnesses. Only
+    // `result:"error"` stops here: a failed or unestablished verdict still renders,
+    // so direct reports exit nonzero and approval-only digests stay comparable.
+    if let Some(error) = report_verification_error(&verification, verification_status) {
         return Err(error);
     }
     let model = match load_model_from_source(request.path, source) {
@@ -18630,7 +18678,7 @@ mod exit_status_tests {
     use crate::spec_loading::validate_specialized_document_from_source;
 
     #[test]
-    fn approval_ledger_rerender_bypasses_only_the_direct_verification_error_gate() {
+    fn approval_ledger_rerender_returns_the_direct_verification_error() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let path = root.join("tests/fixtures/governance_missing_dependency.fsl");
         let source = std::fs::read_to_string(&path).unwrap();
@@ -18661,22 +18709,10 @@ mod exit_status_tests {
             expected
         );
 
-        let (rendered, status) =
-            generate_unapproved_ledger_report_from_source(&request, &source, None);
+        // Rendering this would report the failure as digest drift at exit 0.
         assert_eq!(
-            status, 0,
-            "approval rendering must bypass verification error: {rendered}"
-        );
-        let content = rendered["content"].as_str().expect("rendered Markdown");
-        assert!(content.contains("## リスク一覧（要件ID別）"), "{content}");
-        // Compare the complete generated envelope, not just its verdict.
-        assert_eq!(
-            rendered,
-            json!({
-                "fsl":"1.0", "result":"generated", "kind":"audit_ledger",
-                "spec":load_model_from_source(&path, &source).unwrap().name,
-                "output":"governance_missing_dependency_ledger.md", "content":content
-            })
+            generate_unapproved_ledger_report_from_source(&request, &source, None),
+            expected
         );
     }
 
@@ -20504,4 +20540,20 @@ mod mutate_attribution_reuse_tests {
         assert_eq!(attribution_calls, 1, "one isolated invariant model");
         assert!(killers.contains(&"_bounds_x".to_owned()), "{killers:?}");
     }
+}
+
+#[test]
+fn internal_input_two_normalizes_to_three_before_exit_contract_check() {
+    let output = error_output("internal", "fixture fault");
+    assert!(!fslc_rust::outcome::exit_status_matches(
+        "check", None, &output, 2
+    ));
+    let final_status = normalized_exit_status(&output, 2);
+    assert_eq!(final_status, 3);
+    assert!(fslc_rust::outcome::exit_status_matches(
+        "check",
+        None,
+        &output,
+        final_status
+    ));
 }

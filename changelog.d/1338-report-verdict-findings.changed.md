@@ -6,7 +6,7 @@ CTI/hint/rank-failure evidence retained, not a reachable counterexample.
 Direct `ledger` and `html` now return verification `error` as JSON and exit 2/3
 instead of Markdown/HTML or a generated-artifact envelope, and create no `-o`
 artifact; HTML stops before explain. Non-error failure reports still render.
-The approval-only ledger digest-rerendering path does not use the new gate.
+Approval-only ledger digest rerendering returns the same verification `error`; see #1418.
 Added findings and corrected coverage rendering change affected approved ledger
 and HTML digests (`drifted`, exit 0); corrected declaration attribution also changes
 affected ledger digests. Review and re-approve those artifacts.

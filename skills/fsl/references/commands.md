@@ -94,7 +94,7 @@ fslc check <f>                                  # syntax / names / types, and an
 fslc lint <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)
 fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
-                                                 # exit 0 migrated, 2 refused/I/O/check failure (same check-failure contract as lint)
+                                                 # exit 0 migrated, 1 migrate_manual_required (no inputs written), 2 refused/I/O/check failure (same check-failure contract as lint)
 fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
 fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
@@ -549,7 +549,7 @@ JSON error envelope and exit 2/3, before rendering or output-file creation;
 direct ledger stops before ancillary replay, evidence loading, and witness preparation
 (HTML before explain too). No `-o` artifact is created. Non-error failed or
 unestablished verdicts still render reports with nonzero exit. Approval-only
-ledger rerendering for digest comparison does not use this direct-report gate;
+ledger rerendering for digest comparison stops at the same `result:"error"`;
 its artifact bytes can still change with the new findings and coverage rendering.
 All native full-verification callers share one stage owner; baseline adapters
 disable caching and retain default vacuity warnings. For direct reports,
@@ -570,8 +570,23 @@ clean tracked Git baseline and only accepts a reviewed artifact that matches a
 fresh rendering under the recorded inputs. The sidecar uses a lowered-kernel
 digest that ignores source locations plus a normalized artifact digest for
 `ledger`, `html`, or `scenarios`. `approval check` and `ledger --approval`
-report `approved` or `drifted`; drift reasons distinguish spec, rendering, and
-renderer changes. A drifted row carries the complete baseline digest and an
+report `approved` or `drifted` after completed evaluation; signed records can report
+`signature-invalid`. `approval check` exits 0/0/1 respectively. `ledger --approval`
+renders these statuses while retaining its report/baseline exit contract; when an `html` or
+`scenarios` record's rerender stops on a failed baseline, it instead returns `result:"error"`,
+exit 2, naming the record, and leaves the `-o` file untouched. `approved`
+confirms digest binding, not a verification pass: a `--kind ledger` record can be approved
+on a failed or unestablished baseline, including `violated`, `unknown_cti`, `reachable_failed`, `refinement_failed` and `unknown_budget`, and
+the envelope carries no verdict. Gate on `fslc verify` separately. An approval gate requires
+exit 0 AND `result:"approval_check"` AND `status:"approved"`.
+Input/record/baseline/trust errors exit 2 without approval status. Aborted artifact
+evaluation in `approval create` and `approval check` preserves the complete downstream envelope/exit and writes no approval
+record: scenarios violations exit 1, internal errors exit 3, and failed HTML
+rerendering returns `generated`/`html_report` with exit 1, inline content/default
+metadata and no HTML file. Direct `html -o` still writes failed-baseline reports;
+write errors exit 2 and take precedence. Direct
+HTML/ledger reports retain their generated-report exit 1. Drift reasons distinguish
+spec, rendering, and renderer changes. A drifted row carries the complete baseline digest and an
 `approval diff` command, which compares the approved commit to the current
 working spec. Treat `approver` as attribution; authenticity comes from the
 repository's signed-commit/review/branch-protection policy.

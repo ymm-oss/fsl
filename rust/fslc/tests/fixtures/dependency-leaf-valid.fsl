@@ -1,0 +1,2 @@
+// SPDX-License-Identifier: Apache-2.0
+spec S { state { done: Bool = false } action finish() { done = true } invariant Typed "REQ-DEP-001: 日本語😀" { true } }

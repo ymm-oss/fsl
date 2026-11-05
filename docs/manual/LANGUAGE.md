@@ -2468,10 +2468,12 @@ typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings,
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
-indeterminate (`chain` when its `[impl]` layer has no evidence that a test executed),
+migrate_manual_required / indeterminate (`chain` when its `[impl]` layer has no evidence that a test executed),
 `2` = input error (usage for invalid argv / parse / type / semantics / io / vacuous / acceptance / forbidden /
-`--vacuity error`), `3` = internal error. `observed_*` is `fslc db observe`'s
-result; `imported`/`imported_with_warnings` is `fslc db import`'s. `impl_violated` is listed
+`--vacuity error`) / migration_refused, `3` = internal error. `observed_*` is `fslc db observe`'s
+result; `imported`/`imported_with_warnings` is `fslc db import`'s.
+`migrate_manual_required` (a form it cannot rewrite) and `migration_refused` are
+`fslc migrate`'s results when it writes no input. `impl_violated` is listed
 because inline `implements` propagates that seam verdict to the top-level `result`; a failed
 governance `preservation` folds into `check`/`verify`/`scenarios`/`testgen` through the same mapping (§13). The fold
 happens where the verification envelope is produced, so it is not confined to `check` and
@@ -2514,7 +2516,8 @@ JSON error envelope and exit 2/3, before rendering or writing an artifact;
 direct `ledger` stops before ancillary replay, evidence loading, and witness preparation
 (`html` also stops before explain). With `-o`, no artifact is created. Other
 failed/unestablished verdicts still generate reports with their nonzero exit.
-Approval-only ledger rerendering for digest comparison is separate from this gate.
+Approval-only ledger rerendering for digest comparison stops at the same `result:"error"`;
+other verdicts still render so their digests can be compared.
 All native full-verification callers share one stage owner; baseline adapters
 disable caching and retain default vacuity warnings.
 Direct reports verify and check for errors before loading the presentation model or
@@ -2541,12 +2544,38 @@ replay error is not implementation-log evidence and must not be rendered as
 an empty ledger row — `docs/design/DESIGN-ledger.md`).
 
 `approval_check` and `approval_diff` are absent from this table because their
-exit code is not a function of `result`. `fslc approval check` reports the same
-`approval_check` for every outcome and carries the verdict in `status`: `0` for
-`approved` and for `drifted`, `1` for `signature-invalid`. Drift exits 0 because
-it is analysis output, as `diff` findings are (§12); `docs/design/DESIGN-approval.md`
-records why, and why `fslc document check`'s `document_drifted` differs. Gate on
-`status`, not on the exit code.
+exit code is not a function of `result`. A completed `fslc approval check`
+evaluation returns `approval_check` with `status`: `approved` and `drifted`
+exit 0, `signature-invalid` exits 1. Drift is analysis output, as ordinary nongating
+`diff` findings are (§12); explicit semantic/batch diff gates can exit 1.
+`docs/design/DESIGN-approval.md` records why document drift differs.
+
+`status:"approved"` confirms digest binding, not a verification pass: the current spec and
+rendered artifact still match the digests in the record, and the envelope carries no
+verification verdict. A `--kind ledger` record can be created and then checked `approved` at
+exit 0 on a failed or unestablished baseline, including `violated`, `unknown_cti`, `reachable_failed`, `refinement_failed` and `unknown_budget`.
+Gate on `fslc verify` separately. An approval gate requires exit 0 AND
+`result:"approval_check"` AND `status:"approved"`.
+
+Input, baseline, record and trust-configuration errors retain their error envelope,
+exit 2 and no approval status. Aborted artifact evaluation in `approval create` and
+`approval check` preserves the complete
+downstream envelope and exit (verification 1, internal 3), without an approval
+status or new record. A verification `result:"error"` during `--kind ledger` rerendering
+returns that error envelope and its exit (2, or 3 for internal) in place of `drifted` or an
+artifact mismatch. Failed HTML rerendering propagates `generated`/`html_report`
+with exit 1, inline content and default output metadata, without writing an HTML
+file. Direct failed HTML/ledger reports still generate with exit 1, and output-write errors take precedence with exit 2.
+`fslc ledger --approval` does not propagate those results. When an `html` or `scenarios` record's
+rerender stops on a failed verification baseline, it returns `result:"error"`, exit 2, naming the
+record, and leaves the `-o` file untouched. `ledger` and `requirements_document` records still
+complete, so the ledger is written and shows them `drifted`, with the verification's own exit.
+
+Normal JSON delivery checks the command-aware envelope/exit invariant with a debug
+assertion after internal-error normalization and before serialization. A mismatch
+uses the existing panic exit 101 without a normal stdout JSON envelope; earlier
+producer artifacts remain. Release builds omit this assertion. Raw/source/schema,
+fmt, metadata/help/version and early argv delivery retain their existing contracts.
 
 ### Kinds of result
 

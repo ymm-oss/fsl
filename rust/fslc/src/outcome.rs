@@ -4,10 +4,12 @@
 //! vocabulary (issue #537 C2, `docs/design/DESIGN-rust-component-internals.md`
 //! "Outcome classification").
 //!
-//! The Verdict Conservation Law is that a failure-class `result` must not exit
-//! zero and a success-class `result` must not exit non-zero. Before this
-//! module the crate had no such definition: each command arm compared `result`
-//! against literals at its own return point, so the class was re-derived — and
+//! The Verdict Conservation Law forbids failure-class exit zero. Ordinary
+//! successes exit zero; generated HTML/ledger reports can exit one for their
+//! verification baseline in the command contexts checked by [`exit_status_matches`].
+//! Before this module the crate had no such definition: each command arm
+//! compared `result` against literals at its own return point, so the class was
+//! re-derived — and
 //! re-forgotten — once per family. #596 recorded the consequence from inside
 //! the test suite, which had to carry its own `CHECK_SUCCESS_RESULTS` list
 //! because there was no production enumeration to defer to; a conservation
@@ -110,7 +112,9 @@ pub fn sweep_cell_class(verification: &Value) -> SweepCellClass {
 
 /// Classify a CLI output envelope.
 ///
-/// The class is the one the producing site's exit code already implies, so
+/// This class describes the envelope; generated HTML/ledger reports also need
+/// the command context in [`exit_status_matches`] to validate their exit.
+/// The class is the one the producing site's exit code ordinarily implies, so
 /// migrating a call site to this function preserves behavior; the places where
 /// it does not are the fixes tracked by #594 (`sweep`'s failure list omitted
 /// `unknown_budget`), #600 (`db check` folded only `violated`), and #601
@@ -172,8 +176,9 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
         "mutated" => class_of(output.get("gate").is_none_or(|gate| {
             gate.get("passed").and_then(Value::as_bool).unwrap_or(false)
         })),
-        // `main.rs` `run_diff_git` batch: the same gate, aggregated. The
-        // envelope publishes the decision as `gate.passed`.
+        // `main.rs` `run_diff_git` batch: `gate.passed` classifies only the
+        // semantic gate. The operational exit also includes child errors;
+        // `exit_status_matches` checks that separate maximum-status contract.
         "semantic_diff_batch" => class_of(
             output
                 .get("gate")
@@ -184,7 +189,8 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
 
         // ---- Success class ----------------------------------------------
         //
-        // Every value below exits 0 at its producing site.
+        // Ordinary values below exit 0. `generated` HTML/ledger reports can
+        // carry verification exit 1; see `exit_status_matches`.
 
         // Core verification and checking verdicts.
         "ok"
@@ -268,6 +274,7 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
         | "replay_nonconformant"
         | "document_drifted"
         | "migration_refused"
+        | "migrate_manual_required"
         // `approval diff` only ever publishes this `result` on its
         // signature-invalid path (`main.rs` `run_approval_diff`); a valid
         // signature returns the underlying `semantic_diff` envelope instead.
@@ -288,6 +295,112 @@ pub fn outcome_class(output: &Value) -> OutcomeClass {
         // poisoned verify-cache entry must not be readable as a pass either.
         _ => OutcomeClass::Failure,
     }
+}
+
+/// Check a final normal-JSON envelope/exit pair without changing either.
+///
+/// Called after internal-error normalization. Raw delivery, metadata, argv
+/// rejection and `fmt` retain their dedicated producer contracts. Report
+/// exceptions require both dispatch context and artifact kind; approval-only
+/// ledger digest rendering does not pass its baseline exit through this boundary.
+#[must_use]
+pub fn exit_status_matches(
+    command: &str,
+    subcommand: Option<&str>,
+    output: &Value,
+    status: i32,
+) -> bool {
+    if let Some(verdict) = Verdict::of(output) {
+        return status == verdict.exit_code();
+    }
+    let Some(result) = output.get("result").and_then(Value::as_str) else {
+        return false;
+    };
+    match result {
+        "approval_check" => match output.get("status").and_then(Value::as_str) {
+            Some("approved" | "drifted") => status == SUCCESS_EXIT,
+            Some("signature-invalid") => status == FAILURE_EXIT,
+            _ => false,
+        },
+        "approval_diff" => {
+            output.get("status").and_then(Value::as_str) == Some("signature-invalid")
+                && status == FAILURE_EXIT
+        }
+        "generated" => {
+            let report = match (command, output.get("kind").and_then(Value::as_str)) {
+                ("html", Some("html_report")) | ("ledger", Some("audit_ledger")) => true,
+                ("approval", Some("html_report")) => {
+                    matches!(subcommand, Some("create" | "check"))
+                }
+                _ => false,
+            };
+            status == SUCCESS_EXIT || (report && status == FAILURE_EXIT)
+        }
+        // Existing sibling-field classifiers own the verdict; no new policy.
+        "format_check" | "lint" | "semantic_diff" | "mutated" => {
+            status == i32::from(!outcome_class(output).is_success())
+        }
+        "semantic_diff_batch" => batch_exit_status_matches(output, status),
+        "migrate_manual_required" => status == FAILURE_EXIT,
+        // Registered failures outside Verdict and the sibling-field cases.
+        // Keep this finite: outcome_class deliberately also calls unknown
+        // values failures, but unknown outputs must fail this invariant.
+        "nonconformant"
+        | "sweep_failed"
+        | "sweep_inconclusive"
+        | "observed_mismatch"
+        | "replay_nonconformant"
+        | "document_drifted"
+        | "migration_refused"
+        | "statistically_unsupported"
+        | "dataset_invalid"
+        | "evaluator_untrusted"
+        | "slice_missing"
+        | "insufficient_samples"
+        | "inconclusive"
+        | "unknown" => status != SUCCESS_EXIT,
+        _ => outcome_class(output).is_success() && status == SUCCESS_EXIT,
+    }
+}
+
+// Batch producers max-fold raw child statuses (0/1/2), without normalizing a
+// nested internal error to 3. Their parent gate aggregates semantic failures
+// only: operational errors do not make that semantic gate fail.
+fn batch_exit_status_matches(output: &Value, status: i32) -> bool {
+    let Some(comparisons) = output.get("comparisons").and_then(Value::as_array) else {
+        return false;
+    };
+    if comparisons.is_empty() {
+        return false;
+    }
+    let Some(parent_passed) = output
+        .get("gate")
+        .and_then(|gate| gate.get("passed"))
+        .and_then(Value::as_bool)
+    else {
+        return false;
+    };
+    let mut semantic_passed = true;
+    let mut expected_status = SUCCESS_EXIT;
+    for comparison in comparisons {
+        let child_status = match comparison.get("result").and_then(Value::as_str) {
+            Some("semantic_diff") => {
+                let Some(passed) = comparison
+                    .get("gate")
+                    .and_then(|gate| gate.get("passed"))
+                    .and_then(Value::as_bool)
+                else {
+                    return false;
+                };
+                semantic_passed &= passed;
+                i32::from(!passed)
+            }
+            Some("error") => SPEC_ERROR_EXIT,
+            _ => return false,
+        };
+        expected_status = expected_status.max(child_status);
+    }
+    parent_passed == semantic_passed && status == expected_status
 }
 
 fn class_of(success: bool) -> OutcomeClass {
@@ -752,7 +865,9 @@ pub const fn is_error_exit(status: i32) -> bool {
 }
 
 /// `docs/manual/LANGUAGE.md`'s exit-code table applied to an envelope, as a total
-/// function over [`outcome_class`].
+/// function over [`outcome_class`] for verification-baseline callers.
+/// Direct generated-report commands retain their verification exit separately;
+/// [`exit_status_matches`] checks those command-aware exceptions.
 ///
 /// Classification decides whether exit zero is *allowed*; it does not by
 /// itself pick the code. `error_status` is the classified spec-error code the

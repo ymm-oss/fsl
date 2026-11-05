@@ -2281,10 +2281,12 @@ typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
-indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が無いとき)、
+migrate_manual_required / indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が無いとき)、
 `2` = 入力エラー(usage は argv の誤り / parse / type / semantics / io / vacuous / acceptance / forbidden /
-`--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
-`imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
+`--vacuity error`) / migration_refused、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
+`imported`/`imported_with_warnings` は `fslc db import` の結果です。
+`migrate_manual_required`(書き換えられない形がある)と `migration_refused` は、`fslc migrate` が
+入力を書かないときの結果です。`impl_violated` は
 inline `implements` が top-level `result` へ伝播するため列挙しています。失敗した governance の
 `preservation` も同じ対応付けで `check` / `verify` / `scenarios` / `testgen` に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
@@ -2321,7 +2323,8 @@ ledger の警告は、種類ごとの1つの表示表で検出種別・要約・
 返し、描画も artifact の書き込みもしません。直接の `ledger` は付随の replay、evidence の読み込み、
 witness の準備より前に止まります(`html` は explain より前に止まります)。`-o` でも
 artifact は作りません。それ以外の不成立・未確立の判定では、既存の非 0 exit で report を生成します。
-digest 比較用の承認専用 ledger 再描画は、この門とは別のままです。
+digest 比較用の承認専用 ledger 再描画も、同じ `result:"error"` で止まります。
+それ以外の判定では、digest を比較できるように描画します。
 native の完全な検証を行うすべての呼び出し元は、検証段の一つの持ち主を共有します。
 baseline の adapter は cache を無効にし、既定の vacuity 警告を保ちます。
 直接の report は、描画用 model の読み込みや trace 契約の取り出しより先に検証し、error を確認します。
@@ -2346,12 +2349,39 @@ semantics error(exit 2)を返します。approval create の diagnostic の優�
 に適用されます。
 
 `approval_check` と `approval_diff` がこの表に無いのは、exit code が `result` の
-関数ではないからです。`fslc approval check` はどの結果でも同じ `approval_check` を
-返し、判定は `status` が担います: `approved` と `drifted` が `0`、
-`signature-invalid` が `1`。drift が 0 で終わるのは、`diff` の findings と同じく
-分析出力だからです(§12)。理由と、`fslc document check` の `document_drifted` が
-異なる扱いになる理由は `docs/design/DESIGN-approval.md` にあります。exit code ではなく
-`status` でゲートしてください。
+関数ではないからです。`fslc approval check` は評価が完了した場合に `approval_check` と
+`status` を返します。`approved` と `drifted` は exit 0、`signature-invalid` は exit 1 です。
+drift は通常のゲートなし `diff` の findings と同じ分析出力です(§12)。明示的な
+semantic/batch diff のゲートは失敗時に exit 1 を返します。document の drift と扱いが
+異なる理由は `docs/design/DESIGN-approval.md` にあります。
+
+`status:"approved"` が確認するのは digest の束縛で、検証の合格ではありません。現在の spec と
+描画した artifact が record の digest と一致することだけを示し、封筒に検証の判定は含みません。
+`--kind ledger` の record は、不成立・未確立の baseline でも作成でき、`approval check` は
+exit 0 と `approved` を返します。`violated`、`unknown_cti`、`reachable_failed`、
+`refinement_failed`、`unknown_budget` もこれに含まれます。`fslc verify` は別にゲートしてください。
+承認のゲートでは、exit 0 AND `result:"approval_check"` AND `status:"approved"` をすべて
+確認してください。
+
+入力、baseline、record、trust 設定のエラーは、元のエラー封筒と exit 2 を返し、承認の
+`status` は付きません。`approval create` と `approval check` で artifact 評価が中断した場合は、下流の完全な封筒と終了コード
+(検証失敗1、内部エラー3)を保持し、承認の status も新しい record も作りません。
+`--kind ledger` の再描画で検証が `result:"error"` を返した場合は、`drifted` や artifact の
+不一致ではなく、そのエラー封筒と終了コード(2、内部エラーは3)を返します。
+HTML の再描画で検証に失敗した場合は、`generated`/`html_report`、exit 1、インラインの
+content と既定の output メタデータを返し、HTML ファイルは書きません。
+直接の HTML/ledger は検証失敗時にも report を生成して exit 1 を返し、出力の書き込み
+エラーは baseline の判定より優先して exit 2 を返します。
+`fslc ledger --approval` はこれらの結果を伝播しません。`html` または `scenarios` の record の再描画が
+検証失敗の baseline で止まると、record を名指しした `result:"error"` と exit 2 を返し、`-o` の
+ファイルには触れません。`ledger` と `requirements_document` の record は再描画が完了するので、
+ledger を書いて `drifted` と表示し、検証自身の終了コードを返します。
+
+通常の JSON 出力は、内部エラーの終了コードを正規化した後、serialize より前に、
+コマンドを考慮した封筒と終了コードの整合性を debug assertion で確認します。
+不一致では既存の panic 経路で exit 101 となり、通常の stdout JSON 封筒は出しません。
+先に生成した artifact は保持します。release build にはこの assertion はありません。
+raw/source/schema、fmt、metadata/help/version、早期の argv 拒否は既存の契約を保ちます。
 
 ### 結果の種類
 
