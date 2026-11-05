@@ -114,7 +114,85 @@ working tree.
 Each invocation also receives a fresh Cargo target. Reusing one target across
 disposable checkouts is forbidden: after interruption, a compiled mutant can
 be newer than a restored source file and contaminate the next unmutated
-baseline. The fresh target keeps baseline evidence independent of prior runs.
+baseline. The fresh target keeps baseline evidence independent of prior runs:
+every first-party artifact is compiled in that run's target, and a run that
+tests a mutant also compiles every third-party artifact there.
+
+### Zero-mutant detector target (#1412)
+
+A `--lane mutants` run whose `selected-mutants.json` is empty compiles no mutant,
+so its fresh target may start from third-party build output. That empty roster is
+the real cargo-mutants listing of the maintained scope after diff filtering,
+critical-zero escalation and slicing, already validated against the GLOBAL
+inventory by `check-mutant-shard-cohort.py prepare`. This is the only case: a run
+with any selected mutant, and any run without `--lane`, starts empty.
+
+**What is reused.** `check-mutant-shard-cohort.py seed` copies, with mtimes, the
+`.fingerprint/<package>-<hash>`, `build/<package>-<hash>` and `deps/*-<hash>*` of
+units whose package has a non-null `source` in `cargo metadata`, including vendored
+Z3. The source is `rust/target/debug`, whose third-party units the manifest test
+accepted or built earlier in the same job. A path package, a name used by both a
+path and a registry package, an unknown name and `incremental/` are never copied.
+
+**Why.** On CI, 27 of the last 30 successful pull-request and queue runs at
+`e3c19a39` had zero mutants in every shard, yet each shard spent 11 to 22 minutes
+compiling to run about one second of detectors (for example run `41798402365`,
+`mutation mutants (1/3)`: 22.9 minutes, 20m19s of it build).
+
+**What still guarantees independence.**
+
+- *A mutant cannot be in the seed.* The contamination above is a first-party
+  artifact. Generic mutants compile only in a per-run target outside `rust/target`,
+  curated operators in `rust/target/fault-operators/target`, and both alter only
+  first-party source.
+- *First-party code is compiled in this run, and Cargo's verdict proves it.* Cargo
+  alone would not protect this: with every unit copied and a fault present only in
+  the checkout, it reused the stale `fsl_verifier` and `bmc_rejects_backend_failure`
+  stayed green. So the detector build's `compiler-artifact` rows are retained as
+  `detector-build.jsonl`, and any `path+file://` artifact with `fresh: true`, or a
+  missing `fsl_verifier`, `fslc_rust`, `solver_fail_closed` or
+  `triangulated_assurance` target, fails the shard before the detectors run. The
+  shard record and the aggregate recheck the same rows, which are hash-bound
+  through the provenance sidecar, and reject a `baseline.log` that compiled anything
+  after the verified build.
+- *Third-party reuse stays Cargo's decision.* Cargo reuses a seeded unit only while
+  its fingerprint (version, features, profile, compiler, build-script inputs) matches.
+
+**What is reduced.** The detectors of a zero-mutant shard link third-party code, Z3
+included, once per job: whatever the manifest test accepted from the restored
+`semantic-mutation` cache or built itself after a partial restore. The fresh target
+no longer compiles it again. A defect confined to a cached third-party artifact that
+keeps a matching fingerprint is no longer excluded by this shard. Runs that test a
+mutant still compile all of it, and that cache is saved only by non-pull-request,
+non-queue events.
+
+**Measured.** Run `41940637142` took 3m22s and 3m02s on shards whose cache restored
+in full. A shard with a partial restore took 21m56s, because its manifest test
+rebuilt Z3 for 19m19s before seeding; the detector build after the seed still
+reused every third-party unit. That run followed a Cargo manifest change on `main`
+(#1480): the slow shard restored the previous key `4afd95be` without a full match,
+and the later shards hit the new `eeff49f5`.
+
+**Failure paths.** None of these skips the detectors or passes on a partial result:
+
+- A failing seed command (`cargo metadata`, or the copy) discards the partial copy
+  and takes the full fresh build.
+- A seed unit Cargo refuses fails the shard. Cargo recompiles that unit in the
+  detector build and its dependents in the detector run, and a run that compiled
+  after the verified build is rejected.
+- A seed unit Cargo accepts but rustc cannot read fails the compile, and so the shard.
+
+The shard artifact also keeps `cargo-metadata.json`, the `cargo metadata` output the
+seed classified. It is diagnostic: only a zero-mutant `--lane mutants` run writes
+it, and the provenance sidecar does not bind it. The log states the path taken:
+
+```text
+semantic-mutation: detector-target path=seeded reason=third-party-units-copied
+semantic-mutation: detector-build path=seeded first_party_rebuilt=14 first_party_reused=0 third_party_reused=153 third_party_rebuilt=0 z3_sys=reused
+```
+
+`path=full-fresh` with `reason=seed-unusable` or `reason=not-lane-run` names the
+fallback, and on that path a reused third-party artifact also fails the shard.
 
 ## Tiered execution
 
@@ -162,10 +240,11 @@ tier (`changed`/`complete`), with the same classifications and the same evidence
   against the GLOBAL complete-tier roster, never against an individual slice.
   Every shard keeps the same 35 detectors (19 solver-fail-closed and 16 triangulated-assurance),
   full scratch checkout and fresh first-party target. Empty logical shards and zero-mutant
-  changed runs execute those real detectors and retain a baseline log plus a revision-bound empty
-  report; no raw cargo-mutants outcomes are invented. Nonempty shards must match the actual raw
-  and reported outcome IDs to the selected slice before publishing success.
-  This adds two cold baselines and their compute, not paid runner capacity. The historical 14.3-minute
+  changed runs execute those real detectors and retain a baseline log, a `detector-build.jsonl`
+  and a revision-bound empty report; no raw cargo-mutants outcomes are invented. In this lane only
+  these runs seed third-party units (see "Zero-mutant detector target"). Nonempty shards must match the actual
+  raw and reported outcome IDs to the selected slice before publishing success.
+  Each nonempty shard pays a cold baseline, which is compute, not paid runner capacity. The historical 14.3-minute
   unsharded rationale is superseded by later 72–78-minute observations; no parallel speedup is
   established by listing or by summing serialized local shard times.
 - The `semantic-mutation` aggregator requires both lanes to report `success` (`if: always()`, so a
@@ -194,7 +273,8 @@ tier (`changed`/`complete`), with the same classifications and the same evidence
 
 With no `--lane` flag, `tools/run-semantic-mutation-gate.sh`'s behavior is unchanged from before this
 split: the same manifest test, the same unsharded `run-fault-operators.sh` call, and the same
-cargo-mutants run, in the same order. This is the path `tools/check-native-integration.sh
+cargo-mutants run, in the same order. Its zero-mutant case takes no seed but runs the same
+first-party build check. This is the path `tools/check-native-integration.sh
 semantic-mutation` and every local invocation still take. `--lane`/`--shard` are additive, CI-only
 scheduling controls.
 

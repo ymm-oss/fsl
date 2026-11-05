@@ -87,9 +87,10 @@ rm -rf "$root"/rust/target/semantic-mutation.* "$root/rust/target/semantic-mutat
 
 run_manifest_test() {
   # Validates the operator inventory, the P2 scope/equivalents manifests, and
-  # the mutation runner config together. Cheap (compile-dominated, ~1 min)
-  # and idempotent, so it runs once for the unsharded default path and once
-  # per invocation when split into lanes -- both lanes depend on parts of it
+  # the mutation runner config together. Cheap on a full cache restore
+  # (compile-dominated, ~1 min; 19m19s when a partial restore lost Z3, run
+  # 41940637142, mutants shard 3) and idempotent, so it runs once for the
+  # unsharded default path and once per invocation when split into lanes -- both lanes depend on parts of it
   # (operators.txt for the operators lane, scope.v1.json/equivalents.v1.json
   # for the mutants lane) and neither half is expensive enough to be worth
   # splitting further.
@@ -140,7 +141,8 @@ mkdir -p "$scratch/rust/target"
 # A target shared by disposable checkouts can retain a mutant artifact whose
 # source timestamp is newer than the freshly copied baseline. Give each run a
 # fresh build directory, so the baseline can never reuse another run's
-# mutation. This build tree is disposable working state, not evidence: it
+# mutation; only a zero-mutant lane run seeds it, with third-party units alone
+# (see prepare_detector_target). This build tree is disposable working state, not evidence: it
 # sits outside `rust/target`, unlike the `$output` evidence directory above
 # whose path is published to the artifact-upload step in ci.yml, so
 # `Swatinem/rust-cache` never saves the build tree. This closes a
@@ -234,10 +236,40 @@ fi
 list_inventory "$output/selected-mutants.json"
 python3 "$cohort_helper" prepare "$output" "$shard_index" "$shard_total" "$mode" "$equivalents"
 
-# An empty logical slice still runs all 35 real detectors in its fresh target.
+# A zero-mutant lane run compiles no mutant, so its target may start from the
+# third-party units the manifest test above just accepted in `rust/target/debug`
+# (docs/design/DESIGN-semantic-mutation-gate.md, "Zero-mutant detector target").
+# Any seed failure discards the partial copy and takes the full fresh build.
+prepare_detector_target() {
+  local reason=not-lane-run
+  target_path=full-fresh
+  if [ "$lane" = mutants ]; then
+    if (cd "$scratch/rust" && cargo metadata --locked --format-version 1) >"$output/cargo-metadata.json" \
+      && python3 "$cohort_helper" seed "$root/rust/target/debug" "$CARGO_TARGET_DIR/debug" "$output/cargo-metadata.json"; then
+      target_path=seeded
+      reason=third-party-units-copied
+    else
+      reason=seed-unusable
+      rm -rf "$CARGO_TARGET_DIR"
+      mkdir -p "$CARGO_TARGET_DIR"
+    fi
+  fi
+  printf 'semantic-mutation: detector-target path=%s reason=%s\n' "$target_path" "$reason"
+}
+
+# An empty logical slice still runs all 35 real detectors, with every first-party
+# crate compiled in this run's own target; Cargo's per-artifact verdict proves it.
 # Do not fabricate cargo-mutants outcomes: the runner emits none for this case.
 selected_mutant_count="$(jq length "$output/selected-mutants.json")"
 if [ "$selected_mutant_count" -eq 0 ]; then
+  prepare_detector_target
+  (
+    cd "$scratch/rust"
+    cargo test --locked -p fsl-verifier -p fslc-rust \
+      --test solver_fail_closed --test triangulated_assurance \
+      --no-run --message-format=json-render-diagnostics
+  ) >"$output/detector-build.jsonl"
+  python3 "$cohort_helper" check-detector-build "$output" "$target_path"
   (
     cd "$scratch/rust"
     cargo test --locked -p fsl-verifier -p fslc-rust \
