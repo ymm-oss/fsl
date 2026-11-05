@@ -1,7 +1,9 @@
 Fixed (#1418): Approval artifact failures preserve their complete downstream
 JSON envelopes and exit codes through create, check and ledger overlays.
-Approval status applies to completed evaluations; usable approval requires exit 0,
-`approval_check` and `approved`. Debug builds check final normal-JSON envelope/exit
+Their exit moves from 2 to the downstream exit: 1 for scenarios or HTML verification
+failures and 3 for internal failures. Approval status applies to completed evaluations.
+`approved` confirms digest binding, not a verification pass, so `verify` must be gated
+separately; an approval gate requires exit 0, `approval_check` and `approved`. Debug builds check final normal-JSON envelope/exit
 pairs after internal normalization, with finite HTML/ledger report exceptions;
 release and dedicated raw/metadata/fmt delivery retain their existing behavior.
 Aborted scenarios approval results attach each root migration finding and each

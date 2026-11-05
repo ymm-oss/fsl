@@ -2241,10 +2241,12 @@ typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
-indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が無いとき)、
+migrate_manual_required / indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が無いとき)、
 `2` = 入力エラー(usage は argv の誤り / parse / type / semantics / io / vacuous / acceptance / forbidden /
-`--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
-`imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
+`--vacuity error`) / migration_refused、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
+`imported`/`imported_with_warnings` は `fslc db import` の結果です。
+`migrate_manual_required`(書き換えられない形がある)と `migration_refused` は、`fslc migrate` が
+入力を書かないときの結果です。`impl_violated` は
 inline `implements` が top-level `result` へ伝播するため列挙しています。失敗した governance の
 `preservation` も同じ対応付けで `check` / `verify` / `scenarios` / `testgen` に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
@@ -2311,16 +2313,23 @@ semantics error(exit 2)を返します。approval create の diagnostic の優�
 `status` を返します。`approved` と `drifted` は exit 0、`signature-invalid` は exit 1 です。
 drift は通常のゲートなし `diff` の findings と同じ分析出力です(§12)。明示的な
 semantic/batch diff のゲートは失敗時に exit 1 を返します。document の drift と扱いが
-異なる理由は `docs/design/DESIGN-approval.md` にあります。承認を利用するゲートでは、
-exit 0 AND `result:"approval_check"` AND `status:"approved"` をすべて確認してください。
+異なる理由は `docs/design/DESIGN-approval.md` にあります。
+
+`status:"approved"` が確認するのは digest の束縛で、検証の合格ではありません。現在の spec と
+描画した artifact が record の digest と一致することだけを示し、封筒に検証の判定は含みません。
+`--kind ledger` の record は、不成立・未確立の baseline でも作成でき、`approval check` は
+exit 0 と `approved` を返します。`violated`、`unknown_cti`、`reachable_failed`、
+`refinement_failed`、`unknown_budget` もこれに含まれます。`fslc verify` は別にゲートしてください。
+承認のゲートでは、exit 0 AND `result:"approval_check"` AND `status:"approved"` をすべて
+確認してください。
+
 入力、baseline、record、trust 設定のエラーは、元のエラー封筒と exit 2 を返し、承認の
 `status` は付きません。artifact 評価が中断した場合は、下流の完全な封筒と終了コード
 (検証失敗1、内部エラー3)を保持し、承認の status も新しい record も作りません。
 `--kind ledger` の再描画で検証が `result:"error"` を返した場合は、`drifted` や artifact の
 不一致ではなく、そのエラー封筒と終了コード(2、内部エラーは3)を返します。
 HTML の再描画で検証に失敗した場合は、`generated`/`html_report`、exit 1、インラインの
-content と既定の output メタデータを返し、HTML ファイルは書きません。承認専用の
-ledger digest 描画は、violated/CTI baseline でも従来どおり exit 0 で評価できます。
+content と既定の output メタデータを返し、HTML ファイルは書きません。
 直接の HTML/ledger は検証失敗時にも report を生成して exit 1 を返し、出力の書き込み
 エラーは baseline の判定より優先して exit 2 を返します。
 

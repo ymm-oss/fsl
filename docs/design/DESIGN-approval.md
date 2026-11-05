@@ -119,7 +119,12 @@ renders it `⚠` accordingly, distinct from the `❌` it gives
 `signature-invalid`. This differs deliberately from `fslc document check`,
 whose `document_drifted` exits 1: there, drift means a document contradicts the
 spec it documents, which is a state to correct, not a normal step in the loop.
-A usable approval gate requires exit 0 AND `result:"approval_check"` AND
+`status:"approved"` confirms digest binding, not a verification pass: the record binds
+digests, and the envelope carries no verification verdict. A `--kind ledger` record can be
+created and then checked `approved` at exit 0 on a failed or unestablished baseline, including
+`violated`, `unknown_cti`, `reachable_failed`, `refinement_failed` and `unknown_budget`. Approving a red
+ledger stays allowed (`docs/design/DESIGN-ledger.md`), so `fslc verify` must be gated
+separately. An approval gate requires exit 0 AND `result:"approval_check"` AND
 `status:"approved"`. `drifted` is not approval despite exit 0. A malformed,
 unsupported, wrong-spec, or locally unavailable Git-baseline record is an error
 and exits 2. A signed record without its matching trust key is also a
@@ -139,8 +144,8 @@ digests and approval signatures.
 Approval HTML rerendering uses no output path: inline content and default output metadata
 remain in memory, without an HTML file. Direct `html -o` instead writes its report even for a
 failed verification baseline; a write error exits 2 and outranks the baseline verdict.
-Approval-only ledger rerendering still produces a digest/evaluation at exit 0 for violated/CTI
-baselines, distinct from direct ledger's generated report and exit 1.
+Approval-only ledger rerendering still produces a digest/evaluation at exit 0 for those failed
+or unestablished baselines, distinct from direct ledger's generated report and exit 1.
 Unknown sidecar fields are rejected so schema
 changes cannot be silently ignored.
 

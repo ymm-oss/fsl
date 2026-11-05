@@ -919,7 +919,8 @@ The generated-report exception permits only exits 0/1 and requires both dispatch
 `html`/`html_report`, `ledger`/`audit_ledger`, approval create/check propagating `html_report`,
 or `ledger` approval overlay propagating `html_report`. Other generated artifacts require exit 0.
 Approval-only ledger digest rendering retains its existing successful artifact/evaluation exit 0,
-even for a violated/CTI baseline. There is no new schema or verification run.
+even for a failed or unestablished baseline, except a verification `result:"error"`, which it
+returns (`docs/design/DESIGN-ledger.md`, amendment #1418). There is no new schema or verification run.
 
 Normal `run` uses `debug_assert!`: a debug mismatch panics through the existing exit 101 path,
 before a normal stdout JSON envelope is emitted. Release builds have no assertion guarantee.

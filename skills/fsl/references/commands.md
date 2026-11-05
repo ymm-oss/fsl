@@ -572,15 +572,17 @@ digest that ignores source locations plus a normalized artifact digest for
 `ledger`, `html`, or `scenarios`. `approval check` and `ledger --approval`
 report `approved` or `drifted` after completed evaluation; signed records can report
 `signature-invalid`. `approval check` exits 0/0/1 respectively. `ledger --approval`
-renders these statuses while retaining its report/baseline exit contract. A usable
-approval gate requires exit 0 AND `result:"approval_check"` AND `status:"approved"`.
+renders these statuses while retaining its report/baseline exit contract. `approved`
+confirms digest binding, not a verification pass: a `--kind ledger` record can be approved
+on a failed or unestablished baseline, including `violated`, `unknown_cti`, `reachable_failed`, `refinement_failed` and `unknown_budget`, and
+the envelope carries no verdict. Gate on `fslc verify` separately. An approval gate requires
+exit 0 AND `result:"approval_check"` AND `status:"approved"`.
 Input/record/baseline/trust errors exit 2 without approval status. Aborted artifact
 evaluation preserves the complete downstream envelope/exit and writes no approval
 record: scenarios violations exit 1, internal errors exit 3, and failed HTML
 rerendering returns `generated`/`html_report` with exit 1, inline content/default
 metadata and no HTML file. Direct `html -o` still writes failed-baseline reports;
-write errors exit 2 and take precedence. Approval-only ledger digest rerendering
-still permits approved evaluations at exit 0 for violated/CTI baselines; direct
+write errors exit 2 and take precedence. Direct
 HTML/ledger reports retain their generated-report exit 1. Drift reasons distinguish
 spec, rendering, and renderer changes. A drifted row carries the complete baseline digest and an
 `approval diff` command, which compares the approved commit to the current
