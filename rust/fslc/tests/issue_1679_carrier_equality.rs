@@ -784,6 +784,7 @@ fn old_operand_arm_answers_to_what_surrounds_it() {
 /// Decided by the user: a mismatch in a position that is never evaluated stays
 /// refused, although each of these returned a verdict on every engine on base.
 #[test]
+#[allow(clippy::too_many_lines)] // One literal row per form.
 fn never_evaluated_mismatch_stays_refused() {
     let map = not_assignable("Map(Named(\"K\"), Named(\"A\"))", "Map(Named(\"K\"), Int)");
     let good = "c = not c";
@@ -1458,7 +1459,10 @@ fn assert_refused_on_both_walks(id: &str, source: &str, expected: &str) {
     let built = fsl_core::build_model(
         fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new(".")).expect("lowers"),
     );
-    let failure = built.err().expect("build_model refuses").to_string();
+    let Err(failure) = built else {
+        panic!("{id}: build_model accepted\n{source}");
+    };
+    let failure = failure.to_string();
     assert!(
         failure.contains(expected),
         "{id}: {failure}\n{expected}\n{source}"

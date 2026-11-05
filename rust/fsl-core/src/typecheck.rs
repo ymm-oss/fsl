@@ -1349,6 +1349,7 @@ fn value_expression(value: crate::FslValue) -> Result<Expr, TypecheckError> {
     })
 }
 
+#[allow(clippy::struct_excessive_bools)] // Independent facts about one walk, set separately.
 #[derive(Clone)]
 pub(crate) struct ValidationPhase {
     normalize_aggregates: bool,
