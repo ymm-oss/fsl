@@ -233,7 +233,7 @@ pub fn resign(mut record: Value, key: &SigningKey) -> Value {
     let object = unsigned["signature"].as_object_mut().unwrap();
     object.remove("value");
     unsigned.sort_all_objects();
-    let mut payload = b"fslc.approval.v2\0".to_vec();
+    let mut payload = b"fslc.approval.v6\0".to_vec();
     payload.extend(serde_json::to_vec(&unsigned).unwrap());
     let signature = key.sign(&payload);
     let public = key.verifying_key();

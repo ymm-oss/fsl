@@ -1,6 +1,6 @@
 # Digest-bound approval records
 
-Issues: #190, #269, #333
+Issues: #190, #269, #333, #1421
 
 ## Goal
 
@@ -88,8 +88,9 @@ fslc approval check examples/e2e/2_requirements.fsl --record expense.approval.js
 fslc ledger examples/e2e/2_requirements.fsl --approval expense.approval.json
 ```
 
-`--signing-key` turns the same creation into a signed v2 record. Signed
-records then require an explicit trust anchor on *every* consuming command —
+`--signing-key` turns the same creation into a signed v6 record. Signed
+records require an explicit trust anchor for approval check, diff, ledger,
+and document generation (document check remains structural) —
 the examples below use an Ed25519 key pair the approver holds
 (`alice-private.pem` and its SPKI public half `alice-public.pem`):
 
@@ -169,7 +170,8 @@ again and must match the record's baseline digest.
 
 ## Record contract
 
-The committed sidecar follows
+New sidecars use v5 (unsigned) or v6 (signed), with repository-relative path
+context as specified below. The retained legacy unsigned solver sidecar follows
 [`schemas/fslc/approval/approval-record.v1.schema.json`](../../schemas/fslc/approval/approval-record.v1.schema.json):
 
 ```json
@@ -199,12 +201,11 @@ The committed sidecar follows
 ```
 
 Supported target kinds for v1/v2 are `ledger`, `html`, and `scenarios`.
-Omitting `--signing-key` continues to produce this exact unsigned v1
-contract; **v1/v2 are unchanged by issue #333** — a `requirements_document`
+These retained legacy contracts remain unchanged — a `requirements_document`
 target is never admitted into v1/v2's closed `kind` enum, by design (see
 below).
 
-Signed records use
+Legacy signed solver records use
 [`schemas/fslc/approval/approval-record.v2.schema.json`](../../schemas/fslc/approval/approval-record.v2.schema.json).
 They preserve the v1 `spec`, `target`, and `approval` objects and add:
 
@@ -307,6 +308,129 @@ conditional branch inside v1/v2. `spec`/`approval` are byte-identical to v1's;
   v4 always carry this document-input shape — `fslc approval create` rejects
   `--depth`/`--deadlock`/`--engine` for `--kind requirements_document` and
   rejects `--glossary`/`--evidence` for the other three kinds.
+
+### Repository-relative path context (v5 unsigned, v6 signed; #1421 AP1/AP2)
+
+All new `approval create` records use
+[`approval-record.v5.schema.json`](../../schemas/fslc/approval/approval-record.v5.schema.json)
+without a signing key and
+[`approval-record.v6.schema.json`](../../schemas/fslc/approval/approval-record.v6.schema.json)
+with one. Each admits the existing solver target shape (`ledger`, `html`,
+`scenarios`) or document target shape (`requirements_document`) as separate
+closed branches. The nested objects, document digests and input variants retain
+their existing contracts. Two required top-level strings add the context:
+
+- `path_base` is the invocation directory at creation, relative to the Git root
+  of the checkout holding the spec: `.` for the root, otherwise `/`-separated names
+  with no `.`, `..` or empty name and no control character. The form is text, so a
+  record reads the same on every platform, and the schema pattern and the reader
+  check the same form.
+- `render_source` is the nonempty original spec argument, verbatim, used only
+  as a rendering label. `spec.path` remains Git-repository-relative.
+
+For example, creation from a directory containing `spec.fsl` with the argument
+`./spec.fsl` preserves that exact label, a target such as `./requirements.md`,
+and input spellings such as `glossary.json` or `nested/../evidence.json`.
+Target/input I/O later uses `git_root / path_base / stored_path`, where `git_root`
+is the root of the checkout holding the spec being checked, not the caller's
+directory and not the creating checkout. A clone, a worktree or a relocated checkout
+therefore reads its own files, and nothing reads the creating checkout, which may
+be gone. The resolver does not probe caller/sidecar/repository alternatives.
+
+The root is found from the directory the spec's path names, not from where a final
+symlink leads, and with Git's location variables (`git rev-parse --local-env-vars`)
+cleared for these lookups, so a nested repository behind a link or a hook's `GIT_DIR`
+cannot choose the files. A spec resolving outside that root is refused with
+`kind:"semantics"`, exit 2. `core.worktree` remains Git's own answer for the checkout,
+so when it points away from the spec this refusal applies. A link to the spec inside the
+same checkout is safe and stays allowed: the record's `spec.path` and digest are still
+checked against the resolved file, and the document and inputs still come from that
+checkout. A link into a nested repository or submodule resolves below the outer root,
+so `approval check` and `ledger` refuse it on `spec.path`, and `document generate`, which
+does not compare `spec.path`, reads the outer checkout's files and reports their drift.
+`approval diff` keeps following the spec and reads no document. v1–v4 records keep
+their existing lookup, including the inherited environment, and their `document generate`
+route calls no Git. On v5/v6 that route needs Git for this lookup.
+
+A document record stays inside that root. Creation refuses, with `kind:"semantics"`
+and exit 2, a creation directory outside the root and a target or input that is
+absolute, climbs out of the root by its spelling, or leads out through a link. Check
+refuses a stored path or base that climbs or links out in the same way, before reading
+it. An absolute form is rejected earlier by the record reader, as `kind:"io"` from
+`approval check` and `ledger` and `kind:"document"` from `document generate`; the schema
+rejects the same forms, and the climbing and link checks need the root, so they run
+at use. The stored spelling of a target or input stays literal, including any `\` a
+Windows caller typed; a record that must read across platforms uses `/`.
+
+A solver record reads no file through its base, so it can be created anywhere: its
+target path stays a label, and outside the root it stores `.`. Its `approved` means the
+spec and a fresh rendering match the record. The reviewed file is read at creation and
+not checked afterwards.
+
+Tampering with `path_base` invalidates a v6 signature. A v5 record is unsigned and
+proves nothing against someone editing it: a changed base pointing at a copy with the
+same content reports `approved`, and a solver record reads nothing through the field.
+Use v6 when the record itself needs protecting. Not bound, by decision: a repository's
+identity, and `document generate`'s commit and `spec.path` on identical content. A spelled
+`d/../x` fails on read in a clone that has no `d`, because Git stores no empty directories.
+
+The current explicit spec still supplies the actual bytes and dependency
+directory. Reproduction uses the recorded source and evidence labels; resolved
+I/O strings never replace those labels in rendered content. Kernel source-label
+admission is unchanged: labels containing `..` or absolute source labels remain
+unsupported by current document generation. This context feature does not
+broaden that admission rule.
+
+Root migration-warning locations embedded in rendering copies also use the
+recorded source label. Public diagnostic locations and dependency-file labels
+retain their actual explicit paths; no recursive path substitution is applied.
+
+v6 covers both new strings with
+`b"fslc.approval.v6\0" || canonical_json(record_without_signature.value)`.
+Its unsigned binding is v5 with both strings retained. v2→v1 and v4→v3 bindings
+and their original signing payloads remain unchanged. v1–v4 readers retain
+their closed wire shapes, reject added context even when relabelled, and resolve
+their relative paths against the consuming invocation directory. No record is
+silently migrated, resigned, or downgraded. Older binaries reject v5/v6 as
+unsupported schemas through their existing I/O error envelope and exit 2;
+obtaining context behavior requires a new reproduction, review and approval.
+
+Authoritative approval check and ledger evaluation use contextual input I/O and,
+for documents, contextual reviewed-target I/O. Solver checks reproduce the
+canonical artifact from spec/inputs and never read the live target, while create
+still reads it. Document generation with `--approval` remains lightweight:
+only its reviewed-target read uses stored context; explicit glossary/evidence
+arguments and its rendering remain invocation-relative. It performs no extra
+rendering, stored-input reads or Git-baseline check. Document check remains
+structural without trust verification or live reviewed-target admission;
+approval diff remains signature/spec-baseline-only. Reason ordering, envelopes,
+exit policies, artifact normalization and assurance are unchanged.
+
+### Raw document-input admission (#1421 AP4–7)
+
+Authoritative approval check and ledger evaluation compare every document
+`FileInput.digest` with the raw bytes actually loaded for reproduction, including
+legacy v3/v4 and contextual v5/v6 records. The glossary digest and each evidence
+digest come from the same buffer that is parsed, without a second read. Evidence
+hashes retain recorded order for mismatch selection; the existing sorted combined
+digest and rendering bytes remain unchanged.
+
+All existing record/trust/signature/spec/Git/input-read/parse/locale/rendering and
+reviewed-target errors keep their precedence. First compute the complete existing
+evaluation, with ordered reasons `spec_changed`, `rendering_changed`,
+`renderer_changed`, `claim_set_changed`, `artifact_changed`. If it is drifted,
+return the same complete result and exit policy even when an input digest differs.
+Only an otherwise-approved evaluation with a raw mismatch becomes the existing
+`result:error`, `kind:io`, exit 2, with message
+`approval input digest mismatch: <recorded path>`. Select the glossary first,
+then evidence in its recorded order, preserving the literal path in that message.
+
+Direct drift still exits 0. Ledger retains record order and its verification and
+publication exit rules. Document generate keeps its explicit invocation inputs
+and lightweight reviewed-target admission; document check remains structural and
+approval diff remains signature/spec-baseline-only. These consumers gain no new
+stored-input reads, except that document generate resolves a contextual record's
+reviewed target from the spec's Git root. Solver targets gain no input comparison.
 
 `approval create --kind requirements_document`'s conformance gate (rather than
 the byte-equality the other three kinds use) is exactly `fslc document
@@ -457,7 +581,8 @@ Native integration coverage proves:
 - tampering reports `signature-invalid` and never appears approved in a ledger;
 - signed checks, semantic diffs, and ledgers report the signature status.
 
-Issue #333 adds:
+Issue #333 established the following document-target coverage; its historical
+new-create v3/v4 assertions are superseded by #1421's v5/v6 creation contract:
 
 - `requirements_document` create + check round-trips as `approved`, records
   schema `fslc.approval.v3`, and validates against
@@ -489,3 +614,19 @@ Issue #333 adds:
   unverifiable signed record; `fslc document check --approval` reproduces the
   same section and reports `approval_changed` when the flag is omitted,
   without ever verifying a signature itself.
+
+Issue #1421 AP1/AP2 adds independent CLI controls for unsigned/signed document
+creation at root/subdirectory, literal source/input labels and reviewed bytes,
+cross-CWD checks with distinct valid decoys, missing actual inputs/targets without
+fallback, every solver kind without live-target reads, closed v5/v6 schema
+validation, required context, and v1–v4 rejection of added context fields.
+`issue_1421_checkout_base` adds tampered and untampered clones and worktrees, a
+relocated and a deleted creating checkout, refusal of paths outside the root at
+creation and check, and schema/reader agreement on the stored forms.
+
+Issue #1421 AP4–7 adds controls for otherwise-approved raw mismatches in v3–v6,
+first-mismatch selection including reversed evidence order, all 31 combinations
+of the five existing drift reasons, earlier read/parse/trust/signature failures,
+editable-slot bindings, ledger record/exit order, and the lightweight generation,
+structural check and diff boundaries. The rejecting baseline distinguishes the
+raw-digest gap from the existing preservation controls.

@@ -1933,7 +1933,7 @@ fslc document check &lt;file.fsl&gt; &lt;document.md&gt; [--glossary glossary.js
                                                   # fresh re-render; never interprets prose (§13)
 fslc approval create &lt;file.fsl&gt; --kind ledger|html|scenarios|requirements_document --artifact &lt;reviewed&gt; --approver &lt;name&gt;
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
-                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
+                                                  # new records use v5/v6; requirements_document binds a claim_set_digest (§13)
 fslc approval check  &lt;file.fsl&gt; --record &lt;record.json&gt; [--trust-key public.pem]
                                                   # approved (exit 0) | drifted (exit 0、分析結果)
                                                   # | signature-invalid (exit 1); DESIGN-approval.md 参照
@@ -2371,23 +2371,69 @@ spec を省略すると、変更されたすべての <code>.fsl</code> パス�
 を返します。1 つの spec を与えると <code>semantic_diff</code> が保たれます。両方の形式が
 <code>vcs.materialization: "git_archive_full_tree"</code> を含みます。通常の 2 パス形式は
 決して Git を呼び出さず、リポジトリの外でも動作します。</p>
-<p><code>approval create</code> は、レビュー済みの <code>ledger</code>、<code>html</code>、<code>scenarios</code> アーティファクト
+<p><code>approval create</code> は、レビュー済みの <code>ledger</code>、<code>html</code>、<code>scenarios</code>、
+<code>requirements_document</code> アーティファクト
 を、完全に lowering された位置非依存のカーネルダイジェストと、現在のクリーンな Git
 コミットに束縛します。バージョン付きの JSON サイドカーは、正規化された
 アーティファクトのダイジェスト、ジェネレータ/バージョン/オプション、承認された
 要件 ID、承認者、UTC 時刻も記録します。作成はアーティファクトを再生成し、古い
-レビューファイルを拒否します。<code>approval check</code> は、spec、レンダリング、レンダラの
-バインディングがすべて一致している間だけ <code>approved</code> を返します。そうでなければ
+レビューファイルを拒否します。<code>approval check</code> は、該当するすべてのバインディングが
+一致している間だけ <code>approved</code> を返します。そうでなければ
 <code>spec_changed</code>、<code>rendering_changed</code>、<code>renderer_changed</code> を伴う <code>drifted</code> を返します。
+<code>requirements_document</code> は claim set とレビュー済みのバイト列も別々に束縛し、
+それぞれの変更を <code>claim_set_changed</code>、<code>artifact_changed</code> で示します。
 <code>ledger --approval</code> は要件ごとに同じステータスを追加し、完全なベースラインの
 ダイジェストを含みます。<code>approval diff</code> は承認されたコミットを実体化し、現在の作業
 ファイルに対して通常の有界セマンティック diff を呼び出します。
 <code>docs/design/DESIGN-approval.md</code> を参照。</p>
-<p><code>--signing-key</code> がなければ、<code>approval create</code> は従来どおり無署名の
-<code>fslc.approval.v1</code> レコードを出力します。Ed25519 PKCS#8 PEM の署名鍵があれば
-<code>fslc.approval.v2</code> を出力します。そのレコードを使うすべての check、diff、ledger は
-対応する SPKI PEM の <code>--trust-key</code> を要求します。v2 の分離署名は完全な正準レコード
-をカバーし、暗号的な不一致は承認ではなく <code>signature-invalid</code> です。trust-key の
+<p>4 種類の target すべてで、<code>approval create</code> は <code>--signing-key</code> がなければ無署名の
+<code>fslc.approval.v5</code>、Ed25519 PKCS#8 PEM の署名鍵があれば署名付きの
+<code>fslc.approval.v6</code> レコードを出力します。両スキーマは、空でない 2 つの文字列を
+必須とします。<code>path_base</code> は作成時の実行ディレクトリを、spec を含む checkout の
+Git ルートからの相対パスで表したもの（ルートなら <code>.</code>、それ以外は <code>/</code> 区切りの名前）、
+<code>render_source</code> は元の spec 引数をそのまま保存したものです。<code>spec.path</code> は
+Git リポジトリからの相対パスのままです。target と入力は、検査する spec の Git ルートに
+<code>path_base</code> をつないだ場所から読み込みます。呼び出し元のディレクトリや、レコードを
+作成した checkout は読みません。そのため clone、worktree、移動した checkout はそれぞれ
+自分のファイルを読み、そこで文書や用語集を改ざんすると <code>artifact_changed</code>、
+<code>rendering_changed</code>、または入力 digest の不一致になります。保存したパスの表記、入力順、
+レンダリングのラベルは保ちます。<code>render_source</code> は表示用のラベルに限られ、実際の
+ソースと依存先のディレクトリは明示された spec から取得します。</p>
+<p>Git ルートは spec のパスが指すディレクトリから求め、<code>GIT_DIR</code> や <code>GIT_WORK_TREE</code> などの
+Git の場所を決める環境変数は無視します。そのため、末尾のシンボリックリンクや hook の環境で
+別の checkout を選ぶことはできません。spec の実体がそのルートの外にあれば <code>kind:"semantics"</code>、
+exit 2 で拒否します。<code>core.worktree</code> が spec の外を指す場合も同じです。同じ checkout 内の spec を
+指すリンクは束縛を保ちます。spec の digest とパスを引き続き検査し、ファイルも同じ checkout から
+読むためです。入れ子のリポジトリやサブモジュールへのリンクは、同じパスの検査で失敗します。
+この検索のため、v5/v6 レコードに対する <code>document generate --approval</code> には Git が必要です。
+v1–v4 では不要です。</p>
+<p><code>requirements_document</code> レコードでは、作成ディレクトリ、target、入力がその Git ルートの
+内側になければなりません。作成時は、絶対パス、ルートの外へ出るパス、ルートの外を指す
+リンク、ルートの外の作成ディレクトリを <code>kind:"semantics"</code>、exit 2 で拒否します。検査時は、
+外へ出る、または外へリンクする保存パスを同じように拒否します。絶対パスの形式はそれより先に
+レコードの読み込みで拒否し、<code>approval check</code> と <code>ledger</code> では <code>kind:"io"</code>、
+<code>document generate</code> では <code>kind:"document"</code> になります。<code>ledger</code>、<code>html</code>、<code>scenarios</code> の
+レコードは <code>path_base</code> を通じてファイルを読まないため、どのディレクトリからでも作成でき、
+ルートの外では <code>.</code> を保存します。これらの種類の <code>approved</code> は、spec と新しいレンダリングが
+レコードと一致することを表します。レビュー対象のファイルを読むのは作成時だけで、その後は
+検査しません。</p>
+<p><code>path_base</code> を書き換えると v6 では署名が無効になります。v5 レコードには署名がなく、編集された
+場合には何も証明しません。<code>path_base</code> を同じ内容のコピーを指すように変えても <code>approved</code> の
+ままです。ファイルを読まないソルバー系レコードでも同様です。レコード自体を保護するには
+v6 を使ってください。</p>
+<p>従来の v1–v4 レコードは、形式、署名、実行ディレクトリを基準とする相対パスの
+解釈を変えずに読み込めます。暗黙の移行は行いません。</p>
+<p><code>requirements_document</code> の v3–v6 では、承認を検証する approval check と ledger が、
+記録された各入力の digest を、レンダリングに使ったものと同じ生のバイト列と照合します。
+既存の先行エラーと、順序を含む drift の完全な結果を優先します。それらに問題がなく、
+通常なら承認される評価で入力 digest だけが異なる場合に限り、<code>result:error</code>、
+<code>kind:io</code>、exit 2 と <code>approval input digest mismatch: &lt;recorded path&gt;</code> を返します。
+不一致の選択順は glossary、続いて記録順の evidence です。document generate、
+構造を照合する document check、approval diff に保存済み入力の読み込みは追加しません。</p>
+<p>署名付き承認を使う approval check、diff、ledger、document generate は、対応する
+SPKI PEM の <code>--trust-key</code> を要求します。document check は構造の照合にとどまります。
+v6 の分離署名は 2 つの文脈情報を含む完全な正準レコードをカバーし、
+暗号的な不一致は承認ではなく <code>signature-invalid</code> です。trust-key の
 所持は署名者を認証しますが、認可は依然として組織のポリシーの問題です。正確な正準化
 と鍵のフォーマットは <code>docs/design/DESIGN-approval.md</code> で規定されています。</p>
 <p>Exit code: <code>0</code> = verified / proved / scenarios/testgen の生成 / conformant / refines /
@@ -4928,7 +4974,18 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 選択された <code>statistical_property</code> が宣言する <code>slice</code>/<code>min_samples</code>/
 <code>ci_lower</code>/<code>ci_upper</code> の要件を、事前計算された JSONL（<code>--records</code>、または
 宣言された <code>dataset</code> の <code>source</code> ファイル）に対して Wilson 区間つきで検査
-します。<code>fslc ai regress</code> は選択された <code>ai_migration</code> が宣言する集約の
+します。</p>
+<p>宣言された <code>dataset.source</code> が相対パスなら、宣言元 FSL ファイルのディレクトリ
+（パス上の親で、シンボリックリンク経由ならリンクの隣）を基準に読み込みます。
+絶対パスはそのまま使います。明示した <code>--records</code> は宣言より
+優先し、実行ディレクトリを基準とします。宣言に source がない場合や、外部の source
+を指定した場合も同じです。property/dataset の選択は、引き続き records の読み込みより
+先に行います。上書き指定がなければ、source がない場合と外部の <code>://</code> source に対する
+既存の拒否を保ち、実行ディレクトリやリポジトリ、ファイルの有無による代替探索は
+行いません。そのため、文書の正例では <code>source "support_eval_v3.jsonl"</code> と宣言します。
+従来のリポジトリ接頭辞付き宣言は、表記を明示的に移行するか、実行ディレクトリ基準の
+<code>--records</code> を指定する必要があります。暗黙の付け替えは行いません。</p>
+<p><code>fslc ai regress</code> は選択された <code>ai_migration</code> が宣言する集約の
 <code>no_regression</code> メトリクス低下/増加の節を検査します。<code>fslc ai compare</code> は
 閾値の主張なしにメトリクスの差分を報告します。<code>fslc ai drift</code> は選択された
 <code>observed_property</code> が宣言する <code>observed</code>/<code>drift</code> の要件をランタイムの
@@ -5385,6 +5442,21 @@ claim 側または artifact 側の片方だけに存在する scope dimension �
 <strong><code>causal_support</code> と <code>formal_assurance</code> は直交する 2 軸</strong>です: evidence は
 <code>formal_assurance: "not_run"</code> を決して変えず、どの support 値も verdict では
 ありません。</p>
+<p><code>causal observe-expectations</code> は replay と artifact 構築の後、出力のシリアライズや
+書き込みの前に、実際の <code>--out</code>/<code>--lifecycle-out</code> 出力先をすべて計算します。
+artifact が1つなら指定パス、複数なら従来の <code>&lt;stem&gt;.&lt;evidence_id&gt;.&lt;extension&gt;</code>
+（既定の拡張子は <code>json</code>）を使います。衝突判定のキーは、canonicalize した親ディレクトリと
+ファイル名の組です。したがって <code>sub/../a.json</code> や、<code>self -&gt; .</code> のときの <code>self/a.json</code> は
+<code>a.json</code> と衝突します。親が存在しない場合は、実行ディレクトリ基準の表記から <code>.</code> と <code>..</code> を
+畳んだものをキーにします。大文字と小文字だけが違う名前は、大文字小文字を区別しない
+ファイルシステムでも衝突とは判定しません。artifact 順に
+evidence、lifecycle の順で調べ、最初の重複を <code>kind:"usage"</code>、exit 2 と
+<code>causal output destinations collide: &lt;first path&gt; and &lt;second path&gt;</code> で拒否します。
+この拒否では全出力先の既存バイト列と存在状態を保ちます。既存の model/input/replay
+エラーが先で、有効な衝突は出力先・公開の I/O エラーより先に拒否します。
+artifact が0なら、出力フラグが同じでも衝突にはなりません。異なる出力先への書き込みは
+従来どおり evidence/lifecycle の交互順です。後の書き込みに失敗しても先の書き込みは
+戻さず、そのエラーの <code>written</code> に列挙します。それ以外の名前、バイト列、digest、assurance は変えません。</p>
 <p>人間は claim から観測可能な契約を <code>expectation</code> として切り出し、既存の
 verifier で検査できます — <strong>claim そのものは決して lowering されません</strong>:
 <code>expectation E { trigger action alias.name</code>(または <code>trigger predicate

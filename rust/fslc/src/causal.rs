@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use fsl_core::{FileResolver, FslValue, KernelExpr, KernelModel, TypeRef};
 use fslc_rust::literate_access::literate_access;
@@ -720,6 +720,66 @@ fn run_causal_verify_expectations(path: &Path, source: &str, depth: usize) -> (V
     (Value::Object(output), 0)
 }
 
+fn observation_output_path(
+    base: &Path,
+    count: usize,
+    evidence_id: &str,
+    default_stem: &str,
+) -> PathBuf {
+    if count == 1 {
+        return base.to_path_buf();
+    }
+    let stem = base
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(default_stem);
+    let extension = base
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("json");
+    base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
+}
+
+/// Two outputs collide when they name one file in one physical parent. A parent
+/// that does not exist cannot be resolved, so that path compares by its spelling,
+/// with `.` and `..` collapsed because Windows collapses them when it opens a path.
+fn output_collision_key(destination: &Path) -> PathBuf {
+    if let (Some(parent), Some(name)) = (destination.parent(), destination.file_name())
+        && let Ok(parent) = parent.canonicalize()
+    {
+        return parent.join(name);
+    }
+    let mut key = PathBuf::new();
+    for component in destination.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                key.pop();
+            }
+            _ => key.push(component),
+        }
+    }
+    key
+}
+
+/// A later output's failure does not undo earlier ones, so name them with the error.
+fn output_write_error(
+    file_path: &Path,
+    error: &std::io::Error,
+    evidence_paths: &[String],
+    lifecycle_paths: &[String],
+) -> (Value, i32) {
+    let mut output = error_output(
+        "io",
+        &format!("cannot write {}: {error}", file_path.display()),
+    );
+    let written = [evidence_paths, lifecycle_paths].concat();
+    if !written.is_empty() {
+        output["written"] = json!(written);
+    }
+    (output, 2)
+}
+
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_causal_observe_expectations(
     path: &Path,
@@ -1346,72 +1406,81 @@ fn run_causal_observe_expectations(
         }
     }
 
-    // ── Write output files ───────────────────────────────────────────
-    // One file per artifact so each is independently consumable by
-    // `fslc causal analyze --evidence`. Single artifact uses --out as-is;
-    // multiple artifacts suffix the expectation id.
-    let mut evidence_paths = Vec::new();
-    let mut lifecycle_paths = Vec::new();
-    for (index, artifact) in artifacts.iter().enumerate() {
-        let evidence_id = artifact
-            .get("evidence_id")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        if let Some(base) = out_path {
-            let file_path = if artifacts.len() == 1 {
-                base.to_path_buf()
-            } else {
-                let stem = base
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("evidence");
-                let extension = base
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("json");
-                base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
-            };
-            let out_json = serde_json::to_string_pretty(artifact).expect("valid JSON");
-            if let Err(error) =
-                crate::output_publication::publish(&file_path, format!("{out_json}\n"))
-            {
+    // Plan actual destinations after replay/artifact construction, before
+    // serializing or writing any output. Reuse the exact paths for publication.
+    let output_destinations = artifacts
+        .iter()
+        .enumerate()
+        .map(|(index, artifact)| {
+            let evidence_id = artifact
+                .get("evidence_id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let evidence = out_path.map(|base| {
+                observation_output_path(base, artifacts.len(), evidence_id, "evidence")
+            });
+            let lifecycle = lifecycle_out_path
+                .filter(|_| lifecycle_records.get(index).is_some())
+                .map(|base| {
+                    observation_output_path(base, lifecycle_records.len(), evidence_id, "lifecycle")
+                });
+            (evidence, lifecycle)
+        })
+        .collect::<Vec<_>>();
+    if output_destinations
+        .iter()
+        .any(|(evidence, lifecycle)| evidence.is_some() || lifecycle.is_some())
+    {
+        let invocation_dir = match std::env::current_dir() {
+            Ok(directory) => directory,
+            Err(error) => return (error_output("io", &error.to_string()), 2),
+        };
+        let mut seen = std::collections::BTreeMap::new();
+        for destination in output_destinations
+            .iter()
+            .flat_map(|(evidence, lifecycle)| evidence.iter().chain(lifecycle.iter()))
+        {
+            let key = output_collision_key(&invocation_dir.join(destination));
+            if let Some(first) = seen.insert(key, destination) {
                 return (
                     error_output(
-                        "io",
-                        &format!("cannot write {}: {error}", file_path.display()),
+                        "usage",
+                        &format!(
+                            "causal output destinations collide: {} and {}",
+                            first.display(),
+                            destination.display()
+                        ),
                     ),
                     2,
                 );
             }
+        }
+    }
+
+    // ── Write output files ───────────────────────────────────────────
+    // One file per artifact so each is independently consumable by
+    // `fslc causal analyze --evidence`. Single artifact uses --out as-is;
+    // multiple artifacts suffix the evidence id.
+    let mut evidence_paths = Vec::new();
+    let mut lifecycle_paths = Vec::new();
+    for (index, artifact) in artifacts.iter().enumerate() {
+        if let Some(file_path) = &output_destinations[index].0 {
+            let out_json = serde_json::to_string_pretty(artifact).expect("valid JSON");
+            if let Err(error) =
+                crate::output_publication::publish(file_path, format!("{out_json}\n"))
+            {
+                return output_write_error(file_path, &error, &evidence_paths, &lifecycle_paths);
+            }
             evidence_paths.push(file_path.display().to_string());
         }
-        if let Some(base) = lifecycle_out_path
+        if let Some(file_path) = &output_destinations[index].1
             && let Some(lifecycle) = lifecycle_records.get(index)
         {
-            let file_path = if lifecycle_records.len() == 1 {
-                base.to_path_buf()
-            } else {
-                let stem = base
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("lifecycle");
-                let extension = base
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("json");
-                base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
-            };
             let lifecycle_json = serde_json::to_string_pretty(lifecycle).expect("valid JSON");
             if let Err(error) =
-                crate::output_publication::publish(&file_path, format!("{lifecycle_json}\n"))
+                crate::output_publication::publish(file_path, format!("{lifecycle_json}\n"))
             {
-                return (
-                    error_output(
-                        "io",
-                        &format!("cannot write {}: {error}", file_path.display()),
-                    ),
-                    2,
-                );
+                return output_write_error(file_path, &error, &evidence_paths, &lifecycle_paths);
             }
             lifecycle_paths.push(file_path.display().to_string());
         }

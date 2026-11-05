@@ -707,6 +707,28 @@ const CLASSIFICATIONS: &[Classification] = &[
         "load_evidence",
         ResultOption
     ),
+    // Optional sidecar data: None means no input, never a verdict.
+    entry!(
+        Ordinary,
+        "rust/fslc/src/main.rs",
+        2104,
+        "load_glossary_with_base",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fslc/src/main.rs",
+        2159,
+        "load_evidence_with_base",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fslc/src/main.rs",
+        2166,
+        "load_document_evidence",
+        ResultOption
+    ),
     entry!(
         Ordinary,
         "rust/fslc/src/main.rs",

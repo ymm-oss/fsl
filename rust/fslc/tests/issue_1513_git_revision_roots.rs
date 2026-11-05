@@ -181,7 +181,7 @@ fn approval_baseline_roots_and_precedence() {
     s.successful("ledger spec.fsl --depth 2 -o ledger.md");
     s.successful("approval create spec.fsl --kind ledger --artifact ledger.md --approver edition-test --depth 2 -o record4.json");
     let record4 = s.record("record4.json");
-    assert_eq!(record4["schema"], "fslc.approval.v1");
+    assert_eq!(record4["schema"], "fslc.approval.v5");
     assert_eq!(record4["spec"]["git_commit"], legacy4);
     assert_eq!(
         record4["spec"]["digest"],
@@ -228,7 +228,7 @@ fn approval_baseline_roots_and_precedence() {
     signed5["spec"]["git_commit"] = json!(legacy5);
     let signed5 = resign(signed5, &key);
     s.write_record("signed5.json", &signed5);
-    assert_eq!(signed5["schema"], "fslc.approval.v2");
+    assert_eq!(signed5["schema"], "fslc.approval.v6");
     assert_eq!(signed5["spec"], record5["spec"]);
     assert_eq!(signed5["signature"]["algorithm"], "ed25519");
     assert_eq!(signed5["signature"]["key_id"], key_id);

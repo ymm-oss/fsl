@@ -190,9 +190,9 @@ impl Repository {
             assert_eq!(
                 record["schema"],
                 if signed {
-                    "fslc.approval.v2"
+                    "fslc.approval.v6"
                 } else {
-                    "fslc.approval.v1"
+                    "fslc.approval.v5"
                 }
             );
         }

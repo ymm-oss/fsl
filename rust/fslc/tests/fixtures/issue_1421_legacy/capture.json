@@ -1,0 +1,647 @@
+{
+  "producer": {
+    "production_base_commit": "5564b25ccb37e3477311fde1dae5eb6298eb6b2d",
+    "production_base_tree": "717aaa4f038ffd71f4eba0ab0cf92360f8cb06a6",
+    "materialized_head": "098ec54019acb6e714fcd30baa248aa3e3cb1310",
+    "materialized_tree": "39b34b8a298afbe54d6ddecbca92fff6df8ff55e",
+    "basis_receipt_sha256": "0522e378837233692c6dc0c787be042704871f6dc0f39678cacbdeaeb459f4fc",
+    "binary_sha256_before": "88a4e85b77f7fd973070f657f92febd706b515d44b8d5338a9e80c41cded72cc",
+    "binary_sha256_after": "88a4e85b77f7fd973070f657f92febd706b515d44b8d5338a9e80c41cded72cc"
+  },
+  "git": {
+    "object_format": "sha1",
+    "commit": "6ede052e67d0d736184eb8f37ade497d645dd2ad",
+    "tree": "1035c597e293b3bab37dc89d07ab79f0e3a9d07a",
+    "author_name": "Approval Test",
+    "author_email": "approval-test@example.com",
+    "author_date": "2026-10-27T00:00:00Z",
+    "committer_name": "Approval Test",
+    "committer_email": "approval-test@example.com",
+    "committer_date": "2026-10-27T00:00:00Z",
+    "message": "approval baseline",
+    "tracked_paths": [
+      "spec.fsl"
+    ],
+    "source_mode": "100644",
+    "source_blob": "55a2b49ca451e724fb3ad152712671409c88a43d"
+  },
+  "source": {
+    "repository_path": "tests/fixtures/approval.fsl",
+    "input_sha256": "a88e2b133ff4d7ecde9d8957687a175721397134989a05f843c710baaed9aedc",
+    "normalization": "CRLF to LF only"
+  },
+  "test_key": {
+    "algorithm": "Ed25519",
+    "seed_byte": 7,
+    "seed_length": 32,
+    "public_key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889"
+  },
+  "required_directories": [
+    "nested"
+  ],
+  "evidence_arguments": [
+    "./evidence-b.json",
+    "nested/../evidence-a.json"
+  ],
+  "approved_at": {
+    "approval.v1.json": "2026-11-03T06:08:02Z",
+    "approval.v2.json": "2026-11-03T06:08:02Z",
+    "approval.v3.json": "2026-11-03T06:08:02Z",
+    "approval.v4.json": "2026-11-03T06:08:02Z"
+  },
+  "commands": [
+    {
+      "label": "render-ledger",
+      "program": "B",
+      "cwd": "fixture-repository",
+      "arguments": [
+        "ledger",
+        "./spec.fsl",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "-o",
+        "./ledger.md"
+      ],
+      "exit": 0,
+      "stdout_sha256": "d179997c1a773372e965aab96b34446aacdf0e96df32cf238307b870aaebdef7",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "render-document",
+      "program": "B",
+      "cwd": "fixture-repository",
+      "arguments": [
+        "document",
+        "generate",
+        "./spec.fsl",
+        "--lang",
+        "ja",
+        "--glossary",
+        "glossary.json",
+        "--evidence",
+        "./evidence-b.json",
+        "--evidence",
+        "nested/../evidence-a.json",
+        "-o",
+        "./requirements.md"
+      ],
+      "exit": 0,
+      "stdout_sha256": "9faba95c8253651971470aa25831331d7282a32d227c13b0cddeee84907ec20d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "create-v1",
+      "program": "B",
+      "cwd": "fixture-repository",
+      "arguments": [
+        "approval",
+        "create",
+        "./spec.fsl",
+        "--kind",
+        "ledger",
+        "--artifact",
+        "./ledger.md",
+        "--approver",
+        "alice",
+        "-o",
+        "approval.v1.json",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore"
+      ],
+      "exit": 0,
+      "stdout_sha256": "30ea90c33dfb646b910534f4286835f6ee53c12f7ac6207f537d684e2b811c8b",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "check-v1",
+      "program": "B",
+      "cwd": "fixture-repository",
+      "arguments": [
+        "approval",
+        "check",
+        "./spec.fsl",
+        "--record",
+        "approval.v1.json"
+      ],
+      "exit": 0,
+      "stdout_sha256": "2332d5d10da42d6081c94bd5564c57b84bc0abfbe521936cadaef03ad6cc4a80",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "create-v2",
+      "program": "B",
+      "cwd": "fixture-repository",
+      "arguments": [
+        "approval",
+        "create",
+        "./spec.fsl",
+        "--kind",
+        "ledger",
+        "--artifact",
+        "./ledger.md",
+        "--approver",
+        "alice",
+        "-o",
+        "approval.v2.json",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "--signing-key",
+        "./seed7-private.pem"
+      ],
+      "exit": 0,
+      "stdout_sha256": "3f3a5738d7e033e435a114fbd3c6fa23bd614bf187369ff2e8e03c0bfef9a3bf",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "check-v2",
+      "program": "B",
+      "cwd": "fixture-repository",
+      "arguments": [
+        "approval",
+        "check",
+        "./spec.fsl",
+        "--record",
+        "approval.v2.json",
+        "--trust-key",
+        "./seed7-public.pem"
+      ],
+      "exit": 0,
+      "stdout_sha256": "a522a122b11247b1ea82969b084edd6cfeeed01ebd14449d17fd12e455a6e60d",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "create-v3",
+      "program": "B",
+      "cwd": "fixture-repository",
+      "arguments": [
+        "approval",
+        "create",
+        "./spec.fsl",
+        "--kind",
+        "requirements_document",
+        "--artifact",
+        "./requirements.md",
+        "--approver",
+        "alice",
+        "-o",
+        "approval.v3.json",
+        "--glossary",
+        "glossary.json",
+        "--evidence",
+        "./evidence-b.json",
+        "--evidence",
+        "nested/../evidence-a.json"
+      ],
+      "exit": 0,
+      "stdout_sha256": "c4c9e4f88f1163b6d38242fd1e1160a2f67c17c59dfe1ff09141a3c95732b773",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "check-v3",
+      "program": "B",
+      "cwd": "fixture-repository",
+      "arguments": [
+        "approval",
+        "check",
+        "./spec.fsl",
+        "--record",
+        "approval.v3.json"
+      ],
+      "exit": 0,
+      "stdout_sha256": "43735dc632c6178ea5747e24faca9f4c5956fa90006f298f9b071b6a5bacdf65",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "create-v4",
+      "program": "B",
+      "cwd": "fixture-repository",
+      "arguments": [
+        "approval",
+        "create",
+        "./spec.fsl",
+        "--kind",
+        "requirements_document",
+        "--artifact",
+        "./requirements.md",
+        "--approver",
+        "alice",
+        "-o",
+        "approval.v4.json",
+        "--glossary",
+        "glossary.json",
+        "--evidence",
+        "./evidence-b.json",
+        "--evidence",
+        "nested/../evidence-a.json",
+        "--signing-key",
+        "./seed7-private.pem"
+      ],
+      "exit": 0,
+      "stdout_sha256": "05bcedad48cd39996d37449884d2953e9fd71fdedd724b2315b11f7732ff44cb",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "label": "check-v4",
+      "program": "B",
+      "cwd": "fixture-repository",
+      "arguments": [
+        "approval",
+        "check",
+        "./spec.fsl",
+        "--record",
+        "approval.v4.json",
+        "--trust-key",
+        "./seed7-public.pem"
+      ],
+      "exit": 0,
+      "stdout_sha256": "36d2458567b7189fc27cbec2bd7535ef2447aede4a57e699d11a640b51cbe35c",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "checks": {
+    "approval.v1.json": {
+      "fsl": "1.0",
+      "result": "approval_check",
+      "status": "approved",
+      "reasons": [],
+      "record": "approval.v1.json",
+      "target_kind": "ledger",
+      "approver": "alice",
+      "approved_at": "2026-11-03T06:08:02Z",
+      "requirements": [
+        "REQ-190"
+      ],
+      "baseline_digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+      "current_digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+      "artifact_digest": "sha256:7fa0f2e04df3a7227dd9388ac99fb8db76796f77edb82ab32aebd207f92cffce",
+      "current_artifact_digest": "sha256:7fa0f2e04df3a7227dd9388ac99fb8db76796f77edb82ab32aebd207f92cffce",
+      "diff_base": "6ede052e67d0d736184eb8f37ade497d645dd2ad",
+      "semantic_diff_command": "fslc approval diff spec.fsl --record approval.v1.json",
+      "signature_status": "unsigned",
+      "key_id": null,
+      "warnings": [
+        {
+          "code": "legacy_string_metadata",
+          "kind": "legacy_string_metadata",
+          "taxonomy": "deprecated",
+          "severity": "warning",
+          "edition": "current",
+          "message": "legacy string metadata is deprecated; use a typed annotation",
+          "loc": {
+            "file": "./spec.fsl",
+            "line": 12,
+            "column": 20,
+            "end_line": 12,
+            "end_column": 63
+          },
+          "canonical_replacement": "@requirement(\"REQ-190\", \"a pending review can be approved\")",
+          "machine_applicable": true,
+          "edits": [
+            {
+              "start": 228,
+              "end": 228,
+              "replacement": "@requirement(\"REQ-190\", \"a pending review can be approved\")\n  "
+            },
+            {
+              "start": 245,
+              "end": 288,
+              "replacement": ""
+            }
+          ]
+        },
+        {
+          "code": "legacy_string_metadata",
+          "kind": "legacy_string_metadata",
+          "taxonomy": "deprecated",
+          "severity": "warning",
+          "edition": "current",
+          "message": "legacy string metadata is deprecated; use a typed annotation",
+          "loc": {
+            "file": "./spec.fsl",
+            "line": 18,
+            "column": 30,
+            "end_line": 18,
+            "end_column": 76
+          },
+          "canonical_replacement": "@requirement(\"REQ-190\", \"an approved review remains approved\")",
+          "machine_applicable": true,
+          "edits": [
+            {
+              "start": 369,
+              "end": 369,
+              "replacement": "@requirement(\"REQ-190\", \"an approved review remains approved\")\n  "
+            },
+            {
+              "start": 396,
+              "end": 442,
+              "replacement": ""
+            }
+          ]
+        }
+      ]
+    },
+    "approval.v2.json": {
+      "fsl": "1.0",
+      "result": "approval_check",
+      "status": "approved",
+      "reasons": [],
+      "record": "approval.v2.json",
+      "target_kind": "ledger",
+      "approver": "alice",
+      "approved_at": "2026-11-03T06:08:02Z",
+      "requirements": [
+        "REQ-190"
+      ],
+      "baseline_digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+      "current_digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+      "artifact_digest": "sha256:7fa0f2e04df3a7227dd9388ac99fb8db76796f77edb82ab32aebd207f92cffce",
+      "current_artifact_digest": "sha256:7fa0f2e04df3a7227dd9388ac99fb8db76796f77edb82ab32aebd207f92cffce",
+      "diff_base": "6ede052e67d0d736184eb8f37ade497d645dd2ad",
+      "semantic_diff_command": "fslc approval diff spec.fsl --record approval.v2.json",
+      "signature_status": "signed",
+      "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+      "warnings": [
+        {
+          "code": "legacy_string_metadata",
+          "kind": "legacy_string_metadata",
+          "taxonomy": "deprecated",
+          "severity": "warning",
+          "edition": "current",
+          "message": "legacy string metadata is deprecated; use a typed annotation",
+          "loc": {
+            "file": "./spec.fsl",
+            "line": 12,
+            "column": 20,
+            "end_line": 12,
+            "end_column": 63
+          },
+          "canonical_replacement": "@requirement(\"REQ-190\", \"a pending review can be approved\")",
+          "machine_applicable": true,
+          "edits": [
+            {
+              "start": 228,
+              "end": 228,
+              "replacement": "@requirement(\"REQ-190\", \"a pending review can be approved\")\n  "
+            },
+            {
+              "start": 245,
+              "end": 288,
+              "replacement": ""
+            }
+          ]
+        },
+        {
+          "code": "legacy_string_metadata",
+          "kind": "legacy_string_metadata",
+          "taxonomy": "deprecated",
+          "severity": "warning",
+          "edition": "current",
+          "message": "legacy string metadata is deprecated; use a typed annotation",
+          "loc": {
+            "file": "./spec.fsl",
+            "line": 18,
+            "column": 30,
+            "end_line": 18,
+            "end_column": 76
+          },
+          "canonical_replacement": "@requirement(\"REQ-190\", \"an approved review remains approved\")",
+          "machine_applicable": true,
+          "edits": [
+            {
+              "start": 369,
+              "end": 369,
+              "replacement": "@requirement(\"REQ-190\", \"an approved review remains approved\")\n  "
+            },
+            {
+              "start": 396,
+              "end": 442,
+              "replacement": ""
+            }
+          ]
+        }
+      ]
+    },
+    "approval.v3.json": {
+      "fsl": "1.0",
+      "result": "approval_check",
+      "status": "approved",
+      "reasons": [],
+      "record": "approval.v3.json",
+      "target_kind": "requirements_document",
+      "approver": "alice",
+      "approved_at": "2026-11-03T06:08:02Z",
+      "requirements": [
+        "REQ-190"
+      ],
+      "baseline_digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+      "current_digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+      "artifact_digest": "sha256:e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+      "current_artifact_digest": "sha256:e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+      "diff_base": "6ede052e67d0d736184eb8f37ade497d645dd2ad",
+      "semantic_diff_command": "fslc approval diff spec.fsl --record approval.v3.json",
+      "claim_set_digest": "sha256:6b11a312eb01a7a8f2c5ac3bdd6c9f4f7d0a116441e963f709c6b90d10dd7afe",
+      "current_claim_set_digest": "sha256:6b11a312eb01a7a8f2c5ac3bdd6c9f4f7d0a116441e963f709c6b90d10dd7afe",
+      "reviewed_digest": "sha256:e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+      "current_reviewed_digest": "sha256:e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+      "signature_status": "unsigned",
+      "key_id": null,
+      "warnings": [
+        {
+          "code": "legacy_string_metadata",
+          "kind": "legacy_string_metadata",
+          "taxonomy": "deprecated",
+          "severity": "warning",
+          "edition": "current",
+          "message": "legacy string metadata is deprecated; use a typed annotation",
+          "loc": {
+            "file": "./spec.fsl",
+            "line": 12,
+            "column": 20,
+            "end_line": 12,
+            "end_column": 63
+          },
+          "canonical_replacement": "@requirement(\"REQ-190\", \"a pending review can be approved\")",
+          "machine_applicable": true,
+          "edits": [
+            {
+              "start": 228,
+              "end": 228,
+              "replacement": "@requirement(\"REQ-190\", \"a pending review can be approved\")\n  "
+            },
+            {
+              "start": 245,
+              "end": 288,
+              "replacement": ""
+            }
+          ]
+        },
+        {
+          "code": "legacy_string_metadata",
+          "kind": "legacy_string_metadata",
+          "taxonomy": "deprecated",
+          "severity": "warning",
+          "edition": "current",
+          "message": "legacy string metadata is deprecated; use a typed annotation",
+          "loc": {
+            "file": "./spec.fsl",
+            "line": 18,
+            "column": 30,
+            "end_line": 18,
+            "end_column": 76
+          },
+          "canonical_replacement": "@requirement(\"REQ-190\", \"an approved review remains approved\")",
+          "machine_applicable": true,
+          "edits": [
+            {
+              "start": 369,
+              "end": 369,
+              "replacement": "@requirement(\"REQ-190\", \"an approved review remains approved\")\n  "
+            },
+            {
+              "start": 396,
+              "end": 442,
+              "replacement": ""
+            }
+          ]
+        }
+      ]
+    },
+    "approval.v4.json": {
+      "fsl": "1.0",
+      "result": "approval_check",
+      "status": "approved",
+      "reasons": [],
+      "record": "approval.v4.json",
+      "target_kind": "requirements_document",
+      "approver": "alice",
+      "approved_at": "2026-11-03T06:08:02Z",
+      "requirements": [
+        "REQ-190"
+      ],
+      "baseline_digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+      "current_digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+      "artifact_digest": "sha256:e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+      "current_artifact_digest": "sha256:e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+      "diff_base": "6ede052e67d0d736184eb8f37ade497d645dd2ad",
+      "semantic_diff_command": "fslc approval diff spec.fsl --record approval.v4.json",
+      "claim_set_digest": "sha256:6b11a312eb01a7a8f2c5ac3bdd6c9f4f7d0a116441e963f709c6b90d10dd7afe",
+      "current_claim_set_digest": "sha256:6b11a312eb01a7a8f2c5ac3bdd6c9f4f7d0a116441e963f709c6b90d10dd7afe",
+      "reviewed_digest": "sha256:e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+      "current_reviewed_digest": "sha256:e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+      "signature_status": "signed",
+      "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+      "warnings": [
+        {
+          "code": "legacy_string_metadata",
+          "kind": "legacy_string_metadata",
+          "taxonomy": "deprecated",
+          "severity": "warning",
+          "edition": "current",
+          "message": "legacy string metadata is deprecated; use a typed annotation",
+          "loc": {
+            "file": "./spec.fsl",
+            "line": 12,
+            "column": 20,
+            "end_line": 12,
+            "end_column": 63
+          },
+          "canonical_replacement": "@requirement(\"REQ-190\", \"a pending review can be approved\")",
+          "machine_applicable": true,
+          "edits": [
+            {
+              "start": 228,
+              "end": 228,
+              "replacement": "@requirement(\"REQ-190\", \"a pending review can be approved\")\n  "
+            },
+            {
+              "start": 245,
+              "end": 288,
+              "replacement": ""
+            }
+          ]
+        },
+        {
+          "code": "legacy_string_metadata",
+          "kind": "legacy_string_metadata",
+          "taxonomy": "deprecated",
+          "severity": "warning",
+          "edition": "current",
+          "message": "legacy string metadata is deprecated; use a typed annotation",
+          "loc": {
+            "file": "./spec.fsl",
+            "line": 18,
+            "column": 30,
+            "end_line": 18,
+            "end_column": 76
+          },
+          "canonical_replacement": "@requirement(\"REQ-190\", \"an approved review remains approved\")",
+          "machine_applicable": true,
+          "edits": [
+            {
+              "start": 369,
+              "end": 369,
+              "replacement": "@requirement(\"REQ-190\", \"an approved review remains approved\")\n  "
+            },
+            {
+              "start": 396,
+              "end": 442,
+              "replacement": ""
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "files": {
+    "spec.fsl": {
+      "sha256": "a88e2b133ff4d7ecde9d8957687a175721397134989a05f843c710baaed9aedc",
+      "bytes": 481
+    },
+    "ledger.md": {
+      "sha256": "7fa0f2e04df3a7227dd9388ac99fb8db76796f77edb82ab32aebd207f92cffce",
+      "bytes": 3532
+    },
+    "requirements.md": {
+      "sha256": "e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+      "bytes": 7325
+    },
+    "glossary.json": {
+      "sha256": "97f7cdedbd9d145f246108a434919e64981400ae243ae1a8d84a93400a289330",
+      "bytes": 118
+    },
+    "evidence-b.json": {
+      "sha256": "585eb7f5092b7d2c4c3d6511d7e3a66ff941b9d20474c277625ac9932a47cc67",
+      "bytes": 92
+    },
+    "evidence-a.json": {
+      "sha256": "cda8c7ae509a88c8bfef28f6af1c7f9c2b2948b973810e2114ce0fe79e515203",
+      "bytes": 90
+    },
+    "seed7-public.pem": {
+      "sha256": "5cc558a6d81dbb983bb823d90d832fe06569c2cd75488b299986fc36b3d5306f",
+      "bytes": 113
+    },
+    "approval.v1.json": {
+      "sha256": "c165ff28281aaaa453db189fc0418c988538e40cbf7e4d1adced81643b2b5e42",
+      "bytes": 777
+    },
+    "approval.v2.json": {
+      "sha256": "c03bdb7d236423f4bd226c1ac17e49c6e774001779f437ebe8acd4821bffc504",
+      "bytes": 1018
+    },
+    "approval.v3.json": {
+      "sha256": "7e39ff64efe3c3bea80e8319a78fc4a0a7bf88ac7c90c36a4cd3c0a9e391430d",
+      "bytes": 1634
+    },
+    "approval.v4.json": {
+      "sha256": "300fe93350dccd899a5b6908698234e67084ddf0bfb065203ff413c0e096216c",
+      "bytes": 1875
+    }
+  }
+}

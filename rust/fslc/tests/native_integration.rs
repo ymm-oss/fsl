@@ -481,7 +481,7 @@ fn published_schema_inventory_is_complete_and_parseable() {
     let mut schemas = Vec::new();
     collect_schemas(&root().join("schemas/fslc"), &mut schemas);
     schemas.sort();
-    assert_eq!(schemas.len(), 46, "published schema inventory changed");
+    assert_eq!(schemas.len(), 48, "published schema inventory changed");
     let mut ids = BTreeSet::new();
     for path in schemas {
         let schema: Value =

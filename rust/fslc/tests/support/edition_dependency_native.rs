@@ -500,7 +500,7 @@ fn dependency_edition_standalone_and_nested_whole_reports_keep_independent_findi
             let result = run_admitted_root(&path, Ok(source.into()), None, false, |captured| {
                 let edition = admit_root_source(&path, captured, None).unwrap();
                 nested = Some(
-                    approval_artifact(&path, captured, &edition, kind, &inputs)
+                    approval_artifact(&path, captured, &edition, kind, &inputs, None)
                         .unwrap()
                         .0,
                 );

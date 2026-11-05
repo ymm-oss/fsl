@@ -1974,7 +1974,7 @@ fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evide
                                                   # fresh re-render; never interprets prose (§13)
 fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
-                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
+                                                  # new records use v5/v6; requirements_document binds a claim_set_digest (§13)
 fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem]
                                                   # approved (exit 0) | drifted (exit 0, analysis output)
                                                   # | signature-invalid (exit 1); see DESIGN-approval.md
@@ -2468,23 +2468,76 @@ and returns `semantic_diff_batch`; supplying one spec preserves
 "git_archive_full_tree"`. The ordinary two-path form never invokes Git and
 works outside a repository.
 
-`approval create` binds a reviewed `ledger`, `html`, or `scenarios` artifact to
+`approval create` binds a reviewed `ledger`, `html`, `scenarios`, or
+`requirements_document` artifact to
 the fully lowered, location-insensitive kernel digest and the current clean Git
 commit. The versioned JSON sidecar also records the normalized artifact digest,
 generator/version/options, approved requirement IDs, approver, and UTC time.
 Creation regenerates the artifact and rejects a stale review file. `approval
-check` returns `approved` only while the spec, rendering, and renderer bindings
-all match; otherwise it returns `drifted` with `spec_changed`,
-`rendering_changed`, and/or `renderer_changed`. `ledger --approval` adds the
+check` returns `approved` only while all applicable bindings match; otherwise
+it returns `drifted` with `spec_changed`, `rendering_changed`, and/or
+`renderer_changed`. A `requirements_document` also binds the claim set and exact
+reviewed bytes, with `claim_set_changed` and `artifact_changed` reasons.
+`ledger --approval` adds the
 same status per requirement and includes the full baseline digest. `approval
 diff` materializes the approved commit and invokes the ordinary bounded semantic
 diff against the current working file. See `docs/design/DESIGN-approval.md`.
 
-Without `--signing-key`, `approval create` emits the unchanged unsigned
-`fslc.approval.v1` record. With an Ed25519 PKCS#8 PEM signing key it emits
-`fslc.approval.v2`; every check, diff, or ledger use of that record requires the
-matching SPKI PEM `--trust-key`. The v2 detached signature covers the full
-canonical record, and a cryptographic mismatch is `signature-invalid` rather
+For all four target kinds, `approval create` emits unsigned `fslc.approval.v5`
+without `--signing-key`, or signed `fslc.approval.v6` with an Ed25519 PKCS#8 PEM
+signing key. Both schemas require two nonempty strings: `path_base`, the creation
+directory relative to the Git root of the checkout holding the spec (`.` for the
+root, otherwise `/`-separated names), and `render_source`, the original spec
+argument verbatim. `spec.path` remains Git-repository-relative. Target and input
+I/O resolves from the Git root of the spec being checked, joined with `path_base`,
+not from the caller's directory or the checkout that created the record. So a
+clone, a worktree or a relocated checkout reads its own files, and a tampered
+document or glossary there shows as `artifact_changed`, `rendering_changed` or the
+input-digest failure. Stored path spellings, input order and rendered labels stay
+literal. `render_source` is a display label only; the explicit spec still supplies
+the actual bytes and dependency directory.
+
+The Git root comes from the directory the spec's path names, with Git's location
+variables such as `GIT_DIR` and `GIT_WORK_TREE` ignored, so a final symlink or a hook's
+environment cannot choose another checkout. A spec that resolves outside that root is
+refused with `kind:"semantics"`, exit 2, including when `core.worktree` points away from
+it. A link to the spec within the same checkout keeps the binding, because the spec's
+digest and path are still checked and the files still come from that checkout. A link
+into a nested repository or submodule fails the same path check. Because of this
+lookup, `document generate --approval` on a v5 or v6 record needs Git, which it does
+not for v1–v4.
+
+A `requirements_document` record's creation directory, target and inputs must lie
+inside that Git root. Creation refuses, with `kind:"semantics"` and exit 2, an absolute
+path, a path that climbs out of the root, a link leading out of it, or a creation
+directory outside it. At check, a stored path that climbs or links out gets the same
+refusal, while an absolute form is rejected earlier by the record reader: `kind:"io"`
+from `approval check` and `ledger`, `kind:"document"` from `document generate`.
+A `ledger`, `html` or `scenarios` record reads no file through its base, so it can be
+created from any directory; outside the root it stores `.`. For these kinds `approved`
+means the spec and a fresh rendering match the record: the reviewed file on disk is read
+only at creation and is not checked afterwards.
+
+Tampering with `path_base` invalidates a v6 signature. A v5 record is unsigned and proves
+nothing against someone editing it: a changed `path_base` that points at a copy with the
+same content still reports `approved`, as does a solver record's, which reads nothing
+through the field. Use v6 when the record itself needs protecting.
+
+Legacy v1–v4 records remain readable with their original formats, signatures,
+and invocation-relative path interpretation. Records are not silently migrated.
+
+For `requirements_document` v3–v6, authoritative approval check and ledger
+compare each recorded input digest with the same raw bytes used for rendering.
+Every earlier error and the complete ordered drift result keep precedence.
+Only an otherwise-approved mismatch becomes `result:error`, `kind:io`, exit 2,
+with `approval input digest mismatch: <recorded path>`. Selection follows the
+glossary first, then evidence in recorded order. This adds no stored-input read
+to document generate, structural document check, or approval diff.
+
+Signed approval check, diff, ledger, and document generation require the matching
+SPKI PEM `--trust-key`; document check remains structural. The v6 detached
+signature covers the full canonical record, including both context strings,
+and a cryptographic mismatch is `signature-invalid` rather
 than an approval. Trust-key possession authenticates a signer but authorization
 remains an organizational policy. The exact canonicalization and key formats
 are specified in `docs/design/DESIGN-approval.md`.
@@ -5077,8 +5130,20 @@ the same parser the evidence commands run and returns `ai_project_analyzed`;
 `fslc ai eval` checks the selected
 `statistical_property`'s declared `slice`/`min_samples`/`ci_lower`/`ci_upper`
 requirements against precomputed JSONL (`--records`, or the declared
-`dataset`'s `source` file) with Wilson intervals; `fslc ai regress` checks the
-selected `ai_migration`'s declared aggregate `no_regression` metric
+`dataset`'s `source` file) with Wilson intervals.
+
+A relative declared `dataset.source` resolves against the declaring FSL file's
+directory, the lexical parent of its path, so a file reached through a symlink resolves
+beside the link; an absolute source remains absolute. Explicit `--records` wins and
+remains relative to the invocation directory, including when the declaration has
+no source or names an external source. Property/dataset selection still precedes
+records I/O. Without an override, missing sources and external `://` sources keep
+their existing refusal; no caller-directory, repository or existence fallback is
+tried. The documented example therefore declares `source "support_eval_v3.jsonl"`.
+Existing repository-prefixed declarations require an explicit spelling migration
+or caller-relative `--records`; they are not automatically rebased.
+
+`fslc ai regress` checks the selected `ai_migration`'s declared aggregate `no_regression` metric
 drop/increase clauses; `fslc ai compare` reports metric deltas without a
 threshold claim; `fslc ai drift` checks the selected `observed_property`'s
 declared `observed`/`drift` requirements over runtime telemetry
@@ -5574,6 +5639,23 @@ present on only the claim or artifact side is `unassessable`; absence is never
 treated as universal. **`causal_support`
 and `formal_assurance` are orthogonal axes**: evidence never changes
 `formal_assurance: "not_run"`, and no support value is a verdict.
+
+`causal observe-expectations` plans every actual `--out`/`--lifecycle-out`
+destination after replay and artifact construction, before output serialization
+or writes. One artifact uses the supplied path; multiple artifacts retain
+`<stem>.<evidence_id>.<extension>` names (default extension `json`). A collision key
+is the canonicalized parent directory plus the file name, so `sub/../a.json` and
+`self/a.json` with `self -> .` collide with `a.json`. When the parent does not exist,
+the key is the invocation-absolute spelling with `.` and `..` collapsed. Names that
+differ only by case do not collide, even on a case-insensitive file system.
+The first repeated key in artifact order, evidence then lifecycle, returns
+`kind:"usage"`, exit 2, with
+`causal output destinations collide: <first path> and <second path>`, preserving
+all destination bytes and existence. Existing model/input/replay errors still
+precede this check; a valid collision precedes destination/publication I/O errors.
+Zero artifacts create no collision from equal flags. Distinct outputs retain
+their evidence/lifecycle write interleaving; a later failure does not roll back
+earlier writes, and its error lists them in `written`. Names, bytes, digests and assurance otherwise remain unchanged.
 
 A human can carve an observable contract out of a claim as an `expectation`
 and check it with the existing verifier — **the claim itself is never
