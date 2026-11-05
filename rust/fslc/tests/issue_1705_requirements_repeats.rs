@@ -5,7 +5,7 @@
 //! owning one requirement ID passed `check`. For the ID, the ledger kept one row with one
 //! title and one status for the two. Each is now refused at the repeat, on every route
 //! that loads the document. Two `covers` of one ID with one text are a link and stay
-//! accepted.
+//! accepted, and a `covers` of an ID another declaration owns shows the owner's title.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -342,6 +342,97 @@ fn two_covers_of_one_id_need_one_text() {
         1,
         "{ledger}"
     );
+}
+
+/// A rule owning `REQ-2`, after the decision table: line 24 of `CLAIMS`.
+const RULE_2: &str = "  rule REQ-2 \"Only a manager rejects a large claim\" { allow Manager rejects \
+                      Claim only when amount >= 2 }\n";
+const TITLE_2: &str = "Only a manager rejects a large claim";
+
+/// A `covers` of an ID a rule owns stays a link, and the ID's title is the rule's: the
+/// base ledger row showed the `covers` text and lost the rule's title, and an event's
+/// `covers` dropped the rule's title from the document and the claims too.
+#[test]
+fn a_covers_of_an_owned_id_shows_the_owners_title() {
+    let assuming = "  } assuming amount > 0\n";
+    let small = "covers REQ-2 \"A small claim is auto-approved\"";
+    let reject = "  event reject = Manager rejects Claim Submitted -> Rejected\n";
+    let row = CLAIMS.replacen(assuming, &format!("{assuming}{RULE_2}"), 1);
+    let event = row
+        .replacen(small, "covers REQ-4 \"A small claim is auto-approved\"", 1)
+        .replacen(
+            reject,
+            &format!("{reject}    covers REQ-2 \"A claim can be rejected\"\n"),
+            1,
+        );
+    let cases = [
+        (
+            "covers_row",
+            row,
+            "A small claim is auto-approved",
+            24,
+            json!(["action:auto_approve#operation", "action:reject#operation"]),
+        ),
+        (
+            "covers_event",
+            event,
+            "A claim can be rejected",
+            25,
+            json!(["action:reject#operation"]),
+        ),
+    ];
+    for (label, source, covered, line, claim_ids) in cases {
+        let scratch = Scratch::new(label, &[("doc.fsl", &source)]);
+        assert_eq!(scratch.fslc(&["check", "doc.fsl"]).0, 0, "{label}");
+        // The document violates its own `assuming`, so the ledger exits 1.
+        let (exit, _) = scratch.fslc(&["ledger", "doc.fsl", "--depth", "6", "-o", "ledger.md"]);
+        assert_eq!(exit, 1, "{label}");
+        let ledger = scratch.read("ledger.md");
+        let rows: Vec<_> = ledger
+            .lines()
+            .filter(|line| line.starts_with("| REQ-2 |"))
+            .collect();
+        assert_eq!(rows.len(), 1, "{label}: {ledger}");
+        assert!(
+            rows[0].starts_with(&format!("| REQ-2 | {TITLE_2} |")),
+            "{label}: {}",
+            rows[0]
+        );
+        let (exit, claims) = scratch.fslc(&["document", "claims", "doc.fsl"]);
+        assert_eq!(exit, 0, "{label}");
+        let requirement = claims["requirements"]
+            .as_array()
+            .expect("requirements")
+            .iter()
+            .find(|requirement| requirement["id"] == "REQ-2")
+            .expect("REQ-2");
+        assert_eq!(
+            requirement,
+            &json!({
+                "id": "REQ-2",
+                "statements": [{
+                    "text": TITLE_2,
+                    "source": {"path": "doc.fsl", "line": line, "column": 3},
+                }],
+                "claim_ids": claim_ids,
+                "kinds": [],
+            }),
+            "{label}"
+        );
+        let (exit, _) = scratch.fslc(&["document", "generate", "doc.fsl", "-o", "doc.md"]);
+        assert_eq!(exit, 0, "{label}");
+        let document = scratch.read("doc.md");
+        assert!(
+            document.contains(&format!("#### REQ-2\n\n> {TITLE_2}\n")),
+            "{label}: {document}"
+        );
+        assert!(!document.contains(covered), "{label}: {document}");
+        assert_eq!(
+            scratch.fslc(&["document", "check", "doc.fsl", "doc.md"]).0,
+            0,
+            "{label}"
+        );
+    }
 }
 
 /// Every route the issue lists, on the issue's pair.

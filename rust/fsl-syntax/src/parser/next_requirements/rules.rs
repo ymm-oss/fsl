@@ -115,6 +115,13 @@ pub(in crate::parser) struct RuleDeclaration {
     statements: Vec<Located>,
 }
 
+impl RuleDeclaration {
+    /// The ID this rule owns, its title and its span.
+    pub(in crate::parser) fn owned(&self) -> (&str, &str, Span) {
+        (&self.id, &self.text, self.span)
+    }
+}
+
 impl Parser<'_> {
     /// `rule REQ "text" { … }`.
     pub(in crate::parser) fn rule_declaration(&mut self) -> Result<RuleDeclaration, ParseError> {

@@ -20,8 +20,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Entity, EventSignature, MIXED_PARTICLES, PARTICLE_ROLE_MISMATCH, UNKNOWN_EVENT_PHRASE, Word,
-    actor_not_declared, join_names,
+    Entity, EventSignature, MIXED_PARTICLES, OwnedTitles, PARTICLE_ROLE_MISMATCH,
+    UNKNOWN_EVENT_PHRASE, Word, actor_not_declared, join_names, link_to_owner,
 };
 use crate::keywords::{Kw, Particle};
 use crate::parser::{Parser, join_span};
@@ -86,6 +86,13 @@ fn row_text(condition: &Condition, actor: &Word, verbs: &[Word]) -> String {
         .collect::<Vec<_>>()
         .join(&format!(" {} ", Kw::RowOr.english()));
     format!("{condition} => {} {verbs}", actor.text)
+}
+
+impl DecideDeclaration {
+    /// The ID this table owns, its title and its span.
+    pub(in crate::parser) fn owned(&self) -> (&str, &str, Span) {
+        (&self.id, &self.text, self.span)
+    }
 }
 
 impl Parser<'_> {
@@ -487,6 +494,7 @@ fn reject_differing_covers(decision: &DecideDeclaration) -> Result<(), ParseErro
 #[allow(clippy::too_many_lines)]
 pub(super) fn apply(
     decisions: Vec<DecideDeclaration>,
+    owned: &OwnedTitles,
     transitions: &mut BTreeMap<String, Vec<ProcessItem>>,
     events: &[EventSignature],
     entities: &BTreeMap<String, Entity>,
@@ -494,8 +502,11 @@ pub(super) fn apply(
     actors: &BTreeSet<&str>,
 ) -> Result<Vec<DecisionTable>, ParseError> {
     let mut tables = Vec::new();
-    for decision in decisions {
+    for mut decision in decisions {
         reject_differing_covers(&decision)?;
+        for cover in decision.rows.iter_mut().flat_map(|row| &mut row.covers) {
+            link_to_owner(cover, owned);
+        }
         let Some(entity) = entities.get(&decision.entity.text) else {
             return Err(ParseError::new(
                 format!(

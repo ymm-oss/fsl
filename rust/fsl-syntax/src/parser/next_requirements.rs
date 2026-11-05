@@ -189,6 +189,19 @@ pub(super) struct Pending {
     owners: Vec<(String, Span, &'static str)>,
 }
 
+/// Each owned requirement ID's title and the span of the declaration that owns it.
+type OwnedTitles = BTreeMap<String, (String, Span)>;
+
+/// Make a `covers` of an ID another declaration owns carry the owner's title and span.
+/// The link stays; the ID's one title is its owner's, so the ledger row, the document's
+/// requirement text and the claims all show it (#1705).
+fn link_to_owner(cover: &mut ProcessCover, owned: &OwnedTitles) {
+    if let Some((title, span)) = owned.get(&cover.id) {
+        cover.text.clone_from(title);
+        cover.span = *span;
+    }
+}
+
 /// The keywords whose second owner of an ID an existing check already refuses: a
 /// repeated acceptance or forbidden ID, and a repeated goal or policy property.
 const OWNERS_REFUSED_ELSEWHERE: [&str; 4] = ["scenario", "forbidden", "goal", "policy"];
@@ -1209,6 +1222,29 @@ fn join_names<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
 }
 
 impl Pending {
+    /// The title of each owned requirement ID, from its first owner. A second owner is
+    /// refused before this is read, or by a later check of its own kind.
+    fn owned_titles(&self) -> OwnedTitles {
+        let mut owned = OwnedTitles::new();
+        let declarations = self
+            .rules
+            .iter()
+            .map(|(_, rule)| rule.owned())
+            .chain(self.decisions.iter().map(decide::DecideDeclaration::owned))
+            .chain(
+                self.traces
+                    .iter()
+                    .map(|(_, trace)| (trace.id.as_str(), trace.text.as_str(), trace.span)),
+            )
+            .chain(self.goals.iter().map(relations::GoalSource::owned));
+        for (id, title, span) in declarations {
+            owned
+                .entry(id.to_owned())
+                .or_insert_with(|| (title.to_owned(), span));
+        }
+        owned
+    }
+
     /// Desugar the members read into `items` (the published items, in
     /// order), returning the items with each entity's `process` and each
     /// trace placed where it was declared.
@@ -1235,6 +1271,7 @@ impl Pending {
             }
         }
         reject_second_owners(&self.owners)?;
+        let owned = self.owned_titles();
         let mut instance_bounds = BTreeMap::new();
         for item in &items {
             match item {
@@ -1388,7 +1425,10 @@ impl Pending {
 
         let mut transitions = BTreeMap::<String, Vec<ProcessItem>>::new();
         let mut signatures = Vec::new();
-        for event in self.events {
+        for mut event in self.events {
+            for cover in &mut event.covers {
+                link_to_owner(cover, &owned);
+            }
             if let Some((verb, object)) = &event.marked {
                 check_marked_roles(
                     &event.actor,
@@ -1635,6 +1675,7 @@ impl Pending {
         // `rule_guards`, one `requires` line per table and per statement.
         next.decisions = decide::apply(
             self.decisions,
+            &owned,
             &mut transitions,
             &signatures,
             &entities,
