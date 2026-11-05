@@ -4,8 +4,9 @@
 //! diagnostics. That must not change admission: `Int` inside a container makes
 //! compatibility non-transitive, so a container conditional keeps its mutual arm
 //! check. An `Int` expectation keeps the first arm's more specific type.
-//! The f1-f4 packets are the ones the base before #1517 produced; the scalar
-//! rejection differs from that base only in naming the supplied type.
+//! The f2-f4 packets are the ones the base before #1517 produced; the scalar
+//! rejection differs from that base only in naming the supplied type. #1679 moved
+//! f1, which symbolic engines could not evaluate.
 
 #[path = "support/issue_1517_scratch.rs"]
 mod scratch;
@@ -71,17 +72,17 @@ fn assert_rejected(id: &str, source: &str, reason: &str, line: u32, column: u32)
     );
 }
 
+/// Base admitted this and bmc, explicit and induction then failed with `cannot
+/// coerce symbolic value`. The `Int` arm relates `b` to nothing but itself, so
+/// the else arm now answers to the expectation (#1679).
 #[test]
-fn f1_set_arm_narrower_than_its_sibling_stays_admitted() {
-    assert_eq!(
-        check("f1", ARM_NARROW),
-        (
-            json!({"fsl":"1.0","result":"ok","spec":"ArmNarrow","warnings":[{
-                "kind":"no_user_invariants",
-                "message":"spec declares no user invariants (only implicit type bounds are checked)"}],
-                "versions":versions()}),
-            0
-        )
+fn f1_set_arm_outside_the_expectation_is_rejected_at_the_arm() {
+    assert_rejected(
+        "f1",
+        ARM_NARROW,
+        "expression of type Set(Named(\"B\")) is not assignable to Set(Named(\"A\"))",
+        6,
+        37,
     );
 }
 

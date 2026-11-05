@@ -424,6 +424,19 @@ impl KernelModel {
             .map_err(|error| model_error(error.message))
     }
 
+    /// What reading a value of `actual` as `expected` takes, shared with `check`.
+    ///
+    /// # Errors
+    /// Returns an error when either type names an unknown type.
+    pub fn carrier_coercion(
+        &self,
+        actual: &TypeRef,
+        expected: &TypeRef,
+    ) -> Result<crate::CarrierCoercion, ModelError> {
+        crate::typecheck::carrier_coercion(actual, expected, self)
+            .map_err(|error| model_error(error.message))
+    }
+
     /// Whether a state type contributes an implicit verifier bound property.
     #[must_use]
     pub fn type_has_bounds(&self, ty: &TypeRef) -> bool {

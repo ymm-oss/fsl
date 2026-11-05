@@ -1358,6 +1358,20 @@ pub(crate) fn coerce<S: SmtSolver>(
             set_value_type(&mut value, ty.clone());
             Ok(value)
         }
+        // A collection holding `Int` below an element that no literal expectation typed:
+        // bound by `let` or `is`, a method's result or argument, or read back out of
+        // one, wherever the expression is written. Its nested `Int` elements are
+        // converted the way an element of `Int` is. After retagging, so only a value
+        // that had no coercion before reaches this.
+        (value, ty)
+            if value
+                .ty()
+                .map(|actual| model.carrier_coercion(actual, ty))
+                .transpose()?
+                == Some(fsl_core::CarrierCoercion::RebuildInt) =>
+        {
+            coerce_inferred_collection(solver, model, value, ty)
+        }
         (value, ty) => Err(VerifyError::new(format!(
             "cannot coerce symbolic value {:?} to {ty:?}",
             value.ty()

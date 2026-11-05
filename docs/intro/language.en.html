@@ -1243,8 +1243,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   shared by every verify engine, rather than failing later in symbolic coercion.
   Scalar/Option numeric compatibility and add/contains/push arguments remain
   unchanged. <code>Int</code> has no finite carrier, including an inferred literal element:
-  Set/Seq/Map uses involving it retain prior recursive compatibility (and inferred
-  Seq capacity). An uncontextualized Set/Seq conditional retains an already
+  Set/Seq uses involving it retain prior recursive compatibility (and inferred
+  Seq capacity). A Map has no literal, so in a model expression its carriers must
+  agree even when one holds <code>Int</code>; see #1679 below. A refinement map and a scenario
+  <code>expect</code> keep prior compatibility for a Map too. An uncontextualized Set/Seq conditional retains an already
   known finite arm's carrier/capacity through a <code>let</code>, in either arm order;
   that inference alone does not materialize literals. Refinement resolves numeric types in each
   model independently. #1599's shared Type-kind gate rejects same-name declarations
@@ -1268,6 +1270,52 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   controls still check; the 18 original literal-boundary outputs are unchanged.
   See the <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-finite-container-carriers.md">single carrier decision</a>
   for commands and the full removal inventory; recursive materialization is described above.
+  <strong>Breaking removal (#1679):</strong> the model expressions listed here, whose container carriers
+  symbolic evaluation cannot coerce, now fail <code>check</code> with the existing located assignability error
+  (<code>semantics</code>, exit 2) instead of <code>cannot coerce symbolic value</code> on bmc and induction. The
+  refusal is located at the arm when one is at fault, otherwise at the enclosing guard, statement
+  or property, and it applies whether the expression is evaluated or not. Three routes still pass
+  <code>check</code> and report it; they are at the end of this paragraph. A Map whose
+  value is <code>Int</code> or <code>Option&lt;Int&gt;</code> is refused against one with a range, for <code>m0: Map&lt;K, Int&gt;</code>,
+  <code>m1: Map&lt;K, A&gt;</code>: <code>m0 == m1</code>, <code>m0 != m1</code>, <code>m0 = m1</code>, a conditional arm, <code>m0 == old(m1)</code> and
+  <code>(if c then m0 else m1)[0]</code>; inside a literal (<code>some(m0) == some(m1)</code>,
+  <code>Seq { m0 } == Seq { m1 }</code>, <code>Set { m0 } == Set { m1 }</code>) and between sibling elements
+  (<code>Seq { m0, m1 }</code>, <code>Set { m0, m1 }</code>); as a method argument (<code>Seq { m0 }.contains(m1)</code>,
+  <code>Set { m0 }.add(m1)</code>, <code>Set { m0 }.remove(m1)</code>, <code>Seq { m0 }.push(m1)</code>); and read back out of a
+  literal (<code>Seq { m0 }.head() == m1</code>). A conditional arm that only an <code>Int</code> sibling related to the
+  expectation is refused too: <code>a == (if c then t else b)</code> with <code>let t = Set { 0 }</code>, <code>a: Set&lt;A&gt;</code>,
+  <code>b: Set&lt;B&gt;</code>; the same with a <code>Seq</code> literal, a declared <code>q: Seq&lt;Int, 2&gt;</code> or a differing capacity;
+  <code>sa == old(if c then q else sb)</code>; and such an arm inside <code>some(...)</code>, <code>Seq { ... }</code>, <code>Set { ... }</code>
+  or a method argument. These removals take verdicts away. A mismatch in a position that is never
+  evaluated returned a verdict on every engine and is refused all the same: a <code>forall</code> or <code>exists</code>
+  over an empty domain such as <code>type E = 1..0</code>, an action with a parameter over an empty range, and a
+  property that <code>--exclude-property</code> or <code>--property</code> leaves out. So is a <code>decreases</code> measure, which bmc
+  does not read and induction reads only once it ranks: on bmc, and on induction when a violation
+  comes first, such a <code>leadsTo</code> returned a verdict and is refused too. Explicit and <code>fsl-bfs</code> also answered
+  other removed forms, such as an unused <code>let u = m0 == m1</code>; the measured losses are in the
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-finite-container-carriers.md">carrier decision</a>. Other forms keep their verdicts,
+  including <code>a == t</code>, <code>q == a</code> with a differing range or capacity, <code>some(t) == some(a)</code>,
+  <code>Option&lt;Int&gt;</code> against <code>Option&lt;A&gt;</code>, and Maps of equal carriers or equal-range aliases. A collection
+  holding <code>Int</code> below an element that no literal expectation types used to check and then report
+  <code>cannot coerce</code>, and it now returns a result: a <code>let</code> or <code>is</code> binding (<code>let t = Set { some(0) }</code>
+  against <code>Set { p }</code> for <code>p: Option&lt;A&gt;</code>, <code>some(Set { some(1) }) is some(x) and Set { p } == x</code>), a
+  method's result or argument (<code>Set { p, none } == Set { o }.add(none)</code>,
+  <code>Set { Set { p } }.contains(t)</code>, <code>.add(t)</code>, <code>.remove(t)</code>, <code>Seq { Seq { p } }.push(t)</code>) and a read
+  into state (<code>p = (if c then Seq { p } else t).head()</code>), in a guard and in an <code>invariant</code>,
+  <code>reachable</code>, <code>trans</code> or <code>leadsTo</code>, as far as each engine evaluates that position, and inside a
+  <code>--lemma</code> candidate or a map under <code>preserve progress</code>. A refinement map (<code>map m = m</code>, <code>map same = m == y</code>,
+  <code>map s = if c then x else y</code>) and a scenario <code>expect</code> keep the rule above. An <code>expect</code> is evaluated
+  concretely, and so is a map on the refinement step, but <code>preserve progress</code> evaluates a map
+  symbolically, so <code>map same = m == y</code> for those Maps gives <code>cannot coerce</code>, exit 2, under
+  <code>preserve progress</code> while the same map without it refines. That gap is recorded in the carrier
+  decision. A <code>--lemma</code> candidate keeps the rule above as well: with such a mismatch it is
+  <code>rejected</code> with <code>cannot coerce</code>, <code>used</code> is false and the main result does not change, and a
+  mismatch it never evaluates leaves it usable. The third route predates this change and is
+  recorded in the same decision: a literal under <code>old(...)</code> is not typed against what surrounds
+  it, so a range-typed one keeps its own range and capacity. <code>a == old(Set { vb })</code>,
+  <code>sa == old(Seq { vb })</code> and <code>sa == old(Seq { va })</code> for <code>vb: 0..2</code>, <code>a: Set&lt;A&gt;</code>, <code>sa: Seq&lt;A, 2&gt;</code> pass
+  <code>check</code>, exit 2 on bmc and induction, and explicit answers.
+  Migration: declare the two values with one carrier, or compare the entries (<code>m0[k] == m1[k]</code>).
   In mutate, a statically ill-typed implements map is <code>invalid</code>, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map
   mutants that change a numeric range move from <code>errored</code> to <code>invalid</code> in the

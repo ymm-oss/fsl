@@ -1655,8 +1655,29 @@ when checking a file, the message suffix changes from `at L:C` to
   Narrow-to-wide and wide-to-narrow Set copies now fail at check with the existing
   located assignability error (semantics, exit 2), not later symbolic coercion.
   Scalar/Option numeric compatibility and scalar method arguments are unchanged.
-  Int has no finite carrier: Set/Seq/Map involving it retain prior compatibility,
-   including inferred Seq literal capacity. Set/Seq conditional inference retains
+  Int has no finite carrier: Set/Seq involving it retain prior compatibility,
+   including inferred Seq literal capacity. Breaking removal (#1679): a Map has no literal,
+   so in a model expression its carriers must agree even when one holds Int (`m0 == m1`,
+   `m0 = m1`, a conditional arm, `m0 == old(m1)`, `(if c then m0 else m1)[0]`, `some(m0) == some(m1)`,
+   `Seq { m0, m1 }`, `Seq { m0 }.contains(m1)`, `Set { m0 }.add(m1)`, `Set { m0 }.remove(m1)`,
+   `Seq { m0 }.push(m1)`), and a conditional arm answers to the expectation as well as to its sibling
+   (`a == (if c then t else b)` with `let t = Set { 0 }`, `a: Set<A>`, `b: Set<B>`; the same
+   for Seq, capacity, `old(...)`, and inside `some(...)`, `Seq { ... }`, `Set { ... }`). Both now fail
+   at check with the located assignability error rather than `cannot coerce symbolic value` on bmc and
+   induction, evaluated or not: a mismatch never evaluated (an empty-domain `forall` or `exists`, an
+   action over an empty range, a property left out by `--exclude-property` or `--property`, a `decreases`
+   measure, which bmc does not read and induction reads only once it ranks) returned
+   a verdict before and is refused too. Other forms keep their verdicts (`a == t`, `q == a`,
+   `Option<Int>` with `Option<A>`), and a collection holding `Int` below an element that no literal
+   expectation types now returns a result: a `let` or `is` binding, a method's result or argument
+   (`Set { p, none } == Set { o }.add(none)`, `Set { Set { p } }.contains(t)`), or a read into state, in
+   any position an engine evaluates, including a `--lemma` candidate and a map under `preserve progress`.
+   A refinement map, a scenario `expect` and a `--lemma` candidate keep the prior rule. Three routes still
+   pass check and report `cannot coerce`: a Map comparison in a map under `preserve progress`, which
+   evaluates a map symbolically; such a candidate, which is `rejected` with it; and a range-typed literal
+   under `old(...)`, which keeps its own range and capacity (`a == old(Set { vb })`,
+   `sa == old(Seq { va })` for `sa: Seq<A, 2>`), as before this change.
+   Migration: one carrier, or compare entries. Set/Seq conditional inference retains
    an already known finite arm's carrier/capacity through let in either arm order;
    that inference alone does not materialize literals. Refinement resolves numeric types separately;
    #1599 first rejects same-name declarations through its shared Type-kind
