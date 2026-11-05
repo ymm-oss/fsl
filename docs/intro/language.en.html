@@ -3536,14 +3536,34 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   actual, and after immediate lowering failures, so <code>part.put(0)</code> keeps its arity error.
   <code>def</code> parameters were already refused on every route, at the <code>def</code>, and are unchanged. These
   stay accepted because no actual is lost: a log mapping's <code>action ev(a, a) -&gt; put(a)</code>, whose
-  parameters name one log field, and a domain event field that no action takes as a formal, since
-  <code>emits</code> takes no payload.
+  parameters name one log field. A domain event field that no action takes as a formal was
+  accepted here too, and #1700 below refuses it, and takes over the refusal of the others.
   Migration: give each formal its own name, and pass each actual to the formal it belongs to.
   Measured forms and the corpus sweep are in
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-sync-argument-root-validation.md"><code>DESIGN-sync-argument-root-validation.md</code></a>.
   Rust API: <code>SpecItem::Action</code>, <code>SyncAction</code> and <code>RequirementAction</code> require <code>param_spans</code>, and
   <code>ProcessTransition</code> requires <code>input_spans</code>. Empty means no authored formal: the refusal then
   points at the action.
+- <strong>Repeated <code>domain</code> declarations that lose a copy (breaking removal, #1700).</strong> <code>check</code>, <code>verify</code>
+  and every <code>fslc domain</code> route refuse each of these at the repeat, with exit 2 and a location, and
+  <code>domain expand</code> writes nothing:
+  - in an aggregate, with <code>kind: "name"</code>: a second <code>evolve</code> for one event, a second <code>command</code> of one
+    name, and an <code>event</code> that declares a field twice;
+  - with <code>kind: "parse"</code>, as a second copy of a clause that holds one value: <code>implementation_profile</code>;
+    an aggregate's <code>id</code>; a projection's <code>from</code>; an effect's <code>reliable</code>, <code>irreversible</code>,
+    <code>idempotency_key</code>, <code>correlation_id</code>, <code>handles</code>, <code>request_event</code>, <code>success_event</code>,
+    <code>failure_event</code>, <code>timeout_event</code>, <code>retry</code>, <code>timeout</code>, <code>outbox</code> and <code>inbox</code>, or a field of an
+    effect; <code>max_attempts</code> and <code>backoff</code> in a <code>retry</code>; a saga's <code>starts_on</code>; and a saga step's
+    <code>awaits</code> and <code>timeout</code>.</p>
+<p>These passed <code>check</code> and kept one copy. Two <code>evolve</code>s kept the first, so <code>n = 1</code> then <code>n = 2</code>
+  verified an invariant <code>n &lt;= 1</code> and the reverse order violated it. An event's copies disagreed on
+  which one decides: an <code>evolve</code> read the last and <code>correlation_id</code> the first. Through an inline
+  <code>implements</code> the message names the other file, with <code>kind: "type"</code>, and <code>loc</code> stays on the
+  <code>implements</code>.
+  Kinds that read every copy stay accepted: for example two <code>requires</code>, a saga's <code>outbox</code>, or
+  two sagas or aggregates of one name.
+  Migration: delete the copy that was lost, or merge the two.
+  Measured kinds and the corpus sweep are in <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-domain.md"><code>DESIGN-domain.md</code></a>.
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, <code>check</code> / <code>verify</code> emits a
   <code>fair_not_inherited</code> warning in JSON <code>warnings</code>; write

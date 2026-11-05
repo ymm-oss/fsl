@@ -3276,12 +3276,29 @@ CLI field の mask はありません。scope・移行・反復の証拠は
   後なので、<code>part.put(0)</code> は引数の数のエラーのままです。<code>def</code> の仮引数はすでにすべての経路で <code>def</code> の位置で
   拒否されており、変わりません。次は実引数が失われないので受理されたままです。ログのマッピング
   <code>action ev(a, a) -&gt; put(a)</code> の仮引数は 1 つのログのフィールドを指します。どの action も仮引数として受け取らない
-  domain の event のフィールドは、<code>emits</code> がペイロードを取らないので値を持ちません。
+  domain の event のフィールドもここでは受理されていましたが、下の #1700 が拒否し、他の event のフィールドの拒否も引き継ぎます。
   移行: 仮引数にそれぞれ別の名前を付け、各実引数を対応する仮引数に渡してください。
   計測した形とコーパスの比較は
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-sync-argument-root-validation.md"><code>DESIGN-sync-argument-root-validation.md</code></a> にあります。
   Rust API: <code>SpecItem::Action</code>、<code>SyncAction</code>、<code>RequirementAction</code> に <code>param_spans</code>、<code>ProcessTransition</code> に
   <code>input_spans</code> が必須です。空は記述された仮引数がないことを表し、拒否は action を指します。
+- <strong>コピーが失われる <code>domain</code> 宣言の繰り返し(破壊的な削除、#1700)。</strong> <code>check</code>、<code>verify</code>、<code>fslc domain</code> の
+  すべての経路は、次の宣言を繰り返した箇所で exit 2 と位置つきで拒否し、<code>domain expand</code> は何も書き出しません。
+  - aggregate の中で、<code>kind: "name"</code> のもの: 1 つの event に対する 2 つ目の <code>evolve</code>、同じ名前の 2 つ目の
+    <code>command</code>、フィールドを 2 回宣言する <code>event</code>。
+  - 値を 1 つだけ持つ節の 2 つ目で、<code>kind: "parse"</code> のもの: <code>implementation_profile</code>、aggregate の <code>id</code>、
+    projection の <code>from</code>、effect の <code>reliable</code>、<code>irreversible</code>、<code>idempotency_key</code>、<code>correlation_id</code>、<code>handles</code>、
+    <code>request_event</code>、<code>success_event</code>、<code>failure_event</code>、<code>timeout_event</code>、<code>retry</code>、<code>timeout</code>、<code>outbox</code>、<code>inbox</code>、
+    effect のフィールド、<code>retry</code> の中の <code>max_attempts</code> と <code>backoff</code>、saga の <code>starts_on</code>、saga の step の
+    <code>awaits</code> と <code>timeout</code>。</p>
+<p>これらは <code>check</code> を通り、コピーを 1 つだけ残していました。<code>evolve</code> を 2 つ書くと最初のものが残るので、
+  <code>n = 1</code> の次に <code>n = 2</code> と書くと不変条件 <code>n &lt;= 1</code> は verified になり、逆の順では violated になりました。event の
+  コピーはどれを読むかが一致せず、<code>evolve</code> は最後を、<code>correlation_id</code> は最初を読んでいました。インライン
+  <code>implements</code> を通すとメッセージは相手のファイルを示し、<code>kind</code> は <code>"type"</code>、<code>loc</code> は <code>implements</code> のままです。
+  すべてのコピーを読む種類は受理されたままです。たとえば 2 つの <code>requires</code>、saga の <code>outbox</code>、同じ名前の
+  2 つの saga や aggregate です。
+  移行: 失われていたコピーを削除するか、2 つをまとめてください。
+  計測した種類とコーパスの比較は <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-domain.md"><code>DESIGN-domain.md</code></a> にあります。
 - 公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な
   同期 action から参照されると、<code>check</code> / <code>verify</code> は JSON の <code>warnings</code> に
   <code>fair_not_inherited</code> 警告を出します。同期 action が fair でなければならないとき

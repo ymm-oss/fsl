@@ -3222,12 +3222,30 @@ compose OrderSystem {
   後なので、`part.put(0)` は引数の数のエラーのままです。`def` の仮引数はすでにすべての経路で `def` の位置で
   拒否されており、変わりません。次は実引数が失われないので受理されたままです。ログのマッピング
   `action ev(a, a) -> put(a)` の仮引数は 1 つのログのフィールドを指します。どの action も仮引数として受け取らない
-  domain の event のフィールドは、`emits` がペイロードを取らないので値を持ちません。
+  domain の event のフィールドもここでは受理されていましたが、下の #1700 が拒否し、他の event のフィールドの拒否も引き継ぎます。
   移行: 仮引数にそれぞれ別の名前を付け、各実引数を対応する仮引数に渡してください。
   計測した形とコーパスの比較は
   [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md) にあります。
   Rust API: `SpecItem::Action`、`SyncAction`、`RequirementAction` に `param_spans`、`ProcessTransition` に
   `input_spans` が必須です。空は記述された仮引数がないことを表し、拒否は action を指します。
+- **コピーが失われる `domain` 宣言の繰り返し(破壊的な削除、#1700)。** `check`、`verify`、`fslc domain` の
+  すべての経路は、次の宣言を繰り返した箇所で exit 2 と位置つきで拒否し、`domain expand` は何も書き出しません。
+  - aggregate の中で、`kind: "name"` のもの: 1 つの event に対する 2 つ目の `evolve`、同じ名前の 2 つ目の
+    `command`、フィールドを 2 回宣言する `event`。
+  - 値を 1 つだけ持つ節の 2 つ目で、`kind: "parse"` のもの: `implementation_profile`、aggregate の `id`、
+    projection の `from`、effect の `reliable`、`irreversible`、`idempotency_key`、`correlation_id`、`handles`、
+    `request_event`、`success_event`、`failure_event`、`timeout_event`、`retry`、`timeout`、`outbox`、`inbox`、
+    effect のフィールド、`retry` の中の `max_attempts` と `backoff`、saga の `starts_on`、saga の step の
+    `awaits` と `timeout`。
+
+  これらは `check` を通り、コピーを 1 つだけ残していました。`evolve` を 2 つ書くと最初のものが残るので、
+  `n = 1` の次に `n = 2` と書くと不変条件 `n <= 1` は verified になり、逆の順では violated になりました。event の
+  コピーはどれを読むかが一致せず、`evolve` は最後を、`correlation_id` は最初を読んでいました。インライン
+  `implements` を通すとメッセージは相手のファイルを示し、`kind` は `"type"`、`loc` は `implements` のままです。
+  すべてのコピーを読む種類は受理されたままです。たとえば 2 つの `requires`、saga の `outbox`、同じ名前の
+  2 つの saga や aggregate です。
+  移行: 失われていたコピーを削除するか、2 つをまとめてください。
+  計測した種類とコーパスの比較は [`DESIGN-domain.md`](../design/DESIGN-domain.md) にあります。
 - 公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な
   同期 action から参照されると、`check` / `verify` は JSON の `warnings` に
   `fair_not_inherited` 警告を出します。同期 action が fair でなければならないとき
