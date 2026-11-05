@@ -12,6 +12,6 @@ An input that already failed now reports the repeat, so its kind can change: `P 
 
 Migration: keep the one value you mean. There is no automatic migration.
 
-The 646-form on-disk corpus has an empty transition set: base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `f45e76931aee7da26a4734b011f16a254feed3ac`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
+The 650-form on-disk corpus has an empty transition set: base `b2cdb394fedcba015261df05587c4721583329e3`, head `0dcd71290f03beac3d5d6688a8dea3a354874c21`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
 
 Rust API: `fsl_syntax::DUPLICATE_STRUCT_FIELD`.
