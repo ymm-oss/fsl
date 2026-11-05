@@ -292,6 +292,88 @@ reports the source process/entity declaration, not an unwritten binder token;
 the relation-parameter refusal reports the source event. Hidden projection
 binders are not covered by this visible-name restriction.
 
+#### Repeated scenario step inputs (#1682)
+
+**Breaking removal (#1682).** The desugaring of a `scenario` or `forbidden` step
+collected its inputs into a map by name, so a repeated name kept its last value and
+dropped the others. Binding happens there and nowhere else: the event call a step
+becomes has one argument per input, so no later check could see the dropped value,
+which was not even typed (`with amount true, amount 1` passed). The desugaring now
+records each repeated name with its span in
+`NextEditionRequirements::repeated_step_inputs`, and `lower_requirements` refuses the
+first one before lowering.
+
+Each form below ran with `FSLC_UNSTABLE=fsl5 FSLC_CACHE=off` from a copy of the fixture
+directory named, on base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd` and on head `6dd96a59f9ab19a546d59703e34d742920f2bc88`.
+
+| Fixture and step | Base `check` | Head `check`, exit 2, `kind: "semantics"` |
+|---|---|---|
+| `e2e/fsl5_en_decide.fsl`, `with amount 2, amount 1` | exit 0, `ok`, as `with amount 1` | `duplicate step input 'amount'`, `loc` 43:44 |
+| the same, `with amount 1, amount 2` | exit 2, `acceptance` at 44:5, as `with amount 2` | the same |
+| the same, `with amount 1, amount 1` or `with amount true, amount 1` | exit 0, `ok` | the same, 43:44 and 43:47 |
+| the same, `forbidden` with `with amount 2, amount 1` | exit 0, `ok` | the same, at that step |
+| `e2e/fsl5_ja_particles.fsl`, `申請金額 2, 申請金額 1 で` | exit 0, `ok` | `duplicate step input '申請金額（amount）'`, `loc` 75:25 |
+| the same, `申請金額 2 で 申請金額 1 で` | exit 0, `ok` | the same, 75:26 |
+| `relations/fsl5_en.fsl`, `with assignee 0, assignee 1`, either order | exit 0, `ok` | `duplicate step input 'assignee'`, `loc` 37:37 |
+
+The refusal is a semantic error rather than a parse error because the document parses
+and the step's grammar is not at fault. It comes after the parse-time step errors, which
+keep their kind and text: an unknown verb, a step no event matches, an input the event
+does not take, a missing input. So `with nope 2, nope 1` still reports the missing
+`amount`, and `with amount 1, nope 2, nope 3` still reports
+`event 'submit' has no input 'nope'` at the last `nope`.
+
+On `with amount 2, amount 1`, base and head on these routes:
+
+| Route | Base | Head |
+|---|---|---|
+| `verify` on bmc and explicit | exit 0, `verified` | exit 2 |
+| `verify` on induction | exit 0, `proved` | exit 2 |
+| `kernel` versions 1 and 2, `typestate` | exit 0 | exit 2; version 1 and `typestate` omit the file from the message, version 2 names it by a longer path |
+| `explain`, `analyze`, `conformance`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`, `fmt` | exit 0 | exit 2 |
+| `lint`, `fmt --check` | exit 1 | exit 2 |
+| `refine` with the document as implementation or abstraction | exit 0, `refines` | exit 2, `loc` in the document |
+| `replay --trace` | exit 2, `io`, the trace was malformed | exit 2, `semantics`: the document is loaded first |
+| `check` of an inline `implements` of the document | exit 0 | exit 2, `kind: "type"`, `loc` on the `implements`, `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)` |
+
+`lint`, `fmt` and `fmt --check` report the same message with no `loc`. `kind: "type"` on the
+inline `implements` is the kind of every failure of the other file on that path. A
+`compose` cannot `use` a requirements document (`compose use must reference a spec`, base
+and head), so no component route exists to refuse. The step form is read only in an
+`fsl 5` `requirements` document. `fslc-lsp` and the Worker were not run.
+
+Other surfaces that take named values, measured on base. Only the first changes here.
+
+| Surface | Behavior on a repeat | Outcome |
+|---|---|---|
+| Scenario or forbidden step, with or without particles, instance first, relation role | last value kept | refused here |
+| `name(args)` step call | positional, nothing to repeat; an extra argument fails at the step (`acceptance`) | no change |
+| Two actors or two instances in a marked step | refused, `both ... take が (actor) in a scenario step` | no change |
+| `set f = 1, f = 2` on an event | refused, `an action may not assign the same state location more than once` | no change |
+| Event input `with a, a` | refused; #1680 owns its message and location | no change |
+| `implements` map, same action twice or a repeated parameter | refused, `duplicate action correspondence`, `must match the impl action parameter names` | no change |
+| Entity field or `const` declared twice | refused | no change |
+
+Repeated struct literal fields are #1685. Repeated `verify` bounds and `concept` and `kpi`
+declarations are #1686. Each is outside this change: a struct literal cannot reach a step,
+because an event input of struct type is refused
+(`action parameter type is not a finite scalar`), and a declaration has no formal receiving
+an actual.
+
+Migration: keep the one value you mean. There is no automatic migration.
+
+Rust API: `NextEditionRequirements` gains `repeated_step_inputs`. Nothing outside the
+parser constructs that struct.
+
+On-disk transition set (empty). Base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head
+`6dd96a59f9ab19a546d59703e34d742920f2bc88`, each binary built from its own tree in its own target
+directory with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and
+`rust/fslc/tests/fixtures/` (646 forms: 23/195/428) ran with `FSLC_CACHE=off` and its own
+tree as cwd, as `fslc check <path>` stable and with `FSLC_UNSTABLE=fsl5`, and as
+`fslc kernel <path> --kernel-version 1|2`, twice per side. All 2584 pairs had equal complete
+stdout, stderr and exit with no field excluded, and no run differed from its repeat: 0
+ok-to-error and 0 error-to-ok transitions. No required test's inline fixtures were rewritten.
+
 ### 2.3 Tests (tests/test_req_dialect.py)
 
 Use the return requirements (almost the same as §2.1) as a fixture:

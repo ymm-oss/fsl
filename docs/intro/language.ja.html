@@ -4268,6 +4268,32 @@ instance に使い、relation event は相手の actor の暗黙の instance も
 引数に取ります。これらも同名の const を拒み、生成 init は元の process/entity 宣言、
 relation 引数は元の event 宣言を指します。source から見えない KPI 射影の binder は
 この制限とは別で、衝突するときだけ fresh にします。</p>
+<p><strong>シナリオ step の入力の重複 (破壊的な削除、#1682)。</strong> <code>fsl 5</code> の文書では、同じ入力を
+2 度指定する <code>scenario</code> / <code>forbidden</code> の step を <code>check</code> が拒否します。exit 2、
+<code>kind: "semantics"</code>、メッセージは <code>duplicate step input 'amount' at doc.fsl:43:44</code>、
+<code>loc</code> は 2 度目の名前です。以前は最後の値だけを残して他を捨てていたため、2 つの値を
+入れ替えると結果が変わりました。次の形は <code>check</code> を通っていましたが、今は拒否されます:</p>
+<ul>
+<li><code>Employee submits claim1 with amount 2, amount 1</code>。順序が逆でも、値が同じでも、
+  <code>Employee claim1 submits with ...</code> と書いても同じです。</li>
+<li><code>従業員 が 申請1 を 申請金額 2, 申請金額 1 で 提出する</code>。同じ入力を 2 つの <code>で</code> に
+  分けた形や、別名と正規名を並べた形も同じです。別名と正規名は 1 つの入力です。</li>
+<li><code>Agent takes t1 with assignee 0, assignee 1</code>。関係を作る event の役割も入力です。</li>
+</ul>
+<p>拒否は文書を読み込むすべての経路に及びます。これらの形に対して <code>verify</code>、<code>kernel</code>、
+<code>refine</code>、<code>replay</code>、<code>scenarios</code>、<code>testgen</code>、<code>mutate</code>、<code>html</code>、<code>ledger</code>、<code>diff</code>、
+<code>explain</code>、<code>analyze</code>、<code>conformance</code>、<code>typestate</code> は結果を返さなくなり、<code>lint</code> と
+<code>fmt</code> は同じメッセージを <code>loc</code> なしで返します。<code>kernel</code> バージョン 1 と <code>typestate</code> の
+メッセージにはファイル名が入らず、<code>kernel</code> バージョン 2 はより長いパスで示します。
+そのような文書を inline の <code>implements</code> で読むと、報告は
+<code>implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)</code> で、
+<code>kind: "type"</code>、<code>loc</code> は <code>implements</code> です。すでに構文エラーがある step はそのエラーの
+ままです。<code>with amount 1, nope 2, nope 3</code> は引き続き
+<code>event 'submit' has no input 'nope'</code> を報告します。異なる 2 つの入力はどの順でも書けて、
+後の step が同じ入力をもう一度指定することもできます。移行: 意図する値を 1 つだけ
+残してください。自動移行はありません。
+<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-dialects.md"><code>DESIGN-dialects.md</code></a> の "Repeated scenario step
+inputs (#1682)" を参照してください。</p>
 <h3 id="133-businessfsl-biz">13.3 業務コンサルティングレイヤー: <code>business</code>(fsl-biz ダイアレクト)</h3>
 <p>業務プロセス、ポリシー、KPI を、実装の語彙ゼロで書きます(構文の詳細は
 <code>DESIGN-dialects.md</code> §3)。process は enum+Map+transition の action へ、policy は
