@@ -10,6 +10,6 @@ Now returns a result: a range-typed literal under `old(...)`, the third route #1
 
 Migration: declare the two values with one carrier, or compare the entries (`m0[k] == m1[k]`).
 
-The 646-form on-disk corpus has an empty transition set, base `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `66a17a7f96278c4f5286261c5cf59ece43270618`, and bmc and induction return the same result on all 425 forms it accepts. The matrix and the positions it does not cover are in `docs/design/DESIGN-finite-container-carriers.md`.
+The 646-form on-disk corpus has an empty transition set, base `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `66a17a7f96278c4f5286261c5cf59ece43270618` before a rebase onto `156d9c8ee492ca86bc259bf03afbae96dc73ec33`, and bmc and induction return the same result on all 425 forms it accepts. The matrix and the positions it does not cover are in `docs/design/DESIGN-finite-container-carriers.md`.
 
 Rust API: `CarrierCoercion` gains `Retag` and `NotAssignable`, and loses `Other`.

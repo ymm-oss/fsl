@@ -322,7 +322,9 @@ verdict. A map under `preserve progress` that the pulled `leadsTo` does not read
 `map same = m == y` for those Maps, and `cannot coerce` only when `leadsTo L { same and ... }` reads it. The
 candidate is the #1679 row above: one form's main result would go from `proved` to `unknown_cti`.
 
-**The matrix.** Generated, not retained, except for the bounded grid in the last row. Base
+**The matrix.** Generated, not retained, except for the bounded grid in the last row. These runs and the
+on-disk set below predate a rebase onto `156d9c8ee492ca86bc259bf03afbae96dc73ec33`, whose three commits change no file under
+`fsl-core`, `fsl-verifier`, `fsl-runtime`, `fsl-syntax` or the solver crates, so the head SHAs below name the branch before that rebase. Base
 `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `25368adf49d32a3fc3af4168a50a0a08c1dea76c`. Each ran as
 `fslc check`, and where it passed as `verify --engine bmc --depth 2`, `--engine induction`,
 `--engine explicit --depth 2`, `fsl-bfs <spec> 2` and `fsl-replay-actions` with one `go`.
