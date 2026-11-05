@@ -179,8 +179,9 @@ spans, so a check in the model could only name the enclosing statement, and the 
 repeated name. A `domain` value object lowers its `SyntaxExpr` without that conversion and keeps
 its own `duplicate field` refusal, `kind: "semantics"`, at `check`, `domain check`, `domain generate`,
 `domain testgen` and `domain replay`. `domain expand` and `domain analyze` build no model, so they exited 0 on base,
-and `expand` wrote both copies to a file `check` then refused. They now refuse in the same words where
-they read the literal (`normalize_expr`), and `expand` writes nothing. That was measured with the
+and `expand` wrote both copies to a file `check` then refused. They now refuse where they read the
+literal (`normalize_expr`), and `expand` writes nothing. The message is the same except for the file:
+`check` prints `at doc.fsl:10:31` and they print `at 10:31`. That was measured with the
 literal in `evolve`, a state default, `requires` and an invariant. Reading a marked step's input is
 speculative and discards parse errors, so this code alone is passed on: otherwise the refusal
 became `expected identifier` elsewhere on the line.
