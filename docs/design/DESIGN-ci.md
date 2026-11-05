@@ -500,11 +500,12 @@ dominate; this is not a reason to freeze fingerprints or reuse the baseline CLI 
 The pinned 27.1.0 actual-list pilot established zero-based native round-robin slices 23/23/22
 and a changed one-mutant 1/0/0 case. Public `--shard K/3` remains one-based. The GLOBAL selected
 inventory is captured before slicing and drives complete-tier stale-equivalent checks.
-Every shard retains a full scratch checkout, a fresh target, and the same 35 detectors, including
-a real baseline for empty slices. The required aggregate validates stable logical artifacts and
+Every shard retains a full scratch checkout, a fresh first-party target, and the same 35 detectors,
+including a real baseline for empty slices; a shard with zero selected mutants seeds third-party
+units only (#1412, DESIGN-semantic-mutation-gate, "Zero-mutant detector target"). The required aggregate validates stable logical artifacts and
 exact raw/reported executed-ID union, including empty shards, through
 `check-shard-artifact-cohort.sh mutants` (see DESIGN-semantic-mutation-gate).
-This adds two cold baselines/compute. A historical per-ID projection of roughly 36–40 minutes
+Each nonempty shard pays a cold baseline. A historical per-ID projection of roughly 36–40 minutes
 is only an estimate, not observed parallel CI wall time; serialized local sums are not speedup
 evidence. No cache-save policy, first-party reuse, paid resources, or other gate is changed.
 
@@ -960,7 +961,8 @@ not touched by this fix and is not a lever in the budget arithmetic below.
 **The scratch-build-tree and evidence-path changes in this branch are a closed-ingress-path fix, not
 a size fix, and are kept for that reason alone.** `tools/run-semantic-mutation-gate.sh`'s mutants
 lane's scratch `CARGO_TARGET_DIR` (isolated per run so a stale mutant artifact's timestamp can never
-look newer than a freshly copied baseline checkout) used to be created under
+look newer than a freshly copied baseline checkout; a zero-mutant run seeds it with third-party units
+only) used to be created under
 `rust/target/semantic-mutation-build/run.XXXXXX`, inside the tree `Swatinem/rust-cache` saves
 wholesale, and now lives under `${RUNNER_TEMP:-${TMPDIR:-/tmp}}` instead. The script also clears any
 `rust/target/semantic-mutation.*`/`semantic-mutation-build` a restored cache may carry forward,

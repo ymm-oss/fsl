@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import shlex
 import sys
 from pathlib import Path
 
@@ -153,6 +154,16 @@ mutants = importlib.util.module_from_spec(MUTANT_SPEC)
 MUTANT_SPEC.loader.exec_module(mutants)
 
 
+def detector_build_rows(first_party_fresh: bool = False, third_party_fresh: bool = True,
+                        omit: str | None = None) -> str:
+    import json
+    rows = [dict(reason='compiler-artifact', package_id=f'path+file:///w/{name}#0.1.0', target=dict(name=name), fresh=first_party_fresh)
+            for name in sorted(mutants.DETECTOR_FIRST_PARTY_TARGETS) if name != omit]
+    rows.append(dict(reason='compiler-artifact', package_id='registry+https://index/#z3-sys@0.1.0', target=dict(name='z3_sys'), fresh=third_party_fresh))
+    rows.append(dict(reason='build-finished', success=True))
+    return ''.join(json.dumps(row) + '\n' for row in rows)
+
+
 def mutant_fixture(root: Path, ids: list[str], attempts: tuple[int, int, int] = (1, 2, 1)) -> Path:
     """Synthetic protocol evidence, NOT a claim of actual detector execution."""
     import json
@@ -180,6 +191,7 @@ def mutant_fixture(root: Path, ids: list[str], attempts: tuple[int, int, int] = 
             (raw / 'log/baseline.log').write_text(baseline)
         else:
             (artifact / 'baseline.log').write_text(baseline)
+            (artifact / 'detector-build.jsonl').write_text(detector_build_rows())
         mutants.record(artifact, index, 3, 'changed', equivalents, '77', attempts[index - 1], 'rev')
     return equivalents
 
@@ -203,11 +215,14 @@ def test_mutant_empty_and_partial_rerun_cohorts(tmp_path: Path, ids: list[str], 
     ('raw-drop', 'raw outcome roster'), ('raw-duplicate', 'raw outcome roster'),
     ('baseline-phase-omission', 'baseline test phase'),
     ('empty-baseline-omission', 'baseline omitted'), ('invented-empty-outcomes', 'must not invent'),
+    ('empty-first-party-reused', 'stale first-party artifact reused'),
+    ('empty-detector-build-omitted', 'detector-build.jsonl'),
+    ('empty-detector-run-compiled', 'compiled after the verified build'),
 ])
 def test_mutant_cohort_rejecting_controls(tmp_path: Path, fault: str, expected: str) -> None:
     import json
     import shutil
-    equivalents = mutant_fixture(tmp_path, ['a'] if fault in ('empty-baseline-omission', 'invented-empty-outcomes') else ['a', 'b', 'c', 'd'])
+    equivalents = mutant_fixture(tmp_path, ['a'] if fault.startswith('empty-') or fault == 'invented-empty-outcomes' else ['a', 'b', 'c', 'd'])
     baseline = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
     a = tmp_path / 'semantic-mutation-mutants-1-77'
     path = a / 'artifact-provenance.v1.json'
@@ -237,6 +252,13 @@ def test_mutant_cohort_rejecting_controls(tmp_path: Path, fault: str, expected: 
         (tmp_path / 'semantic-mutation-mutants-2-77/baseline.log').write_text('running 19 tests\n')
     elif fault == 'invented-empty-outcomes':
         (tmp_path / 'semantic-mutation-mutants-2-77/mutants.out').mkdir()
+    elif fault == 'empty-first-party-reused':
+        (tmp_path / 'semantic-mutation-mutants-2-77/detector-build.jsonl').write_text(detector_build_rows(first_party_fresh=True))
+    elif fault == 'empty-detector-build-omitted':
+        (tmp_path / 'semantic-mutation-mutants-2-77/detector-build.jsonl').unlink()
+    elif fault == 'empty-detector-run-compiled':
+        log = tmp_path / 'semantic-mutation-mutants-2-77/baseline.log'
+        log.write_text('\x1b[1m\x1b[92m   Compiling\x1b[0m fsl-core v1 (/w)\n' + log.read_text())
     elif fault == 'wrong-mode':
         data['mode'] = 'complete'
         path.write_text(json.dumps(data))
@@ -363,3 +385,166 @@ def test_successful_empty_native_listing_is_encoded_but_runner_failure_is_not(tm
         assert json.loads(destination.read_text()) == []
     failed = run(function, 42)
     assert failed.returncode == 42 and destination.read_bytes() == b''
+
+
+def seed_source(root: Path, *units: tuple[str, str, str]) -> Path:
+    """A Cargo-shaped debug directory; every unit is (package, crate, hash)."""
+    source = root / 'source'
+    for package, crate, unit_hash in units:
+        for kind in ('.fingerprint', 'build'):
+            (source / kind / f'{package}-{unit_hash}').mkdir(parents=True)
+            (source / kind / f'{package}-{unit_hash}' / 'marker').write_text(package)
+        (source / 'deps').mkdir(exist_ok=True)
+        (source / 'deps' / f'lib{crate}-{unit_hash}.rlib').write_text(package)
+        (source / 'deps' / f'{crate}-{unit_hash}.d').write_text(package)
+    return source
+
+
+def seed_metadata(root: Path) -> Path:
+    import json
+    path = root / 'metadata.json'
+    path.write_text(json.dumps({'packages': [
+        {'name': 'z3-sys', 'source': 'registry+https://index'}, {'name': 'fsl-core', 'source': None},
+        {'name': 'both', 'source': 'registry+https://index'}, {'name': 'both', 'source': None}]}))
+    return path
+
+
+Z3_UNIT = ('z3-sys', 'z3_sys', 'a' * 16)
+FIRST_PARTY_UNIT = ('fsl-core', 'fsl_core', 'b' * 16)
+
+
+def test_seed_copies_third_party_units_and_their_mtimes_only(tmp_path: Path) -> None:
+    import os
+    source = seed_source(tmp_path, Z3_UNIT, FIRST_PARTY_UNIT, ('both', 'both', 'c' * 16), ('unknown', 'unknown', 'd' * 16))
+    old = source / '.fingerprint' / f'z3-sys-{"a" * 16}' / 'marker'
+    os.utime(old, ns=(1_000_000_123, 1_000_000_123))
+    target = tmp_path / 'target' / 'debug'
+    mutants.seed(source, target, seed_metadata(tmp_path))
+    copied = sorted(str(p.relative_to(target)) for p in target.rglob('*') if p.is_file())
+    assert copied == sorted([f'.fingerprint/z3-sys-{"a" * 16}/marker', f'build/z3-sys-{"a" * 16}/marker',
+                             f'deps/libz3_sys-{"a" * 16}.rlib', f'deps/z3_sys-{"a" * 16}.d'])
+    assert (target / '.fingerprint' / f'z3-sys-{"a" * 16}' / 'marker').stat().st_mtime_ns == 1_000_000_123
+
+
+@pytest.mark.parametrize(('fault', 'expected'), [
+    ('missing-source', 'No such file'), ('no-third-party-unit', 'no third-party unit'),
+    ('shared-hash', 'hash shared'), ('no-first-party-metadata', 'no first-party package'),
+])
+def test_seed_rejecting_controls(tmp_path: Path, fault: str, expected: str) -> None:
+    import json
+    units = {'no-third-party-unit': [FIRST_PARTY_UNIT],
+             'shared-hash': [Z3_UNIT, ('fsl-core', 'fsl_core', 'a' * 16)]}.get(fault, [Z3_UNIT])
+    source = tmp_path / 'absent' if fault == 'missing-source' else seed_source(tmp_path, *units)
+    metadata = seed_metadata(tmp_path)
+    if fault == 'no-first-party-metadata':
+        metadata.write_text(json.dumps({'packages': [{'name': 'z3-sys', 'source': 'registry+https://index'}]}))
+    with pytest.raises((ValueError, OSError), match=expected) as rejected:
+        mutants.seed(source, tmp_path / 'target' / 'debug', metadata)
+    print(f'detector {fault}: produced={str(rejected.value)!r}; expected_contains={expected!r}')
+
+
+@pytest.mark.parametrize(('rows', 'path', 'expected'), [
+    (dict(first_party_fresh=True), 'seeded', 'stale first-party artifact reused'),
+    (dict(omit='solver_fail_closed'), 'seeded', 'omitted first-party targets'),
+    (dict(omit='fsl_verifier'), 'full-fresh', 'omitted first-party targets'),
+    (dict(third_party_fresh=True), 'full-fresh', 'reused third-party'),
+    (dict(third_party_fresh=False), 'unknown', 'unknown detector target path'),
+])
+def test_detector_build_rejecting_controls(tmp_path: Path, rows: dict, path: str, expected: str) -> None:
+    (tmp_path / 'detector-build.jsonl').write_text(detector_build_rows(**rows))
+    with pytest.raises(ValueError, match=expected) as rejected:
+        mutants.check_detector_build(tmp_path, path)
+    print(f'detector {rows}/{path}: produced={str(rejected.value)!r}; expected_contains={expected!r}')
+
+
+@pytest.mark.parametrize(('rows', 'path', 'logged'), [
+    (dict(), 'seeded', 'path=seeded first_party_rebuilt=4 first_party_reused=0 third_party_reused=1 third_party_rebuilt=0 z3_sys=reused'),
+    (dict(third_party_fresh=False), 'seeded', 'path=seeded first_party_rebuilt=4 first_party_reused=0 third_party_reused=0 third_party_rebuilt=1 z3_sys=rebuilt'),
+    (dict(third_party_fresh=False), 'full-fresh', 'path=full-fresh first_party_rebuilt=4 first_party_reused=0 third_party_reused=0 third_party_rebuilt=1 z3_sys=rebuilt'),
+])
+def test_detector_build_logs_the_path_taken(tmp_path: Path, capsys: pytest.CaptureFixture[str], rows: dict, path: str, logged: str) -> None:
+    (tmp_path / 'detector-build.jsonl').write_text(detector_build_rows(**rows))
+    mutants.check_detector_build(tmp_path, path)
+    assert logged in capsys.readouterr().out
+
+
+def run_prepare_detector_target(root: Path, function: str, lane: str, source: Path, cargo_status: int = 0):
+    import shutil
+    import subprocess
+
+    shutil.rmtree(root / 'target', ignore_errors=True)
+    (root / 'target').mkdir()
+    (root / 'scratch/rust').mkdir(parents=True, exist_ok=True)
+    (root / 'output').mkdir(exist_ok=True)
+    (root / 'repo/rust/target').mkdir(parents=True, exist_ok=True)
+    debug = root / 'repo/rust/target/debug'
+    if debug.is_symlink():
+        debug.unlink()
+    debug.symlink_to(source)
+    helper = MODULE_PATH.parents[2] / 'tools/check-mutant-shard-cohort.py'
+    metadata = (root / 'metadata.json').read_text()
+    body = (f'set -euo pipefail\n{function}\ncargo() {{ printf %s {shlex.quote(metadata)}; return {cargo_status}; }}\n'
+            f'lane={lane!r}; root={shlex.quote(str(root / "repo"))}; scratch={shlex.quote(str(root / "scratch"))}; '
+            f'output={shlex.quote(str(root / "output"))}; cohort_helper={shlex.quote(str(helper))}; '
+            f'export CARGO_TARGET_DIR={shlex.quote(str(root / "target"))}\n'
+            'prepare_detector_target\nprintf "target_path=%s\\n" "$target_path"\n')
+    return subprocess.run(['bash', '-c', body], capture_output=True, text=True)
+
+
+def gate_function(name: str) -> str:
+    gate = (MODULE_PATH.parents[2] / 'tools/run-semantic-mutation-gate.sh').read_text()
+    start = gate.index(f'{name}() {{')
+    return gate[start:gate.index('\n}\n', start) + 3]
+
+
+def test_prepare_detector_target_paths_are_logged_and_a_bad_seed_is_discarded(tmp_path: Path) -> None:
+    import shutil
+
+    function = gate_function('prepare_detector_target')
+    seed_metadata(tmp_path)
+    source = seed_source(tmp_path, Z3_UNIT, FIRST_PARTY_UNIT)
+    # Healthy, twice: third-party unit present, first-party unit absent.
+    for _ in range(2):
+        seeded = run_prepare_detector_target(tmp_path, function, 'mutants', source)
+        assert seeded.returncode == 0, seeded.stderr
+        assert 'detector-target path=seeded reason=third-party-units-copied' in seeded.stdout
+        assert 'target_path=seeded' in seeded.stdout
+        fingerprints = sorted(p.name for p in (tmp_path / 'target/debug/.fingerprint').iterdir())
+        assert fingerprints == [f'z3-sys-{"a" * 16}']
+    # Outside the lane the run never reads the seed source.
+    unsharded = run_prepare_detector_target(tmp_path, function, '', source)
+    assert 'detector-target path=full-fresh reason=not-lane-run' in unsharded.stdout
+    assert list((tmp_path / 'target').iterdir()) == []
+    # Metadata failure takes the full fresh build.
+    no_metadata = run_prepare_detector_target(tmp_path, function, 'mutants', source, cargo_status=7)
+    assert no_metadata.returncode == 0 and 'path=full-fresh reason=seed-unusable' in no_metadata.stdout
+    assert list((tmp_path / 'target').iterdir()) == []
+    # A copy that dies part-way (no deps directory) must leave no partial seed behind.
+    shutil.rmtree(source / 'deps')
+    partial = run_prepare_detector_target(tmp_path, function, 'mutants', source)
+    assert partial.returncode == 0, partial.stderr
+    assert 'detector-target path=full-fresh reason=seed-unusable' in partial.stdout
+    assert 'target_path=full-fresh' in partial.stdout
+    assert list((tmp_path / 'target').iterdir()) == []
+    # Calibrate that last assertion: without the discard the partial copy survives.
+    faulty = function.replace('rm -rf "$CARGO_TARGET_DIR"', ':')
+    assert faulty != function
+    kept = run_prepare_detector_target(tmp_path, faulty, 'mutants', source)
+    assert 'path=full-fresh reason=seed-unusable' in kept.stdout
+    assert (tmp_path / 'target/debug/.fingerprint').is_dir()
+
+
+def test_only_the_zero_mutant_branch_seeds_and_it_verifies_before_the_detectors() -> None:
+    gate = (MODULE_PATH.parents[2] / 'tools/run-semantic-mutation-gate.sh').read_text()
+    branch = gate.index('if [ "$selected_mutant_count" -eq 0 ]; then')
+    runner = gate.index('cargo mutants "${args[@]}"\n)\nrunner_status')
+    assert gate.count('\n  prepare_detector_target\n') == 1
+    prepare = gate.index('\n  prepare_detector_target\n')
+    verify = gate.index('"$cohort_helper" check-detector-build "$output" "$target_path"')
+    detectors = gate.index('| tee "$output/baseline.log"')
+    assert branch < prepare < verify < detectors < runner
+    assert gate.count('"$cohort_helper" seed ') == 1
+    # The verified build and the detector run stay one Cargo selection.
+    selection = ('cargo test --locked -p fsl-verifier -p fslc-rust \\\n'
+                 '      --test solver_fail_closed --test triangulated_assurance')
+    assert gate.count(selection) == 2

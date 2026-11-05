@@ -646,7 +646,8 @@ jobs:
   # scope. `semantic-mutation-operators` shards the curated fault-operator
   # controls three ways; `semantic-mutation-mutants` partitions the GLOBAL
   # generic inventory three ways with exact executed-ID cohort validation.
-  # Each shard pays a cold baseline; parallel wall-clock gain is not assumed.
+  # A shard with mutants pays a cold baseline; a zero-mutant shard seeds third-party
+  # units and still compiles all first-party code. Parallel wall-clock gain is not assumed.
   # The `semantic-mutation` job
   # below aggregates both under the exact required-context name expression
   # and keeps its job id unchanged, so `product-gate`'s `needs:` list and the
