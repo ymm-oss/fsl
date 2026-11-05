@@ -4011,6 +4011,13 @@ for the same typed relationship. The older <code>"ID: original text"</code> slot
 declaration body remains accepted migration input, but <code>fslc lint</code> reports it as
 <code>legacy_string_metadata</code> and <code>fslc migrate --edition next</code> converts safe cases
 to <code>@requirement(...)</code>.</p>
+<p><code>check</code> accepts a <code>requirements</code> document that writes a second <code>requirement</code>
+with the ID of an earlier one, or an <code>acceptance</code> and a <code>requirement</code> sharing an
+ID, and the ledger keeps one row for that ID. <code>fslc lint</code> reports each second
+owner at its ID as the <code>shared_requirement_id</code> warning (taxonomy
+<code>ambiguous_intent</code>, not machine-applicable), naming the earlier owner. Two
+<code>acceptance</code>s of one ID stay a <code>check</code> error. Rename one of the two IDs, or
+merge the two declarations.</p>
 <p>The reserved <code>"undecided: reason"</code> tag marks a reviewed, intentionally deferred
 decision. It is metadata and is never verified as a property. It may be attached
 to <code>init</code>, <code>action</code>, <code>invariant</code>, <code>trans</code>, <code>reachable</code>, or <code>leadsTo</code>; for example:</p>

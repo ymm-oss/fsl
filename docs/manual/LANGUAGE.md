@@ -3976,6 +3976,14 @@ declaration body remains accepted migration input, but `fslc lint` reports it as
 `legacy_string_metadata` and `fslc migrate --edition next` converts safe cases
 to `@requirement(...)`.
 
+`check` accepts a `requirements` document that writes a second `requirement`
+with the ID of an earlier one, or an `acceptance` and a `requirement` sharing an
+ID, and the ledger keeps one row for that ID. `fslc lint` reports each second
+owner at its ID as the `shared_requirement_id` warning (taxonomy
+`ambiguous_intent`, not machine-applicable), naming the earlier owner. Two
+`acceptance`s of one ID stay a `check` error. Rename one of the two IDs, or
+merge the two declarations.
+
 The reserved `"undecided: reason"` tag marks a reviewed, intentionally deferred
 decision. It is metadata and is never verified as a property. It may be attached
 to `init`, `action`, `invariant`, `trans`, `reachable`, or `leadsTo`; for example:

@@ -3698,6 +3698,13 @@ process の `covers ID "text"` は同じ型付き関係に対する正準なダ�
 `fslc lint` は `legacy_string_metadata` を報告し、`fslc migrate --edition next` は
 安全に変換できる場合に `@requirement(...)` へ変換します。
 
+`requirements` 文書で、先の `requirement` と同じ ID の `requirement` をもう一つ書く場合や、
+`acceptance` と `requirement` が ID を共有する場合も `check` は受理し、台帳はその ID の行を
+一つだけ残します。`fslc lint` は二つ目の所有者をその ID の位置で警告
+`shared_requirement_id`(taxonomy `ambiguous_intent`、機械適用不可)として報告し、
+先の所有者の位置を示します。同じ ID の `acceptance` が二つある場合は、引き続き `check`
+のエラーです。どちらかの ID を変えるか、二つの宣言を一つにまとめてください。
+
 予約された `"undecided: reason"` タグは、レビュー済みで意図的に先送りされた決定を
 マークします。これはメタデータであり、プロパティとして検証されることはありません。
 `init`、`action`、`invariant`、`trans`、`reachable`、`leadsTo` に付けられます。例:

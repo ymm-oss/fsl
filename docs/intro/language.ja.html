@@ -3734,6 +3734,12 @@ process の <code>covers ID "text"</code> は同じ型付き関係に対する�
 宣言本体直前の旧形式 <code>"ID: original text"</code> は移行入力として引き続き受理されますが、
 <code>fslc lint</code> は <code>legacy_string_metadata</code> を報告し、<code>fslc migrate --edition next</code> は
 安全に変換できる場合に <code>@requirement(...)</code> へ変換します。</p>
+<p><code>requirements</code> 文書で、先の <code>requirement</code> と同じ ID の <code>requirement</code> をもう一つ書く場合や、
+<code>acceptance</code> と <code>requirement</code> が ID を共有する場合も <code>check</code> は受理し、台帳はその ID の行を
+一つだけ残します。<code>fslc lint</code> は二つ目の所有者をその ID の位置で警告
+<code>shared_requirement_id</code>(taxonomy <code>ambiguous_intent</code>、機械適用不可)として報告し、
+先の所有者の位置を示します。同じ ID の <code>acceptance</code> が二つある場合は、引き続き <code>check</code>
+のエラーです。どちらかの ID を変えるか、二つの宣言を一つにまとめてください。</p>
 <p>予約された <code>"undecided: reason"</code> タグは、レビュー済みで意図的に先送りされた決定を
 マークします。これはメタデータであり、プロパティとして検証されることはありません。
 <code>init</code>、<code>action</code>、<code>invariant</code>、<code>trans</code>、<code>reachable</code>、<code>leadsTo</code> に付けられます。例:</p>
