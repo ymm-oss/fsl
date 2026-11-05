@@ -329,6 +329,8 @@ fn every_route_that_loads_the_document_refuses() {
         &["scenarios", "F", "--depth", "2"],
         &["testgen", "F", "--depth", "2"],
         &["mutate", "F", "--depth", "2"],
+        &["sweep", "F", "--depth", "0..1"],
+        &["document", "claims", "F"],
         &["html", "F"],
         &["ledger", "F"],
         &["diff", "F", "one.fsl"],
@@ -359,19 +361,21 @@ fn every_route_that_loads_the_document_refuses() {
         );
         assert_eq!(scratch.fslc(&with("one.fsl")).0, 0, "{route:?}");
     }
-    // `lint` adds the file to `loc`, and `fmt --check` reports the formatting
-    // of the control, whose result is not the point here.
-    let (exit, packet) = scratch.fslc(&["lint", "doc.fsl"]);
-    assert_eq!(
-        (exit, &packet["kind"], &packet["loc"]),
-        (
-            2,
-            &json!("parse"),
-            &json!({"line": 5, "column": 24, "file": "doc.fsl"})
-        ),
-        "{packet:#}"
-    );
-    assert_eq!(scratch.fslc(&["lint", "one.fsl"]).0, 0);
+    // `lint` and `migrate` add the file to `loc`, and `fmt --check` reports the
+    // formatting of the control, whose result is not the point here.
+    for command in ["lint", "migrate"] {
+        let (exit, packet) = scratch.fslc(&[command, "doc.fsl"]);
+        assert_eq!(
+            (exit, &packet["kind"], &packet["loc"]),
+            (
+                2,
+                &json!("parse"),
+                &json!({"line": 5, "column": 24, "file": "doc.fsl"})
+            ),
+            "{command}: {packet:#}"
+        );
+        assert_eq!(scratch.fslc(&[command, "one.fsl"]).0, 0, "{command}");
+    }
     assert_eq!(
         summary(&scratch.fslc(&["fmt", "--check", "doc.fsl"])),
         refusal("P.x", 5, 24)
@@ -593,26 +597,113 @@ fn requirements_positions_refuse_at_the_repeated_field() {
 
 /// A domain value object already refused its repeated field, with its own kind,
 /// when it is lowered. That stays as it was.
+/// A literal that already failed for another reason now reports the repeat, as
+/// `parse`, while the same literal with one value per field keeps its failure.
 #[test]
-fn a_domain_value_object_keeps_its_refusal() {
-    let domain = |literal: &str| {
+fn an_already_failing_literal_reports_the_repeat() {
+    let nested = |literal: &str| {
         format!(
-            "domain D {{\n  type Q = 0..2\n  value_object C {{ value: Q = 0; }}\n  \
-             aggregate A {{\n    state {{ counter: C; }}\n    command T {{}}\n    event E {{}}\n    \
-             decide T {{ emits E }}\n    evolve E {{\n      counter = {literal}\n    }}\n  }}\n}}\n"
+            "spec S {{\n  type K = 0..2\n  struct Q {{ a: K }}\n  struct P {{ x: Q, y: K }}\n  \
+             state {{ p: P }}\n  init {{ p = P {{ x: {literal}, y: 0 }} }}\n  \
+             action go() {{ p = p }}\n}}\n"
         )
     };
-    let (exit, packet) = check("domain-one", &domain("C { value: 1 }"));
-    assert_eq!((exit, &packet["result"]), (0, &json!("ok")), "{packet:#}");
-    let (exit, packet) = check("domain-repeat", &domain("C { value: 1, value: 0 }"));
+    let (exit, packet) = check("nested-one", &nested("Q { a: 1 }"));
+    assert_eq!((exit, &packet["kind"]), (2, &json!("type")), "{packet:#}");
     assert_eq!(
-        (exit, &packet["kind"], &packet["message"], &packet["loc"]),
-        (
-            2,
-            &json!("semantics"),
-            &json!("duplicate field 'C.value' at doc.fsl:10:31"),
-            &json!({"line": 10, "column": 31})
-        ),
+        summary(&check("nested-repeat", &nested("Q { a: 1, a: 2 }"))),
+        refusal("Q.a", 6, 31)
+    );
+    let (exit, packet) = check("undefined-one", &spec("Q { a: 1 }"));
+    assert_eq!(
+        (exit, &packet["kind"]),
+        (2, &json!("semantics")),
         "{packet:#}"
     );
+    assert_eq!(
+        summary(&check("undefined-repeat", &spec("Q { a: 1, a: 2 }"))),
+        refusal("Q.a", 5, 24)
+    );
+}
+
+/// A `domain` keeps `check`'s own refusal, and the routes that build no model
+/// refuse in its words. `domain expand` writes nothing.
+#[test]
+fn a_domain_value_object_is_refused_on_every_domain_route() {
+    let domain = |evolve: &str, state: &str, requires: &str, invariant: &str| {
+        format!(
+            "domain D {{\n  type Q = 0..2\n  value_object C {{ value: Q = 0; }}\n  \
+             aggregate A {{\n    state {{ counter: C{state}; }}\n    command T {{}}\n    \
+             event E {{}}\n    decide T {{{requires} emits E }}\n    evolve E {{\n      \
+             counter = {evolve}\n    }}\n{invariant}  }}\n}}\n"
+        )
+    };
+    let one = "C { value: 1 }";
+    let repeat = "C { value: 1, value: 0 }";
+    let requires = |literal: &str| format!(" requires counter == {literal}\n");
+    let invariant = |literal: &str| format!("    invariant I {{ counter == {literal} }}\n");
+    let state = |literal: &str| format!(" = {literal}");
+    for (label, with, line, column) in [
+        ("evolve", domain(repeat, "", "", ""), 10, 31),
+        ("state default", domain(one, &state(repeat), "", ""), 5, 40),
+        ("requires", domain(one, "", &requires(repeat), ""), 8, 50),
+        ("invariant", domain(one, "", "", &invariant(repeat)), 12, 44),
+    ] {
+        let scratch = Scratch::new(
+            &format!("domain-{label}"),
+            &[("doc.fsl", &with), ("one.fsl", &domain(one, "", "", ""))],
+        );
+        let place = |file: &str| format!("duplicate field 'C.value' at {file}{line}:{column}");
+        let expected = |file: &str| {
+            (
+                2,
+                json!("semantics"),
+                json!(place(file)),
+                json!({"line": line, "column": column}),
+            )
+        };
+        let run = |args: &[&str]| {
+            let (exit, packet) = scratch.fslc(args);
+            (
+                exit,
+                packet["kind"].clone(),
+                packet["message"].clone(),
+                packet["loc"].clone(),
+            )
+        };
+        assert_eq!(run(&["check", "doc.fsl"]), expected("doc.fsl:"), "{label}");
+        assert_eq!(
+            run(&["domain", "check", "doc.fsl"]),
+            expected("doc.fsl:"),
+            "{label}"
+        );
+        assert_eq!(
+            run(&["domain", "analyze", "doc.fsl"]),
+            expected(""),
+            "{label}"
+        );
+        assert_eq!(
+            run(&["domain", "expand", "doc.fsl", "--output", "out.fsl"]),
+            expected(""),
+            "{label}"
+        );
+        assert!(!scratch.0.join("out.fsl").exists(), "{label}");
+        for command in ["check", "analyze", "expand"] {
+            let args = ["domain", command, "one.fsl"];
+            assert_eq!(scratch.fslc(&args).0, 0, "{label} {command}");
+        }
+    }
+    // The literal one value per field, in each position, is accepted.
+    for (label, source) in [
+        ("state default", domain(one, &state(one), "", "")),
+        ("requires", domain(one, "", &requires(one), "")),
+        ("invariant", domain(one, "", "", &invariant(one))),
+    ] {
+        let (exit, packet) = check(&format!("domain-one-{label}"), &source);
+        assert_eq!(
+            (exit, &packet["result"]),
+            (0, &json!("ok")),
+            "{label}: {packet:#}"
+        );
+    }
 }
