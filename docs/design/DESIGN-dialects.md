@@ -393,6 +393,74 @@ reports `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.f
 in any order, and the same input in a later step, stay accepted. Migration: keep the one value you
 mean.
 
+#### Repeated actors and requirement ID owners (#1705)
+
+**Breaking removal (#1705).** In `fsl 5` requirements, three repeats passed `check`, and for an ID the
+ledger kept one row, with one title and one status, for two declarations. Each is now refused while the
+document is desugared, with exit 2, `kind: "parse"` and `loc` at the repeat:
+
+- A second `actor` of one name, on its own line or in a list: `duplicate actor 'Agent' at 4:9`.
+- A second declaration that owns the requirement ID after its keyword (`rule`, `decide`, `scenario`,
+  `forbidden`, `goal`, `policy`), at its ID, naming both kinds: `duplicate requirement id
+  'REQ-DESK-001': this rule reuses the ID of the rule at 19:8; a requirement ID has one owner at 22:8`.
+  This follows the policy that a declaration owns the ID after its keyword (`DESIGN-id-policy.md`), now
+  enforced as one owner per ID. A second `scenario`, `forbidden`, `goal` or `policy` of its own kind
+  keeps the refusal it already had (`duplicate acceptance id`, `duplicate forbidden id`, `duplicate
+  property name`, `kind: "semantics"`). Only another kind's ID is new for them.
+- Two rows of one `decide` that cover one ID with different texts, at the second `covers`: `decision
+  table 'REQ-2-3' covers 'REQ-2' twice with different texts; a covered ID names one requirement at
+  22:7`. A `covers` is a link, so one ID with one text on two rows stays accepted, and the ledger shows
+  it once, as before.
+
+What base `56354e477544f9be1f4477ddf036e5855d514bb5` did, measured once each with a debug build on the support-desk and claims documents of
+#1705. The routes were `check`, `verify --depth 6`, `ledger --depth 6`, `document claims` and `document generate`:
+
+| Repeat | Base | What was lost |
+|---|---|---|
+| `actor Agent` twice, or `actor Agent, Agent` | exit 0 on all five | Nothing: the output equals one copy's. Refused because every other declaration of one name is |
+| `rule` of one ID twice: `allow`, `always`, `never`, or two guards on one event | exit 0 | One ledger row, with one of the two titles |
+| `rule` reusing a `policy`, `forbidden` or `scenario` ID | exit 0 | One ledger row, with the rule's title; the other title is gone |
+| `rule` reusing a `decide` ID | exit 0 | The rule's title is in neither the ledger, `document claims` nor `document generate` |
+| `decide` of one ID twice, different rows | exit 0 | One ledger row |
+| `forbidden` reusing a `scenario` ID | exit 0 | No ledger row for either, both in the documents. Refused by the one-owner rule |
+| two `covers` of one ID, different texts | exit 0 | One ledger row; the second title is missing |
+
+Unchanged:
+
+- Two `covers` of one ID with one text.
+- A repeated `lifecycle` line, which merges the same way a single line does.
+- `policy`, `forbidden`, `measure`, a relation role, an entity field, a decide row that overlaps another, and a
+  glossary alias, all already refused.
+- `concept` and `kpi`, which #1686 refuses.
+- Not decided, and left accepted: an event's `covers`, or a decide row's `covers`, naming an ID a `rule`
+  owns. One run of a decide row covering a rule's ID gave one ledger row with the row's title, with the
+  rule's title missing.
+
+The current edition shares IDs the same way and is unchanged. One run each: two `requirement REQ-1`
+blocks checked with one ledger row carrying the last title; an `acceptance` reusing a requirement's
+ID, and a `requirement` reusing an acceptance's, checked.
+
+Routes covered by `issue_1705_requirements_repeats`: `check`, `verify` on bmc, explicit and induction,
+`ledger`, `document generate`, `document claims`, `document check` and `kernel`. `ledger` and `document
+generate` write no file. The other routes load the document through the same desugaring [R]. The
+Japanese particle spellings and the LSP were not measured.
+
+On-disk transition set (empty). Base `56354e477544f9be1f4477ddf036e5855d514bb5`, head `779408fa52110cb3ca7b2adf7394d489513c5cb7`, each binary built from
+its own tree with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/`
+(651 forms: 23/195/433) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable and with
+`FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All 2604 pairs had
+equal complete stdout, stderr and exit with no field excluded, and no run differed from its repeat: 0
+ok-to-error and 0 error-to-ok. No required test's inline fixtures were rewritten.
+
+**Owed to #1437.** This removal is recorded here, in
+`skills-next/fsl-requirements/references/syntax.md` and in
+`changelog.d/1705-requirements-repeats.changed.md`. The next edition's header may not appear in
+published material until #1434 lifts the gate, so `docs/manual/LANGUAGE.md`,
+`docs/manual/LANGUAGE.ja.md` and `skills/fsl/references/syntax.md` do not carry it yet. When #1437
+writes the `fsl 5` reference, those three owe the three refusals above and the accepted `covers`
+link, with the site regenerated. Migration: rename one of the two IDs, or merge the two declarations;
+delete the repeated actor.
+
 ### 2.3 Tests (tests/test_req_dialect.py)
 
 Use the return requirements (almost the same as §2.1) as a fixture:

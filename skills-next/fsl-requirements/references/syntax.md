@@ -63,6 +63,15 @@ entry per finding in `findings[]` (for example `legacy_string_metadata` for a
 | `Order` **belongs to** `User` **as** `buyer` **via** `place` | every `Order` gets the field `buyer` (no one until `place` happens); the event `place` takes the `User` instance that does it as its first input and records it |
 | **resource** `stock: Qty = 2` | one value that belongs to no entity; events `set` it |
 
+Each name and each requirement ID is declared once. A second `actor` of
+one name is refused (`duplicate actor`). An ID belongs to the one `rule`,
+`decide`, `scenario`, `forbidden`, `goal` or `policy` written with it, so a
+second declaration of any of these kinds with the same ID is refused at its
+ID (`duplicate requirement id`, naming both kinds). A `covers` line is a link,
+not an owner. Two rows of one table may cover one ID with one text, and with
+two texts they are refused. Each was accepted before #1705, and the ledger kept
+one row for the two.
+
 The lowering names each field `entity_field` (`order_qty`,
 `order_stage`, `order_buyer`); `fslc explain --readable` lists them under
 "State". Those are the names a design mapping and an `implements` block use.
