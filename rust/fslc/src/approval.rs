@@ -388,7 +388,7 @@ impl TrustStore {
     pub fn load(paths: &[PathBuf]) -> Result<Self, String> {
         let mut keys = BTreeMap::new();
         for path in paths {
-            let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+            let source = crate::spec_loading::read_input_text(path)?;
             let key = VerifyingKey::from_public_key_pem(&source).map_err(|error| {
                 format!("invalid Ed25519 public key '{}': {error}", path.display())
             })?;
@@ -459,8 +459,9 @@ pub fn reviewed_artifact_digest(
     if record.target.kind != "requirements_document" {
         return Ok(None);
     }
-    let reviewed = std::fs::read(record.io_path(root, &record.target.path))
-        .map_err(|error| error.to_string())?;
+    let reviewed = std::fs::read(record.io_path(root, &record.target.path)).map_err(|error| {
+        crate::spec_loading::read_failure_message(Path::new(&record.target.path), &error)
+    })?;
     Ok(Some(sha256_bytes(&reviewed)))
 }
 
@@ -652,7 +653,7 @@ fn normalize_number_key(source: &str, quote: &str, key: &str, replacement: &str)
 /// approval. Imported/composed specifications are covered because the resolver
 /// expands them before `kernel_ast_v1` is projected.
 pub fn spec_digest(path: &Path) -> Result<String, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let source = crate::spec_loading::read_input_text(path)?;
     spec_digest_from_source(path, &source)
 }
 
@@ -834,7 +835,7 @@ pub fn verify_git_baseline(repo: &Path, relative_path: &str, commit: &str) -> Re
 }
 
 pub fn read_record(path: &Path) -> Result<ApprovalRecord, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let source = crate::spec_loading::read_input_text(path)?;
     let record: LegacyApprovalRecord = serde_json::from_str(&source)
         .map_err(|error| format!("invalid approval record: {error}"))?;
     let record = record.into();
@@ -848,7 +849,7 @@ pub fn read_versioned_record(path: &Path) -> Result<VersionedApprovalRecord, Str
         schema: String,
     }
 
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let source = crate::spec_loading::read_input_text(path)?;
     let header: SchemaHeader = serde_json::from_str(&source)
         .map_err(|error| format!("invalid approval record: {error}"))?;
     match header.schema.as_str() {
@@ -1138,7 +1139,7 @@ pub fn write_record(path: &Path, record: &ApprovalRecord) -> Result<(), String> 
 
 pub fn sign_record(record: ApprovalRecord, private_key: &Path) -> Result<ApprovalRecordV2, String> {
     validate_record(&record)?;
-    let source = std::fs::read_to_string(private_key).map_err(|error| error.to_string())?;
+    let source = crate::spec_loading::read_input_text(private_key)?;
     let key = SigningKey::from_pkcs8_pem(&source).map_err(|error| {
         format!(
             "invalid Ed25519 private key '{}': {error}",

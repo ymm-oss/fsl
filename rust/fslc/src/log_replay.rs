@@ -189,7 +189,7 @@ pub(crate) fn json_mismatches(expected: &Value, observed: &Value, path: &str) ->
 }
 
 pub(crate) fn read_jsonl_records(path: &Path) -> Result<Vec<(usize, Value)>, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let source = crate::spec_loading::read_input_text(path)?;
     parse_jsonl_records(&source)
 }
 
@@ -373,16 +373,19 @@ mod captured_jsonl_tests {
         let error = parse_jsonl_records(invalid).unwrap_err();
         assert!(error.starts_with("invalid JSONL at line 4:"), "{error}");
         assert_eq!(read_jsonl_records(&path).unwrap_err(), error);
+        // A read failure names the file, as every unreadable input does
+        // (#1170 phase 2).
+        let read_failure = |path: &std::path::Path| {
+            format!(
+                "{}: {}",
+                path.display(),
+                std::fs::read_to_string(path).unwrap_err()
+            )
+        };
         std::fs::write(&path, [0xff]).unwrap();
-        assert_eq!(
-            read_jsonl_records(&path).unwrap_err(),
-            std::fs::read_to_string(&path).unwrap_err().to_string()
-        );
+        assert_eq!(read_jsonl_records(&path).unwrap_err(), read_failure(&path));
         std::fs::remove_file(&path).unwrap();
-        assert_eq!(
-            read_jsonl_records(&path).unwrap_err(),
-            std::fs::read_to_string(&path).unwrap_err().to_string()
-        );
+        assert_eq!(read_jsonl_records(&path).unwrap_err(), read_failure(&path));
         assert!(parse_jsonl_records(" \r\n\n").unwrap().is_empty());
     }
 }

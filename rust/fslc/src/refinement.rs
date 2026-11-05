@@ -16,7 +16,7 @@ use crate::cli_output::{
     trace_last_action,
 };
 use crate::process::block_on_native;
-use crate::spec_loading::{io_error_output, load_model, load_model_from_source};
+use crate::spec_loading::{io_error_output, load_model, load_model_from_source, read_input_text};
 
 /// Derive governance output from one caller-owned root-source snapshot.
 pub(crate) fn governance_result_from_source(
@@ -294,7 +294,7 @@ pub(crate) fn run_refine(
         depth,
         || load_model(implementation_path),
         || load_model(abstraction_path),
-        || std::fs::read_to_string(mapping_path),
+        || read_input_text(mapping_path),
     )
 }
 
@@ -317,7 +317,7 @@ fn run_refine_with_loaders(
     depth: usize,
     load_implementation: impl FnOnce() -> Result<KernelModel, SpecLoadError>,
     load_abstraction: impl FnOnce() -> Result<KernelModel, SpecLoadError>,
-    read_mapping: impl FnOnce() -> std::io::Result<String>,
+    read_mapping: impl FnOnce() -> Result<String, String>,
 ) -> (Value, i32) {
     let implementation = match load_implementation() {
         Ok(model) => model,
@@ -329,7 +329,7 @@ fn run_refine_with_loaders(
     };
     let source = match read_mapping() {
         Ok(source) => source,
-        Err(error) => return (io_error_output(&error.to_string()), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let mapping = match fsl_core::parse_refinement_with_options(
         &source,

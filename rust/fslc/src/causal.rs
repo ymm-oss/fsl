@@ -15,8 +15,8 @@ use crate::log_replay::{
 };
 use crate::process::{block_on_native, parse_options};
 use crate::spec_loading::{
-    IoMessage, finish_admitted, io_error_output, load_snapshot_value_object, read_source,
-    run_admitted_root, run_admitted_roots,
+    finish_admitted, io_error_output, load_snapshot_value_object, read_failure_message,
+    read_input_text, read_spec_source, run_admitted_root, run_admitted_roots,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -200,7 +200,7 @@ pub(super) fn causal_command(
             Ok(run_admitted_roots(
                 vec![
                     (&path, read_causal_source(&path)),
-                    (&mapping, read_source(&mapping, IoMessage::Bare)),
+                    (&mapping, read_spec_source(&mapping)),
                 ],
                 None,
                 false,
@@ -368,7 +368,7 @@ fn causal_error_output(error: &fsl_tools::CausalError, legacy_literate: bool) ->
 }
 
 fn read_causal_source(path: &Path) -> Result<String, SpecLoadError> {
-    read_source(path, IoMessage::CannotRead)
+    read_spec_source(path)
 }
 
 fn run_causal_root(path: &Path, run: impl FnOnce(&str) -> (Value, i32)) -> (Value, i32) {
@@ -418,12 +418,8 @@ fn load_causal_evidence(
     as_of: Option<&str>,
 ) -> Result<LoadedEvidence, (Value, i32)> {
     let read_json = |path: &PathBuf| -> Result<Value, (Value, i32)> {
-        let source = std::fs::read_to_string(path).map_err(|error| {
-            (
-                io_error_output(&IoMessage::CannotRead.render(path, &error)),
-                2,
-            )
-        })?;
+        let source = std::fs::read_to_string(path)
+            .map_err(|error| (io_error_output(&read_failure_message(path, &error)), 2))?;
         serde_json::from_str(&source).map_err(|error| {
             (
                 error_output(
@@ -839,7 +835,7 @@ fn run_causal_observe_expectations(
     }
     let log_raw = match read_log(log_path) {
         Ok(raw) => raw,
-        Err(error) => return (io_error_output(&error.to_string()), 2),
+        Err(error) => return (io_error_output(&read_failure_message(log_path, &error)), 2),
     };
     let records = match parse_jsonl_records(&log_raw) {
         Ok(records) => records,
@@ -847,9 +843,9 @@ fn run_causal_observe_expectations(
     };
 
     // ── Parse scope ──────────────────────────────────────────────────
-    let scope_raw = match std::fs::read_to_string(scope_path) {
+    let scope_raw = match read_input_text(scope_path) {
         Ok(source) => source,
-        Err(error) => return (io_error_output(&error.to_string()), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let scope: Value = match serde_json::from_str(&scope_raw) {
         Ok(scope) => scope,
@@ -1571,9 +1567,9 @@ fn run_causal_ledger(
     // Load plan artifacts.
     let mut plans = std::collections::BTreeMap::new();
     for plan_path in plan_paths {
-        let source = match std::fs::read_to_string(plan_path) {
+        let source = match read_input_text(plan_path) {
             Ok(source) => source,
-            Err(error) => return (io_error_output(&error.to_string()), 2),
+            Err(error) => return (io_error_output(&error), 2),
         };
         let value: Value = match serde_json::from_str(&source) {
             Ok(value) => value,
@@ -1860,11 +1856,16 @@ mod captured_log_tests {
         let unreadable = f.observe(&|p| std::fs::read_to_string(p));
         assert_eq!(unreadable.1, 2);
         assert_eq!(unreadable.0["kind"], "io");
+        // An unreadable `--from-log` names its path, as every unreadable
+        // input does (#1170 phase 2).
+        let log = f.0.join("log.jsonl");
         assert_eq!(
             unreadable.0["message"],
-            std::fs::read_to_string(f.0.join("log.jsonl"))
-                .unwrap_err()
-                .to_string()
+            format!(
+                "{}: {}",
+                log.display(),
+                std::fs::read_to_string(&log).unwrap_err()
+            )
         );
         std::fs::write(f.0.join("log.jsonl"), "\r\n \r\nnot json\n").unwrap();
         let malformed = f.observe(&|p| std::fs::read_to_string(p));

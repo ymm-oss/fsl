@@ -65,7 +65,12 @@ fn successful_verification_still_reports_missing_impl_log_as_io() {
     assert_eq!(verified["result"], "verified", "{verified}");
     let absent = support::directory("io-control").join("absent.json");
     assert!(!absent.exists());
-    let expected_message = std::fs::read(&absent).unwrap_err().to_string();
+    // An unreadable `--impl-log` names its path (#1170 phase 2).
+    let expected_message = format!(
+        "{}: {}",
+        absent.display(),
+        std::fs::read(&absent).unwrap_err()
+    );
     let (actual, status) = cli::run_json(
         "ledger",
         fixture,

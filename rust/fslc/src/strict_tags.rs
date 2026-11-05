@@ -141,7 +141,7 @@ pub(crate) fn strict_tag_warnings_from_source(
             if error.kind() == std::io::ErrorKind::NotFound {
                 format!("file not found: {}", path.display())
             } else {
-                error.to_string()
+                crate::spec_loading::read_failure_message(path, &error)
             }
         })?;
         declared_from_file.extend(
