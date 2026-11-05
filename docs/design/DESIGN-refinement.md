@@ -227,6 +227,8 @@ duplicate implements 'Broken' (a requirements document declares one, and 'Held' 
 The same contract written twice is refused the same way, `duplicate implements 'Held' (a requirements
 document declares one, and 'Held' came first) at 3:3`.
 
+A second clause is a parse error, so `documentSymbol` returns null until it is fixed, as for any parse error.
+
 What this leaves as it is:
 
 - An abstraction file that repeats the clause is reported through the clause that named it, as any
