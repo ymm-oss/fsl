@@ -1,5 +1,23 @@
 Changed (#1170): `fslc`'s file-IO error classification has one owner,
-`spec_loading.rs`, and every command arm that reported an `io` error now
-builds it there. A new test counts the hand-written IO, error-envelope,
-and error-exit sites left outside their owners and fails if one is added.
-Command output, error `kind`s, messages, and exit codes are unchanged.
+`spec_loading.rs`, and an input file that cannot be read (missing, a
+directory, no permission, not UTF-8) is now reported the same way on every
+command: `kind:"io"`, exit 2, and the message `<path>: <error>`. Routes that
+change: `approval create --kind requirements_document` with an unreadable
+`--artifact`, `--glossary` or `--evidence` (was `kind:"usage"`); the spec of
+`domain analyze`/`check`/`expand`/`generate`/`replay`/`testgen` and
+`db observe` (was `kind:"semantics"`, retiring the #780-era exception); the
+bare OS error without the path from the spec of `ai check`/`compat`/`drift`/
+`eval`/`regress`/`replay`, `db import`, `diff` (both specs and `--mapping`),
+`refine` (the mapping), `fmt`, `replay --trace` and
+`--from-log --mapping`, `approval check`/`diff --record` and `--trust-key`,
+`approval create --artifact` and `--signing-key`, `ledger --impl-log`/
+`--evidence`/`--approval`, `document check` (the document), `mutate --from`,
+`verify --from-state` and `--requirements`, and `causal observe-expectations
+--from-log`/`--mapping`/`--scope` and `causal ledger --plans`; and the causal
+family's `cannot read <path>: <error>` spelling (the spec of every `causal`
+subcommand and `causal analyze`/`ledger --evidence`). A missing file that
+already reported `file not found: <path>` keeps that message, and `ai` log
+and record inputs, `ai compare --from` and `db observe --trace` still report
+an unreadable file as `kind:"parse"`. A new test counts the hand-written IO,
+error-envelope, and error-exit sites left outside their owners and fails if
+one is added.
