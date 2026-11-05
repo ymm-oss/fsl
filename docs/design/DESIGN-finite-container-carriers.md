@@ -318,7 +318,7 @@ were excluded, because each differs between two runs of one binary: 303, 104 and
 18 on induction, none reporting `cannot coerce`.
 
 Inline inputs of `issue_1679_carrier_equality`, whose third-route test this rewrites and renames, and of
-`issue_1683_one_carrier_rule`: 689 single-file forms checked the same way, 678 byte-identical and 11 ok to error, each a
+`issue_1683_one_carrier_rule`: 817 single-file forms checked the same way, 806 byte-identical and 11 ok to error, each a
 Map under a literal under `old(...)` in the new test. The 20 refinement files in the #1679 test were not checked on their own.
 
 ## Mutation classification

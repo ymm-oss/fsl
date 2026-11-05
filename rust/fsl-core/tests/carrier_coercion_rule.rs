@@ -47,7 +47,7 @@ fn relation(source: TypeRef, target: TypeRef) -> TypeRef {
     TypeRef::Relation(Box::new(source), Box::new(target))
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::many_single_char_names)]
 fn rows() -> Vec<(TypeRef, TypeRef, CarrierCoercion)> {
     let (int, boolean) = (TypeRef::Int, TypeRef::Bool);
     let (k, k2, a, a2, b) = (named("K"), named("K2"), named("A"), named("A2"), named("B"));
