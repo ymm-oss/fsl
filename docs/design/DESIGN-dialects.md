@@ -432,9 +432,8 @@ Unchanged:
 - `policy`, `forbidden`, `measure`, a relation role, an entity field, a decide row that overlaps another, and a
   glossary alias, all already refused.
 - `concept` and `kpi`, which #1686 refuses.
-- Not decided, and left accepted: an event's `covers`, or a decide row's `covers`, naming an ID a `rule`
-  owns. One run of a decide row covering a rule's ID gave one ledger row with the row's title, with the
-  rule's title missing.
+- An event's `covers`, or a decide row's `covers`, naming an ID another declaration owns stays accepted.
+  Its output changed; see the next subsection.
 
 The current edition shares IDs the same way and is unchanged. One run each: two `requirement REQ-1`
 blocks checked with one ledger row carrying the last title; an `acceptance` reusing a requirement's
@@ -452,13 +451,38 @@ its own tree with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rus
 equal complete stdout, stderr and exit with no field excluded, and no run differed from its repeat: 0
 ok-to-error and 0 error-to-ok. No required test's inline fixtures were rewritten.
 
+#### A `covers` of an owned ID shows the owner's title (#1705)
+
+**Changed ledger output (#1705).** A decide row's `covers` or an event's `covers` may name an ID that a
+`rule`, `decide`, `scenario`, `forbidden`, `goal` or `policy` owns. It stays accepted and stays a link:
+the covering event's action keeps the ID, and the claims that carry the ID are the same. The ID has one
+title, its owner's. The lowering gives the link the owner's title and the owner's span, so the ledger
+row, the document's rule section and requirement text, and `document claims` show the owner's title once,
+cited at the owner. The `covers` text itself is no longer shown anywhere.
+
+Measured once each, base `56354e477544f9be1f4477ddf036e5855d514bb5` against head
+`a912a7b3d`, on the claims document of #1705 with `rule REQ-2 "Only a manager rejects a large claim"`
+added after the table. `check` exits 0 on both; `ledger` exits 1 on both, because the document violates
+its own `assuming`; `document generate`, `document claims` and `document check` exit 0 on both.
+
+| Link to the rule's `REQ-2` | Base | Head |
+|---|---|---|
+| decide row `covers REQ-2 "A small claim is auto-approved"` | Ledger row titled with the row's text. Claims: two statements for `REQ-2`, the row's text first, so the document's rule section quoted the row's text under the rule | Ledger row, rule section and the one statement show the rule's title, cited at 24:3. Claim IDs of `REQ-2` unchanged |
+| event `covers REQ-2 "A claim can be rejected"` | Ledger row titled with the event's text. The rule's title was in neither the ledger, `document claims` nor `document generate` | Ledger row, rule section and the one statement show the rule's title, cited at 25:3. Claim IDs of `REQ-2` unchanged |
+
+Tested by `a_covers_of_an_owned_id_shows_the_owners_title` in `issue_1705_requirements_repeats`, with
+three faults detected: an event's `covers`, or a row's `covers`, left without its owner's title, and the
+title moved without the span. Not measured: a `covers` of a `scenario`, `forbidden`, `goal` or `policy`
+ID, which takes the same path [R]; the Japanese particle spellings; the LSP. Of the on-disk corpus, the 8
+next-edition files that write `covers` give the same complete `document claims` stdout on base and head.
+
 **Owed to #1437.** This removal is recorded here, in
 `skills-next/fsl-requirements/references/syntax.md` and in
 `changelog.d/1705-requirements-repeats.changed.md`. The next edition's header may not appear in
 published material until #1434 lifts the gate, so `docs/manual/LANGUAGE.md`,
 `docs/manual/LANGUAGE.ja.md` and `skills/fsl/references/syntax.md` do not carry it yet. When #1437
 writes the `fsl 5` reference, those three owe the three refusals above and the accepted `covers`
-link, with the site regenerated. Migration: rename one of the two IDs, or merge the two declarations;
+link with its owner's title, with the site regenerated. Migration: rename one of the two IDs, or merge the two declarations;
 delete the repeated actor.
 
 ### 2.3 Tests (tests/test_req_dialect.py)

@@ -68,8 +68,9 @@ one name is refused (`duplicate actor`). An ID belongs to the one `rule`,
 `decide`, `scenario`, `forbidden`, `goal` or `policy` written with it, so a
 second declaration of any of these kinds with the same ID is refused at its
 ID (`duplicate requirement id`, naming both kinds). A `covers` line is a link,
-not an owner. Two rows of one table may cover one ID with one text, and with
-two texts they are refused. Each was accepted before #1705, and the ledger kept
+not an owner. A `covers` of an ID another declaration owns shows the owner's
+title in the ledger and the documents, not its own text. Two rows of one table
+may cover one ID with one text, and with two texts they are refused. Each was accepted before #1705, and the ledger kept
 one row for the two.
 
 The lowering names each field `entity_field` (`order_qty`,
