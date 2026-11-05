@@ -83,6 +83,8 @@ def detector_build(directory: Path) -> dict[str, list[str]]:
     rows = [json.loads(line) for line in (directory / 'detector-build.jsonl').read_text().splitlines()]
     artifacts = [row for row in rows if row.get('reason') == 'compiler-artifact']
     require(all(type(row['fresh']) is bool for row in artifacts), 'artifact without a Cargo freshness verdict')
+    finished = [row for row in rows if row.get('reason') == 'build-finished']
+    require(len(finished) == 1 and finished[0].get('success') is True, 'detector build did not finish successfully')
     first_party = [row for row in artifacts if row['package_id'].startswith('path+file://')]
     third_party = [row for row in artifacts if not row['package_id'].startswith('path+file://')]
     reused = [row['target']['name'] for row in first_party if row['fresh']]
@@ -91,7 +93,8 @@ def detector_build(directory: Path) -> dict[str, list[str]]:
     require(not missing, f'detector build omitted first-party targets: {sorted(missing)}')
     return dict(first_party_rebuilt=[row['target']['name'] for row in first_party],
                 third_party_reused=[row['target']['name'] for row in third_party if row['fresh']],
-                third_party_rebuilt=[row['target']['name'] for row in third_party if not row['fresh']])
+                third_party_rebuilt=[row['target']['name'] for row in third_party if not row['fresh']],
+                test_executables=sorted(row['executable'] for row in first_party if 'test' in row['target']['kind']))
 
 
 def check_detector_build(directory: Path, target_path: str) -> None:
@@ -145,7 +148,7 @@ def evidence(directory: Path, selected: list[str], revision: str):
         baseline = raw / 'log/baseline.log'
     else:
         require(not (directory / 'mutants.out').exists(), 'empty shard must not invent runner outcomes')
-        detector_build(directory)
+        build = detector_build(directory)
         # The verdict covers only what the test run below it executed if that run compiled nothing.
         require(not re.search(r'^(?:\x1b\[[0-9;]*m|\s)*Compiling\b', baseline.read_text(), re.MULTILINE),
                 'detector run compiled after the verified build')
@@ -154,6 +157,9 @@ def evidence(directory: Path, selected: list[str], revision: str):
                 in text for count in (19, 16)),
             'baseline omitted declared 35 detectors')
     require('test result: FAILED' not in text, 'baseline failed')
+    if not selected:
+        ran = re.findall(r'^\s*Running .*\((.+)\)\s*$', re.sub(r'\x1b\[[0-9;]*m', '', text), re.MULTILINE)
+        require(sorted(ran) == build['test_executables'], 'detector run executables differ from the verified build')
     return report
 
 

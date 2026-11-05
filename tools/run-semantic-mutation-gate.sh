@@ -87,9 +87,10 @@ rm -rf "$root"/rust/target/semantic-mutation.* "$root/rust/target/semantic-mutat
 
 run_manifest_test() {
   # Validates the operator inventory, the P2 scope/equivalents manifests, and
-  # the mutation runner config together. Cheap (compile-dominated, ~1 min)
-  # and idempotent, so it runs once for the unsharded default path and once
-  # per invocation when split into lanes -- both lanes depend on parts of it
+  # the mutation runner config together. Cheap on a full cache restore
+  # (compile-dominated, ~1 min; 19m19s when a partial restore lost Z3, run
+  # 41940637142, mutants shard 3) and idempotent, so it runs once for the
+  # unsharded default path and once per invocation when split into lanes -- both lanes depend on parts of it
   # (operators.txt for the operators lane, scope.v1.json/equivalents.v1.json
   # for the mutants lane) and neither half is expensive enough to be worth
   # splitting further.

@@ -155,19 +155,36 @@ compiling to run about one second of detectors (for example run `41798402365`,
   shard record and the aggregate recheck the same rows, which are hash-bound
   through the provenance sidecar, and reject a `baseline.log` that compiled anything
   after the verified build.
-- *Third-party reuse stays Cargo's decision.* A unit whose fingerprint (version,
-  features, profile, compiler, build-script inputs) does not match is rebuilt.
+- *Third-party reuse stays Cargo's decision.* Cargo reuses a seeded unit only while
+  its fingerprint (version, features, profile, compiler, build-script inputs) matches.
 
 **What is reduced.** The detectors of a zero-mutant shard link third-party code, Z3
-included, from the restored `semantic-mutation` cache instead of compiling it from
-source in that shard. A defect confined to a cached third-party artifact that keeps
-a matching fingerprint is no longer excluded by this shard. Runs that test a mutant
-still compile all of it, and that cache is saved only by non-pull-request,
+included, once per job: whatever the manifest test accepted from the restored
+`semantic-mutation` cache or built itself after a partial restore. The fresh target
+no longer compiles it again. A defect confined to a cached third-party artifact that
+keeps a matching fingerprint is no longer excluded by this shard. Runs that test a
+mutant still compile all of it, and that cache is saved only by non-pull-request,
 non-queue events.
 
-**Failure paths.** Any seed failure discards the partial copy and takes the full
-fresh build; a seed Cargo accepts but cannot use fails the compile and therefore
-the shard. Neither skips the detectors. The log states the path taken:
+**Measured.** Run `41940637142` took 3m22s and 3m02s on shards whose cache restored
+in full. A shard with a partial restore took 21m56s, because its manifest test
+rebuilt Z3 for 19m19s before seeding; the detector build after the seed still
+reused every third-party unit. That run followed a Cargo manifest change on `main`
+(#1480): the slow shard restored the previous key `4afd95be` without a full match,
+and the later shards hit the new `eeff49f5`.
+
+**Failure paths.** None of these skips the detectors or passes on a partial result:
+
+- A failing seed command (`cargo metadata`, or the copy) discards the partial copy
+  and takes the full fresh build.
+- A seed unit Cargo refuses fails the shard. Cargo recompiles that unit in the
+  detector build and its dependents in the detector run, and a run that compiled
+  after the verified build is rejected.
+- A seed unit Cargo accepts but rustc cannot read fails the compile, and so the shard.
+
+The shard artifact also keeps `cargo-metadata.json`, the `cargo metadata` output the
+seed classified. It is diagnostic: only a zero-mutant `--lane mutants` run writes
+it, and the provenance sidecar does not bind it. The log states the path taken:
 
 ```text
 semantic-mutation: detector-target path=seeded reason=third-party-units-copied
@@ -224,8 +241,8 @@ tier (`changed`/`complete`), with the same classifications and the same evidence
   Every shard keeps the same 35 detectors (19 solver-fail-closed and 16 triangulated-assurance),
   full scratch checkout and fresh first-party target. Empty logical shards and zero-mutant
   changed runs execute those real detectors and retain a baseline log, a `detector-build.jsonl`
-  and a revision-bound empty report; no raw cargo-mutants outcomes are invented. Only these runs
-  seed third-party units (see "Zero-mutant detector target"). Nonempty shards must match the actual
+  and a revision-bound empty report; no raw cargo-mutants outcomes are invented. In this lane only
+  these runs seed third-party units (see "Zero-mutant detector target"). Nonempty shards must match the actual
   raw and reported outcome IDs to the selected slice before publishing success.
   Each nonempty shard pays a cold baseline, which is compute, not paid runner capacity. The historical 14.3-minute
   unsharded rationale is superseded by later 72–78-minute observations; no parallel speedup is

@@ -154,14 +154,35 @@ mutants = importlib.util.module_from_spec(MUTANT_SPEC)
 MUTANT_SPEC.loader.exec_module(mutants)
 
 
-def detector_build_rows(first_party_fresh: bool = False, third_party_fresh: bool = True,
-                        omit: str | None = None) -> str:
+DETECTOR_TESTS = ('solver_fail_closed', 'triangulated_assurance')
+# The named targets the check requires, plus the rows it must not treat as optional.
+DETECTOR_FIXTURE_TARGETS = sorted(mutants.DETECTOR_FIRST_PARTY_TARGETS | {'fsl_core', 'build-script-build'})
+
+
+def detector_build_rows(first_party_fresh: bool = False, third_party_fresh: bool = True, omit: str | None = None,
+                        fresh_target: str | None = None, fresh_value: object = False, success: object = True) -> str:
     import json
-    rows = [dict(reason='compiler-artifact', package_id=f'path+file:///w/{name}#0.1.0', target=dict(name=name), fresh=first_party_fresh)
-            for name in sorted(mutants.DETECTOR_FIRST_PARTY_TARGETS) if name != omit]
-    rows.append(dict(reason='compiler-artifact', package_id='registry+https://index/#z3-sys@0.1.0', target=dict(name='z3_sys'), fresh=third_party_fresh))
-    rows.append(dict(reason='build-finished', success=True))
+    rows = []
+    for name in DETECTOR_FIXTURE_TARGETS:
+        if name == omit:
+            continue
+        is_test = name in DETECTOR_TESTS
+        kind = ['test'] if is_test else ['custom-build'] if name == 'build-script-build' else ['lib']
+        rows.append(dict(reason='compiler-artifact', package_id=f'path+file:///w/{name}#0.1.0',
+                         target=dict(name=name, kind=kind), fresh=first_party_fresh or name == fresh_target,
+                         executable=f'/t/debug/deps/{name}-0' if is_test else None))
+    if fresh_value is not False:
+        rows[0]['fresh'] = fresh_value
+    rows.append(dict(reason='compiler-artifact', package_id='registry+https://index/#z3-sys@0.1.0',
+                     target=dict(name='z3_sys', kind=['lib']), fresh=third_party_fresh, executable=None))
+    if success is not None:
+        rows.append(dict(reason='build-finished', success=success))
     return ''.join(json.dumps(row) + '\n' for row in rows)
+
+
+def detector_run_log(names: tuple[str, ...] = DETECTOR_TESTS) -> str:
+    """The Cargo lines of a detector run, with the color CI's CARGO_TERM_COLOR=always emits."""
+    return ''.join(f'\x1b[1m\x1b[92m     Running\x1b[0m tests/{name}.rs (/t/debug/deps/{name}-0)\n' for name in names)
 
 
 def mutant_fixture(root: Path, ids: list[str], attempts: tuple[int, int, int] = (1, 2, 1)) -> Path:
@@ -190,7 +211,7 @@ def mutant_fixture(root: Path, ids: list[str], attempts: tuple[int, int, int] = 
             (raw / 'outcomes.json').write_text(json.dumps(dict(outcomes=rows, cargo_mutants_version='27.1.0', end_time='done', total_mutants=len(selected), caught=0, missed=0, timeout=0, unviable=len(selected), success=0)))
             (raw / 'log/baseline.log').write_text(baseline)
         else:
-            (artifact / 'baseline.log').write_text(baseline)
+            (artifact / 'baseline.log').write_text(detector_run_log() + baseline)
             (artifact / 'detector-build.jsonl').write_text(detector_build_rows())
         mutants.record(artifact, index, 3, 'changed', equivalents, '77', attempts[index - 1], 'rev')
     return equivalents
@@ -218,6 +239,10 @@ def test_mutant_empty_and_partial_rerun_cohorts(tmp_path: Path, ids: list[str], 
     ('empty-first-party-reused', 'stale first-party artifact reused'),
     ('empty-detector-build-omitted', 'detector-build.jsonl'),
     ('empty-detector-run-compiled', 'compiled after the verified build'),
+    ('empty-detector-build-failed', 'did not finish successfully'),
+    ('empty-detector-build-truncated', 'did not finish successfully'),
+    ('empty-detector-run-foreign-executable', 'executables differ'),
+    ('empty-detector-run-dropped-executable', 'executables differ'),
 ])
 def test_mutant_cohort_rejecting_controls(tmp_path: Path, fault: str, expected: str) -> None:
     import json
@@ -259,6 +284,16 @@ def test_mutant_cohort_rejecting_controls(tmp_path: Path, fault: str, expected: 
     elif fault == 'empty-detector-run-compiled':
         log = tmp_path / 'semantic-mutation-mutants-2-77/baseline.log'
         log.write_text('\x1b[1m\x1b[92m   Compiling\x1b[0m fsl-core v1 (/w)\n' + log.read_text())
+    elif fault == 'empty-detector-build-failed':
+        (tmp_path / 'semantic-mutation-mutants-2-77/detector-build.jsonl').write_text(detector_build_rows(success=False))
+    elif fault == 'empty-detector-build-truncated':
+        (tmp_path / 'semantic-mutation-mutants-2-77/detector-build.jsonl').write_text(detector_build_rows(success=None))
+    elif fault == 'empty-detector-run-foreign-executable':
+        log = tmp_path / 'semantic-mutation-mutants-2-77/baseline.log'
+        log.write_text(log.read_text().replace('solver_fail_closed-0', 'solver_fail_closed-foreign'))
+    elif fault == 'empty-detector-run-dropped-executable':
+        log = tmp_path / 'semantic-mutation-mutants-2-77/baseline.log'
+        log.write_text(log.read_text().replace(detector_run_log(('solver_fail_closed',)), ''))
     elif fault == 'wrong-mode':
         data['mode'] = 'complete'
         path.write_text(json.dumps(data))
@@ -418,12 +453,14 @@ def test_seed_copies_third_party_units_and_their_mtimes_only(tmp_path: Path) -> 
     source = seed_source(tmp_path, Z3_UNIT, FIRST_PARTY_UNIT, ('both', 'both', 'c' * 16), ('unknown', 'unknown', 'd' * 16))
     old = source / '.fingerprint' / f'z3-sys-{"a" * 16}' / 'marker'
     os.utime(old, ns=(1_000_000_123, 1_000_000_123))
+    os.utime(source / 'deps' / f'libz3_sys-{"a" * 16}.rlib', ns=(1_000_000_456, 1_000_000_456))
     target = tmp_path / 'target' / 'debug'
     mutants.seed(source, target, seed_metadata(tmp_path))
     copied = sorted(str(p.relative_to(target)) for p in target.rglob('*') if p.is_file())
     assert copied == sorted([f'.fingerprint/z3-sys-{"a" * 16}/marker', f'build/z3-sys-{"a" * 16}/marker',
                              f'deps/libz3_sys-{"a" * 16}.rlib', f'deps/z3_sys-{"a" * 16}.d'])
     assert (target / '.fingerprint' / f'z3-sys-{"a" * 16}' / 'marker').stat().st_mtime_ns == 1_000_000_123
+    assert (target / 'deps' / f'libz3_sys-{"a" * 16}.rlib').stat().st_mtime_ns == 1_000_000_456
 
 
 @pytest.mark.parametrize(('fault', 'expected'), [
@@ -443,6 +480,36 @@ def test_seed_rejecting_controls(tmp_path: Path, fault: str, expected: str) -> N
     print(f'detector {fault}: produced={str(rejected.value)!r}; expected_contains={expected!r}')
 
 
+@pytest.mark.parametrize('name', DETECTOR_FIXTURE_TARGETS)
+def test_every_first_party_row_rejects_reuse(tmp_path: Path, name: str) -> None:
+    (tmp_path / 'detector-build.jsonl').write_text(detector_build_rows(fresh_target=name))
+    with pytest.raises(ValueError, match=f"stale first-party artifact reused: \\['{name}'\\]") as rejected:
+        mutants.check_detector_build(tmp_path, 'seeded')
+    print(f'detector reused-{name}: produced={str(rejected.value)!r}')
+
+
+def test_a_registry_served_from_a_file_url_stays_third_party(tmp_path: Path) -> None:
+    rows = detector_build_rows().replace('registry+https://index/#', 'registry+file:///mirror/#')
+    (tmp_path / 'detector-build.jsonl').write_text(rows)
+    mutants.check_detector_build(tmp_path, 'seeded')
+
+
+@pytest.mark.parametrize('value', [0, None, 'false'])
+def test_detector_build_requires_a_boolean_cargo_verdict(tmp_path: Path, value: object) -> None:
+    (tmp_path / 'detector-build.jsonl').write_text(detector_build_rows(fresh_value=value))
+    with pytest.raises(ValueError, match='artifact without a Cargo freshness verdict') as rejected:
+        mutants.check_detector_build(tmp_path, 'seeded')
+    print(f'detector fresh={value!r}: produced={str(rejected.value)!r}')
+
+
+@pytest.mark.parametrize('success', [False, None, 'true'])
+def test_detector_build_requires_cargo_to_finish_successfully(tmp_path: Path, success: object) -> None:
+    (tmp_path / 'detector-build.jsonl').write_text(detector_build_rows(success=success))
+    with pytest.raises(ValueError, match='did not finish successfully') as rejected:
+        mutants.check_detector_build(tmp_path, 'seeded')
+    print(f'detector success={success!r}: produced={str(rejected.value)!r}')
+
+
 @pytest.mark.parametrize(('rows', 'path', 'expected'), [
     (dict(first_party_fresh=True), 'seeded', 'stale first-party artifact reused'),
     (dict(omit='solver_fail_closed'), 'seeded', 'omitted first-party targets'),
@@ -458,9 +525,9 @@ def test_detector_build_rejecting_controls(tmp_path: Path, rows: dict, path: str
 
 
 @pytest.mark.parametrize(('rows', 'path', 'logged'), [
-    (dict(), 'seeded', 'path=seeded first_party_rebuilt=4 first_party_reused=0 third_party_reused=1 third_party_rebuilt=0 z3_sys=reused'),
-    (dict(third_party_fresh=False), 'seeded', 'path=seeded first_party_rebuilt=4 first_party_reused=0 third_party_reused=0 third_party_rebuilt=1 z3_sys=rebuilt'),
-    (dict(third_party_fresh=False), 'full-fresh', 'path=full-fresh first_party_rebuilt=4 first_party_reused=0 third_party_reused=0 third_party_rebuilt=1 z3_sys=rebuilt'),
+    (dict(), 'seeded', 'path=seeded first_party_rebuilt=6 first_party_reused=0 third_party_reused=1 third_party_rebuilt=0 z3_sys=reused'),
+    (dict(third_party_fresh=False), 'seeded', 'path=seeded first_party_rebuilt=6 first_party_reused=0 third_party_reused=0 third_party_rebuilt=1 z3_sys=rebuilt'),
+    (dict(third_party_fresh=False), 'full-fresh', 'path=full-fresh first_party_rebuilt=6 first_party_reused=0 third_party_reused=0 third_party_rebuilt=1 z3_sys=rebuilt'),
 ])
 def test_detector_build_logs_the_path_taken(tmp_path: Path, capsys: pytest.CaptureFixture[str], rows: dict, path: str, logged: str) -> None:
     (tmp_path / 'detector-build.jsonl').write_text(detector_build_rows(**rows))
