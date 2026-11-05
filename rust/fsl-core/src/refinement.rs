@@ -1817,12 +1817,14 @@ pub fn requirements_implements_with_bounds_with_options(
     )
     .map_err(|error| RefinementError {
         // `loc` stays on the `implements`, so a repeated step input, domain
-        // declaration, value object field or struct literal field in the other file
-        // has to name its own place. A domain refuses a repeated value object field
-        // while it lowers, before `build_model`; a struct literal fails to parse.
+        // declaration, value object field, struct literal field or requirements
+        // declaration in the other file has to name its own place. A domain refuses a
+        // repeated value object field while it lowers, before `build_model`; a struct
+        // literal fails to parse.
         message: if crate::dialect::is_repeated_step_input(&error)
             || crate::model::is_repeated_struct_field_message(&error.message)
             || crate::domain_lowering::is_repeated_domain_declaration(&error)
+            || crate::dialect::is_repeated_declaration(&error)
         {
             format!(
                 "implements \"{path}\" failed to check ({} at {path}:{}:{})",

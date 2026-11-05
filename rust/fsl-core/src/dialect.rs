@@ -17,6 +17,10 @@ use fsl_syntax::{
 };
 
 mod next_rules;
+mod repeated_declarations;
+pub(crate) use repeated_declarations::{
+    is_repeated_declaration, reject_repeated_requirements_declarations,
+};
 
 pub use next_rules::rule_property_names;
 
@@ -1173,6 +1177,7 @@ fn meta(id: &str, text: impl Into<String>) -> Option<MetaTag> {
 /// process/stage references.
 #[allow(clippy::too_many_lines)]
 pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError> {
+    repeated_declarations::reject_repeated_business_declarations(&business)?;
     let mut actors = BTreeSet::new();
     let mut entities = Vec::new();
     let mut bounds = BTreeMap::new();
