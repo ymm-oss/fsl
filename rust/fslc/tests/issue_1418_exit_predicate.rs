@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 2 only: install after the reviewed predicate API exists. Do not link
-//! this file into the old-source semantic RED test build.
-
 use fslc_rust::outcome::exit_status_matches;
 use serde_json::{Value, json};
 
-// Frozen from e8163bc6 outcome.rs's explicit registry, independent of the
-// candidate's new predicate. `generated` is ordinary success at0 and has
-// additional command+kind exceptions tested separately below.
+// Written out independently of the predicate under test. `generated` is an
+// ordinary success at exit 0 and has additional command+kind exceptions tested
+// separately below.
 const SUCCESSES: &[&str] = &[
     "ok",
     "verified",

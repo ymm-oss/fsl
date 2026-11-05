@@ -20522,8 +20522,6 @@ mod mutate_attribution_reuse_tests {
     }
 }
 
-// SPDX-License-Identifier: Apache-2.0
-
 #[test]
 fn internal_input_two_normalizes_to_three_before_exit_contract_check() {
     let output = error_output("internal", "fixture fault");

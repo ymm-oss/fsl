@@ -7,9 +7,9 @@
 //! The Verdict Conservation Law forbids failure-class exit zero. Ordinary
 //! successes exit zero; generated HTML/ledger reports can exit one for their
 //! verification baseline in the command contexts checked by [`exit_status_matches`].
-//! Before this
-//! module the crate had no such definition: each command arm compared `result`
-//! against literals at its own return point, so the class was re-derived — and
+//! Before this module the crate had no such definition: each command arm
+//! compared `result` against literals at its own return point, so the class was
+//! re-derived — and
 //! re-forgotten — once per family. #596 recorded the consequence from inside
 //! the test suite, which had to carry its own `CHECK_SUCCESS_RESULTS` list
 //! because there was no production enumeration to defer to; a conservation
