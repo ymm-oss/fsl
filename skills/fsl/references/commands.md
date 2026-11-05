@@ -82,6 +82,22 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
 
 ## 7. CLI and JSON essentials
 
+Native artifact file output uses complete per-file replacement for approval
+records, document generate/claims, db import, domain expand/generate/testgen,
+testgen, HTML/ledger reports, counterexample export, and causal
+evidence/lifecycle. A write failure before replacement keeps existing bytes;
+publication failures retain the command's I/O error framing and exit 2.
+Existing regular-file permission bits and new-file umask are retained;
+read-only files, final symlinks, and every non-regular destination are refused, including
+`-o /dev/null`, `-o /dev/stdout` and process substitution such as `/dev/fd/63`.
+The parent directory must be writable. Replacement changes the inode (other
+hard links retain old bytes); ownership/ACLs/xattrs are not guaranteed to carry
+over. Earlier completed files remain if a later output fails; there is no
+file-set transaction or added power-loss durability. Abrupt termination can leave an
+owner-only `.fslc-output-*.tmp` file beside the destination. Path interpretation and
+parent creation remain command-specific. See
+[the publication contract](../../../docs/design/DESIGN-atomic-artifact-output.md).
+
 Current-edition `check`, `verify`, and Worker JSON append migration
 warnings for string metadata, colon quantifiers, and inline action `maps`, without
 changing verdicts or exits. Codes and complete finding data match lint; lint still

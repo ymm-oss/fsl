@@ -51,6 +51,7 @@
 | [`DESIGN-design-family.md`](design/DESIGN-design-family.md) | Accepted Phase 0 design-family decision: closed sidecar catalog, independent variant eligibility, directed bounded comparison, provenance/digest gaps, dogfood controls, and no native language/CLI commitment (#427) |
 | [`DESIGN-diff-git.md`](design/DESIGN-diff-git.md) | Git/CI adapter for revision-consistent full-tree materialization and changed-spec batch semantic diff |
 | [`DESIGN-approval.md`](design/DESIGN-approval.md) | Digest-bound human approval records, rendering drift checks, and approved-baseline semantic diff |
+| [`DESIGN-atomic-artifact-output.md`](design/DESIGN-atomic-artifact-output.md) | Complete per-file artifact replacement, permission preservation, and failure cleanup |
 | [`DESIGN-compose.md`](design/DESIGN-compose.md) | Spec composition (namespaces, synchronized actions, internal) |
 | [`DESIGN-sync-argument-root-validation.md`](design/DESIGN-sync-argument-root-validation.md) | Root-authored synchronized arguments: actuals are typed in the root before substitution, and their errors are bare root errors (#1517) |
 | [`DESIGN-bridge.md`](design/DESIGN-bridge.md) | Implementation bridge (runtime Monitor / replay / testgen) |

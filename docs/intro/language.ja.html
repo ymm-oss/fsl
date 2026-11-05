@@ -2411,6 +2411,13 @@ ledger の警告は、種類ごとの1つの表示表で検出種別・要約・
 生成 artifact の封筒とコマンドの exit は変わりません。描画が変わる既存の承認は
 <code>rendering_changed</code> による <code>drifted</code>(exit 0)になります。台帳を確認して承認を作り直してください。
 新しい台帳に対する承認は <code>approved</code> のままです。</p>
+<p>native の artifact のファイル出力(<code>-o</code> と承認 record)は各ファイルを丸ごと置き換えるので、書き込みに
+失敗しても既存の内容を保ちます。パスの最後の要素が symlink でも辿らず、通常ファイルでない出力先は
+すべて拒否します。<code>-o /dev/null</code>、<code>-o /dev/stdout</code>、<code>/dev/fd/63</code> のようなプロセス置換も対象です。
+親ディレクトリには書き込み権限が必要で、書き込み可能な既存ファイルを置き換える場合も同じです。
+これらの拒否は <code>io</code> エラー(exit 2)です。異常終了すると、所有者だけが読める <code>.fslc-output-*.tmp</code>
+が出力先の隣に残ることがあります。完全な契約は
+<code>docs/design/DESIGN-atomic-artifact-output.md</code> にあります。</p>
 <p>直接の <code>ledger</code> と <code>html</code> は、検証の <code>result:"error"</code> には元の JSON エラー封筒と exit 2/3 を
 返し、描画も artifact の書き込みもしません。直接の <code>ledger</code> は付随の replay、evidence の読み込み、
 witness の準備より前に止まります(<code>html</code> は explain より前に止まります)。<code>-o</code> でも

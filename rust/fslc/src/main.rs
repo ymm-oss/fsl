@@ -30,6 +30,7 @@ mod code_audit;
 mod explain_lowering;
 mod log_replay;
 mod name_display;
+mod output_publication;
 mod process;
 mod property_selection;
 mod refinement;
@@ -2478,7 +2479,7 @@ fn run_document_generate(
     };
     let artifact_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
     if let Some(path) = output_path
-        && let Err(error) = std::fs::write(path, &rendered.markdown)
+        && let Err(error) = output_publication::publish(path, &rendered.markdown)
     {
         return (error_output("io", &error.to_string()), 2);
     }
@@ -2574,7 +2575,7 @@ fn run_document_claims(path: &Path, source: &str, output_path: Option<&Path>) ->
         Err(error) => return (error_output("internal", &error.to_string()), 2),
     };
     if let Some(path) = output_path
-        && let Err(error) = std::fs::write(path, &content)
+        && let Err(error) = output_publication::publish(path, &content)
     {
         return (error_output("io", &error.to_string()), 2);
     }
@@ -6629,7 +6630,7 @@ fn run_db_import(
     }
     let imported = fsl_tools::import_db(&source, name, format);
     if let Some(output_path) = output_path
-        && let Err(error) = std::fs::write(output_path, &imported.source)
+        && let Err(error) = output_publication::publish(output_path, &imported.source)
     {
         return (error_output("io", &error.to_string()), 2);
     }
@@ -7568,7 +7569,7 @@ fn run_domain_expand_from_source(
         Err(error) => return (domain_projection_error_output(path, &error), 2),
     };
     if let Some(output_path) = output_path
-        && let Err(error) = std::fs::write(output_path, &source)
+        && let Err(error) = output_publication::publish(output_path, &source)
     {
         return (error_output("io", &error.to_string()), 2);
     }
@@ -7643,8 +7644,8 @@ fn run_domain_generate_from_source(
                 {
                     return (error_output("io", &error.to_string()), 2);
                 }
-                if let Err(error) = std::fs::write(
-                    destination,
+                if let Err(error) = output_publication::publish(
+                    &destination,
                     file.get("content")
                         .and_then(Value::as_str)
                         .unwrap_or_default(),
@@ -12735,7 +12736,7 @@ fn generated_content_result(
     output_path: Option<&Path>,
 ) -> (Value, i32) {
     if let Some(path) = output_path
-        && let Err(error) = std::fs::write(path, content)
+        && let Err(error) = output_publication::publish(path, content)
     {
         return (error_output("io", &error.to_string()), 2);
     }
@@ -13022,7 +13023,7 @@ fn run_counterexample_export_from_source(
         Ok(serialized) => serialized,
         Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
-    if let Err(error) = std::fs::write(output_path, serialized) {
+    if let Err(error) = output_publication::publish(output_path, serialized) {
         return (error_output("io", &error.to_string()), 2);
     }
     if let Value::Object(ref mut map) = verify_output {
