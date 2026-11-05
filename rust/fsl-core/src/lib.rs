@@ -1310,9 +1310,15 @@ impl PredicateExpander {
                 symmetric,
                 span,
             },
-            SpecItem::Struct { name, fields, span } => SpecItem::Struct {
+            SpecItem::Struct {
+                name,
+                fields,
+                field_spans,
+                span,
+            } => SpecItem::Struct {
                 name,
                 span,
+                field_spans,
                 fields: fields
                     .into_iter()
                     .map(|(name, ty)| Ok((name, self.expand_type(ty)?)))

@@ -219,6 +219,7 @@ fn check_param(param: &Param, span: Option<Span>) -> Result<(), ModelError> {
 ///
 /// Returns [`ModelError`] naming the reserved word and the position that used
 /// it.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn check_reserved_names(spec: &SurfaceSpec) -> Result<(), ModelError> {
     check(&spec.name, "specification", None)?;
     for item in &spec.items {
@@ -246,7 +247,9 @@ pub(crate) fn check_reserved_names(spec: &SurfaceSpec) -> Result<(), ModelError>
                     check(member, "enum member", None)?;
                 }
             }
-            SpecItem::Struct { name, fields, span } => {
+            SpecItem::Struct {
+                name, fields, span, ..
+            } => {
                 check(name, "struct", Some(*span))?;
                 for (field, _) in fields {
                     check(field, "struct field", Some(*span))?;
