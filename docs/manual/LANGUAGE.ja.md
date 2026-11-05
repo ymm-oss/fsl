@@ -3987,8 +3987,8 @@ head の証拠であり、後の統合コミットに対して未実施の sweep
   `duplicate instances bound for 'E' at doc.fsl:13:3`、または
   `duplicate kpi 'done' at doc.fsl:9:3` で、`loc` は 2 度目の宣言です。これらの形は `check` を
   通り、最後の宣言だけが残っていました。2 つの `values` を入れ替えると `verify` は `verified` と
-  `violated` の間で変わり、`analyze` は最後の `kpi` だけを報告していました。`verify`、`refine`、
-  `replay`、`scenarios`、`testgen`、`mutate`、`html`、`ledger`、`diff`、`document`、`kernel`、
+  `violated` の間で変わり、`analyze` は最後の `kpi` だけを報告していました。`verify`、`sweep`、`refine`、
+  `replay`、`scenarios`、`testgen`、`mutate`、`html`、`ledger`、`diff`、`migrate`、`document`、`kernel`、
   `typestate`、`lint`、`fmt`、`explain`、`analyze`、`conformance` はこれらの形で結果を返さなく
   なります。inline の `implements` では
   `implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)`、`kind: "type"`、

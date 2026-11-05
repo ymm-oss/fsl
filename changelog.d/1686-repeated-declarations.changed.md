@@ -2,12 +2,12 @@ Breaking removal (#1686): in a business or requirements document, an `instances`
 
 These forms passed `check` before and kept one copy, so swapping the copies changed the result:
 
-- Two `values` bounds of one number: the last was kept, and `verify` moved between `verified` and `violated`.
+- Two `values` bounds of one number: in requirements the last was kept, and `verify` moved between `verified` and `violated`. Lowering a business document does not read `values`, and `check` went from exit 0 to exit 2 there too.
 - Two `instances` bounds of one entity: the last was kept, and `check` moved between `ok` and an error.
 - Two `concept` declarations of one name: the first was kept, and `check` moved between `ok` and a decision-table error.
 - Two `kpi` declarations of one name: `analyze` reported only the last, and no verdict changed.
 
-`verify` no longer returns `verified`, `proved` or `violated` on those forms, `refine` no longer returns `impl_violated`, `replay` no longer returns `conformant`, and `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`, `document`, `kernel`, `typestate`, `lint`, `fmt`, `explain`, `analyze` and `conformance` exit 2 instead of their own results. A `spec` already refused a repeated bound and is unchanged.
+`verify` no longer returns `verified`, `proved` or `violated` on those forms, `refine` no longer returns `impl_violated`, `replay` no longer returns `conformant`, and `sweep`, `migrate`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`, `document`, `kernel`, `typestate`, `lint`, `fmt`, `explain`, `analyze` and `conformance` exit 2 instead of their own results. A `spec` with an `entity` or a `number` already refused a repeated bound and is unchanged. A `spec` with neither does not read its bounds, and repeating one there stays accepted.
 
 Migration: keep the one declaration you mean. There is no automatic migration.
 

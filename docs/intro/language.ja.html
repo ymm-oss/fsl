@@ -4054,8 +4054,8 @@ head の証拠であり、後の統合コミットに対して未実施の sweep
   <code>duplicate instances bound for 'E' at doc.fsl:13:3</code>、または
   <code>duplicate kpi 'done' at doc.fsl:9:3</code> で、<code>loc</code> は 2 度目の宣言です。これらの形は <code>check</code> を
   通り、最後の宣言だけが残っていました。2 つの <code>values</code> を入れ替えると <code>verify</code> は <code>verified</code> と
-  <code>violated</code> の間で変わり、<code>analyze</code> は最後の <code>kpi</code> だけを報告していました。<code>verify</code>、<code>refine</code>、
-  <code>replay</code>、<code>scenarios</code>、<code>testgen</code>、<code>mutate</code>、<code>html</code>、<code>ledger</code>、<code>diff</code>、<code>document</code>、<code>kernel</code>、
+  <code>violated</code> の間で変わり、<code>analyze</code> は最後の <code>kpi</code> だけを報告していました。<code>verify</code>、<code>sweep</code>、<code>refine</code>、
+  <code>replay</code>、<code>scenarios</code>、<code>testgen</code>、<code>mutate</code>、<code>html</code>、<code>ledger</code>、<code>diff</code>、<code>migrate</code>、<code>document</code>、<code>kernel</code>、
   <code>typestate</code>、<code>lint</code>、<code>fmt</code>、<code>explain</code>、<code>analyze</code>、<code>conformance</code> はこれらの形で結果を返さなく
   なります。inline の <code>implements</code> では
   <code>implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)</code>、<code>kind: "type"</code>、

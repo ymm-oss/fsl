@@ -3,9 +3,9 @@
 
 //! Declarations that may be written only once and that lowering reads by name
 //! (#1686): a `verify` bound, a `kpi` and a `concept`. Lowering keeps one copy of
-//! each, so a second copy would be dropped without a word. A `spec` refuses a
-//! repeated bound while it reads them (`duplicate values bound for`), in the same
-//! words.
+//! each, so a second copy would be dropped without a word. A `spec` with an `entity`
+//! or a `number` refuses a repeated bound while it reads them, in the same words. A
+//! `spec` with neither does not read its bounds, so nothing is dropped there.
 
 use std::collections::BTreeSet;
 
@@ -78,7 +78,9 @@ impl<'a> Seen<'a> {
     }
 }
 
-/// Refuse the first repeated bound, `kpi` or `concept` of a requirements document.
+/// Refuse a repeated `concept` of a requirements document, then the first repeated
+/// bound or `kpi` in source order. A repeated `concept` is reported even when a repeated
+/// `kpi` is written above it.
 pub(crate) fn reject_repeated_requirements_declarations(
     requirements: &SurfaceRequirements,
 ) -> Result<(), CoreError> {

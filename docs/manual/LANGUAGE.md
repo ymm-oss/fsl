@@ -4282,8 +4282,8 @@ the named measurement head, not an unperformed sweep of later integration commit
   `duplicate kpi 'done' at doc.fsl:9:3`, with `loc` at the second copy. These forms
   passed `check` and kept the last copy: swapping two `values` bounds moved `verify`
   between `verified` and `violated`, and `analyze` reported only the last `kpi`.
-  `verify`, `refine`, `replay`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`,
-  `diff`, `document`, `kernel`, `typestate`, `lint`, `fmt`, `explain`, `analyze` and
+  `verify`, `sweep`, `refine`, `replay`, `scenarios`, `testgen`, `mutate`, `html`,
+  `ledger`, `diff`, `migrate`, `document`, `kernel`, `typestate`, `lint`, `fmt`, `explain`, `analyze` and
   `conformance` no longer return their results on them. An inline `implements`
   reports `implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)`,
   `kind: "type"`, with `loc` on the `implements`. Migration: keep the one declaration

@@ -4348,8 +4348,8 @@ the named measurement head, not an unperformed sweep of later integration commit
   <code>duplicate kpi 'done' at doc.fsl:9:3</code>, with <code>loc</code> at the second copy. These forms
   passed <code>check</code> and kept the last copy: swapping two <code>values</code> bounds moved <code>verify</code>
   between <code>verified</code> and <code>violated</code>, and <code>analyze</code> reported only the last <code>kpi</code>.
-  <code>verify</code>, <code>refine</code>, <code>replay</code>, <code>scenarios</code>, <code>testgen</code>, <code>mutate</code>, <code>html</code>, <code>ledger</code>,
-  <code>diff</code>, <code>document</code>, <code>kernel</code>, <code>typestate</code>, <code>lint</code>, <code>fmt</code>, <code>explain</code>, <code>analyze</code> and
+  <code>verify</code>, <code>sweep</code>, <code>refine</code>, <code>replay</code>, <code>scenarios</code>, <code>testgen</code>, <code>mutate</code>, <code>html</code>,
+  <code>ledger</code>, <code>diff</code>, <code>migrate</code>, <code>document</code>, <code>kernel</code>, <code>typestate</code>, <code>lint</code>, <code>fmt</code>, <code>explain</code>, <code>analyze</code> and
   <code>conformance</code> no longer return their results on them. An inline <code>implements</code>
   reports <code>implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)</code>,
   <code>kind: "type"</code>, with <code>loc</code> on the <code>implements</code>. Migration: keep the one declaration

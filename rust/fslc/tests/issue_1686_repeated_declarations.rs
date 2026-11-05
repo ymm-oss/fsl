@@ -288,6 +288,41 @@ fn a_repeated_business_bound_is_refused() {
             "{label}"
         );
     }
+    // A business document does not read `values`, so one bound is accepted.
+    let bound_of = |copies: &str| edit(&business, bound, &format!("{bound}{copies}"));
+    let values = "  values Nope = 0..1\n";
+    assert_ok(&scratch.check(&bound_of(values)), "one values bound");
+    assert_eq!(
+        summary(&scratch.check(&bound_of(&format!("{values}  values Nope = 0..2\n")))),
+        refusal("values bound for", "Nope", line + 1),
+    );
+}
+
+/// A `spec` with an `entity` or a `number` refuses a repeated bound while it reads
+/// them. A `spec` with neither does not read its bounds, and that stays as it was.
+#[test]
+fn a_spec_refuses_a_repeated_bound_only_where_it_reads_bounds() {
+    let scratch = Scratch::new("spec-bounds");
+    let (exit, packet) = scratch.check(
+        "spec S {\n  entity E\n  state { n: Bool }\n  init { n = false }\n  \
+         action go() { n = n }\n}\nverify {\n  instances E = 1\n  instances E = 2\n}\n",
+    );
+    assert_eq!(
+        (exit, &packet["kind"], &packet["message"]),
+        (
+            2,
+            &json!("semantics"),
+            &json!("duplicate instances bound for 'E' at 9:3")
+        ),
+        "{packet:#}"
+    );
+    assert_ok(
+        &scratch.check(
+            "spec S {\n  type V = 0..3\n  state { n: V }\n  init { n = 0 }\n  \
+             action go() { n = n }\n}\nverify {\n  instances V = 1\n  instances V = 2\n}\n",
+        ),
+        "a spec with neither",
+    );
 }
 
 /// The issue's row: the first copy was kept, so swapping the two moved `check`
@@ -409,6 +444,8 @@ fn every_route_that_loads_the_document_refuses() {
         &["refine", "one.fsl", "doc.fsl", "map.fsl"],
         &["document", "generate", "doc.fsl"],
         &["document", "claims", "doc.fsl"],
+        &["migrate", "doc.fsl"],
+        &["sweep", "doc.fsl", "--depth", "0..1"],
     ] {
         let (exit, packet) = scratch.fslc(route);
         assert_eq!(

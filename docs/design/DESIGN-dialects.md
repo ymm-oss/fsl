@@ -560,15 +560,21 @@ because `const`, `type`, `action` and #1682's equal step values are.
 | Declaration | Copy kept on base | What the other copy changed | Refusal on head |
 |---|---|---|---|
 | `instances`, requirements and business | Last | In requirements, `check` moved between `ok` and an error. In business `check` stayed `ok`, and verdicts were not measured | `duplicate instances bound for 'E' at doc.fsl:13:3` |
-| `values`, requirements | Last | `verify` moved between `verified` and `violated`, table below | `duplicate values bound for 'V' at doc.fsl:14:3` |
+| `values`, requirements and business | Last in requirements. `lower_business` does not read `values` | In requirements, `verify` moved between `verified` and `violated`, table below. In business nothing changed, and `check` went from exit 0 to exit 2 on `values Nope` twice | `duplicate values bound for 'V' at doc.fsl:14:3` |
 | `concept`, next edition only | First | `check` moved between `ok` and a decision-table error | `duplicate concept 'SmallClaim' at doc.fsl:24:3` |
 | `kpi`, requirements and business | Last on `analyze`, measured in requirements | `analyze` reported only the last stage. `explain`, `document generate` and `html` listed both. `scenarios`, `testgen` and `ledger` were unchanged | `duplicate kpi 'done' at doc.fsl:9:3` |
 
 No row loses nothing, so none stays. A `kpi` changes no verdict, but `analyze` dropped a copy that
-differed. A `spec` already refused a repeated bound, `duplicate values bound for 'V' at 12:3` without
-`loc`, and that stays as it was; the new wording follows it. Two `verify` blocks were already a parse
+differed. A `spec` with an `entity` or a `number` already refused a repeated bound,
+`duplicate values bound for 'V' at 12:3` without `loc`, and that stays as it was; the new wording
+follows it. A `spec` with neither returns from `expand_spec_domains` before reading its bounds, so
+`instances V = 1` then `= 2`, under any name, stays exit 0 on base and head. Nothing is lost there:
+`check`, `kernel` 1 and 2 and `verify` on explicit printed the same with no bound, one, or two in
+either order, and `verify` on bmc returned `violated` each time with a counterexample that varied
+between runs. Other routes were not compared. Two `verify` blocks were already a parse
 error. A document with another earlier error reports that one: a scenario that overflows the last
-bound keeps `kind: "parse"` and names the bound it overflows.
+bound keeps `kind: "parse"` and names the bound it overflows. A repeated `concept` is reported ahead
+of a repeated bound or `kpi`, wherever each is written; the others go in source order.
 
 Verdicts the removal takes, on one document with an invariant that holds only under `0..1`,
 `FSLC_CACHE=off`, base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `fc6d86d274ec1de6af8eac9ddb00c9529fdb7de1`:
@@ -580,15 +586,16 @@ Verdicts the removal takes, on one document with an invariant that holds only un
 | `verify` on explicit, induction | exit 0, `proved` | exit 1, `violated` | exit 2 |
 | `fsl-bfs` | no violation | invariant violation | exit 2, the message on stderr |
 | `scenarios`, `testgen`, `mutate`, `html`, `ledger` | exit 0 | exit 1 | exit 2 |
+| `sweep --depth 0..1` | exit 0, `sweep_passed` | exit 1, `sweep_failed` | exit 2 |
 | `refine`, either side, against the `0..3` document | exit 2, a type error | exit 1, `impl_violated` | exit 2 |
 | `diff` against the `0..3` document | exit 1, `semantic_diff` | exit 1, `semantic_diff` | exit 2 |
 | `lint` | exit 1, `lint` | exit 1, `lint` | exit 2 |
 | `fmt --check` | exit 1, `format_check` | exit 1, `format_check` | exit 2 |
 | `replay --trace`, an empty trace | exit 0, `conformant` | exit 0, `conformant` | exit 2 |
-| `kernel` 1 and 2, `typestate`, `fmt`, `explain`, `analyze`, `conformance`, `document generate`, `document claims` | exit 0 | exit 0 | exit 2 |
+| `kernel` 1 and 2, `typestate`, `fmt`, `explain`, `analyze`, `conformance`, `document generate`, `document claims`, `migrate` | exit 0 | exit 0 | exit 2 |
 
 `verify --values V=0..3` returned `violated` on both base orders and is refused on head: an override
-does not hide the repeat. `lint`, `fmt`, `document generate` and `document claims` omit `loc`.
+does not hide the repeat. `lint`, `fmt`, `migrate`, `document generate` and `document claims` omit `loc`.
 `verify --values`, `kernel` version 1, `typestate` and `document` omit the file from the message, and
 `kernel` version 2 prints a longer path. `compose use` of a requirements document was already
 refused, `compose use must reference a spec`, on base and head. An inline `implements` reports
