@@ -522,8 +522,14 @@ jobs:
     # is a recovery path, not evidence that the current tree has a successful
     # cold-build duration within 60 minutes.
     # #1532: unsplit jobs measured 54-79 min, then hit 90 min twice at 11f01225.
-    # Projections: long-poles about 35-60 min, rest about 28-50 min (90 per shard).
-    # Follow-up: record measured shard times here after two main runs (#1532).
+    # Measured 2026-11-05 on main push and dispatch runs (cf63f1769..b2337fdc6): rest
+    # succeeded in 49-89 min (10 runs) and hit 90 min once; long-poles took 15-31 min.
+    # All 11 shard logs read (8 runs) restored one cache key with a full match, and
+    # the rest shard's per-binary times differed by a median 1.64x between its 49- and
+    # 85-minute runs, so the spread tracks runner speed, not cache or build. Five more
+    # binaries (1698 s of the 89-minute rest run) therefore moved to long-poles.
+    # Projection on the slowest observed runners, not a measurement: long-poles about
+    # 60 min, rest about 61 min (90 per shard).
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -571,14 +577,14 @@ jobs:
           # flag with timeout increases; see docs/design/DESIGN-ci.md, "Actions cache budget".
           cache-on-failure: true
 
-      - name: Check live long-pole names and run both binaries
+      - name: Check live long-pole names and run the long-pole binaries
         if: matrix.part == 'long-poles'
         shell: bash
         working-directory: rust
         run: |
-          cargo test --locked --no-fail-fast -p fslc-rust --test fsl5_glossary --test issue_1442_compose_binding_capture_matrix -- --list > "$RUNNER_TEMP/windows-long-poles.txt"
+          cargo test --locked --no-fail-fast -p fslc-rust --test fsl5_glossary --test issue_1442_compose_binding_capture_matrix --test issue_1480_check_engine_agreement --test issue_697_all_properties_memory --test issue_1467_composite_values --test issue_1467_frozen_lexical --test refine_corpus_parity -- --list > "$RUNNER_TEMP/windows-long-poles.txt"
           python ../tools/check_windows_long_poles.py --list-output "$RUNNER_TEMP/windows-long-poles.txt" --names ../tools/windows-native-long-poles.txt
-          cargo test --locked --no-fail-fast -p fslc-rust --test fsl5_glossary --test issue_1442_compose_binding_capture_matrix
+          cargo test --locked --no-fail-fast -p fslc-rust --test fsl5_glossary --test issue_1442_compose_binding_capture_matrix --test issue_1480_check_engine_agreement --test issue_697_all_properties_memory --test issue_1467_composite_values --test issue_1467_frozen_lexical --test refine_corpus_parity
 
       - name: Test pinned native solver and BMC crates except long poles
         if: matrix.part == 'rest'

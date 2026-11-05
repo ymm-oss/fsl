@@ -270,7 +270,7 @@ parallel:
   as the `always() && <condition>` aggregator (original event condition). When that condition holds,
   any shard failure, cancellation or skip fails it; only `success` passes, preserving the product-gate dependency.
   The long-poles shard checks its live test names against the rest shard's skip manifest;
-  projected timings and the two-main-run measurement follow-up are recorded below (#1532);
+  measured shard timings and the rebalance they prompted are recorded below (#1532);
 - the M13 semantic mutation gate, sharded across three jobs: `semantic-mutation-operators` runs the
   curated fault-operator controls three ways via `tools/run-semantic-mutation-gate.sh <mode> --lane
   operators --shard K/3`; `semantic-mutation-mutants` runs the generic cargo-mutants half in the
@@ -1182,15 +1182,30 @@ whole warm job in August. On the 4.11.0 candidate `a9f49e7a`, four of five Windo
 cancelled with every finished binary passing (runs `38710766880` attempts 1–3 and `38720126150`
 attempts 1 and 3; attempt 2 succeeded in 54 minutes); macOS ran 37–57 minutes. The raise restores
 headroom only. By #1532, Windows jobs measured 54–79 minutes, then hit 90 minutes twice at
-`11f01225`. Windows now splits into `long-poles` (the complete `fsl5_glossary` and
-`issue_1442_compose_binding_capture_matrix` binaries) and `rest` (the same three packages,
-with exact skips read from `tools/windows-native-long-poles.txt`). Before running the two
-binaries, the long-poles shard checks their live libtest `--list` output against that manifest;
-missing, extra or duplicate manifest names fail the job. No test is removed or narrowed.
-Both shards retain 90 minutes and the existing cache settings. Projections, not measurements:
-long-poles about 35–60 minutes, rest about 28–50 minutes. The #1532 follow-up must record both
-shard durations from two consecutive post-merge main runs here and in `ci.yml`; PR checks do
-not run Windows and cannot establish the budget improvement.
+`11f01225`. Windows now splits into `long-poles` (complete test binaries, listed in `ci.yml`)
+and `rest` (the same three packages, with exact skips read from
+`tools/windows-native-long-poles.txt`). Before running its binaries, the long-poles shard checks
+their live libtest `--list` output against that manifest; missing, extra or duplicate manifest
+names fail the job. No test is removed or narrowed. Both shards retain 90 minutes and the
+existing cache settings. The #1532 split started with `fsl5_glossary` and
+`issue_1442_compose_binding_capture_matrix` and projected long-poles about 35–60 minutes and
+rest about 28–50 minutes.
+
+Measured on 2026-11-05 main push and dispatch runs (`cf63f1769`..`b2337fdc6`), that projection
+did not hold for `rest`: it succeeded in 49–89 minutes (10 runs) and was cancelled at 90 minutes
+once (run `42028861481`), while long-poles took 15–31 minutes. The spread tracks runner speed,
+not cache or build: all 11 shard logs read (8 runs) restored the same `rust-native-z3` key with a
+full match, the rest shard's build took 4–7 minutes in all six rest logs read, and its
+per-binary `finished in` times differed by a median 1.64× between the 49-minute (`70a54bfeb`)
+and 85-minute (`ecf5d0ba6`) runs over nearly the same binaries (sums 2426 s and 4242 s). The
+long-poles binaries varied the same way (896 s to 1693 s). A further 400–450 s of the rest shard
+falls between its ~430 test binaries. The long-poles shard therefore also runs the five slowest
+rest binaries, `issue_1480_check_engine_agreement`, `issue_697_all_properties_memory`,
+`issue_1467_composite_values`, `issue_1467_frozen_lexical` and `refine_corpus_parity`
+(1698 s of the 89-minute run's 4485 s), and the manifest grows from 12 to 40 Windows test names.
+Projection on the slowest observed runners, not a measurement: long-poles about 60 minutes,
+rest about 61 minutes. PR checks do not run Windows; only a `workflow_dispatch` or a post-merge
+`main` run can establish the shard durations.
 The `rust-native-z3-windows` aggregator runs on Ubuntu with a 10-minute limit.
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache

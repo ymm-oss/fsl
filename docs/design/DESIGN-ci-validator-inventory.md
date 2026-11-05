@@ -61,7 +61,8 @@ Regenerate the inventory after wiring the module with
 
 `tests/test_windows_native_shards.py` is `required` through the automation lane in
 `tools/check-merge-readiness.sh`. It covers live-name comparison, rejecting name
-drift/duplicates, shard-result rejection, workflow wiring and the 12 source names.
+drift/duplicates, shard-result rejection, workflow wiring and the 40 source names
+(12 at #1532; the rebalance after measured shard times added 28).
 After `generate` and `check`: 131 validator modules, 19 required and 112 exempt.
 The generator scans the two entrypoints above, not `ci.yml`; the new test wiring,
 not the workflow edit alone, adds this inventory row.
