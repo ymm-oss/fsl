@@ -860,6 +860,15 @@ fn never_evaluated_mismatch_stays_refused() {
             7,
             2,
         ),
+        // bmc does not read a measure and this one's violation stops induction first.
+        (
+            "decreases_unread",
+            good,
+            "leadsTo L { n < 3 ~> n == 3 decreases (if m0 == m1 then 1 else 0) }",
+            &[][..],
+            7,
+            44,
+        ),
     ] {
         let source = wide_spec(&[], body, property);
         assert_rejected(id, &source, &map, line, column);
@@ -1433,4 +1442,97 @@ fn rebuilt_value_decides_in_a_candidate_and_under_preserved_progress() {
             }
         }
     }
+}
+
+/// #1480 gave `old` its own arm and each evaluation scope its own phase. The arm, Map
+/// and `old` rules answer in every one of them, in ordinary validation.
+#[test]
+fn carrier_rules_run_in_every_evaluation_scope() {
+    let arm = not_assignable("Seq(Named(\"B\"), 2)", "Seq(Named(\"A\"), 2)");
+    let map = not_assignable("Map(Named(\"K\"), Named(\"A\"))", "Map(Named(\"K\"), Int)");
+    let scopes = [
+        ("trans", "c = not c", "trans T { {} or true }"),
+        ("ensures", "ensures {} or true\n c = not c", ""),
+        (
+            "unless",
+            "c = not c",
+            "unless U { ({} or true) unless done }",
+        ),
+        ("until", "c = not c", "until U { ({} or true) until done }"),
+        ("leadsto", "c = not c", "leadsTo L { {} or true ~> done }"),
+        (
+            "within",
+            "c = not c",
+            "leadsTo L { {} or true ~> within 2 done }",
+        ),
+        ("terminal", "c = not c", "terminal { {} or done }"),
+        ("reachable", "c = not c", "reachable R { {} or true }"),
+        (
+            "binder",
+            "c = not c",
+            "invariant P { forall k: K { {} or true } }",
+        ),
+        (
+            "filter",
+            "c = not c",
+            "invariant P { count(k: K where {} or true) >= 0 }",
+        ),
+        (
+            "old_binder",
+            "c = not c",
+            "trans T { forall x in old(a) { {} or true } }",
+        ),
+        ("guard", "requires {} or true\n c = not c", ""),
+        ("let", "let u = {}\n c = not c", ""),
+        ("statement", "if {} { c = not c }", ""),
+        (
+            "statement_binder",
+            "forall k: K { if {} { m0[k] = 1 } }",
+            "",
+        ),
+        ("frameless", "c = not c", "invariant P { {} or true }"),
+        ("second_old", "c = not c", "trans T { old({} or true) }"),
+        (
+            "endpoint",
+            "c = not c",
+            "invariant P { forall i in 0..(if {} then 1 else 1) { i >= 0 } }",
+        ),
+        (
+            "aggregate_endpoint",
+            "c = not c",
+            "invariant P { count(i in 0..(if {} then 1 else 1)) >= 0 }",
+        ),
+    ];
+    for (id, body, property) in scopes {
+        for (form, written, expected) in [
+            ("arm", "sa == (if c then q else sb)", &arm),
+            ("map", "m0 == m1", &map),
+            ("old_arm", "sa == old(if c then q else sb)", &arm),
+            ("old_map", "m0 == old(m1)", &map),
+        ] {
+            let id = format!("scope_{id}_{form}");
+            let source = wide_spec(
+                &[],
+                &body.replace("{}", written),
+                &property.replace("{}", written),
+            );
+            let (packet, exit) = check(&id, &source);
+            assert_eq!(exit, 2, "{id}: {packet}\n{source}");
+            assert!(
+                packet["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains(expected.as_str())),
+                "{id}: {packet}\n{expected}\n{source}"
+            );
+        }
+    }
+    let source = wide_spec(&[("done", "m0 == m1")], "c = not c", "");
+    let (packet, exit) = check("scope_init", &source);
+    assert_eq!(exit, 2, "{packet}\n{source}");
+    assert!(
+        packet["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(map.as_str())),
+        "{packet}"
+    );
 }

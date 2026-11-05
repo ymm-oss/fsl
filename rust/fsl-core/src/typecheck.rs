@@ -2711,20 +2711,19 @@ fn validate_expression_inner(
                 &phase.inside_old(),
                 self_relations,
             )?;
-        }
-        Expr::UnaryNamed { name, expr, .. } => {
-            let inner_expected = (name == "abs").then_some(TypeRef::Int);
-            validate(expr, env, span, inner_expected.as_ref())?;
             // `old` keeps its operand's type, and symbolic evaluation coerces the
             // operand's arms to what surrounds it (#1679). This is the arm rule
             // above, without typing the operand's literals against that expectation.
-            if name == "old"
-                && phase.symbolic
+            if phase.symbolic
                 && let Some(expected) = expected
                 && is_coerced_container(expected, model)?
             {
                 ensure_assignable(expr, expected, env, model, span)?;
             }
+        }
+        Expr::UnaryNamed { name, expr, .. } => {
+            let inner_expected = (name == "abs").then_some(TypeRef::Int);
+            validate(expr, env, span, inner_expected.as_ref())?;
             if matches!(
                 name.as_str(),
                 "rel_acyclic" | "rel_functional" | "rel_injective" | "rel_domain" | "rel_range"
