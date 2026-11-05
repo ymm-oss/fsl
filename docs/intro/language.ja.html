@@ -3936,6 +3936,14 @@ head の証拠であり、後の統合コミットに対して未実施の sweep
 <li><code>kpi NAME = count ENTITY in STAGE</code> は、business と requirements の両方における
   宣言的な射影です。ghost のカウンターや自動の <code>_kpi_*</code> invariant を作ることは
   ありません。</li>
+<li>requirements 文書に書ける <code>implements</code> は 1 つまでです。破壊的な削除
+  (<a href="https://github.com/ymm-oss/fsl/issues/1694">#1694</a>): 2 つ目の節は、別の契約を指していても
+  同じ契約を指していても、文書をパースするすべてのコマンドでその節の位置を指す
+  <code>kind: "parse"</code> エラー(exit 2)になります。例:
+  <code>duplicate implements 'Other' (a requirements document declares one, and 'Held' came first) at 3:3</code>。
+  以前は何も報告せずに読み捨てていたため、その契約は検査されず、2 つ目に書いた壊れた契約が
+  <code>check</code> を通っていました。移行: この文書が詳細化する契約を残し、それ以外は別の文書から、または
+  <code>fslc refine</code> で検査します。自動移行はありません。</li>
 <li><code>implements</code> があると、<code>fslc check</code> と <code>fslc verify</code> はどちらも上位レイヤーへの refinement も
   実行し、結果は <code>implements: {abs, result}</code> を持ちます。値は <code>refines</code> / <code>refinement_failed</code> /
   <code>impl_violated</code> の3つです。<strong>失敗した seam はこのフィールドの中に閉じません。</strong>

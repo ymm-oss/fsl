@@ -192,6 +192,65 @@ Two consequences fall out of reusing the same merge, not from new logic:
   action '<pre_split_name>'"` — reference the generated alias instead, same as
   a separate-file mapping would need to.
 
+### 1.3 One `implements` in a requirements document (#1694)
+
+A requirements document names one contract. Before this decision the native parser kept every
+`implements` it read, and the two readers that take a contract took the first:
+`requirements_implements_with_bounds_with_options`, by a `find_map`, and
+`requirements_implements_name`, for a selected run. The rest were dropped without a message, so a
+later contract was never checked. Two other readers saw every clause and checked none:
+`document_project` lists each name as outside the claim universe, and the migrator declines to move
+an inline map. A broken contract written second passed, and written first failed,
+in the stable edition and the next one alike. Writing one contract twice also passed.
+
+**Decision: refuse the second clause, rather than check every clause.** Nothing relied on two:
+
+- Neither language reference, no skill and no intro page shows a document with two clauses or says
+  what two would mean. `DESIGN-migration.md` speaks of "the single local `implements` block".
+- No `.fsl` under `specs/`, `examples/` or `rust/fslc/tests/fixtures/` holds two, and no Rust string
+  literal holding a clause holds a second.
+- The frozen Python reference already refuses them: `requirements may declare implements only once`,
+  located at the second clause.
+
+Checking every clause would also have needed an answer no contract states: `implements` in the JSON
+envelope is one `{abs, result}`, and consumers gate on `implements.result`.
+
+**Where.** The parser, in `reject_second_implements`, because every reader parses first. That covers
+the commands that read the clause and those that only read the document around it, without a change
+at each. `preserve progress` inside `implements` is refused in the same place for the same reason
+(#1275). The refusal is `kind: "parse"`, exit 2, with `loc` at the second clause's `implements`:
+
+```text
+duplicate implements 'Broken' (a requirements document declares one, and 'Held' came first) at 3:3
+```
+
+The same contract written twice is refused the same way, `duplicate implements 'Held' (a requirements
+document declares one, and 'Held' came first) at 3:3`.
+
+A second clause is a parse error, so `documentSymbol` returns null until it is fixed, as for any parse error.
+
+What this leaves as it is:
+
+- An abstraction file that repeats the clause is reported through the clause that named it, as any
+  parse failure of an abstraction is: `kind: "type"`, `loc` on that clause, and a message without the
+  other file's name or the place in it.
+- The migrator's `inline maps require exactly one local implements block` now applies only to no
+  block. Its refusal of multiple blocks in the table in `DESIGN-migration.md` still holds, by this
+  parse error.
+- The frozen Python reference keeps its own message and `kind: "type"`, so the two implementations
+  agree on refusing and on `loc`, and differ on those two fields.
+
+**Breaking removal, with an empty transition set.** A document with two clauses passed before and is
+now an error. `sweep.py <base tree> <head tree> <out.json> <inline dir>` ran every `.fsl` under
+`specs/`, `examples/` and `rust/fslc/tests/fixtures/`, 646 forms, through `fslc check` stable and with
+the next edition enabled and `fslc kernel` versions 1 and 2, twice per side, each binary built in its
+own tree, comparing complete stdout, stderr and exit code. Base
+`1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `805751922a4b93c225beeeb7484b1e80581de809`: 2584
+pairs, none changed, none unstable. The 58 Rust string literals in `rust/` that hold a clause, written
+out as documents and checked both ways, also did not change. A document added to that pass with two
+clauses did change, exit 0 to exit 2. A literal that is a template or a fragment can stop parsing
+before its clauses, so that pass is the weaker of the two.
+
 ## 2. Checking Semantics (Bounded Forward Simulation)
 
 α(s) := the mapping that defines the impl state → abs state mapping.

@@ -4216,6 +4216,14 @@ the named measurement head, not an unperformed sweep of later integration commit
 <li><code>kpi NAME = count ENTITY in STAGE</code> is a declarative projection in both
   business and requirements. It does not create a ghost counter or an automatic
   <code>_kpi_*</code> invariant.</li>
+<li>A requirements document declares at most one <code>implements</code>. Breaking removal
+  (<a href="https://github.com/ymm-oss/fsl/issues/1694">#1694</a>): a second clause is a located
+  <code>kind: "parse"</code> error (exit 2) at that clause in every command that parses the document,
+  whether it names another contract or the same one, as in
+  <code>duplicate implements 'Other' (a requirements document declares one, and 'Held' came first) at 3:3</code>.
+  It used to be dropped without a message, so its contract was never checked: a broken contract
+  written second passed <code>check</code>. Migration: keep the contract this document refines, and check
+  any other from its own document or with <code>fslc refine</code>. There is no automatic migration.</li>
 <li>With <code>implements</code>, <code>fslc check</code> and <code>fslc verify</code> both run the refinement to the upper layer
   as well, and the result carries <code>implements: {abs, result}</code>, whose values are <code>refines</code>,
   <code>refinement_failed</code>, and <code>impl_violated</code>. <strong>A failing seam is not confined to this field.</strong>
