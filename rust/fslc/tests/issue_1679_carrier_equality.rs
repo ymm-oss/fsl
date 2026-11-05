@@ -4,8 +4,8 @@
 //! the symbolic engines cannot coerce used to pass `check` and fail later with
 //! `cannot coerce symbolic value`, while `fsl-bfs` answered. `check` now refuses
 //! them, and a collection holding `Int` below an element that no literal expectation
-//! can type now coerces. The controls below keep the other forms, and pin the three
-//! routes that still report it.
+//! can type now coerces. The controls below keep the other forms, and pin the two
+//! routes that still report it. A third, a literal under `old`, closed in #1683.
 
 #[path = "support/issue_1517_scratch.rs"]
 mod scratch;
@@ -1258,79 +1258,62 @@ fn rebuilt_value_decides_when_read_into_state_and_in_every_property() {
     }
 }
 
-/// The third recorded route, not fixed here. A literal under `old(...)` is not typed
-/// against the expectation, so one holding a range-typed value keeps its own range and
-/// capacity, and only an `Int` element is rebuilt. It passes `check` and bmc and
-/// induction report it, while explicit evaluates it, as on base.
+/// Evaluation types `old`'s operand from what surrounds it, as `check` always did (#1683).
+/// A range-typed literal there used to pass `check` and report `cannot coerce` on bmc and
+/// induction, while explicit answered. Each engine now agrees with explicit.
 #[test]
-fn range_typed_literal_under_old_is_the_recorded_third_route() {
+fn range_typed_literal_under_old_is_typed_by_what_surrounds_it() {
     let trans = |property: &str| wide_spec(&[], "c = not c", &format!("trans X {{ {property} }}"));
     let rows = [
-        (
-            "set_range",
-            trans("a == old(Set { vb }) or true"),
-            "Set(Named(\"B\"))",
-            "Set(Named(\"A\"))",
-            "proved",
-        ),
+        ("set_range", trans("a == old(Set { vb }) or true"), "proved"),
         (
             "seq_range",
             trans("sa == old(Seq { vb }) or true"),
-            "Seq(Named(\"B\"), 1)",
-            "Seq(Named(\"A\"), 2)",
             "proved",
         ),
         (
             "seq_arm",
             trans("sa == old(if c then q else Seq { vb }) or true"),
-            "Seq(Named(\"B\"), 1)",
-            "Seq(Named(\"A\"), 2)",
             "proved",
         ),
         (
             "seq_over_capacity",
             trans("sa == old(Seq { vb, vb, vb }) or true"),
-            "Seq(Named(\"B\"), 3)",
-            "Seq(Named(\"A\"), 2)",
             "proved",
         ),
         (
             "seq_capacity_same_range",
             trans("sa == old(Seq { va }) or true"),
-            "Seq(Named(\"A\"), 1)",
-            "Seq(Named(\"A\"), 2)",
             "proved",
         ),
         (
             "explicit_finds_a_violation",
             trans("a == old(Set { vb })"),
-            "Set(Named(\"B\"))",
-            "Set(Named(\"A\"))",
             "violated",
         ),
         (
             "ensures",
             wide_spec(&[], "ensures a == old(Set { vb }) or true\n c = not c", ""),
-            "Set(Named(\"B\"))",
-            "Set(Named(\"A\"))",
             "proved",
         ),
     ];
-    for (id, source, from, to, explicit) in rows {
+    for (id, source, explicit) in rows {
         assert_eq!(check(id, &source).1, 0, "{id}\n{source}");
-        let message = format!("cannot coerce symbolic value Some({from}) to {to}");
-        for engine in ["bmc", "induction"] {
+        for engine in ["bmc", "explicit", "induction"] {
             let (packet, exit) = fslc(id, &source, &["verify", "--engine", engine]);
+            let expected = match (explicit, engine) {
+                ("violated", _) => "violated",
+                (_, "bmc") => "verified",
+                _ => "proved",
+            };
             assert_eq!(
-                (exit, &packet["message"]),
-                (2, &json!(message)),
+                (exit, packet["result"].as_str()),
+                (i32::from(explicit == "violated"), Some(expected)),
                 "{id} {engine}: {packet}"
             );
         }
-        let (packet, _) = fslc(id, &source, &["verify", "--engine", "explicit"]);
-        assert_eq!(packet["result"], explicit, "{id}: {packet}");
     }
-    // A literal that keeps the expectation's carrier or holds `Int` still answers.
+    // A literal that keeps the expectation's carrier or holds `Int` answered already.
     for (id, property) in [
         ("same_range", "a == old(Set { va }) or true"),
         ("full_capacity", "sa == old(Seq { va, va }) or true"),
