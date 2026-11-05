@@ -454,6 +454,29 @@ impl Scope<'_> {
     }
 }
 
+/// Refuse two rows of one table that cover one ID with different texts. A `covers` is a
+/// link, so the same ID and text twice is one requirement; with two texts the ledger kept
+/// one row and lost the other (#1705).
+fn reject_differing_covers(decision: &DecideDeclaration) -> Result<(), ParseError> {
+    let mut texts = BTreeMap::new();
+    for cover in decision.rows.iter().flat_map(|row| &row.covers) {
+        let text = texts
+            .entry(cover.id.as_str())
+            .or_insert(cover.text.as_str());
+        if *text != cover.text {
+            return Err(ParseError::new(
+                format!(
+                    "decision table '{}' covers '{}' twice with different texts; a covered ID \
+                     names one requirement",
+                    decision.id, cover.id
+                ),
+                cover.span,
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Fold each decision table into the guards of the events it names, and
 /// return the tables for fsl-core's checks.
 ///
@@ -472,6 +495,7 @@ pub(super) fn apply(
 ) -> Result<Vec<DecisionTable>, ParseError> {
     let mut tables = Vec::new();
     for decision in decisions {
+        reject_differing_covers(&decision)?;
         let Some(entity) = entities.get(&decision.entity.text) else {
             return Err(ParseError::new(
                 format!(

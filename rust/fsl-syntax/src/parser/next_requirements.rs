@@ -184,6 +184,38 @@ pub(super) struct Pending {
     resources: Vec<relations::ResourceSource>,
     measures: Vec<relations::MeasureSource>,
     goals: Vec<relations::GoalSource>,
+    /// Each declaration that owns the requirement ID after its keyword, as the ID, its
+    /// spelling's span and the keyword, in source order.
+    owners: Vec<(String, Span, &'static str)>,
+}
+
+/// The keywords whose second owner of an ID an existing check already refuses: a
+/// repeated acceptance or forbidden ID, and a repeated goal or policy property.
+const OWNERS_REFUSED_ELSEWHERE: [&str; 4] = ["scenario", "forbidden", "goal", "policy"];
+
+/// Refuse a second declaration that owns a requirement ID already owned, at its ID. The
+/// ledger kept one row for the two, with one title and one status (#1705).
+fn reject_second_owners(owners: &[(String, Span, &'static str)]) -> Result<(), ParseError> {
+    let mut first = BTreeMap::new();
+    for (id, span, kind) in owners {
+        let Some((earlier, at)) = first.get(id.as_str()).copied() else {
+            first.insert(id.as_str(), (*kind, *span));
+            continue;
+        };
+        let at: Span = at;
+        if earlier == *kind && OWNERS_REFUSED_ELSEWHERE.contains(kind) {
+            continue;
+        }
+        return Err(ParseError::new(
+            format!(
+                "duplicate requirement id '{id}': this {kind} reuses the ID of the {earlier} at \
+                 {}:{}; a requirement ID has one owner",
+                at.start.line, at.start.column
+            ),
+            *span,
+        ));
+    }
+    Ok(())
 }
 
 fn is_symbol(token: &Token, symbol: &str) -> bool {
@@ -456,6 +488,34 @@ impl Parser<'_> {
                 self.peek().span,
             ));
         }
+        let owned_from = self.ids.len();
+        let owner = if rules::starts_rule(self) {
+            Some("rule")
+        } else if self.peek_kw(Kw::Decide) {
+            Some("decide")
+        } else if self.peek_kw(Kw::Scenario) {
+            Some("scenario")
+        } else if self.peek_kw(Kw::Forbidden) {
+            Some("forbidden")
+        } else if self.peek_kw(Kw::Goal) {
+            Some("goal")
+        } else if self.peek_kw(Kw::Policy) {
+            Some("policy")
+        } else {
+            None
+        };
+        let parsed = self.next_requirements_declaration(pending, position)?;
+        if let (true, Some(kind), Some(id)) = (parsed, owner, self.ids.get(owned_from)) {
+            pending.owners.push((id.value.clone(), id.span, kind));
+        }
+        Ok(parsed)
+    }
+
+    fn next_requirements_declaration(
+        &mut self,
+        pending: &mut Pending,
+        position: usize,
+    ) -> Result<bool, ParseError> {
         if self.peek_kw(Kw::Actor) {
             self.bump_kw(Kw::Actor);
             loop {
@@ -1163,11 +1223,18 @@ impl Pending {
         items: Vec<RequirementsItem>,
     ) -> Result<(Vec<RequirementsItem>, NextEditionRequirements), ParseError> {
         let mut next = NextEditionRequirements::default();
-        let actors = self
-            .actors
-            .iter()
-            .map(|actor| actor.text.as_str())
-            .collect::<BTreeSet<_>>();
+        let mut actors = BTreeSet::new();
+        for actor in &self.actors {
+            // Copies of a bare name cannot differ, but every other declaration of one name
+            // is refused, and the second copy says nothing the first did not (#1705).
+            if !actors.insert(actor.text.as_str()) {
+                return Err(ParseError::new(
+                    format!("duplicate actor '{}'", actor.text),
+                    actor.span,
+                ));
+            }
+        }
+        reject_second_owners(&self.owners)?;
         let mut instance_bounds = BTreeMap::new();
         for item in &items {
             match item {
