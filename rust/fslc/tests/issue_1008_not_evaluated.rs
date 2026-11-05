@@ -403,15 +403,19 @@ fn vacuity_error_envelope_drops_the_section() {
 }
 
 fn sweep(arguments: &[&str]) -> (Value, i32) {
+    // Tests run on parallel threads and the clock is coarse on Windows, so the
+    // process id and the time alone can name the same directory twice.
+    static NEXT_CACHE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let mut full = vec!["sweep"];
     full.extend_from_slice(arguments);
     let cache = std::env::temp_dir().join(format!(
-        "fsl-issue-1008-sweep-{}-{}",
+        "fsl-issue-1008-sweep-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
-            .as_nanos()
+            .as_nanos(),
+        NEXT_CACHE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir(&cache).expect("sweep cache dir must not already exist");
     let result = run_with_env(&full, &[("FSLC_CACHE_DIR", cache.as_path())]);
