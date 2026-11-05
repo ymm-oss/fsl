@@ -5,9 +5,14 @@
 //!
 //! - IO classification: `spec_loading.rs` (`read_spec_source`, `read_source`
 //!   with its `IoMessage` spelling, `read_unprefixed_spec_source`,
-//!   `io_error_output`, `io_error_detail`, and the named
-//!   `read_source_classified_semantics` exception), rendered through
-//!   `SpecLoadError::Io` in the library's `spec_load.rs`.
+//!   `io_error_output`, `io_error_detail`, the named
+//!   `read_source_classified_semantics` exception, and `IO_KIND` for helpers
+//!   that return a `(kind, message)` pair), rendered through
+//!   `SpecLoadError::Io` in the library's `spec_load.rs`. This rule is scoped
+//!   by function, not by file: a `"io"` string literal or a
+//!   `SpecLoadError::Io(..)` anywhere outside the exact functions in
+//!   [`IO_OWNERS`] is a hand-written site, including one inside
+//!   `spec_loading.rs`.
 //! - Error envelope: `cli_output.rs` (`envelope`, `error_output`) and the
 //!   library renderers it delegates to.
 //! - Error exit code: `fslc_rust::outcome` (the `Verdict` table and
@@ -39,19 +44,20 @@ struct Rule {
     exit_tuples: bool,
 }
 
+/// `(file, item)` pairs allowed to spell the `io` kind or build
+/// `SpecLoadError::Io`. Every other function, constant or file-scope site is
+/// counted by the `io-classification` rule.
+const IO_OWNERS: &[(&str, &str)] = &[
+    ("spec_loading.rs", "IO_KIND"),
+    ("spec_loading.rs", "read_source"),
+    ("spec_loading.rs", "io_error_output"),
+    ("spec_load.rs", "render_spec_load_error"),
+    // Named exception: the library's literate capture cannot call the
+    // binary's owner.
+    ("literate_access.rs", "literate_access"),
+];
+
 const RULES: &[Rule] = &[
-    Rule {
-        name: "io-classification",
-        owners: &["spec_loading.rs", "spec_load.rs"],
-        needles: &[
-            "error_output(\"io\"",
-            "error_detail(\"io\"",
-            "\"kind\":\"io\"",
-            "json!(\"io\")",
-            "SpecLoadError::Io(",
-        ],
-        exit_tuples: false,
-    },
     Rule {
         name: "error-envelope",
         owners: &["cli_output.rs"],
@@ -103,8 +109,6 @@ const PINNED: &[(&str, &str, usize)] = &[
     ("error-exit-literal", "spec_loading.rs", 1),
     ("error-exit-literal", "verification.rs", 49),
     ("error-exit-literal", "verification_output.rs", 1),
-    // The library's literate capture cannot call the binary's IO owner.
-    ("io-classification", "literate_access.rs", 1),
 ];
 
 fn src() -> PathBuf {
@@ -161,6 +165,92 @@ fn count(rule: &Rule, source: &str) -> usize {
     total
 }
 
+/// The innermost named item (function, method, constant or static) around
+/// each byte range of a file.
+#[derive(Default)]
+struct Items(Vec<(std::ops::Range<usize>, String)>);
+
+impl Items {
+    fn push(&mut self, span: proc_macro2::Span, name: &syn::Ident) {
+        self.0.push((span.byte_range(), name.to_string()));
+    }
+
+    fn enclosing(&self, offset: usize) -> &str {
+        self.0
+            .iter()
+            .filter(|(range, _)| range.contains(&offset))
+            .min_by_key(|(range, _)| range.len())
+            .map_or("<file scope>", |(_, name)| name.as_str())
+    }
+}
+
+impl<'ast> Visit<'ast> for Items {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        self.push(syn::spanned::Spanned::span(node), &node.sig.ident);
+        syn::visit::visit_item_fn(self, node);
+    }
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        self.push(syn::spanned::Spanned::span(node), &node.sig.ident);
+        syn::visit::visit_impl_item_fn(self, node);
+    }
+    fn visit_item_const(&mut self, node: &'ast syn::ItemConst) {
+        self.push(syn::spanned::Spanned::span(node), &node.ident);
+        syn::visit::visit_item_const(self, node);
+    }
+    fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
+        self.push(syn::spanned::Spanned::span(node), &node.ident);
+        syn::visit::visit_item_static(self, node);
+    }
+}
+
+/// Byte offsets of every `"io"` string literal and every `SpecLoadError::Io(`
+/// path call, inside macro bodies too.
+fn io_sites(tokens: proc_macro2::TokenStream, out: &mut Vec<usize>) {
+    let tokens = tokens.into_iter().collect::<Vec<_>>();
+    for (index, token) in tokens.iter().enumerate() {
+        match token {
+            proc_macro2::TokenTree::Group(group) => io_sites(group.stream(), out),
+            proc_macro2::TokenTree::Literal(literal) if literal.to_string() == "\"io\"" => {
+                out.push(literal.span().byte_range().start);
+            }
+            proc_macro2::TokenTree::Ident(ident) if ident == "SpecLoadError" => {
+                let rest = tokens[index + 1..].iter().take(4).collect::<Vec<_>>();
+                if let [
+                    proc_macro2::TokenTree::Punct(a),
+                    proc_macro2::TokenTree::Punct(b),
+                    proc_macro2::TokenTree::Ident(io),
+                    proc_macro2::TokenTree::Group(group),
+                ] = rest.as_slice()
+                    && a.as_char() == ':'
+                    && b.as_char() == ':'
+                    && io == "Io"
+                    && group.delimiter() == proc_macro2::Delimiter::Parenthesis
+                {
+                    out.push(ident.span().byte_range().start);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// IO-classification sites outside [`IO_OWNERS`], as `item` names.
+fn io_classification_sites(file: &str, source: &str) -> Vec<String> {
+    let product = product::product_source(source);
+    let mut items = Items::default();
+    items.visit_file(&syn::parse_file(&product).expect("parse product source"));
+    let mut offsets = Vec::new();
+    io_sites(
+        product.parse().expect("tokenize product source"),
+        &mut offsets,
+    );
+    offsets
+        .into_iter()
+        .map(|offset| items.enclosing(offset).to_owned())
+        .filter(|item| !IO_OWNERS.contains(&(file, item.as_str())))
+        .collect()
+}
+
 fn census() -> BTreeMap<(&'static str, String), usize> {
     let root = src();
     let mut files = Vec::new();
@@ -174,6 +264,10 @@ fn census() -> BTreeMap<(&'static str, String), usize> {
             .to_string_lossy()
             .replace('\\', "/");
         let source = std::fs::read_to_string(&path).expect("read source");
+        let io = io_classification_sites(&relative, &source);
+        if !io.is_empty() {
+            counts.insert(("io-classification", relative.clone()), io.len());
+        }
         for rule in RULES {
             if rule.owners.contains(&relative.as_str()) {
                 continue;
@@ -225,24 +319,6 @@ fn hand_written_error_policy_sites_only_decrease() {
 #[test]
 fn census_counts_each_spelling_and_skips_tests_and_comments() {
     let rule = |name| RULES.iter().find(|rule| rule.name == name).expect("rule");
-    let io = rule("io-classification");
-    for (source, expected) in [
-        ("fn f() { error_output(\"io\", \"x\"); }", 1),
-        ("fn f() { error_detail( \"io\" , \"x\"); }", 1),
-        (
-            "fn f() { json!({\"result\": \"error\", \"kind\": \"io\"}); }",
-            1,
-        ),
-        ("fn f() { SpecLoadError::Io(m); }", 1),
-        ("fn f() { o.insert(k, json!(\"io\")); }", 1),
-        ("// error_output(\"io\", \"x\")\nfn f() {}", 0),
-        ("/// error_output(\"io\", \"x\")\nfn f() {}", 0),
-        ("#[cfg(test)]\nfn f() { error_output(\"io\", \"x\"); }", 0),
-        ("#[test]\nfn f() { error_output(\"io\", \"x\"); }", 0),
-        ("fn f() { error_output(\"usage\", \"x\"); }", 0),
-    ] {
-        assert_eq!(count(io, source), expected, "{source}");
-    }
     let envelope = rule("error-envelope");
     for (source, expected) in [
         ("fn f() { json!({\"result\":\n \"error\"}); }", 1),
@@ -265,5 +341,75 @@ fn census_counts_each_spelling_and_skips_tests_and_comments() {
         ("fn f() -> (u8, i32) { error_exit(x) }", 0),
     ] {
         assert_eq!(count(exit, source), expected, "{source}");
+    }
+}
+
+/// The IO rule is scoped by function: each spelling counts outside an owner
+/// function, even inside an owner file, and nothing counts inside one.
+#[test]
+fn io_rule_is_scoped_to_owner_functions() {
+    for (file, source, expected) in [
+        ("approval.rs", "fn f() { error_output(\"io\", \"x\"); }", 1),
+        (
+            "approval.rs",
+            "fn f() { let io = |e: String| (\"io\", e); }",
+            1,
+        ),
+        ("approval.rs", "fn f() { (\"io\".to_owned(), m) }", 1),
+        (
+            "approval.rs",
+            "fn f() { json!({\"result\": \"error\", \"kind\": \"io\"}); }",
+            1,
+        ),
+        ("approval.rs", "fn f() { SpecLoadError::Io(m); }", 1),
+        (
+            "approval.rs",
+            "impl S { fn f(&self) { o.insert(k, json!(\"io\")); } }",
+            1,
+        ),
+        ("approval.rs", "const K: &str = \"io\";", 1),
+        (
+            "spec_loading.rs",
+            "fn load_state_snapshot() { (\"io\".to_owned(), m) }",
+            1,
+        ),
+        (
+            "spec_loading.rs",
+            "fn io_error_output() { SpecLoadError::Io(m) }",
+            0,
+        ),
+        (
+            "spec_loading.rs",
+            "fn read_source() { SpecLoadError::Io(m) }",
+            0,
+        ),
+        (
+            "spec_loading.rs",
+            "pub(crate) const IO_KIND: &str = \"io\";",
+            0,
+        ),
+        (
+            "spec_load.rs",
+            "fn render_spec_load_error() { json!(\"io\") }",
+            0,
+        ),
+        ("spec_load.rs", "fn other() { json!(\"io\") }", 1),
+        ("approval.rs", "fn f() { (IO_KIND, e) }", 0),
+        (
+            "approval.rs",
+            "fn f() { error_output(\"usage\", \"x\"); }",
+            0,
+        ),
+        ("approval.rs", "fn f() { \"iox\"; }", 0),
+        ("approval.rs", "// (\"io\", e)\nfn f() {}", 0),
+        ("approval.rs", "/// (\"io\", e)\nfn f() {}", 0),
+        ("approval.rs", "#[cfg(test)]\nfn f() { (\"io\", e) }", 0),
+        ("approval.rs", "#[test]\nfn f() { (\"io\", e) }", 0),
+    ] {
+        assert_eq!(
+            io_classification_sites(file, source).len(),
+            expected,
+            "{file}: {source}"
+        );
     }
 }
