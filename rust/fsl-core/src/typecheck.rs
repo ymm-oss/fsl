@@ -2734,6 +2734,21 @@ fn validate_expression_inner(
             {
                 ensure_assignable(expr, expected, env, model, span)?;
             }
+            // Evaluation types the operand from what surrounds it too (#1683), so a Map
+            // a literal holds there answers to that, where `infer_type` only sees the
+            // literal take the expectation. This does not admit the literal it needs to
+            // type: the walk above still decides that.
+            if phase.symbolic && expected.is_some() {
+                validate_expression_in_phase(
+                    expr,
+                    env,
+                    model,
+                    span,
+                    expected,
+                    &phase.inside_old(),
+                    self_relations,
+                )?;
+            }
         }
         Expr::UnaryNamed { name, expr, .. } => {
             let inner_expected = (name == "abs").then_some(TypeRef::Int);
