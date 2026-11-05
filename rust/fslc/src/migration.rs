@@ -19,6 +19,12 @@ pub use process_form::{
     plan_process_conversion, process_form_contract,
 };
 
+/// Lint: in a current-edition `requirements` document, a `requirement` or an
+/// `acceptance` reusing the ID of an earlier `requirement`, or a `requirement`
+/// reusing an `acceptance` ID. `check` accepts both; the ledger keeps one row for
+/// the ID.
+pub const SHARED_REQUIREMENT_ID: &str = "shared_requirement_id";
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum IdKind {
     Requirement,
@@ -374,6 +380,7 @@ impl MigrationDiagnostic {
             {
                 "info"
             } else if [
+                SHARED_REQUIREMENT_ID,
                 fsl_syntax::MIXED_NAMES,
                 fsl_syntax::FULLWIDTH_SPACE,
                 fsl_syntax::NON_NFC_IDENTIFIER,
@@ -1167,6 +1174,57 @@ pub fn mixed_names_diagnostics(source: &str, options: &ParseOptions) -> Vec<Migr
             })
         })
         .collect()
+}
+
+/// [`SHARED_REQUIREMENT_ID`]: each `requirement` or `acceptance` of a
+/// current-edition `requirements` document whose ID an earlier `requirement`, or
+/// for a `requirement` an earlier `acceptance`, already owns, at its ID. Two
+/// `acceptance`s of one ID are left to `check`, which refuses them.
+#[must_use]
+pub fn shared_requirement_id_diagnostics(
+    source: &str,
+    options: &ParseOptions,
+) -> Vec<MigrationDiagnostic> {
+    let Ok(SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document_with(source, options)
+    else {
+        return Vec::new();
+    };
+    if requirements.next.is_some() {
+        return Vec::new();
+    }
+    let mut owners = std::collections::BTreeMap::<&str, (&'static str, Span)>::new();
+    let mut diagnostics = Vec::new();
+    for item in &requirements.items {
+        let (kind, id, span) = match item {
+            RequirementsItem::Requirement { id, id_span, .. } => ("requirement", id, *id_span),
+            RequirementsItem::Acceptance { id, id_span, .. } => ("acceptance", id, *id_span),
+            _ => continue,
+        };
+        let Some(&(earlier, at)) = owners.get(id.as_str()) else {
+            owners.insert(id, (kind, span));
+            continue;
+        };
+        if earlier == "acceptance" && kind == "acceptance" {
+            continue;
+        }
+        diagnostics.push(MigrationDiagnostic {
+            code: SHARED_REQUIREMENT_ID,
+            taxonomy: Taxonomy::AmbiguousIntent,
+            message: format!(
+                "requirement ID '{id}': this {kind} reuses the ID of the {earlier} at {}:{}; \
+                 the ledger keeps one row for the two",
+                at.start.line, at.start.column
+            ),
+            span,
+            canonical_replacement: "rename one of the two IDs, or merge the two declarations"
+                .to_owned(),
+            machine_applicable: false,
+            reason: None,
+            edits: Vec::new(),
+        });
+    }
+    diagnostics
 }
 
 /// The lexer's warnings (`fullwidth_space`, `non_nfc_identifier`) as lint
