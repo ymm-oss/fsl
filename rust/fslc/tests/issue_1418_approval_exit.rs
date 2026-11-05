@@ -452,11 +452,10 @@ fn direct_html_writes_a_real_failed_report_and_write_error_outranks_verdict() {
     ]);
     assert_status(&output, 2);
     assert!(output.stderr.is_empty());
-    // Ground the platform-specific IO message in the same filesystem operation.
-    let error = std::fs::write(repo.0.join("unwritable.html"), "").unwrap_err();
+    // Publication refuses a non-regular target itself, on every platform.
     assert_eq!(
         value(&output),
-        json!({"fsl":"1.0","result":"error","kind":"io","message":error.to_string(),"warnings": expected_legacy_warnings("spec.fsl", true)})
+        json!({"fsl":"1.0","result":"error","kind":"io","message":"output target is not a regular file","warnings": expected_legacy_warnings("spec.fsl", true)})
     );
     assert!(repo.0.join("unwritable.html").is_dir());
 }
