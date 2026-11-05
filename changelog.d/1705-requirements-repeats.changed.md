@@ -12,4 +12,6 @@ Migration: rename one of the two IDs, or merge the two declarations, and delete 
 
 The 651-form on-disk corpus has an empty transition set: base `56354e477544f9be1f4477ddf036e5855d514bb5`, head `779408fa52110cb3ca7b2adf7394d489513c5cb7`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
 
+Changed ledger output (#1705): in next-edition requirements, a decide row's or an event's `covers` of an ID that a `rule`, `decide`, `scenario`, `forbidden`, `goal` or `policy` owns stays accepted and linked, and now shows the owner's title. The ledger row for the ID used to take the `covers` text and drop the owner's title. With an event's `covers`, the rule's title also reached neither `document claims` nor `document generate`. The ledger row, the document's rule section and requirement text, and `document claims` now show the owner's title once, cited at the owner. The `covers` text is no longer shown.
+
 The design note `docs/design/DESIGN-dialects.md` holds the measured forms. The language references take this text when the next edition's reference is written (#1437).
