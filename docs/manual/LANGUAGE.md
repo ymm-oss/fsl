@@ -4274,6 +4274,21 @@ the named measurement head, not an unperformed sweep of later integration commit
   It used to be dropped without a message, so its contract was never checked: a broken contract
   written second passed `check`. Migration: keep the contract this document refines, and check
   any other from its own document or with `fslc refine`. There is no automatic migration.
+- **Breaking removal (#1686):** in a business or requirements document, an
+  `instances` or `values` bound or a `kpi` written twice under one name is refused
+  at the repeated declaration, whether or not the copies are equal: exit 2,
+  `kind: "semantics"`, `duplicate values bound for 'V' at doc.fsl:14:3`,
+  `duplicate instances bound for 'E' at doc.fsl:13:3` or
+  `duplicate kpi 'done' at doc.fsl:9:3`, with `loc` at the second copy. These forms
+  passed `check` and kept the last copy: swapping two `values` bounds moved `verify`
+  between `verified` and `violated`, and `analyze` reported only the last `kpi`.
+  `verify`, `refine`, `replay`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`,
+  `diff`, `document`, `kernel`, `typestate`, `lint`, `fmt`, `explain`, `analyze` and
+  `conformance` no longer return their results on them. An inline `implements`
+  reports `implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)`,
+  `kind: "type"`, with `loc` on the `implements`. Migration: keep the one declaration
+  you mean. There is no automatic migration. See
+  [`DESIGN-dialects.md`](../design/DESIGN-dialects.md), §3.2.
 - With `implements`, `fslc check` and `fslc verify` both run the refinement to the upper layer
   as well, and the result carries `implements: {abs, result}`, whose values are `refines`,
   `refinement_failed`, and `impl_violated`. **A failing seam is not confined to this field.**

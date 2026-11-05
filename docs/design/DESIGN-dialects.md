@@ -550,6 +550,68 @@ verify {
      refinement mapping or restate the policy at its own layer — refinement
      does not currently propagate synthesized business-layer state.
 
+#### Repeated declarations (#1686)
+
+**Breaking removal (#1686).** Lowering reads these by name and keeps one copy, so a second copy was
+dropped without a word. Each is now refused at the repeated declaration, with `kind: "semantics"`
+and `loc` there, whether or not the copies are equal. Equal copies lose no value; they are refused
+because `const`, `type`, `action` and #1682's equal step values are.
+
+| Declaration | Copy kept on base | What the other copy changed | Refusal on head |
+|---|---|---|---|
+| `instances`, requirements and business | Last | In requirements, `check` moved between `ok` and an error. In business `check` stayed `ok`, and verdicts were not measured | `duplicate instances bound for 'E' at doc.fsl:13:3` |
+| `values`, requirements | Last | `verify` moved between `verified` and `violated`, table below | `duplicate values bound for 'V' at doc.fsl:14:3` |
+| `concept`, next edition only | First | `check` moved between `ok` and a decision-table error | `duplicate concept 'SmallClaim' at doc.fsl:24:3` |
+| `kpi`, requirements and business | Last on `analyze`, measured in requirements | `analyze` reported only the last stage. `explain`, `document generate` and `html` listed both. `scenarios`, `testgen` and `ledger` were unchanged | `duplicate kpi 'done' at doc.fsl:9:3` |
+
+No row loses nothing, so none stays. A `kpi` changes no verdict, but `analyze` dropped a copy that
+differed. A `spec` already refused a repeated bound, `duplicate values bound for 'V' at 12:3` without
+`loc`, and that stays as it was; the new wording follows it. Two `verify` blocks were already a parse
+error. A document with another earlier error reports that one: a scenario that overflows the last
+bound keeps `kind: "parse"` and names the bound it overflows.
+
+Verdicts the removal takes, on one document with an invariant that holds only under `0..1`,
+`FSLC_CACHE=off`, base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `fc6d86d274ec1de6af8eac9ddb00c9529fdb7de1`:
+
+| Route | Base, `0..3` then `0..1` | Base, `0..1` then `0..3` | Head, either |
+|---|---|---|---|
+| `check` | exit 0, `ok` | exit 0, `ok` | exit 2 at 14:3 |
+| `verify` on bmc | exit 0, `verified` | exit 1, `violated` | exit 2 |
+| `verify` on explicit, induction | exit 0, `proved` | exit 1, `violated` | exit 2 |
+| `fsl-bfs` | no violation | invariant violation | exit 2, the message on stderr |
+| `scenarios`, `testgen`, `mutate`, `html`, `ledger` | exit 0 | exit 1 | exit 2 |
+| `refine`, either side, against the `0..3` document | exit 2, a type error | exit 1, `impl_violated` | exit 2 |
+| `diff` against the `0..3` document | exit 1, `semantic_diff` | exit 1, `semantic_diff` | exit 2 |
+| `lint` | exit 1, `lint` | exit 1, `lint` | exit 2 |
+| `fmt --check` | exit 1, `format_check` | exit 1, `format_check` | exit 2 |
+| `replay --trace`, an empty trace | exit 0, `conformant` | exit 0, `conformant` | exit 2 |
+| `kernel` 1 and 2, `typestate`, `fmt`, `explain`, `analyze`, `conformance`, `document generate`, `document claims` | exit 0 | exit 0 | exit 2 |
+
+`verify --values V=0..3` returned `violated` on both base orders and is refused on head: an override
+does not hide the repeat. `lint`, `fmt`, `document generate` and `document claims` omit `loc`.
+`verify --values`, `kernel` version 1, `typestate` and `document` omit the file from the message, and
+`kernel` version 2 prints a longer path. `compose use` of a requirements document was already
+refused, `compose use must reference a spec`, on base and head. An inline `implements` reports
+`implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)`, `kind: "type"`, with `loc`
+on the `implements`. `fslc-lsp`, the Worker and `replay --from-log` were not run.
+
+**Owed to #1437.** The `concept` row and the bounds and `kpi` of a next-edition document are recorded
+only here and in `changelog.d/1686-repeated-declarations.changed.md`: the next edition's header may
+not appear in published material until #1434 lifts the gate (`rust/fslc/tests/unstable_gate_leak.rs`).
+When #1437 writes the `fsl 5` reference, `docs/manual/LANGUAGE.md`, `docs/manual/LANGUAGE.ja.md` and
+`skills/fsl/references/syntax.md` owe the `concept` refusal, regenerating
+`docs/intro/language.{en,ja}.html`.
+
+Migration: keep the one declaration you mean. There is no automatic migration.
+
+On-disk transition set (empty). Base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `fc6d86d274ec1de6af8eac9ddb00c9529fdb7de1`, each binary built from its own tree in
+its own target directory with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and
+`rust/fslc/tests/fixtures/` (646 forms: 23/195/428) ran with `FSLC_CACHE=off` and its own tree as cwd,
+as `fslc check <path>` stable and with the next edition enabled, and as `fslc kernel <path>
+--kernel-version 1|2`, twice per side. All 2584 pairs had equal complete stdout, stderr and exit with
+no field excluded, and no run differed from its repeat: 0 ok-to-error and 0 error-to-ok transitions.
+No required test's inline fixtures were rewritten.
+
 ### 3.3 Governance catalog
 
 `governance <Name> { ... }` is an optional top-level form for controls that sit

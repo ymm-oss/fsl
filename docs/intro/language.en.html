@@ -4340,6 +4340,21 @@ the named measurement head, not an unperformed sweep of later integration commit
   It used to be dropped without a message, so its contract was never checked: a broken contract
   written second passed <code>check</code>. Migration: keep the contract this document refines, and check
   any other from its own document or with <code>fslc refine</code>. There is no automatic migration.</li>
+<li><strong>Breaking removal (#1686):</strong> in a business or requirements document, an
+  <code>instances</code> or <code>values</code> bound or a <code>kpi</code> written twice under one name is refused
+  at the repeated declaration, whether or not the copies are equal: exit 2,
+  <code>kind: "semantics"</code>, <code>duplicate values bound for 'V' at doc.fsl:14:3</code>,
+  <code>duplicate instances bound for 'E' at doc.fsl:13:3</code> or
+  <code>duplicate kpi 'done' at doc.fsl:9:3</code>, with <code>loc</code> at the second copy. These forms
+  passed <code>check</code> and kept the last copy: swapping two <code>values</code> bounds moved <code>verify</code>
+  between <code>verified</code> and <code>violated</code>, and <code>analyze</code> reported only the last <code>kpi</code>.
+  <code>verify</code>, <code>refine</code>, <code>replay</code>, <code>scenarios</code>, <code>testgen</code>, <code>mutate</code>, <code>html</code>, <code>ledger</code>,
+  <code>diff</code>, <code>document</code>, <code>kernel</code>, <code>typestate</code>, <code>lint</code>, <code>fmt</code>, <code>explain</code>, <code>analyze</code> and
+  <code>conformance</code> no longer return their results on them. An inline <code>implements</code>
+  reports <code>implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)</code>,
+  <code>kind: "type"</code>, with <code>loc</code> on the <code>implements</code>. Migration: keep the one declaration
+  you mean. There is no automatic migration. See
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-dialects.md"><code>DESIGN-dialects.md</code></a>, §3.2.</li>
 <li>With <code>implements</code>, <code>fslc check</code> and <code>fslc verify</code> both run the refinement to the upper layer
   as well, and the result carries <code>implements: {abs, result}</code>, whose values are <code>refines</code>,
   <code>refinement_failed</code>, and <code>impl_violated</code>. <strong>A failing seam is not confined to this field.</strong>
