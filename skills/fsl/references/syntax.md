@@ -1056,6 +1056,17 @@ result JSON `warnings` includes `kind: "fair_not_inherited"` naming the
 composite action and fair constituent(s). Use `fair action <name>(...) = ...`
 when the synchronized action itself must be fair.
 
+Breaking removal (#1692): a `struct` or `value_object` that declares a field twice is refused at
+the repeated field, whether or not the two types agree and whether or not anything reads it: exit 2,
+`kind: "name"`, `duplicate struct field 'P.x'`, `loc` at the second `x`. `check` admitted a value by the
+first type and the bounds refused it, so `struct P { x: K, x: Bool }` passed `check` and `verify` returned
+`violated`. `fmt` reports it as `kind: "semantics"` with no `loc`. A component reports
+`component "piece.fsl" failed to check (duplicate struct field 'P.x' at piece.fsl:3:20) at root.fsl:2:3`
+(`kind: "semantics"`), and an inline `implements` reports
+`implements "abs.fsl" failed to check (duplicate struct field 'P.x' at abs.fsl:3:20)` (`kind: "type"`,
+`loc` on the `implements`). Migration: keep the one field you mean. See
+`docs/design/DESIGN-option-struct.md`, §1.
+
 Compose synchronized arguments are **structural by bounded value range**, not
 nominal by type name. Passing `core.TaskId` to an action parameter declared
 `NoteId` is intended when both domains cover the same values: a repro with

@@ -673,6 +673,22 @@ scalar | nested `Option<scalar>` | struct (scalar / nested `Option<scalar>` fiel
   and `Option<Set/Map/Seq/struct>` are not allowed
   (rejected at check time with a hint). Optional scalar fields can be written
   directly inside a struct as of v2.1.
+- **Breaking removal (#1692):** a `struct` or `value_object` that declares a field
+  twice is refused at the repeated field, whether or not the two types agree and
+  whether or not anything reads the struct: exit 2, `kind: "name"`,
+  `duplicate struct field 'P.x'`, `loc` at the second `x`. `check` admitted a value by
+  the first type and the bounds refused it, so `struct P { x: K, x: Bool }` passed `check`
+  and `verify` returned `violated` on a value `x: K` alone accepts. `verify`, `sweep`,
+  `refine`, `replay`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`,
+  `migrate`, `document`, `kernel`, `typestate`, `lint`, `explain`, `analyze`,
+  `conformance`, `domain expand` and `domain analyze` no longer return their results on
+  them. `fmt` reports the same message as `kind: "semantics"` with no `loc`. A component
+  reports `component "piece.fsl" failed to check (duplicate struct field 'P.x' at
+  piece.fsl:3:20) at root.fsl:2:3`, `kind: "semantics"`, `loc` at the `use`. An inline
+  `implements` reports `implements "abs.fsl" failed to check (duplicate struct field
+  'P.x' at abs.fsl:3:20)`, `kind: "type"`, `loc` on the `implements`. Migration: keep the
+  one field you mean. There is no automatic migration. See
+  [`DESIGN-option-struct.md`](../design/DESIGN-option-struct.md), §1.
 - A Map value may be a scalar, nested `Option<scalar>`, or a struct with those
   fields; nested Map/Set/Seq/relation values are rejected. In particular,
   `Map<Id, Map<K, Bool>>` is rejected because explicit-state execution cannot

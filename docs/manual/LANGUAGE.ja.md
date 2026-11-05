@@ -644,6 +644,19 @@ induction、Public Kernel v1 は、等価な `init` ブロックと同じ意味�
   `Option<Set/Map/Seq/struct>` は許されません
   (check 時にヒント付きで拒否されます)。省略可能なスカラーのフィールドは、
   v2.1 以降 struct の中に直接書けます。
+- **破壊的な削除 (#1692):** 同じフィールドを 2 度宣言する `struct` や `value_object` は、2 つの型が
+  同じでも、その struct を誰も読まなくても、2 度目のフィールドで拒否されます。exit 2、
+  `kind: "name"`、`duplicate struct field 'P.x'`、`loc` は 2 度目の `x` です。`check` は最初の型で値を認め、
+  範囲はその値を拒否していたため、`struct P { x: K, x: Bool }` は `check` を通り、`x: K` だけなら受理
+  される値で `verify` が `violated` を返していました。`verify`、`sweep`、`refine`、`replay`、
+  `scenarios`、`testgen`、`mutate`、`html`、`ledger`、`diff`、`migrate`、`document`、`kernel`、
+  `typestate`、`lint`、`explain`、`analyze`、`conformance`、`domain expand`、`domain analyze` はこれらの
+  形で結果を返さなくなります。`fmt` は同じメッセージを `kind: "semantics"`、`loc` なしで報告します。
+  コンポーネントでは `component "piece.fsl" failed to check (duplicate struct field 'P.x' at
+  piece.fsl:3:20) at root.fsl:2:3`、`kind: "semantics"`、`loc` は `use` です。inline の `implements` では
+  `implements "abs.fsl" failed to check (duplicate struct field 'P.x' at abs.fsl:3:20)`、`kind: "type"`、
+  `loc` は `implements` です。移行: 意図するフィールドを 1 つだけ残してください。自動移行はありません。
+  [`DESIGN-option-struct.md`](../design/DESIGN-option-struct.md) の §1 を参照してください。
 - Map の値はスカラー、入れ子の `Option<scalar>`、またはそれらのフィールドだけを持つ
   struct でなければなりません。入れ子の Map/Set/Seq/relation は拒否されます。特に
   `Map<Id, Map<K, Bool>>` は explicit-state 実行で必要な初期 Map 値を構築できないため
