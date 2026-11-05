@@ -21,9 +21,10 @@ use crate::refinement::{
     fold_governance_from_source, implements_error_output, implements_result_from_source_with_bounds,
 };
 use crate::spec_loading::{
-    load_kernel_model_from_source_with_resolver, load_model, load_model_from_source,
-    load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
-    load_state_snapshot, require_trace_gate, validate_specialized_document_from_source,
+    io_error_output, load_kernel_model_from_source_with_resolver, load_model,
+    load_model_from_source, load_model_scoped, load_model_scoped_from_source,
+    load_snapshot_value_object, load_state_snapshot, require_trace_gate,
+    validate_specialized_document_from_source,
 };
 use crate::strict_tags::add_strict_tag_warnings_from_source;
 
@@ -3105,7 +3106,7 @@ fn add_cli_strict_tag_warnings(
         true,
         options.requirements.as_deref(),
     )
-    .map_err(|error| (error_output("io", &error), 2))
+    .map_err(|error| (io_error_output(&error), 2))
 }
 #[cfg(test)]
 mod tests {

@@ -68,6 +68,9 @@ use spec_loading::{
     run_admitted_root, run_admitted_roots, run_prepared_roots,
 };
 use spec_loading::{
+    io_error_detail, io_error_output, read_source_classified_semantics, read_unprefixed_spec_source,
+};
+use spec_loading::{
     load_kernel_model_from_source, load_model_from_source, load_model_scoped_from_source,
     load_replay_model_from_source, load_snapshot_value_object, read_spec_source,
     require_trace_gate, snapshot_value, validate_requirement_trace_source,
@@ -325,7 +328,7 @@ fn run_fmt_inner(
         }
         let source = match read_fmt_source(path) {
             Ok(source) => source,
-            Err(error) => return (FmtCliOutput::Json(error_output("io", &error)), 2),
+            Err(error) => return (FmtCliOutput::Json(io_error_output(&error)), 2),
         };
         let edition = match fsl_syntax::document_edition(
             &source,
@@ -492,7 +495,7 @@ fn run_lint_inner(
     };
     let paths = match expand_lint_paths(&options.paths) {
         Ok(paths) => paths,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let mut files = Vec::new();
     let mut finding_count = 0_usize;
@@ -716,7 +719,7 @@ fn run_migrate_inner(
             })
             .collect::<Vec<_>>();
         if let Err(error) = atomic_write_migrations(&writes) {
-            return (error_output("io", &error), 2);
+            return (io_error_output(&error), 2);
         }
     }
     let changed = planned
@@ -756,7 +759,7 @@ fn load_migration_plan(
     Value,
 > {
     let source = std::fs::read_to_string(path)
-        .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+        .map_err(|error| io_error_output(&format!("{}: {error}", path.display())))?;
     let edition = fsl_syntax::document_edition(
         &source,
         options.edition,
@@ -2142,10 +2145,10 @@ fn load_glossary_with_base(
         return Ok(None);
     };
     let bytes = std::fs::read(approval::resolve_io_path(path, path_base))
-        .map_err(|error| error_output("io", &error.to_string()))?;
+        .map_err(|error| io_error_output(&error.to_string()))?;
     let digest = approval::sha256_bytes(&bytes);
     let text = String::from_utf8(bytes)
-        .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+        .map_err(|error| io_error_output(&format!("{}: {error}", path.display())))?;
     let glossary = fsl_tools::parse_glossary(&text)
         .map_err(|issues| document_glossary_issue_error(&issues))?;
     if glossary.locale != expected_locale {
@@ -2206,10 +2209,10 @@ fn load_document_evidence(
     let mut digests = Vec::new();
     for path in paths {
         let bytes = std::fs::read(approval::resolve_io_path(path, path_base))
-            .map_err(|error| error_output("io", &error.to_string()))?;
+            .map_err(|error| io_error_output(&error.to_string()))?;
         digests.push(approval::sha256_bytes(&bytes));
         let text = String::from_utf8(bytes)
-            .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+            .map_err(|error| io_error_output(&format!("{}: {error}", path.display())))?;
         let value = serde_json::from_str::<Value>(&text).map_err(|error| {
             document_evidence_error(&format!("{}: invalid JSON: {error}", path.display()))
         })?;
@@ -2281,12 +2284,11 @@ fn load_approvals(
     if paths.is_empty() {
         return Ok(None);
     }
-    let trust =
-        approval::TrustStore::load(trust_keys).map_err(|error| error_output("io", &error))?;
+    let trust = approval::TrustStore::load(trust_keys).map_err(|error| io_error_output(&error))?;
     let mut loaded = Vec::new();
     let mut digests = Vec::new();
     for path in paths {
-        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        let bytes = std::fs::read(path).map_err(|error| io_error_output(&error.to_string()))?;
         digests.push(approval::sha256_bytes(&bytes));
         let versioned = approval::read_versioned_record(path)
             .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
@@ -2295,7 +2297,7 @@ fn load_approvals(
             approval::VersionedApprovalRecord::V2(record) => {
                 let verified = trust
                     .verify(record)
-                    .map_err(|error| error_output("io", &error))?;
+                    .map_err(|error| io_error_output(&error))?;
                 if !verified {
                     return Err(document_approval_error(&format!(
                         "{}: signature is invalid or untrusted",
@@ -2325,7 +2327,7 @@ fn load_approvals(
             None => None,
         };
         let current_reviewed_digest = approval::reviewed_artifact_digest(&record, root.as_deref())
-            .map_err(|error| error_output("io", &error))?;
+            .map_err(|error| io_error_output(&error))?;
         loaded.push(LoadedApproval {
             record,
             record_path: path.display().to_string(),
@@ -2536,7 +2538,7 @@ fn run_document_generate(
     if let Some(path) = output_path
         && let Err(error) = output_publication::publish(path, &rendered.markdown)
     {
-        return (error_output("io", &error.to_string()), 2);
+        return (io_error_output(&error.to_string()), 2);
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("generated"));
@@ -2632,7 +2634,7 @@ fn run_document_claims(path: &Path, source: &str, output_path: Option<&Path>) ->
     if let Some(path) = output_path
         && let Err(error) = output_publication::publish(path, &content)
     {
-        return (error_output("io", &error.to_string()), 2);
+        return (io_error_output(&error.to_string()), 2);
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("generated"));
@@ -2678,7 +2680,7 @@ fn load_approvals_for_check(
     let mut applied = Vec::new();
     let mut digests = Vec::new();
     for path in paths {
-        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        let bytes = std::fs::read(path).map_err(|error| io_error_output(&error.to_string()))?;
         digests.push(approval::sha256_bytes(&bytes));
         let versioned = approval::read_versioned_record(path)
             .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
@@ -2724,7 +2726,7 @@ fn run_document_check(
 ) -> (Value, i32) {
     let artifact_text = match std::fs::read_to_string(artifact) {
         Ok(text) => text,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (io_error_output(&error.to_string()), 2),
     };
     let frontmatter = match fsl_tools::parse_frontmatter_only(&artifact_text) {
         Ok(frontmatter) => frontmatter,
@@ -3833,7 +3835,7 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(_) => {
-            let mut output = error_output("io", &format!("file not found: {}", path.display()));
+            let mut output = io_error_output(&format!("file not found: {}", path.display()));
             if let Value::Object(output) = &mut output {
                 output.insert("manifest".to_owned(), json!(path.display().to_string()));
             }
@@ -4251,13 +4253,7 @@ fn chain_step_file(section: &ManifestSection, layer: &str, base: &Path) -> Resul
         .values
         .get("file")
         .map(|file| base.join(file))
-        .ok_or_else(|| {
-            json!({
-                "result": "error",
-                "kind": "io",
-                "message": format!("[{layer}] file is required"),
-            })
-        })
+        .ok_or_else(|| io_error_detail(&format!("[{layer}] file is required")))
 }
 
 fn chain_step_input_error(layer: &str, kind: &str, detail: &Value) -> (Value, bool) {
@@ -4375,11 +4371,8 @@ fn run_chain_step(
                 .and_then(|target| target.values.get("file"))
                 .is_none()
         {
-            let detail = json!({
-                "result": "error",
-                "kind": "io",
-                "message": format!("[{layer}] unknown refine_against layer: {target}"),
-            });
+            let detail =
+                io_error_detail(&format!("[{layer}] unknown refine_against layer: {target}"));
             (
                 json!({
                     "layer": format!("{layer}->{target}"),
@@ -4479,7 +4472,7 @@ fn run_chain_step(
                 )
             }
             Ok(_) if command.is_empty() => {
-                let detail = json!({"result": "error", "kind": "io", "message": "[impl] command is required"});
+                let detail = io_error_detail("[impl] command is required");
                 (
                     json!({
                         "layer": "impl", "kind": "command", "status": "failed",
@@ -4559,7 +4552,7 @@ fn run_impl_command(command: &str, evidence: &ImplEvidence, base: &Path) -> (Val
     let completed = match completed {
         Ok(completed) => completed,
         Err(error) => {
-            let detail = json!({"result": "error", "kind": "io", "message": error.to_string()});
+            let detail = io_error_detail(&error.to_string());
             return (
                 json!({
                     "layer": "impl", "kind": "command", "command": command,
@@ -4863,15 +4856,15 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
     };
     let raw = match std::fs::read_to_string(trace_path) {
         Ok(raw) => raw,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (io_error_output(&error.to_string()), 2),
     };
     let data = match serde_json::from_str::<Value>(&raw) {
         Ok(data) => data,
-        Err(error) => return (error_output("io", &format!("invalid JSON: {error}")), 2),
+        Err(error) => return (io_error_output(&format!("invalid JSON: {error}")), 2),
     };
     let trace = match fslc_rust::replay_trace::parse_replay_trace(data) {
         Ok(trace) => trace,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let versioned = matches!(
         trace.contract,
@@ -4882,24 +4875,21 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
         fslc_rust::replay_trace::ReplayTraceContract::V1 { spec, initial, .. } => {
             if spec != &model.name {
                 return (
-                    error_output(
-                        "io",
-                        &format!(
-                            "replay trace spec '{spec}' does not match checked spec '{}'",
-                            model.name
-                        ),
-                    ),
+                    io_error_output(&format!(
+                        "replay trace spec '{spec}' does not match checked spec '{}'",
+                        model.name
+                    )),
                     2,
                 );
             }
             let initial_state = match load_snapshot_value_object(initial, &model) {
                 Ok(state) => state,
-                Err(error) => return (error_output("io", &error), 2),
+                Err(error) => return (io_error_output(&error), 2),
             };
             let initial = fslc_rust::state_json(&initial_state);
             let events = match validate_versioned_replay_events(&model, &trace.events) {
                 Ok(events) => events,
-                Err(error) => return (error_output("io", &error), 2),
+                Err(error) => return (io_error_output(&error), 2),
             };
             (Some((initial_state, initial)), events)
         }
@@ -5012,7 +5002,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
             } => {
                 let resolved = match model.resolve_replay_action(action_name) {
                     Ok(resolved) => resolved,
-                    Err(error) => return (error_output("io", &error), 2),
+                    Err(error) => return (io_error_output(&error), 2),
                 };
                 let Some(action) = resolved.or_else(|| {
                     (!versioned)
@@ -5093,7 +5083,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
             } else {
                 match replay_snapshot_json(state, &model) {
                     Ok(observed) => observed,
-                    Err(error) => return (error_output("io", &error), 2),
+                    Err(error) => return (io_error_output(&error), 2),
                 }
             };
             let expected = fslc_rust::state_json(&monitor.state);
@@ -5297,7 +5287,7 @@ fn run_log_replay_from_sources(
     }
     let records = match read_jsonl_records(log_path) {
         Ok(records) => records,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let maps_auto = mapping
         .items
@@ -6543,7 +6533,7 @@ fn run_check_with_tags_from_source(
         if let Err(error) =
             add_strict_tag_warnings_from_source(&mut output, &model, source, true, requirements)
         {
-            return (error_output("io", &error), 2);
+            return (io_error_output(&error), 2);
         }
     }
     dependencies.finish(admission.finish((output, status)), false)
@@ -6695,7 +6685,7 @@ fn run_db_import(
 ) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (io_error_output(&error.to_string()), 2),
     };
     let format = if requested_format == "auto" {
         if path.extension().and_then(std::ffi::OsStr::to_str) == Some("prisma") {
@@ -6716,7 +6706,7 @@ fn run_db_import(
     if let Some(output_path) = output_path
         && let Err(error) = output_publication::publish(output_path, &imported.source)
     {
-        return (error_output("io", &error.to_string()), 2);
+        return (io_error_output(&error.to_string()), 2);
     }
     let mut output = envelope();
     output.insert(
@@ -6795,10 +6785,6 @@ fn ai_project_parse_failure(
         }
     }
     (output, 2)
-}
-
-fn read_unprefixed_spec_source(path: &Path) -> Result<String, SpecLoadError> {
-    std::fs::read_to_string(path).map_err(|error| SpecLoadError::Io(error.to_string()))
 }
 
 fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
@@ -7522,11 +7508,9 @@ fn parse_domain_document_from_source(
 /// this value. Dependencies resolved by `FsResolver` are intentionally outside
 /// this root-input contract.
 fn read_domain_command_source(path: &Path) -> Result<String, SpecLoadError> {
-    // These surface commands' caller contracts predate the typed `io` envelope.
-    // Keep a read failure classified as
-    // `semantics` without widening #780 beyond its declared parse-only scope.
-    std::fs::read_to_string(path)
-        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))
+    // These surface commands' caller contracts predate the typed `io` envelope
+    // (#780); the IO owner names the exception (#1170 phase 2).
+    read_source_classified_semantics(path)
 }
 
 fn domain_scaffold_inputs_from_source(
@@ -7662,7 +7646,7 @@ fn run_domain_expand_from_source(
     if let Some(output_path) = output_path
         && let Err(error) = output_publication::publish(output_path, &source)
     {
-        return (error_output("io", &error.to_string()), 2);
+        return (io_error_output(&error.to_string()), 2);
     }
     let mut result = json!({"result":"expanded","dialect":"fsl-domain-effect.v0","domain":domain.name,"kernel_source":source,"assumptions":[]});
     if let Some(output_path) = output_path
@@ -7722,7 +7706,7 @@ fn run_domain_generate_from_source(
             return (error_output("internal", "invalid scaffold result"), 3);
         };
         if let Err(error) = std::fs::create_dir_all(output_path) {
-            return (error_output("io", &error.to_string()), 2);
+            return (io_error_output(&error.to_string()), 2);
         }
         if let Some(files) = object.get("files").and_then(Value::as_array) {
             for file in files {
@@ -7733,7 +7717,7 @@ fn run_domain_generate_from_source(
                 if let Some(parent) = destination.parent()
                     && let Err(error) = std::fs::create_dir_all(parent)
                 {
-                    return (error_output("io", &error.to_string()), 2);
+                    return (io_error_output(&error.to_string()), 2);
                 }
                 if let Err(error) = output_publication::publish(
                     &destination,
@@ -7741,7 +7725,7 @@ fn run_domain_generate_from_source(
                         .and_then(Value::as_str)
                         .unwrap_or_default(),
                 ) {
-                    return (error_output("io", &error.to_string()), 2);
+                    return (io_error_output(&error.to_string()), 2);
                 }
             }
         }
@@ -12337,7 +12321,7 @@ fn run_mutate_from_source(
         .transpose()
     {
         Ok(candidates) => candidates.unwrap_or_default(),
-        Err(error) => return mutate_error(error_output("io", &error)),
+        Err(error) => return mutate_error(io_error_output(&error)),
     };
     eprintln!(
         "mutate baseline: {} (engine={}, {baseline_elapsed:.3}s)",
@@ -12829,7 +12813,7 @@ fn generated_content_result(
     if let Some(path) = output_path
         && let Err(error) = output_publication::publish(path, content)
     {
-        return (error_output("io", &error.to_string()), 2);
+        return (io_error_output(&error.to_string()), 2);
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("generated"));
@@ -13115,7 +13099,7 @@ fn run_counterexample_export_from_source(
         Err(error) => return (error_output("internal", &error.to_string()), 3),
     };
     if let Err(error) = output_publication::publish(output_path, serialized) {
-        return (error_output("io", &error.to_string()), 2);
+        return (io_error_output(&error.to_string()), 2);
     }
     if let Value::Object(ref mut map) = verify_output {
         map.insert(
@@ -13929,7 +13913,7 @@ fn run_approval_create_from_source(
 ) -> (Value, i32) {
     let creation_directory = match std::env::current_dir().and_then(|cwd| cwd.canonicalize()) {
         Ok(directory) => directory,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (io_error_output(&error.to_string()), 2),
     };
     let render_source = path.to_string_lossy();
     let model = match load_model_from_source(path, source) {
@@ -13995,7 +13979,7 @@ fn run_approval_create_from_source(
         }
         let reviewed_text = match std::fs::read_to_string(artifact_path) {
             Ok(text) => text,
-            Err(error) => return (error_output("io", &error.to_string()), 2),
+            Err(error) => return (io_error_output(&error.to_string()), 2),
         };
         let report = match fsl_tools::check_requirements_document(
             &reviewed_text,
@@ -14042,7 +14026,7 @@ fn run_approval_create_from_source(
             };
         let reviewed_artifact = match std::fs::read(artifact_path) {
             Ok(artifact) => artifact,
-            Err(error) => return (error_output("io", &error.to_string()), 2),
+            Err(error) => return (io_error_output(&error.to_string()), 2),
         };
         let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
             Ok(artifact) => artifact,
@@ -14145,15 +14129,15 @@ fn run_approval_create_from_source(
     let record = if let Some(signing_key) = signing_key {
         let record = match approval::sign_record(record, signing_key) {
             Ok(record) => record,
-            Err(error) => return (error_output("io", &error), 2),
+            Err(error) => return (io_error_output(&error), 2),
         };
         if let Err(error) = approval::write_record_v2(&destination, &record) {
-            return (error_output("io", &error), 2);
+            return (io_error_output(&error), 2);
         }
         serde_json::to_value(record).expect("approval v2 serializes")
     } else {
         if let Err(error) = approval::write_record(&destination, &record) {
-            return (error_output("io", &error), 2);
+            return (io_error_output(&error), 2);
         }
         serde_json::to_value(record).expect("approval v1 serializes")
     };
@@ -14187,7 +14171,7 @@ fn approval_repository(
     path: &Path,
     record: &approval::ApprovalRecord,
 ) -> Result<PathBuf, (Value, i32)> {
-    let io = |error: String| (error_output("io", &error), 2);
+    let io = |error: String| (io_error_output(&error), 2);
     let contextual = record.path_base.is_some();
     let (repo, relative_path) = if contextual {
         let checkout = approval::spec_checkout(path)
@@ -14226,13 +14210,13 @@ fn approval_evaluation(
     trust: &approval::TrustStore,
 ) -> Result<Value, (Value, i32)> {
     let versioned = approval::read_versioned_record(record_path)
-        .map_err(|error| (error_output("io", &error), 2))?;
+        .map_err(|error| (io_error_output(&error), 2))?;
     let (record, signature_status, key_id) = match &versioned {
         approval::VersionedApprovalRecord::V1(record) => (record.clone(), "unsigned", Value::Null),
         approval::VersionedApprovalRecord::V2(record) => {
             let verified = trust
                 .verify(record)
-                .map_err(|error| (error_output("io", &error), 2))?;
+                .map_err(|error| (io_error_output(&error), 2))?;
             if !verified {
                 return Ok(json!({
                     "status": "signature-invalid",
@@ -14283,7 +14267,7 @@ fn approval_evaluation(
         .map_err(|error| (error_output("internal", &error), 3))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
     let current_reviewed_digest = approval::reviewed_artifact_digest(&record, Some(&repo))
-        .map_err(|error| (error_output("io", &error), 2))?;
+        .map_err(|error| (io_error_output(&error), 2))?;
     let mut evaluation = approval::evaluate(
         &record,
         record_path,
@@ -14298,7 +14282,7 @@ fn approval_evaluation(
         && let Some(path) = input_digest_mismatch
     {
         return Err((
-            error_output("io", &format!("approval input digest mismatch: {path}")),
+            io_error_output(&format!("approval input digest mismatch: {path}")),
             2,
         ));
     }
@@ -14340,7 +14324,7 @@ fn run_approval_check_from_source(
 ) -> (Value, i32) {
     let trust = match approval::TrustStore::load(trust_keys) {
         Ok(trust) => trust,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let evaluation = match approval_evaluation(path, source, edition, record_path, &trust) {
         Ok(evaluation) => evaluation,
@@ -14364,7 +14348,7 @@ fn approval_overlay(
     trust_keys: &[PathBuf],
 ) -> Result<Value, (Value, i32)> {
     let trust =
-        approval::TrustStore::load(trust_keys).map_err(|error| (error_output("io", &error), 2))?;
+        approval::TrustStore::load(trust_keys).map_err(|error| (io_error_output(&error), 2))?;
     let mut requirements = Map::new();
     let mut records = Vec::new();
     for record_path in record_paths {
@@ -14579,12 +14563,11 @@ fn prepare_ledger_report_from_source(
         .iter()
         .map(|evidence_path| {
             let source = std::fs::read_to_string(evidence_path)
-                .map_err(|error| error_output("io", &error.to_string()))?;
+                .map_err(|error| io_error_output(&error.to_string()))?;
             let value = serde_json::from_str::<Value>(&source)
-                .map_err(|error| error_output("io", &format!("invalid JSON: {error}")))?;
+                .map_err(|error| io_error_output(&format!("invalid JSON: {error}")))?;
             if !value.is_object() {
-                return Err(error_output(
-                    "io",
+                return Err(io_error_output(
                     "evidence JSON must contain an object envelope",
                 ));
             }
@@ -16662,7 +16645,7 @@ fn run_analyze_from_source(
         let analysis = match code_audit::analyze(&model, code_path.expect("checked above")) {
             Ok(analysis) => analysis,
             Err(code_audit::CodeAuditError::Io(message)) => {
-                return (error_output("io", &message), 2);
+                return (io_error_output(&message), 2);
             }
             Err(code_audit::CodeAuditError::Semantics(message)) => {
                 return (error_output("semantics", &message), 2);
@@ -16819,7 +16802,7 @@ fn run_analyze_batch(
     for path in paths {
         if !path.exists() {
             return (
-                error_output("io", &format!("file not found: {}", path.display())),
+                io_error_output(&format!("file not found: {}", path.display())),
                 2,
             );
         }
@@ -16830,7 +16813,7 @@ fn run_analyze_batch(
             // manifest) or reject it with a real error (anything else),
             // instead of it silently vanishing from `files`/`errors`.
             if let Err(error) = collect_analysis_files(path, &mut files) {
-                return (error_output("io", &error.to_string()), 2);
+                return (io_error_output(&error.to_string()), 2);
             }
         } else {
             files.push(path.clone());
@@ -18011,11 +17994,11 @@ fn run_approval_diff_from_source(
 ) -> (Value, i32) {
     let versioned = match approval::read_versioned_record(record_path) {
         Ok(record) => record,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let trust = match approval::TrustStore::load(trust_keys) {
         Ok(trust) => trust,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let (record, signature_status, key_id) = match &versioned {
         approval::VersionedApprovalRecord::V1(record) => (record.clone(), "unsigned", Value::Null),
@@ -18033,12 +18016,12 @@ fn run_approval_diff_from_source(
                 output.insert("key_id".to_owned(), json!(record.signature.key_id));
                 return (Value::Object(output), 1);
             }
-            Err(error) => return (error_output("io", &error), 2),
+            Err(error) => return (io_error_output(&error), 2),
         },
     };
     let (repo, relative_path, _head) = match approval::git_location(path) {
         Ok(location) => location,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     if relative_path != record.spec.path {
         return (
@@ -18060,19 +18043,16 @@ fn run_approval_diff_from_source(
     let base_tree = root.join("base");
     if let Err(error) = materialize_git_tree(&repo, &record.spec.git_commit, &base_tree) {
         let _ = std::fs::remove_dir_all(&root);
-        return (error_output("io", &error), 2);
+        return (io_error_output(&error), 2);
     }
     let old = base_tree.join(&record.spec.path);
     if !old.is_file() {
         let _ = std::fs::remove_dir_all(&root);
         return (
-            error_output(
-                "io",
-                &format!(
-                    "approved spec '{}' is missing from baseline {}",
-                    record.spec.path, record.spec.git_commit
-                ),
-            ),
+            io_error_output(&format!(
+                "approved spec '{}' is missing from baseline {}",
+                record.spec.path, record.spec.git_commit
+            )),
             2,
         );
     }
@@ -18148,19 +18128,19 @@ fn run_diff_git(
     }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (io_error_output(&error.to_string()), 2),
     };
     let repo = match git_stdout(&["rev-parse", "--show-toplevel"], &cwd) {
         Ok(repo) => PathBuf::from(repo),
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let base = match git_stdout(&["rev-parse", "--verify", base_input], &repo) {
         Ok(commit) => commit,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let head = match git_stdout(&["rev-parse", "--verify", head_input], &repo) {
         Ok(commit) => commit,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let specs = if let Some(spec) = spec {
         let relative = spec
@@ -18183,7 +18163,7 @@ fn run_diff_git(
             &repo,
         ) {
             Ok(changed) => changed,
-            Err(error) => return (error_output("io", &error), 2),
+            Err(error) => return (io_error_output(&error), 2),
         };
         changed
             .lines()
@@ -18197,7 +18177,7 @@ fn run_diff_git(
     };
     if specs.is_empty() {
         return (
-            error_output("io", "Git range contains no changed .fsl files"),
+            io_error_output("Git range contains no changed .fsl files"),
             2,
         );
     }
@@ -18211,7 +18191,7 @@ fn run_diff_git(
         .and_then(|()| materialize_git_tree(&repo, &head, &head_tree))
     {
         let _ = std::fs::remove_dir_all(&root);
-        return (error_output("io", &error), 2);
+        return (io_error_output(&error), 2);
     }
     let vcs = json!({
         "kind":"git","range":range,
@@ -18228,10 +18208,9 @@ fn run_diff_git(
         if !old.is_file() || !new.is_file() {
             let _ = std::fs::remove_dir_all(&root);
             return (
-                error_output(
-                    "io",
-                    &format!("'{relative}' must exist in both revisions for semantic diff"),
-                ),
+                io_error_output(&format!(
+                    "'{relative}' must exist in both revisions for semantic diff"
+                )),
                 2,
             );
         }

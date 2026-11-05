@@ -331,13 +331,78 @@ pub(crate) fn load_kernel_model_from_source_with_resolver(
     Ok((kernel, model))
 }
 
+/// How a read failure's `kind:"io"` message names the file.
+///
+/// This module is the binary's one owner of file-IO error classification
+/// (issue #1170): a failure is classified `io` only here and in the library's
+/// `SpecLoadError::Io` renderer. The command families historically spell the
+/// message three ways; each caller names its spelling instead of formatting
+/// it, so converging them is a reviewable change to this enum's callers.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum IoMessage {
+    /// `<path>: <error>`, what [`read_spec_source`] reports.
+    PathPrefixed,
+    /// `<error>` alone, without the path ([`read_unprefixed_spec_source`] and
+    /// the `causal` mapping input, which predate [`read_spec_source`]).
+    Bare,
+    /// `cannot read <path>: <error>`, the causal family's spelling.
+    CannotRead,
+}
+
+impl IoMessage {
+    pub(crate) fn render(self, path: &Path, error: &std::io::Error) -> String {
+        match self {
+            Self::PathPrefixed => format!("{}: {error}", path.display()),
+            Self::Bare => error.to_string(),
+            Self::CannotRead => format!("cannot read {}: {error}", path.display()),
+        }
+    }
+}
+
 /// Read a spec file, classifying a read failure as `io` rather than letting the
 /// message-string classifier fall through to `semantics` (issue 497: a missing
 /// single analyze input reported `semantics` while the same missing file in a
 /// batch reported `io`).
 pub(crate) fn read_spec_source(path: &Path) -> Result<String, SpecLoadError> {
+    read_source(path, IoMessage::PathPrefixed)
+}
+
+/// Read `path`, classifying a read failure as `io` with `message`'s spelling.
+pub(crate) fn read_source(path: &Path, message: IoMessage) -> Result<String, SpecLoadError> {
+    std::fs::read_to_string(path).map_err(|error| SpecLoadError::Io(message.render(path, &error)))
+}
+
+/// [`read_source`] with the bare error message: how `chain`, `replay
+/// --from-log`, the `ai` family, `diff` and the refinement roots read their
+/// specs.
+pub(crate) fn read_unprefixed_spec_source(path: &Path) -> Result<String, SpecLoadError> {
+    read_source(path, IoMessage::Bare)
+}
+
+/// The one recorded exception to [`read_source`]: the domain surface
+/// commands' caller contracts predate the typed `io` envelope, so their read
+/// failure stays an unlocated `semantics` diagnostic with the bare error
+/// message, without widening #780 beyond its declared parse-only scope.
+pub(crate) fn read_source_classified_semantics(path: &Path) -> Result<String, SpecLoadError> {
     std::fs::read_to_string(path)
-        .map_err(|error| SpecLoadError::Io(format!("{}: {error}", path.display())))
+        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))
+}
+
+/// The `kind:"io"` envelope for an input failure that is not a spec read:
+/// a record, trace, log, artifact or output path, or a git step.
+pub(crate) fn io_error_output(message: &str) -> Value {
+    spec_load_error_output(&SpecLoadError::Io(message.to_owned()))
+}
+
+/// [`io_error_output`] without the top-level `fsl` version key, for an error
+/// nested inside another command's output (a `chain` layer's `detail`).
+pub(crate) fn io_error_detail(message: &str) -> Value {
+    let mut detail = io_error_output(message);
+    detail
+        .as_object_mut()
+        .expect("io error envelope")
+        .shift_remove("fsl");
+    detail
 }
 
 #[allow(clippy::too_many_lines)]

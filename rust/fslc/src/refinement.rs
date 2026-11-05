@@ -16,7 +16,7 @@ use crate::cli_output::{
     trace_last_action,
 };
 use crate::process::block_on_native;
-use crate::spec_loading::{load_model, load_model_from_source};
+use crate::spec_loading::{io_error_output, load_model, load_model_from_source};
 
 /// Derive governance output from one caller-owned root-source snapshot.
 pub(crate) fn governance_result_from_source(
@@ -329,7 +329,7 @@ fn run_refine_with_loaders(
     };
     let source = match read_mapping() {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (io_error_output(&error.to_string()), 2),
     };
     let mapping = match fsl_core::parse_refinement_with_options(
         &source,
