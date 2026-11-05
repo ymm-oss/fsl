@@ -652,28 +652,143 @@ fn other_repeats_are_unchanged() {
 /// and keeps two `requirement` blocks of one ID, with one ledger row. #1705 leaves it.
 #[test]
 fn the_current_edition_is_unchanged() {
-    let source = |extra: &str| {
-        format!(
-            "requirements R {{\n  type K = 0..1\n  state {{ n: K }}\n  init {{ n = 0 }}\n  \
-             requirement REQ-1 \"go sets n\" {{\n    action go() {{\n      requires n == 0\n      \
-             n = 1\n    }}\n  }}\n  acceptance AC-1 \"go reaches one\" {{\n    go()\n    \
-             expect n == 1\n  }}\n{extra}}}\n"
-        )
-    };
     for (label, extra) in [
-        (
-            "requirement_twice",
-            "  requirement REQ-1 \"dup\" {\n    invariant small { n <= 1 }\n  }\n",
-        ),
-        (
-            "acceptance_requirement",
-            "  acceptance REQ-1 \"dup\" {\n    go()\n    expect n == 1\n  }\n",
-        ),
-        (
-            "requirement_acceptance",
-            "  requirement AC-1 \"dup\" {\n    invariant small { n <= 1 }\n  }\n",
-        ),
+        ("requirement_twice", SECOND_REQUIREMENT),
+        ("acceptance_requirement", ACCEPTANCE_OF_REQUIREMENT),
+        ("requirement_acceptance", REQUIREMENT_OF_ACCEPTANCE),
     ] {
-        assert_eq!(check(label, &source(extra)).0, 0, "{label}");
+        assert_eq!(check(label, &current_edition(extra)).0, 0, "{label}");
     }
+}
+
+/// A current-edition document: line 5 starts `requirement REQ-1`, line 11 `acceptance
+/// AC-1`, and `extra` starts at line 15. With the next edition's header each is a line
+/// later.
+fn current_edition(extra: &str) -> String {
+    format!(
+        "requirements R {{\n  type K = 0..1\n  state {{ n: K }}\n  init {{ n = 0 }}\n  \
+         requirement REQ-1 \"go sets n\" {{\n    action go() {{\n      requires n == 0\n      \
+         n = 1\n    }}\n  }}\n  acceptance AC-1 \"go reaches one\" {{\n    go()\n    \
+         expect n == 1\n  }}\n{extra}}}\n"
+    )
+}
+
+const SECOND_REQUIREMENT: &str =
+    "  requirement REQ-1 \"dup\" {\n    invariant small { n <= 1 }\n  }\n";
+const ACCEPTANCE_OF_REQUIREMENT: &str =
+    "  acceptance REQ-1 \"dup\" {\n    go()\n    expect n == 1\n  }\n";
+const REQUIREMENT_OF_ACCEPTANCE: &str =
+    "  requirement AC-1 \"dup\" {\n    invariant small { n <= 1 }\n  }\n";
+
+/// This edition still takes the current edition's `requirement` and `acceptance` blocks,
+/// and each owns the ID after its keyword like any other owner. Base accepted the first
+/// three; a block sharing a next-edition owner's ID was refused only for two acceptances.
+#[test]
+fn a_current_edition_block_is_an_owner() {
+    let next = |extra: &str| format!("fsl 5\n{}", current_edition(extra));
+    let cases = [
+        (
+            "block_requirement_twice",
+            next(SECOND_REQUIREMENT),
+            owner("REQ-1", "requirement", "requirement", (6, 15)),
+            (16, 15),
+        ),
+        (
+            "block_acceptance_requirement",
+            next(ACCEPTANCE_OF_REQUIREMENT),
+            owner("REQ-1", "acceptance", "requirement", (6, 15)),
+            (16, 14),
+        ),
+        (
+            "block_requirement_acceptance",
+            next(REQUIREMENT_OF_ACCEPTANCE),
+            owner("AC-1", "requirement", "acceptance", (12, 14)),
+            (16, 15),
+        ),
+        (
+            "block_acceptance_scenario",
+            before(
+                DESK,
+                "}\nverify {",
+                "  acceptance AC-TICKET-001 \"dup\" {\n    take()\n    expect true\n  }\n",
+            ),
+            owner("AC-TICKET-001", "acceptance", "scenario", (33, 12)),
+            (54, 14),
+        ),
+        (
+            "block_requirement_rule",
+            before(
+                DESK,
+                "}\nverify {",
+                "  requirement REQ-DESK-001 \"dup\" {\n    invariant ok { true }\n  }\n",
+            ),
+            owner("REQ-DESK-001", "requirement", "rule", (19, 8)),
+            (54, 15),
+        ),
+    ];
+    for (label, source, message, at) in cases {
+        assert_eq!(
+            summary(&check(label, &source)),
+            refusal(&message, at.0, at.1),
+            "{label}"
+        );
+    }
+    // Two acceptances keep the refusal they had.
+    let second = next("  acceptance AC-1 \"dup\" {\n    go()\n    expect n == 1\n  }\n");
+    let (exit, packet) = check("block_acceptance_twice", &second);
+    assert_eq!(exit, 2);
+    assert_eq!(packet["kind"], "semantics");
+    assert_eq!(packet["message"], "duplicate acceptance id 'AC-1' at 16:3");
+    // A block's ID is owned, so its `covers` may differ and the ledger shows its title.
+    let close = "  event close = Agent closes Ticket Assigned -> Closed\n";
+    let withdraw = "  event withdraw = Agent withdraws Ticket Open -> Withdrawn\n";
+    let covered = after(
+        &after(
+            &before(
+                DESK,
+                "}\nverify {",
+                "  requirement REQ-DESK-009 \"The desk keeps its tickets\" {\n    invariant ok { true }\n  }\n",
+            ),
+            close,
+            "    covers REQ-DESK-009 \"different\"\n",
+        ),
+        withdraw,
+        "    covers REQ-DESK-009 \"other\"\n",
+    );
+    let scratch = Scratch::new("block_covered", &[("doc.fsl", &covered)]);
+    assert_eq!(scratch.fslc(&["check", "doc.fsl"]).0, 0);
+    let (exit, _) = scratch.fslc(&["ledger", "doc.fsl", "--depth", "4", "-o", "ledger.md"]);
+    assert_eq!(exit, 0);
+    let ledger = scratch.read("ledger.md");
+    let rows: Vec<_> = ledger
+        .lines()
+        .filter(|line| line.starts_with("| REQ-DESK-009 |"))
+        .collect();
+    assert_eq!(rows.len(), 1, "{ledger}");
+    assert!(
+        rows[0].starts_with("| REQ-DESK-009 | The desk keeps its tickets |"),
+        "{}",
+        rows[0]
+    );
+}
+
+/// `migrate --edition next` on a current-edition document with two `requirement`s of one
+/// ID now refuses: the rewritten document no longer checks. Its message locates the
+/// repeat in the rewritten text, a line below the source's. Nothing is written.
+#[test]
+fn migrate_refuses_two_requirements_of_one_id() {
+    let source = current_edition(SECOND_REQUIREMENT);
+    let scratch = Scratch::new("migrate_requirement_twice", &[("doc.fsl", &source)]);
+    let (exit, packet) = scratch.fslc(&["migrate", "doc.fsl", "--edition", "next", "--write"]);
+    assert_eq!(exit, 2);
+    assert_eq!(
+        packet,
+        json!({
+            "fsl": "1.0",
+            "result": "error",
+            "kind": "semantics",
+            "message": format!("{} at doc.fsl:16:15", owner("REQ-1", "requirement", "requirement", (6, 15))),
+        })
+    );
+    assert_eq!(scratch.read("doc.fsl"), source);
 }

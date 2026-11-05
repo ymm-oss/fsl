@@ -239,7 +239,34 @@ fn reject_differing_links(
 
 /// The keywords whose second owner of an ID an existing check already refuses: a
 /// repeated acceptance or forbidden ID, and a repeated goal or policy property.
-const OWNERS_REFUSED_ELSEWHERE: [&str; 4] = ["scenario", "forbidden", "goal", "policy"];
+const OWNERS_REFUSED_ELSEWHERE: [&str; 5] =
+    ["scenario", "acceptance", "forbidden", "goal", "policy"];
+
+/// The current edition's `requirement` and `acceptance` blocks among `items`, which a
+/// next-edition document still takes: each owns the ID after its keyword, as its ID, its
+/// title, the span of its ID and the span of the block.
+fn block_owners(items: &[RequirementsItem]) -> Vec<(&'static str, &str, &str, Span, Span)> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Requirement {
+                id,
+                id_span,
+                text,
+                span,
+                ..
+            } => Some(("requirement", id.as_str(), text.as_str(), *id_span, *span)),
+            RequirementsItem::Acceptance {
+                id,
+                id_span,
+                text,
+                span,
+                ..
+            } => Some(("acceptance", id.as_str(), text.as_str(), *id_span, *span)),
+            _ => None,
+        })
+        .collect()
+}
 
 /// Refuse a second declaration that owns a requirement ID already owned, at its ID. The
 /// ledger kept one row for the two, with one title and one status (#1705).
@@ -1259,19 +1286,23 @@ fn join_names<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
 impl Pending {
     /// The title of each owned requirement ID, from its first owner. A second owner is
     /// refused before this is read, or by a later check of its own kind.
-    fn owned_titles(&self) -> OwnedTitles {
+    fn owned_titles(&self, blocks: &[(&'static str, &str, &str, Span, Span)]) -> OwnedTitles {
         let mut owned = OwnedTitles::new();
-        let declarations = self
-            .rules
+        let declarations = blocks
             .iter()
-            .map(|(_, rule)| rule.owned())
-            .chain(self.decisions.iter().map(decide::DecideDeclaration::owned))
+            .map(|(_, id, title, _, span)| (*id, *title, *span))
             .chain(
-                self.traces
+                self.rules
                     .iter()
-                    .map(|(_, trace)| (trace.id.as_str(), trace.text.as_str(), trace.span)),
-            )
-            .chain(self.goals.iter().map(relations::GoalSource::owned));
+                    .map(|(_, rule)| rule.owned())
+                    .chain(self.decisions.iter().map(decide::DecideDeclaration::owned))
+                    .chain(
+                        self.traces
+                            .iter()
+                            .map(|(_, trace)| (trace.id.as_str(), trace.text.as_str(), trace.span)),
+                    )
+                    .chain(self.goals.iter().map(relations::GoalSource::owned)),
+            );
         for (id, title, span) in declarations {
             owned
                 .entry(id.to_owned())
@@ -1305,8 +1336,16 @@ impl Pending {
                 ));
             }
         }
-        reject_second_owners(&self.owners)?;
-        let owned = self.owned_titles();
+        let blocks = block_owners(&items);
+        let mut owners = self.owners.clone();
+        owners.extend(
+            blocks
+                .iter()
+                .map(|(kind, id, _, id_span, _)| ((*id).to_owned(), *id_span, *kind)),
+        );
+        owners.sort_by_key(|(_, span, _)| span.start.offset);
+        reject_second_owners(&owners)?;
+        let owned = self.owned_titles(&blocks);
         reject_differing_links(
             &owned,
             self.events
