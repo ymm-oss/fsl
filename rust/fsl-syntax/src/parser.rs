@@ -22,6 +22,31 @@ use crate::{
     Token, TokenKind, TypeExpr, VerifyItem, lex,
 };
 
+/// A requirements document names one contract (#1694). The seam reads one
+/// clause, so a second would go unchecked. The parser is the one place every
+/// route passes through, so the refusal cannot miss one.
+fn reject_second_implements(
+    items: &[RequirementsItem],
+    item: &RequirementsItem,
+) -> Result<(), ParseError> {
+    let RequirementsItem::Implements { name, span, .. } = item else {
+        return Ok(());
+    };
+    let first = items.iter().find_map(|earlier| match earlier {
+        RequirementsItem::Implements { name, .. } => Some(name),
+        _ => None,
+    });
+    let Some(first) = first else {
+        return Ok(());
+    };
+    Err(ParseError::new(
+        format!(
+            "duplicate implements '{name}' (a requirements document declares one, and '{first}' came first)"
+        ),
+        *span,
+    ))
+}
+
 fn join_span(start: Span, end: Span) -> Span {
     Span {
         start: start.start,
@@ -602,6 +627,7 @@ impl<'a> Parser<'a> {
             self.published_item = false;
             let item = item?;
             self.expect_no_pending_annotations()?;
+            reject_second_implements(&items, &item)?;
             items.push(item);
         }
         if self.peek_kw(Kw::Verify) {

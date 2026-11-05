@@ -2890,6 +2890,34 @@ mod tests {
         assert_eq!(worker["message"], IMPLEMENTS_AND_INIT_CHECK_MESSAGE);
     }
 
+    /// #1694: the Worker reads the clause with the parser the CLI uses.
+    #[test]
+    fn check_refuses_a_second_implements_at_it() {
+        for (first, second) in [("Abs", "Other"), ("Other", "Abs"), ("Abs", "Abs")] {
+            let request = Request {
+                cmd: "check".to_owned(),
+                source: format!(
+                    "requirements Impl {{\n  implements {first} from \"{first}.fsl\" {{ }}\n  implements {second} from \"{second}.fsl\" {{ }}\n  state {{ done: Bool }}\n  init {{ done = false }}\n  action finish() {{ done = true }}\n}}\n"
+                ),
+                source_file: "impl.fsl".to_owned(),
+                files: BTreeMap::new(),
+                options: Options::default(),
+                unstable: Vec::new(),
+            };
+            let worker = block_on(check(&request, TEST_SOLVER_VERSION));
+            assert_eq!(worker["result"], "error", "{worker}");
+            assert_eq!(worker["kind"], "parse", "{worker}");
+            assert_eq!(
+                worker["message"],
+                format!(
+                    "duplicate implements '{second}' (a requirements document declares one, and '{first}' came first) at 3:3"
+                ),
+                "{worker}"
+            );
+            assert_eq!(worker["loc"], json!({"line": 3, "column": 3}), "{worker}");
+        }
+    }
+
     #[test]
     fn check_keeps_inline_enum_conversion_error_location() {
         let request = Request {
