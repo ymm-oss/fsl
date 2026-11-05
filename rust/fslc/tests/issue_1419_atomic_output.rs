@@ -226,110 +226,62 @@ fn html_healthy_output_is_byte_identical_across_replacements() {
     assert_eq!(names(&home.join("out")), vec![out]);
 }
 
+/// A kill during the write can leave the temporary file, but its partial bytes are
+/// never wider than the owner, whether or not the destination existed.
 #[cfg(target_os = "linux")]
 #[test]
-fn html_destination_matching_first_scratch_name_is_replaced_completely() {
+fn abrupt_termination_leaves_only_a_private_temporary_file() {
     use std::os::unix::fs::PermissionsExt;
-    let home = scratch("html-name-collision");
-    let dir = home.join("out");
-    let ordinary = dir.join("artifact.html");
+    use std::os::unix::process::ExitStatusExt;
     let (_, base_arguments, _) = families()
         .into_iter()
         .find(|(name, _, _)| *name == "html")
         .unwrap();
-    let healthy = run(
-        &home,
-        &root(),
-        &args_with_output(&base_arguments, &ordinary),
-        None,
-    );
-    let mut expected_json = json(&healthy, 0);
-    assert_eq!(expected_json["output"], cli::text(&ordinary));
-    let expected = std::fs::read(&ordinary).unwrap();
-    assert!(!expected.is_empty());
-    std::fs::remove_file(&ordinary).unwrap();
-    std::fs::write(home.join("observations/old"), OLD).unwrap();
-    let mut argv = vec![cli::text(&dir).to_owned()];
-    argv.extend(base_arguments.iter().map(|arg| (*arg).to_owned()));
-    // exec retains the shell PID; this fresh CLI's first publication is sequence zero.
-    let published = run(
-        &home,
-        &root(),
-        &argv,
-        Some(
-            "set -e; binary=$1; dir=$2; shift 2; \
-             out=\"$dir/.fslc-output-$$-0.tmp\"; \
-             printf '%s' \"$out\" > \"$dir/../observations/destination\"; \
-             cp \"$dir/../observations/old\" \"$out\"; chmod 604 \"$out\"; \
-             exec \"$binary\" \"$@\" -o \"$out\"",
-        ),
-    );
-    let out = std::path::PathBuf::from(
-        std::fs::read_to_string(home.join("observations/destination")).unwrap(),
-    );
-    assert_eq!(out.parent(), Some(dir.as_path()));
-    expected_json["output"] = serde_json::json!(out);
-    // Base source must RED here: IO / File exists (os error 17), exit 2, not success.
-    assert_eq!(json(&published, 0), expected_json);
-    assert_eq!(published.stderr, healthy.stderr);
-    assert_eq!(std::fs::read(&out).unwrap(), expected);
-    assert_eq!(
-        std::fs::metadata(&out).unwrap().permissions().mode() & 0o7777,
-        0o604
-    );
-    assert_eq!(names(&dir), vec![out], "no owned scratch residue");
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn html_missing_destination_matching_first_scratch_name_stays_absent_on_write_failure() {
-    let home = scratch("html-missing-name-collision");
-    let dir = home.join("out");
-    let ordinary = dir.join("artifact.html");
-    let (_, base_arguments, _) = families()
-        .into_iter()
-        .find(|(name, _, _)| *name == "html")
-        .unwrap();
-    let healthy = run(
-        &home,
-        &root(),
-        &args_with_output(&base_arguments, &ordinary),
-        None,
-    );
-    json(&healthy, 0);
-    assert!(
-        std::fs::read(&ordinary).unwrap().len() > 1024,
-        "healthy caller must exceed child filesize limit"
-    );
-    std::fs::remove_file(&ordinary).unwrap();
-    assert!(names(&dir).is_empty());
-    let before = cli::state(&dir);
-    let mut argv = vec![cli::text(&dir).to_owned()];
-    argv.extend(base_arguments.iter().map(|arg| (*arg).to_owned()));
-    let failure = run(
-        &home,
-        &root(),
-        &argv,
-        Some(
-            "set -e; binary=$1; dir=$2; shift 2; \
-             out=\"$dir/.fslc-output-$$-0.tmp\"; test ! -e \"$out\"; \
-             printf '%s' \"$out\" > \"$dir/../observations/destination\"; \
-             trap '' XFSZ; ulimit -f 1 || exit 97; \
-             exec \"$binary\" \"$@\" -o \"$out\"",
-        ),
-    );
-    let out = std::path::PathBuf::from(
-        std::fs::read_to_string(home.join("observations/destination")).unwrap(),
-    );
-    assert_eq!(out.parent(), Some(dir.as_path()));
-    let error = io(&failure);
-    assert!(
-        error["message"].as_str().unwrap().contains("os error 27"),
-        "must reach EFBIG write, not parser/early IO: {error}"
-    );
-    // Preservation control: observes post-failure state, not transient visibility.
-    assert!(!out.exists(), "failed new output is not partially visible");
-    assert_eq!(cli::state(&dir), before, "owned scratch cleaned");
+    for existing in [true, false] {
+        let home = scratch(if existing {
+            "abrupt-existing"
+        } else {
+            "abrupt-new"
+        });
+        let out = home.join("out/artifact.html");
+        let argv = args_with_output(&base_arguments, &out);
+        json(&run(&home, &root(), &argv, None), 0);
+        assert!(
+            std::fs::read(&out).unwrap().len() > 1024,
+            "healthy caller must exceed child filesize limit"
+        );
+        let old = vec![b'O'; 8192];
+        if existing {
+            std::fs::write(&out, &old).unwrap();
+            std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o600)).unwrap();
+        } else {
+            std::fs::remove_file(&out).unwrap();
+        }
+        // SIGXFSZ is left at its default, so the write ends the process.
+        let killed = run(
+            &home,
+            &root(),
+            &argv,
+            Some("ulimit -f 1 || exit 97; exec \"$@\""),
+        );
+        assert_eq!(killed.status.code(), None, "{killed:?}");
+        assert!(killed.status.signal().is_some(), "{killed:?}");
+        let left: Vec<_> = names(&home.join("out"))
+            .into_iter()
+            .filter(|path| path != &out)
+            .collect();
+        assert_eq!(left.len(), 1, "{left:?}");
+        let name = left[0].file_name().unwrap().to_str().unwrap();
+        assert!(name.starts_with(".fslc-output-"), "{name}");
+        let metadata = std::fs::metadata(&left[0]).unwrap();
+        assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
+        assert!(metadata.len() <= 1024, "partial bytes only");
+        if existing {
+            assert_eq!(std::fs::read(&out).unwrap(), old);
+        } else {
+            assert!(!out.exists());
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -413,7 +365,15 @@ fn regular_modes_and_child_umask_are_preserved() {
         std::fs::metadata(&out).unwrap().permissions().mode() & 0o777,
         0o640
     );
-    for mode in [0o604, 0o1640, 0o2640, 0o4640] {
+    // Only the permission bits carry over: replacing a setuid file must not leave
+    // new content setuid, which a direct write would have cleared too.
+    for (mode, expected) in [
+        (0o604, 0o604),
+        (0o1640, 0o640),
+        (0o2640, 0o640),
+        (0o4640, 0o640),
+        (0o4755, 0o755),
+    ] {
         std::fs::set_permissions(&out, std::fs::Permissions::from_mode(mode)).unwrap();
         assert_eq!(
             std::fs::metadata(&out).unwrap().permissions().mode() & 0o7777,
@@ -426,7 +386,8 @@ fn regular_modes_and_child_umask_are_preserved() {
         );
         assert_eq!(
             std::fs::metadata(&out).unwrap().permissions().mode() & 0o7777,
-            mode
+            expected,
+            "from {mode:o}"
         );
     }
     assert_eq!(names(&home.join("out")), vec![out]);
@@ -530,6 +491,24 @@ fn fifo_and_directory_are_rejected_without_replacement() {
     let before = cli::state(&home.join("out"));
     io(&run(&home, &root(), &argv, None));
     assert_eq!(cli::state(&home.join("out")), before);
+}
+
+/// Every non-regular destination is refused, including ones a caller might use
+/// to discard output or read it through process substitution.
+#[cfg(unix)]
+#[test]
+fn dev_null_is_refused_as_a_non_regular_destination() {
+    use std::os::unix::fs::FileTypeExt;
+    let home = scratch("dev-null");
+    let argv = args_with_output(&["document", "generate", PM], Path::new("/dev/null"));
+    let error = io(&run(&home, &root(), &argv, None));
+    assert_eq!(error["message"], "output target is not a regular file");
+    assert!(
+        std::fs::symlink_metadata("/dev/null")
+            .unwrap()
+            .file_type()
+            .is_char_device()
+    );
 }
 
 #[cfg(unix)]

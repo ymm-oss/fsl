@@ -24,10 +24,17 @@ the destination absent if it did not exist). Cleanup of a temporary file created
 by this call is best-effort. If cleanup also fails, that file may remain, but
 the original publication error is returned. Failure to create a temporary file
 does not authorize deleting a pre-existing entry at that temporary path.
-Temporary names use the process id and a per-process sequence. If the generated
-basename equals the destination basename, append one fixed `.tmp` suffix before
-`create_new` so preparation never writes at the destination. There is no
-filesystem probing or automatic retry service.
+Temporary names use the process id, a nanosecond clock reading and a per-process
+sequence, so a stale name left by an earlier process with the same id (for example
+a fixed container PID) does not repeat. If the generated basename equals the
+destination basename, append one fixed `.tmp` suffix before `create_new` so
+preparation never writes at the destination. There is no filesystem probing or
+automatic retry service: an entry already at the temporary name fails with an error
+naming that path.
+
+Abrupt termination (a signal, or a file-size limit that ends the process) can leave
+a `.fslc-output-*.tmp` file with partial content beside the destination. The destination
+keeps its old bytes, and that temporary file is owner-only (mode 0600 on Unix).
 
 ## Covered writers and preserved behavior
 
@@ -67,7 +74,11 @@ schemas, and language semantics are unchanged.
 ## Permissions and intentional compatibility boundaries
 
 - New files use ordinary creation permissions subject to the process umask.
-- Existing regular files retain their permission bits. Read-only existing
+- Existing regular files retain their permission bits (`0o777`). Setuid, setgid and
+  sticky bits are not restored. The replacement is created owner-only (`0600`) and
+  receives its final bits before the rename, so partial bytes are never wider than the
+  owner. A new output is created with the default mode to learn its umask-derived bits,
+  then narrowed to `0600` before any byte is written. Read-only existing
   files are refused even if their parent directory permits replacement. An
   existing file is also opened for writing without truncation before preparing
   its replacement, so rename is not used to bypass its write-access denial.
@@ -78,7 +89,10 @@ schemas, and language semantics are unchanged.
 - A final-component symlink, including a dangling one, is refused before
   changing the link or its referent. Direct writes previously followed such
   links. Existing non-regular destinations (directories, FIFOs, devices, and
-  similar entries) are also refused rather than replaced.
+  similar entries) are also refused rather than replaced. This is breaking for
+  `-o /dev/null`, `-o /dev/stdout` and process substitution such as `-o >(cmd)`, which
+  shells pass as a path like `/dev/fd/63`; those callers should omit `-o` where the
+  command prints its artifact, or write a regular file.
 - Rename replaces the inode. Other hard-link names continue to refer to the
   old inode and bytes. Beyond permission bits, preservation of existing inode
   attributes is not guaranteed: ownership, ACLs, extended attributes, and
@@ -96,13 +110,12 @@ Acceptance must observe successful new output and replacement, an actual write
 failure after partial temporary-file output, preservation of old destination
 bytes, and owned-temporary cleanup. It must also cover read-only refusal,
 regular permission bits, new-file umask, final symlinks, non-regular targets,
-parent permissions, and multi-output ordering with a later failure. Compare
+parent permissions, setuid removal, the owner-only temporary file left by abrupt
+termination, `/dev/null`, and multi-output ordering with a later failure. Compare
 complete successful artifacts and caller JSON/exit behavior, including
 signatures and digests, rather than weakening expected values to fit the
 implementation. Runtime acceptance and performance evidence are separate from
 this design decision.
 
-Cover a destination basename equal to the generated temporary basename: existing
-output must be replaced successfully, and an initially absent destination must
-remain absent after a partial-write failure with owned-temporary cleanup. The
-latter is a post-failure preservation control, not a transient-visibility test.
+Cover a destination basename equal to the generated temporary basename at the name
+function, since the clock component makes that name unpredictable from the command line.
