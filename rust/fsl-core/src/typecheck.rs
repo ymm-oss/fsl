@@ -258,6 +258,10 @@ fn enum_member_owners(model: &KernelModel, member: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(test)]
+#[path = "issue_1683_old_walk_tests.rs"]
+mod issue_1683_old_walk_tests;
+
 pub(crate) fn resolve(model: &KernelModel, ty: &TypeRef) -> Result<TypeRef, TypecheckError> {
     match ty {
         TypeRef::Named(name) => match model.types.get(name) {
@@ -549,7 +553,7 @@ pub(crate) fn types_compatible(
     expected: &TypeRef,
     model: &KernelModel,
 ) -> Result<bool, TypecheckError> {
-    Ok(carrier_coercion(actual, expected, model)? != CarrierCoercion::NotAssignable)
+    Ok(carrier_walk(actual, expected, model)? != CarrierCoercion::NotAssignable)
 }
 
 pub(crate) fn expression_type(
@@ -747,33 +751,54 @@ pub(crate) fn carrier_coercion(
     expected: &TypeRef,
     model: &KernelModel,
 ) -> Result<CarrierCoercion, TypecheckError> {
-    use CarrierCoercion::{MapMismatch, NotAssignable, RebuildInt, Retag};
+    let answer = carrier_walk(actual, expected, model)?;
+    if answer != CarrierCoercion::Retag {
+        return Ok(answer);
+    }
+    Ok(
+        if matches!(
+            resolve(model, actual)?,
+            TypeRef::Option(_) | TypeRef::Set(_) | TypeRef::Seq(_, _)
+        ) && !same_carrier(actual, expected, model)?
+        {
+            CarrierCoercion::RebuildInt
+        } else {
+            CarrierCoercion::Retag
+        },
+    )
+}
+
+/// The walk below an answer: `Retag` here means only that the two can meet, and the
+/// whole type decides between `Retag` and `RebuildInt`. Comparing carriers at each level
+/// here would make every assignability question quadratic in the type's depth.
+fn carrier_walk(
+    actual: &TypeRef,
+    expected: &TypeRef,
+    model: &KernelModel,
+) -> Result<CarrierCoercion, TypecheckError> {
+    use CarrierCoercion::{MapMismatch, NotAssignable, Retag};
     let (actual, expected) = (resolve(model, actual)?, resolve(model, expected)?);
-    let below = match (&actual, &expected) {
+    Ok(match (&actual, &expected) {
         (TypeRef::Int | TypeRef::Range(_, _), TypeRef::Int | TypeRef::Range(_, _))
-        | (TypeRef::Bool, TypeRef::Bool) => return Ok(Retag),
-        (TypeRef::Named(left), TypeRef::Named(right)) => {
-            return Ok(if left == right { Retag } else { NotAssignable });
-        }
-        (TypeRef::Option(left), TypeRef::Option(right)) => carrier_coercion(left, right, model)?,
-        (TypeRef::Set(left), TypeRef::Set(right)) => element_coercion(left, right, model)?,
+        | (TypeRef::Bool, TypeRef::Bool) => Retag,
+        (TypeRef::Named(left), TypeRef::Named(right)) if left == right => Retag,
+        (TypeRef::Option(left), TypeRef::Option(right)) => carrier_walk(left, right, model)?,
+        (TypeRef::Set(left), TypeRef::Set(right)) => element_walk(left, right, model)?,
         (TypeRef::Seq(left, left_capacity), TypeRef::Seq(right, right_capacity))
             if left_capacity == right_capacity || has_int(left) || has_int(right) =>
         {
-            element_coercion(left, right, model)?
+            element_walk(left, right, model)?
         }
         (TypeRef::Map(left_key, left_value), TypeRef::Map(right_key, right_value)) => {
-            return Ok(
-                if element_coercion(left_key, right_key, model)? == NotAssignable
-                    || element_coercion(left_value, right_value, model)? == NotAssignable
-                {
-                    NotAssignable
-                } else if same_carrier(&actual, &expected, model)? {
-                    Retag
-                } else {
-                    MapMismatch
-                },
-            );
+            if element_walk(left_key, right_key, model)? == NotAssignable
+                || element_walk(left_value, right_value, model)? == NotAssignable
+            {
+                NotAssignable
+            } else if same_carrier(&actual, &expected, model)? {
+                Retag
+            } else {
+                MapMismatch
+            }
         }
         (
             TypeRef::Relation(left_source, left_target),
@@ -781,26 +806,21 @@ pub(crate) fn carrier_coercion(
         ) if same_carrier(left_source, right_source, model)?
             && same_carrier(left_target, right_target, model)? =>
         {
-            return Ok(Retag);
+            Retag
         }
-        _ => return Ok(NotAssignable),
-    };
-    Ok(match below {
-        MapMismatch | NotAssignable => below,
-        Retag | RebuildInt if same_carrier(&actual, &expected, model)? => Retag,
-        Retag | RebuildInt => RebuildInt,
+        _ => NotAssignable,
     })
 }
 
 /// A container's element answers the rule only if `Int` is involved. Without `Int` it
 /// has a finite carrier, and the whole carrier must agree (#1467).
-fn element_coercion(
+fn element_walk(
     actual: &TypeRef,
     expected: &TypeRef,
     model: &KernelModel,
 ) -> Result<CarrierCoercion, TypecheckError> {
     if has_int(actual) || has_int(expected) {
-        carrier_coercion(actual, expected, model)
+        carrier_walk(actual, expected, model)
     } else if same_carrier(actual, expected, model)? {
         Ok(CarrierCoercion::Retag)
     } else {
@@ -1382,6 +1402,8 @@ pub(crate) struct ValidationPhase {
     // This stays beside `carrier_coercion` because it says where an expression is
     // evaluated, and that rule only sees two types (#1683).
     symbolic: bool,
+    // Inside the second walk of an `old` operand, against what surrounds it.
+    old_expectation_walk: bool,
 }
 
 impl ValidationPhase {
@@ -1397,6 +1419,7 @@ impl ValidationPhase {
             collisions: HashSet::new(),
             range_rule: None,
             symbolic: true,
+            old_expectation_walk: false,
         }
     }
 
@@ -1458,6 +1481,7 @@ impl ValidationPhase {
             collisions: self.collisions.clone(),
             range_rule: self.range_rule.clone(),
             symbolic: self.symbolic,
+            old_expectation_walk: self.old_expectation_walk,
         }
     }
 
@@ -2418,6 +2442,8 @@ fn validate_expression_in_phase(
     phase: &ValidationPhase,
     self_relations: &SelfRelations,
 ) -> Result<(), TypecheckError> {
+    #[cfg(test)]
+    issue_1683_old_walk_tests::count_visit();
     // Statement-domain deferral never extends into RHS/filter expressions.
     let expression_phase = phase.defer_init_statement_domain.then(|| ValidationPhase {
         defer_init_statement_domain: false,
@@ -2717,15 +2743,20 @@ fn validate_expression_inner(
             }
         }
         Expr::UnaryNamed { name, expr, .. } if name == "old" => {
-            validate_expression_in_phase(
-                expr,
-                env,
-                model,
-                span,
-                None,
-                &phase.inside_old(),
-                self_relations,
-            )?;
+            // The ordinary walk of this operand has already run when this is the walk
+            // against an expectation, and it runs only once per operand: running it here
+            // too would double the work at every nested `old` (#1683).
+            if !phase.old_expectation_walk {
+                validate_expression_in_phase(
+                    expr,
+                    env,
+                    model,
+                    span,
+                    None,
+                    &phase.inside_old(),
+                    self_relations,
+                )?;
+            }
             // `old` keeps its operand's type, and symbolic evaluation coerces the
             // operand's arms to what surrounds it (#1679). This is the arm rule above.
             if phase.symbolic
@@ -2736,16 +2767,23 @@ fn validate_expression_inner(
             }
             // Evaluation types the operand from what surrounds it too (#1683), so a Map
             // a literal holds there answers to that, where `infer_type` only sees the
-            // literal take the expectation. This does not admit the literal it needs to
-            // type: the walk above still decides that.
-            if phase.symbolic && expected.is_some() {
+            // literal take the expectation. This does not admit a literal that needs a
+            // type: the walk above still decides that. An operand already of the
+            // expectation's carrier was walked against that by the walk above.
+            if phase.symbolic
+                && let Some(expected) = expected
+                && !same_carrier(&infer_type(expr, env, model, None)?, expected, model)?
+            {
                 validate_expression_in_phase(
                     expr,
                     env,
                     model,
                     span,
-                    expected,
-                    &phase.inside_old(),
+                    Some(expected),
+                    &ValidationPhase {
+                        old_expectation_walk: true,
+                        ..phase.inside_old()
+                    },
                     self_relations,
                 )?;
             }
