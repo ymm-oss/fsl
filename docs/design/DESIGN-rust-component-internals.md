@@ -916,8 +916,8 @@ internal error exits 2, not 3. Empty/malformed/missing/unknown/nested-batch chil
 or inconsistent parent gates are rejected. Top-level internal errors still exit 3.
 
 The generated-report exception permits only exits 0/1 and requires both dispatch context and kind:
-`html`/`html_report`, `ledger`/`audit_ledger`, approval create/check propagating `html_report`,
-or `ledger` approval overlay propagating `html_report`. Other generated artifacts require exit 0.
+`html`/`html_report`, `ledger`/`audit_ledger`, or approval create/check propagating `html_report`.
+`ledger --approval` refuses an overlay record's failed rerender with an error. Other generated artifacts require exit 0.
 Approval-only ledger digest rendering retains its existing successful artifact/evaluation exit 0,
 even for a failed or unestablished baseline, except a verification `result:"error"`, which it
 returns (`docs/design/DESIGN-ledger.md`, amendment #1418). There is no new schema or verification run.

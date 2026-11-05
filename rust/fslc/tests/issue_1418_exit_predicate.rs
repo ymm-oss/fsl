@@ -358,7 +358,6 @@ fn generated_nonzero_exception_requires_both_exact_context_and_artifact_kind() {
         ("ledger", None, "audit_ledger"),
         ("approval", Some("create"), "html_report"),
         ("approval", Some("check"), "html_report"),
-        ("ledger", None, "html_report"), // failed HTML approval overlay
     ] {
         statuses(
             command,
@@ -377,6 +376,7 @@ fn generated_nonzero_exception_requires_both_exact_context_and_artifact_kind() {
         ("domain", Some("generate"), "html_report"),
         ("check", None, "audit_ledger"),
         ("ledger", None, "testgen"),
+        ("ledger", None, "html_report"), // an overlay record's failure is refused
     ] {
         statuses(
             command,

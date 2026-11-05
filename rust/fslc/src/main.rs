@@ -14077,7 +14077,8 @@ fn approval_overlay(
     let mut requirements = Map::new();
     let mut records = Vec::new();
     for record_path in record_paths {
-        let evaluation = approval_evaluation(path, source, edition, record_path, &trust)?;
+        let evaluation = approval_evaluation(path, source, edition, record_path, &trust)
+            .map_err(|failure| overlay_evaluation_error(record_path, failure))?;
         for requirement in evaluation
             .get("requirements")
             .and_then(Value::as_array)
@@ -14090,6 +14091,25 @@ fn approval_overlay(
         records.push(evaluation);
     }
     Ok(json!({"requirements": requirements, "records": records}))
+}
+
+/// A record's artifact rerender can stop on a failed verification baseline with
+/// a non-error envelope and exit 1. Passing that through would read as the ledger's
+/// own exit 1 although no ledger was written, so it is refused here instead.
+fn overlay_evaluation_error(record_path: &Path, failure: (Value, i32)) -> (Value, i32) {
+    if failure.0["result"] == "error" {
+        return failure;
+    }
+    (
+        error_output(
+            "semantics",
+            &format!(
+                "approval record '{}' cannot be evaluated: rerendering its artifact stopped on a failed verification baseline, so no ledger was written",
+                record_path.display()
+            ),
+        ),
+        2,
+    )
 }
 
 struct LedgerReportRequest<'a> {

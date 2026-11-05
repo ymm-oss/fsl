@@ -2510,13 +2510,18 @@ Gate on `fslc verify` separately. An approval gate requires exit 0 AND
 `result:"approval_check"` AND `status:"approved"`.
 
 Input, baseline, record and trust-configuration errors retain their error envelope,
-exit 2 and no approval status. Aborted artifact evaluation preserves the complete
+exit 2 and no approval status. Aborted artifact evaluation in `approval create` and
+`approval check` preserves the complete
 downstream envelope and exit (verification 1, internal 3), without an approval
 status or new record. A verification `result:"error"` during `--kind ledger` rerendering
 returns that error envelope and its exit (2, or 3 for internal) in place of `drifted` or an
 artifact mismatch. Failed HTML rerendering propagates `generated`/`html_report`
 with exit 1, inline content and default output metadata, without writing an HTML
 file. Direct failed HTML/ledger reports still generate with exit 1, and output-write errors take precedence with exit 2.
+`fslc ledger --approval` does not propagate those results. When an `html` or `scenarios` record's
+rerender stops on a failed verification baseline, it returns `result:"error"`, exit 2, naming the
+record, and leaves the `-o` file untouched. `ledger` and `requirements_document` records still
+complete, so the ledger is written and shows them `drifted`, with the verification's own exit.
 
 Normal JSON delivery checks the command-aware envelope/exit invariant with a debug
 assertion after internal-error normalization and before serialization. A mismatch

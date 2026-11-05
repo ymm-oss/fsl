@@ -664,7 +664,7 @@ fn captured_counterexample_preserves_verification_tuple_and_writes_valid_artifac
     assert_eq!(artifact["trace"], actual["trace"]);
 }
 
-fn ledger_overlay_failure(kind: &str) {
+fn ledger_overlay_refused(kind: &str) {
     let repo = Repository::new();
     repo.render_and_approve(kind, false);
     let record_before = std::fs::read(repo.0.join("approval.json")).unwrap();
@@ -675,6 +675,7 @@ fn ledger_overlay_failure(kind: &str) {
     };
     let reviewed_before = std::fs::read(repo.0.join(artifact)).unwrap();
     repo.break_invariant();
+    std::fs::write(repo.0.join("ledger.md"), "previous ledger\n").unwrap();
     let output = repo.run(&[
         "ledger",
         "spec.fsl",
@@ -685,39 +686,29 @@ fn ledger_overlay_failure(kind: &str) {
         "--approval",
         "approval.json",
         "-o",
-        "failed-ledger.md",
+        "ledger.md",
     ]);
-    let actual = assert_aborted(&output, kind == "scenarios");
-    if kind == "scenarios" {
-        assert_eq!(actual["result"], "violated");
-        assert_eq!(actual["violation_kind"], "invariant");
-        assert_eq!(actual["invariant"], "ApprovalPersists");
-        assert_eq!(actual["violated_at_step"], 1);
-        let trace = actual["trace"].as_array().expect("counterexample states");
-        assert_eq!(
-            trace.first().unwrap()["state"],
-            json!({"approved":false,"ever_approved":false})
-        );
-        assert_eq!(
-            trace.last().unwrap()["state"],
-            json!({"approved":false,"ever_approved":true})
-        );
-        assert_eq!(trace.last().unwrap()["action"]["name"], "approve");
-        assert_eq!(trace.last().unwrap()["action"]["params"], json!({}));
-    } else {
-        assert_eq!(actual["result"], "generated");
-        assert_eq!(actual["kind"], "html_report");
-        assert_eq!(actual["spec"], "ApprovalReview");
-        assert_eq!(actual["output"], "spec.html");
-        let html = actual["content"].as_str().expect("in-memory HTML content");
-        assert!(html.contains("<!doctype html>"));
-        assert!(html.contains("ApprovalPersists"));
-        assert!(!repo.0.join("spec.html").exists());
-    }
+    assert_status(&output, 2);
+    let actual = value(&output);
+    assert_eq!(actual["result"], "error", "{actual:#}");
+    assert_eq!(actual["kind"], "semantics", "{actual:#}");
     assert!(
-        !repo.0.join("failed-ledger.md").exists(),
-        "overlay failure precedes ledger write"
+        actual["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("'approval.json'")),
+        "the refusal names the record: {actual:#}"
     );
+    assert_eq!(
+        actual.get("warnings"),
+        Some(&expected_legacy_warnings("spec.fsl", true)),
+        "each distinct authored root finding must occur exactly once"
+    );
+    assert_eq!(
+        std::fs::read(repo.0.join("ledger.md")).unwrap(),
+        b"previous ledger\n",
+        "a stale ledger must not look newly written"
+    );
+    assert!(!repo.0.join("spec.html").exists());
     assert_eq!(
         std::fs::read(repo.0.join("approval.json")).unwrap(),
         record_before
@@ -729,13 +720,88 @@ fn ledger_overlay_failure(kind: &str) {
 }
 
 #[test]
-fn ledger_approval_overlay_propagates_scenarios_violation_without_writing_ledger() {
-    ledger_overlay_failure("scenarios");
+fn ledger_approval_overlay_refuses_a_red_scenarios_record_and_keeps_the_ledger() {
+    ledger_overlay_refused("scenarios");
 }
 
 #[test]
-fn ledger_approval_overlay_propagates_html_report_without_writing_ledger() {
-    ledger_overlay_failure("html");
+fn ledger_approval_overlay_refuses_a_red_html_record_and_keeps_the_ledger() {
+    ledger_overlay_refused("html");
+}
+
+/// Negative control: a ledger record's rerender always completes, so the ledger
+/// is written and shows the drift, with the verification's own exit.
+#[test]
+fn ledger_approval_overlay_with_a_red_ledger_record_writes_the_drifted_ledger() {
+    let repo = Repository::new();
+    let inputs = ["--depth", "2", "--deadlock", "ignore"];
+    let direct = repo.run(&[&["ledger", "spec.fsl", "-o", "review.md"], &inputs[..]].concat());
+    assert_status(&direct, 0);
+    let created = repo.run(
+        &[
+            &[
+                "approval",
+                "create",
+                "spec.fsl",
+                "--kind",
+                "ledger",
+                "--artifact",
+                "review.md",
+                "--approver",
+                "alice",
+                "-o",
+                "approval.json",
+            ],
+            &inputs[..],
+        ]
+        .concat(),
+    );
+    assert_status(&created, 0);
+    repo.break_invariant();
+    std::fs::write(repo.0.join("ledger.md"), "previous ledger\n").unwrap();
+    let output = repo.run(
+        &[
+            &[
+                "ledger",
+                "spec.fsl",
+                "--approval",
+                "approval.json",
+                "-o",
+                "ledger.md",
+            ],
+            &inputs[..],
+        ]
+        .concat(),
+    );
+    assert_status(&output, 1);
+    let actual = value(&output);
+    assert_eq!(actual["result"], "generated", "{actual:#}");
+    assert_eq!(actual["kind"], "audit_ledger", "{actual:#}");
+    assert_eq!(actual["output"], "ledger.md", "{actual:#}");
+    let ledger = std::fs::read_to_string(repo.0.join("ledger.md")).unwrap();
+    assert!(ledger.contains("drifted"), "{ledger}");
+}
+
+/// Green stays as it was: the same html record on its green baseline overlays.
+#[test]
+fn ledger_approval_overlay_with_a_green_html_record_writes_the_ledger() {
+    let repo = Repository::new();
+    repo.render_and_approve("html", false);
+    let output = repo.run(&[
+        "ledger",
+        "spec.fsl",
+        "--depth",
+        "2",
+        "--deadlock",
+        "ignore",
+        "--approval",
+        "approval.json",
+        "-o",
+        "ledger.md",
+    ]);
+    assert_status(&output, 0);
+    assert_eq!(value(&output)["kind"], "audit_ledger");
+    assert!(repo.0.join("ledger.md").exists());
 }
 
 // Fixed e8163bc6 warning literals, calibrated by the four archived BASE probes.
@@ -1176,6 +1242,18 @@ fn dependency_failure(operation: &str) {
         ),
         _ => panic!("finite dependency consumer roster"),
     };
+    if operation == "ledger" {
+        assert_status(&output, 2);
+        let actual = value(&output);
+        assert_eq!(actual["result"], "error", "{actual:#}");
+        assert_eq!(
+            actual["warnings"],
+            dependency_outer_findings(),
+            "root001/root002/dep.fsl/dir/dep.fsl each occur once, in delivered order"
+        );
+        assert!(!repo.0.join("failed-ledger.md").exists());
+        return;
+    }
     assert_status(&output, 1);
     let actual = value(&output);
     assert!(actual.get("status").is_none());
@@ -1239,7 +1317,7 @@ fn dependency_scenarios_check_propagates_each_root_and_provider_once() {
 }
 
 #[test]
-fn dependency_ledger_overlay_propagates_each_root_and_provider_once() {
+fn dependency_ledger_overlay_refuses_with_each_root_and_provider_once() {
     dependency_failure("ledger");
 }
 

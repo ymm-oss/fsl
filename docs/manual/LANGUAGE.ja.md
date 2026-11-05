@@ -2324,7 +2324,7 @@ exit 0 と `approved` を返します。`violated`、`unknown_cti`、`reachable_
 確認してください。
 
 入力、baseline、record、trust 設定のエラーは、元のエラー封筒と exit 2 を返し、承認の
-`status` は付きません。artifact 評価が中断した場合は、下流の完全な封筒と終了コード
+`status` は付きません。`approval create` と `approval check` で artifact 評価が中断した場合は、下流の完全な封筒と終了コード
 (検証失敗1、内部エラー3)を保持し、承認の status も新しい record も作りません。
 `--kind ledger` の再描画で検証が `result:"error"` を返した場合は、`drifted` や artifact の
 不一致ではなく、そのエラー封筒と終了コード(2、内部エラーは3)を返します。
@@ -2332,6 +2332,10 @@ HTML の再描画で検証に失敗した場合は、`generated`/`html_report`�
 content と既定の output メタデータを返し、HTML ファイルは書きません。
 直接の HTML/ledger は検証失敗時にも report を生成して exit 1 を返し、出力の書き込み
 エラーは baseline の判定より優先して exit 2 を返します。
+`fslc ledger --approval` はこれらの結果を伝播しません。`html` または `scenarios` の record の再描画が
+検証失敗の baseline で止まると、record を名指しした `result:"error"` と exit 2 を返し、`-o` の
+ファイルには触れません。`ledger` と `requirements_document` の record は再描画が完了するので、
+ledger を書いて `drifted` と表示し、検証自身の終了コードを返します。
 
 通常の JSON 出力は、内部エラーの終了コードを正規化した後、serialize より前に、
 コマンドを考慮した封筒と終了コードの整合性を debug assertion で確認します。

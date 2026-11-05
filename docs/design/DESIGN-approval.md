@@ -129,7 +129,7 @@ separately. An approval gate requires exit 0 AND `result:"approval_check"` AND
 unsupported, wrong-spec, or locally unavailable Git-baseline record is an error
 and exits 2. A signed record without its matching trust key is also a
 configuration error and exits 2. These errors have no approval status. Artifact evaluation
-that aborts preserves its complete downstream envelope and exit: scenarios violations exit 1,
+in `approval create` and `approval check` that aborts preserves its complete downstream envelope and exit: scenarios violations exit 1,
 internal failures exit 3, and failed HTML reports retain `generated`/`html_report` and exit 1.
 A verification `result:"error"` during `--kind ledger` rerendering returns that envelope and
 its exit (2, or 3 for internal) in place of `drifted` or an artifact mismatch.
@@ -141,6 +141,11 @@ order and locations. Dependency-edition refusals retain priority over the underl
 artifact result. Successful scenarios artifacts retain their existing finalized root
 and dependency warnings before canonical serialization, preserving existing artifact
 digests and approval signatures.
+`fslc ledger --approval` does not propagate that envelope. When an `html` or `scenarios`
+record's rerender stops on a failed verification baseline, it returns `result:"error"`, exit 2,
+naming the record, and leaves the `-o` file untouched: passing exit 1 through would read as the
+ledger's own verdict while a stale file stayed in place. `ledger` and `requirements_document`
+records still complete, so the ledger is written and shows them `drifted`.
 Approval HTML rerendering uses no output path: inline content and default output metadata
 remain in memory, without an HTML file. Direct `html -o` instead writes its report even for a
 failed verification baseline; a write error exits 2 and outranks the baseline verdict.

@@ -328,8 +328,7 @@ pub fn exit_status_matches(
         }
         "generated" => {
             let report = match (command, output.get("kind").and_then(Value::as_str)) {
-                ("html", Some("html_report"))
-                | ("ledger", Some("audit_ledger" | "html_report")) => true,
+                ("html", Some("html_report")) | ("ledger", Some("audit_ledger")) => true,
                 ("approval", Some("html_report")) => {
                     matches!(subcommand, Some("create" | "check"))
                 }
