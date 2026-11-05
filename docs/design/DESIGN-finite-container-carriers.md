@@ -322,9 +322,10 @@ verdict. A map under `preserve progress` that the pulled `leadsTo` does not read
 `map same = m == y` for those Maps, and `cannot coerce` only when `leadsTo L { same and ... }` reads it. The
 candidate is the #1679 row above: one form's main result would go from `proved` to `unknown_cti`.
 
-**The matrix.** Generated, not retained, except for the bounded grid in the last row. These runs and the
-on-disk set below predate a rebase onto `156d9c8ee492ca86bc259bf03afbae96dc73ec33`, whose three commits change no file under
-`fsl-core`, `fsl-verifier`, `fsl-runtime`, `fsl-syntax` or the solver crates, so the head SHAs below name the branch before that rebase. Base
+**The matrix.** Generated, not retained, except for the bounded grid in the last row. These runs, the
+faults and the timings predate rebases onto `b2cdb394fedcba015261df05587c4721583329e3`, which brought changes to `fsl-core` (`dialect.rs`, `refinement.rs`,
+`resolve_aliases.rs`) and `fsl-syntax`, so the head SHAs in this table's run name the branch before them and these numbers were not rerun. The on-disk set
+below was. Base
 `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `25368adf49d32a3fc3af4168a50a0a08c1dea76c`. Each ran as
 `fslc check`, and where it passed as `verify --engine bmc --depth 2`, `--engine induction`,
 `--engine explicit --depth 2`, `fsl-bfs <spec> 2` and `fsl-replay-actions` with one `go`.
@@ -369,14 +370,14 @@ a shared classification as independent evidence, and this is not registered as a
 - Explicit, `fsl-bfs` and the Monitor, which evaluate without asking the rule. A rule that wrongly admits or rebuilds a value can disagree with them on a verdict. They run after the same `build_model`, so **a rule that wrongly refuses a form refuses it on every engine, and no agreement check sees that.** Only the tables and the pinned counts do.
 - **A rule wrongly admitting `Bool` and `Int` gets no refusal from `coerce`,** because its `Scalar` arm does not ask. With that fault, of 18 forms such as `c == n`, `old(c) == n`, `oc == some(n)` and `sc.contains(n)`, 17 pass `check`. bmc and induction stop all 17 with exit 2 `SMT term sort mismatch`, from the solver layer, and not `cannot coerce`. Explicit and `fsl-bfs` return a verdict on them. The fault is caught by `every_pair_of_carriers_answers_as_written`, by the engine table on `Set<Int>` to `Set<Bool>`, a collection row, since no row there asks for a bare scalar, and by 2 CLI tests that pin `check`'s message. [U] A mislabelled term no solver comparison reads was not tried.
 
-On-disk transition set (empty). Base as above, head `66a17a7f96278c4f5286261c5cf59ece43270618`, each built from its own tree in its own target directory
+On-disk transition set (empty). Base `b2cdb394fedcba015261df05587c4721583329e3`, head `683d12d99f5b3510101d4571b5e7e2db8fd1a444`, each built from its own tree in its own target directory
 with `cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -p fsl-runtime --bins --locked --offline`,
-Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (646 forms: 23/195/428) ran with
+Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (650 forms: 23/195/432) ran with
 `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable and with `FSLC_UNSTABLE=fsl5`, and as
-`fslc kernel <path> --kernel-version 1|2`, twice per side. All 2584 pairs had equal complete stdout, stderr and exit,
-with no field excluded: 0 ok-to-error and 0 error-to-ok, 0 unstable. Of the 425 forms base accepts, `verify --engine bmc
+`fslc kernel <path> --kernel-version 1|2`, twice per side. All 2600 pairs had equal complete stdout, stderr and exit,
+with no field excluded: 0 ok-to-error and 0 error-to-ok, 0 unstable. Of the 428 forms base accepts, `verify --engine bmc
 --depth 2` and `--engine induction` gave equal stdout, stderr and exit on both, once `elapsed_s` fields and `memory_mb`
-were excluded, because each differs between two runs of one binary: 303, 104 and 18 exit 0, 1 and 2 on bmc, 312, 95 and
+were excluded, because each differs between two runs of one binary: 305, 105 and 18 exit 0, 1 and 2 on bmc, 314, 96 and
 18 on induction, none reporting `cannot coerce`.
 
 Inline inputs of `issue_1679_carrier_equality`, whose third-route test this rewrites and renames, and of
