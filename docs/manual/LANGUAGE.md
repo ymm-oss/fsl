@@ -1264,14 +1264,22 @@ name in a `decreases` call. There are no unrelated breaking removals.
   decision. A `--lemma` candidate keeps the rule above as well: with such a mismatch it is
   `rejected` with `cannot coerce`, `used` is false and the main result does not change, and a
   mismatch it never evaluates leaves it usable. **Breaking removal (#1683):** a literal under
-  `old(...)` is typed against what surrounds it, in `check` and in evaluation, as it is outside
-  `old(...)`. So a Map it holds answers to the rule above: `some(m0) == old(some(m1))`,
-  `some(m0) != old(some(m1))`, `Set { m0 } == old(Set { m1 })` and `Seq { m0 } == old(Seq { m1 })` are
-  refused, including under an empty-domain `forall` or `exists`, where they returned a verdict
-  before; where they are evaluated, they reported `cannot coerce`. A range-typed literal there
+  `old(...)` that can type itself is also typed against what surrounds it, in `check` and in
+  evaluation. So a Map held at any depth below `some`, Set and Seq literals and conditional arms there
+  answers to the rule above: `some(m0) == old(some(m1))`, `some(m0) != old(some(m1))`,
+  `Set { m0 } == old(Set { m1 })`, `Seq { m0 } == old(Seq { m1 })` and
+  `Set { m0 } == old(Set { if c then m1 else m1 })` are refused. Where such a form is evaluated, bmc
+  and induction reported `cannot coerce`, while explicit and `fsl-bfs` returned a verdict, `violated`
+  included, and that verdict is lost. Under an empty-domain `forall` or `exists` it is lost on bmc and
+  induction too. The refusal comes before property selection, so `--exclude-property` does not avoid
+  it, and a form it would have left out now hides another property's counterexample behind exit 2
+  until the form is rewritten. A literal that cannot type itself stays refused under `old(...)` though
+  it passes outside: `a == old(Set {})`, `sa == old(Seq {})` and `oa == old(none)`. A range-typed literal
   used to pass `check` and report `cannot coerce` on bmc and induction, and now returns a result
   that agrees with explicit: `a == old(Set { vb })`, `sa == old(Seq { vb })` and
-  `sa == old(Seq { va })` for `vb: 0..2`, `a: Set<A>`, `sa: Seq<A, 2>`.
+  `sa == old(Seq { va })` for `vb: 0..2`, `a: Set<A>`, `sa: Seq<A, 2>`. A literal past capacity, as in
+  `sb != old(Seq { va, va, va })` for `sb: Seq<B, 2>`, can instead end in `model sequence length exceeds
+  capacity` on induction, as the same form outside `old(...)` does.
   Migration: declare the two values with one carrier, or compare the entries (`m0[k] == m1[k]`).
   In mutate, a statically ill-typed implements map is `invalid`, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map

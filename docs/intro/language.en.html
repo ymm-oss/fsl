@@ -1311,14 +1311,22 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   decision. A <code>--lemma</code> candidate keeps the rule above as well: with such a mismatch it is
   <code>rejected</code> with <code>cannot coerce</code>, <code>used</code> is false and the main result does not change, and a
   mismatch it never evaluates leaves it usable. <strong>Breaking removal (#1683):</strong> a literal under
-  <code>old(...)</code> is typed against what surrounds it, in <code>check</code> and in evaluation, as it is outside
-  <code>old(...)</code>. So a Map it holds answers to the rule above: <code>some(m0) == old(some(m1))</code>,
-  <code>some(m0) != old(some(m1))</code>, <code>Set { m0 } == old(Set { m1 })</code> and <code>Seq { m0 } == old(Seq { m1 })</code> are
-  refused, including under an empty-domain <code>forall</code> or <code>exists</code>, where they returned a verdict
-  before; where they are evaluated, they reported <code>cannot coerce</code>. A range-typed literal there
+  <code>old(...)</code> that can type itself is also typed against what surrounds it, in <code>check</code> and in
+  evaluation. So a Map held at any depth below <code>some</code>, Set and Seq literals and conditional arms there
+  answers to the rule above: <code>some(m0) == old(some(m1))</code>, <code>some(m0) != old(some(m1))</code>,
+  <code>Set { m0 } == old(Set { m1 })</code>, <code>Seq { m0 } == old(Seq { m1 })</code> and
+  <code>Set { m0 } == old(Set { if c then m1 else m1 })</code> are refused. Where such a form is evaluated, bmc
+  and induction reported <code>cannot coerce</code>, while explicit and <code>fsl-bfs</code> returned a verdict, <code>violated</code>
+  included, and that verdict is lost. Under an empty-domain <code>forall</code> or <code>exists</code> it is lost on bmc and
+  induction too. The refusal comes before property selection, so <code>--exclude-property</code> does not avoid
+  it, and a form it would have left out now hides another property's counterexample behind exit 2
+  until the form is rewritten. A literal that cannot type itself stays refused under <code>old(...)</code> though
+  it passes outside: <code>a == old(Set {})</code>, <code>sa == old(Seq {})</code> and <code>oa == old(none)</code>. A range-typed literal
   used to pass <code>check</code> and report <code>cannot coerce</code> on bmc and induction, and now returns a result
   that agrees with explicit: <code>a == old(Set { vb })</code>, <code>sa == old(Seq { vb })</code> and
-  <code>sa == old(Seq { va })</code> for <code>vb: 0..2</code>, <code>a: Set&lt;A&gt;</code>, <code>sa: Seq&lt;A, 2&gt;</code>.
+  <code>sa == old(Seq { va })</code> for <code>vb: 0..2</code>, <code>a: Set&lt;A&gt;</code>, <code>sa: Seq&lt;A, 2&gt;</code>. A literal past capacity, as in
+  <code>sb != old(Seq { va, va, va })</code> for <code>sb: Seq&lt;B, 2&gt;</code>, can instead end in <code>model sequence length exceeds
+  capacity</code> on induction, as the same form outside <code>old(...)</code> does.
   Migration: declare the two values with one carrier, or compare the entries (<code>m0[k] == m1[k]</code>).
   In mutate, a statically ill-typed implements map is <code>invalid</code>, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map
