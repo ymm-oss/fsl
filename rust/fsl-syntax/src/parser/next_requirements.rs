@@ -202,6 +202,41 @@ fn link_to_owner(cover: &mut ProcessCover, owned: &OwnedTitles) {
     }
 }
 
+/// Refuse a `covers` of an ID no declaration owns whose text differs from an earlier
+/// `covers` of it, at the later `covers`. Events' and decision rows' `covers` count alike,
+/// across the whole document; the ledger kept one row and lost the other text (#1705).
+fn reject_differing_links(
+    owned: &OwnedTitles,
+    links: impl Iterator<Item = ProcessCover>,
+) -> Result<(), ParseError> {
+    let mut links: Vec<_> = links
+        .filter(|cover| !owned.contains_key(&cover.id))
+        .collect();
+    links.sort_by_key(|cover| cover.span.start.offset);
+    let mut first = BTreeMap::<String, ProcessCover>::new();
+    for cover in links {
+        let Some(earlier) = first.get(&cover.id) else {
+            first.insert(cover.id.clone(), cover);
+            continue;
+        };
+        if earlier.text != cover.text {
+            return Err(ParseError::new(
+                format!(
+                    "requirement ID '{}' is covered as \"{}\" here and as \"{}\" at {}:{}; \
+                     every covers of an ID no declaration owns has one text",
+                    cover.id,
+                    cover.text,
+                    earlier.text,
+                    earlier.span.start.line,
+                    earlier.span.start.column
+                ),
+                cover.span,
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The keywords whose second owner of an ID an existing check already refuses: a
 /// repeated acceptance or forbidden ID, and a repeated goal or policy property.
 const OWNERS_REFUSED_ELSEWHERE: [&str; 4] = ["scenario", "forbidden", "goal", "policy"];
@@ -1272,6 +1307,18 @@ impl Pending {
         }
         reject_second_owners(&self.owners)?;
         let owned = self.owned_titles();
+        reject_differing_links(
+            &owned,
+            self.events
+                .iter()
+                .flat_map(|event| &event.covers)
+                .chain(
+                    self.decisions
+                        .iter()
+                        .flat_map(decide::DecideDeclaration::links),
+                )
+                .cloned(),
+        )?;
         let mut instance_bounds = BTreeMap::new();
         for item in &items {
             match item {

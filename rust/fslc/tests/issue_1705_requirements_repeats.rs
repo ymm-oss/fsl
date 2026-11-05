@@ -5,7 +5,8 @@
 //! owning one requirement ID passed `check`. For the ID, the ledger kept one row with one
 //! title and one status for the two. Each is now refused at the repeat, on every route
 //! that loads the document. Two `covers` of one ID with one text are a link and stay
-//! accepted, and a `covers` of an ID another declaration owns shows the owner's title.
+//! accepted; with two texts anywhere in the document they are refused. A `covers` of an
+//! ID another declaration owns stays accepted and shows the owner's title.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -190,6 +191,20 @@ fn owner(id: &str, kind: &str, first: &str, at: (u32, u32)) -> String {
     )
 }
 
+fn differing_link(id: &str, text: &str, first: &str, at: (u32, u32)) -> String {
+    format!(
+        "requirement ID '{id}' is covered as \"{text}\" here and as \"{first}\" at {}:{}; every \
+         covers of an ID no declaration owns has one text",
+        at.0, at.1
+    )
+}
+
+/// `source` with `text` inserted after `anchor`.
+fn after(source: &str, anchor: &str, text: &str) -> String {
+    assert!(source.contains(anchor), "{anchor}");
+    source.replacen(anchor, &format!("{anchor}{text}"), 1)
+}
+
 /// `source` with `text` inserted before `anchor`.
 fn before(source: &str, anchor: &str, text: &str) -> String {
     assert!(source.contains(anchor), "{anchor}");
@@ -317,8 +332,7 @@ fn two_covers_of_one_id_need_one_text() {
     assert_eq!(
         summary(&check("covers_differ", &differing)),
         refusal(
-            "decision table 'REQ-2-3' covers 'REQ-2' twice with different texts; a covered ID \
-             names one requirement",
+            &differing_link("REQ-2", "dup", "A small claim is auto-approved", (20, 7)),
             22,
             7
         )
@@ -344,6 +358,130 @@ fn two_covers_of_one_id_need_one_text() {
     );
 }
 
+/// Every `covers` of an ID no declaration owns needs one text across the whole document:
+/// two events, two tables, and an event and a row. Base accepted the first two and kept
+/// one text in the ledger; the third was a conflict on one action.
+#[test]
+fn every_covers_of_an_unowned_id_needs_one_text() {
+    let close = "  event close = Agent closes Ticket Assigned -> Closed\n";
+    let withdraw = "  event withdraw = Agent withdraws Ticket Open -> Withdrawn\n";
+    let events = after(
+        &after(DESK, close, "    covers REQ-EV-1 \"closing\"\n"),
+        withdraw,
+        "    covers REQ-EV-1 \"withdrawing\"\n",
+    );
+    assert_eq!(
+        summary(&check("links_events", &events)),
+        refusal(
+            &differing_link("REQ-EV-1", "withdrawing", "closing", (15, 5)),
+            19,
+            5
+        )
+    );
+    let tables = after(
+        CLAIMS,
+        "  } assuming amount > 0\n",
+        "  decide REQ-9 \"Submission\" for Draft Claim {
+    SmallClaim => Employee submits
+      covers REQ-2 \"other\"
+    LargeClaim => Employee submits
+      covers REQ-2 \"other\"
+  }
+",
+    );
+    assert_eq!(
+        summary(&check("links_tables", &tables)),
+        refusal(
+            &differing_link("REQ-2", "other", "A small claim is auto-approved", (20, 7)),
+            26,
+            7
+        )
+    );
+    let mixed = after(
+        CLAIMS,
+        "  event reject = Manager rejects Claim Submitted -> Rejected\n",
+        "    covers REQ-3 \"other\"\n",
+    );
+    assert_eq!(
+        summary(&check("links_mixed", &mixed)),
+        refusal(
+            &differing_link(
+                "REQ-3",
+                "A large claim is approved or rejected by a manager",
+                "other",
+                (18, 5)
+            ),
+            23,
+            7
+        )
+    );
+    let same = after(DESK, withdraw, "    covers REQ-EV-1 \"closing\"\n");
+    let same = after(&same, close, "    covers REQ-EV-1 \"closing\"\n");
+    assert_eq!(check("links_same", &same).0, 0);
+}
+
+/// A row covering its own table's ID with another text stays refused: it lands on the
+/// table's own event, which already carries the ID with the table's title.
+#[test]
+fn a_row_covering_its_own_table_with_another_text_stays_refused() {
+    let own = CLAIMS.replacen(
+        "covers REQ-3 \"A large claim is approved or rejected by a manager\"",
+        "covers REQ-2-3 \"different\"",
+        1,
+    );
+    assert_eq!(
+        summary(&check("own_table", &own)),
+        json!({
+            "exit": 2,
+            "result": "error",
+            "kind": "semantics",
+            "message": "requirement annotation 'REQ-2-3' has conflicting text at 22:7",
+            "loc": {"line": 22, "column": 7},
+        })
+    );
+}
+
+/// An event's `covers` of an ID a forbidden, policy, goal or scenario owns shows the
+/// owner's title in the ledger; base showed the `covers` text.
+#[test]
+fn a_covers_of_another_owner_kind_shows_its_title() {
+    let take = "  event take = Agent takes Ticket Open -> Assigned\n";
+    let close = "  event close = Agent closes Ticket Assigned -> Closed\n";
+    let cases = [
+        (
+            take,
+            "FB-DESK-001",
+            "No ticket is taken once the desk has closed",
+        ),
+        (
+            close,
+            "POL-TICKET-001",
+            "Every assigned ticket is eventually closed or escalated",
+        ),
+        (close, "GOAL-TICKET-001", "A ticket can be closed"),
+        (close, "AC-TICKET-001", "An agent takes and closes a ticket"),
+    ];
+    for (event, id, title) in cases {
+        let source = after(DESK, event, &format!("    covers {id} \"different\"\n"));
+        let scratch = Scratch::new(id, &[("doc.fsl", &source)]);
+        assert_eq!(scratch.fslc(&["check", "doc.fsl"]).0, 0, "{id}");
+        let (exit, _) = scratch.fslc(&["ledger", "doc.fsl", "--depth", "6", "-o", "ledger.md"]);
+        assert_eq!(exit, 0, "{id}");
+        let ledger = scratch.read("ledger.md");
+        let rows: Vec<_> = ledger
+            .lines()
+            .filter(|line| line.starts_with(&format!("| {id} |")))
+            .collect();
+        assert_eq!(rows.len(), 1, "{id}: {ledger}");
+        assert!(
+            rows[0].starts_with(&format!("| {id} | {title} |")),
+            "{}",
+            rows[0]
+        );
+        assert!(!ledger.contains("different"), "{id}: {ledger}");
+    }
+}
+
 /// A rule owning `REQ-2`, after the decision table: line 24 of `CLAIMS`.
 const RULE_2: &str = "  rule REQ-2 \"Only a manager rejects a large claim\" { allow Manager rejects \
                       Claim only when amount >= 2 }\n";
@@ -365,6 +503,12 @@ fn a_covers_of_an_owned_id_shows_the_owners_title() {
             &format!("{reject}    covers REQ-2 \"A claim can be rejected\"\n"),
             1,
         );
+    let owned_twice = row.replacen(
+        "covers REQ-3 \"A large claim is approved or rejected by a manager\"",
+        "covers REQ-2 \"other\"",
+        1,
+    );
+    assert_eq!(check("covers_owned_twice", &owned_twice).0, 0);
     let cases = [
         (
             "covers_row",
