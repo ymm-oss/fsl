@@ -241,6 +241,7 @@ wrappers.
 | `fsl-core/src/bin/fsl-parse-kernel.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
 | `fsl-core/src/compose.rs` | `ParseOptions::stable` | 3 | Definition | STABLE_WRAPPER |
 | `fsl-core/src/dialect.rs` | `ParseOptions::stable` | 5 | Definition | STABLE_WRAPPER |
+| `fsl-core/src/issue_1683_old_walk_tests.rs` | `parse_kernel_source` | 1 | Definition | FIXTURE |
 | `fsl-core/src/lib.rs` | `ParseOptions::stable` | 4 | Definition | STABLE_WRAPPER |
 | `fsl-core/src/lib.rs` | `parse_document` | 1 | Definition | DIRECT_KERNEL |
 | `fsl-core/src/refinement.rs` | `ParseOptions::stable` | 2 | Definition | STABLE_WRAPPER |
@@ -268,6 +269,7 @@ wrappers.
 | `fsl-tools/src/causal.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
 | `fsl-tools/src/document_project.rs` | `ParseOptions::stable` | 2 | Definition | STABLE_WRAPPER |
 | `fsl-tools/src/document_render.rs` | `ParseOptions::stable` | 1 | Definition | STABLE_WRAPPER |
+| `fsl-verifier/src/carrier_coercion_tests.rs` | `parse_kernel_source` | 1 | Definition | FIXTURE |
 | `fsl-verifier/src/eval/scope_tests.rs` | `parse_kernel_source` | 1 | Definition | FIXTURE |
 | `fslc/src/bin/fsl-bmc.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
 | `fslc/src/bin/fsl-replay-actions.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
@@ -289,6 +291,9 @@ the runtime and `scope_model` in the verifier. Their parent modules are
 matrix to an inline published-language spec template. They never parse a user
 document or receive process parse options. These are `Definition`/`FIXTURE`
 references, not unrouted production parsers or exclusions from the scanner.
+`visits` in `fsl-core/src/issue_1683_old_walk_tests.rs` and `model` in
+`fsl-verifier/src/carrier_coercion_tests.rs` are the same kind of helper: each lives in a
+`#[cfg(test)]` module and parses one published-language string written in that file.
 
 The #1417 baseline adapter removes the duplicate causal preparse from `main.rs`;
 baseline verification now reaches the existing `verification.rs` entries above.
