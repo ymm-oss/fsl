@@ -4559,34 +4559,6 @@ relation events similarly take an implicit instance of their target actor.
 Those visible names also reject matching consts, at the generated init's source
 process/entity declaration or the relation event declaration. Hidden KPI
 projection bindings are not source names and instead freshen on collision.</p>
-<p><strong>Repeated scenario step inputs (breaking removal, #1682).</strong> In an <code>fsl 5</code>
-document, <code>check</code> refuses a <code>scenario</code> or <code>forbidden</code> step that names an input
-twice, with exit 2, <code>kind: "semantics"</code>, the message
-<code>duplicate step input 'amount' at doc.fsl:43:44</code> and <code>loc</code> at the repeated name.
-The step used to keep the last value and drop the others, so swapping the two
-values changed the result. These forms passed <code>check</code> and are now refused:</p>
-<ul>
-<li><code>Employee submits claim1 with amount 2, amount 1</code>, in either order, with equal
-  values, or written <code>Employee claim1 submits with ...</code>.</li>
-<li><code>従業員 が 申請1 を 申請金額 2, 申請金額 1 で 提出する</code>, the same input in two
-  <code>で</code> groups, or an alias and its canonical name, which are one input.</li>
-<li><code>Agent takes t1 with assignee 0, assignee 1</code>, the role of a relation event.</li>
-</ul>
-<p>The refusal reaches every route that loads the document: <code>verify</code>, <code>kernel</code>,
-<code>refine</code>, <code>replay</code>, <code>scenarios</code>, <code>testgen</code>, <code>mutate</code>, <code>html</code>, <code>ledger</code>, <code>diff</code>,
-<code>explain</code>, <code>analyze</code>, <code>conformance</code> and <code>typestate</code> no longer return their
-results on these forms, and <code>lint</code> and <code>fmt</code> give the same message with no <code>loc</code>.
-<code>kernel</code> version 1 and <code>typestate</code> omit the file from the message, and <code>kernel</code>
-version 2 names it by a longer path. Through an inline
-<code>implements</code> of such a document, the report is
-<code>implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)</code>,
-with <code>kind: "type"</code> and <code>loc</code> on the <code>implements</code>. A step that already has a parse
-error keeps it: <code>with amount 1, nope 2, nope 3</code> still reports
-<code>event 'submit' has no input 'nope'</code>. Two different inputs may come in any order,
-and a later step may name the same input again. Migration: keep the one value you
-mean. There is no automatic migration. See
-<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-dialects.md"><code>DESIGN-dialects.md</code></a>, "Repeated scenario step
-inputs (#1682)".</p>
 <h3 id="133-consulting-layer-business-the-fsl-biz-dialect">13.3 Consulting layer: <code>business</code> (the fsl-biz dialect)</h3>
 <p>Write business processes, policies, and KPIs with zero implementation
 vocabulary (syntax details in <code>DESIGN-dialects.md</code> §3). A process expands into

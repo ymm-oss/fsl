@@ -374,6 +374,21 @@ tree as cwd, as `fslc check <path>` stable and with `FSLC_UNSTABLE=fsl5`, and as
 stdout, stderr and exit with no field excluded, and no run differed from its repeat: 0
 ok-to-error and 0 error-to-ok transitions. No required test's inline fixtures were rewritten.
 
+**Owed to #1437.** This removal is recorded only here and in
+`changelog.d/1682-repeated-step-inputs.changed.md`: the next edition's header may not appear in
+published material until #1434 lifts the gate (`rust/fslc/tests/unstable_gate_leak.rs`), so
+`docs/manual/LANGUAGE.md`, `docs/manual/LANGUAGE.ja.md` and `skills/fsl/references/syntax.md` do not
+carry it yet. When #1437 writes the `fsl 5` reference, those three owe this text, regenerating
+`docs/intro/language.{en,ja}.html`: a `scenario` or `forbidden` step that names an input twice is
+refused with exit 2, `kind: "semantics"`, `duplicate step input 'amount' at doc.fsl:43:44` and `loc` at
+the repeated name, covering `with`, instance first, a `で` list, two `で` groups, an alias with its
+canonical name, and a relation role. `lint` and `fmt` omit `loc`. `kernel` version 1 and `typestate`
+omit the file from the message, and `kernel` version 2 prints a longer path. An inline `implements`
+reports `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)`, `kind:
+"type"`, with `loc` on the `implements`. A step with a parse error keeps that error. Different inputs
+in any order, and the same input in a later step, stay accepted. Migration: keep the one value you
+mean.
+
 ### 2.3 Tests (tests/test_req_dialect.py)
 
 Use the return requirements (almost the same as §2.1) as a fixture:

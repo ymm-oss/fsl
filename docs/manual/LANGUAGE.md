@@ -4393,35 +4393,6 @@ Those visible names also reject matching consts, at the generated init's source
 process/entity declaration or the relation event declaration. Hidden KPI
 projection bindings are not source names and instead freshen on collision.
 
-**Repeated scenario step inputs (breaking removal, #1682).** In an `fsl 5`
-document, `check` refuses a `scenario` or `forbidden` step that names an input
-twice, with exit 2, `kind: "semantics"`, the message
-`duplicate step input 'amount' at doc.fsl:43:44` and `loc` at the repeated name.
-The step used to keep the last value and drop the others, so swapping the two
-values changed the result. These forms passed `check` and are now refused:
-
-- `Employee submits claim1 with amount 2, amount 1`, in either order, with equal
-  values, or written `Employee claim1 submits with ...`.
-- `従業員 が 申請1 を 申請金額 2, 申請金額 1 で 提出する`, the same input in two
-  `で` groups, or an alias and its canonical name, which are one input.
-- `Agent takes t1 with assignee 0, assignee 1`, the role of a relation event.
-
-The refusal reaches every route that loads the document: `verify`, `kernel`,
-`refine`, `replay`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`,
-`explain`, `analyze`, `conformance` and `typestate` no longer return their
-results on these forms, and `lint` and `fmt` give the same message with no `loc`.
-`kernel` version 1 and `typestate` omit the file from the message, and `kernel`
-version 2 names it by a longer path. Through an inline
-`implements` of such a document, the report is
-`implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)`,
-with `kind: "type"` and `loc` on the `implements`. A step that already has a parse
-error keeps it: `with amount 1, nope 2, nope 3` still reports
-`event 'submit' has no input 'nope'`. Two different inputs may come in any order,
-and a later step may name the same input again. Migration: keep the one value you
-mean. There is no automatic migration. See
-[`DESIGN-dialects.md`](../design/DESIGN-dialects.md), "Repeated scenario step
-inputs (#1682)".
-
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 
 Write business processes, policies, and KPIs with zero implementation

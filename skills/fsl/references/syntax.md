@@ -168,20 +168,6 @@ verify {
 }
 ```
 
-Breaking removal (#1682): in an `fsl 5` document, `check` refuses a `scenario` or
-`forbidden` step that names an input twice, with exit 2, `kind: "semantics"`,
-`duplicate step input 'amount' at doc.fsl:43:44` and `loc` at the repeated name. The
-step used to keep the last value, so swapping values changed the result. This covers
-`with amount 2, amount 1` in either order or with equal values, the same input in a
-`で` list or two `で` groups, an alias with its canonical name, and a relation role
-(`with assignee 0, assignee 1`). Every route that loads the document refuses; `lint`
-and `fmt` omit `loc`, and an inline `implements` reports
-`implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)`
-with `kind: "type"` and `loc` on the `implements`. A step with a parse error keeps
-that error. Different inputs in any order, and the same input in a later step, stay
-accepted. Migration: keep the one value you mean. See
-`docs/design/DESIGN-dialects.md`.
-
 Breaking removals (#1552, #1561): for requirements `rule ... only when` conditions,
 `check` now rejects previously accepted unsatisfiable guards that reuse an entity
 field's name as an `is` pattern inside a quantifier body or aggregate value. The

@@ -4101,33 +4101,6 @@ instance に使い、relation event は相手の actor の暗黙の instance も
 relation 引数は元の event 宣言を指します。source から見えない KPI 射影の binder は
 この制限とは別で、衝突するときだけ fresh にします。
 
-**シナリオ step の入力の重複 (破壊的な削除、#1682)。** `fsl 5` の文書では、同じ入力を
-2 度指定する `scenario` / `forbidden` の step を `check` が拒否します。exit 2、
-`kind: "semantics"`、メッセージは `duplicate step input 'amount' at doc.fsl:43:44`、
-`loc` は 2 度目の名前です。以前は最後の値だけを残して他を捨てていたため、2 つの値を
-入れ替えると結果が変わりました。次の形は `check` を通っていましたが、今は拒否されます:
-
-- `Employee submits claim1 with amount 2, amount 1`。順序が逆でも、値が同じでも、
-  `Employee claim1 submits with ...` と書いても同じです。
-- `従業員 が 申請1 を 申請金額 2, 申請金額 1 で 提出する`。同じ入力を 2 つの `で` に
-  分けた形や、別名と正規名を並べた形も同じです。別名と正規名は 1 つの入力です。
-- `Agent takes t1 with assignee 0, assignee 1`。関係を作る event の役割も入力です。
-
-拒否は文書を読み込むすべての経路に及びます。これらの形に対して `verify`、`kernel`、
-`refine`、`replay`、`scenarios`、`testgen`、`mutate`、`html`、`ledger`、`diff`、
-`explain`、`analyze`、`conformance`、`typestate` は結果を返さなくなり、`lint` と
-`fmt` は同じメッセージを `loc` なしで返します。`kernel` バージョン 1 と `typestate` の
-メッセージにはファイル名が入らず、`kernel` バージョン 2 はより長いパスで示します。
-そのような文書を inline の `implements` で読むと、報告は
-`implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)` で、
-`kind: "type"`、`loc` は `implements` です。すでに構文エラーがある step はそのエラーの
-ままです。`with amount 1, nope 2, nope 3` は引き続き
-`event 'submit' has no input 'nope'` を報告します。異なる 2 つの入力はどの順でも書けて、
-後の step が同じ入力をもう一度指定することもできます。移行: 意図する値を 1 つだけ
-残してください。自動移行はありません。
-[`DESIGN-dialects.md`](../design/DESIGN-dialects.md) の "Repeated scenario step
-inputs (#1682)" を参照してください。
-
 ### 13.3 業務コンサルティングレイヤー: `business`(fsl-biz ダイアレクト)
 
 業務プロセス、ポリシー、KPI を、実装の語彙ゼロで書きます(構文の詳細は
