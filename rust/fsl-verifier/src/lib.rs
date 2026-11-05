@@ -4,6 +4,8 @@
 
 mod agreement;
 mod bmc;
+#[cfg(test)]
+mod carrier_coercion_tests;
 mod eval;
 mod induction;
 mod init_definedness;

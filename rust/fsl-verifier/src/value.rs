@@ -204,30 +204,6 @@ impl<T> SymbolicValue<T> {
             Self::None | Self::SetLiteral(_) | Self::SeqLiteral(_) => None,
         }
     }
-
-    fn inferred_collection_element<'a>(&self, target: &'a TypeRef) -> Option<&'a TypeRef> {
-        match (self, target) {
-            (
-                Self::Collection {
-                    ty: TypeRef::Set(source),
-                    ..
-                }
-                | Self::Set {
-                    ty: TypeRef::Set(source),
-                    ..
-                },
-                TypeRef::Set(element),
-            )
-            | (
-                Self::Seq {
-                    ty: TypeRef::Seq(source, _),
-                    ..
-                },
-                TypeRef::Seq(element, _),
-            ) if **source == TypeRef::Int || **element == TypeRef::Int => Some(element),
-            _ => None,
-        }
-    }
 }
 
 pub(crate) fn solver_sort(model: &KernelModel, ty: &TypeRef) -> Result<Sort, VerifyError> {
@@ -1232,22 +1208,6 @@ fn term_for_key<'a, K: PartialEq, T>(entries: &'a [(K, T)], key: &K) -> Result<&
         .ok_or_else(|| VerifyError::new("finite collection domain mismatch"))
 }
 
-fn can_retag<T>(
-    value: &SymbolicValue<T>,
-    ty: &TypeRef,
-    model: &KernelModel,
-) -> Result<bool, VerifyError> {
-    Ok(value.ty() == Some(ty)
-        || matches!(
-            ty,
-            TypeRef::Set(_) | TypeRef::Seq(_, _) | TypeRef::Map(_, _) | TypeRef::Relation(_, _)
-        ) && value
-            .ty()
-            .map(|actual| model.same_carrier(actual, ty))
-            .transpose()?
-            == Some(true))
-}
-
 #[allow(clippy::too_many_lines)]
 pub(crate) fn coerce<S: SmtSolver>(
     solver: &S,
@@ -1341,41 +1301,35 @@ pub(crate) fn coerce<S: SmtSolver>(
                 len: solver.int_value(i64_index(items.len())?),
             })
         }
-        (value, ty)
-            if value
-                .inferred_collection_element(ty)
-                .is_some_and(|element| solver_sort(model, element).is_ok()) =>
-        {
-            coerce_inferred_collection(solver, model, value, ty)
-        }
         (SymbolicValue::Scalar { term, .. }, ty) if solver_sort(model, ty).is_ok() => {
             Ok(SymbolicValue::Scalar {
                 ty: ty.clone(),
                 term,
             })
         }
-        (mut value, ty) if can_retag(&value, ty, model)? => {
-            set_value_type(&mut value, ty.clone());
-            Ok(value)
-        }
-        // A collection holding `Int` below an element that no literal expectation typed:
-        // bound by `let` or `is`, a method's result or argument, or read back out of
-        // one, wherever the expression is written. Its nested `Int` elements are
-        // converted the way an element of `Int` is. After retagging, so only a value
-        // that had no coercion before reaches this.
-        (value, ty)
-            if value
+        // A literal has no carrier of its own, so its arms above type each element, and
+        // a scalar is one term whatever it is labelled. The rest answer the carrier rule
+        // `check` asks (#1683). `RebuildInt` covers a collection holding `Int`, bound by
+        // `let` or `is`, a method's result or argument, or read back out of one.
+        (mut value, ty) => {
+            let answer = value
                 .ty()
                 .map(|actual| model.carrier_coercion(actual, ty))
-                .transpose()?
-                == Some(fsl_core::CarrierCoercion::RebuildInt) =>
-        {
-            coerce_inferred_collection(solver, model, value, ty)
+                .transpose()?;
+            match answer {
+                Some(fsl_core::CarrierCoercion::Retag) => {
+                    set_value_type(&mut value, ty.clone());
+                    Ok(value)
+                }
+                Some(fsl_core::CarrierCoercion::RebuildInt) => {
+                    coerce_inferred_collection(solver, model, value, ty)
+                }
+                _ => Err(VerifyError::new(format!(
+                    "cannot coerce symbolic value {:?} to {ty:?}",
+                    value.ty()
+                ))),
+            }
         }
-        (value, ty) => Err(VerifyError::new(format!(
-            "cannot coerce symbolic value {:?} to {ty:?}",
-            value.ty()
-        ))),
     }
 }
 

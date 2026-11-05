@@ -542,52 +542,14 @@ fn has_int(ty: &TypeRef) -> bool {
     }
 }
 
-fn compatible_carrier(
-    actual: &TypeRef,
-    expected: &TypeRef,
-    model: &KernelModel,
-) -> Result<bool, TypecheckError> {
-    if has_int(actual) || has_int(expected) {
-        types_compatible(actual, expected, model)
-    } else {
-        same_carrier(actual, expected, model)
-    }
-}
-
+/// Whether a value of `actual` may stand where `expected` is written: every answer of
+/// [`carrier_coercion`] except `NotAssignable`.
 pub(crate) fn types_compatible(
     actual: &TypeRef,
     expected: &TypeRef,
     model: &KernelModel,
 ) -> Result<bool, TypecheckError> {
-    let actual = resolve(model, actual)?;
-    let expected = resolve(model, expected)?;
-    Ok(match (&actual, &expected) {
-        (TypeRef::Int | TypeRef::Range(_, _), TypeRef::Int | TypeRef::Range(_, _))
-        | (TypeRef::Bool, TypeRef::Bool) => true,
-        (TypeRef::Named(actual), TypeRef::Named(expected)) => actual == expected,
-        (TypeRef::Option(actual), TypeRef::Option(expected)) => {
-            types_compatible(actual, expected, model)?
-        }
-        (TypeRef::Set(actual), TypeRef::Set(expected)) => {
-            compatible_carrier(actual, expected, model)?
-        }
-        (TypeRef::Seq(actual, actual_capacity), TypeRef::Seq(expected, expected_capacity)) => {
-            (actual_capacity == expected_capacity || has_int(actual) || has_int(expected))
-                && compatible_carrier(actual, expected, model)?
-        }
-        (TypeRef::Map(actual_key, actual_value), TypeRef::Map(expected_key, expected_value)) => {
-            compatible_carrier(actual_key, expected_key, model)?
-                && compatible_carrier(actual_value, expected_value, model)?
-        }
-        (
-            TypeRef::Relation(actual_key, actual_value),
-            TypeRef::Relation(expected_key, expected_value),
-        ) => {
-            same_carrier(actual_key, expected_key, model)?
-                && same_carrier(actual_value, expected_value, model)?
-        }
-        _ => false,
-    })
+    Ok(carrier_coercion(actual, expected, model)? != CarrierCoercion::NotAssignable)
 }
 
 pub(crate) fn expression_type(
@@ -760,19 +722,24 @@ fn ensure_assignable_inner(
     }
 }
 
-/// What reading a value of one container type as another takes. `check` refuses a
-/// `MapMismatch`, and symbolic evaluation rebuilds a value on `RebuildInt`, so both
-/// sides answer from this one rule (#1679).
+/// What reading a value of one type as another takes. The one carrier rule (#1683):
+/// assignability, `check`'s refusal of a Map and symbolic coercion all answer from it.
+/// Only `NotAssignable` and `MapMismatch` are refusals, and which of them applies at an
+/// expression depends on whether that position reaches coercion, which a type cannot
+/// say (`ValidationPhase::symbolic`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CarrierCoercion {
-    /// `Int` stands for a scalar below any Option, Set or Seq: a literal can infer it,
-    /// and coercion rebuilds the value element by element.
+    /// The same carrier, or two scalars of one kind. A value keeps its representation.
+    Retag,
+    /// `Int` stands for a scalar below an Option, Set or Seq: a literal can infer it, so
+    /// the carriers differ and coercion rebuilds the value element by element. An
+    /// Option of different scalars also answers this, as its value is always rebuilt.
     RebuildInt,
-    /// Two Maps of different carriers. No literal or inference produces a Map, and its
-    /// coercion can only retag it, so its carriers must agree.
+    /// Two Maps of different carriers, at any depth. They were assignable through `Int`,
+    /// but no literal or inference produces a Map and coercion can only retag one.
     MapMismatch,
-    /// Neither of those; the compatibility rule and retagging decide.
-    Other,
+    /// No rule relates the two.
+    NotAssignable,
 }
 
 pub(crate) fn carrier_coercion(
@@ -780,19 +747,65 @@ pub(crate) fn carrier_coercion(
     expected: &TypeRef,
     model: &KernelModel,
 ) -> Result<CarrierCoercion, TypecheckError> {
-    Ok(match (resolve(model, actual)?, resolve(model, expected)?) {
-        (TypeRef::Int, TypeRef::Int | TypeRef::Range(_, _))
-        | (TypeRef::Range(_, _), TypeRef::Int) => CarrierCoercion::RebuildInt,
-        (TypeRef::Map(_, _), TypeRef::Map(_, _)) if !same_carrier(actual, expected, model)? => {
-            CarrierCoercion::MapMismatch
+    use CarrierCoercion::{MapMismatch, NotAssignable, RebuildInt, Retag};
+    let (actual, expected) = (resolve(model, actual)?, resolve(model, expected)?);
+    let below = match (&actual, &expected) {
+        (TypeRef::Int | TypeRef::Range(_, _), TypeRef::Int | TypeRef::Range(_, _))
+        | (TypeRef::Bool, TypeRef::Bool) => return Ok(Retag),
+        (TypeRef::Named(left), TypeRef::Named(right)) => {
+            return Ok(if left == right { Retag } else { NotAssignable });
         }
-        (TypeRef::Option(actual), TypeRef::Option(expected))
-        | (TypeRef::Set(actual), TypeRef::Set(expected))
-        | (TypeRef::Seq(actual, _), TypeRef::Seq(expected, _)) => {
-            carrier_coercion(&actual, &expected, model)?
+        (TypeRef::Option(left), TypeRef::Option(right)) => carrier_coercion(left, right, model)?,
+        (TypeRef::Set(left), TypeRef::Set(right)) => element_coercion(left, right, model)?,
+        (TypeRef::Seq(left, left_capacity), TypeRef::Seq(right, right_capacity))
+            if left_capacity == right_capacity || has_int(left) || has_int(right) =>
+        {
+            element_coercion(left, right, model)?
         }
-        _ => CarrierCoercion::Other,
+        (TypeRef::Map(left_key, left_value), TypeRef::Map(right_key, right_value)) => {
+            return Ok(
+                if element_coercion(left_key, right_key, model)? == NotAssignable
+                    || element_coercion(left_value, right_value, model)? == NotAssignable
+                {
+                    NotAssignable
+                } else if same_carrier(&actual, &expected, model)? {
+                    Retag
+                } else {
+                    MapMismatch
+                },
+            );
+        }
+        (
+            TypeRef::Relation(left_source, left_target),
+            TypeRef::Relation(right_source, right_target),
+        ) if same_carrier(left_source, right_source, model)?
+            && same_carrier(left_target, right_target, model)? =>
+        {
+            return Ok(Retag);
+        }
+        _ => return Ok(NotAssignable),
+    };
+    Ok(match below {
+        MapMismatch | NotAssignable => below,
+        Retag | RebuildInt if same_carrier(&actual, &expected, model)? => Retag,
+        Retag | RebuildInt => RebuildInt,
     })
+}
+
+/// A container's element answers the rule only if `Int` is involved. Without `Int` it
+/// has a finite carrier, and the whole carrier must agree (#1467).
+fn element_coercion(
+    actual: &TypeRef,
+    expected: &TypeRef,
+    model: &KernelModel,
+) -> Result<CarrierCoercion, TypecheckError> {
+    if has_int(actual) || has_int(expected) {
+        carrier_coercion(actual, expected, model)
+    } else if same_carrier(actual, expected, model)? {
+        Ok(CarrierCoercion::Retag)
+    } else {
+        Ok(CarrierCoercion::NotAssignable)
+    }
 }
 
 /// The containers whose every conditional arm symbolic evaluation coerces, where
@@ -1361,12 +1374,13 @@ pub(crate) struct ValidationPhase {
     /// Present only in the checked-admission walk; ordinary validation ignores it.
     range_rule: Option<RangeRule>,
     // The model's own expressions reach symbolic evaluation, so their whole
-    // container values must be coercible (#1679), except for the range-typed literal
-    // under `old(...)` that the amendment records. A refinement map, a scenario
+    // container values must be coercible (#1679). A refinement map, a scenario
     // expectation and a lemma candidate keep the assignable rule. An expectation
     // is evaluated concretely, and so is a map, except that `preserve progress`
     // evaluates a map symbolically: a Map comparison there still reports
     // `cannot coerce`, as a rejected candidate does (see the #1679 amendment).
+    // This stays beside `carrier_coercion` because it says where an expression is
+    // evaluated, and that rule only sees two types (#1683).
     symbolic: bool,
 }
 
@@ -2713,8 +2727,7 @@ fn validate_expression_inner(
                 self_relations,
             )?;
             // `old` keeps its operand's type, and symbolic evaluation coerces the
-            // operand's arms to what surrounds it (#1679). This is the arm rule
-            // above, without typing the operand's literals against that expectation.
+            // operand's arms to what surrounds it (#1679). This is the arm rule above.
             if phase.symbolic
                 && let Some(expected) = expected
                 && is_coerced_container(expected, model)?
