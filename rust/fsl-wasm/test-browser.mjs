@@ -634,10 +634,25 @@ function recursiveStable(packet) {
   } else if (value.result !== "error") throw new Error("missing successful cost packet");
   return value;
 }
+// Repeat comparisons only: Z3's allocator footprint is ambient (observed
+// 18.01 vs 18.02 MB between identical native runs) and not part of the
+// verdict. It must be present, finite and positive in both packets, then is
+// dropped; every other field, including conflicts/decisions/propagations,
+// stays exact.
+function recursiveRepeatStable(packet) {
+  const value = recursiveStable(packet);
+  if (value.cost) {
+    const solver = value.cost.solver;
+    if (!Object.hasOwn(solver, "memory_mb") || !Number.isFinite(solver.memory_mb)
+      || solver.memory_mb <= 0) throw new Error("1467 missing positive allocator metric");
+    delete solver.memory_mb;
+  }
+  return value;
+}
 const recursiveComparisons = [];
 for (let index = 0; index < recursiveCases.length; index += 2) {
-  const nativeDrift = differences(recursiveStable(recursiveNative[index]), recursiveStable(recursiveNative[index + 1]));
-  const workerDrift = differences(recursiveStable(recursiveEnvelopes[index]), recursiveStable(recursiveEnvelopes[index + 1]));
+  const nativeDrift = differences(recursiveRepeatStable(recursiveNative[index]), recursiveRepeatStable(recursiveNative[index + 1]));
+  const workerDrift = differences(recursiveRepeatStable(recursiveEnvelopes[index]), recursiveRepeatStable(recursiveEnvelopes[index + 1]));
   const left = recursiveStable(recursiveNative[index]);
   const right = recursiveStable(recursiveEnvelopes[index]);
   if (recursiveCases[index].variant === "materialize") {
@@ -669,7 +684,7 @@ for (let index = 0; index < recursiveCases.length; index += 2) {
     if (packet.cost) {
       if (!Object.hasOwn(packet.cost.solver, "memory_mb") || !Number.isFinite(packet.cost.solver.memory_mb)
         || packet.cost.solver.memory_mb <= 0) throw new Error("1467 missing positive allocator metric");
-      packet.cost.solver.memory_mb = 0; // Only cross-runtime; repeat comparisons retain it exactly.
+      packet.cost.solver.memory_mb = 0; // Ambient allocator footprint, not part of the verdict.
     }
     packet.versions.verifier.name = "runtime"; packet.versions.solver.backend = "runtime";
   }
