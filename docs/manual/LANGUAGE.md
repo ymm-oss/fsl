@@ -2511,6 +2511,12 @@ assurance, generated-artifact envelopes and command exits remain unchanged.
 Changed rows make affected approvals `drifted` for `rendering_changed` (exit 0);
 review the ledger and regenerate the approval. Newly approved ledgers stay approved.
 
+Native artifact file output (`-o` and approval records) replaces each file completely, so a
+write failure keeps the existing bytes. The final path component is not followed if it is a
+symlink, and non-regular destinations such as `-o /dev/stdout` are refused. The parent directory
+must be writable, even to replace a writable existing file. These refusals are `io` errors
+(exit 2); `docs/design/DESIGN-atomic-artifact-output.md` records the complete contract.
+
 Direct `ledger` and `html` return verification `result:"error"` as the original
 JSON error envelope and exit 2/3, before rendering or writing an artifact;
 direct `ledger` stops before ancillary replay, evidence loading, and witness preparation

@@ -2319,6 +2319,12 @@ ledger の警告は、種類ごとの1つの表示表で検出種別・要約・
 `rendering_changed` による `drifted`(exit 0)になります。台帳を確認して承認を作り直してください。
 新しい台帳に対する承認は `approved` のままです。
 
+native の artifact のファイル出力(`-o` と承認 record)は各ファイルを丸ごと置き換えるので、書き込みに
+失敗しても既存の内容を保ちます。パスの最後の要素が symlink でも辿らず、`-o /dev/stdout` のような
+通常ファイルでない出力先は拒否します。親ディレクトリには書き込み権限が必要で、書き込み可能な既存
+ファイルを置き換える場合も同じです。これらの拒否は `io` エラー(exit 2)です。完全な契約は
+`docs/design/DESIGN-atomic-artifact-output.md` にあります。
+
 直接の `ledger` と `html` は、検証の `result:"error"` には元の JSON エラー封筒と exit 2/3 を
 返し、描画も artifact の書き込みもしません。直接の `ledger` は付随の replay、evidence の読み込み、
 witness の準備より前に止まります(`html` は explain より前に止まります)。`-o` でも

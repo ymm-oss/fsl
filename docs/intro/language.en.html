@@ -2602,6 +2602,11 @@ reachable and progress checks may still run. Raw warnings and other evidence,
 assurance, generated-artifact envelopes and command exits remain unchanged.
 Changed rows make affected approvals <code>drifted</code> for <code>rendering_changed</code> (exit 0);
 review the ledger and regenerate the approval. Newly approved ledgers stay approved.</p>
+<p>Native artifact file output (<code>-o</code> and approval records) replaces each file completely, so a
+write failure keeps the existing bytes. The final path component is not followed if it is a
+symlink, and non-regular destinations such as <code>-o /dev/stdout</code> are refused. The parent directory
+must be writable, even to replace a writable existing file. These refusals are <code>io</code> errors
+(exit 2); <code>docs/design/DESIGN-atomic-artifact-output.md</code> records the complete contract.</p>
 <p>Direct <code>ledger</code> and <code>html</code> return verification <code>result:"error"</code> as the original
 JSON error envelope and exit 2/3, before rendering or writing an artifact;
 direct <code>ledger</code> stops before ancillary replay, evidence loading, and witness preparation
