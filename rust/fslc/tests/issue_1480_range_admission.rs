@@ -682,7 +682,10 @@ fn replay_keeps_its_unchecked_load_and_trace_precedence() {
         refusal("type 'S' is not a finite scalar")
     );
     let malformed = io("invalid JSON: expected ident at line 1 column 2");
-    let missing = io("No such file or directory (os error 2)");
+    // The operating system words this message, so ask it rather than pin one platform's text.
+    let missing = io(&std::fs::File::open(dir.join("missing.json"))
+        .expect_err("missing.json is not in the scratch directory")
+        .to_string());
     for file in ["range.fsl", "struct.fsl", "elsewhere.fsl"] {
         assert_eq!(replay(file, "bad.json"), malformed, "{file}");
         assert_eq!(replay(file, "missing.json"), missing, "{file}");
