@@ -752,7 +752,7 @@ pub struct SpecCheckout {
 /// symlink leads, so a link into a nested repository cannot choose other files. The
 /// error carries its envelope kind.
 pub fn spec_checkout(path: &Path) -> Result<SpecCheckout, (&'static str, String)> {
-    let io = |error: String| ("io", error);
+    let io = |error: String| (crate::spec_loading::IO_KIND, error);
     let physical = |path: &Path| path.canonicalize().map_err(|error| io(error.to_string()));
     let parent = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
@@ -809,7 +809,7 @@ pub fn git_location(path: &Path) -> Result<(PathBuf, String, String), String> {
 /// it. The error carries its envelope kind.
 pub fn git_binding(path: &Path) -> Result<(PathBuf, String, String), (&'static str, String)> {
     let SpecCheckout { root, relative } = spec_checkout(path)?;
-    let io = |error: String| ("io", error);
+    let io = |error: String| (crate::spec_loading::IO_KIND, error);
     checkout_git(&root, &["ls-files", "--error-unmatch", "--", &relative]).map_err(io)?;
     let commit = checkout_git(&root, &["rev-parse", "HEAD"]).map_err(io)?;
     // `diff --quiet` reports a difference by its exit status, so its stderr is empty.

@@ -331,13 +331,24 @@ pub(crate) fn load_kernel_model_from_source_with_resolver(
     Ok((kernel, model))
 }
 
-/// How a read failure's `kind:"io"` message names the file.
+/// The `kind` of a failure classified as IO.
 ///
 /// This module is the binary's one owner of file-IO error classification
-/// (issue #1170): a failure is classified `io` only here and in the library's
-/// `SpecLoadError::Io` renderer. The command families historically spell the
-/// message three ways; each caller names its spelling instead of formatting
-/// it, so converging them is a reviewable change to this enum's callers.
+/// (issue #1170). The binary spells `io` only here: [`IO_KIND`], the
+/// `SpecLoadError::Io` values [`read_source`] and [`io_error_output`] build,
+/// and the library's `SpecLoadError::Io` renderer. Helpers that hand a
+/// `(kind, message)` pair to their caller (`approval::spec_checkout`,
+/// `approval::git_binding`, [`load_state_snapshot`]) take the kind from
+/// [`IO_KIND`]. The one exception is the library's `literate_access`
+/// capture, which cannot call the binary. `tests/issue_1170_error_policy_owners.rs`
+/// enforces this per function.
+pub(crate) const IO_KIND: &str = "io";
+
+/// How a read failure's `kind:"io"` message names the file.
+///
+/// The command families historically spell the message three ways; each
+/// caller names its spelling instead of formatting it, so converging them is
+/// a reviewable change to this enum's callers.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum IoMessage {
     /// `<path>: <error>`, what [`read_spec_source`] reports.
@@ -596,7 +607,7 @@ pub(crate) fn load_state_snapshot(
 ) -> Result<std::collections::BTreeMap<String, FslValue>, (String, String)> {
     let source = std::fs::read_to_string(path).map_err(|error| {
         (
-            "io".to_owned(),
+            IO_KIND.to_owned(),
             if error.kind() == std::io::ErrorKind::NotFound {
                 format!("file not found: {}", path.display())
             } else {
@@ -606,7 +617,7 @@ pub(crate) fn load_state_snapshot(
     })?;
     let value: Value = serde_json::from_str(&source).map_err(|error| {
         (
-            "io".to_owned(),
+            IO_KIND.to_owned(),
             format!(
                 "invalid state JSON at line {}, column {}: {}",
                 error.line(),
