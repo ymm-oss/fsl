@@ -13,7 +13,8 @@ mod scratch;
 use serde_json::Value;
 use std::{collections::BTreeMap, fs, process::Command, sync::Mutex, thread};
 
-const TYPES: &str = "type K = 0..1 type A = 0..1 type A2 = 0..1 type B = 0..2";
+const TYPES: &str =
+    "type K = 0..1 type A = 0..1 type A2 = 0..1 type B = 0..2 enum E { e0, e1 } enum F { f0, f1 }";
 
 /// A shape's left value is always state `l`. Its right value is state `r`, of the
 /// declared carrier, or a literal over `va: A` and `vb: B`.
@@ -55,7 +56,18 @@ const fn literal(
     }
 }
 
-const SHAPES: [Shape; 22] = [
+const SHAPES: [Shape; 28] = [
+    declared("relation_alias", "relation A -> B", "relation A2 -> B", 0),
+    declared("relation_source", "relation A -> A", "relation B -> A", 20),
+    declared("relation_target", "relation A -> A", "relation A -> B", 20),
+    declared(
+        "relation_alias_target",
+        "relation A -> A",
+        "relation A -> A2",
+        0,
+    ),
+    declared("enum_same", "E", "E", 0),
+    declared("enum_other", "E", "F", 20),
     declared("set_alias", "Set<A>", "Set<A2>", 0),
     declared("set_range", "Set<A>", "Set<B>", 20),
     declared("seq_alias", "Seq<A, 2>", "Seq<A2, 2>", 0),
@@ -111,12 +123,14 @@ const POSITIONS: [(&str, &str); 20] = [
 ];
 
 fn initial(ty: &str, name: &str) -> String {
-    if ty.starts_with("Set<") {
+    if ty.starts_with("Set<") || ty.starts_with("relation ") {
         format!("{name} = Set {{}}")
     } else if ty.starts_with("Seq<") {
         format!("{name} = Seq {{}}")
     } else if ty.starts_with("Option<") {
         format!("{name} = none")
+    } else if ty == "E" || ty == "F" {
+        format!("{name} = {}0", ty.to_lowercase())
     } else if ty.starts_with("Map<K, Option<") {
         format!("forall k: K {{ {name}[k] = none }}")
     } else {
@@ -291,6 +305,74 @@ fn map_in_a_literal_under_old_is_refused_where_it_is_written() {
             (exit, packet["result"].as_str()),
             (0, Some(result)),
             "{id}: {packet}"
+        );
+    }
+}
+
+/// A position evaluated concretely asks only for assignability, so the rule's `MapMismatch`
+/// passes there and its `NotAssignable` does not. `check` reaches both through the rule.
+#[test]
+fn a_position_on_the_prior_rule_answers_assignability_from_the_rule() {
+    let spec = |left: &str, right: &str| {
+        format!(
+            "requirements R {{\n  type K = 0..1\n  type A = 0..1\n  type B = 0..2\n  state {{ l: {left}, r: {right}, c: Bool }}\n  init {{ {} {} c = false }}\n  requirement REQ-1 \"go\" {{\n    action go() {{ c = not c }}\n  }}\n  acceptance AC-1 \"same\" {{\n    go()\n    expect l == r\n  }}\n}}\n",
+            initial(left, "l"),
+            initial(right, "r"),
+        )
+    };
+    let scratch = scratch::Scratch::new("FSLC_1683_INPUTS", "prior_rule", "1683-prior");
+    for (id, left, right, accepted) in [
+        ("map_int", "Map<K, Int>", "Map<K, A>", true),
+        (
+            "map_option_int",
+            "Map<K, Option<Int>>",
+            "Map<K, Option<A>>",
+            true,
+        ),
+        ("map_range", "Map<K, A>", "Map<K, B>", false),
+        ("map_key", "Map<K, A>", "Map<B, A>", false),
+        ("seq_int_capacity", "Seq<Int, 2>", "Seq<A, 3>", true),
+        ("seq_capacity", "Seq<A, 2>", "Seq<A, 3>", false),
+        ("set_range", "Set<A>", "Set<B>", false),
+    ] {
+        let form = scratch.path().join(id);
+        fs::create_dir_all(&form).expect("form");
+        fs::write(form.join("p.fsl"), spec(left, right)).expect("fixture");
+        let (exit, packet, _) = fslc(&form, &["check", "p.fsl"]);
+        assert_eq!(exit == 0, accepted, "{id}: {packet}");
+    }
+}
+
+/// A candidate reaches no old state, so it never ran the operand's walk, and its mismatch
+/// under `old` stays where evaluation finds the missing state.
+#[test]
+fn a_lemma_candidate_under_old_keeps_the_prior_rule() {
+    let scratch = scratch::Scratch::new("FSLC_1683_INPUTS", "lemma_under_old", "1683-lemma");
+    fs::write(
+        scratch.path().join("p.fsl"),
+        "spec S { type K = 0..1 type A = 0..1\n  state { m0: Map<K, Int>, m1: Map<K, A>, c: Bool }\n  init { forall k: K { m0[k] = 0 m1[k] = 0 } c = false }\n  action go() { c = not c }\n  invariant P { c or not c }\n}\n",
+    )
+    .expect("fixture");
+    for lemma in [
+        "some(m0) == old(some(m1))",
+        "Set { 1 } == old(Set { true })",
+    ] {
+        let (exit, packet, _) = fslc(
+            scratch.path(),
+            &["verify", "p.fsl", "--engine", "induction", "--lemma", lemma],
+        );
+        assert_eq!(
+            (exit, packet["result"].as_str()),
+            (0, Some("proved")),
+            "{lemma}: {packet}"
+        );
+        assert_eq!(
+            packet["lemmas"][0]["status"], "rejected",
+            "{lemma}: {packet}"
+        );
+        assert_eq!(
+            packet["lemmas"][0]["proof"]["message"], "old() used without old state",
+            "{lemma}: {packet}"
         );
     }
 }

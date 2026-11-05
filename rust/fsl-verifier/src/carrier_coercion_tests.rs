@@ -32,6 +32,8 @@ fn model() -> KernelModel {
   type A2 = 0..1
   type B = 0..2
   enum E { e0, e1 }
+  struct P { x: A }
+  struct Q { x: A }
   state { x: A }
   init { x = 0 }
   action idle() { }
@@ -54,6 +56,9 @@ fn option(item: TypeRef) -> TypeRef {
 fn map(key: TypeRef, value: TypeRef) -> TypeRef {
     TypeRef::Map(Box::new(key), Box::new(value))
 }
+fn relation(source: TypeRef, target: TypeRef) -> TypeRef {
+    TypeRef::Relation(Box::new(source), Box::new(target))
+}
 
 /// One present element at every level, so that a rebuild that drops or changes a member
 /// differs from the value built at the target type.
@@ -75,8 +80,18 @@ fn sample(ty: &TypeRef, model: &KernelModel) -> FslValue {
                 type_name: name.clone(),
                 member: "e1".to_owned(),
             },
+            Some(TypeDef::Struct { fields }) => FslValue::Struct {
+                type_name: name.clone(),
+                fields: fields
+                    .iter()
+                    .map(|(field, ty)| (field.clone(), sample(ty, model)))
+                    .collect(),
+            },
             _ => FslValue::Int(1),
         },
+        TypeRef::Relation(source, target) => {
+            FslValue::Relation([(sample(source, model), sample(target, model))].into())
+        }
         TypeRef::Bool => FslValue::Bool(true),
         _ => FslValue::Int(1),
     }
@@ -159,6 +174,12 @@ fn coercible_pairs_keep_their_contents_and_carry_the_target_type() {
             Shape::Map,
         ),
         (named("E"), named("E"), Shape::Scalar),
+        (named("P"), named("P"), Shape::Other),
+        (
+            relation(a.clone(), b.clone()),
+            relation(a2.clone(), b.clone()),
+            Shape::Other,
+        ),
         // Scalars and Options answer before the rule, and an Option's value through it.
         (a.clone(), b.clone(), Shape::Scalar),
         (TypeRef::Int, a.clone(), Shape::Scalar),
@@ -240,6 +261,15 @@ fn pairs_the_rule_refuses_report_cannot_coerce() {
         (set(e.clone()), set(int.clone())),
         (seq(int.clone(), 2), seq(TypeRef::Bool, 2)),
         (a.clone(), set(a.clone())),
+        (named("P"), named("Q")),
+        (
+            relation(a.clone(), a.clone()),
+            relation(b.clone(), a.clone()),
+        ),
+        (
+            relation(a.clone(), a.clone()),
+            relation(a.clone(), b.clone()),
+        ),
         (set(a.clone()), a.clone()),
     ];
     let model = model();
