@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fsl.dev/schemas/fslc/approval/approval-record.v6.schema.json",
-  "title": "FSL creation-directory approval record v6",
+  "title": "FSL repository-relative approval record v6",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,7 +20,7 @@
     "path_base": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?:\\.|(?![A-Za-z]:)(?!\\.\\.?(?:/|$))(?!.*/\\.\\.?(?:/|$))[^/\\\\]+(?:/[^/\\\\]+)*)$",
+      "pattern": "^(?![\\s\\S]*[\\x00-\\x1f])(?:\\.|(?![A-Za-z]:)(?!\\.\\.?(?:/|$))(?!.*/\\.\\.?(?:/|$))[^/\\\\]+(?:/[^/\\\\]+)*)$",
       "description": "Git-root-relative directory: '.' or '/'-separated names."
     },
     "render_source": {

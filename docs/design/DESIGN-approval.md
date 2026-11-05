@@ -322,8 +322,9 @@ their existing contracts. Two required top-level strings add the context:
 
 - `path_base` is the invocation directory at creation, relative to the Git root
   of the checkout holding the spec: `.` for the root, otherwise `/`-separated names
-  with no `.`, `..` or empty name. The form is text, so a record reads the same on
-  every platform, and the schema pattern and the reader check the same form.
+  with no `.`, `..` or empty name and no control character. The form is text, so a
+  record reads the same on every platform, and the schema pattern and the reader
+  check the same form.
 - `render_source` is the nonempty original spec argument, verbatim, used only
   as a rendering label. `spec.path` remains Git-repository-relative.
 
@@ -336,20 +337,42 @@ directory and not the creating checkout. A clone, a worktree or a relocated chec
 therefore reads its own files, and nothing reads the creating checkout, which may
 be gone. The resolver does not probe caller/sidecar/repository alternatives.
 
+The root is found from the directory the spec's path names, not from where a final
+symlink leads, and with Git's location variables (`git rev-parse --local-env-vars`)
+cleared for these lookups, so a nested repository behind a link or a hook's `GIT_DIR`
+cannot choose the files. A spec resolving outside that root is refused with
+`kind:"semantics"`, exit 2. `core.worktree` remains Git's own answer for the checkout,
+so when it points away from the spec this refusal applies. A link to the spec inside the
+same checkout is safe and stays allowed: the record's `spec.path` and digest are still
+checked against the resolved file, and the document and inputs still come from that
+checkout. A link into a nested repository or submodule resolves below the outer root,
+so `approval check` and `ledger` refuse it on `spec.path`, and `document generate`, which
+does not compare `spec.path`, reads the outer checkout's files and reports their drift.
+`approval diff` keeps following the spec and reads no document. v1–v4 records keep
+their existing lookup, including the inherited environment, and their `document generate`
+route calls no Git. On v5/v6 that route needs Git for this lookup.
+
 A document record stays inside that root. Creation refuses, with `kind:"semantics"`
 and exit 2, a creation directory outside the root and a target or input that is
 absolute, climbs out of the root by its spelling, or leads out through a link. Check
-refuses a stored path that escapes in the same way, before reading it; the schema
-and the reader refuse an absolute form, and the climbing and link checks need the
-root, so they run at use. The stored spelling of a target or input stays literal,
-including any `\` a Windows caller typed; a record that must read across platforms
-uses `/`. A solver record reads no file through its base, so it can be created
-anywhere: its target path stays a label, and outside the root it stores `.`.
+refuses a stored path or base that climbs or links out in the same way, before reading
+it. An absolute form is rejected earlier by the record reader, as `kind:"io"` from
+`approval check` and `ledger` and `kind:"document"` from `document generate`; the schema
+rejects the same forms, and the climbing and link checks need the root, so they run
+at use. The stored spelling of a target or input stays literal, including any `\` a
+Windows caller typed; a record that must read across platforms uses `/`.
 
-Tampering with `path_base` invalidates a v6 signature. A v5 record has no signature,
-so a different base that passes the form check reads other files, which fail on read
-or against the record's digests. A solver v5 record reads nothing through it, so only
-its form is checked.
+A solver record reads no file through its base, so it can be created anywhere: its
+target path stays a label, and outside the root it stores `.`. Its `approved` means the
+spec and a fresh rendering match the record. The reviewed file is read at creation and
+not checked afterwards.
+
+Tampering with `path_base` invalidates a v6 signature. A v5 record is unsigned and
+proves nothing against someone editing it: a changed base pointing at a copy with the
+same content reports `approved`, and a solver record reads nothing through the field.
+Use v6 when the record itself needs protecting. Not bound, by decision: a repository's
+identity, and `document generate`'s commit and `spec.path` on identical content. A spelled
+`d/../x` fails on read in a clone that has no `d`, because Git stores no empty directories.
 
 The current explicit spec still supplies the actual bytes and dependency
 directory. Reproduction uses the recorded source and evidence labels; resolved

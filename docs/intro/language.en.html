@@ -2561,15 +2561,29 @@ document or glossary there shows as <code>artifact_changed</code>, <code>renderi
 input-digest failure. Stored path spellings, input order and rendered labels stay
 literal. <code>render_source</code> is a display label only; the explicit spec still supplies
 the actual bytes and dependency directory.</p>
+<p>The Git root comes from the directory the spec's path names, with Git's location
+variables such as <code>GIT_DIR</code> and <code>GIT_WORK_TREE</code> ignored, so a final symlink or a hook's
+environment cannot choose another checkout. A spec that resolves outside that root is
+refused with <code>kind:"semantics"</code>, exit 2, including when <code>core.worktree</code> points away from
+it. A link to the spec within the same checkout keeps the binding, because the spec's
+digest and path are still checked and the files still come from that checkout. A link
+into a nested repository or submodule fails the same path check. Because of this
+lookup, <code>document generate --approval</code> on a v5 or v6 record needs Git, which it does
+not for v1–v4.</p>
 <p>A <code>requirements_document</code> record's creation directory, target and inputs must lie
-inside that Git root. Creation refuses an absolute path, a path that climbs out of
-the root, a link leading out of it, or a creation directory outside it, with
-<code>kind:"semantics"</code>, exit 2, and check refuses a stored path that escapes in the
-same way. A <code>ledger</code>, <code>html</code> or <code>scenarios</code> record reads no file through its base,
-so it can be created from any directory; outside the root it stores <code>.</code>. Tampering
-with <code>path_base</code> invalidates a v6 signature. In v5, a different base that passes
-the form check reads other files, which fail on read or against the record's
-digests; a solver record reads nothing through it, so only its form is checked.</p>
+inside that Git root. Creation refuses, with <code>kind:"semantics"</code> and exit 2, an absolute
+path, a path that climbs out of the root, a link leading out of it, or a creation
+directory outside it. At check, a stored path that climbs or links out gets the same
+refusal, while an absolute form is rejected earlier by the record reader: <code>kind:"io"</code>
+from <code>approval check</code> and <code>ledger</code>, <code>kind:"document"</code> from <code>document generate</code>.
+A <code>ledger</code>, <code>html</code> or <code>scenarios</code> record reads no file through its base, so it can be
+created from any directory; outside the root it stores <code>.</code>. For these kinds <code>approved</code>
+means the spec and a fresh rendering match the record: the reviewed file on disk is read
+only at creation and is not checked afterwards.</p>
+<p>Tampering with <code>path_base</code> invalidates a v6 signature. A v5 record is unsigned and proves
+nothing against someone editing it: a changed <code>path_base</code> that points at a copy with the
+same content still reports <code>approved</code>, as does a solver record's, which reads nothing
+through the field. Use v6 when the record itself needs protecting.</p>
 <p>Legacy v1–v4 records remain readable with their original formats, signatures,
 and invocation-relative path interpretation. Records are not silently migrated.</p>
 <p>For <code>requirements_document</code> v3–v6, authoritative approval check and ledger

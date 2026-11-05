@@ -241,13 +241,15 @@ impl ApprovalRecord {
 }
 
 /// A stored `path_base`: `.` for the Git root, otherwise `/`-separated names below
-/// it. The form is checked as text so a record reads the same on every platform.
+/// it, without control characters. The form is checked as text so a record reads the
+/// same on every platform.
 fn is_path_base(base: &str) -> bool {
     base == "."
         || (!has_absolute_form(base)
             && base
                 .split('/')
-                .all(|name| !matches!(name, "" | "." | "..") && !name.contains('\\')))
+                .all(|name| !matches!(name, "" | "." | "..") && !name.contains('\\'))
+            && !base.bytes().any(|byte| byte < b' '))
 }
 
 /// Whether a stored path names a root, a drive or a UNC share on any platform.
@@ -278,6 +280,15 @@ pub fn repository_relative_base(root: &Path, directory: &Path) -> Option<String>
 /// Refuse a stored document path that lies outside the physical `root`, whether
 /// by its spelling or through a link. A missing file stays the caller's read error.
 pub fn require_inside_root(root: &Path, base: &str, path: &str) -> Result<(), String> {
+    if root
+        .join(base)
+        .canonicalize()
+        .is_ok_and(|physical| !physical.starts_with(root))
+    {
+        return Err(format!(
+            "approval path_base '{base}' lies outside the repository root"
+        ));
+    }
     let mut depth = if base == "." {
         0
     } else {
@@ -695,10 +706,95 @@ fn git_output(cwd: &Path, arguments: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// What `git rev-parse --local-env-vars` lists: these point Git away from `cwd`.
+const GIT_LOCAL_VARIABLES: [&str; 15] = [
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CONFIG",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_GRAFT_FILE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_SHALLOW_FILE",
+    "GIT_WORK_TREE",
+];
+
+/// Run Git for a v5 or v6 record, answering for `cwd` whatever the caller's
+/// environment, so a hook's `GIT_DIR` cannot choose the checkout.
+fn checkout_git(cwd: &Path, arguments: &[&str]) -> Result<String, String> {
+    let mut command = Command::new("git");
+    command.args(arguments).current_dir(cwd);
+    for variable in GIT_LOCAL_VARIABLES {
+        command.env_remove(variable);
+    }
+    let output = command.output().map_err(|error| {
+        format!("a v5 or v6 approval record needs Git: cannot run git: {error}")
+    })?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// The checkout holding a spec's path, for a v5 or v6 record, and the spec's path in it.
+pub struct SpecCheckout {
+    pub root: PathBuf,
+    pub relative: String,
+}
+
+/// Take the root from the directory the spec's path names, not from where a final
+/// symlink leads, so a link into a nested repository cannot choose other files. The
+/// error carries its envelope kind.
+pub fn spec_checkout(path: &Path) -> Result<SpecCheckout, (&'static str, String)> {
+    let io = |error: String| ("io", error);
+    let physical = |path: &Path| path.canonicalize().map_err(|error| io(error.to_string()));
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let root = PathBuf::from(
+        checkout_git(&physical(parent)?, &["rev-parse", "--show-toplevel"]).map_err(io)?,
+    );
+    let root = physical(&root)?;
+    let relative = physical(path)?
+        .strip_prefix(&root)
+        .map_err(|_| {
+            (
+                "semantics",
+                format!(
+                    "spec '{}' lies outside the Git repository that holds its path",
+                    path.display()
+                ),
+            )
+        })?
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok(SpecCheckout { root, relative })
+}
+
+/// Require a v5 or v6 record's recorded commit and spec, and that the spec is tracked.
+pub fn verify_checkout_baseline(root: &Path, relative: &str, commit: &str) -> Result<(), String> {
+    checkout_git(root, &["ls-files", "--error-unmatch", "--", relative])?;
+    checkout_git(root, &["cat-file", "-e", &format!("{commit}^{{commit}}")])?;
+    checkout_git(root, &["cat-file", "-e", &format!("{commit}:{relative}")])?;
+    Ok(())
+}
+
 /// Return `(repository root, repository-relative spec path, HEAD commit)`.
 pub fn git_location(path: &Path) -> Result<(PathBuf, String, String), String> {
     let absolute = path.canonicalize().map_err(|error| error.to_string())?;
-    let root = git_root(&absolute)?;
+    let root = PathBuf::from(git_output(
+        absolute.parent().unwrap_or_else(|| Path::new(".")),
+        &["rev-parse", "--show-toplevel"],
+    )?)
+    .canonicalize()
+    .map_err(|error| error.to_string())?;
     let relative = absolute
         .strip_prefix(&root)
         .map_err(|_| "spec is outside its Git repository".to_owned())?
@@ -709,30 +805,21 @@ pub fn git_location(path: &Path) -> Result<(PathBuf, String, String), String> {
     Ok((root, relative, commit))
 }
 
-/// The physical root of the checkout holding `path`.
-pub fn git_root(path: &Path) -> Result<PathBuf, String> {
-    let absolute = path.canonicalize().map_err(|error| error.to_string())?;
-    PathBuf::from(git_output(
-        absolute.parent().unwrap_or_else(|| Path::new(".")),
-        &["rev-parse", "--show-toplevel"],
-    )?)
-    .canonicalize()
-    .map_err(|error| error.to_string())
-}
-
-/// Resolve the Git baseline and require all tracked content to match it.
-pub fn git_binding(path: &Path) -> Result<(PathBuf, String, String), String> {
-    let (root, relative, commit) = git_location(path)?;
-    let status = Command::new("git")
-        .args(["diff", "--quiet", "HEAD", "--"])
-        .current_dir(&root)
-        .status()
-        .map_err(|error| error.to_string())?;
-    if !status.success() {
-        return Err(
+/// Resolve the Git baseline of a new record and require all tracked content to match
+/// it. The error carries its envelope kind.
+pub fn git_binding(path: &Path) -> Result<(PathBuf, String, String), (&'static str, String)> {
+    let SpecCheckout { root, relative } = spec_checkout(path)?;
+    let io = |error: String| ("io", error);
+    checkout_git(&root, &["ls-files", "--error-unmatch", "--", &relative]).map_err(io)?;
+    let commit = checkout_git(&root, &["rev-parse", "HEAD"]).map_err(io)?;
+    // `diff --quiet` reports a difference by its exit status, so its stderr is empty.
+    if let Err(error) = checkout_git(&root, &["diff", "--quiet", "HEAD", "--"]) {
+        return Err(io(if error.is_empty() {
             "approval creation requires a clean tracked worktree so the baseline can be reconstructed"
-                .to_owned(),
-        );
+                .to_owned()
+        } else {
+            error
+        }));
     }
     Ok((root, relative, commit))
 }
@@ -800,7 +887,9 @@ pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
     if record.schema == APPROVAL_SCHEMA_V5 {
         if !record.path_base.as_deref().is_some_and(is_path_base) {
             return Err(
-                "approval record requires a repository-relative path_base using '/'".to_owned(),
+                "approval record requires a repository-relative path_base using '/'; \
+                 a record with an absolute one came from an earlier build, so create it again"
+                    .to_owned(),
             );
         }
         if record.render_source.as_deref().is_none_or(str::is_empty) {

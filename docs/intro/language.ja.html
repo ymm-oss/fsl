@@ -2376,14 +2376,28 @@ Git リポジトリからの相対パスのままです。target と入力は、
 <code>rendering_changed</code>、または入力 digest の不一致になります。保存したパスの表記、入力順、
 レンダリングのラベルは保ちます。<code>render_source</code> は表示用のラベルに限られ、実際の
 ソースと依存先のディレクトリは明示された spec から取得します。</p>
+<p>Git ルートは spec のパスが指すディレクトリから求め、<code>GIT_DIR</code> や <code>GIT_WORK_TREE</code> などの
+Git の場所を決める環境変数は無視します。そのため、末尾のシンボリックリンクや hook の環境で
+別の checkout を選ぶことはできません。spec の実体がそのルートの外にあれば <code>kind:"semantics"</code>、
+exit 2 で拒否します。<code>core.worktree</code> が spec の外を指す場合も同じです。同じ checkout 内の spec を
+指すリンクは束縛を保ちます。spec の digest とパスを引き続き検査し、ファイルも同じ checkout から
+読むためです。入れ子のリポジトリやサブモジュールへのリンクは、同じパスの検査で失敗します。
+この検索のため、v5/v6 レコードに対する <code>document generate --approval</code> には Git が必要です。
+v1–v4 では不要です。</p>
 <p><code>requirements_document</code> レコードでは、作成ディレクトリ、target、入力がその Git ルートの
 内側になければなりません。作成時は、絶対パス、ルートの外へ出るパス、ルートの外を指す
-リンク、ルートの外の作成ディレクトリを <code>kind:"semantics"</code>、exit 2 で拒否します。検査時も、
-外へ出る保存パスを同じように拒否します。<code>ledger</code>、<code>html</code>、<code>scenarios</code> のレコードは
-<code>path_base</code> を通じてファイルを読まないため、どのディレクトリからでも作成でき、ルートの
-外では <code>.</code> を保存します。<code>path_base</code> を書き換えると v6 では署名が無効になります。v5 では、
-形式検査を通る別の値にすると別のファイルを読むことになり、読み込みまたはレコードの
-digest との照合で失敗します。ソルバー系レコードは読み込みに使わないため、形式だけを検査します。</p>
+リンク、ルートの外の作成ディレクトリを <code>kind:"semantics"</code>、exit 2 で拒否します。検査時は、
+外へ出る、または外へリンクする保存パスを同じように拒否します。絶対パスの形式はそれより先に
+レコードの読み込みで拒否し、<code>approval check</code> と <code>ledger</code> では <code>kind:"io"</code>、
+<code>document generate</code> では <code>kind:"document"</code> になります。<code>ledger</code>、<code>html</code>、<code>scenarios</code> の
+レコードは <code>path_base</code> を通じてファイルを読まないため、どのディレクトリからでも作成でき、
+ルートの外では <code>.</code> を保存します。これらの種類の <code>approved</code> は、spec と新しいレンダリングが
+レコードと一致することを表します。レビュー対象のファイルを読むのは作成時だけで、その後は
+検査しません。</p>
+<p><code>path_base</code> を書き換えると v6 では署名が無効になります。v5 レコードには署名がなく、編集された
+場合には何も証明しません。<code>path_base</code> を同じ内容のコピーを指すように変えても <code>approved</code> の
+ままです。ファイルを読まないソルバー系レコードでも同様です。レコード自体を保護するには
+v6 を使ってください。</p>
 <p>従来の v1–v4 レコードは、形式、署名、実行ディレクトリを基準とする相対パスの
 解釈を変えずに読み込めます。暗黙の移行は行いません。</p>
 <p><code>requirements_document</code> の v3–v6 では、承認を検証する approval check と ledger が、

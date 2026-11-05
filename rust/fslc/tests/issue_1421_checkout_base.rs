@@ -46,6 +46,16 @@ fn run(cwd: &Path, arguments: &[&str]) -> Output {
         .expect("run fslc")
 }
 
+fn run_with_env(cwd: &Path, arguments: &[&str], variables: &[(&str, &str)]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(arguments)
+        .current_dir(cwd)
+        .env("FSLC_CACHE", "off")
+        .envs(variables.iter().copied())
+        .output()
+        .expect("run fslc")
+}
+
 fn value(output: &Output) -> Value {
     serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!("expected JSON: {error}: {output:?}");
@@ -202,6 +212,43 @@ impl Fixture {
     fn check(&self, cwd: &Path, spec: &str) -> Output {
         let record = self.record_path();
         let mut arguments = vec!["approval", "check", spec, "--record", path_text(&record)];
+        if self.signed {
+            arguments.extend(["--trust-key", path_text(&self.public)]);
+        }
+        run(cwd, &arguments)
+    }
+
+    fn generate(&self, cwd: &Path, spec: &str, variables: &[(&str, &str)]) -> Output {
+        let record = self.record_path();
+        let mut arguments = vec![
+            "document",
+            "generate",
+            spec,
+            "--lang",
+            "ja",
+            "--glossary",
+            GLOSSARY,
+            "--approval",
+            path_text(&record),
+        ];
+        if self.signed {
+            arguments.extend(["--trust-key", path_text(&self.public)]);
+        }
+        run_with_env(cwd, &arguments, variables)
+    }
+
+    fn ledger(&self, cwd: &Path, spec: &str) -> Output {
+        let record = self.record_path();
+        let mut arguments = vec![
+            "ledger",
+            spec,
+            "--depth",
+            "2",
+            "--deadlock",
+            "ignore",
+            "--approval",
+            path_text(&record),
+        ];
         if self.signed {
             arguments.extend(["--trust-key", path_text(&self.public)]);
         }
@@ -604,6 +651,10 @@ fn schema_and_reader_agree_on_the_stored_forms() {
         ("review/deep", true),
         ("a:b", false),
         ("ab:c", true),
+        ("x\n/../y", false),
+        ("x\n", false),
+        (".\n", false),
+        ("a\tb", false),
         ("", false),
         ("/work", false),
         ("C:\\work", false),
@@ -689,4 +740,237 @@ fn a_solver_record_does_not_depend_on_its_base() {
     assert_eq!(fixture.record()["path_base"], ".");
     let checkout = fixture.clone("B");
     fixture.assert_approved(&checkout, "./spec.fsl");
+}
+
+fn assert_generate_drifted(fixture: &Fixture, cwd: &Path, variables: &[(&str, &str)]) {
+    let output = fixture.generate(cwd, SPEC, variables);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let refused = value(&output);
+    assert_eq!(
+        refused["reasons"],
+        json!(["artifact_changed"]),
+        "{refused:#}"
+    );
+    assert!(refused.get("approval_digest").is_none(), "{refused:#}");
+}
+
+/// `spec.fsl` links into a nested repository holding the original commit, beside a
+/// tampered document, on a clean tree when `commit` is set.
+#[cfg(unix)]
+fn assert_link_into_nested_repository_is_refused(fixture: &Fixture, outer: &Path, commit: bool) {
+    append(&outer.join(DOCUMENT), "TAMPERED\n");
+    std::fs::remove_file(outer.join(SPEC)).unwrap();
+    std::os::unix::fs::symlink("vendor/spec.fsl", outer.join(SPEC)).unwrap();
+    if commit {
+        git(outer, &["add", "-A"]);
+        git(
+            outer,
+            &["commit", "-qm", "link the spec; tamper the document"],
+        );
+    }
+    let refused = "approval record targets 'spec.fsl' but current spec is 'vendor/spec.fsl'";
+    fixture.assert_error(outer, "./spec.fsl", "semantics", refused);
+    let ledger = fixture.ledger(outer, SPEC);
+    assert_eq!(ledger.status.code(), Some(2), "{ledger:?}");
+    assert_eq!(value(&ledger)["message"], refused, "{ledger:?}");
+    assert_generate_drifted(fixture, outer, &[]);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_spec_linked_into_a_nested_clone_does_not_move_the_root() {
+    for signed in [false, true] {
+        let fixture = Fixture::new(signed);
+        let outer = fixture.clone("B");
+        git(&outer, &["clone", "-q", path_text(&fixture.a()), "vendor"]);
+        assert_link_into_nested_repository_is_refused(&fixture, &outer, false);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_spec_linked_into_a_submodule_does_not_move_the_root() {
+    for signed in [false, true] {
+        let fixture = Fixture::new(signed);
+        let outer = fixture.clone("B");
+        git(
+            &outer,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "--quiet",
+                "add",
+                path_text(&fixture.a()),
+                "vendor",
+            ],
+        );
+        git(&outer, &["commit", "-qm", "add submodule"]);
+        assert_link_into_nested_repository_is_refused(&fixture, &outer, true);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_spec_linked_out_of_its_root_is_refused_on_every_route() {
+    let fixture = Fixture::new(false);
+    let outer = fixture.clone("B");
+    let other = fixture.clone("C");
+    std::fs::remove_file(outer.join(SPEC)).unwrap();
+    std::os::unix::fs::symlink(other.join(SPEC), outer.join(SPEC)).unwrap();
+    let refused = "spec 'spec.fsl' lies outside the Git repository that holds its path";
+    fixture.assert_error(&outer, SPEC, "semantics", refused);
+    let ledger = fixture.ledger(&outer, SPEC);
+    assert_eq!(ledger.status.code(), Some(2), "{ledger:?}");
+    assert_eq!(value(&ledger)["kind"], "semantics", "{ledger:?}");
+    let generated = fixture.generate(&outer, SPEC, &[]);
+    assert_eq!(generated.status.code(), Some(2), "{generated:?}");
+    assert_eq!(value(&generated)["message"], refused, "{generated:?}");
+    let created = run(
+        &outer,
+        &[
+            "approval",
+            "create",
+            SPEC,
+            "--kind",
+            "requirements_document",
+            "--artifact",
+            DOCUMENT,
+            "--approver",
+            "alice",
+            "--glossary",
+            GLOSSARY,
+            "-o",
+            "refused.json",
+        ],
+    );
+    assert_eq!(created.status.code(), Some(2), "{created:?}");
+    assert_eq!(value(&created)["kind"], "semantics", "{created:?}");
+}
+
+/// A link within one root is safe: the spec's digest and its path are checked, and
+/// the document and inputs still come from the same checkout.
+#[cfg(unix)]
+#[test]
+fn a_tracked_link_to_the_spec_within_its_root_keeps_the_binding() {
+    let fixture = Fixture::new(false);
+    let checkout = fixture.clone("B");
+    std::os::unix::fs::symlink(SPEC, checkout.join("alias.fsl")).unwrap();
+    git(&checkout, &["add", "alias.fsl"]);
+    git(&checkout, &["commit", "-qm", "alias"]);
+    fixture.assert_approved(&checkout, "alias.fsl");
+    // Generate renders from the explicit path, so its label shows as a rendering change.
+    let generated = fixture.generate(&checkout, "alias.fsl", &[]);
+    assert_eq!(generated.status.code(), Some(2), "{generated:?}");
+    assert_eq!(value(&generated)["reasons"], json!(["rendering_changed"]));
+    append(&checkout.join(DOCUMENT), "TAMPERED\n");
+    fixture.assert_status(
+        &checkout,
+        "alias.fsl",
+        "drifted",
+        &json!(["artifact_changed"]),
+    );
+}
+
+#[test]
+fn git_environment_does_not_choose_the_checkout() {
+    let fixture = Fixture::new(false);
+    let a = fixture.a();
+    let other = fixture.clone("B");
+    let git_dir = other.join(".git");
+    append(&a.join(DOCUMENT), "TAMPERED\n");
+    let directory = [
+        ("GIT_DIR", path_text(&git_dir)),
+        ("GIT_WORK_TREE", path_text(&other)),
+    ];
+    let configured = [
+        ("GIT_CONFIG_COUNT", "1"),
+        ("GIT_CONFIG_KEY_0", "core.worktree"),
+        ("GIT_CONFIG_VALUE_0", path_text(&other)),
+    ];
+    for variables in [&directory[..], &configured[..]] {
+        assert_generate_drifted(&fixture, &a, variables);
+        let record = fixture.record_path();
+        let checked = run_with_env(
+            &a,
+            &["approval", "check", SPEC, "--record", path_text(&record)],
+            variables,
+        );
+        assert_eq!(checked.status.code(), Some(0), "{checked:?}");
+        assert_eq!(value(&checked)["reasons"], json!(["artifact_changed"]));
+    }
+}
+
+#[test]
+fn a_linked_worktree_hook_environment_does_not_refuse_a_spec_in_a_subdirectory() {
+    let fixture = Fixture::in_subdirectory(false, "review");
+    let worktree = fixture.worktree("W");
+    let hook_git_dir = fixture.a().join(".git/worktrees/W");
+    let variables = [("GIT_DIR", path_text(&hook_git_dir))];
+    let below = worktree.join("review");
+    let record = fixture.record_path();
+    let checked = run_with_env(
+        &below,
+        &["approval", "check", SPEC, "--record", path_text(&record)],
+        &variables,
+    );
+    assert_eq!(checked.status.code(), Some(0), "{checked:?}");
+    assert_eq!(value(&checked)["status"], "approved", "{checked:?}");
+    let generated = fixture.generate(&below, SPEC, &variables);
+    assert_eq!(generated.status.code(), Some(0), "{generated:?}");
+}
+
+/// `core.worktree` is Git's own answer for the checkout, so a spec outside it is refused.
+#[cfg(unix)]
+#[test]
+fn core_worktree_pointing_away_from_the_spec_is_refused() {
+    let fixture = Fixture::new(false);
+    let a = fixture.a();
+    let other = fixture.clone("B");
+    git(&a, &["config", "core.worktree", path_text(&other)]);
+    append(&a.join(DOCUMENT), "TAMPERED\n");
+    let refused = "spec 'spec.fsl' lies outside the Git repository that holds its path";
+    fixture.assert_error(&a, SPEC, "semantics", refused);
+    let generated = fixture.generate(&a, SPEC, &[]);
+    assert_eq!(generated.status.code(), Some(2), "{generated:?}");
+    let refusal = value(&generated);
+    assert_eq!(refusal["kind"], "semantics", "{refusal:#}");
+    assert_eq!(refusal["message"], refused, "{refusal:#}");
+}
+
+#[cfg(unix)]
+#[test]
+fn refusals_name_what_to_do_about_them() {
+    let fixture = Fixture::new(false);
+    let checkout = fixture.clone("B");
+    let record = fixture.record();
+
+    // Without Git on the path the error says why Git was wanted.
+    let generated = fixture.generate(&checkout, SPEC, &[("PATH", "")]);
+    assert_eq!(generated.status.code(), Some(2), "{generated:?}");
+    let message = value(&generated)["message"].as_str().unwrap().to_owned();
+    assert!(
+        message.starts_with("a v5 or v6 approval record needs Git"),
+        "{message}"
+    );
+
+    std::fs::create_dir_all(fixture.home.join("ext")).unwrap();
+    std::os::unix::fs::symlink(fixture.home.join("ext"), checkout.join("linkout")).unwrap();
+    let mut moved = record.clone();
+    moved["path_base"] = json!("linkout");
+    fixture.write_record(&moved);
+    fixture.assert_error(
+        &checkout,
+        SPEC,
+        "semantics",
+        "approval path_base 'linkout' lies outside the repository root",
+    );
+
+    let mut old = record;
+    old["path_base"] = json!("/earlier/build");
+    fixture.write_record(&old);
+    let output = fixture.check(&checkout, SPEC);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let message = value(&output)["message"].as_str().unwrap().to_owned();
+    assert!(message.ends_with("so create it again"), "{message}");
 }

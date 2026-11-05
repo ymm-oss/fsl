@@ -627,13 +627,23 @@ the Git root of the spec's checkout (`.` or `/`-separated names), and the nonemp
 original spec argument verbatim as `render_source`. Target/input I/O resolves from
 the Git root of the spec being checked plus `path_base`, never the caller's directory
 or the creating checkout, so a clone, worktree or relocated checkout reads its own
-files; path spellings, input order and rendered labels stay literal. A document
-record's creation directory, target and inputs must stay inside that root: absolute
-paths, climbing paths and links out are refused (`semantics`, exit 2) at creation and
-at check. Solver records read nothing through the base and store `.` when created
-outside the root. `render_source` is only a label: the explicit spec supplies the
-actual bytes and dependency directory. Legacy v1–v4 reads retain their original
-closed formats, signatures and invocation-relative paths, with no silent migration.
+files; path spellings, input order and rendered labels stay literal. The root comes
+from the directory the spec's path names, ignoring `GIT_DIR` and similar variables; a
+spec resolving outside it, including through `core.worktree`, is refused (`semantics`,
+exit 2), a link within the checkout keeps the binding, and a link into a nested
+repository fails the path check. `document generate --approval` on v5/v6 therefore
+needs Git. A document record's creation directory, target and inputs must stay inside
+that root: at creation, absolute paths, climbing paths and links out are refused
+(`semantics`, exit 2). At check, climbing paths and links out get the same refusal, and
+an absolute form is rejected by the record reader (`io` from `approval check` and
+`ledger`, `document` from `document generate`). Solver records read nothing through
+the base and store `.` when created outside the root; their `approved` covers the spec
+and a fresh rendering, not the reviewed file on disk. A v5 record is unsigned and proves
+nothing against someone editing it: a `path_base` pointing at a same-content copy still
+reports `approved`, and v6 catches it. `render_source` is only a label: the explicit
+spec supplies the actual bytes and dependency directory. Legacy v1–v4 reads retain
+their original closed formats, signatures and invocation-relative paths, with no silent
+migration.
 
 For document records v3–v6, authoritative approval check and ledger compare raw
 input digests from the same loaded buffers used for rendering. Every earlier

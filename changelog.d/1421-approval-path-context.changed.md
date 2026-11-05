@@ -4,7 +4,12 @@ resolve stored inputs and reviewed document targets from the Git root of the spe
 being checked, so a clone, worktree or relocated checkout reads its own files,
 while preserving literal paths, rendering labels and bytes. A document record's
 creation directory, target and inputs must stay inside that root: paths that are
-absolute or lead outside are refused at creation and at check. Legacy v1–v4
+absolute or lead outside are refused at creation and at check. The root comes from
+the directory the spec's path names, ignoring `GIT_DIR` and similar variables, so
+`document generate --approval` on these records needs Git, and a spec resolving outside
+the root is refused. For solver records `approved` covers the spec and a fresh
+rendering, not the reviewed file on disk; a v5 record is unsigned, so a `path_base`
+edited to reach a same-content copy still reports `approved`, while v6 catches it. Legacy v1–v4
 records retain their closed formats, signatures and invocation-relative paths;
 older binaries reject new records as unsupported schemas. Document source-label
 admission remains unchanged.

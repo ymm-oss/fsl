@@ -2315,8 +2315,9 @@ fn load_approvals(
         // Only a contextual record needs the checkout root, to read its reviewed target.
         let root = match &record.path_base {
             Some(base) => {
-                let root =
-                    approval::git_root(spec_path).map_err(|error| error_output("io", &error))?;
+                let root = approval::spec_checkout(spec_path)
+                    .map_err(|(kind, error)| error_output(kind, &error))?
+                    .root;
                 approval::require_inside_root(&root, base, &record.target.path)
                     .map_err(|error| error_output("semantics", &error))?;
                 Some(root)
@@ -13909,7 +13910,7 @@ fn run_approval_create_from_source(
     };
     let (repo, relative_path, git_commit) = match approval::git_binding(path) {
         Ok(binding) => binding,
-        Err(error) => return (error_output("io", &error), 2),
+        Err((kind, error)) => return (error_output(kind, &error), 2),
     };
     let stored_base = approval::repository_relative_base(&repo, &creation_directory);
     let digest = match approval::spec_digest_from_source(path, source) {
@@ -14152,6 +14153,43 @@ fn solver_approval_artifact(
     )
 }
 
+/// Locate the record's repository and require its baseline there. A v5 or v6 record
+/// uses the checkout holding the spec's path; v1-v4 records keep following the spec.
+fn approval_repository(
+    path: &Path,
+    record: &approval::ApprovalRecord,
+) -> Result<PathBuf, (Value, i32)> {
+    let io = |error: String| (error_output("io", &error), 2);
+    let contextual = record.path_base.is_some();
+    let (repo, relative_path) = if contextual {
+        let checkout = approval::spec_checkout(path)
+            .map_err(|(kind, error)| (error_output(kind, &error), 2))?;
+        (checkout.root, checkout.relative)
+    } else {
+        let (repo, relative_path, _head) = approval::git_location(path).map_err(io)?;
+        (repo, relative_path)
+    };
+    if record.spec.path != relative_path {
+        return Err((
+            error_output(
+                "semantics",
+                &format!(
+                    "approval record targets '{}' but current spec is '{relative_path}'",
+                    record.spec.path
+                ),
+            ),
+            2,
+        ));
+    }
+    let commit = &record.spec.git_commit;
+    if contextual {
+        approval::verify_checkout_baseline(&repo, &relative_path, commit).map_err(io)?;
+    } else {
+        approval::verify_git_baseline(&repo, &relative_path, commit).map_err(io)?;
+    }
+    Ok(repo)
+}
+
 fn approval_evaluation(
     path: &Path,
     source: &str,
@@ -14188,22 +14226,7 @@ fn approval_evaluation(
             )
         }
     };
-    let (repo, relative_path, _head) =
-        approval::git_location(path).map_err(|error| (error_output("io", &error), 2))?;
-    if record.spec.path != relative_path {
-        return Err((
-            error_output(
-                "semantics",
-                &format!(
-                    "approval record targets '{}' but current spec is '{relative_path}'",
-                    record.spec.path
-                ),
-            ),
-            2,
-        ));
-    }
-    approval::verify_git_baseline(&repo, &relative_path, &record.spec.git_commit)
-        .map_err(|error| (error_output("io", &error), 2))?;
+    let repo = approval_repository(path, &record)?;
     let current_spec_digest =
         approval_spec_digest(path, source).map_err(|error| (spec_load_error_output(&error), 2))?;
     let (artifact, current_claim_set_digest, input_digest_mismatch) =
