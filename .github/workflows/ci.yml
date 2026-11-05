@@ -162,6 +162,16 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: ./tools/check-product-gate-scope.sh >>"$GITHUB_OUTPUT"
 
+      # This job's test binaries fill the whole disk on some hosted runners. Nothing
+      # here uses these toolchains, and the runner carries its own .NET runtime. See
+      # docs/design/DESIGN-ci.md, "Runner disk budget".
+      - name: Free runner disk for the test-binary build
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup
+          df -h /
+
       - uses: dtolnay/rust-toolchain@1.98.0
         if: steps.scope.outputs.run == 'true'
 
@@ -210,6 +220,12 @@ jobs:
       - name: Run Rust test shard
         if: steps.scope.outputs.run == 'true'
         run: ./tools/check-native-integration.sh rust-tests ${{ matrix.shard }}/3
+
+      - name: Report runner disk use
+        if: always() && steps.scope.outputs.run == 'true'
+        run: |
+          df -h /
+          du -sh rust/target ~/.cargo/registry || true
 
       - name: Record test-shard provenance
         if: steps.scope.outputs.run == 'true'

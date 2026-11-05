@@ -1543,6 +1543,83 @@ requests are cold until that save lands. While both generations exist the listin
 up to twice the Rust bytes, so the audit can report `budget-exhausted` until the superseded entries
 are deleted or LRU-evicted, and `main-cache-absent` for any pair whose new entry is not saved yet.
 
+### Runner disk budget
+
+`rust-tests` is the one job measured running out of disk, and it removes unused preinstalled
+toolchains before it builds. Every shard links every test binary, because
+`tools/check-native-integration.sh rust-tests K/3` lists the whole workspace to write `full.txt`
+before it selects its slice.
+
+**What the job writes.** No job printed free space before this change, so the budget below is
+inferred from a local build and from the runner's own warnings; it has not been measured on a
+runner. `cargo test --workspace --locked --no-run` at commit `156d9c8ee`, from an empty target
+directory with `CARGO_INCREMENTAL=0` and Rust 1.98.0, wrote 18.06 GiB, of which 16.43 GiB is 547
+executables (median 25 MiB). The toolchain (about 0.7 GiB), registry (at most about 1 GiB) and
+checkout (about 0.3 GiB) come on top, for about 20 GiB before any test runs.
+
+**Where it fails.** This table covers the 459 logged `rust tests`, `rust checks`, `WASM`,
+`FSL Logic Test` and `mutation` jobs from the 40 `ci.yml` runs created between 2026-11-04T23:17Z and
+2026-11-05T11:23Z. Jobs are grouped by the `Region:` line in each job log. The three logs where the
+`Cloud:` line was read say `AWS` for `us-west-2` (twice) and `Azure` for `centralus`; the other
+groupings follow from the region's name.
+
+| Regions | Images | Heavy jobs | `rust tests` jobs | Jobs with a disk signal |
+|---|---|---:|---:|---:|
+| Azure-named | `20261025.179.1`, `20261101.186.1` | 442 | 108 | 0 |
+| AWS-named (`us-west-2`, `us-east-1`) | `20261101.64.1`, `20261018.50.1` | 17 | 3 | 2 |
+
+The two signals are job `127186090349` (shard 1), where `rustc` hit `No space left on device` and the
+runner reported 67 MB free, and job `126970733676` (shard 3), where the build finished with 97 MB free
+and the job later failed on an unrelated test. A complete build leaving 97 MB free suggests that those
+runners start with about 20 GiB free. The Azure-named ones finish the same build with no warning, so
+they have more, by an unmeasured margin. Two more
+`rust tests (1/3)` jobs, `127061402906` and `127075424043`, died on the same error with no log
+retained, so their region is unknown. All four signals are in `rust-tests`.
+
+The absence of a signal is weak evidence. The runner warns only when a periodic check sees less than
+100 MB free, so it says nothing about how close a job came above that line.
+
+**What is removed.** The step sits after the scope decision and before the toolchain install, so a
+run the scope check skips pays nothing, and it cannot separate the hash step from `rust-cache`, which
+`.github/scripts/validate_rust_cache_key.py` requires to be adjacent.
+
+| Path | Why this job does not need it |
+|---|---|
+| `/usr/local/lib/android` | No step or test reads `ANDROID_*`. A cold vendored-Z3 build finds CMake in `/usr/local/bin`, where the image's `install-cmake.sh` puts it, not in the SDK. |
+| `/usr/share/dotnet` | The runner does not use it: `Runner.Listener.csproj` at `v2.338.2` sets `SelfContained`, and the runner runs from its own directory. No step or test calls `dotnet`. |
+| `/usr/local/.ghcup` | No step or test calls GHC or Cabal. This is where the image's `install-haskell.sh` installs them; `/opt/ghc`, which older cleanup recipes name, is not in that script. |
+
+`/opt/hostedtoolcache` stays, along with everything else on the image. On Linux the tests spawn only
+`git`, `sh`, `bash`, `python3`, `tar`, `mkfifo`, `cargo` and binaries the workspace built. The cache
+key does not change:
+the step sets no environment variable and touches no file that "Cache key generation" lists as a key
+input, and the job's Cargo profiles are untouched.
+
+The removal is unconditional. A threshold on free space would save time on the larger runners, but
+its value would depend on the same unmeasured budget.
+
+**What is unproven until the job runs.** The Android, .NET and GHCup paths were read from the
+`ubuntu26/20261101.186` image sources. The repository `actions/runner-images` has no tag for
+`20261101.64`, the image on the failing runners, so its contents are unknown; `rm -rf` does nothing
+for a path it lacks. The only size figures found are from a third party on an older image, about
+14 GiB for Android and 2.7 GiB for .NET. The time the removal takes is also unknown. `df -h /` before
+and after the removal, and the `Report runner disk use` step, record all of this on the next run. That
+last step cannot report when the runner itself dies of a full disk, as it did in the two jobs with no
+log.
+
+**Other jobs.** None of the other jobs gets the step, because none shows a signal. That includes the
+14 such jobs on AWS-named regions, among them `mutation mutants` in the `complete` tier and one
+`rust checks`. `rust-workspace` and `semantic-mutation` are aggregators that build nothing.
+`production-native-z3-linux` is the closest match: `cargo test -p fsl-solver-z3 -p fsl-verifier
+-p fslc-rust` builds most of the same binaries, but it runs only on pull requests into `production`
+and did not run in this window. If it reports a full disk, give it the same step.
+
+**This is headroom, not a limit.** Tracked integration-test files under `rust/*/tests/` went from 232
+on 2026-10-01 to 465 on 2026-11-01, and at the median each new one adds about 25 MiB to all three
+shards. Growth at that rate would use 14 GiB in under three months and would reach the Azure-named
+runners too. The lasting fix would be to stop linking every binary in every shard, which changes how
+`full.txt` is produced and is a separate decision.
+
 ## Required pre-merge contexts and merge queue adoption
 
 ### Automation contracts use parser-backed workflow inspection
