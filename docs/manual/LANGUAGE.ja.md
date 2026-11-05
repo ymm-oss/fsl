@@ -3824,6 +3824,14 @@ head の証拠であり、後の統合コミットに対して未実施の sweep
 - `kpi NAME = count ENTITY in STAGE` は、business と requirements の両方における
   宣言的な射影です。ghost のカウンターや自動の `_kpi_*` invariant を作ることは
   ありません。
+- requirements 文書に書ける `implements` は 1 つまでです。破壊的な削除
+  ([#1694](https://github.com/ymm-oss/fsl/issues/1694)): 2 つ目の節は、別の契約を指していても
+  同じ契約を指していても、文書をパースするすべてのコマンドでその節の位置を指す
+  `kind: "parse"` エラー(exit 2)になります。例:
+  `duplicate implements 'Other' (a requirements document declares one, and 'Held' came first) at 3:3`。
+  以前は何も報告せずに読み捨てていたため、その契約は検査されず、2 つ目に書いた壊れた契約が
+  `check` を通っていました。移行: この文書が詳細化する契約を残し、それ以外は別の文書から、または
+  `fslc refine` で検査します。自動移行はありません。
 - `implements` があると、`fslc check` と `fslc verify` はどちらも上位レイヤーへの refinement も
   実行し、結果は `implements: {abs, result}` を持ちます。値は `refines` / `refinement_failed` /
   `impl_violated` の3つです。**失敗した seam はこのフィールドの中に閉じません。**

@@ -1126,6 +1126,13 @@ have9 unchanged/9 changed (5 abort→progress_lost,1 false-refines→progress_lo
 All710 routes ran twice per SHA, no CLI masks. Full boundary evidence and
 migration cautions: `docs/design/DESIGN-refinement.md` §4 (#1613).
 
+A requirements document declares at most one `implements`. Breaking removal (#1694): a second
+clause, naming another contract or the same one, is a located `kind: "parse"` error (exit 2) at that
+clause in every command that parses the document, as in
+`duplicate implements 'Other' (a requirements document declares one, and 'Held' came first) at 3:3`. It used
+to be dropped without a message, so its contract was never checked. Keep the contract this document
+refines, and check any other from its own document or with `fslc refine`.
+
 Standalone action items, inline `implements` items, requirement-action `maps`,
 and auto/identity synthesis share one typed action-correspondence validator.
 Typed impl parameters, target arity/argument expressions, and auto actor
