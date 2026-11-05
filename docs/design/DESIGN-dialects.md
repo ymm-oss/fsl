@@ -396,8 +396,9 @@ mean.
 #### Repeated actors and requirement ID owners (#1705)
 
 **Breaking removal (#1705).** In `fsl 5` requirements, three repeats passed `check`, and for an ID the
-ledger kept one row, with one title and one status, for two declarations. Each is now refused while the
-document is desugared, with exit 2, `kind: "parse"` and `loc` at the repeat:
+ledger kept one row, with one title and one status, for two declarations, or one text for two `covers`.
+Each is now refused while the document is desugared, with exit 2 and `kind: "parse"`. The `loc` is the
+repeated actor name, the second owner's ID, or the `covers` keyword of the later `covers`:
 
 - A second `actor` of one name, on its own line or in a list: `duplicate actor 'Agent' at 4:9`.
 - A second declaration that owns the requirement ID after its keyword (`rule`, `decide`, `scenario`,
@@ -407,10 +408,13 @@ document is desugared, with exit 2, `kind: "parse"` and `loc` at the repeat:
   enforced as one owner per ID. A second `scenario`, `forbidden`, `goal` or `policy` of its own kind
   keeps the refusal it already had (`duplicate acceptance id`, `duplicate forbidden id`, `duplicate
   property name`, `kind: "semantics"`). Only another kind's ID is new for them.
-- Two rows of one `decide` that cover one ID with different texts, at the second `covers`: `decision
-  table 'REQ-2-3' covers 'REQ-2' twice with different texts; a covered ID names one requirement at
-  22:7`. A `covers` is a link, so one ID with one text on two rows stays accepted, and the ledger shows
-  it once, as before.
+- Two `covers` of an ID that no declaration owns, with different texts, anywhere in the document, at
+  the later `covers` and naming the earlier one: `requirement ID 'REQ-EV-1' is covered as
+  "withdrawing" here and as "closing" at 15:5; every covers of an ID no declaration owns has one text
+  at 19:5`. Events' and decision rows' `covers` count alike: two events, two rows of one table, rows of
+  two tables, or an event and a row. A `covers` is a link, so one ID with one text stays accepted, and
+  the ledger shows it once, as before. An unowned ID has no title of its own, so the `covers` texts are
+  its only wording, and two of them left the ledger with one.
 
 What base `56354e477544f9be1f4477ddf036e5855d514bb5` did, measured once each with a debug build on the support-desk and claims documents of
 #1705. The routes were `check`, `verify --depth 6`, `ledger --depth 6`, `document claims` and `document generate`:
@@ -423,7 +427,10 @@ What base `56354e477544f9be1f4477ddf036e5855d514bb5` did, measured once each wit
 | `rule` reusing a `decide` ID | exit 0 | The rule's title is in neither the ledger, `document claims` nor `document generate` |
 | `decide` of one ID twice, different rows | exit 0 | One ledger row |
 | `forbidden` reusing a `scenario` ID | exit 0 | No ledger row for either, both in the documents. Refused by the one-owner rule |
-| two `covers` of one ID, different texts | exit 0 | One ledger row; the second title is missing |
+| two rows of one `decide` covering one ID, different texts | exit 0 | One ledger row; the second title is missing |
+| two events covering `REQ-EV-1` with "closing" and "withdrawing" | exit 0 on `check` and `ledger` | One ledger row, "closing" |
+| two `decide` tables covering `REQ-2` with different texts | exit 0 on `check` | One ledger row, "other"; the first table's text is missing |
+| an event and a row covering `REQ-3` on one event, different texts | exit 2, `kind: "semantics"`, `requirement annotation 'REQ-3' has conflicting text at 23:7` | Refused already; now the message above, `kind: "parse"`, at the same location |
 
 Unchanged:
 
@@ -432,7 +439,7 @@ Unchanged:
 - `policy`, `forbidden`, `measure`, a relation role, an entity field, a decide row that overlaps another, and a
   glossary alias, all already refused.
 - `concept` and `kpi`, which #1686 refuses.
-- An event's `covers`, or a decide row's `covers`, naming an ID another declaration owns stays accepted.
+- An event's `covers`, or a decide row's `covers`, naming an ID another declaration owns, with any text.
   Its output changed; see the next subsection.
 
 The current edition shares IDs the same way and is unchanged. One run each: two `requirement REQ-1`
@@ -444,17 +451,19 @@ Routes covered by `issue_1705_requirements_repeats`: `check`, `verify` on bmc, e
 generate` write no file. The other routes load the document through the same desugaring [R]. The
 Japanese particle spellings and the LSP were not measured.
 
-On-disk transition set (empty). Base `56354e477544f9be1f4477ddf036e5855d514bb5`, head `779408fa52110cb3ca7b2adf7394d489513c5cb7`, each binary built from
+On-disk transition set (empty). Base `56354e477544f9be1f4477ddf036e5855d514bb5`, head `c2bd60208cb3102e63b2b3c5ded6ee7fb58a7800`, each binary built from
 its own tree with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/`
 (651 forms: 23/195/433) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable and with
 `FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All 2604 pairs had
 equal complete stdout, stderr and exit with no field excluded, and no run differed from its repeat: 0
-ok-to-error and 0 error-to-ok. No required test's inline fixtures were rewritten.
+ok-to-error and 0 error-to-ok. The same sweep on the earlier head `779408fa52110cb3ca7b2adf7394d489513c5cb7`,
+before the document-wide `covers` rule, gave the same result. No required test's inline fixtures were rewritten.
 
 #### A `covers` of an owned ID shows the owner's title (#1705)
 
 **Changed ledger output (#1705).** A decide row's `covers` or an event's `covers` may name an ID that a
-`rule`, `decide`, `scenario`, `forbidden`, `goal` or `policy` owns. It stays accepted and stays a link:
+`rule`, `decide`, `scenario`, `forbidden`, `goal` or `policy` owns, with any text, and two of them may
+differ. It stays accepted and stays a link:
 the covering event's action keeps the ID, and the claims that carry the ID are the same. The ID has one
 title, its owner's. The lowering gives the link the owner's title and the owner's span, so the ledger
 row, the document's rule section and requirement text, and `document claims` show the owner's title once,
@@ -470,11 +479,29 @@ its own `assuming`; `document generate`, `document claims` and `document check` 
 | decide row `covers REQ-2 "A small claim is auto-approved"` | Ledger row titled with the row's text. Claims: two statements for `REQ-2`, the row's text first, so the document's rule section quoted the row's text under the rule | Ledger row, rule section and the one statement show the rule's title, cited at 24:3. Claim IDs of `REQ-2` unchanged |
 | event `covers REQ-2 "A claim can be rejected"` | Ledger row titled with the event's text. The rule's title was in neither the ledger, `document claims` nor `document generate` | Ledger row, rule section and the one statement show the rule's title, cited at 25:3. Claim IDs of `REQ-2` unchanged |
 
-Tested by `a_covers_of_an_owned_id_shows_the_owners_title` in `issue_1705_requirements_repeats`, with
-three faults detected: an event's `covers`, or a row's `covers`, left without its owner's title, and the
-title moved without the span. Not measured: a `covers` of a `scenario`, `forbidden`, `goal` or `policy`
-ID, which takes the same path [R]; the Japanese particle spellings; the LSP. Of the on-disk corpus, the 8
-next-edition files that write `covers` give the same complete `document claims` stdout on base and head.
+An event's `covers` of another owner kind's ID, on the support-desk document with the text "different",
+measured once each. Base showed "different" as the ledger title; head shows the owner's:
+
+| Owner | Base ledger title | Head ledger title |
+|---|---|---|
+| `forbidden FB-DESK-001` | different | No ticket is taken once the desk has closed |
+| `policy POL-TICKET-001` | different | Every assigned ticket is eventually closed or escalated |
+| `goal GOAL-TICKET-001` | different | A ticket can be closed |
+| `scenario AC-TICKET-001` | different | An agent takes and closes a ticket |
+
+One case stays refused: a row covering its own table's ID with another text, `requirement annotation
+'REQ-2-3' has conflicting text at 22:7` with `kind: "semantics"`, as on base. The row's `covers` lands on the event the table
+already annotates with that ID and the table's title, so the event would carry one ID with two texts.
+Taking the table's title there would turn a row that contradicts its own table into silence, so the
+lowering leaves that `covers` its own text and the conflict stands. A row covering its own table's ID
+with the table's title stays accepted.
+
+Tested by `a_covers_of_an_owned_id_shows_the_owners_title`, `a_covers_of_another_owner_kind_shows_its_title`
+and `a_row_covering_its_own_table_with_another_text_stays_refused` in `issue_1705_requirements_repeats`.
+Three faults were detected: an event's `covers`, or a row's `covers`, left without its owner's title, and
+the title moved without the span. Not measured: the Japanese particle spellings and the LSP. Of the
+on-disk corpus, the 8 next-edition files that write `covers` give the same complete `document claims`
+stdout on base and on head `a912a7b3d`.
 
 **Owed to #1437.** This removal is recorded here, in
 `skills-next/fsl-requirements/references/syntax.md` and in
@@ -482,7 +509,8 @@ next-edition files that write `covers` give the same complete `document claims` 
 published material until #1434 lifts the gate, so `docs/manual/LANGUAGE.md`,
 `docs/manual/LANGUAGE.ja.md` and `skills/fsl/references/syntax.md` do not carry it yet. When #1437
 writes the `fsl 5` reference, those three owe the three refusals above and the accepted `covers`
-link with its owner's title, with the site regenerated. Migration: rename one of the two IDs, or merge the two declarations;
+link with its owner's title, the document-wide one-text rule for an unowned ID, and the row covering its
+own table, with the site regenerated. Migration: rename one of the two IDs, or merge the two declarations;
 delete the repeated actor.
 
 ### 2.3 Tests (tests/test_req_dialect.py)
