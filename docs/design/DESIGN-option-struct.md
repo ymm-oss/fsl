@@ -32,7 +32,7 @@ repeated field before it reads the field types, with `kind: "name"` and `loc` at
 parallel to `fields`, for that location. Two copies of one type are refused too: they lose nothing, and
 that matches the other repeated declarations (#1686). A struct nothing reads is refused as well.
 
-Routes on one document, `FSLC_CACHE=off`, base `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `1f392f576b0a11aa40f602609c631d74af01aec0`. The literal is `P { x: 1 }`
+Routes on one document, `FSLC_CACHE=off`, base `b2cdb394fedcba015261df05587c4721583329e3`, head `66ca55474a05a8aefc9d92b29095505f1f1742af`. The literal is `P { x: 1 }`
 and the invariant `p.x == 1`.
 
 | Route | Base, `x: K, x: Bool` | Base, `x: Bool, x: K` | Base, `x: K, x: K` | Head, any |
@@ -77,14 +77,14 @@ In `fslc-lsp` the refusal is a diagnostic at the repeated field, `kind` `name`, 
 
 Migration: keep the one field you mean. There is no automatic migration.
 
-On-disk transition set (empty). Base `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `1f392f576b0a11aa40f602609c631d74af01aec0`, each binary built from its own tree in
+On-disk transition set (empty). Base `b2cdb394fedcba015261df05587c4721583329e3`, head `66ca55474a05a8aefc9d92b29095505f1f1742af`, each binary built from its own tree in
 its own target directory with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and
-`rust/fslc/tests/fixtures/` (646 forms: 23/195/428) ran with `FSLC_CACHE=off` and its own tree as cwd,
+`rust/fslc/tests/fixtures/` (650 forms: 23/195/432) ran with `FSLC_CACHE=off` and its own tree as cwd,
 as `fslc check <path>` stable and with the next edition enabled, and as `fslc kernel <path>
---kernel-version 1|2`, twice per side. All 2584 pairs had equal complete stdout, stderr and exit with
+--kernel-version 1|2`, twice per side. All 2600 pairs had equal complete stdout, stderr and exit with
 no field excluded, and no run differed from its repeat: 0 ok-to-error and 0 error-to-ok transitions.
 That includes `specs/order_system.fsl`, whose component `specs/payment.fsl` declares a struct. A pattern
-scan of the repository's `.fsl`, `.rs`, `.md`, `.py`, `.ts`, `.js`, `.json` and `.html` files found 930
+scan, on the earlier base `1559e8eba`, of the repository's `.fsl`, `.rs`, `.md`, `.py`, `.ts`, `.js`, `.json` and `.html` files found 930
 `struct` bodies and no FSL declaration repeating a field; the only hits were Rust structs. No required
 test's inline fixtures were rewritten.
 

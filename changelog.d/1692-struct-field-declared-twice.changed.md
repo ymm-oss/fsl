@@ -11,6 +11,6 @@ An input that already failed now reports the repeat, so its kind can change: `st
 
 Migration: keep the one field you mean. There is no automatic migration.
 
-The 646-form on-disk corpus has an empty transition set: base `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `1f392f576b0a11aa40f602609c631d74af01aec0`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
+The 650-form on-disk corpus has an empty transition set: base `b2cdb394fedcba015261df05587c4721583329e3`, head `66ca55474a05a8aefc9d92b29095505f1f1742af`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
 
 Rust API: `SpecItem::Struct` gains `field_spans`.
