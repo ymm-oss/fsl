@@ -18,6 +18,9 @@ use crate::{
     TokenKind,
 };
 
+/// A struct literal that names a field an earlier field of the literal took.
+pub const DUPLICATE_STRUCT_FIELD: &str = "duplicate_struct_field";
+
 /// An unresolved source identifier with its exact token span.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyntaxIdent {
@@ -346,13 +349,24 @@ impl SyntaxExpr {
             SyntaxExprKind::Some(value) => Expr::Some(Box::new(value.into_kernel()?)),
             SyntaxExprKind::Set(values) => Expr::Set(convert_list(values)?),
             SyntaxExprKind::Seq(values) => Expr::Seq(convert_list(values)?),
-            SyntaxExprKind::Struct { name, fields } => Expr::Struct {
-                name: name.text,
-                fields: fields
-                    .into_iter()
-                    .map(|(field, value)| Ok((field.text, value.into_kernel()?)))
-                    .collect::<Result<Vec<_>, ParseError>>()?,
-            },
+            SyntaxExprKind::Struct { name, fields } => {
+                let mut seen = std::collections::BTreeSet::new();
+                if let Some((field, _)) = fields.iter().find(|(field, _)| !seen.insert(&field.text))
+                {
+                    return Err(ParseError::coded(
+                        DUPLICATE_STRUCT_FIELD,
+                        format!("duplicate field '{}.{}'", name.text, field.text),
+                        field.span,
+                    ));
+                }
+                Expr::Struct {
+                    name: name.text,
+                    fields: fields
+                        .into_iter()
+                        .map(|(field, value)| Ok((field.text, value.into_kernel()?)))
+                        .collect::<Result<Vec<_>, ParseError>>()?,
+                }
+            }
             SyntaxExprKind::Name(name) => Expr::Var(name.text),
             SyntaxExprKind::Call { callee, args } => {
                 let name = callee.text;

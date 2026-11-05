@@ -286,6 +286,8 @@ impl std::error::Error for CoreError {}
 
 impl From<ParseError> for CoreError {
     fn from(error: ParseError) -> Self {
+        let diagnostic_code =
+            (error.code() == fsl_syntax::DUPLICATE_STRUCT_FIELD).then_some(error.code());
         Self {
             message: error.message,
             line: error.span.start.line,
@@ -307,7 +309,7 @@ impl From<ParseError> for CoreError {
                 generated: false,
             })),
             kind: CoreErrorKind::Semantics,
-            diagnostic_code: None,
+            diagnostic_code,
         }
     }
 }

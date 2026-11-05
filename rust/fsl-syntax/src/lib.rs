@@ -120,7 +120,7 @@ pub use surface::{
     SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem, entity_binder, stage_reference,
 };
 pub use syntax_expr::{
-    SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,
-    SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind,
+    DUPLICATE_STRUCT_FIELD, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue,
+    SyntaxOperator, SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind,
 };
 pub use unstable::{ParseOptions, UnstableFeature, UnstableFeatures};

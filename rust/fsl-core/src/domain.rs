@@ -878,6 +878,16 @@ impl<'a> Context<'a> {
                 })
             }
             SyntaxExprKind::Struct { name, fields } => {
+                // `domain expand` and `domain analyze` render through here and
+                // build no model, so lowering's refusal does not reach them.
+                let mut seen = BTreeSet::new();
+                if let Some((field, _)) = fields.iter().find(|(field, _)| !seen.insert(&field.text))
+                {
+                    return Err(error_at(
+                        format!("duplicate field '{}.{}'", name.text, field.text),
+                        field.span,
+                    ));
+                }
                 let fields = fields
                     .iter()
                     .map(|(field, value)| {

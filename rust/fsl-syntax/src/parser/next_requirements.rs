@@ -128,6 +128,9 @@ struct EventDeclaration {
     phrase_span: Span,
 }
 
+/// A step's inputs as written: `name value`, each with its span.
+type StepInputs = Vec<(Word, Expr, Span)>;
+
 enum Step {
     Phrase {
         actor: Word,
@@ -996,10 +999,11 @@ impl Parser<'_> {
                     roles.mark(word, particle, PHRASE)?;
                 }
                 None => {
-                    if let Some(mut given) = self.marked_step_inputs(&word, line) {
-                        inputs.append(&mut given);
-                    } else {
+                    let mut given = self.marked_step_inputs(&word, line)?;
+                    if given.is_empty() {
                         roles.unmarked(word)?;
+                    } else {
+                        inputs.append(&mut given);
                     }
                 }
             }
@@ -1031,9 +1035,9 @@ impl Parser<'_> {
     }
 
     /// After the word `input`, already read: `value {, input value} で` on
-    /// `line`, the step's inputs; `None` (nothing consumed) when what
-    /// follows is not that, so the word is the verb.
-    fn marked_step_inputs(&mut self, input: &Word, line: u32) -> Option<Vec<(Word, Expr, Span)>> {
+    /// `line`, the step's inputs; none (nothing consumed) when what follows
+    /// is not that, so the word is the verb.
+    fn marked_step_inputs(&mut self, input: &Word, line: u32) -> Result<StepInputs, ParseError> {
         let start = self.cursor;
         let mut inputs = Vec::new();
         let mut name = input.clone();
@@ -1044,15 +1048,19 @@ impl Parser<'_> {
             let mut cursor = self.cursor;
             // This is speculative phrase matching: errors are discarded, so
             // do not commit an expression diagnostic at a possible boundary.
-            let Ok(value) = parse_tokens_expression(
+            let value = match parse_tokens_expression(
                 &self.tokens,
                 &mut cursor,
                 self.expression_mode(),
                 true,
                 false,
             )
-            .and_then(crate::SyntaxExpr::into_kernel) else {
-                break;
+            .and_then(crate::SyntaxExpr::into_kernel)
+            {
+                Ok(value) => value,
+                // Not a possible boundary: the value was read and repeats a field.
+                Err(error) if error.code() == crate::DUPLICATE_STRUCT_FIELD => return Err(error),
+                Err(_) => break,
             };
             let value_start = self.cursor;
             self.cursor = cursor;
@@ -1061,7 +1069,7 @@ impl Parser<'_> {
             inputs.push((name, value, span));
             if self.particle_here() == Some(Particle::De) {
                 self.bump();
-                return Some(inputs);
+                return Ok(inputs);
             }
             if !self.eat_symbol(",") {
                 break;
@@ -1076,7 +1084,7 @@ impl Parser<'_> {
         self.spellings
             .expressions
             .retain(|expression| expression.span.start.offset < rewound);
-        None
+        Ok(Vec::new())
     }
 }
 

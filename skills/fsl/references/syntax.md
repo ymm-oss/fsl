@@ -1056,6 +1056,21 @@ a field twice. With `kind: "parse"`: a second `implementation_profile`, aggregat
 every copy stay accepted, such as two `requires` or two sagas of one name. Migration: delete the lost
 copy or merge the two. See `docs/design/DESIGN-domain.md`.
 
+Breaking removal (#1685): a struct literal that names a field twice is refused at the
+repeated field, in every position and edition: exit 2, `kind: "parse"`,
+`diagnostic_code: "duplicate_struct_field"`, `duplicate field 'P.x' at 5:24`. It kept the
+last value, so `P { x: 1, x: 2, y: 0 }` and `P { x: 2, x: 1, y: 0 }` passed `check` and gave
+opposite verdicts; `verify`, `refine`, `replay` and the other routes no longer return a
+result on them. A component reports
+`component "piece.fsl" failed to parse (duplicate field 'P.x' at piece.fsl:6:32) at root.fsl:2:3`
+(`kind: "semantics"`), an inline `implements` reports
+`implements "abs.fsl" failed to parse (duplicate field 'P.x' at abs.fsl:6:33)` (`kind: "type"`,
+`loc` on the `implements`), and a refinement mapping reports `duplicate field 'P.x'`
+(`kind: "type"`, `loc` at the field). A `domain` value object is refused in `check` and every `domain` command (`kind: "semantics"`), and
+`domain expand` writes nothing. An input that already failed now reports the repeat, so its kind can
+change to `parse`. Migration:
+keep the one value you mean. See `docs/design/DESIGN-option-struct.md`, §8.
+
 Component free value reads and update roots resolve against the original component declarations before merging; composition cannot rescue an undeclared reference (breaking removal, #1442), while public names remain legal and protected enum reads display their source member spelling.
 
 A glue action reads and writes local and component state directly via `alias.var`.
