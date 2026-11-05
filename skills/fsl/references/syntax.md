@@ -1066,7 +1066,9 @@ result on them. A component reports
 (`kind: "semantics"`), an inline `implements` reports
 `implements "abs.fsl" failed to parse (duplicate field 'P.x' at abs.fsl:6:33)` (`kind: "type"`,
 `loc` on the `implements`), and a refinement mapping reports `duplicate field 'P.x'`
-(`kind: "type"`, `loc` at the field). A `domain` value object keeps its own refusal. Migration:
+(`kind: "type"`, `loc` at the field). A `domain` value object is refused in `check` and every `domain` command (`kind: "semantics"`), and
+`domain expand` writes nothing. An input that already failed now reports the repeat, so its kind can
+change to `parse`. Migration:
 keep the one value you mean. See `docs/design/DESIGN-option-struct.md`, §8.
 
 Component free value reads and update roots resolve against the original component declarations before merging; composition cannot rescue an undeclared reference (breaking removal, #1442), while public names remain legal and protected enum reads display their source member spelling.

@@ -1132,16 +1132,18 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   <code>diagnostic_code: "duplicate_struct_field"</code>、<code>duplicate field 'P.x' at 5:24</code> です。以前は
   最後の値だけを残して他を捨てていたため、<code>P { x: 1, x: 2, y: 0 }</code> と
   <code>P { x: 2, x: 1, y: 0 }</code> はどちらも <code>check</code> を通り、検証結果は逆になりました。これらの形は
-  順序が逆でも、値が同じでも <code>check</code> を通っていましたが、今は拒否され、<code>verify</code>、<code>refine</code>、
-  <code>replay</code>、<code>scenarios</code>、<code>testgen</code>、<code>mutate</code>、<code>html</code>、<code>ledger</code>、<code>diff</code>、<code>kernel</code>、<code>typestate</code>、
+  順序が逆でも、値が同じでも <code>check</code> を通っていましたが、今は拒否され、<code>verify</code>、<code>sweep</code>、<code>refine</code>、
+  <code>replay</code>、<code>scenarios</code>、<code>testgen</code>、<code>mutate</code>、<code>html</code>、<code>ledger</code>、<code>diff</code>、<code>migrate</code>、<code>document</code>、<code>kernel</code>、<code>typestate</code>、
   <code>lint</code>、<code>fmt</code>、<code>explain</code>、<code>analyze</code>、<code>conformance</code> は結果を返さなくなります。コンポーネントでは
   <code>component "piece.fsl" failed to parse (duplicate field 'P.x' at piece.fsl:6:32) at root.fsl:2:3</code>、
   <code>kind: "semantics"</code> で、action が lift されていても、同期されていても、internal で参照されて
   いなくても同じです。inline の <code>implements</code> では
   <code>implements "abs.fsl" failed to parse (duplicate field 'P.x' at abs.fsl:6:33)</code>、<code>kind: "type"</code>、
   <code>loc</code> は <code>implements</code> です。refinement のマッピングでは <code>duplicate field 'P.x'</code>、
-  <code>kind: "type"</code>、<code>loc</code> はそのフィールドです。<code>domain</code> の value object は <code>check</code> での従来の
-  拒否 (<code>kind: "semantics"</code>) のままです。移行: 意図する値を 1 つだけ残してください。自動移行は
+  <code>kind: "type"</code>、<code>loc</code> はそのフィールドです。<code>domain</code> の value object は <code>check</code> とすべての
+  <code>domain</code> コマンドで拒否され (<code>kind: "semantics"</code>)、<code>domain expand</code> は何も書き出しません。
+  すでに失敗していた入力は重複を報告するようになるため、kind が <code>parse</code> に変わることが
+  あります。エディタではこれは構文エラーなので、修正するまで文書のシンボルは得られません。移行: 意図する値を 1 つだけ残してください。自動移行は
   ありません。<a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-option-struct.md"><code>DESIGN-option-struct.md</code></a> の §8 を参照して
   ください。
 - Set/Seq 式の実体化 (Refs #1467): 既に受理される再帰的な式は、構築・等値比較・

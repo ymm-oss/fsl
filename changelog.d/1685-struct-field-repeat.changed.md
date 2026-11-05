@@ -6,10 +6,12 @@ These forms passed `check` before and kept only the last value, so swapping the 
 - The same literal in a compose component, whether its action is lifted, synchronized, or internal and unreferenced.
 - The same literal in a refinement mapping or an inline `implements` abstraction.
 
-`verify` no longer returns `violated`, `verified` or `proved` on those forms, `refine` no longer returns `refines`, `impl_violated` or `refinement_failed`, `replay` no longer returns `conformant` or `nonconformant`, and `scenarios`, `mutate`, `testgen`, `html`, `ledger`, `diff`, `lint`, `fmt`, `explain`, `analyze`, `conformance`, `kernel` and `typestate` exit 2 instead of their own results. A `domain` value object keeps its own refusal at `check`.
+An input that already failed now reports the repeat, so its kind can change: `P { x: Q { a: 1, a: 2 }, y: 0 }` from `type` to `parse`, and an undefined `Q { a: 1, a: 2 }` from `semantics` to `parse`. In `fslc-lsp` the refusal is a parse diagnostic at the repeated field, and like any parse error it leaves `documentSymbol` returning null until the literal is fixed.
+
+`verify` no longer returns `violated`, `verified` or `proved` on those forms, `refine` no longer returns `refines`, `impl_violated` or `refinement_failed`, `replay` no longer returns `conformant` or `nonconformant`, `sweep --depth 0..1` no longer returns `sweep_failed` or `sweep_passed`, and `migrate`, `document claims`, `scenarios`, `mutate`, `testgen`, `html`, `ledger`, `diff`, `lint`, `fmt`, `explain`, `analyze`, `conformance`, `kernel` and `typestate` exit 2 instead of their own results. A `domain` value object is refused in `check` and every `domain` command, with `kind: "semantics"`: `domain expand` and `domain analyze` exited 0 before, and `expand` wrote both copies to a file `check` refused. `domain expand` now writes nothing.
 
 Migration: keep the one value you mean. There is no automatic migration.
 
-The 646-form on-disk corpus has an empty transition set: base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `7d1fb36f653427bbfe13844d6b963720ab1df2d2`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
+The 646-form on-disk corpus has an empty transition set: base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `f45e76931aee7da26a4734b011f16a254feed3ac`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
 
 Rust API: `fsl_syntax::DUPLICATE_STRUCT_FIELD`.

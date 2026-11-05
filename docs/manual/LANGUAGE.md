@@ -1170,9 +1170,9 @@ name in a `decreases` call. There are no unrelated breaking removals.
   `duplicate field 'P.x' at 5:24`. It kept the last value and dropped the others,
   so `P { x: 1, x: 2, y: 0 }` and `P { x: 2, x: 1, y: 0 }` passed `check` and gave
   opposite verdicts. These forms, in either order or with equal values, passed
-  `check` and are now refused, and `verify`, `refine`, `replay`, `scenarios`,
-  `testgen`, `mutate`, `html`, `ledger`, `diff`, `kernel`, `typestate`, `lint`,
-  `fmt`, `explain`, `analyze` and `conformance` no longer return their results on
+  `check` and are now refused, and `verify`, `sweep`, `refine`, `replay`,
+  `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`, `migrate`, `document`,
+  `kernel`, `typestate`, `lint`, `fmt`, `explain`, `analyze` and `conformance` no longer return their results on
   them. A component reports
   `component "piece.fsl" failed to parse (duplicate field 'P.x' at piece.fsl:6:32) at root.fsl:2:3`,
   `kind: "semantics"`, whether its action is lifted, synchronized, or internal and
@@ -1180,7 +1180,10 @@ name in a `decreases` call. There are no unrelated breaking removals.
   `implements "abs.fsl" failed to parse (duplicate field 'P.x' at abs.fsl:6:33)`,
   `kind: "type"`, with `loc` on the `implements`. A refinement mapping reports
   `duplicate field 'P.x'`, `kind: "type"`, with `loc` at the field. A `domain`
-  value object keeps its own refusal at `check`, `kind: "semantics"`. Migration:
+  value object is refused in `check` and every `domain` command, `kind: "semantics"`,
+  and `domain expand` writes nothing. An input that already failed now reports the
+  repeat, so its kind can change to `parse`. In the editor this is a parse error, so
+  the document's symbols are gone until it is fixed. Migration:
   keep the one value you mean. There is no automatic migration. See
   [`DESIGN-option-struct.md`](../design/DESIGN-option-struct.md), §8.
 - Set/Seq expression materialization (Refs #1467): already-admitted recursive

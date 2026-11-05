@@ -1084,16 +1084,18 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `diagnostic_code: "duplicate_struct_field"`、`duplicate field 'P.x' at 5:24` です。以前は
   最後の値だけを残して他を捨てていたため、`P { x: 1, x: 2, y: 0 }` と
   `P { x: 2, x: 1, y: 0 }` はどちらも `check` を通り、検証結果は逆になりました。これらの形は
-  順序が逆でも、値が同じでも `check` を通っていましたが、今は拒否され、`verify`、`refine`、
-  `replay`、`scenarios`、`testgen`、`mutate`、`html`、`ledger`、`diff`、`kernel`、`typestate`、
+  順序が逆でも、値が同じでも `check` を通っていましたが、今は拒否され、`verify`、`sweep`、`refine`、
+  `replay`、`scenarios`、`testgen`、`mutate`、`html`、`ledger`、`diff`、`migrate`、`document`、`kernel`、`typestate`、
   `lint`、`fmt`、`explain`、`analyze`、`conformance` は結果を返さなくなります。コンポーネントでは
   `component "piece.fsl" failed to parse (duplicate field 'P.x' at piece.fsl:6:32) at root.fsl:2:3`、
   `kind: "semantics"` で、action が lift されていても、同期されていても、internal で参照されて
   いなくても同じです。inline の `implements` では
   `implements "abs.fsl" failed to parse (duplicate field 'P.x' at abs.fsl:6:33)`、`kind: "type"`、
   `loc` は `implements` です。refinement のマッピングでは `duplicate field 'P.x'`、
-  `kind: "type"`、`loc` はそのフィールドです。`domain` の value object は `check` での従来の
-  拒否 (`kind: "semantics"`) のままです。移行: 意図する値を 1 つだけ残してください。自動移行は
+  `kind: "type"`、`loc` はそのフィールドです。`domain` の value object は `check` とすべての
+  `domain` コマンドで拒否され (`kind: "semantics"`)、`domain expand` は何も書き出しません。
+  すでに失敗していた入力は重複を報告するようになるため、kind が `parse` に変わることが
+  あります。エディタではこれは構文エラーなので、修正するまで文書のシンボルは得られません。移行: 意図する値を 1 つだけ残してください。自動移行は
   ありません。[`DESIGN-option-struct.md`](../design/DESIGN-option-struct.md) の §8 を参照して
   ください。
 - Set/Seq 式の実体化 (Refs #1467): 既に受理される再帰的な式は、構築・等値比較・

@@ -1217,9 +1217,9 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   <code>duplicate field 'P.x' at 5:24</code>. It kept the last value and dropped the others,
   so <code>P { x: 1, x: 2, y: 0 }</code> and <code>P { x: 2, x: 1, y: 0 }</code> passed <code>check</code> and gave
   opposite verdicts. These forms, in either order or with equal values, passed
-  <code>check</code> and are now refused, and <code>verify</code>, <code>refine</code>, <code>replay</code>, <code>scenarios</code>,
-  <code>testgen</code>, <code>mutate</code>, <code>html</code>, <code>ledger</code>, <code>diff</code>, <code>kernel</code>, <code>typestate</code>, <code>lint</code>,
-  <code>fmt</code>, <code>explain</code>, <code>analyze</code> and <code>conformance</code> no longer return their results on
+  <code>check</code> and are now refused, and <code>verify</code>, <code>sweep</code>, <code>refine</code>, <code>replay</code>,
+  <code>scenarios</code>, <code>testgen</code>, <code>mutate</code>, <code>html</code>, <code>ledger</code>, <code>diff</code>, <code>migrate</code>, <code>document</code>,
+  <code>kernel</code>, <code>typestate</code>, <code>lint</code>, <code>fmt</code>, <code>explain</code>, <code>analyze</code> and <code>conformance</code> no longer return their results on
   them. A component reports
   <code>component "piece.fsl" failed to parse (duplicate field 'P.x' at piece.fsl:6:32) at root.fsl:2:3</code>,
   <code>kind: "semantics"</code>, whether its action is lifted, synchronized, or internal and
@@ -1227,7 +1227,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   <code>implements "abs.fsl" failed to parse (duplicate field 'P.x' at abs.fsl:6:33)</code>,
   <code>kind: "type"</code>, with <code>loc</code> on the <code>implements</code>. A refinement mapping reports
   <code>duplicate field 'P.x'</code>, <code>kind: "type"</code>, with <code>loc</code> at the field. A <code>domain</code>
-  value object keeps its own refusal at <code>check</code>, <code>kind: "semantics"</code>. Migration:
+  value object is refused in <code>check</code> and every <code>domain</code> command, <code>kind: "semantics"</code>,
+  and <code>domain expand</code> writes nothing. An input that already failed now reports the
+  repeat, so its kind can change to <code>parse</code>. In the editor this is a parse error, so
+  the document's symbols are gone until it is fixed. Migration:
   keep the one value you mean. There is no automatic migration. See
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-option-struct.md"><code>DESIGN-option-struct.md</code></a>, §8.
 - Set/Seq expression materialization (Refs #1467): already-admitted recursive

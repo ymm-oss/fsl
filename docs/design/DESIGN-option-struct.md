@@ -177,13 +177,16 @@ The first repeated field is now refused at its name where the literal becomes a 
 The kind is `parse`, with `diagnostic_code: "duplicate_struct_field"`. `Expr::Struct` has no field
 spans, so a check in the model could only name the enclosing statement, and the requirement is the
 repeated name. A `domain` value object lowers its `SyntaxExpr` without that conversion and keeps
-its own `duplicate field` refusal, `kind: "semantics"`, at `check`; `domain analyze` and `domain
-expand` build no model and exit 0 on it, on base and head. Reading a marked step's input is
+its own `duplicate field` refusal, `kind: "semantics"`, at `check`, `domain check`, `domain generate`,
+`domain testgen` and `domain replay`. `domain expand` and `domain analyze` build no model, so they exited 0 on base,
+and `expand` wrote both copies to a file `check` then refused. They now refuse in the same words where
+they read the literal (`normalize_expr`), and `expand` writes nothing. That was measured with the
+literal in `evolve`, a state default, `requires` and an invariant. Reading a marked step's input is
 speculative and discards parse errors, so this code alone is passed on: otherwise the refusal
 became `expected identifier` elsewhere on the line.
 
 Verdicts the removal takes, on one document whose `init` holds the literal and whose invariant is `p.x == 1`, with `FSLC_CACHE=off`, base
-`3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `7d1fb36f653427bbfe13844d6b963720ab1df2d2`:
+`3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `f45e76931aee7da26a4734b011f16a254feed3ac`:
 
 | Route | Base, `x: 1, x: 2` | Base, `x: 2, x: 1` | Head, either |
 |---|---|---|---|
@@ -197,10 +200,11 @@ Verdicts the removal takes, on one document whose `init` holds the literal and w
 | `replay --trace`, an empty trace | exit 0, `conformant` | exit 0, `conformant` | exit 2 |
 | `scenarios`, `mutate`, `testgen`, `html`, `ledger` | exit 1 | exit 0 | exit 2 |
 | `diff` against the one-value spec, either side | exit 1, `semantic_diff` | exit 0, `semantic_diff` | exit 2 |
-| `lint`, `explain`, `analyze`, `conformance`, `kernel` 1 and 2, `typestate`, `fmt` | exit 0 | exit 0 | exit 2 |
+| `sweep --depth 0..1` | exit 1, `sweep_failed` | exit 0, `sweep_passed` | exit 2 |
+| `lint`, `explain`, `analyze`, `conformance`, `kernel` 1 and 2, `typestate`, `fmt`, `migrate`, `document claims` | exit 0 | exit 0 | exit 2 |
 | `fmt --check` | exit 1, `format_check` | exit 1, `format_check` | exit 2 |
 
-`lint` adds `file` to `loc`. Each form was also refused at the repeated field, and accepted with one
+`lint` and `migrate` add `file` to `loc`. Each form was also refused at the repeated field, and accepted with one
 value per field, in these positions: `init`, an assignment, `let`, an `if` statement, a conditional,
 `requires`, `ensures`, `invariant`, a quantifier body, `reachable`, `leadsTo`, a `def` body, a `def`
 argument, a map value, a field read, a scenario's `then`, a rule guard, a step's input with and without
@@ -215,14 +219,25 @@ parse error.
 | Inline `implements` | `implements "abs.fsl" failed to parse (duplicate field 'P.x' at abs.fsl:6:33)`, `kind: "type"`, `loc` on the `implements` |
 | Refinement mapping | `duplicate field 'P.x'`, `kind: "type"`, `loc` at the field; base accepted it, exit 0, `refines` |
 
-`fslc-lsp` and the Worker were not run. Rust API: `fsl_syntax::DUPLICATE_STRUCT_FIELD`.
+An input that already failed keeps exit 2 and now reports the repeat, so its kind changes. With
+`struct P { x: Q, y: K }`, `P { x: Q { a: 1, a: 2 }, y: 0 }` goes from `kind: "type"`, `struct field
+'P.x' has non-scalar type`, to `kind: "parse"`, `duplicate field 'Q.a' at 6:31`. An undefined
+`Q { a: 1, a: 2 }` goes from `kind: "semantics"`, `public Kernel cannot resolve type 'Q'`, to
+`kind: "parse"`, `duplicate field 'Q.a' at 5:24`. With one value per field each keeps its failure.
+
+In `fslc-lsp` the refusal is a diagnostic at the repeated field, `kind` `parse`, `code`
+`duplicate_struct_field` (`rust/fsl-lsp/tests/issue_1685_struct_field_repeat.rs`), and like any parse
+error it leaves `documentSymbol` returning null until the literal is fixed. The Worker was not run.
+Rust API: `fsl_syntax::DUPLICATE_STRUCT_FIELD`.
 
 Migration: keep the one value you mean. There is no automatic migration.
 
 On-disk transition set (empty). Base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head
-`7d1fb36f653427bbfe13844d6b963720ab1df2d2`, each binary built from its own tree in its own target directory with
+`f45e76931aee7da26a4734b011f16a254feed3ac`, each binary built from its own tree in its own target directory with
 Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (646 forms:
 23/195/428) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable and with
 `FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All 2584 pairs
 had equal complete stdout, stderr and exit with no field excluded, and no run differed from its repeat:
-0 ok-to-error and 0 error-to-ok transitions. No required test's inline fixtures were rewritten.
+0 ok-to-error and 0 error-to-ok transitions. No required test's inline fixtures were rewritten. That
+sweep runs no `domain` command, so `domain expand` and `domain analyze` also ran on the 37 forms in that
+corpus that declare a `domain`: 74 runs, each with equal complete stdout, stderr and exit, once per side.
