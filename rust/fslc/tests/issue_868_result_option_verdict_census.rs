@@ -1021,10 +1021,10 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
     ),
     // Files contains raw file bytes; Raw carries bytes and a process exit code,
     // not an optional verification verdict.
-    unresolved_ordinary!("rust/fslc/tests/issue_1422_producer_period.rs", 43, "files"),
+    unresolved_ordinary!("rust/fslc/tests/issue_1422_producer_period.rs", 42, "files"),
     unresolved_ordinary!(
         "rust/fslc/tests/issue_1422_producer_period.rs",
-        54,
+        53,
         "observe"
     ),
     unresolved_ordinary!(

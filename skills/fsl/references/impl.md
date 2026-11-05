@@ -334,7 +334,9 @@ using the solver-free `BoundedLivenessMonitor`. Generates per-expectation
 `support: "inconclusive"`, `assurance: "replay-observed"`, and matching
 lifecycle records. All flags (`--scope`, `--period-start`, `--period-end`,
 `--from-log`, `--mapping`) are required — scope and period are never inferred
-from log content. A nonconformant log (action not enabled, state mismatch)
+from log content. A `--period-start`/`--period-end` that is not a real Gregorian
+date in ASCII `YYYY-MM-DD` is refused with `kind:"usage"`, exit 2, and nothing
+written (new: an invalid start used to exit 0 and write an artifact). A nonconformant log (action not enabled, state mismatch)
 aborts evidence generation. **Agents: `replay-observed` is observational
 evidence only — temporal co-occurrence does not establish causality, pass does
 not mean the claim is true, violation does not refute it, and `support` stays

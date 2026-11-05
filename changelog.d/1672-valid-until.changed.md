@@ -25,4 +25,9 @@ Representable negation, non-integer type errors, and other arithmetic are unchan
 
 Observation producers now validate generated evidence before writing evidence or
 lifecycle files. Invalid declared freshness returns the existing exit-2 schema
-diagnostic, preserving existing output files; invalid-start timing remains soft.
+diagnostic, preserving existing output files.
+
+`causal observe-expectations` now refuses a `--period-start` or `--period-end`
+that is not a real Gregorian date in ASCII `YYYY-MM-DD` with `kind:"usage"` and
+exit 2 while reading options, writing nothing. This is a new refusal: an invalid
+`--period-start` such as `2026-02-30` used to exit 0 and write an artifact.

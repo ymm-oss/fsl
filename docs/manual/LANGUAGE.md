@@ -5652,7 +5652,10 @@ against an explicit `--as-of` date — never the wall clock. `causal analyze`
 and `causal ledger` refuse an `--as-of` value that is not a real Gregorian
 date written as ASCII `YYYY-MM-DD` (no sign, no other characters) with
 `kind:"usage"` and exit 2, before reading the model or evidence; such a value
-used to exit 0 and count nothing as stale. A scope dimension
+used to exit 0 and count nothing as stale. `causal observe-expectations`
+refuses a `--period-start` or `--period-end` that breaks the same rule in the
+same way, writing nothing; an invalid `--period-start` used to exit 0 and
+write an artifact. A scope dimension
 present on only the claim or artifact side is `unassessable`; absence is never
 treated as universal. **`causal_support`
 and `formal_assurance` are orthogonal axes**: evidence never changes

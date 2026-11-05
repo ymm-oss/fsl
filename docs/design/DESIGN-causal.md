@@ -880,9 +880,16 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
   before writing any evidence or lifecycle file. Since the declared period end
   is emitted as `valid_until`, an invalid generated freshness date returns a
   `semantics` error with diagnostic `causal_evidence_schema_mismatch` and exit 2.
-  This refusal leaves existing output files unchanged. Invalid `period.start`
-  remains a soft timing exclusion; this adds no global date-order policy
-  (observation takes no `--as-of`) and does not remove declared freshness.
+  This refusal leaves existing output files unchanged. `--period-start` and
+  `--period-end` are checked while options are read, by the same rule as
+  `--as-of`: a value that is not a real Gregorian date in ASCII `YYYY-MM-DD`
+  is refused with `kind:"usage"`, exit 2, and the message `<option> requires
+  a valid Gregorian date in YYYY-MM-DD format, got '<value>'`, before any
+  input is read or output written. This is a new refusal: an invalid
+  `--period-start` such as `2026-02-30` used to exit 0 and write an artifact
+  whose start was a soft timing exclusion. A stored artifact's invalid
+  `period.start`/`period.end` stays a soft timing exclusion on ingestion.
+  Observation adds no date-order policy and takes no `--as-of`.
 - **Captured inputs (#1423).** Observation parses JSONL records and hashes the
   same single UTF-8 capture, including original whitespace and line endings;
   log read/parse failures still precede scope parsing. Replacing or removing

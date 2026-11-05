@@ -5335,6 +5335,9 @@ collapse されます(lineage 内の矛盾は `inconclusive`)。staleness は明
 文字を含まない)で書かれた実在するグレゴリオ暦の日付ではない `--as-of` の値を、
 model や evidence を読む前に `kind:"usage"`・exit 2 で拒否します。以前はこうした
 値でも exit 0 になり、stale と数えられる evidence はありませんでした。
+`causal observe-expectations` も同じ規則に反する `--period-start` と
+`--period-end` を同じ形で拒否し、何も書き出しません。以前は不正な
+`--period-start` でも exit 0 になり、artifact が書き出されていました。
 claim 側または artifact 側の片方だけに存在する scope dimension は
 `unassessable` であり、欠落を universal として扱いません。
 **`causal_support` と `formal_assurance` は直交する 2 軸**です: evidence は

@@ -74,7 +74,7 @@ pub(super) fn causal_command(
                         &mut args,
                         "--lifecycle",
                     )?)),
-                    "--as-of" => as_of = Some(as_of_value(&mut args)?),
+                    "--as-of" => as_of = Some(date_option_value(&mut args, "--as-of")?),
                     _ => args.positional(option, unknown)?,
                 }
             }
@@ -142,10 +142,10 @@ pub(super) fn causal_command(
                             Some(PathBuf::from(required_option_value(&mut args, "--scope")?));
                     }
                     "--period-start" => {
-                        period_start = Some(required_option_value(&mut args, "--period-start")?);
+                        period_start = Some(date_option_value(&mut args, "--period-start")?);
                     }
                     "--period-end" => {
-                        period_end = Some(required_option_value(&mut args, "--period-end")?);
+                        period_end = Some(date_option_value(&mut args, "--period-end")?);
                     }
                     "--out" => {
                         out = Some(PathBuf::from(required_option_value(&mut args, "--out")?));
@@ -290,7 +290,7 @@ pub(super) fn causal_command(
                         &mut args,
                         "--lifecycle",
                     )?)),
-                    "--as-of" => as_of = Some(as_of_value(&mut args)?),
+                    "--as-of" => as_of = Some(date_option_value(&mut args, "--as-of")?),
                     "--format" => format = required_option_value(&mut args, "--format")?,
                     _ => args.positional(option, unknown)?,
                 }
@@ -1676,16 +1676,20 @@ fn run_causal_diff(
     merge_causal_envelope(fsl_tools::causal_diff_json(&before_model, &after_model))
 }
 
-/// `--as-of` names a real Gregorian date as ASCII `YYYY-MM-DD`, the same
-/// rule as an artifact's `period.valid_until`. Anything else is a usage
-/// error, never a silent "not stale" (#1422).
-fn as_of_value(args: &mut impl Iterator<Item = String>) -> Result<String, String> {
-    let value = required_option_value(args, "--as-of")?;
+/// A date option (`--as-of`, `--period-start`, `--period-end`) names a real
+/// Gregorian date as ASCII `YYYY-MM-DD`, the same rule as an artifact's
+/// `period.valid_until`. Anything else is a usage error while options are
+/// read: never a silent "not stale", and never a written artifact (#1422).
+fn date_option_value(
+    args: &mut impl Iterator<Item = String>,
+    option: &str,
+) -> Result<String, String> {
+    let value = required_option_value(args, option)?;
     if fsl_tools::is_calendar_date(&value) {
         Ok(value)
     } else {
         Err(format!(
-            "--as-of requires a valid Gregorian date in YYYY-MM-DD format, got '{value}'"
+            "{option} requires a valid Gregorian date in YYYY-MM-DD format, got '{value}'"
         ))
     }
 }
