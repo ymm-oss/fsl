@@ -277,7 +277,7 @@ is exit 2 with the same wrapper on each, `loc` 2:3 except that `lint`, `fmt` and
 | FSL5 event input | refused, message `duplicate action parameter 'x' at root.fsl:6:3`, located at the event | `duplicate action parameter 'x'`, located at the repeated input |
 | Domain command input | refused, message `duplicate action parameter 'amount' at root.fsl:18:5; conflicting assignment at root.fsl:11:5`, located at the `decide` | `duplicate action parameter 'amount'`, located at the repeated input |
 | Domain event field an effect completion or a saga observe action takes as a formal | refused, located at the first token spelled like the name | same message, located at the repeated field |
-| Domain event field no action takes as a formal | accepted | accepted; see below |
+| Domain event field no action takes as a formal | accepted | accepted; see below. Refused since #1700, see DESIGN-domain, "Repeated declarations (#1700)" |
 | `domain analyze`, `domain expand` on a repeated command input | exit 0 | exit 0: neither builds a model. `check` refuses what `expand` prints, at the printed formal |
 | `domain generate`, `domain testgen` on a repeated command input | refused, as `check` | refused, as `check` |
 | Inline `implements` abstraction's action | refused, `kind: "type"`, `duplicate action parameter 'x'`, located on the `implements` with no file or position | `implements "abs.fsl" failed to check (step: duplicate action parameter 'x' at abs.fsl:1:77)`, `kind: "type"`, located on the `implements` |
@@ -319,6 +319,12 @@ it up to positions and, in v2, the provenance ids that embed them. Two things do
 `amount: Int  amount: Bool` checks when the evolve needs `Bool`. `domain generate` writes the field
 twice in `types.ts` and `decide.ts`, both from the same command input, which [R] a TypeScript
 compiler refuses; running one would settle that. Neither loses a value, so the form stays accepted.
+
+Amendment (#1700): this form is refused. No value is lost, but the first declared type being ignored
+means the order of the copies decides `check`, and `correlation_id` reads the first where an `evolve`
+reads the last. The event field an action takes as a formal is now refused by the same check, before
+the action exists: the place is the same, the message is `duplicate event field 'E.a'` and the kind is
+`name`. See DESIGN-domain, "Repeated declarations (#1700)".
 
 Rust API: `SpecItem::Action`, `SyncAction` and `RequirementAction` require `param_spans`, and
 `ProcessTransition` requires `input_spans`. Both are parallel to the formals, and neither reaches

@@ -3483,14 +3483,35 @@ compose OrderSystem {
   actual, and after immediate lowering failures, so `part.put(0)` keeps its arity error.
   `def` parameters were already refused on every route, at the `def`, and are unchanged. These
   stay accepted because no actual is lost: a log mapping's `action ev(a, a) -> put(a)`, whose
-  parameters name one log field, and a domain event field that no action takes as a formal, since
-  `emits` takes no payload.
+  parameters name one log field. A domain event field that no action takes as a formal was
+  accepted here too, and #1700 below refuses it, and takes over the refusal of the others.
   Migration: give each formal its own name, and pass each actual to the formal it belongs to.
   Measured forms and the corpus sweep are in
   [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md).
   Rust API: `SpecItem::Action`, `SyncAction` and `RequirementAction` require `param_spans`, and
   `ProcessTransition` requires `input_spans`. Empty means no authored formal: the refusal then
   points at the action.
+- **Repeated `domain` declarations that lose a copy (breaking removal, #1700).** `check`, `verify`
+  and every `fslc domain` route refuse each of these at the repeat, with exit 2 and a location, and
+  `domain expand` writes nothing:
+  - in an aggregate, with `kind: "name"`: a second `evolve` for one event, a second `command` of one
+    name, and an `event` that declares a field twice;
+  - with `kind: "parse"`, as a second copy of a clause that holds one value: `implementation_profile`;
+    an aggregate's `id`; a projection's `from`; an effect's `reliable`, `irreversible`,
+    `idempotency_key`, `correlation_id`, `handles`, `request_event`, `success_event`,
+    `failure_event`, `timeout_event`, `retry`, `timeout`, `outbox` and `inbox`, or a field of an
+    effect; `max_attempts` and `backoff` in a `retry`; a saga's `starts_on`; and a saga step's
+    `awaits` and `timeout`.
+
+  These passed `check` and kept one copy. Two `evolve`s kept the first, so `n = 1` then `n = 2`
+  verified an invariant `n <= 1` and the reverse order violated it. An event's copies disagreed on
+  which one decides: an `evolve` read the last and `correlation_id` the first. Through an inline
+  `implements` the message names the other file, with `kind: "type"`, and `loc` stays on the
+  `implements`.
+  Kinds that read every copy stay accepted: for example two `requires`, a saga's `outbox`, or
+  two sagas or aggregates of one name.
+  Migration: delete the copy that was lost, or merge the two.
+  Measured kinds and the corpus sweep are in [`DESIGN-domain.md`](../design/DESIGN-domain.md).
 - Fairness is not inherited through synchronization. If a fair component action
   is referenced by a non-fair synchronized action, `check` / `verify` emits a
   `fair_not_inherited` warning in JSON `warnings`; write

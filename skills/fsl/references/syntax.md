@@ -1040,9 +1040,21 @@ return a result on those component forms, and `lint`, `fmt`, `conformance`, `exp
 exit 2. `domain analyze` and `domain expand` build no model and still exit 0. It precedes typing
 the actuals, so `part.put(true, 0)` reports it, and follows immediate lowering failures, so
 `part.put(0)` keeps its arity error. `def` parameters were already refused at the `def`. A log
-mapping's `action ev(a, a) -> put(a)` and a domain event field no action takes stay accepted: no
-actual is lost. Migration: give each formal its own name. See
+mapping's `action ev(a, a) -> put(a)` stays accepted: no actual is lost. A domain event field no
+action takes was accepted here too; #1700 below refuses it and takes over the other event fields'
+refusal. Migration: give each formal its own name. See
 `docs/design/DESIGN-sync-argument-root-validation.md`.
+
+Breaking removal (#1700): a repeated `domain` declaration that loses a copy is refused at the repeat
+on `check`, `verify` and every `fslc domain` route (exit 2), and `domain expand` writes nothing. With
+`kind: "name"`: a second `evolve` for one event, a second `command` of one name, an `event` declaring
+a field twice. With `kind: "parse"`: a second `implementation_profile`, aggregate `id`, projection
+`from`, effect `reliable`, `irreversible`, `idempotency_key`, `correlation_id`, `handles`,
+`request_event`, `success_event`, `failure_event`, `timeout_event`, `retry`, `timeout`, `outbox`,
+`inbox` or field, `retry` `max_attempts` or `backoff`, saga `starts_on`, or step `awaits` or
+`timeout`. Two `evolve`s kept the first, so the order of two copies flipped `verify`. Kinds that read
+every copy stay accepted, such as two `requires` or two sagas of one name. Migration: delete the lost
+copy or merge the two. See `docs/design/DESIGN-domain.md`.
 
 Component free value reads and update roots resolve against the original component declarations before merging; composition cannot rescue an undeclared reference (breaking removal, #1442), while public names remain legal and protected enum reads display their source member spelling.
 

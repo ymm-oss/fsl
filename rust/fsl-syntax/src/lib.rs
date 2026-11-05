@@ -69,7 +69,8 @@ pub use domain::{
     DomainAggregate, DomainAssignment, DomainAwait, DomainCommand, DomainDecide, DomainEffect,
     DomainError, DomainEvent, DomainEvolve, DomainField, DomainInvariant, DomainLoc,
     DomainProjection, DomainReject, DomainRetry, DomainSaga, DomainSagaCompensation,
-    DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm, parse_domain,
+    DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm,
+    REPEATED_DOMAIN_CLAUSE, parse_domain,
 };
 pub use edition::{
     CURRENT_EDITION_MIGRATION_CODES, EDITION_CONFLICT, EDITION_HEADER_NOT_ACCEPTED,
