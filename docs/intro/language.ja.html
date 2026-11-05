@@ -2334,10 +2334,12 @@ typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 <code>1</code> = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
-indeterminate(<code>chain</code> の <code>[impl]</code> 層に、テストが実行された証拠が無いとき)、
+migrate_manual_required / indeterminate(<code>chain</code> の <code>[impl]</code> 層に、テストが実行された証拠が無いとき)、
 <code>2</code> = 入力エラー(usage は argv の誤り / parse / type / semantics / io / vacuous / acceptance / forbidden /
-<code>--vacuity error</code>)、<code>3</code> = 内部エラー。<code>observed_*</code> は <code>fslc db observe</code> の結果、
-<code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。<code>impl_violated</code> は
+<code>--vacuity error</code>) / migration_refused、<code>3</code> = 内部エラー。<code>observed_*</code> は <code>fslc db observe</code> の結果、
+<code>imported</code>/<code>imported_with_warnings</code> は <code>fslc db import</code> の結果です。
+<code>migrate_manual_required</code>(書き換えられない形がある)と <code>migration_refused</code> は、<code>fslc migrate</code> が
+入力を書かないときの結果です。<code>impl_violated</code> は
 inline <code>implements</code> が top-level <code>result</code> へ伝播するため列挙しています。失敗した governance の
 <code>preservation</code> も同じ対応付けで <code>check</code> / <code>verify</code> / <code>scenarios</code> / <code>testgen</code> に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、<code>check</code> / <code>verify</code> に閉じません。seam が失敗する spec では、<code>mutate</code> は
@@ -2373,7 +2375,8 @@ ledger の警告は、種類ごとの1つの表示表で検出種別・要約・
 返し、描画も artifact の書き込みもしません。直接の <code>ledger</code> は付随の replay、evidence の読み込み、
 witness の準備より前に止まります(<code>html</code> は explain より前に止まります)。<code>-o</code> でも
 artifact は作りません。それ以外の不成立・未確立の判定では、既存の非 0 exit で report を生成します。
-digest 比較用の承認専用 ledger 再描画は、この門とは別のままです。
+digest 比較用の承認専用 ledger 再描画も、同じ <code>result:"error"</code> で止まります。
+それ以外の判定では、digest を比較できるように描画します。
 native の完全な検証を行うすべての呼び出し元は、検証段の一つの持ち主を共有します。
 baseline の adapter は cache を無効にし、既定の vacuity 警告を保ちます。
 直接の report は、描画用 model の読み込みや trace 契約の取り出しより先に検証し、error を確認します。
@@ -2401,14 +2404,21 @@ semantics error(exit 2)を返します。approval create の diagnostic の優�
 <code>status</code> を返します。<code>approved</code> と <code>drifted</code> は exit 0、<code>signature-invalid</code> は exit 1 です。
 drift は通常のゲートなし <code>diff</code> の findings と同じ分析出力です(§12)。明示的な
 semantic/batch diff のゲートは失敗時に exit 1 を返します。document の drift と扱いが
-異なる理由は <code>docs/design/DESIGN-approval.md</code> にあります。承認を利用するゲートでは、
-exit 0 AND <code>result:"approval_check"</code> AND <code>status:"approved"</code> をすべて確認してください。
-入力、baseline、record、trust 設定のエラーは、元のエラー封筒と exit 2 を返し、承認の
+異なる理由は <code>docs/design/DESIGN-approval.md</code> にあります。</p>
+<p><code>status:"approved"</code> が確認するのは digest の束縛で、検証の合格ではありません。現在の spec と
+描画した artifact が record の digest と一致することだけを示し、封筒に検証の判定は含みません。
+<code>--kind ledger</code> の record は、不成立・未確立の baseline でも作成でき、<code>approval check</code> は
+exit 0 と <code>approved</code> を返します。<code>violated</code>、<code>unknown_cti</code>、<code>reachable_failed</code>、
+<code>refinement_failed</code>、<code>unknown_budget</code> もこれに含まれます。<code>fslc verify</code> は別にゲートしてください。
+承認のゲートでは、exit 0 AND <code>result:"approval_check"</code> AND <code>status:"approved"</code> をすべて
+確認してください。</p>
+<p>入力、baseline、record、trust 設定のエラーは、元のエラー封筒と exit 2 を返し、承認の
 <code>status</code> は付きません。artifact 評価が中断した場合は、下流の完全な封筒と終了コード
 (検証失敗1、内部エラー3)を保持し、承認の status も新しい record も作りません。
+<code>--kind ledger</code> の再描画で検証が <code>result:"error"</code> を返した場合は、<code>drifted</code> や artifact の
+不一致ではなく、そのエラー封筒と終了コード(2、内部エラーは3)を返します。
 HTML の再描画で検証に失敗した場合は、<code>generated</code>/<code>html_report</code>、exit 1、インラインの
-content と既定の output メタデータを返し、HTML ファイルは書きません。承認専用の
-ledger digest 描画は、violated/CTI baseline でも従来どおり exit 0 で評価できます。
+content と既定の output メタデータを返し、HTML ファイルは書きません。
 直接の HTML/ledger は検証失敗時にも report を生成して exit 1 を返し、出力の書き込み
 エラーは baseline の判定より優先して exit 2 を返します。</p>
 <p>通常の JSON 出力は、内部エラーの終了コードを正規化した後、serialize より前に、
