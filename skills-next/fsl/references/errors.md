@@ -37,6 +37,7 @@ Edition-specific codes and origin reading are in
 | Impl self-violation during refine | No valid correspondence judgment: verify/fix the impl on its own first; do not conflate it with mapping failure. Read the actual outer command envelope. |
 | Non-refines inline implements | Outer failure mirrors seam, exit 1. Nested summary is not standalone refine's full replay trace; run refine for full evidence. |
 | Non-refines governance preservation | First failure owns outer verdict; inspect every preservation and run its standalone refine if needed. |
+| `error / io` | An input file cannot be read; every command reports `<path>: <error>`. Fix the named path or its permissions, not the spec. |
 | `error / acceptance` | Positive scenario step/check failed; read ID/failed_step. |
 | `error / forbidden` | Final call accepted, violated, uncallable, wrong-kind or out of scope. Read accepted_step/accepted_trace, violation or message/input fields. Only an actual rejection succeeds; violation is not rejection. |
 | `error / forbidden_setup` | Earlier setup rejected, so final operation was never tested. Fix the setup or interpretation. |
