@@ -187,7 +187,7 @@ speculative and discards parse errors, so this code alone is passed on: otherwis
 became `expected identifier` elsewhere on the line.
 
 Verdicts the removal takes, on one document whose `init` holds the literal and whose invariant is `p.x == 1`, with `FSLC_CACHE=off`, base
-`b2cdb394fedcba015261df05587c4721583329e3`, head `0dcd71290f03beac3d5d6688a8dea3a354874c21`:
+`56354e477544f9be1f4477ddf036e5855d514bb5`, head `0d869b09886c1f627bf21bcc61394477dcceb4e7`:
 
 | Route | Base, `x: 1, x: 2` | Base, `x: 2, x: 1` | Head, either |
 |---|---|---|---|
@@ -233,11 +233,11 @@ Rust API: `fsl_syntax::DUPLICATE_STRUCT_FIELD`.
 
 Migration: keep the one value you mean. There is no automatic migration.
 
-On-disk transition set (empty). Base `b2cdb394fedcba015261df05587c4721583329e3`, head
-`0dcd71290f03beac3d5d6688a8dea3a354874c21`, each binary built from its own tree in its own target directory with
-Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (650 forms:
-23/195/432) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable and with
-`FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All 2600 pairs
+On-disk transition set (empty). Base `56354e477544f9be1f4477ddf036e5855d514bb5`, head
+`0d869b09886c1f627bf21bcc61394477dcceb4e7`, each binary built from its own tree in its own target directory with
+Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (651 forms:
+23/195/433) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable and with
+`FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All 2604 pairs
 had equal complete stdout, stderr and exit with no field excluded, and no run differed from its repeat:
 0 ok-to-error and 0 error-to-ok transitions. No required test's inline fixtures were rewritten. That
 sweep runs no `domain` command, so `domain expand` and `domain analyze` also ran on the 37 forms in that
