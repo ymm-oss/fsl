@@ -2413,14 +2413,18 @@ exit 0 と <code>approved</code> を返します。<code>violated</code>、<code
 承認のゲートでは、exit 0 AND <code>result:"approval_check"</code> AND <code>status:"approved"</code> をすべて
 確認してください。</p>
 <p>入力、baseline、record、trust 設定のエラーは、元のエラー封筒と exit 2 を返し、承認の
-<code>status</code> は付きません。artifact 評価が中断した場合は、下流の完全な封筒と終了コード
+<code>status</code> は付きません。<code>approval create</code> と <code>approval check</code> で artifact 評価が中断した場合は、下流の完全な封筒と終了コード
 (検証失敗1、内部エラー3)を保持し、承認の status も新しい record も作りません。
 <code>--kind ledger</code> の再描画で検証が <code>result:"error"</code> を返した場合は、<code>drifted</code> や artifact の
 不一致ではなく、そのエラー封筒と終了コード(2、内部エラーは3)を返します。
 HTML の再描画で検証に失敗した場合は、<code>generated</code>/<code>html_report</code>、exit 1、インラインの
 content と既定の output メタデータを返し、HTML ファイルは書きません。
 直接の HTML/ledger は検証失敗時にも report を生成して exit 1 を返し、出力の書き込み
-エラーは baseline の判定より優先して exit 2 を返します。</p>
+エラーは baseline の判定より優先して exit 2 を返します。
+<code>fslc ledger --approval</code> はこれらの結果を伝播しません。<code>html</code> または <code>scenarios</code> の record の再描画が
+検証失敗の baseline で止まると、record を名指しした <code>result:"error"</code> と exit 2 を返し、<code>-o</code> の
+ファイルには触れません。<code>ledger</code> と <code>requirements_document</code> の record は再描画が完了するので、
+ledger を書いて <code>drifted</code> と表示し、検証自身の終了コードを返します。</p>
 <p>通常の JSON 出力は、内部エラーの終了コードを正規化した後、serialize より前に、
 コマンドを考慮した封筒と終了コードの整合性を debug assertion で確認します。
 不一致では既存の panic 経路で exit 101 となり、通常の stdout JSON 封筒は出しません。
