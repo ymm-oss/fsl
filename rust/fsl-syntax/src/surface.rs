@@ -767,6 +767,10 @@ pub struct NextEditionRequirements {
     /// same form ([`BusinessGoalBody::SomeStage`] and
     /// [`BusinessPolicyBody::Eventually`]), in source order.
     pub goals: Vec<BusinessItem>,
+    /// Each input a scenario or forbidden step names again, with the span of
+    /// the repeated name, in source order. The desugared event call carries
+    /// one value per input, so the core refuses these before lowering.
+    pub repeated_step_inputs: Vec<(String, Span)>,
 }
 
 /// `Entity belongs to Target as role via event`: each instance of `entity`

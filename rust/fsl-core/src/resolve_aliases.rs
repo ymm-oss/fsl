@@ -22,9 +22,11 @@ use crate::{CoreError, KernelSpec, naming};
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] for missing entity/number bounds, malformed process
-/// declarations, or a glossary alias spelled like a declared name.
+/// Returns [`CoreError`] for a repeated scenario step input, missing
+/// entity/number bounds, malformed process declarations, or a glossary alias
+/// spelled like a declared name.
 pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpec, CoreError> {
+    crate::dialect::reject_repeated_step_input(&requirements)?;
     let glossary = requirements.items.iter().find_map(|item| match item {
         RequirementsItem::Glossary(glossary) => Some(glossary.clone()),
         _ => None,

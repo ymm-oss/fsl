@@ -292,6 +292,107 @@ reports the source process/entity declaration, not an unwritten binder token;
 the relation-parameter refusal reports the source event. Hidden projection
 binders are not covered by this visible-name restriction.
 
+#### Repeated scenario step inputs (#1682)
+
+**Breaking removal (#1682).** The desugaring of a `scenario` or `forbidden` step
+collected its inputs into a map by name, so a repeated name kept its last value and
+dropped the others. Binding happens there and nowhere else: the event call a step
+becomes has one argument per input, so no later check could see the dropped value,
+which was not even typed (`with amount true, amount 1` passed). The desugaring now
+records each repeated name with its span in
+`NextEditionRequirements::repeated_step_inputs`, and `lower_requirements` refuses the
+first one before lowering.
+
+Each form below ran with `FSLC_UNSTABLE=fsl5 FSLC_CACHE=off` from a copy of the fixture
+directory named, on base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd` and on head `6dd96a59f9ab19a546d59703e34d742920f2bc88`.
+
+| Fixture and step | Base `check` | Head `check`, exit 2, `kind: "semantics"` |
+|---|---|---|
+| `e2e/fsl5_en_decide.fsl`, `with amount 2, amount 1` | exit 0, `ok`, as `with amount 1` | `duplicate step input 'amount'`, `loc` 43:44 |
+| the same, `with amount 1, amount 2` | exit 2, `acceptance` at 44:5, as `with amount 2` | the same |
+| the same, `with amount 1, amount 1` or `with amount true, amount 1` | exit 0, `ok` | the same, 43:44 and 43:47 |
+| the same, `forbidden` with `with amount 2, amount 1` | exit 0, `ok` | the same, at that step |
+| `e2e/fsl5_ja_particles.fsl`, `申請金額 2, 申請金額 1 で` | exit 0, `ok` | `duplicate step input '申請金額（amount）'`, `loc` 75:25 |
+| the same, `申請金額 2 で 申請金額 1 で` | exit 0, `ok` | the same, 75:26 |
+| `relations/fsl5_en.fsl`, `with assignee 0, assignee 1`, either order | exit 0, `ok` | `duplicate step input 'assignee'`, `loc` 37:37 |
+
+The refusal is a semantic error rather than a parse error because the document parses
+and the step's grammar is not at fault. It comes after the parse-time step errors, which
+keep their kind and text: an unknown verb, a step no event matches, an input the event
+does not take, a missing input. So `with nope 2, nope 1` still reports the missing
+`amount`, and `with amount 1, nope 2, nope 3` still reports
+`event 'submit' has no input 'nope'` at the last `nope`.
+
+On `with amount 2, amount 1`, base and head on these routes:
+
+| Route | Base | Head |
+|---|---|---|
+| `verify` on bmc and explicit | exit 0, `verified` | exit 2 |
+| `verify` on induction | exit 0, `proved` | exit 2 |
+| `kernel` versions 1 and 2, `typestate` | exit 0 | exit 2; version 1 and `typestate` omit the file from the message, version 2 names it by a longer path |
+| `explain`, `analyze`, `conformance`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`, `fmt` | exit 0 | exit 2 |
+| `lint`, `fmt --check` | exit 1 | exit 2 |
+| `sweep --depth 0..1` | exit 0, `sweep_passed` | exit 2 |
+| `migrate` | exit 0, `migrated` | exit 2, no `loc` |
+| `document claims`, `document generate` | exit 0 | exit 2, no `loc` and no file in the message |
+| `refine` with the document as implementation or abstraction | exit 0, `refines` | exit 2, `loc` in the document |
+| `replay --trace` | exit 2, `io`, the trace was malformed | exit 2, `semantics`: the document is loaded first |
+| `check` of an inline `implements` of the document | exit 0 | exit 2, `kind: "type"`, `loc` on the `implements`, `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)` |
+
+`lint`, `fmt`, `fmt --check` and `migrate` report the same message with no `loc`. `document` omits
+the file name as well. `kind: "type"` on the
+inline `implements` is the kind of every failure of the other file on that path. A
+`compose` cannot `use` a requirements document (`compose use must reference a spec`, base
+and head), so no component route exists to refuse. The step form is read only in an
+`fsl 5` `requirements` document. `fslc-lsp` and the Worker were not run.
+
+Other surfaces that take named values, measured on base. Only the first changes here.
+
+| Surface | Behavior on a repeat | Outcome |
+|---|---|---|
+| Scenario or forbidden step, with or without particles, instance first, relation role | last value kept | refused here |
+| `name(args)` step call | positional, nothing to repeat; an extra argument fails at the step (`acceptance`) | no change |
+| Two actors or two instances in a marked step | refused, `both ... take が (actor) in a scenario step` | no change |
+| `set f = 1, f = 2` on an event | refused, `an action may not assign the same state location more than once` | no change |
+| Event input `with a, a` | refused; #1680 owns its message and location | no change |
+| `implements` map, same action twice or a repeated parameter | refused, `duplicate action correspondence`, `must match the impl action parameter names` | no change |
+| Entity field or `const` declared twice | refused | no change |
+
+Repeated struct literal fields are #1685. Repeated `verify` bounds and `concept` and `kpi`
+declarations are #1686. Each is outside this change: a struct literal cannot reach a step,
+because an event input of struct type is refused
+(`action parameter type is not a finite scalar`), and a declaration has no formal receiving
+an actual.
+
+Migration: keep the one value you mean. There is no automatic migration.
+
+Rust API: `NextEditionRequirements` gains `repeated_step_inputs`. Nothing outside the
+parser constructs that struct.
+
+On-disk transition set (empty). Base `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head
+`596881fc5e944a2548eedfe1b55d52fbea8ee344`, each binary built from its own tree in its own target
+directory with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and
+`rust/fslc/tests/fixtures/` (646 forms: 23/195/428) ran with `FSLC_CACHE=off` and its own
+tree as cwd, as `fslc check <path>` stable and with `FSLC_UNSTABLE=fsl5`, and as
+`fslc kernel <path> --kernel-version 1|2`, twice per side. All 2584 pairs had equal complete
+stdout, stderr and exit with no field excluded, and no run differed from its repeat: 0
+ok-to-error and 0 error-to-ok transitions. No required test's inline fixtures were rewritten.
+
+**Owed to #1437.** This removal is recorded only here and in
+`changelog.d/1682-repeated-step-inputs.changed.md`: the next edition's header may not appear in
+published material until #1434 lifts the gate (`rust/fslc/tests/unstable_gate_leak.rs`), so
+`docs/manual/LANGUAGE.md`, `docs/manual/LANGUAGE.ja.md` and `skills/fsl/references/syntax.md` do not
+carry it yet. When #1437 writes the `fsl 5` reference, those three owe this text, regenerating
+`docs/intro/language.{en,ja}.html`: a `scenario` or `forbidden` step that names an input twice is
+refused with exit 2, `kind: "semantics"`, `duplicate step input 'amount' at doc.fsl:43:44` and `loc` at
+the repeated name, covering `with`, instance first, a `で` list, two `で` groups, an alias with its
+canonical name, and a relation role. `lint`, `fmt` and `migrate` omit `loc`. `document` omits `loc` and
+the file. `kernel` version 1 and `typestate` omit the file from the message, and `kernel` version 2 prints a longer path. An inline `implements`
+reports `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)`, `kind:
+"type"`, with `loc` on the `implements`. A step with a parse error keeps that error. Different inputs
+in any order, and the same input in a later step, stay accepted. Migration: keep the one value you
+mean.
+
 ### 2.3 Tests (tests/test_req_dialect.py)
 
 Use the return requirements (almost the same as §2.1) as a fixture:

@@ -1816,7 +1816,16 @@ pub fn requirements_implements_with_bounds_with_options(
         options,
     )
     .map_err(|error| RefinementError {
-        message: error.message,
+        // `loc` stays on the `implements`, so a repeated step input in the
+        // other file has to name its own place.
+        message: if crate::dialect::is_repeated_step_input(&error) {
+            format!(
+                "implements \"{path}\" failed to check ({} at {path}:{}:{})",
+                error.message, error.line, error.column
+            )
+        } else {
+            error.message
+        },
         span: Some(span),
         kind: RefinementErrorKind::Other,
     })?;
