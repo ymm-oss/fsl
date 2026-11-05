@@ -5331,6 +5331,10 @@ lag が `unknown` で比較する `lag_min` が無い場合は、timing eligibil
 で current support から除外され、票を投じません。同一 source lineage は 1 票に
 collapse されます(lineage 内の矛盾は `inconclusive`)。staleness は明示的な
 `--as-of` 日付に対してだけ判定され、実行環境の時計は決して使いません。
+`causal analyze` と `causal ledger` は、ASCII の `YYYY-MM-DD`(符号やほかの
+文字を含まない)で書かれた実在するグレゴリオ暦の日付ではない `--as-of` の値を、
+model や evidence を読む前に `kind:"usage"`・exit 2 で拒否します。以前はこうした
+値でも exit 0 になり、stale と数えられる evidence はありませんでした。
 claim 側または artifact 側の片方だけに存在する scope dimension は
 `unassessable` であり、欠落を universal として扱いません。
 **`causal_support` と `formal_assurance` は直交する 2 軸**です: evidence は

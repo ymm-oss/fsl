@@ -734,7 +734,15 @@ never contradict, the sections above.
   Missing `valid_until` remains accepted with `unknown_freshness` and no
   current support. This check does not tighten `period.start` or `period.end`.
 - **Staleness needs `--as-of`.** `stale_evidence` compares `valid_until`
-  against an explicit `--as-of YYYY-MM-DD` only; without `--as-of`, a
+  against an explicit `--as-of YYYY-MM-DD` only. `causal analyze` and
+  `causal ledger` check the `--as-of` value while reading options, before
+  the model or any evidence is read, by the same rule as `valid_until`:
+  exactly ten ASCII characters, digits in every field, no sign, and a valid
+  Gregorian date. Any other value, including an empty one, is refused with
+  `kind:"usage"`, exit 2, and the message `--as-of requires a valid Gregorian
+  date in YYYY-MM-DD format, got '<value>'` (#1422). This is a new refusal:
+  such a value used to exit 0 and silently count nothing as stale. Without
+  `--as-of`, a
   valid declared `valid_until` is used as-declared (never the wall clock, so
   identical inputs always produce identical output). Missing `valid_until`
   is `unknown_freshness` and excludes the artifact regardless.
@@ -757,8 +765,11 @@ never contradict, the sections above.
   `week_window_not_whole_weeks`; the lag side reports `claim_lag_unknown`.
   The existing `civil_days` conversion checks Gregorian month lengths and
   leap years: an impossible date such as `2026-02-31` reports
-  `period_date_unparsable` rather than being normalized. The same calendar
-  conversion also governs `valid_until` staleness. Unconvertible start/end
+  `period_date_unparsable` rather than being normalized. Every field must be
+  fixed-width ASCII digits, so a signed field such as `+026-01-01` or
+  `2026-+1-01` is also `period_date_unparsable` rather than being read as a
+  number (#1422). The same calendar conversion also governs `valid_until`
+  validation, `--as-of` validation and staleness. Unconvertible start/end
   dates remain soft timing exclusions rather than artifact parse errors.
 - **Lineage.** The lineage root is the transitive `derived_from` root when
   present, else `source_study_id`, else the artifact itself. Roots sharing
@@ -870,8 +881,8 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
   is emitted as `valid_until`, an invalid generated freshness date returns a
   `semantics` error with diagnostic `causal_evidence_schema_mismatch` and exit 2.
   This refusal leaves existing output files unchanged. Invalid `period.start`
-  remains a soft timing exclusion; this adds no global date-order or `--as-of`
-  policy and does not remove declared freshness.
+  remains a soft timing exclusion; this adds no global date-order policy
+  (observation takes no `--as-of`) and does not remove declared freshness.
 - **Captured inputs (#1423).** Observation parses JSONL records and hashes the
   same single UTF-8 capture, including original whitespace and line endings;
   log read/parse failures still precede scope parsing. Replacing or removing

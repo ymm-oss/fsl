@@ -178,12 +178,16 @@ fn valid_missing_and_lifecycle_controls_preserve_support() {
     }
 }
 #[test]
-fn start_end_null_and_garbage_remain_named_soft_exclusions() {
+fn start_end_null_garbage_and_signed_remain_named_soft_exclusions() {
     for (field, value, code) in [
         ("start", json!(null), "period_start_missing"),
         ("end", json!(null), "period_end_missing"),
         ("start", json!("garbage"), "period_date_unparsable"),
         ("end", json!("garbage"), "period_date_unparsable"),
+        // A sign is not a digit: `+026` is not read as year 26.
+        ("start", json!("+026-01-01"), "period_date_unparsable"),
+        ("end", json!("+026-03-31"), "period_date_unparsable"),
+        ("start", json!("2026-+1-01"), "period_date_unparsable"),
     ] {
         let mut artifact = artifact(Some(json!("2027-03-31")));
         artifact["period"][field] = value;

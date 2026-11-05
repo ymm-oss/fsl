@@ -74,7 +74,7 @@ pub(super) fn causal_command(
                         &mut args,
                         "--lifecycle",
                     )?)),
-                    "--as-of" => as_of = Some(required_option_value(&mut args, "--as-of")?),
+                    "--as-of" => as_of = Some(as_of_value(&mut args)?),
                     _ => args.positional(option, unknown)?,
                 }
             }
@@ -290,7 +290,7 @@ pub(super) fn causal_command(
                         &mut args,
                         "--lifecycle",
                     )?)),
-                    "--as-of" => as_of = Some(required_option_value(&mut args, "--as-of")?),
+                    "--as-of" => as_of = Some(as_of_value(&mut args)?),
                     "--format" => format = required_option_value(&mut args, "--format")?,
                     _ => args.positional(option, unknown)?,
                 }
@@ -1674,6 +1674,20 @@ fn run_causal_diff(
         Err(error) => return error,
     };
     merge_causal_envelope(fsl_tools::causal_diff_json(&before_model, &after_model))
+}
+
+/// `--as-of` names a real Gregorian date as ASCII `YYYY-MM-DD`, the same
+/// rule as an artifact's `period.valid_until`. Anything else is a usage
+/// error, never a silent "not stale" (#1422).
+fn as_of_value(args: &mut impl Iterator<Item = String>) -> Result<String, String> {
+    let value = required_option_value(args, "--as-of")?;
+    if fsl_tools::is_calendar_date(&value) {
+        Ok(value)
+    } else {
+        Err(format!(
+            "--as-of requires a valid Gregorian date in YYYY-MM-DD format, got '{value}'"
+        ))
+    }
 }
 
 #[cfg(test)]

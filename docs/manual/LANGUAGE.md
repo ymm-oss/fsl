@@ -5648,7 +5648,11 @@ that cannot be converted, or a claim whose `lag` is `unknown` so there is no
 `lag_min` to compare against, leaves timing eligibility not evaluable: the
 edge stays in history and in the graph but is excluded from current support
 with `evidence_timing_not_evaluable` and casts no vote. Staleness is judged only
-against an explicit `--as-of` date — never the wall clock. A scope dimension
+against an explicit `--as-of` date — never the wall clock. `causal analyze`
+and `causal ledger` refuse an `--as-of` value that is not a real Gregorian
+date written as ASCII `YYYY-MM-DD` (no sign, no other characters) with
+`kind:"usage"` and exit 2, before reading the model or evidence; such a value
+used to exit 0 and count nothing as stale. A scope dimension
 present on only the claim or artifact side is `unassessable`; absence is never
 treated as universal. **`causal_support`
 and `formal_assurance` are orthogonal axes**: evidence never changes

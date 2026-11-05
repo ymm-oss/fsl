@@ -308,7 +308,10 @@ excluded from current support with `evidence_timing_not_evaluable` and casts
 no vote — it is never counted on the strength of the other conditions alone.
 A scope dimension present on only one side is
 `unassessable`, never universal. Staleness needs an explicit `--as-of` — never the wall
-clock. **Agents: `causal_support` and `formal_assurance` are separate axes;
+clock. `causal analyze` and `causal ledger` refuse an `--as-of` that is not a real
+Gregorian date in ASCII `YYYY-MM-DD` (no sign) with `kind:"usage"`, exit 2, before
+reading the model or evidence; it used to exit 0 and count nothing as stale. Start/end
+dates with a signed field are `period_date_unparsable`. **Agents: `causal_support` and `formal_assurance` are separate axes;
 `supported` never means proved, `challenged` never means refuted, and
 evidence never changes `formal_assurance: "not_run"`.**
 

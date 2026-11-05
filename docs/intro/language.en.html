@@ -5767,7 +5767,11 @@ that cannot be converted, or a claim whose <code>lag</code> is <code>unknown</co
 <code>lag_min</code> to compare against, leaves timing eligibility not evaluable: the
 edge stays in history and in the graph but is excluded from current support
 with <code>evidence_timing_not_evaluable</code> and casts no vote. Staleness is judged only
-against an explicit <code>--as-of</code> date — never the wall clock. A scope dimension
+against an explicit <code>--as-of</code> date — never the wall clock. <code>causal analyze</code>
+and <code>causal ledger</code> refuse an <code>--as-of</code> value that is not a real Gregorian
+date written as ASCII <code>YYYY-MM-DD</code> (no sign, no other characters) with
+<code>kind:"usage"</code> and exit 2, before reading the model or evidence; such a value
+used to exit 0 and count nothing as stale. A scope dimension
 present on only the claim or artifact side is <code>unassessable</code>; absence is never
 treated as universal. <strong><code>causal_support</code>
 and <code>formal_assurance</code> are orthogonal axes</strong>: evidence never changes

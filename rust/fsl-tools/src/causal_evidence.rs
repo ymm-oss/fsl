@@ -125,10 +125,24 @@ fn days_in_month(year: i64, month: i64) -> i64 {
     }
 }
 
-/// Days since the civil epoch for a `YYYY-MM-DD` date (Gregorian).
+/// Whether `date` is a real Gregorian date written as exactly ten ASCII
+/// characters `YYYY-MM-DD`: four, two and two ASCII digits, no sign (#1422).
+#[must_use]
+pub fn is_calendar_date(date: &str) -> bool {
+    civil_days(date).is_some()
+}
+
+/// Days since the civil epoch for a `YYYY-MM-DD` date (Gregorian). Every
+/// field is fixed-width ASCII digits; a sign or any other byte is refused
+/// (#1422).
 fn civil_days(date: &str) -> Option<i64> {
     let bytes = date.as_bytes();
-    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+    if bytes.len() != 10
+        || !bytes.iter().enumerate().all(|(index, byte)| match index {
+            4 | 7 => *byte == b'-',
+            _ => byte.is_ascii_digit(),
+        })
+    {
         return None;
     }
     let year: i64 = date.get(0..4)?.parse().ok()?;
@@ -334,14 +348,7 @@ pub fn parse_artifact(artifact: &Value) -> Result<EvidenceArtifact, EvidenceErro
                 format!("{context}: period.valid_until must be a string"),
             )
         })?;
-        let bytes = valid_until.as_bytes();
-        if bytes.len() != 10
-            || !bytes.iter().enumerate().all(|(index, byte)| match index {
-                4 | 7 => *byte == b'-',
-                _ => byte.is_ascii_digit(),
-            })
-            || civil_days(valid_until).is_none()
-        {
+        if civil_days(valid_until).is_none() {
             return Err(error(
                 "causal_evidence_schema_mismatch",
                 format!(
@@ -1342,6 +1349,10 @@ mod tests {
         assert_eq!(civil_days("2026-00-10"), None);
         assert_eq!(civil_days("2026-01-00"), None);
         assert_eq!(civil_days("garbage"), None);
+        assert_eq!(civil_days("+026-01-01"), None);
+        assert_eq!(civil_days("-026-01-01"), None);
+        assert_eq!(civil_days("2099-+4-01"), None);
+        assert_eq!(civil_days("2099-04-+1"), None);
     }
 }
 
