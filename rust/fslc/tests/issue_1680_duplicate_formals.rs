@@ -375,6 +375,7 @@ fn domain_command_input_points_at_the_repeated_name() {
 }
 
 /// A saga observe action and an effect completion take an event's fields as formals.
+/// The event's own refusal comes first (#1700), at the same place.
 #[test]
 fn domain_event_field_behind_an_action_points_at_the_repeated_name() {
     let saga = |fields: &str| {
@@ -382,10 +383,17 @@ fn domain_event_field_behind_an_action_points_at_the_repeated_name() {
             "domain D {{\n  implementation_profile functional_ddd\n  type OrderId = 0..1\n  aggregate Order {{\n    id OrderId\n    state {{ flag: Bool = false; }}\n    command Start {{}}\n    command Done {{}}\n    event Started {{}}\n    event Finished {{ {fields} }}\n    decide Start {{ emits Started }}\n    decide Done {{ emits Finished }}\n    evolve Started {{ flag = true }}\n    evolve Finished {{ flag = false }}\n  }}\n  saga Flow {{\n    starts_on Started\n    step Wait {{\n      async\n      requires Started\n      awaits one_of [Finished]\n    }}\n  }}\n}}\n"
         )
     };
-    assert_refused(
+    let source = saga("note: Bool  note: Bool");
+    let run = fslc(
         "domain-saga",
-        &[("root.fsl", &saga("note: Bool  note: Bool"))],
-        "duplicate action parameter 'note'",
+        &[("root.fsl", &source)],
+        &["check", "root.fsl"],
+        false,
+    );
+    assert_located(
+        &run,
+        "name",
+        "duplicate event field 'Finished.note' at root.fsl:10:34",
         10,
         34,
     );
@@ -401,11 +409,12 @@ fn domain_event_field_behind_an_action_points_at_the_repeated_name() {
         )
     };
     // This fixture also carries a deprecation warning.
-    let refused_at = |id: &str, fields: &str, formal: &str, column: u32| {
+    let refused_at = |id: &str, fields: &str, field: &str, column: u32| {
         let source = with_fields(fields);
         let run = fslc(id, &[("root.fsl", &source)], &["check", "root.fsl"], false);
-        let message = format!("duplicate action parameter '{formal}'");
-        assert_located(&run, "semantics", &message, 18, column);
+        let message =
+            format!("duplicate event field 'PaymentCaptured.{field}' at root.fsl:18:{column}");
+        assert_located(&run, "name", &message, 18, column);
     };
     refused_at("domain-effect", "  note: Bool  note: Bool", "note", 79);
     // The name an effect correlates on is its own formal when the event declares it.
@@ -418,37 +427,39 @@ fn domain_event_field_behind_an_action_points_at_the_repeated_name() {
     assert_checks("domain-effect-one", &[("root.fsl", &with_fields(""))]);
 }
 
-/// `emits` takes no payload, so a field no action takes as a formal has no actual
-/// to lose: checking and verifying give what one field gives. Accepted as on base.
+/// `emits` takes no payload, so no action takes this field as a formal. #1680 accepted
+/// it because no actual is lost; #1700 refuses it, because the copies still differ in
+/// type and their order decides `check`. One field is unchanged.
 #[test]
-fn domain_event_field_no_action_takes_is_not_a_formal() {
+fn domain_event_field_no_action_takes_is_refused_too() {
     let repeated = domain(
         "input amount: Bool",
         "amount: Bool\n      amount: Bool",
         "flag = amount",
     );
     let once = domain("input amount: Bool", "amount: Bool\n", "flag = amount");
-    for (engine, depth) in [("explicit", "2"), ("bmc", "2")] {
-        let arguments = ["verify", "root.fsl", "--engine", engine, "--depth", depth];
-        let left = fslc(
+    let message = "duplicate event field 'Added.amount' at root.fsl:17:7";
+    for arguments in [
+        ["check", "root.fsl", "", "", "", ""],
+        ["verify", "root.fsl", "--engine", "explicit", "--depth", "2"],
+        ["verify", "root.fsl", "--engine", "bmc", "--depth", "2"],
+    ] {
+        let arguments: Vec<&str> = arguments.into_iter().filter(|a| !a.is_empty()).collect();
+        let run = fslc(
             "domain-event-twice",
             &[("root.fsl", &repeated)],
             &arguments,
             false,
         );
-        let right = fslc(
+        assert_located(&run, "name", message, 17, 7);
+        let run = fslc(
             "domain-event-once",
             &[("root.fsl", &once)],
             &arguments,
             false,
         );
-        assert_eq!(left.exit, 0, "{}", left.packet);
-        assert_eq!(right.exit, 0, "{}", right.packet);
-        for field in ["result", "invariants_checked", "action_coverage"] {
-            assert_eq!(left.packet[field], right.packet[field], "{engine} {field}");
-        }
+        assert_eq!(run.exit, 0, "{}", run.packet);
     }
-    assert_checks("domain-event-check", &[("root.fsl", &repeated)]);
 }
 
 const INLINE_IMPL: &str = "requirements Impl {\n  implements AbsI from \"abs.fsl\" {\n    map done = done\n    action step() -> step(false, false)\n  }\n  state { done: Bool }\n  init { done = false }\n  action step() { done = false }\n}\n";

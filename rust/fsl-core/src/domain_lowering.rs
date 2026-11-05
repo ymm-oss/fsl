@@ -94,6 +94,74 @@ fn reject_repeated_value_object_fields(domain: &DomainSpec) -> Result<(), CoreEr
     Ok(())
 }
 
+const REPEATED_EVENT_FIELD: &str = "duplicate event field ";
+const REPEATED_COMMAND: &str = "duplicate command ";
+const REPEATED_EVOLVE: &str = "duplicate evolve ";
+
+/// Whether `error` refuses a repeated declaration of a domain, in the document's
+/// lowering or its parse.
+pub(crate) fn is_repeated_domain_declaration(error: &CoreError) -> bool {
+    [
+        REPEATED_EVENT_FIELD,
+        REPEATED_COMMAND,
+        REPEATED_EVOLVE,
+        fsl_syntax::REPEATED_DOMAIN_CLAUSE,
+    ]
+    .iter()
+    .any(|prefix| error.message.starts_with(prefix))
+}
+
+/// Refuse a declaration whose second copy is lost, at the repeat. An `evolve` and a
+/// `command` read the first copy, an `evolve` reads the event field's last copy and
+/// `correlation_id` its first, and `domain expand` keeps no event type. It sits on the
+/// path every domain route shares, because `domain expand` and `domain analyze` build
+/// no model (#1700).
+fn reject_repeated_declarations(domain: &DomainSpec) -> Result<(), CoreError> {
+    for aggregate in &domain.aggregates {
+        let mut commands = BTreeSet::new();
+        for command in &aggregate.commands {
+            if !commands.insert(&command.name) {
+                return Err(error_at(
+                    format!(
+                        "{REPEATED_COMMAND}'{}' in aggregate '{}'",
+                        command.name, aggregate.name
+                    ),
+                    command.loc.span(),
+                )
+                .into_name_resolution());
+            }
+        }
+        for event in &aggregate.events {
+            let mut seen = BTreeSet::new();
+            if let Some(field) = event
+                .fields
+                .iter()
+                .find(|field| !seen.insert(&field.name.text))
+            {
+                return Err(error_at(
+                    format!("{REPEATED_EVENT_FIELD}'{}.{}'", event.name, field.name.text),
+                    field.name.span,
+                )
+                .into_name_resolution());
+            }
+        }
+        let mut evolves = BTreeSet::new();
+        for evolve in &aggregate.evolves {
+            if !evolves.insert(&evolve.event) {
+                return Err(error_at(
+                    format!(
+                        "{REPEATED_EVOLVE}'{}' in aggregate '{}'",
+                        evolve.event, aggregate.name
+                    ),
+                    evolve.loc.span(),
+                )
+                .into_name_resolution());
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_domain_enums(types: &[DomainType]) -> Result<(), CoreError> {
     for ty in types {
         if ty.kind != "enum" {
@@ -135,6 +203,7 @@ fn span_at(loc: DomainLoc) -> Span {
 /// not name-resolution failures.
 pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), CoreError> {
     reject_repeated_value_object_fields(domain)?;
+    reject_repeated_declarations(domain)?;
     if let Some(awaited) = domain.awaits.first() {
         return Err(error_at(
             format!(
