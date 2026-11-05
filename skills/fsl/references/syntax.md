@@ -1672,11 +1672,14 @@ when checking a file, the message suffix changes from `at L:C` to
    expectation types now returns a result: a `let` or `is` binding, a method's result or argument
    (`Set { p, none } == Set { o }.add(none)`, `Set { Set { p } }.contains(t)`), or a read into state, in
    any position an engine evaluates, including a `--lemma` candidate and a map under `preserve progress`.
-   A refinement map, a scenario `expect` and a `--lemma` candidate keep the prior rule. Three routes still
+   A refinement map, a scenario `expect` and a `--lemma` candidate keep the prior rule. Two routes still
    pass check and report `cannot coerce`: a Map comparison in a map under `preserve progress`, which
-   evaluates a map symbolically; such a candidate, which is `rejected` with it; and a range-typed literal
-   under `old(...)`, which keeps its own range and capacity (`a == old(Set { vb })`,
-   `sa == old(Seq { va })` for `sa: Seq<A, 2>`), as before this change.
+   evaluates a map symbolically, and such a candidate, which is `rejected` with it. Breaking removal
+   (#1683): a literal under `old(...)` is typed against what surrounds it, as outside `old(...)`, so
+   `some(m0) == old(some(m1))`, `Set { m0 } == old(Set { m1 })` and `Seq { m0 } == old(Seq { m1 })` are
+   refused, including under an empty-domain binder, where they returned a verdict, and a range-typed
+   literal (`a == old(Set { vb })`, `sa == old(Seq { va })` for `sa: Seq<A, 2>`) now returns a result
+   instead of `cannot coerce`.
    Migration: one carrier, or compare entries. Set/Seq conditional inference retains
    an already known finite arm's carrier/capacity through let in either arm order;
    that inference alone does not materialize literals. Refinement resolves numeric types separately;

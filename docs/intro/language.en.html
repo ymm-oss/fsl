@@ -1274,7 +1274,7 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   symbolic evaluation cannot coerce, now fail <code>check</code> with the existing located assignability error
   (<code>semantics</code>, exit 2) instead of <code>cannot coerce symbolic value</code> on bmc and induction. The
   refusal is located at the arm when one is at fault, otherwise at the enclosing guard, statement
-  or property, and it applies whether the expression is evaluated or not. Three routes still pass
+  or property, and it applies whether the expression is evaluated or not. Two routes still pass
   <code>check</code> and report it; they are at the end of this paragraph. A Map whose
   value is <code>Int</code> or <code>Option&lt;Int&gt;</code> is refused against one with a range, for <code>m0: Map&lt;K, Int&gt;</code>,
   <code>m1: Map&lt;K, A&gt;</code>: <code>m0 == m1</code>, <code>m0 != m1</code>, <code>m0 = m1</code>, a conditional arm, <code>m0 == old(m1)</code> and
@@ -1310,11 +1310,15 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   <code>preserve progress</code> while the same map without it refines. That gap is recorded in the carrier
   decision. A <code>--lemma</code> candidate keeps the rule above as well: with such a mismatch it is
   <code>rejected</code> with <code>cannot coerce</code>, <code>used</code> is false and the main result does not change, and a
-  mismatch it never evaluates leaves it usable. The third route predates this change and is
-  recorded in the same decision: a literal under <code>old(...)</code> is not typed against what surrounds
-  it, so a range-typed one keeps its own range and capacity. <code>a == old(Set { vb })</code>,
-  <code>sa == old(Seq { vb })</code> and <code>sa == old(Seq { va })</code> for <code>vb: 0..2</code>, <code>a: Set&lt;A&gt;</code>, <code>sa: Seq&lt;A, 2&gt;</code> pass
-  <code>check</code>, exit 2 on bmc and induction, and explicit answers.
+  mismatch it never evaluates leaves it usable. <strong>Breaking removal (#1683):</strong> a literal under
+  <code>old(...)</code> is typed against what surrounds it, in <code>check</code> and in evaluation, as it is outside
+  <code>old(...)</code>. So a Map it holds answers to the rule above: <code>some(m0) == old(some(m1))</code>,
+  <code>some(m0) != old(some(m1))</code>, <code>Set { m0 } == old(Set { m1 })</code> and <code>Seq { m0 } == old(Seq { m1 })</code> are
+  refused, including under an empty-domain <code>forall</code> or <code>exists</code>, where they returned a verdict
+  before; where they are evaluated, they reported <code>cannot coerce</code>. A range-typed literal there
+  used to pass <code>check</code> and report <code>cannot coerce</code> on bmc and induction, and now returns a result
+  that agrees with explicit: <code>a == old(Set { vb })</code>, <code>sa == old(Seq { vb })</code> and
+  <code>sa == old(Seq { va })</code> for <code>vb: 0..2</code>, <code>a: Set&lt;A&gt;</code>, <code>sa: Seq&lt;A, 2&gt;</code>.
   Migration: declare the two values with one carrier, or compare the entries (<code>m0[k] == m1[k]</code>).
   In mutate, a statically ill-typed implements map is <code>invalid</code>, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map

@@ -1227,7 +1227,7 @@ name in a `decreases` call. There are no unrelated breaking removals.
   symbolic evaluation cannot coerce, now fail `check` with the existing located assignability error
   (`semantics`, exit 2) instead of `cannot coerce symbolic value` on bmc and induction. The
   refusal is located at the arm when one is at fault, otherwise at the enclosing guard, statement
-  or property, and it applies whether the expression is evaluated or not. Three routes still pass
+  or property, and it applies whether the expression is evaluated or not. Two routes still pass
   `check` and report it; they are at the end of this paragraph. A Map whose
   value is `Int` or `Option<Int>` is refused against one with a range, for `m0: Map<K, Int>`,
   `m1: Map<K, A>`: `m0 == m1`, `m0 != m1`, `m0 = m1`, a conditional arm, `m0 == old(m1)` and
@@ -1263,11 +1263,15 @@ name in a `decreases` call. There are no unrelated breaking removals.
   `preserve progress` while the same map without it refines. That gap is recorded in the carrier
   decision. A `--lemma` candidate keeps the rule above as well: with such a mismatch it is
   `rejected` with `cannot coerce`, `used` is false and the main result does not change, and a
-  mismatch it never evaluates leaves it usable. The third route predates this change and is
-  recorded in the same decision: a literal under `old(...)` is not typed against what surrounds
-  it, so a range-typed one keeps its own range and capacity. `a == old(Set { vb })`,
-  `sa == old(Seq { vb })` and `sa == old(Seq { va })` for `vb: 0..2`, `a: Set<A>`, `sa: Seq<A, 2>` pass
-  `check`, exit 2 on bmc and induction, and explicit answers.
+  mismatch it never evaluates leaves it usable. **Breaking removal (#1683):** a literal under
+  `old(...)` is typed against what surrounds it, in `check` and in evaluation, as it is outside
+  `old(...)`. So a Map it holds answers to the rule above: `some(m0) == old(some(m1))`,
+  `some(m0) != old(some(m1))`, `Set { m0 } == old(Set { m1 })` and `Seq { m0 } == old(Seq { m1 })` are
+  refused, including under an empty-domain `forall` or `exists`, where they returned a verdict
+  before; where they are evaluated, they reported `cannot coerce`. A range-typed literal there
+  used to pass `check` and report `cannot coerce` on bmc and induction, and now returns a result
+  that agrees with explicit: `a == old(Set { vb })`, `sa == old(Seq { vb })` and
+  `sa == old(Seq { va })` for `vb: 0..2`, `a: Set<A>`, `sa: Seq<A, 2>`.
   Migration: declare the two values with one carrier, or compare the entries (`m0[k] == m1[k]`).
   In mutate, a statically ill-typed implements map is `invalid`, using the shared
   check-invalid classification, not an oracle error. Thus whole-container map

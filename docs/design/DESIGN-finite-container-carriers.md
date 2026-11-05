@@ -79,7 +79,8 @@ with `cannot coerce symbolic value`, while `fsl-bfs` answered:
 Both apply to the model's own expressions: action guards, lets, statements, `ensures`, `old(...)`,
 init and every property kind, evaluated or not. `old(...)` keeps its operand's type, and its
 operand's arms answer to what surrounds it without its literals being typed against that. So this
-does not reach every expression symbolic evaluation cannot coerce: see the recorded routes below.
+does not reach every expression symbolic evaluation cannot coerce: see the recorded routes below,
+and #1683 for a literal under `old(...)`.
 
 **Keeping the prior rule.** A refinement map, a scenario `expect` and a `--lemma` candidate stay on
 the prior rule through `ValidationPhase::concrete_only`. The name is older than what it covers:
@@ -97,7 +98,7 @@ candidate keeps the prior rule.
 
 **One rule.** `CarrierCoercion`, through `KernelModel::carrier_coercion`, is the rule `check` and
 `coerce` both ask. `check` refuses its `MapMismatch`; `coerce` rebuilds a value on its `RebuildInt`.
-`types_compatible`, `can_retag` and `inferred_collection_element` still answer separately.
+`types_compatible`, `can_retag` and `inferred_collection_element` answered separately until #1683.
 
 **Collections no literal expectation types.** A collection holding `Int` below an element checked
 and then reported `cannot coerce` on bmc and induction, and on explicit except in a `trans` or a read
@@ -181,12 +182,12 @@ evaluates an endpoint itself and also serves the positions that keep the prior r
 
 Of the forms still accepted, none reports `cannot coerce` on bmc, explicit or induction, and bmc,
 explicit and `fsl-bfs` agree wherever all three give a verdict. Outside these grids three routes
-still report it: a Map comparison in a refinement map under `preserve progress` and a rejected
-`--lemma` candidate, both recorded above, and a range-typed literal under `old(...)`, which
-predates this change. A literal there is not typed against the expectation, so it keeps its own range
-and capacity: `a == old(Set { vb })`, `sa == old(Seq { vb })` and `sa == old(Seq { vb, vb, vb })` with
+still reported it at this amendment: a Map comparison in a refinement map under `preserve progress`
+and a rejected `--lemma` candidate, both recorded above, and a range-typed literal under `old(...)`,
+which predated this change and closed in #1683. A literal there was not typed against the expectation
+in evaluation, so it kept its own range and capacity: `a == old(Set { vb })`, `sa == old(Seq { vb })` and `sa == old(Seq { vb, vb, vb })` with
 `vb: 0..2`, `a: Set<A>`, `sa: Seq<A, 2>`, and with the same range `sa == old(Seq { va })`, whose
-capacity differs. These pass `check`, exit 2 on bmc and induction, and explicit answers. A sweep of
+capacity differs. These passed `check`, exited 2 on bmc and induction, and explicit answered. A sweep of
 480 `old(...)` forms found 18 of them, each Set or Seq; the controls with a literal holding `Int`, or
 of the expectation's own carrier, answer on every engine. 22 forms that reported `cannot coerce` now return
 a result.
@@ -218,6 +219,107 @@ including `f4`, whose first arm is also a new refusal but whose second arm is st
 Of the 238 inline inputs of `issue_1679_carrier_equality`, checked the same way, 113 are byte-identical,
 including every control, rebuilt value and third-route form, 117 go from exit 0 to exit 2, and 8 are
 binder bounds the range rule already refused on `check`, which now report the carrier first.
+
+## Amendment (#1683): one carrier rule
+
+`check` and `coerce` now answer from one function, `CarrierCoercion` through
+`KernelModel::carrier_coercion`, with four answers: `Retag`, `RebuildInt`, `MapMismatch` and
+`NotAssignable`. Assignability is every answer but the last. `coerce` retags on the first, rebuilds on
+the second and reports `cannot coerce` on the others. A `check` phase that reaches coercion refuses
+`MapMismatch`. `compatible_carrier`, `can_retag` and `inferred_collection_element` are gone.
+
+**What stays outside the rule, and why.** Nothing in `coerce` needs the solver: `solver_sort` reads only
+the model's types.
+
+| What | Where | Why |
+|---|---|---|
+| `ValidationPhase.symbolic` | `check` | It says where an expression is evaluated, and the rule sees two types. Dropping it refuses a scenario `expect` and a refinement step's map that answer on every engine (`concretely_evaluated_positions_keep_their_verdicts`) |
+| `is_coerced_container` | `check` | It picks the positions the arm rule runs at. Running it at a Map too moves an existing refusal from one arm to the other. The rule it applies is `types_compatible`, so this one |
+| `None`, `SetLiteral`, `SeqLiteral` arms | `coerce` | A literal has no carrier of its own, only elements, and each element goes back through `coerce` |
+| `Option` arm | `coerce` | An Option is rebuilt whatever its carrier, and its value answers to the rule on the way down. The rule says the same (`RebuildInt`), so nothing is decided twice |
+| `Scalar` arm | `coerce` | A scalar is one term. It retags to any scalar sort, including `Bool` to `Int`, which `check` refuses. [R] Stays looser than the rule because no form reaches it past `check`: no grid below did, and it fails open only for a form `check` refused |
+
+**One narrowing in `coerce` itself.** `inferred_collection_element` rebuilt `Set<Int>` as `Set<Bool>` or a
+Set of an enum, or the reverse, and the rule answers `NotAssignable`. [R] No form reaches that: `check`
+refuses each, in the grids `set_a_e`, `seq_bool`, `setlit_bool` and `setlit_e`, and in the `old(...)`
+probe `Set { 1 } == old(Set { true })`. Against the same carrier `Set<Int>` now keeps its value instead
+of rebuilding an equal one.
+
+**A literal under `old(...)`.** `infer_type` has always carried the expectation through `old(...)`, and
+`eval_expected` carried it through every other form that does, so this was the one place the two
+disagreed.
+
+- `eval_expected` now carries it there too. **This closes the third route above.** `a == old(Set { vb })`,
+  `sa == old(Seq { vb })`, `sa == old(Seq { vb, vb, vb })` and `sa == old(Seq { va })` return a result that
+  agrees with explicit, and with the same form outside `old(...)`.
+- **Breaking removal.** `check` now walks `old`'s operand against the expectation too, so a Map a literal
+  holds there answers to the rule, as it does outside `old(...)`. Before, `infer_type` only saw the literal
+  take the expectation. For `m0: Map<K, Int>`, `m1: Map<K, A>` this refuses `some(m0) == old(some(m1))`,
+  `some(m0) != old(some(m1))`, `Set { m0 } == old(Set { m1 })`, `Seq { m0 } == old(Seq { m1 })` and
+  `Set { some(m0) } == old(Set { some(m1) })`, with the located assignability error. Where such a form is
+  evaluated it reported `cannot coerce` on bmc and induction, so no verdict goes with it. **Under a
+  never-evaluated position it returned a verdict, and that verdict is lost:** `forall i: E { ... }`,
+  `not (exists i: E { ... })` and an arm under such a binder, for `type E = 1..0`, and a property that
+  `--exclude-property` leaves out, each `verified` on bmc and `proved` on induction. This is the never-evaluated kind #1679 decided: a mismatch stays refused where
+  it is written. The earlier walk stays, so an uncontextualized `old(none)` is still refused.
+
+**The routes that remain.** A Map comparison in a refinement map under `preserve progress`, and a rejected
+`--lemma` candidate. Neither is on bmc or induction's model path, and refusing either at `check` loses a
+verdict. A map under `preserve progress` that the pulled `leadsTo` does not read returns `refines`, with
+`map same = m == y` for those Maps, and `cannot coerce` only when `leadsTo L { same and ... }` reads it. The
+candidate is the #1679 row above: one form's main result would go from `proved` to `unknown_cti`.
+
+**The matrix.** Generated, not retained, except for the bounded grid in the last row. Base
+`1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `ab1cacbc6fbd19363a4c1203a13fcddb306a4d82`. Each ran as
+`fslc check`, and where it passed as `verify --engine bmc --depth 2`, `--engine induction`,
+`--engine explicit --depth 2`, `fsl-bfs <spec> 2` and `fsl-replay-actions` with one `go`.
+
+| Grid | Forms | Refused, base | Refused, head | ok to error | of which verdict on base | `cannot coerce`, base | `cannot coerce`, head | Result gained | Verdict changed or lost otherwise |
+|---|---|---|---|---|---|---|---|---|---|
+| Carrier shape by position, by property kind | 4577 | 1822 | 1826 | 4 | 0 | 38 | 0 | 34 | 0 |
+| Wrappers of `old(...)`, with never-evaluated positions | 5253 | 2137 | 2207 | 70 | 30 | 156 | 0 | 116 | 0 |
+| The #1679 grids again | 1754 | 1053 | 1053 | 0 | 0 | 0 | 0 | 0 | 0 |
+| `issue_1683_one_carrier_rule`, retained | 560 | 194 | 198 | 4 | 0 | 15 | 0 | 11 | 0 |
+
+No form went from error to ok. Every refused form has a location. Shapes are Set, Seq, Option, Map, a
+relation, a scalar and an enum, with range, equal-range alias, `Int` and capacity differences, plus literals
+holding `Int`, a range value, a differing capacity, `Bool` and an enum, nested literals and `some`.
+Positions are `==`, `!=` and either order, conditional arms on either side, `old(...)` around and inside
+each, `some`, Set and Seq literals with sibling elements, `.contains`, `.add`, `.remove`, `.push`, `.head`, `.at`,
+`is`, `forall`, `exists`, `count`, `sum`, `=>`, a dead `and`, `requires`, `ensures`, `let`, assignment, `if`, and for
+10 representative shapes `invariant`, `trans`, `reachable`, `leadsTo` and `terminal`. bmc and explicit disagree
+on no form where both give a verdict. bmc and `fsl-bfs` differ on 12 forms, each a `leadsTo`, for which `fsl-bfs` reports no violation
+as recorded above. `fsl-bfs` and the Monitor gave the same output on base and head wherever both ran; the
+Monitor was not compared with another engine.
+
+**Not covered:** `until` and `unless` bodies, `decreases`, action parameters, binder bounds, init statements
+and expressions, `def` and predicate arguments, struct fields, Map index writes, deeper literal nesting than two
+levels, compose and the dialects that lower to these forms, `--exclude-property` and `--property` beyond the #1679
+grid, and a scenario `expect`, refinement map, `--lemma` candidate or KPI projection beyond the #1679 tests. A
+declared nested carrier such as `Set<Option<A>>` is `unsupported state type`, so it is reached only through
+literals, as in the #1679 let-bound grid. The grids are a finite measurement.
+
+**What still detects a wrong shared rule.** Merging removes the check this question used to have: `cannot coerce`
+past `check` meant the two rules disagreed, and now they cannot. DESIGN-triangulated-assurance does not count
+a shared classification as independent evidence, and this is not registered as a triangulated claim.
+
+- Two hand-written tables that do not call the rule for their expectation. `rust/fsl-core/tests/carrier_coercion_rule.rs` states the answer for each pair. `rust/fsl-verifier/src/carrier_coercion_tests.rs` asks `coerce` directly, past `check`, and has the solver compare the coerced value with the same value built at the target type.
+- Pinned refusal counts per shape in `rust/fslc/tests/issue_1683_one_carrier_rule.rs`, and the forms pinned in `issue_1679_carrier_equality`.
+- Explicit, `fsl-bfs` and the Monitor, which evaluate without asking the rule. A rule that wrongly admits or rebuilds a value can disagree with them on a verdict. They run after the same `build_model`, so **a rule that wrongly refuses a form refuses it on every engine, and no agreement check sees that.** Only the tables and the pinned counts do.
+
+On-disk transition set (empty). Base and head as above, each built from its own tree in its own target directory
+with `cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -p fsl-runtime --bins --locked --offline`,
+Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (646 forms: 23/195/428) ran with
+`FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable and with `FSLC_UNSTABLE=fsl5`, and as
+`fslc kernel <path> --kernel-version 1|2`, twice per side. All 2584 pairs had equal complete stdout, stderr and exit,
+with no field excluded: 0 ok-to-error and 0 error-to-ok, 0 unstable. Of the 425 forms base accepts, `verify --engine bmc
+--depth 2` and `--engine induction` gave equal stdout, stderr and exit on both, once `elapsed_s` fields and `memory_mb`
+were excluded, because each differs between two runs of one binary: 303, 104 and 18 exit 0, 1 and 2 on bmc, 312, 95 and
+18 on induction, none reporting `cannot coerce`.
+
+Inline inputs of `issue_1679_carrier_equality`, whose third-route test this rewrites and renames, and of
+`issue_1683_one_carrier_rule`: 689 single-file forms checked the same way, 678 byte-identical and 11 ok to error, each a
+Map under a literal under `old(...)` in the new test. The 20 refinement files in the #1679 test were not checked on their own.
 
 ## Mutation classification
 

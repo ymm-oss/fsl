@@ -1181,7 +1181,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   形は、bmc と induction の <code>cannot coerce symbolic value</code> ではなく、<code>check</code> が既存の位置付き代入可能性エラー
   (<code>semantics</code>、終了コード2)で拒否します。拒否の位置は、原因の分岐があればその分岐、なければ囲んでいるガード、
   文、プロパティです。式が評価されるかどうかにかかわらず拒否します。<code>check</code> を通って <code>cannot coerce</code> を報告する
-  経路は3つ残っており、この段落の最後に示します。<code>m0: Map&lt;K, Int&gt;</code>、<code>m1: Map&lt;K, A&gt;</code> のように、
+  経路は2つ残っており、この段落の最後に示します。<code>m0: Map&lt;K, Int&gt;</code>、<code>m1: Map&lt;K, A&gt;</code> のように、
   値が <code>Int</code> または <code>Option&lt;Int&gt;</code> の Map と値が範囲の Map を組み合わせる形を拒否します。<code>m0 == m1</code>、<code>m0 != m1</code>、
   <code>m0 = m1</code>、条件式の分岐、<code>m0 == old(m1)</code>、<code>(if c then m0 else m1)[0]</code> です。リテラルの中
   (<code>some(m0) == some(m1)</code>、<code>Seq { m0 } == Seq { m1 }</code>、<code>Set { m0 } == Set { m1 }</code>)、兄弟の要素
@@ -1210,10 +1210,13 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   <code>preserve progress</code> のもとでは <code>cannot coerce</code>(終了コード2)になり、それがなければ refines です。この差は
   ドメイン互換の決定に記録しています。<code>--lemma</code> の候補も上記の規則のままです。このような不一致を持つ候補は
   <code>cannot coerce</code> で <code>rejected</code>、<code>used</code> は false で、主の結果は変わりません。評価されない不一致を持つ候補は
-  使えるままです。3つ目の経路はこの変更の前からあり、同じ決定に記録しています。<code>old(...)</code> の中のリテラルは
-  周囲の期待型で型付けされないので、範囲の値を持つリテラルは自身の範囲と容量を保ちます。<code>vb: 0..2</code>、<code>a: Set&lt;A&gt;</code>、
-  <code>sa: Seq&lt;A, 2&gt;</code> に対する <code>a == old(Set { vb })</code>、<code>sa == old(Seq { vb })</code>、<code>sa == old(Seq { va })</code> は <code>check</code> を通り、
-  bmc と induction は終了コード2で、explicit は答えます。
+  使えるままです。<strong>破壊的な受理範囲の縮小(#1683):</strong> <code>old(...)</code> の中のリテラルは、<code>old(...)</code> の外と同じく、<code>check</code>
+  でも評価でも周囲の期待型で型付けされます。そのため、リテラルが持つ Map は上記の規則に従います。
+  <code>some(m0) == old(some(m1))</code>、<code>some(m0) != old(some(m1))</code>、<code>Set { m0 } == old(Set { m1 })</code>、
+  <code>Seq { m0 } == old(Seq { m1 })</code> は拒否されます。空のドメインの <code>forall</code> や <code>exists</code> の中でも拒否され、そこでは以前は
+  判定を返していました。評価される位置では <code>cannot coerce</code> を報告していました。範囲の値を持つリテラルは <code>check</code> を
+  通って bmc と induction で <code>cannot coerce</code> を報告していましたが、今は explicit と一致する結果を返します。<code>vb: 0..2</code>、
+  <code>a: Set&lt;A&gt;</code>、<code>sa: Seq&lt;A, 2&gt;</code> に対する <code>a == old(Set { vb })</code>、<code>sa == old(Seq { vb })</code>、<code>sa == old(Seq { va })</code> です。
   移行: 2つの値を同じドメインで宣言するか、要素を比較してください(<code>m0[k] == m1[k]</code>)。
   mutateでは、静的に型が不正なimplementsのmapをoracleの失敗でなく<code>invalid</code>として、
   checkで不正なmutantと同じ経路で分類します。入れ物全体のmapを持つspecの範囲変更mutantは、
