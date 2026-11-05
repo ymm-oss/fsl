@@ -5,7 +5,7 @@
 //! form reports `cannot coerce`. Each shape's refusal count is pinned, not derived from
 //! the rule, because a test that asks the rule what to expect cannot detect a wrong rule.
 //! The positions this does not cover are listed in
-//! `docs/design/DESIGN-finite-container-carriers.md`, "Amendment (#1683)".
+//! `docs/design/DESIGN-finite-container-carriers.md`, "Amendment (#1683): one carrier rule".
 
 #[path = "support/issue_1517_scratch.rs"]
 mod scratch;
