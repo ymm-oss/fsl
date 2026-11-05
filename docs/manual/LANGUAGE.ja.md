@@ -1133,7 +1133,7 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   形は、bmc と induction の `cannot coerce symbolic value` ではなく、`check` が既存の位置付き代入可能性エラー
   (`semantics`、終了コード2)で拒否します。拒否の位置は、原因の分岐があればその分岐、なければ囲んでいるガード、
   文、プロパティです。式が評価されるかどうかにかかわらず拒否します。`check` を通って `cannot coerce` を報告する
-  経路は3つ残っており、この段落の最後に示します。`m0: Map<K, Int>`、`m1: Map<K, A>` のように、
+  経路は2つ残っており、この段落の最後に示します。`m0: Map<K, Int>`、`m1: Map<K, A>` のように、
   値が `Int` または `Option<Int>` の Map と値が範囲の Map を組み合わせる形を拒否します。`m0 == m1`、`m0 != m1`、
   `m0 = m1`、条件式の分岐、`m0 == old(m1)`、`(if c then m0 else m1)[0]` です。リテラルの中
   (`some(m0) == some(m1)`、`Seq { m0 } == Seq { m1 }`、`Set { m0 } == Set { m1 }`)、兄弟の要素
@@ -1162,10 +1162,20 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `preserve progress` のもとでは `cannot coerce`(終了コード2)になり、それがなければ refines です。この差は
   ドメイン互換の決定に記録しています。`--lemma` の候補も上記の規則のままです。このような不一致を持つ候補は
   `cannot coerce` で `rejected`、`used` は false で、主の結果は変わりません。評価されない不一致を持つ候補は
-  使えるままです。3つ目の経路はこの変更の前からあり、同じ決定に記録しています。`old(...)` の中のリテラルは
-  周囲の期待型で型付けされないので、範囲の値を持つリテラルは自身の範囲と容量を保ちます。`vb: 0..2`、`a: Set<A>`、
-  `sa: Seq<A, 2>` に対する `a == old(Set { vb })`、`sa == old(Seq { vb })`、`sa == old(Seq { va })` は `check` を通り、
-  bmc と induction は終了コード2で、explicit は答えます。
+  使えるままです。**破壊的な受理範囲の縮小(#1683):** `old(...)` の中で自分の型を決められるリテラルは、`check`
+  でも評価でも周囲の期待型でも型付けされます。そのため、`some`、Set と Seq のリテラル、条件式の枝の下にある Map は、
+  深さによらず上記の規則に従います。`some(m0) == old(some(m1))`、`some(m0) != old(some(m1))`、
+  `Set { m0 } == old(Set { m1 })`、`Seq { m0 } == old(Seq { m1 })`、
+  `Set { m0 } == old(Set { if c then m1 else m1 })` は拒否されます。評価される位置では bmc と induction が
+  `cannot coerce` を報告する一方、explicit と `fsl-bfs` は `violated` を含む判定を返しており、その判定は失われます。
+  空のドメインの `forall` や `exists` の中では bmc と induction の判定も失われます。拒否はプロパティの選択より前に起きるため、
+  `--exclude-property` では避けられません。除外するはずだった形があると、その形を書き直すまで、別のプロパティの反例も
+  exit 2 の陰に隠れます。自分の型を決められないリテラルは、`old(...)` の外では通りますが中では拒否されたままです。
+  `a == old(Set {})`、`sa == old(Seq {})`、`oa == old(none)` です。範囲の値を持つリテラルは `check` を
+  通って bmc と induction で `cannot coerce` を報告していましたが、今は explicit と一致する結果を返します。`vb: 0..2`、
+  `a: Set<A>`、`sa: Seq<A, 2>` に対する `a == old(Set { vb })`、`sa == old(Seq { vb })`、`sa == old(Seq { va })` です。
+  容量を超えるリテラルは、`sb: Seq<B, 2>` に対する `sb != old(Seq { va, va, va })` のように、`old(...)` の外の同じ形と同じく
+  induction で `model sequence length exceeds capacity` になることがあります。
   移行: 2つの値を同じドメインで宣言するか、要素を比較してください(`m0[k] == m1[k]`)。
   mutateでは、静的に型が不正なimplementsのmapをoracleの失敗でなく`invalid`として、
   checkで不正なmutantと同じ経路で分類します。入れ物全体のmapを持つspecの範囲変更mutantは、

@@ -141,6 +141,13 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         STABLE_WRAPPER,
     ),
     (
+        "fsl-core/src/issue_1683_old_walk_tests.rs",
+        "parse_kernel_source",
+        1,
+        Owner::Definition,
+        FIXTURE,
+    ),
+    (
         "fsl-core/src/lib.rs",
         "ParseOptions::stable",
         4,
@@ -321,6 +328,13 @@ const INVENTORY: &[(&str, &str, usize, Owner, &str)] = &[
         "fsl-verifier/src/bmc/integer_range_tests.rs",
         "parse_kernel_source",
         2,
+        Owner::Definition,
+        FIXTURE,
+    ),
+    (
+        "fsl-verifier/src/carrier_coercion_tests.rs",
+        "parse_kernel_source",
+        1,
         Owner::Definition,
         FIXTURE,
     ),

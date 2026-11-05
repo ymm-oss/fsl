@@ -424,7 +424,8 @@ impl KernelModel {
             .map_err(|error| model_error(error.message))
     }
 
-    /// What reading a value of `actual` as `expected` takes, shared with `check`.
+    /// What reading a value of `actual` as `expected` takes: the one carrier rule
+    /// `check` and symbolic coercion answer from (#1683).
     ///
     /// # Errors
     /// Returns an error when either type names an unknown type.

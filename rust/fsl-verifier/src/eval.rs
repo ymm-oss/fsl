@@ -2080,6 +2080,17 @@ pub(crate) fn eval_expected_in<S: SmtSolver>(
             &else_value,
         );
     }
+    // `check` types `old`'s operand from what surrounds it, as it does these other forms.
+    if let Expr::UnaryNamed {
+        name,
+        expr: operand,
+        ..
+    } = expr
+        && name == "old"
+    {
+        let old = old_state.ok_or_else(|| VerifyError::new("old() used without old state"))?;
+        return eval_expected_in(solver, model, operand, expected, old, bindings, None, ctx);
+    }
     if let (Expr::Some(inner), TypeRef::Option(inner_ty)) = (expr, expected) {
         return Ok(SymbolicValue::Option {
             ty: expected.clone(),
