@@ -57,7 +57,7 @@ failure, not something this refusal adds.
 | Other file or dialect | Base | Head |
 |---|---|---|
 | Component, action lifted, synchronized or internal, or struct unreferenced | exit 0, `ok` | `component "piece.fsl" failed to check (duplicate struct field 'P.x' at piece.fsl:3:20) at root.fsl:2:3`, `kind: "semantics"`, `loc` at the `use` |
-| Inline `implements` | the next error of that root | `implements "abs.fsl" failed to check (duplicate struct field 'P.x' at abs.fsl:3:20)`, `kind: "type"`, `loc` on the `implements` |
+| Inline `implements`, the other file a `spec` or `domain` | the next error of that root | `implements "abs.fsl" failed to check (duplicate struct field 'P.x' at abs.fsl:3:20)`, or `(duplicate struct field 'C.value' at absdom.fsl:3:34)` for a `domain`, `kind: "type"`, `loc` on the `implements` |
 | `value_object`, `check`, `domain check`, `testgen`, `generate` | exit 2 at the `init` for a different type, exit 0 for the same type | `duplicate struct field 'C.value' at doc.fsl:3:34`, `kind: "name"`, `loc` there |
 | `value_object`, `domain expand`, `domain analyze` | exit 0 | the same message without the file, and `expand` writes nothing |
 | `requirements` with a struct, `fsl 5` `spec`, literate document | exit 0, `ok` | as a `spec`, at the repeated field |

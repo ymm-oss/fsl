@@ -328,6 +328,27 @@ fn another_file_names_the_repeated_field() {
             "loc": {"line": 2, "column": 3},
         })
     );
+    // A domain refuses before the model is built, and says the same.
+    let domain = "domain D {\n  type Q = 0..2\n  value_object C { value: Q = 0; value: Bool = false; }\n  \
+        aggregate A {\n    state { counter: C; }\n    command T {}\n    event E {}\n    \
+        decide T { emits E }\n    evolve E {\n      counter = C { value: 1 }\n    }\n  }\n}\n";
+    std::fs::write(scratch.0.join("absdom.fsl"), domain).expect("write domain");
+    let domain_root = root.replace(
+        "implements Abs from \"abs.fsl\"",
+        "implements D from \"absdom.fsl\"",
+    );
+    std::fs::write(scratch.0.join("domain_root.fsl"), domain_root).expect("write root");
+    assert_eq!(
+        summary(&scratch.fslc(&["check", "domain_root.fsl"])),
+        json!({
+            "exit": 2,
+            "result": "error",
+            "kind": "type",
+            "message": "implements \"absdom.fsl\" failed to check \
+                        (duplicate struct field 'C.value' at absdom.fsl:3:34)",
+            "loc": {"line": 2, "column": 3},
+        })
+    );
     // With one declaration the same root reaches its next, unrelated error.
     std::fs::write(scratch.0.join("abs.fsl"), abstraction("x: K")).expect("write abs");
     let (exit, packet) = scratch.fslc(&["check", "root.fsl"]);

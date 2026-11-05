@@ -67,6 +67,11 @@ pub(crate) fn repeated_struct_field_message(name: &str, field: &str) -> String {
     format!("duplicate struct field '{name}.{field}'")
 }
 
+/// Whether `message` is the refusal `repeated_struct_field_message` writes.
+pub(crate) fn is_repeated_struct_field_message(message: &str) -> bool {
+    message.starts_with("duplicate struct field '")
+}
+
 /// Each struct's repeated field in `kernel`, as the refusal's message and the
 /// repeated name's span.
 pub(crate) fn repeated_struct_fields(kernel: &crate::KernelSpec) -> Vec<(String, Span)> {

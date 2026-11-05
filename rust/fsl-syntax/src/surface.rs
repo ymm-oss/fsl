@@ -146,8 +146,7 @@ pub enum SpecItem {
         fields: Vec<(String, TypeExpr)>,
         /// The span of each field's name, positionally parallel to `fields`.
         ///
-        /// A repeated field is refused at the repeated name (#1692). Generated
-        /// structs may carry an empty list and report at `span`.
+        /// A repeated field is refused at the repeated name (#1692).
         field_spans: Vec<Span>,
         /// The `struct` declaration's own span. `TypeExpr` carries none, so a
         /// field-level type diagnostic has no closer location to report
