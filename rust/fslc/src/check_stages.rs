@@ -37,8 +37,8 @@ pub struct CheckedSpec {
 ///
 /// `source_path` names the root source for lowering and for the file label in
 /// specialized-validation messages; `display_path` is the label shown in the
-/// AI-project and source-diagnostic envelopes (they differ for a materialized
-/// literate input). `resolver` reads imports and `envelope` produces the
+/// AI-project and source-diagnostic envelopes (they differ for a literate
+/// input). `resolver` reads imports and `envelope` produces the
 /// surface's base envelope for every rendered result.
 ///
 /// `new_solver` makes the solver of the requirements stage, once per

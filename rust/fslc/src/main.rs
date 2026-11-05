@@ -6130,7 +6130,7 @@ fn format_bindings(binding: &fsl_runtime::Bindings) -> String {
 /// Check one caller-owned root-source snapshot.
 ///
 /// The displayed path intentionally remains independent of the path used to
-/// resolve imports, including for materialized literate sources.
+/// resolve imports, including for captured literate sources.
 fn run_check_from_source(
     path: &Path,
     display_path: &Path,
