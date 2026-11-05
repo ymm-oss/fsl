@@ -8,7 +8,8 @@ These forms passed `check` before and are now semantic errors:
 Verdicts taken away:
 
 - A mismatch in a position that is never evaluated returned a verdict on bmc, explicit, induction and `fsl-bfs`, and is refused: `forall i: E { m0 == m1 }` and `exists` over `type E = 1..0`, an arm under such a binder, an action with a parameter over an empty range, and a property left out by `--exclude-property` or `--property`. There are 11 such forms in the audit grids.
-- Other removed forms returned no verdict on bmc or induction. Explicit answered 82 of them, such as an unused `let u = m0 == m1`, and `fsl-bfs` answered 234.
+- A mismatch in a `decreases` measure is the same kind of position: bmc does not read a measure, and induction reads one only once it ranks. `leadsTo L { n < 3 ~> n == 3 decreases (if m0 == m1 then 1 else 0) }` returned `violated` on both where `n` never moves, and `verified` on bmc and `cannot coerce` on induction where an action reaches `n == 3`.
+- In the audit grids, other removed forms returned no verdict on bmc or induction. Explicit answered 82 of them, such as an unused `let u = m0 == m1`, and `fsl-bfs` answered 234.
 
 Migration: declare the two values with one carrier, or compare the entries (`m0[k] == m1[k]`). There is no automatic migration.
 
@@ -16,6 +17,6 @@ Other forms keep their verdicts, including `a == t`, `q == a` with a differing r
 
 A refinement map and a scenario `expect` keep the prior rule. An `expect` is evaluated concretely, and so is a map on the refinement step, but `preserve progress` evaluates a map symbolically: `map same = m == y` for those Maps gives `cannot coerce`, exit 2, under `preserve progress`, and refines without it. A `--lemma` candidate with such a mismatch stays `rejected` with `cannot coerce`, `used` false and the main result unchanged, and one whose mismatch is never evaluated stays usable. The third route predates this change: a range-typed literal under `old(...)` keeps its own range and capacity, so `a == old(Set { vb })`, `sa == old(Seq { vb })` and `sa == old(Seq { va })` for `vb: 0..2`, `a: Set<A>`, `sa: Seq<A, 2>` pass `check`, exit 2 on bmc and induction, and explicit answers.
 
-The 617-form on-disk corpus has an empty transition set: base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`, head `644278436fe0a94af236bd8aaa1207c58fedbe4f`, `fslc check` stable and FSL5 opt-in, and `fslc kernel` versions 1 and 2, complete output compared. The one inline change in a rewritten test is `f1` in `issue_1517_conditional_arm_admission`, ok to error.
+The 646-form on-disk corpus has an empty transition set: base `268fdf62e6449c28c7048d04ca0030bd3f23c3b8`, head `d7d35d672e61d5cce8ee3dfea0428f892240b347`, `fslc check` stable and FSL5 opt-in, and `fslc kernel` versions 1 and 2, complete output compared. The one inline change in a rewritten test is `f1` in `issue_1517_conditional_arm_admission`, ok to error.
 
 Rust API: `fsl_core::CarrierCoercion` and `KernelModel::carrier_coercion` are new; `check` and `coerce` answer from them.

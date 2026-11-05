@@ -1242,7 +1242,9 @@ name in a `decreases` call. There are no unrelated breaking removals.
   or a method argument. These removals take verdicts away. A mismatch in a position that is never
   evaluated returned a verdict on every engine and is refused all the same: a `forall` or `exists`
   over an empty domain such as `type E = 1..0`, an action with a parameter over an empty range, and a
-  property that `--exclude-property` or `--property` leaves out. Explicit and `fsl-bfs` also answered
+  property that `--exclude-property` or `--property` leaves out. So is a `decreases` measure, which bmc
+  does not read and induction reads only once it ranks: on bmc, and on induction when a violation
+  comes first, such a `leadsTo` returned a verdict and is refused too. Explicit and `fsl-bfs` also answered
   other removed forms, such as an unused `let u = m0 == m1`; the measured losses are in the
   [carrier decision](../design/DESIGN-finite-container-carriers.md). Other forms keep their verdicts,
   including `a == t`, `q == a` with a differing range or capacity, `some(t) == some(a)`,

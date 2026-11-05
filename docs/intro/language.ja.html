@@ -1192,7 +1192,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   <code>q: Seq&lt;Int, 2&gt;</code>、異なる容量でも同じで、<code>sa == old(if c then q else sb)</code>、<code>some(...)</code>、<code>Seq { ... }</code>、
   <code>Set { ... }</code>、メソッド引数の中の分岐も含みます。この削除で失われる判定があります。評価されない位置の不一致は
   全エンジンが判定を返していましたが、拒否します。<code>type E = 1..0</code> のような空のドメインの <code>forall</code> と <code>exists</code>、
-  空の範囲を仮引数に持つ action、<code>--exclude-property</code> や <code>--property</code> で外れるプロパティです。使われない
+  空の範囲を仮引数に持つ action、<code>--exclude-property</code> や <code>--property</code> で外れるプロパティです。<code>decreases</code> の尺度も同じです。bmc は尺度を読まず、
+  induction はランク付けに進んだときにだけ読みます。そのため、この不一致を持つ <code>leadsTo</code> は bmc で、違反が先に見つかれば
+  induction でも判定を返していましたが、拒否します。使われない
   <code>let u = m0 == m1</code> など、削除された他の形にも explicit と <code>fsl-bfs</code> が答えていました。計測した判定の喪失は
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-finite-container-carriers.md">ドメイン互換の決定</a>にあります。他の形は判定を保ちます。
   <code>a == t</code>、範囲や容量が異なる <code>q == a</code>、<code>some(t) == some(a)</code>、<code>Option&lt;Int&gt;</code> と <code>Option&lt;A&gt;</code>、ドメインが同じ Map や
@@ -1222,10 +1224,10 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   保持しますが、関係としての init を逐次実行に置き換えません。BMC で境界を選ばない
   ルートを re-frame するには、新しい frame の有限の support の外に生きたキーがない
   ことの証明が必要です。この re-frame の検査は省いた境界を仮定せず、本当に増え続ける
-  support は保持します。</li>
-<li>Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>、<code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
-  <code>.contains(e)</code> <code>.size()</code>、<code>==</code> は長さとすべての要素の等値</li>
-<li>Relation: <code>r.contains(a, b)</code>、<code>r.add(a, b)</code>、<code>r.remove(a, b)</code>、
+  support は保持します。
+- Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>、<code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
+  <code>.contains(e)</code> <code>.size()</code>、<code>==</code> は長さとすべての要素の等値
+- Relation: <code>r.contains(a, b)</code>、<code>r.add(a, b)</code>、<code>r.remove(a, b)</code>、
   <code>reachable(r, a, b)</code>、<code>acyclic(r)</code>、<code>functional(r)</code>、<code>injective(r)</code>、
   <code>domain(r)</code>、<code>range(r)</code>。<code>reachable</code> と <code>acyclic</code> は自己関係
   (<code>relation T -&gt; T</code>)を要求します。端点の型/アリティのエラーは修復ヒントを
@@ -1329,12 +1331,11 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   relation は Map ではありません。<code>r[a]</code> と <code>r[a] = b</code> は、<code>functional(r)</code> が真でも
   <code>check</code> が拒否するため、relation のメソッドを使います。これは実行可能な index の
   意味がないまま受理していた読み・書きの breaking removal (#1463) です。
-  Map のインデックス操作は変えません。</li>
-<li>ensures / trans の内側のみ: <code>old(expr)</code> で遷移前の状態を読む</li>
-<li>leadsTo ブロックの内側のみ: <code>P ~&gt; Q</code>(応答プロパティ。一般式の演算子階層の一部ではありません)。
+  Map のインデックス操作は変えません。
+- ensures / trans の内側のみ: <code>old(expr)</code> で遷移前の状態を読む
+- leadsTo ブロックの内側のみ: <code>P ~&gt; Q</code>(応答プロパティ。一般式の演算子階層の一部ではありません)。
   Q の前に有界の締め切り <code>within K</code> を、応答本体の後に induction のランキング用の
-  <code>decreases &lt;int expr&gt;</code> を置けます</li>
-</ul>
+  <code>decreases &lt;int expr&gt;</code> を置けます</p>
 <p>静的なオペランド・シグネチャ検査(#1459、<strong>破壊的変更</strong>)は、選択されない分岐、
 action の代入、<code>requires</code>/<code>ensures</code>、trace 内の式も検査します:</p>
 <ul>

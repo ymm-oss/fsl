@@ -1289,7 +1289,9 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   or a method argument. These removals take verdicts away. A mismatch in a position that is never
   evaluated returned a verdict on every engine and is refused all the same: a <code>forall</code> or <code>exists</code>
   over an empty domain such as <code>type E = 1..0</code>, an action with a parameter over an empty range, and a
-  property that <code>--exclude-property</code> or <code>--property</code> leaves out. Explicit and <code>fsl-bfs</code> also answered
+  property that <code>--exclude-property</code> or <code>--property</code> leaves out. So is a <code>decreases</code> measure, which bmc
+  does not read and induction reads only once it ranks: on bmc, and on induction when a violation
+  comes first, such a <code>leadsTo</code> returned a verdict and is refused too. Explicit and <code>fsl-bfs</code> also answered
   other removed forms, such as an unused <code>let u = m0 == m1</code>; the measured losses are in the
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-finite-container-carriers.md">carrier decision</a>. Other forms keep their verdicts,
   including <code>a == t</code>, <code>q == a</code> with a differing range or capacity, <code>some(t) == some(a)</code>,
@@ -1326,10 +1328,10 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   with sequential execution. In BMC, re-framing a root whose bound is omitted
   requires proof that no live key escapes the new frame's finite support; the
   re-framing check does not assume that omitted bound. Genuinely growing support
-  continues to be retained.</li>
-<li>Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>, <code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
-  <code>.contains(e)</code> <code>.size()</code>, <code>==</code> is equality of length and all elements</li>
-<li>Relation: <code>r.contains(a, b)</code>, <code>r.add(a, b)</code>, <code>r.remove(a, b)</code>,
+  continues to be retained.
+- Seq: <code>Seq {}</code> / <code>Seq { 1, 2 }</code>, <code>.push(e)</code> <code>.pop()</code> <code>.head()</code> <code>.at(i)</code>
+  <code>.contains(e)</code> <code>.size()</code>, <code>==</code> is equality of length and all elements
+- Relation: <code>r.contains(a, b)</code>, <code>r.add(a, b)</code>, <code>r.remove(a, b)</code>,
   <code>reachable(r, a, b)</code>, <code>acyclic(r)</code>, <code>functional(r)</code>, <code>injective(r)</code>,
   <code>domain(r)</code>, <code>range(r)</code>. <code>reachable</code> and <code>acyclic</code> require a self-relation
   (<code>relation T -&gt; T</code>); endpoint type/arity errors include repair hints.
@@ -1439,12 +1441,11 @@ name in a <code>decreases</code> call. There are no unrelated breaking removals.
   A relation is not a Map: <code>r[a]</code> and indexed assignment <code>r[a] = b</code> are rejected
   by <code>check</code>, even when <code>functional(r)</code> holds. Use the relation methods instead.
   This is a breaking removal (#1463) of previously accepted reads and writes
-  without executable index semantics; Map indexing is unchanged.</li>
-<li>Inside ensures / trans only: read the pre-transition state with <code>old(expr)</code></li>
-<li>Inside a leadsTo block only: <code>P ~&gt; Q</code> (response property. not part of the operator hierarchy of general expressions);
+  without executable index semantics; Map indexing is unchanged.
+- Inside ensures / trans only: read the pre-transition state with <code>old(expr)</code>
+- Inside a leadsTo block only: <code>P ~&gt; Q</code> (response property. not part of the operator hierarchy of general expressions);
   optional <code>within K</code> before Q for a bounded deadline, and optional
-  <code>decreases &lt;int expr&gt;</code> after the response body for induction ranking</li>
-</ul>
+  <code>decreases &lt;int expr&gt;</code> after the response body for induction ranking</p>
 <p>Static operand/signature checking (#1459, <strong>breaking</strong>) also visits unselected
 branches, action assignments, <code>requires</code>/<code>ensures</code>, and trace expressions:</p>
 <ul>

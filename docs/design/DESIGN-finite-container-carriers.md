@@ -122,8 +122,8 @@ A Seq holding `Int` keeps prior compatibility, including a differing capacity: `
 So do `some(t) == some(a)`, `Seq { t } == Seq { a }` and `Option<Int>` against `Option<A>`. This
 is narrower than "whole finite containers require equal carriers": `Int` has no finite carrier.
 
-Audit: 1794 forms, base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654` against head
-`644278436fe0a94af236bd8aaa1207c58fedbe4f`, each built from its own tree with Rust 1.98.0, run as `fslc check`,
+Audit: 1794 forms, base `268fdf62e6449c28c7048d04ca0030bd3f23c3b8` against head
+`d7d35d672e61d5cce8ee3dfea0428f892240b347`, each built from its own tree with Rust 1.98.0, run as `fslc check`,
 `fslc verify --engine bmc --depth 2`, `--engine explicit --depth 2`, `--engine induction` and
 `fsl-bfs <spec> 2`. Shapes were Set, Seq, Map and Option, nested through literals and lets, with `Int`
 against range carriers and equal-range aliases, in `==`, `!=`, conditional arms in either order and
@@ -162,10 +162,22 @@ mismatch stays refused where it is written.
 | `trans Bad { old(m0) == m1 }` | `--exclude-property Bad` | the same |
 | `invariant Bad { m0 == m1 }` | `--property Q` | the same |
 
-The other removed forms returned no verdict on bmc or on induction. Their losses are explicit on
+In these grids the other removed forms returned no verdict on bmc or on induction. Their losses are explicit on
 82 forms and `fsl-bfs` on 234, where those solver-free routes evaluated a form the symbolic
 engines refused. Explicit's include an unused `let u = m0 == m1`, `if false { m0 = m1 }` and
 `requires false` followed by `m0 = m1`.
+
+Outside the grids, a `decreases` measure is the same kind of position. bmc does not read one, and
+induction reads one only once it ranks. `leadsTo L { n < 3 ~> n == 3 decreases (if m0 == m1 then 1 else 0) }`
+in a spec where `n` never moves returned `violated` on both without evaluating the measure, and with
+an action that reaches `n == 3` it returned `verified` on bmc and `cannot coerce` on induction. Both
+are refused, since a mismatch stays refused where it is written.
+
+`check` walks a model twice, in ordinary validation and then in range admission (#1480), and
+`build_model`, which is all `fsl-bfs` and the Monitor have, runs only the first. Every action,
+property, `leadsTo` and terminal scope carries the rule on both walks, including `old(...)`'s own arm
+and its operand, and a binder's bound is checked there rather than by the range planner, which
+evaluates an endpoint itself and also serves the positions that keep the prior rule.
 
 Of the forms still accepted, none reports `cannot coerce` on bmc, explicit or induction, and bmc,
 explicit and `fsl-bfs` agree wherever all three give a verdict. Outside these grids three routes
@@ -192,20 +204,20 @@ explicit and `fsl-bfs` gave a violation exactly when it matched, induction gave 
 equal. Explicit's own `leadsTo` refusal is unchanged. The grids are a finite measurement and were
 not retained; `rust/fslc/tests/issue_1679_carrier_equality.rs` pins representative forms of each row.
 
-On-disk transition set (empty). Base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`, head
-`644278436fe0a94af236bd8aaa1207c58fedbe4f`, each built from its own materialized tree in its own
-target directory with `cargo +1.98.0 build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc
---locked --offline`. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (617
-forms: 23/195/399) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable
+On-disk transition set (empty). Base `268fdf62e6449c28c7048d04ca0030bd3f23c3b8`, head
+`d7d35d672e61d5cce8ee3dfea0428f892240b347`, each built from its own materialized tree in its own
+target directory with `cargo +1.98.0 build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc -p fsl-runtime --bins
+--locked --offline`. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (646
+forms: 23/195/428) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable
 and with `FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All
-2468 pairs had equal complete stdout, stderr and exit, with no field excluded: 0 ok-to-error and 0
+2584 pairs had equal complete stdout, stderr and exit, with no field excluded: 0 ok-to-error and 0
 error-to-ok transitions. Of the 7 inline inputs of the rewritten
 `issue_1517_conditional_arm_admission`, `f1` goes from ok to the refusal at 6:37 (the test is
 renamed `f1_set_arm_outside_the_expectation_is_rejected_at_the_arm`) and 6 are byte-identical,
 including `f4`, whose first arm is also a new refusal but whose second arm is still reported first.
-Of the 159 inline inputs of `issue_1679_carrier_equality`, checked the same way at
-`e6288cebf`, 46 go from exit 0 to exit 2 and 113 are byte-identical, including every control, rebuilt
-value and third-route form.
+Of the 238 inline inputs of `issue_1679_carrier_equality`, checked the same way, 113 are byte-identical,
+including every control, rebuilt value and third-route form, 117 go from exit 0 to exit 2, and 8 are
+binder bounds the range rule already refused on `check`, which now report the carrier first.
 
 ## Mutation classification
 

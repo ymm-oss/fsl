@@ -1642,7 +1642,8 @@ when checking a file, the message suffix changes from `at L:C` to
    for Seq, capacity, `old(...)`, and inside `some(...)`, `Seq { ... }`, `Set { ... }`). Both now fail
    at check with the located assignability error rather than `cannot coerce symbolic value` on bmc and
    induction, evaluated or not: a mismatch never evaluated (an empty-domain `forall` or `exists`, an
-   action over an empty range, a property left out by `--exclude-property` or `--property`) returned
+   action over an empty range, a property left out by `--exclude-property` or `--property`, a `decreases`
+   measure, which bmc does not read and induction reads only once it ranks) returned
    a verdict before and is refused too. Other forms keep their verdicts (`a == t`, `q == a`,
    `Option<Int>` with `Option<A>`), and a collection holding `Int` below an element that no literal
    expectation types now returns a result: a `let` or `is` binding, a method's result or argument

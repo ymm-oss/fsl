@@ -1144,7 +1144,9 @@ def 本体の自由な名前を捕まえる呼び出しは、通常の spec、co
   `q: Seq<Int, 2>`、異なる容量でも同じで、`sa == old(if c then q else sb)`、`some(...)`、`Seq { ... }`、
   `Set { ... }`、メソッド引数の中の分岐も含みます。この削除で失われる判定があります。評価されない位置の不一致は
   全エンジンが判定を返していましたが、拒否します。`type E = 1..0` のような空のドメインの `forall` と `exists`、
-  空の範囲を仮引数に持つ action、`--exclude-property` や `--property` で外れるプロパティです。使われない
+  空の範囲を仮引数に持つ action、`--exclude-property` や `--property` で外れるプロパティです。`decreases` の尺度も同じです。bmc は尺度を読まず、
+  induction はランク付けに進んだときにだけ読みます。そのため、この不一致を持つ `leadsTo` は bmc で、違反が先に見つかれば
+  induction でも判定を返していましたが、拒否します。使われない
   `let u = m0 == m1` など、削除された他の形にも explicit と `fsl-bfs` が答えていました。計測した判定の喪失は
   [ドメイン互換の決定](../design/DESIGN-finite-container-carriers.md)にあります。他の形は判定を保ちます。
   `a == t`、範囲や容量が異なる `q == a`、`some(t) == some(a)`、`Option<Int>` と `Option<A>`、ドメインが同じ Map や
