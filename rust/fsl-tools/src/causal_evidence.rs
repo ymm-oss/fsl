@@ -740,8 +740,7 @@ impl WindowConversion {
             Self::PeriodStartMissing => "the observation period start date is missing".to_owned(),
             Self::PeriodEndMissing => "the observation period end date is missing".to_owned(),
             Self::PeriodDateUnparsable => {
-                "an observation period date does not parse as YYYY-MM-DD with a month in 1..12 \
-                 and a day in 1..31"
+                "an observation period date is not a valid Gregorian date in YYYY-MM-DD format"
                     .to_owned()
             }
             Self::PeriodEndBeforeStart => {
@@ -1780,8 +1779,8 @@ mod aggregation_tests {
 
     /// Every conversion failure names *which* conversion refused, exactly.
     fn assert_each_conversion_cause_is_named() {
-        const UNPARSABLE: &str = "an observation period date does not parse as YYYY-MM-DD \
-                                  with a month in 1..12 and a day in 1..31";
+        const UNPARSABLE: &str =
+            "an observation period date is not a valid Gregorian date in YYYY-MM-DD format";
         for (label, period, expected_code, expected_reason) in [
             (
                 "period_start_missing",
