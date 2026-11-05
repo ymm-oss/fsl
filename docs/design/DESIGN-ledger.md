@@ -66,7 +66,9 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
 - A verification `result:"error"` returns its full JSON envelope and exit 2/3
   before ancillary inputs, rendering, or output-file creation; see the
   [verdict-findings amendment](#amendment-to-1316-verdict-findings-1338-decision-2026-10-26)
-  for the direct-report gate and approval-only exception.
+  for the direct-report gate, and the
+  [#1418 amendment](#amendment-approval-rerendering-returns-verification-errors-1418)
+  for approval-only rerendering.
 
 ## Structure
 
@@ -180,10 +182,26 @@ creation. This shares its gate with direct
 HTML reporting, which checks before explain/render/write. Stdout is error JSON,
 not Markdown/HTML or a generated-artifact envelope. Non-error failed or
 unestablished verdicts still produce reports with their existing nonzero exit.
-Approval-only `generate_unapproved_ledger_report_from_source` rerendering keeps
-its existing digest-comparison behavior and does not use this direct-report gate.
+Approval-only `generate_unapproved_ledger_report_from_source` rerendering kept
+its digest-comparison behavior and did not use this direct-report gate until the
+[#1418 amendment](#amendment-approval-rerendering-returns-verification-errors-1418).
 Its ancillary-input errors retain their existing handling. For non-error
 verification results, direct ledger also retains those ancillary-input errors.
+
+### Amendment: approval rerendering returns verification errors (#1418)
+
+This reverses the approval-only exception recorded above for verification
+`result:"error"`. Rendering such a result as a digest input hid the error: on a spec
+that fails `check`, `approval check` on a ledger record reported `drifted` at exit 0,
+and `approval create --kind ledger` reported an artifact mismatch. Approval-only
+rerendering now returns the same error envelope and exit (2, or 3 for internal) as
+direct `ledger`, which already happened for the trace gate (#1243).
+
+Only `result:"error"` stops rerendering. A failed or unestablished verdict still
+renders, and approving such a ledger stays allowed: `approved` confirms digest
+binding, not a verification pass (`docs/design/DESIGN-approval.md`). A record whose
+current spec produces a verification error now has no approval status, where it
+previously reported `approved` or `drifted`. Non-error digests are unchanged.
 
 ### Amendment: one native verification pipeline (#1417)
 
@@ -197,8 +215,9 @@ Verify dispatch metadata and edition handling remain caller-owned.
 Both direct ledger and HTML run verification and the existing error gate **before**
 presentation-model loading; ledger extracts its checked trace contract afterwards.
 No error conversion, panic catch, duplicate fold or second verification is added.
-Approval-only ledger rerendering still bypasses the direct-report gate and retains
-ancillary-input handling. Non-error verdicts retain their existing reports/exits.
+Approval-only ledger rerendering bypassed the direct-report gate until the
+[#1418 amendment](#amendment-approval-rerendering-returns-verification-errors-1418).
+Non-error verdicts retain their existing reports/exits.
 
 The only public error corrections are in direct ledger/HTML reports on invalid inputs:
 

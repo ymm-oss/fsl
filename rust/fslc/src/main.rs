@@ -14115,7 +14115,8 @@ struct PreparedLedgerReport {
 /// `generate_unapproved_ledger_report_from_source` (which `approval_artifact` also calls
 /// to reproduce a target's canonical rendering purely for a digest
 /// comparison -- a verdict mismatch there is legitimate drift evidence for
-/// `approval check`/`create`, not a hard error), this is the command a user
+/// `approval check`/`create`, not a hard error, although a verification
+/// `result:"error"` still is), this is the command a user
 /// or CI gate actually runs and reads the exit code of, so it must not hide
 /// a violated/unknown verification baseline behind the unconditional exit 0
 /// `generated_content_result` gives every generated artifact (issue #592).
@@ -14168,7 +14169,7 @@ fn run_ledger_report_admitted_from_source(
     trust_keys: &[PathBuf],
     edition: &SourceEdition,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source, true, Some(edition)) {
+    let prepared = match prepare_ledger_report_from_source(request, source, Some(edition)) {
         Ok(prepared) => prepared,
         Err(error) => return error,
     };
@@ -14205,7 +14206,7 @@ fn generate_unapproved_ledger_report_from_source(
     source: &str,
     edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source, false, edition) {
+    let prepared = match prepare_ledger_report_from_source(request, source, edition) {
         Ok(prepared) => prepared,
         Err(error) => return error,
     };
@@ -14215,7 +14216,6 @@ fn generate_unapproved_ledger_report_from_source(
 fn prepare_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
-    direct_report: bool,
     edition: Option<&SourceEdition>,
 ) -> Result<PreparedLedgerReport, (Value, i32)> {
     let (verification, verification_status) = report_verification_from_source(
@@ -14226,11 +14226,10 @@ fn prepare_ledger_report_from_source(
         request.engine,
         edition,
     );
-    // Approval-only rerendering deliberately keeps processing ancillary inputs.
-    // Direct reports must preserve this error before replay, evidence or witnesses.
-    if direct_report
-        && let Some(error) = report_verification_error(&verification, verification_status)
-    {
+    // Preserve this error before replay, evidence or witnesses. Only
+    // `result:"error"` stops here: a failed or unestablished verdict still renders,
+    // so direct reports exit nonzero and approval-only digests stay comparable.
+    if let Some(error) = report_verification_error(&verification, verification_status) {
         return Err(error);
     }
     let model = match load_model_from_source(request.path, source) {
@@ -18659,7 +18658,7 @@ mod exit_status_tests {
     use crate::spec_loading::validate_specialized_document_from_source;
 
     #[test]
-    fn approval_ledger_rerender_bypasses_only_the_direct_verification_error_gate() {
+    fn approval_ledger_rerender_returns_the_direct_verification_error() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let path = root.join("tests/fixtures/governance_missing_dependency.fsl");
         let source = std::fs::read_to_string(&path).unwrap();
@@ -18690,22 +18689,10 @@ mod exit_status_tests {
             expected
         );
 
-        let (rendered, status) =
-            generate_unapproved_ledger_report_from_source(&request, &source, None);
+        // Rendering this would report the failure as digest drift at exit 0.
         assert_eq!(
-            status, 0,
-            "approval rendering must bypass verification error: {rendered}"
-        );
-        let content = rendered["content"].as_str().expect("rendered Markdown");
-        assert!(content.contains("## リスク一覧（要件ID別）"), "{content}");
-        // Compare the complete generated envelope, not just its verdict.
-        assert_eq!(
-            rendered,
-            json!({
-                "fsl":"1.0", "result":"generated", "kind":"audit_ledger",
-                "spec":load_model_from_source(&path, &source).unwrap().name,
-                "output":"governance_missing_dependency_ledger.md", "content":content
-            })
+            generate_unapproved_ledger_report_from_source(&request, &source, None),
+            expected
         );
     }
 

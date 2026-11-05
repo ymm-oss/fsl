@@ -68,6 +68,11 @@ impl Repository {
         ]);
     }
 
+    fn replace_spec(&self, source: &str) {
+        std::fs::write(self.0.join("spec.fsl"), source).unwrap();
+        self.commit("replace the spec");
+    }
+
     fn break_invariant(&self) {
         let path = self.0.join("spec.fsl");
         let source = std::fs::read_to_string(&path).unwrap();
@@ -1341,4 +1346,175 @@ fn original_unsigned_and_signed_records_keep_complete_approved_packets_and_raw_b
             include_bytes!("fixtures/prior-public.pem")
         );
     }
+}
+
+// Valid syntax whose `check` fails: the model still loads and renders.
+const CHECK_FAILING_SPEC: &str = "spec V {
+  state { a: Bool }
+  init { a = false
+    a = true }
+  action go() \"REQ-1: go\" { a = true }
+  invariant I \"REQ-1: inv\" { a or not a }
+}
+";
+
+const CTI_SPEC: &str = "spec Cti {
+  state { a: Bool, b: Bool }
+  init { a = false
+    b = false }
+  action step() \"REQ-1: step\" {
+    a = b
+    b = false
+  }
+  invariant Imp \"REQ-1: a implies b\" { a => b }
+}
+";
+
+const REACHABLE_FAILED_SPEC: &str = "spec Reach {
+  state { a: Bool }
+  init { a = false }
+  action go() \"REQ-1: go\" { a = true }
+  reachable Never \"REQ-2: unreachable goal\" { a and not a }
+  invariant I \"REQ-1: inv\" { a or not a }
+}
+";
+
+/// Approve a ledger whose verification is red and return `approval check`'s
+/// output. The record binds digests, so `approved` is not a verification pass.
+fn approve_red_ledger(repo: &Repository, engine: &str, verdict: &str) -> Output {
+    let inputs = ["--depth", "4", "--deadlock", "ignore", "--engine", engine];
+    let direct = repo.run(&[&["ledger", "spec.fsl", "-o", "review.md"], &inputs[..]].concat());
+    assert_status(&direct, 1);
+    let created = repo.run(
+        &[
+            &[
+                "approval",
+                "create",
+                "spec.fsl",
+                "--kind",
+                "ledger",
+                "--artifact",
+                "review.md",
+                "--approver",
+                "alice",
+                "-o",
+                "approval.json",
+            ],
+            &inputs[..],
+        ]
+        .concat(),
+    );
+    assert_status(&created, 0);
+    let verified = repo.run(&[&["verify", "spec.fsl"], &inputs[..]].concat());
+    assert_status(&verified, 1);
+    assert_eq!(value(&verified)["result"], verdict);
+    repo.run(&["approval", "check", "spec.fsl", "--record", "approval.json"])
+}
+
+fn assert_approved_without_a_verdict(checked: &Output) {
+    assert_status(checked, 0);
+    let actual = value(checked);
+    assert_eq!(actual["result"], "approval_check", "{actual:#}");
+    assert_eq!(actual["status"], "approved", "{actual:#}");
+    for verdict_field in ["verification", "verdict", "invariants_checked"] {
+        assert!(actual.get(verdict_field).is_none(), "{actual:#}");
+    }
+}
+
+#[test]
+fn ledger_approval_of_a_violated_baseline_confirms_digests_not_a_pass() {
+    let repo = Repository::new();
+    repo.break_invariant();
+    assert_approved_without_a_verdict(&approve_red_ledger(&repo, "bmc", "violated"));
+}
+
+#[test]
+fn ledger_approval_of_a_cti_baseline_confirms_digests_not_a_pass() {
+    let repo = Repository::new();
+    repo.replace_spec(CTI_SPEC);
+    assert_approved_without_a_verdict(&approve_red_ledger(&repo, "induction", "unknown_cti"));
+}
+
+#[test]
+fn ledger_approval_of_a_failed_reachable_baseline_confirms_digests_not_a_pass() {
+    let repo = Repository::new();
+    repo.replace_spec(REACHABLE_FAILED_SPEC);
+    assert_approved_without_a_verdict(&approve_red_ledger(&repo, "bmc", "reachable_failed"));
+}
+
+/// The real error, not `drifted` at exit 0: the spec must fail `check` only
+/// after the record exists, so its model still loads and could still render.
+#[test]
+fn ledger_approval_check_reports_the_verification_error_instead_of_drift() {
+    let repo = Repository::new();
+    let inputs = ["--depth", "2", "--deadlock", "ignore"];
+    let direct = repo.run(&[&["ledger", "spec.fsl", "-o", "review.md"], &inputs[..]].concat());
+    assert_status(&direct, 0);
+    let created = repo.run(
+        &[
+            &[
+                "approval",
+                "create",
+                "spec.fsl",
+                "--kind",
+                "ledger",
+                "--artifact",
+                "review.md",
+                "--approver",
+                "alice",
+                "-o",
+                "approval.json",
+            ],
+            &inputs[..],
+        ]
+        .concat(),
+    );
+    assert_status(&created, 0);
+    let record = std::fs::read(repo.0.join("approval.json")).unwrap();
+    repo.replace_spec(CHECK_FAILING_SPEC);
+    let expected = repo.run(&[&["ledger", "spec.fsl"], &inputs[..]].concat());
+    assert_status(&expected, 2);
+    assert_eq!(value(&expected)["result"], "error");
+
+    let checked = repo.run(&["approval", "check", "spec.fsl", "--record", "approval.json"]);
+    assert_status(&checked, 2);
+    assert_eq!(value(&checked), value(&expected));
+    assert!(value(&checked).get("status").is_none());
+    assert_eq!(
+        std::fs::read(repo.0.join("approval.json")).unwrap(),
+        record,
+        "a failed evaluation must not replace the record"
+    );
+}
+
+#[test]
+fn ledger_approval_create_reports_the_verification_error_instead_of_a_mismatch() {
+    let repo = Repository::new();
+    repo.replace_spec(CHECK_FAILING_SPEC);
+    std::fs::write(repo.0.join("wrong.md"), "not the rendered ledger\n").unwrap();
+    let inputs = ["--depth", "2", "--deadlock", "ignore"];
+    let expected = repo.run(&[&["ledger", "spec.fsl"], &inputs[..]].concat());
+    assert_status(&expected, 2);
+    let created = repo.run(
+        &[
+            &[
+                "approval",
+                "create",
+                "spec.fsl",
+                "--kind",
+                "ledger",
+                "--artifact",
+                "wrong.md",
+                "--approver",
+                "alice",
+                "-o",
+                "approval.json",
+            ],
+            &inputs[..],
+        ]
+        .concat(),
+    );
+    assert_status(&created, 2);
+    assert_eq!(value(&created), value(&expected));
+    assert!(!repo.0.join("approval.json").exists());
 }

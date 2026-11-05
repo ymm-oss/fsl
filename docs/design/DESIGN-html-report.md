@@ -75,8 +75,9 @@ fslc html spec.fsl --depth 8 [-o report.html] [--no-timing]
   `approval check` / `approval diff` lower the spec for its digest. Those preloads
   process invalid input before `run_html_report`'s error gate, so approvals do not
   receive the direct-report error-precedence correction. Ledger approval-only rerendering calls
-  `generate_unapproved_ledger_report_from_source` and does not use the gate;
-  its digest-comparison behavior is deliberately separate.
+  `generate_unapproved_ledger_report_from_source`, which returns the same verification
+  error (`docs/design/DESIGN-ledger.md`, amendment #1418) and otherwise keeps its
+  digest-comparison behavior.
 
 ### Shared verification and error precedence (#1417)
 

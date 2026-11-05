@@ -13,3 +13,7 @@ Batch diff's debug exit check preserves its existing maximum child exit (0/1/2),
 separately from the semantic gate, including operational errors at exit 2.
 The design-citation CI scanner honors Git's declared binary/nontext attributes
 without ignoring malformed UTF-8 text or relaxing heading and tracked-target checks.
+`approval create --kind ledger` and `approval check` on a ledger record now return a
+verification `result:"error"` with its envelope and exit (2, or 3 for internal). On a spec
+that fails `check`, they previously reported an artifact mismatch and `drifted` at exit 0.
+Approving a ledger with a failed or unestablished verdict stays allowed.

@@ -2466,7 +2466,8 @@ JSON error envelope and exit 2/3, before rendering or writing an artifact;
 direct `ledger` stops before ancillary replay, evidence loading, and witness preparation
 (`html` also stops before explain). With `-o`, no artifact is created. Other
 failed/unestablished verdicts still generate reports with their nonzero exit.
-Approval-only ledger rerendering for digest comparison is separate from this gate.
+Approval-only ledger rerendering for digest comparison stops at the same `result:"error"`;
+other verdicts still render so their digests can be compared.
 All native full-verification callers share one stage owner; baseline adapters
 disable caching and retain default vacuity warnings.
 Direct reports verify and check for errors before loading the presentation model or
@@ -2502,7 +2503,9 @@ approval gate requires exit 0 AND `result:"approval_check"` AND `status:"approve
 Input, baseline, record and trust-configuration errors retain their error envelope,
 exit 2 and no approval status. Aborted artifact evaluation preserves the complete
 downstream envelope and exit (verification 1, internal 3), without an approval
-status or new record. Failed HTML rerendering propagates `generated`/`html_report`
+status or new record. A verification `result:"error"` during `--kind ledger` rerendering
+returns that error envelope and its exit (2, or 3 for internal) in place of `drifted` or an
+artifact mismatch. Failed HTML rerendering propagates `generated`/`html_report`
 with exit 1, inline content and default output metadata, without writing an HTML
 file. Approval-only ledger digest rendering retains its existing evaluation exit 0
 for violated/CTI baselines; direct failed HTML/ledger reports still generate with

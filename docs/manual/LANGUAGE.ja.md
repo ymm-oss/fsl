@@ -2281,7 +2281,8 @@ ledger の警告は、種類ごとの1つの表示表で検出種別・要約・
 返し、描画も artifact の書き込みもしません。直接の `ledger` は付随の replay、evidence の読み込み、
 witness の準備より前に止まります(`html` は explain より前に止まります)。`-o` でも
 artifact は作りません。それ以外の不成立・未確立の判定では、既存の非 0 exit で report を生成します。
-digest 比較用の承認専用 ledger 再描画は、この門とは別のままです。
+digest 比較用の承認専用 ledger 再描画も、同じ `result:"error"` で止まります。
+それ以外の判定では、digest を比較できるように描画します。
 native の完全な検証を行うすべての呼び出し元は、検証段の一つの持ち主を共有します。
 baseline の adapter は cache を無効にし、既定の vacuity 警告を保ちます。
 直接の report は、描画用 model の読み込みや trace 契約の取り出しより先に検証し、error を確認します。
@@ -2315,6 +2316,8 @@ exit 0 AND `result:"approval_check"` AND `status:"approved"` をすべて確認�
 入力、baseline、record、trust 設定のエラーは、元のエラー封筒と exit 2 を返し、承認の
 `status` は付きません。artifact 評価が中断した場合は、下流の完全な封筒と終了コード
 (検証失敗1、内部エラー3)を保持し、承認の status も新しい record も作りません。
+`--kind ledger` の再描画で検証が `result:"error"` を返した場合は、`drifted` や artifact の
+不一致ではなく、そのエラー封筒と終了コード(2、内部エラーは3)を返します。
 HTML の再描画で検証に失敗した場合は、`generated`/`html_report`、exit 1、インラインの
 content と既定の output メタデータを返し、HTML ファイルは書きません。承認専用の
 ledger digest 描画は、violated/CTI baseline でも従来どおり exit 0 で評価できます。

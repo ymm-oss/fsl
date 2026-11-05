@@ -126,6 +126,8 @@ and exits 2. A signed record without its matching trust key is also a
 configuration error and exits 2. These errors have no approval status. Artifact evaluation
 that aborts preserves its complete downstream envelope and exit: scenarios violations exit 1,
 internal failures exit 3, and failed HTML reports retain `generated`/`html_report` and exit 1.
+A verification `result:"error"` during `--kind ledger` rerendering returns that envelope and
+its exit (2, or 3 for internal) in place of `drifted` or an artifact mismatch.
 No approval record is written and no digest-based status is invented after such a failure.
 An aborted scenarios artifact leaves root and dependency-warning finalization to
 its outer approval/report owner. Each distinct root finding and each finding from

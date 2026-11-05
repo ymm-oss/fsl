@@ -549,7 +549,7 @@ JSON error envelope and exit 2/3, before rendering or output-file creation;
 direct ledger stops before ancillary replay, evidence loading, and witness preparation
 (HTML before explain too). No `-o` artifact is created. Non-error failed or
 unestablished verdicts still render reports with nonzero exit. Approval-only
-ledger rerendering for digest comparison does not use this direct-report gate;
+ledger rerendering for digest comparison stops at the same `result:"error"`;
 its artifact bytes can still change with the new findings and coverage rendering.
 All native full-verification callers share one stage owner; baseline adapters
 disable caching and retain default vacuity warnings. For direct reports,
