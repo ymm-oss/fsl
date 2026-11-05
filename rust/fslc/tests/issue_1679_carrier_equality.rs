@@ -1444,6 +1444,27 @@ fn rebuilt_value_decides_in_a_candidate_and_under_preserved_progress() {
     }
 }
 
+/// `check` also runs the range admission walk, and `build_model` alone is what
+/// `fsl-bfs` and the Monitor have, so a rule held by only one walk fails here.
+fn assert_refused_on_both_walks(id: &str, source: &str, expected: &str) {
+    let (packet, exit) = check(id, source);
+    assert_eq!(exit, 2, "{id}: {packet}\n{source}");
+    assert!(
+        packet["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(expected)),
+        "{id}: {packet}\n{expected}\n{source}"
+    );
+    let built = fsl_core::build_model(
+        fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new(".")).expect("lowers"),
+    );
+    let failure = built.err().expect("build_model refuses").to_string();
+    assert!(
+        failure.contains(expected),
+        "{id}: {failure}\n{expected}\n{source}"
+    );
+}
+
 /// #1480 gave `old` its own arm and each evaluation scope its own phase. The arm, Map
 /// and `old` rules answer in every one of them, in ordinary validation.
 #[test]
@@ -1516,23 +1537,14 @@ fn carrier_rules_run_in_every_evaluation_scope() {
                 &body.replace("{}", written),
                 &property.replace("{}", written),
             );
-            let (packet, exit) = check(&id, &source);
-            assert_eq!(exit, 2, "{id}: {packet}\n{source}");
-            assert!(
-                packet["message"]
-                    .as_str()
-                    .is_some_and(|message| message.contains(expected.as_str())),
-                "{id}: {packet}\n{expected}\n{source}"
-            );
+            assert_refused_on_both_walks(&id, &source, expected);
         }
     }
     let source = wide_spec(&[("done", "m0 == m1")], "c = not c", "");
-    let (packet, exit) = check("scope_init", &source);
-    assert_eq!(exit, 2, "{packet}\n{source}");
-    assert!(
-        packet["message"]
-            .as_str()
-            .is_some_and(|message| message.contains(map.as_str())),
-        "{packet}"
+    assert_refused_on_both_walks("scope_init", &source, &map);
+    let source = wide_spec(&[], "c = not c", "").replace(
+        " done = false }",
+        " if m0 == m1 { done = true } else { done = false } }",
     );
+    assert_refused_on_both_walks("scope_init_condition", &source, &map);
 }
