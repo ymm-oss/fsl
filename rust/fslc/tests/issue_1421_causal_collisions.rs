@@ -461,6 +461,45 @@ fn co2_dot_components_and_relative_absolute_spelling_share_collision_keys() {
     }
 }
 
+#[test]
+fn co2_a_parent_spelled_through_dotdot_shares_the_collision_key() {
+    for linked in [1, 2] {
+        let fixture = Fixture::new(linked);
+        std::fs::create_dir_all(fixture.root.join("outputs/sub")).expect("existing parent");
+        let out = Path::new("outputs/a.json");
+        let lifecycle = Path::new("outputs/sub/../a.json");
+        fixture.seed(out, lifecycle);
+        let before = inventory(&fixture.root);
+        let expected = collision(&fixture.paths(out)[0], &fixture.paths(lifecycle)[0]);
+        same(&fixture.observe(Some(out), Some(lifecycle)), 2, &expected);
+        assert_eq!(inventory(&fixture.root), before);
+    }
+}
+
+#[test]
+fn co2_a_parent_that_does_not_exist_compares_by_its_spelling() {
+    let fixture = Fixture::new(1);
+    let out = Path::new("a.json");
+    let lifecycle = Path::new("missing/../a.json");
+    let expected = collision(out, lifecycle);
+    let before = inventory(&fixture.root);
+    same(&fixture.observe(Some(out), Some(lifecycle)), 2, &expected);
+    assert_eq!(inventory(&fixture.root), before);
+}
+
+#[cfg(unix)]
+#[test]
+fn co2_a_parent_linked_to_the_same_directory_shares_the_collision_key() {
+    let fixture = Fixture::new(1);
+    std::os::unix::fs::symlink(".", fixture.root.join("self")).expect("controlled owned link");
+    let out = Path::new("a.json");
+    let lifecycle = Path::new("self/a.json");
+    let before = inventory(&fixture.root);
+    let expected = collision(out, lifecycle);
+    same(&fixture.observe(Some(out), Some(lifecycle)), 2, &expected);
+    assert_eq!(inventory(&fixture.root), before);
+}
+
 #[cfg(unix)]
 #[test]
 fn co2_dotdot_is_retained_and_a_controlled_symlink_can_reach_distinct_destinations() {
@@ -616,7 +655,8 @@ fn co3_distinct_publication_failure_keeps_interleaving_and_does_not_roll_back_pr
         let mut expected_tree = inventory(&fixture.root);
         // Publication refuses a non-regular target itself, on every platform.
         let expected = json!({"fsl":"1.0", "result":"error", "kind":"io",
-            "message":format!("cannot write {}: output target is not a regular file", first_lifecycle.display())});
+            "message":format!("cannot write {}: output target is not a regular file", first_lifecycle.display()),
+            "written":[first_evidence.display().to_string()]});
         same(&fixture.observe(Some(out), Some(lifecycle)), 2, &expected);
         expected_tree.insert(first_evidence, Node::File(reference.evidence[0].clone()));
         assert_eq!(

@@ -319,7 +319,11 @@ fn schema(version: u8) -> jsonschema::Validator {
     jsonschema::validator_for(&value).expect("schema compiles")
 }
 
-fn assert_new_record(record: &Value, cwd: &Path, source: &str, artifact: &str, signed: bool) {
+fn stored_base(repo: &ApprovalRepo, cwd: &Path) -> &'static str {
+    if cwd == repo.root { "." } else { "review" }
+}
+
+fn assert_new_record(record: &Value, base: &str, source: &str, artifact: &str, signed: bool) {
     assert_eq!(
         record["schema"],
         if signed {
@@ -328,14 +332,7 @@ fn assert_new_record(record: &Value, cwd: &Path, source: &str, artifact: &str, s
             "fslc.approval.v5"
         }
     );
-    assert!(
-        cwd.is_absolute(),
-        "test must supply the absolute creation CWD"
-    );
-    assert_eq!(
-        record["path_base"],
-        cwd.to_str().expect("UTF-8 creation CWD")
-    );
+    assert_eq!(record["path_base"], base);
     assert_eq!(record["render_source"], source);
     assert_eq!(record["spec"]["path"], SPEC_GIT_PATH);
     assert_eq!(record["target"]["path"], artifact);
@@ -361,10 +358,10 @@ fn assert_new_record(record: &Value, cwd: &Path, source: &str, artifact: &str, s
         );
     }
     let mut relative = record.clone();
-    relative["path_base"] = json!("relative/base");
+    relative["path_base"] = json!("/absolute/base");
     assert!(
         !validator.is_valid(&relative),
-        "schema must require an absolute base"
+        "schema must require a repository-relative base"
     );
     let mut unknown = record.clone();
     unknown["unexpected"] = json!(true);
@@ -465,7 +462,7 @@ fn document_cross_cwd(subdirectory: bool, signed: bool) {
         ARTIFACT,
         signed,
     );
-    assert_new_record(&record, cwd, source, ARTIFACT, signed);
+    assert_new_record(&record, stored_base(&repo, cwd), source, ARTIFACT, signed);
     assert_eq!(record["target"]["digest"], generated["artifact_digest"]);
     assert_eq!(
         record["target"]["reviewed_digest"],
@@ -692,7 +689,7 @@ fn solver_cross_cwd(signed: bool) {
         let artifact_path = cwd.join(&artifact);
         let reviewed_bytes = std::fs::read(&artifact_path).expect("read reviewed solver target");
         let (record, record_path) = create(&repo, cwd, source, kind, &artifact, signed);
-        assert_new_record(&record, cwd, source, &artifact, signed);
+        assert_new_record(&record, stored_base(&repo, cwd), source, &artifact, signed);
         let baseline = repo.check(cwd, &record_path, signed);
         assert_eq!(baseline["status"], "approved", "{kind}");
         assert_eq!(baseline["target_kind"], kind);
@@ -791,7 +788,7 @@ fn ap2_legacy_v1_through_v4_reject_each_added_context_field_before_signature_che
         ("requirements_document", ARTIFACT, true, 4),
     ] {
         let (record, record_path) = create(&repo, &repo.root, ROOT_SOURCE, kind, artifact, signed);
-        assert_new_record(&record, &repo.root, ROOT_SOURCE, artifact, signed);
+        assert_new_record(&record, ".", ROOT_SOURCE, artifact, signed);
         let original_bytes = std::fs::read(&record_path).expect("read new record");
         let mut legacy = record.clone();
         legacy["schema"] = json!(format!("fslc.approval.v{version}"));
@@ -862,7 +859,7 @@ fn ap2_new_context_is_required_by_the_authoritative_reader() {
         ARTIFACT,
         false,
     );
-    assert_new_record(&record, &repo.root, ROOT_SOURCE, ARTIFACT, false);
+    assert_new_record(&record, ".", ROOT_SOURCE, ARTIFACT, false);
     let baseline = repo.check(&repo.root, &record_path, false);
     assert_eq!(baseline["status"], "approved");
     for field in ["path_base", "render_source"] {
@@ -885,12 +882,12 @@ fn ap2_new_context_is_required_by_the_authoritative_reader() {
         }
     }
     let mut relative = record.clone();
-    relative["path_base"] = json!(".");
+    relative["path_base"] = json!("/absolute/base");
     std::fs::write(
         &record_path,
-        serde_json::to_vec_pretty(&relative).expect("encode relative base"),
+        serde_json::to_vec_pretty(&relative).expect("encode absolute base"),
     )
-    .expect("write relative base");
+    .expect("write absolute base");
     assert_io(&repo.check_output(&repo.root, &record_path, false));
     std::fs::write(
         &record_path,

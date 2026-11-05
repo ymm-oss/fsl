@@ -577,13 +577,9 @@ fn ap3_v6_signatures_cover_both_context_fields_before_missing_input_reads() {
     let before = repo.originals();
     let (record, baseline) = create_v6(&repo);
     let original_bytes = std::fs::read(repo.root.join("new-v6.json")).expect("new v6 bytes");
-    let missing_base = repo.root.join("missing-input-base");
-    std::fs::create_dir(&missing_base).expect("create empty alternate base");
+    std::fs::create_dir(repo.root.join("missing-input-base")).expect("create empty alternate base");
     for (field, value) in [
-        (
-            "path_base",
-            missing_base.to_str().expect("UTF-8 alternate base"),
-        ),
+        ("path_base", "missing-input-base"),
         ("render_source", "./different-display.fsl"),
     ] {
         let mut mutant = record.clone();

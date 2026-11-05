@@ -222,7 +222,14 @@ fn ai1_absolute_declared_source_is_unchanged_and_has_no_missing_file_fallback() 
     let inputs = Inputs::new();
     let actual = inputs.root.join("absolute-data.jsonl");
     Inputs::write(&actual, &inputs.positive);
-    inputs.declare(Some(actual.to_str().expect("absolute source")));
+    // FSL strings are not unescaped, so a Windows path is declared with forward
+    // slashes and without its verbatim prefix.
+    let declared = actual
+        .to_str()
+        .expect("absolute source")
+        .trim_start_matches(r"\\?\")
+        .replace('\\', "/");
+    inputs.declare(Some(&declared));
     Inputs::write(
         &inputs.unrelated.join("absolute-data.jsonl"),
         &inputs.negative,

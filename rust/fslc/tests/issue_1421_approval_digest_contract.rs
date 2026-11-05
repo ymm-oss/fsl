@@ -930,22 +930,22 @@ fn ap7_generate_resolves_new_reviewed_target_but_keeps_current_explicit_renderin
         args.extend(DOCUMENT_FLAGS);
         let expected = checked(&run(&original.root, &args), 0);
         let bytes = std::fs::read(original.root.join("overlay.md")).expect("original overlay");
+        // The reviewed target comes from the checkout of the spec being generated.
+        let path = original.root.join("requirements.md");
+        let reviewed = std::fs::read(&path).expect("real reviewed target");
         std::fs::remove_file(caller.root.join("requirements.md"))
             .expect("no caller reviewed target");
+        let failure = checked(&run(&caller.root, &args), 2);
+        assert_eq!(failure["kind"], "io");
+        std::fs::write(caller.root.join("requirements.md"), &reviewed)
+            .expect("caller's own reviewed target");
+        std::fs::remove_file(&path).expect("remove original reviewed target");
         same(&run(&caller.root, &args), 0, &expected);
         assert_eq!(
             std::fs::read(caller.root.join("overlay.md")).expect("caller overlay"),
             bytes
         );
-        let path = original.root.join("requirements.md");
-        let reviewed = std::fs::read(&path).expect("real reviewed target");
-        std::fs::write(caller.root.join("requirements.md"), &reviewed)
-            .expect("valid caller reviewed decoy");
-        std::fs::remove_file(&path).expect("remove original reviewed target");
-        let failure = checked(&run(&caller.root, &args), 2);
-        assert_eq!(failure["kind"], "io");
         std::fs::write(path, reviewed).expect("restore original reviewed bytes");
-        same(&run(&caller.root, &args), 0, &expected);
         let glossary_path = caller.root.join(INPUTS[0]);
         let glossary_bytes = std::fs::read(&glossary_path).expect("caller glossary");
         let mut glossary = read_json(&glossary_path);

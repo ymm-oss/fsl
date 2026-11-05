@@ -227,10 +227,85 @@ impl From<LegacyApprovalRecordV2> for ApprovalRecordV2 {
 
 impl ApprovalRecord {
     /// Resolve only filesystem access; the stored path remains its display label.
+    /// `root` is the Git root of the spec being checked, for a contextual record.
     #[must_use]
-    pub fn io_path(&self, path: &str) -> PathBuf {
-        resolve_io_path(Path::new(path), self.path_base.as_deref().map(Path::new))
+    pub fn io_path(&self, root: Option<&Path>, path: &str) -> PathBuf {
+        resolve_io_path(Path::new(path), self.base_directory(root).as_deref())
     }
+
+    /// The directory a contextual record's relative paths resolve from.
+    #[must_use]
+    pub fn base_directory(&self, root: Option<&Path>) -> Option<PathBuf> {
+        Some(root?.join(self.path_base.as_deref()?))
+    }
+}
+
+/// A stored `path_base`: `.` for the Git root, otherwise `/`-separated names below
+/// it. The form is checked as text so a record reads the same on every platform.
+fn is_path_base(base: &str) -> bool {
+    base == "."
+        || (!has_absolute_form(base)
+            && base
+                .split('/')
+                .all(|name| !matches!(name, "" | "." | "..") && !name.contains('\\')))
+}
+
+/// Whether a stored path names a root, a drive or a UNC share on any platform.
+fn has_absolute_form(path: &str) -> bool {
+    let mut bytes = path.bytes();
+    let first = bytes.next();
+    matches!(first, Some(b'/' | b'\\'))
+        || (first.is_some_and(|byte| byte.is_ascii_alphabetic()) && bytes.next() == Some(b':'))
+}
+
+/// The stored form of `directory` below `root`, both already physical.
+#[must_use]
+pub fn repository_relative_base(root: &Path, directory: &Path) -> Option<String> {
+    let names = directory
+        .strip_prefix(root)
+        .ok()?
+        .iter()
+        .map(|name| name.to_str())
+        .collect::<Option<Vec<_>>>()?;
+    let base = if names.is_empty() {
+        ".".to_owned()
+    } else {
+        names.join("/")
+    };
+    is_path_base(&base).then_some(base)
+}
+
+/// Refuse a stored document path that lies outside the physical `root`, whether
+/// by its spelling or through a link. A missing file stays the caller's read error.
+pub fn require_inside_root(root: &Path, base: &str, path: &str) -> Result<(), String> {
+    let mut depth = if base == "." {
+        0
+    } else {
+        base.split('/').count()
+    };
+    let climbs = path.split(['/', '\\']).any(|name| match name {
+        "" | "." => false,
+        ".." if depth == 0 => true,
+        ".." => {
+            depth -= 1;
+            false
+        }
+        _ => {
+            depth += 1;
+            false
+        }
+    });
+    let linked_out = root
+        .join(base)
+        .join(path)
+        .canonicalize()
+        .is_ok_and(|physical| !physical.starts_with(root));
+    if has_absolute_form(path) || climbs || linked_out {
+        return Err(format!(
+            "approval document path '{path}' lies outside the repository root"
+        ));
+    }
+    Ok(())
 }
 
 #[must_use]
@@ -239,6 +314,24 @@ pub fn resolve_io_path(path: &Path, path_base: Option<&Path>) -> PathBuf {
         Some(base) if path.is_relative() => base.join(path),
         _ => path.to_path_buf(),
     }
+}
+
+/// Refuse a contextual document record whose target or input leaves `root`.
+pub fn require_document_paths_inside_root(
+    record: &ApprovalRecord,
+    inputs: &DocumentGenerationInputs,
+    root: &Path,
+) -> Result<(), String> {
+    let Some(base) = &record.path_base else {
+        return Ok(());
+    };
+    inputs
+        .glossary
+        .iter()
+        .chain(&inputs.evidence)
+        .map(|input| input.path.as_str())
+        .chain([record.target.path.as_str()])
+        .try_for_each(|stored| require_inside_root(root, base, stored))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -348,12 +441,15 @@ pub fn sha256_bytes(bytes: &[u8]) -> String {
     format!("sha256:{:x}", hasher.finalize())
 }
 
-pub fn reviewed_artifact_digest(record: &ApprovalRecord) -> Result<Option<String>, String> {
+pub fn reviewed_artifact_digest(
+    record: &ApprovalRecord,
+    root: Option<&Path>,
+) -> Result<Option<String>, String> {
     if record.target.kind != "requirements_document" {
         return Ok(None);
     }
-    let reviewed =
-        std::fs::read(record.io_path(&record.target.path)).map_err(|error| error.to_string())?;
+    let reviewed = std::fs::read(record.io_path(root, &record.target.path))
+        .map_err(|error| error.to_string())?;
     Ok(Some(sha256_bytes(&reviewed)))
 }
 
@@ -602,12 +698,7 @@ fn git_output(cwd: &Path, arguments: &[&str]) -> Result<String, String> {
 /// Return `(repository root, repository-relative spec path, HEAD commit)`.
 pub fn git_location(path: &Path) -> Result<(PathBuf, String, String), String> {
     let absolute = path.canonicalize().map_err(|error| error.to_string())?;
-    let root = PathBuf::from(git_output(
-        absolute.parent().unwrap_or_else(|| Path::new(".")),
-        &["rev-parse", "--show-toplevel"],
-    )?)
-    .canonicalize()
-    .map_err(|error| error.to_string())?;
+    let root = git_root(&absolute)?;
     let relative = absolute
         .strip_prefix(&root)
         .map_err(|_| "spec is outside its Git repository".to_owned())?
@@ -616,6 +707,17 @@ pub fn git_location(path: &Path) -> Result<(PathBuf, String, String), String> {
     git_output(&root, &["ls-files", "--error-unmatch", "--", &relative])?;
     let commit = git_output(&root, &["rev-parse", "HEAD"])?;
     Ok((root, relative, commit))
+}
+
+/// The physical root of the checkout holding `path`.
+pub fn git_root(path: &Path) -> Result<PathBuf, String> {
+    let absolute = path.canonicalize().map_err(|error| error.to_string())?;
+    PathBuf::from(git_output(
+        absolute.parent().unwrap_or_else(|| Path::new(".")),
+        &["rev-parse", "--show-toplevel"],
+    )?)
+    .canonicalize()
+    .map_err(|error| error.to_string())
 }
 
 /// Resolve the Git baseline and require all tracked content to match it.
@@ -696,15 +798,23 @@ pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
         schema => return Err(format!("unsupported approval schema '{schema}'")),
     };
     if record.schema == APPROVAL_SCHEMA_V5 {
-        if !record
-            .path_base
-            .as_deref()
-            .is_some_and(|base| !base.is_empty() && Path::new(base).is_absolute())
-        {
-            return Err("approval record requires an absolute nonempty path_base".to_owned());
+        if !record.path_base.as_deref().is_some_and(is_path_base) {
+            return Err(
+                "approval record requires a repository-relative path_base using '/'".to_owned(),
+            );
         }
         if record.render_source.as_deref().is_none_or(str::is_empty) {
             return Err("approval record requires a nonempty render_source".to_owned());
+        }
+        if let GenerationInputs::Document(inputs) = &record.target.inputs {
+            let stored = inputs.glossary.iter().chain(&inputs.evidence);
+            if has_absolute_form(&record.target.path)
+                || stored
+                    .into_iter()
+                    .any(|input| has_absolute_form(&input.path))
+            {
+                return Err("approval record requires relative document paths".to_owned());
+            }
         }
     } else if record.path_base.is_some() || record.render_source.is_some() {
         return Err("legacy approval records must not carry path context".to_owned());

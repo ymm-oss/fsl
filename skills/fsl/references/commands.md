@@ -585,12 +585,14 @@ errors (exit 2); approval create's diagnostic precedence remains a separate issu
 **Causal observation outputs.** After replay/artifact construction and before
 output serialization/writes, `causal observe-expectations` checks all actual
 `--out`/`--lifecycle-out` destinations in artifact order, evidence then lifecycle.
-Invocation-absolute keys remove `.` only, retaining `..` and preceding components;
-the first duplicate rejects usage/2 with
+A key is the canonicalized parent plus the file name, or the collapsed spelling when
+the parent does not exist; names differing only by case do not collide. The first
+duplicate rejects usage/2 with
 `causal output destinations collide: <first path> and <second path>` and no writes.
 Earlier input/replay errors win; valid collisions beat publication I/O errors.
 Zero artifacts do not collide from equal flags. Distinct names/bytes/assurance,
-interleaved writes and later-error partial publication remain unchanged.
+interleaved writes and later-error partial publication remain unchanged; that error
+lists the earlier files in `written`.
 
 Digest-bound approvals are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a
@@ -620,14 +622,18 @@ working spec. Treat `approver` as attribution; authenticity comes from the
 repository's signed-commit/review/branch-protection policy.
 
 New creates for all four target kinds use unsigned `fslc.approval.v5` or signed
-`fslc.approval.v6`. Both require a nonempty absolute creation-directory
-`path_base` and the nonempty original spec argument verbatim as `render_source`.
-Relative stored target/input I/O uses only `path_base`; path spellings, input
-order and rendered labels stay literal. `render_source` is only a label: the
-explicit spec supplies the actual bytes and dependency directory. Legacy v1–v4
-reads retain their original closed formats, signatures and invocation-relative
-paths. No silent migration or rebasing of a moved checkout occurs; the original
-absolute directory must remain available for contextual I/O.
+`fslc.approval.v6`. Both require `path_base`, the creation directory relative to
+the Git root of the spec's checkout (`.` or `/`-separated names), and the nonempty
+original spec argument verbatim as `render_source`. Target/input I/O resolves from
+the Git root of the spec being checked plus `path_base`, never the caller's directory
+or the creating checkout, so a clone, worktree or relocated checkout reads its own
+files; path spellings, input order and rendered labels stay literal. A document
+record's creation directory, target and inputs must stay inside that root: absolute
+paths, climbing paths and links out are refused (`semantics`, exit 2) at creation and
+at check. Solver records read nothing through the base and store `.` when created
+outside the root. `render_source` is only a label: the explicit spec supplies the
+actual bytes and dependency directory. Legacy v1–v4 reads retain their original
+closed formats, signatures and invocation-relative paths, with no silent migration.
 
 For document records v3–v6, authoritative approval check and ledger compare raw
 input digests from the same loaded buffers used for rendering. Every earlier

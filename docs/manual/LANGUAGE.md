@@ -2457,17 +2457,30 @@ diff against the current working file. See `docs/design/DESIGN-approval.md`.
 
 For all four target kinds, `approval create` emits unsigned `fslc.approval.v5`
 without `--signing-key`, or signed `fslc.approval.v6` with an Ed25519 PKCS#8 PEM
-signing key. Both schemas require two nonempty strings: `path_base`, the absolute
-invocation directory at creation, and `render_source`, the original spec argument
-verbatim. `spec.path` remains Git-repository-relative. Relative target/input I/O
-resolves only against the stored `path_base`, preserving stored path spellings,
-input order, and rendered labels. `render_source` is a display label only; the
-explicit spec still supplies the actual bytes and dependency directory.
+signing key. Both schemas require two nonempty strings: `path_base`, the creation
+directory relative to the Git root of the checkout holding the spec (`.` for the
+root, otherwise `/`-separated names), and `render_source`, the original spec
+argument verbatim. `spec.path` remains Git-repository-relative. Target and input
+I/O resolves from the Git root of the spec being checked, joined with `path_base`,
+not from the caller's directory or the checkout that created the record. So a
+clone, a worktree or a relocated checkout reads its own files, and a tampered
+document or glossary there shows as `artifact_changed`, `rendering_changed` or the
+input-digest failure. Stored path spellings, input order and rendered labels stay
+literal. `render_source` is a display label only; the explicit spec still supplies
+the actual bytes and dependency directory.
+
+A `requirements_document` record's creation directory, target and inputs must lie
+inside that Git root. Creation refuses an absolute path, a path that climbs out of
+the root, a link leading out of it, or a creation directory outside it, with
+`kind:"semantics"`, exit 2, and check refuses a stored path that escapes in the
+same way. A `ledger`, `html` or `scenarios` record reads no file through its base,
+so it can be created from any directory; outside the root it stores `.`. Tampering
+with `path_base` invalidates a v6 signature. In v5, a different base that passes
+the form check reads other files, which fail on read or against the record's
+digests; a solver record reads nothing through it, so only its form is checked.
 
 Legacy v1–v4 records remain readable with their original formats, signatures,
 and invocation-relative path interpretation. Records are not silently migrated.
-New context preserves lookup at the original absolute directory; it does not
-rebase paths when a checkout moves, and a missing original directory can fail.
 
 For `requirements_document` v3–v6, authoritative approval check and ledger
 compare each recorded input digest with the same raw bytes used for rendering.
@@ -5055,7 +5068,8 @@ requirements against precomputed JSONL (`--records`, or the declared
 `dataset`'s `source` file) with Wilson intervals.
 
 A relative declared `dataset.source` resolves against the declaring FSL file's
-directory; an absolute source remains absolute. Explicit `--records` wins and
+directory, the lexical parent of its path, so a file reached through a symlink resolves
+beside the link; an absolute source remains absolute. Explicit `--records` wins and
 remains relative to the invocation directory, including when the declaration has
 no source or names an external source. Property/dataset selection still precedes
 records I/O. Without an override, missing sources and external `://` sources keep
@@ -5564,9 +5578,11 @@ and `formal_assurance` are orthogonal axes**: evidence never changes
 `causal observe-expectations` plans every actual `--out`/`--lifecycle-out`
 destination after replay and artifact construction, before output serialization
 or writes. One artifact uses the supplied path; multiple artifacts retain
-`<stem>.<evidence_id>.<extension>` names (default extension `json`). Collision keys
-are invocation-absolute with `.` removed; every `..` and preceding directory
-component is retained, without canonicalization or filesystem-alias resolution.
+`<stem>.<evidence_id>.<extension>` names (default extension `json`). A collision key
+is the canonicalized parent directory plus the file name, so `sub/../a.json` and
+`self/a.json` with `self -> .` collide with `a.json`. When the parent does not exist,
+the key is the invocation-absolute spelling with `.` and `..` collapsed. Names that
+differ only by case do not collide, even on a case-insensitive file system.
 The first repeated key in artifact order, evidence then lifecycle, returns
 `kind:"usage"`, exit 2, with
 `causal output destinations collide: <first path> and <second path>`, preserving
@@ -5574,7 +5590,7 @@ all destination bytes and existence. Existing model/input/replay errors still
 precede this check; a valid collision precedes destination/publication I/O errors.
 Zero artifacts create no collision from equal flags. Distinct outputs retain
 their evidence/lifecycle write interleaving; a later failure does not roll back
-earlier writes. Names, bytes, digests and assurance otherwise remain unchanged.
+earlier writes, and its error lists them in `written`. Names, bytes, digests and assurance otherwise remain unchanged.
 
 A human can carve an observable contract out of a claim as an `expectation`
 and check it with the existing verifier — **the claim itself is never

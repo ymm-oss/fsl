@@ -2550,16 +2550,28 @@ diff</code> materializes the approved commit and invokes the ordinary bounded se
 diff against the current working file. See <code>docs/design/DESIGN-approval.md</code>.</p>
 <p>For all four target kinds, <code>approval create</code> emits unsigned <code>fslc.approval.v5</code>
 without <code>--signing-key</code>, or signed <code>fslc.approval.v6</code> with an Ed25519 PKCS#8 PEM
-signing key. Both schemas require two nonempty strings: <code>path_base</code>, the absolute
-invocation directory at creation, and <code>render_source</code>, the original spec argument
-verbatim. <code>spec.path</code> remains Git-repository-relative. Relative target/input I/O
-resolves only against the stored <code>path_base</code>, preserving stored path spellings,
-input order, and rendered labels. <code>render_source</code> is a display label only; the
-explicit spec still supplies the actual bytes and dependency directory.</p>
+signing key. Both schemas require two nonempty strings: <code>path_base</code>, the creation
+directory relative to the Git root of the checkout holding the spec (<code>.</code> for the
+root, otherwise <code>/</code>-separated names), and <code>render_source</code>, the original spec
+argument verbatim. <code>spec.path</code> remains Git-repository-relative. Target and input
+I/O resolves from the Git root of the spec being checked, joined with <code>path_base</code>,
+not from the caller's directory or the checkout that created the record. So a
+clone, a worktree or a relocated checkout reads its own files, and a tampered
+document or glossary there shows as <code>artifact_changed</code>, <code>rendering_changed</code> or the
+input-digest failure. Stored path spellings, input order and rendered labels stay
+literal. <code>render_source</code> is a display label only; the explicit spec still supplies
+the actual bytes and dependency directory.</p>
+<p>A <code>requirements_document</code> record's creation directory, target and inputs must lie
+inside that Git root. Creation refuses an absolute path, a path that climbs out of
+the root, a link leading out of it, or a creation directory outside it, with
+<code>kind:"semantics"</code>, exit 2, and check refuses a stored path that escapes in the
+same way. A <code>ledger</code>, <code>html</code> or <code>scenarios</code> record reads no file through its base,
+so it can be created from any directory; outside the root it stores <code>.</code>. Tampering
+with <code>path_base</code> invalidates a v6 signature. In v5, a different base that passes
+the form check reads other files, which fail on read or against the record's
+digests; a solver record reads nothing through it, so only its form is checked.</p>
 <p>Legacy v1–v4 records remain readable with their original formats, signatures,
-and invocation-relative path interpretation. Records are not silently migrated.
-New context preserves lookup at the original absolute directory; it does not
-rebase paths when a checkout moves, and a missing original directory can fail.</p>
+and invocation-relative path interpretation. Records are not silently migrated.</p>
 <p>For <code>requirements_document</code> v3–v6, authoritative approval check and ledger
 compare each recorded input digest with the same raw bytes used for rendering.
 Every earlier error and the complete ordered drift result keep precedence.
@@ -5207,7 +5219,8 @@ the same parser the evidence commands run and returns <code>ai_project_analyzed<
 requirements against precomputed JSONL (<code>--records</code>, or the declared
 <code>dataset</code>'s <code>source</code> file) with Wilson intervals.</p>
 <p>A relative declared <code>dataset.source</code> resolves against the declaring FSL file's
-directory; an absolute source remains absolute. Explicit <code>--records</code> wins and
+directory, the lexical parent of its path, so a file reached through a symlink resolves
+beside the link; an absolute source remains absolute. Explicit <code>--records</code> wins and
 remains relative to the invocation directory, including when the declaration has
 no source or names an external source. Property/dataset selection still precedes
 records I/O. Without an override, missing sources and external <code>://</code> sources keep
@@ -5687,9 +5700,11 @@ and <code>formal_assurance</code> are orthogonal axes</strong>: evidence never c
 <p><code>causal observe-expectations</code> plans every actual <code>--out</code>/<code>--lifecycle-out</code>
 destination after replay and artifact construction, before output serialization
 or writes. One artifact uses the supplied path; multiple artifacts retain
-<code>&lt;stem&gt;.&lt;evidence_id&gt;.&lt;extension&gt;</code> names (default extension <code>json</code>). Collision keys
-are invocation-absolute with <code>.</code> removed; every <code>..</code> and preceding directory
-component is retained, without canonicalization or filesystem-alias resolution.
+<code>&lt;stem&gt;.&lt;evidence_id&gt;.&lt;extension&gt;</code> names (default extension <code>json</code>). A collision key
+is the canonicalized parent directory plus the file name, so <code>sub/../a.json</code> and
+<code>self/a.json</code> with <code>self -&gt; .</code> collide with <code>a.json</code>. When the parent does not exist,
+the key is the invocation-absolute spelling with <code>.</code> and <code>..</code> collapsed. Names that
+differ only by case do not collide, even on a case-insensitive file system.
 The first repeated key in artifact order, evidence then lifecycle, returns
 <code>kind:"usage"</code>, exit 2, with
 <code>causal output destinations collide: &lt;first path&gt; and &lt;second path&gt;</code>, preserving
@@ -5697,7 +5712,7 @@ all destination bytes and existence. Existing model/input/replay errors still
 precede this check; a valid collision precedes destination/publication I/O errors.
 Zero artifacts create no collision from equal flags. Distinct outputs retain
 their evidence/lifecycle write interleaving; a later failure does not roll back
-earlier writes. Names, bytes, digests and assurance otherwise remain unchanged.</p>
+earlier writes, and its error lists them in <code>written</code>. Names, bytes, digests and assurance otherwise remain unchanged.</p>
 <p>A human can carve an observable contract out of a claim as an <code>expectation</code>
 and check it with the existing verifier — <strong>the claim itself is never
 lowered</strong>: <code>expectation E { trigger action alias.name</code> (or <code>trigger

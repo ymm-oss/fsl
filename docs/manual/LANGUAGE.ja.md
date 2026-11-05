@@ -2272,17 +2272,28 @@ spec を省略すると、変更されたすべての `.fsl` パスを比較し�
 4 種類の target すべてで、`approval create` は `--signing-key` がなければ無署名の
 `fslc.approval.v5`、Ed25519 PKCS#8 PEM の署名鍵があれば署名付きの
 `fslc.approval.v6` レコードを出力します。両スキーマは、空でない 2 つの文字列を
-必須とします。`path_base` は作成時の実行ディレクトリの絶対パス、`render_source` は
-元の spec 引数をそのまま保存したものです。`spec.path` は Git リポジトリからの
-相対パスのままです。target と入力の相対パスを読み込む際は、保存済みの `path_base`
-だけを基準にします。保存したパスの表記、入力順、レンダリングのラベルは保ちます。
-`render_source` は表示用のラベルに限られ、実際のソースと依存先のディレクトリは
-明示された spec から取得します。
+必須とします。`path_base` は作成時の実行ディレクトリを、spec を含む checkout の
+Git ルートからの相対パスで表したもの（ルートなら `.`、それ以外は `/` 区切りの名前）、
+`render_source` は元の spec 引数をそのまま保存したものです。`spec.path` は
+Git リポジトリからの相対パスのままです。target と入力は、検査する spec の Git ルートに
+`path_base` をつないだ場所から読み込みます。呼び出し元のディレクトリや、レコードを
+作成した checkout は読みません。そのため clone、worktree、移動した checkout はそれぞれ
+自分のファイルを読み、そこで文書や用語集を改ざんすると `artifact_changed`、
+`rendering_changed`、または入力 digest の不一致になります。保存したパスの表記、入力順、
+レンダリングのラベルは保ちます。`render_source` は表示用のラベルに限られ、実際の
+ソースと依存先のディレクトリは明示された spec から取得します。
+
+`requirements_document` レコードでは、作成ディレクトリ、target、入力がその Git ルートの
+内側になければなりません。作成時は、絶対パス、ルートの外へ出るパス、ルートの外を指す
+リンク、ルートの外の作成ディレクトリを `kind:"semantics"`、exit 2 で拒否します。検査時も、
+外へ出る保存パスを同じように拒否します。`ledger`、`html`、`scenarios` のレコードは
+`path_base` を通じてファイルを読まないため、どのディレクトリからでも作成でき、ルートの
+外では `.` を保存します。`path_base` を書き換えると v6 では署名が無効になります。v5 では、
+形式検査を通る別の値にすると別のファイルを読むことになり、読み込みまたはレコードの
+digest との照合で失敗します。ソルバー系レコードは読み込みに使わないため、形式だけを検査します。
 
 従来の v1–v4 レコードは、形式、署名、実行ディレクトリを基準とする相対パスの
-解釈を変えずに読み込めます。暗黙の移行は行いません。新しい文脈情報が保つのは
-元の絶対ディレクトリでの読み込みです。checkout を移動してもパスを付け替えず、
-元のディレクトリがなくなれば読み込みに失敗する場合があります。
+解釈を変えずに読み込めます。暗黙の移行は行いません。
 
 `requirements_document` の v3–v6 では、承認を検証する approval check と ledger が、
 記録された各入力の digest を、レンダリングに使ったものと同じ生のバイト列と照合します。
@@ -4758,8 +4769,9 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 宣言された `dataset` の `source` ファイル）に対して Wilson 区間つきで検査
 します。
 
-宣言された `dataset.source` が相対パスなら、宣言元 FSL ファイルのディレクトリを
-基準に読み込みます。絶対パスはそのまま使います。明示した `--records` は宣言より
+宣言された `dataset.source` が相対パスなら、宣言元 FSL ファイルのディレクトリ
+（パス上の親で、シンボリックリンク経由ならリンクの隣）を基準に読み込みます。
+絶対パスはそのまま使います。明示した `--records` は宣言より
 優先し、実行ディレクトリを基準とします。宣言に source がない場合や、外部の source
 を指定した場合も同じです。property/dataset の選択は、引き続き records の読み込みより
 先に行います。上書き指定がなければ、source がない場合と外部の `://` source に対する
@@ -5256,16 +5268,18 @@ claim 側または artifact 側の片方だけに存在する scope dimension �
 `causal observe-expectations` は replay と artifact 構築の後、出力のシリアライズや
 書き込みの前に、実際の `--out`/`--lifecycle-out` 出力先をすべて計算します。
 artifact が1つなら指定パス、複数なら従来の `<stem>.<evidence_id>.<extension>`
-（既定の拡張子は `json`）を使います。衝突判定のキーは実行ディレクトリ基準の
-絶対パスから `.` だけを除いたものです。すべての `..` とその前のディレクトリを
-残し、canonicalize やファイルシステムの別名解決は行いません。artifact 順に
+（既定の拡張子は `json`）を使います。衝突判定のキーは、canonicalize した親ディレクトリと
+ファイル名の組です。したがって `sub/../a.json` や、`self -> .` のときの `self/a.json` は
+`a.json` と衝突します。親が存在しない場合は、実行ディレクトリ基準の表記から `.` と `..` を
+畳んだものをキーにします。大文字と小文字だけが違う名前は、大文字小文字を区別しない
+ファイルシステムでも衝突とは判定しません。artifact 順に
 evidence、lifecycle の順で調べ、最初の重複を `kind:"usage"`、exit 2 と
 `causal output destinations collide: <first path> and <second path>` で拒否します。
 この拒否では全出力先の既存バイト列と存在状態を保ちます。既存の model/input/replay
 エラーが先で、有効な衝突は出力先・公開の I/O エラーより先に拒否します。
 artifact が0なら、出力フラグが同じでも衝突にはなりません。異なる出力先への書き込みは
 従来どおり evidence/lifecycle の交互順です。後の書き込みに失敗しても先の書き込みは
-戻しません。それ以外の名前、バイト列、digest、assurance は変えません。
+戻さず、そのエラーの `written` に列挙します。それ以外の名前、バイト列、digest、assurance は変えません。
 
 人間は claim から観測可能な契約を `expectation` として切り出し、既存の
 verifier で検査できます — **claim そのものは決して lowering されません**:

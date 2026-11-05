@@ -1,6 +1,6 @@
 # Digest-bound approval records
 
-Issues: #190, #269, #333
+Issues: #190, #269, #333, #1421
 
 ## Goal
 
@@ -170,8 +170,8 @@ again and must match the record's baseline digest.
 
 ## Record contract
 
-New sidecars use v5 (unsigned) or v6 (signed), with creation-directory context
-as specified below. The retained legacy unsigned solver sidecar follows
+New sidecars use v5 (unsigned) or v6 (signed), with repository-relative path
+context as specified below. The retained legacy unsigned solver sidecar follows
 [`schemas/fslc/approval/approval-record.v1.schema.json`](../../schemas/fslc/approval/approval-record.v1.schema.json):
 
 ```json
@@ -309,7 +309,7 @@ conditional branch inside v1/v2. `spec`/`approval` are byte-identical to v1's;
   `--depth`/`--deadlock`/`--engine` for `--kind requirements_document` and
   rejects `--glossary`/`--evidence` for the other three kinds.
 
-### Creation-directory context (v5 unsigned, v6 signed; #1421 AP1/AP2)
+### Repository-relative path context (v5 unsigned, v6 signed; #1421 AP1/AP2)
 
 All new `approval create` records use
 [`approval-record.v5.schema.json`](../../schemas/fslc/approval/approval-record.v5.schema.json)
@@ -320,18 +320,36 @@ with one. Each admits the existing solver target shape (`ledger`, `html`,
 closed branches. The nested objects, document digests and input variants retain
 their existing contracts. Two required top-level strings add the context:
 
-- `path_base` is the nonempty absolute invocation directory captured before
-  create-time reproduction.
+- `path_base` is the invocation directory at creation, relative to the Git root
+  of the checkout holding the spec: `.` for the root, otherwise `/`-separated names
+  with no `.`, `..` or empty name. The form is text, so a record reads the same on
+  every platform, and the schema pattern and the reader check the same form.
 - `render_source` is the nonempty original spec argument, verbatim, used only
   as a rendering label. `spec.path` remains Git-repository-relative.
 
 For example, creation from a directory containing `spec.fsl` with the argument
 `./spec.fsl` preserves that exact label, a target such as `./requirements.md`,
 and input spellings such as `glossary.json` or `nested/../evidence.json`.
-Relative target/input I/O later uses `path_base / stored_path`; absolute stored
-paths remain absolute. The resolver does not canonicalize, collapse parent
-components, probe caller/sidecar/repository alternatives, or rebase a moved
-checkout. Deleting or moving the original directory can therefore fail.
+Target/input I/O later uses `git_root / path_base / stored_path`, where `git_root`
+is the root of the checkout holding the spec being checked, not the caller's
+directory and not the creating checkout. A clone, a worktree or a relocated checkout
+therefore reads its own files, and nothing reads the creating checkout, which may
+be gone. The resolver does not probe caller/sidecar/repository alternatives.
+
+A document record stays inside that root. Creation refuses, with `kind:"semantics"`
+and exit 2, a creation directory outside the root and a target or input that is
+absolute, climbs out of the root by its spelling, or leads out through a link. Check
+refuses a stored path that escapes in the same way, before reading it; the schema
+and the reader refuse an absolute form, and the climbing and link checks need the
+root, so they run at use. The stored spelling of a target or input stays literal,
+including any `\` a Windows caller typed; a record that must read across platforms
+uses `/`. A solver record reads no file through its base, so it can be created
+anywhere: its target path stays a label, and outside the root it stores `.`.
+
+Tampering with `path_base` invalidates a v6 signature. A v5 record has no signature,
+so a different base that passes the form check reads other files, which fail on read
+or against the record's digests. A solver v5 record reads nothing through it, so only
+its form is checked.
 
 The current explicit spec still supplies the actual bytes and dependency
 directory. Reproduction uses the recorded source and evidence labels; resolved
@@ -388,7 +406,8 @@ Direct drift still exits 0. Ledger retains record order and its verification and
 publication exit rules. Document generate keeps its explicit invocation inputs
 and lightweight reviewed-target admission; document check remains structural and
 approval diff remains signature/spec-baseline-only. These consumers gain no new
-stored-input reads. Solver targets and record formats are unchanged.
+stored-input reads, except that document generate resolves a contextual record's
+reviewed target from the spec's Git root. Solver targets gain no input comparison.
 
 `approval create --kind requirements_document`'s conformance gate (rather than
 the byte-equality the other three kinds use) is exactly `fslc document
@@ -578,6 +597,9 @@ creation at root/subdirectory, literal source/input labels and reviewed bytes,
 cross-CWD checks with distinct valid decoys, missing actual inputs/targets without
 fallback, every solver kind without live-target reads, closed v5/v6 schema
 validation, required context, and v1–v4 rejection of added context fields.
+`issue_1421_checkout_base` adds tampered and untampered clones and worktrees, a
+relocated and a deleted creating checkout, refusal of paths outside the root at
+creation and check, and schema/reader agreement on the stored forms.
 
 Issue #1421 AP4–7 adds controls for otherwise-approved raw mismatches in v3–v6,
 first-mismatch selection including reversed evidence order, all 31 combinations

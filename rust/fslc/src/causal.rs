@@ -740,6 +740,46 @@ fn observation_output_path(
     base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
 }
 
+/// Two outputs collide when they name one file in one physical parent. A parent
+/// that does not exist cannot be resolved, so that path compares by its spelling,
+/// with `.` and `..` collapsed because Windows collapses them when it opens a path.
+fn output_collision_key(destination: &Path) -> PathBuf {
+    if let (Some(parent), Some(name)) = (destination.parent(), destination.file_name())
+        && let Ok(parent) = parent.canonicalize()
+    {
+        return parent.join(name);
+    }
+    let mut key = PathBuf::new();
+    for component in destination.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                key.pop();
+            }
+            _ => key.push(component),
+        }
+    }
+    key
+}
+
+/// A later output's failure does not undo earlier ones, so name them with the error.
+fn output_write_error(
+    file_path: &Path,
+    error: &std::io::Error,
+    evidence_paths: &[String],
+    lifecycle_paths: &[String],
+) -> (Value, i32) {
+    let mut output = error_output(
+        "io",
+        &format!("cannot write {}: {error}", file_path.display()),
+    );
+    let written = [evidence_paths, lifecycle_paths].concat();
+    if !written.is_empty() {
+        output["written"] = json!(written);
+    }
+    (output, 2)
+}
+
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_causal_observe_expectations(
     path: &Path,
@@ -1400,13 +1440,7 @@ fn run_causal_observe_expectations(
             .iter()
             .flat_map(|(evidence, lifecycle)| evidence.iter().chain(lifecycle.iter()))
         {
-            // Keep ParentDir and every preceding component; filesystem aliases
-            // such as link/../out are deliberately not resolved or collapsed.
-            let key = invocation_dir
-                .join(destination)
-                .components()
-                .filter(|component| !matches!(component, Component::CurDir))
-                .collect::<PathBuf>();
+            let key = output_collision_key(&invocation_dir.join(destination));
             if let Some(first) = seen.insert(key, destination) {
                 return (
                     error_output(
@@ -1435,13 +1469,7 @@ fn run_causal_observe_expectations(
             if let Err(error) =
                 crate::output_publication::publish(file_path, format!("{out_json}\n"))
             {
-                return (
-                    error_output(
-                        "io",
-                        &format!("cannot write {}: {error}", file_path.display()),
-                    ),
-                    2,
-                );
+                return output_write_error(file_path, &error, &evidence_paths, &lifecycle_paths);
             }
             evidence_paths.push(file_path.display().to_string());
         }
@@ -1452,13 +1480,7 @@ fn run_causal_observe_expectations(
             if let Err(error) =
                 crate::output_publication::publish(file_path, format!("{lifecycle_json}\n"))
             {
-                return (
-                    error_output(
-                        "io",
-                        &format!("cannot write {}: {error}", file_path.display()),
-                    ),
-                    2,
-                );
+                return output_write_error(file_path, &error, &evidence_paths, &lifecycle_paths);
             }
             lifecycle_paths.push(file_path.display().to_string());
         }

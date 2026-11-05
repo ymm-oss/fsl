@@ -20,7 +20,8 @@
     "path_base": {
       "type": "string",
       "minLength": 1,
-      "pattern": "^(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\)"
+      "pattern": "^(?:\\.|(?![A-Za-z]:)(?!\\.\\.?(?:/|$))(?!.*/\\.\\.?(?:/|$))[^/\\\\]+(?:/[^/\\\\]+)*)$",
+      "description": "Git-root-relative directory: '.' or '/'-separated names."
     },
     "render_source": {
       "type": "string",
@@ -143,7 +144,8 @@
             },
             "path": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "pattern": "^(?![/\\\\])(?![A-Za-z]:)"
             },
             "digest_algorithm": {
               "const": "fsl-rendered-requirements-document-v1+sha256"
@@ -277,7 +279,8 @@
       "properties": {
         "path": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "^(?![/\\\\])(?![A-Za-z]:)"
         },
         "digest": {
           "$ref": "#/$defs/sha256"

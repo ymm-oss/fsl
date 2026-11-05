@@ -2274,6 +2274,7 @@ struct LoadedApproval {
 /// file's own digest before hashing them together, the same order-
 /// independent scheme `load_evidence`/`load_glossary` already use.
 fn load_approvals(
+    spec_path: &Path,
     paths: &[PathBuf],
     trust_keys: &[PathBuf],
 ) -> Result<Option<(Vec<LoadedApproval>, String)>, Value> {
@@ -2311,7 +2312,18 @@ fn load_approvals(
                 record.target.kind
             )));
         }
-        let current_reviewed_digest = approval::reviewed_artifact_digest(&record)
+        // Only a contextual record needs the checkout root, to read its reviewed target.
+        let root = match &record.path_base {
+            Some(base) => {
+                let root =
+                    approval::git_root(spec_path).map_err(|error| error_output("io", &error))?;
+                approval::require_inside_root(&root, base, &record.target.path)
+                    .map_err(|error| error_output("semantics", &error))?;
+                Some(root)
+            }
+            None => None,
+        };
+        let current_reviewed_digest = approval::reviewed_artifact_digest(&record, root.as_deref())
             .map_err(|error| error_output("io", &error))?;
         loaded.push(LoadedApproval {
             record,
@@ -2450,7 +2462,7 @@ fn run_document_generate(
     }
     let pre_approval_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
 
-    let loaded_approvals = match load_approvals(approval_paths, trust_keys) {
+    let loaded_approvals = match load_approvals(path, approval_paths, trust_keys) {
         Ok(loaded) => loaded,
         Err(output) => return (output, 2),
     };
@@ -13673,17 +13685,6 @@ fn approval_artifact(
     edition: &SourceEdition,
     kind: &str,
     inputs: &approval::GenerationInputs,
-) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
-    approval_artifact_with_context(path, source, edition, kind, inputs, None, None)
-}
-
-fn approval_artifact_with_context(
-    path: &Path,
-    source: &str,
-    edition: &SourceEdition,
-    kind: &str,
-    inputs: &approval::GenerationInputs,
-    path_base: Option<&Path>,
     render_source: Option<&str>,
 ) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
     if kind == "requirements_document" {
@@ -13697,7 +13698,7 @@ fn approval_artifact_with_context(
             ));
         };
         let rendered =
-            render_document_for_approval(path, source, document_inputs, path_base, render_source)
+            render_document_for_approval(path, source, document_inputs, None, render_source)
                 .map_err(|error| (error, 2))?;
         return Ok((
             rendered.markdown.into_bytes(),
@@ -13897,8 +13898,8 @@ fn run_approval_create_from_source(
     output_path: Option<&Path>,
     signing_key: Option<&Path>,
 ) -> (Value, i32) {
-    let path_base = match std::env::current_dir() {
-        Ok(base) => base,
+    let creation_directory = match std::env::current_dir().and_then(|cwd| cwd.canonicalize()) {
+        Ok(directory) => directory,
         Err(error) => return (error_output("io", &error.to_string()), 2),
     };
     let render_source = path.to_string_lossy();
@@ -13906,10 +13907,11 @@ fn run_approval_create_from_source(
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let (_repo, relative_path, git_commit) = match approval::git_binding(path) {
+    let (repo, relative_path, git_commit) = match approval::git_binding(path) {
         Ok(binding) => binding,
         Err(error) => return (error_output("io", &error), 2),
     };
+    let stored_base = approval::repository_relative_base(&repo, &creation_directory);
     let digest = match approval::spec_digest_from_source(path, source) {
         Ok(digest) => digest,
         Err(error) => return (semantic_error_output(&error), 2),
@@ -13935,12 +13937,33 @@ fn run_approval_create_from_source(
             path,
             source,
             document_inputs,
-            Some(&path_base),
+            Some(&creation_directory),
             Some(&render_source),
         ) {
             Ok(result) => result,
             Err(error) => return (error, 2),
         };
+        let Some(base) = stored_base.as_deref() else {
+            return (
+                error_output(
+                    "semantics",
+                    "a requirements_document approval must be created inside the spec's Git repository",
+                ),
+                2,
+            );
+        };
+        let inputs_inside_root = document_inputs
+            .glossary
+            .iter()
+            .chain(&document_inputs.evidence)
+            .map(|input| input.path.as_str())
+            .try_for_each(|input| approval::require_inside_root(&repo, base, input))
+            .and_then(|()| {
+                approval::require_inside_root(&repo, base, &artifact_path.to_string_lossy())
+            });
+        if let Err(error) = inputs_inside_root {
+            return (error_output("semantics", &error), 2);
+        }
         let reviewed_text = match std::fs::read_to_string(artifact_path) {
             Ok(text) => text,
             Err(error) => return (error_output("io", &error.to_string()), 2),
@@ -13983,18 +14006,11 @@ fn run_approval_create_from_source(
                 2,
             );
         };
-        let (expected_artifact, _) = match approval_artifact_with_context(
-            path,
-            source,
-            edition,
-            kind,
-            inputs,
-            Some(&path_base),
-            Some(&render_source),
-        ) {
-            Ok(artifact) => artifact,
-            Err(error) => return error,
-        };
+        let (expected_artifact, _) =
+            match approval_artifact(path, source, edition, kind, inputs, Some(&render_source)) {
+                Ok(artifact) => artifact,
+                Err(error) => return error,
+            };
         let reviewed_artifact = match std::fs::read(artifact_path) {
             Ok(artifact) => artifact,
             Err(error) => return (error_output("io", &error.to_string()), 2),
@@ -14055,7 +14071,8 @@ fn run_approval_create_from_source(
     }
     let record = approval::ApprovalRecord {
         schema: approval::APPROVAL_SCHEMA_V5.to_owned(),
-        path_base: Some(path_base.to_string_lossy().into_owned()),
+        // A solver record reads nothing through its base, so it can be created anywhere.
+        path_base: Some(stored_base.unwrap_or_else(|| ".".to_owned())),
         render_source: Some(render_source.into_owned()),
         spec: approval::SpecBinding {
             path: relative_path,
@@ -14125,25 +14142,14 @@ fn solver_approval_artifact(
     edition: &SourceEdition,
     record: &approval::ApprovalRecord,
 ) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
-    if let Some(base) = &record.path_base {
-        approval_artifact_with_context(
-            path,
-            source,
-            edition,
-            &record.target.kind,
-            &record.target.inputs,
-            Some(Path::new(base)),
-            record.render_source.as_deref(),
-        )
-    } else {
-        approval_artifact(
-            path,
-            source,
-            edition,
-            &record.target.kind,
-            &record.target.inputs,
-        )
-    }
+    approval_artifact(
+        path,
+        source,
+        edition,
+        &record.target.kind,
+        &record.target.inputs,
+        record.render_source.as_deref(),
+    )
 }
 
 fn approval_evaluation(
@@ -14202,11 +14208,13 @@ fn approval_evaluation(
         approval_spec_digest(path, source).map_err(|error| (spec_load_error_output(&error), 2))?;
     let (artifact, current_claim_set_digest, input_digest_mismatch) =
         if let approval::GenerationInputs::Document(inputs) = &record.target.inputs {
+            approval::require_document_paths_inside_root(&record, inputs, &repo)
+                .map_err(|error| (error_output("semantics", &error), 2))?;
             let rendered = render_document_for_approval(
                 path,
                 source,
                 inputs,
-                record.path_base.as_deref().map(Path::new),
+                record.base_directory(Some(&repo)).as_deref(),
                 record.render_source.as_deref(),
             )
             .map_err(|error| (error, 2))?;
@@ -14223,7 +14231,7 @@ fn approval_evaluation(
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
         .map_err(|error| (error_output("internal", &error), 3))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
-    let current_reviewed_digest = approval::reviewed_artifact_digest(&record)
+    let current_reviewed_digest = approval::reviewed_artifact_digest(&record, Some(&repo))
         .map_err(|error| (error_output("io", &error), 2))?;
     let mut evaluation = approval::evaluate(
         &record,

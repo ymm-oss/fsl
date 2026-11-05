@@ -527,7 +527,7 @@ fn issue_1475_fixed_timestamp_record_and_document_bytes_are_preserved() {
     let mut expected = golden.clone();
     expected["record"] = json!({
         "schema": "fslc.approval.v5",
-        "path_base": fixture.root.canonicalize().expect("physical creation CWD"),
+        "path_base": ".",
         "render_source": "spec.fsl",
         "spec": golden["record"]["spec"],
         "target": golden["record"]["target"],
