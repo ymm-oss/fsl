@@ -177,6 +177,29 @@ two `values` bounds moved `verify` between `verified` and `violated`. An inline 
 on the `implements`. Migration: keep the one declaration you mean. See
 `docs/design/DESIGN-dialects.md`, §3.2.
 
+FSL 5 requirements repeats (documents headed `fsl 5`; each a breaking removal, no automatic
+migration; `docs/manual/LANGUAGE.md`, "Repeated inputs, declarations and requirement IDs", is the
+owner of the full text):
+
+- #1682: a `scenario` / `forbidden` step naming one input twice (`with`, instance first, a `で`
+  list, two `で` groups, an alias beside its canonical name, a relation role) is refused, exit 2,
+  `kind: "semantics"`, `loc` at the repeat: `duplicate step input 'amount' at doc.fsl:43:44`.
+  Different inputs in any order, and the same input in a later step, stay accepted.
+- #1705: a second `actor` of one name is refused, `kind: "parse"`: `duplicate actor 'Agent' at 4:9`.
+  One owner per requirement ID: `rule`, `decide`, `scenario`, `forbidden`, `goal`, `policy` and the
+  FSL 4 `requirement` / `acceptance` blocks own the ID after their keyword; a second owner of any kind
+  is refused at its ID, `kind: "parse"`: `duplicate requirement id 'REQ-DESK-001': this rule reuses
+  the ID of the rule at 19:8; a requirement ID has one owner at 22:8` (same-kind repeats of
+  `scenario` / `forbidden` / `goal` / `policy` keep their `kind: "semantics"` refusals). A `covers`
+  is a link: naming an owned ID with any text stays accepted and the ledger titles the ID with its
+  owner; every `covers` of an ID no declaration owns must have one text, else `requirement ID
+  'REQ-EV-1' is covered as "withdrawing" here and as "closing" at 15:5; every covers of an ID no
+  declaration owns has one text at 19:5`. `migrate --edition 5` refuses a document sharing an ID
+  between owners (`migrate_manual_required`, `reason: "shared_requirement_id"`) and never renames.
+- #1686: a `concept` written twice is refused, `kind: "semantics"`: `duplicate concept 'SmallClaim'
+  at doc.fsl:24:3`, reported ahead of a repeated bound or `kpi`; repeated bounds and `kpi` are
+  refused as above.
+
 Breaking removals (#1552, #1561): for requirements `rule ... only when` conditions,
 `check` now rejects previously accepted unsatisfiable guards that reuse an entity
 field's name as an `is` pattern inside a quantifier body or aggregate value. The

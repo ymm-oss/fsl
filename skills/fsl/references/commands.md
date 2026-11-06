@@ -1012,6 +1012,10 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   within depth, not structurally impossible). Blame identifies; it never
   proposes a repair — do not turn a `blame` entry into a suggested guard
   weakening (that cuts against the anti-hollowing principle).
+  Both levels are shallow: only the invariant's top-level `and` is split (a
+  conjunction inside a quantifier body is one conjunct), and
+  `violating_bindings` names the outermost quantifier's failing values only —
+  `forall u: U { forall i: I { ... } }` reports `[{"u": 0}]`, with no `i`.
 - **repair routing (`trace_type`)**: every counterexample/failure result carries a
   `trace_type` discriminator — one of `invariant` | `sla` | `type_bound` | `trans`
   | `ensures` | `partial_op` | `deadlock` | `leadsTo` | `leadsTo_rank` |
