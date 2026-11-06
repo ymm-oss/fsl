@@ -779,8 +779,8 @@ native binary: argument parsing
   approval records, keys and artifacts, `diff`, `refine`, `verify --from-state`), causal's
   `cannot read <path>: <error>`, the domain commands' #780-era `semantics` read failure, and
   `approval create --kind requirements_document`'s `usage` for an unreadable `--artifact`,
-  `--glossary` or `--evidence`. The error envelope stays owned by `cli_output.rs` and the error
-  exit by `fslc_rust::outcome`'s `Verdict` table. `tests/issue_1170_error_policy_owners.rs`
+  `--glossary` or `--evidence`. The error envelope and the error exit have their own owners (next
+  item). `tests/issue_1170_error_policy_owners.rs`
   rejects a `"io"` literal or `SpecLoadError::Io(..)` outside an exact allowlist of owner
   functions, even inside `spec_loading.rs`, and counts the hand-written envelope and exit-literal
   sites per file, letting those counts only go down. Still open: reads reported under another
@@ -790,6 +790,16 @@ native binary: argument parsing
   `file not found: <path>` spelling for a missing file only (`chain` manifest, `analyze`,
   `verify --from-state`, `--requirements`), failures labeled `io` that are not file reads, and the
   library-side `literate_access` IO envelope, which cannot call the binary's owner.
+- **Error exit and envelope owners (#1170, no output change):** `fslc_rust::outcome` owns the
+  error exit. `error_exit` pairs an error envelope with the code the `Verdict` table gives it (2 for
+  every `kind` but `internal`, 3 for `internal`), and `normalized_exit_status` is the process-exit
+  normalization formerly in `main.rs`. `cli_output.rs` owns the error envelope: `error_output`, and
+  `error_detail` for an error nested in another command's output (`chain`'s layer `detail`); `chain`'s
+  failed-layer record is built once by `chain_step_input_error`. The command arms of `main.rs`,
+  `causal.rs`, `refinement.rs`, and `verification.rs` return `error_exit(..)` wherever the literal
+  they spelled equals the table's code. A literal that differs (an `internal` error reported with 2)
+  and the other files' literals stay hand-written: changing such an exit is a behavior decision, not
+  this refactor. The ratchet's `error-envelope` and `error-exit-literal` pins hold the counts left.
 - `LiterateState`, atomic migration, verify cache, approval trust, and solver execution remain
   distinct state/failure owners rather than a single application state.
 - **Candidate experiment (not authorization):** if selected through the C2 gate, first make
