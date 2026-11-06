@@ -627,26 +627,20 @@ fn explain_skeleton_authored_declarations_carry_no_generated_marker() {
 }
 
 /// `(stdout, exit)` of `fslc <args...>` run in the e2e fixture directory of
-/// the next edition, behind the gate when `gate`.
-fn run_fsl5_e2e(args: &[&str], gate: bool) -> (String, i32) {
-    run_fsl5("e2e", args, gate)
+/// the next edition.
+fn run_fsl5_e2e(args: &[&str]) -> (String, i32) {
+    run_fsl5("e2e", args)
 }
 
 /// `(stdout, exit)` of `fslc <args...>` run in the fixture directory
-/// `tests/fixtures/fsl5/<example>`, behind the gate when `gate`.
-fn run_fsl5(example: &str, args: &[&str], gate: bool) -> (String, i32) {
+/// `tests/fixtures/fsl5/<example>`.
+fn run_fsl5(example: &str, args: &[&str]) -> (String, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    command
-        .args(args)
-        .current_dir(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("tests/fixtures/fsl5")
-                .join(example),
-        )
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if gate {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    }
+    command.args(args).current_dir(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fsl5")
+            .join(example),
+    );
     let output = command.output().expect("run native CLI");
     (
         String::from_utf8(output.stdout).expect("UTF-8 stdout"),
@@ -673,7 +667,7 @@ fn readable_action<'t>(readable: &'t str, action: &str) -> &'t str {
 /// golden was read and fixed by hand.
 #[test]
 fn explain_readable_names_the_origin_of_each_requires() {
-    let (readable, exit) = run_fsl5_e2e(&["explain", "--readable", "fsl5_en.fsl"], true);
+    let (readable, exit) = run_fsl5_e2e(&["explain", "--readable", "fsl5_en.fsl"]);
     assert_eq!(exit, 0, "{readable}");
     assert_eq!(
         readable_action(&readable, "auto_approve"),
@@ -705,14 +699,11 @@ fn strip_lines(value: &mut serde_json::Value) {
 /// same for the example written in English, in Japanese keywords and aliases,
 /// and in particles: the lowering steps carry canonical names and English
 /// keywords (`--names canonical` shows them as recorded), only the source
-/// lines differ. Without the gate the option does not exist.
+/// lines differ. A document of the current edition has no such steps.
 #[test]
 fn explain_lowering_is_one_correspondence_for_every_spelling() {
     fn lowering(file: &str) -> serde_json::Value {
-        let (stdout, exit) = run_fsl5_e2e(
-            &["explain", "--lowering", "--names", "canonical", file],
-            true,
-        );
+        let (stdout, exit) = run_fsl5_e2e(&["explain", "--lowering", "--names", "canonical", file]);
         assert_eq!(exit, 0, "{file}: {stdout}");
         let mut value: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
         strip_lines(&mut value);
@@ -738,10 +729,12 @@ fn explain_lowering_is_one_correspondence_for_every_spelling() {
     for file in ["fsl5_ja_full.fsl", "fsl5_ja_particles.fsl"] {
         assert_eq!(lowering(file), english, "{file}");
     }
-    let (stdout, exit) = run_fsl5_e2e(&["explain", "--lowering", "original.fsl"], false);
-    assert_eq!(exit, 2, "{stdout}");
-    assert!(
-        stdout.contains("unknown explain option '--lowering'"),
+    let (stdout, exit) = run_fsl5_e2e(&["explain", "--lowering", "original.fsl"]);
+    assert_eq!(exit, 0, "{stdout}");
+    let current: serde_json::Value = serde_json::from_str(&stdout).expect("JSON");
+    assert_eq!(
+        current["lowering"],
+        serde_json::json!({"actions": [], "properties": []}),
         "{stdout}"
     );
 }
@@ -763,7 +756,6 @@ fn explain_readable_names_resource_guard_and_role_property_origins() {
                 "canonical",
                 file,
             ],
-            true,
         );
         assert_eq!(exit, 0, "{file}: {readable}");
         for expected in [

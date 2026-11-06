@@ -24,7 +24,7 @@ mod aggregate_and_component_locations {
 
     fn check_cases(cases: Vec<forms::Case>) {
         for case in cases {
-            let mut request = Request { cmd: "check".into(), source: case.source.clone(), source_file: "root.fsl".into(), files: case.files.iter().cloned().collect(), options: Options::default(), unstable: vec![] };
+            let mut request = Request { cmd: "check".into(), source: case.source.clone(), source_file: "root.fsl".into(), files: case.files.iter().cloned().collect(), options: Options::default() };
             let mut no_solver = || -> Result<fsl_solver_z3js::Z3JsSolver, String> { panic!("unexpected solver: {}", case.id) };
             let report = block_on(check_with(&request, TEST_SOLVER_VERSION, &mut no_solver));
             if case.rejection {

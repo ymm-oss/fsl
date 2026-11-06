@@ -101,7 +101,6 @@ fn run(id: &str) {
             .args(&args)
             .current_dir(inputs)
             .env("FSLC_CACHE", "off")
-            .env_remove("FSLC_UNSTABLE")
             .output()
             .expect("CLI");
         let actual: Value = serde_json::from_slice(&output.stdout).expect("full CLI packet");

@@ -59,7 +59,6 @@ impl Fixture {
             .arg("verify")
             .arg(&self.source)
             .args(["--engine", "induction", "--depth", "8"])
-            .env_remove("FSLC_UNSTABLE")
             .env_remove("FSLC_CACHE_VERIFY")
             .env("FSLC_CACHE", if cache_enabled { "on" } else { "off" })
             .env("FSLC_CACHE_DIR", &self.cache);

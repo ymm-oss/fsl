@@ -115,13 +115,13 @@ fn valid_corpus_declarations_match_the_authoritative_ast_role_and_scope() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// R0 for the language server (fsl 5 plan §3 S0, S11): the unstable gate
-/// changes nothing for a document in the published language. Every corpus
-/// file is indexed into the same declarations, uses and imports with the
-/// gate off and on, so the next edition's keywords, aliases and mappings
-/// reach no published document.
+/// R0 for the language server (fsl 5 plan §3 S0, S11), after #1434: a
+/// corpus document has no edition header, so it is read as `fsl 4` and
+/// indexed with the published lexicon; the next edition's keywords, aliases
+/// and mappings reach no published document. (The former gate-off/gate-on
+/// comparison has no second reading to compare since the gate is gone.)
 #[test]
-fn the_gate_leaves_the_published_corpus_index_unchanged() {
+fn the_published_corpus_is_indexed_with_the_published_lexicon() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -130,30 +130,16 @@ fn the_gate_leaves_the_published_corpus_index_unchanged() {
     collect(&root.join("specs"), &mut files);
     collect(&root.join("examples"), &mut files);
     files.sort();
-    let gated = fsl_syntax::ParseOptions::with_unstable(
-        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-    );
     let mut indexed = 0_usize;
     let mut failures = Vec::new();
     for path in files {
         let source = std::fs::read_to_string(&path).expect("read corpus source");
-        let stable =
-            DocumentIndex::build(&source, path.to_str(), &fsl_syntax::ParseOptions::stable());
-        let on = DocumentIndex::build(&source, path.to_str(), &gated);
-        match (stable, on) {
-            (Ok(stable), Ok(on)) => {
-                indexed += 1;
-                if (&stable.symbols, &stable.references, &stable.imports)
-                    != (&on.symbols, &on.references, &on.imports)
-                    || on.lexicon() != fsl_lsp::Lexicon::Published
-                {
-                    failures.push(path.display().to_string());
-                }
-            }
-            (stable, on) => {
-                if stable.is_ok() != on.is_ok() {
-                    failures.push(format!("{}: {stable:?} / {on:?}", path.display()));
-                }
+        if let Ok(index) =
+            DocumentIndex::build(&source, path.to_str(), &fsl_syntax::ParseOptions::stable())
+        {
+            indexed += 1;
+            if index.lexicon() != fsl_lsp::Lexicon::Published {
+                failures.push(path.display().to_string());
             }
         }
     }

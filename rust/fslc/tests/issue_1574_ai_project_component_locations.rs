@@ -21,10 +21,7 @@ fn run(command: &str, source: &str) -> (Value, i32) {
     } else {
         process.args(["ai", command, source]);
     }
-    process
-        .current_dir(root)
-        .env_remove("FSLC_CACHE")
-        .env_remove("FSLC_UNSTABLE");
+    process.current_dir(root).env_remove("FSLC_CACHE");
     if command == "replay" {
         process.args(["--logs", LOGS]);
     }

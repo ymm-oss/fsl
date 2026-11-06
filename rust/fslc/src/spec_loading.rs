@@ -211,18 +211,18 @@ type AskedRequirements = Vec<(
 ///
 /// A command may load one spec more than once (`verify` lowers it again for
 /// the compose warnings); the answer for a source and model already asked is
-/// reused, so the solver runs once per question. Without the `fsl5` gate
-/// nothing is asked or kept.
+/// reused, so the solver runs once per question. Only a `fsl 5` document
+/// has such checks, so for any other document nothing is asked or kept.
 pub(crate) fn reject_refuted_requirements(
     source: &str,
     model: &KernelModel,
 ) -> Result<(), SpecLoadError> {
     static ASKED: std::sync::Mutex<AskedRequirements> = std::sync::Mutex::new(Vec::new());
     let options = crate::process::parse_options();
-    if !options
-        .unstable()
-        .contains(fsl_syntax::UnstableFeature::Fsl5)
-    {
+    if !matches!(
+        fsl_syntax::edition_header(source, options),
+        Ok(Some(header)) if header.edition == fsl_syntax::Edition::Fsl5
+    ) {
         return Ok(());
     }
     let mut asked = ASKED

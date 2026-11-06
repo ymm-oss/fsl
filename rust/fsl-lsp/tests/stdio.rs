@@ -36,7 +36,7 @@ fn issue_1463_supported_forms_publish_and_clear_located_diagnostics() {
         texts.push(valid);
     }
     let uri = format!("file://{}", dir.join("support.fsl").display());
-    let published = published_diagnostics_each_at(&texts, None, &[], &uri);
+    let published = published_diagnostics_each_at(&texts, &[], &uri);
     let (pairs, remainder) = published.as_chunks::<2>();
     assert!(remainder.is_empty());
     assert_eq!(pairs.len(), cases.len());
@@ -124,11 +124,7 @@ fn edition_findings_are_complete_utf16_warnings_or_pre_analysis_errors() {
         .iter()
         .map(|probe| probe.4.as_str())
         .collect::<Vec<_>>();
-    let published = published_diagnostics_each(
-        &texts,
-        Some("fsl5"),
-        &[("FSLC_LSP_ANALYSIS_DIAGNOSTICS", "1")],
-    );
+    let published = published_diagnostics_each(&texts, &[("FSLC_LSP_ANALYSIS_DIAGNOSTICS", "1")]);
     let mut results = edition_cases::Results::default();
     for ((code, header, edition, severity, source), diagnostics) in probes.iter().zip(published) {
         let findings = edition_cases::findings(source, "/tmp/fsl-lsp-astral.fsl", *edition);
@@ -186,7 +182,6 @@ fn publication_transcript(texts: &[String], gate: Option<&str>) -> Vec<Value> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    command.env_remove("FSLC_UNSTABLE");
     command.env_remove("FSLC_LSP_ANALYSIS_DIAGNOSTICS");
     if let Some(value) = gate {
         command.env("FSLC_UNSTABLE", value);
@@ -465,10 +460,10 @@ fn diagnostic_after_non_ascii_text_is_published_at_its_utf16_position() {
     assert!(child.wait().expect("wait for fslc-lsp").success());
 }
 
-/// Open `text` in a fresh server with the unstable gate set or unset and
-/// return the diagnostics the server publishes for it.
-fn published_diagnostics(text: &str, unstable: Option<&str>) -> Vec<Value> {
-    published_diagnostics_each(&[text], unstable, &[])
+/// Open `text` in a fresh server and return the diagnostics the server
+/// publishes for it.
+fn published_diagnostics(text: &str) -> Vec<Value> {
+    published_diagnostics_each(&[text], &[])
         .pop()
         .expect("one publish")
 }
@@ -480,7 +475,7 @@ fn legacy_expression_operator_diagnostics_use_the_operator_utf16_range() {
             "  @requirement(\"REQ-PROBE-001\", \"日本語😀\") invariant I {{ true {operator} false }}"
         );
         let source = format!("fsl 5\nspec S {{\n  state {{ flag: Bool = false }}\n{line}\n}}\n");
-        let diagnostics = published_diagnostics(&source, Some("fsl5"));
+        let diagnostics = published_diagnostics(&source);
         let diagnostic = diagnostics
             .iter()
             .find(|d| d["code"] == "unsupported_in_edition")
@@ -501,7 +496,7 @@ fn legacy_expression_operator_diagnostics_use_the_operator_utf16_range() {
         );
         let canonical = source.replace(operator, replacement);
         assert!(
-            published_diagnostics(&canonical, Some("fsl5"))
+            published_diagnostics(&canonical)
                 .iter()
                 .all(|d| d["code"] != "unsupported_in_edition")
         );
@@ -521,7 +516,7 @@ fn shared_expression_entries_publish_both_operator_endpoints() {
             .count();
         for operator in ["||", "->"] {
             let source = format!("fsl 5\n{}\n", body.replace("OP", operator));
-            let diagnostics = published_diagnostics(&source, Some("fsl5"));
+            let diagnostics = published_diagnostics(&source);
             let diagnostic = diagnostics
                 .iter()
                 .find(|d| d["code"] == "unsupported_in_edition")
@@ -534,25 +529,15 @@ fn shared_expression_entries_publish_both_operator_endpoints() {
     }
 }
 
-/// Open the first of `texts` in a fresh server with the unstable gate set or
-/// unset, replace the document's text with each of the others in turn, and
-/// return the diagnostics the server publishes for each.
-fn published_diagnostics_each(
-    texts: &[&str],
-    unstable: Option<&str>,
-    environment: &[(&str, &str)],
-) -> Vec<Vec<Value>> {
-    published_diagnostics_each_at(
-        texts,
-        unstable,
-        environment,
-        "file:///tmp/fsl-lsp-astral.fsl",
-    )
+/// Open the first of `texts` in a fresh server, replace the document's text
+/// with each of the others in turn, and return the diagnostics the server
+/// publishes for each.
+fn published_diagnostics_each(texts: &[&str], environment: &[(&str, &str)]) -> Vec<Vec<Value>> {
+    published_diagnostics_each_at(texts, environment, "file:///tmp/fsl-lsp-astral.fsl")
 }
 
 fn published_diagnostics_each_at(
     texts: &[&str],
-    unstable: Option<&str>,
     environment: &[(&str, &str)],
     uri: &str,
 ) -> Vec<Vec<Value>> {
@@ -560,11 +545,7 @@ fn published_diagnostics_each_at(
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .env_remove("FSLC_UNSTABLE");
-    if let Some(features) = unstable {
-        command.env("FSLC_UNSTABLE", features);
-    }
+        .stderr(Stdio::piped());
     command.envs(environment.iter().copied());
     let mut child = command.spawn().expect("spawn fslc-lsp");
     let mut stdin = child.stdin.take().expect("child stdin");
@@ -666,7 +647,7 @@ fn ai_project_authority_and_rule_publish_and_clear() {
                 ),
         ),
     ] {
-        let found = published_diagnostics_each(&[source, &valid, &valid, source], None, &[]);
+        let found = published_diagnostics_each(&[source, &valid, &valid, source], &[]);
         let expected = vec![ai_expected(message, "semantics", line, column)];
         let expected = vec![expected.clone(), vec![], vec![], expected];
         if found != expected {
@@ -709,7 +690,7 @@ fn ai_project_later_and_inline_ranges_are_document_utf16() {
             let valid = source
                 .replace("Missing", "Search")
                 .replace("bogus", "tool_authority");
-            let found = published_diagnostics_each(&[&source, &valid], None, &[]);
+            let found = published_diagnostics_each(&[&source, &valid], &[]);
             assert_eq!(
                 found,
                 vec![
@@ -727,7 +708,7 @@ fn ai_project_unchanged_valid_must_publish_then_reject_a_change() {
         "ai_component C { tool Search { schema S; } authority { may_execute Search; } }",
     );
     let invalid = valid.replace("may_execute Search", "may_execute Missing");
-    let found = published_diagnostics_each(&[&valid, &valid, &invalid, &valid], None, &[]);
+    let found = published_diagnostics_each(&[&valid, &valid, &invalid, &valid], &[]);
     let column = invalid.find("may_execute").unwrap();
     assert_eq!(
         found,
@@ -753,7 +734,7 @@ fn ai_project_no_tools_and_standalone_controls_keep_their_contracts() {
                 "ai_component C {",
                 "ai_component C { tool Search { schema S; }",
             );
-            let found = published_diagnostics_each(&[&source, &valid], None, &[]);
+            let found = published_diagnostics_each(&[&source, &valid], &[]);
             assert_eq!(
                 found,
                 vec![
@@ -771,7 +752,7 @@ fn ai_project_no_tools_and_standalone_controls_keep_their_contracts() {
     let source = include_str!("../../fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl");
     let message = "unknown tool 'MissingTool' in authority block at /tmp/fsl-lsp-astral.fsl:14:5";
     assert_eq!(
-        published_diagnostics(source, None),
+        published_diagnostics(source),
         vec![ai_expected(message, "semantics", 13, 4)]
     );
 }
@@ -780,7 +761,7 @@ fn ai_project_no_tools_and_standalone_controls_keep_their_contracts() {
 fn ai_project_parse_errors_are_not_relocated_twice_and_never_build_a_model() {
     let source =
         ai_project("// preceding comment\n    ai_component C { authority { may_execute ; } }");
-    let published = published_diagnostics(&source, None);
+    let published = published_diagnostics(&source);
     assert_eq!(published.len(), 1, "{published:#?}");
     assert_eq!(published[0]["data"]["kind"], "parse");
     assert_eq!(
@@ -810,9 +791,7 @@ fn ai_project_parse_errors_are_not_relocated_twice_and_never_build_a_model() {
 fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
     let fixtures =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fslc/tests/fixtures/fsl5_solver");
-    let options = fsl_syntax::ParseOptions::with_unstable(
-        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-    );
+    let options = fsl_syntax::ParseOptions::stable();
     for file in ["large_domain.fsl", "resource_condition.fsl"] {
         let text = std::fs::read_to_string(fixtures.join(file)).expect("read fixture");
         let resolver = fsl_core::FsResolver::new(&fixtures);
@@ -853,7 +832,7 @@ fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
             native["diagnostic_code"], "decide_not_exhaustive",
             "{native:#}"
         );
-        for diagnostics in published_diagnostics_each(&[text.as_str(); 4], Some("fsl5"), &[]) {
+        for diagnostics in published_diagnostics_each(&[text.as_str(); 4], &[]) {
             let error = diagnostics
                 .iter()
                 .find(|diagnostic| diagnostic["severity"] == 1)
@@ -883,14 +862,15 @@ fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
 
 /// fsl 5 plan S2 acceptance 4: on a line holding a character outside the
 /// BMP (CJK Extension B `𠮷`, two UTF-16 code units), every published range
-/// is in UTF-16 code units, including the lexer's own warnings behind the
-/// gate. Without the gate the same document publishes no lexical warning.
+/// is in UTF-16 code units, including the lexer's own warnings under the
+/// `fsl 5` header. Without the header the same body publishes no lexical
+/// warning.
 #[test]
 fn ranges_after_a_character_outside_the_bmp_count_utf16_units() {
     let text = "fsl 5\nspec S {\n  state { 𠮷野\u{3000}: Int }\n}\n";
     let range = |line: u32, start: u32, end: u32| json!({"start":{"line":line,"character":start},"end":{"line":line,"character":end}});
 
-    let gated = published_diagnostics(text, Some("fsl5"));
+    let gated = published_diagnostics(text);
     let warning = gated
         .iter()
         .find(|diagnostic| diagnostic["code"] == "fullwidth_space")
@@ -899,24 +879,25 @@ fn ranges_after_a_character_outside_the_bmp_count_utf16_units() {
     assert_eq!(warning["range"], range(2, 13, 14), "{warning:#}");
     assert_eq!(warning["data"]["replacement"], " ");
 
-    let error_at = |text: &str, unstable: Option<&str>| {
-        let diagnostics = published_diagnostics(text, unstable);
+    let error_at = |text: &str| {
+        let diagnostics = published_diagnostics(text);
         diagnostics
             .iter()
             .find(|diagnostic| diagnostic["severity"] == 1)
             .unwrap_or_else(|| panic!("an error is published: {diagnostics:#?}"))
             .clone()
     };
-    // With the gate the header selects the wider identifier rule, so the
+    // The header selects the wider identifier rule, so the
     // lexer reads `𠮷野`; a spec has no glossary, so the name is refused as
     // not ASCII. Its range ends after `𠮷野` at 13 UTF-16 units (12 chars).
-    let error = error_at(text, Some("fsl5"));
+    let error = error_at(text);
     assert_eq!(error["code"], "canonical_name_not_ascii", "{error:#}");
     assert_eq!(error["range"], range(2, 10, 13), "{error:#}");
-    // Without the gate `𠮷` is a lexer error.
-    assert_eq!(error_at(text, None)["range"], range(2, 10, 12));
+    // Without the header `𠮷` is a lexer error.
+    let headerless = text.strip_prefix("fsl 5\n").expect("header");
+    assert_eq!(error_at(headerless)["range"], range(1, 10, 12));
     assert!(
-        published_diagnostics(text, None)
+        published_diagnostics(headerless)
             .iter()
             .all(|diagnostic| diagnostic["data"]["kind"] != "lexical")
     );
@@ -930,7 +911,7 @@ fn ranges_after_a_character_outside_the_bmp_count_utf16_units() {
 fn a_diagnostic_after_japanese_keywords_and_an_astral_alias_counts_utf16_units() {
     let text = "fsl 5\n要件 R {\n  用語集 {\n    Claim = 𠮷申請\n  }\n  \
                 エンティティ 𠮷申請 { 金額: Int = 0  ライフサイクル A -> B }\n}\n";
-    let diagnostics = published_diagnostics(text, Some("fsl5"));
+    let diagnostics = published_diagnostics(text);
     let error = diagnostics
         .iter()
         .find(|diagnostic| diagnostic["code"] == "canonical_name_not_ascii")
@@ -941,11 +922,11 @@ fn a_diagnostic_after_japanese_keywords_and_an_astral_alias_counts_utf16_units()
         json!({"start":{"line":5,"character":16},"end":{"line":5,"character":18}}),
         "{error:#}"
     );
-    // Without the gate the first Japanese keyword is not a word.
-    let published = published_diagnostics(text, None);
+    // Without the header the first Japanese keyword is not a word.
+    let published = published_diagnostics(text.strip_prefix("fsl 5\n").expect("header"));
     assert_eq!(
         published[0]["range"]["start"],
-        json!({"line":1,"character":0}),
+        json!({"line":0,"character":0}),
         "{published:#?}"
     );
 }
@@ -953,7 +934,7 @@ fn a_diagnostic_after_japanese_keywords_and_an_astral_alias_counts_utf16_units()
 /// fsl 5 plan S1 acceptance 5: an `fsl 5` document whose first line is a
 /// Japanese `//` comment is served without a panic, and its migration
 /// diagnostics are errors, as `--edition next` makes them. The same body
-/// without the header, or without the gate, keeps them warnings.
+/// without the header keeps them warnings.
 #[test]
 fn an_fsl_5_header_after_a_japanese_comment_makes_migration_diagnostics_errors() {
     const ERROR: u64 = 1;
@@ -973,7 +954,7 @@ fn an_fsl_5_header_after_a_japanese_comment_makes_migration_diagnostics_errors()
     };
 
     let headed = format!("// 日本語のコメント\nfsl 5\n{body}");
-    let gated = published_diagnostics(&headed, Some("fsl5"));
+    let gated = published_diagnostics(&headed);
     let found = migration(&gated);
     assert!(!found.is_empty(), "{gated:#?}");
     assert!(
@@ -987,10 +968,9 @@ fn an_fsl_5_header_after_a_japanese_comment_makes_migration_diagnostics_errors()
         "{gated:#?}"
     );
 
-    let plain = migration(&published_diagnostics(
-        &format!("// 日本語のコメント\n{body}"),
-        Some("fsl5"),
-    ));
+    let plain = migration(&published_diagnostics(&format!(
+        "// 日本語のコメント\n{body}"
+    )));
     assert_eq!(
         plain
             .iter()
@@ -1004,14 +984,6 @@ fn an_fsl_5_header_after_a_japanese_comment_makes_migration_diagnostics_errors()
     assert!(
         plain.iter().all(|(_, severity)| *severity == WARNING),
         "{plain:?}"
-    );
-
-    let ungated = published_diagnostics(&headed, None);
-    assert!(
-        ungated
-            .iter()
-            .any(|diagnostic| diagnostic["code"] == "FSL-DIALECT-UNKNOWN"),
-        "without the gate the header is the unknown declaration `fsl`: {ungated:#?}"
     );
 }
 
@@ -1029,7 +1001,7 @@ fn a_forbidden_the_gate_rejects_is_published_as_an_error() {
             .join("../../examples/gallery/errors/forbidden_op_accepted.fsl"),
     )
     .expect("read gallery fixture");
-    let published = published_diagnostics(&fixture, None);
+    let published = published_diagnostics(&fixture);
     let trace = published
         .iter()
         .filter(|diagnostic| diagnostic["code"] == "FSL-REQUIREMENT-TRACE")
@@ -1052,7 +1024,7 @@ fn a_forbidden_the_gate_rejects_is_published_as_an_error() {
         "requires order[o] == Paid",
     );
     assert_ne!(guarded, fixture, "the fixture's weakened guard moved");
-    let published = published_diagnostics(&guarded, None);
+    let published = published_diagnostics(&guarded);
     assert!(
         published
             .iter()
@@ -1078,7 +1050,7 @@ fn an_acceptance_wrong_kind_step_is_published_as_a_located_error() {
   }
 }
 "#;
-    let published = published_diagnostics(source, None);
+    let published = published_diagnostics(source);
     let trace = published
         .iter()
         .filter(|diagnostic| diagnostic["code"] == "FSL-REQUIREMENT-TRACE")
@@ -1102,14 +1074,14 @@ fn an_acceptance_wrong_kind_step_is_published_as_a_located_error() {
 /// keyword token, not an acceptance replay error or the trace declaration.
 #[test]
 fn ill_typed_expect_and_then_publish_semantic_keyword_ranges() {
-    for (header, trace, keyword, unstable, line, end) in [
-        ("", "acceptance", "expect", None, 9, 10),
-        ("fsl 5\n", "scenario", "then", Some("fsl5"), 10, 8),
+    for (header, trace, keyword, line, end) in [
+        ("", "acceptance", "expect", 9, 10),
+        ("fsl 5\n", "scenario", "then", 10, 8),
     ] {
         let source = format!(
             "{header}requirements E {{\n  enum Color {{ Red, Blue }}\n  state {{ c: Color }}\n  init {{ c = Red }}\n  requirement REQ-1 \"paint\" {{\n    action paint(x: Color) {{ c = x }}\n  }}\n  {trace} AC-1 \"type comparison\" {{\n    paint(Blue)\n    {keyword} c != 1\n  }}\n}}\n"
         );
-        let published = published_diagnostics(&source, unstable);
+        let published = published_diagnostics(&source);
         let errors = published
             .iter()
             .filter(|diagnostic| diagnostic["severity"] == 1)
@@ -1132,23 +1104,21 @@ fn ill_typed_expect_and_then_publish_semantic_keyword_ranges() {
 
 #[test]
 fn ill_typed_trace_arguments_publish_semantic_step_token_ranges() {
-    for (source, unstable, line, end, type_name) in [
+    for (source, line, end, type_name) in [
         (
             "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { requires x != c c = x }\n  }\n  forbidden FB-1 \"internal type\" {\n    paint(if c != 1 then Red else Blue)\n    expect rejected\n  }\n}\n",
-            None,
             8,
             9,
             "Color",
         ),
         (
             "fsl 5\nrequirements R {\n  number Amount\n  actor Employee\n  entity Claim { amount: Amount = 0 lifecycle Draft -> Submitted }\n  event submit = Employee submits Claim with amount Draft -> Submitted\n  scenario AC-1 \"internal type\" {\n    Employee submits claim1 with amount (if claim_stage[0] != 1 then 1 else 2)\n    then claim1 is Submitted\n  }\n}\nverify { instances Claim = 2 values Amount = 0..3 }\n",
-            Some("fsl5"),
             7,
             12,
             "ClaimStage",
         ),
     ] {
-        let published = published_diagnostics(source, unstable);
+        let published = published_diagnostics(source);
         let errors = published
             .iter()
             .filter(|diagnostic| diagnostic["severity"] == 1)
@@ -1186,7 +1156,6 @@ impl Session {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .env_remove("FSLC_UNSTABLE")
             .spawn()
             .expect("spawn fslc-lsp");
         let stdin = child.stdin.take().expect("child stdin");
@@ -1361,7 +1330,7 @@ fn a_decision_table_gap_is_published_with_its_values() {
                 decide T \"who\" for Submitted Claim {\n    \
                 SmallClaim => System approves\n    LargeClaim => Manager approves\n  \
                 }\n}\nverify {\n  instances Claim = 1\n  values Amount = 0..3\n}\n";
-    let diagnostics = published_diagnostics(text, Some("fsl5"));
+    let diagnostics = published_diagnostics(text);
     let gap = diagnostics
         .iter()
         .find(|diagnostic| diagnostic["code"] == "decide_not_exhaustive")

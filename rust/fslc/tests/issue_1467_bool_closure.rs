@@ -84,7 +84,6 @@ fn run(label: &str, relation: &str, pair: &str, predicate: &str, outcome: &str) 
             }
             let output = command
                 .current_dir(&directory)
-                .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
                 .env("FSLC_CACHE", "off")
                 .output()
                 .unwrap();

@@ -169,7 +169,6 @@ fn observe(directory: &Path, route: &str) -> (i32, Value) {
         .current_dir(directory)
         .env("FSLC_CACHE", "off")
         .env_remove("FSLC_CACHE_VERIFY")
-        .env_remove("FSLC_UNSTABLE")
         .output()
         .unwrap();
     std::fs::write(

@@ -7,7 +7,7 @@ use cases::{Results, Scratch, value, without_versions};
 use serde_json::json;
 
 fn run(scratch: &Scratch, command: &str) -> std::process::Output {
-    cases::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, command, true)
+    cases::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, command)
 }
 
 #[test]
@@ -59,13 +59,13 @@ fn markdown(source: &str, label: &str, base: &std::path::Path) -> String {
         source,
         Some(label),
         base,
-        &cases::gated(),
+        &cases::parse_options(),
     )
     .unwrap();
     let kernel = fsl_core::parse_kernel_source_with_options(
         source,
         &fsl_core::FsResolver::new(base),
-        &cases::gated(),
+        &cases::parse_options(),
     )
     .unwrap();
     let model = fsl_core::build_model(kernel.clone()).unwrap();
@@ -78,7 +78,7 @@ fn markdown(source: &str, label: &str, base: &std::path::Path) -> String {
         None,
         None,
         None,
-        &cases::gated(),
+        &cases::parse_options(),
     )
     .unwrap()
     .markdown

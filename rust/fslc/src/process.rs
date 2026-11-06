@@ -26,13 +26,13 @@ use std::task::{Context, Poll, Waker};
 /// that reports `kind:"internal"` instead of aborting.
 pub(crate) const STACK_SIZE: usize = 8 * 1024 * 1024;
 
-/// Parse options for this process, fixed once in [`main`](crate::main) before any parse.
-static PARSE_OPTIONS: std::sync::OnceLock<fsl_syntax::ParseOptions> = std::sync::OnceLock::new();
+/// Parse options for this process: the published language.
+static PARSE_OPTIONS: fsl_syntax::ParseOptions = fsl_syntax::ParseOptions::stable();
 
 /// The process's parse options. Every document parse in this binary's own
 /// modules receives them (`docs/design/parse-entry-inventory.md`).
 pub(crate) fn parse_options() -> &'static fsl_syntax::ParseOptions {
-    PARSE_OPTIONS.get_or_init(fslc_rust::unstable_gate::from_environment)
+    &PARSE_OPTIONS
 }
 
 pub(crate) fn block_on_native<F: Future>(future: F) -> F::Output {

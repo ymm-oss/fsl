@@ -56,7 +56,6 @@ fn check(label: &str, text: &str) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["check", "paths.fsl"])
         .current_dir(directory)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
         .env("FSLC_CACHE", "off")
         .output()
         .expect("run path checker");

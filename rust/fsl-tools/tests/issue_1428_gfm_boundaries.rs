@@ -2,7 +2,7 @@
 //! Independent literal encodings calibrated by parent-owned actual GFM evidence.
 //! These public-API tests execute no renderer/network and reuse no escaping oracle.
 
-use fsl_syntax::{ParseOptions, UnstableFeature, UnstableFeatures};
+use fsl_syntax::ParseOptions;
 use fsl_tools::{AppliedEvidence, Locale, RequirementClaimSet, Segment};
 use serde_json::{Value, json};
 
@@ -144,7 +144,7 @@ fn underscore_domain_labels_in_document_and_ledger_slots() {
 #[test]
 fn underscore_domain_labels_in_authored_comments() {
     let mut failures = Vec::new();
-    let options = ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5));
+    let options = ParseOptions::stable();
     for &(raw, code, _) in DOMAINS {
         let source = |comment: &str| {
             format!(

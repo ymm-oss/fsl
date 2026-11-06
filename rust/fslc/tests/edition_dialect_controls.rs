@@ -10,7 +10,7 @@ use cases::{Results, Scratch, value, without_versions};
 use serde_json::{Value, json};
 
 fn run(scratch: &Scratch, template: &str) -> std::process::Output {
-    cases::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, template, true)
+    cases::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, template)
 }
 
 fn git(scratch: &Scratch, args: &[&str]) -> String {
@@ -102,7 +102,7 @@ pub(crate) fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
                 .replace("false } }", "false } } }"),
         );
         for command in &commands {
-            let output = cases::invoke(env!("CARGO_BIN_EXE_fslc"), command, &scratch.0, true);
+            let output = cases::invoke(env!("CARGO_BIN_EXE_fslc"), command, &scratch.0);
             let actual = value(&output);
             results.check(
                 &format!("preserved/dialect/{repeat}/{}", command.join(" ")),
@@ -122,7 +122,7 @@ pub(crate) fn actual_dialects_and_valid_sidecars_are_preserved_twice() {
             &document,
             "spec.fsl",
             fsl_syntax::Edition::Fsl5,
-            &cases::gated(),
+            &cases::parse_options(),
         )
         .unwrap()
         .migrated_source
@@ -155,7 +155,7 @@ pub(crate) fn approval_records_and_git_roots_refuse_before_output_writes() {
         &rejected,
         "spec.fsl",
         fsl_syntax::Edition::Fsl5,
-        &cases::gated(),
+        &cases::parse_options(),
     )
     .unwrap()
     .migrated_source

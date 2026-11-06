@@ -66,7 +66,6 @@ fn run(id: &str) {
             .args(&args)
             .current_dir(root)
             .env("FSLC_CACHE", "off")
-            .env_remove("FSLC_UNSTABLE")
             .output()
             .expect("CLI");
         fs::write(root.join(format!("{route}.stdout")), &output.stdout).expect("stdout");
@@ -82,7 +81,7 @@ fn run(id: &str) {
             "binary_sha256":hash(binary),"head":std::env::var("FSLC_1517_HEAD").ok(),"active_test_patch":std::env::var("FSLC_1517_PATCH").ok(),
             "sources_sha256":[hash(&root.join("root.fsl")),hash(&root.join("piece.fsl")),hash(&root.join("good.fsl"))],
             "env":std::env::vars().filter(|(k,_)| k.starts_with("RUST") || k.starts_with("CARGO") || k.starts_with("FSLC") || k == "PATH" || k == "TMPDIR").collect::<std::collections::BTreeMap<_,_>>(),
-            "env_overrides":{"FSLC_CACHE":"off","FSLC_UNSTABLE":null},"exit":output.status.code(),
+            "env_overrides":{"FSLC_CACHE":"off"},"exit":output.status.code(),
             "expected_exit":code,"expected":expected,"packet":report,"pass":pass});
         fs::write(
             root.join(format!("{route}.json")),

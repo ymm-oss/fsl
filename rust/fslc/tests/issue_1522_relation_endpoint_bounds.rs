@@ -113,7 +113,6 @@ fn run(directory: &Path, consumer: &str) -> (Value, i32) {
     };
     let output = command
         .current_dir(directory)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
         .env("FSLC_CACHE", "off")
         .output()
         .expect("run native CLI");

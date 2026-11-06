@@ -80,7 +80,6 @@ fn run(args: &[&str]) -> Output {
                 .expect("repository root"),
         )
         .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE")
         .output()
         .expect("run native mutate")
 }

@@ -74,7 +74,7 @@ async function nativeEnvelope(testCase) {
       "--no-cache",
     ];
   const result = await command(nativeBinary, args, nativeCommandTimeoutMs,
-    testCase.dependency_edition ? { ...process.env, FSLC_UNSTABLE: "fsl5", FSLC_CACHE: "off" } : process.env);
+    testCase.dependency_edition ? { ...process.env, FSLC_CACHE: "off" } : process.env);
   if (testCase.id?.startsWith("1467/")) {
     await writeFile(join(dist, `issue-${testCase.id.replaceAll("/", "-")}-native-command.json`),
       JSON.stringify({ binary: nativeBinary, args, cwd: repository, ...result }, null, 2));
@@ -335,8 +335,7 @@ for (const binder of ["seq_literal", "set_statement"]) {
 // Exact issue-pair rejection and one-time warning, Linux WASM integration only.
 // The native test seam cannot run the pre-fix main browser BMC. Read the same
 // fixture files as the shared Rust table, rather than maintaining byte copies.
-// The existing batch protocol retains explicit unstable options; no product
-// transport or solver-injection surface is changed here.
+// No product transport or solver-injection surface is changed here.
 const dependencyRoot = await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_root.txt"), "utf8");
 const dependencyVerify = JSON.parse(await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_verify.json"), "utf8"));
 delete dependencyVerify._license;
@@ -374,7 +373,7 @@ for (const [variant, header, expected_status] of [["N", 5, 2], ["W", 4, 0]]) {
   await writeFile(join(directory, "dep_next_colon.fsl"), dependencyChild, "utf8");
   dependencyCases.push({
     id: `E01/${variant}/worker-verify`, variant, dependency_edition: true, cmd: "verify", path, source: dependencyRoot, source_file: path,
-    files: { "dep_next_colon.fsl": dependencyChild }, unstable: ["fsl5"], options: { depth: 2, deadlock: "warn" }, expected_status,
+    files: { "dep_next_colon.fsl": dependencyChild }, options: { depth: 2, deadlock: "warn" }, expected_status,
   });
 }
 await writeFile(
@@ -704,8 +703,8 @@ async function publicationBoundary(socket) {
     logPhase("client-completion", `client=${details.phase ?? "unknown"}`);
     // A fresh Worker for each new repeat avoids shared-runtime solver history.
     for (const [batchIndex, batch] of [dependencyCases, ...recursiveCases.map((testCase) => [testCase])].entries()) {
-    const requests = batch.map(({ cmd, source, source_file, files, unstable, options }) => (
-      { cmd, source, source_file, files, unstable, options }
+    const requests = batch.map(({ cmd, source, source_file, files, options }) => (
+      { cmd, source, source_file, files, options }
     ));
     const evaluated = await cdp(socket, "Runtime.evaluate", {
       expression: `new Promise((resolve, reject) => {

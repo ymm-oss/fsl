@@ -54,7 +54,6 @@ fn verify_lemma(name: &str, expression: &str) -> (Value, i32) {
             "--lemma",
             expression,
         ])
-        .env_remove("FSLC_UNSTABLE")
         .env_remove("FSLC_CACHE_VERIFY")
         .env("FSLC_CACHE", "off")
         .env("FSLC_CACHE_DIR", directory.join("cache"))

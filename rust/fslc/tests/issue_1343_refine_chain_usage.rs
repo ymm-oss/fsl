@@ -24,7 +24,6 @@ fn run(args: &[&str]) -> (Option<i32>, Value) {
         .args(args)
         .current_dir(root())
         .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE")
         .output()
         .expect("run native CLI");
     assert!(

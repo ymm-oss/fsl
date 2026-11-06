@@ -58,7 +58,6 @@ fn fslc_with(id: &str, source: &str, others: &[(&str, &str)], arguments: &[&str]
         .arg("p.fsl")
         .current_dir(scratch.path())
         .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE")
         .output()
         .expect("CLI");
     assert!(
@@ -540,7 +539,6 @@ fn refine_specs(
         .args(["refine", "im.fsl", "ab.fsl", "map.fsl", "--depth", "2"])
         .current_dir(scratch.path())
         .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE")
         .output()
         .expect("CLI");
     (

@@ -17,8 +17,7 @@
 //!
 //! The left side is the canonical (implementation-facing) name, qualified by
 //! its entity for a field; the right side is one identifier, the alias. The
-//! block is accepted only behind the `fsl5` gate in a document headed
-//! `fsl 5`, and only as the first item of `requirements`. Aliases are resolved
+//! block is accepted only in a document headed `fsl 5`, and only as the first item of `requirements`. Aliases are resolved
 //! on the token stream, so every position that names something reads the
 //! canonical name and the frontends below see no alias. Inside
 //! `implements { ... }` the mapping is written in canonical names, and an
@@ -623,8 +622,8 @@ fn expect_ident(tokens: &[Token], cursor: &mut usize) -> Result<(String, Span), 
     }
 }
 
-/// The glossary of `source` read under `options`: `None` unless the gate is
-/// on, the document is headed `fsl 5`, and it is a requirements document
+/// The glossary of `source` read under `options`: `None` unless the
+/// document is headed `fsl 5` and it is a requirements document
 /// whose first item is a well-formed `glossary` block.
 #[must_use]
 pub fn document_glossary(source: &str, options: &crate::ParseOptions) -> Option<Glossary> {
@@ -677,13 +676,7 @@ pub fn alias_at(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        ParseOptions, RequirementsItem, SurfaceDocument, UnstableFeature, UnstableFeatures,
-    };
-
-    fn gated() -> ParseOptions {
-        ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5))
-    }
+    use crate::{ParseOptions, RequirementsItem, SurfaceDocument};
 
     const DOCUMENT: &str = "requirements R {\n  glossary {\n    Claim = Shinsei\n    Claim.amount = Kingaku\n  }\n  entity Shinsei\n  state { total: Map<Shinsei, Int> }\n  implements A from \"a.fsl\" { action go(c) -> go(c) }\n}\n";
 
@@ -749,18 +742,18 @@ mod tests {
     /// The block is the next edition's: elsewhere `glossary` is the published
     /// language's unknown requirements declaration.
     #[test]
-    fn glossary_is_read_only_behind_the_gate_in_an_fsl5_document() {
-        for (source, options) in [
-            (DOCUMENT.to_owned(), ParseOptions::stable()),
-            (DOCUMENT.to_owned(), gated()),
-            (format!("fsl 4\n{DOCUMENT}"), gated()),
-        ] {
-            let error = crate::parse_surface_document_with(&source, &options).unwrap_err();
+    fn glossary_is_read_only_in_an_fsl5_document() {
+        for source in [DOCUMENT.to_owned(), format!("fsl 4\n{DOCUMENT}")] {
+            let error =
+                crate::parse_surface_document_with(&source, &ParseOptions::stable()).unwrap_err();
             assert_eq!(error.code(), "FSL-PARSE", "{source}");
             assert_eq!(error.message, "expected requirements declaration");
         }
-        let parsed =
-            crate::parse_surface_document_with(&format!("fsl 5\n{DOCUMENT}"), &gated()).unwrap();
+        let parsed = crate::parse_surface_document_with(
+            &format!("fsl 5\n{DOCUMENT}"),
+            &ParseOptions::stable(),
+        )
+        .unwrap();
         let SurfaceDocument::Requirements(requirements) = parsed else {
             panic!("requirements document");
         };
@@ -793,10 +786,18 @@ mod tests {
         let source = format!("fsl 5\n{DOCUMENT}");
         // `entity Shinsei` is line 7 (after the header), column 10.
         assert_eq!(
-            alias_at(&source, &gated(), 7, 10),
+            alias_at(&source, &ParseOptions::stable(), 7, 10),
             Some(("Claim".to_owned(), "Shinsei".to_owned()))
         );
-        assert_eq!(alias_at(&source, &gated(), 7, 3), None, "the keyword");
-        assert_eq!(alias_at(&source, &ParseOptions::stable(), 7, 10), None);
+        assert_eq!(
+            alias_at(&source, &ParseOptions::stable(), 7, 3),
+            None,
+            "the keyword"
+        );
+        assert_eq!(
+            alias_at(DOCUMENT, &ParseOptions::stable(), 6, 10),
+            None,
+            "no fsl 5 header"
+        );
     }
 }

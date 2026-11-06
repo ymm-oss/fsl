@@ -225,13 +225,12 @@ pub fn probe(src: &str, route: &str, trace: &Value) -> (i32, Value) {
     if route == "replay" {
         args.extend(["--trace", "trace.json"]);
     }
-    let request = json!({"source":src,"source_sha256":format!("{:x}",Sha256::digest(src.as_bytes())),"route":route,"argv":args,"trace":trace,"binary":binary,"binary_sha256":format!("{:x}",Sha256::digest(std::fs::read(binary).unwrap())),"cwd":dir,"environment_overrides":{"FSLC_CACHE":"off","FSLC_UNSTABLE":null}});
+    let request = json!({"source":src,"source_sha256":format!("{:x}",Sha256::digest(src.as_bytes())),"route":route,"argv":args,"trace":trace,"binary":binary,"binary_sha256":format!("{:x}",Sha256::digest(std::fs::read(binary).unwrap())),"cwd":dir,"environment_overrides":{"FSLC_CACHE":"off"}});
     std::fs::write(dir.join("request.json"), request.to_string()).unwrap();
     let out = Command::new(binary)
         .args(args)
         .current_dir(&dir)
         .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE")
         .output()
         .unwrap();
     let packet: Value = serde_json::from_slice(&out.stdout).expect("public JSON");

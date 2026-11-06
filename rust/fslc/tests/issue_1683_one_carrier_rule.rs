@@ -170,7 +170,6 @@ fn fslc(directory: &std::path::Path, arguments: &[&str]) -> (i32, Value, String)
         .args(arguments)
         .current_dir(directory)
         .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE")
         .output()
         .expect("CLI");
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();

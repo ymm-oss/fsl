@@ -25,11 +25,7 @@ fn fixture(source: &str) -> PathBuf {
 
 fn run(command: &[&str], path: &Path) -> (Value, i32) {
     let mut process = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    process
-        .args(command)
-        .arg(path)
-        .env_remove("FSLC_CACHE")
-        .env_remove("FSLC_UNSTABLE");
+    process.args(command).arg(path).env_remove("FSLC_CACHE");
     if command == ["ai", "replay"] {
         process.args(["--logs", "tests/fixtures/error_envelope_empty_records.json"]);
     }

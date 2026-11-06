@@ -36,7 +36,6 @@ fn check(id: &str, source: &str) -> (Value, i32) {
         .args(["check", "p.fsl"])
         .current_dir(scratch.path())
         .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE")
         .output()
         .expect("CLI");
     assert!(

@@ -344,24 +344,15 @@ const E2E_EN: &str = "rust/fslc/tests/fixtures/fsl5/e2e/fsl5_en.fsl";
 const E2E_JA: &str = "rust/fslc/tests/fixtures/fsl5/e2e/fsl5_ja_full.fsl";
 const REJECTION: &str = "rust/fslc/tests/fixtures/fsl5/rejection/fsl5_en.fsl";
 
-/// `run` with the unstable gate set to `unstable` (or unset).
-fn run_gated(args: &[&str], unstable: Option<&str>) -> Output {
+/// `fslc <args>` in the repository root.
+fn run_fslc(args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    command
-        .args(args)
-        .current_dir(root())
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if let Some(features) = unstable {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, features);
-    }
+    command.args(args).current_dir(root());
     command.output().expect("run native fslc")
 }
 
 fn gated_markdown(path: &str, lang: &str) -> String {
-    let output = run_gated(
-        &["document", "generate", path, "--lang", lang],
-        Some("fsl5"),
-    );
+    let output = run_fslc(&["document", "generate", path, "--lang", lang]);
     assert!(
         output.status.success(),
         "document generate {path} --lang {lang}: {}{}",
@@ -564,12 +555,11 @@ fn document_shows_policies_in_either_language() {
     ));
 }
 
-/// The projection reads the document under the gate's options, so the
-/// forbidden traces of a document written with rules are claims (the
-/// published-language reading rejected the whole document).
+/// The projection reads the `fsl 5` document in its edition, so the
+/// forbidden traces of a document written with rules are claims.
 #[test]
-fn document_claims_keep_the_forbidden_traces_of_a_gated_document() {
-    let output = run_gated(&["document", "claims", REJECTION], Some("fsl5"));
+fn document_claims_keep_the_forbidden_traces_of_an_fsl5_document() {
+    let output = run_fslc(&["document", "claims", REJECTION]);
     assert!(
         output.status.success(),
         "{}{}",
@@ -596,19 +586,16 @@ fn document_claims_keep_the_forbidden_traces_of_a_gated_document() {
     );
 }
 
-/// R0: a requirements document in the published form renders the same bytes
-/// with the gate on, without the new sections.
+/// A requirements document in the published (`fsl 4`) form renders without
+/// the next edition's sections.
 #[test]
-fn a_published_form_document_renders_the_same_with_the_gate_on() {
+fn a_published_form_document_renders_without_the_next_edition_sections() {
     let original = "rust/fslc/tests/fixtures/fsl5/e2e/original.fsl";
-    let args = ["document", "generate", original, "--lang", "ja"];
-    let off = run_gated(&args, None);
-    let on = run_gated(&args, Some("fsl5"));
+    let output = run_fslc(&["document", "generate", original, "--lang", "ja"]);
     assert!(
-        off.status.success(),
+        output.status.success(),
         "{}",
-        String::from_utf8_lossy(&off.stdout)
+        String::from_utf8_lossy(&output.stdout)
     );
-    assert_eq!(off.stdout, on.stdout);
-    assert!(!String::from_utf8_lossy(&on.stdout).contains("## 要件の概観"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("## 要件の概観"));
 }

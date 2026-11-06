@@ -79,19 +79,14 @@ fn scratch(label: &str) -> PathBuf {
     scratch_of(label, &e2e())
 }
 
-/// `(stdout, exit)` of `fslc fmt <path> <args>` with the gate set when
-/// `gate`.
-fn fmt_raw(path: &Path, args: &[&str], gate: bool) -> (String, i32) {
+/// `(stdout, exit)` of `fslc fmt <path> <args>`.
+fn fmt_raw(path: &Path, args: &[&str]) -> (String, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
     command
         .arg("fmt")
         .arg(path.file_name().expect("file name"))
         .args(args)
-        .current_dir(path.parent().expect("directory"))
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if gate {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    }
+        .current_dir(path.parent().expect("directory"));
     let output = command.output().expect("run fslc fmt");
     (
         String::from_utf8(output.stdout).expect("UTF-8 output"),
@@ -105,7 +100,7 @@ fn fmt_raw(path: &Path, args: &[&str], gate: bool) -> (String, i32) {
 fn fmt(directory: &Path, name: &str, source: &str, args: &[&str]) -> (String, PathBuf) {
     let path = directory.join(name);
     std::fs::write(&path, source).expect("write source");
-    let (output, status) = fmt_raw(&path, args, true);
+    let (output, status) = fmt_raw(&path, args);
     assert_eq!(status, 0, "fmt {name} {args:?}: {output}");
     let out = directory.join(format!("{}.out.fsl", name.trim_end_matches(".fsl")));
     std::fs::write(&out, &output).expect("write formatted");
@@ -114,8 +109,8 @@ fn fmt(directory: &Path, name: &str, source: &str, args: &[&str]) -> (String, Pa
 
 fn same_kernel(original: &Path, rewritten: &Path, context: &str) {
     kernel_compare::assert_same_kernel(
-        &kernel_compare::kernel_v2_fsl5(original),
-        &kernel_compare::kernel_v2_fsl5(rewritten),
+        &kernel_compare::kernel_v2(original),
+        &kernel_compare::kernel_v2(rewritten),
         context,
     );
 }
@@ -345,7 +340,6 @@ fn fmt_inserts_the_space_a_particle_needs() {
     let check = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["check", "joined.fsl"])
         .current_dir(&directory)
-        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
         .output()
         .expect("run fslc check");
     let report: Value = serde_json::from_slice(&check.stdout).expect("check JSON");
@@ -367,35 +361,36 @@ fn fmt_inserts_the_space_a_particle_needs() {
         &spaced_path,
         "spaced particles",
     );
-    let (_, status) = fmt_raw(&path, &["--check"], true);
+    let (_, status) = fmt_raw(&path, &["--check"]);
     assert_eq!(status, 1, "--check reports the missing spaces as a change");
 }
 
-/// The options exist only behind the gate; without it `fmt` rejects them as
-/// it always has, and a document without the keyword table is not respelled.
+/// The options are accepted without any opt-in (#1434), a document without
+/// the keyword table is not respelled, and an option `fmt` does not have is
+/// still refused.
 #[test]
-fn lang_and_names_are_gated_and_need_a_next_edition_requirements_document() {
-    let directory = scratch("gated");
+fn lang_and_names_need_a_next_edition_requirements_document() {
+    let directory = scratch("published");
     let path = directory.join("doc.fsl");
     std::fs::write(&path, read(&e2e().join("fsl5_en.fsl"))).expect("write source");
-    for option in ["--lang", "--names"] {
-        let (output, status) = fmt_raw(&path, &[option, "en"], false);
-        assert_eq!(status, 2, "{output}");
-        assert!(
-            output.contains(&format!("unknown fmt option '{option}'")),
-            "{output}"
-        );
-    }
+    let (output, status) = fmt_raw(&path, &["--lang", "en"]);
+    assert_eq!(status, 0, "{output}");
+    let (output, status) = fmt_raw(&path, &["--lowering"]);
+    assert_eq!(status, 2, "{output}");
+    assert!(
+        output.contains("unknown fmt option '--lowering'"),
+        "{output}"
+    );
     let spec = directory.join("spec.fsl");
     std::fs::write(
         &spec,
         "spec S {\n  state { x: Bool }\n  init { x = false }\n}\n",
     )
     .expect("write spec");
-    let (output, status) = fmt_raw(&spec, &["--lang", "ja"], true);
+    let (output, status) = fmt_raw(&spec, &["--lang", "ja"]);
     assert_eq!(status, 2, "{output}");
     assert!(output.contains("respell_not_applicable"), "{output}");
-    let (output, status) = fmt_raw(&path, &["--lang", "fr"], true);
+    let (output, status) = fmt_raw(&path, &["--lang", "fr"]);
     assert_eq!(status, 2, "{output}");
     assert!(output.contains("--lang must be ja or en"), "{output}");
 }

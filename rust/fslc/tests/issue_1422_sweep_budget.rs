@@ -27,7 +27,6 @@ fn expect_packet(root: &Path, file: &str, options: &[&str], expected: &Value) {
             .current_dir(root)
             .args(["sweep", file])
             .args(options)
-            .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
             .env("FSLC_CACHE", "off")
             .output()
             .unwrap();

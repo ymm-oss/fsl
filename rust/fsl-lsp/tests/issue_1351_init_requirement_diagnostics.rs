@@ -44,7 +44,6 @@ fn diagnostics(analysis_enabled: bool) -> Vec<Value> {
             "FSLC_LSP_ANALYSIS_DIAGNOSTICS",
             if analysis_enabled { "1" } else { "0" },
         )
-        .env_remove("FSLC_UNSTABLE")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

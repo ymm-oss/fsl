@@ -26,7 +26,7 @@ use std::path::Path;
 
 use fsl_syntax::{
     BusinessItem, Edition, LosslessKind, Param, ParseOptions, ProcessItem, ProcessTransition,
-    RequirementsItem, Span, SurfaceDocument, Token, TokenKind, UnstableFeature, source_span,
+    RequirementsItem, Span, SurfaceDocument, Token, TokenKind, source_span,
 };
 use serde_json::Value;
 
@@ -154,8 +154,8 @@ pub enum ProcessFormOutcome {
 
 /// Rewrite the processes of `migrated` (the published-edition document the
 /// other migrations produced from `original`) for the next edition, and
-/// check the rewrite keeps the kernel. Only the next edition behind its
-/// unstable gate rewrites; every other request is [`ProcessFormOutcome::Unchanged`].
+/// check the rewrite keeps the kernel. Only the next edition rewrites; every
+/// other request is [`ProcessFormOutcome::Unchanged`].
 /// Findings are located in `original`.
 pub fn convert_process_forms(
     original: &str,
@@ -164,7 +164,7 @@ pub fn convert_process_forms(
     edition: Edition,
     options: &ParseOptions,
 ) -> ProcessFormOutcome {
-    if edition != Edition::Fsl5 || !options.unstable().contains(UnstableFeature::Fsl5) {
+    if edition != Edition::Fsl5 {
         return ProcessFormOutcome::Unchanged;
     }
     let shared = shared_requirement_ids(original, *options);

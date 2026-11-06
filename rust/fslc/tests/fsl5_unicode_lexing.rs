@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! fsl 5 plan §3 S2, through the native CLI: identifiers widen to UAX #31
-//! only behind the `fsl5` gate and only in a document headed `fsl 5`; the
+//! only in a document headed `fsl 5`; the
 //! look-alike characters of design C.4 fail with their own code there, and
 //! every other combination reads identifiers exactly as the published language
 //! does.
@@ -40,16 +40,10 @@ impl Drop for Scratch {
     }
 }
 
-/// `(stdout, exit)` of `fslc <subcommand> <path>` with the gate unset or set.
-fn fslc(subcommand: &str, path: &Path, gate: bool) -> (Vec<u8>, i32) {
+/// `(stdout, exit)` of `fslc <subcommand> <path>`.
+fn fslc(subcommand: &str, path: &Path) -> (Vec<u8>, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    command
-        .arg(subcommand)
-        .arg(path)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if gate {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    }
+    command.arg(subcommand).arg(path);
     let output = command.output().expect("run fslc");
     (output.stdout, output.status.code().expect("fslc exit code"))
 }
@@ -69,21 +63,15 @@ fn spec_with_state_field(header: &str, field: &str) -> String {
     format!("{header}spec S {{\n  state {{ {field}: Int }}\n}}\n")
 }
 
-/// Acceptance 1: `経費` stays an unexpected character unless both the gate and
-/// the `fsl 5` header are present, and those outputs are byte-identical to
-/// the gate-off output of the same file, except that `check` records a
-/// header read under the gate as `fsl_edition`.
+/// Acceptance 1: `経費` stays an unexpected character unless the `fsl 5`
+/// header is present (#1434 removed the gate this also needed).
 #[test]
-fn japanese_identifier_needs_both_the_gate_and_the_fsl5_header() {
+fn japanese_identifier_needs_the_fsl5_header() {
     let scratch = Scratch::new("acceptance-1");
-    for (name, header, gate) in [
-        ("no-header-gate-on.fsl", "", true),
-        ("fsl4-gate-on.fsl", "fsl 4\n", true),
-        ("fsl5-gate-off.fsl", "fsl 5\n", false),
-    ] {
+    for (name, header) in [("no-header.fsl", ""), ("fsl4.fsl", "fsl 4\n")] {
         let path = scratch.write(name, &spec_with_state_field(header, "経費"));
         for subcommand in ["lint", "check"] {
-            let (stdout, exit) = fslc(subcommand, &path, gate);
+            let (stdout, exit) = fslc(subcommand, &path);
             assert_eq!(exit, 2, "{subcommand} {name}");
             let output = envelope(&stdout);
             assert_eq!(output["kind"], "parse", "{name}: {output:#}");
@@ -94,34 +82,15 @@ fn japanese_identifier_needs_both_the_gate_and_the_fsl5_header() {
                     .is_some_and(|message| message.starts_with("unexpected character '経'")),
                 "{name}: {output:#}"
             );
-            let (published, published_exit) = fslc(subcommand, &path, false);
-            assert_eq!(published_exit, exit, "{subcommand} {name}");
-            if gate && !header.is_empty() && subcommand == "check" {
-                // A header read under the gate adds only `fsl_edition`.
-                let mut expected = envelope(&published);
-                expected
-                    .as_object_mut()
-                    .expect("envelope object")
-                    .insert("fsl_edition".to_owned(), 4.into());
-                assert_eq!(output, expected, "{subcommand} {name}");
-            } else {
-                assert_eq!(
-                    published, stdout,
-                    "{subcommand} {name}: the gate changed the bytes"
-                );
-            }
         }
     }
 
     // The lexer accepts the identifier and the header is read: what stops
     // the document now is the naming rule, not an unexpected character. A
     // spec has no glossary, so its names are canonical and must be ASCII.
-    let path = scratch.write(
-        "fsl5-gate-on.fsl",
-        &spec_with_state_field("fsl 5\n", "経費"),
-    );
+    let path = scratch.write("fsl5.fsl", &spec_with_state_field("fsl 5\n", "経費"));
     for subcommand in ["lint", "check"] {
-        let (stdout, exit) = fslc(subcommand, &path, true);
+        let (stdout, exit) = fslc(subcommand, &path);
         let output = envelope(&stdout);
         assert_eq!(exit, 2, "{subcommand}: {output:#}");
         assert_eq!(
@@ -168,7 +137,7 @@ fn lexical_warnings_reach_check_and_lint() {
         ("fullwidth_space".to_owned(), 6, 8, " ".to_owned()),
     ];
 
-    let (stdout, exit) = fslc("check", &path, true);
+    let (stdout, exit) = fslc("check", &path);
     let output = envelope(&stdout);
     assert_eq!(
         (exit, output["result"].as_str()),
@@ -188,7 +157,7 @@ fn lexical_warnings_reach_check_and_lint() {
         "{output:#}"
     );
 
-    let (stdout, exit) = fslc("lint", &path, true);
+    let (stdout, exit) = fslc("lint", &path);
     let output = envelope(&stdout);
     assert_eq!(exit, 1, "{output:#}");
     assert_eq!(output["finding_count"], 2, "{output:#}");
@@ -236,7 +205,7 @@ fn a_non_ascii_name_outside_requirements_is_canonical_name_not_ascii() {
     ] {
         let path = scratch.write(&format!("{dialect}.fsl"), &source);
         for subcommand in ["check", "lint"] {
-            let (stdout, exit) = fslc(subcommand, &path, true);
+            let (stdout, exit) = fslc(subcommand, &path);
             let output = envelope(&stdout);
             assert_eq!(exit, 2, "{dialect} {subcommand}: {output:#}");
             assert_eq!(
@@ -259,10 +228,10 @@ fn a_non_ascii_name_outside_requirements_is_canonical_name_not_ascii() {
 }
 
 /// Acceptance 2 (lexical rows of design C.4): each look-alike fails with its
-/// own code at its own location under the gate and the `fsl 5` header, and
-/// stays the published `FSL-PARSE` unexpected character without the gate.
+/// own code at its own location under the `fsl 5` header, and stays the
+/// published `FSL-PARSE` unexpected character without the header.
 #[test]
-fn look_alike_characters_fail_with_their_own_code_behind_the_gate() {
+fn look_alike_characters_fail_with_their_own_code_under_the_fsl5_header() {
     let scratch = Scratch::new("acceptance-2");
     for (name, field, code, column, hint) in [
         (
@@ -299,7 +268,7 @@ fn look_alike_characters_fail_with_their_own_code_behind_the_gate() {
             &format!("{name}.fsl"),
             &spec_with_state_field("fsl 5\n", field),
         );
-        let (stdout, exit) = fslc("lint", &path, true);
+        let (stdout, exit) = fslc("lint", &path);
         assert_eq!(exit, 2, "{name}");
         let output = envelope(&stdout);
         assert_eq!(output["kind"], "parse", "{name}: {output:#}");
@@ -312,7 +281,11 @@ fn look_alike_characters_fail_with_their_own_code_behind_the_gate() {
             "{name}: message names {hint}: {output:#}"
         );
 
-        let (stdout, exit) = fslc("lint", &path, false);
+        let headerless = scratch.write(
+            &format!("{name}-headerless.fsl"),
+            &spec_with_state_field("", field),
+        );
+        let (stdout, exit) = fslc("lint", &headerless);
         assert_eq!(exit, 2, "{name}");
         let output = envelope(&stdout);
         assert_eq!(output["diagnostic_code"], "FSL-PARSE", "{name}: {output:#}");

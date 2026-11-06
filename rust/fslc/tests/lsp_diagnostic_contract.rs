@@ -14,7 +14,7 @@ fn trace_step_type_errors_share_native_and_lsp_identity() {
         std::process::id()
     ));
     std::fs::create_dir_all(&directory).expect("create step diagnostic fixtures");
-    for (name, source, unstable, type_name, line, word) in [
+    for (name, source, next_edition, type_name, line, word) in [
         (
             "published",
             "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { requires x != c c = x }\n  }\n  forbidden FB-1 \"internal type\" {\n    paint(if c != 1 then Red else Blue)\n    expect rejected\n  }\n}\n",
@@ -36,15 +36,8 @@ fn trace_step_type_errors_share_native_and_lsp_identity() {
         std::fs::write(&path, source).expect("write step fixture");
         let path = path.to_str().expect("UTF-8 path");
         let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-        command.args(["check", path]).env_remove("FSLC_UNSTABLE");
-        let options = if unstable {
-            command.env("FSLC_UNSTABLE", "fsl5");
-            fsl_syntax::ParseOptions::with_unstable(
-                fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-            )
-        } else {
-            fsl_syntax::ParseOptions::stable()
-        };
+        command.args(["check", path]);
+        let options = fsl_syntax::ParseOptions::stable();
         let output = command.output().expect("native check");
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stderr.is_empty());
@@ -73,7 +66,7 @@ fn trace_step_type_errors_share_native_and_lsp_identity() {
             &source[shared.span.start.offset..shared.span.end.offset],
             word
         );
-        if unstable {
+        if next_edition {
             assert_eq!(cli["edition"], "next");
             assert_eq!(cli["fsl_edition"], 5);
         }
@@ -190,11 +183,11 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
 
 /// fsl 5 plan S11: a requirements document written with the keyword
 /// table's Japanese keywords and a glossary alias holding a character outside
-/// the BMP. Behind the gate the CLI and the language server report the same
-/// diagnostic, and the CLI's character column and the shared span's byte
-/// offset name the same word, the one the server converts to UTF-16. Without
-/// the gate the Japanese keyword is a lexical error at the same place for
-/// both.
+/// the BMP. Under the `fsl 5` header the CLI and the language server report
+/// the same diagnostic, and the CLI's character column and the shared span's
+/// byte offset name the same word, the one the server converts to UTF-16.
+/// Without the header the Japanese keyword is a lexical error at the same
+/// place for both.
 #[test]
 fn japanese_keyword_diagnostics_share_cli_and_lsp_identity() {
     let directory = std::env::temp_dir().join(format!(
@@ -207,54 +200,48 @@ fn japanese_keyword_diagnostics_share_cli_and_lsp_identity() {
     let path = directory.join("japanese.fsl");
     std::fs::write(&path, source).expect("write fixture");
     let path = path.to_str().expect("UTF-8 fixture path");
-    let gated = fsl_syntax::ParseOptions::with_unstable(
-        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-    );
-    for (unstable, options, code, location, word) in [
+    // #1434: the former gate-off row (the header read as `fsl`, then
+    // `要件` an unexpected character) no longer exists; the headerless row
+    // keeps the negative control.
+    let headerless = directory.join("headerless.fsl");
+    std::fs::write(&headerless, source.strip_prefix("fsl 5\n").unwrap()).expect("write fixture");
+    let headerless = headerless.to_str().expect("UTF-8 fixture path").to_owned();
+    let headerless_source = source.strip_prefix("fsl 5\n").unwrap();
+    for (path, source, code, location, word) in [
+        (path, source, "canonical_name_not_ascii", (6, 16), "金額"),
         (
-            Some("fsl5"),
-            gated,
-            "canonical_name_not_ascii",
-            (6, 16),
-            "金額",
-        ),
-        (
-            None,
-            fsl_syntax::ParseOptions::stable(),
+            headerless.as_str(),
+            headerless_source,
             "FSL-PARSE",
-            (2, 1),
+            (1, 1),
             "要件",
         ),
     ] {
+        let options = fsl_syntax::ParseOptions::stable();
         let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-        command
-            .args(["check", path])
-            .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-        if let Some(features) = unstable {
-            command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, features);
-        }
+        command.args(["check", path]);
         let output = command.output().expect("run native check");
-        assert_eq!(output.status.code(), Some(2), "{unstable:?}");
+        assert_eq!(output.status.code(), Some(2), "{path}");
         let cli: Value = serde_json::from_slice(&output.stdout).expect("parse CLI envelope");
         let resolver = fsl_core::FsResolver::new(Path::new(&directory));
         let shared = fslc_rust::source_diagnostic::diagnostics(source, path, &resolver, &options)
             .into_iter()
             .find(|diagnostic| diagnostic.kind != "migration")
             .expect("shared source diagnostic");
-        assert_eq!(cli["kind"], shared.kind, "{unstable:?}");
-        assert_eq!(cli["message"], shared.message, "{unstable:?}");
-        assert_eq!(cli["diagnostic_code"], code, "{unstable:?}");
-        assert_eq!(shared.code, code, "{unstable:?}");
-        assert_eq!(cli["loc"], shared.span.python_loc(), "{unstable:?}");
+        assert_eq!(cli["kind"], shared.kind, "{path}");
+        assert_eq!(cli["message"], shared.message, "{path}");
+        assert_eq!(cli["diagnostic_code"], code, "{path}");
+        assert_eq!(shared.code, code, "{path}");
+        assert_eq!(cli["loc"], shared.span.python_loc(), "{path}");
         assert_eq!(
             (shared.span.start.line, shared.span.start.column),
             location,
-            "{unstable:?}"
+            "{path}"
         );
         assert!(
             source.is_char_boundary(shared.span.start.offset)
                 && source[shared.span.start.offset..].starts_with(word),
-            "{unstable:?}: the span starts at byte {}",
+            "{path}: the span starts at byte {}",
             shared.span.start.offset
         );
     }

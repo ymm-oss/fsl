@@ -175,9 +175,7 @@ fn block_on<F: Future>(future: F) -> F::Output {
 }
 
 fn run(answers: Vec<SolverResult<SatResult>>) -> Option<Rejection> {
-    let options = fsl_syntax::ParseOptions::with_unstable(
-        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-    );
+    let options = fsl_syntax::ParseOptions::stable();
     let (_, model) = fslc_rust::check_stages::load_kernel_model(
         SOURCE,
         "requirements-stub.fsl",

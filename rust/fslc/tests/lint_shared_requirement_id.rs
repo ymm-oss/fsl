@@ -72,7 +72,6 @@ impl Scratch {
             .args(args)
             .current_dir(&self.0)
             .env("FSLC_CACHE", "off")
-            .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
             .output()
             .expect("run fslc");
         let packet = serde_json::from_slice(&output.stdout).expect("JSON stdout");

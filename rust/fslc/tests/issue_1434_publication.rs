@@ -59,11 +59,15 @@ fn migrated(written: bool, changed: bool) -> Value {
 
 // Only these ten numeric timings varied in two d83 gate-on probes. Preserve
 // their slots and finite/nonnegative type; compare ALL other keys/values.
-// No verdict, location, assurance, cost count, memory or cache masks.
+// `memory_mb` is masked too: it was 17.46 on the d83 binaries and 17.68 in
+// 5/5 runs of the #1434 head binary, so it follows the build, not the
+// verdict (`edition_all_commands.rs` masks it for the same reason).
+// No verdict, location, assurance, cost count or cache masks.
 fn stable_verify(mut value: Value) -> Value {
     let mut paths = vec![
         "/cost/elapsed_s".to_owned(),
         "/cost/solver/check_elapsed_s".to_owned(),
+        "/cost/solver/memory_mb".to_owned(),
     ];
     paths.extend((0..8).map(|i| format!("/cost/properties/{i}/elapsed_s")));
     for path in paths {
@@ -96,7 +100,7 @@ fn verified() -> Value {
         "action_coverage":{"stay":true},"deadlock":{"found":false},"warnings":[],
         "note":"bounded verification: no violation within depth 2","edition":"next","fsl_edition":5,
         "versions":versions(),"cost":{"elapsed_s":0,"solver":{"checks":17,"check_elapsed_s":0,
-            "conflicts":2,"decisions":1,"propagations":4,"memory_mb":17.46},"properties":properties}})
+            "conflicts":2,"decisions":1,"propagations":4,"memory_mb":0},"properties":properties}})
 }
 
 fn packet(dir: &Path, argv: &[&str], gate: Option<&str>) -> (i32, Value, String) {

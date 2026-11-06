@@ -70,7 +70,6 @@ impl Scratch {
             .args(arguments)
             .current_dir(&self.0)
             .env("FSLC_CACHE_DIR", self.0.join("cache"))
-            .env("FSLC_UNSTABLE", "fsl5")
             .env_remove("FSLC_CACHE")
             .env_remove("FSLC_CACHE_VERIFY");
         command

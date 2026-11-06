@@ -24,11 +24,7 @@ fn rejects_nested(label: &str, predicate: &str, next_edition: bool) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
     command
         .args(["check", "nested.fsl"])
-        .current_dir(&directory)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if next_edition {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    }
+        .current_dir(&directory);
     let output = command.output().expect("run nested expectation check");
     std::fs::remove_dir_all(directory).expect("remove nested fixture directory");
     let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {

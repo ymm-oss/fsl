@@ -129,7 +129,6 @@ fn observe(root: &Path, causal: bool, state: bool, operation: &str) {
         let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
             .current_dir(root)
             .args(&args)
-            .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
             .env("FSLC_CACHE", "off")
             .env("RUST_BACKTRACE", "0")
             .output()

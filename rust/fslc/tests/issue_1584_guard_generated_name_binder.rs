@@ -55,7 +55,6 @@ fn assert_source_accepts(label: &str, source: &str) {
         }
         let output = command
             .current_dir(&directory)
-            .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
             .env("FSLC_CACHE", "off")
             .output()
             .expect("run fslc");
@@ -297,7 +296,6 @@ verify {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["check", "rule.fsl"])
         .current_dir(&directory)
-        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
         .env("FSLC_CACHE", "off")
         .output()
         .expect("run fslc");

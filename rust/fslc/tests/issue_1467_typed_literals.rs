@@ -53,7 +53,6 @@ fn observe(directory: &Path, route: &str) -> (Value, i32) {
         .current_dir(directory)
         .env("FSLC_CACHE", "off")
         .env_remove("FSLC_CACHE_VERIFY")
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
         .output()
         .expect("native CLI");
     std::fs::write(

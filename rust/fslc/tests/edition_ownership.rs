@@ -7,7 +7,7 @@ use cases::{Results, Scratch, value, without_versions};
 use serde_json::{Value, json};
 
 fn run(scratch: &Scratch, template: &str) -> std::process::Output {
-    cases::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, template, true)
+    cases::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, template)
 }
 
 // Count complete findings across the envelope, not only its outer warnings.
@@ -381,7 +381,6 @@ pub(crate) fn verify_cache_miss_and_hit_each_finish_one_complete_warning() {
             .env("FSLC_CACHE", "on")
             .env("FSLC_CACHE_DIR", &cache)
             .env("TMPDIR", cases::root().join(".codex/tmp"))
-            .env_remove("FSLC_UNSTABLE")
             .output()
             .expect("verify with isolated enabled cache");
         let actual = value(&output);
@@ -412,7 +411,7 @@ pub(crate) fn causal_unreadable_later_root_precedes_earlier_parse_error() {
         "causal observe-expectations broken.fsl --mapping missing.fsl --from-log {repo}/examples/causal/evidence/incident-observation-log.jsonl --scope {repo}/examples/causal/evidence/incident-replay-scope.json --period-start 2026-01-01 --period-end 2026-03-31 --out observations.json",
     ] {
         let args = cases::expand(command, &[("{repo}", cases::root())]);
-        let output = cases::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &scratch.0, true);
+        let output = cases::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &scratch.0);
         let actual = without_versions(value(&output));
         let io = std::fs::read_to_string(scratch.0.join("missing.fsl")).unwrap_err();
         // Both roots name the unreadable path the same way: #1170 phase 2

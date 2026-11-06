@@ -7,8 +7,8 @@ use cases::{Results, Scratch, value, without_versions};
 use serde_json::{Value, json};
 use std::process::Output;
 
-fn run(args: &[String], gate: bool) -> Output {
-    cases::invoke(env!("CARGO_BIN_EXE_fslc"), args, &cases::root(), gate)
+fn run(args: &[String]) -> Output {
+    cases::invoke(env!("CARGO_BIN_EXE_fslc"), args, &cases::root())
 }
 
 fn lsp_row(results: &mut Results, label: &str) {
@@ -17,7 +17,7 @@ fn lsp_row(results: &mut Results, label: &str) {
         &source,
         "source.fsl",
         &fsl_core::FsResolver::new(cases::root()),
-        &cases::gated(),
+        &cases::parse_options(),
     );
     let codes: Vec<_> = diagnostics.iter().map(|d| d.code.as_str()).collect();
     results.check(
@@ -61,7 +61,7 @@ pub(crate) fn every_registered_root_has_the_same_admission_before_dialect_or_sid
         let scratch = Scratch::new();
         let canonical = format!("fsl 5\n{}", cases::DOMAIN);
         let args = scratch.args(row.argv, &canonical);
-        let output = run(&args, true);
+        let output = run(&args);
         if row.key == "version" {
             // The nonreader is executed; cli_contract_conformance owns its
             // metadata/alias assertions, not this source-admission matrix.
@@ -95,7 +95,7 @@ pub(crate) fn every_registered_root_has_the_same_admission_before_dialect_or_sid
         if row.key == "check" {
             continue;
         } // Already exercised as the oracle.
-        let output = run(&args, true);
+        let output = run(&args);
         if row.role == "repair" {
             let actual = value(&output);
             results.check(
@@ -123,7 +123,7 @@ pub(crate) fn every_registered_root_has_the_same_admission_before_dialect_or_sid
                 &cases::root(),
                 &scratch.0.join("source.fsl"),
             );
-            let output = run(&args, true);
+            let output = run(&args);
             results.error_envelope(
                 &format!("priority/output-parent/{}", row.key),
                 &output,
@@ -188,10 +188,7 @@ pub(crate) fn four_warning_classes_and_refusals_finish_once_on_all_eight_verific
             assert!(finding["edits"].is_array());
             for key in VERIFY_ROUTES {
                 let scratch = Scratch::new();
-                let oracle = run(
-                    &scratch.args("verify {src} --depth 2 --no-cache", &source),
-                    true,
-                );
+                let oracle = run(&scratch.args("verify {src} --depth 2 --no-cache", &source));
                 assert_eq!(oracle.status.code(), Some(2));
                 let expected = without_versions(value(&oracle));
                 let path = scratch.0.join("source.fsl");
@@ -207,7 +204,7 @@ pub(crate) fn four_warning_classes_and_refusals_finish_once_on_all_eight_verific
                     &json!(findings)
                 );
                 let row = cases::rows().into_iter().find(|r| r.key == *key).unwrap();
-                let output = run(&scratch.args(row.argv, &source), true);
+                let output = run(&scratch.args(row.argv, &source));
                 let wanted = if next {
                     expected.clone()
                 } else if *key == "chain" {
@@ -243,9 +240,9 @@ pub(crate) fn argv_validation_remains_ahead_of_source_admission() {
         let scratch = Scratch::new();
         let mut args = scratch.args(row.argv, &format!("fsl 5\n{}", cases::DOMAIN));
         args.push("--edition-inventory-unknown".into());
-        let first = run(&args, true);
+        let first = run(&args);
         scratch.write("source.fsl", &cases::rejected_domain());
-        let second = run(&args, true);
+        let second = run(&args);
         let actual = value(&second);
         results.check(
             &format!("preserved/argv/{}", row.key),
@@ -267,10 +264,7 @@ pub(crate) fn report_baselines_receive_one_finished_warning_before_rendering() {
     let path = scratch.write("source.fsl", source);
     let mut results = Results::default();
     for repeat in 0..2 {
-        let oracle = run(
-            &scratch.args("verify {src} --depth 2 --no-cache", source),
-            false,
-        );
+        let oracle = run(&scratch.args("verify {src} --depth 2 --no-cache", source));
         assert_eq!(oracle.status.code(), Some(0));
         let mut expected = without_versions(value(&oracle));
         assert_eq!(
@@ -281,7 +275,7 @@ pub(crate) fn report_baselines_receive_one_finished_warning_before_rendering() {
                 fsl_syntax::Edition::Fsl4
             ))
         );
-        let ledger = run(&scratch.args("ledger {src} --depth 2", source), false);
+        let ledger = run(&scratch.args("ledger {src} --depth 2", source));
         let content = String::from_utf8_lossy(&ledger.stdout);
         let body = content.split("## 付録:").next().unwrap();
         let finding = &expected["warnings"][0];
@@ -323,10 +317,7 @@ pub(crate) fn report_baselines_receive_one_finished_warning_before_rendering() {
                     .is_some()
             );
         }
-        let html = run(
-            &scratch.args("html {src} --depth 2 --no-timing", source),
-            false,
-        );
+        let html = run(&scratch.args("html {src} --depth 2 --no-timing", source));
         let content = String::from_utf8(html.stdout).unwrap();
         let raw = content
             .split_once("<summary>verify JSON</summary>")

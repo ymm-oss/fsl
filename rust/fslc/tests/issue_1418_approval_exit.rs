@@ -95,7 +95,6 @@ impl Repository {
             .current_dir(&self.0)
             .env("FSLC_CACHE", "off")
             .env_remove("FSLC_CACHE_VERIFY")
-            .env_remove("FSLC_UNSTABLE")
             .output()
             .unwrap();
         let dir = self.0.join("observations");
@@ -1040,7 +1039,6 @@ fn dependency_run(repo: &Repository, args: &[&str]) -> Output {
         .current_dir(&repo.0)
         .env("FSLC_CACHE", "off")
         .env_remove("FSLC_CACHE_VERIFY")
-        .env("FSLC_UNSTABLE", "fsl5")
         .output()
         .unwrap();
     let dir = repo.0.join("observations");

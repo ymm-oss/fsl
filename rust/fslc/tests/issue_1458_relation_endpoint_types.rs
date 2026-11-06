@@ -47,7 +47,6 @@ fn run(label: &str, relation: &str, predicate: &str) -> [(&'static str, Value, i
         }
         let output = command
             .current_dir(&directory)
-            .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
             .env("FSLC_CACHE", "off")
             .output()
             .expect("run native relation endpoint check");

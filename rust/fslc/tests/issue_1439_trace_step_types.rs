@@ -29,17 +29,11 @@ impl Drop for Scratch {
     }
 }
 
-fn run(label: &str, source: &str, next_edition: bool, arguments: &[&str]) -> (Value, i32) {
+fn run(label: &str, source: &str, arguments: &[&str]) -> (Value, i32) {
     let scratch = Scratch::new(label);
     std::fs::write(scratch.0.join("trace.fsl"), source).expect("write inline trace fixture");
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    command
-        .args(arguments)
-        .current_dir(&scratch.0)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if next_edition {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    }
+    command.args(arguments).current_dir(&scratch.0);
     let output = command.output().expect("run native fslc");
     assert!(
         output.stderr.is_empty(),
@@ -55,8 +49,8 @@ fn run(label: &str, source: &str, next_edition: bool, arguments: &[&str]) -> (Va
     (value, output.status.code().expect("native exit status"))
 }
 
-fn check(label: &str, source: &str, next_edition: bool) -> (Value, i32) {
-    run(label, source, next_edition, &["check", "trace.fsl"])
+fn check(label: &str, source: &str) -> (Value, i32) {
+    run(label, source, &["check", "trace.fsl"])
 }
 
 /// The first authored step is always at 11:5; a second step is at 12:5.
@@ -176,7 +170,7 @@ fn acceptance_step_rejects_ill_typed_color_condition() {
         "    paint(if c != 1 then Blue else Red)",
         "c == Blue",
     );
-    let (output, status) = check("acceptance-color", &source, false);
+    let (output, status) = check("acceptance-color", &source);
     assert_type_error(&output, status, "Color", 11);
 }
 
@@ -187,7 +181,7 @@ fn forbidden_setup_step_rejects_ill_typed_color_condition() {
         "    paint(if c != 1 then Blue else Red)\n    paint(Blue)",
         "rejected",
     );
-    let (output, status) = check("forbidden-color-setup", &source, false);
+    let (output, status) = check("forbidden-color-setup", &source);
     assert_type_error(&output, status, "Color", 11);
 }
 
@@ -200,7 +194,7 @@ fn forbidden_final_step_rejects_ill_typed_color_condition_s1() {
         "    paint(if c != 1 then Red else Blue)",
         "rejected",
     );
-    let (output, status) = check("forbidden-color-final-s1", &source, false);
+    let (output, status) = check("forbidden-color-final-s1", &source);
     assert_type_error(&output, status, "Color", 11);
 }
 
@@ -211,7 +205,7 @@ fn fsl5_scenario_call_rejects_ill_typed_stage_condition() {
         "    submit(0, if claim_stage[0] != 1 then 1 else 2)",
         "claim_stage[0] == Submitted",
     );
-    let (output, status) = check("scenario-call", &source, true);
+    let (output, status) = check("scenario-call", &source);
     assert_type_error(&output, status, "ClaimStage", 8);
 }
 
@@ -222,7 +216,7 @@ fn fsl5_scenario_input_rejects_ill_typed_stage_condition() {
         "    Employee submits claim1 with amount (if claim_stage[0] != 1 then 1 else 2)",
         "claim1 is Submitted",
     );
-    let (output, status) = check("scenario-input", &source, true);
+    let (output, status) = check("scenario-input", &source);
     assert_type_error(&output, status, "ClaimStage", 8);
 }
 
@@ -233,7 +227,7 @@ fn fsl5_scenario_marked_input_rejects_ill_typed_stage_condition() {
         "    Employee が claim1 を amount (if claim_stage[0] != 1 then 1 else 2) で submits",
         "claim1 is Submitted",
     );
-    let (output, status) = check("scenario-marked-input", &source, true);
+    let (output, status) = check("scenario-marked-input", &source);
     assert_type_error(&output, status, "ClaimStage", 8);
 }
 
@@ -244,7 +238,7 @@ fn fsl5_forbidden_call_setup_rejects_ill_typed_stage_condition() {
         "    submit(0, if claim_stage[0] != 1 then 1 else 2)\n    submit(0, 1)",
         "rejected",
     );
-    let (output, status) = check("forbidden-call-setup", &source, true);
+    let (output, status) = check("forbidden-call-setup", &source);
     assert_type_error(&output, status, "ClaimStage", 8);
 }
 
@@ -255,7 +249,7 @@ fn fsl5_forbidden_call_final_rejects_ill_typed_stage_condition() {
         "    submit(0, 1)\n    submit(0, if claim_stage[0] != 1 then 1 else 2)",
         "rejected",
     );
-    let (output, status) = check("forbidden-call-final", &source, true);
+    let (output, status) = check("forbidden-call-final", &source);
     assert_type_error(&output, status, "ClaimStage", 9);
 }
 
@@ -266,7 +260,7 @@ fn fsl5_forbidden_input_setup_rejects_ill_typed_stage_condition() {
         "    Employee submits claim1 with amount (if claim_stage[0] != 1 then 1 else 2)\n    Employee submits claim1 with amount 1",
         "rejected",
     );
-    let (output, status) = check("forbidden-input-setup", &source, true);
+    let (output, status) = check("forbidden-input-setup", &source);
     assert_type_error(&output, status, "ClaimStage", 8);
 }
 
@@ -277,7 +271,7 @@ fn fsl5_forbidden_input_final_rejects_ill_typed_stage_condition() {
         "    Employee submits claim1 with amount 1\n    Employee submits claim1 with amount (if claim_stage[0] != 1 then 1 else 2)",
         "rejected",
     );
-    let (output, status) = check("forbidden-input-final", &source, true);
+    let (output, status) = check("forbidden-input-final", &source);
     assert_type_error(&output, status, "ClaimStage", 9);
 }
 
@@ -288,7 +282,7 @@ fn fsl5_forbidden_marked_setup_rejects_ill_typed_stage_condition() {
         "    Employee が claim1 を amount (if claim_stage[0] != 1 then 1 else 2) で submits\n    Employee が claim1 を amount 1 で submits",
         "rejected",
     );
-    let (output, status) = check("forbidden-marked-setup", &source, true);
+    let (output, status) = check("forbidden-marked-setup", &source);
     assert_type_error(&output, status, "ClaimStage", 8);
 }
 
@@ -299,7 +293,7 @@ fn fsl5_forbidden_marked_final_rejects_ill_typed_stage_condition() {
         "    Employee が claim1 を amount 1 で submits\n    Employee が claim1 を amount (if claim_stage[0] != 1 then 1 else 2) で submits",
         "rejected",
     );
-    let (output, status) = check("forbidden-marked-final", &source, true);
+    let (output, status) = check("forbidden-marked-final", &source);
     assert_type_error(&output, status, "ClaimStage", 9);
 }
 
@@ -310,7 +304,7 @@ fn acceptance_numeric_step_rejects_ill_typed_color_condition() {
         "    setn(if c != 1 then 2 else 0)",
         "n == 2",
     );
-    let (output, status) = check("acceptance-number", &source, false);
+    let (output, status) = check("acceptance-number", &source);
     assert_type_error(&output, status, "Color", 11);
 }
 
@@ -321,7 +315,7 @@ fn fsl5_marked_with_input_rejects_ill_typed_stage_condition() {
         "    Employee が claim1 を submits with amount (if claim_stage[0] != 1 then 1 else 2)",
         "claim1 is Submitted",
     );
-    let (output, status) = check("scenario-marked-with", &source, true);
+    let (output, status) = check("scenario-marked-with", &source);
     assert_type_error(&output, status, "ClaimStage", 8);
 }
 
@@ -341,7 +335,7 @@ requirements R {
 }
 verify { instances Ticket = 2 instances Agent = 2 }
 "#;
-    let (output, status) = check("scenario-relation-role", source, true);
+    let (output, status) = check("scenario-relation-role", source);
     assert_type_error(&output, status, "TicketStage", 9);
 }
 
@@ -352,7 +346,7 @@ fn acceptance_step_checks_unselected_conditional_branch() {
         "    paint(if true then Blue else (if c != 1 then Red else Blue))",
         "c == Blue",
     );
-    let (output, status) = check("acceptance-unselected-branch", &source, false);
+    let (output, status) = check("acceptance-unselected-branch", &source);
     assert_type_error(&output, status, "Color", 11);
 }
 
@@ -384,7 +378,7 @@ fn well_typed_trace_arguments_preserve_const_enum_number_and_bool() {
   }
 }
 "#;
-    let (output, status) = check("typed-published-arguments", source, false);
+    let (output, status) = check("typed-published-arguments", source);
     assert_ok(&output, status);
 }
 
@@ -429,7 +423,7 @@ verify { instances Claim = 2 values Amount = 0..3 }
 
 #[test]
 fn fsl5_well_typed_calls_phrases_and_named_instances_still_pass() {
-    let (output, status) = check("typed-fsl5-arguments", FSL5_WELL_TYPED, true);
+    let (output, status) = check("typed-fsl5-arguments", FSL5_WELL_TYPED);
     assert_ok(&output, status);
     assert_eq!(output["edition"], "next", "{output:#}");
     assert_eq!(output["fsl_edition"], 5, "{output:#}");
@@ -442,7 +436,7 @@ fn forbidden_final_literal_wrong_kind_keeps_existing_diagnostic() {
         "    paint(1)",
         "rejected",
     );
-    let (output, status) = check("literal-wrong-kind", &source, false);
+    let (output, status) = check("literal-wrong-kind", &source);
     assert_wrong_kind(&output, status);
 }
 
@@ -453,7 +447,7 @@ fn forbidden_final_conditional_wrong_kind_keeps_existing_diagnostic() {
         "    paint(if true then 1 else 2)",
         "rejected",
     );
-    let (output, status) = check("conditional-wrong-kind", &source, false);
+    let (output, status) = check("conditional-wrong-kind", &source);
     assert_wrong_kind(&output, status);
 }
 
@@ -462,7 +456,6 @@ fn well_typed_step_arguments_keep_values_override_skips() {
     let (output, status) = run(
         "typed-values-override",
         FSL5_WELL_TYPED,
-        true,
         &[
             "verify",
             "trace.fsl",

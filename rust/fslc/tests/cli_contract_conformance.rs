@@ -29,7 +29,6 @@ fn run(args: &[String]) -> Output {
         .args(args)
         .current_dir(root())
         .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE")
         .env("TMPDIR", root().join(".codex/tmp"))
         .output()
         .expect("run native CLI")
@@ -663,8 +662,10 @@ fn metadata_help_and_stable_gate_controls_are_live() {
             );
         }
     }
-    // Gate-off controls: no FSLC_UNSTABLE inheritance. No gate-on exemption
-    // is silently invented; #1434 owns publishing the unstable CLI surface.
+    // #1434: the next edition's options are accepted without any opt-in,
+    // although `cli-contract.json` does not list them (the command-local
+    // overlay in `cli_contract.rs`); they reach the missing file instead of
+    // a usage error.
     for args in [
         vec!["explain", MISSING, "--names", "canonical"],
         vec!["explain", MISSING, "--lowering"],
@@ -673,7 +674,9 @@ fn metadata_help_and_stable_gate_controls_are_live() {
         vec!["lint", MISSING, "--strict-names"],
     ] {
         let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
-        assert!(usage(&run(&args)), "{args:?}");
+        let output = run(&args);
+        assert!(!usage(&output), "{args:?}");
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
     }
 }
 

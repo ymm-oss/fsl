@@ -123,7 +123,7 @@ pub fn cli(src: &str, bad: bool, temporal: bool, errors: &mut Vec<String>) -> Ve
         };
         requests.push(json!({"route":route,"argv":args}));
     }
-    let request = json!({"case":id,"source":src,"source_sha256":format!("{:x}",Sha256::digest(src.as_bytes())),"trace":trace,"binary":binary,"binary_sha256":binary_hash,"cwd":dir,"environment_overrides":{"FSLC_CACHE":"off","FSLC_UNSTABLE":null},"requests":requests,"bad":bad,"temporal":temporal});
+    let request = json!({"case":id,"source":src,"source_sha256":format!("{:x}",Sha256::digest(src.as_bytes())),"trace":trace,"binary":binary,"binary_sha256":binary_hash,"cwd":dir,"environment_overrides":{"FSLC_CACHE":"off"},"requests":requests,"bad":bad,"temporal":temporal});
     // Independent request records precede CLI observations, outside observed dirs.
     let plans = std::env::temp_dir().join(format!("plans-{}", std::process::id()));
     std::fs::create_dir_all(&plans).unwrap();
@@ -140,7 +140,6 @@ pub fn cli(src: &str, bad: bool, temporal: bool, errors: &mut Vec<String>) -> Ve
             .args(&args)
             .current_dir(&dir)
             .env("FSLC_CACHE", "off")
-            .env_remove("FSLC_UNSTABLE")
             .output()
             .unwrap();
         let packet: Value = serde_json::from_slice(&out.stdout).expect("public JSON");

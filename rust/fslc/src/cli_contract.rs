@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Contract-driven argv membership, before command-local typed interpretation.
-//! Only diagnostic rendering and the existing unstable overlay are command-specific;
-//! stable option ownership, arity, choices and positional limits come from metadata.
+//! Only diagnostic rendering and the next-edition overlay are command-specific;
+//! other option ownership, arity, choices and positional limits come from metadata.
 
-use fsl_syntax::{ParseOptions, UnstableFeature};
+use fsl_syntax::ParseOptions;
 use serde_json::{Value, json};
 
 pub(crate) fn validate_argv(
@@ -38,10 +38,7 @@ pub(crate) fn validate_argv(
     }
     let command = label(node);
     let mut actions = actions(node).to_vec();
-    let gated = options.unstable().contains(UnstableFeature::Fsl5);
-    if gated {
-        unstable_overlay(&command, &mut actions);
-    }
+    next_edition_overlay(&command, &mut actions);
     validate_tokens(&command, &actions, &argv[index..], options)
 }
 
@@ -69,7 +66,10 @@ fn has_flag(action: &Value, flag: &str) -> bool {
         .is_some_and(|flags| flags.iter().any(|value| value.as_str() == Some(flag)))
 }
 
-fn unstable_overlay(command: &str, actions: &mut Vec<Value>) {
+/// The options of the next edition that `cli-contract.json` does not list:
+/// accepted by the command parsers, not yet in the contract or help (#1434
+/// published the edition without advertising them).
+fn next_edition_overlay(command: &str, actions: &mut Vec<Value>) {
     let extras = match command {
         "explain" => json!([
             {"flags":["--names"],"choices":["canonical","alias"]},
@@ -82,8 +82,14 @@ fn unstable_overlay(command: &str, actions: &mut Vec<Value>) {
         "lint" => json!([{"flags":["--strict-names"],"nargs":0}]),
         _ => json!([]),
     };
-    actions.extend(extras.as_array().expect("unstable overlay").iter().cloned());
-    // Edition's numeric aliases are also already gated in Edition::parse_option.
+    actions.extend(
+        extras
+            .as_array()
+            .expect("next-edition overlay")
+            .iter()
+            .cloned(),
+    );
+    // Edition's numeric aliases, which Edition::parse_option accepts too.
     for action in actions
         .iter_mut()
         .filter(|action| has_flag(action, "--edition"))
@@ -396,18 +402,23 @@ mod tests {
     }
 
     #[test]
-    fn unstable_overlay_is_command_local_and_does_not_bypass_stable_validation() {
-        let options = ParseOptions::with_unstable(
-            fsl_syntax::UnstableFeatures::NONE.with(UnstableFeature::Fsl5),
-        );
+    fn next_edition_overlay_is_command_local_and_does_not_bypass_validation() {
+        let options = ParseOptions::stable();
         for argv in [
             vec!["explain", "spec.fsl", "--names", "canonical", "--lowering"],
             vec!["fmt", "spec.fsl", "--lang", "en", "--names", "alias"],
             vec!["lint", "spec.fsl", "--strict-names"],
             vec!["check", "spec.fsl", "--edition", "5"],
+            vec!["check", "spec.fsl", "--edition", "4"],
+        ] {
+            assert_eq!(validate(&argv), Ok(()), "{argv:?}");
+        }
+        for argv in [
+            vec!["check", "spec.fsl", "--lowering"],
+            vec!["verify", "spec.fsl", "--lang", "en"],
+            vec!["migrate", "spec.fsl", "--strict-names"],
         ] {
             assert!(validate(&argv).is_err(), "{argv:?}");
-            assert_eq!(validate_with(&argv, options), Ok(()), "{argv:?}");
         }
         assert_eq!(
             validate_with(&["testgen", "--engine", "bmc", "spec.fsl"], options),

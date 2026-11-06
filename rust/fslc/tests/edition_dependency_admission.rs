@@ -30,7 +30,7 @@ fn dependency_edition_cli_compose_and_implements_refusals_and_mixed_controls() {
             } else {
                 cases::expected_verify(&row, &fixture, &fixture.child)
             };
-            let output = common::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, args, true);
+            let output = common::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, args);
             let _ = cases::versioned_native_value(common::value(&output));
             let label = format!("{}/{cmd}", row.id);
             results.output(
@@ -62,7 +62,7 @@ fn dependency_edition_fixture_roles_are_valid() {
             source,
             &fixture.child,
             None,
-            &common::gated(),
+            &common::parse_options(),
             &serde_json::Map::new,
             false,
         );

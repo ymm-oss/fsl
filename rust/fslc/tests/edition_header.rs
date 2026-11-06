@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-//! The syntax-edition header behind the unstable gate (fsl 5 plan S1,
+//! The syntax-edition header (fsl 5 plan S1,
 //! `docs/design/parse-entry-inventory.md`, "Edition header").
 //!
-//! A document without a header is unchanged with the gate on; R0
-//! (`unstable_gate_r0.rs`) holds that for the whole corpus, positions
-//! included. This file holds the rest against corpus copies:
+//! A document without a header is read as `fsl 4`; the #1434 type-boundary
+//! sweep recorded that publishing `fsl 5` changed no headerless verdict. This
+//! file holds the rest against corpus copies:
 //!
 //! - a copy with `fsl 4` added reads like the original (the kernel without
 //!   positions, and `check`'s verdict);
@@ -28,19 +28,10 @@ use serde_json::Value;
 mod support;
 use support::{corpus_files, repo_relative, root, top_level_keyword};
 
-const GATE: &str = "fsl5";
-
-/// `(stdout, exit)` of `fslc <arguments>` in `directory`, with the gate set
-/// or unset.
-fn fslc(directory: &Path, arguments: &[&str], gate: bool) -> (String, i32) {
+/// `(stdout, exit)` of `fslc <arguments>` in `directory`.
+fn fslc(directory: &Path, arguments: &[&str]) -> (String, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    command
-        .args(arguments)
-        .current_dir(directory)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if gate {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, GATE);
-    }
+    command.args(arguments).current_dir(directory);
     let output = command.output().expect("run fslc");
     let exit = output
         .status
@@ -210,8 +201,8 @@ fn an_fsl_4_header_reads_the_corpus_as_without_one() {
     let four = mirror("fsl4", Some("fsl 4"));
     let failures = each_path(&paths, |path| {
         let mut failures = Vec::new();
-        let (plain_kernel, plain_exit) = fslc(&plain, &["kernel", path], true);
-        let (four_kernel, four_exit) = fslc(&four, &["kernel", path], true);
+        let (plain_kernel, plain_exit) = fslc(&plain, &["kernel", path]);
+        let (four_kernel, four_exit) = fslc(&four, &["kernel", path]);
         let same_kernel = if plain_exit == 0 {
             four_exit == 0
                 && without_positions(json(&plain_kernel)) == without_positions(json(&four_kernel))
@@ -223,8 +214,8 @@ fn an_fsl_4_header_reads_the_corpus_as_without_one() {
                 "{path}: kernel differs with `fsl 4` (exit {plain_exit} -> {four_exit})"
             ));
         }
-        let (plain_check, plain_status) = fslc(&plain, &["check", path], true);
-        let (four_check, four_status) = fslc(&four, &["check", path], true);
+        let (plain_check, plain_status) = fslc(&plain, &["check", path]);
+        let (four_check, four_status) = fslc(&four, &["check", path]);
         if verdict(&plain_check, plain_status) != verdict(&four_check, four_status) {
             failures.push(format!(
                 "{path}: check {} -> {}",
@@ -246,8 +237,8 @@ fn an_fsl_5_header_checks_the_corpus_as_edition_next_does() {
     let plain = mirror("plain5", None);
     let five = mirror("fsl5", Some("fsl 5"));
     let rows = each_path(&paths, |path| {
-        let (next, next_exit) = fslc(&plain, &["check", path, "--edition", "next"], false);
-        let (header, header_exit) = fslc(&five, &["check", path], true);
+        let (next, next_exit) = fslc(&plain, &["check", path, "--edition", "next"]);
+        let (header, header_exit) = fslc(&five, &["check", path]);
         (
             format!("{path}\t{}", next_summary(&next, next_exit)),
             format!("{path}\t{}", next_summary(&header, header_exit)),
@@ -328,7 +319,7 @@ fn editionless_dialects_in_the_corpus_reject_the_header() {
     assert!(!paths.is_empty(), "the corpus has causal or ai documents");
     let five = mirror("editionless", Some("fsl 5"));
     for path in &paths {
-        let (stdout, exit) = fslc(&five, &["check", path], true);
+        let (stdout, exit) = fslc(&five, &["check", path]);
         let output = json(&stdout);
         assert_eq!(
             (exit, output["diagnostic_code"].as_str()),
@@ -366,7 +357,7 @@ fn header_conflicts_and_unknown_editions_exit_2() {
 
     for (file, requested, declared) in [(&five, "4", 5), (&four, "5", 4), (&four, "next", 4)] {
         for command in ["check", "verify"] {
-            let (stdout, exit) = fslc(&directory, &[command, file, "--edition", requested], true);
+            let (stdout, exit) = fslc(&directory, &[command, file, "--edition", requested]);
             let output = json(&stdout);
             assert_eq!(exit, 2, "{command} {file} --edition {requested}: {stdout}");
             assert_eq!(
@@ -386,11 +377,11 @@ fn header_conflicts_and_unknown_editions_exit_2() {
         }
     }
     for (file, requested) in [(&five, "5"), (&five, "next"), (&four, "4"), (&plain, "4")] {
-        let (stdout, exit) = fslc(&directory, &["check", file, "--edition", requested], true);
+        let (stdout, exit) = fslc(&directory, &["check", file, "--edition", requested]);
         assert_eq!(exit, 0, "{file} --edition {requested}: {stdout}");
     }
 
-    let (stdout, exit) = fslc(&directory, &["check", &six], true);
+    let (stdout, exit) = fslc(&directory, &["check", &six]);
     let output = json(&stdout);
     assert_eq!(exit, 2, "{stdout}");
     assert_eq!(
@@ -403,21 +394,9 @@ fn header_conflicts_and_unknown_editions_exit_2() {
         "unsupported syntax edition 'fsl 6'; supported editions: 4, 5 at 1:1"
     );
 
-    for file in [&five, &six] {
-        let (stdout, exit) = fslc(&directory, &["check", file], false);
-        assert_eq!(exit, 2, "{stdout}");
-        assert_eq!(
-            json(&stdout)["diagnostic_code"],
-            "FSL-DIALECT-UNKNOWN",
-            "without the gate a header stays the unknown declaration `fsl`"
-        );
-    }
-    for requested in ["4", "5"] {
-        let (stdout, exit) = fslc(
-            &directory,
-            &["check", &plain, "--edition", requested],
-            false,
-        );
+    // #1434: the numeric spellings are published; other values still refuse.
+    for requested in ["6", "fsl5", ""] {
+        let (stdout, exit) = fslc(&directory, &["check", &plain, "--edition", requested]);
         assert_eq!(exit, 2, "{stdout}");
         assert_eq!(
             json(&stdout)["message"],
@@ -433,13 +412,13 @@ fn fsl_stays_an_identifier_outside_the_header_line() {
     let spec = "spec S {\n  const fsl = 1\n  state { n: 0..1 = 0 }\n  action a() { requires n < fsl  n = n + 1 }\n}\n";
     let plain = write(&directory, "plain.fsl", spec);
     let five = write(&directory, "five.fsl", &with_header(spec, "fsl 5"));
-    for (file, gate) in [(&plain, false), (&plain, true), (&five, true)] {
-        let (stdout, exit) = fslc(&directory, &["check", file], gate);
-        assert_eq!(exit, 0, "{file} gate={gate}: {stdout}");
+    for file in [&plain, &five] {
+        let (stdout, exit) = fslc(&directory, &["check", file]);
+        assert_eq!(exit, 0, "{file}: {stdout}");
         assert_eq!(json(&stdout)["result"], "ok");
     }
-    let (plain_kernel, _) = fslc(&directory, &["kernel", &plain], true);
-    let (five_kernel, _) = fslc(&directory, &["kernel", &five], true);
+    let (plain_kernel, _) = fslc(&directory, &["kernel", &plain]);
+    let (five_kernel, _) = fslc(&directory, &["kernel", &five]);
     assert_eq!(
         without_positions(json(&plain_kernel))["constants"],
         without_positions(json(&five_kernel))["constants"]
@@ -457,18 +436,18 @@ fn a_header_in_the_first_literate_fence_selects_the_edition() {
     };
     let five = write(&directory, "five.fsl.md", &fence("fsl 5\n"));
     let four = write(&directory, "four.fsl.md", &fence("fsl 4\n"));
-    let (stdout, exit) = fslc(&directory, &["check", &five], true);
+    let (stdout, exit) = fslc(&directory, &["check", &five]);
     let output = json(&stdout);
     assert_eq!(exit, 0, "{stdout}");
     assert_eq!(output["fsl_edition"], 5, "{stdout}");
     assert_eq!(output["edition"], "next", "{stdout}");
-    let (stdout, exit) = fslc(&directory, &["check", &four], true);
+    let (stdout, exit) = fslc(&directory, &["check", &four]);
     assert_eq!(
         (exit, &json(&stdout)["fsl_edition"]),
         (0, &Value::from(4)),
         "{stdout}"
     );
-    let (stdout, exit) = fslc(&directory, &["check", &five, "--edition", "4"], true);
+    let (stdout, exit) = fslc(&directory, &["check", &five, "--edition", "4"]);
     assert_eq!(exit, 2, "{stdout}");
     assert_eq!(
         json(&stdout)["diagnostic_code"],
@@ -484,14 +463,14 @@ fn fmt_keeps_and_lint_and_migrate_add_the_header() {
     let plain = write(&directory, "plain.fsl", &source);
     let five = write(&directory, "five.fsl", &with_header(LEGACY, "fsl 5"));
 
-    let (formatted, exit) = fslc(&directory, &["fmt", &five], true);
+    let (formatted, exit) = fslc(&directory, &["fmt", &five]);
     assert_eq!(exit, 0, "{formatted}");
     assert!(formatted.starts_with("fsl 5\n"), "{formatted}");
     let formatted_file = write(&directory, "formatted.fsl", &formatted);
-    let (check, exit) = fslc(&directory, &["fmt", "--check", &formatted_file], true);
+    let (check, exit) = fslc(&directory, &["fmt", "--check", &formatted_file]);
     assert_eq!(exit, 0, "a formatted header is stable: {check}");
 
-    let (lint, exit) = fslc(&directory, &["lint", &plain, "--edition", "5"], true);
+    let (lint, exit) = fslc(&directory, &["lint", &plain, "--edition", "5"]);
     let output = json(&lint);
     assert_eq!(exit, 1, "{lint}");
     let finding = &output["files"][0]["findings"][0];
@@ -508,46 +487,51 @@ fn fmt_keeps_and_lint_and_migrate_add_the_header() {
         ),
         (Some(2), Some(1))
     );
-    let (lint, exit) = fslc(&directory, &["lint", &five, "--edition", "5"], true);
+    let (lint, exit) = fslc(&directory, &["lint", &five, "--edition", "5"]);
     assert_eq!(
         (exit, &json(&lint)["finding_count"]),
         (0, &Value::from(0)),
         "{lint}"
     );
-    for (arguments, gate) in [
-        (&["lint", plain.as_str(), "--edition", "next"][..], false),
-        (&["lint", plain.as_str()][..], true),
-    ] {
-        let (lint, exit) = fslc(&directory, arguments, gate);
-        assert_eq!(
-            (exit, &json(&lint)["finding_count"]),
-            (0, &Value::from(0)),
-            "{arguments:?} gate={gate}: {lint}"
-        );
-    }
+    // #1434: `--edition next` is `--edition 5`, so it reports the missing
+    // header too; a lint for the current edition does not.
+    let (lint, exit) = fslc(&directory, &["lint", &plain, "--edition", "next"]);
+    assert_eq!(
+        (exit, &json(&lint)["files"][0]["findings"][0]["code"]),
+        (1, &Value::from(fsl_syntax::MISSING_EDITION_HEADER)),
+        "{lint}"
+    );
+    let (lint, exit) = fslc(&directory, &["lint", &plain]);
+    assert_eq!(
+        (exit, &json(&lint)["finding_count"]),
+        (0, &Value::from(0)),
+        "{lint}"
+    );
 
-    let (migrate, exit) = fslc(&directory, &["migrate", &plain, "--write"], true);
+    let (migrate, exit) = fslc(&directory, &["migrate", &plain, "--write"]);
     assert_eq!(exit, 0, "{migrate}");
     assert_eq!(
         std::fs::read_to_string(directory.join(&plain)).expect("read migrated"),
         format!("// 日本語の先頭コメント\nfsl 5\n{LEGACY}")
     );
-    let (again, _) = fslc(&directory, &["migrate", &plain], true);
+    let (again, _) = fslc(&directory, &["migrate", &plain]);
     assert_eq!(json(&again)["changed"], 0, "{again}");
     let untouched = write(&directory, "untouched.fsl", &source);
-    let (migrate, _) = fslc(&directory, &["migrate", &untouched, "--write"], false);
+    let (migrate, _) = fslc(
+        &directory,
+        &["migrate", &untouched, "--edition", "current", "--write"],
+    );
     assert_eq!(json(&migrate)["changed"], 0, "{migrate}");
     assert_eq!(
         std::fs::read_to_string(directory.join(&untouched)).expect("read untouched"),
         source,
-        "without the gate migrate inserts no header"
+        "a migration for the current edition inserts no header"
     );
     let _ = std::fs::remove_dir_all(&directory);
 }
 
 /// `migrate` defaults to the next edition, so an explicit `--edition current`
-/// must stay distinct from an omitted flag, with or without the gate, and it
-/// inserts no header.
+/// must stay distinct from an omitted flag, and it inserts no header.
 #[test]
 fn migrate_with_edition_current_keeps_the_current_edition() {
     let directory = scratch("migrate-current");
@@ -556,39 +540,34 @@ fn migrate_with_edition_current_keeps_the_current_edition() {
         "legacy.fsl",
         "spec S {\n  state { n: 0..3 }\n  init { n = 0 }\n  action bump() \"REQ-1: bump\" {\n    requires n < 3\n    n = n + 1\n  }\n  invariant Bound { n >= 0 }\n}\n",
     );
-    for gate in [false, true] {
-        for (arguments, edition, severity) in [
-            (&["migrate", legacy.as_str()][..], "next", "error"),
-            (
-                &["migrate", legacy.as_str(), "--edition", "current"][..],
-                "current",
-                "warning",
-            ),
-        ] {
-            let (stdout, exit) = fslc(&directory, arguments, gate);
-            let output = json(&stdout);
-            assert_eq!(exit, 0, "{arguments:?} gate={gate}: {stdout}");
-            assert_eq!(output["edition"], edition, "{arguments:?} gate={gate}");
-            let findings = output["files"][0]["findings"]
-                .as_array()
-                .unwrap_or_else(|| panic!("findings: {stdout}"));
-            assert!(!findings.is_empty(), "{arguments:?} gate={gate}: {stdout}");
-            let codes = findings
-                .iter()
-                .map(|finding| finding["code"].as_str().unwrap_or_default())
-                .collect::<Vec<_>>();
-            assert_eq!(
-                codes.contains(&fsl_syntax::MISSING_EDITION_HEADER),
-                gate && edition == "next",
-                "{arguments:?} gate={gate}: {stdout}"
-            );
-            for finding in findings {
-                if finding["code"] != fsl_syntax::MISSING_EDITION_HEADER {
-                    assert_eq!(
-                        finding["severity"], severity,
-                        "{arguments:?} gate={gate}: {stdout}"
-                    );
-                }
+    for (arguments, edition, severity) in [
+        (&["migrate", legacy.as_str()][..], "next", "error"),
+        (
+            &["migrate", legacy.as_str(), "--edition", "current"][..],
+            "current",
+            "warning",
+        ),
+    ] {
+        let (stdout, exit) = fslc(&directory, arguments);
+        let output = json(&stdout);
+        assert_eq!(exit, 0, "{arguments:?}: {stdout}");
+        assert_eq!(output["edition"], edition, "{arguments:?}");
+        let findings = output["files"][0]["findings"]
+            .as_array()
+            .unwrap_or_else(|| panic!("findings: {stdout}"));
+        assert!(!findings.is_empty(), "{arguments:?}: {stdout}");
+        let codes = findings
+            .iter()
+            .map(|finding| finding["code"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            codes.contains(&fsl_syntax::MISSING_EDITION_HEADER),
+            edition == "next",
+            "{arguments:?}: {stdout}"
+        );
+        for finding in findings {
+            if finding["code"] != fsl_syntax::MISSING_EDITION_HEADER {
+                assert_eq!(finding["severity"], severity, "{arguments:?}: {stdout}");
             }
         }
     }

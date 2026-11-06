@@ -66,10 +66,9 @@ the core does not duplicate a legacy requirements guide over them.
   `fsl-requirements/SKILL.md` and its Japanese spelling in
   `fsl-requirements/references/glossary.md` lower to the same kernel (spans,
   origins and annotations aside); the same test file checks it.
-- **No gate name.** The material here is about the `fsl 5` header, which is
-  what users write once the edition is released, so the header is allowed
-  here (the published-material leak check does not scan this directory). The
-  environment variable that enables the edition today is not: these files
-  move into `skills/` unchanged, and the variable would then be a stale
-  instruction. `rust/fslc/tests/unstable_gate_leak.rs` checks both that and
-  that the release workflow and the installer never package this directory.
+- **No gate name.** The material here is about the `fsl 5` header, which
+  users write without any opt-in since #1434 removed the unstable gate. The
+  removed gate variable must not appear: these files move into `skills/`
+  unchanged (#1437), and the variable would be a stale instruction.
+  `rust/fslc/tests/skills_next_unpackaged.rs` checks both that and that the
+  release workflow and the installer never package this directory.

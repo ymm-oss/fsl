@@ -80,7 +80,6 @@ fn fslc(command: &str, directory: &Path, file: &str) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args([command, file])
         .current_dir(directory)
-        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
         .output()
         .expect("run fslc");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -362,7 +361,7 @@ fn rule_statements_compose_in_any_order() {
     let scratch = Scratch::new("order", Some("rejection"));
     let path = scratch.write("reversed.fsl", &reversed);
     kernel_compare::assert_same_kernel(
-        &kernel_compare::kernel_v2_fsl5(&path),
+        &kernel_compare::kernel_v2(&path),
         &kernel_compare::kernel_v2(&fixture_dir("rejection").join("lowered.fsl")),
         "rejection with its rule statements reversed",
     );
@@ -565,7 +564,7 @@ fn rules_the_lifecycle_implies_are_implied_by_lifecycle() {
     );
     let scratch = Scratch::new("implied-after-kernel", None);
     let path = scratch.write("doc.fsl", &claim_document(after, SMALL));
-    let kernel = kernel_compare::kernel_v2_fsl5(&path);
+    let kernel = kernel_compare::kernel_v2(&path);
     let state = kernel["state"]
         .as_array()
         .expect("state")
@@ -716,7 +715,7 @@ fn names_a_rule_generates_are_checked_for_collisions() {
 fn rule_lowerings_carry_their_statement_as_a_lowering_step() {
     let mut kinds = BTreeSet::new();
     for example in ["rejection", "rules"] {
-        let kernel = kernel_compare::kernel_v2_fsl5(&fixture_dir(example).join("fsl5_en.fsl"));
+        let kernel = kernel_compare::kernel_v2(&fixture_dir(example).join("fsl5_en.fsl"));
         let origins = kernel["provenance"]["origins"].as_array().expect("origins");
         for origin in origins {
             for step in origin["lowering_steps"].as_array().expect("steps") {
@@ -753,9 +752,7 @@ fn rule_lowerings_carry_their_statement_as_a_lowering_step() {
 #[test]
 fn rules_annotate_their_requirement() {
     let source = fixture("rules", "fsl5_en.fsl");
-    let options = fsl_syntax::ParseOptions::with_unstable(
-        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-    );
+    let options = fsl_syntax::ParseOptions::stable();
     let kernel = fsl_core::parse_kernel_source_with_file_with_options(
         &source,
         &fsl_core::FsResolver::new(fixture_dir("rules")),
@@ -813,8 +810,8 @@ fn a_rule_deadline_is_the_requirement_deadline() {
         &document("  requirement REQ-1 \"t\" {\n    deadline open_age <= SLA\n  }\n"),
     );
     kernel_compare::assert_same_kernel(
-        &kernel_compare::kernel_v2_fsl5(&rule),
-        &kernel_compare::kernel_v2_fsl5(&block),
+        &kernel_compare::kernel_v2(&rule),
+        &kernel_compare::kernel_v2(&block),
         "rule deadline against requirement deadline",
     );
     let (output, exit) = fslc("verify", &scratch.0, "rule.fsl");
@@ -830,7 +827,7 @@ fn a_rule_deadline_is_the_requirement_deadline() {
 fn property_names(label: &str, source: &str) -> BTreeSet<String> {
     let scratch = Scratch::new(label, None);
     let path = scratch.write("doc.fsl", source);
-    let kernel = kernel_compare::kernel_v2_fsl5(&path);
+    let kernel = kernel_compare::kernel_v2(&path);
     ["invariants", "transitions"]
         .iter()
         .flat_map(|kind| {

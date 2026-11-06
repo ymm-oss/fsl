@@ -113,7 +113,7 @@ fn fslc_check(path: &Path) -> (Value, i32) {
 fn a_trace_over_a_large_values_scope_checks_under_an_address_space_ceiling() {
     const CEILING_KB: u64 = 1024 * 1024;
     const HI: u32 = 2_000_000;
-    for (label, source, next_edition) in [
+    for (label, source, _next_edition) in [
         ("published", claims(HI, &traces_at(TOP_OF_SCOPE, HI)), false),
         ("next-edition", claims_next_edition(HI), true),
     ] {
@@ -125,9 +125,6 @@ fn a_trace_over_a_large_values_scope_checks_under_an_address_space_ceiling() {
             env!("CARGO_BIN_EXE_fslc"),
             path,
         ));
-        if next_edition {
-            command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-        }
         let output = command.output().expect("run capped fslc check");
         assert_eq!(
             output.status.code(),

@@ -639,7 +639,6 @@ pub fn full_observe(directory: &std::path::Path, route: &str) -> (Value, i32) {
     let binary = env!("CARGO_BIN_EXE_fslc");
     let digest =
         DIGEST.get_or_init(|| format!("{:x}", Sha256::digest(std::fs::read(binary).unwrap())));
-    let gate = fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE;
     let trace_digest = if route == "monitor" {
         let trace = std::fs::read(directory.join("actions.json")).unwrap();
         std::fs::write(file("trace.json"), &trace).unwrap();
@@ -652,7 +651,6 @@ pub fn full_observe(directory: &std::path::Path, route: &str) -> (Value, i32) {
         .current_dir(directory)
         .env("FSLC_CACHE", "off")
         .env_remove("FSLC_CACHE_VERIFY")
-        .env_remove(gate)
         .env("TMPDIR", directory)
         .output()
         .unwrap();
@@ -661,7 +659,7 @@ pub fn full_observe(directory: &std::path::Path, route: &str) -> (Value, i32) {
     let exit = output.status.code().unwrap();
     let metadata = json!({"binary": binary, "argv": args, "cwd": directory,
         "exit": exit, "FSLC_CACHE": "off", "FSLC_CACHE_VERIFY": null,
-        "gate_name": gate, "gate_present": false, "TMPDIR": directory,
+        "TMPDIR": directory,
         "source_sha256": format!("{:x}", Sha256::digest(std::fs::read(directory.join("input.fsl")).unwrap())),
         "binary_sha256": digest, "trace_sha256": trace_digest});
     std::fs::write(

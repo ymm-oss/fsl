@@ -49,7 +49,6 @@ fn fslc(directory: &Path, command: &[&str]) -> (Option<Value>, i32) {
         .args(command)
         .arg("doc.fsl")
         .current_dir(directory)
-        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
         .output()
         .expect("run fslc");
     (
