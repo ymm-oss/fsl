@@ -58,6 +58,10 @@ and `migrate` (whose default edition is `next`) plans the header insertion;
 add it. A document without a header is still read as `fsl 4`; neither command
 changes how it is read.
 
+A declaration that takes no edition header (`EDITIONLESS_DECLARATIONS`, such
+as `agent`) gets no such finding: `check` refuses a header on it with
+`edition_header_not_accepted`, so the insertion would break the document.
+
 ## Rewrite table
 
 | Legacy form | Canonical form | Automatic boundary |

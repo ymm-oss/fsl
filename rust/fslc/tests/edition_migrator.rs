@@ -1464,6 +1464,42 @@ fn valid_spec_with_legacy_syntax_still_migrates_and_lints() {
     );
 }
 
+/// #1434: an `agent` document takes no edition header
+/// (`EDITIONLESS_DECLARATIONS`), so the next edition owes it none. `lint`
+/// and `migrate` report nothing and `--write` leaves it unchanged; a header
+/// inserted by hand is refused, which is why none may be planned.
+#[test]
+fn agent_documents_are_not_offered_an_edition_header() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = text(&root.join("../../examples/ai/recursive_support_agent.fsl"));
+    assert!(source.starts_with("agent "), "fixture is an agent document");
+    let directory = FixtureDir::new();
+    let path = directory.write("agent.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(0), "{}", json(&linted));
+    assert_eq!(json(&linted)["finding_count"], 0);
+    for edition in ["next", "5"] {
+        let migrated = run(&["migrate", path, "--edition", edition, "--write"]);
+        assert_eq!(migrated.status.code(), Some(0), "{}", json(&migrated));
+        let migrated = json(&migrated);
+        assert_eq!(migrated["changed"], 0, "{migrated:#}");
+        assert_eq!(
+            migrated["files"][0]["findings"],
+            Value::Array(Vec::new()),
+            "{migrated:#}"
+        );
+        assert_eq!(text(Path::new(path)), source);
+    }
+    let headed = directory.write("headed.fsl", &format!("fsl 5\n{source}"));
+    let checked = run(&["check", headed.to_str().expect("UTF-8 path")]);
+    assert_eq!(checked.status.code(), Some(2));
+    assert_eq!(
+        json(&checked)["diagnostic_code"],
+        fsl_syntax::EDITION_HEADER_NOT_ACCEPTED
+    );
+}
+
 /// Regression control: a `refinement`-dialect input (no `state` block —
 /// `fslc check` itself fails "spec has no state block" for this dialect,
 /// since a refinement spec is not a standalone check target) must keep
