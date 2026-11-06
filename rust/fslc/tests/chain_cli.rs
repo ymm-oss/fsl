@@ -1032,3 +1032,52 @@ fn chain_impl_empty_report_key_is_a_parse_error() {
     assert_eq!(value["result"], "error", "{value:#}");
     assert_eq!(value["kind"], "parse", "{value:#}");
 }
+
+/// Issue #1170: a layer whose input is rejected is one failed-layer record
+/// whose `detail` is a nested error without the top-level `fsl` key, the
+/// record `chain_step_input_error` builds for every layer input error.
+#[test]
+fn chain_layer_input_errors_are_complete_failed_layer_records() {
+    let failed = |layer: &str, kind: &str, detail_kind: &str, message: &str| {
+        serde_json::json!({
+            "layer": layer,
+            "kind": kind,
+            "status": "failed",
+            "result": "error",
+            "exit_code": 2,
+            "detail": {"result": "error", "kind": detail_kind, "message": message},
+        })
+    };
+    let dir = scratch_dir("1170-malformed-refine-depth");
+    copy_chain_fixture(&dir);
+    let manifest = fs::read_to_string(dir.join("fsl-project.toml")).expect("read manifest");
+    let manifest = manifest.replace(
+        "refine_against = \"requirements\"\n",
+        "refine_against = \"requirements\"\nrefine_depth = notanumber\n",
+    );
+    fs::write(dir.join("fsl-project.toml"), manifest).expect("write manifest");
+    let value = json(&run(&dir, &["chain", "fsl-project.toml"]));
+    assert_eq!(
+        layer(&value, "design->requirements"),
+        &failed(
+            "design->requirements",
+            "refine",
+            "parse",
+            "[design] invalid refine_depth value: \"notanumber\"",
+        ),
+        "{value:#}"
+    );
+
+    let dir = scratch_dir("1170-impl-no-command");
+    fs::write(
+        dir.join("fsl-project.toml"),
+        "[impl]\nevidence = \"exit_code\"\n",
+    )
+    .expect("write manifest");
+    let value = json(&run(&dir, &["chain", "fsl-project.toml"]));
+    assert_eq!(
+        layer(&value, "impl"),
+        &failed("impl", "command", "io", "[impl] command is required"),
+        "{value:#}"
+    );
+}
