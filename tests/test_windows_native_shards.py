@@ -9,7 +9,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = "tools/windows-native-long-poles.txt"
-TESTS = "--test fsl5_glossary --test issue_1442_compose_binding_capture_matrix"
+BINARIES = ("fsl5_glossary", "issue_1442_compose_binding_capture_matrix", "issue_1480_check_engine_agreement",
+            "issue_697_all_properties_memory", "issue_1467_composite_values", "issue_1467_frozen_lexical",
+            "refine_corpus_parity")
+TESTS = " ".join(f"--test {binary}" for binary in BINARIES)
 A = "k_glossary_sources_lower_to_the_canonical_kernel"
 B = "all_compose_and_sync_binding_sources_preserve_alpha_equivalence"
 LIST = (f"     Running tests/fsl5_glossary.rs (fsl5_glossary-1234.exe)\n{A}: test\n"
@@ -107,7 +110,7 @@ def test_workflow_structure():
     assert shards.index(f"{TESTS} -- --list") < shards.index("tools/check_windows_long_poles.py")
     assert TESTS in shards[shards.index("tools/check_windows_long_poles.py"):]
     assert "--list-output" in shards and "--names" in shards
-    poles = _step(shards, "Check live long-pole names and run both binaries")
+    poles = _step(shards, "Check live long-pole names and run the long-pole binaries")
     rest = _step(shards, "Test pinned native solver and BMC crates except long poles")
     for step, part in ((poles, "long-poles"), (rest, "rest")):
         assert f"        if: matrix.part == '{part}'\n" in step
@@ -129,15 +132,29 @@ def test_workflow_structure():
 def test_real_names():
     names = [line.strip() for line in (ROOT / NAMES).read_text(encoding="utf-8").splitlines()
              if line.strip() and not line.lstrip().startswith("#")]
-    assert len(names) == len(set(names)) == 12, names
+    assert len(names) == len(set(names)) == 40, names
     source = "\n".join((ROOT / f"rust/fslc/tests/{binary}.rs").read_text(encoding="utf-8")
-                       for binary in ("fsl5_glossary", "issue_1442_compose_binding_capture_matrix"))
+                       for binary in BINARIES)
     assert set(names) <= set(re.findall(r"^fn (\w+)\(", source, re.M)), names
-    long_poles = {ROOT / f"rust/fslc/tests/{binary}.rs" for binary in ("fsl5_glossary", "issue_1442_compose_binding_capture_matrix")}
+    long_poles = {ROOT / f"rust/fslc/tests/{binary}.rs" for binary in BINARIES}
     for crate in ("fsl-solver-z3", "fsl-verifier", "fslc"):
         for path in (ROOT / "rust" / crate).rglob("*.rs"):
             if path not in long_poles:
-                assert not re.search(r"\bfn\s+(?:" + "|".join(map(re.escape, names)) + r")\s*\(", path.read_text(encoding="utf-8")), path
+                assert not _defines(path.read_text(encoding="utf-8"), names), path
+
+
+def _defines(source, names):
+    # A function definition at the start of a line, not a citation string such as
+    # `anchor: "fn name()"` in rust/fslc/tests/assurance/dialects.rs.
+    prefix = r"^[ \t]*(?:pub(?:\([^)]*\))?[ \t]+)?(?:(?:async|const|unsafe)[ \t]+)*fn[ \t]+"
+    return re.search(prefix + "(?:" + "|".join(map(re.escape, names)) + r")[ \t]*\(", source, re.M)
+
+
+def test_definition_scan():
+    for source in ("fn a_test() {}", "    fn a_test() {}", "pub(crate) async fn a_test ()", "\t#[test] fn x() {}\nfn a_test("):
+        assert _defines(source, ["a_test"]), source
+    for source in ('    anchor: "fn a_test()",', "// fn a_test()", "fn a_test_more()", "let a = fn_a_test();"):
+        assert not _defines(source, ["a_test"]), source
 
 
 if __name__ == "__main__":
