@@ -2856,8 +2856,8 @@ fmt, metadata/help/version and early argv delivery retain their existing contrac
 </tr>
 <tr>
 <td><code>error</code></td>
-<td>usage (invalid argv) / parse / type / semantics / io</td>
-<td>Fix argv for <code>usage</code>; otherwise follow <code>loc</code> / <code>expected</code> / <code>hint</code></td>
+<td>usage (invalid argv) / parse / type / semantics / io (an input file the command reads cannot be read; the message is <code>&lt;path&gt;: &lt;error&gt;</code>)</td>
+<td>Fix argv for <code>usage</code>; for <code>io</code>, fix the named path; otherwise follow <code>loc</code> / <code>expected</code> / <code>hint</code></td>
 </tr>
 </tbody>
 </table>
