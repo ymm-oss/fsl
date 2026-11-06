@@ -769,9 +769,9 @@ native binary: argument parsing
   centralize only regular-command stdout and exit delivery; metadata/help, `fmt`, command-family
   parsing, semantic results, stderr side channels, Worker transport, and LSP remain outside it.
 - **IO classification owner (#1170):** `spec_loading.rs` is the binary's one owner of how a file
-  that cannot be read is reported: `kind:"io"` with `read_failure_message`'s `<path>: <error>`, on
-  every command. `read_spec_source` (and `read_spec_source_shown_as` for a git-tree checkout, which
-  names the user's path), `read_input_text`, `read_input_bytes`, `io_error_output`, and
+  that the binary reads itself is reported: `kind:"io"` with `read_failure_message`'s
+  `<path>: <error>`. `read_spec_source` (and `read_spec_source_shown_as` for a git-tree checkout,
+  which names the user's path or `<commit>:<path>`, never the temporary tree), `read_input_text`, `read_input_bytes`, `io_error_output`, and
   `io_error_detail` render it through the library's `SpecLoadError::Io`; `IO_KIND` gives the kind
   to the helpers that return a `(kind, message)` pair (`approval::spec_checkout`,
   `approval::git_binding`, `load_state_snapshot`). The binary spells `io` nowhere else. Phase 2
@@ -785,7 +785,9 @@ native binary: argument parsing
   functions, even inside `spec_loading.rs`, and counts the hand-written envelope and exit-literal
   sites per file, letting those counts only go down. Still open: reads reported under another
   kind (`ai` log and record inputs and `db observe --trace` as `parse`, `lint --project` as
-  `config`), the `file not found: <path>` spelling (`chain` manifest, `analyze`,
+  `config`), an import or `compose` component that cannot be read (`fsl-core`'s
+  `FsResolver::read`: `semantics` with the importer's `loc`, which `io` would drop), the
+  `file not found: <path>` spelling for a missing file only (`chain` manifest, `analyze`,
   `verify --from-state`, `--requirements`), failures labeled `io` that are not file reads, and the
   library-side `literate_access` IO envelope, which cannot call the binary's owner.
 - `LiterateState`, atomic migration, verify cache, approval trust, and solver execution remain
