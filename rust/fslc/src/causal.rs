@@ -4,6 +4,7 @@ use std::path::{Component, Path, PathBuf};
 
 use fsl_core::{FileResolver, FslValue, KernelExpr, KernelModel, TypeRef};
 use fslc_rust::literate_access::literate_access;
+use fslc_rust::outcome::error_exit;
 use fslc_rust::spec_load::SpecLoadError;
 use serde_json::{Map, Value, json};
 
@@ -165,37 +166,28 @@ pub(super) fn causal_command(
                 Err(early_return) => return Ok(early_return),
             };
             let Some(from_log) = from_log else {
-                return Ok((error_output("usage", "--from-log is required"), 2));
+                return Ok(error_exit(error_output("usage", "--from-log is required")));
             };
             let Some(mapping) = mapping else {
-                return Ok((error_output("usage", "--mapping is required"), 2));
+                return Ok(error_exit(error_output("usage", "--mapping is required")));
             };
             let Some(scope_path) = scope_path else {
-                return Ok((
-                    error_output(
-                        "usage",
-                        "--scope is required (observation scope is never inferred from log content)",
-                    ),
-                    2,
-                ));
+                return Ok(error_exit(error_output(
+                    "usage",
+                    "--scope is required (observation scope is never inferred from log content)",
+                )));
             };
             let Some(period_start) = period_start else {
-                return Ok((
-                    error_output(
-                        "usage",
-                        "--period-start is required (observation period is never inferred from log content)",
-                    ),
-                    2,
-                ));
+                return Ok(error_exit(error_output(
+                    "usage",
+                    "--period-start is required (observation period is never inferred from log content)",
+                )));
             };
             let Some(period_end) = period_end else {
-                return Ok((
-                    error_output(
-                        "usage",
-                        "--period-end is required (observation period is never inferred from log content)",
-                    ),
-                    2,
-                ));
+                return Ok(error_exit(error_output(
+                    "usage",
+                    "--period-end is required (observation period is never inferred from log content)",
+                )));
             };
             Ok(run_admitted_roots(
                 vec![
@@ -390,7 +382,7 @@ fn load_causal_model_from_source(
 
 fn merge_causal_envelope(value: Value) -> (Value, i32) {
     let Value::Object(body) = value else {
-        return (error_output("internal", "invalid causal result"), 3);
+        return error_exit(error_output("internal", "invalid causal result"));
     };
     let mut output = envelope();
     output.extend(body);
@@ -419,15 +411,12 @@ fn load_causal_evidence(
 ) -> Result<LoadedEvidence, (Value, i32)> {
     let read_json = |path: &PathBuf| -> Result<Value, (Value, i32)> {
         let source = std::fs::read_to_string(path)
-            .map_err(|error| (io_error_output(&read_failure_message(path, &error)), 2))?;
+            .map_err(|error| error_exit(io_error_output(&read_failure_message(path, &error))))?;
         serde_json::from_str(&source).map_err(|error| {
-            (
-                error_output(
-                    "parse",
-                    &format!("invalid JSON in {}: {error}", path.display()),
-                ),
-                2,
-            )
+            error_exit(error_output(
+                "parse",
+                &format!("invalid JSON in {}: {error}", path.display()),
+            ))
         })
     };
     let evidence_error = |error: &fsl_tools::EvidenceError| {
@@ -445,13 +434,10 @@ fn load_causal_evidence(
             .insert(artifact.evidence_id.clone(), artifact)
             .is_some()
         {
-            return Err((
-                error_output(
-                    "semantics",
-                    "duplicate evidence_id across --evidence inputs",
-                ),
-                2,
-            ));
+            return Err(error_exit(error_output(
+                "semantics",
+                "duplicate evidence_id across --evidence inputs",
+            )));
         }
     }
     for path in lifecycle_paths {
@@ -478,13 +464,10 @@ fn run_causal_analyze(
     as_of: Option<&str>,
 ) -> (Value, i32) {
     if !matches!(format, "json" | "dot" | "mermaid") {
-        return (
-            error_output(
-                "usage",
-                &format!("unsupported causal analyze format: {format}"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "usage",
+            &format!("unsupported causal analyze format: {format}"),
+        ));
     }
     let (model, _) = match load_causal_model_from_source(path, source) {
         Ok(loaded) => loaded,
@@ -505,32 +488,26 @@ fn run_causal_analyze(
             "causal_traceability_graph" => fsl_tools::causal_traceability_projection(&model),
             "causal_evidence_graph" => {
                 let Some((artifacts, overlay)) = &evidence else {
-                    return (
-                        error_output(
-                            "usage",
-                            "--projection causal_evidence_graph requires at least one --evidence artifact",
-                        ),
-                        2,
-                    );
+                    return error_exit(error_output(
+                        "usage",
+                        "--projection causal_evidence_graph requires at least one --evidence artifact",
+                    ));
                 };
                 Ok(fsl_tools::causal_evidence_graph(&model, artifacts, overlay))
             }
             other => {
-                return (
-                    error_output("usage", &format!("unknown causal projection '{other}'")),
-                    2,
-                );
+                return error_exit(error_output(
+                    "usage",
+                    &format!("unknown causal projection '{other}'"),
+                ));
             }
         },
         (None, Some("causal-review")) => {
             if format != "json" {
-                return (
-                    error_output(
-                        "usage",
-                        "--profile causal-review supports only --format json",
-                    ),
-                    2,
-                );
+                return error_exit(error_output(
+                    "usage",
+                    "--profile causal-review supports only --format json",
+                ));
             }
             let mut review = match fsl_tools::causal_review_json(&model) {
                 Ok(review) => review,
@@ -550,19 +527,16 @@ fn run_causal_analyze(
             Ok(review)
         }
         (None, Some(other)) => {
-            return (
-                error_output("usage", &format!("unknown causal profile '{other}'")),
-                2,
-            );
+            return error_exit(error_output(
+                "usage",
+                &format!("unknown causal profile '{other}'"),
+            ));
         }
         (Some(_), Some(_)) | (None, None) => {
-            return (
-                error_output(
-                    "usage",
-                    "fslc causal analyze requires exactly one of --projection or --profile",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "usage",
+                "fslc causal analyze requires exactly one of --projection or --profile",
+            ));
         }
     };
     let analysis = match analysis {
@@ -622,7 +596,7 @@ fn run_causal_verify_expectations(path: &Path, source: &str, depth: usize) -> (V
     for expectation in &compiled {
         let mut solver = match fsl_solver_z3::Z3Solver::new() {
             Ok(solver) => solver,
-            Err(error) => return (error_output("internal", &error.to_string()), 3),
+            Err(error) => return error_exit(error_output("internal", &error.to_string())),
         };
         let result = match block_on_native(fsl_verifier::verify_bounded(
             &expectation.model,
@@ -631,13 +605,10 @@ fn run_causal_verify_expectations(path: &Path, source: &str, depth: usize) -> (V
         )) {
             Ok(result) => result,
             Err(error) => {
-                return (
-                    error_output(
-                        "semantics",
-                        &format!("expectation '{}': {error}", expectation.id),
-                    ),
-                    2,
-                );
+                return error_exit(error_output(
+                    "semantics",
+                    &format!("expectation '{}': {error}", expectation.id),
+                ));
             }
         };
         let violated_here = result
@@ -650,16 +621,13 @@ fn run_causal_verify_expectations(path: &Path, source: &str, depth: usize) -> (V
                 .as_ref()
                 .is_some_and(|violation| violation.name != expectation.property);
         if base_violation {
-            return (
-                error_output(
-                    "semantics",
-                    &format!(
-                        "expectation '{}': the target spec itself is not clean at depth {depth}; fix the spec before checking expectations",
-                        expectation.id
-                    ),
+            return error_exit(error_output(
+                "semantics",
+                &format!(
+                    "expectation '{}': the target spec itself is not clean at depth {depth}; fix the spec before checking expectations",
+                    expectation.id
                 ),
-                2,
-            );
+            ));
         }
         expectations.push(json!({
             "id": format!("expectation:{}", expectation.id),
@@ -811,17 +779,17 @@ fn run_causal_observe_expectations(
         Err(error) => return causal_error_output(&error, false),
     };
     if compiled.is_empty() {
-        return (
-            error_output("semantics", "causal model has no expectations to observe"),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "causal model has no expectations to observe",
+        ));
     }
 
     // ── Parse mapping and log ────────────────────────────────────────
     let mapping = match fsl_syntax::parse_surface_document_with(mapping_source, parse_options()) {
         Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
-        Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
-        Err(error) => return (error_output("parse", &error.to_string()), 2),
+        Ok(_) => return error_exit(error_output("type", "expected refinement mapping file")),
+        Err(error) => return error_exit(error_output("parse", &error.to_string())),
     };
     if let Some(span) = untyped_replay_enum_mapping_span(&mapping) {
         return (
@@ -835,22 +803,22 @@ fn run_causal_observe_expectations(
     }
     let log_raw = match read_log(log_path) {
         Ok(raw) => raw,
-        Err(error) => return (io_error_output(&read_failure_message(log_path, &error)), 2),
+        Err(error) => return error_exit(io_error_output(&read_failure_message(log_path, &error))),
     };
     let records = match parse_jsonl_records(&log_raw) {
         Ok(records) => records,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
 
     // ── Parse scope ──────────────────────────────────────────────────
     let scope_raw = match read_input_text(scope_path) {
         Ok(source) => source,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let scope: Value = match serde_json::from_str(&scope_raw) {
         Ok(scope) => scope,
         Err(error) => {
-            return (io_error_output(&format!("invalid scope JSON: {error}")), 2);
+            return error_exit(io_error_output(&format!("invalid scope JSON: {error}")));
         }
     };
 
@@ -901,10 +869,10 @@ fn run_causal_observe_expectations(
         let spec_source = match resolver.read(import_path) {
             Ok(source) => source,
             Err(error) => {
-                return (
-                    io_error_output(&format!("cannot read '{}': {}", import_path, error.message)),
-                    2,
-                );
+                return error_exit(io_error_output(&format!(
+                    "cannot read '{}': {}",
+                    import_path, error.message
+                )));
             }
         };
         let kernel = match fsl_core::parse_kernel_source_with_options(
@@ -913,27 +881,24 @@ fn run_causal_observe_expectations(
             crate::process::parse_options(),
         ) {
             Ok(kernel) => kernel,
-            Err(error) => return (error_output("semantics", &error.to_string()), 2),
+            Err(error) => return error_exit(error_output("semantics", &error.to_string())),
         };
         match fsl_core::build_model(kernel) {
             Ok(model) => model,
-            Err(error) => return (error_output("semantics", &error.to_string()), 2),
+            Err(error) => return error_exit(error_output("semantics", &error.to_string())),
         }
     } else {
-        return (
-            error_output("semantics", "causal model has no uses imports"),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "causal model has no uses imports",
+        ));
     };
 
     // ── Replay: conformance + bounded liveness per expectation ───────
     let mut monitor = match fsl_runtime::Monitor::new(spec_model.clone()) {
         Ok(monitor) => monitor,
         Err(error) => {
-            return (
-                error_output("internal", &format!("monitor init: {error}")),
-                3,
-            );
+            return error_exit(error_output("internal", &format!("monitor init: {error}")));
         }
     };
 
@@ -943,13 +908,10 @@ fn run_causal_observe_expectations(
         match fsl_runtime::BoundedLivenessMonitor::new(expectation.model.clone()) {
             Ok(liveness) => liveness_monitors.push(liveness),
             Err(error) => {
-                return (
-                    error_output(
-                        "internal",
-                        &format!("liveness monitor for '{}': {error}", expectation.id),
-                    ),
-                    3,
-                );
+                return error_exit(error_output(
+                    "internal",
+                    &format!("liveness monitor for '{}': {error}", expectation.id),
+                ));
             }
         }
     }
@@ -971,16 +933,13 @@ fn run_causal_observe_expectations(
             }
             Ok(None) => {}
             Err(error) => {
-                return (
-                    error_output(
-                        "internal",
-                        &format!(
-                            "liveness observe init for '{}': {error}",
-                            compiled[index].id
-                        ),
+                return error_exit(error_output(
+                    "internal",
+                    &format!(
+                        "liveness observe init for '{}': {error}",
+                        compiled[index].id
                     ),
-                    3,
-                );
+                ));
             }
         }
     }
@@ -1170,7 +1129,7 @@ fn run_causal_observe_expectations(
             };
             let enabled = match monitor.enabled() {
                 Ok(enabled) => enabled,
-                Err(error) => return (error_output("internal", &error.to_string()), 3),
+                Err(error) => return error_exit(error_output("internal", &error.to_string())),
             };
             let Some(instance) = enabled
                 .iter()
@@ -1192,7 +1151,7 @@ fn run_causal_observe_expectations(
                 );
             };
             if let Err(error) = monitor.step(instance) {
-                return (error_output("internal", &error.to_string()), 3);
+                return error_exit(error_output("internal", &error.to_string()));
             }
         }
 
@@ -1259,16 +1218,13 @@ fn run_causal_observe_expectations(
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    return (
-                        error_output(
-                            "internal",
-                            &format!(
-                                "liveness observe for '{}' at step {step}: {error}",
-                                expectation.id
-                            ),
+                    return error_exit(error_output(
+                        "internal",
+                        &format!(
+                            "liveness observe for '{}' at step {step}: {error}",
+                            expectation.id
                         ),
-                        3,
-                    );
+                    ));
                 }
             }
         }
@@ -1423,7 +1379,7 @@ fn run_causal_observe_expectations(
     {
         let invocation_dir = match std::env::current_dir() {
             Ok(directory) => directory,
-            Err(error) => return (io_error_output(&error.to_string()), 2),
+            Err(error) => return error_exit(io_error_output(&error.to_string())),
         };
         let mut seen = std::collections::BTreeMap::new();
         for destination in output_destinations
@@ -1432,17 +1388,14 @@ fn run_causal_observe_expectations(
         {
             let key = output_collision_key(&invocation_dir.join(destination));
             if let Some(first) = seen.insert(key, destination) {
-                return (
-                    error_output(
-                        "usage",
-                        &format!(
-                            "causal output destinations collide: {} and {}",
-                            first.display(),
-                            destination.display()
-                        ),
+                return error_exit(error_output(
+                    "usage",
+                    &format!(
+                        "causal output destinations collide: {} and {}",
+                        first.display(),
+                        destination.display()
                     ),
-                    2,
-                );
+                ));
             }
         }
     }
@@ -1569,15 +1522,15 @@ fn run_causal_ledger(
     for plan_path in plan_paths {
         let source = match read_input_text(plan_path) {
             Ok(source) => source,
-            Err(error) => return (io_error_output(&error), 2),
+            Err(error) => return error_exit(io_error_output(&error)),
         };
         let value: Value = match serde_json::from_str(&source) {
             Ok(value) => value,
             Err(error) => {
-                return (
-                    io_error_output(&format!("invalid JSON in {}: {error}", plan_path.display())),
-                    2,
-                );
+                return error_exit(io_error_output(&format!(
+                    "invalid JSON in {}: {error}",
+                    plan_path.display()
+                )));
             }
         };
         let plan = match fsl_tools::parse_plan(&value) {
@@ -1609,16 +1562,13 @@ fn run_causal_ledger(
             if let Some(chain_digest) = value.get("artifact_digest").and_then(Value::as_str)
                 && chain_digest != plan.declared_digest
             {
-                return (
-                    error_output(
-                        "causal_plan_digest_mismatch",
-                        &format!(
-                            "lifecycle chain for plan '{plan_id}' declares artifact_digest {chain_digest} but plan has {}",
-                            plan.declared_digest
-                        ),
+                return error_exit(error_output(
+                    "causal_plan_digest_mismatch",
+                    &format!(
+                        "lifecycle chain for plan '{plan_id}' declares artifact_digest {chain_digest} but plan has {}",
+                        plan.declared_digest
                     ),
-                    2,
-                );
+                ));
             }
             let empty_artifacts = std::collections::BTreeMap::new();
             let Ok((_, status)) = fsl_tools::validate_lifecycle_chain(&value, &empty_artifacts)
@@ -1632,7 +1582,7 @@ fn run_causal_ledger(
     // Build ledger projection.
     let ledger_body = fsl_tools::build_ledger(&model, &plans, &artifacts, &overlay, as_of);
     let Value::Object(body) = ledger_body else {
-        return (error_output("internal", "invalid ledger result"), 3);
+        return error_exit(error_output("internal", "invalid ledger result"));
     };
     let mut output = envelope();
     output.extend(body);

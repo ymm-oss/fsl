@@ -15,9 +15,9 @@
 //!   `spec_loading.rs`.
 //! - Error envelope: `cli_output.rs` (`envelope`, `error_output`) and the
 //!   library renderers it delegates to.
-//! - Error exit code: `fslc_rust::outcome` (the `Verdict` table and
-//!   `exit_status`). Routing the literal exits through it is #1170's
-//!   follow-up; this file only stops their number from growing.
+//! - Error exit code: `fslc_rust::outcome` (the `Verdict` table,
+//!   `error_exit`, `normalized_exit_status` and `exit_status`). A literal
+//!   left outside it is one routing would change, or one not yet routed.
 //!
 //! Each rule counts the sites outside its owners in product source: comments,
 //! doc attributes and `#[cfg(test)]`/`#[test]` items are blanked first by
@@ -97,21 +97,17 @@ const PINNED: &[(&str, &str, usize)] = &[
     ("error-envelope", "verification_output.rs", 6),
     ("error-exit-literal", "bin/fsl-bmc.rs", 1),
     ("error-exit-literal", "bin/fsl-replay-actions.rs", 1),
-    // 55 = 54 + #1672's `parse_artifact` refusal in
-    // `run_causal_observe_expectations`, a base change, not a site this PR adds.
-    ("error-exit-literal", "causal.rs", 55),
+    ("error-exit-literal", "causal.rs", 14),
     ("error-exit-literal", "check_stages.rs", 8),
     ("error-exit-literal", "cli_options.rs", 1),
     ("error-exit-literal", "coverage.rs", 1),
     ("error-exit-literal", "frontend_output.rs", 2),
     ("error-exit-literal", "literate_access.rs", 3),
-    // 333 = 332 + #1672's sweep cell limit in `run_sweep_grid_from_source`,
-    // a base change, not a site this PR adds.
-    ("error-exit-literal", "main.rs", 333),
+    ("error-exit-literal", "main.rs", 174),
     ("error-exit-literal", "migration.rs", 3),
-    ("error-exit-literal", "refinement.rs", 9),
+    ("error-exit-literal", "refinement.rs", 3),
     ("error-exit-literal", "spec_loading.rs", 1),
-    ("error-exit-literal", "verification.rs", 49),
+    ("error-exit-literal", "verification.rs", 29),
     ("error-exit-literal", "verification_output.rs", 1),
 ];
 
