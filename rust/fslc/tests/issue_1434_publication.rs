@@ -61,20 +61,27 @@ fn migrated(written: bool, changed: bool) -> Value {
 // their slots and finite/nonnegative type; compare ALL other keys/values.
 // `memory_mb` is masked too: it was 17.46 on the d83 binaries and 17.68 in
 // 5/5 runs of the #1434 head binary, so it follows the build, not the
-// verdict (`edition_all_commands.rs` masks it for the same reason).
-// No verdict, location, assurance, cost count or cache masks.
+// verdict. The Z3 search statistics `conflicts` / `decisions` /
+// `propagations` are masked as `edition_all_commands.rs` removes them: they
+// were only ever observed on Linux, and no other test pins them on the macOS
+// or Windows native-Z3 jobs. The solver `checks` counts and the Z3 version
+// (also pinned by `specialized_preflight_preservation.rs`) stay compared.
+// No verdict, location, assurance, check count or cache masks.
 fn stable_verify(mut value: Value) -> Value {
     let mut paths = vec![
         "/cost/elapsed_s".to_owned(),
         "/cost/solver/check_elapsed_s".to_owned(),
         "/cost/solver/memory_mb".to_owned(),
+        "/cost/solver/conflicts".to_owned(),
+        "/cost/solver/decisions".to_owned(),
+        "/cost/solver/propagations".to_owned(),
     ];
     paths.extend((0..8).map(|i| format!("/cost/properties/{i}/elapsed_s")));
     for path in paths {
         let slot = value
             .pointer_mut(&path)
             .unwrap_or_else(|| panic!("missing ambient slot {path}"));
-        let number = slot.as_f64().expect("numeric ambient timing");
+        let number = slot.as_f64().expect("numeric ambient value");
         assert!(number.is_finite() && number >= 0.0, "{path}: {number}");
         *slot = json!(0);
     }
@@ -100,7 +107,7 @@ fn verified() -> Value {
         "action_coverage":{"stay":true},"deadlock":{"found":false},"warnings":[],
         "note":"bounded verification: no violation within depth 2","edition":"next","fsl_edition":5,
         "versions":versions(),"cost":{"elapsed_s":0,"solver":{"checks":17,"check_elapsed_s":0,
-            "conflicts":2,"decisions":1,"propagations":4,"memory_mb":0},"properties":properties}})
+            "conflicts":0,"decisions":0,"propagations":0,"memory_mb":0},"properties":properties}})
 }
 
 fn packet(dir: &Path, argv: &[&str], gate: Option<&str>) -> (i32, Value, String) {
