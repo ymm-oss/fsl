@@ -543,6 +543,30 @@ stdout, stderr and exit for all 109, with no run differing from its repeat (84 `
 `migrate_manual_required`, 6 `migration_refused` and 8 errors on both). `edition_migrator` passes 41 of
 41 on head.
 
+The search for a shared ID runs before the process conversion and returns early, so a document that
+also has a process migrate cannot rewrite reports only the `shared_requirement_id` findings in that run;
+its `migrate_manual_required` findings for the process appear once the IDs are fixed.
+
+A rewrite migrate does make can retitle a ledger row. A process `covers` naming a `requirement` block's ID
+with another text migrates with exit 0, and the ID is the block's. On a copy of
+`examples/annotations/annotated_claims.fsl` whose `pay` transition writes `covers REQ-READY "different"`,
+measured once on head: the current-edition ledger row is `| REQ-READY | different |`, the first linked
+text; after `migrate --edition next --write` the next-edition row is `| REQ-READY | the ledger tracks
+readiness for external callers |`, the block's title. That is the intended next-edition title. A
+digest-bound ledger approval of the current-edition document does not survive the migration either
+way: `approval check` reports `drifted` with `spec_changed` and `rendering_changed` both on that copy and
+on a control whose `covers` already has the block's title, so the retitling adds no drift a migration
+did not already cause.
+
+The current edition is unchanged. Base `9c31458678cf6c70e77987c85c95f4bc0d8df503` against head
+`878e03fcd2be79062270c27bbdea88b16d8cb109`, each binary from its own tree, every one of the 631
+current-edition `.fsl` files under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` ran through
+`ledger --depth 3 -o`, `document generate -o` and `document claims`, without the next edition enabled,
+twice per side: complete stdout, stderr, exit and written file were equal for all 1893 pairs, none
+unstable (322, 98 and 340 of them exit 0 on base). With the next edition enabled, `kernel
+--kernel-version 1` and `2` on the 8 next-edition corpus files that write `covers` were equal on base and
+head, so each `covers` keeps its text in the kernel.
+
 **Owed to #1437.** This removal is recorded here, in
 `skills-next/fsl-requirements/references/syntax.md` and in
 `changelog.d/1705-requirements-repeats.changed.md`. The next edition's header may not appear in
