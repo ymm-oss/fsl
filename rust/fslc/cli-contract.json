@@ -1399,7 +1399,7 @@
           "explain"
         ],
         "prog": "fslc explain",
-        "help": "usage: fslc explain [-h] [--depth DEPTH] [--readable] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help     show this help message and exit\n  --depth DEPTH\n  --readable\n",
+        "help": "usage: fslc explain [-h] [--depth DEPTH] [--readable] [--lowering]\n                    [--names {canonical,alias}]\n                    file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --readable\n  --lowering            add a 'lowering' object: each action's and property's\n                        origins\n  --names {canonical,alias}\n                        spell glossary names as their alias (default) or\n                        canonical name\n",
         "actions": [
           {
             "dest": "help",
@@ -1435,6 +1435,28 @@
             "nargs": 0,
             "default": false,
             "action": "store_true"
+          },
+          {
+            "dest": "lowering",
+            "required": false,
+            "flags": [
+              "--lowering"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          },
+          {
+            "dest": "names",
+            "required": false,
+            "flags": [
+              "--names"
+            ],
+            "choices": [
+              "canonical",
+              "alias"
+            ],
+            "action": "store"
           }
         ],
         "commands": []
@@ -2607,7 +2629,7 @@
       {
         "path": ["fmt"],
         "prog": "fslc fmt",
-        "help": "usage: fslc fmt [-h] [--check] [--edition {current,next}] path [path ...]\n\nFormat one registered FSL document to stdout without mutating it. Multiple paths are accepted only with --check. Use '-' for stdin.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --check               report whether formatting is required (exit 0 clean, 1 changed)\n  --edition {current,next}\n                        formatting policy (default: current)\n",
+        "help": "usage: fslc fmt [-h] [--check] [--edition {current,next}] [--lang {ja,en}] [--names {alias,canonical}] path [path ...]\n\nFormat one registered FSL document to stdout without mutating it. Multiple paths are accepted only with --check. Use '-' for stdin.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --check               report whether formatting is required (exit 0 clean, 1 changed)\n  --edition {current,next}\n                        formatting policy (default: current)\n  --lang {ja,en}        respell every keyword in one language (fsl 5 requirements)\n  --names {alias,canonical}\n                        respell glossary names as their alias or canonical name (fsl 5 requirements)\n",
         "actions": [
           {
             "dest": "help",
@@ -2637,6 +2659,30 @@
             "choices": ["current", "next"],
             "default": "current",
             "action": "store"
+          },
+          {
+            "dest": "lang",
+            "required": false,
+            "flags": [
+              "--lang"
+            ],
+            "choices": [
+              "ja",
+              "en"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "names",
+            "required": false,
+            "flags": [
+              "--names"
+            ],
+            "choices": [
+              "alias",
+              "canonical"
+            ],
+            "action": "store"
           }
         ],
         "commands": []
@@ -2644,7 +2690,7 @@
       {
         "path": ["lint"],
         "prog": "fslc lint",
-        "help": "usage: fslc lint [-h] [--edition {current,next}] [--project PROJECT] path [path ...]\n\nReport stable edition and ID-policy diagnostics without mutating source files.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next}\n                        lint policy (default: current)\n  --project PROJECT     explicit fsl-project.toml ID-policy manifest\n",
+        "help": "usage: fslc lint [-h] [--edition {current,next}] [--project PROJECT] [--strict-names] path [path ...]\n\nReport stable edition and ID-policy diagnostics without mutating source files.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next}\n                        lint policy (default: current)\n  --project PROJECT     explicit fsl-project.toml ID-policy manifest\n  --strict-names        warn 'mixed_names' where a glossary name is also written as its canonical name\n",
         "actions": [
           {
             "dest": "help",
@@ -2673,6 +2719,16 @@
             "required": false,
             "flags": ["--project"],
             "action": "store"
+          },
+          {
+            "dest": "strict_names",
+            "required": false,
+            "flags": [
+              "--strict-names"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
           }
         ],
         "commands": []

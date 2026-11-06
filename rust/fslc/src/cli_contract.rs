@@ -38,7 +38,7 @@ pub(crate) fn validate_argv(
     }
     let command = label(node);
     let mut actions = actions(node).to_vec();
-    next_edition_overlay(&command, &mut actions);
+    next_edition_overlay(&mut actions);
     validate_tokens(&command, &actions, &argv[index..], options)
 }
 
@@ -66,30 +66,10 @@ fn has_flag(action: &Value, flag: &str) -> bool {
         .is_some_and(|flags| flags.iter().any(|value| value.as_str() == Some(flag)))
 }
 
-/// The options of the next edition that `cli-contract.json` does not list:
-/// accepted by the command parsers, not yet in the contract or help (#1434
-/// published the edition without advertising them).
-fn next_edition_overlay(command: &str, actions: &mut Vec<Value>) {
-    let extras = match command {
-        "explain" => json!([
-            {"flags":["--names"],"choices":["canonical","alias"]},
-            {"flags":["--lowering"],"nargs":0}
-        ]),
-        "fmt" => json!([
-            {"flags":["--lang"],"choices":["ja","en"]},
-            {"flags":["--names"],"choices":["alias","canonical"]}
-        ]),
-        "lint" => json!([{"flags":["--strict-names"],"nargs":0}]),
-        _ => json!([]),
-    };
-    actions.extend(
-        extras
-            .as_array()
-            .expect("next-edition overlay")
-            .iter()
-            .cloned(),
-    );
-    // Edition's numeric aliases, which Edition::parse_option accepts too.
+/// The `--edition` spellings `cli-contract.json` does not list: the numeric
+/// aliases `4` and `5`, which `Edition::parse_option` accepts beside
+/// `current` / `next` (#1434; which spelling to advertise is #1437's).
+fn next_edition_overlay(actions: &mut [Value]) {
     for action in actions
         .iter_mut()
         .filter(|action| has_flag(action, "--edition"))
