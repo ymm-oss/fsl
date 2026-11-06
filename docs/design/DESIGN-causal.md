@@ -724,9 +724,26 @@ never contradict, the sections above.
   (version pin, scope, freshness, lifecycle status, window-vs-lag, lineage)
   are warnings: the artifact stays in history and in the graph but is
   excluded from current support.
+- **Declared freshness is validated.** After the artifact's declared digest
+  matches its canonical payload, a present `period.valid_until` must be a
+  string of exactly ten ASCII characters in `YYYY-MM-DD` form and a valid
+  Gregorian date, including year `0000` and Gregorian leap-year rules.
+  Null and other non-string values, malformed strings, and impossible dates
+  fail closed with `causal_evidence_schema_mismatch` and exit 2, with or
+  without `--as-of`. A digest mismatch retains precedence over this check.
+  Missing `valid_until` remains accepted with `unknown_freshness` and no
+  current support. This check does not tighten `period.start` or `period.end`.
 - **Staleness needs `--as-of`.** `stale_evidence` compares `valid_until`
-  against an explicit `--as-of YYYY-MM-DD` only; without `--as-of`, a
-  declared `valid_until` is accepted as-declared (never the wall clock, so
+  against an explicit `--as-of YYYY-MM-DD` only. `causal analyze` and
+  `causal ledger` check the `--as-of` value while reading options, before
+  the model or any evidence is read, by the same rule as `valid_until`:
+  exactly ten ASCII characters, digits in every field, no sign, and a valid
+  Gregorian date. Any other value, including an empty one, is refused with
+  `kind:"usage"`, exit 2, and the message `--as-of requires a valid Gregorian
+  date in YYYY-MM-DD format, got '<value>'` (#1422). This is a new refusal:
+  such a value used to exit 0 and silently count nothing as stale. Without
+  `--as-of`, a
+  valid declared `valid_until` is used as-declared (never the wall clock, so
   identical inputs always produce identical output). Missing `valid_until`
   is `unknown_freshness` and excludes the artifact regardless.
 - **Window conversion.** `period.end - period.start` converts to timebase
@@ -746,11 +763,14 @@ never contradict, the sections above.
   `period_start_missing`, `period_end_missing`, `period_date_unparsable`,
   `period_end_before_start`, `timebase_not_convertible`,
   `week_window_not_whole_weeks`; the lag side reports `claim_lag_unknown`.
-  A date is parsed as `YYYY-MM-DD` with a month in 1..12 and a day in 1..31 —
-  day-of-month validity against the month is **not** checked, so an impossible
-  date such as `2026-02-31` converts as its normalized value rather than
-  reporting `period_date_unparsable`. That is pre-existing `civil_days`
-  behaviour and also governs `valid_until` staleness.
+  The existing `civil_days` conversion checks Gregorian month lengths and
+  leap years: an impossible date such as `2026-02-31` reports
+  `period_date_unparsable` rather than being normalized. Every field must be
+  fixed-width ASCII digits, so a signed field such as `+026-01-01` or
+  `2026-+1-01` is also `period_date_unparsable` rather than being read as a
+  number (#1422). The same calendar conversion also governs `valid_until`
+  validation, `--as-of` validation and staleness. Unconvertible start/end
+  dates remain soft timing exclusions rather than artifact parse errors.
 - **Lineage.** The lineage root is the transitive `derived_from` root when
   present, else `source_study_id`, else the artifact itself. Roots sharing
   members emit `duplicate_evidence_source`; one root is one vote; support
@@ -837,7 +857,16 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
   A nonconformant log record (action not enabled, state mismatch) aborts
   with `observation_replay_nonconformant`. A mapping failure (unknown
   action, parameter mismatch, missing state variable) aborts with
-  `observation_replay_failed`. All failure outputs carry `do_not_assume`.
+  `observation_replay_failed`. These record-mapping and conformance failures
+  carry `do_not_assume`. Non-record argument, schema, and I/O errors retain
+  their ordinary CLI error envelopes.
+- **Shared mapping arithmetic (#1422).** Negating a dynamic JSON-log integer
+  at `i64::MIN` refuses with the existing `invalid mapping arithmetic` error
+  instead of overflowing. `fslc replay --from-log --mapping` reports
+  `nonconformant` with violation kind `log_mapping` and exit 1;
+  `causal observe-expectations` reports `observation_replay_failed` and exit 2.
+  Representable integer negation, non-integer type errors, and the other
+  arithmetic operators retain their existing behavior.
 - **Evidence artifacts.** Per-expectation `fsl-causal-evidence.v0` artifacts
   with the `observation` object filled in: `design: "observational"`,
   `support: "inconclusive"`, `observation.kind: "expectation_replay"`,
@@ -846,6 +875,21 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
   than `"inconclusive"` or `design` other than `"observational"` (AC 3/4).
   `observation.digests` carries sha256 digests of the causal source, JSONL
   log, and mapping file. Lifecycle records are sequence-1 active chains.
+- **Generated artifact validation (#1422).** Observation checks each generated
+  evidence artifact with the ingestion parser after stamping its digest and
+  before writing any evidence or lifecycle file. Since the declared period end
+  is emitted as `valid_until`, an invalid generated freshness date returns a
+  `semantics` error with diagnostic `causal_evidence_schema_mismatch` and exit 2.
+  This refusal leaves existing output files unchanged. `--period-start` and
+  `--period-end` are checked while options are read, by the same rule as
+  `--as-of`: a value that is not a real Gregorian date in ASCII `YYYY-MM-DD`
+  is refused with `kind:"usage"`, exit 2, and the message `<option> requires
+  a valid Gregorian date in YYYY-MM-DD format, got '<value>'`, before any
+  input is read or output written. This is a new refusal: an invalid
+  `--period-start` such as `2026-02-30` used to exit 0 and write an artifact
+  whose start was a soft timing exclusion. A stored artifact's invalid
+  `period.start`/`period.end` stays a soft timing exclusion on ingestion.
+  Observation adds no date-order policy and takes no `--as-of`.
 - **Captured inputs (#1423).** Observation parses JSONL records and hashes the
   same single UTF-8 capture, including original whitespace and line endings;
   log read/parse failures still precede scope parsing. Replacing or removing

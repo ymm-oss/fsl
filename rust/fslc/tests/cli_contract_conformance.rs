@@ -116,8 +116,9 @@ fn sample(node: &Value, action: &Value) -> String {
         "min_kill_rate" => "0.5".to_owned(),
         "output" | "out" | "lifecycle_out" => OUTPUT.to_owned(),
         "git" | "git_range" => "HEAD..HEAD".to_owned(),
-        "period_start" => "2026-01-01T00:00:00Z".to_owned(),
-        "period_end" | "as_of" => "2026-01-02T00:00:00Z".to_owned(),
+        // Date options take a Gregorian `YYYY-MM-DD` (#1422).
+        "period_start" => "2026-01-01".to_owned(),
+        "period_end" | "as_of" => "2026-01-02".to_owned(),
         _ => MISSING.to_owned(),
     }
 }
@@ -314,6 +315,46 @@ fn advertised_options_reach_downstream_validation() {
         }
     }
     sweep.finish("accepted");
+}
+
+#[test]
+fn date_options_refuse_a_timestamp_with_usage_naming_the_option() {
+    let contract = contract();
+    let mut probed = BTreeSet::new();
+    for node in nodes(&contract) {
+        for action in actions(node) {
+            if !matches!(
+                action["dest"].as_str(),
+                Some("as_of" | "period_start" | "period_end")
+            ) {
+                continue;
+            }
+            let flag = flags(action)[0];
+            let timestamp = "2026-01-02T00:00:00Z";
+            let mut args = context(node, flag);
+            append(&mut args, flag, Some(timestamp));
+            let output = run(&args);
+            assert!(usage(&output), "{args:?}");
+            assert_eq!(
+                decoded(&output)["message"],
+                format!(
+                    "{flag} requires a valid Gregorian date in YYYY-MM-DD format, got '{timestamp}'"
+                ),
+                "{args:?}"
+            );
+            probed.insert((label(node), flag.to_owned()));
+        }
+    }
+    let expected: BTreeSet<(String, String)> = [
+        ("causal analyze", "--as-of"),
+        ("causal ledger", "--as-of"),
+        ("causal observe-expectations", "--period-start"),
+        ("causal observe-expectations", "--period-end"),
+    ]
+    .into_iter()
+    .map(|(command, flag)| (command.to_owned(), flag.to_owned()))
+    .collect();
+    assert_eq!(probed, expected);
 }
 
 #[test]

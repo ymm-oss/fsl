@@ -115,11 +115,12 @@ pub(crate) fn mapping_json_expr(
                 .as_bool()
                 .ok_or_else(|| "mapping not requires Boolean".to_owned())?
         )),
-        KernelExpr::Neg(value) => Ok(json!(
-            -mapping_json_expr(value, raw, bindings, model)?
-                .as_i64()
-                .ok_or_else(|| "mapping negation requires integer".to_owned())?
-        )),
+        KernelExpr::Neg(value) => mapping_json_expr(value, raw, bindings, model)?
+            .as_i64()
+            .ok_or_else(|| "mapping negation requires integer".to_owned())?
+            .checked_neg()
+            .map(|value| json!(value))
+            .ok_or_else(|| "invalid mapping arithmetic".to_owned()),
         KernelExpr::Conditional {
             condition,
             then_expr,
@@ -385,3 +386,6 @@ mod captured_jsonl_tests {
         assert!(parse_jsonl_records(" \r\n\n").unwrap().is_empty());
     }
 }
+
+#[cfg(test)]
+include!("issue_1422_mapping_neg_tests.rs");

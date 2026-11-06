@@ -288,7 +288,14 @@ causal_evidence_graph` (or `--profile causal-review`). Artifacts
 closed `design` vocabulary, directed `support`, scope tokens, a period, and a
 digest over the canonical payload; lifecycle chains
 (`fsl-causal-evidence-lifecycle.v0`) are separate append-only, digest-linked
-records. Schema/digest/lifecycle violations fail closed (exit 2). The
+records. Schema/digest/lifecycle violations fail closed (exit 2). After
+artifact digest validation, a present `period.valid_until` must be a string
+with exactly the ASCII `YYYY-MM-DD` shape and a valid Gregorian date
+(including year `0000`); null, other types, malformed strings, and impossible
+dates fail with `causal_evidence_schema_mismatch`, even without `--as-of`.
+Digest mismatch retains precedence. Missing `valid_until` stays accepted as
+`unknown_freshness` and excludes current support; start/end date conversion
+continues to use soft timing exclusions. The
 deterministic per-claim `causal_support`
 (`untested | supported | challenged | inconclusive | mixed |
 unsupported_by_current_evidence`) counts only artifacts pinning the current
@@ -301,7 +308,10 @@ excluded from current support with `evidence_timing_not_evaluable` and casts
 no vote — it is never counted on the strength of the other conditions alone.
 A scope dimension present on only one side is
 `unassessable`, never universal. Staleness needs an explicit `--as-of` — never the wall
-clock. **Agents: `causal_support` and `formal_assurance` are separate axes;
+clock. `causal analyze` and `causal ledger` refuse an `--as-of` that is not a real
+Gregorian date in ASCII `YYYY-MM-DD` (no sign) with `kind:"usage"`, exit 2, before
+reading the model or evidence; it used to exit 0 and count nothing as stale. Start/end
+dates with a signed field are `period_date_unparsable`. **Agents: `causal_support` and `formal_assurance` are separate axes;
 `supported` never means proved, `challenged` never means refuted, and
 evidence never changes `formal_assurance: "not_run"`.**
 
@@ -324,7 +334,9 @@ using the solver-free `BoundedLivenessMonitor`. Generates per-expectation
 `support: "inconclusive"`, `assurance: "replay-observed"`, and matching
 lifecycle records. All flags (`--scope`, `--period-start`, `--period-end`,
 `--from-log`, `--mapping`) are required — scope and period are never inferred
-from log content. A nonconformant log (action not enabled, state mismatch)
+from log content. A `--period-start`/`--period-end` that is not a real Gregorian
+date in ASCII `YYYY-MM-DD` is refused with `kind:"usage"`, exit 2, and nothing
+written (new: an invalid start used to exit 0 and write an artifact). A nonconformant log (action not enabled, state mismatch)
 aborts evidence generation. **Agents: `replay-observed` is observational
 evidence only — temporal co-occurrence does not establish causality, pass does
 not mean the claim is true, violation does not refute it, and `support` stays

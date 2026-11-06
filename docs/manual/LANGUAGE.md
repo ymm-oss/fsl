@@ -2406,8 +2406,22 @@ verification result under `sweep.results`, and returns the first true failing
 scope under `sweep.minimal_counterexample`. For `--values`, the sweep fixes the
 lower bound and expands the upper bound (`lo..lo`, `lo..lo+1`, ..., `lo..hi`).
 A passing sweep means "no counterexample in this grid", not an unbounded proof.
-A spec `error` (parse / type / semantics / io / vacuous / …) from any scope in
-the grid is not a counterexample: `sweep` returns that underlying error
+The normalized grid has a fixed limit of 10,000 cells: multiply the inclusive
+width of every `--instances` range, every `--values` range, and the depth range.
+An axis with no overrides contributes 1. Within each axis, the last range for
+each trimmed name wins. The checked count follows CLI option validation,
+literate-input restrictions, range validation, file loading, and edition
+admission (which may itself parse the source). It precedes both Cartesian-product
+allocations and every cell's parsing, type checks, and scope validation. An
+unrepresentable count or a count above 10,000 returns `kind:"semantics"`, exit 2,
+with `message:"sweep grid exceeds the maximum of 10000 cells"`; no partial sweep
+result is returned. Admitted grids retain their cell order, error propagation,
+verdicts, minimal counterexample, and per-scope aggregation. This limits the
+number of verification calls, not each cell's state count, elapsed time, or
+absolute depth value.
+
+Within an admitted grid, a spec `error` (parse / type / semantics / io /
+vacuous / …) from any scope is not a counterexample: `sweep` returns that underlying error
 envelope verbatim (`result`, `kind`, `message`, `loc`, exit code unchanged)
 instead of folding it into `sweep_passed`, `sweep_inconclusive`, or
 `sweep_failed`.
@@ -5655,7 +5669,14 @@ that cannot be converted, or a claim whose `lag` is `unknown` so there is no
 `lag_min` to compare against, leaves timing eligibility not evaluable: the
 edge stays in history and in the graph but is excluded from current support
 with `evidence_timing_not_evaluable` and casts no vote. Staleness is judged only
-against an explicit `--as-of` date — never the wall clock. A scope dimension
+against an explicit `--as-of` date — never the wall clock. `causal analyze`
+and `causal ledger` refuse an `--as-of` value that is not a real Gregorian
+date written as ASCII `YYYY-MM-DD` (no sign, no other characters) with
+`kind:"usage"` and exit 2, before reading the model or evidence; such a value
+used to exit 0 and count nothing as stale. `causal observe-expectations`
+refuses a `--period-start` or `--period-end` that breaks the same rule in the
+same way, writing nothing; an invalid `--period-start` used to exit 0 and
+write an artifact. A scope dimension
 present on only the claim or artifact side is `unassessable`; absence is never
 treated as universal. **`causal_support`
 and `formal_assurance` are orthogonal axes**: evidence never changes

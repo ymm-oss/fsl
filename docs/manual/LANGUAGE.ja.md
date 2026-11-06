@@ -2217,7 +2217,22 @@ cache の読み書きを止めるには `FSLC_CACHE=off` を使います。
 失敗スコープを `sweep.minimal_counterexample` として返します。`--values` に
 ついては、sweep は下限を固定して上限を拡大します(`lo..lo`, `lo..lo+1`, ...,
 `lo..hi`)。sweep の合格は「このグリッドに反例がない」ことを意味し、非有界の証明
-ではありません。グリッド中のいずれかのスコープが spec `error`(parse / type /
+ではありません。
+
+正規化後のグリッドの上限は 10,000 セルです。各 `--instances` 範囲、各
+`--values` 範囲、深さ範囲の幅を、両端を含めて掛け合わせます。上書き指定のない
+軸は 1 と数えます。同じ軸で同じ名前を繰り返した場合は、前後の空白を除いた
+名前ごとに最後の範囲を使います。CLI オプション、literate 入力の制限、範囲、
+ファイル読み取り、edition の受け入れ検査を先に行い、その後でセル数を検査します。
+edition の受け入れ検査では、ソースを構文解析する場合もあります。セル数の検査は
+両方の直積の生成と、各セルの構文・型・scope の検査より前です。セル数を整数で
+表せない場合や 10,000 を超える場合は、`kind:"semantics"`、exit 2、
+`message:"sweep grid exceeds the maximum of 10000 cells"` を返し、部分的な
+sweep 結果は返しません。上限内のセル順序、既存エラーの返し方、判定、最小反例、
+スコープごとの集約は変わりません。この上限が制限するのは検証の呼び出し回数であり、
+各セルの状態数、経過時間、深さの値自体ではありません。
+
+上限内のグリッド中のいずれかのスコープが spec `error`(parse / type /
 semantics / io / vacuous / …)を返した場合、それは反例ではありません。`sweep` は
 その基盤のエラー envelope をそのまま返します(`result`、`kind`、`message`、
 `loc`、exit code は変更しません)。`sweep_passed`、`sweep_inconclusive`、
@@ -5334,6 +5349,13 @@ lag が `unknown` で比較する `lag_min` が無い場合は、timing eligibil
 で current support から除外され、票を投じません。同一 source lineage は 1 票に
 collapse されます(lineage 内の矛盾は `inconclusive`)。staleness は明示的な
 `--as-of` 日付に対してだけ判定され、実行環境の時計は決して使いません。
+`causal analyze` と `causal ledger` は、ASCII の `YYYY-MM-DD`(符号やほかの
+文字を含まない)で書かれた実在するグレゴリオ暦の日付ではない `--as-of` の値を、
+model や evidence を読む前に `kind:"usage"`・exit 2 で拒否します。以前はこうした
+値でも exit 0 になり、stale と数えられる evidence はありませんでした。
+`causal observe-expectations` も同じ規則に反する `--period-start` と
+`--period-end` を同じ形で拒否し、何も書き出しません。以前は不正な
+`--period-start` でも exit 0 になり、artifact が書き出されていました。
 claim 側または artifact 側の片方だけに存在する scope dimension は
 `unassessable` であり、欠落を universal として扱いません。
 **`causal_support` と `formal_assurance` は直交する 2 軸**です: evidence は

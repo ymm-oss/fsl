@@ -1019,6 +1019,14 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
         2114,
         "run_verify_cli_kernel_from_source"
     ),
+    // Files contains raw file bytes; Raw carries bytes and a process exit code,
+    // not an optional verification verdict.
+    unresolved_ordinary!("rust/fslc/tests/issue_1422_producer_period.rs", 42, "files"),
+    unresolved_ordinary!(
+        "rust/fslc/tests/issue_1422_producer_period.rs",
+        53,
+        "observe"
+    ),
     unresolved_ordinary!(
         "rust/fslc/tests/issue_868_result_option_verdict_census.rs",
         750,

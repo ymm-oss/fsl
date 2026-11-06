@@ -69,7 +69,8 @@ pub use causal_evidence::{
     Applicability, CAUSAL_SUPPORT_UNTESTED, EVIDENCE_SCHEMA_VERSION, EvidenceArtifact,
     EvidenceError, FORMAL_ASSURANCE_NOT_RUN, LIFECYCLE_SCHEMA_VERSION, LifecycleStatus,
     ScopeApplication, SupportOverlay, aggregate_support, artifact_digest, canonical_json,
-    causal_evidence_graph, lifecycle_record_digest, parse_artifact, validate_lifecycle_chain,
+    causal_evidence_graph, is_calendar_date, lifecycle_record_digest, parse_artifact,
+    validate_lifecycle_chain,
 };
 pub use causal_expectation::{CompiledExpectation, compile_expectations};
 pub use causal_ledger_projection::build_ledger;

@@ -2506,8 +2506,21 @@ verification result under <code>sweep.results</code>, and returns the first true
 scope under <code>sweep.minimal_counterexample</code>. For <code>--values</code>, the sweep fixes the
 lower bound and expands the upper bound (<code>lo..lo</code>, <code>lo..lo+1</code>, ..., <code>lo..hi</code>).
 A passing sweep means "no counterexample in this grid", not an unbounded proof.
-A spec <code>error</code> (parse / type / semantics / io / vacuous / …) from any scope in
-the grid is not a counterexample: <code>sweep</code> returns that underlying error
+The normalized grid has a fixed limit of 10,000 cells: multiply the inclusive
+width of every <code>--instances</code> range, every <code>--values</code> range, and the depth range.
+An axis with no overrides contributes 1. Within each axis, the last range for
+each trimmed name wins. The checked count follows CLI option validation,
+literate-input restrictions, range validation, file loading, and edition
+admission (which may itself parse the source). It precedes both Cartesian-product
+allocations and every cell's parsing, type checks, and scope validation. An
+unrepresentable count or a count above 10,000 returns <code>kind:"semantics"</code>, exit 2,
+with <code>message:"sweep grid exceeds the maximum of 10000 cells"</code>; no partial sweep
+result is returned. Admitted grids retain their cell order, error propagation,
+verdicts, minimal counterexample, and per-scope aggregation. This limits the
+number of verification calls, not each cell's state count, elapsed time, or
+absolute depth value.</p>
+<p>Within an admitted grid, a spec <code>error</code> (parse / type / semantics / io /
+vacuous / …) from any scope is not a counterexample: <code>sweep</code> returns that underlying error
 envelope verbatim (<code>result</code>, <code>kind</code>, <code>message</code>, <code>loc</code>, exit code unchanged)
 instead of folding it into <code>sweep_passed</code>, <code>sweep_inconclusive</code>, or
 <code>sweep_failed</code>.</p>
@@ -5775,7 +5788,14 @@ that cannot be converted, or a claim whose <code>lag</code> is <code>unknown</co
 <code>lag_min</code> to compare against, leaves timing eligibility not evaluable: the
 edge stays in history and in the graph but is excluded from current support
 with <code>evidence_timing_not_evaluable</code> and casts no vote. Staleness is judged only
-against an explicit <code>--as-of</code> date — never the wall clock. A scope dimension
+against an explicit <code>--as-of</code> date — never the wall clock. <code>causal analyze</code>
+and <code>causal ledger</code> refuse an <code>--as-of</code> value that is not a real Gregorian
+date written as ASCII <code>YYYY-MM-DD</code> (no sign, no other characters) with
+<code>kind:"usage"</code> and exit 2, before reading the model or evidence; such a value
+used to exit 0 and count nothing as stale. <code>causal observe-expectations</code>
+refuses a <code>--period-start</code> or <code>--period-end</code> that breaks the same rule in the
+same way, writing nothing; an invalid <code>--period-start</code> used to exit 0 and
+write an artifact. A scope dimension
 present on only the claim or artifact side is <code>unassessable</code>; absence is never
 treated as universal. <strong><code>causal_support</code>
 and <code>formal_assurance</code> are orthogonal axes</strong>: evidence never changes

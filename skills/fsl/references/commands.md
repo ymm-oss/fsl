@@ -861,7 +861,18 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   values}` scope (`[]` when there is none). Missing,
   unknown, or mixed classifications, including `over_constrained`, fail closed as
   `sweep_failed`. For `--values NAME=LO..HI`, it fixes `LO` and expands
-  `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope
+  `LO..LO`, `LO..LO+1`, ..., `LO..HI`. The normalized grid is limited to
+  10,000 cells: the product of every inclusive instances/value range width and
+  the inclusive depth width; an empty axis contributes 1, and the last range
+  for each trimmed name wins within each axis. Existing option, literate-input,
+  range, file-loading, and edition-admission checks come first; admission may
+  itself parse the source. The checked cell count then precedes both product
+  allocations and per-cell parsing/type/scope checks. Overflow or more than
+  10,000 cells returns `kind:"semantics"`, exit 2, and
+  `message:"sweep grid exceeds the maximum of 10000 cells"`, with no partial
+  sweep result. This limits verification calls, not per-cell states, elapsed
+  time, or the absolute depth. Admitted grids keep their existing behavior.
+  Within an admitted grid, a spec `error` from any scope
   (parse/type/semantics/io/vacuous, a mistyped `--instances`/`--values` name,
   a missing file) is returned verbatim — exit code and `kind` unchanged.
   Cells always carry `--instances`/`--values`, so a check a cell skips
