@@ -64,7 +64,19 @@ as `agent`) gets no such finding: `check` refuses a header on it with
 A `refinement` document gets none either. It accepts a header, but it is not a
 standalone check target (`lint`/`migrate` skip its input pre-flight), so no
 Kernel contract can show the insertion preserves it; `lint --edition next`
-stays exit 0 on it, as before #1434.
+stays exit 0 on it, as before #1434. Nor does a `compose` document (dialect
+keyword `compose`): its Public Kernel v1 migration contract cannot keep the
+components' source files, so `migrate` refused the planned insertion with exit 2
+("public Kernel v1 cannot preserve component source filenames after compose
+lowering"). For all three, `lint` and `migrate` give what they gave before
+#1434; a header written by hand is still read.
+
+Because `migrate` defaults to `next`, it now also runs the next edition's
+process-form conversion on a headerless `requirements` document. Where that
+conversion needs a manual step (`migrate_manual_required`), a default `migrate`
+exits 1 where it exited 0: 11 of the 651 corpus forms, for example
+`examples/annotations/annotated_claims.fsl`. `--edition current` keeps the
+former result.
 
 ## Rewrite table
 

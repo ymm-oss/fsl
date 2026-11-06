@@ -1538,6 +1538,50 @@ fn refinement_documents_are_not_offered_an_edition_header() {
     assert_eq!(checked["fsl_edition"], 5, "{checked:#}");
 }
 
+/// #1434: a `compose` document (dialect keyword `compose`) is offered no
+/// edition header either: its Public Kernel v1 migration contract cannot keep
+/// the components' source files, so `migrate` could not show the insertion
+/// preserves it. `lint` and `migrate` report nothing, `--write` leaves it
+/// unchanged, and a hand-written header is still read.
+#[test]
+fn compose_documents_are_not_offered_an_edition_header() {
+    let fixtures =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/issue_1573_inventory");
+    let directory = FixtureDir::new();
+    for name in ["a.fsl", "b.fsl"] {
+        directory.write(name, &text(&fixtures.join(name)));
+    }
+    let source = text(&fixtures.join("s.fsl"));
+    assert_eq!(
+        fsl_syntax::dialect_keyword(&source),
+        Ok("compose"),
+        "fixture is a compose document"
+    );
+    let path = directory.write("s.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    let plain = run(&["check", path]);
+    assert_eq!(plain.status.code(), Some(0), "{}", json(&plain));
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(0), "{}", json(&linted));
+    assert_eq!(json(&linted)["finding_count"], 0);
+    for edition in ["next", "5"] {
+        let migrated = run(&["migrate", path, "--edition", edition, "--write"]);
+        assert_eq!(migrated.status.code(), Some(0), "{}", json(&migrated));
+        let migrated = json(&migrated);
+        assert_eq!(migrated["changed"], 0, "{migrated:#}");
+        assert_eq!(
+            migrated["files"][0]["findings"],
+            Value::Array(Vec::new()),
+            "{migrated:#}"
+        );
+        assert_eq!(text(Path::new(path)), source);
+    }
+    let headed = directory.write("headed.fsl", &format!("fsl 5\n{source}"));
+    let checked = json(&run(&["check", headed.to_str().expect("UTF-8 path")]));
+    assert_eq!(checked["result"], "ok", "{checked:#}");
+    assert_eq!(checked["fsl_edition"], 5, "{checked:#}");
+}
+
 /// Regression control: a `refinement`-dialect input (no `state` block —
 /// `fslc check` itself fails "spec has no state block" for this dialect,
 /// since a refinement spec is not a standalone check target) must keep

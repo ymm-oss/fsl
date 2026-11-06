@@ -996,9 +996,10 @@ fn with_declared_edition(mut output: Value, declared: Option<Edition>) -> Value 
 /// document has no header. `None` also for a declaration that takes no
 /// header ([`fsl_syntax::EDITIONLESS_DECLARATIONS`], such as `agent`), where
 /// the header would make the document a parse error, and for a `refinement`,
-/// which is not a standalone check target: no Kernel contract can show the
-/// insertion preserves it, so none is offered (a hand-written header is
-/// still read).
+/// which is not a standalone check target, and for a `compose` document,
+/// whose Public Kernel v1 contract cannot keep its components' source files:
+/// for those two no Kernel contract can show the insertion preserves the
+/// document, so none is offered (a hand-written header is still read).
 #[must_use]
 pub fn missing_edition_header(
     source: &str,
@@ -1008,7 +1009,8 @@ pub fn missing_edition_header(
     if edition != Edition::Fsl5
         || !matches!(fsl_syntax::edition_header(source, options), Ok(None))
         || fsl_syntax::dialect_keyword_with(source, options).is_ok_and(|keyword| {
-            keyword == "refinement" || fsl_syntax::EDITIONLESS_DECLARATIONS.contains(&keyword)
+            matches!(keyword, "refinement" | "compose")
+                || fsl_syntax::EDITIONLESS_DECLARATIONS.contains(&keyword)
         })
     {
         return None;
