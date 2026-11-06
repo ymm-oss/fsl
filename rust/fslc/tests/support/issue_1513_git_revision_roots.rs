@@ -7,7 +7,13 @@ use sha2::{Digest, Sha256};
 use std::cell::Cell;
 use std::path::PathBuf;
 use std::process::{Command, Output};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub const BODY: &str = "spec S { state { done: Bool = false } action finish() \"REQ-PROBE-001: 日本語😀\" { done = true } invariant Typed { true } }\n";
 pub const ANNOTATION: &str = "@requirement(\"REQ-PROBE-001\", \"日本語😀\")";
@@ -43,8 +49,11 @@ impl Repo {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("fslc-1513-{}-{label}-{nonce}", std::process::id()));
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "fslc-1513-{}-{label}-{nonce}-{sequence}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&path).unwrap();
         let evidence = std::env::var_os("FSL_1513_EVIDENCE").map(|p| PathBuf::from(p).join(label));
         if let Some(p) = &evidence {

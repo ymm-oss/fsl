@@ -9,6 +9,12 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const TEMPLATE: &str = r"spec R2 {
   type A = 0..1
@@ -79,12 +85,13 @@ fn fixture(label: &str, source: &str) -> PathBuf {
     let directory = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("issue_1522_relation_endpoint_bounds")
         .join(format!(
-            "{label}-{}-{}",
+            "{label}-{}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("system clock")
-                .as_nanos()
+                .as_nanos(),
+            FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         ));
     std::fs::create_dir_all(&directory).expect("create fixture directory");
     std::fs::write(directory.join("spec.fsl"), source).expect("write fixture");
