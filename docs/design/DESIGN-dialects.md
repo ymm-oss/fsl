@@ -611,12 +611,14 @@ When #1437 writes the `fsl 5` reference, `docs/manual/LANGUAGE.md`, `docs/manual
 
 Migration: keep the one declaration you mean. There is no automatic migration.
 
-On-disk transition set (empty). Base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `fc6d86d274ec1de6af8eac9ddb00c9529fdb7de1`, each binary built from its own tree in
-its own target directory with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and
-`rust/fslc/tests/fixtures/` (646 forms: 23/195/428) ran with `FSLC_CACHE=off` and its own tree as cwd,
-as `fslc check <path>` stable and with the next edition enabled, and as `fslc kernel <path>
---kernel-version 1|2`, twice per side. All 2584 pairs had equal complete stdout, stderr and exit with
-no field excluded, and no run differed from its repeat: 0 ok-to-error and 0 error-to-ok transitions.
+On-disk transition set (empty). Base `9c31458678cf6c70e77987c85c95f4bc0d8df503`, head `b2367d61fd8a410f9e1364301f1fab0d6b7c4cb7` (the rebase onto it), each binary built
+from its own tree in its own target directory with Rust 1.98.0. Every `.fsl` under `specs/`,
+`examples/` and `rust/fslc/tests/fixtures/` (651 forms: 23/195/433) ran with `FSLC_CACHE=off` and its
+own tree as cwd, as `fslc check <path>` stable and with the next edition enabled, and as `fslc kernel
+<path> --kernel-version 1|2`, twice per side. All 2604 pairs had equal complete stdout, stderr and exit
+with no field excluded, and no run differed from its repeat: 0 ok-to-error and 0 error-to-ok
+transitions. Before the rebase, the same sweep on base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd` and
+head `fc6d86d274ec1de6af8eac9ddb00c9529fdb7de1` (646 forms, 2584 pairs) gave the same result.
 No required test's inline fixtures were rewritten.
 
 ### 3.3 Governance catalog

@@ -11,4 +11,4 @@ These forms passed `check` before and kept one copy, so swapping the copies chan
 
 Migration: keep the one declaration you mean. There is no automatic migration.
 
-The 646-form on-disk corpus has an empty transition set: base `3901764f0fd07c3e98a5cc78b8ca341a6d1276dd`, head `fc6d86d274ec1de6af8eac9ddb00c9529fdb7de1`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
+The 651-form on-disk corpus has an empty transition set: base `9c31458678cf6c70e77987c85c95f4bc0d8df503`, head `b2367d61fd8a410f9e1364301f1fab0d6b7c4cb7`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
