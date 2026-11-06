@@ -103,6 +103,24 @@ evidence; guessing that graph from one source file would be unsafe. Therefore
 `fslc migrate` does not rename IDs and the policy is not applied by `check` or
 `verify`.
 
+### One owner per requirement ID in the current edition
+
+The current edition's `check` accepts a `requirements` document in which one
+requirement ID has two owners: a second `requirement` with the ID of an earlier
+one, or an `acceptance` and a `requirement` sharing an ID, in either order. The
+ledger then keeps one row for the ID; with two `requirement`s it carries the
+last title. The next edition refuses a second owner (#1705, `DESIGN-dialects.md`);
+the current edition keeps accepting it, so `fslc lint` reports it instead.
+
+`shared_requirement_id` is a warning with taxonomy `ambiguous_intent`, at the
+second owner's ID, naming the kind and position of the earlier owner. Its
+severity is `warning` under `--edition next` too, because it reports the
+document rather than an edition rule. It is never machine-applicable: choosing
+which declaration keeps the ID is the author's decision. Two `acceptance`s of one
+ID are left to `check`, which refuses them (`duplicate acceptance id`). A
+`forbidden`, `policy`, `goal` or `control` sharing a requirement ID is outside
+this warning; it was not measured here.
+
 ## Consequences
 
 - New projects receive a deterministic convention without configuration.

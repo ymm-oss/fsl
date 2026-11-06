@@ -512,6 +512,11 @@ fn run_lint_inner(
                 &source,
                 crate::parse_options(),
             ));
+        plan.diagnostics
+            .extend(fslc_rust::migration::shared_requirement_id_diagnostics(
+                &source,
+                crate::parse_options(),
+            ));
         if options.strict_names {
             plan.diagnostics
                 .extend(fslc_rust::migration::mixed_names_diagnostics(
