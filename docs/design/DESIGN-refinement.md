@@ -1115,8 +1115,8 @@ action items follow the own-actor rule in the #1456 amendment below.
 4. **Commands:** run unscoped `fslc check req.fsl`, inspect both declarations
    and the mapping, correct confirmed mistakes, then repeat `check` and run
    `fslc verify req.fsl --depth 6 --no-cache`. For a standalone mapping run
-   `fslc refine impl.fsl abs.fsl map.fsl --depth 6`; add `FSLC_UNSTABLE=fsl5`
-   for fsl 5 input. There is no dedicated lint/migrate auto-fix for policy
+   `fslc refine impl.fsl abs.fsl map.fsl --depth 6` (an `fsl 5` input is read
+   from its header, #1434). There is no dedicated lint/migrate auto-fix for policy
    actors; selected `verify` is not a migration detector.
 5. **Verdicts/evidence:** old `ok`/`verified`/`refines` can become type errors;
    public Kernel/JSON schemas do not change. After a source correction,

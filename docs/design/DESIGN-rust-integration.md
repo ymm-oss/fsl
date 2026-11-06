@@ -89,8 +89,10 @@ any following tokens remain excess positional arguments rejected by preflight.
 Every repeated choice is checked, so a later valid occurrence cannot mask an earlier invalid one.
 Existing typed parsers
 retain numeric/type interpretation, required-argument diagnostics, duplicate/combination rules,
-and execution plumbing. Unstable fsl5 options and numeric edition aliases remain gated, command-local
-overlays, not a bypass of stable validation or additions to the stable metadata.
+and execution plumbing. Since #1434 the `fsl 5` options (`explain --lowering` / `--names`, `fmt --lang` /
+`--names`, `lint --strict-names`) are listed in the contract like any other option. Only the numeric
+edition aliases `--edition 4|5` remain a command-local overlay, not a bypass of validation and not
+advertised in the metadata or help, until #1437 settles which spelling to advertise.
 
 Diagnostics retain already-rejecting wording when it identifies the option and the actual command;
 wrong helper labels and omitted option spellings are corrected. Unsupported Kernel majors keep
