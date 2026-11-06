@@ -993,9 +993,12 @@ fn with_declared_edition(mut output: Value, declared: Option<Edition>) -> Value 
 /// The `missing_edition_header` finding of a document read for `edition`
 /// without an edition header: one edit inserting the header line before the
 /// first significant line. `None` unless the edition is the next one and the
-/// document has no header, and `None` for a declaration that takes no
-/// header ([`fsl_syntax::EDITIONLESS_DECLARATIONS`], such as `agent`): the
-/// header would make that document a parse error.
+/// document has no header. `None` also for a declaration that takes no
+/// header ([`fsl_syntax::EDITIONLESS_DECLARATIONS`], such as `agent`), where
+/// the header would make the document a parse error, and for a `refinement`,
+/// which is not a standalone check target: no Kernel contract can show the
+/// insertion preserves it, so none is offered (a hand-written header is
+/// still read).
 #[must_use]
 pub fn missing_edition_header(
     source: &str,
@@ -1004,8 +1007,9 @@ pub fn missing_edition_header(
 ) -> Option<MigrationDiagnostic> {
     if edition != Edition::Fsl5
         || !matches!(fsl_syntax::edition_header(source, options), Ok(None))
-        || fsl_syntax::dialect_keyword_with(source, options)
-            .is_ok_and(|keyword| fsl_syntax::EDITIONLESS_DECLARATIONS.contains(&keyword))
+        || fsl_syntax::dialect_keyword_with(source, options).is_ok_and(|keyword| {
+            keyword == "refinement" || fsl_syntax::EDITIONLESS_DECLARATIONS.contains(&keyword)
+        })
     {
         return None;
     }

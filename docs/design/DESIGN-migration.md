@@ -61,6 +61,10 @@ changes how it is read.
 A declaration that takes no edition header (`EDITIONLESS_DECLARATIONS`, such
 as `agent`) gets no such finding: `check` refuses a header on it with
 `edition_header_not_accepted`, so the insertion would break the document.
+A `refinement` document gets none either. It accepts a header, but it is not a
+standalone check target (`lint`/`migrate` skip its input pre-flight), so no
+Kernel contract can show the insertion preserves it; `lint --edition next`
+stays exit 0 on it, as before #1434.
 
 ## Rewrite table
 

@@ -1500,6 +1500,44 @@ fn agent_documents_are_not_offered_an_edition_header() {
     );
 }
 
+/// #1434: a `refinement` document is not a standalone check target, so the
+/// next edition offers it no edition header either: `lint` and `migrate`
+/// report nothing and `--write` leaves it unchanged. A header written by
+/// hand is still read (the document checks exactly as without one).
+#[test]
+fn refinement_documents_are_not_offered_an_edition_header() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = text(&root.join("../../specs/cart_refines.fsl"));
+    assert!(source.starts_with("refinement "), "fixture is a refinement");
+    let directory = FixtureDir::new();
+    let path = directory.write("refines.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(0), "{}", json(&linted));
+    assert_eq!(json(&linted)["finding_count"], 0);
+    for edition in ["next", "5"] {
+        let migrated = run(&["migrate", path, "--edition", edition, "--write"]);
+        assert_eq!(migrated.status.code(), Some(0), "{}", json(&migrated));
+        let migrated = json(&migrated);
+        assert_eq!(migrated["changed"], 0, "{migrated:#}");
+        assert_eq!(
+            migrated["files"][0]["findings"],
+            Value::Array(Vec::new()),
+            "{migrated:#}"
+        );
+        assert_eq!(text(Path::new(path)), source);
+    }
+    let headed = directory.write("headed.fsl", &format!("fsl 5\n{source}"));
+    let checked = json(&run(&["check", headed.to_str().expect("UTF-8 path")]));
+    let plain = json(&run(&["check", path]));
+    assert_eq!(
+        (&checked["kind"], &checked["message"]),
+        (&plain["kind"], &plain["message"]),
+        "{checked:#}"
+    );
+    assert_eq!(checked["fsl_edition"], 5, "{checked:#}");
+}
+
 /// Regression control: a `refinement`-dialect input (no `state` block —
 /// `fslc check` itself fails "spec has no state block" for this dialect,
 /// since a refinement spec is not a standalone check target) must keep
@@ -1519,12 +1557,10 @@ fn refinement_dialect_is_still_not_a_standalone_lint_migrate_target() {
         run(&["migrate", path, "--edition", "next"]).status.code(),
         Some(0)
     );
-    // #1434: lint reports only the missing header (info), so it exits 1.
-    let linted = run(&["lint", path, "--edition", "next"]);
-    assert_eq!(linted.status.code(), Some(1));
-    let linted = json(&linted);
-    assert!(reports_missing_header_once(&linted), "{linted:#}");
-    assert!(without_missing_header(&linted).is_empty(), "{linted:#}");
+    assert_eq!(
+        run(&["lint", path, "--edition", "next"]).status.code(),
+        Some(0)
+    );
 }
 
 // Requirements `process` forms under `--edition 5` (fsl 5 plan §3 S9): the
