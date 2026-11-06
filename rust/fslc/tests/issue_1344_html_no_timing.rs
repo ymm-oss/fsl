@@ -9,6 +9,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const CLEAN: &str = "rust/fslc/tests/fixtures/sweep_clean.fsl";
 const VIOLATED: &str = "rust/fslc/tests/fixtures/sweep_violating.fsl";
@@ -28,12 +34,13 @@ impl ReportRun {
         let parent = root().join(".codex/tmp");
         std::fs::create_dir_all(&parent).expect("worktree-local scratch parent");
         let path = parent.join(format!(
-            "issue-1344-{label}-{}-{}",
+            "issue-1344-{label}-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("clock after epoch")
                 .as_nanos(),
+            FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         ));
         std::fs::create_dir(&path).expect("unique worktree-local report directory");
         Self(path)

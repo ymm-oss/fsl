@@ -26,6 +26,12 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// A small temp directory holding two related `.fsl` files, so a
 /// requirements-layer `implements Abs from "<relative>"` path resolves the
@@ -38,8 +44,9 @@ impl FixtureDir {
             .duration_since(UNIX_EPOCH)
             .expect("clock after epoch")
             .as_nanos();
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
-            "fsl-issue-1041-{name}-{}-{nonce}",
+            "fsl-issue-1041-{name}-{}-{nonce}-{sequence}",
             std::process::id()
         ));
         std::fs::create_dir_all(&dir).expect("create fixture directory");

@@ -20,6 +20,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fslc_rust::literate_access::{LITERATE_REGISTRY, LITERATE_SUPPORTED_COMMANDS, LiterateSupport};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -287,8 +293,9 @@ impl Fixture {
             .duration_since(UNIX_EPOCH)
             .expect("clock after epoch")
             .as_nanos();
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "fsl-literate-docs-contract-{name}-{}-{nonce}.md",
+            "fsl-literate-docs-contract-{name}-{}-{nonce}-{sequence}.md",
             std::process::id()
         ));
         std::fs::write(&path, source).expect("write CRLF fixture");

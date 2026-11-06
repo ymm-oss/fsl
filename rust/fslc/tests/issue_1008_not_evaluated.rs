@@ -21,6 +21,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const FIXTURE_DIR: &str = "rust/fslc/tests/fixtures/issue_1008_not_evaluated";
 
@@ -195,8 +201,9 @@ fn a_cached_selected_run_replays_the_section() {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock after epoch")
         .as_nanos();
+    let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let cache = std::env::temp_dir().join(format!(
-        "fsl-issue-1008-cache-{}-{nonce}",
+        "fsl-issue-1008-cache-{}-{nonce}-{sequence}",
         std::process::id()
     ));
     std::fs::create_dir(&cache).expect("cache dir must not already exist");

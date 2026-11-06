@@ -7,6 +7,12 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const EMPTY: &str = "invariant Empty { r == Set {} }";
 const NOT_EMPTY: &str = "invariant NotEmpty { not (r == Set {}) }";
@@ -75,12 +81,13 @@ fn assert_case(
     let directory = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("issue_1568_empty_relation_equality")
         .join(format!(
-            "{label}-{}-{}",
+            "{label}-{}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         ));
     std::fs::create_dir_all(&directory).expect("create acceptance directory");
     std::fs::write(directory.join("spec.fsl"), source).expect("write spec");
@@ -408,12 +415,13 @@ fn assert_empty_refinement_map(label: &str, field: &str, expression: &str) {
     let directory = Path::new(env!("CARGO_TARGET_TMPDIR"))
         .join("issue_1568_empty_relation_equality")
         .join(format!(
-            "{label}-{}-{}",
+            "{label}-{}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         ));
     std::fs::create_dir_all(&directory).expect("create refinement acceptance directory");
     // The same empty relation supplies the identity-map preservation control;

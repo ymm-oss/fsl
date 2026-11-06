@@ -9,6 +9,12 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[allow(dead_code)]
 #[path = "compose_scratch.rs"]
@@ -602,7 +608,8 @@ pub fn full_fixture(label: &str, source: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let directory = parent.join(format!("{label}-{}-{nonce}", std::process::id()));
+    let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let directory = parent.join(format!("{label}-{}-{nonce}-{sequence}", std::process::id()));
     std::fs::create_dir(&directory).unwrap();
     std::fs::write(directory.join("input.fsl"), source).unwrap();
     std::fs::write(

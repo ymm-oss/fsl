@@ -11,6 +11,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -171,12 +177,13 @@ fn check_and_sweep_accept_options_before_the_spec() {
         &["check", SPEC, "--strict-tags", "--edition", "current"],
     );
     let cache = scratch(&format!(
-        "sweep-cache-{}-{}",
+        "sweep-cache-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
             .as_nanos(),
+        FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
     ));
     std::fs::create_dir(&cache).expect("fresh worktree-local sweep cache");
     let run_sweep = |args: &[&str], expect_hit: bool| {
