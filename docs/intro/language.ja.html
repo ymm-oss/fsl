@@ -4067,6 +4067,19 @@ head の証拠であり、後の統合コミットに対して未実施の sweep
   以前は何も報告せずに読み捨てていたため、その契約は検査されず、2 つ目に書いた壊れた契約が
   <code>check</code> を通っていました。移行: この文書が詳細化する契約を残し、それ以外は別の文書から、または
   <code>fslc refine</code> で検査します。自動移行はありません。</li>
+<li><strong>破壊的な削除 (#1686):</strong> business と requirements の文書では、同じ名前の <code>instances</code> や
+  <code>values</code> の範囲、<code>kpi</code> を 2 度書くと、値が同じでも 2 度目の宣言で拒否されます。exit 2、
+  <code>kind: "semantics"</code>、<code>duplicate values bound for 'V' at doc.fsl:14:3</code>、
+  <code>duplicate instances bound for 'E' at doc.fsl:13:3</code>、または
+  <code>duplicate kpi 'done' at doc.fsl:9:3</code> で、<code>loc</code> は 2 度目の宣言です。これらの形は <code>check</code> を
+  通り、最後の宣言だけが残っていました。2 つの <code>values</code> を入れ替えると <code>verify</code> は <code>verified</code> と
+  <code>violated</code> の間で変わり、<code>analyze</code> は最後の <code>kpi</code> だけを報告していました。<code>verify</code>、<code>sweep</code>、<code>refine</code>、
+  <code>replay</code>、<code>scenarios</code>、<code>testgen</code>、<code>mutate</code>、<code>html</code>、<code>ledger</code>、<code>diff</code>、<code>migrate</code>、<code>document</code>、<code>kernel</code>、
+  <code>typestate</code>、<code>lint</code>、<code>fmt</code>、<code>explain</code>、<code>analyze</code>、<code>conformance</code> はこれらの形で結果を返さなく
+  なります。inline の <code>implements</code> では
+  <code>implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)</code>、<code>kind: "type"</code>、
+  <code>loc</code> は <code>implements</code> です。移行: 意図する宣言を 1 つだけ残してください。自動移行はありません。
+  <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-dialects.md"><code>DESIGN-dialects.md</code></a> の §3.2 を参照してください。</li>
 <li><code>implements</code> があると、<code>fslc check</code> と <code>fslc verify</code> はどちらも上位レイヤーへの refinement も
   実行し、結果は <code>implements: {abs, result}</code> を持ちます。値は <code>refines</code> / <code>refinement_failed</code> /
   <code>impl_violated</code> の3つです。<strong>失敗した seam はこのフィールドの中に閉じません。</strong>

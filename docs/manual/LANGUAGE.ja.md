@@ -4003,6 +4003,19 @@ head の証拠であり、後の統合コミットに対して未実施の sweep
   以前は何も報告せずに読み捨てていたため、その契約は検査されず、2 つ目に書いた壊れた契約が
   `check` を通っていました。移行: この文書が詳細化する契約を残し、それ以外は別の文書から、または
   `fslc refine` で検査します。自動移行はありません。
+- **破壊的な削除 (#1686):** business と requirements の文書では、同じ名前の `instances` や
+  `values` の範囲、`kpi` を 2 度書くと、値が同じでも 2 度目の宣言で拒否されます。exit 2、
+  `kind: "semantics"`、`duplicate values bound for 'V' at doc.fsl:14:3`、
+  `duplicate instances bound for 'E' at doc.fsl:13:3`、または
+  `duplicate kpi 'done' at doc.fsl:9:3` で、`loc` は 2 度目の宣言です。これらの形は `check` を
+  通り、最後の宣言だけが残っていました。2 つの `values` を入れ替えると `verify` は `verified` と
+  `violated` の間で変わり、`analyze` は最後の `kpi` だけを報告していました。`verify`、`sweep`、`refine`、
+  `replay`、`scenarios`、`testgen`、`mutate`、`html`、`ledger`、`diff`、`migrate`、`document`、`kernel`、
+  `typestate`、`lint`、`fmt`、`explain`、`analyze`、`conformance` はこれらの形で結果を返さなく
+  なります。inline の `implements` では
+  `implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)`、`kind: "type"`、
+  `loc` は `implements` です。移行: 意図する宣言を 1 つだけ残してください。自動移行はありません。
+  [`DESIGN-dialects.md`](../design/DESIGN-dialects.md) の §3.2 を参照してください。
 - `implements` があると、`fslc check` と `fslc verify` はどちらも上位レイヤーへの refinement も
   実行し、結果は `implements: {abs, result}` を持ちます。値は `refines` / `refinement_failed` /
   `impl_violated` の3つです。**失敗した seam はこのフィールドの中に閉じません。**

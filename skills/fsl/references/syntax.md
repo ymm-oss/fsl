@@ -168,6 +168,15 @@ verify {
 }
 ```
 
+Breaking removal (#1686): in a business or requirements document, an `instances` or `values`
+bound or a `kpi` written twice under one name is refused at the repeated declaration, whether or
+not the copies are equal: exit 2, `kind: "semantics"`, `duplicate values bound for 'V' at
+doc.fsl:14:3` or `duplicate kpi 'done' at doc.fsl:9:3`. These forms kept the last copy, so swapping
+two `values` bounds moved `verify` between `verified` and `violated`. An inline `implements` reports
+`implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)`, `kind: "type"`, with `loc`
+on the `implements`. Migration: keep the one declaration you mean. See
+`docs/design/DESIGN-dialects.md`, §3.2.
+
 Breaking removals (#1552, #1561): for requirements `rule ... only when` conditions,
 `check` now rejects previously accepted unsatisfiable guards that reuse an entity
 field's name as an `is` pattern inside a quantifier body or aggregate value. The
