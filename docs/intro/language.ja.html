@@ -2654,8 +2654,8 @@ raw/source/schema、fmt、metadata/help/version、早期の argv 拒否は既存
 </tr>
 <tr>
 <td><code>error</code></td>
-<td>usage(argv の誤り) / parse / type / semantics / io</td>
-<td><code>usage</code> は argv を直す。それ以外は <code>loc</code> / <code>expected</code> / <code>hint</code> に従って直す</td>
+<td>usage(argv の誤り) / parse / type / semantics / io(コマンドが読む入力ファイルを読めない。メッセージは <code>&lt;path&gt;: &lt;error&gt;</code>)</td>
+<td><code>usage</code> は argv を直す。<code>io</code> は示されたパスを直す。それ以外は <code>loc</code> / <code>expected</code> / <code>hint</code> に従って直す</td>
 </tr>
 </tbody>
 </table>

@@ -3,11 +3,11 @@
 //! Issue #1170: the binary's file-IO classification has one owner, and new
 //! hand-written IO, error-envelope and error-exit sites are counted.
 //!
-//! - IO classification: `spec_loading.rs` (`read_spec_source`, `read_source`
-//!   with its `IoMessage` spelling, `read_unprefixed_spec_source`,
-//!   `io_error_output`, `io_error_detail`, the named
-//!   `read_source_classified_semantics` exception, and `IO_KIND` for helpers
-//!   that return a `(kind, message)` pair), rendered through
+//! - IO classification: `spec_loading.rs` (`read_failure_message`'s
+//!   `<path>: <error>`, `read_spec_source`, `read_spec_source_shown_as`,
+//!   `read_input_text`, `read_input_bytes`, `io_error_output`,
+//!   `io_error_detail`, and `IO_KIND` for helpers that return a
+//!   `(kind, message)` pair), rendered through
 //!   `SpecLoadError::Io` in the library's `spec_load.rs`. This rule is scoped
 //!   by function, not by file: a `"io"` string literal or a
 //!   `SpecLoadError::Io(..)` anywhere outside the exact functions in
@@ -49,7 +49,7 @@ struct Rule {
 /// counted by the `io-classification` rule.
 const IO_OWNERS: &[(&str, &str)] = &[
     ("spec_loading.rs", "IO_KIND"),
-    ("spec_loading.rs", "read_source"),
+    ("spec_loading.rs", "read_spec_source_shown_as"),
     ("spec_loading.rs", "io_error_output"),
     ("spec_load.rs", "render_spec_load_error"),
     // Named exception: the library's literate capture cannot call the
@@ -384,7 +384,7 @@ fn io_rule_is_scoped_to_owner_functions() {
         ),
         (
             "spec_loading.rs",
-            "fn read_source() { SpecLoadError::Io(m) }",
+            "fn read_spec_source_shown_as() { SpecLoadError::Io(m) }",
             0,
         ),
         (

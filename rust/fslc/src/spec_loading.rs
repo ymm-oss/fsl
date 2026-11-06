@@ -334,9 +334,11 @@ pub(crate) fn load_kernel_model_from_source_with_resolver(
 /// The `kind` of a failure classified as IO.
 ///
 /// This module is the binary's one owner of file-IO error classification
-/// (issue #1170). The binary spells `io` only here: [`IO_KIND`], the
-/// `SpecLoadError::Io` values [`read_source`] and [`io_error_output`] build,
-/// and the library's `SpecLoadError::Io` renderer. Helpers that hand a
+/// (issue #1170): a file that cannot be read is reported `kind:"io"` with
+/// [`read_failure_message`]'s `<path>: <error>` on every command. The binary
+/// spells `io` only here: [`IO_KIND`], the `SpecLoadError::Io` values
+/// [`read_spec_source_shown_as`] and [`io_error_output`] build, and the
+/// library's `SpecLoadError::Io` renderer. Helpers that hand a
 /// `(kind, message)` pair to their caller (`approval::spec_checkout`,
 /// `approval::git_binding`, [`load_state_snapshot`]) take the kind from
 /// [`IO_KIND`]. The one exception is the library's `literate_access`
@@ -344,30 +346,9 @@ pub(crate) fn load_kernel_model_from_source_with_resolver(
 /// enforces this per function.
 pub(crate) const IO_KIND: &str = "io";
 
-/// How a read failure's `kind:"io"` message names the file.
-///
-/// The command families historically spell the message three ways; each
-/// caller names its spelling instead of formatting it, so converging them is
-/// a reviewable change to this enum's callers.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum IoMessage {
-    /// `<path>: <error>`, what [`read_spec_source`] reports.
-    PathPrefixed,
-    /// `<error>` alone, without the path ([`read_unprefixed_spec_source`] and
-    /// the `causal` mapping input, which predate [`read_spec_source`]).
-    Bare,
-    /// `cannot read <path>: <error>`, the causal family's spelling.
-    CannotRead,
-}
-
-impl IoMessage {
-    pub(crate) fn render(self, path: &Path, error: &std::io::Error) -> String {
-        match self {
-            Self::PathPrefixed => format!("{}: {error}", path.display()),
-            Self::Bare => error.to_string(),
-            Self::CannotRead => format!("cannot read {}: {error}", path.display()),
-        }
-    }
+/// The message of a file that cannot be read: `<path>: <error>`.
+pub(crate) fn read_failure_message(path: &Path, error: &std::io::Error) -> String {
+    format!("{}: {error}", path.display())
 }
 
 /// Read a spec file, classifying a read failure as `io` rather than letting the
@@ -375,28 +356,28 @@ impl IoMessage {
 /// single analyze input reported `semantics` while the same missing file in a
 /// batch reported `io`).
 pub(crate) fn read_spec_source(path: &Path) -> Result<String, SpecLoadError> {
-    read_source(path, IoMessage::PathPrefixed)
+    read_spec_source_shown_as(path, path)
 }
 
-/// Read `path`, classifying a read failure as `io` with `message`'s spelling.
-pub(crate) fn read_source(path: &Path, message: IoMessage) -> Result<String, SpecLoadError> {
-    std::fs::read_to_string(path).map_err(|error| SpecLoadError::Io(message.render(path, &error)))
-}
-
-/// [`read_source`] with the bare error message: how `chain`, `replay
-/// --from-log`, the `ai` family, `diff` and the refinement roots read their
-/// specs.
-pub(crate) fn read_unprefixed_spec_source(path: &Path) -> Result<String, SpecLoadError> {
-    read_source(path, IoMessage::Bare)
-}
-
-/// The one recorded exception to [`read_source`]: the domain surface
-/// commands' caller contracts predate the typed `io` envelope, so their read
-/// failure stays an unlocated `semantics` diagnostic with the bare error
-/// message, without widening #780 beyond its declared parse-only scope.
-pub(crate) fn read_source_classified_semantics(path: &Path) -> Result<String, SpecLoadError> {
+/// [`read_spec_source`] for a file materialized somewhere other than where the
+/// user named it (a git-tree checkout): the message names `shown`.
+pub(crate) fn read_spec_source_shown_as(
+    path: &Path,
+    shown: &Path,
+) -> Result<String, SpecLoadError> {
     std::fs::read_to_string(path)
-        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))
+        .map_err(|error| SpecLoadError::Io(read_failure_message(shown, &error)))
+}
+
+/// Read a non-spec input file (a record, key, trace, log, evidence or
+/// artifact), reporting a failure with [`read_failure_message`].
+pub(crate) fn read_input_text(path: &Path) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|error| read_failure_message(path, &error))
+}
+
+/// [`read_input_text`] for a file whose bytes are hashed or decoded later.
+pub(crate) fn read_input_bytes(path: &Path) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(|error| read_failure_message(path, &error))
 }
 
 /// The `kind:"io"` envelope for an input failure that is not a spec read:
@@ -611,7 +592,7 @@ pub(crate) fn load_state_snapshot(
             if error.kind() == std::io::ErrorKind::NotFound {
                 format!("file not found: {}", path.display())
             } else {
-                error.to_string()
+                read_failure_message(path, &error)
             },
         )
     })?;

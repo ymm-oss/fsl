@@ -415,8 +415,10 @@ pub(crate) fn causal_unreadable_later_root_precedes_earlier_parse_error() {
         let output = cases::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &scratch.0, true);
         let actual = without_versions(value(&output));
         let io = std::fs::read_to_string(scratch.0.join("missing.fsl")).unwrap_err();
+        // Both roots name the unreadable path the same way: #1170 phase 2
+        // retired causal's `cannot read <path>:` and the mapping's bare error.
         let wanted = json!({"fsl":"1.0", "result":"error", "kind":"io",
-            "message":if command.starts_with("causal diff ") {format!("cannot read missing.fsl: {io}")} else {io.to_string()}});
+            "message":format!("missing.fsl: {io}")});
         results.error_envelope(
             &format!("causal/later-io/{command}"),
             &output,
@@ -638,7 +640,8 @@ pub(crate) fn unreadable_roots_keep_the_command_specific_error_kind() {
         ("ai check missing.fsl --depth 2", "io"),
         ("ai replay missing.fsl --logs records.json", "io"),
         ("ai compat missing.fsl", "io"),
-        ("domain check missing.fsl --depth 2", "semantics"),
+        // #1170 phase 2 retired the domain commands' #780-era `semantics`.
+        ("domain check missing.fsl --depth 2", "io"),
     ] {
         let output = run(&scratch, command);
         let actual = without_versions(value(&output));

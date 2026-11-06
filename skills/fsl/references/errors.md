@@ -41,6 +41,7 @@ existing result/kind fields:
 | warning / `always_true_requires` | Under the context of the preceding requires, this requires clause is not effective as a constraint | Decide whether the clause is redundant or whether a path to the state where the clause bites is missing. Do not delete it automatically |
 | warning / `tautology_over_frozen` | An invariant that depends only on frozen variables no action ever assigns to, and is dynamically always true (a dead ghost = hollow) | Make the variable `const`, or suspect a missing action that should change it. A sign that the invariant "thinks it is checking a contract but checks nothing" |
 | `error` / `usage` | Invalid CLI argv (exit 2) | Correct the command's options, values, or operands; do not change the spec to repair argv |
+| `error` / `io` | An input file (spec, record, key, trace, log, evidence, artifact) cannot be read; the message is `<path>: <error>`. An imported component that cannot be read is `semantics` with the importer's `loc` instead | Fix the named path or its permissions; do not change the spec |
 | `error` / `parse` | Syntax error | Follow `loc` and `expected` (candidate tokens) |
 | `error` / `type` | Type error | Follow the `hint`; Option equality requires compatible payload types, while ordering remains invalid |
 | `error` / `semantics` | Double assignment, etc. | Do not assign to the same variable twice on the same path (an if's then/else are separate paths, so it is allowed) |

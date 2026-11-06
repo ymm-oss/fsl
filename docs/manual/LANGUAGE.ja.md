@@ -2516,7 +2516,7 @@ raw/source/schema、fmt、metadata/help/version、早期の argv 拒否は既存
 | `unknown_cti` / `key_domain` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が有限キーの `Map` をキー定義域の外で添字参照する(読み出しまたは添字代入)。BMC と explicit は深さ内に入るとエラーとして報告する | 短絡する `and`/`=>`/`or`/`if` か `requires` で添字を守るか、その状態が到達不能なら除外する補助 invariant を足す |
 | `unknown_cti` / `ensures` | 証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の `ensures` が偽になる | 本体か `ensures` を直す。始状態が到達不能なら、それを除外する補助 invariant を足す |
 | `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline `implements Abs from "file" { }` seam(`check`/`verify`)、`fslc refine`(単体・chain)、`fslc chain` の refine 層、governance の `preservation`(§10、§13) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。refinement の場合: depth を下げるか、両層の `verify {}` の domain を縮める。inline `implements` seam は各層の `fslc verify` に分けることもできるが、`fslc refine` は同じ予算を共有する。`fslc diff` は打ち切られた方向を `unknown_budget` と報告し、gate を無条件に落とす(finding `unknown_budget`、exit 1)。`fslc mutate` はその mutant を `inconclusive` と報告し、`kill_rate` から外し、要求された gate を落とす |
-| `error` | usage(argv の誤り) / parse / type / semantics / io | `usage` は argv を直す。それ以外は `loc` / `expected` / `hint` に従って直す |
+| `error` | usage(argv の誤り) / parse / type / semantics / io(コマンドが読む入力ファイルを読めない。メッセージは `<path>: <error>`) | `usage` は argv を直す。`io` は示されたパスを直す。それ以外は `loc` / `expected` / `hint` に従って直す |
 
 `--engine auto` は explicit と bmc を合成します: まず explicit を試し(より速く、
 `proved`+`closure:true` に到達できます)、explicit が単独ではその spec を判定でき

@@ -221,7 +221,7 @@ fn dependency_edition_t06_isolates_the_actual_owned_refine_step() {
     scratch.write("abstract.fsl", &source);
     scratch.write("map.fsl", "refinement M { impl C abs C maps auto }\n");
     let sections=parse_project_manifest("[requirements]\nfile = \"abstract.fsl\"\n[design]\nfile = \"root.fsl\"\nrefine_against = \"requirements\"\nmapping = \"map.fsl\"\ndepth = 2\n").unwrap();
-    let roots = prepare_project_roots(&sections, &scratch.0, read_unprefixed_spec_source).unwrap();
+    let roots = prepare_project_roots(&sections, &scratch.0, read_spec_source).unwrap();
     let first = run_chain_step_isolated("refine", "design", &sections, &scratch.0, &roots);
     let second = run_chain_step_isolated("refine", "design", &sections, &scratch.0, &roots);
     assert!(!first.1 && !second.1);
@@ -371,7 +371,7 @@ fn dependency_edition_prepared_execution_has_exact_captured_slots_and_no_readmis
     let sections = parse_project_manifest("[requirements]\nfile = \"layer.fsl\"\n[design]\nfile = \"layer.fsl\"\nrefine_against = \"requirements\"\nmapping = \"map.fsl\"\n").unwrap();
     let events = observer::Handle::default();
     let _guard = observer::install(Some(events.clone()));
-    let roots = prepare_project_roots(&sections, &s.0, read_unprefixed_spec_source).unwrap();
+    let roots = prepare_project_roots(&sections, &s.0, read_spec_source).unwrap();
     let census = vec![
         Event::Admission(layer_path.clone(), layer.clone()),
         Event::Admission(layer_path.clone(), layer.clone()),
@@ -709,7 +709,7 @@ fn dependency_edition_actual_workers_transport_tokens_and_finish_detail_before_w
         s.write("map.fsl", mapping);
         let events = observer::Handle::default();
         let _guard = observer::install(Some(events.clone()));
-        let roots = prepare_project_roots(&sections, &s.0, read_unprefixed_spec_source).unwrap();
+        let roots = prepare_project_roots(&sections, &s.0, read_spec_source).unwrap();
         let mut census = layers
             .iter()
             .zip(&sources)

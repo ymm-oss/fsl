@@ -68,7 +68,8 @@ use spec_loading::{
     run_admitted_root, run_admitted_roots, run_prepared_roots,
 };
 use spec_loading::{
-    io_error_detail, io_error_output, read_source_classified_semantics, read_unprefixed_spec_source,
+    io_error_detail, io_error_output, read_failure_message, read_input_bytes, read_input_text,
+    read_spec_source_shown_as,
 };
 use spec_loading::{
     load_kernel_model_from_source, load_model_from_source, load_model_scoped_from_source,
@@ -393,7 +394,7 @@ fn read_fmt_source(path: &Path) -> Result<String, String> {
             .map_err(|error| error.to_string())?;
         Ok(source)
     } else {
-        std::fs::read_to_string(path).map_err(|error| error.to_string())
+        read_input_text(path)
     }
 }
 
@@ -1633,7 +1634,16 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                             .to_owned(),
                     );
                 }
-                document_generation_inputs(&artifact, glossary.as_deref(), &evidence_paths)?
+                match document_generation_inputs(&artifact, glossary.as_deref(), &evidence_paths) {
+                    Ok(inputs) => inputs,
+                    Err(DocumentInputError::Usage(message)) => return Err(message),
+                    Err(DocumentInputError::Io(message)) => {
+                        return Ok((
+                            io_error_output(&message),
+                            fslc_rust::outcome::SPEC_ERROR_EXIT,
+                        ));
+                    }
+                }
             } else {
                 if glossary.is_some() || !evidence_paths.is_empty() {
                     return Err(
@@ -2150,7 +2160,7 @@ fn load_glossary_with_base(
         return Ok(None);
     };
     let bytes = std::fs::read(approval::resolve_io_path(path, path_base))
-        .map_err(|error| io_error_output(&error.to_string()))?;
+        .map_err(|error| io_error_output(&read_failure_message(path, &error)))?;
     let digest = approval::sha256_bytes(&bytes);
     let text = String::from_utf8(bytes)
         .map_err(|error| io_error_output(&format!("{}: {error}", path.display())))?;
@@ -2214,7 +2224,7 @@ fn load_document_evidence(
     let mut digests = Vec::new();
     for path in paths {
         let bytes = std::fs::read(approval::resolve_io_path(path, path_base))
-            .map_err(|error| io_error_output(&error.to_string()))?;
+            .map_err(|error| io_error_output(&read_failure_message(path, &error)))?;
         digests.push(approval::sha256_bytes(&bytes));
         let text = String::from_utf8(bytes)
             .map_err(|error| io_error_output(&format!("{}: {error}", path.display())))?;
@@ -2293,7 +2303,7 @@ fn load_approvals(
     let mut loaded = Vec::new();
     let mut digests = Vec::new();
     for path in paths {
-        let bytes = std::fs::read(path).map_err(|error| io_error_output(&error.to_string()))?;
+        let bytes = read_input_bytes(path).map_err(|error| io_error_output(&error))?;
         digests.push(approval::sha256_bytes(&bytes));
         let versioned = approval::read_versioned_record(path)
             .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
@@ -2685,7 +2695,7 @@ fn load_approvals_for_check(
     let mut applied = Vec::new();
     let mut digests = Vec::new();
     for path in paths {
-        let bytes = std::fs::read(path).map_err(|error| io_error_output(&error.to_string()))?;
+        let bytes = read_input_bytes(path).map_err(|error| io_error_output(&error))?;
         digests.push(approval::sha256_bytes(&bytes));
         let versioned = approval::read_versioned_record(path)
             .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
@@ -2729,9 +2739,9 @@ fn run_document_check(
     evidence_paths: &[PathBuf],
     approval_paths: &[PathBuf],
 ) -> (Value, i32) {
-    let artifact_text = match std::fs::read_to_string(artifact) {
+    let artifact_text = match read_input_text(artifact) {
         Ok(text) => text,
-        Err(error) => return (io_error_output(&error.to_string()), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let frontmatter = match fsl_tools::parse_frontmatter_only(&artifact_text) {
         Ok(frontmatter) => frontmatter,
@@ -3839,8 +3849,13 @@ fn parse_manifest_depth(layer: &str, key: &str, raw: &str) -> Result<usize, Stri
 fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
-        Err(_) => {
-            let mut output = io_error_output(&format!("file not found: {}", path.display()));
+        Err(error) => {
+            let message = if error.kind() == std::io::ErrorKind::NotFound {
+                format!("file not found: {}", path.display())
+            } else {
+                read_failure_message(path, &error)
+            };
+            let mut output = io_error_output(&message);
             if let Value::Object(output) = &mut output {
                 output.insert("manifest".to_owned(), json!(path.display().to_string()));
             }
@@ -3920,7 +3935,7 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
-    let roots = match prepare_project_roots(&sections, base, read_unprefixed_spec_source) {
+    let roots = match prepare_project_roots(&sections, base, read_spec_source) {
         Ok(roots) => roots,
         Err(refusal) => return refusal,
     };
@@ -4859,9 +4874,9 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let raw = match std::fs::read_to_string(trace_path) {
+    let raw = match read_input_text(trace_path) {
         Ok(raw) => raw,
-        Err(error) => return (io_error_output(&error.to_string()), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let data = match serde_json::from_str::<Value>(&raw) {
         Ok(data) => data,
@@ -5248,7 +5263,7 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
     run_admitted_roots(
         vec![
             (path, read_spec_source(path)),
-            (mapping_path, read_unprefixed_spec_source(mapping_path)),
+            (mapping_path, read_spec_source(mapping_path)),
         ],
         None,
         false,
@@ -6688,9 +6703,9 @@ fn run_db_import(
     requested_format: &str,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
+    let source = match read_input_text(path) {
         Ok(source) => source,
-        Err(error) => return (io_error_output(&error.to_string()), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
     let format = if requested_format == "auto" {
         if path.extension().and_then(std::ffi::OsStr::to_str) == Some("prisma") {
@@ -6793,13 +6808,9 @@ fn ai_project_parse_failure(
 }
 
 fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
-    run_admitted_root(
-        path,
-        read_unprefixed_spec_source(path),
-        None,
-        false,
-        |source| run_ai_check_from_source(path, source, depth, deadlock, engine),
-    )
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_check_from_source(path, source, depth, deadlock, engine)
+    })
 }
 
 fn run_ai_check_from_source(
@@ -6870,13 +6881,9 @@ fn read_json_events(path: &Path) -> Result<Vec<Value>, String> {
 }
 
 fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> (Value, i32) {
-    run_admitted_root(
-        path,
-        read_unprefixed_spec_source(path),
-        None,
-        false,
-        |source| run_ai_replay_from_source(path, source, logs, selected_component),
-    )
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_replay_from_source(path, source, logs, selected_component)
+    })
 }
 
 fn run_ai_replay_from_source(
@@ -7145,13 +7152,9 @@ fn run_ai_eval(
     property: Option<&str>,
     slice: Option<&str>,
 ) -> (Value, i32) {
-    run_admitted_root(
-        path,
-        read_unprefixed_spec_source(path),
-        None,
-        false,
-        |source| run_ai_eval_from_source(path, source, records, dataset, property, slice),
-    )
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_eval_from_source(path, source, records, dataset, property, slice)
+    })
 }
 
 fn run_ai_eval_from_source(
@@ -7229,13 +7232,9 @@ fn run_ai_regress(
     dataset: Option<&str>,
     migration: Option<&str>,
 ) -> (Value, i32) {
-    run_admitted_root(
-        path,
-        read_unprefixed_spec_source(path),
-        None,
-        false,
-        |source| run_ai_regress_from_source(path, source, before, after, dataset, migration),
-    )
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_regress_from_source(path, source, before, after, dataset, migration)
+    })
 }
 
 fn run_ai_regress_from_source(
@@ -7285,23 +7284,17 @@ fn run_ai_drift(
     window: Option<&str>,
     baseline_label: Option<&str>,
 ) -> (Value, i32) {
-    run_admitted_root(
-        path,
-        read_unprefixed_spec_source(path),
-        None,
-        false,
-        |source| {
-            run_ai_drift_from_source(
-                path,
-                source,
-                current,
-                baseline,
-                property,
-                window,
-                baseline_label,
-            )
-        },
-    )
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_drift_from_source(
+            path,
+            source,
+            current,
+            baseline,
+            property,
+            window,
+            baseline_label,
+        )
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -7348,13 +7341,9 @@ fn run_ai_drift_from_source(
 /// all, previously produced a syntactically empty profile that reported
 /// success indistinguishably from a genuine clean result).
 fn run_ai_compat(path: &Path, environment: Option<&str>) -> (Value, i32) {
-    run_admitted_root(
-        path,
-        read_unprefixed_spec_source(path),
-        None,
-        false,
-        |source| run_ai_compat_from_source(path, source, environment),
-    )
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_compat_from_source(path, source, environment)
+    })
 }
 
 fn run_ai_compat_from_source(path: &Path, source: &str, environment: Option<&str>) -> (Value, i32) {
@@ -7513,9 +7502,9 @@ fn parse_domain_document_from_source(
 /// this value. Dependencies resolved by `FsResolver` are intentionally outside
 /// this root-input contract.
 fn read_domain_command_source(path: &Path) -> Result<String, SpecLoadError> {
-    // These surface commands' caller contracts predate the typed `io` envelope
-    // (#780); the IO owner names the exception (#1170 phase 2).
-    read_source_classified_semantics(path)
+    // A read failure is `kind:"io"` here as on every other command (#1170
+    // phase 2 retired the #780-era `semantics` classification).
+    read_spec_source(path)
 }
 
 fn domain_scaffold_inputs_from_source(
@@ -11829,7 +11818,7 @@ fn replace_external_source(
 
 #[allow(clippy::too_many_lines)]
 fn load_external_mutations(path: &Path, baseline: &str) -> Result<Vec<ExternalMutation>, String> {
-    let raw = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let raw = read_input_text(path)?;
     let mut output = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for (index, line) in raw.lines().enumerate() {
@@ -13553,8 +13542,16 @@ fn html_report_without_timing(explained: &Value, verification: &Value) -> (Value
     (explained, verification)
 }
 
-fn load_file_input(path: &Path) -> Result<approval::FileInput, String> {
-    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+/// Why `approval create --kind requirements_document` could not record its
+/// inputs: a file that cannot be read is `kind:"io"` (#1170 phase 2); a
+/// readable artifact with unusable frontmatter stays a usage error.
+enum DocumentInputError {
+    Io(String),
+    Usage(String),
+}
+
+fn load_file_input(path: &Path) -> Result<approval::FileInput, DocumentInputError> {
+    let bytes = read_input_bytes(path).map_err(DocumentInputError::Io)?;
     Ok(approval::FileInput {
         path: path.display().to_string(),
         digest: approval::sha256_bytes(&bytes),
@@ -13571,13 +13568,15 @@ fn document_generation_inputs(
     artifact_path: &Path,
     glossary_path: Option<&Path>,
     evidence_paths: &[PathBuf],
-) -> Result<approval::GenerationInputs, String> {
-    let artifact_text =
-        std::fs::read_to_string(artifact_path).map_err(|error| error.to_string())?;
-    let frontmatter =
-        fsl_tools::parse_frontmatter_only(&artifact_text).map_err(|error| error.to_string())?;
+) -> Result<approval::GenerationInputs, DocumentInputError> {
+    let artifact_text = read_input_text(artifact_path).map_err(DocumentInputError::Io)?;
+    let frontmatter = fsl_tools::parse_frontmatter_only(&artifact_text)
+        .map_err(|error| DocumentInputError::Usage(error.to_string()))?;
     if frontmatter.view != "requirements" {
-        return Err(format!("unsupported document view '{}'", frontmatter.view));
+        return Err(DocumentInputError::Usage(format!(
+            "unsupported document view '{}'",
+            frontmatter.view
+        )));
     }
     let glossary = glossary_path.map(load_file_input).transpose()?;
     let evidence = evidence_paths
@@ -13982,9 +13981,9 @@ fn run_approval_create_from_source(
         if let Err(error) = inputs_inside_root {
             return (error_output("semantics", &error), 2);
         }
-        let reviewed_text = match std::fs::read_to_string(artifact_path) {
+        let reviewed_text = match read_input_text(artifact_path) {
             Ok(text) => text,
-            Err(error) => return (io_error_output(&error.to_string()), 2),
+            Err(error) => return (io_error_output(&error), 2),
         };
         let report = match fsl_tools::check_requirements_document(
             &reviewed_text,
@@ -14029,9 +14028,9 @@ fn run_approval_create_from_source(
                 Ok(artifact) => artifact,
                 Err(error) => return error,
             };
-        let reviewed_artifact = match std::fs::read(artifact_path) {
+        let reviewed_artifact = match read_input_bytes(artifact_path) {
             Ok(artifact) => artifact,
-            Err(error) => return (io_error_output(&error.to_string()), 2),
+            Err(error) => return (io_error_output(&error), 2),
         };
         let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
             Ok(artifact) => artifact,
@@ -14569,8 +14568,7 @@ fn prepare_ledger_report_from_source(
         .evidence_paths
         .iter()
         .map(|evidence_path| {
-            let source = std::fs::read_to_string(evidence_path)
-                .map_err(|error| io_error_output(&error.to_string()))?;
+            let source = read_input_text(evidence_path).map_err(|error| io_error_output(&error))?;
             let value = serde_json::from_str::<Value>(&source)
                 .map_err(|error| io_error_output(&format!("invalid JSON: {error}")))?;
             if !value.is_object() {
@@ -17611,11 +17609,8 @@ fn run_diff(
     mapping: Option<&Path>,
     forbid: &[String],
 ) -> (Value, i32) {
-    let mut roots = vec![
-        (old, read_unprefixed_spec_source(old)),
-        (new, read_unprefixed_spec_source(new)),
-    ];
-    roots.extend(mapping.map(|path| (path, read_unprefixed_spec_source(path))));
+    let mut roots = vec![(old, read_spec_source(old)), (new, read_spec_source(new))];
+    roots.extend(mapping.map(|path| (path, read_spec_source(path))));
     run_admitted_roots(roots, None, false, |sources, editions| {
         finish_admitted(
             run_diff_from_sources(
@@ -17640,7 +17635,7 @@ fn run_historical_diff(
     let mut editions = Vec::new();
     // Admit the explicit slots without introducing a historical dependency scope.
     for (path, label) in [(old, old_label), (new, new_label)] {
-        let source = match read_unprefixed_spec_source(path) {
+        let source = match read_spec_source_shown_as(path, label) {
             Ok(source) => source,
             Err(error) => return (spec_load_error_output(&error), 2),
         };
@@ -18065,7 +18060,12 @@ fn run_approval_diff_from_source(
             2,
         );
     }
-    let materialized_digest = match approval::spec_digest(&old) {
+    let baseline_label = PathBuf::from(format!("{}:{}", record.spec.git_commit, record.spec.path));
+    // Name the baseline by commit and path, not by the temporary tree.
+    let materialized_digest = match std::fs::read_to_string(&old)
+        .map_err(|error| read_failure_message(&baseline_label, &error))
+        .and_then(|source| approval::spec_digest_from_source(&old, &source))
+    {
         Ok(digest) => digest,
         Err(error) => {
             let _ = std::fs::remove_dir_all(&root);
@@ -18082,10 +18082,12 @@ fn run_approval_diff_from_source(
             2,
         );
     }
-    let baseline_label = PathBuf::from(format!("{}:{}", record.spec.git_commit, record.spec.path));
     let result =
         run_admitted_roots(
-            vec![(&baseline_label, read_unprefixed_spec_source(&old))],
+            vec![(
+                &baseline_label,
+                read_spec_source_shown_as(&old, &baseline_label),
+            )],
             None,
             false,
             |sources, editions| {
@@ -18243,13 +18245,15 @@ fn run_diff_git(
         });
         let (mut comparison, comparison_status) = if let Some(path) = resolved_mapping.as_deref() {
             if path.starts_with(&head_tree) {
-                match read_unprefixed_spec_source(path) {
+                // Show the mapping as the caller named it: the materialized
+                // tree's temporary path is gone when the command returns.
+                match read_spec_source_shown_as(path, mapping.unwrap_or(path)) {
                     Ok(source) => run_historical_diff(roots, depth, Some(&source), forbid),
                     Err(error) => (spec_load_error_output(&error), 2),
                 }
             } else {
                 let captured = live_mapping.get_or_insert_with(|| {
-                    let source = read_unprefixed_spec_source(path)
+                    let source = read_spec_source(path)
                         .map_err(|error| (spec_load_error_output(&error), 2))?;
                     let edition = admit_root_source(path, &source, None)?;
                     Ok::<_, (Value, i32)>((source, edition))
@@ -18374,7 +18378,7 @@ fn run_refine_admitted(
         vec![
             (implementation, read_spec_source(implementation)),
             (abstraction, read_spec_source(abstraction)),
-            (mapping, read_unprefixed_spec_source(mapping)),
+            (mapping, read_spec_source(mapping)),
         ],
         None,
         false,
@@ -18416,7 +18420,7 @@ fn run_refine_chain(
     roots.extend(
         mappings
             .iter()
-            .map(|path| (path.as_path(), read_unprefixed_spec_source(path))),
+            .map(|path| (path.as_path(), read_spec_source(path))),
     );
     run_admitted_roots(roots, None, false, |sources, editions| {
         finish_admitted(
@@ -18888,7 +18892,7 @@ mod chain_jobs_tests {
         }
         sections.insert("impl".to_owned(), ManifestSection::default());
         steps.push(("impl".to_owned(), "impl".to_owned()));
-        let roots = prepare_project_roots(&sections, &base, read_unprefixed_spec_source).unwrap();
+        let roots = prepare_project_roots(&sections, &base, read_spec_source).unwrap();
         let groups = chain_step_groups(&steps, &roots);
         std::fs::remove_dir_all(&base).expect("remove scratch dir");
         assert_eq!(groups, vec![vec![0], vec![1], vec![2]]);
@@ -19029,7 +19033,13 @@ mod exit_status_tests {
             std::process::id()
         ));
         assert!(!absent.exists());
-        let expected_message = std::fs::read(&absent).unwrap_err().to_string();
+        // An unreadable `--impl-log` or `--evidence` names its path (#1170
+        // phase 2).
+        let expected_message = format!(
+            "{}: {}",
+            absent.display(),
+            std::fs::read(&absent).unwrap_err()
+        );
         for replay in [false, true] {
             let evidence = if replay { vec![] } else { vec![absent.clone()] };
             let request = LedgerReportRequest {

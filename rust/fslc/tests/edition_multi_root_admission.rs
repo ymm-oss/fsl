@@ -483,10 +483,12 @@ fn later_io_precedes_earlier_model_or_parse_errors_outside_chain() {
             "refine a.fsl b.fsl map.fsl missing.fsl map.fsl --depth 2",
             "diff a.fsl b.fsl --mapping missing-map.fsl --depth 2",
         ] {
+            // Issue #1170 route c: the unreadable mapping is named with the
+            // path the caller passed (it was the bare OS error without it).
             let message = if command.contains(" missing.fsl ") {
                 format!("missing.fsl: {io}")
             } else {
-                io.clone()
+                format!("missing-map.fsl: {io}")
             };
             expect(
                 &mut r,
@@ -853,8 +855,16 @@ fn git_batch_borrows_one_live_mapping_for_every_comparison() {
     }
     let missing = s.0.join("missing-map.fsl");
     let mut expected = git_batch(&first, &second, &[]);
+    // Issue #1170 route c: the unreadable mapping is named with the path the
+    // caller passed, the same message in every comparison that borrows the
+    // one live mapping (it was the bare OS error without the path).
+    let mapping_error = format!(
+        "{}: {}",
+        missing.display(),
+        std::io::Error::from_raw_os_error(2)
+    );
     for value in expected["comparisons"].as_array_mut().unwrap() {
-        *value = json!({"fsl":"1.0","result":"error","kind":"io","message":std::io::Error::from_raw_os_error(2).to_string(),"old":{"file":value["old"]["file"],"spec":null},"new":{"file":value["new"]["file"],"spec":null},"vcs":value["vcs"]});
+        *value = json!({"fsl":"1.0","result":"error","kind":"io","message":mapping_error,"old":{"file":value["old"]["file"],"spec":null},"new":{"file":value["new"]["file"],"spec":null},"vcs":value["vcs"]});
     }
     expect(
         &mut r,

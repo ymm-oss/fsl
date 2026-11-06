@@ -425,7 +425,11 @@ fn legacy_missing_local_files(version: u8) {
         let bytes = std::fs::read(&path).expect("read local input/target");
         std::fs::remove_file(&path).expect("remove only caller-local file");
         let error = std::fs::read(&path).expect_err("local file must really be absent");
-        let expected = io_error(&error.to_string(), &baseline["warnings"]);
+        // The unreadable caller-local file is named (#1170 phase 2).
+        let expected = io_error(
+            &format!("{}: {error}", Path::new(name).display()),
+            &baseline["warnings"],
+        );
         assert_full(&check(&caller.root, &record, trust), 2, &expected);
         assert_full(&check(&original.root, &record, trust), 0, &baseline);
         std::fs::write(&path, bytes).expect("restore exact caller-local bytes");

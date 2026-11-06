@@ -2785,8 +2785,11 @@ fn ai_project_parser_failures_keep_their_own_spans_across_evidence_commands() {
     }
 }
 
+/// #1170 phase 2 retired the #780-era `semantics` classification: a domain
+/// command's unreadable input is `kind:"io"` with `<path>: <error>`, as on
+/// every other command, and still carries no `loc` or diagnostic code.
 #[test]
-fn surface_loader_read_failures_keep_the_legacy_semantic_envelope() {
+fn surface_loader_read_failures_report_io_with_the_path() {
     let missing = "rust/fslc/tests/fixtures/error_envelope_missing_surface_input.fsl";
     assert!(
         !workspace_root().join(missing).exists(),
@@ -2802,7 +2805,9 @@ fn surface_loader_read_failures_keep_the_legacy_semantic_envelope() {
     assert_eq!(actual.exit, 2, "{}", actual.stdout);
     let output = actual.json.expect("missing input JSON envelope");
     assert_eq!(output["result"], "error", "{output}");
-    assert_eq!(output["kind"], "semantics", "{output}");
+    assert_eq!(output["kind"], "io", "{output}");
+    let error = std::fs::read_to_string(workspace_root().join(missing)).unwrap_err();
+    assert_eq!(output["message"], format!("{missing}: {error}"), "{output}");
     assert!(output.get("loc").is_none(), "{output}");
     assert!(output.get("diagnostic").is_none(), "{output}");
     assert!(output.get("diagnostic_code").is_none(), "{output}");
