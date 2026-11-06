@@ -768,6 +768,21 @@ native binary: argument parsing
   evaluation. Follow-up #441 is the separate, independently revertible implementation issue and may
   centralize only regular-command stdout and exit delivery; metadata/help, `fmt`, command-family
   parsing, semantic results, stderr side channels, Worker transport, and LSP remain outside it.
+- **IO classification owner (#1170, phase 1, no output change):** `spec_loading.rs` is the
+  binary's one owner of how a failure becomes `kind:"io"`: `read_spec_source`, `read_source` with
+  an explicit `IoMessage` spelling, `read_unprefixed_spec_source`, `io_error_output`,
+  `io_error_detail`, the named `read_source_classified_semantics` exception the domain commands
+  keep for #780, and `IO_KIND` for the helpers that return a `(kind, message)` pair
+  (`approval::spec_checkout`, `approval::git_binding`, `load_state_snapshot`), all rendered through
+  the library's `SpecLoadError::Io`. The binary spells `io` nowhere else. The error envelope stays
+  owned by `cli_output.rs` and the error exit by `fslc_rust::outcome`'s `Verdict` table; routing
+  the literal error exits and the hand-spelled envelopes through those owners is a follow-up.
+  `tests/issue_1170_error_policy_owners.rs` rejects a `"io"` literal or `SpecLoadError::Io(..)`
+  outside an exact allowlist of owner functions, even inside `spec_loading.rs`, and counts the
+  hand-written envelope and exit-literal sites per file, letting those counts only go down. A message spelling,
+  kind, or exit that routing would change is a phase-2 behavior decision. The library-side
+  `literate_access` IO envelope stays hand-written because the library cannot call the binary's
+  owner.
 - `LiterateState`, atomic migration, verify cache, approval trust, and solver execution remain
   distinct state/failure owners rather than a single application state.
 - **Candidate experiment (not authorization):** if selected through the C2 gate, first make

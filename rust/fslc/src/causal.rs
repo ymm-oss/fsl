@@ -15,7 +15,8 @@ use crate::log_replay::{
 };
 use crate::process::{block_on_native, parse_options};
 use crate::spec_loading::{
-    finish_admitted, load_snapshot_value_object, run_admitted_root, run_admitted_roots,
+    IoMessage, finish_admitted, io_error_output, load_snapshot_value_object, read_source,
+    run_admitted_root, run_admitted_roots,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -199,11 +200,7 @@ pub(super) fn causal_command(
             Ok(run_admitted_roots(
                 vec![
                     (&path, read_causal_source(&path)),
-                    (
-                        &mapping,
-                        std::fs::read_to_string(&mapping)
-                            .map_err(|error| SpecLoadError::Io(error.to_string())),
-                    ),
+                    (&mapping, read_source(&mapping, IoMessage::Bare)),
                 ],
                 None,
                 false,
@@ -371,8 +368,7 @@ fn causal_error_output(error: &fsl_tools::CausalError, legacy_literate: bool) ->
 }
 
 fn read_causal_source(path: &Path) -> Result<String, SpecLoadError> {
-    std::fs::read_to_string(path)
-        .map_err(|error| SpecLoadError::Io(format!("cannot read {}: {error}", path.display())))
+    read_source(path, IoMessage::CannotRead)
 }
 
 fn run_causal_root(path: &Path, run: impl FnOnce(&str) -> (Value, i32)) -> (Value, i32) {
@@ -424,7 +420,7 @@ fn load_causal_evidence(
     let read_json = |path: &PathBuf| -> Result<Value, (Value, i32)> {
         let source = std::fs::read_to_string(path).map_err(|error| {
             (
-                error_output("io", &format!("cannot read {}: {error}", path.display())),
+                io_error_output(&IoMessage::CannotRead.render(path, &error)),
                 2,
             )
         })?;
@@ -769,10 +765,7 @@ fn output_write_error(
     evidence_paths: &[String],
     lifecycle_paths: &[String],
 ) -> (Value, i32) {
-    let mut output = error_output(
-        "io",
-        &format!("cannot write {}: {error}", file_path.display()),
-    );
+    let mut output = io_error_output(&format!("cannot write {}: {error}", file_path.display()));
     let written = [evidence_paths, lifecycle_paths].concat();
     if !written.is_empty() {
         output["written"] = json!(written);
@@ -846,25 +839,22 @@ fn run_causal_observe_expectations(
     }
     let log_raw = match read_log(log_path) {
         Ok(raw) => raw,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (io_error_output(&error.to_string()), 2),
     };
     let records = match parse_jsonl_records(&log_raw) {
         Ok(records) => records,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return (io_error_output(&error), 2),
     };
 
     // ── Parse scope ──────────────────────────────────────────────────
     let scope_raw = match std::fs::read_to_string(scope_path) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return (io_error_output(&error.to_string()), 2),
     };
     let scope: Value = match serde_json::from_str(&scope_raw) {
         Ok(scope) => scope,
         Err(error) => {
-            return (
-                error_output("io", &format!("invalid scope JSON: {error}")),
-                2,
-            );
+            return (io_error_output(&format!("invalid scope JSON: {error}")), 2);
         }
     };
 
@@ -916,10 +906,7 @@ fn run_causal_observe_expectations(
             Ok(source) => source,
             Err(error) => {
                 return (
-                    error_output(
-                        "io",
-                        &format!("cannot read '{}': {}", import_path, error.message),
-                    ),
+                    io_error_output(&format!("cannot read '{}': {}", import_path, error.message)),
                     2,
                 );
             }
@@ -1440,7 +1427,7 @@ fn run_causal_observe_expectations(
     {
         let invocation_dir = match std::env::current_dir() {
             Ok(directory) => directory,
-            Err(error) => return (error_output("io", &error.to_string()), 2),
+            Err(error) => return (io_error_output(&error.to_string()), 2),
         };
         let mut seen = std::collections::BTreeMap::new();
         for destination in output_destinations
@@ -1586,16 +1573,13 @@ fn run_causal_ledger(
     for plan_path in plan_paths {
         let source = match std::fs::read_to_string(plan_path) {
             Ok(source) => source,
-            Err(error) => return (error_output("io", &error.to_string()), 2),
+            Err(error) => return (io_error_output(&error.to_string()), 2),
         };
         let value: Value = match serde_json::from_str(&source) {
             Ok(value) => value,
             Err(error) => {
                 return (
-                    error_output(
-                        "io",
-                        &format!("invalid JSON in {}: {error}", plan_path.display()),
-                    ),
+                    io_error_output(&format!("invalid JSON in {}: {error}", plan_path.display())),
                     2,
                 );
             }
