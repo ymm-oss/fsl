@@ -377,8 +377,11 @@ evaluation still closes its children and `or`/implication export no whole-result
 bindings. Top-level and blame packets preserve reached payloads without widening
 read visibility or changing truth/errors. Native projection remains one candidate
 level and blame renders a whole expression; historical descriptions of recursive
-nested-forall projection or conjunct splitting are not implemented by this repair
-(#1437).
+nested-forall projection or conjunct splitting are not implemented by this repair.
+The user-facing statement is in `docs/manual/LANGUAGE.md` / `LANGUAGE.ja.md` (the blame
+paragraph of the `verify` output) and `skills/fsl/references/commands.md` (#1437):
+`forall u { forall i { ... } }` reports `[{"u": 0}]`, and a conjunction inside a quantifier
+body is one conjunct.
 
 `fsl-core::pattern_binding_flows(op, right_operand)` is the single operator
 decision. The initial eight-consumer estimate omitted the separate free-name

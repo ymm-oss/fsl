@@ -3,7 +3,8 @@
 Status: internal design note for the `fsl 5` syntax edition. The edition was
 developed on `main` behind an unstable gate; #1434 removed the gate, so
 `fsl 5` is read unconditionally. A document without an edition header is
-still `fsl 4`. User documentation of the edition is owed to #1437.
+still `fsl 4`. User documentation of the edition is in `docs/manual/LANGUAGE.md` and
+`LANGUAGE.ja.md` (#1437).
 
 ## Parse options (after #1434)
 
