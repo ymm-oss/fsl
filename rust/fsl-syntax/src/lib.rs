@@ -114,10 +114,11 @@ pub use surface::{
     MapsClause, MeasureDeclaration, MetaTag, NextEditionRequirements, Param, PreservationItem,
     ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition, RefinementItem,
     RefinementParam, RelationDeclaration, RequirementAction, RequirementActionItem,
-    RequirementBlockItem, RequirementBranch, RequirementsItem, ResourceDeclaration, RuleGuard,
-    RuleProperty, SpecItem, StateField, Statement, SurfaceAgent, SurfaceBusiness, SurfaceCompose,
-    SurfaceDocument, SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec,
-    SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem, entity_binder, stage_reference,
+    RequirementBlockItem, RequirementBranch, RequirementOwner, RequirementsItem,
+    ResourceDeclaration, RuleGuard, RuleProperty, SpecItem, StateField, Statement, SurfaceAgent,
+    SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
+    SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
+    entity_binder, stage_reference,
 };
 pub use syntax_expr::{
     SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,

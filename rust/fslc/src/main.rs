@@ -14386,6 +14386,8 @@ struct LedgerReportRequest<'a> {
 }
 
 struct PreparedLedgerReport {
+    /// The declaration owning each requirement ID, which titles its ledger row.
+    owners: std::collections::BTreeMap<String, fsl_syntax::RequirementOwner>,
     model: KernelModel,
     verification: Value,
     verification_status: i32,
@@ -14577,6 +14579,7 @@ fn prepare_ledger_report_from_source(
         .map(|(source, value)| (source.display().to_string(), value))
         .collect::<Vec<_>>();
     Ok(PreparedLedgerReport {
+        owners: fsl_tools::requirement_owners(source, crate::parse_options()),
         model,
         verification,
         verification_status,
@@ -14592,7 +14595,7 @@ fn render_ledger_report(
     approvals: Option<&Value>,
     render_source: Option<&str>,
 ) -> (Value, i32) {
-    let content = fsl_tools::render_ledger_with_approvals(
+    let content = fsl_tools::render_ledger_with_owners(
         render_source.unwrap_or(&request.path.to_string_lossy()),
         &prepared.model,
         &prepared.verification,
@@ -14600,6 +14603,7 @@ fn render_ledger_report(
         prepared.replay.as_ref(),
         &prepared.evidence,
         approvals,
+        &prepared.owners,
     );
     generated_content_result(
         "audit_ledger",

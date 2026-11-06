@@ -20,8 +20,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Entity, EventSignature, MIXED_PARTICLES, OwnedTitles, PARTICLE_ROLE_MISMATCH,
-    UNKNOWN_EVENT_PHRASE, Word, actor_not_declared, join_names, link_to_owner,
+    Entity, EventSignature, MIXED_PARTICLES, PARTICLE_ROLE_MISMATCH, UNKNOWN_EVENT_PHRASE, Word,
+    actor_not_declared, join_names,
 };
 use crate::keywords::{Kw, Particle};
 use crate::parser::{Parser, join_span};
@@ -479,7 +479,6 @@ impl Scope<'_> {
 #[allow(clippy::too_many_lines)]
 pub(super) fn apply(
     decisions: Vec<DecideDeclaration>,
-    owned: &OwnedTitles,
     transitions: &mut BTreeMap<String, Vec<ProcessItem>>,
     events: &[EventSignature],
     entities: &BTreeMap<String, Entity>,
@@ -487,14 +486,7 @@ pub(super) fn apply(
     actors: &BTreeSet<&str>,
 ) -> Result<Vec<DecisionTable>, ParseError> {
     let mut tables = Vec::new();
-    for mut decision in decisions {
-        // A row covering its own table's ID keeps its text: it lands on the table's own
-        // event, where a second text for one ID is refused as a conflict.
-        for cover in decision.rows.iter_mut().flat_map(|row| &mut row.covers) {
-            if cover.id != decision.id {
-                link_to_owner(cover, owned);
-            }
-        }
+    for decision in decisions {
         let Some(entity) = entities.get(&decision.entity.text) else {
             return Err(ParseError::new(
                 format!(

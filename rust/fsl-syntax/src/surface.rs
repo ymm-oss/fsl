@@ -729,6 +729,18 @@ pub struct SurfaceRequirements {
     pub next: Option<NextEditionRequirements>,
 }
 
+/// A declaration that owns the requirement ID after its keyword.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequirementOwner {
+    pub id: String,
+    /// `rule`, `decide`, `scenario`, `forbidden`, `goal`, `policy`, `requirement` or
+    /// `acceptance`.
+    pub kind: &'static str,
+    pub title: String,
+    /// The whole declaration, from its keyword.
+    pub span: Span,
+}
+
 /// The declarations of a next-edition requirements document that do not
 /// survive as [`RequirementsItem`]s: `entity { … }`, `event`, `scenario` and
 /// `forbidden … then rejected` become `process`, `acceptance` and `forbidden`
@@ -737,6 +749,9 @@ pub struct SurfaceRequirements {
 pub struct NextEditionRequirements {
     /// Every written rule ID and its source ID span, even when no effect survives.
     pub rule_headers: Vec<(String, Span)>,
+    /// The declaration owning each requirement ID, in source order: one per ID. A `covers`
+    /// of the ID is a link; the ID's title is its owner's (#1705).
+    pub owners: Vec<RequirementOwner>,
     /// The declared actors.
     pub actors: Vec<String>,
     /// The entities declared with a body, each desugared into a `process` of

@@ -1396,7 +1396,6 @@ pub fn render_ledger(
 
 /// Render the audit ledger with optional digest-bound approval decisions.
 #[must_use]
-#[allow(clippy::too_many_lines)]
 pub fn render_ledger_with_approvals(
     file: &str,
     model: &KernelModel,
@@ -1406,7 +1405,38 @@ pub fn render_ledger_with_approvals(
     evidence: &[(String, Value)],
     approvals: Option<&Value>,
 ) -> String {
-    let (mut requirement_order, registry) = requirement_registry(model);
+    render_ledger_with_owners(
+        file,
+        model,
+        verification,
+        scenarios,
+        replay,
+        evidence,
+        approvals,
+        &BTreeMap::new(),
+    )
+}
+
+/// [`render_ledger_with_approvals`], titling each ID a declaration owns with the owner's
+/// title rather than the first linked text ([`crate::requirement_owners`], #1705).
+#[must_use]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+pub fn render_ledger_with_owners(
+    file: &str,
+    model: &KernelModel,
+    verification: &Value,
+    scenarios: &Value,
+    replay: Option<&Value>,
+    evidence: &[(String, Value)],
+    approvals: Option<&Value>,
+    owners: &BTreeMap<String, fsl_syntax::RequirementOwner>,
+) -> String {
+    let (mut requirement_order, mut registry) = requirement_registry(model);
+    for (id, entry) in &mut registry {
+        if let Some(owner) = owners.get(id) {
+            entry.text = Some(owner.title.clone());
+        }
+    }
     let file = crate::document_markdown::code(file);
     let undecided = undecided_declarations(model);
     let findings = collect_findings(model, verification);

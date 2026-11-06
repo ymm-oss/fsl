@@ -49,8 +49,8 @@ use crate::{
     AcceptanceExpectation, AcceptanceStep, Annotation, Annotations, BusinessItem,
     ConceptDeclaration, EditionWarning, EventForm, Expr, NextEditionRequirements, Param,
     ParseError, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
-    QualifiedName, RequirementsItem, Span, SpecItem, SymbolPath, SyntaxIdent, Token, TokenKind,
-    VerifyItem,
+    QualifiedName, RequirementOwner, RequirementsItem, Span, SpecItem, SymbolPath, SyntaxIdent,
+    Token, TokenKind, VerifyItem,
 };
 use crate::{PhraseKind, PhraseSpelling};
 
@@ -189,28 +189,15 @@ pub(super) struct Pending {
     owners: Vec<(String, Span, &'static str)>,
 }
 
-/// Each owned requirement ID's title and the span of the declaration that owns it.
-type OwnedTitles = BTreeMap<String, (String, Span)>;
-
-/// Make a `covers` of an ID another declaration owns carry the owner's title and span.
-/// The link stays; the ID's one title is its owner's, so the ledger row, the document's
-/// requirement text and the claims all show it (#1705).
-fn link_to_owner(cover: &mut ProcessCover, owned: &OwnedTitles) {
-    if let Some((title, span)) = owned.get(&cover.id) {
-        cover.text.clone_from(title);
-        cover.span = *span;
-    }
-}
-
 /// Refuse a `covers` of an ID no declaration owns whose text differs from an earlier
 /// `covers` of it, at the later `covers`. Events' and decision rows' `covers` count alike,
 /// across the whole document; the ledger kept one row and lost the other text (#1705).
 fn reject_differing_links(
-    owned: &OwnedTitles,
+    owned: &BTreeSet<&str>,
     links: impl Iterator<Item = ProcessCover>,
 ) -> Result<(), ParseError> {
     let mut links: Vec<_> = links
-        .filter(|cover| !owned.contains_key(&cover.id))
+        .filter(|cover| !owned.contains(cover.id.as_str()))
         .collect();
     links.sort_by_key(|cover| cover.span.start.offset);
     let mut first = BTreeMap::<String, ProcessCover>::new();
@@ -1284,31 +1271,48 @@ fn join_names<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
 }
 
 impl Pending {
-    /// The title of each owned requirement ID, from its first owner. A second owner is
+    /// The first owner of each owned requirement ID, in source order. A second owner is
     /// refused before this is read, or by a later check of its own kind.
-    fn owned_titles(&self, blocks: &[(&'static str, &str, &str, Span, Span)]) -> OwnedTitles {
-        let mut owned = OwnedTitles::new();
-        let declarations = blocks
+    fn requirement_owners(
+        &self,
+        blocks: &[(&'static str, &str, &str, Span, Span)],
+    ) -> Vec<RequirementOwner> {
+        let mut declarations: Vec<(&'static str, &str, &str, Span)> = blocks
             .iter()
-            .map(|(_, id, title, _, span)| (*id, *title, *span))
-            .chain(
-                self.rules
-                    .iter()
-                    .map(|(_, rule)| rule.owned())
-                    .chain(self.decisions.iter().map(decide::DecideDeclaration::owned))
-                    .chain(
-                        self.traces
-                            .iter()
-                            .map(|(_, trace)| (trace.id.as_str(), trace.text.as_str(), trace.span)),
-                    )
-                    .chain(self.goals.iter().map(relations::GoalSource::owned)),
-            );
-        for (id, title, span) in declarations {
-            owned
-                .entry(id.to_owned())
-                .or_insert_with(|| (title.to_owned(), span));
-        }
-        owned
+            .map(|(kind, id, title, _, span)| (*kind, *id, *title, *span))
+            .chain(self.rules.iter().map(|(_, rule)| {
+                let (id, title, span) = rule.owned();
+                ("rule", id, title, span)
+            }))
+            .chain(self.decisions.iter().map(|decision| {
+                let (id, title, span) = decision.owned();
+                ("decide", id, title, span)
+            }))
+            .chain(self.traces.iter().map(|(_, trace)| {
+                let kind = if trace.forbidden {
+                    "forbidden"
+                } else {
+                    "scenario"
+                };
+                (kind, trace.id.as_str(), trace.text.as_str(), trace.span)
+            }))
+            .chain(self.goals.iter().map(|goal| {
+                let (id, title, span) = goal.owned();
+                (goal.kind(), id, title, span)
+            }))
+            .collect();
+        declarations.sort_by_key(|(_, _, _, span)| span.start.offset);
+        let mut seen = BTreeSet::new();
+        declarations
+            .into_iter()
+            .filter(|(_, id, _, _)| seen.insert(*id))
+            .map(|(kind, id, title, span)| RequirementOwner {
+                id: id.to_owned(),
+                kind,
+                title: title.to_owned(),
+                span,
+            })
+            .collect()
     }
 
     /// Desugar the members read into `items` (the published items, in
@@ -1345,7 +1349,8 @@ impl Pending {
         );
         owners.sort_by_key(|(_, span, _)| span.start.offset);
         reject_second_owners(&owners)?;
-        let owned = self.owned_titles(&blocks);
+        next.owners = self.requirement_owners(&blocks);
+        let owned: BTreeSet<&str> = next.owners.iter().map(|owner| owner.id.as_str()).collect();
         reject_differing_links(
             &owned,
             self.events
@@ -1511,10 +1516,7 @@ impl Pending {
 
         let mut transitions = BTreeMap::<String, Vec<ProcessItem>>::new();
         let mut signatures = Vec::new();
-        for mut event in self.events {
-            for cover in &mut event.covers {
-                link_to_owner(cover, &owned);
-            }
+        for event in self.events {
             if let Some((verb, object)) = &event.marked {
                 check_marked_roles(
                     &event.actor,
@@ -1761,7 +1763,6 @@ impl Pending {
         // `rule_guards`, one `requires` line per table and per statement.
         next.decisions = decide::apply(
             self.decisions,
-            &owned,
             &mut transitions,
             &signatures,
             &entities,

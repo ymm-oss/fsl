@@ -482,14 +482,42 @@ fn a_covers_of_another_owner_kind_shows_its_title() {
     }
 }
 
+/// The kernel's requirement of `action`, from a `document claims` packet.
+fn requirement_of(claims: &Value, action: &str) -> Value {
+    claims["public_kernel"]["actions"]
+        .as_array()
+        .expect("actions")
+        .iter()
+        .find(|candidate| candidate["name"] == action)
+        .expect("action")["requirement"]
+        .clone()
+}
+
+/// Two `covers` of an owned ID in one table may differ.
+#[test]
+fn two_covers_of_an_owned_id_may_differ() {
+    let row = CLAIMS.replacen(
+        "  } assuming amount > 0\n",
+        &format!("  }} assuming amount > 0\n{RULE_2}"),
+        1,
+    );
+    let owned_twice = row.replacen(
+        "covers REQ-3 \"A large claim is approved or rejected by a manager\"",
+        "covers REQ-2 \"other\"",
+        1,
+    );
+    assert_eq!(check("covers_owned_twice", &owned_twice).0, 0);
+}
+
 /// A rule owning `REQ-2`, after the decision table: line 24 of `CLAIMS`.
 const RULE_2: &str = "  rule REQ-2 \"Only a manager rejects a large claim\" { allow Manager rejects \
                       Claim only when amount >= 2 }\n";
 const TITLE_2: &str = "Only a manager rejects a large claim";
 
-/// A `covers` of an ID a rule owns stays a link, and the ID's title is the rule's: the
-/// base ledger row showed the `covers` text and lost the rule's title, and an event's
-/// `covers` dropped the rule's title from the document and the claims too.
+/// A `covers` of an ID a rule owns stays a link with its own text in the kernel, and the
+/// ID's title is the rule's: the base ledger row showed the `covers` text and lost the
+/// rule's title, and an event's `covers` dropped the rule's title from the document and
+/// the claims too. The `covers` text stays as the ID's second, linked statement.
 #[test]
 fn a_covers_of_an_owned_id_shows_the_owners_title() {
     let assuming = "  } assuming amount > 0\n";
@@ -503,29 +531,23 @@ fn a_covers_of_an_owned_id_shows_the_owners_title() {
             &format!("{reject}    covers REQ-2 \"A claim can be rejected\"\n"),
             1,
         );
-    let owned_twice = row.replacen(
-        "covers REQ-3 \"A large claim is approved or rejected by a manager\"",
-        "covers REQ-2 \"other\"",
-        1,
-    );
-    assert_eq!(check("covers_owned_twice", &owned_twice).0, 0);
     let cases = [
         (
             "covers_row",
             row,
-            "A small claim is auto-approved",
+            ("A small claim is auto-approved", 20, 7, "auto_approve"),
             24,
             json!(["action:auto_approve#operation", "action:reject#operation"]),
         ),
         (
             "covers_event",
             event,
-            "A claim can be rejected",
+            ("A claim can be rejected", 18, 5, "reject"),
             25,
             json!(["action:reject#operation"]),
         ),
     ];
-    for (label, source, covered, line, claim_ids) in cases {
+    for (label, source, (covered, covered_line, covered_column, action), line, claim_ids) in cases {
         let scratch = Scratch::new(label, &[("doc.fsl", &source)]);
         assert_eq!(scratch.fslc(&["check", "doc.fsl"]).0, 0, "{label}");
         // The document violates its own `assuming`, so the ledger exits 1.
@@ -554,14 +576,25 @@ fn a_covers_of_an_owned_id_shows_the_owners_title() {
             requirement,
             &json!({
                 "id": "REQ-2",
-                "statements": [{
-                    "text": TITLE_2,
-                    "source": {"path": "doc.fsl", "line": line, "column": 3},
-                }],
+                "statements": [
+                    {
+                        "text": TITLE_2,
+                        "source": {"path": "doc.fsl", "line": line, "column": 3},
+                    },
+                    {
+                        "text": covered,
+                        "source": {"path": "doc.fsl", "line": covered_line, "column": covered_column},
+                    },
+                ],
                 "claim_ids": claim_ids,
                 "kinds": [],
             }),
             "{label}"
+        );
+        // The kernel keeps the `covers` text, as on base.
+        assert_eq!(
+            requirement_of(&claims, action),
+            json!({"id": "REQ-2", "text": covered})
         );
         let (exit, _) = scratch.fslc(&["document", "generate", "doc.fsl", "-o", "doc.md"]);
         assert_eq!(exit, 0, "{label}");
@@ -570,7 +603,14 @@ fn a_covers_of_an_owned_id_shows_the_owners_title() {
             document.contains(&format!("#### REQ-2\n\n> {TITLE_2}\n")),
             "{label}: {document}"
         );
-        assert!(!document.contains(covered), "{label}: {document}");
+        let owner_at = document.find(&format!("> {TITLE_2}\n\n（出典: `doc.fsl:{line}`）"));
+        let link_at = document.find(&format!(
+            "> {covered}\n\n（出典: `doc.fsl:{covered_line}`）"
+        ));
+        assert!(
+            owner_at.is_some() && link_at.is_some() && owner_at < link_at,
+            "{label}: {document}"
+        );
         assert_eq!(
             scratch.fslc(&["document", "check", "doc.fsl", "doc.md"]).0,
             0,
@@ -773,22 +813,48 @@ fn a_current_edition_block_is_an_owner() {
 }
 
 /// `migrate --edition next` on a current-edition document with two `requirement`s of one
-/// ID now refuses: the rewritten document no longer checks. Its message locates the
-/// repeat in the rewritten text, a line below the source's. Nothing is written.
+/// ID refuses before rewriting, with its own reason, at the second ID in the source.
+/// Before, it added the header and wrote a document the next edition now refuses.
 #[test]
 fn migrate_refuses_two_requirements_of_one_id() {
     let source = current_edition(SECOND_REQUIREMENT);
     let scratch = Scratch::new("migrate_requirement_twice", &[("doc.fsl", &source)]);
     let (exit, packet) = scratch.fslc(&["migrate", "doc.fsl", "--edition", "next", "--write"]);
-    assert_eq!(exit, 2);
+    assert_eq!(exit, 1, "{packet:#}");
+    assert_eq!(packet["result"], "migrate_manual_required");
+    assert_eq!(packet["written"], false);
+    let findings = packet["files"][0]["findings"].as_array().expect("findings");
     assert_eq!(
-        packet,
+        findings[0],
         json!({
-            "fsl": "1.0",
-            "result": "error",
-            "kind": "semantics",
-            "message": format!("{} at doc.fsl:16:15", owner("REQ-1", "requirement", "requirement", (6, 15))),
+            "code": "migrate_manual_required",
+            "kind": "migrate_manual_required",
+            "taxonomy": "unsupported_in_edition",
+            "severity": "error",
+            "edition": "next",
+            "message": "this requirement reuses the ID 'REQ-1' of the requirement at 5:15; the \
+                        next edition gives a requirement ID one owner",
+            "loc": {"file": "doc.fsl", "line": 15, "column": 15, "end_line": 15, "end_column": 20},
+            "canonical_replacement": "rename one of the two IDs, or merge the two declarations",
+            "machine_applicable": false,
+            "edits": [],
+            "reason": "shared_requirement_id",
         })
     );
+    assert_eq!(findings.len(), 2);
+    assert_eq!(findings[1]["code"], "missing_edition_header");
     assert_eq!(scratch.read("doc.fsl"), source);
+    // An acceptance sharing the requirement's ID is refused the same way.
+    let acceptance = current_edition(ACCEPTANCE_OF_REQUIREMENT);
+    let scratch = Scratch::new(
+        "migrate_acceptance_requirement",
+        &[("doc.fsl", &acceptance)],
+    );
+    let (exit, packet) = scratch.fslc(&["migrate", "doc.fsl", "--edition", "next"]);
+    assert_eq!(exit, 1, "{packet:#}");
+    assert_eq!(
+        packet["files"][0]["findings"][0]["reason"],
+        "shared_requirement_id"
+    );
+    assert_eq!(packet["files"][0]["findings"][0]["loc"]["column"], 14);
 }

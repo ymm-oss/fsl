@@ -94,6 +94,14 @@ impl GoalSource {
     pub(in crate::parser) fn owned(&self) -> (&str, &str, Span) {
         (&self.id, &self.text, self.span)
     }
+
+    /// The keyword this was written with.
+    pub(in crate::parser) const fn kind(&self) -> &'static str {
+        match self.form {
+            GoalForm::Reach { .. } => "goal",
+            GoalForm::Eventually { .. } => "policy",
+        }
+    }
 }
 
 impl Parser<'_> {

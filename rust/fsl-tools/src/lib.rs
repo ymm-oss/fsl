@@ -112,6 +112,7 @@ pub use document_project::{
     DocumentDialect, DocumentInput, DocumentProjectionError, RCIR_SUPPORTED_DIALECTS,
     project_requirement_claims, project_requirement_claims_from_source,
     project_requirement_claims_from_source_with_options, project_requirement_claims_with_options,
+    requirement_owners,
 };
 pub use document_render::{
     AppliedApproval, AppliedApprovals, RenderedDocument, render_requirements_document,
@@ -122,7 +123,7 @@ pub use domain::{
     domain_kernel_source, domain_scaffold, domain_scaffold_metadata,
 };
 pub use html::{VERIFY_VERDICTS, render_html_report, verdict_class};
-pub use ledger::{render_ledger, render_ledger_with_approvals};
+pub use ledger::{render_ledger, render_ledger_with_approvals, render_ledger_with_owners};
 pub use mutate::{BuiltinMutant, enumerate_builtin_mutants};
 pub use refinement_analysis::analyze_refinement;
 pub use testgen::{
