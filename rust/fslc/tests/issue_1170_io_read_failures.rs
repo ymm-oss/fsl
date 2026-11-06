@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Issue #1170 phase 2: an input file that cannot be read is reported the same
-//! way on every command, `kind:"io"`, exit 2, message `<path>: <error>`.
+//! Issue #1170 phase 2: an input file the binary reads itself that cannot be
+//! read is reported the same way on each retired route, `kind:"io"`, exit 2,
+//! message `<path>: <error>`.
 //!
 //! One positive case per retired route, each compared in full against the OS
 //! error the same read produces, plus negative controls that keep the
@@ -177,4 +178,161 @@ fn causal_inputs_use_the_common_spelling() {
     ] {
         assert_unreadable(&cwd, &args, "missing.fsl");
     }
+}
+
+fn git(cwd: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .status()
+        .expect("run git");
+    assert!(status.success(), "git {args:?}");
+}
+
+/// Route c, git trees: `diff --git` reads a mapping committed in the head
+/// revision from a temporary checkout that is gone when the command returns.
+/// The message names the mapping as the caller named it.
+#[test]
+fn git_tree_mapping_is_named_as_the_caller_named_it() {
+    let cwd = scratch();
+    copy(&cwd, "specs/cart_v1.fsl", "spec.fsl");
+    git(&cwd, &["init", "-q"]);
+    git(&cwd, &["config", "user.email", "t@example.com"]);
+    git(&cwd, &["config", "user.name", "T"]);
+    git(&cwd, &["config", "commit.gpgsign", "false"]);
+    git(&cwd, &["add", "spec.fsl"]);
+    git(&cwd, &["commit", "-qm", "base"]);
+    std::fs::write(cwd.join("badmap.fsl"), b"\xff\xfe mapping\n").expect("write mapping");
+    git(&cwd, &["add", "badmap.fsl"]);
+    git(&cwd, &["commit", "-qm", "mapping"]);
+    let error = std::fs::read_to_string(cwd.join("badmap.fsl")).expect_err("not UTF-8");
+    let (actual, status) = run(
+        &cwd,
+        &[
+            "diff",
+            "--git",
+            "HEAD~1..HEAD",
+            "spec.fsl",
+            "--mapping",
+            "badmap.fsl",
+        ],
+    );
+    assert_eq!(
+        (actual["kind"].as_str(), actual["message"].as_str(), status),
+        (Some("io"), Some(format!("badmap.fsl: {error}").as_str()), 2),
+        "{actual}"
+    );
+}
+
+/// Route c, `chain` manifest: a missing manifest keeps `file not found:`;
+/// any other read failure names the path with the OS error.
+#[test]
+fn chain_manifest_read_failures_name_the_error() {
+    let cwd = scratch();
+    std::fs::create_dir(cwd.join("adir")).expect("create directory input");
+    std::fs::write(cwd.join("bad.toml"), b"\xff\xfe\n").expect("write manifest");
+    let envelope = |message: String, manifest: &str| {
+        json!({
+            "fsl": "1.0",
+            "result": "error",
+            "kind": "io",
+            "message": message,
+            "manifest": manifest,
+        })
+    };
+    for manifest in ["adir", "bad.toml"] {
+        let error = std::fs::read_to_string(cwd.join(manifest)).expect_err("unreadable");
+        let (mut actual, status) = run(&cwd, &["chain", manifest]);
+        if let Some(object) = actual.as_object_mut() {
+            object.remove("versions");
+        }
+        assert_eq!(
+            (actual, status),
+            (envelope(format!("{manifest}: {error}"), manifest), 2)
+        );
+    }
+    // Negative control: a missing manifest keeps its spelling.
+    let (mut actual, status) = run(&cwd, &["chain", "missing.toml"]);
+    if let Some(object) = actual.as_object_mut() {
+        object.remove("versions");
+    }
+    assert_eq!(
+        (actual, status),
+        (
+            envelope("file not found: missing.toml".to_owned(), "missing.toml"),
+            2
+        )
+    );
+}
+
+/// Route c, git trees: `approval diff` reads the baseline from a temporary
+/// checkout of the recorded commit. A baseline that cannot be read is named
+/// `<commit>:<path>`, never by the temporary path. Its kind stays the
+/// `semantics` the digest check reported before.
+#[test]
+fn git_tree_approval_baseline_is_named_by_commit_and_path() {
+    let cwd = scratch();
+    git(&cwd, &["init", "-q"]);
+    git(&cwd, &["config", "user.email", "t@example.com"]);
+    git(&cwd, &["config", "user.name", "T"]);
+    git(&cwd, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(cwd.join("spec.fsl"), b"\xff\xfe spec\n").expect("write spec");
+    git(&cwd, &["add", "spec.fsl"]);
+    git(&cwd, &["commit", "-qm", "unreadable baseline"]);
+    let error = std::fs::read_to_string(cwd.join("spec.fsl")).expect_err("not UTF-8");
+    copy(&cwd, "tests/fixtures/approval.fsl", "spec.fsl");
+    git(&cwd, &["commit", "-qam", "readable"]);
+    let baseline = String::from_utf8(
+        Command::new("git")
+            .args(["rev-parse", "HEAD~1"])
+            .current_dir(&cwd)
+            .output()
+            .expect("rev-parse")
+            .stdout,
+    )
+    .expect("utf-8 sha")
+    .trim()
+    .to_owned();
+    let (ledger, status) = run(
+        &cwd,
+        &["ledger", "spec.fsl", "--depth", "2", "-o", "review.md"],
+    );
+    assert_eq!(status, 0, "{ledger}");
+    let (created, status) = run(
+        &cwd,
+        &[
+            "approval",
+            "create",
+            "spec.fsl",
+            "--kind",
+            "ledger",
+            "--artifact",
+            "review.md",
+            "--approver",
+            "a",
+            "--depth",
+            "2",
+            "-o",
+            "approval.json",
+        ],
+    );
+    assert_eq!(status, 0, "{created}");
+    let mut record: Value =
+        serde_json::from_slice(&std::fs::read(cwd.join("approval.json")).expect("read record"))
+            .expect("record JSON");
+    record["spec"]["git_commit"] = json!(baseline);
+    std::fs::write(cwd.join("approval.json"), record.to_string()).expect("write record");
+    let (actual, status) = run(
+        &cwd,
+        &["approval", "diff", "spec.fsl", "--record", "approval.json"],
+    );
+    assert_eq!(
+        (actual["kind"].as_str(), actual["message"].as_str(), status),
+        (
+            Some("semantics"),
+            Some(format!("{baseline}:spec.fsl: {error}").as_str()),
+            2
+        ),
+        "{actual}"
+    );
 }

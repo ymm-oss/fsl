@@ -652,11 +652,6 @@ fn normalize_number_key(source: &str, quote: &str, key: &str, replacement: &str)
 /// Comments, whitespace, source paths, and line movement do not invalidate an
 /// approval. Imported/composed specifications are covered because the resolver
 /// expands them before `kernel_ast_v1` is projected.
-pub fn spec_digest(path: &Path) -> Result<String, String> {
-    let source = crate::spec_loading::read_input_text(path)?;
-    spec_digest_from_source(path, &source)
-}
-
 pub fn spec_digest_from_source(path: &Path, source: &str) -> Result<String, String> {
     let resolver =
         crate::spec_loading::dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));

@@ -3849,8 +3849,13 @@ fn parse_manifest_depth(layer: &str, key: &str, raw: &str) -> Result<usize, Stri
 fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
-        Err(_) => {
-            let mut output = io_error_output(&format!("file not found: {}", path.display()));
+        Err(error) => {
+            let message = if error.kind() == std::io::ErrorKind::NotFound {
+                format!("file not found: {}", path.display())
+            } else {
+                read_failure_message(path, &error)
+            };
+            let mut output = io_error_output(&message);
             if let Value::Object(output) = &mut output {
                 output.insert("manifest".to_owned(), json!(path.display().to_string()));
             }
@@ -18055,7 +18060,12 @@ fn run_approval_diff_from_source(
             2,
         );
     }
-    let materialized_digest = match approval::spec_digest(&old) {
+    let baseline_label = PathBuf::from(format!("{}:{}", record.spec.git_commit, record.spec.path));
+    // Name the baseline by commit and path, not by the temporary tree.
+    let materialized_digest = match std::fs::read_to_string(&old)
+        .map_err(|error| read_failure_message(&baseline_label, &error))
+        .and_then(|source| approval::spec_digest_from_source(&old, &source))
+    {
         Ok(digest) => digest,
         Err(error) => {
             let _ = std::fs::remove_dir_all(&root);
@@ -18072,7 +18082,6 @@ fn run_approval_diff_from_source(
             2,
         );
     }
-    let baseline_label = PathBuf::from(format!("{}:{}", record.spec.git_commit, record.spec.path));
     let result =
         run_admitted_roots(
             vec![(
@@ -18236,7 +18245,9 @@ fn run_diff_git(
         });
         let (mut comparison, comparison_status) = if let Some(path) = resolved_mapping.as_deref() {
             if path.starts_with(&head_tree) {
-                match read_spec_source(path) {
+                // Show the mapping as the caller named it: the materialized
+                // tree's temporary path is gone when the command returns.
+                match read_spec_source_shown_as(path, mapping.unwrap_or(path)) {
                     Ok(source) => run_historical_diff(roots, depth, Some(&source), forbid),
                     Err(error) => (spec_load_error_output(&error), 2),
                 }
