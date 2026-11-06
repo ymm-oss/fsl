@@ -737,8 +737,8 @@ pub const INTERNAL_EXIT: i32 = 3;
 ///
 /// Before this table each consumer re-mapped the same classes to the same
 /// codes on its own: the verify-cache replay (`verification.rs`
-/// `cached_output_status`), the process-exit normalization (`main.rs`
-/// `normalized_exit_status`), `chain`'s layer and run status, the nested
+/// `cached_output_status`), the process-exit normalization
+/// ([`normalized_exit_status`], formerly in `main.rs`), `chain`'s layer and run status, the nested
 /// refinement fold (`verification_output.rs` `fold_refinement_verdict`), and
 /// [`exit_status`]. Each now asks [`Verdict::exit_code`].
 ///
@@ -862,6 +862,35 @@ impl Verdict {
 #[must_use]
 pub const fn is_error_exit(status: i32) -> bool {
     status == Verdict::SpecError.exit_code() || status == Verdict::InternalError.exit_code()
+}
+
+/// Pair an error envelope with the exit code the [`Verdict`] table gives it:
+/// [`SPEC_ERROR_EXIT`] for every `kind` but `internal`, [`INTERNAL_EXIT`] for
+/// `internal`. The binary's command arms return an error through this instead
+/// of a hand-picked literal (issue #1170).
+///
+/// # Panics
+///
+/// When `output` is not an error envelope: only an error envelope has an
+/// error exit, so any other value is a programming error at the call site.
+#[must_use]
+pub fn error_exit(output: Value) -> (Value, i32) {
+    let verdict = Verdict::of(&output)
+        .filter(|verdict| matches!(verdict, Verdict::SpecError | Verdict::InternalError))
+        .expect("error_exit takes an error envelope");
+    (output, verdict.exit_code())
+}
+
+/// The process-exit normalization every regular command's result passes
+/// before it is printed: an `internal` error exits [`INTERNAL_EXIT`] whatever
+/// status the command arm reported; anything else keeps the reported status.
+#[must_use]
+pub fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
+    if Verdict::of(output) == Some(Verdict::InternalError) {
+        Verdict::InternalError.exit_code()
+    } else {
+        reported_status
+    }
 }
 
 /// `docs/manual/LANGUAGE.md`'s exit-code table applied to an envelope, as a total

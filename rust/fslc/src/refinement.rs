@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use fsl_core::{FslValue, KernelModel, TraceStep, TypeRef};
-use fslc_rust::outcome::Verdict;
+use fslc_rust::outcome::{Verdict, error_exit};
 use fslc_rust::spec_load::SpecLoadError;
 use serde_json::{Map, Value, json};
 
@@ -329,7 +329,7 @@ fn run_refine_with_loaders(
     };
     let source = match read_mapping() {
         Ok(source) => source,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let mapping = match fsl_core::parse_refinement_with_options(
         &source,
@@ -351,7 +351,7 @@ fn run_refine_with_loaders(
     let checked =
         match fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, depth) {
             Ok(checked) => checked,
-            Err(error) => return (error_output("type", &error.to_string()), 2),
+            Err(error) => return error_exit(error_output("type", &error.to_string())),
         };
     let failure = match checked.verdict() {
         fsl_runtime::RefinementVerdict::ImplViolated { violation, trace } => {
@@ -377,7 +377,7 @@ fn run_refine_with_loaders(
     let progress = if failure.is_none() && !mapping.progress.is_empty() {
         let mut solver = match fsl_solver_z3::Z3Solver::new() {
             Ok(solver) => solver,
-            Err(error) => return (error_output("internal", &error.to_string()), 3),
+            Err(error) => return error_exit(error_output("internal", &error.to_string())),
         };
         match block_on_native(fsl_verifier::check_refinement_progress(
             &implementation,
@@ -387,7 +387,7 @@ fn run_refine_with_loaders(
             depth,
         )) {
             Ok(progress) => Some(progress),
-            Err(error) => return (error_output("semantics", &error.to_string()), 2),
+            Err(error) => return error_exit(error_output("semantics", &error.to_string())),
         }
     } else {
         None
@@ -474,13 +474,13 @@ fn run_refine_with_loaders(
         .and_then(|progress| progress.violation.as_ref())
     {
         let Some(details) = &violation.leads_to else {
-            return (
-                error_output("internal", "missing refinement progress diagnostics"),
-                3,
-            );
+            return error_exit(error_output(
+                "internal",
+                "missing refinement progress diagnostics",
+            ));
         };
         if let Err(error) = fsl_runtime::replay_trace(implementation.clone(), &violation.trace) {
-            return (error_output("internal", &error.to_string()), 3);
+            return error_exit(error_output("internal", &error.to_string()));
         }
         let declaration = mapping
             .progress

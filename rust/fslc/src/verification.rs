@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use fsl_core::{FslValue, KernelExpr, KernelModel, TypeDef, TypeRef};
+use fslc_rust::outcome::error_exit;
 use fslc_rust::spec_load::SpecLoadError;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -250,10 +251,10 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         Err(output) => return output,
     };
     let Value::Object(base) = &base_value else {
-        return (
-            error_output("internal", "BMC returned a non-object envelope"),
-            3,
-        );
+        return error_exit(error_output(
+            "internal",
+            "BMC returned a non-object envelope",
+        ));
     };
     if base.get("result").and_then(Value::as_str) != Some("verified") {
         // A base-case `leadsTo` violation may be a raw BMC stall/lasso trace
@@ -284,11 +285,11 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
     };
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return (error_output("internal", &error.to_string()), 3),
+        Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
     let induction = match block_on_native(fsl_verifier::prove_induction(&model, &mut solver, k)) {
         Ok(result) => result,
-        Err(error) => return (error_output("semantics", &error.to_string()), 2),
+        Err(error) => return error_exit(error_output("semantics", &error.to_string())),
     };
 
     if let Some(cti) = &induction.cti {
@@ -299,7 +300,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
 
     let ranked = match block_on_native(fsl_verifier::prove_ranked_leadstos(&model, &mut solver)) {
         Ok(result) => result,
-        Err(error) => return (error_output("semantics", &error.to_string()), 2),
+        Err(error) => return error_exit(error_output("semantics", &error.to_string())),
     };
     let mut statistics = base_solved.statistics.clone();
     statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
@@ -941,14 +942,16 @@ fn explicit_solver_findings(
     action_coverage: &std::collections::BTreeMap<String, bool>,
 ) -> Result<ExplicitSolverFindings, (Value, i32)> {
     let mut solver = fsl_solver_z3::Z3Solver::new()
-        .map_err(|error| (error_output("internal", &error.to_string()), 3))?;
+        .map_err(|error| error_exit(error_output("internal", &error.to_string())))?;
     block_on_native(async {
         let diagnostics = fsl_verifier::diagnose_reachables(model, &mut solver).await?;
         let vacuity =
             fsl_verifier::model_vacuity_findings(model, &mut solver, action_coverage).await?;
         Ok((vacuity, diagnostics))
     })
-    .map_err(|error: fsl_verifier::VerifyError| (error_output("semantics", &error.to_string()), 2))
+    .map_err(|error: fsl_verifier::VerifyError| {
+        error_exit(error_output("semantics", &error.to_string()))
+    })
 }
 
 pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
@@ -1138,7 +1141,7 @@ fn budget_fallback_reason(explicit_output: &Value) -> String {
 fn finish_explicit_output(rendered: Result<(Value, i32), String>) -> (Value, i32) {
     match rendered {
         Ok(output) => output,
-        Err(error) => (error_output("internal", &error), 3),
+        Err(error) => error_exit(error_output("internal", &error)),
     }
 }
 
@@ -1346,7 +1349,7 @@ fn ranked_lasso_discharges(
 fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedBmc, CommandResult> {
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return Err((error_output("internal", &error.to_string()), 3)),
+        Err(error) => return Err(error_exit(error_output("internal", &error.to_string()))),
     };
     // A ranked `leadsTo` whose ranking obligations hold needs no bounded
     // fair-lasso search: the ranking already shows that search is `unsat`
@@ -1372,7 +1375,7 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
         request.initial_state,
         prepared.checked_bounds.as_ref(),
     ) {
-        return Err((error_output("internal", &error), 3));
+        return Err(error_exit(error_output("internal", &error)));
     }
     // Static reachable diagnosis deliberately uses a separate solver session.
     // Even stack-isolated queries perturb backend query history and can change
@@ -1391,7 +1394,7 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
     if needs_reachable_diagnosis {
         let mut diagnosis_solver = match fsl_solver_z3::Z3Solver::new() {
             Ok(solver) => solver,
-            Err(error) => return Err((error_output("internal", &error.to_string()), 3)),
+            Err(error) => return Err(error_exit(error_output("internal", &error.to_string()))),
         };
         result.reachable_diagnostics = match block_on_native(fsl_verifier::diagnose_reachables(
             &prepared.model,
@@ -1623,7 +1626,7 @@ fn run_induction_with_lemmas(
 ) -> (Value, i32) {
     let deadlock = match DeadlockMode::parse(&options.deadlock) {
         Ok(mode) => mode,
-        Err(error) => return (error_output("usage", &error), 2),
+        Err(error) => return error_exit(error_output("usage", &error)),
     };
     let (selection, model, occupied_names) = match prepare_lemma_induction(path, options, prepared)
     {
@@ -2298,19 +2301,13 @@ fn run_verify_cli_kernel_from_source(
     options: &CliVerifyOptions,
 ) -> CommandResult {
     if !options.lemmas.is_empty() && options.engine != "induction" {
-        return (
-            error_output("usage", "--lemma requires --engine induction"),
-            2,
-        );
+        return error_exit(error_output("usage", "--lemma requires --engine induction"));
     }
     if options.from_state.is_some() && options.engine != "bmc" {
-        return (
-            error_output(
-                "semantics",
-                "--from-state is available only with the BMC engine; induction and explicit verification start from the spec init contract",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "--from-state is available only with the BMC engine; induction and explicit verification start from the spec init contract",
+        ));
     }
     // Causal models are intentionally outside the kernel dialect dispatcher.
     // Check their syntax first so a malformed causal input retains its parser
@@ -2582,22 +2579,19 @@ fn validate_cli_property_selection(
                     .then_some("reachable")
             })
     {
-        return Err((
-            error_output(
-                "usage",
-                &format!(
-                    "--property {name} is a {kind}, which the induction engine cannot prove; check it with the default bmc engine"
-                ),
+        return Err(error_exit(error_output(
+            "usage",
+            &format!(
+                "--property {name} is a {kind}, which the induction engine cannot prove; check it with the default bmc engine"
             ),
-            2,
-        ));
+        )));
     }
     select_properties(
         &mut model,
         options.property.as_deref(),
         &options.exclude_properties,
     )
-    .map_err(|error| (error_output("usage", &error), 2))
+    .map_err(|error| error_exit(error_output("usage", &error)))
 }
 
 fn cached_verification(
@@ -2804,17 +2798,14 @@ fn execute_cli_verification(
     suppressed_implements: Option<Value>,
 ) -> CommandResult {
     if !(selection_filtered || prepared.has_scope) && prepared.is_agent_document {
-        return (
-            error_output(
-                "parse",
-                "agent documents cannot be verified as Kernel specs",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "parse",
+            "agent documents cannot be verified as Kernel specs",
+        ));
     }
     let deadlock = match DeadlockMode::parse(&options.deadlock) {
         Ok(mode) => mode,
-        Err(error) => return (error_output("usage", &error), 2),
+        Err(error) => return error_exit(error_output("usage", &error)),
     };
     let model = match &prepared.model {
         Ok(model) => model,
@@ -2879,7 +2870,7 @@ fn execute_cli_verification(
             budget: options.explicit_budget,
             skip_vacuity_probe,
         }),
-        Err(error) => return (error_output("usage", &error), 2),
+        Err(error) => return error_exit(error_output("usage", &error)),
     };
     // A selected run (#1008) keeps the `implements` key with the reason it
     // was not evaluated instead of dropping it, and still gets the same
@@ -3017,17 +3008,14 @@ fn finalize_cli_verification(
             && let Some(cached) = verify_cache_lookup(key, xdepth, options.depth)
             && cached.get("result") != output.get("result")
         {
-            return (
-                error_output(
-                    "internal",
-                    &format!(
-                        "verify cache divergence: cached result={:?} fresh result={:?} for key={key}",
-                        cached.get("result"),
-                        output.get("result")
-                    ),
+            return error_exit(error_output(
+                "internal",
+                &format!(
+                    "verify cache divergence: cached result={:?} fresh result={:?} for key={key}",
+                    cached.get("result"),
+                    output.get("result")
                 ),
-                3,
-            );
+            ));
         }
         verify_cache_store(key, xdepth, &output);
     }
@@ -3106,7 +3094,7 @@ fn add_cli_strict_tag_warnings(
         true,
         options.requirements.as_deref(),
     )
-    .map_err(|error| (io_error_output(&error), 2))
+    .map_err(|error| error_exit(io_error_output(&error)))
 }
 #[cfg(test)]
 mod tests {

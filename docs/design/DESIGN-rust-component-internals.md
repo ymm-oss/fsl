@@ -779,8 +779,8 @@ native binary: argument parsing
   approval records, keys and artifacts, `diff`, `refine`, `verify --from-state`), causal's
   `cannot read <path>: <error>`, the domain commands' #780-era `semantics` read failure, and
   `approval create --kind requirements_document`'s `usage` for an unreadable `--artifact`,
-  `--glossary` or `--evidence`. The error envelope stays owned by `cli_output.rs` and the error
-  exit by `fslc_rust::outcome`'s `Verdict` table. `tests/issue_1170_error_policy_owners.rs`
+  `--glossary` or `--evidence`. The error envelope and the error exit have their own owners (next
+  item). `tests/issue_1170_error_policy_owners.rs`
   rejects a `"io"` literal or `SpecLoadError::Io(..)` outside an exact allowlist of owner
   functions, even inside `spec_loading.rs`, and counts the hand-written envelope and exit-literal
   sites per file, letting those counts only go down. Still open: reads reported under another
@@ -790,6 +790,25 @@ native binary: argument parsing
   `file not found: <path>` spelling for a missing file only (`chain` manifest, `analyze`,
   `verify --from-state`, `--requirements`), failures labeled `io` that are not file reads, and the
   library-side `literate_access` IO envelope, which cannot call the binary's owner.
+- **Error exit and envelope owners (#1170, no output change):** `fslc_rust::outcome` owns the
+  error exit. `error_exit` pairs an error envelope with the code the `Verdict` table gives it (2 for
+  every `kind` but `internal`, 3 for `internal`), and `normalized_exit_status` is the process-exit
+  normalization formerly in `main.rs`. `cli_output.rs` owns the error envelope: `error_output`, and
+  `error_detail` for an error nested in another command's output (`chain`'s layer `detail`).
+  `chain_step_input_error` builds `chain`'s failed-layer record for a layer input error; the
+  record for a refine run that fails and `run_impl_command`'s records are still built where they
+  are produced. In `main.rs`, `causal.rs`, `refinement.rs`, and `verification.rs`, a pair of
+  `error_output("<kind>", ..)` or `io_error_output(..)` with a literal `2` or `3` became
+  `error_exit(..)` where the literal equals the table's code. Other shapes keep their literal even
+  when it equals the table's code: a bare `(output, 2)`, a pair built from
+  `surface_parse_error_output` or `semantic_error_output`, `process::exit`, and an `"exit_code"`
+  field. So does the one pair whose literal differs (`run_document_claims`' `internal` error with
+  2), whose change would be a behavior decision, and every literal in the other files. The
+  ratchet's `error-exit-literal` pins hold what is left: `main.rs` 170, `verification.rs` 29,
+  `causal.rs` 14, `check_stages.rs` 8, `refinement.rs` 3, `migration.rs` 3, `literate_access.rs` 3,
+  `frontend_output.rs` 2, and one each in `bin/fsl-bmc.rs`, `bin/fsl-replay-actions.rs`,
+  `cli_options.rs`, `coverage.rs`, `spec_loading.rs`, and `verification_output.rs`. The
+  `error-envelope` pins hold 2 in `main.rs` (those two `chain` records) and the other files' sites.
 - `LiterateState`, atomic migration, verify cache, approval trust, and solver execution remain
   distinct state/failure owners rather than a single application state.
 - **Candidate experiment (not authorization):** if selected through the C2 gate, first make

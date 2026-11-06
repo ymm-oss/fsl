@@ -46,12 +46,27 @@ pub(crate) fn envelope() -> Map<String, Value> {
     output
 }
 
+/// The error envelope. This module owns its shape (issue #1170): commands
+/// build an error through it, or through [`error_detail`] when the error is
+/// nested in another command's output, instead of spelling the keys.
 pub(crate) fn error_output(kind: &str, message: &str) -> Value {
     let mut output = envelope();
-    output.insert("result".to_owned(), json!("error"));
-    output.insert("kind".to_owned(), json!(kind));
-    output.insert("message".to_owned(), json!(message));
+    output.extend(error_fields(kind, message));
     Value::Object(output)
+}
+
+/// [`error_output`] without the top-level `fsl` version key, for an error
+/// nested inside another command's output (a `chain` layer's `detail`).
+pub(crate) fn error_detail(kind: &str, message: &str) -> Value {
+    Value::Object(error_fields(kind, message))
+}
+
+fn error_fields(kind: &str, message: &str) -> Map<String, Value> {
+    let mut fields = Map::new();
+    fields.insert("result".to_owned(), json!("error"));
+    fields.insert("kind".to_owned(), json!(kind));
+    fields.insert("message".to_owned(), json!(message));
+    fields
 }
 
 pub(crate) fn surface_parse_error_output(error: &fsl_syntax::ParseError) -> Value {

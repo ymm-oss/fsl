@@ -12,8 +12,8 @@ use fsl_core::{
 };
 use fslc_rust::literate_access::literate_access;
 use fslc_rust::outcome::{
-    FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, exit_status_matches,
-    is_error_exit, outcome_class, sweep_cell_class,
+    FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, error_exit,
+    exit_status_matches, is_error_exit, normalized_exit_status, outcome_class, sweep_cell_class,
 };
 use fslc_rust::spec_load::{SpecLoadError, kernel_load_error, surface_parse_failure};
 use fslc_rust::verification_output::{
@@ -47,8 +47,9 @@ use cli_options::{
     TestplanOptions, VerifyCommandOptions, parse_edition, parse_sweep_range, required_option_value,
 };
 use cli_output::{
-    analysis_display_path, display_binding, envelope, error_output, located_error_output,
-    semantic_error_output, spec_load_error_output, surface_parse_error_output, trace_last_action,
+    analysis_display_path, display_binding, envelope, error_detail, error_output,
+    located_error_output, semantic_error_output, spec_load_error_output,
+    surface_parse_error_output, trace_last_action,
 };
 use fslc_rust::migration::SourceEdition;
 use log_replay::{
@@ -200,7 +201,7 @@ fn run() {
     }
     let (output, reported_status) = match command() {
         Ok(result) => result,
-        Err(error) => (error_output("usage", &error), 2),
+        Err(error) => error_exit(error_output("usage", &error)),
     };
     let status = normalized_exit_status(&output, reported_status);
     debug_assert!(
@@ -492,11 +493,11 @@ fn run_lint_inner(
 ) -> (Value, i32) {
     let (id_policy, policy_source) = match load_id_policy(options.project.as_deref()) {
         Ok(policy) => policy,
-        Err(error) => return (error_output("config", &error), 2),
+        Err(error) => return error_exit(error_output("config", &error)),
     };
     let paths = match expand_lint_paths(&options.paths) {
         Ok(paths) => paths,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let mut files = Vec::new();
     let mut finding_count = 0_usize;
@@ -725,7 +726,7 @@ fn run_migrate_inner(
             })
             .collect::<Vec<_>>();
         if let Err(error) = atomic_write_migrations(&writes) {
-            return (io_error_output(&error), 2);
+            return error_exit(io_error_output(&error));
         }
     }
     let changed = planned
@@ -1365,10 +1366,10 @@ fn command() -> Result<(Value, i32), String> {
             }
             if let Some(range) = &options.git_range {
                 if paths.len() > 1 {
-                    return Ok((
-                        error_output("usage", "--git accepts at most one spec path"),
-                        2,
-                    ));
+                    return Ok(error_exit(error_output(
+                        "usage",
+                        "--git accepts at most one spec path",
+                    )));
                 }
                 Ok(run_diff_git(
                     range,
@@ -1386,10 +1387,10 @@ fn command() -> Result<(Value, i32), String> {
                     &options.forbid,
                 ))
             } else {
-                Ok((
-                    error_output("usage", "diff requires OLD NEW or --git BASE..HEAD [SPEC]"),
-                    2,
-                ))
+                Ok(error_exit(error_output(
+                    "usage",
+                    "diff requires OLD NEW or --git BASE..HEAD [SPEC]",
+                )))
             }
         }
         "chain" => {
@@ -1416,13 +1417,10 @@ fn command() -> Result<(Value, i32), String> {
                     options.depth,
                 ))
             } else if options.rest.len() % 2 != 0 {
-                Ok((
-                    error_output(
-                        "usage",
-                        "refine chain must list (abs map) pairs after the first mapping",
-                    ),
-                    2,
-                ))
+                Ok(error_exit(error_output(
+                    "usage",
+                    "refine chain must list (abs map) pairs after the first mapping",
+                )))
             } else {
                 Ok(run_refine_chain(
                     &options.path,
@@ -1440,32 +1438,32 @@ fn command() -> Result<(Value, i32), String> {
                 return Ok(early_return);
             }
             if options.trace.is_some() && options.from_log.is_some() {
-                return Ok((
-                    error_output("usage", "--trace and --from-log are mutually exclusive"),
-                    2,
-                ));
+                return Ok(error_exit(error_output(
+                    "usage",
+                    "--trace and --from-log are mutually exclusive",
+                )));
             }
             if let Some(log) = &options.from_log {
                 let Some(mapping) = &options.mapping else {
-                    return Ok((
-                        error_output("usage", "--mapping is required with --from-log"),
-                        2,
-                    ));
+                    return Ok(error_exit(error_output(
+                        "usage",
+                        "--mapping is required with --from-log",
+                    )));
                 };
                 Ok(run_log_replay(path, log, mapping))
             } else if let Some(trace) = &options.trace {
                 if options.mapping.is_some() {
-                    return Ok((
-                        error_output("usage", "--mapping is only valid with --from-log"),
-                        2,
-                    ));
+                    return Ok(error_exit(error_output(
+                        "usage",
+                        "--mapping is only valid with --from-log",
+                    )));
                 }
                 Ok(run_replay(path, trace))
             } else {
-                Ok((
-                    error_output("usage", "one of --trace or --from-log is required"),
-                    2,
-                ))
+                Ok(error_exit(error_output(
+                    "usage",
+                    "one of --trace or --from-log is required",
+                )))
             }
         }
         "sweep" => {
@@ -2462,7 +2460,7 @@ fn run_document_generate(
         crate::parse_options(),
     ) {
         Ok(rendered) => rendered,
-        Err(error) => return (error_output("document", &error), 2),
+        Err(error) => return error_exit(error_output("document", &error)),
     };
     if strict_rendering && rendered.formula_fallback_count > 0 {
         let mut output = error_output(
@@ -2544,7 +2542,7 @@ fn run_document_generate(
             crate::parse_options(),
         ) {
             Ok(rendered) => rendered,
-            Err(error) => return (error_output("document", &error), 2),
+            Err(error) => return error_exit(error_output("document", &error)),
         }
     } else {
         rendered
@@ -2553,7 +2551,7 @@ fn run_document_generate(
     if let Some(path) = output_path
         && let Err(error) = output_publication::publish(path, &rendered.markdown)
     {
-        return (io_error_output(&error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("generated"));
@@ -2649,7 +2647,7 @@ fn run_document_claims(path: &Path, source: &str, output_path: Option<&Path>) ->
     if let Some(path) = output_path
         && let Err(error) = output_publication::publish(path, &content)
     {
-        return (io_error_output(&error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("generated"));
@@ -2741,7 +2739,7 @@ fn run_document_check(
 ) -> (Value, i32) {
     let artifact_text = match read_input_text(artifact) {
         Ok(text) => text,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let frontmatter = match fsl_tools::parse_frontmatter_only(&artifact_text) {
         Ok(frontmatter) => frontmatter,
@@ -2823,7 +2821,7 @@ fn run_document_check(
         crate::parse_options(),
     ) {
         Ok(rendered) => rendered,
-        Err(error) => return (error_output("document", &error), 2),
+        Err(error) => return error_exit(error_output("document", &error)),
     };
 
     let report =
@@ -3407,52 +3405,40 @@ fn run_sweep(
     value_args: &[String],
 ) -> (Value, i32) {
     let Some((depth_lo, depth_hi)) = depth_range.split_once("..") else {
-        return (
-            error_output(
-                "semantics",
-                &format!("invalid --depth value '{depth_range}': expected LO..HI"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("invalid --depth value '{depth_range}': expected LO..HI"),
+        ));
     };
     let parsed_depth = depth_lo
         .trim()
         .parse::<usize>()
         .and_then(|lo| depth_hi.trim().parse::<usize>().map(|hi| (lo, hi)));
     let Ok((depth_lo, depth_hi)) = parsed_depth else {
-        return (
-            error_output(
-                "semantics",
-                "invalid --depth value: bounds must be integers",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "invalid --depth value: bounds must be integers",
+        ));
     };
     if depth_lo > depth_hi {
-        return (
-            error_output(
-                "semantics",
-                &format!("invalid --depth value '{depth_range}': expected 0 <= LO <= HI"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("invalid --depth value '{depth_range}': expected 0 <= LO <= HI"),
+        ));
     }
     let mut instance_ranges = std::collections::BTreeMap::new();
     for argument in instance_args {
         let (name, range) = match parse_sweep_range(argument, "--instances") {
             Ok(value) => value,
-            Err(error) => return (error_output("semantics", &error), 2),
+            Err(error) => return error_exit(error_output("semantics", &error)),
         };
         if range.0 < 1 {
-            return (
-                error_output(
-                    "semantics",
-                    &format!(
-                        "invalid --instances value '{argument}': instance lower bound must be >= 1"
-                    ),
+            return error_exit(error_output(
+                "semantics",
+                &format!(
+                    "invalid --instances value '{argument}': instance lower bound must be >= 1"
                 ),
-                2,
-            );
+            ));
         }
         instance_ranges.insert(name, range);
     }
@@ -3460,7 +3446,7 @@ fn run_sweep(
     for argument in value_args {
         let (name, range) = match parse_sweep_range(argument, "--values") {
             Ok(value) => value,
-            Err(error) => return (error_output("semantics", &error), 2),
+            Err(error) => return error_exit(error_output("semantics", &error)),
         };
         value_ranges.insert(name, range);
     }
@@ -3507,13 +3493,10 @@ fn run_sweep_grid_from_source(
     value_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
 ) -> (Value, i32) {
     if checked_sweep_cell_count(depth_lo, depth_hi, instance_ranges, value_ranges).is_none() {
-        return (
-            error_output(
-                "semantics",
-                &format!("sweep grid exceeds the maximum of {MAX_SWEEP_CELLS} cells"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("sweep grid exceeds the maximum of {MAX_SWEEP_CELLS} cells"),
+        ));
     }
     let instance_combinations = integer_combinations(instance_ranges);
     let value_upper_combinations = integer_combinations(value_ranges);
@@ -4339,12 +4322,7 @@ fn run_chain_step(
                             });
                             (detail, status, "verify", Some(depth))
                         }
-                        Err(message) => (
-                            json!({"result": "error", "kind": "parse", "message": message}),
-                            2,
-                            "verify",
-                            None,
-                        ),
+                        Err(message) => (error_detail("parse", &message), 2, "verify", None),
                     }
                 } else {
                     let root = project_root(roots, layer, false);
@@ -4393,17 +4371,7 @@ fn run_chain_step(
         {
             let detail =
                 io_error_detail(&format!("[{layer}] unknown refine_against layer: {target}"));
-            (
-                json!({
-                    "layer": format!("{layer}->{target}"),
-                    "kind": "refine",
-                    "status": "failed",
-                    "result": "error",
-                    "exit_code": 2,
-                    "detail": detail,
-                }),
-                true,
-            )
+            chain_step_input_error(&format!("{layer}->{target}"), "refine", &detail)
         } else {
             let file_path = match chain_step_file(section, layer, base) {
                 Ok(path) => path,
@@ -4463,18 +4431,8 @@ fn run_chain_step(
                     )
                 }
                 Err(message) => {
-                    let detail = json!({"result": "error", "kind": "parse", "message": message});
-                    (
-                        json!({
-                            "layer": format!("{layer}->{target}"),
-                            "kind": "refine",
-                            "status": "failed",
-                            "result": "error",
-                            "exit_code": 2,
-                            "detail": detail,
-                        }),
-                        true,
-                    )
+                    let detail = error_detail("parse", &message);
+                    chain_step_input_error(&format!("{layer}->{target}"), "refine", &detail)
                 }
             }
         }
@@ -4482,24 +4440,12 @@ fn run_chain_step(
         let command = section.values.get("command").cloned().unwrap_or_default();
         match impl_evidence(section) {
             Err(message) => {
-                let detail = json!({"result": "error", "kind": "parse", "message": message});
-                (
-                    json!({
-                        "layer": "impl", "kind": "command", "status": "failed",
-                        "result": "error", "exit_code": 2, "detail": detail,
-                    }),
-                    true,
-                )
+                let detail = error_detail("parse", &message);
+                chain_step_input_error("impl", "command", &detail)
             }
             Ok(_) if command.is_empty() => {
                 let detail = io_error_detail("[impl] command is required");
-                (
-                    json!({
-                        "layer": "impl", "kind": "command", "status": "failed",
-                        "result": "error", "exit_code": 2, "detail": detail,
-                    }),
-                    true,
-                )
+                chain_step_input_error("impl", "command", &detail)
             }
             Ok(evidence) => run_impl_command(&command, &evidence, base),
         }
@@ -4876,15 +4822,15 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
     };
     let raw = match read_input_text(trace_path) {
         Ok(raw) => raw,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let data = match serde_json::from_str::<Value>(&raw) {
         Ok(data) => data,
-        Err(error) => return (io_error_output(&format!("invalid JSON: {error}")), 2),
+        Err(error) => return error_exit(io_error_output(&format!("invalid JSON: {error}"))),
     };
     let trace = match fslc_rust::replay_trace::parse_replay_trace(data) {
         Ok(trace) => trace,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let versioned = matches!(
         trace.contract,
@@ -4894,22 +4840,19 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
         fslc_rust::replay_trace::ReplayTraceContract::Legacy => (None, Vec::new()),
         fslc_rust::replay_trace::ReplayTraceContract::V1 { spec, initial, .. } => {
             if spec != &model.name {
-                return (
-                    io_error_output(&format!(
-                        "replay trace spec '{spec}' does not match checked spec '{}'",
-                        model.name
-                    )),
-                    2,
-                );
+                return error_exit(io_error_output(&format!(
+                    "replay trace spec '{spec}' does not match checked spec '{}'",
+                    model.name
+                )));
             }
             let initial_state = match load_snapshot_value_object(initial, &model) {
                 Ok(state) => state,
-                Err(error) => return (io_error_output(&error), 2),
+                Err(error) => return error_exit(io_error_output(&error)),
             };
             let initial = fslc_rust::state_json(&initial_state);
             let events = match validate_versioned_replay_events(&model, &trace.events) {
                 Ok(events) => events,
-                Err(error) => return (io_error_output(&error), 2),
+                Err(error) => return error_exit(io_error_output(&error)),
             };
             (Some((initial_state, initial)), events)
         }
@@ -4974,7 +4917,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                 );
             }
             Ok(None) => {}
-            Err(error) => return (error_output("internal", &error.to_string()), 3),
+            Err(error) => return error_exit(error_output("internal", &error.to_string())),
         }
         if let Some(liveness) = &mut bounded_liveness {
             match liveness.observe(&monitor.state, 0) {
@@ -4987,7 +4930,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                     );
                 }
                 Ok(None) => {}
-                Err(error) => return (error_output("internal", &error.to_string()), 3),
+                Err(error) => return error_exit(error_output("internal", &error.to_string())),
             }
         }
     }
@@ -5012,7 +4955,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                         );
                     }
                     Ok(None) => {}
-                    Err(error) => return (error_output("internal", &error.to_string()), 3),
+                    Err(error) => return error_exit(error_output("internal", &error.to_string())),
                 }
                 (Value::Null, "stutter")
             }
@@ -5022,7 +4965,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
             } => {
                 let resolved = match model.resolve_replay_action(action_name) {
                     Ok(resolved) => resolved,
-                    Err(error) => return (io_error_output(&error), 2),
+                    Err(error) => return error_exit(io_error_output(&error)),
                 };
                 let Some(action) = resolved.or_else(|| {
                     (!versioned)
@@ -5077,7 +5020,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                 };
                 let stepped = match monitor.attempt(&action.name, &parsed) {
                     Ok(stepped) => stepped,
-                    Err(error) => return (error_output("internal", &error.to_string()), 3),
+                    Err(error) => return error_exit(error_output("internal", &error.to_string())),
                 };
                 if let Some(violation) = stepped.violation {
                     return replay_failure(
@@ -5103,7 +5046,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
             } else {
                 match replay_snapshot_json(state, &model) {
                     Ok(observed) => observed,
-                    Err(error) => return (io_error_output(&error), 2),
+                    Err(error) => return error_exit(io_error_output(&error)),
                 }
             };
             let expected = fslc_rust::state_json(&monitor.state);
@@ -5137,7 +5080,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                     );
                 }
                 Ok(None) => {}
-                Err(error) => return (error_output("internal", &error.to_string()), 3),
+                Err(error) => return error_exit(error_output("internal", &error.to_string())),
             }
         }
     }
@@ -5292,8 +5235,8 @@ fn run_log_replay_from_sources(
     let mapping =
         match fsl_syntax::parse_surface_document_with(mapping_source, crate::parse_options()) {
             Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
-            Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
-            Err(error) => return (error_output("parse", &error.to_string()), 2),
+            Ok(_) => return error_exit(error_output("type", "expected refinement mapping file")),
+            Err(error) => return error_exit(error_output("parse", &error.to_string())),
         };
     if let Some(span) = untyped_replay_enum_mapping_span(&mapping) {
         return (
@@ -5307,7 +5250,7 @@ fn run_log_replay_from_sources(
     }
     let records = match read_jsonl_records(log_path) {
         Ok(records) => records,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let maps_auto = mapping
         .items
@@ -5511,7 +5454,7 @@ fn run_log_replay_from_sources(
             };
             let enabled = match monitor.enabled() {
                 Ok(enabled) => enabled,
-                Err(error) => return (error_output("internal", &error.to_string()), 3),
+                Err(error) => return error_exit(error_output("internal", &error.to_string())),
             };
             let Some(instance) = enabled
                 .iter()
@@ -5523,7 +5466,7 @@ fn run_log_replay_from_sources(
                 );
             };
             if let Err(error) = monitor.step(instance) {
-                return (error_output("internal", &error.to_string()), 3);
+                return error_exit(error_output("internal", &error.to_string()));
             }
         }
         let expected = fslc_rust::state_json(&monitor.state);
@@ -5718,11 +5661,11 @@ fn scenarios_from_checked_traces(
 ) -> (Value, i32) {
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return (error_output("internal", &error.to_string()), 3),
+        Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
     let result = match block_on_native(fsl_verifier::verify_bounded(model, &mut solver, depth)) {
         Ok(result) => result,
-        Err(error) => return (error_output("semantics", &error.to_string()), 2),
+        Err(error) => return error_exit(error_output("semantics", &error.to_string())),
     };
     if result.violation.is_some()
         || result.leadsto_violation.is_some()
@@ -5741,11 +5684,11 @@ fn scenarios_from_checked_traces(
         );
     }
     if let Err(error) = fslc_rust::verification_output::replay_bmc_witnesses(model, &result, None) {
-        return (error_output("internal", &error), 3);
+        return error_exit(error_output("internal", &error));
     }
     let covers = match fsl_runtime::action_cover_traces(model.clone(), depth) {
         Ok(covers) => covers,
-        Err(error) => return (error_output("internal", &error.to_string()), 3),
+        Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
     let reachables =
         fslc_rust::verification_output::sorted_by_published(&result.reachables, |name| {
@@ -5804,7 +5747,7 @@ fn scenarios_from_checked_traces(
     }
     let (responses, missing_responses) = match fsl_runtime::leadsto_response_traces(model, depth) {
         Ok(result) => result,
-        Err(error) => return (error_output("internal", &error.to_string()), 3),
+        Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
     // Both lists come keyed by internal property name (`p2__Back` before
     // `p__Back`); print them in the order of the name they print (`p.Back`
@@ -6260,7 +6203,7 @@ fn run_check_from_source(
                 .collect::<Vec<_>>();
             output.insert("warnings".to_owned(), Value::Array(warnings));
             let Ok((output, status)) = attach_check_implements(output, implements) else {
-                return (error_output("internal", "check envelope"), 3);
+                return error_exit(error_output("internal", "check envelope"));
             };
             let mut output = Value::Object(output);
             match fold_governance_from_source(path, source, &mut output) {
@@ -6553,7 +6496,7 @@ fn run_check_with_tags_from_source(
         if let Err(error) =
             add_strict_tag_warnings_from_source(&mut output, &model, source, true, requirements)
         {
-            return (io_error_output(&error), 2);
+            return error_exit(io_error_output(&error));
         }
     }
     dependencies.finish(admission.finish((output, status)), false)
@@ -6614,7 +6557,7 @@ fn run_db_check_from_source(
     };
     let mut result = match fsl_tools::check_db(&system) {
         Ok(Value::Object(result)) => result,
-        Ok(_) => return (error_output("internal", "invalid database result"), 3),
+        Ok(_) => return error_exit(error_output("internal", "invalid database result")),
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
     let status = if result.get("result").and_then(Value::as_str) == Some("violated") {
@@ -6678,7 +6621,7 @@ fn run_db_observe_from_source(path: &Path, source: &str, trace: &Path) -> (Value
         .and_then(|source| serde_json::from_str(&source).map_err(|error| error.to_string()))
     {
         Ok(payload) => payload,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     match fsl_tools::observe_db(&system, &payload) {
         Ok(Value::Object(result)) => {
@@ -6689,10 +6632,10 @@ fn run_db_observe_from_source(path: &Path, source: &str, trace: &Path) -> (Value
             );
             (Value::Object(output), status)
         }
-        Ok(_) => (
-            error_output("internal", "invalid database observation result"),
-            3,
-        ),
+        Ok(_) => error_exit(error_output(
+            "internal",
+            "invalid database observation result",
+        )),
         Err(error) => (semantic_error_output(&error.to_string()), 2),
     }
 }
@@ -6705,7 +6648,7 @@ fn run_db_import(
 ) -> (Value, i32) {
     let source = match read_input_text(path) {
         Ok(source) => source,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let format = if requested_format == "auto" {
         if path.extension().and_then(std::ffi::OsStr::to_str) == Some("prisma") {
@@ -6726,7 +6669,7 @@ fn run_db_import(
     if let Some(output_path) = output_path
         && let Err(error) = output_publication::publish(output_path, &imported.source)
     {
-        return (io_error_output(&error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     let mut output = envelope();
     output.insert(
@@ -6751,7 +6694,7 @@ fn run_db_import(
 
 fn wrap_specialized(result: Value) -> (Value, i32) {
     let Value::Object(mut result) = result else {
-        return (error_output("internal", "invalid specialized result"), 3);
+        return error_exit(error_output("internal", "invalid specialized result"));
     };
     result.retain(|_, value| !value.is_null());
     // Issue #601. This used to carry its own failure list ending in `_ => 0`,
@@ -6915,7 +6858,7 @@ fn run_ai_replay_from_source(
         }
         let events = match read_json_events(logs) {
             Ok(events) => events,
-            Err(error) => return (error_output("parse", &error), 2),
+            Err(error) => return error_exit(error_output("parse", &error)),
         };
         let mut findings = Vec::new();
         for (index, event) in events.iter().enumerate() {
@@ -6961,7 +6904,7 @@ fn run_ai_replay_from_source(
     }
     let events = match read_json_events(logs) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     wrap_specialized(fsl_tools::replay_ai(&component, &events))
 }
@@ -7104,11 +7047,11 @@ fn run_ai_compare(
 ) -> (Value, i32) {
     let before_events = match read_json_events(before) {
         Ok(value) => value,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     let after_events = match read_json_events(after) {
         Ok(value) => value,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     let left = metric_summaries(&before_events, dataset);
     let right = metric_summaries(&after_events, dataset);
@@ -7213,7 +7156,7 @@ fn run_ai_eval_from_source(
     };
     let events = match read_json_events(&records_path) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     match fsl_tools::evaluate_statistical_property(selected, &events, &dataset_name, slice) {
         Ok(result) => wrap_specialized(result),
@@ -7255,11 +7198,11 @@ fn run_ai_regress_from_source(
     };
     let before_events = match read_json_events(before) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     let after_events = match read_json_events(after) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     match fsl_tools::evaluate_migration(selected, &before_events, &after_events, dataset) {
         Ok(result) => wrap_specialized(result),
@@ -7317,12 +7260,12 @@ fn run_ai_drift_from_source(
     };
     let current_events = match read_json_events(current) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     let baseline_events = match baseline {
         Some(path) => match read_json_events(path) {
             Ok(events) => events,
-            Err(error) => return (error_output("parse", &error), 2),
+            Err(error) => return error_exit(error_output("parse", &error)),
         },
         None => Vec::new(),
     };
@@ -7640,7 +7583,7 @@ fn run_domain_expand_from_source(
     if let Some(output_path) = output_path
         && let Err(error) = output_publication::publish(output_path, &source)
     {
-        return (io_error_output(&error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     let mut result = json!({"result":"expanded","dialect":"fsl-domain-effect.v0","domain":domain.name,"kernel_source":source,"assumptions":[]});
     if let Some(output_path) = output_path
@@ -7679,13 +7622,10 @@ fn run_domain_generate_from_source(
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     if profile != "functional-ddd" {
-        return (
-            error_output(
-                "semantics",
-                &format!("unsupported domain profile: {profile}"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("unsupported domain profile: {profile}"),
+        ));
     }
     let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, source, &domain) {
         Ok(input) => input,
@@ -7693,14 +7633,14 @@ fn run_domain_generate_from_source(
     };
     let mut result = match fsl_tools::domain_scaffold(&kernel, &metadata, target) {
         Ok(result) => result,
-        Err(error) => return (error_output("semantics", &error), 2),
+        Err(error) => return error_exit(error_output("semantics", &error)),
     };
     if let Some(output_path) = output_path {
         let Value::Object(object) = &mut result else {
-            return (error_output("internal", "invalid scaffold result"), 3);
+            return error_exit(error_output("internal", "invalid scaffold result"));
         };
         if let Err(error) = std::fs::create_dir_all(output_path) {
-            return (io_error_output(&error.to_string()), 2);
+            return error_exit(io_error_output(&error.to_string()));
         }
         if let Some(files) = object.get("files").and_then(Value::as_array) {
             for file in files {
@@ -7711,7 +7651,7 @@ fn run_domain_generate_from_source(
                 if let Some(parent) = destination.parent()
                     && let Err(error) = std::fs::create_dir_all(parent)
                 {
-                    return (io_error_output(&error.to_string()), 2);
+                    return error_exit(io_error_output(&error.to_string()));
                 }
                 if let Err(error) = output_publication::publish(
                     &destination,
@@ -7719,7 +7659,7 @@ fn run_domain_generate_from_source(
                         .and_then(Value::as_str)
                         .unwrap_or_default(),
                 ) {
-                    return (io_error_output(&error.to_string()), 2);
+                    return error_exit(io_error_output(&error.to_string()));
                 }
             }
         }
@@ -8327,7 +8267,7 @@ fn run_domain_replay_from_source(path: &Path, source: &str, logs: &Path) -> (Val
     };
     let events = match read_json_events(logs) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     let model = match load_model_from_source(path, source) {
         Ok(model) => model,
@@ -12807,7 +12747,7 @@ fn generated_content_result(
     if let Some(path) = output_path
         && let Err(error) = output_publication::publish(path, content)
     {
-        return (io_error_output(&error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("generated"));
@@ -13090,10 +13030,10 @@ fn run_counterexample_export_from_source(
     };
     let serialized = match serde_json::to_string_pretty(&artifact) {
         Ok(serialized) => serialized,
-        Err(error) => return (error_output("internal", &error.to_string()), 3),
+        Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
     if let Err(error) = output_publication::publish(output_path, serialized) {
-        return (io_error_output(&error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     if let Value::Object(ref mut map) = verify_output {
         map.insert(
@@ -13706,13 +13646,10 @@ fn approval_artifact(
 ) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
     if kind == "requirements_document" {
         let approval::GenerationInputs::Document(document_inputs) = inputs else {
-            return Err((
-                error_output(
-                    "usage",
-                    "requirements_document approval requires document generation inputs",
-                ),
-                2,
-            ));
+            return Err(error_exit(error_output(
+                "usage",
+                "requirements_document approval requires document generation inputs",
+            )));
         };
         let rendered =
             render_document_for_approval(path, source, document_inputs, None, render_source)
@@ -13723,13 +13660,10 @@ fn approval_artifact(
         ));
     }
     let approval::GenerationInputs::Solver(inputs) = inputs else {
-        return Err((
-            error_output(
-                "usage",
-                "ledger/html/scenarios approval requires solver generation inputs",
-            ),
-            2,
-        ));
+        return Err(error_exit(error_output(
+            "usage",
+            "ledger/html/scenarios approval requires solver generation inputs",
+        )));
     };
     let dependencies = fslc_rust::migration::DependencyScope::enter();
     let (mut result, status) = dependencies.finish_distinct(match kind {
@@ -13777,10 +13711,10 @@ fn approval_artifact(
             }
         }
         _ => {
-            return Err((
-                error_output("usage", &format!("unsupported approval target '{kind}'")),
-                2,
-            ));
+            return Err(error_exit(error_output(
+                "usage",
+                &format!("unsupported approval target '{kind}'"),
+            )));
         }
     });
     if status != 0 {
@@ -13793,14 +13727,14 @@ fn approval_artifact(
             .and_then(Value::as_str)
             .map(|content| content.as_bytes().to_vec())
             .ok_or_else(|| {
-                (
-                    error_output("internal", "generated artifact has no content"),
-                    3,
-                )
+                error_exit(error_output(
+                    "internal",
+                    "generated artifact has no content",
+                ))
             })?
     } else {
         let mut encoded = serde_json::to_vec_pretty(&result)
-            .map_err(|error| (error_output("internal", &error.to_string()), 3))?;
+            .map_err(|error| error_exit(error_output("internal", &error.to_string())))?;
         encoded.push(b'\n');
         encoded
     };
@@ -13866,16 +13800,13 @@ fn run_approval_create(
         kind,
         "ledger" | "html" | "scenarios" | "requirements_document"
     ) {
-        return (
-            error_output(
-                "usage",
-                "--kind must be ledger, html, scenarios, or requirements_document",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "usage",
+            "--kind must be ledger, html, scenarios, or requirements_document",
+        ));
     }
     if approver.trim().is_empty() {
-        return (error_output("usage", "--approver must not be empty"), 2);
+        return error_exit(error_output("usage", "--approver must not be empty"));
     }
     run_admitted_roots(
         vec![(path, read_spec_source(path))],
@@ -13917,7 +13848,7 @@ fn run_approval_create_from_source(
 ) -> (Value, i32) {
     let creation_directory = match std::env::current_dir().and_then(|cwd| cwd.canonicalize()) {
         Ok(directory) => directory,
-        Err(error) => return (io_error_output(&error.to_string()), 2),
+        Err(error) => return error_exit(io_error_output(&error.to_string())),
     };
     let render_source = path.to_string_lossy();
     let model = match load_model_from_source(path, source) {
@@ -13938,13 +13869,10 @@ fn run_approval_create_from_source(
         == "requirements_document"
     {
         let approval::GenerationInputs::Document(document_inputs) = inputs else {
-            return (
-                error_output(
-                    "usage",
-                    "--kind requirements_document requires document generation inputs",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "usage",
+                "--kind requirements_document requires document generation inputs",
+            ));
         };
         let RenderedApprovalDocument {
             claims,
@@ -13961,13 +13889,10 @@ fn run_approval_create_from_source(
             Err(error) => return (error, 2),
         };
         let Some(base) = stored_base.as_deref() else {
-            return (
-                error_output(
-                    "semantics",
-                    "a requirements_document approval must be created inside the spec's Git repository",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "a requirements_document approval must be created inside the spec's Git repository",
+            ));
         };
         let inputs_inside_root = document_inputs
             .glossary
@@ -13979,11 +13904,11 @@ fn run_approval_create_from_source(
                 approval::require_inside_root(&repo, base, &artifact_path.to_string_lossy())
             });
         if let Err(error) = inputs_inside_root {
-            return (error_output("semantics", &error), 2);
+            return error_exit(error_output("semantics", &error));
         }
         let reviewed_text = match read_input_text(artifact_path) {
             Ok(text) => text,
-            Err(error) => return (io_error_output(&error), 2),
+            Err(error) => return error_exit(io_error_output(&error)),
         };
         let report = match fsl_tools::check_requirements_document(
             &reviewed_text,
@@ -14015,13 +13940,10 @@ fn run_approval_create_from_source(
         )
     } else {
         let approval::GenerationInputs::Solver(_) = inputs else {
-            return (
-                error_output(
-                    "usage",
-                    "--kind ledger/html/scenarios requires solver generation inputs",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "usage",
+                "--kind ledger/html/scenarios requires solver generation inputs",
+            ));
         };
         let (expected_artifact, _) =
             match approval_artifact(path, source, edition, kind, inputs, Some(&render_source)) {
@@ -14030,24 +13952,21 @@ fn run_approval_create_from_source(
             };
         let reviewed_artifact = match read_input_bytes(artifact_path) {
             Ok(artifact) => artifact,
-            Err(error) => return (io_error_output(&error), 2),
+            Err(error) => return error_exit(io_error_output(&error)),
         };
         let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
             Ok(artifact) => artifact,
-            Err(error) => return (error_output("semantics", &error), 2),
+            Err(error) => return error_exit(error_output("semantics", &error)),
         };
         let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact) {
             Ok(artifact) => artifact,
-            Err(error) => return (error_output("internal", &error), 3),
+            Err(error) => return error_exit(error_output("internal", &error)),
         };
         if normalized_reviewed != normalized_expected {
-            return (
-                error_output(
-                    "semantics",
-                    "reviewed artifact does not match a fresh rendering with the recorded inputs",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "reviewed artifact does not match a fresh rendering with the recorded inputs",
+            ));
         }
         (
             normalized_reviewed,
@@ -14059,13 +13978,10 @@ fn run_approval_create_from_source(
 
     let available = approval::requirement_ids(&model);
     if available.is_empty() {
-        return (
-            error_output(
-                "semantics",
-                "approval creation requires at least one requirement ID in the specification",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "approval creation requires at least one requirement ID in the specification",
+        ));
     }
     let mut requirements = if selected_requirements.is_empty() {
         available.clone()
@@ -14078,13 +13994,10 @@ fn run_approval_create_from_source(
         .iter()
         .find(|requirement| !available.contains(*requirement))
     {
-        return (
-            error_output(
-                "semantics",
-                &format!("approval references unknown requirement '{unknown}'"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("approval references unknown requirement '{unknown}'"),
+        ));
     }
     let record = approval::ApprovalRecord {
         schema: approval::APPROVAL_SCHEMA_V5.to_owned(),
@@ -14133,15 +14046,15 @@ fn run_approval_create_from_source(
     let record = if let Some(signing_key) = signing_key {
         let record = match approval::sign_record(record, signing_key) {
             Ok(record) => record,
-            Err(error) => return (io_error_output(&error), 2),
+            Err(error) => return error_exit(io_error_output(&error)),
         };
         if let Err(error) = approval::write_record_v2(&destination, &record) {
-            return (io_error_output(&error), 2);
+            return error_exit(io_error_output(&error));
         }
         serde_json::to_value(record).expect("approval v2 serializes")
     } else {
         if let Err(error) = approval::write_record(&destination, &record) {
-            return (io_error_output(&error), 2);
+            return error_exit(io_error_output(&error));
         }
         serde_json::to_value(record).expect("approval v1 serializes")
     };
@@ -14175,7 +14088,7 @@ fn approval_repository(
     path: &Path,
     record: &approval::ApprovalRecord,
 ) -> Result<PathBuf, (Value, i32)> {
-    let io = |error: String| (io_error_output(&error), 2);
+    let io = |error: String| error_exit(io_error_output(&error));
     let contextual = record.path_base.is_some();
     let (repo, relative_path) = if contextual {
         let checkout = approval::spec_checkout(path)
@@ -14186,16 +14099,13 @@ fn approval_repository(
         (repo, relative_path)
     };
     if record.spec.path != relative_path {
-        return Err((
-            error_output(
-                "semantics",
-                &format!(
-                    "approval record targets '{}' but current spec is '{relative_path}'",
-                    record.spec.path
-                ),
+        return Err(error_exit(error_output(
+            "semantics",
+            &format!(
+                "approval record targets '{}' but current spec is '{relative_path}'",
+                record.spec.path
             ),
-            2,
-        ));
+        )));
     }
     let commit = &record.spec.git_commit;
     if contextual {
@@ -14214,13 +14124,13 @@ fn approval_evaluation(
     trust: &approval::TrustStore,
 ) -> Result<Value, (Value, i32)> {
     let versioned = approval::read_versioned_record(record_path)
-        .map_err(|error| (io_error_output(&error), 2))?;
+        .map_err(|error| error_exit(io_error_output(&error)))?;
     let (record, signature_status, key_id) = match &versioned {
         approval::VersionedApprovalRecord::V1(record) => (record.clone(), "unsigned", Value::Null),
         approval::VersionedApprovalRecord::V2(record) => {
             let verified = trust
                 .verify(record)
-                .map_err(|error| (io_error_output(&error), 2))?;
+                .map_err(|error| error_exit(io_error_output(&error)))?;
             if !verified {
                 return Ok(json!({
                     "status": "signature-invalid",
@@ -14248,7 +14158,7 @@ fn approval_evaluation(
     let (artifact, current_claim_set_digest, input_digest_mismatch) =
         if let approval::GenerationInputs::Document(inputs) = &record.target.inputs {
             approval::require_document_paths_inside_root(&record, inputs, &repo)
-                .map_err(|error| (error_output("semantics", &error), 2))?;
+                .map_err(|error| error_exit(error_output("semantics", &error)))?;
             let rendered = render_document_for_approval(
                 path,
                 source,
@@ -14268,10 +14178,10 @@ fn approval_evaluation(
             (artifact, claim_set_digest, None)
         };
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
-        .map_err(|error| (error_output("internal", &error), 3))?;
+        .map_err(|error| error_exit(error_output("internal", &error)))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
     let current_reviewed_digest = approval::reviewed_artifact_digest(&record, Some(&repo))
-        .map_err(|error| (io_error_output(&error), 2))?;
+        .map_err(|error| error_exit(io_error_output(&error)))?;
     let mut evaluation = approval::evaluate(
         &record,
         record_path,
@@ -14285,10 +14195,9 @@ fn approval_evaluation(
     if evaluation["status"] == "approved"
         && let Some(path) = input_digest_mismatch
     {
-        return Err((
-            io_error_output(&format!("approval input digest mismatch: {path}")),
-            2,
-        ));
+        return Err(error_exit(io_error_output(&format!(
+            "approval input digest mismatch: {path}"
+        ))));
     }
     let output = evaluation
         .as_object_mut()
@@ -14328,7 +14237,7 @@ fn run_approval_check_from_source(
 ) -> (Value, i32) {
     let trust = match approval::TrustStore::load(trust_keys) {
         Ok(trust) => trust,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let evaluation = match approval_evaluation(path, source, edition, record_path, &trust) {
         Ok(evaluation) => evaluation,
@@ -14351,8 +14260,8 @@ fn approval_overlay(
     record_paths: &[PathBuf],
     trust_keys: &[PathBuf],
 ) -> Result<Value, (Value, i32)> {
-    let trust =
-        approval::TrustStore::load(trust_keys).map_err(|error| (io_error_output(&error), 2))?;
+    let trust = approval::TrustStore::load(trust_keys)
+        .map_err(|error| error_exit(io_error_output(&error)))?;
     let mut requirements = Map::new();
     let mut records = Vec::new();
     for record_path in record_paths {
@@ -14379,16 +14288,13 @@ fn overlay_evaluation_error(record_path: &Path, failure: (Value, i32)) -> (Value
     if failure.0["result"] == "error" {
         return failure;
     }
-    (
-        error_output(
-            "semantics",
-            &format!(
-                "approval record '{}' cannot be evaluated: rerendering its artifact stopped on a failed verification baseline, so no ledger was written",
-                record_path.display()
-            ),
+    error_exit(error_output(
+        "semantics",
+        &format!(
+            "approval record '{}' cannot be evaluated: rerendering its artifact stopped on a failed verification baseline, so no ledger was written",
+            record_path.display()
         ),
-        2,
-    )
+    ))
 }
 
 struct LedgerReportRequest<'a> {
@@ -16490,97 +16396,67 @@ fn run_analyze_from_source(
     project: Option<&ProjectSources>,
 ) -> (Value, i32) {
     if !matches!(output_format, "json" | "dot" | "mermaid") {
-        return (
-            error_output(
-                "semantics",
-                &format!("unsupported analyze format: {output_format}"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("unsupported analyze format: {output_format}"),
+        ));
     }
     if projection == "code_audit" {
         if code_path.is_none() {
-            return (
-                error_output(
-                    "semantics",
-                    "--projection code_audit requires --code <dir|file>",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "--projection code_audit requires --code <dir|file>",
+            ));
         }
         if output_format != "json" || focus.is_some() || profile.is_some() || export_kind.is_some()
         {
-            return (
-                error_output(
-                    "semantics",
-                    "code_audit cannot be combined with --focus, --profile, --export, or non-JSON --format",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "code_audit cannot be combined with --focus, --profile, --export, or non-JSON --format",
+            ));
         }
     } else if code_path.is_some() {
-        return (
-            error_output(
-                "semantics",
-                "--code is supported only with --projection code_audit",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "--code is supported only with --projection code_audit",
+        ));
     }
     if focus.is_some() && profile.is_none() && projection != "impact_graph" {
-        return (
-            error_output(
-                "semantics",
-                "--focus is supported only with --projection impact_graph",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "--focus is supported only with --projection impact_graph",
+        ));
     }
     if profile.is_some() && output_format != "json" {
-        return (
-            error_output(
-                "semantics",
-                "DOT/Mermaid export is supported for graph projections, not profiles",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "DOT/Mermaid export is supported for graph projections, not profiles",
+        ));
     }
     if profile.is_some() && focus.is_some() {
-        return (
-            error_output(
-                "semantics",
-                "--focus is supported only with graph projections, not profiles",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "--focus is supported only with graph projections, not profiles",
+        ));
     }
     if path.extension().and_then(std::ffi::OsStr::to_str) == Some("toml") {
         if export_kind.is_some() {
-            return (
-                error_output(
-                    "semantics",
-                    "tag-review export requires an FSL specification",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "tag-review export requires an FSL specification",
+            ));
         }
         if profile.is_some() {
-            return (
-                error_output(
-                    "semantics",
-                    "project traceability analysis does not support --profile",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "project traceability analysis does not support --profile",
+            ));
         }
         if projection != "traceability_graph" {
-            return (
-                error_output(
-                    "semantics",
-                    "project manifests support only --projection traceability_graph",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "project manifests support only --projection traceability_graph",
+            ));
         }
         let analysis =
             match project_traceability_output(path, project.expect("prepared project analysis")) {
@@ -16591,22 +16467,16 @@ fn run_analyze_from_source(
     }
     if let Some(export_kind) = export_kind {
         if export_kind != "tag-review" {
-            return (
-                error_output(
-                    "semantics",
-                    &format!("unsupported analyze export: {export_kind}"),
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                &format!("unsupported analyze export: {export_kind}"),
+            ));
         }
         if profile.is_some() || focus.is_some() || output_format != "json" || projection != "tsg" {
-            return (
-                error_output(
-                    "semantics",
-                    "--export tag-review cannot be combined with --profile, --focus, --projection, or non-JSON --format",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "--export tag-review cannot be combined with --profile, --focus, --projection, or non-JSON --format",
+            ));
         }
         let model = match load_model_from_source(path, source) {
             Ok(model) => model,
@@ -16628,13 +16498,10 @@ fn run_analyze_from_source(
             return (Value::Object(output), 0);
         }
         if !matches!(projection, "tsg" | "refinement_graph") {
-            return (
-                error_output(
-                    "semantics",
-                    "refinement mappings support only --projection refinement_graph (or the default tsg alias)",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "refinement mappings support only --projection refinement_graph (or the default tsg alias)",
+            ));
         }
         let name = refinement.name.clone();
         return finish_analysis(
@@ -16652,10 +16519,10 @@ fn run_analyze_from_source(
         let analysis = match code_audit::analyze(&model, code_path.expect("checked above")) {
             Ok(analysis) => analysis,
             Err(code_audit::CodeAuditError::Io(message)) => {
-                return (io_error_output(&message), 2);
+                return error_exit(io_error_output(&message));
             }
             Err(code_audit::CodeAuditError::Semantics(message)) => {
-                return (error_output("semantics", &message), 2);
+                return error_exit(error_output("semantics", &message));
             }
         };
         return finish_analysis(
@@ -16667,10 +16534,10 @@ fn run_analyze_from_source(
     }
     if let Some(profile) = profile {
         if profile != "ai-review" {
-            return (
-                error_output("semantics", &format!("unsupported profile: {profile}")),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                &format!("unsupported profile: {profile}"),
+            ));
         }
         let acceptance = analysis_acceptance_predicates_from_source(path, source);
         return (ai_review_output(&model, &acceptance, source), 0);
@@ -16691,10 +16558,10 @@ fn run_analyze_from_source(
             };
             (error_output(kind, &message), 2)
         }
-        Ok(_) => (
-            error_output("internal", "analysis result must be an object"),
-            3,
-        ),
+        Ok(_) => error_exit(error_output(
+            "internal",
+            "analysis result must be an object",
+        )),
     }
 }
 
@@ -16773,45 +16640,36 @@ fn run_analyze_batch(
     code_path: Option<&Path>,
 ) -> (Value, i32) {
     if projection == "code_audit" || code_path.is_some() {
-        return (
-            error_output(
-                "semantics",
-                "code_audit accepts exactly one specification file",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "code_audit accepts exactly one specification file",
+        ));
     }
     if export_kind.is_some() {
-        return (
-            error_output(
-                "semantics",
-                "tag-review export accepts exactly one specification file",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "tag-review export accepts exactly one specification file",
+        ));
     }
     if output_format != "json" {
-        return (
-            error_output("semantics", "batch analyze supports only --format json"),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "batch analyze supports only --format json",
+        ));
     }
     if focus.is_some() {
-        return (
-            error_output(
-                "semantics",
-                "batch analyze does not support --focus; run impact_graph per file",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "batch analyze does not support --focus; run impact_graph per file",
+        ));
     }
     let mut files = Vec::new();
     for path in paths {
         if !path.exists() {
-            return (
-                io_error_output(&format!("file not found: {}", path.display())),
-                2,
-            );
+            return error_exit(io_error_output(&format!(
+                "file not found: {}",
+                path.display()
+            )));
         }
         if path.is_dir() {
             // `.fsl`-only filtering applies only to directory expansion — an
@@ -16820,7 +16678,7 @@ fn run_analyze_batch(
             // manifest) or reject it with a real error (anything else),
             // instead of it silently vanishing from `files`/`errors`.
             if let Err(error) = collect_analysis_files(path, &mut files) {
-                return (io_error_output(&error.to_string()), 2);
+                return error_exit(io_error_output(&error.to_string()));
             }
         } else {
             files.push(path.clone());
@@ -16896,17 +16754,14 @@ fn finish_analysis(
 ) -> (Value, i32) {
     if output_format != "json" {
         if analysis["nodes"].as_array().is_none_or(Vec::is_empty) || !analysis["edges"].is_array() {
-            return (
-                error_output(
-                    "semantics",
-                    &format!("--format {output_format} requires a graph projection"),
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                &format!("--format {output_format} requires a graph projection"),
+            ));
         }
         let content = match fsl_tools::export_analysis_graph(&analysis, output_format) {
             Ok(content) => content,
-            Err(message) => return (error_output("semantics", &message), 2),
+            Err(message) => return error_exit(error_output("semantics", &message)),
         };
         let mut output = envelope();
         output.insert("result".to_owned(), json!("analyzed"));
@@ -16929,10 +16784,10 @@ fn finish_analysis(
         return (Value::Object(output), 0);
     }
     let Value::Object(analysis) = analysis else {
-        return (
-            error_output("internal", "analysis result must be an object"),
-            3,
-        );
+        return error_exit(error_output(
+            "internal",
+            "analysis result must be an object",
+        ));
     };
     let mut output = envelope();
     output.insert("result".to_owned(), json!("analyzed"));
@@ -17734,8 +17589,8 @@ fn run_diff_from_sources(
         let surface = match fsl_syntax::parse_surface_document_with(source, crate::parse_options())
         {
             Ok(fsl_syntax::SurfaceDocument::Refinement(surface)) => surface,
-            Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
-            Err(error) => return (error_output("parse", &error.to_string()), 2),
+            Ok(_) => return error_exit(error_output("type", "expected refinement mapping file")),
+            Err(error) => return error_exit(error_output("parse", &error.to_string())),
         };
         let implementation = surface.items.iter().find_map(|item| match item {
             fsl_syntax::RefinementItem::Impl(name) => Some(name.as_str()),
@@ -17757,10 +17612,10 @@ fn run_diff_from_sources(
                 Some("old_to_new")
             }
             _ => {
-                return (
-                    error_output("type", "diff mapping must map NEW to OLD or OLD to NEW"),
-                    2,
-                );
+                return error_exit(error_output(
+                    "type",
+                    "diff mapping must map NEW to OLD or OLD to NEW",
+                ));
             }
         };
     }
@@ -17773,7 +17628,7 @@ fn run_diff_from_sources(
             .flatten(),
     ) {
         Ok(result) => result,
-        Err(error) => return (error_output("type", &error), 2),
+        Err(error) => return error_exit(error_output("type", &error)),
     };
     let (old_result, old_public, old_raw) = match semantic_diff_direction(
         &old_model,
@@ -17784,7 +17639,7 @@ fn run_diff_from_sources(
             .flatten(),
     ) {
         Ok(result) => result,
-        Err(error) => return (error_output("type", &error), 2),
+        Err(error) => return error_exit(error_output("type", &error)),
     };
     let mut findings = Vec::new();
     for (direction, result, public, raw, kind) in [
@@ -17829,7 +17684,7 @@ fn run_diff_from_sources(
     findings.extend(compare_diff_invariants(&old_model, &new_model));
     match forbidden_diff_findings((old_source, &old_model), (new_source, &new_model)) {
         Ok(forbidden_findings) => findings.extend(forbidden_findings),
-        Err(error) => return (error_output("type", &error), 2),
+        Err(error) => return error_exit(error_output("type", &error)),
     }
     if scope_changed {
         findings.push(json!({
@@ -17852,16 +17707,13 @@ fn run_diff_from_sources(
         .cloned()
         .collect::<Vec<_>>();
     if !unknown_forbid.is_empty() {
-        return (
-            error_output(
-                "semantics",
-                &format!(
-                    "unknown --forbid finding kind(s): {}",
-                    unknown_forbid.join(", ")
-                ),
+        return error_exit(error_output(
+            "semantics",
+            &format!(
+                "unknown --forbid finding kind(s): {}",
+                unknown_forbid.join(", ")
             ),
-            2,
-        );
+        ));
     }
     let mut forbidden = forbid.to_vec();
     forbidden.sort();
@@ -17998,11 +17850,11 @@ fn run_approval_diff_from_source(
 ) -> (Value, i32) {
     let versioned = match approval::read_versioned_record(record_path) {
         Ok(record) => record,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let trust = match approval::TrustStore::load(trust_keys) {
         Ok(trust) => trust,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let (record, signature_status, key_id) = match &versioned {
         approval::VersionedApprovalRecord::V1(record) => (record.clone(), "unsigned", Value::Null),
@@ -18020,24 +17872,21 @@ fn run_approval_diff_from_source(
                 output.insert("key_id".to_owned(), json!(record.signature.key_id));
                 return (Value::Object(output), 1);
             }
-            Err(error) => return (io_error_output(&error), 2),
+            Err(error) => return error_exit(io_error_output(&error)),
         },
     };
     let (repo, relative_path, _head) = match approval::git_location(path) {
         Ok(location) => location,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     if relative_path != record.spec.path {
-        return (
-            error_output(
-                "semantics",
-                &format!(
-                    "approval record targets '{}' but current spec is '{relative_path}'",
-                    record.spec.path
-                ),
+        return error_exit(error_output(
+            "semantics",
+            &format!(
+                "approval record targets '{}' but current spec is '{relative_path}'",
+                record.spec.path
             ),
-            2,
-        );
+        ));
     }
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -18047,18 +17896,15 @@ fn run_approval_diff_from_source(
     let base_tree = root.join("base");
     if let Err(error) = materialize_git_tree(&repo, &record.spec.git_commit, &base_tree) {
         let _ = std::fs::remove_dir_all(&root);
-        return (io_error_output(&error), 2);
+        return error_exit(io_error_output(&error));
     }
     let old = base_tree.join(&record.spec.path);
     if !old.is_file() {
         let _ = std::fs::remove_dir_all(&root);
-        return (
-            io_error_output(&format!(
-                "approved spec '{}' is missing from baseline {}",
-                record.spec.path, record.spec.git_commit
-            )),
-            2,
-        );
+        return error_exit(io_error_output(&format!(
+            "approved spec '{}' is missing from baseline {}",
+            record.spec.path, record.spec.git_commit
+        )));
     }
     let baseline_label = PathBuf::from(format!("{}:{}", record.spec.git_commit, record.spec.path));
     // Name the baseline by commit and path, not by the temporary tree.
@@ -18074,13 +17920,10 @@ fn run_approval_diff_from_source(
     };
     if materialized_digest != record.spec.digest {
         let _ = std::fs::remove_dir_all(&root);
-        return (
-            error_output(
-                "semantics",
-                "approval baseline commit does not match the recorded specification digest",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "approval baseline commit does not match the recorded specification digest",
+        ));
     }
     let result =
         run_admitted_roots(
@@ -18128,30 +17971,30 @@ fn run_diff_git(
     forbid: &[String],
 ) -> (Value, i32) {
     let Some((base_input, head_input)) = range.split_once("..") else {
-        return (error_output("usage", "--git range must be BASE..HEAD"), 2);
+        return error_exit(error_output("usage", "--git range must be BASE..HEAD"));
     };
     if range.contains("...")
         || base_input.is_empty()
         || head_input.is_empty()
         || head_input.contains("..")
     {
-        return (error_output("usage", "--git range must be BASE..HEAD"), 2);
+        return error_exit(error_output("usage", "--git range must be BASE..HEAD"));
     }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
-        Err(error) => return (io_error_output(&error.to_string()), 2),
+        Err(error) => return error_exit(io_error_output(&error.to_string())),
     };
     let repo = match git_stdout(&["rev-parse", "--show-toplevel"], &cwd) {
         Ok(repo) => PathBuf::from(repo),
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let base = match git_stdout(&["rev-parse", "--verify", base_input], &repo) {
         Ok(commit) => commit,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let head = match git_stdout(&["rev-parse", "--verify", head_input], &repo) {
         Ok(commit) => commit,
-        Err(error) => return (io_error_output(&error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let specs = if let Some(spec) = spec {
         let relative = spec
@@ -18174,7 +18017,7 @@ fn run_diff_git(
             &repo,
         ) {
             Ok(changed) => changed,
-            Err(error) => return (io_error_output(&error), 2),
+            Err(error) => return error_exit(io_error_output(&error)),
         };
         changed
             .lines()
@@ -18187,10 +18030,7 @@ fn run_diff_git(
             .collect::<Vec<_>>()
     };
     if specs.is_empty() {
-        return (
-            io_error_output("Git range contains no changed .fsl files"),
-            2,
-        );
+        return error_exit(io_error_output("Git range contains no changed .fsl files"));
     }
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -18202,7 +18042,7 @@ fn run_diff_git(
         .and_then(|()| materialize_git_tree(&repo, &head, &head_tree))
     {
         let _ = std::fs::remove_dir_all(&root);
-        return (io_error_output(&error), 2);
+        return error_exit(io_error_output(&error));
     }
     let vcs = json!({
         "kind":"git","range":range,
@@ -18218,12 +18058,9 @@ fn run_diff_git(
         let new = head_tree.join(relative);
         if !old.is_file() || !new.is_file() {
             let _ = std::fs::remove_dir_all(&root);
-            return (
-                io_error_output(&format!(
-                    "'{relative}' must exist in both revisions for semantic diff"
-                )),
-                2,
-            );
+            return error_exit(io_error_output(&format!(
+                "'{relative}' must exist in both revisions for semantic diff"
+            )));
         }
         let old_label = PathBuf::from(format!("{base_input}:{relative}"));
         let new_label = PathBuf::from(format!("{head_input}:{relative}"));
@@ -18792,14 +18629,6 @@ fn format_error_output(error: &fsl_syntax::FormatError) -> Value {
             ("span".to_owned(), json!(span)),
         ]);
     output
-}
-
-fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
-    if Verdict::of(output) == Some(Verdict::InternalError) {
-        Verdict::InternalError.exit_code()
-    } else {
-        reported_status
-    }
 }
 
 /// Render a core frontend/lowering diagnostic without discarding its typed
