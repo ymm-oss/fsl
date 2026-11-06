@@ -50,16 +50,17 @@ still `fsl 4`. User documentation of the edition is owed to #1437.
     requested edition only;
   - the CLI options `--lang` / `--names` (`fmt`), `--names` / `--lowering`
     (`explain`), `--strict-names` (`lint`) and the `--edition` spellings `4`
-    and `5` are accepted without an opt-in. `cli-contract.json` does not list
-    them; `cli_contract.rs` adds them as a command-local overlay;
+    and `5` are accepted without an opt-in. `cli-contract.json` and the help
+    list the options; `cli_contract.rs` adds only the `--edition` spellings
+    `4` / `5` as an overlay (which spelling to advertise is #1437's);
   - `explain` respells through the model's glossary and prints the readable
     lowering steps for every document; a document without a glossary or
     next-edition lowering steps prints what it printed before.
 - The #1434 type-boundary sweep ran `fslc check` on all 651 `.fsl` forms
   under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (631
-  headerless, 20 headed `fsl 5`) and on 486 inline sources of the changed
-  tests, with the base binary with and without `FSLC_UNSTABLE=fsl5` and the
-  head binary. Head equals base with the gate on in complete stdout and exit
+  headerless, 20 headed `fsl 5`) and on 488 inline sources of the changed
+  tests, with the base binary (`63dd3e02c`) with and without
+  `FSLC_UNSTABLE=fsl5` and the head binary. Head equals base with the gate on in complete stdout and exit
   for every form; every headerless form equals base without the gate; the
   `ok`-to-`error` set is empty, and the `error`-to-`ok` set is the 17 corpus
   and 16 inline forms headed `fsl 4` / `fsl 5`. The former R0 test
