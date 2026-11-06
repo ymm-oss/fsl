@@ -43,6 +43,28 @@ Adding a header alone does not convert a legacy requirements specification: a
 `process` under `fsl 5` is `mixed_requirements_forms`, so
 use [the migration guide below](#fsl4-to-fsl5-migration).
 
+The header and the `--edition` option do different jobs. The **header** selects
+the syntax a document is parsed with; nothing else does. The **`--edition`**
+option of `check`, `verify`, `lint`, `migrate`, `fmt` and the other commands
+that take it selects the edition *policy*: which findings apply and how severe
+they are. It is spelled `current` or `next`; `4` is accepted as another spelling
+of `current` for a headerless or `fsl 4` document, and `5` as another spelling
+of `next`. The help text and `cli-contract.json` list only `current` and `next`,
+and an unknown value is refused with `--edition must be current or next`. JSON
+output never spells a number for the option: a result read under the next
+edition carries `"edition": "next"` (absent under the current edition), and a
+document that has a header also carries `"fsl_edition": 4` or `5`.
+
+On a **headerless** document, `--edition 5` (or `next`) does not make it an
+FSL 5 document. It is still parsed as FSL 4, so the FSL 5 requirements forms of
+§13.2 are refused as parse errors, and no `fsl_edition` is reported. What
+changes is the policy: a legacy form that the current edition reports as a
+warning, such as string metadata (`legacy_string_metadata`), becomes an
+`unsupported_in_edition` error under the next edition, and `lint --edition 5`
+also reports `missing_edition_header`. To write FSL 5, add the header (or let
+`fslc migrate` add it); to check a headerless document as before, omit
+`--edition` or pass `current`.
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <constant expr>
@@ -2778,6 +2800,14 @@ Blame identifies; it never proposes a repair (weakening a guard, dropping a
 conjunct) — that would cut against the anti-hollowing principle. All of this
 is strictly additive to the JSON contract.
 
+Both levels of this localization are shallow. Only the invariant's top-level
+`and` is split into conjuncts: a conjunction inside a quantifier body stays one
+conjunct, whose `text` is the whole quantified expression. `violating_bindings`
+names the failing values of the outermost quantifier only: for
+`forall u: U { forall i: I { not (a[u] and b[i]) } }` it reports `[{"u": 0}]`,
+without a value for `i`. Recursive projection of nested quantifiers and
+splitting inside a quantifier are not implemented.
+
 Diagnostics that identify a faithfulness/intent gap may also carry
 `faithfulness_class` plus `recommended_action`. Current classes are:
 `partial_op_unguarded`, `frozen_only_invariant`, `intent_unexercised`,
@@ -4390,6 +4420,57 @@ condition. An explicit `terminal { expression }` **replaces** this derived
 condition; it is not conjoined with it. This differs from FSL 4 requirements,
 which derive no terminal condition from a process.
 
+<a id="fsl5-repeats"></a>
+
+#### Repeated inputs, declarations and requirement IDs
+
+An FSL 5 requirements document refuses a repeat that FSL 4 would have read by
+keeping one copy and dropping the other without a word. Each refusal below is a
+**breaking removal**: the form passed `check` before. None has an automatic
+migration.
+
+- **A step input named twice (#1682).** A `scenario` or `forbidden` step that
+  names one input twice is refused with exit 2, `kind: "semantics"`, and `loc` at
+  the repeated name, for example `duplicate step input 'amount' at doc.fsl:43:44`.
+  This covers `with`, an instance written first, a `で` list, two `で` groups, an
+  alias beside its canonical name, and a relation role. Different inputs in any
+  order, and the same input in a later step, stay accepted. A step that already
+  has a parse error keeps that error. `lint`, `fmt` and `migrate` report the same
+  message without `loc`, and an inline `implements` of the document reports
+  `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)`
+  with `kind: "type"`. Keep the one value you mean.
+- **A repeated `actor` (#1705).** A second `actor` of one name, on its own line
+  or in a list, is refused with exit 2 and `kind: "parse"` at the repeated name:
+  `duplicate actor 'Agent' at 4:9`. Delete the repeat.
+- **One owner per requirement ID (#1705).** A declaration owns the ID written
+  after its keyword: `rule`, `decide`, `scenario`, `forbidden`, `goal`, `policy`,
+  and the FSL 4 `requirement` and `acceptance` blocks that an FSL 5 document still
+  takes. A second owner of one ID, of any of these kinds, is refused at its ID
+  with exit 2 and `kind: "parse"`, naming both kinds: `duplicate requirement id
+  'REQ-DESK-001': this rule reuses the ID of the rule at 19:8; a requirement ID has
+  one owner at 22:8`. A second `scenario`, `forbidden`, `goal` or `policy` of its
+  own kind keeps its existing refusal (`duplicate acceptance id`, `duplicate
+  forbidden id`, `duplicate property name`, `kind: "semantics"`). Rename one of the
+  two IDs, or merge the two declarations; `fslc migrate --edition 5` refuses
+  an FSL 4 document that would hit this rule, with `migrate_manual_required` and
+  `reason: "shared_requirement_id"`, and never renames an ID.
+- **`covers` is a link (#1705).** An event's or a decision row's `covers` may
+  name an ID that a declaration owns, with any text; it stays accepted, and the
+  ledger and `document claims` title the ID with its owner's title, listing the
+  `covers` texts after it. An ID that **no** declaration owns takes its wording
+  only from its `covers`, so every `covers` of it in the document must have one
+  text; the first that differs is refused at the later `covers`, `kind: "parse"`:
+  `requirement ID 'REQ-EV-1' is covered as "withdrawing" here and as "closing" at
+  15:5; every covers of an ID no declaration owns has one text at 19:5`. A row
+  covering its own table's ID with another text stays refused, `requirement
+  annotation 'REQ-2-3' has conflicting text at 22:7`, `kind: "semantics"`.
+- **Repeated `concept`, bounds and `kpi` (#1686).** A `concept` written twice
+  under one name is refused at the second, `kind: "semantics"`:
+  `duplicate concept 'SmallClaim' at doc.fsl:24:3`. A repeated `concept` is
+  reported ahead of a repeated bound or `kpi`. Repeated `instances` and `values`
+  bounds and `kpi` declarations are refused as in FSL 4 (§13.2, FSL 4 reference).
+  Keep the one declaration you mean.
+
 #### Glossaries and Japanese spellings
 
 An optional `glossary` must be the first member of a requirements block, and
@@ -4496,6 +4577,27 @@ an `&&` chain. A refused process conversion exits 1 with
 `derived_terminal_added` carry empty per-finding `edits`; the rewrite is in
 `files[].edits`. The existing migration taxonomies and atomic-write contract are described
 in §7 and [DESIGN-migration](../design/DESIGN-migration.md).
+
+`migrate` targets the next edition by default (`--edition next`, spelled `5`
+above); `lint` defaults to `current`, so pass `--edition 5` to see the plan's
+findings. On a headerless document the next edition adds `missing_edition_header`,
+so `lint --edition 5` exits 1 even when nothing else is reported. Three kinds of
+document are **not offered a header**, and `lint` and `migrate` report on them
+exactly as they did before FSL 5 was published:
+
+- a declaration that takes no edition header: `causal`, `agent` and the other
+  AI-dialect declarations (`ai_component`, `dataset`, `evaluator`, …). A header
+  there is refused with `edition_header_not_accepted`;
+- a `refinement` document. It accepts a header, but it is not a standalone
+  check target, so migration cannot show that inserting one preserves it;
+- a `compose` document. Its migration contract cannot keep its components'
+  source files, so the same holds.
+
+A header you write by hand on a `refinement` or `compose` document is still
+read. Because the default `migrate` also runs the process-form conversion, a
+headerless FSL 4 `requirements` document whose conversion needs a decision
+(`migrate_manual_required`, below) now makes a plain `fslc migrate` exit 1;
+pass `--edition current` to plan only the current edition's rewrites.
 
 | Finding / conversion | What to review |
 |---|---|

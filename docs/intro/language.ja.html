@@ -88,6 +88,22 @@ FSL 5 の要件は <strong>entity / lifecycle / event / rule / decide</strong> �
 causal と AI ダイアレクトの文書はヘッダーを取りません（<code>edition_header_not_accepted</code>）。
 ヘッダーの追加だけでは旧形式の要件を変換できません。<code>fsl 5</code> の下の <code>process</code> は
 <code>mixed_requirements_forms</code> です。<a href="#fsl4-to-fsl5-migration">後述の移行手順</a>を使ってください。</p>
+<p>ヘッダーと <code>--edition</code> オプションは役割が違います。文書をどの構文で読むかを決めるのは
+<strong>ヘッダー</strong>だけです。<code>check</code>、<code>verify</code>、<code>lint</code>、<code>migrate</code>、<code>fmt</code> などの
+<strong><code>--edition</code></strong> は、エディションの<em>方針</em>、つまりどの finding を出し、どの重さで扱うかを
+選びます。綴りは <code>current</code> と <code>next</code> です。ヘッダーのない文書と <code>fsl 4</code> の文書では <code>4</code> も
+<code>current</code> の別綴りとして受け付け、<code>5</code> は <code>next</code> の別綴りです。ヘルプと
+<code>cli-contract.json</code> に載っているのは <code>current</code> と <code>next</code> だけで、未知の値は
+<code>--edition must be current or next</code> で拒否します。JSON 出力はこのオプションを番号で書きません。
+次のエディションで読んだ結果には <code>"edition": "next"</code> が付き（現行のエディションでは付きません）、
+ヘッダーのある文書には <code>"fsl_edition": 4</code> または <code>5</code> も付きます。</p>
+<p><strong>ヘッダーのない</strong>文書に <code>--edition 5</code>（または <code>next</code>）を付けても、FSL 5 の文書にはなりません。
+構文は FSL 4 のまま読むので、§13.2 の FSL 5 の要件の書き方は構文エラーになり、<code>fsl_edition</code>
+も出ません。変わるのは方針です。現行のエディションで警告になる旧形式、たとえば文字列の
+メタデータ（<code>legacy_string_metadata</code>）は、次のエディションでは <code>unsupported_in_edition</code> の
+エラーになります。<code>lint --edition 5</code> は <code>missing_edition_header</code> も報告します。FSL 5 で書くには
+ヘッダーを書くか、<code>fslc migrate</code> に追加させてください。ヘッダーのない文書を従来どおり検査するには、
+<code>--edition</code> を付けないか、<code>current</code> を指定します。</p>
 <pre><code class="language-fsl">spec &lt;Name&gt; [&quot;&lt;kind&gt;: &lt;intent&gt;&quot;] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const &lt;NAME&gt; = &lt;constant expr&gt;
   type  &lt;Name&gt; = &lt;lo&gt;..&lt;hi&gt;            // domain type (bounded integer)
@@ -2707,6 +2723,11 @@ state の budget で打ち切られた、というもので、上記のどちら
 blame は特定するだけで、修復(ガードの弱化、連言肢の削除)を提案することは決して
 ありません — それは anti-hollowing の原則に反するからです。これらはすべて JSON
 コントラクトへの厳密に追加的な変更です。</p>
+<p>この特定はどちらも浅いものです。連言肢に分けるのは invariant の最上位の <code>and</code> だけで、
+量化子の本体の中の論理積は 1 つの連言肢のままであり、その <code>text</code> は量化した式の全体です。
+<code>violating_bindings</code> が示すのは、いちばん外側の量化子の偽になった値だけです。
+<code>forall u: U { forall i: I { not (a[u] and b[i]) } }</code> では <code>[{"u": 0}]</code> を返し、<code>i</code> の値は
+含みません。入れ子の量化子を再帰的に射影することと、量化子の中を分割することは実装されていません。</p>
 <p>忠実性/意図のギャップを特定する診断は、<code>faithfulness_class</code> と
 <code>recommended_action</code> も運ぶことがあります。現在のクラスは
 <code>partial_op_unguarded</code>、<code>frozen_only_invariant</code>、<code>intent_unexercised</code>、
@@ -4147,6 +4168,49 @@ event の欠落や無効化によって、途中の段階が最終段階にな�
 明示的な <code>terminal { expression }</code> は、導出された条件を<strong>置き換えます</strong>。
 論理積で追加するのではありません。process から停止条件を導かない FSL 4 requirements
 との違いです。</p>
+<p><a id="fsl5-repeats"></a></p>
+<h4 id="id">入力、宣言、要件 ID の重複</h4>
+<p>FSL 4 では、重複したものを 1 つだけ残し、もう片方を黙って捨てて読んでいました。FSL 5 の
+requirements 文書は、次の重複を拒否します。どれも<strong>破壊的な削除</strong>で、以前は <code>check</code> を
+通っていた書き方です。自動の移行はありません。</p>
+<ul>
+<li><strong>ステップで同じ入力を 2 度書く (#1682)。</strong> <code>scenario</code> や <code>forbidden</code> のステップで
+  1 つの入力を 2 度書くと、終了コード 2、<code>kind: "semantics"</code> で拒否し、<code>loc</code> は 2 度目の
+  名前です。例: <code>duplicate step input 'amount' at doc.fsl:43:44</code>。<code>with</code>、インスタンスを先に
+  書く形、<code>で</code> の並び、2 つの <code>で</code> の句、別名と正式名、relation の役割が対象です。違う入力を
+  どの順で書いても、後のステップで同じ入力を書いても受理します。構文エラーのあるステップは
+  そのエラーのままです。<code>lint</code>、<code>fmt</code>、<code>migrate</code> は同じメッセージを <code>loc</code> なしで報告し、
+  この文書を inline <code>implements</code> すると
+  <code>implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)</code>、
+  <code>kind: "type"</code> です。意図する値を 1 つだけ残してください。</li>
+<li><strong><code>actor</code> の重複 (#1705)。</strong> 同じ名前の <code>actor</code> を 2 度書くと（別の行でも、並びの中でも）、
+  終了コード 2、<code>kind: "parse"</code> で、2 度目の名前で拒否します: <code>duplicate actor 'Agent' at 4:9</code>。
+  重複を消してください。</li>
+<li><strong>要件 ID の持ち主は 1 つ (#1705)。</strong> キーワードの後に書いた ID は、その宣言のものです。
+  <code>rule</code>、<code>decide</code>、<code>scenario</code>、<code>forbidden</code>、<code>goal</code>、<code>policy</code>、そして FSL 5 の文書でも書ける
+  FSL 4 の <code>requirement</code> と <code>acceptance</code> のブロックが該当します。同じ ID の 2 つ目の持ち主は、
+  種類を問わず、その ID の位置で終了コード 2、<code>kind: "parse"</code> で拒否し、両方の種類を示します:
+  <code>duplicate requirement id 'REQ-DESK-001': this rule reuses the ID of the rule at 19:8; a
+  requirement ID has one owner at 22:8</code>。同じ種類の <code>scenario</code>、<code>forbidden</code>、<code>goal</code>、<code>policy</code>
+  の 2 つ目は、従来どおりの拒否です（<code>duplicate acceptance id</code>、<code>duplicate forbidden id</code>、
+  <code>duplicate property name</code>、<code>kind: "semantics"</code>）。どちらかの ID を付け替えるか、2 つの宣言を
+  まとめてください。この規則に当たる FSL 4 の文書を <code>fslc migrate --edition 5</code> は
+  <code>migrate_manual_required</code>、<code>reason: "shared_requirement_id"</code> で拒否し、ID を付け替えることは
+  しません。</li>
+<li><strong><code>covers</code> は参照 (#1705)。</strong> event や判定表の行の <code>covers</code> は、持ち主のいる ID を、どんな
+  文でも指せます。受理され、ledger と <code>document claims</code> はその ID を持ち主の題名で示し、
+  <code>covers</code> の文はその後に並べます。持ち主の<strong>いない</strong> ID は、言葉を <code>covers</code> からしか得ないので、
+  文書の中のその ID の <code>covers</code> はすべて同じ文でなければなりません。最初に違ったものを、後の
+  <code>covers</code> の位置で <code>kind: "parse"</code> で拒否します: <code>requirement ID 'REQ-EV-1' is covered as
+  "withdrawing" here and as "closing" at 15:5; every covers of an ID no declaration owns has one
+  text at 19:5</code>。行が自分の表の ID を別の文で <code>covers</code> するのは従来どおり拒否です:
+  <code>requirement annotation 'REQ-2-3' has conflicting text at 22:7</code>、<code>kind: "semantics"</code>。</li>
+<li><strong><code>concept</code>、範囲、<code>kpi</code> の重複 (#1686)。</strong> 同じ名前の <code>concept</code> を 2 度書くと、2 度目で
+  <code>kind: "semantics"</code> で拒否します: <code>duplicate concept 'SmallClaim' at doc.fsl:24:3</code>。
+  <code>concept</code> の重複は、範囲や <code>kpi</code> の重複より先に報告します。<code>instances</code> と <code>values</code> の範囲、
+  <code>kpi</code> の重複は、FSL 4 と同じく拒否します（§13.2 の FSL 4 の参照）。意図する宣言を
+  1 つだけ残してください。</li>
+</ul>
 <h4 id="_1">用語集と日本語の綴り</h4>
 <p>任意の <code>glossary</code> は requirements ブロックの最初の項目に、一つだけ置けます（<code>misplaced_glossary</code>）。
 ASCII の正規名と、空白を含まない一語の別名を対応させます。フィールドの左辺は
@@ -4336,6 +4400,23 @@ fslc verify requirements.fsl --engine induction
 <code>derived_terminal_added</code> の finding ごとの <code>edits</code> は空で、書き換えは <code>files[].edits</code> にあります。
 既存の分類と原子的な
 書き込みの契約は、§7 と <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-migration.md">DESIGN-migration</a>を参照してください。</p>
+<p><code>migrate</code> の既定は次のエディション（<code>--edition next</code>。上では <code>5</code> と綴っています）です。
+<code>lint</code> の既定は <code>current</code> なので、計画の finding を見るには <code>--edition 5</code> を付けます。
+ヘッダーのない文書には次のエディションで <code>missing_edition_header</code> が付くので、ほかに何も
+報告がなくても <code>lint --edition 5</code> は終了コード 1 を返します。次の 3 種類の文書には
+<strong>ヘッダーを提案しません</strong>。<code>lint</code> と <code>migrate</code> は、FSL 5 の公開前と同じ結果を返します。</p>
+<ul>
+<li>エディションヘッダーを取らない宣言: <code>causal</code>、<code>agent</code>、そのほかの AI ダイアレクトの宣言
+  （<code>ai_component</code>、<code>dataset</code>、<code>evaluator</code> など）。ヘッダーを書くと
+  <code>edition_header_not_accepted</code> で拒否されます。</li>
+<li><code>refinement</code> の文書。ヘッダーは受け付けますが、単独で検査する対象ではないので、
+  挿入しても文書が保たれることを移行で示せません。</li>
+<li><code>compose</code> の文書。移行の契約が構成要素のソースファイルを保てないので、同じ理由です。</li>
+</ul>
+<p><code>refinement</code> や <code>compose</code> の文書に手で書いたヘッダーは、そのまま読まれます。既定の
+<code>migrate</code> は process の変換も行うので、変換に判断が要る（後述の <code>migrate_manual_required</code>）
+ヘッダーのない FSL 4 の <code>requirements</code> 文書では、<code>fslc migrate</code> だけでも終了コード 1 に
+なります。現行エディションの書き換えだけを計画するには <code>--edition current</code> を付けます。</p>
 <table>
 <thead>
 <tr>

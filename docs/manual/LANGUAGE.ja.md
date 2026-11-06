@@ -39,6 +39,24 @@ causal と AI ダイアレクトの文書はヘッダーを取りません（`ed
 ヘッダーの追加だけでは旧形式の要件を変換できません。`fsl 5` の下の `process` は
 `mixed_requirements_forms` です。[後述の移行手順](#fsl4-to-fsl5-migration)を使ってください。
 
+ヘッダーと `--edition` オプションは役割が違います。文書をどの構文で読むかを決めるのは
+**ヘッダー**だけです。`check`、`verify`、`lint`、`migrate`、`fmt` などの
+**`--edition`** は、エディションの*方針*、つまりどの finding を出し、どの重さで扱うかを
+選びます。綴りは `current` と `next` です。ヘッダーのない文書と `fsl 4` の文書では `4` も
+`current` の別綴りとして受け付け、`5` は `next` の別綴りです。ヘルプと
+`cli-contract.json` に載っているのは `current` と `next` だけで、未知の値は
+`--edition must be current or next` で拒否します。JSON 出力はこのオプションを番号で書きません。
+次のエディションで読んだ結果には `"edition": "next"` が付き（現行のエディションでは付きません）、
+ヘッダーのある文書には `"fsl_edition": 4` または `5` も付きます。
+
+**ヘッダーのない**文書に `--edition 5`（または `next`）を付けても、FSL 5 の文書にはなりません。
+構文は FSL 4 のまま読むので、§13.2 の FSL 5 の要件の書き方は構文エラーになり、`fsl_edition`
+も出ません。変わるのは方針です。現行のエディションで警告になる旧形式、たとえば文字列の
+メタデータ（`legacy_string_metadata`）は、次のエディションでは `unsupported_in_edition` の
+エラーになります。`lint --edition 5` は `missing_edition_header` も報告します。FSL 5 で書くには
+ヘッダーを書くか、`fslc migrate` に追加させてください。ヘッダーのない文書を従来どおり検査するには、
+`--edition` を付けないか、`current` を指定します。
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <constant expr>
@@ -2573,6 +2591,12 @@ blame は特定するだけで、修復(ガードの弱化、連言肢の削除)
 ありません — それは anti-hollowing の原則に反するからです。これらはすべて JSON
 コントラクトへの厳密に追加的な変更です。
 
+この特定はどちらも浅いものです。連言肢に分けるのは invariant の最上位の `and` だけで、
+量化子の本体の中の論理積は 1 つの連言肢のままであり、その `text` は量化した式の全体です。
+`violating_bindings` が示すのは、いちばん外側の量化子の偽になった値だけです。
+`forall u: U { forall i: I { not (a[u] and b[i]) } }` では `[{"u": 0}]` を返し、`i` の値は
+含みません。入れ子の量化子を再帰的に射影することと、量化子の中を分割することは実装されていません。
+
 忠実性/意図のギャップを特定する診断は、`faithfulness_class` と
 `recommended_action` も運ぶことがあります。現在のクラスは
 `partial_op_unguarded`、`frozen_only_invariant`、`intent_unexercised`、
@@ -4090,6 +4114,51 @@ event の欠落や無効化によって、途中の段階が最終段階にな�
 論理積で追加するのではありません。process から停止条件を導かない FSL 4 requirements
 との違いです。
 
+<a id="fsl5-repeats"></a>
+
+#### 入力、宣言、要件 ID の重複
+
+FSL 4 では、重複したものを 1 つだけ残し、もう片方を黙って捨てて読んでいました。FSL 5 の
+requirements 文書は、次の重複を拒否します。どれも**破壊的な削除**で、以前は `check` を
+通っていた書き方です。自動の移行はありません。
+
+- **ステップで同じ入力を 2 度書く (#1682)。** `scenario` や `forbidden` のステップで
+  1 つの入力を 2 度書くと、終了コード 2、`kind: "semantics"` で拒否し、`loc` は 2 度目の
+  名前です。例: `duplicate step input 'amount' at doc.fsl:43:44`。`with`、インスタンスを先に
+  書く形、`で` の並び、2 つの `で` の句、別名と正式名、relation の役割が対象です。違う入力を
+  どの順で書いても、後のステップで同じ入力を書いても受理します。構文エラーのあるステップは
+  そのエラーのままです。`lint`、`fmt`、`migrate` は同じメッセージを `loc` なしで報告し、
+  この文書を inline `implements` すると
+  `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)`、
+  `kind: "type"` です。意図する値を 1 つだけ残してください。
+- **`actor` の重複 (#1705)。** 同じ名前の `actor` を 2 度書くと（別の行でも、並びの中でも）、
+  終了コード 2、`kind: "parse"` で、2 度目の名前で拒否します: `duplicate actor 'Agent' at 4:9`。
+  重複を消してください。
+- **要件 ID の持ち主は 1 つ (#1705)。** キーワードの後に書いた ID は、その宣言のものです。
+  `rule`、`decide`、`scenario`、`forbidden`、`goal`、`policy`、そして FSL 5 の文書でも書ける
+  FSL 4 の `requirement` と `acceptance` のブロックが該当します。同じ ID の 2 つ目の持ち主は、
+  種類を問わず、その ID の位置で終了コード 2、`kind: "parse"` で拒否し、両方の種類を示します:
+  `duplicate requirement id 'REQ-DESK-001': this rule reuses the ID of the rule at 19:8; a
+  requirement ID has one owner at 22:8`。同じ種類の `scenario`、`forbidden`、`goal`、`policy`
+  の 2 つ目は、従来どおりの拒否です（`duplicate acceptance id`、`duplicate forbidden id`、
+  `duplicate property name`、`kind: "semantics"`）。どちらかの ID を付け替えるか、2 つの宣言を
+  まとめてください。この規則に当たる FSL 4 の文書を `fslc migrate --edition 5` は
+  `migrate_manual_required`、`reason: "shared_requirement_id"` で拒否し、ID を付け替えることは
+  しません。
+- **`covers` は参照 (#1705)。** event や判定表の行の `covers` は、持ち主のいる ID を、どんな
+  文でも指せます。受理され、ledger と `document claims` はその ID を持ち主の題名で示し、
+  `covers` の文はその後に並べます。持ち主の**いない** ID は、言葉を `covers` からしか得ないので、
+  文書の中のその ID の `covers` はすべて同じ文でなければなりません。最初に違ったものを、後の
+  `covers` の位置で `kind: "parse"` で拒否します: `requirement ID 'REQ-EV-1' is covered as
+  "withdrawing" here and as "closing" at 15:5; every covers of an ID no declaration owns has one
+  text at 19:5`。行が自分の表の ID を別の文で `covers` するのは従来どおり拒否です:
+  `requirement annotation 'REQ-2-3' has conflicting text at 22:7`、`kind: "semantics"`。
+- **`concept`、範囲、`kpi` の重複 (#1686)。** 同じ名前の `concept` を 2 度書くと、2 度目で
+  `kind: "semantics"` で拒否します: `duplicate concept 'SmallClaim' at doc.fsl:24:3`。
+  `concept` の重複は、範囲や `kpi` の重複より先に報告します。`instances` と `values` の範囲、
+  `kpi` の重複は、FSL 4 と同じく拒否します（§13.2 の FSL 4 の参照）。意図する宣言を
+  1 つだけ残してください。
+
 #### 用語集と日本語の綴り
 
 任意の `glossary` は requirements ブロックの最初の項目に、一つだけ置けます（`misplaced_glossary`）。
@@ -4192,6 +4261,24 @@ fslc verify requirements.fsl --engine induction
 `derived_terminal_added` の finding ごとの `edits` は空で、書き換えは `files[].edits` にあります。
 既存の分類と原子的な
 書き込みの契約は、§7 と [DESIGN-migration](../design/DESIGN-migration.md)を参照してください。
+
+`migrate` の既定は次のエディション（`--edition next`。上では `5` と綴っています）です。
+`lint` の既定は `current` なので、計画の finding を見るには `--edition 5` を付けます。
+ヘッダーのない文書には次のエディションで `missing_edition_header` が付くので、ほかに何も
+報告がなくても `lint --edition 5` は終了コード 1 を返します。次の 3 種類の文書には
+**ヘッダーを提案しません**。`lint` と `migrate` は、FSL 5 の公開前と同じ結果を返します。
+
+- エディションヘッダーを取らない宣言: `causal`、`agent`、そのほかの AI ダイアレクトの宣言
+  （`ai_component`、`dataset`、`evaluator` など）。ヘッダーを書くと
+  `edition_header_not_accepted` で拒否されます。
+- `refinement` の文書。ヘッダーは受け付けますが、単独で検査する対象ではないので、
+  挿入しても文書が保たれることを移行で示せません。
+- `compose` の文書。移行の契約が構成要素のソースファイルを保てないので、同じ理由です。
+
+`refinement` や `compose` の文書に手で書いたヘッダーは、そのまま読まれます。既定の
+`migrate` は process の変換も行うので、変換に判断が要る（後述の `migrate_manual_required`）
+ヘッダーのない FSL 4 の `requirements` 文書では、`fslc migrate` だけでも終了コード 1 に
+なります。現行エディションの書き換えだけを計画するには `--edition current` を付けます。
 
 | finding / 変換 | 確認する点 |
 |---|---|
