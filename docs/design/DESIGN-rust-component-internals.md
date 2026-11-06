@@ -794,12 +794,21 @@ native binary: argument parsing
   error exit. `error_exit` pairs an error envelope with the code the `Verdict` table gives it (2 for
   every `kind` but `internal`, 3 for `internal`), and `normalized_exit_status` is the process-exit
   normalization formerly in `main.rs`. `cli_output.rs` owns the error envelope: `error_output`, and
-  `error_detail` for an error nested in another command's output (`chain`'s layer `detail`); `chain`'s
-  failed-layer record is built once by `chain_step_input_error`. The command arms of `main.rs`,
-  `causal.rs`, `refinement.rs`, and `verification.rs` return `error_exit(..)` wherever the literal
-  they spelled equals the table's code. A literal that differs (an `internal` error reported with 2)
-  and the other files' literals stay hand-written: changing such an exit is a behavior decision, not
-  this refactor. The ratchet's `error-envelope` and `error-exit-literal` pins hold the counts left.
+  `error_detail` for an error nested in another command's output (`chain`'s layer `detail`).
+  `chain_step_input_error` builds `chain`'s failed-layer record for a layer input error; the
+  record for a refine run that fails and `run_impl_command`'s records are still built where they
+  are produced. In `main.rs`, `causal.rs`, `refinement.rs`, and `verification.rs`, a pair of
+  `error_output("<kind>", ..)` or `io_error_output(..)` with a literal `2` or `3` became
+  `error_exit(..)` where the literal equals the table's code. Other shapes keep their literal even
+  when it equals the table's code: a bare `(output, 2)`, a pair built from
+  `surface_parse_error_output` or `semantic_error_output`, `process::exit`, and an `"exit_code"`
+  field. So does the one pair whose literal differs (`run_document_claims`' `internal` error with
+  2), whose change would be a behavior decision, and every literal in the other files. The
+  ratchet's `error-exit-literal` pins hold what is left: `main.rs` 170, `verification.rs` 29,
+  `causal.rs` 14, `check_stages.rs` 8, `refinement.rs` 3, `migration.rs` 3, `literate_access.rs` 3,
+  `frontend_output.rs` 2, and one each in `bin/fsl-bmc.rs`, `bin/fsl-replay-actions.rs`,
+  `cli_options.rs`, `coverage.rs`, `spec_loading.rs`, and `verification_output.rs`. The
+  `error-envelope` pins hold 2 in `main.rs` (those two `chain` records) and the other files' sites.
 - `LiterateState`, atomic migration, verify cache, approval trust, and solver execution remain
   distinct state/failure owners rather than a single application state.
 - **Candidate experiment (not authorization):** if selected through the C2 gate, first make
