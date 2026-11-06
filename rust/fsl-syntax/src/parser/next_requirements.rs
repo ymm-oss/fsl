@@ -49,8 +49,8 @@ use crate::{
     AcceptanceExpectation, AcceptanceStep, Annotation, Annotations, BusinessItem,
     ConceptDeclaration, EditionWarning, EventForm, Expr, NextEditionRequirements, Param,
     ParseError, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
-    QualifiedName, RequirementsItem, Span, SpecItem, SymbolPath, SyntaxIdent, Token, TokenKind,
-    VerifyItem,
+    QualifiedName, RequirementOwner, RequirementsItem, Span, SpecItem, SymbolPath, SyntaxIdent,
+    Token, TokenKind, VerifyItem,
 };
 use crate::{PhraseKind, PhraseSpelling};
 
@@ -187,6 +187,100 @@ pub(super) struct Pending {
     resources: Vec<relations::ResourceSource>,
     measures: Vec<relations::MeasureSource>,
     goals: Vec<relations::GoalSource>,
+    /// Each declaration that owns the requirement ID after its keyword, as the ID, its
+    /// spelling's span and the keyword, in source order.
+    owners: Vec<(String, Span, &'static str)>,
+}
+
+/// Refuse a `covers` of an ID no declaration owns whose text differs from an earlier
+/// `covers` of it, at the later `covers`. Events' and decision rows' `covers` count alike,
+/// across the whole document; the ledger kept one row and lost the other text (#1705).
+fn reject_differing_links(
+    owned: &BTreeSet<&str>,
+    links: impl Iterator<Item = ProcessCover>,
+) -> Result<(), ParseError> {
+    let mut links: Vec<_> = links
+        .filter(|cover| !owned.contains(cover.id.as_str()))
+        .collect();
+    links.sort_by_key(|cover| cover.span.start.offset);
+    let mut first = BTreeMap::<String, ProcessCover>::new();
+    for cover in links {
+        let Some(earlier) = first.get(&cover.id) else {
+            first.insert(cover.id.clone(), cover);
+            continue;
+        };
+        if earlier.text != cover.text {
+            return Err(ParseError::new(
+                format!(
+                    "requirement ID '{}' is covered as \"{}\" here and as \"{}\" at {}:{}; \
+                     every covers of an ID no declaration owns has one text",
+                    cover.id,
+                    cover.text,
+                    earlier.text,
+                    earlier.span.start.line,
+                    earlier.span.start.column
+                ),
+                cover.span,
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The keywords whose second owner of an ID an existing check already refuses: a
+/// repeated acceptance or forbidden ID, and a repeated goal or policy property.
+const OWNERS_REFUSED_ELSEWHERE: [&str; 5] =
+    ["scenario", "acceptance", "forbidden", "goal", "policy"];
+
+/// The current edition's `requirement` and `acceptance` blocks among `items`, which a
+/// next-edition document still takes: each owns the ID after its keyword, as its ID, its
+/// title, the span of its ID and the span of the block.
+fn block_owners(items: &[RequirementsItem]) -> Vec<(&'static str, &str, &str, Span, Span)> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Requirement {
+                id,
+                id_span,
+                text,
+                span,
+                ..
+            } => Some(("requirement", id.as_str(), text.as_str(), *id_span, *span)),
+            RequirementsItem::Acceptance {
+                id,
+                id_span,
+                text,
+                span,
+                ..
+            } => Some(("acceptance", id.as_str(), text.as_str(), *id_span, *span)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Refuse a second declaration that owns a requirement ID already owned, at its ID. The
+/// ledger kept one row for the two, with one title and one status (#1705).
+fn reject_second_owners(owners: &[(String, Span, &'static str)]) -> Result<(), ParseError> {
+    let mut first = BTreeMap::new();
+    for (id, span, kind) in owners {
+        let Some((earlier, at)) = first.get(id.as_str()).copied() else {
+            first.insert(id.as_str(), (*kind, *span));
+            continue;
+        };
+        let at: Span = at;
+        if earlier == *kind && OWNERS_REFUSED_ELSEWHERE.contains(kind) {
+            continue;
+        }
+        return Err(ParseError::new(
+            format!(
+                "duplicate requirement id '{id}': this {kind} reuses the ID of the {earlier} at \
+                 {}:{}; a requirement ID has one owner",
+                at.start.line, at.start.column
+            ),
+            *span,
+        ));
+    }
+    Ok(())
 }
 
 fn is_symbol(token: &Token, symbol: &str) -> bool {
@@ -459,6 +553,34 @@ impl Parser<'_> {
                 self.peek().span,
             ));
         }
+        let owned_from = self.ids.len();
+        let owner = if rules::starts_rule(self) {
+            Some("rule")
+        } else if self.peek_kw(Kw::Decide) {
+            Some("decide")
+        } else if self.peek_kw(Kw::Scenario) {
+            Some("scenario")
+        } else if self.peek_kw(Kw::Forbidden) {
+            Some("forbidden")
+        } else if self.peek_kw(Kw::Goal) {
+            Some("goal")
+        } else if self.peek_kw(Kw::Policy) {
+            Some("policy")
+        } else {
+            None
+        };
+        let parsed = self.next_requirements_declaration(pending, position)?;
+        if let (true, Some(kind), Some(id)) = (parsed, owner, self.ids.get(owned_from)) {
+            pending.owners.push((id.value.clone(), id.span, kind));
+        }
+        Ok(parsed)
+    }
+
+    fn next_requirements_declaration(
+        &mut self,
+        pending: &mut Pending,
+        position: usize,
+    ) -> Result<bool, ParseError> {
         if self.peek_kw(Kw::Actor) {
             self.bump_kw(Kw::Actor);
             loop {
@@ -1157,6 +1279,50 @@ fn join_names<'a>(names: impl IntoIterator<Item = &'a str>) -> String {
 }
 
 impl Pending {
+    /// The first owner of each owned requirement ID, in source order. A second owner is
+    /// refused before this is read, or by a later check of its own kind.
+    fn requirement_owners(
+        &self,
+        blocks: &[(&'static str, &str, &str, Span, Span)],
+    ) -> Vec<RequirementOwner> {
+        let mut declarations: Vec<(&'static str, &str, &str, Span)> = blocks
+            .iter()
+            .map(|(kind, id, title, _, span)| (*kind, *id, *title, *span))
+            .chain(self.rules.iter().map(|(_, rule)| {
+                let (id, title, span) = rule.owned();
+                ("rule", id, title, span)
+            }))
+            .chain(self.decisions.iter().map(|decision| {
+                let (id, title, span) = decision.owned();
+                ("decide", id, title, span)
+            }))
+            .chain(self.traces.iter().map(|(_, trace)| {
+                let kind = if trace.forbidden {
+                    "forbidden"
+                } else {
+                    "scenario"
+                };
+                (kind, trace.id.as_str(), trace.text.as_str(), trace.span)
+            }))
+            .chain(self.goals.iter().map(|goal| {
+                let (id, title, span) = goal.owned();
+                (goal.kind(), id, title, span)
+            }))
+            .collect();
+        declarations.sort_by_key(|(_, _, _, span)| span.start.offset);
+        let mut seen = BTreeSet::new();
+        declarations
+            .into_iter()
+            .filter(|(_, id, _, _)| seen.insert(*id))
+            .map(|(kind, id, title, span)| RequirementOwner {
+                id: id.to_owned(),
+                kind,
+                title: title.to_owned(),
+                span,
+            })
+            .collect()
+    }
+
     /// Desugar the members read into `items` (the published items, in
     /// order), returning the items with each entity's `process` and each
     /// trace placed where it was declared.
@@ -1171,11 +1337,40 @@ impl Pending {
         items: Vec<RequirementsItem>,
     ) -> Result<(Vec<RequirementsItem>, NextEditionRequirements), ParseError> {
         let mut next = NextEditionRequirements::default();
-        let actors = self
-            .actors
-            .iter()
-            .map(|actor| actor.text.as_str())
-            .collect::<BTreeSet<_>>();
+        let mut actors = BTreeSet::new();
+        for actor in &self.actors {
+            // Copies of a bare name cannot differ, but every other declaration of one name
+            // is refused, and the second copy says nothing the first did not (#1705).
+            if !actors.insert(actor.text.as_str()) {
+                return Err(ParseError::new(
+                    format!("duplicate actor '{}'", actor.text),
+                    actor.span,
+                ));
+            }
+        }
+        let blocks = block_owners(&items);
+        let mut owners = self.owners.clone();
+        owners.extend(
+            blocks
+                .iter()
+                .map(|(kind, id, _, id_span, _)| ((*id).to_owned(), *id_span, *kind)),
+        );
+        owners.sort_by_key(|(_, span, _)| span.start.offset);
+        reject_second_owners(&owners)?;
+        next.owners = self.requirement_owners(&blocks);
+        let owned: BTreeSet<&str> = next.owners.iter().map(|owner| owner.id.as_str()).collect();
+        reject_differing_links(
+            &owned,
+            self.events
+                .iter()
+                .flat_map(|event| &event.covers)
+                .chain(
+                    self.decisions
+                        .iter()
+                        .flat_map(decide::DecideDeclaration::links),
+                )
+                .cloned(),
+        )?;
         let mut instance_bounds = BTreeMap::new();
         for item in &items {
             match item {

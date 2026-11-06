@@ -19,8 +19,8 @@ use fsl_core::{
     requirements_trace_contract_with_options,
 };
 use fsl_syntax::{
-    Expr, ParseOptions, ParsedDocument, RequirementsItem, SourceFile, SourcePos, Span, SpecItem,
-    SurfaceDocument, VerifyItem, parse_document_with,
+    Expr, ParseOptions, ParsedDocument, RequirementOwner, RequirementsItem, SourceFile, SourcePos,
+    Span, SpecItem, SurfaceDocument, VerifyItem, parse_document_with,
 };
 use serde_json::{Value, json};
 
@@ -218,6 +218,50 @@ pub fn project_requirement_claims_from_source_with_options(
         options,
     )
     .map_err(DocumentProjectionError::Other)
+}
+
+/// The declaration owning each requirement ID of a next-edition `requirements` document,
+/// by ID; empty for any other document. A `covers` of an owned ID keeps its own text in
+/// the kernel, and the ledger and the documents title the ID with its owner's (#1705).
+#[must_use]
+pub fn requirement_owners(
+    source: &str,
+    options: &ParseOptions,
+) -> BTreeMap<String, RequirementOwner> {
+    match fsl_syntax::parse_surface_document_with(source, options) {
+        Ok(SurfaceDocument::Requirements(requirements)) => requirements
+            .next
+            .map(|next| {
+                next.owners
+                    .into_iter()
+                    .map(|owner| (owner.id.clone(), owner))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => BTreeMap::new(),
+    }
+}
+
+/// Put the owner's title, cited at the owner, first among an owned ID's statements; the
+/// `covers` texts linking to the ID follow it.
+fn title_with_owner(
+    requirement: &mut Requirement,
+    owners: &BTreeMap<String, RequirementOwner>,
+    source_path: Option<&str>,
+) {
+    let Some(owner) = owners.get(&requirement.id) else {
+        return;
+    };
+    requirement
+        .statements
+        .retain(|statement| statement.text.as_deref() != Some(owner.title.as_str()));
+    requirement.statements.insert(
+        0,
+        RequirementStatement {
+            text: Some(owner.title.clone()),
+            source: Some(source_ref_span(source_path, owner.span)),
+        },
+    );
 }
 
 fn projection_context(
@@ -900,13 +944,14 @@ pub fn project_requirement_claims_with_options(
     // before every document command and fails closed on its refusal.
     let trace = requirements_trace_contract_with_options(input.source, options)
         .map_err(|error| error.to_string())?;
-    project_requirement_claims_with_trace(input, trace.as_ref())
+    project_requirement_claims_with_trace(input, trace.as_ref(), *options)
 }
 
 #[allow(clippy::too_many_lines)]
 fn project_requirement_claims_with_trace(
     input: &DocumentInput<'_>,
     trace_contract: Option<&RequirementsTraceContract>,
+    options: ParseOptions,
 ) -> Result<RequirementClaimSet, String> {
     let model = input.model;
     let source_path = input.source_path;
@@ -1163,6 +1208,7 @@ fn project_requirement_claims_with_trace(
         .collect();
 
     // Requirements section, aggregated across every target/trace case above.
+    let owners = requirement_owners(input.source, &options);
     let requirements: Vec<Requirement> = agg
         .into_iter()
         .map(|(id, entry)| Requirement {
@@ -1177,6 +1223,10 @@ fn project_requirement_claims_with_trace(
                 .collect(),
             claim_ids: entry.claim_ids.into_iter().collect(),
             kinds: entry.kinds.into_iter().collect(),
+        })
+        .map(|mut requirement| {
+            title_with_owner(&mut requirement, &owners, source_path);
+            requirement
         })
         .collect();
 
@@ -1333,5 +1383,6 @@ pub(crate) fn project_renderer_contract(
             analysis_scope,
         },
         trace,
+        options,
     )
 }

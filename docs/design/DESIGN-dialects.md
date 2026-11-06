@@ -393,6 +393,190 @@ reports `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.f
 in any order, and the same input in a later step, stay accepted. Migration: keep the one value you
 mean.
 
+#### Repeated actors and requirement ID owners (#1705)
+
+**Breaking removal (#1705).** In `fsl 5` requirements, three repeats passed `check`, and for an ID the
+ledger kept one row, with one title and one status, for two declarations, or one text for two `covers`.
+Each is now refused while the document is desugared, with exit 2 and `kind: "parse"`. The `loc` is the
+repeated actor name, the second owner's ID, or the `covers` keyword of the later `covers`:
+
+- A second `actor` of one name, on its own line or in a list: `duplicate actor 'Agent' at 4:9`.
+- A second declaration that owns the requirement ID after its keyword (`rule`, `decide`, `scenario`,
+  `forbidden`, `goal`, `policy`), at its ID, naming both kinds: `duplicate requirement id
+  'REQ-DESK-001': this rule reuses the ID of the rule at 19:8; a requirement ID has one owner at 22:8`.
+  This follows the policy that a declaration owns the ID after its keyword (`DESIGN-id-policy.md`), now
+  enforced as one owner per ID. A second `scenario`, `forbidden`, `goal` or `policy` of its own kind
+  keeps the refusal it already had (`duplicate acceptance id`, `duplicate forbidden id`, `duplicate
+  property name`, `kind: "semantics"`). Only another kind's ID is new for them.
+- Two `covers` of an ID that no declaration owns, with different texts, anywhere in the document, at
+  the later `covers` and naming the earlier one: `requirement ID 'REQ-EV-1' is covered as
+  "withdrawing" here and as "closing" at 15:5; every covers of an ID no declaration owns has one text
+  at 19:5`. Events' and decision rows' `covers` count alike: two events, two rows of one table, rows of
+  two tables, or an event and a row. A `covers` is a link, so one ID with one text stays accepted, and
+  the ledger shows it once, as before. An unowned ID has no title of its own, so the `covers` texts are
+  its only wording, and two of them left the ledger with one.
+
+What base `56354e477544f9be1f4477ddf036e5855d514bb5` did, measured once each with a debug build on the support-desk and claims documents of
+#1705. The routes were `check`, `verify --depth 6`, `ledger --depth 6`, `document claims` and `document generate`:
+
+| Repeat | Base | What was lost |
+|---|---|---|
+| `actor Agent` twice, or `actor Agent, Agent` | exit 0 on all five | Nothing: the output equals one copy's. Refused because every other declaration of one name is |
+| `rule` of one ID twice: `allow`, `always`, `never`, or two guards on one event | exit 0 | One ledger row, with one of the two titles |
+| `rule` reusing a `policy`, `forbidden` or `scenario` ID | exit 0 | One ledger row, with the rule's title; the other title is gone |
+| `rule` reusing a `decide` ID | exit 0 | The rule's title is in neither the ledger, `document claims` nor `document generate` |
+| `decide` of one ID twice, different rows | exit 0 | One ledger row |
+| `forbidden` reusing a `scenario` ID | exit 0 | No ledger row for either, both in the documents. Refused by the one-owner rule |
+| two rows of one `decide` covering one ID, different texts | exit 0 | One ledger row; the second title is missing |
+| two events covering `REQ-EV-1` with "closing" and "withdrawing" | exit 0 on `check` and `ledger` | One ledger row, "closing" |
+| two `decide` tables covering `REQ-2` with different texts | exit 0 on `check` | One ledger row, "other"; the first table's text is missing |
+| an event and a row covering `REQ-3` on one event, different texts | exit 2, `kind: "semantics"`, `requirement annotation 'REQ-3' has conflicting text at 23:7` | Refused already; now the message above, `kind: "parse"`, at the same location |
+
+Unchanged:
+
+- Two `covers` of one ID with one text.
+- A repeated `lifecycle` line, which merges the same way a single line does.
+- `policy`, `forbidden`, `measure`, a relation role, an entity field, a decide row that overlaps another, and a
+  glossary alias, all already refused.
+- `concept` and `kpi`, which #1686 refuses.
+- An event's `covers`, or a decide row's `covers`, naming an ID another declaration owns, with any text.
+  Its output changed; see the next subsection.
+
+The current edition shares IDs the same way and is unchanged. One run each: two `requirement REQ-1`
+blocks checked with one ledger row carrying the last title; an `acceptance` reusing a requirement's
+ID, and a `requirement` reusing an acceptance's, checked.
+
+Routes covered by `issue_1705_requirements_repeats`: `check`, `verify` on bmc, explicit and induction,
+`ledger`, `document generate`, `document claims`, `document check` and `kernel`. `ledger` and `document
+generate` write no file. The other routes load the document through the same desugaring [R]. The
+Japanese particle spellings and the LSP were not measured.
+
+On-disk transition set (empty). Base `56354e477544f9be1f4477ddf036e5855d514bb5`, head `2286fc51feaf3b49dac235c15e3367eb8346b919`, each binary built from
+its own tree with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/`
+(651 forms: 23/195/433) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable and with
+`FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All 2604 pairs had
+equal complete stdout, stderr and exit with no field excluded, and no run differed from its repeat: 0
+ok-to-error and 0 error-to-ok. The same sweep on the earlier heads `779408fa52110cb3ca7b2adf7394d489513c5cb7` and
+`c2bd60208cb3102e63b2b3c5ded6ee7fb58a7800` gave the same result. No required test's inline fixtures were rewritten.
+
+#### A `covers` of an owned ID shows the owner's title (#1705)
+
+**Changed ledger and document output (#1705).** A decide row's `covers` or an event's `covers` may name
+an ID that a declaration owns (`rule`, `decide`, `scenario`, `forbidden`, `goal`, `policy`, or a
+current-edition `requirement` or `acceptance` block), with any text, and two of them may differ. It
+stays accepted and stays a link: the covering event's action keeps the ID with the `covers` text in the
+kernel, as on base, and the claims that carry the ID are the same. The ID's title is its owner's. The
+desugaring records each owner (`NextEditionRequirements::owners`), and the rendering titles the ID with
+it: the ledger row takes the owner's title, and `document claims` puts the owner's title, cited at the
+owner's keyword, first among the ID's statements, so the document's rule section quotes it and its
+requirement text lists it first. The `covers` texts follow as the ID's linked statements, each cited at
+its `covers`; they no longer title the ledger row. A first version of this change gave the `covers` the
+owner's title in the lowering; it changed the kernel of a migrated process form whose rule took one of two
+`covers` texts, so `migrate` refused the flagship example, and it was replaced by the rendering.
+
+Measured once each, base `56354e477544f9be1f4477ddf036e5855d514bb5` against head `2286fc51feaf3b49dac235c15e3367eb8346b919`, on the
+claims document of #1705 with `rule REQ-2 "Only a manager rejects a large claim"` added after the table.
+`check` exits 0 on both; `ledger` exits 1 on both, because the document violates its own `assuming`;
+`document generate`, `document claims` and `document check` exit 0 on both.
+
+| Link to the rule's `REQ-2` | Base | Head |
+|---|---|---|
+| decide row `covers REQ-2 "A small claim is auto-approved"` | Ledger row titled with the row's text. Claims: the row's text, then the rule's, so the document's rule section quoted the row's text under the rule | Ledger row and rule section show the rule's title. Claims: the rule's title at 24:3, then the row's text at 20:7. Kernel and claim IDs unchanged |
+| event `covers REQ-2 "A claim can be rejected"` | Ledger row titled with the event's text. The rule's title was in neither the ledger, `document claims` nor `document generate` | Ledger row and rule section show the rule's title. Claims: the rule's title at 25:3, then the event's text at 18:5. Kernel and claim IDs unchanged |
+
+An event's `covers` of another owner kind's ID, on the support-desk document with the text "different",
+measured once each. Base showed "different" as the ledger title; head shows the owner's, and "different"
+appears nowhere in the head ledger:
+
+| Owner | Base ledger title | Head ledger title |
+|---|---|---|
+| `forbidden FB-DESK-001` | different | No ticket is taken once the desk has closed |
+| `policy POL-TICKET-001` | different | Every assigned ticket is eventually closed or escalated |
+| `goal GOAL-TICKET-001` | different | A ticket can be closed |
+| `scenario AC-TICKET-001` | different | An agent takes and closes a ticket |
+
+One case stays refused: a row covering its own table's ID with another text, `requirement annotation
+'REQ-2-3' has conflicting text at 22:7` with `kind: "semantics"`, as on base. The row's `covers` lands on
+the event the table already annotates with that ID and the table's title, and one action carries one text
+per ID. The row contradicts its own table on the one event both describe, so there is no link to keep
+apart from the owner. A row covering its own table's ID with the table's title stays accepted.
+
+Tested by `a_covers_of_an_owned_id_shows_the_owners_title`, `a_covers_of_another_owner_kind_shows_its_title`
+and `a_row_covering_its_own_table_with_another_text_stays_refused` in `issue_1705_requirements_repeats`.
+Faults detected: the ledger ignoring the owner, and the documents ignoring it. Not measured: the Japanese
+particle spellings and the LSP.
+
+#### Current-edition blocks own their IDs (#1705)
+
+**Breaking removal (#1705).** A next-edition requirements document still takes the current edition's
+`requirement` and `acceptance` blocks, and `DESIGN-id-policy.md` makes each the owner of the ID after its
+keyword. The one-owner check now counts them, at the ID, naming both kinds. Measured once each, base
+against head:
+
+| Form, next edition | Base | Head |
+|---|---|---|
+| `requirement REQ-1` twice | exit 0 | `duplicate requirement id 'REQ-1': this requirement reuses the ID of the requirement at 6:15; a requirement ID has one owner at 16:15` |
+| `acceptance REQ-1` after `requirement REQ-1` | exit 0 | the same, "this acceptance reuses the ID of the requirement" at 16:14 |
+| `requirement AC-1` after `acceptance AC-1` | exit 0 | "this requirement reuses the ID of the acceptance" at 16:15 |
+| `requirement REQ-DESK-001` after `rule REQ-DESK-001` | exit 0 | "this requirement reuses the ID of the rule at 19:8" at 54:15 |
+| `acceptance AC-TICKET-001` after `scenario AC-TICKET-001` | exit 2, `duplicate acceptance id`, `kind: "semantics"` | "this acceptance reuses the ID of the scenario at 33:12" at 54:14, `kind: "parse"` |
+| `acceptance AC-1` twice | exit 2, `duplicate acceptance id 'AC-1' at 16:3`, `kind: "semantics"` | unchanged |
+
+A block's ID is owned, so two `covers` of it with different texts stay accepted, and the ledger titles it
+with the block's title. Tested by `a_current_edition_block_is_an_owner`.
+
+`fslc migrate --edition next` used to add the header to a current-edition document with two
+`requirement`s of one ID, or an `acceptance` and a `requirement` sharing one, and write a document the
+next edition now refuses. It now refuses before rewriting, with exit 1, `result: "migrate_manual_required"`,
+nothing written, and a `migrate_manual_required` finding with `reason: "shared_requirement_id"` at the
+second owner's ID in the source: `this requirement reuses the ID 'REQ-1' of the requirement at 5:15; the
+next edition gives a requirement ID one owner`. It never renames an ID (`DESIGN-id-policy.md`). Two
+`acceptance`s of one ID are refused by migrate's existing pre-flight `check`. Tested by
+`migrate_refuses_two_requirements_of_one_id`; a fault that skips the search was detected. A process's
+`covers` that names a block's ID and becomes a `rule` was not searched for by this refusal; the corpus
+pass below found no such document [R].
+
+`fslc migrate --edition 5` over the 109 current-edition `requirements` files under `specs/`, `examples/`
+and `rust/fslc/tests/fixtures/`, without `--write`, each in its own tree with the next edition enabled,
+twice per side: base `56354e477544f9be1f4477ddf036e5855d514bb5` and head `2286fc51feaf3b49dac235c15e3367eb8346b919` gave equal complete
+stdout, stderr and exit for all 109, with no run differing from its repeat (84 `migrated`, 11
+`migrate_manual_required`, 6 `migration_refused` and 8 errors on both). `edition_migrator` passes 41 of
+41 on head.
+
+The search for a shared ID runs before the process conversion and returns early, so a document that
+also has a process migrate cannot rewrite reports only the `shared_requirement_id` findings in that run;
+its `migrate_manual_required` findings for the process appear once the IDs are fixed.
+
+A rewrite migrate does make can retitle a ledger row. A process `covers` naming a `requirement` block's ID
+with another text migrates with exit 0, and the ID is the block's. On a copy of
+`examples/annotations/annotated_claims.fsl` whose `pay` transition writes `covers REQ-READY "different"`,
+measured once on head: the current-edition ledger row is `| REQ-READY | different |`, the first linked
+text; after `migrate --edition next --write` the next-edition row is `| REQ-READY | the ledger tracks
+readiness for external callers |`, the block's title. That is the intended next-edition title. A
+digest-bound ledger approval of the current-edition document does not survive the migration either
+way: `approval check` reports `drifted` with `spec_changed` and `rendering_changed` both on that copy and
+on a control whose `covers` already has the block's title, so the retitling adds no drift a migration
+did not already cause.
+
+The current edition is unchanged. Base `9c31458678cf6c70e77987c85c95f4bc0d8df503` against head
+`878e03fcd2be79062270c27bbdea88b16d8cb109`, each binary from its own tree, every one of the 631
+current-edition `.fsl` files under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` ran through
+`ledger --depth 3 -o`, `document generate -o` and `document claims`, without the next edition enabled,
+twice per side: complete stdout, stderr, exit and written file were equal for all 1893 pairs, none
+unstable (322, 98 and 340 of them exit 0 on base). With the next edition enabled, `kernel
+--kernel-version 1` and `2` on the 8 next-edition corpus files that write `covers` were equal on base and
+head, so each `covers` keeps its text in the kernel.
+
+**Owed to #1437.** This removal is recorded here, in
+`skills-next/fsl-requirements/references/syntax.md` and in
+`changelog.d/1705-requirements-repeats.changed.md`. The next edition's header may not appear in
+published material until #1434 lifts the gate, so `docs/manual/LANGUAGE.md`,
+`docs/manual/LANGUAGE.ja.md` and `skills/fsl/references/syntax.md` do not carry it yet. When #1437
+writes the `fsl 5` reference, those three owe the three refusals above and the accepted `covers`
+link with its owner's title, the document-wide one-text rule for an unowned ID, the row covering its
+own table, and the current-edition blocks as owners, with the site regenerated. Migration: rename one of the two IDs, or merge the two declarations;
+delete the repeated actor.
+
 ### 2.3 Tests (tests/test_req_dialect.py)
 
 Use the return requirements (almost the same as §2.1) as a fixture:

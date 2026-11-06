@@ -88,6 +88,21 @@ fn row_text(condition: &Condition, actor: &Word, verbs: &[Word]) -> String {
     format!("{condition} => {} {verbs}", actor.text)
 }
 
+impl DecideDeclaration {
+    /// The ID this table owns, its title and its span.
+    pub(in crate::parser) fn owned(&self) -> (&str, &str, Span) {
+        (&self.id, &self.text, self.span)
+    }
+
+    /// Each row's `covers` other than one of this table's own ID, in source order.
+    pub(in crate::parser) fn links(&self) -> impl Iterator<Item = &ProcessCover> {
+        self.rows
+            .iter()
+            .flat_map(|row| &row.covers)
+            .filter(|cover| cover.id != self.id)
+    }
+}
+
 impl Parser<'_> {
     /// `decide ID "text" for Stage Entity { row … [otherwise => outcome] }
     /// [assuming Q]`.

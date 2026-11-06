@@ -89,6 +89,21 @@ pub(in crate::parser) fn starts_relation(parser: &Parser<'_>) -> bool {
     matches!(parser.peek().kind, TokenKind::Ident(_)) && parser.peek_kw_at(1, Kw::BelongsTo)
 }
 
+impl GoalSource {
+    /// The ID this goal or policy owns, its title and its span.
+    pub(in crate::parser) fn owned(&self) -> (&str, &str, Span) {
+        (&self.id, &self.text, self.span)
+    }
+
+    /// The keyword this was written with.
+    pub(in crate::parser) const fn kind(&self) -> &'static str {
+        match self.form {
+            GoalForm::Reach { .. } => "goal",
+            GoalForm::Eventually { .. } => "policy",
+        }
+    }
+}
+
 impl Parser<'_> {
     /// `R belongs to E as r via n`.
     pub(in crate::parser) fn relation_declaration(&mut self) -> Result<RelationSource, ParseError> {

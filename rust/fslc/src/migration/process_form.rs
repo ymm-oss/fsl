@@ -167,6 +167,10 @@ pub fn convert_process_forms(
     if edition != Edition::Fsl5 || !options.unstable().contains(UnstableFeature::Fsl5) {
         return ProcessFormOutcome::Unchanged;
     }
+    let shared = shared_requirement_ids(original, *options);
+    if !shared.is_empty() {
+        return ProcessFormOutcome::ManualRequired(shared);
+    }
     let locations = Locations::of(original, *options).or_else(|| Locations::of(migrated, *options));
     let locate = |site: Site| {
         locations
@@ -397,6 +401,57 @@ pub fn ignore_generated_actor_notes(before: &mut Value, after: &Value) {
             true
         }
     });
+}
+
+/// A `requirement` or `acceptance` reusing the ID of an earlier `requirement`, or a
+/// `requirement` reusing an `acceptance`'s: the published edition accepts both, and the
+/// next edition gives a requirement ID one owner (#1705).
+const SHARED_REQUIREMENT_ID: &str = "shared_requirement_id";
+
+/// Each `requirement` or `acceptance` of a published-edition requirements document whose
+/// ID an earlier one owns, at its ID in `source`. Two `acceptance`s of one ID are left to
+/// the pre-flight `check`, which refuses them.
+fn shared_requirement_ids(source: &str, options: ParseOptions) -> Vec<MigrationDiagnostic> {
+    let Ok(SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document_with(source, &options)
+    else {
+        return Vec::new();
+    };
+    if requirements.next.is_some() {
+        return Vec::new();
+    }
+    let mut owners = BTreeMap::<&str, (&'static str, Span)>::new();
+    let mut findings = Vec::new();
+    for item in &requirements.items {
+        let (kind, id, span) = match item {
+            RequirementsItem::Requirement { id, id_span, .. } => ("requirement", id, *id_span),
+            RequirementsItem::Acceptance { id, id_span, .. } => ("acceptance", id, *id_span),
+            _ => continue,
+        };
+        let Some(&(earlier, at)) = owners.get(id.as_str()) else {
+            owners.insert(id, (kind, span));
+            continue;
+        };
+        if earlier == "acceptance" && kind == "acceptance" {
+            continue;
+        }
+        findings.push(MigrationDiagnostic {
+            code: MIGRATE_MANUAL_REQUIRED,
+            taxonomy: Taxonomy::UnsupportedInEdition,
+            message: format!(
+                "this {kind} reuses the ID '{id}' of the {earlier} at {}:{}; the next edition \
+                 gives a requirement ID one owner",
+                at.start.line, at.start.column
+            ),
+            span,
+            canonical_replacement: "rename one of the two IDs, or merge the two declarations"
+                .to_owned(),
+            machine_applicable: false,
+            reason: Some(SHARED_REQUIREMENT_ID),
+            edits: Vec::new(),
+        });
+    }
+    findings
 }
 
 fn manual_finding(reason: &'static str, message: String, span: Span) -> MigrationDiagnostic {
