@@ -62,7 +62,6 @@ fn check(label: &str, source: &str) -> (Value, i32, std::path::PathBuf) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .arg("check")
         .arg(&path)
-        .env("FSLC_UNSTABLE", "fsl5")
         .env("FSLC_CACHE", "off")
         .output()
         .expect("run fslc");

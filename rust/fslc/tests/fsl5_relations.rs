@@ -73,7 +73,6 @@ fn fslc_with(args: &[&str], label: &str, source: &str) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(args)
         .current_dir(&scratch.0)
-        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
         .output()
         .expect("run fslc");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -94,9 +93,7 @@ fn edit(source: &str, old: &str, new: &str) -> String {
 
 /// The kernel model of a next-edition document.
 fn model(source: &str) -> fsl_core::KernelModel {
-    let options = fsl_syntax::ParseOptions::with_unstable(
-        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-    );
+    let options = fsl_syntax::ParseOptions::stable();
     let kernel = fsl_core::parse_kernel_source_with_file_with_options(
         source,
         &fsl_core::FsResolver::new(fixture_dir("multi_entity")),

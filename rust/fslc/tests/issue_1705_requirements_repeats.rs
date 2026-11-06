@@ -135,7 +135,6 @@ impl Scratch {
             .args(args)
             .current_dir(&self.0)
             .env("FSLC_CACHE", "off")
-            .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
             .output()
             .expect("run fslc");
         let stdout = String::from_utf8(output.stdout).expect("utf-8 stdout");

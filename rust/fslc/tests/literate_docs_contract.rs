@@ -449,7 +449,6 @@ fn next_edition_skill_fences_all_check_under_the_next_edition() {
         .arg(&script)
         .args(["check", "--every-fence", "skills-next"])
         .args(["--fslc", env!("CARGO_BIN_EXE_fslc")])
-        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
         .current_dir(&root)
         .output()
         .unwrap_or_else(|error| panic!("run {}: {error}", script.display()));

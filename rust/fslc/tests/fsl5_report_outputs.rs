@@ -32,14 +32,12 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// `(stdout, exit)` of `fslc <args...> <path>` behind the gate, run in
-/// `path`'s directory.
+/// `(stdout, exit)` of `fslc <args...> <path>`, run in `path`'s directory.
 fn fslc(args: &[&str], path: &Path) -> (String, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(args)
         .arg(path.file_name().expect("file name"))
         .current_dir(path.parent().expect("directory"))
-        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
         .output()
         .expect("run fslc");
     (

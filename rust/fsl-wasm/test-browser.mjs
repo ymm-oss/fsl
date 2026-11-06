@@ -74,7 +74,7 @@ async function nativeEnvelope(testCase) {
       "--no-cache",
     ];
   const result = await command(nativeBinary, args, nativeCommandTimeoutMs,
-    testCase.dependency_edition ? { ...process.env, FSLC_UNSTABLE: "fsl5", FSLC_CACHE: "off" } : process.env);
+    testCase.dependency_edition ? { ...process.env, FSLC_CACHE: "off" } : process.env);
   if (testCase.id?.startsWith("1467/")) {
     await writeFile(join(dist, `issue-${testCase.id.replaceAll("/", "-")}-native-command.json`),
       JSON.stringify({ binary: nativeBinary, args, cwd: repository, ...result }, null, 2));
@@ -335,8 +335,7 @@ for (const binder of ["seq_literal", "set_statement"]) {
 // Exact issue-pair rejection and one-time warning, Linux WASM integration only.
 // The native test seam cannot run the pre-fix main browser BMC. Read the same
 // fixture files as the shared Rust table, rather than maintaining byte copies.
-// The existing batch protocol retains explicit unstable options; no product
-// transport or solver-injection surface is changed here.
+// No product transport or solver-injection surface is changed here.
 const dependencyRoot = await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_root.txt"), "utf8");
 const dependencyVerify = JSON.parse(await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_verify.json"), "utf8"));
 delete dependencyVerify._license;
@@ -374,7 +373,7 @@ for (const [variant, header, expected_status] of [["N", 5, 2], ["W", 4, 0]]) {
   await writeFile(join(directory, "dep_next_colon.fsl"), dependencyChild, "utf8");
   dependencyCases.push({
     id: `E01/${variant}/worker-verify`, variant, dependency_edition: true, cmd: "verify", path, source: dependencyRoot, source_file: path,
-    files: { "dep_next_colon.fsl": dependencyChild }, unstable: ["fsl5"], options: { depth: 2, deadlock: "warn" }, expected_status,
+    files: { "dep_next_colon.fsl": dependencyChild }, options: { depth: 2, deadlock: "warn" }, expected_status,
   });
 }
 await writeFile(
@@ -547,6 +546,131 @@ function rejectPending(error) {
 let details;
 let dependencyEnvelopes;
 const recursiveEnvelopes = [];
+// #1434: send whole request objects through the actual batch -> run boundary.
+// The single-request JS adapter destructures keys and cannot detect a typed
+// legacy Rust field. Never use normalizeEnvelope for these comparisons.
+async function publicationBoundary(socket) {
+  const body = "spec S { state { flag: Bool = false } action stay() { flag = false } invariant Safe { not flag } }\n";
+  const variants = [{}, { unstable: ["fsl5"] }, { unstable: ["later"] },
+    { unstable: 42 }, { unstable: { fsl5: true } }, { unrelated_unknown: { arbitrary: [42] } }];
+  const requests = [];
+  for (const header of ["", "fsl 4\n", "fsl 5\n"]) {
+    for (const extra of variants) {
+      requests.push({ cmd: "check", source: header + body, source_file: "model.fsl", ...extra });
+    }
+  }
+  const malformed = [
+    { cmd: 42 }, { source: {} }, { source_file: 42 }, { files: [] }, { options: 42 },
+    { options: { depth: "2" } }, { options: { deadlock: 42 } },
+  ];
+  for (const extra of malformed) {
+    requests.push({ cmd: "check", source: body, source_file: "model.fsl", ...extra });
+  }
+  // Real verify, not a host serde/check substitute. Preserve every raw value.
+  for (const extra of variants) {
+    requests.push({ cmd: "verify", source: "fsl 5\n" + body, source_file: "model.fsl",
+      options: { depth: 2, deadlock: "warn" }, ...extra });
+  }
+  const evaluated = await cdp(socket, "Runtime.evaluate", {
+    expression: `new Promise((resolve, reject) => {
+      const worker = new Worker('./worker.js');
+      const timer = setTimeout(() => { worker.terminate(); reject(new Error('publication boundary timeout')); }, 120000);
+      worker.onmessage = ({data}) => {
+        if (data.envelopes || data.envelope || data.transportError) {
+          clearTimeout(timer); worker.terminate();
+          if (data.envelopes) resolve(data.envelopes); else reject(new Error(JSON.stringify(data)));
+        }
+      };
+      worker.onerror = (event) => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message)); };
+      worker.postMessage({id:'publication-1434',batch:${JSON.stringify(requests)}});
+    })`, awaitPromise: true, returnByValue: true,
+  });
+  if (evaluated.exceptionDetails) throw new Error(JSON.stringify(evaluated.exceptionDetails));
+  const outputs = evaluated.result.value;
+  console.log(JSON.stringify({ publication1434: { requests, outputs } }));
+  if (!Array.isArray(outputs) || outputs.length !== requests.length) {
+    throw new Error("publication request population did not execute");
+  }
+  const versions = { verifier: { name: "fsl-wasm", version: "4.12.0" },
+    core: { name: "fsl-core", version: "4.12.0" },
+    solver: { name: "z3", backend: "z3-solver-wasm", version: "Z3 4.16.0.0" } };
+  const failures = [];
+  for (let header = 0; header < 3; header += 1) {
+    const reference = outputs[header * variants.length + 1];
+    const expected = { fsl: "1.0", result: "ok", spec: "S", warnings: [], versions };
+    if (header > 0) expected.fsl_edition = header === 1 ? 4 : 5;
+    if (header === 2) expected.edition = "next";
+    const oracleDrift = differences(reference, expected);
+    if (oracleDrift.length) failures.push({ header, oracleDrift });
+    for (let variant = 0; variant < variants.length; variant += 1) {
+      const actual = outputs[header * variants.length + variant];
+      const drift = differences(actual, reference);
+      if (drift.length) failures.push({ header, variant, drift });
+    }
+  }
+  const knownStart = 3 * variants.length;
+  // Literal messages/JSON offsets observed at the real run boundary on d83.
+  const knownMessages = [
+    "invalid type: integer `42`, expected a string at line 1 column 9",
+    "invalid type: map, expected a string at line 1 column 24",
+    "invalid type: integer `42`, expected a string at line 1 column 143",
+    "invalid type: sequence, expected a map at line 1 column 161",
+    "invalid type: integer `42`, expected struct Options at line 1 column 165",
+    "invalid type: string \"2\", expected usize at line 1 column 175",
+    "invalid type: integer `42`, expected a string at line 1 column 177",
+  ];
+  for (let index = 0; index < malformed.length; index += 1) {
+    const actual = outputs[knownStart + index];
+    const expected = { fsl: "1.0", versions, result: "error", kind: "io",
+      message: `invalid request JSON: ${knownMessages[index]}` };
+    const drift = differences(actual, expected);
+    if (drift.length) failures.push({ knownField: index, drift });
+  }
+  const verifies = outputs.slice(knownStart + malformed.length);
+  const stableVerify = (packet) => {
+    const stable = structuredClone(packet);
+    // These exact ten elapsed slots were observed on native and the actual
+    // d83 browser packet for this model/depth. Missing/extra/other changing
+    // cost slots FAIL closed; no new numeric paths are admitted here.
+    // Time spent executing/checking a property is ambient, never its verdict.
+    const slots = [[stable.cost, "elapsed_s"], [stable.cost?.solver, "check_elapsed_s"],
+      ...Array.from({ length: 8 }, (_, index) => [stable.cost?.properties?.[index], "elapsed_s"])];
+    for (const [object, key] of slots) {
+      if (!object || !Number.isFinite(object[key]) || object[key] < 0) {
+        throw new Error(`missing/non-numeric live publication timing ${JSON.stringify(packet)}`);
+      }
+      object[key] = 0;
+    }
+    // The allocator footprint is ambient, as #1702 found for the #1467
+    // comparisons: native and the Worker reported 8.85 and 8.84 MB for the
+    // same packet on #1711's CI. It must be present, finite and positive,
+    // then is zeroed; every other field, including the solver counts, stays
+    // exact.
+    const solver = stable.cost?.solver;
+    if (!solver || !Number.isFinite(solver.memory_mb) || solver.memory_mb <= 0) {
+      throw new Error(`missing positive publication allocator metric ${JSON.stringify(packet)}`);
+    }
+    solver.memory_mb = 0;
+    return stable;
+  };
+  const properties = [["action_coverage", "stay", 1], ["deadlock", "deadlock", 3],
+    ["init", "initial_state", 1], ["invariant", "Safe", 3], ["partial_op", "Safe", 3],
+    ["partial_op", "actions", 2], ["type_bound", "_bounds_flag", 3], ["vacuity", "session", 1]]
+    .map(([kind, name, checks]) => ({ kind, name, checks, elapsed_s: 0 }));
+  const verified = { fsl: "1.0", versions, spec: "S", result: "verified", depth: 2,
+    checked_to_depth: 2, completeness: "bounded", invariants_checked: ["Safe"], transitions_checked: [],
+    reachables: {}, action_coverage: { stay: true }, deadlock: { found: false }, warnings: [],
+    note: "bounded verification: no violation within depth 2", edition: "next", fsl_edition: 5,
+    cost: { elapsed_s: 0, solver: { checks: 17, check_elapsed_s: 0, conflicts: 2,
+      decisions: 1, propagations: 4, memory_mb: 0 }, properties } };
+  for (const [variant, actual] of verifies.entries()) {
+    // A baseline admission refusal stays semantic RED, not a missing-cost
+    // setup failure. Every key still participates in the literal comparison.
+    const drift = differences(actual.result === "verified" ? stableVerify(actual) : actual, verified);
+    if (drift.length) failures.push({ verifyVariant: variant, drift });
+  }
+  if (failures.length) throw new ParityViolationError(`publication packet drift ${JSON.stringify(failures)}`);
+}
 {
   const debugPort = await devtoolsPort();
   const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`).then((response) => response.json());
@@ -582,8 +706,8 @@ const recursiveEnvelopes = [];
     logPhase("client-completion", `client=${details.phase ?? "unknown"}`);
     // A fresh Worker for each new repeat avoids shared-runtime solver history.
     for (const [batchIndex, batch] of [dependencyCases, ...recursiveCases.map((testCase) => [testCase])].entries()) {
-    const requests = batch.map(({ cmd, source, source_file, files, unstable, options }) => (
-      { cmd, source, source_file, files, unstable, options }
+    const requests = batch.map(({ cmd, source, source_file, files, options }) => (
+      { cmd, source, source_file, files, options }
     ));
     const evaluated = await cdp(socket, "Runtime.evaluate", {
       expression: `new Promise((resolve, reject) => {
@@ -604,6 +728,7 @@ const recursiveEnvelopes = [];
     else recursiveEnvelopes.push(...evaluated.result.value);
     }
     await writeFile(join(dist, "issue-1467-worker-raw.json"), JSON.stringify({ cases: recursiveCases, envelopes: recursiveEnvelopes }, null, 2));
+    await publicationBoundary(socket);
   } finally {
     socket.close();
   }

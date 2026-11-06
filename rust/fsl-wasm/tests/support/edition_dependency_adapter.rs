@@ -36,7 +36,7 @@ fn dependency_edition_worker_check_uses_child_edition_and_ignores_unused_files()
     let mut observations = cases::Observations::default();
     for row in cases::worker_rows() {
         let fixture = cases::fixture(&row);
-        let request: Request = serde_json::from_value(serde_json::json!({"cmd":"check","source":fixture.root,"source_file":"root_compose.fsl","files":fixture.files,"options":{"depth":2},"unstable":["fsl5"]})).unwrap();
+        let request: Request = serde_json::from_value(serde_json::json!({"cmd":"check","source":fixture.root,"source_file":"root_compose.fsl","files":fixture.files,"options":{"depth":2}})).unwrap();
         let (actual, calls) = worker(&request, false);
         let expected = cases::expected_check(&row, &fixture, &fixture.child, expected_envelope());
         observations.eq(
@@ -56,7 +56,7 @@ fn dependency_edition_worker_check_uses_child_edition_and_ignores_unused_files()
     }
     let row = cases::row("E01/P");
     let fixture = cases::fixture(&row);
-    let mut request: Request = serde_json::from_value(serde_json::json!({"cmd":"check","source":fixture.root,"source_file":"root_compose.fsl","files":fixture.files,"unstable":["fsl5"]})).unwrap();
+    let mut request: Request = serde_json::from_value(serde_json::json!({"cmd":"check","source":fixture.root,"source_file":"root_compose.fsl","files":fixture.files})).unwrap();
     request
         .files
         .insert("unused.fsl".into(), cases::next_leaf());

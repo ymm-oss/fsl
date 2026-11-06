@@ -35,17 +35,10 @@ fn e2e() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fsl5/e2e")
 }
 
-/// `(stdout as JSON, exit)` of `fslc check <file>` in `directory`, with the
-/// `fsl5` gate set when `gate`.
-fn check(directory: &Path, file: &str, gate: bool) -> (Value, i32) {
+/// `(stdout as JSON, exit)` of `fslc check <file>` in `directory`.
+fn check(directory: &Path, file: &str) -> (Value, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    command
-        .args(["check", file])
-        .current_dir(directory)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if gate {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    }
+    command.args(["check", file]).current_dir(directory);
     let output = command.output().expect("run fslc check");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
@@ -208,7 +201,7 @@ fn each_particle_diagnostic_fails_check_at_its_text() {
         );
         let text = original.replacen(broken.from, broken.to, 1);
         let directory = scratch(broken.label, &text);
-        let (output, exit) = check(&directory, "doc.fsl", true);
+        let (output, exit) = check(&directory, "doc.fsl");
         assert_eq!(exit, 2, "{}: {output:#}", broken.label);
         assert_eq!(
             output["diagnostic_code"], broken.code,
@@ -234,7 +227,7 @@ fn each_particle_diagnostic_fails_check_at_its_text() {
 fn the_negative_examples_start_from_a_document_that_checks() {
     let original = std::fs::read_to_string(e2e().join("fsl5_ja_full.fsl")).expect("fixture");
     let directory = scratch("clean", &original);
-    let (output, exit) = check(&directory, "doc.fsl", true);
+    let (output, exit) = check(&directory, "doc.fsl");
     assert_eq!(
         (output["result"].as_str(), exit),
         (Some("ok"), 0),
@@ -242,14 +235,14 @@ fn the_negative_examples_start_from_a_document_that_checks() {
     );
 }
 
-/// The table is read in next-edition requirements only: behind the gate, a
-/// `spec` headed `fsl 5` does not read `定数` as `const`, and without the
-/// gate a requirements document in Japanese keywords is not read.
+/// The table is read in next-edition requirements only: a `spec` headed
+/// `fsl 5` does not read `定数` as `const`, and without the `fsl 5` header a
+/// requirements document in Japanese keywords is not read.
 #[test]
 fn japanese_keywords_are_read_in_next_edition_requirements_only() {
     let spec = "fsl 5\nspec S {\n  定数 N = 1\n  state { x: Int }\n  init { x = 0 }\n}\n";
     let directory = scratch("spec", spec);
-    let (output, exit) = check(&directory, "doc.fsl", true);
+    let (output, exit) = check(&directory, "doc.fsl");
     assert_eq!(exit, 2, "{output:#}");
     assert_eq!(output["diagnostic_code"], "FSL-PARSE", "{output:#}");
     assert_eq!(
@@ -262,8 +255,10 @@ fn japanese_keywords_are_read_in_next_edition_requirements_only() {
     );
 
     let original = std::fs::read_to_string(e2e().join("fsl5_ja_full.fsl")).expect("fixture");
-    let directory = scratch("ungated", &original);
-    let (output, exit) = check(&directory, "doc.fsl", false);
+    let headerless = original.replacen("fsl 5\n", "", 1);
+    assert_ne!(headerless, original, "the fixture is headed fsl 5");
+    let directory = scratch("headerless", &headerless);
+    let (output, exit) = check(&directory, "doc.fsl");
     assert_eq!(
         (output["result"].as_str(), exit),
         (Some("error"), 2),
@@ -451,7 +446,7 @@ fn the_requirements_skill_example_reads_the_same_in_japanese() {
         );
         let path = directory.join(file);
         std::fs::write(&path, source).expect("write the example");
-        kernels.push(kernel_compare::kernel_v2_fsl5(&path));
+        kernels.push(kernel_compare::kernel_v2(&path));
     }
     kernel_compare::assert_same_kernel(
         &kernels[0],

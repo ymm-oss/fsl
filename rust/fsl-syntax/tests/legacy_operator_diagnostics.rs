@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use fsl_syntax::{
-    ParseOptions, SourceFile, UnstableFeature, UnstableFeatures, parse_document_with,
-};
+use fsl_syntax::{ParseOptions, SourceFile, parse_document_with};
 
 fn options() -> ParseOptions {
-    ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5))
+    ParseOptions::stable()
 }
 
 #[test]

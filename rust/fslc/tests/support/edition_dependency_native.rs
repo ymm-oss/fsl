@@ -23,12 +23,6 @@ fn consume(path: &Path, source: &str) -> (Value, i32) {
 }
 
 fn dependency_edition_o01_fresh_thread_has_no_owner_and_fails_closed() {
-    assert!(
-        crate::parse_options()
-            .unstable()
-            .contains(fsl_syntax::UnstableFeature::Fsl5),
-        "run this adapter with FSLC_UNSTABLE=fsl5"
-    );
     let (scratch, path, source) = fixture();
     scratch.write("dep.fsl", cases::LEAF);
     let canonical =
@@ -336,33 +330,9 @@ fn dependency_edition_e08_compiles_against_a_canonical_prefix() {
     observations.finish();
 }
 
-// Match the existing adapter's process-local opt-in; never mutate the test
-// runner's environment while other tests are executing.
-fn in_fsl5_test_process() -> bool {
-    if crate::parse_options()
-        .unstable()
-        .contains(fsl_syntax::UnstableFeature::Fsl5)
-    {
-        return true;
-    }
-    let status = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([std::thread::current().name().unwrap(), "--exact"])
-        .env("FSLC_UNSTABLE", "fsl5")
-        .status()
-        .unwrap();
-    assert!(
-        status.success(),
-        "opted-in seam test must execute successfully"
-    );
-    false
-}
-
 #[test]
 fn dependency_edition_prepared_execution_has_exact_captured_slots_and_no_readmission() {
     use spec_loading::admission_observer::{self as observer, Event};
-    if !in_fsl5_test_process() {
-        return;
-    }
     let s = common::Scratch::new();
     let layer = format!("fsl 4\n{}", cases::LEGACY_LEAF);
     let mapping = "fsl 5\nrefinement M { impl S abs S maps auto }\n";
@@ -679,9 +649,6 @@ fn dependency_edition_positional_carrier_keeps_errors_and_captured_grouping() {
 #[allow(clippy::too_many_lines)]
 fn dependency_edition_actual_workers_transport_tokens_and_finish_detail_before_wrapper() {
     use spec_loading::admission_observer::{self as observer, Event};
-    if !in_fsl5_test_process() {
-        return;
-    }
     let s = common::Scratch::new();
     let caller = std::thread::current().id();
     let layers = ["business", "requirements", "design"];
@@ -829,14 +796,6 @@ fn dependency_edition_actual_workers_transport_tokens_and_finish_detail_before_w
 
 #[test]
 fn dependency_edition_private_adapter_executes_all_assigned_rows() {
-    let gate = fsl_syntax::UnstableFeature::Fsl5;
-    if !crate::parse_options().unstable().contains(gate) {
-        let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-        child.args([std::thread::current().name().unwrap(), "--exact"]);
-        child.env("FSLC_UNSTABLE", "fsl5");
-        assert!(child.status().unwrap().success());
-        return;
-    }
     let scratch = common::Scratch::new();
     scratch.write("dep.fsl", "fsl 99\n");
     let log = fslc_rust::migration::DependencyRecords::default();

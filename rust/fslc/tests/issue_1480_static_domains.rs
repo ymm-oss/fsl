@@ -42,11 +42,10 @@ impl Fixture {
             .args(&args)
             .current_dir(&self.0)
             .env("FSLC_CACHE", "off")
-            .env_remove("FSLC_UNSTABLE")
             .output()
             .expect("native CLI");
         eprintln!(
-            "RAW bin={} cwd={} argv={args:?} FSLC_CACHE=off FSLC_UNSTABLE=unset exit={:?}\nstdout={}\nstderr={}",
+            "RAW bin={} cwd={} argv={args:?} FSLC_CACHE=off exit={:?}\nstdout={}\nstderr={}",
             env!("CARGO_BIN_EXE_fslc"),
             self.0.display(),
             out.status.code(),

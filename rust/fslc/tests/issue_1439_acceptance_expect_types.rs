@@ -55,11 +55,7 @@ fn check(label: &str, predicate: &str, next_edition: bool) -> (Value, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
     command
         .args(["check", "comparison.fsl"])
-        .current_dir(&scratch.0)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if next_edition {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    }
+        .current_dir(&scratch.0);
     let output = command.output().expect("run native fslc check");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(

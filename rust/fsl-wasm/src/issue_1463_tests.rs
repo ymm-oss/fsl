@@ -21,7 +21,6 @@ mod issue_1463 {
                 source_file: "support.fsl".into(),
                 files: c.files.iter().cloned().collect(),
                 options: Options::default(),
-                unstable: Vec::new(),
             };
             let mut no_solver = || -> Result<fsl_solver_z3js::Z3JsSolver, String> {
                 panic!("{}: source preflight must not request a solver", c.id)
@@ -90,7 +89,6 @@ mod issue_1463 {
                 source_file: "range.fsl".into(),
                 files: std::collections::BTreeMap::default(),
                 options: Options::default(),
-                unstable: Vec::new(),
             };
             let mut no_solver = || -> Result<fsl_solver_z3js::Z3JsSolver, String> {
                 panic!("range admission must precede solver creation")
@@ -134,7 +132,6 @@ mod issue_1463 {
                 source_file: "priority.fsl".into(),
                 files: std::collections::BTreeMap::default(),
                 options: Options::default(),
-                unstable: Vec::new(),
             };
             let mut no_solver = || -> Result<fsl_solver_z3js::Z3JsSolver, String> {
                 panic!("init admission must precede solver creation")

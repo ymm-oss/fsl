@@ -74,7 +74,6 @@ fn fslc(directory: &Path, args: &[&str]) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(args)
         .current_dir(directory)
-        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
         .output()
         .expect("run fslc");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -172,7 +171,7 @@ fn m_a_boundary_moved_by_one_differs_in_k_and_fails_r() {
     let file = scratch.write("moved.fsl", &moved);
     assert!(
         kernel_compare::difference(
-            &kernel_compare::kernel_v2_fsl5(&scratch.0.join(&file)),
+            &kernel_compare::kernel_v2(&scratch.0.join(&file)),
             &kernel_compare::kernel_v2(&fixture_dir("e2e").join("lowered_decide.fsl")),
         )
         .is_some(),

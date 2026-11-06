@@ -66,7 +66,6 @@ fn check(directory: &Path, file: &str) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["check", file])
         .current_dir(directory)
-        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
         .output()
         .expect("run fslc check");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {

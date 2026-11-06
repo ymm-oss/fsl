@@ -240,7 +240,6 @@ fn run_files(label: &str, files: &[(&str, &str)]) -> [(i32, Value); 4] {
         let output = command
             .current_dir(&directory)
             .env("FSLC_CACHE", "off")
-            .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
             .output()
             .expect("run native regression");
         assert!(output.stderr.is_empty(), "{label} {route}: {output:?}");

@@ -55,7 +55,6 @@ fn run(label: &str, text: &str) -> Vec<(&'static str, i32, Value)> {
             }
             let output = command
                 .current_dir(&directory)
-                .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
                 .env("FSLC_CACHE", "off")
                 .output()
                 .expect("run fslc");

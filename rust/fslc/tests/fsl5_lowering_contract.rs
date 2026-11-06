@@ -159,19 +159,8 @@ fn example_dir(name: &str) -> PathBuf {
 }
 
 /// `fslc refine <implementation> <abstraction> <mapping> --depth 8` in
-/// `dir`, in the published language.
+/// `dir`.
 fn refine(dir: &Path, implementation: &str, abstraction: &str, mapping: &str) -> (Value, i32) {
-    refine_with(dir, implementation, abstraction, mapping, None)
-}
-
-/// [`refine`] with the `unstable` features enabled.
-fn refine_with(
-    dir: &Path,
-    implementation: &str,
-    abstraction: &str,
-    mapping: &str,
-    unstable: Option<&str>,
-) -> (Value, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
     command
         .args([
@@ -182,11 +171,7 @@ fn refine_with(
             "--depth",
             "8",
         ])
-        .current_dir(dir)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if let Some(features) = unstable {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, features);
-    }
+        .current_dir(dir);
     let output = command.output().expect("run fslc refine");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
@@ -294,8 +279,7 @@ fn r_complete_fsl5_sources_and_the_original_refine_each_other() {
             (source, contract.original, "refines_lowered_to_original.fsl"),
             (contract.original, source, "refines_original_to_lowered.fsl"),
         ] {
-            let (output, exit) =
-                refine_with(&dir, implementation, abstraction, mapping, Some("fsl5"));
+            let (output, exit) = refine(&dir, implementation, abstraction, mapping);
             assert_eq!(
                 (output["result"].as_str(), exit),
                 (Some("refines"), 0),
@@ -337,7 +321,7 @@ fn m_a_source_without_a_rule_differs_in_k_and_fails_r() {
             .expect("write weakened source");
         let difference = kernel_compare::difference(
             &kernel_compare::kernel_v2(&dir.join(lowering)),
-            &kernel_compare::kernel_v2_fsl5(&dir.join("weakened.fsl")),
+            &kernel_compare::kernel_v2(&dir.join("weakened.fsl")),
         );
         assert!(
             difference.is_some(),
@@ -349,12 +333,11 @@ fn m_a_source_without_a_rule_differs_in_k_and_fails_r() {
                 .find(|candidate| candidate.name == example)
                 .expect("an example with an original")
                 .original;
-            let (output, exit) = refine_with(
+            let (output, exit) = refine(
                 &dir,
                 "weakened.fsl",
                 original,
                 "refines_lowered_to_original.fsl",
-                Some("fsl5"),
             );
             assert_eq!(
                 (output["result"].as_str(), exit),
@@ -390,7 +373,7 @@ fn k_fsl5_sources_lower_to_the_lowered_kernel() {
     for &(example, source, lowering) in FSL5_SOURCES {
         let dir = example_dir(example);
         kernel_compare::assert_same_kernel(
-            &kernel_compare::kernel_v2_fsl5(&dir.join(source)),
+            &kernel_compare::kernel_v2(&dir.join(source)),
             &kernel_compare::kernel_v2(&dir.join(lowering)),
             &format!("{example}/{source} against {lowering}"),
         );
@@ -436,19 +419,9 @@ fn norules_lowerings_only_delete_requires_lines() {
 
 /// The requirement IDs of every target of `file`'s kernel model that has
 /// one (`action:submit`, `property:invariant:…`), from its annotations.
-fn annotated_requirements(
-    dir: &Path,
-    file: &str,
-    fsl5: bool,
-) -> BTreeMap<String, BTreeSet<String>> {
+fn annotated_requirements(dir: &Path, file: &str) -> BTreeMap<String, BTreeSet<String>> {
     let source = std::fs::read_to_string(dir.join(file)).expect("read source");
-    let options = if fsl5 {
-        fsl_syntax::ParseOptions::with_unstable(
-            fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-        )
-    } else {
-        fsl_syntax::ParseOptions::default()
-    };
+    let options = fsl_syntax::ParseOptions::stable();
     let kernel = fsl_core::parse_kernel_source_with_file_with_options(
         &source,
         &fsl_core::FsResolver::new(dir.to_path_buf()),
@@ -491,15 +464,9 @@ fn kernel_requirements(kernel: &Value) -> BTreeMap<String, Option<String>> {
 /// `(ID, status)`, in order. The whole-spec row (`（仕様全体）`) is left out:
 /// it holds the findings of no requirement, such as the warnings only a
 /// next-edition source has.
-fn ledger_rows(dir: &Path, file: &str, fsl5: bool) -> Vec<(String, String)> {
+fn ledger_rows(dir: &Path, file: &str) -> Vec<(String, String)> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    command
-        .args(["ledger", file])
-        .current_dir(dir)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if fsl5 {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    }
+    command.args(["ledger", file]).current_dir(dir);
     let output = command.output().expect("run fslc ledger");
     let ledger = String::from_utf8(output.stdout).expect("UTF-8 ledger");
     assert!(output.status.success(), "ledger {file}: {ledger}");
@@ -526,17 +493,17 @@ fn t_fsl5_sources_attribute_the_requirements_of_the_lowered_kernel() {
             continue;
         }
         let dir = example_dir(example);
-        let annotated = annotated_requirements(&dir, source, true);
+        let annotated = annotated_requirements(&dir, source);
         assert_eq!(
             annotated,
-            annotated_requirements(&dir, lowering, false),
+            annotated_requirements(&dir, lowering),
             "{example}/{source}: requirement annotations against {lowering}"
         );
         // The kernel's one `requirement` of a target is one of its annotated
         // IDs; an action's is the one `lowered.fsl`'s requirement block gives
         // it. (A `trans` or an `@requirement` in `lowered.fsl` reaches the
         // annotations only, so properties are held to the first check.)
-        let kernel = kernel_requirements(&kernel_compare::kernel_v2_fsl5(&dir.join(source)));
+        let kernel = kernel_requirements(&kernel_compare::kernel_v2(&dir.join(source)));
         for (target, id) in &kernel {
             if let Some(id) = id {
                 assert!(
@@ -559,10 +526,10 @@ fn t_fsl5_sources_attribute_the_requirements_of_the_lowered_kernel() {
             "{example}/{source}: the actions' kernel `requirement` against {lowering}"
         );
         // The ledger lists the same requirements, each with the same status.
-        let expected = ledger_rows(&dir, lowering, false);
+        let expected = ledger_rows(&dir, lowering);
         assert!(!expected.is_empty(), "{example}/{lowering}: no ledger rows");
         assert_eq!(
-            ledger_rows(&dir, source, true),
+            ledger_rows(&dir, source),
             expected,
             "{example}/{source}: ledger rows against {lowering}"
         );

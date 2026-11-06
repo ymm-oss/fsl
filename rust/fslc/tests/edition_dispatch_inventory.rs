@@ -385,7 +385,7 @@ fn all_cells_agree_across_the_complete_native_adapters() {
         root_slots::manifest_layers_and_mapping_refuse_before_the_implementation_marker();
         root_slots::causal_explicit_mapping_is_a_root_and_missing_sidecars_lose_to_refusal();
         root_slots::closed_schemas_and_raw_output_send_the_exact_warning_to_stderr_once();
-        root_slots::header_flag_conflict_and_gate_off_modes_are_preserved();
+        root_slots::header_flag_conflict_and_headerless_modes_are_preserved();
         root_slots::checked_repairs_and_editionless_sources_are_preserved();
     }));
     cells.extend(ownership::cases::capture(|| {

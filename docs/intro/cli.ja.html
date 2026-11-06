@@ -491,15 +491,22 @@ options:
   --allow-unwired       emit runtime skips instead of failures for unwired adapters
   -o, --output OUTPUT
 </pre></div></details></div></div></details>
-<details><summary>fslc explain</summary><div class="tree-body"><pre>usage: fslc explain [-h] [--depth DEPTH] [--readable] file
+<details><summary>fslc explain</summary><div class="tree-body"><pre>usage: fslc explain [-h] [--depth DEPTH] [--readable] [--lowering]
+                    [--names {canonical,alias}]
+                    file
 
 positional arguments:
   file
 
 options:
-  -h, --help     show this help message and exit
+  -h, --help            show this help message and exit
   --depth DEPTH
   --readable
+  --lowering            add a &#x27;lowering&#x27; object: each action&#x27;s and property&#x27;s
+                        origins
+  --names {canonical,alias}
+                        spell glossary names as their alias (default) or
+                        canonical name
 </pre></div></details>
 <details><summary>fslc html</summary><div class="tree-body"><pre>usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] [--no-timing] file
 
@@ -892,7 +899,7 @@ options:
   --kernel-version {1,2}
                         public Kernel major (default: 1)
 </pre></div></details>
-<details><summary>fslc fmt</summary><div class="tree-body"><pre>usage: fslc fmt [-h] [--check] [--edition {current,next}] path [path ...]
+<details><summary>fslc fmt</summary><div class="tree-body"><pre>usage: fslc fmt [-h] [--check] [--edition {current,next}] [--lang {ja,en}] [--names {alias,canonical}] path [path ...]
 
 Format one registered FSL document to stdout without mutating it. Multiple paths are accepted only with --check. Use &#x27;-&#x27; for stdin.
 
@@ -904,8 +911,11 @@ options:
   --check               report whether formatting is required (exit 0 clean, 1 changed)
   --edition {current,next}
                         formatting policy (default: current)
+  --lang {ja,en}        respell every keyword in one language (fsl 5 requirements)
+  --names {alias,canonical}
+                        respell glossary names as their alias or canonical name (fsl 5 requirements)
 </pre></div></details>
-<details><summary>fslc lint</summary><div class="tree-body"><pre>usage: fslc lint [-h] [--edition {current,next}] [--project PROJECT] path [path ...]
+<details><summary>fslc lint</summary><div class="tree-body"><pre>usage: fslc lint [-h] [--edition {current,next}] [--project PROJECT] [--strict-names] path [path ...]
 
 Report stable edition and ID-policy diagnostics without mutating source files.
 
@@ -917,6 +927,7 @@ options:
   --edition {current,next}
                         lint policy (default: current)
   --project PROJECT     explicit fsl-project.toml ID-policy manifest
+  --strict-names        warn &#x27;mixed_names&#x27; where a glossary name is also written as its canonical name
 </pre></div></details>
 <details><summary>fslc migrate</summary><div class="tree-body"><pre>usage: fslc migrate [-h] [--edition {current,next}] [--write] path [path ...]
 

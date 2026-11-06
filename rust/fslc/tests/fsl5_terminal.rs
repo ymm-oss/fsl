@@ -37,7 +37,6 @@ impl Scratch {
             .args(args)
             .arg("doc.fsl")
             .current_dir(&self.0)
-            .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5")
             .output()
             .expect("run fslc");
         serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {

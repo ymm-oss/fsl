@@ -185,27 +185,19 @@ verify { instances Case = 3 }
 
 #[test]
 fn fmt_prints_requirement_ids_as_written() {
-    for (path, features) in [
-        ("examples/e2e/2_requirements.fsl", None),
-        ("examples/nfr/support_sla.fsl", None),
-        ("examples/gallery/injected/bank__guard_weakening.fsl", None),
-        ("examples/consulting/governance_controls.fsl", None),
-        ("examples/e2e/1_business.fsl", None),
-        (
-            "rust/fslc/tests/fixtures/fsl5/e2e/fsl5_en.fsl",
-            Some("fsl5"),
-        ),
+    for path in [
+        "examples/e2e/2_requirements.fsl",
+        "examples/nfr/support_sla.fsl",
+        "examples/gallery/injected/bank__guard_weakening.fsl",
+        "examples/consulting/governance_controls.fsl",
+        "examples/e2e/1_business.fsl",
+        "rust/fslc/tests/fixtures/fsl5/e2e/fsl5_en.fsl",
     ] {
         let source = fs::read_to_string(root().join(path)).expect("corpus source");
         let ids = compact_hyphen_runs(&source);
         assert!(!ids.is_empty(), "{path} spells no IDs");
         let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
         command.args(["fmt", path]).current_dir(root());
-        if let Some(features) = features {
-            command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, features);
-        } else {
-            command.env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-        }
         let formatted = command.output().expect("run fslc");
         assert!(
             formatted.status.success(),

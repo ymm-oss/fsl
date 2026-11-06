@@ -41,7 +41,7 @@ impl Drop for Scratch {
     }
 }
 
-fn check(label: &str, source: &str, fsl5: bool) -> Value {
+fn check(label: &str, source: &str) -> Value {
     let scratch = Scratch(
         Path::new(env!("CARGO_TARGET_TMPDIR"))
             .join("issue_1439_trace_binding_scope")
@@ -50,13 +50,7 @@ fn check(label: &str, source: &str, fsl5: bool) -> Value {
     std::fs::create_dir_all(&scratch.0).expect("create owned inline fixture directory");
     std::fs::write(scratch.0.join("trace.fsl"), source).expect("write inline fixture");
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    command
-        .args(["check", "trace.fsl"])
-        .current_dir(&scratch.0)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if fsl5 {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    }
+    command.args(["check", "trace.fsl"]).current_dir(&scratch.0);
     let output = command.output().expect("run native check");
     assert!(output.stderr.is_empty(), "{label}: {output:?}");
     let envelope: Value = serde_json::from_slice(&output.stdout).expect("native JSON envelope");
@@ -74,7 +68,7 @@ fn check(label: &str, source: &str, fsl5: bool) -> Value {
 
 #[test]
 fn trace_argument_rejects_pattern_binding_outside_its_logical_continuation() {
-    let output = check("binding-step", BINDING_STEP, false);
+    let output = check("binding-step", BINDING_STEP);
     assert!(
         output["message"].as_str().is_some_and(|message| {
             message.contains("public Kernel cannot type identifier 'z'")
@@ -85,7 +79,7 @@ fn trace_argument_rejects_pattern_binding_outside_its_logical_continuation() {
 
 #[test]
 fn reordered_particle_argument_error_starts_at_the_instance_token() {
-    let output = check("instance-first", REORDERED_PARTICLE, true);
+    let output = check("instance-first", REORDERED_PARTICLE);
     assert!(output["message"].as_str().is_some_and(|message| {
         message.contains("expression of type Int is not assignable to Named(\"ClaimStage\")")
     }));

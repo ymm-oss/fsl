@@ -32,12 +32,12 @@ mod kernel_compare;
 mod parallel;
 
 /// A glossary source and its canonical twin, the same model in canonical
-/// names: `fsl5/<example>/<twin>`, read behind the gate when `twin_gated`.
+/// names: `fsl5/<example>/<twin>`, itself headed `fsl 5` when `twin_next`.
 struct Source {
     example: &'static str,
     name: &'static str,
     twin: &'static str,
-    twin_gated: bool,
+    twin_next: bool,
 }
 
 /// The entity / event / scenario fixture in Japanese aliases, which
@@ -46,7 +46,7 @@ const ENTITY_FORM: Source = Source {
     example: "e2e",
     name: "glossary_ja.fsl",
     twin: "fsl5_en_norules.fsl",
-    twin_gated: true,
+    twin_next: true,
 };
 
 const SOURCES: &[Source] = &[
@@ -54,13 +54,13 @@ const SOURCES: &[Source] = &[
         example: "e2e",
         name: "glossary_ascii.fsl",
         twin: "fsl5_en_norules.fsl",
-        twin_gated: true,
+        twin_next: true,
     },
     Source {
         example: "rejection",
         name: "glossary_ja.fsl",
         twin: "original.fsl",
-        twin_gated: false,
+        twin_next: false,
     },
 ];
 
@@ -102,16 +102,12 @@ fn source(example: &str, name: &str) -> PathBuf {
 }
 
 /// `(stdout, exit)` of `fslc <args...> <path>` run in `path`'s directory.
-fn fslc(args: &[&str], path: &Path, gate: bool) -> (String, i32) {
+fn fslc(args: &[&str], path: &Path) -> (String, i32) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
     command
         .args(args)
         .arg(path.file_name().expect("file name"))
-        .current_dir(path.parent().expect("directory"))
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if gate {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    }
+        .current_dir(path.parent().expect("directory"));
     let output = command.output().expect("run fslc");
     (
         String::from_utf8(output.stdout).expect("UTF-8 stdout"),
@@ -215,15 +211,11 @@ fn broken_copy(label: &str, from: &str, to: &str) -> (PathBuf, String) {
 /// K: the source checks, and lowers to the kernel its canonical twin lowers
 /// to, names and all.
 fn assert_canonical_kernel(source: &Source) {
-    let (check, exit) = fslc(&["check"], &source.path(), true);
+    let (check, exit) = fslc(&["check"], &source.path());
     assert_eq!(exit, 0, "{}: {check}", source.context());
-    let twin = if source.twin_gated {
-        kernel_compare::kernel_v2_fsl5(&source.twin_path())
-    } else {
-        kernel_compare::kernel_v2(&source.twin_path())
-    };
+    let twin = kernel_compare::kernel_v2(&source.twin_path());
     kernel_compare::assert_same_kernel(
-        &kernel_compare::kernel_v2_fsl5(&source.path()),
+        &kernel_compare::kernel_v2(&source.path()),
         &twin,
         &source.context(),
     );
@@ -247,10 +239,10 @@ const EXPLAIN_COMMANDS: [&[&str]; 4] = [
     &["explain", "--readable"],
 ];
 
-fn observe_outputs(jobs: &[(PathBuf, Vec<&str>, bool)]) -> std::vec::IntoIter<(String, i32)> {
+fn observe_outputs(jobs: &[(PathBuf, Vec<&str>)]) -> std::vec::IntoIter<(String, i32)> {
     parallel::map(jobs.len(), |index| {
-        let (path, args, gate) = &jobs[index];
-        fslc(args, path, *gate)
+        let (path, args) = &jobs[index];
+        fslc(args, path)
     })
     .into_iter()
 }
@@ -269,7 +261,7 @@ fn assert_ascii_outputs(sources: &[(PathBuf, String, bool)]) {
                         .take(if *japanese { 4 } else { 2 })
                         .map(<[_]>::to_vec),
                 )
-                .map(move |args| (path.clone(), args, true))
+                .map(move |args| (path.clone(), args))
         })
         .collect::<Vec<_>>();
     let mut outputs = observe_outputs(&jobs);
@@ -370,7 +362,7 @@ fn aliases_resolve_inside_entity_event_and_scenario() {
     let source = ENTITY_FORM;
     assert_canonical_kernel(&source);
     assert_ascii_outputs(&[(source.path(), source.context(), true)]);
-    let kernel = kernel_compare::kernel_v2_fsl5(&source.path());
+    let kernel = kernel_compare::kernel_v2(&source.path());
     let mut phrases = Vec::new();
     for origin in kernel["provenance"]["origins"].as_array().expect("origins") {
         for step in origin["lowering_steps"].as_array().into_iter().flatten() {
@@ -418,12 +410,8 @@ fn explain_names_canonical_is_the_canonical_explanation() {
             .iter()
             .flat_map(|source| {
                 [
-                    (source.path(), EXPLAIN_COMMANDS[0].to_vec(), true),
-                    (
-                        source.twin_path(),
-                        EXPLAIN_COMMANDS[2].to_vec(),
-                        source.twin_gated,
-                    ),
+                    (source.path(), EXPLAIN_COMMANDS[0].to_vec()),
+                    (source.twin_path(), EXPLAIN_COMMANDS[2].to_vec()),
                 ]
             })
             .collect::<Vec<_>>(),
@@ -435,7 +423,7 @@ fn explain_names_canonical_is_the_canonical_explanation() {
         let twin = json(&twin);
         assert_eq!(canonical["edition"], "next", "{}", source.context());
         assert_eq!(canonical["fsl_edition"], 5, "{}", source.context());
-        if source.twin_gated {
+        if source.twin_next {
             assert_eq!(twin["edition"], "next", "{}", source.context());
             assert_eq!(twin["fsl_edition"], 5, "{}", source.context());
         } else {
@@ -574,7 +562,7 @@ fn each_glossary_diagnostic_fails_check_at_its_text() {
             broken.from,
             broken.to,
         );
-        let (stdout, exit) = fslc(&["check"], &path, true);
+        let (stdout, exit) = fslc(&["check"], &path);
         let output = json(&stdout);
         assert_eq!(exit, 2, "{}: {output:#}", broken.code);
         assert_eq!(output["diagnostic_code"], broken.code, "{output:#}");
@@ -626,7 +614,7 @@ fn diagnostics_show_the_alias_beside_the_canonical_name() {
     .enumerate()
     {
         let (path, _) = broken_copy(&format!("display-{index}"), from, to);
-        let (stdout, exit) = fslc(&["check"], &path, true);
+        let (stdout, exit) = fslc(&["check"], &path);
         let output = json(&stdout);
         assert_eq!(exit, 2, "{output:#}");
         assert!(
@@ -653,7 +641,7 @@ fn strict_names_reports_mixed_names() {
         "  concept 少額申請 = 申請 where amount <= 自動承認上限",
     );
     let mixed = |args: &[&str]| {
-        let (stdout, _) = fslc(args, &path, true);
+        let (stdout, _) = fslc(args, &path);
         json(&stdout)["files"][0]["findings"]
             .as_array()
             .expect("findings")
@@ -678,7 +666,6 @@ fn strict_names_reports_mixed_names() {
     let (stdout, _) = fslc(
         &["lint", "--strict-names"],
         &source("e2e", "glossary_ja.fsl"),
-        true,
     );
     assert!(
         json(&stdout)["files"][0]["findings"]
@@ -690,15 +677,16 @@ fn strict_names_reports_mixed_names() {
     );
 }
 
-/// Outside a gated `fsl 5` document nothing changes: `glossary` is the
-/// unknown requirements declaration it always was, byte for byte, and the
-/// two options exist only behind the gate.
+/// Outside a `fsl 5` document nothing changes: `glossary` is the unknown
+/// requirements declaration it always was, and the two options are accepted
+/// without any opt-in (#1434) but still validate their values.
 #[test]
-fn glossary_and_its_options_need_the_gate_and_the_fsl5_header() {
+fn glossary_needs_the_fsl5_header() {
     let fsl5 = std::fs::read_to_string(source("e2e", "glossary_ascii.fsl")).expect("fixture");
     let body = fsl5.strip_prefix("fsl 5\n").expect("header");
     let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fsl5_glossary");
     std::fs::create_dir_all(&directory).expect("scratch directory");
+    let mut outputs = Vec::new();
     for (name, text) in [
         ("no-header.fsl", body.to_owned()),
         ("fsl4.fsl", format!("fsl 4\n{body}")),
@@ -707,43 +695,26 @@ fn glossary_and_its_options_need_the_gate_and_the_fsl5_header() {
         std::fs::write(&path, &text).expect("write");
         let (line, column) = position(&text, "glossary {", 0);
         let expected = format!("expected requirements declaration at {line}:{column}");
-        let (gated, gated_exit) = fslc(&["check"], &path, true);
-        let (published, published_exit) = fslc(&["check"], &path, false);
-        assert_eq!(gated_exit, 2, "{name}: {gated}");
-        assert_eq!(published_exit, 2, "{name}: {published}");
-        let mut gated = json(&gated);
-        let published = json(&published);
+        let (stdout, exit) = fslc(&["check"], &path);
+        assert_eq!(exit, 2, "{name}: {stdout}");
+        let mut output = json(&stdout);
+        assert_eq!(output["message"], expected.as_str(), "{name}");
         if name == "fsl4.fsl" {
-            // A header read under the gate adds only `fsl_edition`; without
-            // the gate the header is the unknown declaration `fsl`.
-            assert_eq!(gated["fsl_edition"], 4);
-            assert_eq!(gated["message"], expected.as_str());
-            assert_eq!(published["diagnostic_code"], "FSL-DIALECT-UNKNOWN");
+            // The header adds only `fsl_edition` (and moves the location).
+            let output = output.as_object_mut().expect("envelope");
+            assert_eq!(output.remove("fsl_edition"), Some(4.into()));
+            output.remove("message");
+            output.remove("loc");
         } else {
-            gated
-                .as_object_mut()
-                .expect("envelope")
-                .remove("fsl_edition");
-            assert_eq!(gated, published, "{name}");
-            assert_eq!(published["message"], expected.as_str());
+            let output = output.as_object_mut().expect("envelope");
+            output.remove("message");
+            output.remove("loc");
         }
+        outputs.push(output);
     }
+    assert_eq!(outputs[0], outputs[1]);
     let path = source("e2e", "glossary_ascii.fsl");
-    for (args, message) in [
-        (
-            &["explain", "--names", "canonical"][..],
-            "unknown explain option '--names'",
-        ),
-        (
-            &["lint", "--strict-names"][..],
-            "unknown lint option '--strict-names'",
-        ),
-    ] {
-        let (stdout, exit) = fslc(args, &path, false);
-        assert_eq!(exit, 2, "{args:?}: {stdout}");
-        assert_eq!(json(&stdout)["message"], message, "{args:?}");
-    }
-    let (stdout, exit) = fslc(&["explain", "--names", "both"], &path, true);
+    let (stdout, exit) = fslc(&["explain", "--names", "both"], &path);
     assert_eq!(
         (exit, json(&stdout)["message"].as_str()),
         (2, Some("--names must be canonical or alias"))

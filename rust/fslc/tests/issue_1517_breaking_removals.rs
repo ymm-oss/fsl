@@ -315,7 +315,6 @@ fn run(id: &str) {
         .args(["check", "root.fsl"])
         .current_dir(scratch.path())
         .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE")
         .output()
         .expect("CLI");
     let actual: Value = serde_json::from_slice(&output.stdout).expect("JSON packet");

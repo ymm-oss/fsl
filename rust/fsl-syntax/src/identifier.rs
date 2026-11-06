@@ -3,9 +3,9 @@
 
 //! Which identifiers the lexer reads, and the diagnostics of the wider rule.
 //!
-//! The published language reads `[A-Za-z_][A-Za-z0-9_]*`. Behind the `fsl5`
-//! unstable feature, a document whose first significant line is the `fsl 5`
-//! edition header reads UAX #31 identifiers (`XID_Start` `XID_Continue*`,
+//! A document without an edition header, or headed `fsl 4`, reads
+//! `[A-Za-z_][A-Za-z0-9_]*`. A document whose first significant line is the
+//! `fsl 5` edition header reads UAX #31 identifiers (`XID_Start` `XID_Continue*`,
 //! plus `_`) instead, read in Unicode normalization form C. Characters that
 //! look like ASCII or like a word separator are rejected there with their own
 //! codes rather than read as a different name.
@@ -60,7 +60,7 @@ pub const RESERVED_IDENTIFIER_CODES: &[&str] = &[CANONICAL_NAME_NOT_ASCII];
 /// The identifier rule a document is lexed with.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IdentifierRule {
-    /// `[A-Za-z_][A-Za-z0-9_]*`: the published language.
+    /// `[A-Za-z_][A-Za-z0-9_]*`: a headerless or `fsl 4` document.
     Ascii,
     /// UAX #31 identifiers in NFC, with the look-alike checks.
     Unicode,
@@ -68,7 +68,7 @@ pub enum IdentifierRule {
 
 impl IdentifierRule {
     /// The rule for `source` under `options`: [`Self::Unicode`] only when the
-    /// `fsl5` feature is enabled and the document opens with `fsl 5`.
+    /// document opens with `fsl 5`.
     #[must_use]
     pub fn for_source(source: &str, options: &ParseOptions) -> Self {
         match crate::edition_header(source, options) {
@@ -188,40 +188,28 @@ fn highly_restrictive(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{UnstableFeature, UnstableFeatures};
-
-    fn gated() -> ParseOptions {
-        ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5))
-    }
 
     #[test]
-    fn unicode_rule_needs_the_gate_and_the_fsl5_header() {
-        for (source, gate, expected) in [
-            ("fsl 5\nspec S {}", true, IdentifierRule::Unicode),
+    fn unicode_rule_needs_the_fsl5_header() {
+        for (source, expected) in [
+            ("fsl 5\nspec S {}", IdentifierRule::Unicode),
             (
                 "\u{feff}// 経費の仕様\n\n  fsl\t5 \r\nspec S {}",
-                true,
                 IdentifierRule::Unicode,
             ),
-            ("fsl 5", true, IdentifierRule::Unicode),
-            ("fsl 5\nspec S {}", false, IdentifierRule::Ascii),
-            ("fsl 4\nspec S {}", true, IdentifierRule::Ascii),
-            ("spec S {}", true, IdentifierRule::Ascii),
-            ("fsl 55\nspec S {}", true, IdentifierRule::Ascii),
-            ("fsl5\nspec S {}", true, IdentifierRule::Ascii),
-            ("fsl 5 spec S {}", true, IdentifierRule::Ascii),
-            ("spec S {}\nfsl 5\n", true, IdentifierRule::Ascii),
-            ("// fsl 5\nspec S {}", true, IdentifierRule::Ascii),
+            ("fsl 5", IdentifierRule::Unicode),
+            ("fsl 4\nspec S {}", IdentifierRule::Ascii),
+            ("spec S {}", IdentifierRule::Ascii),
+            ("fsl 55\nspec S {}", IdentifierRule::Ascii),
+            ("fsl5\nspec S {}", IdentifierRule::Ascii),
+            ("fsl 5 spec S {}", IdentifierRule::Ascii),
+            ("spec S {}\nfsl 5\n", IdentifierRule::Ascii),
+            ("// fsl 5\nspec S {}", IdentifierRule::Ascii),
         ] {
-            let options = if gate {
-                gated()
-            } else {
-                ParseOptions::stable()
-            };
             assert_eq!(
-                IdentifierRule::for_source(source, &options),
+                IdentifierRule::for_source(source, &ParseOptions::stable()),
                 expected,
-                "{source:?} gate={gate}"
+                "{source:?}"
             );
         }
     }
@@ -252,38 +240,34 @@ mod tests {
         }
     }
 
-    /// The surface of a `fsl 5` document parsed behind the gate.
+    /// The surface of a `fsl 5` document.
     fn fsl5_surface(body: &str) -> Result<crate::SurfaceDocument, crate::ParseError> {
-        crate::parse_surface_document_with(&format!("fsl 5\n{body}"), &gated())
+        crate::parse_surface_document_with(&format!("fsl 5\n{body}"), &ParseOptions::stable())
     }
 
     fn fsl5_warnings(body: &str) -> Vec<&'static str> {
-        crate::lexical_warnings(&format!("fsl 5\n{body}"), &gated())
+        crate::lexical_warnings(&format!("fsl 5\n{body}"), &ParseOptions::stable())
             .into_iter()
             .map(|warning| warning.code)
             .collect()
     }
 
-    /// fsl 5 plan S2 acceptance 1: outside a gated `fsl 5` document a
-    /// Japanese identifier is the published unexpected character, error for
-    /// error.
+    /// fsl 5 plan S2 acceptance 1: outside a `fsl 5` document a Japanese
+    /// identifier is the published unexpected character, error for error.
     #[test]
-    fn published_identifiers_hold_without_the_gate_or_the_header() {
+    fn published_identifiers_hold_without_the_fsl5_header() {
         let body = "spec S { state { 経費: Int } }";
-        for (source, options) in [
-            (body.to_owned(), gated()),
-            (format!("fsl 4\n{body}"), gated()),
-            (format!("fsl 5\n{body}"), ParseOptions::stable()),
-        ] {
+        let options = ParseOptions::stable();
+        for source in [body.to_owned(), format!("fsl 4\n{body}")] {
             let published = crate::lex(&source).unwrap_err();
             assert_eq!(crate::lex_with(&source, &options), Err(published.clone()));
             assert_eq!(published.code(), "FSL-PARSE");
             assert_eq!(published.message, "unexpected character '経'");
             assert!(crate::lexical_warnings(&source, &options).is_empty());
         }
-        // Behind both, the lexer reads the name; a spec has no glossary, so
+        // Under the header, the lexer reads the name; a spec has no glossary, so
         // the naming rule is what refuses it.
-        assert!(crate::lex_with(&format!("fsl 5\n{body}"), &gated()).is_ok());
+        assert!(crate::lex_with(&format!("fsl 5\n{body}"), &ParseOptions::stable()).is_ok());
         assert_eq!(
             fsl5_surface(body).unwrap_err().code(),
             CANONICAL_NAME_NOT_ASCII
@@ -383,7 +367,7 @@ mod tests {
         );
         let warning = &crate::lexical_warnings(
             "fsl 5\nspec S { state { \u{304b}\u{3099}: Int } }",
-            &gated(),
+            &ParseOptions::stable(),
         )[0];
         assert_eq!(warning.replacement, "\u{304c}");
         assert_eq!(
@@ -400,7 +384,7 @@ mod tests {
         let nfd = nfc.nfd().collect::<String>();
         assert_ne!(nfc, nfd);
         let tokens = |text: String| {
-            crate::lex_with(&format!("fsl 5\n{text}"), &gated())
+            crate::lex_with(&format!("fsl 5\n{text}"), &ParseOptions::stable())
                 .unwrap()
                 .into_iter()
                 .map(|token| token.kind)

@@ -4,14 +4,13 @@
 //! Syntax editions: the edition header a document opens with, and the one
 //! edition type every command and the formatter share.
 //!
-//! Behind the `fsl5` unstable feature, a document whose first significant
-//! line (after a BOM, whitespace and `//` comments, as the lexer skips them)
-//! is `fsl`, blanks, an integer is headed by that edition. The header is read
-//! before lexing, because the edition picks the lexer's identifier rule, and
-//! its two tokens never reach a frontend. Without the feature there is no
-//! header: the line is the unknown declaration `fsl`, exactly as before.
+//! A document whose first significant line (after a BOM, whitespace and `//`
+//! comments, as the lexer skips them) is `fsl`, blanks, an integer is headed
+//! by that edition. The header is read before lexing, because the edition
+//! picks the lexer's identifier rule, and its two tokens never reach a
+//! frontend. A document without a header is read as `fsl 4`.
 
-use crate::{ParseError, ParseOptions, Span, UnstableFeature};
+use crate::{ParseError, ParseOptions, Span};
 
 /// `--edition` contradicts the document's edition header.
 pub const EDITION_CONFLICT: &str = "edition_conflict";
@@ -93,19 +92,16 @@ impl Edition {
 
     /// Parse an `--edition` value. `current` requests no edition (the
     /// document's header decides, and no header is [`Self::Fsl4`]); `next` is
-    /// [`Self::Fsl5`]. With `fsl5` enabled the edition numbers `4` and `5` are
-    /// accepted too; otherwise the error is the published one.
+    /// [`Self::Fsl5`]. The edition numbers `4` and `5` are accepted too.
     ///
     /// # Errors
     ///
     /// Returns the usage message for any other value.
-    pub fn parse_option(value: &str, options: &ParseOptions) -> Result<Option<Self>, String> {
-        let numbers = options.unstable().contains(UnstableFeature::Fsl5);
+    pub fn parse_option(value: &str, _options: &ParseOptions) -> Result<Option<Self>, String> {
         match value {
             "current" => Ok(None),
-            "next" => Ok(Some(Self::Fsl5)),
-            "4" if numbers => Ok(Some(Self::Fsl4)),
-            "5" if numbers => Ok(Some(Self::Fsl5)),
+            "next" | "5" => Ok(Some(Self::Fsl5)),
+            "4" => Ok(Some(Self::Fsl4)),
             _ => Err("--edition must be current or next".to_owned()),
         }
     }
@@ -131,11 +127,8 @@ pub struct EditionHeader {
 /// Returns [`UNSUPPORTED_EDITION`] for a header naming another number.
 pub fn edition_header(
     source: &str,
-    options: &ParseOptions,
+    _options: &ParseOptions,
 ) -> Result<Option<EditionHeader>, ParseError> {
-    if !options.unstable().contains(UnstableFeature::Fsl5) {
-        return Ok(None);
-    }
     let Some((start, digits)) = header_line(source) else {
         return Ok(None);
     };
@@ -233,17 +226,13 @@ fn header_line(source: &str) -> Option<(usize, std::ops::Range<usize>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::UnstableFeatures;
-
-    fn gated() -> ParseOptions {
-        ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5))
-    }
 
     #[test]
-    fn header_is_read_only_behind_the_gate() {
+    fn header_is_read_by_the_published_language() {
         let source = "fsl 5\nrequirements R {}\n";
-        assert_eq!(edition_header(source, &ParseOptions::stable()), Ok(None));
-        let header = edition_header(source, &gated()).unwrap().unwrap();
+        let header = edition_header(source, &ParseOptions::stable())
+            .unwrap()
+            .unwrap();
         assert_eq!(header.edition, Edition::Fsl5);
         assert_eq!((header.span.start.line, header.span.start.column), (1, 1));
         assert_eq!((header.span.end.line, header.span.end.column), (1, 6));
@@ -258,12 +247,14 @@ mod tests {
             ("fsl 5", Edition::Fsl5),
         ] {
             assert_eq!(
-                edition_header(source, &gated()).unwrap().map(|h| h.edition),
+                edition_header(source, &ParseOptions::stable())
+                    .unwrap()
+                    .map(|h| h.edition),
                 Some(edition),
                 "{source:?}"
             );
         }
-        let header = edition_header("// 日本語\n  fsl 5\n", &gated())
+        let header = edition_header("// 日本語\n  fsl 5\n", &ParseOptions::stable())
             .unwrap()
             .unwrap();
         assert_eq!((header.span.start.line, header.span.start.column), (2, 3));
@@ -280,7 +271,11 @@ mod tests {
             "spec S {}\nfsl 5\n",
             "fsl\n5\nspec S {}",
         ] {
-            assert_eq!(edition_header(source, &gated()), Ok(None), "{source:?}");
+            assert_eq!(
+                edition_header(source, &ParseOptions::stable()),
+                Ok(None),
+                "{source:?}"
+            );
         }
     }
 
@@ -291,7 +286,7 @@ mod tests {
             ("fsl 3\n", "3"),
             ("fsl 99999999999999999999999\n", "99999999999999999999999"),
         ] {
-            let error = edition_header(source, &gated()).unwrap_err();
+            let error = edition_header(source, &ParseOptions::stable()).unwrap_err();
             assert_eq!(error.code(), UNSUPPORTED_EDITION);
             assert!(
                 error.message.contains(&format!("'fsl {number}'")),
@@ -310,24 +305,17 @@ mod tests {
             Edition::parse_option("next", &stable),
             Ok(Some(Edition::Fsl5))
         );
-        for value in ["4", "5", "fsl5", ""] {
+        assert_eq!(Edition::parse_option("4", &stable), Ok(Some(Edition::Fsl4)));
+        assert_eq!(Edition::parse_option("5", &stable), Ok(Some(Edition::Fsl5)));
+        for value in ["6", "fsl5", "FSL5", ""] {
             assert_eq!(
                 Edition::parse_option(value, &stable),
                 Err("--edition must be current or next".to_owned())
             );
         }
-        assert_eq!(
-            Edition::parse_option("4", &gated()),
-            Ok(Some(Edition::Fsl4))
-        );
-        assert_eq!(
-            Edition::parse_option("5", &gated()),
-            Ok(Some(Edition::Fsl5))
-        );
-        assert!(Edition::parse_option("6", &gated()).is_err());
 
         let resolve = |source: &str, requested, default| {
-            document_edition(source, requested, default, &gated())
+            document_edition(source, requested, default, &ParseOptions::stable())
                 .map_err(|error| error.code().to_owned())
         };
         let plain = "spec S {}";
@@ -351,7 +339,8 @@ mod tests {
             resolve("fsl 6\nspec S {}", Some(Fsl5), Fsl4),
             Err(UNSUPPORTED_EDITION.to_owned())
         );
-        let conflict = document_edition(five, Some(Fsl4), Fsl4, &gated()).unwrap_err();
+        let conflict =
+            document_edition(five, Some(Fsl4), Fsl4, &ParseOptions::stable()).unwrap_err();
         assert_eq!(
             conflict.message,
             "the document declares 'fsl 5' but --edition 4 was requested"
@@ -359,11 +348,6 @@ mod tests {
         assert_eq!(
             (conflict.span.start.line, conflict.span.start.column),
             (1, 1)
-        );
-        assert_eq!(
-            document_edition(five, Some(Fsl4), Fsl4, &ParseOptions::stable()),
-            Ok(Fsl4),
-            "without fsl5 the header is not read"
         );
         assert_eq!(Fsl4.as_str(), "current");
         assert_eq!(Fsl5.as_str(), "next");

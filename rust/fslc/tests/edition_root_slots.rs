@@ -6,8 +6,8 @@ pub(crate) mod cases;
 use cases::{Results, Scratch, value};
 use serde_json::Value;
 
-fn run(scratch: &Scratch, args: &[String], gate: bool) -> std::process::Output {
-    cases::invoke(env!("CARGO_BIN_EXE_fslc"), args, &scratch.0, gate)
+fn run(scratch: &Scratch, args: &[String]) -> std::process::Output {
+    cases::invoke(env!("CARGO_BIN_EXE_fslc"), args, &scratch.0)
 }
 
 #[test]
@@ -51,7 +51,7 @@ pub(crate) fn explicit_refine_diff_replay_and_batch_slots_are_admitted_individua
                 "{\"action\":\"finish\",\"params\":{},\"state\":{\"done\":true}}\n",
             );
             let args = cases::split(template);
-            let canonical = run(&scratch, &args, true);
+            let canonical = run(&scratch, &args);
             let canonical_value = value(&canonical);
             // The mapped log is a real conforming finish transition, not a
             // missing file or merely syntactically valid invalid record.
@@ -72,7 +72,7 @@ pub(crate) fn explicit_refine_diff_replay_and_batch_slots_are_admitted_individua
                 &scratch.0,
                 std::path::Path::new(slot),
             );
-            let output = run(&scratch, &args, true);
+            let output = run(&scratch, &args);
             results.error_envelope(&format!("slot/{template}/{slot}"), &output, &wanted, true);
         }
     }
@@ -119,7 +119,7 @@ pub(crate) fn manifest_layers_and_mapping_refuse_before_the_implementation_marke
             if keep_going {
                 args.push("--keep-going".into());
             }
-            let canonical = run(&scratch, &args, true);
+            let canonical = run(&scratch, &args);
             results.check(
                 &format!("preserved/chain/{layer}/{jobs}/{keep_going}/{checks_only}"),
                 canonical.status.code(),
@@ -133,7 +133,7 @@ pub(crate) fn manifest_layers_and_mapping_refuse_before_the_implementation_marke
                 "traceability_graph".into(),
             ];
             if jobs == 1 && !checks_only {
-                let canonical = run(&scratch, &analysis_args, true);
+                let canonical = run(&scratch, &analysis_args);
                 results.check(
                     &format!("preserved/project/{layer}"),
                     canonical.status.code(),
@@ -144,7 +144,7 @@ pub(crate) fn manifest_layers_and_mapping_refuse_before_the_implementation_marke
             let path = scratch.write(&format!("{layer}.fsl"), &rejected);
             scratch.write("project.toml", &manifest);
             let wanted = cases::refusal(env!("CARGO_BIN_EXE_fslc"), &scratch.0, &path);
-            let output = run(&scratch, &args, true);
+            let output = run(&scratch, &args);
             results.error_envelope(
                 &format!("chain/{layer}/{jobs}/{keep_going}/{checks_only}"),
                 &output,
@@ -152,7 +152,7 @@ pub(crate) fn manifest_layers_and_mapping_refuse_before_the_implementation_marke
                 !scratch.0.join("marker").exists(),
             );
             if jobs == 1 && !checks_only {
-                let analysis = run(&scratch, &analysis_args, true);
+                let analysis = run(&scratch, &analysis_args);
                 results.error_envelope(&format!("project/{layer}"), &analysis, &wanted, true);
             }
         }
@@ -182,7 +182,7 @@ pub(crate) fn causal_explicit_mapping_is_a_root_and_missing_sidecars_lose_to_ref
             root.display()
         );
         let args = cases::split(&command);
-        let output = run(&scratch, &args, true);
+        let output = run(&scratch, &args);
         results.error_envelope(
             &format!("causal/mapping/missing={missing}"),
             &output,
@@ -224,7 +224,7 @@ pub(crate) fn closed_schemas_and_raw_output_send_the_exact_warning_to_stderr_onc
                 *arg = "source.fsl".into();
             }
         }
-        let output = run(&scratch, &args, false);
+        let output = run(&scratch, &args);
         let expected = cases::findings(source, "source.fsl", fsl_syntax::Edition::Fsl4);
         let stderr = String::from_utf8(output.stderr).unwrap();
         let actual: Vec<Value> = stderr
@@ -254,27 +254,24 @@ pub(crate) fn closed_schemas_and_raw_output_send_the_exact_warning_to_stderr_onc
 }
 
 #[test]
-pub(crate) fn header_flag_conflict_and_gate_off_modes_are_preserved() {
+pub(crate) fn header_flag_conflict_and_headerless_modes_are_preserved() {
     let mut results = Results::default();
     for &(code, _, body) in cases::WARNING_CASES {
         let legacy = cases::legacy(code, body);
+        let next_refusal = if code == "deprecated_domain_enum_union" {
+            "deprecated_domain_enum_union"
+        } else {
+            "unsupported_in_edition"
+        };
         for verb in ["check", "verify"] {
-            for (header, flag, gate, expected_kind, expected_code) in [
-                ("", "current", false, "", ""),
-                (
-                    "",
-                    "next",
-                    false,
-                    if code == "deprecated_domain_enum_union" {
-                        "deprecated_domain_enum_union"
-                    } else {
-                        "unsupported_in_edition"
-                    },
-                    "",
-                ),
-                ("fsl 4\n", "next", true, "parse", "edition_conflict"),
-                ("fsl 5\n", "4", true, "parse", "edition_conflict"),
-                ("fsl 5\n", "next", false, "parse", "FSL-DIALECT-UNKNOWN"),
+            // #1434: the former gate-off row (`fsl 5` header read as the
+            // unknown declaration `fsl`) is now the header's own edition.
+            for (header, flag, expected_kind, expected_code) in [
+                ("", "current", "", ""),
+                ("", "next", next_refusal, ""),
+                ("fsl 4\n", "next", "parse", "edition_conflict"),
+                ("fsl 5\n", "4", "parse", "edition_conflict"),
+                ("fsl 5\n", "next", next_refusal, ""),
             ] {
                 let scratch = Scratch::new();
                 let path = scratch.write("source.fsl", &format!("{header}{legacy}"));
@@ -287,7 +284,7 @@ pub(crate) fn header_flag_conflict_and_gate_off_modes_are_preserved() {
                 if verb == "verify" {
                     args.extend(["--depth".into(), "2".into(), "--no-cache".into()]);
                 }
-                let output = run(&scratch, &args, gate);
+                let output = run(&scratch, &args);
                 let actual = value(&output);
                 let agrees = if expected_kind.is_empty() {
                     output.status.code() == Some(0)
@@ -304,7 +301,7 @@ pub(crate) fn header_flag_conflict_and_gate_off_modes_are_preserved() {
                         && (expected_code.is_empty() || actual["diagnostic_code"] == expected_code)
                 };
                 results.check(
-                    &format!("mode/{code}/{verb}/{header:?}/{flag}/{gate}"),
+                    &format!("mode/{code}/{verb}/{header:?}/{flag}"),
                     (output.status.code(), &actual),
                     (expected_kind, expected_code),
                     agrees,
@@ -330,7 +327,6 @@ pub(crate) fn checked_repairs_and_editionless_sources_are_preserved() {
                 path.to_str().unwrap().into(),
                 "--write".into(),
             ],
-            true,
         );
         let actual = value(&output);
         let migrated = std::fs::read_to_string(&path).unwrap();
@@ -344,11 +340,7 @@ pub(crate) fn checked_repairs_and_editionless_sources_are_preserved() {
                 && cases::findings(&migrated, path.to_str().unwrap(), fsl_syntax::Edition::Fsl5)
                     .is_empty(),
         );
-        let formatted = run(
-            &scratch,
-            &["fmt".into(), path.to_str().unwrap().into()],
-            true,
-        );
+        let formatted = run(&scratch, &["fmt".into(), path.to_str().unwrap().into()]);
         results.check(
             &format!("preserved/fmt/{code}"),
             formatted.status.code(),
@@ -358,23 +350,20 @@ pub(crate) fn checked_repairs_and_editionless_sources_are_preserved() {
     }
     let scratch = Scratch::new();
     let path = cases::root().join("examples/causal/incident_response.fsl");
-    for gate in [false, true] {
-        let output = run(
-            &scratch,
-            &[
-                "causal".into(),
-                "check".into(),
-                path.to_str().unwrap().into(),
-            ],
-            gate,
-        );
-        let actual = value(&output);
-        results.check(
-            &format!("preserved/editionless/{gate}"),
-            (output.status.code(), &actual),
-            "causal check without edition metadata",
-            output.status.code() == Some(0) && actual.get("fsl_edition").is_none(),
-        );
-    }
+    let output = run(
+        &scratch,
+        &[
+            "causal".into(),
+            "check".into(),
+            path.to_str().unwrap().into(),
+        ],
+    );
+    let actual = value(&output);
+    results.check(
+        "preserved/editionless",
+        (output.status.code(), &actual),
+        "causal check without edition metadata",
+        output.status.code() == Some(0) && actual.get("fsl_edition").is_none(),
+    );
     results.finish();
 }

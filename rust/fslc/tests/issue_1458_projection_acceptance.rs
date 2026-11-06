@@ -108,7 +108,6 @@ fn run(directory: &Path, args: &[&str]) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(args)
         .current_dir(directory)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
         .env("FSLC_CACHE", "off")
         .output()
         .expect("run native projection command");

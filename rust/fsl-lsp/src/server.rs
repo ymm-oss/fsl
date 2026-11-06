@@ -115,7 +115,7 @@ pub fn run_stdio() -> Result<(), Box<dyn std::error::Error + Sync + Send>> {
     let params: InitializeParams = serde_json::from_value(initialize)?;
     let mut state = ServerState {
         roots: workspace_roots(&params),
-        parse_options: fslc_rust::unstable_gate::from_environment(),
+        parse_options: fsl_syntax::ParseOptions::stable(),
         ..ServerState::default()
     };
 
@@ -383,15 +383,10 @@ fn publish_diagnostics(
         fslc_rust::source_diagnostic::trace_gate_diagnostics(&source, model, &state.parse_options)
     });
     // `check`'s last stage: the requirements checks the enumeration deferred,
-    // asked once the trace gate passes (decisions/048 J3).
+    // asked once the trace gate passes (decisions/048 J3). Only a `fsl 5`
+    // document has such checks.
     let requirements = match &model {
-        Some(model)
-            if trace_gate.is_empty()
-                && state
-                    .parse_options
-                    .unstable()
-                    .contains(fsl_syntax::UnstableFeature::Fsl5) =>
-        {
+        Some(model) if trace_gate.is_empty() && edition == fsl_syntax::Edition::Fsl5 => {
             requirements_diagnostics(&source, model, state.parse_options)
         }
         _ => Vec::new(),
@@ -1688,16 +1683,14 @@ mod tests {
     }
 
     /// A rename reaches every file that names the symbol, so the new name must
-    /// be an identifier under each file's own rule: a `fsl 5` document behind
-    /// the gate accepts `経費`, a published-language document never does.
+    /// be an identifier under each file's own rule: a `fsl 5` document
+    /// accepts `経費`, a headerless (`fsl 4`) document never does.
     #[test]
-    fn rename_target_rule_follows_each_documents_edition_and_the_gate() {
+    fn rename_target_rule_follows_each_documents_edition() {
         let fsl5 = Url::parse("file:///tmp/fsl-lsp-rename/fsl5.fsl").unwrap();
         let published = Url::parse("file:///tmp/fsl-lsp-rename/published.fsl").unwrap();
         let mut state = ServerState {
-            parse_options: fsl_syntax::ParseOptions::with_unstable(
-                fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-            ),
+            parse_options: fsl_syntax::ParseOptions::stable(),
             ..ServerState::default()
         };
         for (uri, text) in [
@@ -1715,8 +1708,6 @@ mod tests {
         assert!(valid_identifier_in(&state, &fsl5, "経費"));
         assert!(!valid_identifier_in(&state, &published, "経費"));
         assert!(valid_identifier_in(&state, &published, "cost"));
-        state.parse_options = fsl_syntax::ParseOptions::stable();
-        assert!(!valid_identifier_in(&state, &fsl5, "経費"));
     }
 
     #[test]
@@ -1810,12 +1801,6 @@ verify { instances Claim = 1 }
 }
 ";
 
-    fn gated() -> fsl_syntax::ParseOptions {
-        fsl_syntax::ParseOptions::with_unstable(
-            fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-        )
-    }
-
     /// The UTF-16 position of the `nth` (0-based) `needle` on `line`.
     fn at(source: &str, line: u32, needle: &str, nth: usize) -> Position {
         let text = source.lines().nth(line as usize).expect("line");
@@ -1860,7 +1845,7 @@ verify { instances Claim = 1 }
                 state: ServerState {
                     documents,
                     roots: Vec::new(),
-                    parse_options: gated(),
+                    parse_options: fsl_syntax::ParseOptions::stable(),
                 },
                 a,
                 b,

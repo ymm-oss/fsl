@@ -47,7 +47,7 @@ struct Run {
     exit: i32,
 }
 
-fn run_in(id: &str, files: &[(&str, &str)], arguments: &[&str], fsl5: bool) -> Run {
+fn run_in(id: &str, files: &[(&str, &str)], arguments: &[&str]) -> Run {
     let scratch = scratch::Scratch::new("FSLC_1694_INPUTS", id, &format!("1694-{id}"));
     for (name, source) in files {
         fs::write(scratch.path().join(name), source).expect("fixture");
@@ -56,11 +56,7 @@ fn run_in(id: &str, files: &[(&str, &str)], arguments: &[&str], fsl5: bool) -> R
     command
         .args(arguments)
         .current_dir(scratch.path())
-        .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE");
-    if fsl5 {
-        command.env("FSLC_UNSTABLE", "fsl5");
-    }
+        .env("FSLC_CACHE", "off");
     let output = command.output().expect("CLI");
     Run {
         packet: serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -74,10 +70,10 @@ fn run_in(id: &str, files: &[(&str, &str)], arguments: &[&str], fsl5: bool) -> R
     }
 }
 
-fn run(id: &str, root: &str, arguments: &[&str], fsl5: bool) -> Run {
+fn run(id: &str, root: &str, arguments: &[&str]) -> Run {
     let mut files = FILES.to_vec();
     files.push(("root.fsl", root));
-    run_in(id, &files, arguments, fsl5)
+    run_in(id, &files, arguments)
 }
 
 fn versions() -> Value {
@@ -101,8 +97,8 @@ fn message(second: &str, first: &str, line: u32) -> String {
     )
 }
 
-fn assert_refused(id: &str, root: &str, fsl5: bool, second: &str, first: &str, line: u32) {
-    let run = run(id, root, &["check", "root.fsl"], fsl5);
+fn assert_refused(id: &str, root: &str, second: &str, first: &str, line: u32) {
+    let run = run(id, root, &["check", "root.fsl"]);
     assert_eq!(
         (run.exit, &run.packet),
         (2, &refused(&message(second, first, line), line)),
@@ -116,7 +112,6 @@ fn broken_contract_written_second_is_refused_at_it() {
     assert_refused(
         "second-stable",
         &stable(&[USE_HELD, USE_BROKEN]),
-        false,
         "Broken",
         "Held",
         3,
@@ -129,7 +124,6 @@ fn broken_contract_written_first_is_refused_at_the_held_one() {
     assert_refused(
         "first-stable",
         &stable(&[USE_BROKEN, USE_HELD]),
-        false,
         "Held",
         "Broken",
         3,
@@ -142,7 +136,7 @@ fn next_edition_refuses_in_both_orders() {
         ("second-next", [USE_HELD, USE_BROKEN], "Broken", "Held"),
         ("first-next", [USE_BROKEN, USE_HELD], "Held", "Broken"),
     ] {
-        let run = run(id, &next(&clauses), &["check", "root.fsl"], true);
+        let run = run(id, &next(&clauses), &["check", "root.fsl"]);
         assert_eq!(run.exit, 2, "{id}: {}", run.packet);
         assert_eq!(run.packet["kind"], "parse", "{id}");
         assert_eq!(
@@ -161,7 +155,7 @@ fn a_contract_that_cannot_be_read_is_refused_without_reading_it() {
         ("missing-second", [USE_HELD, USE_MISSING], "Missing", "Held"),
         ("missing-first", [USE_MISSING, USE_HELD], "Held", "Missing"),
     ] {
-        assert_refused(id, &stable(&clauses), false, second, first, 3);
+        assert_refused(id, &stable(&clauses), second, first, 3);
     }
 }
 
@@ -170,7 +164,6 @@ fn the_same_contract_written_twice_is_refused() {
     assert_refused(
         "same-stable",
         &stable(&[USE_HELD, USE_HELD]),
-        false,
         "Held",
         "Held",
         3,
@@ -179,7 +172,6 @@ fn the_same_contract_written_twice_is_refused() {
         "same-next",
         &next(&[USE_HELD, USE_HELD]),
         &["check", "root.fsl"],
-        true,
     );
     assert_eq!(run.exit, 2, "{}", run.packet);
     assert_eq!(
@@ -195,7 +187,7 @@ fn clauses_apart_are_refused_at_the_later_one() {
     let root = format!(
         "requirements Impl {{\n  {USE_HELD}\n  state {{ done: Bool }}\n  init {{ done = false }}\n  {USE_BROKEN}\n  action finish() {{ done = true }}\n}}\n"
     );
-    let run = run("apart", &root, &["check", "root.fsl"], false);
+    let run = run("apart", &root, &["check", "root.fsl"]);
     assert_eq!(
         (run.exit, &run.packet),
         (2, &refused(&message("Broken", "Held", 5), 5)),
@@ -205,7 +197,7 @@ fn clauses_apart_are_refused_at_the_later_one() {
 #[test]
 fn a_third_clause_names_the_first() {
     let root = stable(&[USE_HELD, USE_BROKEN, USE_MISSING]);
-    let run = run("third", &root, &["check", "root.fsl"], false);
+    let run = run("third", &root, &["check", "root.fsl"]);
     assert_eq!(
         (run.exit, &run.packet),
         (2, &refused(&message("Broken", "Held", 3), 3)),
@@ -259,7 +251,7 @@ fn every_route_that_loads_the_document_refuses_it() {
     ];
     for arguments in routes {
         let id = format!("route-{}", arguments.join("-").replace(['.', ' '], "_"));
-        let run = run(&id, &root, arguments, false);
+        let run = run(&id, &root, arguments);
         assert_eq!(run.exit, 2, "{arguments:?}: {}", run.packet);
         assert_eq!(
             (&run.packet["kind"], &run.packet["message"]),
@@ -284,7 +276,7 @@ fn chain_refuses_the_layer() {
     let mut files = FILES.to_vec();
     files.push(("root.fsl", &root));
     files.push(("fsl-project.toml", "[requirements]\nfile = \"root.fsl\"\n"));
-    let run = run_in("chain", &files, &["chain"], false);
+    let run = run_in("chain", &files, &["chain"]);
     assert_ne!(run.exit, 0, "{}", run.packet);
     assert!(
         run.packet
@@ -305,7 +297,7 @@ fn an_abstraction_that_repeats_the_clause_is_refused() {
     let mut files = FILES.to_vec();
     files.push(("middle.fsl", &middle));
     files.push(("root.fsl", &root));
-    let run = run_in("abstraction", &files, &["check", "root.fsl"], false);
+    let run = run_in("abstraction", &files, &["check", "root.fsl"]);
     assert_eq!(run.exit, 2, "{}", run.packet);
     assert_eq!(run.packet["kind"], "type");
     assert_eq!(
@@ -322,7 +314,7 @@ fn a_literate_document_points_at_the_clause() {
     let root = format!("# Title\n\n```fsl\n{body}```\n");
     let mut files = FILES.to_vec();
     files.push(("root.md", &root));
-    let run = run_in("literate", &files, &["check", "root.md"], false);
+    let run = run_in("literate", &files, &["check", "root.md"]);
     assert_eq!(run.exit, 2, "{}", run.packet);
     assert_eq!(run.packet["kind"], "parse");
     assert_eq!(run.packet["message"], json!(message("Broken", "Held", 6)));
@@ -333,23 +325,13 @@ fn a_literate_document_points_at_the_clause() {
 /// It keeps passing with the refusal removed.
 #[test]
 fn one_clause_keeps_deciding() {
-    let held = run(
-        "one-held",
-        &stable(&[USE_HELD]),
-        &["check", "root.fsl"],
-        false,
-    );
+    let held = run("one-held", &stable(&[USE_HELD]), &["check", "root.fsl"]);
     assert_eq!(held.exit, 0, "{}", held.packet);
     assert_eq!(
         held.packet["implements"],
         json!({"abs":"Held","result":"refines"}),
     );
-    let broken = run(
-        "one-broken",
-        &stable(&[USE_BROKEN]),
-        &["check", "root.fsl"],
-        false,
-    );
+    let broken = run("one-broken", &stable(&[USE_BROKEN]), &["check", "root.fsl"]);
     assert_eq!(broken.exit, 1, "{}", broken.packet);
     assert_eq!(broken.packet["result"], "refinement_failed");
     assert_eq!(broken.packet["implements"]["abs"], "Broken");
@@ -363,7 +345,6 @@ fn a_document_with_no_clause_is_unaffected() {
         "none",
         "requirements Impl {\n  state { done: Bool }\n  init { done = false }\n  action finish() { done = true }\n  invariant Typed { true }\n}\n",
         &["check", "root.fsl"],
-        false,
     );
     assert_eq!(run.exit, 0, "{}", run.packet);
     assert!(run.packet.get("implements").is_none(), "{}", run.packet);

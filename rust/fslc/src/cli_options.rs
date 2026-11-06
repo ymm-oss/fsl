@@ -592,15 +592,10 @@ impl MutationFamilyOptions {
         let mut min_kill_rate = None;
         let mut names = None;
         let mut lowering = false;
-        let next_edition = || {
-            crate::process::parse_options()
-                .unstable()
-                .contains(fsl_syntax::UnstableFeature::Fsl5)
-        };
         while let Some(option) = args.next() {
             match option.as_str() {
-                "--lowering" if command == "explain" && next_edition() => lowering = true,
-                "--names" if command == "explain" && next_edition() => {
+                "--lowering" if command == "explain" => lowering = true,
+                "--names" if command == "explain" => {
                     names = Some(crate::name_display::NameSpelling::parse(
                         &required_option_value(&mut args, "--names")?,
                     )?);

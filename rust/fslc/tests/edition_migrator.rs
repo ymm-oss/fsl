@@ -64,33 +64,45 @@ fn json(output: &Output) -> Value {
     })
 }
 
+/// The findings of `output`'s first file other than `missing_edition_header`,
+/// which every headerless document gets for the next edition since #1434.
+fn without_missing_header(output: &Value) -> Vec<Value> {
+    output["files"][0]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .filter(|finding| finding["code"] != fsl_syntax::MISSING_EDITION_HEADER)
+        .cloned()
+        .collect()
+}
+
+/// Whether `output`'s first file reports `missing_edition_header` once.
+fn reports_missing_header_once(output: &Value) -> bool {
+    output["files"][0]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .filter(|finding| finding["code"] == fsl_syntax::MISSING_EDITION_HEADER)
+        .count()
+        == 1
+}
+
 fn text(path: &Path) -> String {
     std::fs::read_to_string(path).expect("read fixture")
 }
 
-fn edition_command(verb: &str, headed: bool) -> Command {
+fn edition_command(verb: &str) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    command.env_remove("FSLC_UNSTABLE").arg(verb);
-    if headed {
-        command.env("FSLC_UNSTABLE", "fsl5");
-    }
+    command.arg(verb);
     command
 }
 
 fn gated_options() -> fsl_syntax::ParseOptions {
-    fsl_syntax::ParseOptions::with_unstable(
-        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-    )
+    fsl_syntax::ParseOptions::stable()
 }
 
-fn run_edition(
-    path: &str,
-    verb: &str,
-    edition: Option<&str>,
-    headed: bool,
-    extra: &[&str],
-) -> Output {
-    let mut command = edition_command(verb, headed);
+fn run_edition(path: &str, verb: &str, edition: Option<&str>, extra: &[&str]) -> Output {
+    let mut command = edition_command(verb);
     command.arg(path);
     if let Some(edition) = edition {
         command.args(["--edition", edition]);
@@ -107,7 +119,7 @@ fn lint_and_migrate_share_next_operator_diagnostics_without_rewriting() {
         );
         let path = directory.write("legacy.fsl", &source);
         for verb in ["lint", "migrate"] {
-            let output = run_edition(path.to_str().expect("path"), verb, Some("next"), false, &[]);
+            let output = run_edition(path.to_str().expect("path"), verb, Some("next"), &[]);
             assert_eq!(output.status.code(), Some(2));
             let output = json(&output);
             assert_eq!(output["result"], "error");
@@ -141,13 +153,7 @@ fn relation_range_arrows_remain_structural_in_every_edition_entry() {
         for (prefix, edition) in [("fsl 5\n", None), ("", None), ("", Some("next"))] {
             let source = format!("{prefix}{body}");
             let path = directory.write("relation.fsl", &source);
-            let output = run_edition(
-                path.to_str().expect("path"),
-                "check",
-                edition,
-                !prefix.is_empty(),
-                &[],
-            );
+            let output = run_edition(path.to_str().expect("path"), "check", edition, &[]);
             assert_eq!(
                 output.status.code(),
                 Some(0),
@@ -167,13 +173,7 @@ fn relation_range_arrows_remain_structural_in_every_edition_entry() {
                 "must not replace a later real parse error with a relation diagnostic"
             );
             let path = directory.write("malformed.fsl", &malformed);
-            let error = run_edition(
-                path.to_str().expect("path"),
-                "check",
-                edition,
-                !prefix.is_empty(),
-                &[],
-            );
+            let error = run_edition(path.to_str().expect("path"), "check", edition, &[]);
             assert_eq!(error.status.code(), Some(2));
             assert_eq!(json(&error)["diagnostic_code"], "FSL-PARSE");
         }
@@ -184,7 +184,6 @@ fn relation_range_arrows_remain_structural_in_every_edition_entry() {
             path.to_str().expect("path"),
             "migrate",
             Some("next"),
-            true,
             &["--write"],
         );
         assert_eq!(
@@ -195,7 +194,7 @@ fn relation_range_arrows_remain_structural_in_every_edition_entry() {
         );
         assert_eq!(json(&migrated)["result"], "migrated");
         assert!(text(&path).starts_with("fsl 5\n"));
-        let checked = run_edition(path.to_str().expect("path"), "check", None, true, &[]);
+        let checked = run_edition(path.to_str().expect("path"), "check", None, &[]);
         assert_eq!(checked.status.code(), Some(0));
         assert_eq!(json(&checked)["result"], "ok");
     }
@@ -209,13 +208,7 @@ fn action_correspondence_range_parameter_precedes_a_structural_arrow() {
     for (prefix, edition) in [("fsl 5\n", None), ("", None), ("", Some("next"))] {
         let source = format!("{prefix}{body}");
         let path = directory.write("parameter.fsl", &source);
-        let output = run_edition(
-            path.to_str().expect("path"),
-            "check",
-            edition,
-            !prefix.is_empty(),
-            &[],
-        );
+        let output = run_edition(path.to_str().expect("path"), "check", edition, &[]);
         assert_eq!(
             output.status.code(),
             Some(0),
@@ -261,7 +254,6 @@ fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() 
                         path.to_str().expect("path"),
                         verb,
                         edition,
-                        headed,
                         if verb == "fmt" { &["--check"] } else { &[] },
                     )
                 };
@@ -304,7 +296,7 @@ fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() 
 }
 
 fn assert_next_legacy_rejection(path: &str, headed: bool, code: &str) {
-    let output = run_edition(path, "check", Some("next"), headed, &[]);
+    let output = run_edition(path, "check", Some("next"), &[]);
     assert_eq!(output.status.code(), Some(2));
     let output = json(&output);
     assert_eq!(output["result"], "error");
@@ -370,9 +362,7 @@ fn current_edition_exposes_legacy_findings_without_changing_success() {
             let source = format!("{prefix}{body}");
             let path = directory.write("current.fsl", &source);
             let path = path.to_str().expect("path");
-            let invoke = |verb: &str, extra: &[&str]| {
-                run_edition(path, verb, edition, prefix.starts_with("fsl 4"), extra)
-            };
+            let invoke = |verb: &str, extra: &[&str]| run_edition(path, verb, edition, extra);
             // Preservation: lint already reports these findings, including exit 1.
             let lint = invoke("lint", &[]);
             assert_eq!(lint.status.code(), Some(1));
@@ -457,11 +447,11 @@ fn assert_canonical_operator_twin(directory: &FixtureDir, source: &str, headed: 
     } else {
         "check"
     };
-    let mut command = edition_command(verb, headed);
+    let mut command = edition_command(verb);
     let expected = if source.contains("refinement Probe") {
         // Match the negative twin's fmt --check entry as well as proving the
         // mapping below. Normalize layout first so a positive check exits 0.
-        let mut layout = edition_command("fmt", headed);
+        let mut layout = edition_command("fmt");
         layout.arg(path.to_str().expect("path"));
         if !headed {
             layout.args(["--edition", "next"]);
@@ -474,7 +464,6 @@ fn assert_canonical_operator_twin(directory: &FixtureDir, source: &str, headed: 
             formatted.to_str().expect("path"),
             "fmt",
             (!headed).then_some("next"),
-            headed,
             &["--check"],
         );
         assert_eq!(checked.status.code(), Some(0));
@@ -522,7 +511,6 @@ fn domain_quantifier_rejection_and_warning_absence_match_the_base_contract() {
     );
     let path = directory.write("quantifier.fsl", source);
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .env_remove("FSLC_UNSTABLE")
         .args([
             "domain",
             "check",
@@ -560,7 +548,7 @@ fn current_domain_warnings_exclude_unrelated_planner_codes() {
     let source = "domain D { enum E { A, B } aggregate X { state { e: E = A } command Finish {} event Finished {} decide Finish { requires e == A || e == B emits Finished } evolve Finished { e = B } invariant I { e == A -> e == A } } }\n";
     let path = directory.write("logical.fsl", source);
     let path = path.to_str().expect("path");
-    let lint = run_edition(path, "lint", None, false, &[]);
+    let lint = run_edition(path, "lint", None, &[]);
     assert_eq!(lint.status.code(), Some(1));
     assert!(
         json(&lint)["files"][0]["findings"]
@@ -575,7 +563,6 @@ fn current_domain_warnings_exclude_unrelated_planner_codes() {
         vec!["domain", "check", path, "--depth", "2"],
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-            .env_remove("FSLC_UNSTABLE")
             .args(&args)
             .output()
             .expect("run fslc");
@@ -840,7 +827,16 @@ fn migrate_writes_requirement_ids_as_written() {
             String::from_utf8_lossy(&migrated.stdout)
         );
         assert_eq!(json(&migrated)["written"], true, "{fixture}");
-        assert_eq!(compact_hyphen_runs(&text(&path)), ids, "{fixture}");
+        // #1434: the next edition's process-form conversion may write an ID
+        // in more places (a rule names its requirement); every ID is still
+        // spelled as written and none is added or respelled.
+        let distinct =
+            |ids: Vec<String>| ids.into_iter().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            distinct(compact_hyphen_runs(&text(&path))),
+            distinct(ids),
+            "{fixture}"
+        );
     }
 }
 
@@ -880,9 +876,20 @@ fn builtin_id_policy_reports_each_surface_kind_without_rewriting_ids() {
                 && finding["edits"].as_array().is_some_and(Vec::is_empty))
     }));
 
+    // #1434: the next edition inserts only the missing header; no ID is
+    // rewritten.
     let migrate = run(&["migrate", path_text, "--edition", "next"]);
     assert!(migrate.status.success());
-    assert_eq!(json(&migrate)["changed"], 0);
+    let migrate = json(&migrate);
+    assert_eq!(migrate["changed"], 1);
+    assert!(reports_missing_header_once(&migrate), "{migrate:#}");
+    assert_eq!(
+        migrate["files"][0]["edits"][0]["replacement"]
+            .as_str()
+            .map(|text| text.replacen("fsl 5\n", "", 1)),
+        Some(text(&path)),
+        "{migrate:#}"
+    );
 }
 
 #[test]
@@ -929,13 +936,16 @@ verify {
         "--edition",
         "next",
     ]);
-    assert!(
-        output.status.success(),
+    // #1434: each distinct file reports its missing header once, so a
+    // duplicate path would show as a third finding.
+    assert_eq!(
+        output.status.code(),
+        Some(1),
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );
     let output = json(&output);
-    assert_eq!(output["finding_count"], 0);
+    assert_eq!(output["finding_count"], 2);
     assert_eq!(
         output["files"]
             .as_array()
@@ -1062,7 +1072,8 @@ fn invalid_double_ampersand_and_ambiguous_maps_are_explicit_refusals() {
     let invalid_text = invalid.to_str().expect("UTF-8 path");
     let lint = run(&["lint", invalid_text, "--edition", "next"]);
     assert_eq!(lint.status.code(), Some(1));
-    let finding = &json(&lint)["files"][0]["findings"][0];
+    let findings = without_missing_header(&json(&lint));
+    let finding = &findings[0];
     assert_eq!(finding["taxonomy"], "unsupported_in_edition");
     assert_eq!(finding["canonical_replacement"], "and");
     assert_eq!(finding["machine_applicable"], false);
@@ -1080,7 +1091,7 @@ fn invalid_double_ampersand_and_ambiguous_maps_are_explicit_refusals() {
     ]);
     assert_eq!(duplicate_output.status.code(), Some(2));
     assert_eq!(
-        json(&duplicate_output)["files"][0]["findings"][0]["taxonomy"],
+        without_missing_header(&json(&duplicate_output))[0]["taxonomy"],
         "ambiguous_intent"
     );
 }
@@ -1096,10 +1107,7 @@ fn ai_native_legacy_operator_attempt_reports_each_unsupported_token() {
         "next",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    let findings = json(&output)["files"][0]["findings"]
-        .as_array()
-        .expect("findings")
-        .clone();
+    let findings = without_missing_header(&json(&output));
     assert_eq!(findings.len(), 2);
     assert_eq!(
         findings
@@ -1305,7 +1313,18 @@ fn genuinely_valid_unchanged_input_still_passes_lint_and_migrate() {
 
     assert_eq!(run(&["check", path]).status.code(), Some(0));
 
+    // #1434: headerless, the next edition reports only the missing header;
+    // headed `fsl 5`, the same body is unchanged with no finding.
     let migrated = run(&["migrate", path, "--edition", "next"]);
+    assert_eq!(migrated.status.code(), Some(0));
+    let migrated = json(&migrated);
+    assert_eq!(migrated["result"], "migrated", "{migrated:#}");
+    assert!(reports_missing_header_once(&migrated), "{migrated:#}");
+    assert!(without_missing_header(&migrated).is_empty(), "{migrated:#}");
+
+    let headed = directory.write("sound5.fsl", &format!("fsl 5\n{source}"));
+    let headed = headed.to_str().expect("UTF-8 path");
+    let migrated = run(&["migrate", headed, "--edition", "next"]);
     assert_eq!(migrated.status.code(), Some(0));
     let migrated = json(&migrated);
     assert_eq!(migrated["result"], "migrated", "{migrated:#}");
@@ -1317,7 +1336,7 @@ fn genuinely_valid_unchanged_input_still_passes_lint_and_migrate() {
         "{migrated:#}"
     );
 
-    let linted = run(&["lint", path, "--edition", "next"]);
+    let linted = run(&["lint", headed, "--edition", "next"]);
     assert_eq!(linted.status.code(), Some(0));
     assert_eq!(json(&linted)["finding_count"], 0);
 }
@@ -1445,6 +1464,124 @@ fn valid_spec_with_legacy_syntax_still_migrates_and_lints() {
     );
 }
 
+/// #1434: an `agent` document takes no edition header
+/// (`EDITIONLESS_DECLARATIONS`), so the next edition owes it none. `lint`
+/// and `migrate` report nothing and `--write` leaves it unchanged; a header
+/// inserted by hand is refused, which is why none may be planned.
+#[test]
+fn agent_documents_are_not_offered_an_edition_header() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = text(&root.join("../../examples/ai/recursive_support_agent.fsl"));
+    assert!(source.starts_with("agent "), "fixture is an agent document");
+    let directory = FixtureDir::new();
+    let path = directory.write("agent.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(0), "{}", json(&linted));
+    assert_eq!(json(&linted)["finding_count"], 0);
+    for edition in ["next", "5"] {
+        let migrated = run(&["migrate", path, "--edition", edition, "--write"]);
+        assert_eq!(migrated.status.code(), Some(0), "{}", json(&migrated));
+        let migrated = json(&migrated);
+        assert_eq!(migrated["changed"], 0, "{migrated:#}");
+        assert_eq!(
+            migrated["files"][0]["findings"],
+            Value::Array(Vec::new()),
+            "{migrated:#}"
+        );
+        assert_eq!(text(Path::new(path)), source);
+    }
+    let headed = directory.write("headed.fsl", &format!("fsl 5\n{source}"));
+    let checked = run(&["check", headed.to_str().expect("UTF-8 path")]);
+    assert_eq!(checked.status.code(), Some(2));
+    assert_eq!(
+        json(&checked)["diagnostic_code"],
+        fsl_syntax::EDITION_HEADER_NOT_ACCEPTED
+    );
+}
+
+/// #1434: a `refinement` document is not a standalone check target, so the
+/// next edition offers it no edition header either: `lint` and `migrate`
+/// report nothing and `--write` leaves it unchanged. A header written by
+/// hand is still read (the document checks exactly as without one).
+#[test]
+fn refinement_documents_are_not_offered_an_edition_header() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = text(&root.join("../../specs/cart_refines.fsl"));
+    assert!(source.starts_with("refinement "), "fixture is a refinement");
+    let directory = FixtureDir::new();
+    let path = directory.write("refines.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(0), "{}", json(&linted));
+    assert_eq!(json(&linted)["finding_count"], 0);
+    for edition in ["next", "5"] {
+        let migrated = run(&["migrate", path, "--edition", edition, "--write"]);
+        assert_eq!(migrated.status.code(), Some(0), "{}", json(&migrated));
+        let migrated = json(&migrated);
+        assert_eq!(migrated["changed"], 0, "{migrated:#}");
+        assert_eq!(
+            migrated["files"][0]["findings"],
+            Value::Array(Vec::new()),
+            "{migrated:#}"
+        );
+        assert_eq!(text(Path::new(path)), source);
+    }
+    let headed = directory.write("headed.fsl", &format!("fsl 5\n{source}"));
+    let checked = json(&run(&["check", headed.to_str().expect("UTF-8 path")]));
+    let plain = json(&run(&["check", path]));
+    assert_eq!(
+        (&checked["kind"], &checked["message"]),
+        (&plain["kind"], &plain["message"]),
+        "{checked:#}"
+    );
+    assert_eq!(checked["fsl_edition"], 5, "{checked:#}");
+}
+
+/// #1434: a `compose` document (dialect keyword `compose`) is offered no
+/// edition header either: its Public Kernel v1 migration contract cannot keep
+/// the components' source files, so `migrate` could not show the insertion
+/// preserves it. `lint` and `migrate` report nothing, `--write` leaves it
+/// unchanged, and a hand-written header is still read.
+#[test]
+fn compose_documents_are_not_offered_an_edition_header() {
+    let fixtures =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/issue_1573_inventory");
+    let directory = FixtureDir::new();
+    for name in ["a.fsl", "b.fsl"] {
+        directory.write(name, &text(&fixtures.join(name)));
+    }
+    let source = text(&fixtures.join("s.fsl"));
+    assert_eq!(
+        fsl_syntax::dialect_keyword(&source),
+        Ok("compose"),
+        "fixture is a compose document"
+    );
+    let path = directory.write("s.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    let plain = run(&["check", path]);
+    assert_eq!(plain.status.code(), Some(0), "{}", json(&plain));
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(0), "{}", json(&linted));
+    assert_eq!(json(&linted)["finding_count"], 0);
+    for edition in ["next", "5"] {
+        let migrated = run(&["migrate", path, "--edition", edition, "--write"]);
+        assert_eq!(migrated.status.code(), Some(0), "{}", json(&migrated));
+        let migrated = json(&migrated);
+        assert_eq!(migrated["changed"], 0, "{migrated:#}");
+        assert_eq!(
+            migrated["files"][0]["findings"],
+            Value::Array(Vec::new()),
+            "{migrated:#}"
+        );
+        assert_eq!(text(Path::new(path)), source);
+    }
+    let headed = directory.write("headed.fsl", &format!("fsl 5\n{source}"));
+    let checked = json(&run(&["check", headed.to_str().expect("UTF-8 path")]));
+    assert_eq!(checked["result"], "ok", "{checked:#}");
+    assert_eq!(checked["fsl_edition"], 5, "{checked:#}");
+}
+
 /// Regression control: a `refinement`-dialect input (no `state` block —
 /// `fslc check` itself fails "spec has no state block" for this dialect,
 /// since a refinement spec is not a standalone check target) must keep
@@ -1473,16 +1610,6 @@ fn refinement_dialect_is_still_not_a_standalone_lint_migrate_target() {
 // Requirements `process` forms under `--edition 5` (fsl 5 plan §3 S9): the
 // migration rewrites them into `entity` / `event` / `rule … allow`, keeps the
 // checked kernel, and refuses what it cannot rewrite without touching a file.
-
-const EDITION_GATE: &str = "fsl5";
-
-fn run_gated(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args(args)
-        .env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, EDITION_GATE)
-        .output()
-        .expect("run fslc")
-}
 
 fn e2e_fixture(name: &str) -> String {
     std::fs::read_to_string(
@@ -1515,7 +1642,7 @@ fn located_free_kernel(path: &Path) -> Value {
             _ => {}
         }
     }
-    let output = run_gated(&["kernel", path.to_str().expect("UTF-8 path")]);
+    let output = run(&["kernel", path.to_str().expect("UTF-8 path")]);
     assert_eq!(
         output.status.code(),
         Some(0),
@@ -1536,22 +1663,23 @@ fn edition_5_rewrites_the_e2e_process_form_into_entity_events_and_rules_keeping_
     let path = original.to_str().expect("UTF-8 path");
     let before = located_free_kernel(&original);
 
-    // Without the gate `--edition 5` is refused, and the default edition
-    // rewrites no process.
-    let ungated = run(&["migrate", path, "--edition", "5"]);
-    assert_eq!(ungated.status.code(), Some(2));
-    let ungated = json(&run(&["migrate", path]));
+    // #1434: `--edition 5` needs no opt-in; a migration for the current
+    // edition rewrites no process, and a plan without `--write` writes
+    // nothing.
+    let current = json(&run(&["migrate", path, "--edition", "current"]));
     assert!(
-        ungated["files"][0]["findings"]
+        current["files"][0]["findings"]
             .as_array()
             .expect("findings")
             .iter()
             .all(|finding| finding["code"] != "legacy_process_form"),
-        "{ungated:#}"
+        "{current:#}"
     );
+    let planned = run(&["migrate", path, "--edition", "5"]);
+    assert_eq!(planned.status.code(), Some(0), "{:#}", json(&planned));
     assert_eq!(text(&original), original_source);
 
-    let output = run_gated(&["migrate", path, "--edition", "5", "--write"]);
+    let output = run(&["migrate", path, "--edition", "5", "--write"]);
     let migrated = json(&output);
     assert_eq!(output.status.code(), Some(0), "{migrated:#}");
     assert_eq!(migrated["result"], "migrated", "{migrated:#}");
@@ -1589,7 +1717,7 @@ fn edition_5_rewrites_the_e2e_process_form_into_entity_events_and_rules_keeping_
         "{rewritten}"
     );
 
-    let checked = run_gated(&["check", path]);
+    let checked = run(&["check", path]);
     assert_eq!(checked.status.code(), Some(0), "{:#}", json(&checked));
     assert_eq!(json(&checked)["result"], "ok");
     // The edition derives the terminal states from the lifecycle's final
@@ -1602,7 +1730,7 @@ fn edition_5_rewrites_the_e2e_process_form_into_entity_events_and_rules_keeping_
     }
     assert_eq!(after, before);
 
-    let again = json(&run_gated(&["migrate", path, "--edition", "5"]));
+    let again = json(&run(&["migrate", path, "--edition", "5"]));
     assert_eq!(again["changed"], 0, "{again:#}");
 }
 
@@ -1663,7 +1791,7 @@ fn edition_5_process_forms_it_cannot_rewrite_are_manual_required_and_no_file_is_
             json(&checked)
         );
 
-        let output = run_gated(&[
+        let output = run(&[
             "migrate",
             convertible.to_str().expect("UTF-8 path"),
             path.to_str().expect("UTF-8 path"),
@@ -1706,7 +1834,7 @@ fn edition_5_process_forms_it_cannot_rewrite_are_manual_required_and_no_file_is_
 fn dropping_one_guard_in_the_process_form_converter_fails_the_kernel_contract() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/e2e/2_requirements.fsl");
     let source = text(&path);
-    let options = fslc_rust::unstable_gate::from_value(Some(EDITION_GATE));
+    let options = fsl_syntax::ParseOptions::stable();
     let conversion = fslc_rust::migration::plan_process_conversion(&source, &options)
         .expect("the e2e process form is rewritable")
         .expect("the e2e document has a process");
@@ -1767,7 +1895,15 @@ fn assert_canonical_example(name: &str) -> Value {
     assert_eq!(findings_with_code(&lint, "inline_action_maps").len(), 0);
     let migrate = run(&["migrate", path, "--edition", "next"]);
     assert_eq!(migrate.status.code(), Some(0), "{}", json(&migrate));
-    assert_eq!(json(&migrate)["changed"], 0);
+    // #1434: the headerless example changes only by its missing header.
+    assert_eq!(json(&migrate)["changed"], 1);
+    assert!(reports_missing_header_once(&json(&migrate)));
+    assert_eq!(
+        json(&migrate)["files"][0]["edits"][0]["replacement"]
+            .as_str()
+            .map(|text| text.replacen("fsl 5\n", "", 1)),
+        Some(text(Path::new(path)))
+    );
     assert!(findings_with_code(&json(&migrate), "inline_action_maps").is_empty());
     lint
 }
@@ -2027,7 +2163,7 @@ fn edition_5_migration_reports_the_terminal_it_derives_for_a_process_form_withou
         if write {
             args.push("--write");
         }
-        let output = run_gated(&args);
+        let output = run(&args);
         let migrated = json(&output);
         assert_eq!(output.status.code(), Some(0), "{migrated:#}");
         assert_eq!(migrated["result"], "migrated", "{migrated:#}");
@@ -2054,7 +2190,7 @@ fn edition_5_migration_reports_the_terminal_it_derives_for_a_process_form_withou
     );
 
     // The written document is the edition's own form: nothing more to derive.
-    let again = json(&run_gated(&["migrate", path, "--edition", "5"]));
+    let again = json(&run(&["migrate", path, "--edition", "5"]));
     assert_eq!(again["changed"], 0, "{again:#}");
     assert!(
         findings_with_code(&again, "derived_terminal_added").is_empty(),
@@ -2076,7 +2212,7 @@ fn edition_5_migration_of_a_process_form_with_terminal_reports_no_derived_termin
         if write {
             args.push("--write");
         }
-        let output = run_gated(&args);
+        let output = run(&args);
         let migrated = json(&output);
         assert_eq!(output.status.code(), Some(0), "{migrated:#}");
         assert_eq!(
@@ -2098,7 +2234,7 @@ fn edition_5_migration_of_a_process_form_with_terminal_reports_no_derived_termin
 fn the_process_form_contract_compares_a_terminal_the_process_form_writes() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/requirements_stage.fsl");
     let source = text(&path);
-    let options = fslc_rust::unstable_gate::from_value(Some(EDITION_GATE));
+    let options = fsl_syntax::ParseOptions::stable();
     let conversion = fslc_rust::migration::plan_process_conversion(&source, &options)
         .expect("the process form is rewritable")
         .expect("the document has a process");

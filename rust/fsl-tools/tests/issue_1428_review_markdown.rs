@@ -4,7 +4,7 @@
 //! boundary, and free producer text in ledger cells. Byte oracles, not a claim
 //! that a `CommonMark` renderer was executed. No production escaping is reused.
 
-use fsl_syntax::{ParseOptions, UnstableFeature, UnstableFeatures};
+use fsl_syntax::ParseOptions;
 use fsl_tools::{AppliedEvidence, Locale};
 use serde_json::{Value, json};
 
@@ -105,7 +105,7 @@ fn r1_ledger_mixed_path_is_literal() {
 fn r1_authored_rule_comment_is_literal() {
     // A genuine authored line comment; the actual LF ends it before >= 0.
     let source = "fsl 5\nrequirements Demo {\n  glossary { Draft = 下書き Approved = 承認済み User = 利用者 }\n  number Amount\n  actor User\n  entity Claim {\n    amount: Amount = 0\n    lifecycle Draft -> Approved\n  }\n  event approve = User approves Claim Draft -> Approved\n  rule REQ-1 \"ordinary intent\" {\n    allow User approves Claim only when amount // *must*| _x_ [link](#x) ![image](x) \\ & `tick`\n      >= 0\n  }\n}\nverify { instances Claim = 1 values Amount = 0..2 }\n";
-    let options = ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5));
+    let options = ParseOptions::stable();
     let doc = document_source(source, "overview.fsl", &[], options).unwrap();
     let expected = "<code>allow User approves Claim only when amount // &#42;must&#42;&#124; &#95;x&#95; &#91;link&#93;(#x) &#33;&#91;image&#93;(x) &#92; &amp; &#96;tick&#96; &gt;= 0</code>";
     assert!(

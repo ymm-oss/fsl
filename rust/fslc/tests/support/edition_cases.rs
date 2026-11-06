@@ -125,23 +125,19 @@ pub fn commit(s: &Scratch, files: &[&str]) -> String {
     git(s, &["rev-parse", "HEAD"])
 }
 
-pub fn invoke(binary: &str, args: &[String], cwd: &Path, gate: bool) -> std::process::Output {
-    cli_command(binary, args, cwd, gate)
+pub fn invoke(binary: &str, args: &[String], cwd: &Path) -> std::process::Output {
+    cli_command(binary, args, cwd)
         .output()
         .expect("execute working-tree CLI")
 }
 
-fn cli_command(binary: &str, args: &[String], cwd: &Path, gate: bool) -> std::process::Command {
+fn cli_command(binary: &str, args: &[String], cwd: &Path) -> std::process::Command {
     let mut command = std::process::Command::new(binary);
     command
         .args(args)
         .current_dir(cwd)
         .env("FSLC_CACHE", "off")
-        .env("TMPDIR", root().join(".codex/tmp"))
-        .env_remove("FSLC_UNSTABLE");
-    if gate {
-        command.env("FSLC_UNSTABLE", "fsl5");
-    }
+        .env("TMPDIR", root().join(".codex/tmp"));
     command
 }
 
@@ -154,7 +150,7 @@ pub fn invoke_input(
 ) -> std::process::Output {
     use std::io::Write;
     use std::process::Stdio;
-    let mut child = cli_command(binary, args, cwd, true)
+    let mut child = cli_command(binary, args, cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -175,8 +171,8 @@ pub fn split(template: &str) -> Vec<String> {
     template.split_whitespace().map(str::to_owned).collect()
 }
 
-pub fn command(binary: &str, cwd: &Path, template: &str, gate: bool) -> std::process::Output {
-    invoke(binary, &split(template), cwd, gate)
+pub fn command(binary: &str, cwd: &Path, template: &str) -> std::process::Output {
+    invoke(binary, &split(template), cwd)
 }
 
 pub fn expand(template: &str, replacements: &[(&str, PathBuf)]) -> Vec<String> {
@@ -197,7 +193,6 @@ pub fn refusal(binary: &str, cwd: &Path, path: &Path) -> Value {
         binary,
         &["check".into(), path.to_str().unwrap().into()],
         cwd,
-        true,
     );
     assert_eq!(output.status.code(), Some(2));
     let output = without_versions(value(&output));
@@ -373,10 +368,8 @@ pub fn root() -> PathBuf {
         .to_owned()
 }
 
-pub fn gated() -> fsl_syntax::ParseOptions {
-    fsl_syntax::ParseOptions::with_unstable(
-        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-    )
+pub fn parse_options() -> fsl_syntax::ParseOptions {
+    fsl_syntax::ParseOptions::stable()
 }
 
 pub const DOMAIN: &str = "domain D { enum Status { Open, Closed } aggregate Doc { state { status: Status = Open } command Close {} command Reopen {} event ClosedDoc {} event OpenedDoc {} decide Close { requires status == Open emits ClosedDoc } decide Reopen { requires status == Closed emits OpenedDoc } evolve ClosedDoc { status = Closed } evolve OpenedDoc { status = Open } invariant Typed { status == Open or status == Closed } } }\n";
@@ -439,7 +432,7 @@ pub fn model_error(source: &str) -> String {
 }
 
 pub fn findings(source: &str, path: &str, edition: fsl_syntax::Edition) -> Vec<Value> {
-    fslc_rust::migration::plan_migration(source, path, edition, &gated())
+    fslc_rust::migration::plan_migration(source, path, edition, &parse_options())
         .expect("valid migration case")
         .diagnostics
         .iter()

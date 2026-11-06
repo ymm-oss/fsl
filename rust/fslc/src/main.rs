@@ -141,8 +141,6 @@ fn parse_optional_output(
 }
 
 fn main() {
-    // Read the unstable gate once, before the worker thread parses anything.
-    parse_options();
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         z3_panic::record(info);
@@ -242,7 +240,7 @@ struct FmtOptions {
     paths: Vec<PathBuf>,
     check: bool,
     edition: Option<fsl_syntax::Edition>,
-    /// `--lang` / `--names`, read only behind the next edition's gate.
+    /// `--lang` / `--names`: respell a next-edition requirements document.
     respelling: fsl_syntax::Respelling,
 }
 
@@ -252,14 +250,11 @@ fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, S
     let mut check = false;
     let mut edition = None;
     let mut respelling = fsl_syntax::Respelling::default();
-    let gated = crate::parse_options()
-        .unstable()
-        .contains(fsl_syntax::UnstableFeature::Fsl5);
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--check" => check = true,
             "--edition" => edition = parse_edition(&mut args)?,
-            "--lang" if gated => {
+            "--lang" => {
                 respelling.language =
                     Some(match required_option_value(&mut args, "--lang")?.as_str() {
                         "ja" => fsl_syntax::KeywordLanguage::Japanese,
@@ -267,7 +262,7 @@ fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, S
                         _ => return Err("--lang must be ja or en".to_owned()),
                     });
             }
-            "--names" if gated => {
+            "--names" => {
                 respelling.names = Some(
                     match required_option_value(&mut args, "--names")?.as_str() {
                         "alias" => fsl_syntax::NameForm::Alias,
@@ -424,14 +419,7 @@ fn parse_migration_options(
     let mut strict_names = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
-            "--strict-names"
-                if !migrate
-                    && crate::parse_options()
-                        .unstable()
-                        .contains(fsl_syntax::UnstableFeature::Fsl5) =>
-            {
-                strict_names = true;
-            }
+            "--strict-names" if !migrate => strict_names = true,
             // `migrate` defaults to the next edition, so an explicit
             // `current` is kept rather than read as an omitted flag.
             "--edition" => {
@@ -10328,12 +10316,9 @@ fn run_explain_from_source_with_names(
     } else {
         run_explain_from_source(path, source, depth, readable)
     };
-    // A glossary exists only behind the gate; without it nothing is reloaded.
-    let gated = parse_options()
-        .unstable()
-        .contains(fsl_syntax::UnstableFeature::Fsl5);
-    if gated
-        && status == 0
+    // Only a model with a glossary is respelled (`respell` leaves any other
+    // output as it is).
+    if status == 0
         && let Ok((_, model)) = load_kernel_model_from_source(path, source)
     {
         name_display::respell(
@@ -10415,11 +10400,6 @@ fn run_explain_from_source(
         );
     }
     if readable {
-        // Where each lowered `requires` and property came from, for a
-        // next-edition document (read only behind the gate).
-        let next_edition = parse_options()
-            .unstable()
-            .contains(fsl_syntax::UnstableFeature::Fsl5);
         let mut text = format!("Spec: {} (depth {depth})\n", model.name);
         text.push_str(
             "Counterfactual scope: invariant/reachable (leadsTo liveness skipped; use verify)\n",
@@ -10487,10 +10467,11 @@ fn run_explain_from_source(
                     let _ = writeln!(text, "    branch: {detail}");
                 }
             }
-            if next_edition {
-                for line in explain_lowering::action_lines(&model, &action.name) {
-                    let _ = writeln!(text, "    {line}");
-                }
+            // Where each lowered `requires` and property came from: only a
+            // next-edition document's lowering has such steps, so for any
+            // other document these lines and suffixes are empty.
+            for line in explain_lowering::action_lines(&model, &action.name) {
+                let _ = writeln!(text, "    {line}");
             }
             for requirement in action
                 .annotations
@@ -10514,11 +10495,7 @@ fn run_explain_from_source(
                         text,
                         "      - requires {}{}",
                         fslc_rust::expr_text(requirement),
-                        if next_edition {
-                            explain_lowering::requires_suffix(&model, &action.name, index)
-                        } else {
-                            String::new()
-                        }
+                        explain_lowering::requires_suffix(&model, &action.name, index)
                     );
                 }
             }
@@ -10557,10 +10534,8 @@ fn run_explain_from_source(
                     model.names().public_property(name).into_string()
                 );
                 let _ = writeln!(text, "    body: {body}");
-                if next_edition {
-                    for line in explain_lowering::property_lines(&model, kind, name) {
-                        let _ = writeln!(text, "    {line}");
-                    }
+                for line in explain_lowering::property_lines(&model, kind, name) {
+                    let _ = writeln!(text, "    {line}");
                 }
             }
         }

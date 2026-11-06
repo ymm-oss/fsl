@@ -39,31 +39,13 @@ pub const EXCLUDED_KEYS: &[&str] = &[
 /// When the command fails or prints something other than one JSON document.
 #[allow(dead_code)]
 pub fn kernel_v2(path: &Path) -> Value {
-    run_kernel_v2(path, None)
-}
-
-/// [`kernel_v2`] with the next edition enabled behind the unstable gate.
-///
-/// # Panics
-///
-/// As [`kernel_v2`].
-#[allow(dead_code)]
-pub fn kernel_v2_fsl5(path: &Path) -> Value {
-    run_kernel_v2(path, Some("fsl5"))
-}
-
-fn run_kernel_v2(path: &Path, unstable: Option<&str>) -> Value {
     let directory = path.parent().expect("kernel source directory");
     let file = path.file_name().expect("kernel source file name");
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
     command
         .args(["kernel", "--kernel-version", "2"])
         .arg(file)
-        .current_dir(directory)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    if let Some(features) = unstable {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, features);
-    }
+        .current_dir(directory);
     let output = command.output().expect("run fslc kernel");
     assert!(
         output.status.success(),

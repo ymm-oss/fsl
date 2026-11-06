@@ -41,7 +41,7 @@ fn run_cases(cases: &[forms::Case], label: &str) {
         };
         for &route in routes {
             let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-            command.env("FSLC_CACHE", "off").env_remove("FSLC_UNSTABLE");
+            command.env("FSLC_CACHE", "off");
             if route == "check" {
                 command.args(["check"]).arg(&path);
             } else {

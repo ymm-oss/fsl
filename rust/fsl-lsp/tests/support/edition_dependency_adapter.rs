@@ -18,7 +18,7 @@ fn state(root: &Url, child: &Url, source: &str, dependency: &str) -> ServerState
             (root.clone(), document(source)),
             (child.clone(), document(dependency)),
         ]),
-        parse_options: common::gated(),
+        parse_options: common::parse_options(),
         ..ServerState::default()
     }
 }
@@ -169,7 +169,7 @@ fn dependency_edition_t21_existing_requirements_solver_thread_is_preserved() {
     }
     assert_eq!(replies[0], replies[1]);
     let native = std::thread::spawn(move || {
-        let options = common::gated();
+        let options = common::parse_options();
         let admission =
             admit_source(text, "requirements.fsl", None, &options, &Map::new, false).unwrap();
         let mut solver = || fsl_solver_z3::Z3Solver::new().map_err(|e| e.to_string());

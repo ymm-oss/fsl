@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use fsl_syntax::{ParseOptions, SourceFile, UnstableFeature, UnstableFeatures};
+use fsl_syntax::{ParseOptions, SourceFile};
 use fsl_tools::{Locale, RequirementClaimSet, Segment};
 
 fn options() -> ParseOptions {
-    ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5))
+    ParseOptions::stable()
 }
 
 fn source(text: &str, comment: &str) -> String {

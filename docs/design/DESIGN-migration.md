@@ -43,6 +43,41 @@ backups. A process or filesystem crash cannot be made transactionally atomic
 across unrelated files by a portable CLI; recoverable `.bak` files are retained
 if the process is interrupted before cleanup.
 
+### Missing edition header (#1434)
+
+`--edition next` and `--edition 5` name the same edition. Since #1434
+published `fsl 5`, a `lint` or `migrate` request for it on a document without
+an edition header also reports `missing_edition_header` (taxonomy
+`non_canonical`, severity `info`, `edition: "next"`, one machine-applicable
+edit inserting `fsl 5` before the first significant line). Before #1434 the
+finding existed only behind the unstable gate. It is a finding like any other:
+`lint --edition next` on a headerless document now exits 1 where it exited 0,
+and `migrate` (whose default edition is `next`) plans the header insertion;
+`--write` inserts it, and a second run is unchanged. `--edition current` (the
+`lint` default) reports no such finding, and `check --edition next` does not
+add it. A document without a header is still read as `fsl 4`; neither command
+changes how it is read.
+
+A declaration that takes no edition header (`EDITIONLESS_DECLARATIONS`, such
+as `agent`) gets no such finding: `check` refuses a header on it with
+`edition_header_not_accepted`, so the insertion would break the document.
+A `refinement` document gets none either. It accepts a header, but it is not a
+standalone check target (`lint`/`migrate` skip its input pre-flight), so no
+Kernel contract can show the insertion preserves it; `lint --edition next`
+stays exit 0 on it, as before #1434. Nor does a `compose` document (dialect
+keyword `compose`): its Public Kernel v1 migration contract cannot keep the
+components' source files, so `migrate` refused the planned insertion with exit 2
+("public Kernel v1 cannot preserve component source filenames after compose
+lowering"). For all three, `lint` and `migrate` give what they gave before
+#1434; a header written by hand is still read.
+
+Because `migrate` defaults to `next`, it now also runs the next edition's
+process-form conversion on a headerless `requirements` document. Where that
+conversion needs a manual step (`migrate_manual_required`), a default `migrate`
+exits 1 where it exited 0: 11 of the 651 corpus forms, for example
+`examples/annotations/annotated_claims.fsl`. `--edition current` keeps the
+former result.
+
 ## Rewrite table
 
 | Legacy form | Canonical form | Automatic boundary |
@@ -150,7 +185,7 @@ pass once through the same outer edition finalization step. Check folds
 governance only on its model/implements path, never on successful early
 AI-project/agent gate results; verify retains its native outer governance fold
 before edition finalization. Headerless documents use
-current edition; gated explicit headers select their declared edition. Omitted
+current edition; explicit headers select their declared edition. Omitted
 initial-value warnings are added only by this step, not also by success-only
 metadata finalization. Existing warnings,
 verdicts, envelopes, and process exits are retained. Lint already exposes these

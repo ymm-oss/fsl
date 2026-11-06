@@ -141,7 +141,6 @@ fn assert_case(
         let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
             .args(args)
             .current_dir(&directory)
-            .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
             .env("FSLC_CACHE", "off")
             .output()
             .expect("run native CLI");
@@ -448,7 +447,6 @@ fn assert_empty_refinement_map(label: &str, field: &str, expression: &str) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["refine", "impl.fsl", "abs.fsl", "map.fsl", "--depth", "4"])
         .current_dir(&directory)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
         .env("FSLC_CACHE", "off")
         .output()
         .expect("run native refine CLI");

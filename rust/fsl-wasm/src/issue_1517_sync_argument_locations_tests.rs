@@ -91,13 +91,12 @@ mod issue_1517_sync_argument {
             ]
             .into(),
             options: Options::default(),
-            unstable: vec![],
         };
         println!(
             "1517_WORKER_SOURCE {}",
             json!({"id":id,"cmd":request.cmd,
             "source":request.source,"source_file":request.source_file,"files":request.files,
-            "options":{"depth":8,"deadlock":"warn"},"unstable":[],
+            "options":{"depth":8,"deadlock":"warn"},
             "producer":std::env::current_exe().expect("test executable"),
             "implementation_fingerprint":option_env!("FSLC_IMPLEMENTATION_FINGERPRINT")})
         );
@@ -120,7 +119,7 @@ mod issue_1517_sync_argument {
                 &request.source,
                 &resolver,
                 &request.source_file,
-                &request.parse_options(),
+                &fsl_syntax::ParseOptions::stable(),
             )
             .expect("valid0 native kernel");
             let model = fsl_core::build_model(kernel).expect("valid0 native model");

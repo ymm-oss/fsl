@@ -24,13 +24,13 @@ pub mod keywords;
 mod lexer;
 mod literate;
 mod lossless;
+mod parse_options;
 mod parser;
 pub mod recursion;
 mod respell;
 mod source_spellings;
 mod surface;
 mod syntax_expr;
-mod unstable;
 
 pub use ai::{
     AiAgentContract, AiAgentGrant, AiAgentOutput, AiAuthority, AiAuthorityRule, AiCheckRule,
@@ -97,6 +97,7 @@ pub use lossless::{
     canonical_rewrites_with, format_source, format_source_respelled, format_source_with,
     lossless_document, lossless_document_with, source_position, source_span,
 };
+pub use parse_options::ParseOptions;
 pub use parser::{
     ParseError, parse_expr, parse_surface_document, parse_surface_document_with, parse_surface_spec,
 };
@@ -124,4 +125,3 @@ pub use syntax_expr::{
     DUPLICATE_STRUCT_FIELD, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue,
     SyntaxOperator, SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind,
 };
-pub use unstable::{ParseOptions, UnstableFeature, UnstableFeatures};

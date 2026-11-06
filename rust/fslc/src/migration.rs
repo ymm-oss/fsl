@@ -981,9 +981,8 @@ pub fn admit_source(
     })
 }
 
-/// Record the edition a document's header declares as `fsl_edition`. A
-/// header is read only when the options enable it, so without them (or
-/// without a header) the envelope is unchanged.
+/// Record the edition a document's header declares as `fsl_edition`.
+/// Without a header the envelope is unchanged.
 fn with_declared_edition(mut output: Value, declared: Option<Edition>) -> Value {
     if let (Some(edition), Value::Object(envelope)) = (declared, &mut output) {
         envelope.insert("fsl_edition".to_owned(), json!(edition.number()));
@@ -993,8 +992,14 @@ fn with_declared_edition(mut output: Value, declared: Option<Edition>) -> Value 
 
 /// The `missing_edition_header` finding of a document read for `edition`
 /// without an edition header: one edit inserting the header line before the
-/// first significant line. `None` unless the options read headers, the
-/// edition is the next one, and the document has no header.
+/// first significant line. `None` unless the edition is the next one and the
+/// document has no header. `None` also for a declaration that takes no
+/// header ([`fsl_syntax::EDITIONLESS_DECLARATIONS`], such as `agent`), where
+/// the header would make the document a parse error, and for a `refinement`,
+/// which is not a standalone check target, and for a `compose` document,
+/// whose Public Kernel v1 contract cannot keep its components' source files:
+/// for those two no Kernel contract can show the insertion preserves the
+/// document, so none is offered (a hand-written header is still read).
 #[must_use]
 pub fn missing_edition_header(
     source: &str,
@@ -1002,10 +1007,11 @@ pub fn missing_edition_header(
     options: &ParseOptions,
 ) -> Option<MigrationDiagnostic> {
     if edition != Edition::Fsl5
-        || !options
-            .unstable()
-            .contains(fsl_syntax::UnstableFeature::Fsl5)
         || !matches!(fsl_syntax::edition_header(source, options), Ok(None))
+        || fsl_syntax::dialect_keyword_with(source, options).is_ok_and(|keyword| {
+            matches!(keyword, "refinement" | "compose")
+                || fsl_syntax::EDITIONLESS_DECLARATIONS.contains(&keyword)
+        })
     {
         return None;
     }

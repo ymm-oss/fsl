@@ -11,12 +11,8 @@ use std::path::{Path, PathBuf};
 
 use fsl_lsp::{DocumentIndex, SymbolRole};
 use fsl_syntax::keywords::{KEYWORDS, PARTICLES, Status};
-use fsl_syntax::{ParseOptions, TokenKind, UnstableFeature, UnstableFeatures};
+use fsl_syntax::{ParseOptions, TokenKind};
 use lsp_types::Position;
-
-fn gated() -> ParseOptions {
-    ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5))
-}
 
 fn e2e() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -29,7 +25,7 @@ const SPELLINGS: [&str; 3] = ["fsl5_en.fsl", "fsl5_ja_particles.fsl", "fsl5_ja_f
 
 fn index(file: &str) -> (String, DocumentIndex) {
     let source = std::fs::read_to_string(e2e().join(file)).expect("read fixture");
-    let index = DocumentIndex::build(&source, Some(file), &gated())
+    let index = DocumentIndex::build(&source, Some(file), &ParseOptions::stable())
         .unwrap_or_else(|error| panic!("{file}: {error}"));
     (source, index)
 }
@@ -70,7 +66,7 @@ fn the_three_spellings_of_one_document_declare_the_same_canonical_names() {
             )
             .collect::<BTreeSet<_>>();
         let mut keywords = 0;
-        for token in fsl_syntax::lex_with(&source, &gated()).expect("lex") {
+        for token in fsl_syntax::lex_with(&source, &ParseOptions::stable()).expect("lex") {
             let TokenKind::Ident(word) = &token.kind else {
                 continue;
             };
@@ -139,7 +135,7 @@ fn every_next_edition_fixture_is_indexed_in_full() {
     }
     assert!(files.len() >= 12, "{files:?}");
     for (path, source) in files {
-        let index = DocumentIndex::build(&source, path.to_str(), &gated())
+        let index = DocumentIndex::build(&source, path.to_str(), &ParseOptions::stable())
             .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
         assert_eq!(
             index.lexicon(),
@@ -171,7 +167,7 @@ fn relations_resources_measures_goals_and_policies_declare_their_names() {
     let fixtures = e2e().parent().expect("fsl5 fixtures").to_path_buf();
     let read = |file: &str| {
         let source = std::fs::read_to_string(fixtures.join(file)).expect("read fixture");
-        DocumentIndex::build(&source, Some(file), &gated())
+        DocumentIndex::build(&source, Some(file), &ParseOptions::stable())
             .unwrap_or_else(|error| panic!("{file}: {error}"))
     };
     let declared = |index: &DocumentIndex| {

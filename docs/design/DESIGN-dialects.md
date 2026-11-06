@@ -379,10 +379,9 @@ stdout, stderr and exit with no field excluded, and no run differed from its rep
 ok-to-error and 0 error-to-ok transitions. No required test's inline fixtures were rewritten.
 
 **Owed to #1437.** This removal is recorded only here and in
-`changelog.d/1682-repeated-step-inputs.changed.md`: the next edition's header may not appear in
-published material until #1434 lifts the gate (`rust/fslc/tests/unstable_gate_leak.rs`), so
-`docs/manual/LANGUAGE.md`, `docs/manual/LANGUAGE.ja.md` and `skills/fsl/references/syntax.md` do not
-carry it yet. When #1437 writes the `fsl 5` reference, those three owe this text, regenerating
+`changelog.d/1682-repeated-step-inputs.changed.md`. #1434 published the next edition without its
+language reference, which is #1437's, so `docs/manual/LANGUAGE.md`, `docs/manual/LANGUAGE.ja.md` and
+`skills/fsl/references/syntax.md` do not carry it yet. When #1437 writes the `fsl 5` reference, those three owe this text, regenerating
 `docs/intro/language.{en,ja}.html`: a `scenario` or `forbidden` step that names an input twice is
 refused with exit 2, `kind: "semantics"`, `duplicate step input 'amount' at doc.fsl:43:44` and `loc` at
 the repeated name, covering `with`, instance first, a `で` list, two `で` groups, an alias with its
@@ -569,8 +568,8 @@ head, so each `covers` keeps its text in the kernel.
 
 **Owed to #1437.** This removal is recorded here, in
 `skills-next/fsl-requirements/references/syntax.md` and in
-`changelog.d/1705-requirements-repeats.changed.md`. The next edition's header may not appear in
-published material until #1434 lifts the gate, so `docs/manual/LANGUAGE.md`,
+`changelog.d/1705-requirements-repeats.changed.md`. #1434 published the next edition without its
+language reference, which is #1437's, so `docs/manual/LANGUAGE.md`,
 `docs/manual/LANGUAGE.ja.md` and `skills/fsl/references/syntax.md` do not carry it yet. When #1437
 writes the `fsl 5` reference, those three owe the three refusals above and the accepted `covers`
 link with its owner's title, the document-wide one-text rule for an unowned ID, the row covering its
@@ -787,8 +786,8 @@ refused, `compose use must reference a spec`, on base and head. An inline `imple
 on the `implements`. `fslc-lsp`, the Worker and `replay --from-log` were not run.
 
 **Owed to #1437.** The `concept` row and the bounds and `kpi` of a next-edition document are recorded
-only here and in `changelog.d/1686-repeated-declarations.changed.md`: the next edition's header may
-not appear in published material until #1434 lifts the gate (`rust/fslc/tests/unstable_gate_leak.rs`).
+only here and in `changelog.d/1686-repeated-declarations.changed.md`. #1434 published the next
+edition without its language reference, which is #1437's.
 When #1437 writes the `fsl 5` reference, `docs/manual/LANGUAGE.md`, `docs/manual/LANGUAGE.ja.md` and
 `skills/fsl/references/syntax.md` owe the `concept` refusal, regenerating
 `docs/intro/language.{en,ja}.html`.

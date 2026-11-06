@@ -40,7 +40,6 @@ fn check(label: &str, source: &str) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["check", "unary.fsl"])
         .current_dir(&directory)
-        .env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE)
         .output()
         .expect("run native unary operand check");
     assert!(

@@ -5,7 +5,7 @@
 //! trusted <span>@</span> boundary preserves email text without trusting input HTML.
 //! Legacy accept/refuse oracles come from the base82 CLI, not today's formatter.
 
-use fsl_syntax::{ParseOptions, UnstableFeature, UnstableFeatures};
+use fsl_syntax::ParseOptions;
 use fsl_tools::{AppliedEvidence, Locale, RequirementClaimSet, Segment};
 use serde_json::{Value, json};
 
@@ -145,7 +145,7 @@ fn gfm_code_paths_and_document_results_are_literal() {
 #[test]
 fn gfm_authored_rule_comments_are_literal() {
     let mut failures = Vec::new();
-    let options = ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5));
+    let options = ParseOptions::stable();
     for &(raw, code, _) in LITERALS {
         let comment = format!("{raw}| ~~must~~ <&> `tick`");
         let source = |comment: &str| {

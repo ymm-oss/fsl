@@ -1850,10 +1850,12 @@ fn verify_cache_keys_with_solver_version(
 /// blob instead. Both are inputs to the same single key derivation -- they
 /// do not compete for one slot.
 ///
-/// With unstable features enabled the key also carries their names and the
-/// exact `--edition` request, so a run with the gate never reuses a result
-/// computed without it (the document's edition header is part of the source
-/// text the key already hashes). Without them the blob is unchanged.
+/// An explicit `--edition` request is also carried as its number
+/// (`edition_request`): `--edition 4` and an omitted or `current` request
+/// share the `edition` spelling `current` but differ on a `fsl 5` document
+/// (an edition conflict), so their results are never shared. The document's
+/// edition header is part of the source text the key already hashes. Without
+/// an explicit request the blob has no `edition_request` (#1434).
 fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value {
     let mut blob = json!({
         "deadlock": options.deadlock,
@@ -1870,24 +1872,8 @@ fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value 
         "lemmas": options.lemmas,
         "edition": options.shared.edition.map_or("current", fsl_syntax::Edition::as_str),
     });
-    let unstable = crate::process::parse_options().unstable();
-    if !unstable.is_empty()
-        && let Value::Object(fields) = &mut blob
-    {
-        fields.insert(
-            "unstable".to_owned(),
-            json!(
-                fsl_syntax::UnstableFeature::ALL
-                    .iter()
-                    .filter(|feature| unstable.contains(**feature))
-                    .map(|feature| feature.name())
-                    .collect::<Vec<_>>()
-            ),
-        );
-        fields.insert(
-            "edition_request".to_owned(),
-            json!(options.shared.edition.map(fsl_syntax::Edition::number)),
-        );
+    if let (Some(edition), Value::Object(fields)) = (options.shared.edition, &mut blob) {
+        fields.insert("edition_request".to_owned(), json!(edition.number()));
     }
     blob
 }
@@ -3288,6 +3274,29 @@ mod tests {
             json!(fsl_runtime::IMPLEMENTS_SEARCH_BUDGET),
             "{base_options:#}"
         );
+    }
+
+    /// #1434: `--edition 4` and an omitted request share the `edition`
+    /// spelling `current` but not a result, so the key tells them apart; the
+    /// blob of a run without `--edition` carries no gate or request field.
+    #[test]
+    fn verify_cache_base_options_separate_explicit_edition_requests() {
+        let blob = |edition| {
+            let mut options = CliVerifyOptions::default();
+            options.shared.edition = edition;
+            verify_cache_base_options("bmc", &options)
+        };
+        let omitted = blob(None);
+        assert_eq!(omitted["edition"], json!("current"), "{omitted:#}");
+        assert!(omitted.get("edition_request").is_none(), "{omitted:#}");
+        assert!(omitted.get("unstable").is_none(), "{omitted:#}");
+        let four = blob(Some(fsl_syntax::Edition::Fsl4));
+        assert_eq!(four["edition"], json!("current"), "{four:#}");
+        assert_eq!(four["edition_request"], json!(4), "{four:#}");
+        assert_ne!(four, omitted);
+        let five = blob(Some(fsl_syntax::Edition::Fsl5));
+        assert_eq!(five["edition"], json!("next"), "{five:#}");
+        assert_eq!(five["edition_request"], json!(5), "{five:#}");
     }
 
     #[test]

@@ -228,7 +228,6 @@ fn supported_db_rules_omitted_and_empty_checks_preserve_check_kernel_and_repair_
         for (command, edition, expected) in [
             ("fmt", "current", source.as_str()),
             ("lint", "current", LINT_STDOUT),
-            ("migrate", "next", MIGRATE_STDOUT),
         ] {
             let actual = directory.run(&[command, "case.fsl", "--edition", edition]);
             assert_eq!(
@@ -243,6 +242,35 @@ fn supported_db_rules_omitted_and_empty_checks_preserve_check_kernel_and_repair_
                 "{name}/{command}: full stdout changed"
             );
         }
+        // #1434: for the next edition the headerless document is planned to
+        // gain its `fsl 5` header and nothing else (a dry run writes nothing).
+        let migrate = directory.run(&["migrate", "case.fsl", "--edition", "next"]);
+        assert_eq!(migrate.status.code(), Some(0), "{name}/migrate");
+        let migrate: serde_json::Value =
+            serde_json::from_slice(&migrate.stdout).expect("migrate JSON");
+        let file = &migrate["files"][0];
+        assert_eq!(
+            (&migrate["changed"], &file["changed"]),
+            (&serde_json::json!(1), &serde_json::json!(true)),
+            "{name}/migrate: {migrate:#}"
+        );
+        assert_eq!(
+            file["findings"]
+                .as_array()
+                .expect("findings")
+                .iter()
+                .map(|finding| finding["code"].as_str().unwrap_or_default())
+                .collect::<Vec<_>>(),
+            [fsl_syntax::MISSING_EDITION_HEADER],
+            "{name}/migrate: {migrate:#}"
+        );
+        assert_eq!(
+            file["edits"][0]["replacement"]
+                .as_str()
+                .map(|text| text.replacen("fsl 5\n", "", 1)),
+            Some(source.clone()),
+            "{name}/migrate: {migrate:#}"
+        );
         assert_eq!(
             std::fs::read_to_string(directory.0.join("case.fsl")).expect("unchanged input"),
             source

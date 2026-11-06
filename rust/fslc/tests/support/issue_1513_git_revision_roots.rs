@@ -88,7 +88,6 @@ impl Repo {
 
     fn invoke(&self, executable: &str, args: &[&str]) -> Output {
         let settings = [
-            ("FSLC_UNSTABLE", "fsl5"),
             ("FSLC_CACHE", "off"),
             ("GIT_CONFIG_GLOBAL", "/dev/null"),
             ("GIT_CONFIG_NOSYSTEM", "1"),

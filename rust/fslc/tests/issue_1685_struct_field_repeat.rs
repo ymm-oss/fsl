@@ -44,7 +44,6 @@ impl Scratch {
             .args(args)
             .current_dir(&self.0)
             .env("FSLC_CACHE", "off")
-            .env("FSLC_UNSTABLE", "fsl5")
             .output()
             .expect("run fslc");
         (

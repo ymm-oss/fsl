@@ -90,7 +90,6 @@ impl Scratch {
         let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
             .args(args)
             .current_dir(&self.0)
-            .env("FSLC_UNSTABLE", "fsl5")
             .env("FSLC_CACHE", "off")
             .output()
             .expect("run fslc");

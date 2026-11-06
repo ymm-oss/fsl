@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 
 fn run(path: &Path, route: &str, extra: &[&str]) -> (i32, Value) {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    command.env("FSLC_CACHE", "off").env_remove("FSLC_UNSTABLE");
+    command.env("FSLC_CACHE", "off");
     if matches!(route, "check" | "replay") {
         command.arg(route).arg(path);
     } else {

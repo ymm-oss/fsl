@@ -19,7 +19,7 @@ fn run(s: &Scratch, command: &str) -> Output {
 }
 
 fn run_args(s: &Scratch, args: &[String]) -> Output {
-    common::invoke(env!("CARGO_BIN_EXE_fslc"), args, &s.0, true)
+    common::invoke(env!("CARGO_BIN_EXE_fslc"), args, &s.0)
 }
 
 fn payload(output: &Output) -> Value {
@@ -1101,7 +1101,6 @@ fn chain_duplicate_grouping_keeps_root_warnings_on_cold_and_warm_cache() {
             let actual = std::process::Command::new(env!("CARGO_BIN_EXE_fslc"))
                 .args(common::split(&command))
                 .current_dir(&s.0)
-                .env("FSLC_UNSTABLE", "fsl5")
                 .env("FSLC_CACHE", "on")
                 .env("FSLC_CACHE_DIR", s.0.join("cache"))
                 .env("TMPDIR", common::root().join(".codex/tmp"))

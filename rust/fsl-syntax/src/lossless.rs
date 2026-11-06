@@ -1159,41 +1159,38 @@ mod tests {
         assert!(once.contains(" => "));
     }
 
-    /// The formatter keeps an edition header (behind the gate) and leaves the
-    /// rest of the document formatted as without it.
+    /// The formatter keeps an edition header and leaves the rest of the
+    /// document formatted as without it.
     #[test]
     fn formatter_keeps_the_edition_header() {
-        let gated = ParseOptions::with_unstable(
-            crate::UnstableFeatures::NONE.with(crate::UnstableFeature::Fsl5),
-        );
+        let options = ParseOptions::stable();
         let body = "domain D {   type Status = Draft | Done; }";
         let plain = format_source(body, Edition::Fsl4).expect("format");
         for header in ["fsl 4", "fsl 5"] {
             let source = format!("// note\n{header}\n\n{body}");
-            let once = format_source_with(&source, Edition::Fsl4, &gated).expect("format");
+            let once = format_source_with(&source, Edition::Fsl4, &options).expect("format");
             assert_eq!(once, format!("// note\n{header}\n\n{plain}"));
             assert_eq!(
-                format_source_with(&once, Edition::Fsl4, &gated).expect("format twice"),
+                format_source_with(&once, Edition::Fsl4, &options).expect("format twice"),
                 once
             );
-            assert!(matches!(
-                format_source(&source, Edition::Fsl4),
-                Err(FormatError::Parse(error)) if error.code() == "FSL-DIALECT-UNKNOWN"
-            ));
+            assert_eq!(
+                format_source(&source, Edition::Fsl4).expect("format"),
+                once,
+                "the entry without explicit options reads the header too"
+            );
         }
     }
 
     /// With a header, only comments come before it and no blank line opens
-    /// the document; without the gate the published layout is kept.
+    /// the document; without a header the published layout is kept.
     #[test]
     fn formatter_opens_a_headed_document_with_its_header_line() {
-        let gated = ParseOptions::with_unstable(
-            crate::UnstableFeatures::NONE.with(crate::UnstableFeature::Fsl5),
-        );
+        let options = ParseOptions::stable();
         let body = "domain D {   type Status = Draft | Done; }";
         let plain = format_source(body, Edition::Fsl4).expect("format");
         let source = format!("\n\n// note\n\n\nfsl   5\n\n\n{body}");
-        let once = format_source_with(&source, Edition::Fsl5, &gated).expect("format");
+        let once = format_source_with(&source, Edition::Fsl5, &options).expect("format");
         assert_eq!(once, format!("// note\n\nfsl 5\n\n{plain}"));
         let published = format_source(&format!("\n\n{body}"), Edition::Fsl4).expect("format");
         assert_eq!(

@@ -1,16 +1,18 @@
-# Parse-entry inventory and the unstable gate
+# Parse-entry inventory and the published `fsl 5` edition
 
-Status: internal design note for the next syntax edition, developed on
-`main` behind an unstable gate. Not user documentation: the gate is not
-advertised, and `rust/fslc/tests/unstable_gate_leak.rs` keeps it out of every
-published tree except this directory.
+Status: internal design note for the `fsl 5` syntax edition. The edition was
+developed on `main` behind an unstable gate; #1434 removed the gate, so
+`fsl 5` is read unconditionally. A document without an edition header is
+still `fsl 4`. User documentation of the edition is owed to #1437.
 
-## Gate
+## Parse options (after #1434)
 
-- `fsl-syntax` owns `UnstableFeatures` (a bit set; the only feature is
-  `fsl5`) and `ParseOptions { unstable }`. Options are obtained only through
-  `ParseOptions::stable()` (the published language, also `Default`) and
-  `ParseOptions::with_unstable(..)`.
+- `fsl-syntax` owns `ParseOptions`, which no longer carries a feature set:
+  `UnstableFeature` / `UnstableFeatures`, `ParseOptions::with_unstable(..)` and
+  `ParseOptions::unstable()` are gone. `ParseOptions::stable()` (also
+  `Default`) is the only value, the published language, which reads every
+  edition header. The type and the explicit options argument of every parse
+  entry are kept, so the entries below keep their signatures.
 - Entries that take options: `parse_document_with`,
   `parse_surface_document_with`, `dialect_keyword_with`, `lex_with`,
   `lexical_warnings`, `IdentifierRule::for_source`, `edition_header`,
@@ -18,11 +20,10 @@ published tree except this directory.
   `canonical_rewrites_with`, `legacy_expression_operator_error`,
   `ParseError::for_edition`, and in fsl-core one `_with_options` entry beside
   each function that reads source text (`parse_kernel_source_with_options`,
-  `governance_contract_with_options`, ...). The old
-  names (`parse_document`, ...) stay as the published-language entries and are
-  the `_with` entry under `ParseOptions::stable()`. Every registered dialect
-  frontend is reached only through `parse_document_with`, on the token stream
-  it lexed with the same options.
+  `governance_contract_with_options`, ...). The old names (`parse_document`,
+  ...) are the `_with` entry under `ParseOptions::stable()` and now read the
+  same language. Every registered dialect frontend is reached only through
+  `parse_document_with`, on the token stream it lexed with the same options.
 - `legacy_expression_operator_error` is a diagnostic-only reparse of an already
   rejected expression under the original header/grammar and caller's options.
   It uses the same shared parser, never returns a model or broadens acceptance,
@@ -33,30 +34,43 @@ published tree except this directory.
   check/verify, formatter, lint, and migrate. Range type bounds disable only the
   operator diagnostic because a following relation arrow belongs to the type
   grammar. A line-terminated expression never classifies the next line's token.
-- The library never reads the environment. Three process entry points decide
-  the options, once:
-  - native CLI: `main` reads `FSLC_UNSTABLE` (comma-separated feature names)
-    through `fslc_rust::unstable_gate::from_environment` into a process
-    `OnceLock`; the binary's own modules (`main.rs`, `causal.rs`,
-    `verification.rs`) parse with it;
-  - language server: `run_stdio` reads the same variable into `ServerState`
-    and passes it to `DocumentIndex::build`, which keeps it for its later
-    re-lexing;
-  - browser Worker: `run(request_json)` accepts `"unstable": ["fsl5"]`, and the
-    request's options reach the Worker's own parse.
-- Unknown feature names enable nothing and print nothing, so an unset, empty,
-  or unknown value is byte-for-byte the published language.
-- The behaviour behind the feature is the identifier rule and the edition
-  header below. R0
-  (`rust/fslc/tests/unstable_gate_r0.rs`) holds that for the whole
-  `specs/` + `examples/` corpus: `fslc kernel` and `fslc check` print the same
-  bytes and exit the same with the gate off and on. It is the merge condition
-  for every stage behind the gate.
+- No entry point reads an opt-in any more. `FSLC_UNSTABLE` and
+  `rust/fslc/src/unstable_gate.rs` are removed: the native CLI and the language
+  server ignore the variable. The browser Worker's `Request` has no `unstable`
+  field; serde ignores an old client's `"unstable"` value of any type as an
+  unknown field (`Request` does not deny unknown fields), and its other fields
+  keep their types.
+- Where a command used to ask whether the gate was on, it now asks the
+  document's edition or nothing:
+  - the requirements solver checks (`spec_loading::reject_refuted_requirements`,
+    the language server's requirements diagnostics) run only for a document
+    headed `fsl 5`; `requirements_solver::refute` keeps its own
+    next-edition check (`requirements.next`);
+  - `missing_edition_header` and the process-form conversion depend on the
+    requested edition only;
+  - the CLI options `--lang` / `--names` (`fmt`), `--names` / `--lowering`
+    (`explain`), `--strict-names` (`lint`) and the `--edition` spellings `4`
+    and `5` are accepted without an opt-in. `cli-contract.json` and the help
+    list the options; `cli_contract.rs` adds only the `--edition` spellings
+    `4` / `5` as an overlay (which spelling to advertise is #1437's);
+  - `explain` respells through the model's glossary and prints the readable
+    lowering steps for every document; a document without a glossary or
+    next-edition lowering steps prints what it printed before.
+- The #1434 type-boundary sweep ran `fslc check` on all 651 `.fsl` forms
+  under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (631
+  headerless, 20 headed `fsl 5`) and on 488 inline sources of the changed
+  tests, with the base binary (`63dd3e02c`) with and without
+  `FSLC_UNSTABLE=fsl5` and the head binary. Head equals base with the gate on in complete stdout and exit
+  for every form; every headerless form equals base without the gate; the
+  `ok`-to-`error` set is empty, and the `error`-to-`ok` set is the 17 corpus
+  and 16 inline forms headed `fsl 4` / `fsl 5`. The former R0 test
+  (`unstable_gate_r0.rs`) and the leak check (`unstable_gate_leak.rs`) were
+  removed with the gate.
 
 ## Identifier rule (S2)
 
 `IdentifierRule::for_source(source, options)` picks the lexer's identifier
-rule. It is `Unicode` only when `fsl5` is enabled **and** the first significant
+rule. It is `Unicode` only when the first significant
 line (after a BOM, whitespace and `//` comments, as the lexer skips them) is
 `fsl`, blanks, `5`; otherwise `Ascii`, the published `[A-Za-z_][A-Za-z0-9_]*`.
 The rule reads the header through `edition_header` (below). An ASCII-only
@@ -89,9 +103,8 @@ one identifier under the rule of every document it edits.
 
 ## Edition header (S1)
 
-`edition_header(source, options)` reads the header before lexing (J2). With
-`fsl5` off it returns nothing, so a header stays the unknown declaration `fsl`.
-With it on, the first significant line is a header when it is `fsl`, blanks,
+`edition_header(source, options)` reads the header before lexing (J2). The
+first significant line is a header when it is `fsl`, blanks,
 decimal digits, and only blanks to the end of the line; `fsl` followed by
 anything else is an identifier, so `const fsl = 1` keeps its meaning.
 
@@ -108,7 +121,8 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
   parse and needs no options.
 - `Edition` is the one edition type: the CLI's `--edition`, `fmt`, `lint` and
   `migrate` all hold `Option<Edition>` (`None` = `current`). `--edition 4|5` is
-  accepted only with the gate; `next` is `5`. `document_edition` resolves the
+  accepted (without an opt-in since #1434); `next` is `5`, and outputs spell
+  the requested edition `current` / `next`. `document_edition` resolves the
   header against an explicit `--edition`; a mismatch is `edition_conflict`
   (exit 2) at the header.
 - A document read in `fsl 5` behaves as `--edition next` does: every migration
@@ -121,9 +135,12 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
   the first significant line. Both stay outside `plan_migration`, which
   `check --edition next` turns into errors.
 - `check` / `verify` add `fsl_edition` only when a header was read, so a
-  document without one prints the same bytes with the gate on (R0). The
-  verify cache key adds the unstable set and the exact `--edition` request
-  when the gate is on; the header itself is part of the hashed source.
+  document without one prints what it printed before the edition existed. The
+  verify cache key adds the exact `--edition` request (`edition_request`, the
+  number) when one is given, so `--edition 4` and an omitted flag never share
+  an entry; the header itself is part of the hashed source. Before #1434 the
+  key also carried the unstable set when the gate was on, so a `fsl 5`
+  document's key changes once.
 - Worker check/verify validate options first, then admit source before model or
   solver work. Admitted source results, including errors and headerless documents,
   share edition finalization. Check folds governance only after its
@@ -133,7 +150,7 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
 ## Glossary and alias resolution (S3)
 
 - `glossary { Canonical = alias  Entity.field = alias ... }` is read only in a
-  `requirements` document headed `fsl 5` with the gate on, and only as its
+  `requirements` document headed `fsl 5`, and only as its
   first item (`misplaced_glossary` otherwise). Elsewhere `glossary` is still
   `expected requirements declaration`. The parser learns the edition through
   S4's `SourceFile::edition`.
@@ -164,8 +181,8 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
   `display` to a rejection; `explain` shows aliases by default for a document
   with a glossary and canonical names with `--names canonical`; `lint
   --strict-names` reports `mixed_names` (warning) where a canonical name is
-  also written as itself. `--names` and `--strict-names` exist only behind
-  the gate.
+  also written as itself. `--names` and `--strict-names` are accepted
+  without an opt-in since #1434.
 - Not yet: the language server (hover, completion, rename of aliases; S11),
   and `fmt --names` (S10). The document (S10) reads the glossary from the
   checked model: its glossary table, and aliases in its views under
@@ -191,134 +208,20 @@ anything else is an identifier, so `const fsl = 1` keeps its meaning.
   `Keyword::lookup_*`, `Kw::english` / `Kw::japanese`, `PARTICLES`) for
   `fmt --lang` (S10) and the language server's keyword index (S11).
 
-## Fail closed (decisions/049 D2)
+## Fail closed (decisions/049 D2), retired by #1434
 
-A parse that does not receive the process's options reads the published
-language. Under the published language a document that starts with an edition
-header (`fsl 5`, `fsl 4`) is the unknown declaration `fsl` and is rejected with
-`FSL-DIALECT-UNKNOWN`, exactly as today
-(`dispatch::tests::edition_header_fails_closed_under_stable_options`). So a
-command whose first parse ran behind the gate and whose later re-parse did not
-stops with an error; it never reads one file two ways. S1 kept the stable side
-of that test and routed the re-parses; the rows below stay on the published
-language by design or until the named stage.
+While the gate existed, a parse that did not receive the process's options
+read the published language, where a header was the unknown declaration
+`fsl`, so a command never read one file two ways. With the feature set gone,
+every entry reads the header the same way, and
+`dispatch::tests::edition_header_is_read_by_every_document_entry` replaces the
+former `edition_header_fails_closed_under_stable_options`.
 
-## Inventory
+## Inventory, retired by #1434
 
-Every reference to a stable-pinned entry outside tests, by file. The
-authoritative copy is `INVENTORY` in
-`rust/fslc/tests/parse_entry_inventory.rs`; that test reads every non-test
-Rust source of the workspace as a syntax tree (paths, `use` aliases, function
-pointers, macro bodies; a glob import from `fsl_syntax` is reported) and fails
-on any count that differs, so a new parse entry cannot bypass the options
-silently. Explicit stable constructions (`ParseOptions::stable`,
-`ParseOptions::default`) are counted the same way, so
-`parse_document_with(source, &ParseOptions::stable())` is not a routed parse.
-
-`parse_expr` is exempt: it parses one expression with no document header.
-
-Owner: the stage that converts the reference. `Definition` = the
-published-language entry itself, a fixed published-language input, or a parity
-tool (stays); `D8` = causal / ai dialects, where decisions/049 D8 makes an
-edition header an error, so the published language is the intended reading.
-The document projection and render (S10) take the options through their
-`_with_options` entries; the published-language names beside them are
-wrappers.
-
-| Reason | Meaning |
-|---|---|
-| CAUSAL_AI | causal / ai dialects (D8) |
-| STANDALONE_FRONTEND | public single-dialect parsers with no product caller; the registry frontends reuse the routed tokens instead; they stay on the published language (fail closed) |
-| FRAGMENT | expression / spec fragment parsers without a header; the identifier rule is chosen by the header, so they always read ASCII identifiers |
-| PARITY_TOOL | Python-parity debug binaries; the frozen reference reads only the published language |
-| REGISTRY | the private `domain` frontend wrapper shares the public entry's name |
-| STABLE_WRAPPER | the published-language entry itself (fsl-syntax, and fsl-core's wrapper beside each `_with_options` entry) |
-| DIRECT_KERNEL | `parse_direct_kernel_spec`, whose only callers are tests |
-| FIXTURE | a fixed in-repository fixture in the published language, never a user document |
-
-| File | Entry | Count | Owner | Reason |
-|---|---|---|---|---|
-| `fsl-core/src/bin/fsl-parse-kernel.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
-| `fsl-core/src/compose.rs` | `ParseOptions::stable` | 3 | Definition | STABLE_WRAPPER |
-| `fsl-core/src/dialect.rs` | `ParseOptions::stable` | 5 | Definition | STABLE_WRAPPER |
-| `fsl-core/src/issue_1683_old_walk_tests.rs` | `parse_kernel_source` | 1 | Definition | FIXTURE |
-| `fsl-core/src/lib.rs` | `ParseOptions::stable` | 4 | Definition | STABLE_WRAPPER |
-| `fsl-core/src/lib.rs` | `parse_document` | 1 | Definition | DIRECT_KERNEL |
-| `fsl-core/src/refinement.rs` | `ParseOptions::stable` | 2 | Definition | STABLE_WRAPPER |
-| `fsl-core/src/refinement.rs` | `requirements_implements_with_bounds` | 1 | Definition | STABLE_WRAPPER |
-| `fsl-lsp/src/index.rs` | `is_causal_source` | 1 | D8 | CAUSAL_AI |
-| `fsl-runtime/src/bin/fsl-bfs.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
-| `fsl-runtime/src/bin/fsl-explicit.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
-| `fsl-runtime/src/bin/fsl-refine.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
-| `fsl-runtime/src/bin/fsl-refine.rs` | `parse_refinement` | 1 | Definition | PARITY_TOOL |
-| `fsl-runtime/src/scope_tests.rs` | `parse_kernel_source` | 2 | Definition | FIXTURE |
-| `fsl-syntax/src/ai.rs` | `lex` | 1 | D8 | CAUSAL_AI |
-| `fsl-syntax/src/ai_project.rs` | `lex` | 1 | D8 | CAUSAL_AI |
-| `fsl-syntax/src/bin/fsl-parse-surface.rs` | `parse_surface_document` | 1 | Definition | PARITY_TOOL |
-| `fsl-syntax/src/causal.rs` | `declaration_keyword` | 1 | D8 | CAUSAL_AI |
-| `fsl-syntax/src/causal.rs` | `lex` | 1 | D8 | CAUSAL_AI |
-| `fsl-syntax/src/db.rs` | `lex` | 1 | Definition | STANDALONE_FRONTEND |
-| `fsl-syntax/src/dispatch.rs` | `ParseOptions::stable` | 2 | Definition | STABLE_WRAPPER |
-| `fsl-syntax/src/dispatch.rs` | `parse_domain` | 1 | Definition | REGISTRY |
-| `fsl-syntax/src/domain.rs` | `lex` | 1 | Definition | STANDALONE_FRONTEND |
-| `fsl-syntax/src/lexer.rs` | `ParseOptions::stable` | 1 | Definition | STABLE_WRAPPER |
-| `fsl-syntax/src/lossless.rs` | `ParseOptions::stable` | 3 | Definition | STABLE_WRAPPER |
-| `fsl-syntax/src/parser.rs` | `ParseOptions::stable` | 1 | Definition | STABLE_WRAPPER |
-| `fsl-syntax/src/parser.rs` | `lex` | 2 | Definition | FRAGMENT |
-| `fsl-tools/src/causal.rs` | `ParseOptions::stable` | 1 | Definition | STABLE_WRAPPER |
-| `fsl-tools/src/causal.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
-| `fsl-tools/src/document_project.rs` | `ParseOptions::stable` | 2 | Definition | STABLE_WRAPPER |
-| `fsl-tools/src/document_render.rs` | `ParseOptions::stable` | 1 | Definition | STABLE_WRAPPER |
-| `fsl-verifier/src/carrier_coercion_tests.rs` | `parse_kernel_source` | 1 | Definition | FIXTURE |
-| `fsl-verifier/src/eval/scope_tests.rs` | `parse_kernel_source` | 1 | Definition | FIXTURE |
-| `fslc/src/bin/fsl-bmc.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
-| `fslc/src/bin/fsl-replay-actions.rs` | `parse_kernel_source` | 1 | Definition | PARITY_TOOL |
-| `fslc/src/causal.rs` | `parse_causal` | 2 | D8 | CAUSAL_AI |
-| `fslc/src/coverage.rs` | `parse_kernel_source` | 1 | Definition | FIXTURE |
-| `fslc/src/frontend_output.rs` | `declaration_keyword` | 1 | D8 | CAUSAL_AI |
-| `fslc/src/frontend_output.rs` | `parse_ai_project` | 1 | D8 | CAUSAL_AI |
-| `fslc/src/main.rs` | `is_causal_source` | 1 | D8 | CAUSAL_AI |
-| `fslc/src/main.rs` | `parse_ai_project` | 3 | D8 | CAUSAL_AI |
-| `fslc/src/origin_coverage.rs` | `parse_kernel_source_with_file` | 1 | Definition | FIXTURE |
-| `fslc/src/source_diagnostic.rs` | `is_causal_source` | 1 | D8 | CAUSAL_AI |
-| `fslc/src/source_diagnostic.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
-| `fslc/src/verification.rs` | `is_causal_source` | 1 | D8 | CAUSAL_AI |
-| `fslc/src/verification.rs` | `parse_causal` | 1 | D8 | CAUSAL_AI |
-
-The scope-test fixture rows count the private `model`/`witness_model` helpers in
-the runtime and `scope_model` in the verifier. Their parent modules are
-`#[cfg(test)]`; every caller supplies a fixed unit-test string or expression
-matrix to an inline published-language spec template. They never parse a user
-document or receive process parse options. These are `Definition`/`FIXTURE`
-references, not unrouted production parsers or exclusions from the scanner.
-`visits` in `fsl-core/src/issue_1683_old_walk_tests.rs` and `model` in
-`fsl-verifier/src/carrier_coercion_tests.rs` are the same kind of helper: each lives in a
-`#[cfg(test)]` module and parses one published-language string written in that file.
-
-The #1417 baseline adapter removes the duplicate causal preparse from `main.rs`;
-baseline verification now reaches the existing `verification.rs` entries above.
-The remaining `main.rs` causal-source check belongs to command dispatch.
-
-Routed at S0 (receive the process's options): every document parse in the
-native CLI's own modules (`main.rs` 15 sites, `causal.rs` 1, `verification.rs`
-1), `fsl-lsp` `DocumentIndex::build` and its re-lexing (`index.rs`), and the
-Worker's surface parse before verification (`fsl-wasm/src/lib.rs`).
-
-Routed at S1: fsl-core's source-reading functions (compose, dialect contracts,
-refinement, scope overrides) through their `_with_options` entries; the shared
-fslc modules (`check_stages`, `source_diagnostic`, `spec_load`, `reproducer`,
-`verification_output`, `frontend_output`, `migration`), which take the options
-as a parameter (the CLI passes its process value, the Worker the request's,
-the language server its state's); every fsl-core call of the CLI binary; the
-causal model's imported specs (`build_causal_model_with_options`,
-`compile_expectations`); and the lossless tree, formatter and canonical
-rewrites. Literate extraction is no longer listed: it does not parse.
-
-## Known limits of the inventory test
-
-- A `ParseOptions` produced by `Default::default()` through type inference or
-  a derived `Default` on a containing struct is not visible to a syntax-tree
-  scan. The language server's `ServerState` derives `Default` and its start
-  overrides the field; that is the only such holder at S0.
-- Calls through trait objects or function values received from elsewhere are
-  attributed to the file that names the entry, not to the caller.
+`rust/fslc/tests/parse_entry_inventory.rs` counted every product reference to
+an entry that parses without explicit options, and every explicit
+`ParseOptions::stable()`, because such a parse read a different language from
+a gated one. `ParseOptions` now has one value, so those references read the
+same language as the `_with` entries and the count guarded no behavior; the
+test and its inventory were removed with the gate.

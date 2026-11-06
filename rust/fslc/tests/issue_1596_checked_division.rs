@@ -26,11 +26,6 @@ fn run(source: &str, engine: Option<&str>) -> (Value, i32) {
     if let Some(engine) = engine {
         command.args(["--engine", engine, "--depth", "2", "--no-cache"]);
     }
-    if source.starts_with("fsl 5\n") {
-        command.env(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE, "fsl5");
-    } else {
-        command.env_remove(fslc_rust::unstable_gate::ENVIRONMENT_VARIABLE);
-    }
     let output = command.output().expect("run working-tree CLI");
     let exit = output.status.code().expect("native exit status");
     println!("fixture={} engine={engine:?} exit={exit}", path.display());

@@ -28,7 +28,7 @@ struct Run {
     exit: i32,
 }
 
-fn fslc(id: &str, files: &[(&str, &str)], arguments: &[&str], fsl5: bool) -> Run {
+fn fslc(id: &str, files: &[(&str, &str)], arguments: &[&str]) -> Run {
     let scratch = scratch::Scratch::new(
         "FSLC_1680_INPUTS",
         id,
@@ -41,11 +41,7 @@ fn fslc(id: &str, files: &[(&str, &str)], arguments: &[&str], fsl5: bool) -> Run
     command
         .args(arguments)
         .current_dir(scratch.path())
-        .env("FSLC_CACHE", "off")
-        .env_remove("FSLC_UNSTABLE");
-    if fsl5 {
-        command.env("FSLC_UNSTABLE", "fsl5");
-    }
+        .env("FSLC_CACHE", "off");
     let output = command.output().expect("CLI");
     assert!(
         output.stderr.is_empty(),
@@ -73,7 +69,7 @@ fn refused(message: &str, line: u32, column: u32) -> Value {
 }
 
 fn assert_refused(id: &str, files: &[(&str, &str)], message: &str, line: u32, column: u32) {
-    let run = fslc(id, files, &["check", "root.fsl"], false);
+    let run = fslc(id, files, &["check", "root.fsl"]);
     assert_eq!(
         (run.exit, &run.packet),
         (2, &refused(message, line, column)),
@@ -102,7 +98,7 @@ fn assert_located(run: &Run, kind: &str, message: &str, line: u32, column: u32) 
 }
 
 fn assert_checks(id: &str, files: &[(&str, &str)]) {
-    let run = fslc(id, files, &["check", "root.fsl"], false);
+    let run = fslc(id, files, &["check", "root.fsl"]);
     assert_eq!(
         (run.exit, &run.packet["result"]),
         (0, &json!("ok")),
@@ -183,7 +179,6 @@ fn every_verify_engine_refuses_what_check_refuses() {
             engine,
             &[("root.fsl", root.as_str()), ("piece.fsl", PIECE)],
             &["verify", "root.fsl", "--engine", engine, "--depth", "2"],
-            false,
         );
         assert_eq!(
             (run.exit, &run.packet["result"], &run.packet["message"]),
@@ -340,7 +335,6 @@ fn next_edition_event_input_points_at_the_repeated_name() {
             "fsl 5\nrequirements R {\n  number Amount\n  actor Employee\n  entity Claim { amount: Amount = 0 lifecycle Draft -> Submitted }\n  event submit = Employee submits Claim with x: Amount, x: Amount Draft -> Submitted\n}\nverify { instances Claim = 1 values Amount = 0..1 }\n",
         )],
         &["check", "root.fsl"],
-        true,
     );
     // The event's origin is not the repeated name, so the message does not cite it.
     assert_located(&run, "semantics", "duplicate action parameter 'x'", 6, 57);
@@ -388,7 +382,6 @@ fn domain_event_field_behind_an_action_points_at_the_repeated_name() {
         "domain-saga",
         &[("root.fsl", &source)],
         &["check", "root.fsl"],
-        false,
     );
     assert_located(
         &run,
@@ -411,7 +404,7 @@ fn domain_event_field_behind_an_action_points_at_the_repeated_name() {
     // This fixture also carries a deprecation warning.
     let refused_at = |id: &str, fields: &str, field: &str, column: u32| {
         let source = with_fields(fields);
-        let run = fslc(id, &[("root.fsl", &source)], &["check", "root.fsl"], false);
+        let run = fslc(id, &[("root.fsl", &source)], &["check", "root.fsl"]);
         let message =
             format!("duplicate event field 'PaymentCaptured.{field}' at root.fsl:18:{column}");
         assert_located(&run, "name", &message, 18, column);
@@ -445,19 +438,9 @@ fn domain_event_field_no_action_takes_is_refused_too() {
         ["verify", "root.fsl", "--engine", "bmc", "--depth", "2"],
     ] {
         let arguments: Vec<&str> = arguments.into_iter().filter(|a| !a.is_empty()).collect();
-        let run = fslc(
-            "domain-event-twice",
-            &[("root.fsl", &repeated)],
-            &arguments,
-            false,
-        );
+        let run = fslc("domain-event-twice", &[("root.fsl", &repeated)], &arguments);
         assert_located(&run, "name", message, 17, 7);
-        let run = fslc(
-            "domain-event-once",
-            &[("root.fsl", &once)],
-            &arguments,
-            false,
-        );
+        let run = fslc("domain-event-once", &[("root.fsl", &once)], &arguments);
         assert_eq!(run.exit, 0, "{}", run.packet);
     }
 }
@@ -474,7 +457,6 @@ fn inline_implements_names_the_repeated_formal() {
         "inline",
         &[("root.fsl", INLINE_IMPL), ("abs.fsl", INLINE_ABS)],
         &["check", "root.fsl"],
-        false,
     );
     assert_located(
         &run,
@@ -498,7 +480,6 @@ fn inline_implements_other_failure_keeps_its_message() {
         "inline-other",
         &[("root.fsl", INLINE_IMPL), ("abs.fsl", abs)],
         &["check", "root.fsl"],
-        false,
     );
     assert_located(&run, "type", "duplicate action 'step'", 2, 3);
 }
@@ -543,7 +524,6 @@ fn log_mapping_repeated_name_is_one_log_field() {
                     "--mapping",
                     "map.fsl",
                 ],
-                false,
             )
         };
         let (twice, once) = (run("a, a", "twice"), run("a", "once"));
@@ -589,16 +569,11 @@ fn composed_refusal_reaches_the_routes_besides_check_and_verify() {
             "conformant",
         ),
     ] {
-        let refused = fslc(&format!("route-{route}"), &files, arguments, false);
+        let refused = fslc(&format!("route-{route}"), &files, arguments);
         assert_eq!(refused.exit, 2, "{route}: {}", refused.packet);
         assert_eq!(refused.packet["kind"], "semantics", "{route}");
         assert_eq!(refused.packet["message"], AT_PIECE, "{route}");
-        let kept = fslc(
-            &format!("route-{route}-control"),
-            &control,
-            arguments,
-            false,
-        );
+        let kept = fslc(&format!("route-{route}-control"), &control, arguments);
         assert_eq!(
             kept.packet["result"], control_result,
             "{route}: {}",
@@ -619,7 +594,6 @@ fn composed_refusal_reaches_the_routes_besides_check_and_verify() {
             ("map.fsl", map),
         ],
         &arguments,
-        false,
     );
     assert_eq!(refine.exit, 2, "{}", refine.packet);
     assert_eq!(refine.packet["message"], AT_PIECE);
@@ -632,7 +606,6 @@ fn composed_refusal_reaches_the_routes_besides_check_and_verify() {
             ("map.fsl", map),
         ],
         &arguments,
-        false,
     );
     assert_eq!(
         (kept.exit, &kept.packet["result"]),
@@ -675,7 +648,6 @@ fn distinct_formals_still_check_and_decide_by_the_formal_they_read() {
             id,
             &files,
             &["verify", "root.fsl", "--engine", "explicit", "--depth", "2"],
-            false,
         );
         assert_eq!(
             (run.exit, &run.packet["result"]),

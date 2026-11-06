@@ -33,7 +33,6 @@ fn run(label: &str, source: &str, args: &[&str]) -> (i32, Value) {
         .arg("case.fsl")
         .args(&args[1..])
         .current_dir(&dir)
-        .env("FSLC_UNSTABLE", "fsl5")
         .env("FSLC_CACHE", "off")
         .output()
         .unwrap();

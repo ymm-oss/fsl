@@ -13,7 +13,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 fn run(s: &common::Scratch, command: &str) -> std::process::Output {
-    common::command(env!("CARGO_BIN_EXE_fslc"), &s.0, command, true)
+    common::command(env!("CARGO_BIN_EXE_fslc"), &s.0, command)
 }
 
 fn git(s: &common::Scratch, args: &[&str]) {
@@ -393,7 +393,7 @@ fn dependency_edition_warnings_preserve_canonical_identity_and_distinct_findings
                 &body,
                 "dep.fsl",
                 None,
-                &common::gated(),
+                &common::parse_options(),
                 &serde_json::Map::new,
                 false,
             )
@@ -1059,7 +1059,6 @@ fn dependency_edition_a16_cache_and_c04_materialized_source_controls() {
             .args(["verify", "root.fsl", "--depth", "2"])
             .args(extra)
             .current_dir(&s.0)
-            .env("FSLC_UNSTABLE", "fsl5")
             .env("FSLC_CACHE", "on")
             .env("FSLC_CACHE_DIR", s.0.join("cache"))
             .env("TMPDIR", common::root().join(".codex/tmp"))
@@ -1212,8 +1211,8 @@ fn dependency_edition_plain_kernel_schema_controls() {
             "--kernel-version".into(),
             version.to_string(),
         ];
-        let first = common::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &root, true);
-        let second = common::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &root, true);
+        let first = common::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &root);
+        let second = common::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &root);
         let actual = payload(&first);
         let expected = kernel_contract_expected(version);
         assert!(

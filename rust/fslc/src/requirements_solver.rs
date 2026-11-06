@@ -201,20 +201,14 @@ async fn guards<S: fsl_solver::SmtSolver>(
 
 /// The first obligation of `source` the solver refutes (or cannot decide),
 /// or `None` when every one holds or `source` has none: only a next-edition
-/// requirements document read under the `fsl5` gate has any, so nothing else
-/// is parsed a second time or reaches `new_solver`.
+/// (`fsl 5`) requirements document has any, so nothing else reaches
+/// `new_solver`.
 pub async fn refute<S: fsl_solver::SmtSolver>(
     source: &str,
     model: &KernelModel,
     options: &fsl_syntax::ParseOptions,
     new_solver: &mut NewSolver<'_, S>,
 ) -> Option<Rejection> {
-    if !options
-        .unstable()
-        .contains(fsl_syntax::UnstableFeature::Fsl5)
-    {
-        return None;
-    }
     let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) =
         fsl_syntax::parse_surface_document_with(source, options)
     else {

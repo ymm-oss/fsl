@@ -32,7 +32,6 @@ fn native_stdout_bytes_keep_the_complete_base_envelopes() {
             .arg("check")
             .arg(path)
             .env_remove("FSLC_CACHE")
-            .env_remove("FSLC_UNSTABLE")
             .output()
             .unwrap();
         assert_eq!(

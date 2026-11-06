@@ -686,9 +686,7 @@ mod tests {
 
     #[test]
     fn issue_1561_typed_and_range_inputs_shadow_fields() {
-        let options = fsl_syntax::ParseOptions::with_unstable(
-            fsl_syntax::UnstableFeatures::parse_list("fsl5").0,
-        );
+        let options = fsl_syntax::ParseOptions::stable();
         let fsl_syntax::SurfaceDocument::Requirements(mut requirements) =
             fsl_syntax::parse_surface_document_with(
                 "fsl 5\nrequirements R { number Amount actor Manager entity Claim { amount: Amount = 0 lifecycle Draft -> Approved } event approve = Manager approves Claim with amount: Amount Draft -> Approved rule REQ-1 \"t\" { allow Manager approves Claim only when input amount == 1 } } verify { instances Claim = 1 values Amount = 0..2 }",

@@ -20,12 +20,7 @@ fn run(dir: &Path, source: &str, composed: bool) -> [(i32, Value); 4] {
         if route != "check" {
             cmd.args(["--depth", "3", "--no-cache", "--engine", route]);
         }
-        cmd.current_dir(dir)
-            .env("FSLC_CACHE", "off")
-            .env_remove("FSLC_UNSTABLE");
-        if source.starts_with("fsl 5\n") {
-            cmd.env("FSLC_UNSTABLE", "fsl5");
-        }
+        cmd.current_dir(dir).env("FSLC_CACHE", "off");
         let output = cmd.output().unwrap();
         assert!(output.stderr.is_empty(), "{output:?}");
         (
@@ -187,9 +182,7 @@ fn hidden_kpi_name_preserves_values_and_verdicts() {
         "  kpi waiting = count Request in Idle\n}\nverify",
     );
     let control = source.replace("const c =", "const LIMIT =");
-    let options = fsl_syntax::ParseOptions::with_unstable(
-        fsl_syntax::UnstableFeatures::NONE.with(fsl_syntax::UnstableFeature::Fsl5),
-    );
+    let options = fsl_syntax::ParseOptions::stable();
     for text in [&control, &source] {
         let out = run(&dir, text, false);
         assert!(

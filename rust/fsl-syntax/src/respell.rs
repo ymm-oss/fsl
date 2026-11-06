@@ -479,11 +479,6 @@ fn aliases_by_name(glossary: &Glossary) -> BTreeMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{UnstableFeature, UnstableFeatures};
-
-    fn gated() -> ParseOptions {
-        ParseOptions::with_unstable(UnstableFeatures::NONE.with(UnstableFeature::Fsl5))
-    }
 
     const REJECTION: &str = include_str!("../../fslc/tests/fixtures/fsl5/rejection/fsl5_en.fsl");
 
@@ -507,7 +502,8 @@ mod tests {
             1,
         );
         assert_ne!(source, REJECTION);
-        let respelled = respell_source(&source, &gated(), japanese()).expect("respell");
+        let respelled =
+            respell_source(&source, &ParseOptions::stable(), japanese()).expect("respell");
         assert!(
             respelled.contains("対象 ExplicitlyApproved かつ OperatorHeld"),
             "{respelled}"
@@ -527,8 +523,11 @@ mod tests {
             "= Agent executes Request        ToolApproved",
             "= Agent // who\n    executes Request ToolApproved",
         );
-        assert!(crate::parse_document_with(SourceFile::new(&source), &gated()).is_ok());
-        let error = respell_source(&source, &gated(), japanese()).expect_err("refused");
+        assert!(
+            crate::parse_document_with(SourceFile::new(&source), &ParseOptions::stable()).is_ok()
+        );
+        let error =
+            respell_source(&source, &ParseOptions::stable(), japanese()).expect_err("refused");
         assert!(
             matches!(
                 error,
@@ -543,13 +542,15 @@ mod tests {
 
     #[test]
     fn only_next_edition_requirements_are_respelled() {
-        let error = respell_source("spec S {}", &gated(), japanese()).expect_err("refused");
+        let error =
+            respell_source("spec S {}", &ParseOptions::stable(), japanese()).expect_err("refused");
         assert!(
             matches!(&error, FormatError::Parse(error) if error.code() == RESPELL_NOT_APPLICABLE),
             "{error}"
         );
         assert_eq!(
-            respell_source("spec S {}", &gated(), Respelling::default()).expect("no rewrite"),
+            respell_source("spec S {}", &ParseOptions::stable(), Respelling::default())
+                .expect("no rewrite"),
             "spec S {}"
         );
     }
@@ -560,12 +561,14 @@ mod tests {
     fn particles_are_spaced_off_names_only_in_the_next_edition() {
         let source =
             "fsl 5\nrequirements R {\n  actor 従業員\n  // 従業員が\n  const 従業員が = 1\n}\n";
-        assert_eq!(space_particles(source, &ParseOptions::stable()), source);
         assert_eq!(
-            space_particles(source, &gated()),
+            space_particles(source, &ParseOptions::stable()),
             source.replace("const 従業員が", "const 従業員 が")
         );
         let unrelated = "fsl 5\nrequirements R {\n  const 金額が = 1\n}\n";
-        assert_eq!(space_particles(unrelated, &gated()), unrelated);
+        assert_eq!(
+            space_particles(unrelated, &ParseOptions::stable()),
+            unrelated
+        );
     }
 }

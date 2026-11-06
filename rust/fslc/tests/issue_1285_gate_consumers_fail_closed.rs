@@ -52,7 +52,6 @@ fn run(cwd: &Path, arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(arguments)
         .current_dir(cwd)
-        .env_remove("FSLC_UNSTABLE")
         .output()
         .expect("run native fslc")
 }

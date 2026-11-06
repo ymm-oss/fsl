@@ -16,7 +16,6 @@ fn check(source: &str, position: &str, name: &str, line: u32, column: u32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .arg("check")
         .arg(&path)
-        .env("FSLC_UNSTABLE", "fsl5")
         .env("FSLC_CACHE", "off")
         .output()
         .expect("run fslc");
