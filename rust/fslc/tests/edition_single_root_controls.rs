@@ -17,7 +17,10 @@ fn replay_mapping_io_precedes_an_ordinary_root_parse_error() {
     scratch.write("log.jsonl", "");
     let missing = scratch.0.join("missing.fsl");
     let io = std::fs::read_to_string(&missing).unwrap_err();
-    let expected = json!({"fsl":"1.0", "result":"error", "kind":"io", "message":io.to_string()});
+    // Issue #1170 route c: the unreadable mapping is named with the path the
+    // caller passed (it was the bare OS error without it).
+    let expected =
+        json!({"fsl":"1.0", "result":"error", "kind":"io", "message":format!("missing.fsl: {io}")});
     let output = run(
         &scratch,
         "replay broken.fsl --from-log log.jsonl --mapping missing.fsl",

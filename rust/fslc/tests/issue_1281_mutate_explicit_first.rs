@@ -443,13 +443,17 @@ fn unreadable_catalog_after_a_clean_baseline_is_quiet_and_byte_identical() {
             "  \"message\": {}\n",
             "}}\n",
         ),
-        serde_json::to_string(&error.to_string()).expect("serialize OS error message"),
+        // Issue #1170 route c: the catalog is named with the path the caller
+        // passed (it was the bare OS error without it).
+        serde_json::to_string(&format!("{UNREADABLE_CATALOG}: {error}"))
+            .expect("serialize OS error message"),
     );
     // Retain main's Unix identity while allowing the platform's own OS text.
+    // #1170 moved it from 0378857a… (the bare OS error) to this digest.
     #[cfg(unix)]
     assert_eq!(
         format!("{:x}", Sha256::digest(expected.as_bytes())),
-        "0378857af9ede852462b991c4c66b1c8013673f8ac882187cc1739a5b515b6f8"
+        "553cc70deb689d5597c5e29cee0d26b780f7cc30b0e3599caa94f1aefa92b55d"
     );
     let output = run(UNREADABLE);
     assert_eq!(output.status.code(), Some(2));

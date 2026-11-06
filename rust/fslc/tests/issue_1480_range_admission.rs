@@ -683,9 +683,13 @@ fn replay_keeps_its_unchecked_load_and_trace_precedence() {
     );
     let malformed = io("invalid JSON: expected ident at line 1 column 2");
     // The operating system words this message, so ask it rather than pin one platform's text.
-    let missing = io(&std::fs::File::open(dir.join("missing.json"))
-        .expect_err("missing.json is not in the scratch directory")
-        .to_string());
+    // Issue #1170 route c: the trace is named with the path the caller passed
+    // (it was the bare OS error without it).
+    let missing = io(&format!(
+        "missing.json: {}",
+        std::fs::File::open(dir.join("missing.json"))
+            .expect_err("missing.json is not in the scratch directory")
+    ));
     for file in ["range.fsl", "struct.fsl", "elsewhere.fsl"] {
         assert_eq!(replay(file, "bad.json"), malformed, "{file}");
         assert_eq!(replay(file, "missing.json"), missing, "{file}");
