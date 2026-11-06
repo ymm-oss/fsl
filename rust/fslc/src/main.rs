@@ -47,8 +47,9 @@ use cli_options::{
     TestplanOptions, VerifyCommandOptions, parse_edition, parse_sweep_range, required_option_value,
 };
 use cli_output::{
-    analysis_display_path, display_binding, envelope, error_output, located_error_output,
-    semantic_error_output, spec_load_error_output, surface_parse_error_output, trace_last_action,
+    analysis_display_path, display_binding, envelope, error_detail, error_output,
+    located_error_output, semantic_error_output, spec_load_error_output,
+    surface_parse_error_output, trace_last_action,
 };
 use fslc_rust::migration::SourceEdition;
 use log_replay::{
@@ -4321,12 +4322,7 @@ fn run_chain_step(
                             });
                             (detail, status, "verify", Some(depth))
                         }
-                        Err(message) => (
-                            json!({"result": "error", "kind": "parse", "message": message}),
-                            2,
-                            "verify",
-                            None,
-                        ),
+                        Err(message) => (error_detail("parse", &message), 2, "verify", None),
                     }
                 } else {
                     let root = project_root(roots, layer, false);
@@ -4375,17 +4371,7 @@ fn run_chain_step(
         {
             let detail =
                 io_error_detail(&format!("[{layer}] unknown refine_against layer: {target}"));
-            (
-                json!({
-                    "layer": format!("{layer}->{target}"),
-                    "kind": "refine",
-                    "status": "failed",
-                    "result": "error",
-                    "exit_code": 2,
-                    "detail": detail,
-                }),
-                true,
-            )
+            chain_step_input_error(&format!("{layer}->{target}"), "refine", &detail)
         } else {
             let file_path = match chain_step_file(section, layer, base) {
                 Ok(path) => path,
@@ -4445,18 +4431,8 @@ fn run_chain_step(
                     )
                 }
                 Err(message) => {
-                    let detail = json!({"result": "error", "kind": "parse", "message": message});
-                    (
-                        json!({
-                            "layer": format!("{layer}->{target}"),
-                            "kind": "refine",
-                            "status": "failed",
-                            "result": "error",
-                            "exit_code": 2,
-                            "detail": detail,
-                        }),
-                        true,
-                    )
+                    let detail = error_detail("parse", &message);
+                    chain_step_input_error(&format!("{layer}->{target}"), "refine", &detail)
                 }
             }
         }
@@ -4464,24 +4440,12 @@ fn run_chain_step(
         let command = section.values.get("command").cloned().unwrap_or_default();
         match impl_evidence(section) {
             Err(message) => {
-                let detail = json!({"result": "error", "kind": "parse", "message": message});
-                (
-                    json!({
-                        "layer": "impl", "kind": "command", "status": "failed",
-                        "result": "error", "exit_code": 2, "detail": detail,
-                    }),
-                    true,
-                )
+                let detail = error_detail("parse", &message);
+                chain_step_input_error("impl", "command", &detail)
             }
             Ok(_) if command.is_empty() => {
                 let detail = io_error_detail("[impl] command is required");
-                (
-                    json!({
-                        "layer": "impl", "kind": "command", "status": "failed",
-                        "result": "error", "exit_code": 2, "detail": detail,
-                    }),
-                    true,
-                )
+                chain_step_input_error("impl", "command", &detail)
             }
             Ok(evidence) => run_impl_command(&command, &evidence, base),
         }

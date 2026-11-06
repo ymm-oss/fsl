@@ -13,8 +13,8 @@
 //!   `SpecLoadError::Io(..)` anywhere outside the exact functions in
 //!   [`IO_OWNERS`] is a hand-written site, including one inside
 //!   `spec_loading.rs`.
-//! - Error envelope: `cli_output.rs` (`envelope`, `error_output`) and the
-//!   library renderers it delegates to.
+//! - Error envelope: `cli_output.rs` (`envelope`, `error_output`,
+//!   `error_detail`) and the library renderers it delegates to.
 //! - Error exit code: `fslc_rust::outcome` (the `Verdict` table,
 //!   `error_exit`, `normalized_exit_status` and `exit_status`). A literal
 //!   left outside it is one routing would change, or one not yet routed.
@@ -88,8 +88,8 @@ const PINNED: &[(&str, &str, usize)] = &[
     ("error-envelope", "check_stages.rs", 1),
     ("error-envelope", "frontend_output.rs", 2),
     ("error-envelope", "literate_access.rs", 3),
-    // `chain`'s nested `parse` details and its failed-layer records.
-    ("error-envelope", "main.rs", 9),
+    // `chain_step_input_error` and `run_impl_command`'s layer records.
+    ("error-envelope", "main.rs", 2),
     ("error-envelope", "migration.rs", 1),
     ("error-envelope", "property_selection.rs", 1),
     ("error-envelope", "spec_load.rs", 1),
@@ -103,7 +103,7 @@ const PINNED: &[(&str, &str, usize)] = &[
     ("error-exit-literal", "coverage.rs", 1),
     ("error-exit-literal", "frontend_output.rs", 2),
     ("error-exit-literal", "literate_access.rs", 3),
-    ("error-exit-literal", "main.rs", 174),
+    ("error-exit-literal", "main.rs", 170),
     ("error-exit-literal", "migration.rs", 3),
     ("error-exit-literal", "refinement.rs", 3),
     ("error-exit-literal", "spec_loading.rs", 1),
