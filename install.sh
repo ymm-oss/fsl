@@ -203,6 +203,13 @@ preflight_command_link() {
   fi
 }
 
+# An agent loads every directory in its skill directory as a skill, so a copy
+# this installer replaces is kept under the data directory instead, where no
+# agent looks. Each backup is named after its skill and this run's UTC time.
+SKILLS_DIR="$HOME/.claude/skills"
+SKILL_BACKUP_DIR="$INSTALL_DIR/skill-backups/claude"
+BACKUP_STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+
 payload_skill_names() {
   local dir
   for dir in "$RELEASE_DIR"/skills/*/; do
@@ -252,8 +259,8 @@ foreign_skill_link() {
 preflight_skill_link() {
   local skill_name="$1"
   local source="$CURRENT_LINK/skills/$skill_name"
-  local destination="$HOME/.claude/skills/$skill_name"
-  local backup="$destination.pre-native-v3"
+  local destination="$SKILLS_DIR/$skill_name"
+  local backup="$SKILL_BACKUP_DIR/$skill_name-$BACKUP_STAMP"
   [ -d "$RELEASE_DIR/skills/$skill_name" ] \
     || fail "$RELEASE_DIR is missing the $skill_name skill."
   if [ -L "$destination" ] && [ "$(readlink "$destination")" = "$source" ]; then
@@ -268,6 +275,21 @@ preflight_skill_link() {
   fi
 }
 
+# Earlier installers kept the backup beside the link, as
+# `<name>.pre-native-v3`, where the agent offered it as a second, stale copy of
+# the skill. Only this installer ever wrote that suffix, and every skill it
+# installed is named `fsl*`. Such a backup is moved, never removed, to the
+# same backup directory under its original name.
+preflight_legacy_skill_backups() {
+  local legacy backup
+  for legacy in "$SKILLS_DIR"/fsl*.pre-native-v3; do
+    [ -e "$legacy" ] || [ -L "$legacy" ] || continue
+    backup="$SKILL_BACKUP_DIR/$(basename "$legacy")"
+    [ ! -e "$backup" ] && [ ! -L "$backup" ] \
+      || fail "$backup already exists, so $legacy cannot be moved there. Move one of them and re-run."
+  done
+}
+
 preflight_command_link fslc "$FSL_BIN"
 preflight_command_link fslc-lsp "$FSL_LSP_BIN"
 if [ "$INSTALL_SKILL" -eq 1 ]; then
@@ -276,6 +298,7 @@ if [ "$INSTALL_SKILL" -eq 1 ]; then
   for SKILL_NAME in $SKILL_NAMES; do
     preflight_skill_link "$SKILL_NAME"
   done
+  preflight_legacy_skill_backups
 fi
 
 link_command() {
@@ -328,10 +351,19 @@ case ":$PATH:" in
 esac
 
 if [ "$INSTALL_SKILL" -eq 1 ]; then
-  mkdir -p "$HOME/.claude/skills"
+  mkdir -p "$SKILLS_DIR"
+  for LEGACY_BACKUP in "$SKILLS_DIR"/fsl*.pre-native-v3; do
+    [ -e "$LEGACY_BACKUP" ] || [ -L "$LEGACY_BACKUP" ] || continue
+    SKILL_BACKUP="$SKILL_BACKUP_DIR/$(basename "$LEGACY_BACKUP")"
+    [ ! -e "$SKILL_BACKUP" ] && [ ! -L "$SKILL_BACKUP" ] \
+      || fail "$SKILL_BACKUP already exists, so $LEGACY_BACKUP cannot be moved there. Move one of them and re-run."
+    mkdir -p "$SKILL_BACKUP_DIR"
+    mv "$LEGACY_BACKUP" "$SKILL_BACKUP"
+    echo "Moved an earlier skill backup out of $SKILLS_DIR: $LEGACY_BACKUP -> $SKILL_BACKUP"
+  done
   for SKILL_NAME in $SKILL_NAMES; do
     SKILL_SRC="$CURRENT_LINK/skills/$SKILL_NAME"
-    SKILL_DST="$HOME/.claude/skills/$SKILL_NAME"
+    SKILL_DST="$SKILLS_DIR/$SKILL_NAME"
     [ -d "$RELEASE_DIR/skills/$SKILL_NAME" ] \
       || fail "$RELEASE_DIR is missing the $SKILL_NAME skill."
     if [ -L "$SKILL_DST" ] && [ "$(readlink "$SKILL_DST")" = "$SKILL_SRC" ]; then
@@ -339,9 +371,10 @@ if [ "$INSTALL_SKILL" -eq 1 ]; then
     elif foreign_skill_link "$SKILL_DST" "$SKILL_SRC"; then
       echo "Skipped $SKILL_DST: it links to $(readlink "$SKILL_DST"), which another tool placed." >&2
     elif [ -e "$SKILL_DST" ] || [ -L "$SKILL_DST" ]; then
-      SKILL_BACKUP="$SKILL_DST.pre-native-v3"
+      SKILL_BACKUP="$SKILL_BACKUP_DIR/$SKILL_NAME-$BACKUP_STAMP"
       [ ! -e "$SKILL_BACKUP" ] && [ ! -L "$SKILL_BACKUP" ] \
         || fail "$SKILL_BACKUP already exists. Move it and re-run."
+      mkdir -p "$SKILL_BACKUP_DIR"
       mv "$SKILL_DST" "$SKILL_BACKUP"
       ln -s "$SKILL_SRC" "$SKILL_DST"
       echo "Linked Claude Code skill: $SKILL_DST (previous copy preserved at $SKILL_BACKUP)"

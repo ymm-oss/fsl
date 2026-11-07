@@ -250,7 +250,10 @@ fn assert_installer_release_contract(root: &Path) {
     assert!(installer.contains("$HOME/.fsl/.venv/bin/$cmd_name"));
     assert!(!installer.contains("*\"/.venv/bin/$cmd_name\""));
     assert!(installer.contains("ln -s \"$SKILL_SRC\" \"$SKILL_DST\""));
-    assert!(installer.contains("$SKILL_DST.pre-native-v3"));
+    // A replaced skill copy is kept where no agent loads it as a skill.
+    assert!(installer.contains("SKILL_BACKUP_DIR=\"$INSTALL_DIR/skill-backups/claude\""));
+    assert!(!installer.contains("$SKILL_DST.pre-native-v3"));
+    assert!(!installer.contains("$destination.pre-native-v3"));
 
     // A symbolic link this installer did not create belongs to whatever put it
     // there. `mise skills sync` links into its own versioned payload exactly as
@@ -264,7 +267,7 @@ fn assert_installer_release_contract(root: &Path) {
         .find("if foreign_skill_link \"$destination\" \"$source\"; then")
         .expect("the guard runs before any write");
     let backup = installer
-        .find("SKILL_BACKUP=\"$SKILL_DST.pre-native-v3\"")
+        .find("SKILL_BACKUP=\"$SKILL_BACKUP_DIR/$SKILL_NAME-$BACKUP_STAMP\"")
         .expect("the backup path");
     let placement = installer
         .find("elif foreign_skill_link \"$SKILL_DST\" \"$SKILL_SRC\"; then")
@@ -795,6 +798,199 @@ fn installer_migrates_its_own_skill_links_and_keeps_foreign_ones() {
             destination.display()
         );
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Writes a test file, creating its directory, and marks it executable on request.
+#[cfg(unix)]
+fn write_test_file(path: &Path, body: &str, executable: bool) {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, body).unwrap();
+    if executable {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+/// Stages a local `v9.9.9` release under `dir`: a native pair reporting the tag,
+/// a two-skill bundle, their checksums, and a `curl` and `uname` that serve it.
+/// Returns the release directory and the directory holding the fake commands.
+#[cfg(unix)]
+fn stage_fake_installer_release(dir: &Path) -> (PathBuf, PathBuf) {
+    let write = write_test_file;
+    let os = String::from_utf8(Command::new("uname").arg("-s").output().unwrap().stdout).unwrap();
+    let (target, machine) = match os.trim() {
+        "Darwin" => ("macos-arm64", "arm64"),
+        _ => ("linux-x64", "x86_64"),
+    };
+
+    // The release: a native pair reporting the tag, and a two-skill bundle.
+    let release = dir.join("release");
+    let stub = "#!/bin/sh\necho 'fslc 9.9.9'\n";
+    write(&release.join(format!("fslc-{target}")), stub, true);
+    write(&release.join(format!("fslc-lsp-{target}")), stub, true);
+    for skill in ["fsl", "fsl-verify"] {
+        write(
+            &dir.join(format!("bundle/skills/{skill}/SKILL.md")),
+            skill,
+            false,
+        );
+    }
+    let bundle = release.join("fsl-skills.tar.gz");
+    assert!(
+        Command::new("tar")
+            .arg("-czf")
+            .arg(&bundle)
+            .args(["-C", dir.join("bundle").to_str().unwrap(), "skills"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let fakebin = dir.join("fakebin");
+    write(
+        &fakebin.join("curl"),
+        "#!/usr/bin/env bash\n\
+         url=\"\"; dest=\"\"\n\
+         while [ $# -gt 0 ]; do case \"$1\" in -o) dest=\"$2\"; shift;; -*) ;; *) url=\"$1\";; esac; shift; done\n\
+         case \"$url\" in\n\
+           */releases/latest) printf '{\\n  \"tag_name\": \"v9.9.9\"\\n}\\n' > \"$dest\" ;;\n\
+           */releases/download/v9.9.9/*) cp \"$FAKE_RELEASE/${url##*/}\" \"$dest\" ;;\n\
+           *) exit 22 ;;\n\
+         esac\n",
+        true,
+    );
+    write(
+        &fakebin.join("uname"),
+        &format!(
+            "#!/bin/sh\n[ \"$1\" = -m ] && {{ echo {machine}; exit 0; }}\n\
+             for u in /usr/bin/uname /bin/uname; do [ -x \"$u\" ] && exec \"$u\" \"$@\"; done\n\
+             exit 127\n"
+        ),
+        true,
+    );
+    let checksums = Command::new("bash")
+        .current_dir(&release)
+        .arg("-c")
+        .arg(
+            "for f in *; do if command -v shasum >/dev/null; then shasum -a 256 \"$f\"; \
+             else sha256sum \"$f\"; fi > \"$f.sha256\"; done",
+        )
+        .status()
+        .unwrap();
+    assert!(checksums.success());
+    (release, fakebin)
+}
+
+/// Runs the whole installer against a local release. A skill directory the
+/// installer replaces, and a `<name>.pre-native-v3` backup an earlier installer
+/// left beside the links, both end up under the data directory: an agent loads
+/// every directory in its skill directory as a skill. A re-run moves nothing,
+/// and an existing backup stops the run before anything is linked.
+#[cfg(unix)]
+#[cfg(unix)]
+#[test]
+fn installer_keeps_skill_backups_outside_the_skills_directory() {
+    let dir = std::env::temp_dir().join(format!("fsl-installer-backup-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let write = write_test_file;
+    let (release, fakebin) = stage_fake_installer_release(&dir);
+
+    let home = dir.join("home");
+    let skills = home.join(".claude/skills");
+    let backups = home.join(".local/share/fsl/skill-backups/claude");
+    let install = || {
+        Command::new("bash")
+            .arg(root().join("install.sh"))
+            .env_clear()
+            .env("HOME", &home)
+            .env("PATH", format!("{}:/usr/bin:/bin", fakebin.display()))
+            .env("FAKE_RELEASE", &release)
+            .output()
+            .unwrap()
+    };
+    let entries = |path: &Path| -> BTreeSet<String> {
+        std::fs::read_dir(path)
+            .map(|entries| {
+                entries
+                    .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let only_links = || {
+        entries(&skills) == BTreeSet::from(["fsl".to_owned(), "fsl-verify".to_owned()])
+            && entries(&skills).iter().all(|name| {
+                std::fs::symlink_metadata(skills.join(name))
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            })
+    };
+
+    // A hand copy where a link goes, and a backup an earlier installer left.
+    write(&skills.join("fsl/SKILL.md"), "hand copy", false);
+    write(
+        &skills.join("fsl-old.pre-native-v3/SKILL.md"),
+        "legacy",
+        false,
+    );
+    let first = install();
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(first.status.success(), "{first:?}");
+    assert!(only_links(), "{:?}", entries(&skills));
+    let kept = entries(&backups);
+    assert_eq!(kept.len(), 2, "{kept:?}");
+    let copy = kept
+        .iter()
+        .find(|name| name.starts_with("fsl-2"))
+        .expect("the hand copy's backup");
+    assert_eq!(
+        std::fs::read_to_string(backups.join(copy).join("SKILL.md")).unwrap(),
+        "hand copy"
+    );
+    assert_eq!(
+        std::fs::read_to_string(backups.join("fsl-old.pre-native-v3/SKILL.md")).unwrap(),
+        "legacy"
+    );
+    assert!(stdout.contains(&format!(
+        "previous copy preserved at {}",
+        backups.join(copy).display()
+    )));
+    assert!(stdout.contains(&format!(
+        "{} -> {}",
+        skills.join("fsl-old.pre-native-v3").display(),
+        backups.join("fsl-old.pre-native-v3").display()
+    )));
+
+    // A re-run finds every link current and moves nothing.
+    let again = install();
+    assert!(again.status.success(), "{again:?}");
+    assert!(only_links());
+    assert_eq!(entries(&backups), kept);
+
+    // A backup already at the destination is never overwritten.
+    write(
+        &skills.join("fsl-old.pre-native-v3/SKILL.md"),
+        "newer",
+        false,
+    );
+    std::fs::remove_file(skills.join("fsl-verify")).unwrap();
+    let refused = install();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("already exists"));
+    assert_eq!(
+        std::fs::read_to_string(skills.join("fsl-old.pre-native-v3/SKILL.md")).unwrap(),
+        "newer"
+    );
+    assert_eq!(
+        std::fs::read_to_string(backups.join("fsl-old.pre-native-v3/SKILL.md")).unwrap(),
+        "legacy"
+    );
+    assert!(
+        std::fs::symlink_metadata(skills.join("fsl-verify")).is_err(),
+        "the run must stop before linking"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

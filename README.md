@@ -72,10 +72,38 @@ at the old `~/.fsl/.venv/bin` or `~/.fsl/.native/bin` installs (the pre-Rust, fs
 > writes the same directory, so the two would otherwise contend for it. Nothing else
 > writes there unless you ask for it: mise links into the project by default.
 
-Uninstall:
+When `~/.claude/skills/<name>` already holds something other than the current link or a
+link another tool placed, such as a hand-copied skill directory, the installer moves it to
+`<data>/skill-backups/claude/<name>-<UTC time>` and prints the new path. `<data>` is
+`FSL_DATA_DIR`, else `$XDG_DATA_HOME/fsl`, else `~/.local/share/fsl`. The backup stays out
+of the skills directory because Claude Code loads every directory there as a skill. The
+installer stops before linking anything if a backup path already exists, so a backup is
+never overwritten. Earlier installers kept backups beside the links as
+`~/.claude/skills/<name>.pre-native-v3`; when skills are linked, the next run moves each one,
+unchanged and under the same name, into `<data>/skill-backups/claude/` and prints it.
+
+Uninstall, using the same `FSL_DATA_DIR`, `XDG_DATA_HOME` and `FSL_BIN_DIR` values as the
+installation (the defaults apply when they are unset). The loop removes a command or skill
+link only when it points into the FSL data directory, so a real directory and a skill link
+another tool placed stay where they are. The last line removes the data directory,
+including `skill-backups/`, so move out any backup you want to keep first. The command
+leaves the bin and skills directories themselves in place, even when they end up empty. If
+you uninstall without re-running the installer, also move or delete any
+`~/.claude/skills/fsl*.pre-native-v3` an earlier installer left behind.
 
 ```bash
-rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery ~/.claude/skills/fsl-from-code ~/.claude/skills/fsl-requirements-document ~/.claude/skills/fsl-verify
+data_dir="${FSL_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fsl}"
+bin_dir="${FSL_BIN_DIR:-$HOME/.local/bin}"
+skills_dir="$HOME/.claude/skills"
+for link in "$bin_dir/fslc" "$bin_dir/fslc-lsp" \
+  "$skills_dir/fsl" "$skills_dir/fsl-business" "$skills_dir/fsl-requirements" \
+  "$skills_dir/fsl-design" "$skills_dir/fsl-design-review" "$skills_dir/fsl-delivery" \
+  "$skills_dir/fsl-from-code" "$skills_dir/fsl-requirements-document" "$skills_dir/fsl-verify"; do
+  if [ -L "$link" ]; then
+    case "$(readlink "$link")" in "$data_dir"/*) rm -f "$link" ;; esac
+  fi
+done
+rm -rf "$data_dir"
 ```
 
 A mise installation is removed with `mise uninstall` instead. Its skill links are removed
@@ -211,9 +239,11 @@ EOF
 Delete `requires n < 3` and run it again: `verify` reports `"result": "violated"` for
 `AtMostThree` at step 4, where `n` reaches 4, and exits 1.
 
-> **macOS note**: a downloaded executable will be blocked by Gatekeeper. The first time
-> only, remove the quarantine attribute: `xattr -d com.apple.quarantine ./fslc-macos-arm64`
-> (or right-click in Finder → "Open" once).
+> **macOS note**: Gatekeeper may block a downloaded executable the first time it runs. If
+> it does, remove the quarantine attribute once:
+> `xattr -d com.apple.quarantine ./fslc-macos-arm64 2>/dev/null || true`
+> (or right-click in Finder → "Open" once). Not every download carries that attribute; the
+> `|| true` keeps the command from failing when the file has none.
 
 Each file ships with a companion `*.sha256`. You can verify it with
 `shasum -a 256 -c fslc-macos-arm64.sha256`. The Linux binaries target the Ubuntu 24.04 ABI
