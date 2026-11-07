@@ -65,8 +65,14 @@
     <h2 class="reveal">Use <code>actor</code>, <code>entity</code>, and <code>process</code></h2>
     <p class="lead narrow reveal">Start with the business object and its allowed stage transitions. FSL expands this readable form into a verifiable state machine.</p>
 
-    <div class="panel reveal">
-      <pre><code>business ReturnHandling {
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>Edition:</b> the examples on this page have no header, so they are <b>FSL 4</b> documents. A <code>business</code> spec keeps the same <code>actor</code> / <code>entity</code> / <code>process</code> / <code>stages</code> / <code>transition</code>, <code>policy</code>, <code>goal</code>, <code>kpi</code> and <code>control</code> forms under <b>FSL 5</b>: put <code>fsl 5</code> on its first line, as in the second panel. Put together in one spec, the <code>business</code> examples of sections 2 and 3 check and verify under that header. The requirements layer changes more: <a href="requirements-layer.en.html#fsl5">its FSL 5 form</a>, the <a href="https://github.com/ymm-oss/fsl/blob/main/docs/manual/LANGUAGE.md#fsl-editions">edition guide</a> and the <a href="https://github.com/ymm-oss/fsl/blob/main/docs/manual/LANGUAGE.md#fsl4-to-fsl5-migration">FSL 4 to FSL 5 migration guide</a>.</p>
+    </div>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <p class="dim" style="margin:0 0 6px;font-size:14px">FSL 4 (headerless)</p>
+        <pre><code>business ReturnHandling {
   actor Customer, Manager
   entity Return
 
@@ -82,6 +88,27 @@
 verify {
   instances Return = 3
 }</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <p class="dim" style="margin:0 0 6px;font-size:14px">FSL 5</p>
+        <pre><code>fsl 5
+business ReturnHandling {
+  actor Customer, Manager
+  entity Return
+
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -&gt; Approved by Manager
+    transition reject  Requested -&gt; Rejected by Manager
+    transition refund  Approved  -&gt; Refunded by Manager
+  }
+}
+
+verify {
+  instances Return = 3
+}</code></pre>
+      </div>
     </div>
 
     <table class="matrix reveal" style="margin-top:24px">
@@ -224,7 +251,7 @@ verify { values Amount = 0..3 }</code></pre>
 
     <div class="split reveal" style="margin-top:24px">
       <div class="panel" style="margin-top:0">
-        <h3>Business layer</h3>
+        <h3>Business layer (FSL 4, headerless)</h3>
         <pre><code>business ExpenseToBe {
   actor Employee, Manager, Finance, System
   entity Claim
@@ -239,7 +266,7 @@ verify { values Amount = 0..3 }</code></pre>
 }</code></pre>
       </div>
       <div class="panel" style="margin-top:0">
-        <h3>Requirements layer</h3>
+        <h3>Requirements layer (FSL 4, headerless)</h3>
         <pre><code>requirements ExpenseRequirements {
   implements ExpenseToBe from "business.fsl" { }
 
@@ -255,12 +282,68 @@ verify { values Amount = 0..3 }</code></pre>
       </div>
     </div>
 
+    <h3 class="reveal" style="margin-top:40px">The same handoff in FSL 5</h3>
+    <p class="reveal narrow">Both files are headed <code>fsl 5</code>. The requirements file writes the claim as an <code>entity</code> with <code>event</code>s. <code>submit</code> takes an input, so it has one parameter more than the business transition and needs the explicit <code>action submit(c, amount) -&gt; submit(c)</code>; the other events match by name. The stages first appear in the <code>lifecycle</code> lines in the business order (Draft, Submitted, Approved, Rejected, Paid), because <code>implements</code> compares stages by position. <code>verify requirements.fsl --depth 8</code> gives <code>implements.result: "refines"</code>. See the <a href="requirements-layer.en.html#fsl5">requirements layer's FSL 5 form</a>.</p>
+    <div class="split reveal" style="margin-top:16px">
+      <div class="panel" style="margin-top:0">
+        <h3>business.fsl (FSL 5)</h3>
+        <pre><code>fsl 5
+business ExpenseToBe {
+  actor Employee, Manager, Finance, System
+  entity Claim
+  process Claim {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit Draft -&gt; Submitted by Employee
+    transition approve Submitted -&gt; Approved by Manager
+    transition reject Submitted -&gt; Rejected by Manager
+    transition pay Approved -&gt; Paid by Finance
+  }
+}
+verify {
+  instances Claim = 2
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>requirements.fsl (FSL 5)</h3>
+        <pre><code>fsl 5
+requirements ExpenseRequirements {
+  implements ExpenseToBe from "business.fsl" {
+    action submit(c, amount) -&gt; submit(c)
+  }
+  number Amount
+  actor Employee, Manager, Finance
+  entity Claim {
+    amount: Amount = 0
+    lifecycle Draft -&gt; Submitted -&gt; Approved
+    lifecycle Submitted -&gt; Rejected
+    lifecycle Approved -&gt; Paid
+  }
+  event submit  = Employee submits Claim with amount Draft -&gt; Submitted
+  event approve = Manager approves Claim             Submitted -&gt; Approved
+  event reject  = Manager rejects Claim              Submitted -&gt; Rejected
+  event pay     = Finance pays Claim                 Approved -&gt; Paid
+  rule REQ-EXPENSE-001 "The applicant submits an expense claim by entering an amount" {
+    allow Employee submits Claim only when input amount &gt; 0
+  }
+  forbidden FB-EXPENSE-001 "A claim of zero cannot be submitted" {
+    Employee submits c1 with amount 0
+    then rejected
+  }
+}
+verify {
+  instances Claim = 2
+  values Amount = 0..3
+}</code></pre>
+      </div>
+    </div>
+
     <div class="callout warn reveal" style="margin-top:24px">
       <p style="margin:0"><b>Do not weaken business intent to make refinement pass.</b> If the lower layer fails to implement the business layer, first inspect whether the requirement dropped or changed the business rule.</p>
     </div>
 
     <div class="panel reveal" style="margin-top:24px">
-      <p class="dim" style="margin:0 0 6px;font-size:14px">Run the flagship e2e chain step by step (native Rust):</p>
+      <p class="dim" style="margin:0 0 6px;font-size:14px">Run the flagship e2e chain step by step (native Rust; the <code>examples/e2e/</code> files are FSL 4, headerless):</p>
       <pre><code>$ fslc verify examples/e2e/1_business.fsl --engine induction
 $ fslc verify examples/e2e/2_requirements.fsl --engine induction
 # assert JSON implements.result == "refines"

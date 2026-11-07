@@ -130,17 +130,20 @@ a separate activity (`fsl-requirements-document`).
    the table exhaustive — ask.
 5. Add `measure`, `goal`, `policy`, then `scenario` (positive) and `forbidden
    … then rejected` (negative) traces, then the `verify { instances … values
-   … }` bounds. If the spec has intended stopping points, declare them in
-   `terminal { }` (step 7 shows why).
+   … }` bounds. If the spec stops on purpose in a stage that still has an
+   outgoing lifecycle edge, declare that in `terminal { }` (step 7 shows
+   why).
 6. Optional Japanese layer: a `glossary` as the first item, Japanese keywords
    and particles (`references/glossary.md`). Re-run the whole check loop.
 7. Check loop: `fslc check` → `fslc check --strict-tags --requirements
    ids.txt` → `fslc lint` → `fslc verify --depth 8` (read
    `implements.result` when there is an upper layer) → `fslc verify --engine
-   induction` → `fslc scenarios`. A requirements spec of this edition gets no
-   derived `terminal { }`: a run that ends with every entity in a final stage
-   is reported as a `deadlock` warning until `terminal { }` names those
-   stages. Reading the results, the origin self-check with `fslc explain`,
+   induction` → `fslc scenarios`. Without `terminal { }`, a requirements spec
+   of this edition derives one: every instance in a stage with no outgoing
+   lifecycle edge. A `deadlock` warning therefore names a state where an
+   instance stopped in a stage that still has an edge out. An explicit
+   `terminal { }` replaces the derived condition, so it names the final stages
+   as well. Reading the results, the origin self-check with `fslc explain`,
    `mutate`, and the completion report are in `../fsl-verify/SKILL.md`.
 8. For SLA / deadline requirements, use `deadline` inside the rule with a
    `time { }` block (`references/syntax.md`) and confirm the deadline can

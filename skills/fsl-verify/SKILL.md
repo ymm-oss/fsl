@@ -67,8 +67,10 @@ Notes on the columns:
 
 ## 2. Results that look green but are not
 
-Each row was reproduced with `fslc 4.11.0`, and each row that starts with
-`fsl 5` on a file with that header; the field is what you must read.
+Each row was first reproduced with `fslc 4.11.0`, or with the later build
+that introduced its output, and each row that starts with `fsl 5` on a file
+with that header. A later release can word a message differently; the field is
+what you must read.
 
 | You see | It means | Next move / how to report it |
 |---|---|---|
@@ -82,12 +84,12 @@ Each row was reproduced with `fslc 4.11.0`, and each row that starts with
 | `check --strict-tags --requirements ids.txt`: `result: "ok"`, exit 0, `warnings[].kind: "unreferenced_requirement"` | an ID in `ids.txt` is carried by nothing | not done until there are zero `unreferenced_requirement` and zero `untagged` warnings |
 | `verify --property X`: top-level `verified`, exit 0, `implements.result: "not_evaluated"`, `reason: "property_selection"` | the upper-layer seam was skipped | never use a `--property` run as the completion run; the seam passes only on `implements.result == "refines"` |
 | `testplan`: `formal_result: "not_run"`, `assurance_effect: "none"` | a plan; nothing was verified | run the tests or `replay` against the implementation |
-| `diff` without `--forbid`: `result: "semantic_diff"`, exit 0, `summary: ["behavior_added"]`, `gate.passed: true` | findings are reported, not gated | add `--forbid` (§1); gate on `gate.passed` / `gate.violations` |
-| `diff` finding `unknown` (for example `forbidden_replay_failed`) | the comparison could not decide that case | list `unknown` in `--forbid`; never read it as "no change". In fslc 4.12.0 and later a NEW guard that disables a forbidden's **setup** step is reported this way, so `--forbid forbidden_relaxed` alone misses it |
+| `diff` without `--forbid`: `result: "semantic_diff"`, exit 0, `summary: ["behavior_added"]`, `gate.passed: true` | findings are reported, not gated (only `impl_violated` and `unknown_budget` fail the gate without `--forbid`: exit 1, `gate.passed: false`) | add `--forbid` (§1); gate on `gate.passed` / `gate.violations` |
+| `diff` finding `unknown` (for example `forbidden_replay_failed`) | the comparison could not decide that case | list `unknown` in `--forbid`; never read it as "no change". A NEW guard that disables a forbidden's **setup** step is reported this way, so `--forbid forbidden_relaxed` alone misses it |
 | `mutate`: `result: "mutated"`, exit 0, `summary.survived: 18`, `summary.kill_rate: 0.3077` | survivors never change the exit code | §6; for a gate add `--min-kill-rate R` or `--fail-on-survivors` |
 | `chain`: `[impl]` layer passed with `evidence = "exit_code"` (`warnings` has `impl_exit_code_only`) | the test command exited 0; no evidence a test ran | give `[impl]` a JUnit `report` so an empty run is `indeterminate` |
-| fslc 4.12.0 and later: `proved` with `not_covered: ["int_overflow"]` | the induction step does not check integer overflow; only the base case (to `--depth`) does | run `--engine bmc` or `--engine explicit` at a depth that reaches the large values, or bound the value; report the gap |
-| `fsl 5` requirements: `verified`, exit 0, `deadlock` warning in a state where every instance is in a final stage | this edition derives no `terminal { }` for requirements (a business spec derives one from its sink stages) | if the stop is intended, declare it: `terminal { forall r: Return { stage(r) == Refunded or stage(r) == Rejected } }`; otherwise it is a bug |
+| `proved` with `not_covered: ["int_overflow"]` | the induction step does not check integer overflow; only the base case (to `--depth`) does | run `--engine bmc` or `--engine explicit` at a depth that reaches the large values, or bound the value; report the gap |
+| `fsl 5` requirements: `verified`, exit 0, `deadlock` warning | a reachable state where no event is enabled and an instance is in a stage that still has an outgoing lifecycle edge. Without `terminal { }`, this edition derives one (every instance in a stage with no outgoing lifecycle edge), so a run that ends with every instance in a final stage is no deadlock | a missing event (`lifecycle_edge_without_event`) or a guard that blocks the edge is a bug. If the stop is intended, declare it, naming the final stages too, because an explicit `terminal { }` replaces the derived one: `terminal { forall r: Return { stage(r) == Approved or stage(r) == Refunded or stage(r) == Rejected } }` |
 | `fsl 5` `check`: `ok`, exit 0, `warnings[].code: "never_rule_without_forbidden"` | a rule rejects calls (`allow` / `never`) but no `forbidden` trace ends in an event it guards; nothing shows the rejection works | add the `forbidden … then rejected` the source implies; never delete the rule to silence it |
 | `fsl 5` `check`: `ok`, `warnings[].code: "decide_row_emptied"` | a decision row holds for no value of the fields: its outcome can never be chosen | the row's concepts are wrong or the source is; fix or ask |
 | `fsl 5` `check`: `ok`, `warnings[].code: "lifecycle_edge_without_event"` | a lifecycle edge no event moves along: a stage may be unreachable | add the event the source states, or remove the edge |
@@ -102,7 +104,7 @@ Each row was reproduced with `fslc 4.11.0`, and each row that starts with
 | `violated` | `violation_kind`, `invariant`, `violated_at_step`, `violating_bindings`, `last_action`, `trace[].changes` | decide (§4 step 3) before editing |
 | `reachable_failed` | `unreached`, `action_coverage`, `blocking_requires`, `hint` | depth too small, or a guard blocks the goal |
 | `unknown_cti` | `cti.states`, `invariant`, `hint` | §4 step 5; `--engine explicit --depth N` for a small space |
-| `proved` | `k_used`, `base_depth`, `invariants_checked`, `warnings` (and `not_covered` in 4.12.0+) | report with the scope |
+| `proved` | `k_used`, `base_depth`, `invariants_checked`, `warnings`, and `not_covered` when present | report with the scope |
 | `refinement_failed` / `impl_violated` | `kind`, `impl_action`, `impl_trace`, `abs_before`, `abs_after_expected` / `abs_after_actual`, `mismatch` | fix the lower layer or the mapping |
 | `refines` | `checked_to_depth`, `action_map` | bounded by that depth |
 | `semantic_diff` | `summary`, findings, `gate` | gate with `--forbid` |
