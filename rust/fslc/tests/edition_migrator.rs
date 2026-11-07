@@ -97,10 +97,6 @@ fn edition_command(verb: &str) -> Command {
     command
 }
 
-fn gated_options() -> fsl_syntax::ParseOptions {
-    fsl_syntax::ParseOptions::stable()
-}
-
 fn run_edition(path: &str, verb: &str, edition: Option<&str>, extra: &[&str]) -> Output {
     let mut command = edition_command(verb);
     command.arg(path);
@@ -161,7 +157,7 @@ fn relation_range_arrows_remain_structural_in_every_edition_entry() {
                 String::from_utf8_lossy(&output.stdout)
             );
             assert_eq!(json(&output)["result"], "ok");
-            let options = gated_options();
+            let options = fsl_syntax::ParseOptions::stable();
             assert!(
                 fsl_syntax::legacy_expression_operator_error(&source, &options).is_none(),
                 "relation arrow is not an expression operator"
@@ -177,8 +173,8 @@ fn relation_range_arrows_remain_structural_in_every_edition_entry() {
             assert_eq!(error.status.code(), Some(2));
             assert_eq!(json(&error)["diagnostic_code"], "FSL-PARSE");
         }
-        // Explicit gated conversion control: the migrator inserts a header;
-        // this is separate from the ungated current-edition checks above.
+        // Conversion control: the migrator inserts a header; this is separate
+        // from the current-edition checks above.
         let path = directory.write("migrating.fsl", &body);
         let migrated = run_edition(
             path.to_str().expect("path"),
@@ -216,7 +212,7 @@ fn action_correspondence_range_parameter_precedes_a_structural_arrow() {
             String::from_utf8_lossy(&output.stdout)
         );
         assert_eq!(json(&output)["result"], "ok");
-        let options = gated_options();
+        let options = fsl_syntax::ParseOptions::stable();
         assert!(fsl_syntax::legacy_expression_operator_error(&source, &options).is_none());
     }
 }
@@ -418,7 +414,7 @@ fn current_edition_exposes_legacy_findings_without_changing_success() {
 }
 
 fn assert_operator_endpoints(source: &str, offset: usize) {
-    let options = gated_options();
+    let options = fsl_syntax::ParseOptions::stable();
     let error = fsl_syntax::parse_surface_document_with(source, &options)
         .expect_err("legacy operator")
         .for_edition(source, fsl_syntax::Edition::Fsl5, &options);

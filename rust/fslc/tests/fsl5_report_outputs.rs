@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! What `mutate --by-requirement`, `lint` and `explain --readable` report
-//! for a requirements document headed `fsl 5`, behind the `fsl5` gate.
+//! for a requirements document headed `fsl 5`.
 //!
 //! - `mutate --by-requirement`: a rule or a decision table whose statements
 //!   are guards is formalized by those guards, so each killed mutant of such

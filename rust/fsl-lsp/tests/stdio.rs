@@ -176,14 +176,14 @@ fn block_on<F: std::future::Future>(future: F) -> F::Output {
 
 // Independent #1434 controls. Keep the existing harness and every old body
 // intact; retain complete protocol messages as well as diagnostics.
-fn publication_transcript(texts: &[String], gate: Option<&str>) -> Vec<Value> {
+fn publication_transcript(texts: &[String], legacy_unstable: Option<&str>) -> Vec<Value> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"));
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     command.env_remove("FSLC_LSP_ANALYSIS_DIAGNOSTICS");
-    if let Some(value) = gate {
+    if let Some(value) = legacy_unstable {
         command.env("FSLC_UNSTABLE", value);
     }
     let mut child = command.spawn().expect("publication LSP");
@@ -235,7 +235,7 @@ fn publication_transcript(texts: &[String], gate: Option<&str>) -> Vec<Value> {
     let stderr = String::from_utf8(output.stderr).unwrap();
     println!(
         "{}",
-        json!({"gate":gate,"transcript":transcript,"exit":output.status.code(),"stderr":stderr})
+        json!({"legacy_unstable":legacy_unstable,"transcript":transcript,"exit":output.status.code(),"stderr":stderr})
     );
     assert!(output.status.success());
     assert_eq!(stderr, "");
@@ -264,7 +264,7 @@ fn publication_lsp_is_unconditional_and_keeps_astral_operator_ranges() {
         Some("later,fsl5"),
     ]
     .into_iter()
-    .map(|gate| publication_transcript(&texts, gate))
+    .map(|legacy_unstable| publication_transcript(&texts, legacy_unstable))
     .collect();
     let reference = &transcripts[0];
     for index in [1, 2, 3, 5, 6] {
@@ -870,11 +870,11 @@ fn ranges_after_a_character_outside_the_bmp_count_utf16_units() {
     let text = "fsl 5\nspec S {\n  state { 𠮷野\u{3000}: Int }\n}\n";
     let range = |line: u32, start: u32, end: u32| json!({"start":{"line":line,"character":start},"end":{"line":line,"character":end}});
 
-    let gated = published_diagnostics(text);
-    let warning = gated
+    let published = published_diagnostics(text);
+    let warning = published
         .iter()
         .find(|diagnostic| diagnostic["code"] == "fullwidth_space")
-        .unwrap_or_else(|| panic!("fullwidth_space published: {gated:#?}"));
+        .unwrap_or_else(|| panic!("fullwidth_space published: {published:#?}"));
     assert_eq!(warning["severity"], 2, "{warning:#}");
     assert_eq!(warning["range"], range(2, 13, 14), "{warning:#}");
     assert_eq!(warning["data"]["replacement"], " ");
@@ -954,18 +954,18 @@ fn an_fsl_5_header_after_a_japanese_comment_makes_migration_diagnostics_errors()
     };
 
     let headed = format!("// 日本語のコメント\nfsl 5\n{body}");
-    let gated = published_diagnostics(&headed);
-    let found = migration(&gated);
-    assert!(!found.is_empty(), "{gated:#?}");
+    let published = published_diagnostics(&headed);
+    let found = migration(&published);
+    assert!(!found.is_empty(), "{published:#?}");
     assert!(
         found.iter().all(|(_, severity)| *severity == ERROR),
-        "{gated:#?}"
+        "{published:#?}"
     );
     assert!(
-        gated
+        published
             .iter()
             .all(|diagnostic| diagnostic["code"] != "FSL-DIALECT-UNKNOWN"),
-        "{gated:#?}"
+        "{published:#?}"
     );
 
     let plain = migration(&published_diagnostics(&format!(

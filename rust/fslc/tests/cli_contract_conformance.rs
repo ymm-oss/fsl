@@ -384,7 +384,8 @@ fn every_unadvertised_spelling_is_usage_with_the_option_named() {
         }
     }
     // P-C spellings from the independent parser inventory (sigma-b1-ref 9b),
-    // including gated extras. All other P-C spellings already occur in C elsewhere.
+    // including the extras that were gated before #1434. All other P-C
+    // spellings already occur in C elsewhere.
     for (flag, value) in [
         (PROBE, None),
         ("--cli-contract", None),

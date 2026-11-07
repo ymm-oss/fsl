@@ -2,7 +2,7 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! The `terminal { }` a `fsl 5` requirements document derives from its
-//! lifecycles, through the native CLI behind the `fsl5` gate.
+//! lifecycles, through the native CLI.
 //!
 //! A business document has always derived its terminal states from the sink
 //! stages of its processes. A requirements document of this edition derives

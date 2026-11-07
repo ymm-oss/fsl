@@ -3,7 +3,7 @@
 
 //! fsl 5 plan §3 S7, through the native CLI: the decision table
 //! `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`
-//! in a document headed `fsl 5`, behind the `fsl5` gate.
+//! in a document headed `fsl 5`.
 //!
 //! K for the e2e example's table (`fsl5_en_decide.fsl` against
 //! `lowered_decide.fsl`) lives in `fsl5_lowering_contract.rs`. This file
@@ -69,7 +69,7 @@ impl Drop for Scratch {
     }
 }
 
-/// `fslc <args>` in `directory` with the `fsl5` gate set.
+/// `fslc <args>` in `directory`.
 fn fslc(directory: &Path, args: &[&str]) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(args)

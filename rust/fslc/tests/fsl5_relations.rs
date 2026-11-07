@@ -3,7 +3,7 @@
 
 //! fsl 5 plan §3 S8, through the native CLI and the library: `R belongs to E
 //! as r via n`, `resource`, `measure`, `goal` and `policy` in a document
-//! headed `fsl 5`, behind the `fsl5` gate.
+//! headed `fsl 5`.
 //!
 //! The acceptance (K, R and M for the multi-entity example against
 //! `original_renamed.fsl`, and K for the hand-written `relations` example)
@@ -58,14 +58,12 @@ impl Drop for Scratch {
     }
 }
 
-/// `fslc <command> <source>` on `source` written to a scratch file, with the
-/// `fsl5` gate set.
+/// `fslc <command> <source>` on `source` written to a scratch file.
 fn fslc(command: &str, label: &str, source: &str) -> (Value, i32) {
     fslc_with(&[command, "doc.fsl"], label, source)
 }
 
-/// `fslc <args>` with `source` written to `doc.fsl` in a scratch directory,
-/// with the `fsl5` gate set.
+/// `fslc <args>` with `source` written to `doc.fsl` in a scratch directory.
 fn fslc_with(args: &[&str], label: &str, source: &str) -> (Value, i32) {
     let command = args[0];
     let scratch = Scratch::new(label);
