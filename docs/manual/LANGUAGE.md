@@ -49,11 +49,14 @@ The header and the `--edition` option do different jobs. The **header** selects
 the syntax a document is parsed with; nothing else does. The **`--edition`**
 option of `check`, `verify`, `lint`, `migrate`, `fmt` and the other commands
 that take it selects the edition *policy*: which findings apply and how severe
-they are. It is spelled `current` or `next`; `4` is accepted as another spelling
-of `current` for a headerless or `fsl 4` document, and `5` as another spelling
-of `next`. The help text and `cli-contract.json` list only `current` and `next`,
-and an unknown value is refused with `--edition must be current or next`. JSON
-output never spells a number for the option: a result read under the next
+they are. It takes four spellings, `current`, `next`, `4` and `5`: `4` is
+another spelling of `current` for a headerless or `fsl 4` document, and `5` is
+another spelling of `next`. The commands that take the option are `check`,
+`verify`, `domain check`, `fmt`, `lint` and `migrate`; each one's help text shows
+`--edition {current,next,4,5}` and `cli-contract.json` lists the same four
+choices. Any other value is a usage error (`"kind": "usage"`, exit 2) with the
+message `--edition must be current, next, 4, or 5`. JSON output never spells a
+number for the option: a result read under the next
 edition carries `"edition": "next"` (absent under the current edition), and a
 document that has a header also carries `"fsl_edition": 4` or `5`.
 
@@ -349,7 +352,7 @@ Domain declarations use `enum Name { Member, ... }` for finite variants and
 `type Name = A | B` remains accepted in the current 2.x edition and produces the
 stable `deprecated_domain_enum_union` warning over the complete declaration,
 including a canonical replacement. `fslc check`, `fslc verify`, and
-`fslc domain check` accept `--edition current|next`; `next` rejects the legacy
+`fslc domain check` accept `--edition current|next|4|5`; `next` (or `5`) rejects the legacy
 union spelling. Other covered consumers use the source header's edition; this
 does not add an `--edition` option to those commands. `fslc lint` reports the
 edition finding without mutation, and
@@ -1979,9 +1982,9 @@ additional removals in #1463.
 
 ```
 fslc check     <file.fsl|file.md>                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
-fslc lint      <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
-fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)

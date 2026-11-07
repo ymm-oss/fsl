@@ -96,11 +96,14 @@ name above is its <code>diagnostic_code</code> field, beside the <code>message</
 the syntax a document is parsed with; nothing else does. The <strong><code>--edition</code></strong>
 option of <code>check</code>, <code>verify</code>, <code>lint</code>, <code>migrate</code>, <code>fmt</code> and the other commands
 that take it selects the edition <em>policy</em>: which findings apply and how severe
-they are. It is spelled <code>current</code> or <code>next</code>; <code>4</code> is accepted as another spelling
-of <code>current</code> for a headerless or <code>fsl 4</code> document, and <code>5</code> as another spelling
-of <code>next</code>. The help text and <code>cli-contract.json</code> list only <code>current</code> and <code>next</code>,
-and an unknown value is refused with <code>--edition must be current or next</code>. JSON
-output never spells a number for the option: a result read under the next
+they are. It takes four spellings, <code>current</code>, <code>next</code>, <code>4</code> and <code>5</code>: <code>4</code> is
+another spelling of <code>current</code> for a headerless or <code>fsl 4</code> document, and <code>5</code> is
+another spelling of <code>next</code>. The commands that take the option are <code>check</code>,
+<code>verify</code>, <code>domain check</code>, <code>fmt</code>, <code>lint</code> and <code>migrate</code>; each one's help text shows
+<code>--edition {current,next,4,5}</code> and <code>cli-contract.json</code> lists the same four
+choices. Any other value is a usage error (<code>"kind": "usage"</code>, exit 2) with the
+message <code>--edition must be current, next, 4, or 5</code>. JSON output never spells a
+number for the option: a result read under the next
 edition carries <code>"edition": "next"</code> (absent under the current edition), and a
 document that has a header also carries <code>"fsl_edition": 4</code> or <code>5</code>.</p>
 <p>On a <strong>headerless</strong> document, <code>--edition 5</code> (or <code>next</code>) does not make it an
@@ -375,7 +378,7 @@ status.</p>
 <code>type Name = A | B</code> remains accepted in the current 2.x edition and produces the
 stable <code>deprecated_domain_enum_union</code> warning over the complete declaration,
 including a canonical replacement. <code>fslc check</code>, <code>fslc verify</code>, and
-<code>fslc domain check</code> accept <code>--edition current|next</code>; <code>next</code> rejects the legacy
+<code>fslc domain check</code> accept <code>--edition current|next|4|5</code>; <code>next</code> (or <code>5</code>) rejects the legacy
 union spelling. Other covered consumers use the source header's edition; this
 does not add an <code>--edition</code> option to those commands. <code>fslc lint</code> reports the
 edition finding without mutation, and
@@ -2085,9 +2088,9 @@ additional removals in #1463.</p></div></details>
   (to guard it, write <code>requires q.size() &lt; N</code>).</li>
 </ul></div></details>
 <details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl|file.md&gt;                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
-fslc lint      &lt;path&gt;... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
-fslc fmt       &lt;file.fsl|-&gt; [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       &lt;file.fsl|-&gt; [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)

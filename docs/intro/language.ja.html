@@ -93,10 +93,12 @@ causal と AI ダイアレクトの文書はヘッダーを取りません（<co
 <p>ヘッダーと <code>--edition</code> オプションは役割が違います。文書をどの構文で読むかを決めるのは
 <strong>ヘッダー</strong>だけです。<code>check</code>、<code>verify</code>、<code>lint</code>、<code>migrate</code>、<code>fmt</code> などの
 <strong><code>--edition</code></strong> は、エディションの<em>方針</em>、つまりどの finding を出し、どの重さで扱うかを
-選びます。綴りは <code>current</code> と <code>next</code> です。ヘッダーのない文書と <code>fsl 4</code> の文書では <code>4</code> も
-<code>current</code> の別綴りとして受け付け、<code>5</code> は <code>next</code> の別綴りです。ヘルプと
-<code>cli-contract.json</code> に載っているのは <code>current</code> と <code>next</code> だけで、未知の値は
-<code>--edition must be current or next</code> で拒否します。JSON 出力はこのオプションを番号で書きません。
+選びます。綴りは <code>current</code>、<code>next</code>、<code>4</code>、<code>5</code> の 4 つです。ヘッダーのない文書と <code>fsl 4</code> の
+文書では <code>4</code> は <code>current</code> の別綴りで、<code>5</code> は <code>next</code> の別綴りです。このオプションを取るのは
+<code>check</code>、<code>verify</code>、<code>domain check</code>、<code>fmt</code>、<code>lint</code>、<code>migrate</code> で、いずれのヘルプにも
+<code>--edition {current,next,4,5}</code> と表示され、<code>cli-contract.json</code> にも同じ 4 つの選択肢が
+載っています。それ以外の値は usage エラー(<code>"kind": "usage"</code>、終了コード 2)で、メッセージは
+<code>--edition must be current, next, 4, or 5</code> です。JSON 出力はこのオプションを番号で書きません。
 次のエディションで読んだ結果には <code>"edition": "next"</code> が付き（現行のエディションでは付きません）、
 ヘッダーのある文書には <code>"fsl_edition": 4</code> または <code>5</code> も付きます。</p>
 <p><strong>ヘッダーのない</strong>文書に <code>--edition 5</code>（または <code>next</code>）を付けても、FSL 5 の文書にはなりません。
@@ -364,8 +366,8 @@ never-enabled action の警告として報告します。</p>
 に <code>type Name = lo..hi</code> を使います。レガシーな書き方 <code>type Name = A | B</code> は現行の
 2.x エディションでは引き続き受理され、宣言全体に対して安定した
 <code>deprecated_domain_enum_union</code> 警告(正準の置き換えを含む)を生成します。
-<code>fslc check</code>、<code>fslc verify</code>、<code>fslc domain check</code> は <code>--edition current|next</code> を
-受け付けます。<code>next</code> はレガシーの union 記法を拒否します。他の対応済み consumer は
+<code>fslc check</code>、<code>fslc verify</code>、<code>fslc domain check</code> は <code>--edition current|next|4|5</code> を
+受け付けます。<code>next</code>(または <code>5</code>)はレガシーの union 記法を拒否します。他の対応済み consumer は
 source のヘッダーのエディションを使います。それらに <code>--edition</code> を追加するものではありません。
 <code>fslc lint</code> は変更を
 加えずにエディション finding を報告し、<code>fslc migrate --edition next</code> は検査済みの
@@ -1923,9 +1925,9 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
   (ガードするには <code>requires q.size() &lt; N</code> と書きます)。</li>
 </ul></div></details>
 <details id="7-the-verifier-fslc"><summary>7. 検証器 `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
-fslc lint      &lt;path&gt;... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
-fslc fmt       &lt;file.fsl|-&gt; [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       &lt;file.fsl|-&gt; [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)

@@ -44,10 +44,12 @@ causal と AI ダイアレクトの文書はヘッダーを取りません（`ed
 ヘッダーと `--edition` オプションは役割が違います。文書をどの構文で読むかを決めるのは
 **ヘッダー**だけです。`check`、`verify`、`lint`、`migrate`、`fmt` などの
 **`--edition`** は、エディションの*方針*、つまりどの finding を出し、どの重さで扱うかを
-選びます。綴りは `current` と `next` です。ヘッダーのない文書と `fsl 4` の文書では `4` も
-`current` の別綴りとして受け付け、`5` は `next` の別綴りです。ヘルプと
-`cli-contract.json` に載っているのは `current` と `next` だけで、未知の値は
-`--edition must be current or next` で拒否します。JSON 出力はこのオプションを番号で書きません。
+選びます。綴りは `current`、`next`、`4`、`5` の 4 つです。ヘッダーのない文書と `fsl 4` の
+文書では `4` は `current` の別綴りで、`5` は `next` の別綴りです。このオプションを取るのは
+`check`、`verify`、`domain check`、`fmt`、`lint`、`migrate` で、いずれのヘルプにも
+`--edition {current,next,4,5}` と表示され、`cli-contract.json` にも同じ 4 つの選択肢が
+載っています。それ以外の値は usage エラー(`"kind": "usage"`、終了コード 2)で、メッセージは
+`--edition must be current, next, 4, or 5` です。JSON 出力はこのオプションを番号で書きません。
 次のエディションで読んだ結果には `"edition": "next"` が付き（現行のエディションでは付きません）、
 ヘッダーのある文書には `"fsl_edition": 4` または `5` も付きます。
 
@@ -336,8 +338,8 @@ domain 宣言では、有限のバリアントに `enum Name { Member, ... }` �
 に `type Name = lo..hi` を使います。レガシーな書き方 `type Name = A | B` は現行の
 2.x エディションでは引き続き受理され、宣言全体に対して安定した
 `deprecated_domain_enum_union` 警告(正準の置き換えを含む)を生成します。
-`fslc check`、`fslc verify`、`fslc domain check` は `--edition current|next` を
-受け付けます。`next` はレガシーの union 記法を拒否します。他の対応済み consumer は
+`fslc check`、`fslc verify`、`fslc domain check` は `--edition current|next|4|5` を
+受け付けます。`next`(または `5`)はレガシーの union 記法を拒否します。他の対応済み consumer は
 source のヘッダーのエディションを使います。それらに `--edition` を追加するものではありません。
 `fslc lint` は変更を
 加えずにエディション finding を報告し、`fslc migrate --edition next` は検査済みの
@@ -1816,9 +1818,9 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 
 ```
 fslc check     <file.fsl>                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
-fslc lint      <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
-fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)

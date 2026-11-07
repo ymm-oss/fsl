@@ -99,7 +99,7 @@ parent creation remain command-specific. See
 [the publication contract](../../../docs/design/DESIGN-atomic-artifact-output.md).
 
 **Editions.** The document header selects the syntax (`fsl 5`, or headerless /
-`fsl 4` for FSL 4); `--edition current|next` selects the edition policy, not the
+`fsl 4` for FSL 4); `--edition current|next|4|5` selects the edition policy, not the
 syntax. Stricter rules follow each source's own header. Consumed child files
 retain their own edition; do not assume a parent's edition flag propagates to
 dependencies. Migration edits the requested roots, not imported children.
@@ -114,12 +114,12 @@ Domain checking rejects quantified domain expressions, so it does not emit this
 colon-quantifier warning for them; metadata slots and requirement maps are not domain forms.
 
 ```
-fslc check <f> [--edition current|next]         # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
-fslc lint <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
+fslc check <f> [--edition current|next|4|5]     # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
+fslc lint <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)
 fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
                                                  # exit 0 migrated, 1 migrate_manual_required (no inputs written), 2 refused/I/O/check failure (same check-failure contract as lint)
-fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
+fslc fmt <f|-> [--edition current|next|4|5]     # canonical source on stdout; input is never mutated
 fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
 fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (default v1)

@@ -23,7 +23,7 @@ when the value is keeping the layers aligned, reach for the connected workflow
 The header selects the syntax. A document whose first non-trivia line is
 `fsl 5` (blank lines and `//` comments may precede it; document annotations and
 the dialect keyword follow it) is FSL 5. **A headerless document is FSL 4**, as
-is one headed `fsl 4`. `--edition current|next` selects the edition policy
+is one headed `fsl 4`. `--edition current|next|4|5` selects the edition policy
 (which findings are reported and how severe they are), never the syntax: on a
 headerless document `--edition next` still parses FSL 4.
 

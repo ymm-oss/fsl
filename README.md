@@ -259,7 +259,7 @@ engine's visited-state budget returns `unknown_budget` rather than a false `veri
 obligation runs, `--instances`/`--values` to override verify-block bounds, `--lemma` for
 induction candidate auxiliary invariants, `--from-state` to continue BMC from a captured
 Monitor/replay state snapshot, `--requirements` to scope by requirement id, `--deadlock
-{warn,error,ignore}`, and `--edition {current,next}`. See `fslc verify --help` for the
+{warn,error,ignore}`, and `--edition {current,next,4,5}`. See `fslc verify --help` for the
 full, current list.
 
 ### Scenarios, test generation, and log conformance
