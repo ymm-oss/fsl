@@ -677,7 +677,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   free-value support gap remains in #1451. Rewrite by reading after complete
   assignment or explicitly initializing the whole root; the 19 measured-inline
   migration examples (original 13, N2, two subsets and three post-loop cases) are in
-  [DESIGN-bridge](../docs/design/DESIGN-bridge.md#assigned-root-read-order-1451).
+  [DESIGN-bridge](docs/design/DESIGN-bridge.md#assigned-root-read-order-1451).
   Breaking-removal evidence: `fslc check <form>` in each own materialized tree,
   base `c79016efeb630c717292e9392901cfe65ab40915` versus head
   `2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4`, all 597 `.fsl` files under `specs/`,
@@ -1289,7 +1289,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `enum abstraction endpoint 'X' has no members` to `enum 'X' has no members`, loc
   moves from the mapping file to the impl/abs declaration, and the later mapping
   span object is absent. See the
-  [boundary decision](../docs/design/DESIGN-enum-member-identity.md#nonempty-enum-declarations-1546).
+  [boundary decision](docs/design/DESIGN-enum-member-identity.md#nonempty-enum-declarations-1546).
 - Changed (#1547, breaking removal): native `check` rejects pattern variables
   outside their true continuation, including disjunctive/comparison/implication
   escapes and non-conjunctive `requires` exports. Ten logical scope consumers and
@@ -1316,7 +1316,7 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   changes in 601 corpus inputs (598 baseline plus three new fixtures supplied to
   both trees) and 1,777 existing complete static Rust-test literal occurrences.
   Authored 147 routes have 57 removals; reviewed 110 inputs have 24, totaling 81, enumerated in
-  [the scope design](../docs/design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
+  [the scope design](docs/design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
   The historical 18 message-change packets are unchanged: 15 collision-priority
   cases with mechanical collision-return controls (seven tested location changes),
   plus three def-call capture examples. A nineteenth occurrence is the authored
