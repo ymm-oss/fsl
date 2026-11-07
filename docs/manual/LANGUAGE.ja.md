@@ -38,6 +38,8 @@ FSL 5 の要件は **entity / lifecycle / event / rule / decide** で記述し�
 causal と AI ダイアレクトの文書はヘッダーを取りません（`edition_header_not_accepted`）。
 ヘッダーの追加だけでは旧形式の要件を変換できません。`fsl 5` の下の `process` は
 `mixed_requirements_forms` です。[後述の移行手順](#fsl4-to-fsl5-migration)を使ってください。
+この 4 つの拒否は、いずれも `"result": "error"`、`"kind": "parse"`、終了コード 2 の
+エンベロープです。上の名前は、`message` と `loc` と並ぶ `diagnostic_code` フィールドの値です。
 
 ヘッダーと `--edition` オプションは役割が違います。文書をどの構文で読むかを決めるのは
 **ヘッダー**だけです。`check`、`verify`、`lint`、`migrate`、`fmt` などの

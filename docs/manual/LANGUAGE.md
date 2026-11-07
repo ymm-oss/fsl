@@ -41,7 +41,9 @@ the document; an explicitly requested edition conflicting with its header is
 Causal and AI-dialect documents take no header (`edition_header_not_accepted`).
 Adding a header alone does not convert a legacy requirements specification: a
 `process` under `fsl 5` is `mixed_requirements_forms`, so
-use [the migration guide below](#fsl4-to-fsl5-migration).
+use [the migration guide below](#fsl4-to-fsl5-migration). Each of these four
+refusals is a `"result": "error"` envelope with `"kind": "parse"` and exit 2; the
+name above is its `diagnostic_code` field, beside the `message` and `loc`.
 
 The header and the `--edition` option do different jobs. The **header** selects
 the syntax a document is parsed with; nothing else does. The **`--edition`**

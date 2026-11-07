@@ -6,11 +6,24 @@ or one headed `fsl 4`, is FSL 4; the examples in this reference are FSL 4 unless
 they carry the header. The FSL 5 requirements forms are owned by
 [fsl-requirements syntax](../../fsl-requirements/references/syntax.md).
 
-```fsl-fragment
+```fsl check
 fsl 5
 @requirement("REQ-SCOPE-001", "document intent")
-spec <Name> { ... }
+spec HeaderedScope {
+  state { done: Bool }
+  init { done = false }
+  @requirement("REQ-SCOPE-002", "work can finish once")
+  action finish() {
+    requires not done
+    done = true
+  }
+  terminal { done }
+}
 ```
+
+This is the only checked fence in this reference, so it is the one FSL 5
+compilation unit `tools/check-doc-fences.py` reads here; the other fences are
+FSL 4 fragments or grammar templates with `<placeholders>`, which no checker reads.
 
 The native parser selects every dialect from one shared lexer/registry. A leading
 UTF-8 BOM, whitespace, and `//` comments are trivia. Typed document annotations

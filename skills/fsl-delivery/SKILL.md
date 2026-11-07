@@ -1,6 +1,6 @@
 ---
 name: fsl-delivery
-description: Orchestrate FSL-centered delivery from business planning through PM requirements, engineering design, verification, refinement, scenarios, testgen/replay, and implementation conformance for files headed fsl 5. Use for planning-to-implementation workflows, connected business/requirements/design contracts, or coordination of the FSL layer and review skills.
+description: Orchestrate FSL-centered delivery from business planning through PM requirements, engineering design, verification, refinement, scenarios, testgen/replay, and implementation conformance. New files are headed fsl 5 (preferred); an existing headerless FSL 4 project is coordinated as it is or migrated through the LANGUAGE.md migration guide. Use for planning-to-implementation workflows, connected business/requirements/design contracts, or coordination of the FSL layer and review skills.
 ---
 
 # FSL Delivery
@@ -34,7 +34,7 @@ Before authoring, read only the relevant owner:
 - [Core](../fsl/SKILL.md): source fidelity, syntax, commands and repair.
 - Retained `fsl-requirements-document` skill from the base bundle: checked
   requirements/spec → deterministic stakeholder document; edits only the
-  non-normative slot. It is intentionally not duplicated in this staging tree.
+  non-normative slot. It is edition-neutral, so it has no FSL 5 variant.
 
 DB compatibility, Functional DDD/effects, AI tools/agents and external evidence
 are cross-cutting [dialects](../fsl/references/advanced.md), not extra mandatory

@@ -29,6 +29,16 @@ block, and kernel members are those of `../fsl/references/syntax.md`. The shared
 syntax here. **Do not use earlier requirements `process` / `transition` forms**:
 `fsl 5` rejects them (`mixed_requirements_forms`). `fslc migrate --edition 5`
 rewrites an existing process-form file into the forms below.
+To maintain an existing headerless (FSL 4) requirements document as it is,
+without migrating it, use the FSL 4 forms in
+[`../fsl/references/layers.md`](../fsl/references/layers.md#requirements-the-requirements-layer).
+
+An inline `implements` seam is fail-closed. How a failing seam changes the
+top-level result and exit is in the core's
+["Inline `implements` failures are fail-closed"](../fsl/SKILL.md#how-to-run);
+reading `implements.result` and the seam fields is in
+[fsl-verify §2](../fsl-verify/SKILL.md#2-results-that-look-green-but-are-not) and
+[§3](../fsl-verify/SKILL.md#3-reading-the-deciding-fields-per-result).
 
 ## English is canonical
 

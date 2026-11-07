@@ -87,7 +87,9 @@ FSL 5 の要件は <strong>entity / lifecycle / event / rule / decide</strong> �
 ヘッダーが食い違うと <code>edition_conflict</code>、未知の番号は <code>unsupported_edition</code> です。
 causal と AI ダイアレクトの文書はヘッダーを取りません（<code>edition_header_not_accepted</code>）。
 ヘッダーの追加だけでは旧形式の要件を変換できません。<code>fsl 5</code> の下の <code>process</code> は
-<code>mixed_requirements_forms</code> です。<a href="#fsl4-to-fsl5-migration">後述の移行手順</a>を使ってください。</p>
+<code>mixed_requirements_forms</code> です。<a href="#fsl4-to-fsl5-migration">後述の移行手順</a>を使ってください。
+この 4 つの拒否は、いずれも <code>"result": "error"</code>、<code>"kind": "parse"</code>、終了コード 2 の
+エンベロープです。上の名前は、<code>message</code> と <code>loc</code> と並ぶ <code>diagnostic_code</code> フィールドの値です。</p>
 <p>ヘッダーと <code>--edition</code> オプションは役割が違います。文書をどの構文で読むかを決めるのは
 <strong>ヘッダー</strong>だけです。<code>check</code>、<code>verify</code>、<code>lint</code>、<code>migrate</code>、<code>fmt</code> などの
 <strong><code>--edition</code></strong> は、エディションの<em>方針</em>、つまりどの finding を出し、どの重さで扱うかを

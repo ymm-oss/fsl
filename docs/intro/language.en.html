@@ -89,7 +89,9 @@ the document; an explicitly requested edition conflicting with its header is
 Causal and AI-dialect documents take no header (<code>edition_header_not_accepted</code>).
 Adding a header alone does not convert a legacy requirements specification: a
 <code>process</code> under <code>fsl 5</code> is <code>mixed_requirements_forms</code>, so
-use <a href="#fsl4-to-fsl5-migration">the migration guide below</a>.</p>
+use <a href="#fsl4-to-fsl5-migration">the migration guide below</a>. Each of these four
+refusals is a <code>"result": "error"</code> envelope with <code>"kind": "parse"</code> and exit 2; the
+name above is its <code>diagnostic_code</code> field, beside the <code>message</code> and <code>loc</code>.</p>
 <p>The header and the <code>--edition</code> option do different jobs. The <strong>header</strong> selects
 the syntax a document is parsed with; nothing else does. The <strong><code>--edition</code></strong>
 option of <code>check</code>, <code>verify</code>, <code>lint</code>, <code>migrate</code>, <code>fmt</code> and the other commands
