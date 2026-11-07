@@ -38,8 +38,24 @@ const nativeCommandTimeoutMs = 60_000;
 // Live envelopes carry the workspace release; read it from the package
 // metadata the producers were built from instead of pinning a literal.
 const workspaceManifest = await readFile(join(repository, "rust/Cargo.toml"), "utf8");
-const workspaceVersion = /^\[workspace\.package\][^[]*?^version\s*=\s*"([^"]+)"/m
-  .exec(workspaceManifest)?.[1];
+// Scan line by line: a `[` inside a value (an array, an inline table) must not
+// end the section; only a new `[table]` header does.
+let workspaceVersion;
+{
+  let section = "";
+  for (const line of workspaceManifest.split(/\r?\n/)) {
+    const header = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/.exec(line);
+    if (header) {
+      section = header[1].trim();
+      continue;
+    }
+    const entry = /^\s*version\s*=\s*"([^"]+)"/.exec(line);
+    if (section === "workspace.package" && entry) {
+      workspaceVersion = entry[1];
+      break;
+    }
+  }
+}
 if (!workspaceVersion) throw new Error("rust/Cargo.toml [workspace.package].version not found");
 
 async function command(executable, args, timeoutMs = 300_000, environment = process.env) {
