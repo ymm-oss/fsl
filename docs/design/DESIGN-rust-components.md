@@ -381,7 +381,8 @@ rejecting oracle, pre-PR audit, and independently revertible pull request.
   One family extraction has since been executed and measured; the post-extraction evidence below
   extends this analysis, and the falsifier's shape appeared in both commits that touched the
   extracted module — neither of them a family-scoped change, so the result reads as unconfirmed,
-  not disproven.
+  not disproven. A second slice, the approval family (issue #1171), was replayed before any move
+  and not executed; the replay record below predicts that the falsifier fires.
 
 #### Post-extraction measurement (issue #738 spike)
 
@@ -569,6 +570,58 @@ appear in half of all commits and still mostly receive legitimate composition wi
 rate and line count cannot separate cohesion from coupling and neither authorizes an extraction.
 The 30-lines-or-fewer wiring scale is an observed distribution feature (median 29), not a
 semantically derived threshold.
+
+#### Approval-family replay (issue #1171)
+
+Issue #1171 scoped one in-crate slice for v5.0.0: the approval family plus `approval_command`,
+moved out of `main.rs` as one independently revertible pull request, measured against the
+falsifier above before further extraction was decided. Before moving any source, the slice was
+replayed on `origin/main` at `56354e477`: four representative changes were re-attributed to the
+planned layout, with the approval family in its own module, and counted with the rollback rule's
+changed-owner count below.
+
+| Change | Owners before | Owners after | `main.rs` lines left after |
+|---|---|---|---|
+| #980 `0ba6e9023` | 2 | 2 | 10 → 0 |
+| #1673 `56024d681` | 1 | 2 | 53 (diff family) |
+| #1668 `156d9c8ee` | 2 | 3 | ~89 |
+| #1676 `56354e477` | 3 | 4 | ~250 |
+
+- Method: each change's owner set comes from `git show --numstat`, and its `main.rs` lines were
+  attributed to their enclosing items by script, then assigned to the module that would own them
+  after the move.
+- Limit: this is a prediction from a replay, not a post-extraction sample. No extraction was
+  merged, so the rollback rule's "next three family-scoped changes" were never observed [R]. The
+  prediction would be wrong if the moved module changed which items later changes touch, which a
+  replay of past diffs cannot show.
+- Result: the median changed-owner count rises from 2 to 2.5 instead of falling, and three of the
+  four changes still touch `main.rs` by more than ten lines. Both halves of the rollback rule
+  fail, so the falsifier fires and **the approval-family extraction is not done.**
+- Why: the four changes are cross-family policy changes — the exit contract, the path base, and
+  Git revision roots — which is the shape the policy-site discriminator above classifies as
+  coupling and a vertical family split cannot remove.
+- Extra cost the replay exposed: the family calls the ledger, html, scenarios, document and diff
+  renderers, which live only in `main.rs`, while `rust/fslc/tests/issue_1171_main_helper_modules.rs`
+  (#1376) forbids a helper module from calling back into `main.rs`. The move would also have
+  needed a renderer port.
+
+What was done instead is the single-owner move this section already credits, applied to the three
+policies issue #1170 names:
+
+- #1707 (`49332169e`) gave file-IO error classification one owner in
+  `rust/fslc/src/spec_loading.rs`, with no output change.
+- #1709 (`63dd3e02c`) routed every input read the binary performs itself through that owner, so
+  an unreadable file is reported as `kind:"io"` with `<path>: <error>`. That PR records which
+  changes alter output.
+- #1710 (`5e9614c24`) gave the error exit one owner, `fslc_rust::outcome::error_exit` on the
+  `Verdict` table, and gave `chain`'s nested error envelope one owner, `cli_output::error_detail`,
+  with no output change.
+- `rust/fslc/tests/issue_1170_error_policy_owners.rs` is the ratchet. It rejects an `"io"`
+  literal outside an exact allowlist of owner functions, and pins per-file counts of the
+  hand-written envelope and exit-literal sites that are left. A count may only go down.
+
+Typed option parsing for the six family subcommands that still parse untyped (approval,
+document, db, ai, domain and counterexample) moved to issue #1704, after v5.0.0.
 
 #### Controls and rollback rule for a future extraction slice
 
