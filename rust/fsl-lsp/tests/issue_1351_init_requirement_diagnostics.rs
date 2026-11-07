@@ -6,10 +6,15 @@
 //! targets are all anchors under decision A. The CLI graph-API test preserves
 //! genuine-orphan detection without inventing new LSP projection behavior.
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{ChildStdin, ChildStdout, Command, Stdio};
+use std::io::Write;
+use std::process::{ChildStdin, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+
+#[path = "support/lsp_receiver.rs"]
+mod lsp_receiver;
+use lsp_receiver::LspReceiver;
 
 fn send(stdin: &mut ChildStdin, value: &Value) {
     let body = serde_json::to_vec(value).expect("serialize LSP message");
@@ -18,24 +23,12 @@ fn send(stdin: &mut ChildStdin, value: &Value) {
     stdin.flush().expect("flush message");
 }
 
-fn receive(stdout: &mut BufReader<ChildStdout>) -> Value {
-    let mut length = None;
-    loop {
-        let mut header = String::new();
-        assert!(
-            stdout.read_line(&mut header).expect("read header") > 0,
-            "LSP closed output"
-        );
-        if header == "\r\n" {
-            break;
-        }
-        if let Some(value) = header.strip_prefix("Content-Length: ") {
-            length = Some(value.trim().parse::<usize>().expect("content length"));
-        }
-    }
-    let mut body = vec![0; length.expect("content-length header")];
-    stdout.read_exact(&mut body).expect("read body");
-    serde_json::from_slice(&body).expect("LSP JSON")
+/// The next LSP frame, failing the test (with the partial output) instead of
+/// hanging when the server stops answering (#1413).
+fn receive(stdout: &mut LspReceiver) -> Value {
+    stdout
+        .recv(Instant::now() + Duration::from_secs(120))
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 fn diagnostics(analysis_enabled: bool) -> Vec<Value> {
@@ -50,7 +43,7 @@ fn diagnostics(analysis_enabled: bool) -> Vec<Value> {
         .spawn()
         .expect("spawn native LSP");
     let mut stdin = child.stdin.take().expect("stdin");
-    let mut stdout = BufReader::new(child.stdout.take().expect("stdout"));
+    let mut stdout = LspReceiver::new(child.stdout.take().expect("stdout"));
     send(
         &mut stdin,
         &json!({

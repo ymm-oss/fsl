@@ -40,3 +40,27 @@ fn ci_without_an_update_request_still_compares_the_golden() {
         assert_eq!(golden_update_requested(None, Some(ci)), Ok(false));
     }
 }
+
+/// The edition-header golden (`edition_header.rs`) goes through the same
+/// guard: under `CI` a set `FSLC_UPDATE_EDITION_GOLDEN` fails, naming it,
+/// instead of rewriting the golden and passing.
+#[test]
+fn ci_rejects_a_set_edition_golden_update_variable() {
+    const VARIABLE: &str = "FSLC_UPDATE_EDITION_GOLDEN";
+    for ci in ["1", "true", "false", ""] {
+        for update in ["1", "0", ""] {
+            let error =
+                golden_update::golden_update_requested_for(VARIABLE, Some(update), Some(ci))
+                    .expect_err("CI must reject a set FSLC_UPDATE_EDITION_GOLDEN");
+            assert!(error.contains("CI") && error.contains(VARIABLE), "{error}");
+        }
+        assert_eq!(
+            golden_update::golden_update_requested_for(VARIABLE, None, Some(ci)),
+            Ok(false)
+        );
+    }
+    assert_eq!(
+        golden_update::golden_update_requested_for(VARIABLE, Some("1"), None),
+        Ok(true)
+    );
+}

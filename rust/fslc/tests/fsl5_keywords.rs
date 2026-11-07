@@ -373,13 +373,9 @@ mod golden_update;
 /// When `CI` is set, any set update variable fails before comparison or writing.
 #[test]
 fn the_requirements_skill_prints_the_parser_keyword_table() {
-    let update = std::env::var_os("FSLC_SKILLS_KEYWORDS_UPDATE");
-    let ci = std::env::var_os("CI");
-    let update_requested = golden_update::golden_update_requested(
-        update.as_ref().map(|value| value.to_str().unwrap_or("")),
-        ci.as_ref().map(|value| value.to_str().unwrap_or("")),
-    )
-    .unwrap_or_else(|error| panic!("{error}"));
+    let update_requested =
+        golden_update::golden_update_requested_from_env("FSLC_SKILLS_KEYWORDS_UPDATE")
+            .unwrap_or_else(|error| panic!("{error}"));
     let path = repository().join("skills/fsl-requirements/references/keywords.md");
     let text = std::fs::read_to_string(&path).expect("read the skill's keyword table");
     let begin = text.find(TABLE_BEGIN).expect("begin marker") + TABLE_BEGIN.len();
