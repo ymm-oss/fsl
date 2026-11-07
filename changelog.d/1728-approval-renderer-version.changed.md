@@ -1,4 +1,4 @@
-Changed (#9999): approval records name the target kind's renderer instead of
+Changed (#1728): approval records name the target kind's renderer instead of
 the `fslc` release. A new record stores `"<renderer-id>/<semver>"` in
 `target.generator_version`: `fslc-ledger-renderer/1.0.0`,
 `fslc-html-renderer/1.0.0`, `fslc-scenarios-renderer/1.0.0`, or

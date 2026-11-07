@@ -2898,7 +2898,9 @@ commit. The versioned JSON sidecar also records the normalized artifact digest,
 generator, renderer version and options, approved requirement IDs, approver,
 and UTC time. The renderer version is the target kind's own
 <code>"&lt;renderer-id&gt;/&lt;semver&gt;"</code> (for example <code>fslc-ledger-renderer/1.0.0</code>), not the
-<code>fslc</code> release, so upgrading <code>fslc</code> alone does not drift an approval.
+<code>fslc</code> release, so upgrading <code>fslc</code> alone does not report <code>renderer_changed</code>.
+An upgrade that changes the rendered bytes, such as a ledger or HTML
+presentation change, still drifts the approval with <code>rendering_changed</code>.
 Creation regenerates the artifact and rejects a stale review file. <code>approval
 check</code> returns <code>approved</code> only while all applicable bindings match; otherwise
 it returns <code>drifted</code> with <code>spec_changed</code>, <code>rendering_changed</code>, and/or

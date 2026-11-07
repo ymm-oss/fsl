@@ -2444,8 +2444,9 @@ spec を省略すると、変更されたすべての `.fsl` パスを比較し�
 アーティファクトのダイジェスト、ジェネレータ、レンダラのバージョン、オプション、
 承認された要件 ID、承認者、UTC 時刻も記録します。レンダラのバージョンは
 target の種類ごとの `"<renderer-id>/<semver>"`(例: `fslc-ledger-renderer/1.0.0`)
-で、`fslc` のリリース番号ではありません。そのため `fslc` を更新しただけでは承認は
-drift しません。作成はアーティファクトを再生成し、古い
+で、`fslc` のリリース番号ではありません。そのため `fslc` を更新しただけでは
+`renderer_changed` は出ません。ただし ledger や HTML の表示の変更のように、
+更新で出力のバイト列が変わった場合は、`rendering_changed` で drift します。作成はアーティファクトを再生成し、古い
 レビューファイルを拒否します。`approval check` は、該当するすべてのバインディングが
 一致している間だけ `approved` を返します。そうでなければ
 `spec_changed`、`rendering_changed`、`renderer_changed` を伴う `drifted` を返します。
