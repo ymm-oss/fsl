@@ -1172,13 +1172,60 @@ pub fn write_record_v2(path: &Path, record: &ApprovalRecordV2) -> Result<(), Str
     crate::output_publication::publish(path, encoded).map_err(|error| error.to_string())
 }
 
+/// Renderer identity of the scenario JSON artifact, recorded as
+/// `"<id>/<version>"` in `target.generator_version`. The scenario envelope is
+/// built here in fslc rather than in fsl-tools. Bump the version by hand when
+/// the envelope's field layout or presentation changes for the same
+/// verification result; do not bump it for a crate release or a changed
+/// verifier result.
+pub const SCENARIOS_RENDERER: &str = "fslc-scenarios-renderer";
+/// See [`SCENARIOS_RENDERER`].
+pub const SCENARIOS_RENDERER_VERSION: &str = "1.0.0";
+
+/// The `target.generator_version` a new record of `kind` writes and the value
+/// `evaluate` compares it with: `"<renderer-id>/<semver>"` from one
+/// per-kind constant, independent of the crate version. `None` for a kind no
+/// approval record admits.
+#[must_use]
+pub fn renderer_version(kind: &str) -> Option<String> {
+    let (renderer, version) = match kind {
+        "ledger" => (
+            fsl_tools::LEDGER_RENDERER,
+            fsl_tools::LEDGER_RENDERER_VERSION,
+        ),
+        "html" => (fsl_tools::HTML_RENDERER, fsl_tools::HTML_RENDERER_VERSION),
+        "scenarios" => (SCENARIOS_RENDERER, SCENARIOS_RENDERER_VERSION),
+        "requirements_document" => (
+            fsl_tools::DOCUMENT_RENDERER,
+            fsl_tools::DOCUMENT_RENDERER_VERSION,
+        ),
+        _ => return None,
+    };
+    Some(format!("{renderer}/{version}"))
+}
+
+/// A record written before per-kind renderer versions stored the bare crate
+/// version (`^\d+\.\d+\.\d+$`, ASCII digits). Such a value carries no
+/// renderer identity, so `evaluate` skips only its `renderer_changed`
+/// comparison; every other value, including non-semver strings, is compared.
+#[must_use]
+pub fn is_legacy_crate_version(value: &str) -> bool {
+    let mut parts = 0;
+    for part in value.split('.') {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+        parts += 1;
+    }
+    parts == 3
+}
+
 #[must_use]
 pub fn evaluate(
     record: &ApprovalRecord,
     record_path: &Path,
     current_spec_digest: &str,
     current_artifact_digest: &str,
-    current_generator_version: &str,
     current_claim_set_digest: Option<&str>,
     current_reviewed_digest: Option<&str>,
 ) -> Value {
@@ -1189,7 +1236,12 @@ pub fn evaluate(
     if record.target.digest != current_artifact_digest {
         reasons.push("rendering_changed");
     }
-    if record.target.generator_version != current_generator_version {
+    // A legacy crate version is still bound by every digest above and below;
+    // only the renderer identity it never recorded is not compared.
+    if !is_legacy_crate_version(&record.target.generator_version)
+        && renderer_version(&record.target.kind).as_deref()
+            != Some(record.target.generator_version.as_str())
+    {
         reasons.push("renderer_changed");
     }
     if let (Some(recorded), Some(current)) =
@@ -1284,12 +1336,53 @@ pub fn now_rfc3339() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_canonical_utc_timestamp, normalized_artifact, normalized_ast, now_rfc3339,
-        requirement_ids, sha256_bytes, shell_word,
+        is_canonical_utc_timestamp, is_legacy_crate_version, normalized_artifact, normalized_ast,
+        now_rfc3339, renderer_version, requirement_ids, sha256_bytes, shell_word,
     };
     use fsl_core::{Annotation, FsResolver, action_target, build_model, parse_kernel_source};
     use fsl_syntax::{SourcePos, Span};
     use serde_json::{Value, json};
+
+    #[test]
+    fn legacy_crate_version_is_exactly_three_ascii_digit_groups() {
+        for legacy in ["4.12.0", "0.0.0", "10.200.3000"] {
+            assert!(is_legacy_crate_version(legacy), "{legacy}");
+        }
+        for other in [
+            "",
+            "4",
+            "4.12",
+            "4.12.0.1",
+            "v4.12.0",
+            "4.12.0-rc.1",
+            " 4.12.0",
+            "4.12.0 ",
+            "4..12",
+            ".4.12",
+            "4.12.",
+            "４.12.0",
+            "fslc-ledger-renderer/1.0.0",
+        ] {
+            assert!(!is_legacy_crate_version(other), "{other:?}");
+        }
+    }
+
+    #[test]
+    fn renderer_versions_are_per_kind_and_never_legacy_shaped() {
+        let versions = ["ledger", "html", "scenarios", "requirements_document"]
+            .map(|kind| renderer_version(kind).expect("admitted kind"));
+        assert_eq!(
+            versions,
+            [
+                "fslc-ledger-renderer/1.0.0",
+                "fslc-html-renderer/1.0.0",
+                "fslc-scenarios-renderer/1.0.0",
+                "fslc-document-renderer/1.3.0",
+            ]
+        );
+        assert!(versions.iter().all(|value| !is_legacy_crate_version(value)));
+        assert_eq!(renderer_version("unknown"), None);
+    }
 
     #[test]
     fn normalized_ast_removes_locations_but_preserves_metadata() {

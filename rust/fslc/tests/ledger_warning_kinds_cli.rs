@@ -309,8 +309,10 @@ fn old_warning_rendering_digest_is_drifted_not_an_error() {
     let head = String::from_utf8(head.stdout).unwrap();
     assert_eq!(head.trim().len(), 40);
     record["spec"]["git_commit"] = json!(head.trim());
-    // A future package bump is an independent renderer_changed cause. Retain the
-    // measured old artifact digest, but keep this test about rendering_changed.
+    // A package version is a legacy bare crate version, for which only the
+    // renderer_changed comparison is skipped (DESIGN-approval.md, "Renderer
+    // version"). Retain the measured old artifact digest, and keep this test
+    // about rendering_changed.
     assert!(
         record["target"]["generator_version"]
             .as_str()

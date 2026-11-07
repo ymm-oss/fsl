@@ -15,6 +15,17 @@ use serde_json::{Value, json};
 
 use crate::coverage::source_action_coverage;
 
+/// Approval renderer identity for the HTML report (`fslc approval`, recorded
+/// as `"<id>/<version>"` in `target.generator_version`). Bump the version by
+/// hand when a template string, section order, escaping, style or other
+/// presentation of the rendered bytes changes for the same verification
+/// result; do not bump it for a crate release or a changed verifier result.
+/// Deliberately independent of `CARGO_PKG_VERSION`, like
+/// `DOCUMENT_RENDERER_VERSION`.
+pub const HTML_RENDERER: &str = "fslc-html-renderer";
+/// See [`HTML_RENDERER`].
+pub const HTML_RENDERER_VERSION: &str = "1.0.0";
+
 fn escape(value: &str) -> String {
     value
         .replace('&', "&amp;")

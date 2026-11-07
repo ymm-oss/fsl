@@ -18,7 +18,11 @@ only inside temporary test repositories. Independent canonical signing is
 calibrated against both genuine v2/v4 signatures; production signing/validation is
 not the test oracle.
 
-Captured renderer version fields remain `4.12.0`. A future renderer/package change
-may intentionally change the complete expected approval output. Such a change
-requires explicit compatibility review; these tests do not mask that drift or
+Captured renderer version fields remain `4.12.0`. The compatibility review for the
+v5.0.0 renderer-version contract (`docs/design/DESIGN-approval.md`, "Renderer
+version") decided that a bare crate version like this one skips only the
+`renderer_changed` comparison, so these records keep their approved outputs at any
+crate version while every digest still binds them. A future renderer change may
+still intentionally change the complete expected approval output; such a change
+requires its own compatibility review. These tests do not mask that drift or
 rewrite the genuine signed records to suppress it.

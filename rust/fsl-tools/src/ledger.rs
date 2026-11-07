@@ -12,6 +12,18 @@ use serde_json::Value;
 
 use crate::undecided_declarations;
 
+/// Approval renderer identity for the Markdown ledger (`fslc approval`, recorded as
+/// `"<id>/<version>"` in `target.generator_version`). Bump the version by
+/// hand when a template string, section order, escaping or other
+/// presentation of the rendered bytes changes for the same verification
+/// result; do not bump it for a crate release or a changed verifier result.
+/// Deliberately independent of `CARGO_PKG_VERSION`, for the same reason as
+/// `DOCUMENT_RENDERER_VERSION`: tying it to the crate would mark every
+/// approval drifted on every unrelated `fslc` release.
+pub const LEDGER_RENDERER: &str = "fslc-ledger-renderer";
+/// See [`LEDGER_RENDERER`].
+pub const LEDGER_RENDERER_VERSION: &str = "1.0.0";
+
 #[derive(Clone, Default)]
 struct RequirementEntry {
     text: Option<String>,
