@@ -73,8 +73,14 @@
     <h2 class="reveal"><code>actor</code>・<code>entity</code>・<code>process</code> で業務の流れを書く</h2>
     <p class="lead narrow reveal">最初は、業務対象がどのステージを進むかだけを書きます。FSL はこの流れから、検証できる状態機械を作ります。</p>
 
-    <div class="panel reveal">
-      <pre><code>business ReturnHandling {
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>版（edition）:</b> このページの例にはヘッダーがないため、<b>FSL 4</b> の文書として読まれます。<code>business</code> 仕様は <b>FSL 5</b> でも同じ <code>actor</code> / <code>entity</code> / <code>process</code> / <code>stages</code> / <code>transition</code>、<code>policy</code>、<code>goal</code>、<code>kpi</code>、<code>control</code> の形で書きます。2 つ目のパネルのように、先頭の行に <code>fsl 5</code> を置きます。2 章の工程と、3 章の読みやすい形・式で書く形・統制のブロックを 1 つの仕様にまとめると、このヘッダーの有無にかかわらず <code>check</code> と <code>verify</code> を通ります。<code>EveryRequestDecided</code> は 1 つだけ残してください（<code>satisfies</code> つきの統制ブロックのもの）。同じ名前の方針が 2 つあると <code>duplicate property name</code> で終了コード 2 になります。要件層は FSL 5 で書き方が大きく変わります。<a href="requirements-layer.ja.html#fsl5">要件層の FSL 5 の書き方</a>、<a href="https://github.com/ymm-oss/fsl/blob/main/docs/manual/LANGUAGE.ja.md#fsl-editions">版の説明</a>、<a href="https://github.com/ymm-oss/fsl/blob/main/docs/manual/LANGUAGE.ja.md#fsl4-to-fsl5-migration">FSL 4 から FSL 5 への移行ガイド</a> を参照してください。</p>
+    </div>
+
+    <div class="split reveal" style="margin-top:24px">
+      <div class="panel" style="margin-top:0">
+        <p class="dim" style="margin:0 0 6px;font-size:14px">FSL 4（ヘッダーなし）</p>
+        <pre><code>business ReturnHandling {
   actor Customer, Manager
   entity Return
 
@@ -90,6 +96,27 @@
 verify {
   instances Return = 3
 }</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <p class="dim" style="margin:0 0 6px;font-size:14px">FSL 5</p>
+        <pre><code>fsl 5
+business ReturnHandling {
+  actor Customer, Manager
+  entity Return
+
+  process Return {
+    stages Requested, Approved, Rejected, Refunded
+    initial Requested
+    transition approve Requested -&gt; Approved by Manager
+    transition reject  Requested -&gt; Rejected by Manager
+    transition refund  Approved  -&gt; Refunded by Manager
+  }
+}
+
+verify {
+  instances Return = 3
+}</code></pre>
+      </div>
     </div>
 
     <table class="matrix reveal" style="margin-top:24px">
@@ -232,7 +259,7 @@ verify { values Amount = 0..3 }</code></pre>
 
     <div class="split reveal" style="margin-top:24px">
       <div class="panel" style="margin-top:0">
-        <h3>業務層</h3>
+        <h3>業務層（FSL 4、ヘッダーなし）</h3>
         <pre><code>business ExpenseToBe {
   actor Employee, Manager, Finance, System
   entity Claim
@@ -247,7 +274,7 @@ verify { values Amount = 0..3 }</code></pre>
 }</code></pre>
       </div>
       <div class="panel" style="margin-top:0">
-        <h3>要件層</h3>
+        <h3>要件層（FSL 4、ヘッダーなし）</h3>
         <pre><code>requirements ExpenseRequirements {
   implements ExpenseToBe from "business.fsl" { }
 
@@ -263,12 +290,68 @@ verify { values Amount = 0..3 }</code></pre>
       </div>
     </div>
 
+    <h3 class="reveal" style="margin-top:40px">同じ受け渡しを FSL 5 で書く</h3>
+    <p class="reveal narrow">どちらのファイルも <code>fsl 5</code> で始めます。要件層では申請を <code>entity</code> と <code>event</code> で書きます。<code>submit</code> は入力を取るため、業務層の遷移より引数が 1 つ多く、<code>action submit(c, amount) -&gt; submit(c)</code> の対応を明示します。ほかのイベントは名前で対応します。<code>implements</code> はステージを位置で比べるため、<code>lifecycle</code> の行にステージが初めて現れる順序を業務層と同じ（Draft、Submitted、Approved、Rejected、Paid）にします。<code>verify requirements.fsl --depth 8</code> は <code>implements.result: "refines"</code> を返します。<a href="requirements-layer.ja.html#fsl5">要件層の FSL 5 の書き方</a> も参照してください。</p>
+    <div class="split reveal" style="margin-top:16px">
+      <div class="panel" style="margin-top:0">
+        <h3>business.fsl（FSL 5）</h3>
+        <pre><code>fsl 5
+business ExpenseToBe {
+  actor Employee, Manager, Finance, System
+  entity Claim
+  process Claim {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit Draft -&gt; Submitted by Employee
+    transition approve Submitted -&gt; Approved by Manager
+    transition reject Submitted -&gt; Rejected by Manager
+    transition pay Approved -&gt; Paid by Finance
+  }
+}
+verify {
+  instances Claim = 2
+}</code></pre>
+      </div>
+      <div class="panel" style="margin-top:0">
+        <h3>requirements.fsl（FSL 5）</h3>
+        <pre><code>fsl 5
+requirements ExpenseRequirements {
+  implements ExpenseToBe from "business.fsl" {
+    action submit(c, amount) -&gt; submit(c)
+  }
+  number Amount
+  actor Employee, Manager, Finance
+  entity Claim {
+    amount: Amount = 0
+    lifecycle Draft -&gt; Submitted -&gt; Approved
+    lifecycle Submitted -&gt; Rejected
+    lifecycle Approved -&gt; Paid
+  }
+  event submit  = Employee submits Claim with amount Draft -&gt; Submitted
+  event approve = Manager approves Claim             Submitted -&gt; Approved
+  event reject  = Manager rejects Claim              Submitted -&gt; Rejected
+  event pay     = Finance pays Claim                 Approved -&gt; Paid
+  rule REQ-EXPENSE-001 "申請者が金額を入力して申請する" {
+    allow Employee submits Claim only when input amount &gt; 0
+  }
+  forbidden FB-EXPENSE-001 "金額0では申請できない" {
+    Employee submits c1 with amount 0
+    then rejected
+  }
+}
+verify {
+  instances Claim = 2
+  values Amount = 0..3
+}</code></pre>
+      </div>
+    </div>
+
     <div class="callout warn reveal" style="margin-top:24px">
       <p style="margin:0"><b>注意:</b> 業務層を要件に合わせて弱めてはいけません。詳細化チェックに失敗したら、まず要件層が業務意図を落としていないかを見ます。</p>
     </div>
 
     <div class="panel reveal" style="margin-top:24px">
-      <p class="dim" style="margin:0 0 6px;font-size:14px">旗艦 e2e 連鎖を段階的に実行（ネイティブ Rust）:</p>
+      <p class="dim" style="margin:0 0 6px;font-size:14px">旗艦 e2e 連鎖を段階的に実行（ネイティブ Rust。<code>examples/e2e/</code> のファイルは FSL 4、ヘッダーなし）:</p>
       <pre><code>$ fslc verify examples/e2e/1_business.fsl --engine induction
 $ fslc verify examples/e2e/2_requirements.fsl --engine induction
 # JSON implements.result == "refines" を確認

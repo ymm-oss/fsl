@@ -142,8 +142,6 @@ fsl 5
     AmountPositive: 常に 返品 段階以外 下書き 必須 返品金額 > 0
   }
 
-  terminal { forall r: 返品 { stage(r) == 返金済み or stage(r) == 却下済み } }
-
   指標 返金件数 = 件数 返品 段階 返金済み
   目標 GOAL-RET-001 "返品は返金まで進める" いずれかの 返品 到達可能 返金済み
   方針 POL-RET-001 "申請された返品はいずれ決まる"
@@ -179,8 +177,9 @@ fsl 5
 Read it against the English example line by line: `要件` is `requirements`,
 `許可 … 条件 入力 返品金額 > 0` is `allow … only when input amount > 0`,
 `常に 返品 段階以外 下書き 必須 …` is `always Return not in Draft has …`,
-`結果 拒否` is `then rejected`. `terminal { }` is a kernel member and stays
-English, but the names in it are aliases like everywhere else.
+`結果 拒否` is `then rejected`. A `terminal { }`, where one is written, is a
+kernel member and stays English, but the names in it are aliases like
+everywhere else.
 
 ## Checking a glossary
 

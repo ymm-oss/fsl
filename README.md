@@ -75,7 +75,7 @@ at the old `~/.fsl/.venv/bin` or `~/.fsl/.native/bin` installs (the pre-Rust, fs
 Uninstall:
 
 ```bash
-rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery ~/.claude/skills/fsl-from-code ~/.claude/skills/fsl-requirements-document
+rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery ~/.claude/skills/fsl-from-code ~/.claude/skills/fsl-requirements-document ~/.claude/skills/fsl-verify
 ```
 
 A mise installation is removed with `mise uninstall` instead. Its skill links are removed
@@ -117,11 +117,12 @@ Put this in your `mise.toml`, then run `mise install`:
 > [!IMPORTANT]
 > Releases made before packslip support carry no packslip, so pin a version only once
 > the release you want carries one.
-> mise says so rather than guessing:
+> mise says so rather than guessing. Pinning such a release prints, with that release's
+> number in place of `<version>`:
 >
 > ```console
 > $ mise install
-> failed: github.com/ymm-oss/fsl has no release 4.6.0 carrying packslip.fslc.sigstore.json;
+> failed: github.com/ymm-oss/fsl has no release <version> carrying packslip.fslc.sigstore.json;
 > mise installs from a packslip and does not guess at release assets
 > ```
 
@@ -195,8 +196,20 @@ runs, with no skill integration and no PATH setup.
 ```bash
 # Example: macOS (Apple Silicon)
 chmod +x fslc-macos-arm64
-./fslc-macos-arm64 verify spec.fsl
+cat > spec.fsl <<'EOF'
+spec Counter {
+  state { n: 0..5 }
+  init { n = 0 }
+  action inc() { requires n < 3  n = n + 1 }
+  action reset() { requires n == 3  n = 0 }
+  invariant AtMostThree { n <= 3 }
+}
+EOF
+./fslc-macos-arm64 verify spec.fsl   # "result": "verified", exit 0
 ```
+
+Delete `requires n < 3` and run it again: `verify` reports `"result": "violated"` for
+`AtMostThree` at step 4, where `n` reaches 4, and exits 1.
 
 > **macOS note**: a downloaded executable will be blocked by Gatekeeper. The first time
 > only, remove the quarantine attribute: `xattr -d com.apple.quarantine ./fslc-macos-arm64`
@@ -239,8 +252,12 @@ test scaffolds from this spec" or "check whether this log conforms to the spec."
 ## Using the CLI directly
 
 Every command below was run against this repository's own `specs/` (the `document` and
-`ledger` examples below run against `examples/pm/` instead). Except where noted, output
-is JSON on stdout (`fslc chain` also writes a human status table to stderr).
+`ledger` examples below run against `examples/pm/` instead). Those paths are relative to a
+checkout of this repository (`git clone https://github.com/ymm-oss/fsl && cd fsl`): the
+install script, mise and the single executables install `fslc` without them. Without a
+checkout, run the same commands on your own `.fsl` file, such as the `spec.fsl` above.
+Except where noted, output is JSON on stdout (`fslc chain` also writes a human status
+table to stderr).
 
 ### Check and verify
 
@@ -374,8 +391,15 @@ does not tutorialize them.
 
 0 = verified / proved / refines / conformant / generated / mutated / explained / analyzed
 / typestate; 1 = violated / refinement_failed / reachable_failed / unknown_cti /
-unknown_budget / nonconformant; 2 = spec error (`error`, including vacuity under
-`--vacuity error`); 3 = internal error.
+unknown_budget / nonconformant, and a `fslc diff` whose `gate.passed` is `false`; 2 = spec
+error (`error`, including vacuity under `--vacuity error`); 3 = internal error.
+
+`fslc diff` reports its findings as `result: "semantic_diff"` and exits 0 unless its gate
+fails. A kind named in `--forbid` fails the gate, and two kinds fail it without `--forbid`:
+`impl_violated` (one side violates its own invariants or type bounds, so the comparison
+is not trustworthy) and `unknown_budget` (the comparison stopped at its state budget). For
+example, `fslc diff specs/cart_v1.fsl specs/cart_v1_buggy.fsl` gives
+`gate.violations: ["impl_violated"]`, `gate.passed: false`, and exit 1.
 
 ## Skills for AI agents
 
@@ -393,6 +417,7 @@ discovery, the canonical copies live under [`skills/`](skills/) at the repositor
 - [`skills/fsl-delivery/SKILL.md`](skills/fsl-delivery/SKILL.md) — end-to-end workflow orchestration across planning, requirements, design, and implementation conformance
 - [`skills/fsl-from-code/SKILL.md`](skills/fsl-from-code/SKILL.md) — reverse-engineer a design-layer spec from existing source code
 - [`skills/fsl-requirements-document/SKILL.md`](skills/fsl-requirements-document/SKILL.md) — generate and re-verify a human-readable requirements document from a checked spec
+- [`skills/fsl-verify/SKILL.md`](skills/fsl-verify/SKILL.md) — choose the verification run per layer and change, read results that exit 0 without passing, and write the completion report
 
 Two routes place these skills for you.
 

@@ -241,7 +241,7 @@ the disjunction of the rows that name it.
 | Form | Meaning |
 |---|---|
 | **time** `{ urgent e  age a[o: E] while cond }` | kernel time: `a` counts ticks while `cond` holds; time does not pass while an `urgent` event is enabled. `stage(o)` is the instance's stage |
-| **terminal** `{ cond }` | the states where stopping is intended. This edition derives none for requirements: without it, a run that ends with every instance in a final stage is a `deadlock` warning |
+| **terminal** `{ cond }` | the states where stopping is intended. Without it, this edition derives one for requirements: every instance in a stage with no outgoing lifecycle edge. An explicit `terminal` replaces that condition; it is not added to it |
 | **measure** `m = count C` / `count E in S, …` | a count of instances, a projection that adds no state (`kpi` is accepted as the same thing) |
 | **goal** `ID "text"` **some** `E` **can reach** `S` | a reachability property |
 | **policy** `ID "text"` **every** `E` **in** `S` **must eventually be** `T {or T}` | a progress property (`leadsTo`) over the fair events |
