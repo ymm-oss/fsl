@@ -247,6 +247,11 @@ check_automation() {
   # split check-product-gate-scope.sh's own `selftest` versus its real
   # `diff_scope` invocation uses.
   step ./tools/aggregate_changelog.sh selftest
+  # Accepting/rejecting controls for the GitHub Release body that
+  # release.yml's `assemble` and `publish` jobs build: summary versus
+  # CHANGELOG section, emptiness, and both sides of the size limit
+  # (docs/design/RELEASE.md, step 8).
+  step ./tools/release-notes.sh selftest
   step python3 tools/check-design-citation-headings.py selftest
   step python3 tools/check-design-citation-headings.py check
   # Markdown link targets and heading anchors, repository-wide

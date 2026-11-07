@@ -373,8 +373,9 @@ longer drift silently).
 
 No **product-gate lane** reads those files. The paths that do read them keep their own
 unfiltered pre-merge coverage: `merge readiness / automation contracts` executes the `.claude/`
-environment contract test from `tests/test_claude_environment.py`, and `release.yml` extracts
-release notes from `CHANGELOG.md` at tag time and fails loudly (`test -s`) on a malformed file.
+environment contract test from `tests/test_claude_environment.py`, and `release.yml` builds
+release notes from `CHANGELOG.md` with `tools/release-notes.sh` in `assemble` (dispatch and tag)
+and `publish` (tag), and fails loudly on a missing section or an empty or oversized body.
 A pull request whose every changed file matches the list therefore still gets `run=false` from the
 scope script, each heavy job exits its remaining steps fast, and the pull request merges once all
 six required contexts report: real evidence from `merge readiness` and `site reference freshness`
@@ -414,7 +415,7 @@ doc-contract tests read documentation files directly.
 still classifying as `product` (the same shape as the existing `CLAUDE.md.d/x` case). Its two
 readers keep the coverage this decision requires of every exempt path:
 
-- `.github/workflows/release.yml` reads it fail-loud, at tag time, before "Extract release
+- `.github/workflows/release.yml` reads it fail-loud, at tag time, before "Build the release
   notes": a fragment still present under `changelog.d/` fails the guard
   (`stale-fragments-present`) rather than silently shipping notes with a missing entry.
 - `.github/workflows/merge-readiness.yml`'s `automation contracts` job reads it unfiltered, on

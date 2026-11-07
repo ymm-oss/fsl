@@ -63,6 +63,18 @@ It also rejects a dynamic dependency on `libz3`.
    bump here unless the release also removes a documented command or contract surface.
    **Record the reason in the release pull request when a release contains any `!` commit**,
    so the choice is not re-derived from git log each time.
+
+   A **major** release departs from that default, so it needs its own recorded rationale. The
+   release pull request and the promotion pull request must both state it, and it must:
+
+   - name each removed or incompatible surface that makes a minor release wrong, such as a
+     removed command, flag, or Kernel/JSON contract field, an exit code or envelope with a
+     changed meaning, or source that the previous release accepted and that now fails `check`;
+   - cite where each one is documented for users: the design note, both language references,
+     and the `changed` fragment that the section aggregates;
+   - say what a user of the previous major line must do, or link the migration text that says it.
+
+   Existing documentation that already names the version is not a rationale on its own.
 4. On a short-lived branch from `main`, change
    `[workspace.package].version` in `rust/Cargo.toml`. Regenerate
    `rust/Cargo.lock` with Cargo, then prove the lockfile and CLI version agree:
@@ -127,6 +139,15 @@ It also rejects a dynamic dependency on `libz3`.
    `is_product_surface_path` that widens to cover a path releases already touch
    (`editors/vscode/*` is the live candidate). Otherwise every subsequent release commit will
    fail its own `changelog-fragment-missing` at merge time.
+
+   **The release commit's product-surface changes stay within `is_release_bump_path`.** A
+   version bump must not need any other product-surface edit. A test that compares live output
+   with a hard-coded version, or a fixture that records one, is a defect in that test, not a
+   release step. Fix it in a separate pull request with its own fragment, and land that pull
+   request on `main` before the release commit. Do not add such a path to
+   `is_release_bump_path` to admit it; that set names release steps, not test repairs. The
+   release summary `docs/release-notes/vX.Y.Z.md` (step 8) is not a product surface, so a
+   release commit may add it without a fragment or an `is_release_bump_path` entry.
 7. Run the aggregator, which moves the current `[Unreleased]` body under
    `## [X.Y.Z] - YYYY-MM-DD` verbatim, appends every `changelog.d/` fragment
    sorted by the declared category/id order, verifies conservation (every
@@ -140,8 +161,9 @@ It also rejects a dynamic dependency on `libz3`.
 
    Update the link references so `[Unreleased]` compares `vX.Y.Z...HEAD` and
    `[X.Y.Z]` compares the previous tag with `vX.Y.Z`. Review the produced
-   `## [X.Y.Z]` section before committing; this is the point of the "Extract
-   release notes" content, and the last chance to fix a wording issue
+   `## [X.Y.Z]` section before committing. It is the complete record of the
+   release that the GitHub Release body is built from or links to (step 8),
+   and this is the last chance to fix a wording issue
    directly in the version section (never in `[Unreleased]`, which control 4
    in `docs/design/DESIGN-changelog-fragments.md` protects even at this step, except
    for exactly this move).
@@ -154,11 +176,37 @@ It also rejects a dynamic dependency on `libz3`.
    product-only version bump for lacking a fragment that was never needed. If `[Unreleased]`
    was also already empty, the produced `## [X.Y.Z]` section will have no bullets at all —
    expected for that shape, not a defect to work around.
-8. Confirm the complete `X.Y.Z` changelog section is non-empty and suitable for
-   the GitHub Release body, **unless** step 7's zero-fragment case applies and `[Unreleased]`
-   was already empty, in which case the section legitimately has no bullets; state the release's
-   actual reason (e.g. a dependency or version-only bump) in the release commit message and the
-   promotion pull request instead of fabricating a placeholder bullet.
+8. Build and check the GitHub Release body with the command the release workflow runs:
+
+   ```bash
+   ./tools/release-notes.sh build --version X.Y.Z \
+     --repository-url https://github.com/ymm-oss/fsl --out /tmp/release-notes-X.Y.Z.md
+   ```
+
+   The body depends on whether the release has a hand-written summary at
+   `docs/release-notes/vX.Y.Z.md`:
+
+   - **With a summary,** the body is that file, followed by an absolute link to the
+     `## [X.Y.Z]` section of the tagged `CHANGELOG.md`
+     (`https://github.com/ymm-oss/fsl/blob/vX.Y.Z/CHANGELOG.md#<heading anchor>`).
+   - **Without one,** the body is the complete `## [X.Y.Z]` section without its heading, as it
+     was before summaries existed.
+
+   In both cases the command fails unless the section exists exactly once, the body contains a
+   non-whitespace character, and the body is at most 125,000 bytes. GitHub rejects a longer body
+   with "body is too long (maximum is 125000 characters)". That message comes from third-party
+   API error reports; GitHub's documentation does not state the limit. A UTF-8 byte count is
+   never smaller than the character count, so the byte limit is the conservative reading.
+
+   Write the summary when the section is over the limit. Also write one when step 7's
+   zero-fragment case applies and `[Unreleased]` was already empty, so the section has no
+   bullets. In that case the summary states the release's actual reason, such as a dependency
+   or version-only bump, and you state it in the release commit message and the promotion pull
+   request too. Never add a placeholder bullet to the section.
+
+   The summary is release-page prose, not a second changelog. Use absolute URLs, because
+   relative links do not resolve on a GitHub Release page. The `CHANGELOG.md` section remains
+   the complete record. The summary may land on `main` before the release commit or inside it.
 9. Run the complete product gate:
 
    ```bash
@@ -175,9 +223,11 @@ It also rejects a dynamic dependency on `libz3`.
    `workflow_dispatch` run builds and smoke-tests every artifact but cannot
    attach files to a GitHub Release, even when the selected ref is a tag.
 2. Verify the completed run's `head_sha` equals the recorded candidate SHA and
-   all four native targets, the Agent Skill bundle, VS Code extension, and both
-   Kernel bundles pass. Do not reuse evidence from a moving branch after its SHA
-   changes.
+   all four native targets, the Agent Skill bundle, VS Code extension, both
+   Kernel bundles, and the `assemble` job pass. `assemble` verifies the complete
+   release unit and builds and checks the release body (§1, step 8); read the
+   body it built from the job summary. Do not reuse evidence from a moving
+   branch after its SHA changes.
 3. Create a branch fixed at the recorded candidate SHA, then open the
    release-promotion pull request from that branch to `production` — never from
    moving `main`. Name the branch `release/vX.Y` (for example, `release/v4.5`
@@ -237,10 +287,9 @@ truth for the pinned-head and tree-identity requirements.
    workflow from `production`. Require the run's `head_sha` to equal the
    recorded production HEAD and every job to pass; pre-promotion evidence is
    not valid for a distinct production merge commit.
-3. Regenerate a temporary notes file from the complete `X.Y.Z` section in the
-   exact production HEAD's `CHANGELOG.md`, excluding its version heading. Review
-   it, show it to the user, and stop if it is empty; do not reuse a file derived
-   from the pre-promotion candidate.
+3. Regenerate a temporary notes file on the exact production HEAD with the
+   §1, step 8 command. Review it, show it to the user, and stop if the command
+   fails; do not reuse a file derived from the pre-promotion candidate.
 4. Show the user the production commit, annotated tag `vX.Y.Z`, the exact notes,
    and that pushing the tag uploads a draft, verifies its remote inventory, signs
    the two packslip bundles, uploads them, verifies the inventory again, then
@@ -258,8 +307,10 @@ truth for the pinned-head and tree-identity requirements.
 
 ## 4. Verify the release
 
-1. Confirm the published body is non-empty and matches the `X.Y.Z` changelog
-   section.
+1. Confirm the published body is non-empty and matches the file §3, step 3
+   built: the summary plus its link, or the `X.Y.Z` changelog section. When the
+   body has the link, confirm it opens the `X.Y.Z` section of the tagged
+   `CHANGELOG.md`.
 2. Confirm `fslc`, `fslc-lsp`, and their checksum files exist for exactly the
    four supported suffixes. Confirm no `macos-x64` asset exists. Also confirm
    the Agent Skill bundle/checksum pair, VS Code extension, both Kernel
