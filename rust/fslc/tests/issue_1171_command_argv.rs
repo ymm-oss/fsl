@@ -11,8 +11,13 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
+
+/// Separates the cache directories of the runs one test binary makes: the
+/// tests share the process id.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const SPEC: &str = "specs/cart_v1.fsl";
 const CAUSAL: &str = "examples/causal/incident_response.fsl";
@@ -38,14 +43,22 @@ impl Run {
     }
 }
 
+/// `fslc <args>` in the repository root, with a cache directory of its own
+/// that no earlier run filled and that is removed afterwards (#1414).
 fn run(args: &[&str]) -> Run {
-    let cache = std::env::temp_dir().join(format!("fslc-issue-1171-argv-{}", std::process::id()));
+    let cache = std::env::temp_dir().join(format!(
+        "fslc-issue-1171-argv-{}-{}",
+        std::process::id(),
+        FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&cache);
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(args)
         .current_dir(root())
         .env("FSLC_CACHE_DIR", &cache)
         .output()
         .expect("run native CLI");
+    let _ = std::fs::remove_dir_all(&cache);
     Run {
         status: output.status.code().expect("exit status"),
         stdout: String::from_utf8(output.stdout).expect("utf-8 stdout"),

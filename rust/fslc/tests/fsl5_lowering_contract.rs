@@ -50,11 +50,45 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
 #[path = "support/kernel_compare.rs"]
 mod kernel_compare;
+
+/// Separates the scratch copies one test binary makes: the tests share the
+/// process id.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// A copy of one example's fixture files in a directory unique to this
+/// process and call (#1414): emptied before the copy, so no file from an
+/// earlier run is read, and removed when dropped.
+struct ScratchCopy(PathBuf);
+
+impl ScratchCopy {
+    fn new(label: &str, example: &str) -> Self {
+        let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+            "fsl5_lowering_contract-{label}-{example}-{}-{}",
+            std::process::id(),
+            FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        for entry in std::fs::read_dir(example_dir(example)).expect("read example") {
+            let path = entry.expect("example entry").path();
+            std::fs::copy(&path, dir.join(path.file_name().expect("file name")))
+                .expect("copy example");
+        }
+        Self(dir)
+    }
+}
+
+impl Drop for ScratchCopy {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 struct Example {
     name: &'static str,
@@ -212,16 +246,10 @@ fn r_lowered_and_original_refine_each_other() {
 
 #[test]
 fn m_weakened_lowering_fails_r_and_differs_in_k() {
-    let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fsl5_lowering_contract");
     for example in EXAMPLES {
         let source = example_dir(example.name);
-        let dir = scratch.join(example.name);
-        std::fs::create_dir_all(&dir).expect("scratch directory");
-        for entry in std::fs::read_dir(&source).expect("read example") {
-            let path = entry.expect("example entry").path();
-            std::fs::copy(&path, dir.join(path.file_name().expect("file name")))
-                .expect("copy example");
-        }
+        let scratch = ScratchCopy::new("m", example.name);
+        let dir = &scratch.0;
         let lowered = std::fs::read_to_string(source.join("lowered.fsl")).expect("read lowered");
         let (text, replacement) = example.weakening;
         assert_eq!(
@@ -237,7 +265,7 @@ fn m_weakened_lowering_fails_r_and_differs_in_k() {
         .expect("write weakened lowering");
 
         let (output, exit) = refine(
-            &dir,
+            dir,
             "weakened.fsl",
             example.original,
             "refines_lowered_to_original.fsl",
@@ -300,20 +328,14 @@ fn r_complete_fsl5_sources_and_the_original_refine_each_other() {
 /// original.
 #[test]
 fn m_a_source_without_a_rule_differs_in_k_and_fails_r() {
-    let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fsl5_lowering_contract_m5");
     for &(example, statement, refine_result) in FSL5_WEAKENINGS {
         let (_, source, lowering) = FSL5_SOURCES
             .iter()
             .copied()
             .find(|&(listed, _, lowering)| listed == example && lowering == "lowered.fsl")
             .expect("a complete source");
-        let dir = scratch.join(example);
-        std::fs::create_dir_all(&dir).expect("scratch directory");
-        for entry in std::fs::read_dir(example_dir(example)).expect("read example") {
-            let path = entry.expect("example entry").path();
-            std::fs::copy(&path, dir.join(path.file_name().expect("file name")))
-                .expect("copy example");
-        }
+        let scratch = ScratchCopy::new("m5", example);
+        let dir = &scratch.0;
         let text = std::fs::read_to_string(dir.join(source)).expect("read source");
         let line = format!("    {statement}\n");
         assert_eq!(text.matches(&line).count(), 1, "{example}: {statement}");
@@ -334,7 +356,7 @@ fn m_a_source_without_a_rule_differs_in_k_and_fails_r() {
                 .expect("an example with an original")
                 .original;
             let (output, exit) = refine(
-                &dir,
+                dir,
                 "weakened.fsl",
                 original,
                 "refines_lowered_to_original.fsl",
