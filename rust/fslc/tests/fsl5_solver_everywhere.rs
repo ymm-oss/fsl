@@ -42,8 +42,8 @@ impl Drop for Scratch {
     }
 }
 
-/// `fslc <command> doc.fsl` in `directory` with the `fsl5` gate set: the
-/// JSON envelope (`None` for a command whose success is not JSON) and exit.
+/// `fslc <command> doc.fsl` in `directory`: the JSON envelope (`None` for a
+/// command whose success is not JSON) and exit.
 fn fslc(directory: &Path, command: &[&str]) -> (Option<Value>, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(command)

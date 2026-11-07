@@ -572,9 +572,9 @@ pub(crate) struct MutationFamilyOptions {
     pub(crate) external_mutants: Option<PathBuf>,
     pub(crate) fail_on_survivors: bool,
     pub(crate) min_kill_rate: Option<f64>,
-    /// `explain --names`, read only behind the next edition's gate.
+    /// `explain --names` (no opt-in since #1434).
     pub(crate) names: Option<crate::name_display::NameSpelling>,
-    /// `explain --lowering`, read only behind the next edition's gate.
+    /// `explain --lowering` (no opt-in since #1434).
     pub(crate) lowering: bool,
 }
 

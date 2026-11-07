@@ -3,7 +3,7 @@
 
 //! fsl 5 plan §3 S4, through the native CLI: `actor`, `entity { … lifecycle }`,
 //! `concept`, `event`, `scenario` and `forbidden … then rejected` in a document
-//! headed `fsl 5`, behind the `fsl5` gate.
+//! headed `fsl 5`.
 //!
 //! Acceptance 1 (K) lives in `fsl5_lowering_contract.rs`. This file holds:
 //!
@@ -61,7 +61,7 @@ impl Drop for Scratch {
     }
 }
 
-/// `fslc check <file>` in `directory` with the `fsl5` gate set.
+/// `fslc check <file>` in `directory`.
 fn check(directory: &Path, file: &str) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args(["check", file])

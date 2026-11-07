@@ -3,7 +3,7 @@
 
 //! fsl 5 plan §3 S6, through the native CLI: `rule REQ "text" { … }` with
 //! `allow`, `never`, `only after`, `enters … only from`, `always` and
-//! `deadline`, in a document headed `fsl 5`, behind the `fsl5` gate.
+//! `deadline`, in a document headed `fsl 5`.
 //!
 //! Acceptance 1 and 3 (K, R, M for the rejection example, e2e's REQ-1 and the
 //! hand-written `rules` example) live in `fsl5_lowering_contract.rs`. This
@@ -75,7 +75,7 @@ impl Drop for Scratch {
     }
 }
 
-/// `fslc <command> <file>` in `directory` with the `fsl5` gate set.
+/// `fslc <command> <file>` in `directory`.
 fn fslc(command: &str, directory: &Path, file: &str) -> (Value, i32) {
     let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
         .args([command, file])

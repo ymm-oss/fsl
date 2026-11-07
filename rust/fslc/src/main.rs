@@ -402,8 +402,7 @@ struct MigrationOptions {
     default_edition: fsl_syntax::Edition,
     write: bool,
     project: Option<PathBuf>,
-    /// `lint --strict-names`: report `mixed_names` (read only behind the
-    /// next edition's gate).
+    /// `lint --strict-names`: report `mixed_names` (no opt-in since #1434).
     strict_names: bool,
 }
 
