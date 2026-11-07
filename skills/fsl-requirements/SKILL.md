@@ -190,8 +190,6 @@ requirements ReturnRequirements {
     AmountPositive: always Return not in Draft has amount > 0
   }
 
-  terminal { forall r: Return { stage(r) == Refunded or stage(r) == Rejected } }
-
   measure refunded_returns = count Return in Refunded
   goal GOAL-RET-001 "A return can be refunded" some Return can reach Refunded
   policy POL-RET-001 "Every requested return is eventually decided"
