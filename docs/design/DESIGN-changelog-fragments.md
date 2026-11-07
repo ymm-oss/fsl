@@ -784,6 +784,20 @@ generated **compatibility snapshots** and never applied to them — and hand edi
 over `## [<version>]` headings plus `test -s`) is never changed, which is what makes the
 rollback below trivial.
 
+**Amendment (v5.0.0 release-body limit).** The consumer has since moved into
+`tools/release-notes.sh build`. The 5.0.0 section aggregated 232 fragments into
+225,185 characters. GitHub rejects a release body over 125,000 characters, and the
+inline extractor ran only at tag time, in `publish`. The script extracts the same
+section with the same `## [<version>]` prefix match. It replaces `test -s` with a
+non-whitespace check and a 125,000-byte limit. It also runs in `assemble`, so a
+`workflow_dispatch` dry run reaches it. Control 4's `check-stale` guard still runs
+before it in `publish`, now ahead of the step named "Build the release notes"
+rather than "Extract release notes". When `docs/release-notes/vX.Y.Z.md` exists,
+the body is that summary plus a link to the section, so the summary is not a
+second record of any change. The section stays the single authoritative record,
+and the fallback without a summary is the old body byte for byte. The rollback
+below is therefore unaffected (`docs/design/RELEASE.md` §1, step 8).
+
 ## Migration: six named sites
 
 1. New `tools/aggregate_changelog` (stdlib-only) plus executable tests for all six controls,

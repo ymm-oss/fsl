@@ -32,6 +32,47 @@ fn assert_windows_release_smoke(workflow: &str) {
     assert!(workflow.contains("$verifyResult.result -ne \"verified\""));
 }
 
+/// The release body is built and checked by one script in `assemble`, which a
+/// `workflow_dispatch` dry run reaches, and again in the tag-only `publish` job
+/// that hands it to `body_path`. A check only in `publish` would first fail
+/// after the tag, which cannot be reused.
+fn assert_release_notes_checked_before_the_tag(workflow: &str) {
+    let job = |name: &str| {
+        let start = workflow
+            .find(&format!("\n  {name}:\n"))
+            .unwrap_or_else(|| panic!("the {name} job"))
+            + 1;
+        let body = &workflow[start..];
+        let end = body
+            .match_indices("\n  ")
+            .map(|(at, _)| at)
+            .find(|&at| !body[at + 3..].starts_with(' '))
+            .unwrap_or(body.len());
+        &body[..end]
+    };
+    let build = "./tools/release-notes.sh build --version";
+    let (assemble, publish) = (job("assemble"), job("publish"));
+    assert_eq!(workflow.matches(build).count(), 2);
+    assert!(
+        !assemble.contains("\n    if:"),
+        "assemble must also run on workflow_dispatch"
+    );
+    assert!(assemble.contains("./tools/release-notes.sh workspace-version"));
+    assert!(assemble.contains(build) && publish.contains(build));
+    assert!(publish.contains("--out release-notes.md"));
+    assert!(
+        publish.find("check-stale").expect("check-stale") < publish.find(build).expect("build"),
+        "the stale-fragment guard runs before the notes are built"
+    );
+    // An artifact uploaded before the merge-multiple download would join the
+    // release unit it verifies.
+    assert!(!assemble.contains("name: release-notes"));
+    let script = std::fs::read_to_string(root().join("tools/release-notes.sh"))
+        .expect("release notes script");
+    assert!(script.contains("RELEASE_BODY_LIMIT=125000"));
+    assert!(script.contains("DEFAULT_SUMMARY_DIR=docs/release-notes"));
+}
+
 /// The signed release manifest mise reads, and the two things that can make it
 /// describe something other than this release.
 fn assert_packslip_release_contract(workflow: &str, root: &Path) {
@@ -541,6 +582,7 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     assert!(workflow.contains("merge-multiple: true"));
     assert!(workflow.contains("draft: true"));
     assert!(workflow.contains("body_path: release-notes.md"));
+    assert_release_notes_checked_before_the_tag(&workflow);
     assert!(workflow.contains("Verify the remote draft release unit"));
     assert!(workflow.contains("diff -u expected-assets.txt remote-assets.txt"));
     assert!(workflow.contains(
