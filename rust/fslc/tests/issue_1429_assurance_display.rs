@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! #1429 S1: ledger and HTML assurance displays require reported completeness
-//! (`docs/design/DESIGN-assurance-classes.md`, "amendment #1429 S1"). The spec
+//! (`docs/design/DESIGN-assurance-classes.md`, "Ledger guarantee text — amendment #1429 S1"). The spec
 //! model and `explain` skeleton come from the real CLI. [`cases`] are synthetic
 //! public-renderer inputs; [`native_cases`] are `fslc verify` envelopes captured
 //! on each run. Expectations are literals from the accepted contract, never the
