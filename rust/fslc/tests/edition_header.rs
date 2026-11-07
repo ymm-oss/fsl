@@ -400,7 +400,7 @@ fn header_conflicts_and_unknown_editions_exit_2() {
         assert_eq!(exit, 2, "{stdout}");
         assert_eq!(
             json(&stdout)["message"],
-            "--edition must be current or next"
+            "--edition must be current, next, 4, or 5"
         );
     }
     let _ = std::fs::remove_dir_all(&directory);

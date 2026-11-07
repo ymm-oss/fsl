@@ -132,7 +132,7 @@ fn fmt_help_and_multiple_path_contract_are_fixed() {
     assert!(help.status.success());
     let help = String::from_utf8(help.stdout).expect("help UTF-8");
     assert!(help.contains("--check"));
-    assert!(help.contains("--edition {current,next}"));
+    assert!(help.contains("--edition {current,next,4,5}"));
 
     let multiple = run(&["fmt", "specs/cart_v1.fsl", "specs/payment.fsl"]);
     assert_eq!(multiple.status.code(), Some(2));

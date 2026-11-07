@@ -102,7 +102,7 @@ impl Edition {
             "current" => Ok(None),
             "next" | "5" => Ok(Some(Self::Fsl5)),
             "4" => Ok(Some(Self::Fsl4)),
-            _ => Err("--edition must be current or next".to_owned()),
+            _ => Err("--edition must be current, next, 4, or 5".to_owned()),
         }
     }
 }
@@ -310,7 +310,7 @@ mod tests {
         for value in ["6", "fsl5", "FSL5", ""] {
             assert_eq!(
                 Edition::parse_option(value, &stable),
-                Err("--edition must be current or next".to_owned())
+                Err("--edition must be current, next, 4, or 5".to_owned())
             );
         }
 

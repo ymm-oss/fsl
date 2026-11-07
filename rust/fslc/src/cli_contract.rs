@@ -37,9 +37,7 @@ pub(crate) fn validate_argv(
         }
     }
     let command = label(node);
-    let mut actions = actions(node).to_vec();
-    next_edition_overlay(&mut actions);
-    validate_tokens(&command, &actions, &argv[index..], options)
+    validate_tokens(&command, actions(node), &argv[index..], options)
 }
 
 fn children(node: &Value) -> &[Value] {
@@ -64,21 +62,6 @@ fn has_flag(action: &Value, flag: &str) -> bool {
     action["flags"]
         .as_array()
         .is_some_and(|flags| flags.iter().any(|value| value.as_str() == Some(flag)))
-}
-
-/// The `--edition` spellings `cli-contract.json` does not list: the numeric
-/// aliases `4` and `5`, which `Edition::parse_option` accepts beside
-/// `current` / `next` (#1434; which spelling to advertise is #1437's).
-fn next_edition_overlay(actions: &mut [Value]) {
-    for action in actions
-        .iter_mut()
-        .filter(|action| has_flag(action, "--edition"))
-    {
-        action["choices"]
-            .as_array_mut()
-            .expect("edition choices")
-            .extend([json!("4"), json!("5")]);
-    }
 }
 
 fn positional_capacity(actions: &[Value]) -> Option<u64> {
@@ -382,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn next_edition_overlay_is_command_local_and_does_not_bypass_validation() {
+    fn numeric_editions_are_command_local_and_do_not_bypass_validation() {
         let options = ParseOptions::stable();
         for argv in [
             vec!["explain", "spec.fsl", "--names", "canonical", "--lowering"],
