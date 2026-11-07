@@ -719,9 +719,14 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <td>actor をそろえるか、明示的な action の対応を書きます。§13.2</td>
 </tr>
 <tr>
-<td>エンティティのフィールドや関係の役割と同名の <code>is some(name)</code> パターン (#1552, #1561)。process のない型のバインダーに対する <code>stage(c)</code> (#1569)。<code>expect</code> での enum と整数の比較 (#1439)</td>
+<td>エンティティのフィールドや関係の役割と同名の <code>is some(name)</code> パターン (#1552, #1561)。process のない型のバインダーに対する <code>stage(c)</code> (#1569)</td>
 <td>位置つきのエラー</td>
-<td>フィールドでないパターン名を使います(<code>some(1) is some(v) and v == 1</code>)。<code>stage</code> はエンティティのバインダーに使います。enum のメンバーと比べます。§13.2</td>
+<td>フィールドでないパターン名を使います(<code>some(1) is some(v) and v == 1</code>)。<code>stage</code> はエンティティのバインダーに使います。§13.2</td>
+</tr>
+<tr>
+<td>型の合わない acceptance の <code>expect</code>(enum と整数の比較など)や FSL 5 の scenario の <code>then</code>(<code>then</code> は FSL 5 のみ)。acceptance、forbidden、FSL 5 の scenario の中で内部の型が合わないステップ引数。モデルの式のどこかにある、Bool でないものへの <code>not</code> と Int でないものへの単項マイナス(選ばれない分岐の中も含む) (#1439)</td>
+<td><code>semantics</code>。たとえば <code>expression of type Int is not assignable to Bool</code></td>
+<td>式の型を合わせます。enum はメンバーと比べ、<code>not</code> には Bool、単項マイナスには Int を渡します。§13.2、§3</td>
 </tr>
 <tr>
 <td>未知の <code>check compatibility</code> 規則名 (#1473)</td>
@@ -743,7 +748,9 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <p>同じリリースの削除のうち、次のものは FSL 5 の構文要素だけに関わるので、4.12 の文書には
 現れません。次のエディションの関係の役割・resource・measure に含まれる <code>__</code> (#1600)、
 重複したステップの入力 (#1682)、重複した actor と要件 ID の持ち主 (#1705)、コロンの量化子を使う
-<code>fsl 5</code> ヘッダーの compose の子 (#1452) です。</p>
+<code>fsl 5</code> ヘッダーの compose の子 (#1452)、そして <code>check</code> がすでに拒否していた次のエディションの
+4 つの移行形式を <code>analyze</code>、<code>conformance</code>、<code>explain</code>、<code>html</code>、<code>kernel</code>、<code>ledger</code>、<code>mutate</code>、
+<code>scenarios</code>、<code>sweep</code>、<code>testgen</code>、<code>typestate</code> も拒否するようになったもの (#1449) です。</p>
 <p><strong>CLI、JSON、終了コードの変更を見つける。</strong> <code>fslc</code> を呼ぶスクリプトや CI のジョブで、
 最初の列の値を探してください。</p>
 <table>
@@ -800,7 +807,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 </tr>
 <tr>
 <td>承認レコード (#1421)</td>
-<td>v1〜v4</td>
+<td>v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4</td>
 <td>署名なしの v5、署名つきの v6(<code>path_base</code> つき)</td>
 <td>新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。<code>document generate --approval</code> には Git が必要です</td>
 </tr>

@@ -1,4 +1,4 @@
-Changed (#1546, breaking): `check` and every model-loading command,
+Changed (#1546, breaking removal): `check` and every model-loading command,
 including fmt, lint, kernel, diff, all verification engines, scenarios and
 testgen, reject empty spec/Kernel enums even when unused, with kind type,
 `enum '<Name>' has no members` and CLI exit 2. Where the command publishes loc,

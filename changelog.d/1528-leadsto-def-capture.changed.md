@@ -1,4 +1,4 @@
-Changed (#1528, breaking): `leadsTo` declaration binders now participate
+Changed (#1528, breaking removal): `leadsTo` declaration binders now participate
 in def free-name capture checks for before/after expressions, `helpful`
 arguments, `decreases`, and `within`, in direct specs, compose components and root
 properties, and dialect properties lowered to `leadsTo` (such as requirements).

@@ -1,4 +1,4 @@
-Changed (#1515, breaking): removal of executable local bindings with the same
+Changed (#1515, breaking removal): executable local bindings with the same
 name as any `const`, including non-integer constants. `check` now rejects
 quantifier and aggregate binders, statement `forall`, `leadsTo` binders, action
 parameters and `let` bindings, and `def` parameters, including their requirements

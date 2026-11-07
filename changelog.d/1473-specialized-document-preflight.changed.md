@@ -1,4 +1,4 @@
-Changed (#1473, breaking): DB lowering rejects unknown compatibility-rule names with an
+Changed (#1473, breaking removal): DB lowering rejects unknown compatibility-rule names with an
 authored semantics error before emitting a model or artifact. Kernel export no
 longer accepts these malformed documents; file-based fmt, lint, and migrate now
 return exit 2 instead of exit 0. Commands retain their established lowering-error

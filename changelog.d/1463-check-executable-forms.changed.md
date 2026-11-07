@@ -1,4 +1,4 @@
-Changed (#1463, breaking): check now rejects leadsTo collection/where wrapper
+Changed (#1463, breaking removal): check now rejects leadsTo collection/where wrapper
 binders, init statement forall collection sources with free state references,
 and relation index reads/writes, with shared core diagnostics and authored
 locations across native CLI, LSP and Worker. These forms previously checked

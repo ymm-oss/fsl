@@ -1,4 +1,4 @@
-Changed (Part of #1451, breaking): check and ordinary verify reject reads of an init
+Changed (Part of #1451, breaking removal): check and ordinary verify reject reads of an init
 may-assigned root before full-root definite assignment with explicit's
 `init references state variable '<name>' before it is assigned`, semantics/exit 2
 and a statement location. This conservatively rejects dead RHS reads,

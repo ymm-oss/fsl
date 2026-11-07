@@ -1,4 +1,4 @@
-Changed (#1467): already-admitted recursive Set/Seq expressions share checked
+Changed (#1467, breaking): already-admitted recursive Set/Seq expressions share checked
 expected-type construction, equality, conditional joins, methods and binders,
 including Struct, Option/nested absence, nested collections, relation and existing
 Map values. Sets use logical deduplication; Seq keeps order, duplicates and live

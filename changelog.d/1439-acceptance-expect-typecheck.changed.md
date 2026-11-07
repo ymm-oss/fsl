@@ -1,4 +1,4 @@
-Changed (#1439, breaking): requirements acceptance `expect <expr>` and FSL 5 scenario
+Changed (#1439, breaking removal): requirements acceptance `expect <expr>` and FSL 5 scenario
 `then <expr>` now use the invariant's recursive Bool expression checker before
 replay. Enum-vs-integer comparisons such as `c != 1` and `c == 1` fail with the
 existing assignability message, `kind: "semantics"`, exit 2, and the authored

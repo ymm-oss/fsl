@@ -1,4 +1,4 @@
-Changed (#1561, breaking): requirements now reject `is some(name)` declarations that collide with an entity
+Changed (#1561, breaking removal): requirements now reject `is some(name)` declarations that collide with an entity
 field or relation role before field substitution and rule-conflict analysis.
 Rename both the pattern and its continuation to a fresh name: replace
 `some(1) is some(amount) and amount == 1` with `some(1) is some(v) and v == 1`.

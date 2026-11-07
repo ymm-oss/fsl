@@ -1,4 +1,4 @@
-Changed (#1334, breaking): sync additional statements assigning component
+Changed (#1334, breaking removal): sync additional statements assigning component
 state through physical names such as `alias__x` now produce an explicit located
 error. Those spellings previously passed `check`; alias-qualified writes were
 already rejected. This removal affects only physical-name component-state

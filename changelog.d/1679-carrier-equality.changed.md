@@ -1,4 +1,4 @@
-Changed (#1679, breaking): the model expressions listed here, whose container carriers symbolic evaluation cannot coerce, now fail `check` with the existing located assignability error (`semantics`, exit 2) instead of `cannot coerce symbolic value` on bmc and induction, evaluated or not. Three routes still pass `check` and report it; they are listed below.
+Changed (#1679, breaking removal): the model expressions listed here, whose container carriers symbolic evaluation cannot coerce, now fail `check` with the existing located assignability error (`semantics`, exit 2) instead of `cannot coerce symbolic value` on bmc and induction, evaluated or not. Three routes still pass `check` and report it; they are listed below.
 
 These forms passed `check` before and are now semantic errors:
 

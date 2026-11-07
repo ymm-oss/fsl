@@ -1,4 +1,4 @@
-Changed (#1522, breaking): Different-bound relation values in conditionals, Set/Seq items,
+Changed (#1522, breaking removal): Different-bound relation values in conditionals, Set/Seq items,
 action/init/let assignments now fail check/verify/replay (located semantics, exit 2),
 even narrow→wide, due to engine disagreement. At the #1522 measurement,
 equal-bound aliases, scalar/Map compatibility, nominal enums and self-relation

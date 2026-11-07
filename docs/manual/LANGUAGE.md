@@ -697,7 +697,8 @@ unsound or ambiguous, and the section linked from each row shows the rewrite.
 | An enum with no members, a `dbsystem` without columns, an `ai_component` without tools (#1546); an undeclared AI authority tool or an unknown hard-contract rule (#1545) | `enum '<Name>' has no members` and the like | Declare the members, columns or tools, or remove the declaration; §2, §13.5, §13.6 |
 | A synchronized statement writing `alias__x` (#1334); a synchronized argument reading an additional-item `let` (#1442); a root synchronized argument whose type does not fit the formal (#1517) | located error | Write `alias.x`; pass header parameters, `const`s or state; match the formal's type; §11 |
 | An automatic requirements mapping whose actors differ (#1441, #1456) | located error | Make the actors agree, or write an explicit action entry; §13.2 |
-| An `is some(name)` pattern named like an entity field or relation role (#1552, #1561); `stage(c)` over a binder whose type has no process (#1569); an enum compared with an integer in `expect` (#1439) | located error | Use a pattern name that is not a field (`some(1) is some(v) and v == 1`); apply `stage` to an entity binder; compare with an enum member; §13.2 |
+| An `is some(name)` pattern named like an entity field or relation role (#1552, #1561); `stage(c)` over a binder whose type has no process (#1569) | located error | Use a pattern name that is not a field (`some(1) is some(v) and v == 1`); apply `stage` to an entity binder; §13.2 |
+| An ill-typed acceptance `expect` (such as an enum compared with an integer) or FSL 5 scenario `then` (the `then` case is FSL 5 only); an internally ill-typed step argument in an acceptance, a forbidden or an FSL 5 scenario; `not` on a non-Bool or unary minus on a non-Int anywhere in a model expression, even in an unselected branch (#1439) | `semantics`, for example `expression of type Int is not assignable to Bool` | Make the expression well typed: compare an enum with a member, give `not` a Bool and unary minus an Int; §13.2 and §3 |
 | An unknown `check compatibility` rule name (#1473) | `kernel`, `fmt`, `lint` and `migrate` exit 2 where they exited 0 | Use one of the twelve rule names; §1, database layer |
 | A causal `period.valid_until` or `--as-of` that is not a real `YYYY-MM-DD` date (#1422) | `--as-of`: `kind: "usage"` | Write the date as `YYYY-MM-DD`; §17 |
 | `refine`: an incomplete init root (#1521); a preserved-progress pattern name matching a free implementation name (#1595); same-named types that differ (#1599); a free whole-map read under per-element maps (#1613) | exit 2 where `refines` or `refinement_failed` was reported | Initialize every field and key of the root; rename the abstract or mapping pattern binder; give the types distinct names; read elements instead of the whole map; §10 |
@@ -705,8 +706,10 @@ unsound or ambiguous, and the section linked from each row shows the rewrite.
 Some removals in the same release involve FSL 5 constructs only, so no 4.12
 document has them: `__` in next-edition relation roles, resources and measures
 (#1600), repeated step inputs (#1682), repeated actors and requirement-ID owners
-(#1705), and a compose child headed `fsl 5` that uses a colon quantifier
-(#1452).
+(#1705), a compose child headed `fsl 5` that uses a colon quantifier
+(#1452), and the four next-edition migration forms that `analyze`,
+`conformance`, `explain`, `html`, `kernel`, `ledger`, `mutate`, `scenarios`,
+`sweep`, `testgen` and `typestate` now refuse as `check` already did (#1449).
 
 **Find the CLI, JSON and exit-code changes.** Search scripts and CI jobs that
 call `fslc` for the values in the first column:
@@ -720,7 +723,7 @@ call `fslc` for the values in the first column:
 | `fslc refine` on an implementation that breaks its own contract; governance `preservations[].result` (#1315) | `"violated"` | `"impl_violated"` | Match `impl_violated`; `verify` keeps `violated` |
 | Generated and component names in outputs (#1256, #1255, #1284) | `submit__b1`, `acct__Inv` | `submit.b1`, `acct.Inv` | Match the dotted name, including stored `analyze` IDs and `--focus` arguments |
 | Approval artifact failures in `approval create` and `approval check` (#1418) | exit 2 | the downstream exit: 1 for a scenarios or HTML verification failure, 3 for an internal failure | Gate on exit 0 with `approval_check` and `approved` |
-| Approval records (#1421) | v1 to v4 | unsigned v5 or signed v6 with `path_base` | Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; `document generate --approval` needs Git |
+| Approval records (#1421) | v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind | unsigned v5 or signed v6 with `path_base` | Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; `document generate --approval` needs Git |
 | A relative AI `dataset.source` (#1421) | resolved from the caller | resolved from the declaring file's directory | Rewrite repository-prefixed paths, or pass `--records` |
 | `-o` to a symlink or a non-regular file such as `/dev/null`, `/dev/stdout` or `/dev/fd/63` (#1419) | written | refused, exit 2; a writable parent directory is required | Write to a regular file, or read stdout |
 | `lint --edition next` (or `5`) on a headerless document with no other finding (#1434) | exit 0 | `missing_edition_header`, exit 1 | Omit `--edition`, or add the header |

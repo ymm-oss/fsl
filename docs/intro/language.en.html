@@ -751,9 +751,14 @@ unsound or ambiguous, and the section linked from each row shows the rewrite.</p
 <td>Make the actors agree, or write an explicit action entry; §13.2</td>
 </tr>
 <tr>
-<td>An <code>is some(name)</code> pattern named like an entity field or relation role (#1552, #1561); <code>stage(c)</code> over a binder whose type has no process (#1569); an enum compared with an integer in <code>expect</code> (#1439)</td>
+<td>An <code>is some(name)</code> pattern named like an entity field or relation role (#1552, #1561); <code>stage(c)</code> over a binder whose type has no process (#1569)</td>
 <td>located error</td>
-<td>Use a pattern name that is not a field (<code>some(1) is some(v) and v == 1</code>); apply <code>stage</code> to an entity binder; compare with an enum member; §13.2</td>
+<td>Use a pattern name that is not a field (<code>some(1) is some(v) and v == 1</code>); apply <code>stage</code> to an entity binder; §13.2</td>
+</tr>
+<tr>
+<td>An ill-typed acceptance <code>expect</code> (such as an enum compared with an integer) or FSL 5 scenario <code>then</code> (the <code>then</code> case is FSL 5 only); an internally ill-typed step argument in an acceptance, a forbidden or an FSL 5 scenario; <code>not</code> on a non-Bool or unary minus on a non-Int anywhere in a model expression, even in an unselected branch (#1439)</td>
+<td><code>semantics</code>, for example <code>expression of type Int is not assignable to Bool</code></td>
+<td>Make the expression well typed: compare an enum with a member, give <code>not</code> a Bool and unary minus an Int; §13.2 and §3</td>
 </tr>
 <tr>
 <td>An unknown <code>check compatibility</code> rule name (#1473)</td>
@@ -775,8 +780,10 @@ unsound or ambiguous, and the section linked from each row shows the rewrite.</p
 <p>Some removals in the same release involve FSL 5 constructs only, so no 4.12
 document has them: <code>__</code> in next-edition relation roles, resources and measures
 (#1600), repeated step inputs (#1682), repeated actors and requirement-ID owners
-(#1705), and a compose child headed <code>fsl 5</code> that uses a colon quantifier
-(#1452).</p>
+(#1705), a compose child headed <code>fsl 5</code> that uses a colon quantifier
+(#1452), and the four next-edition migration forms that <code>analyze</code>,
+<code>conformance</code>, <code>explain</code>, <code>html</code>, <code>kernel</code>, <code>ledger</code>, <code>mutate</code>, <code>scenarios</code>,
+<code>sweep</code>, <code>testgen</code> and <code>typestate</code> now refuse as <code>check</code> already did (#1449).</p>
 <p><strong>Find the CLI, JSON and exit-code changes.</strong> Search scripts and CI jobs that
 call <code>fslc</code> for the values in the first column:</p>
 <table>
@@ -833,7 +840,7 @@ call <code>fslc</code> for the values in the first column:</p>
 </tr>
 <tr>
 <td>Approval records (#1421)</td>
-<td>v1 to v4</td>
+<td>v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind</td>
 <td>unsigned v5 or signed v6 with <code>path_base</code></td>
 <td>Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; <code>document generate --approval</code> needs Git</td>
 </tr>

@@ -1,4 +1,4 @@
-Changed (#1700, breaking): a repeated `domain` declaration that loses a copy is refused at the repeat on `check`, `verify` and every `fslc domain` route (exit 2, located), and `domain expand` writes nothing.
+Changed (#1700, breaking removal): a repeated `domain` declaration that loses a copy is refused at the repeat on `check`, `verify` and every `fslc domain` route (exit 2, located), and `domain expand` writes nothing.
 
 These forms passed `check` before and kept one copy:
 

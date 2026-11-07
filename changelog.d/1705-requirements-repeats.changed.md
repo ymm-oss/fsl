@@ -1,4 +1,4 @@
-Changed (#1705, breaking): in next-edition requirements, `check` and every route that loads the document refuse three repeats, with exit 2 and `kind: "parse"`. For an ID, the ledger used to keep one row, with one title and one status, for the two declarations, or one text for two `covers`.
+Changed (#1705, breaking removal): in next-edition requirements, `check` and every route that loads the document refuse three repeats, with exit 2 and `kind: "parse"`. For an ID, the ledger used to keep one row, with one title and one status, for the two declarations, or one text for two `covers`.
 
 These forms passed `check` before:
 

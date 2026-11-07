@@ -1,4 +1,4 @@
-Changed (#1599, breaking): refinement rejects conflicting same-named type definitions, including unequal
+Changed (#1599, breaking removal): refinement rejects conflicting same-named type definitions, including unequal
 resolved domain bounds, at the refinement/implements declaration (type, exit 2).
 Symmetry annotations do not participate; equal definitions retain the impl entry.
 With preserved progress, different enums may not share member spellings, even at

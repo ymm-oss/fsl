@@ -663,7 +663,8 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 | メンバーのない enum、列のない `dbsystem`、ツールのない `ai_component` (#1546)。宣言していない AI の authority ツール、未知の hard-contract 規則 (#1545) | `enum '<Name>' has no members` など | メンバー・列・ツールを宣言するか、その宣言を削ります。§2、§13.5、§13.6 |
 | `alias__x` に書く同期文 (#1334)、追加項目の `let` を読む同期引数 (#1442)、仮引数の型に合わないルートの同期引数 (#1517) | 位置つきのエラー | `alias.x` と書きます。ヘッダーの引数・`const`・状態を渡します。仮引数の型に合わせます。§11 |
 | 両側の actor が違う要件の自動対応 (#1441, #1456) | 位置つきのエラー | actor をそろえるか、明示的な action の対応を書きます。§13.2 |
-| エンティティのフィールドや関係の役割と同名の `is some(name)` パターン (#1552, #1561)。process のない型のバインダーに対する `stage(c)` (#1569)。`expect` での enum と整数の比較 (#1439) | 位置つきのエラー | フィールドでないパターン名を使います(`some(1) is some(v) and v == 1`)。`stage` はエンティティのバインダーに使います。enum のメンバーと比べます。§13.2 |
+| エンティティのフィールドや関係の役割と同名の `is some(name)` パターン (#1552, #1561)。process のない型のバインダーに対する `stage(c)` (#1569) | 位置つきのエラー | フィールドでないパターン名を使います(`some(1) is some(v) and v == 1`)。`stage` はエンティティのバインダーに使います。§13.2 |
+| 型の合わない acceptance の `expect`(enum と整数の比較など)や FSL 5 の scenario の `then`(`then` は FSL 5 のみ)。acceptance、forbidden、FSL 5 の scenario の中で内部の型が合わないステップ引数。モデルの式のどこかにある、Bool でないものへの `not` と Int でないものへの単項マイナス(選ばれない分岐の中も含む) (#1439) | `semantics`。たとえば `expression of type Int is not assignable to Bool` | 式の型を合わせます。enum はメンバーと比べ、`not` には Bool、単項マイナスには Int を渡します。§13.2、§3 |
 | 未知の `check compatibility` 規則名 (#1473) | `kernel`、`fmt`、`lint`、`migrate` が終了コード 0 から 2 に変わる | 12 個の規則名のどれかを使います。§1 のデータベース層 |
 | 実在する `YYYY-MM-DD` の日付でない causal の `period.valid_until` や `--as-of` (#1422) | `--as-of` は `kind: "usage"` | 日付を `YYYY-MM-DD` で書きます。§17 |
 | `refine`: 不完全な init ルート (#1521)、自由な impl 名と同名の preserve progress のパターン名 (#1595)、同名で定義の違う型 (#1599)、要素ごとの map の下での map 全体の自由な読み取り (#1613) | `refines` や `refinement_failed` だったものが終了コード 2 | ルートのすべてのフィールドとキーを初期化します。抽象側か写像側のパターンのバインダーを改名します。型に別の名前を付けます。map 全体でなく要素を読みます。§10 |
@@ -671,7 +672,9 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 同じリリースの削除のうち、次のものは FSL 5 の構文要素だけに関わるので、4.12 の文書には
 現れません。次のエディションの関係の役割・resource・measure に含まれる `__` (#1600)、
 重複したステップの入力 (#1682)、重複した actor と要件 ID の持ち主 (#1705)、コロンの量化子を使う
-`fsl 5` ヘッダーの compose の子 (#1452) です。
+`fsl 5` ヘッダーの compose の子 (#1452)、そして `check` がすでに拒否していた次のエディションの
+4 つの移行形式を `analyze`、`conformance`、`explain`、`html`、`kernel`、`ledger`、`mutate`、
+`scenarios`、`sweep`、`testgen`、`typestate` も拒否するようになったもの (#1449) です。
 
 **CLI、JSON、終了コードの変更を見つける。** `fslc` を呼ぶスクリプトや CI のジョブで、
 最初の列の値を探してください。
@@ -685,7 +688,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 | 自分の契約を破る実装に対する `fslc refine`、governance の `preservations[].result` (#1315) | `"violated"` | `"impl_violated"` | `impl_violated` で照合します。`verify` の `violated` はそのままです |
 | 出力の中の生成名とコンポーネント名 (#1256, #1255, #1284) | `submit__b1`、`acct__Inv` | `submit.b1`、`acct.Inv` | 保存した `analyze` の ID や `--focus` の引数も含め、ドットの名前で照合します |
 | `approval create` と `approval check` での承認対象の失敗 (#1418) | 終了コード 2 | 下流の終了コード。scenarios や HTML の検証の失敗は 1、内部の失敗は 3 | 終了コード 0 と `approval_check`、`approved` で判定します |
-| 承認レコード (#1421) | v1〜v4 | 署名なしの v5、署名つきの v6(`path_base` つき) | 新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。`document generate --approval` には Git が必要です |
+| 承認レコード (#1421) | v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4 | 署名なしの v5、署名つきの v6(`path_base` つき) | 新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。`document generate --approval` には Git が必要です |
 | 相対パスの AI の `dataset.source` (#1421) | 呼び出し側から解決 | 宣言したファイルのディレクトリから解決 | リポジトリを前置したパスを書き直すか、`--records` を渡します |
 | シンボリックリンクや、`/dev/null`、`/dev/stdout`、`/dev/fd/63` のような通常ファイルでないものへの `-o` (#1419) | 書き込む | 拒否、終了コード 2。書き込める親ディレクトリが必要 | 通常ファイルに書くか、標準出力を読みます |
 | ほかに finding のないヘッダーのない文書への `lint --edition next`(または `5`) (#1434) | 終了コード 0 | `missing_edition_header`、終了コード 1 | `--edition` を付けないか、ヘッダーを書きます |

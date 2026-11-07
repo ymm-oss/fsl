@@ -1,4 +1,4 @@
-Changed (#1442, breaking): synchronized reference arguments read only
+Changed (#1442, breaking removal): synchronized reference arguments read only
 header parameters, consts, and state, not `let` bindings in the additional items.
 The previously accepted `action s() = b.go(t) { let t = true }`, where that let
 is the only declaration of `t`, now fails `check` with exit 2 and

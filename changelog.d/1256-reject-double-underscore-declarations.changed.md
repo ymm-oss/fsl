@@ -1,4 +1,4 @@
-Changed (#1256, breaking): a name declared in a `spec`, `requirements`,
+Changed (#1256, breaking removal): a name declared in a `spec`, `requirements`,
 `business`, or `compose` document may no longer contain `__`. `fslc check`
 (and every command that loads the document) rejects one with `kind: "name"`,
 exit 2, located at the declaration; a compose component's own declaration is
