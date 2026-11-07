@@ -453,6 +453,46 @@ fn every_unadvertised_spelling_is_usage_with_the_option_named() {
         }
     }
     sweep.finish("unknown");
+    edition_owners_refuse_an_unlisted_number(&contract);
+}
+
+/// Negative control for the advertised `--edition` spellings: each owner
+/// lists exactly `current`, `next`, `4` and `5`, and refuses a number that
+/// names no edition with the complete usage envelope naming all four.
+fn edition_owners_refuse_an_unlisted_number(contract: &Value) {
+    let mut owners = BTreeSet::new();
+    for node in nodes(contract) {
+        for action in actions(node) {
+            if !flags(action).contains(&"--edition") {
+                continue;
+            }
+            assert_eq!(
+                action["choices"],
+                json!(["current", "next", "4", "5"]),
+                "{}",
+                label(node)
+            );
+            owners.insert(label(node));
+            let mut args = context(node, "--edition");
+            append(&mut args, "--edition", Some("6"));
+            let output = run(&args);
+            assert_eq!(
+                (output.status.code(), decoded(&output)),
+                (
+                    Some(2),
+                    json!({"fsl":"1.0", "result":"error", "kind":"usage",
+                        "message":"--edition must be current, next, 4, or 5"})
+                ),
+                "{args:?}"
+            );
+            assert!(output.stderr.is_empty(), "{args:?}");
+        }
+    }
+    let expected: BTreeSet<String> = ["check", "domain check", "fmt", "lint", "migrate", "verify"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(owners, expected);
 }
 
 #[test]

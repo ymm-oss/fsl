@@ -145,15 +145,15 @@ fn check_argv() {
     usage(&["check", SPEC, "--edition"], "--edition requires a value");
     usage(
         &["check", "--edition", "bogus", SPEC],
-        "--edition must be current or next",
+        "--edition must be current, next, 4, or 5",
     );
     usage(
         &["check", "--edition", "bogus", "--edition", "current", SPEC],
-        "--edition must be current or next",
+        "--edition must be current, next, 4, or 5",
     );
     usage(
         &["check", "--edition", "current", "--edition", "bogus", SPEC],
-        "--edition must be current or next",
+        "--edition must be current, next, 4, or 5",
     );
     assert_eq!(ran(&["check", SPEC], 0)["result"], "ok");
     assert_eq!(
@@ -759,7 +759,7 @@ fn verify_argv() {
             "Cart=0",
             "invalid --instances value 'Cart=0': expected a non-empty NAME and N >= 1",
         ),
-        ("--edition", "x", "--edition must be current or next"),
+        ("--edition", "x", "--edition must be current, next, 4, or 5"),
     ] {
         usage(&["verify", flag, value, SPEC], message);
         usage(&["verify", flag, value, "--depth", "1", SPEC], message);
@@ -856,11 +856,11 @@ fn lint_and_migrate_argv() {
     }
     usage(
         &["lint"],
-        "usage: fslc lint FILE... [--edition current|next] [--project fsl-project.toml]",
+        "usage: fslc lint FILE... [--edition current|next|4|5] [--project fsl-project.toml]",
     );
     usage(
         &["migrate"],
-        "usage: fslc migrate FILE... [--edition current|next] [--write]",
+        "usage: fslc migrate FILE... [--edition current|next|4|5] [--write]",
     );
     usage(&["lint", "--write", SPEC], "unknown lint option '--write'");
     usage(

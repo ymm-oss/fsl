@@ -683,7 +683,7 @@
           "check"
         ],
         "prog": "fslc check",
-        "help": "usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] [--edition {current,next}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --strict-tags\n  --requirements REQUIREMENTS\n  --edition {current,next}\n",
+        "help": "usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] [--edition {current,next,4,5}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --strict-tags\n  --requirements REQUIREMENTS\n  --edition {current,next,4,5}\n",
         "actions": [
           {
             "dest": "help",
@@ -727,7 +727,9 @@
             ],
             "choices": [
               "current",
-              "next"
+              "next",
+              "4",
+              "5"
             ],
             "default": "current",
             "action": "store"
@@ -1091,7 +1093,7 @@
               "check"
             ],
             "prog": "fslc domain check",
-            "help": "usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] [--edition {current,next}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n  --edition {current,next}\n",
+            "help": "usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] [--edition {current,next,4,5}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n  --edition {current,next,4,5}\n",
             "actions": [
               {
                 "dest": "help",
@@ -1153,7 +1155,9 @@
                 ],
                 "choices": [
                   "current",
-                  "next"
+                  "next",
+                  "4",
+                  "5"
                 ],
                 "default": "current",
                 "action": "store"
@@ -2283,7 +2287,7 @@
           "verify"
         ],
         "prog": "fslc verify",
-        "help": "usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction,explicit,auto}] [--k K_IND] [--explicit-budget EXPLICIT_BUDGET] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] [--edition {current,next}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction,explicit,auto}\n  --k K_IND             max induction depth (induction engine only)\n  --explicit-budget EXPLICIT_BUDGET\n                        max visited states for the explicit engine (default\n                        1000000); exceeding returns unknown_budget\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        select one named property obligation; resolves across\n                        invariant/trans/leadsTo/reachable declarations; under\n                        induction, a selected trans keeps all invariant\n                        hypotheses, and every implicit type bound is still\n                        checked in the base case\n  --exclude-property EXCLUDE_PROPERTY_NAMES\n                        skip a named property; repeat to omit\n                        invariants/trans/leadsTo/reachable declarations\n  --instances INSTANCES\n                        override a verify-block 'instances NAME = N' bound\n                        (NAME=N; repeatable) — e.g. shrink to 1 entity for\n                        liveness\n  --values VALUES       override a verify-block 'values NAME = LO..HI' bound\n                        (NAME=LO..HI; repeatable)\n  --strict-tags\n  --requirements REQUIREMENTS\n  --no-cache            skip the persistent verdict cache for this run (neither\n                        reads nor writes it)\n  --lemma LEMMAS        candidate auxiliary invariant expression (induction\n                        only; repeatable)\n  --from-state FROM_STATE\n                        replace spec init with a complete Monitor/replay\n                        logical-state JSON snapshot (BMC only)\n  --edition {current,next}\n",
+        "help": "usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction,explicit,auto}] [--k K_IND] [--explicit-budget EXPLICIT_BUDGET] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] [--edition {current,next,4,5}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction,explicit,auto}\n  --k K_IND             max induction depth (induction engine only)\n  --explicit-budget EXPLICIT_BUDGET\n                        max visited states for the explicit engine (default\n                        1000000); exceeding returns unknown_budget\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        select one named property obligation; resolves across\n                        invariant/trans/leadsTo/reachable declarations; under\n                        induction, a selected trans keeps all invariant\n                        hypotheses, and every implicit type bound is still\n                        checked in the base case\n  --exclude-property EXCLUDE_PROPERTY_NAMES\n                        skip a named property; repeat to omit\n                        invariants/trans/leadsTo/reachable declarations\n  --instances INSTANCES\n                        override a verify-block 'instances NAME = N' bound\n                        (NAME=N; repeatable) — e.g. shrink to 1 entity for\n                        liveness\n  --values VALUES       override a verify-block 'values NAME = LO..HI' bound\n                        (NAME=LO..HI; repeatable)\n  --strict-tags\n  --requirements REQUIREMENTS\n  --no-cache            skip the persistent verdict cache for this run (neither\n                        reads nor writes it)\n  --lemma LEMMAS        candidate auxiliary invariant expression (induction\n                        only; repeatable)\n  --from-state FROM_STATE\n                        replace spec init with a complete Monitor/replay\n                        logical-state JSON snapshot (BMC only)\n  --edition {current,next,4,5}\n",
         "actions": [
           {
             "dest": "help",
@@ -2459,7 +2463,9 @@
             ],
             "choices": [
               "current",
-              "next"
+              "next",
+              "4",
+              "5"
             ],
             "default": "current",
             "action": "store"
@@ -2629,7 +2635,7 @@
       {
         "path": ["fmt"],
         "prog": "fslc fmt",
-        "help": "usage: fslc fmt [-h] [--check] [--edition {current,next}] [--lang {ja,en}] [--names {alias,canonical}] path [path ...]\n\nFormat one registered FSL document to stdout without mutating it. Multiple paths are accepted only with --check. Use '-' for stdin.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --check               report whether formatting is required (exit 0 clean, 1 changed)\n  --edition {current,next}\n                        formatting policy (default: current)\n  --lang {ja,en}        respell every keyword in one language (fsl 5 requirements)\n  --names {alias,canonical}\n                        respell glossary names as their alias or canonical name (fsl 5 requirements)\n",
+        "help": "usage: fslc fmt [-h] [--check] [--edition {current,next,4,5}] [--lang {ja,en}] [--names {alias,canonical}] path [path ...]\n\nFormat one registered FSL document to stdout without mutating it. Multiple paths are accepted only with --check. Use '-' for stdin.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --check               report whether formatting is required (exit 0 clean, 1 changed)\n  --edition {current,next,4,5}\n                        formatting policy (default: current)\n  --lang {ja,en}        respell every keyword in one language (fsl 5 requirements)\n  --names {alias,canonical}\n                        respell glossary names as their alias or canonical name (fsl 5 requirements)\n",
         "actions": [
           {
             "dest": "help",
@@ -2656,7 +2662,7 @@
             "dest": "edition",
             "required": false,
             "flags": ["--edition"],
-            "choices": ["current", "next"],
+            "choices": ["current", "next", "4", "5"],
             "default": "current",
             "action": "store"
           },
@@ -2690,7 +2696,7 @@
       {
         "path": ["lint"],
         "prog": "fslc lint",
-        "help": "usage: fslc lint [-h] [--edition {current,next}] [--project PROJECT] [--strict-names] path [path ...]\n\nReport stable edition and ID-policy diagnostics without mutating source files.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next}\n                        lint policy (default: current)\n  --project PROJECT     explicit fsl-project.toml ID-policy manifest\n  --strict-names        warn 'mixed_names' where a glossary name is also written as its canonical name\n",
+        "help": "usage: fslc lint [-h] [--edition {current,next,4,5}] [--project PROJECT] [--strict-names] path [path ...]\n\nReport stable edition and ID-policy diagnostics without mutating source files.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next,4,5}\n                        lint policy (default: current)\n  --project PROJECT     explicit fsl-project.toml ID-policy manifest\n  --strict-names        warn 'mixed_names' where a glossary name is also written as its canonical name\n",
         "actions": [
           {
             "dest": "help",
@@ -2710,7 +2716,7 @@
             "dest": "edition",
             "required": false,
             "flags": ["--edition"],
-            "choices": ["current", "next"],
+            "choices": ["current", "next", "4", "5"],
             "default": "current",
             "action": "store"
           },
@@ -2736,7 +2742,7 @@
       {
         "path": ["migrate"],
         "prog": "fslc migrate",
-        "help": "usage: fslc migrate [-h] [--edition {current,next}] [--write] path [path ...]\n\nPlan machine-applicable edition edits without mutation. --write applies the validated file set atomically.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next}\n                        target edition (default: next)\n  --write               atomically replace every validated input file\n",
+        "help": "usage: fslc migrate [-h] [--edition {current,next,4,5}] [--write] path [path ...]\n\nPlan machine-applicable edition edits without mutation. --write applies the validated file set atomically.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next,4,5}\n                        target edition (default: next)\n  --write               atomically replace every validated input file\n",
         "actions": [
           {
             "dest": "help",
@@ -2756,7 +2762,7 @@
             "dest": "edition",
             "required": false,
             "flags": ["--edition"],
-            "choices": ["current", "next"],
+            "choices": ["current", "next", "4", "5"],
             "default": "next",
             "action": "store"
           },

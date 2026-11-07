@@ -279,7 +279,7 @@ fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, S
     }
     paths.extend(args.into_positionals().map(PathBuf::from));
     if paths.is_empty() {
-        return Err("usage: fslc fmt FILE [--check] [--edition current|next]".to_owned());
+        return Err("usage: fslc fmt FILE [--check] [--edition current|next|4|5]".to_owned());
     }
     if !check && paths.len() != 1 {
         return Err("fmt accepts multiple paths only with --check".to_owned());
@@ -444,9 +444,9 @@ fn parse_migration_options(
     paths.extend(args.into_positionals().map(PathBuf::from));
     if paths.is_empty() {
         return Err(if migrate {
-            "usage: fslc migrate FILE... [--edition current|next] [--write]".to_owned()
+            "usage: fslc migrate FILE... [--edition current|next|4|5] [--write]".to_owned()
         } else {
-            "usage: fslc lint FILE... [--edition current|next] [--project fsl-project.toml]"
+            "usage: fslc lint FILE... [--edition current|next|4|5] [--project fsl-project.toml]"
                 .to_owned()
         });
     }
