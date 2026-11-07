@@ -1,4 +1,4 @@
-Fixed (#1255): `fslc conformance` names a compose component invariant broken
+Fixed (#1255, breaking): `fslc conformance` names a compose component invariant broken
 while another action stepped by its public name, `acct.Inv` (was `acct__Inv`),
 the name `verify` and `replay` give it. `fslc mutate` compares the dead
 actions of the baseline (`action_coverage` keys, `acct.thaw`) with the mutant's

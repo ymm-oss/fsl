@@ -1,4 +1,4 @@
-Changed (#1459, breaking): shared static checking now rejects non-Option
+Changed (#1459, breaking removal): shared static checking now rejects non-Option
 `is none`/`is some` operands; non-integer `abs` arguments, including enum
 domain/range elements; non-relation operands of acyclic, functional, injective,
 domain, range and reachable; and non-self path/cycle relations. Reachable and

@@ -1,4 +1,4 @@
-Changed (#1446, #1341, #1342, #1343, #1447): **Breaking CLI change.** Native
+Changed (#1446, #1341, #1342, #1343, #1447, breaking): Native
 argv acceptance is validated centrally against the embedded CLI contract.
 Non-owned shared options on `explain`, `typestate`, `mutate`, `testgen`,
 `html`, and `ledger`, non-owned `scenarios` options even at default values,

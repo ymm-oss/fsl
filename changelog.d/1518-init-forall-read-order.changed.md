@@ -1,4 +1,4 @@
-Changed (#1518): Breaking removal: check now rejects reads in init forall bodies
+Changed (#1518, breaking removal): check now rejects reads in init forall bodies
 or filters of roots written by the same forall, except locations already written
 at the current binder key in the current iteration. This root-based removal
 includes correct forms with agreeing base-engine results, as well as

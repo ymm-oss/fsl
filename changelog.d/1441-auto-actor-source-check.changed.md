@@ -1,4 +1,4 @@
-Changed (#1441, breaking): v5.0.0 auto mappings compare source actors on both
+Changed (#1441, breaking removal): v5.0.0 auto mappings compare source actors on both
 sides (the `by X` label for an edition 4 process transition) independently of
 `covers`, including fsl 4 process/business transitions,
 cross-edition 4/5 pairs and typed/legacy compose pairs. Previously hidden

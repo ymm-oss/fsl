@@ -1,4 +1,4 @@
-Changed (#1552, breaking): `check` now rejects previously accepted unsatisfiable
+Changed (#1552, breaking removal): `check` now rejects previously accepted unsatisfiable
 requirements `rule` guards that reuse an entity field's name as an `is` pattern
 inside a quantifier body or aggregate value. The conflict check reads that name
 as the field, not the payload, matching the event's lowering (#1561 tracks the

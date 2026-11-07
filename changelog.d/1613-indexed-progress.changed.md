@@ -1,4 +1,4 @@
-Changed (#1613): `refine` progress pulls now instantiate indexed mappings
+Changed (#1613, breaking removal): `refine` progress pulls now instantiate indexed mappings
 simultaneously in implementation scope, avoiding identity/swap stack overflow
 and an indexed chain's false `refines`. **Breaking removal:** with per-element
 maps, free abstract whole-map reads in pulled progress properties are now

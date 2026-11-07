@@ -1,4 +1,4 @@
-Changed (#1569, breaking): legacy requirements transition guards such as
+Changed (#1569, breaking removal): legacy requirements transition guards such as
 `exists c: Amount { stage(c) == Approved and amount == c }`, with a process field
 `amount`, now fail `check`, `kernel`, and `verify` with exit 2, `kind: "semantics"`,
 and `stage(c) refers to type 'Amount', which has no process`. A field named `c`

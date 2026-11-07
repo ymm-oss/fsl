@@ -1,4 +1,4 @@
-Breaking removal (#1602, #1603): `check` now rejects `__` in goal and policy IDs,
+Changed (#1602, #1603, breaking removal): `check` now rejects `__` in goal and policy IDs,
 requirement IDs (`rule` in the next edition), scenario IDs (`acceptance` in
 legacy), forbidden IDs, decision-table IDs (`decide`), and glossary aliases,
 in both editions wherever the construct exists. These previously accepted names

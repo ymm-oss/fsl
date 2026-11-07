@@ -1,4 +1,4 @@
-Changed (#1456, breaking): v5.0.0 automatic mappings use requirement actions'
+Changed (#1456, breaking removal): v5.0.0 automatic mappings use requirement actions'
 own actors, including standalone actions and generated branches on either side,
 not enclosing requirement prose. Hidden own-actor mismatches now fail check,
 unscoped verify, refine and Worker with the existing located type error (exit 2);

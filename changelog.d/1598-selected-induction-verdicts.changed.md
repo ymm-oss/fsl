@@ -1,4 +1,4 @@
-Selected induction now establishes every implicit bound assumed by its step in
+Changed (#1598): selected induction now establishes every implicit bound assumed by its step in
 the base case, even with `--property P`. This intentionally changes these verdicts:
 
 - Exit 0 false `proved` / `unbounded` → exit 1 `violated` / `type_bound`, naming

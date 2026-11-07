@@ -1,4 +1,4 @@
-Changed (#1437): the installed Agent Skills now describe FSL 5. The layer
+Changed (#1437, breaking): the installed Agent Skills now describe FSL 5. The layer
 skills `fsl-business`, `fsl-requirements`, `fsl-design`, `fsl-design-review`,
 `fsl-from-code`, `fsl-delivery` and `fsl-verify` are replaced by their FSL 5
 versions, which write files headed `fsl 5`. Each one also notes that a headerless

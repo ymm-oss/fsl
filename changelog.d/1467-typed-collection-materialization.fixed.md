@@ -1,4 +1,4 @@
-Fixed (Refs #1467): symbolic scalar/enum Set/Seq expressions use shared checked
+Fixed (#1467): symbolic scalar/enum Set/Seq expressions use shared checked
 inferred/expected types, including empty equality operands and conditional arms.
 Private lexical type metadata preserves raw `none`/composite values and the public
 Rust `Bindings<T>` alias. Carrier, capacity and storage-bound rules are unchanged;

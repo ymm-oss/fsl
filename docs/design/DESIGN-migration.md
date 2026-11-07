@@ -515,3 +515,15 @@ table plus a site-specific static provider-type inventory, not a claimed isolate
 runtime detector. A raw late provider makes that inventory fail; full-route
 controls still preserve their observed result. No runtime fault-injection hook or
 new production test seam was added.
+
+**Breaking removal (#1452).** A headerless compose root whose child is headed
+`fsl 5` and uses a legacy colon quantifier returned `ok`/0 on pre-release builds;
+it now returns the child's complete `unsupported_in_edition` refusal with exit 2,
+and the braced twin stays `ok`/0. This is not a removal against `fslc` 4.12.0,
+which refused every `fsl 5` child as the unknown declaration `fsl`. Observed on
+2026-11-07 with `FSLC_CACHE=off`: the v4.12.0 binary reports `kind: "semantics"`
+(`component "dep.fsl" failed to parse (unsupported top-level declaration 'fsl'`)
+for both the colon child and the braced child, and a binary built from
+`c505d0a6c` reports `unsupported_in_edition`/2 for the colon child and `ok`/0 for
+the braced child. The language references and `skills/fsl/references/syntax.md`
+record the same scope.

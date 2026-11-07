@@ -1,4 +1,4 @@
-Changed (#1170, #1709): an input file that `fslc` cannot read (missing, a
+Changed (#1170, #1709, breaking): an input file that `fslc` cannot read (missing, a
 directory, no permission, not UTF-8) is now reported the same way on the
 routes below: `kind:"io"`, exit 2, and the message `<path>: <error>`. Routes that
 change: `approval create --kind requirements_document` with an unreadable

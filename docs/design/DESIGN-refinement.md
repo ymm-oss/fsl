@@ -803,6 +803,22 @@ JSON outputs are retained, not excluded or normalized. There were no timeouts
 and no invalid JSON outputs at head. This audit is bounded behavior evidence,
 not an unbounded proof or an assurance promotion.
 
+### Preserved-progress pattern names (breaking removal, #1595)
+
+A preserved-progress property pattern name that matches a free implementation
+name from a lexically used map is refused even outside a readable continuation,
+and a used-map RHS pattern may not reuse a property binder or a sibling used-map
+pattern name. `refine` reports `kind: "type"` with `loc` at `respond`, exit 2.
+Observed on 2026-11-07 with `FSLC_CACHE=off`, for the abstract property
+`y==0 ~> ((o is some(x)) or y==3)` under `map y=x map o=p` (the
+`r1_pattern_or` cell of `rust/fslc/tests/issue_1595_progress_pull_scope.rs`):
+`refine --depth 4` reports `refines`/0 on the v4.12.0 binary and
+`error`/`type`/2 with `rename the abstract pattern binder 'x' to avoid
+mapped-name capture` on a binary built from `c505d0a6c`; the abstract spec alone
+stays `verified`/0 on `verify --engine bmc --depth 4`. Renaming the pattern
+binder to `w` gives `refines`/0 on the same binary. Repair: rename the abstract
+or mapping pattern binder; ordinary source binding scope is unchanged.
+
 ## 5. Test Plan (tests/test_refine.py) + Sample
 
 Sample: `specs/cart_impl.fsl` (a refinement of ShoppingCart. Example: it has

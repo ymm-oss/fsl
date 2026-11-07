@@ -1,4 +1,4 @@
-Changed (#1421): New approval records use unsigned v5 or signed v6
+Changed (#1421, breaking): New approval records use unsigned v5 or signed v6
 with a `path_base` relative to the Git root and the original source label. Checks
 resolve stored inputs and reviewed document targets from the Git root of the spec
 being checked, so a clone, worktree or relocated checkout reads its own files,

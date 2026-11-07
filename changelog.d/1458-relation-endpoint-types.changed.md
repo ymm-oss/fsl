@@ -1,4 +1,4 @@
-Changed (#1458, breaking): relation `contains`, `add`, `remove`, and `reachable` now
+Changed (#1458, breaking removal): relation `contains`, `add`, `remove`, and `reachable` now
 check source and target arguments against their independently declared endpoint
 types. This breaking removal rejects previously accepted mismatched endpoints
 before evaluation with `kind: "semantics"`, exit 2, the existing assignability

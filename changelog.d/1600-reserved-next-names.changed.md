@@ -1,4 +1,4 @@
-Changed (#1600, breaking): in next-edition requirements, a relation role, a
+Changed (#1600, breaking removal): in next-edition requirements, a relation role, a
 resource name, and a measure name may no longer contain `__`, extending
 #1256's `__` reservation to these three kinds of next-edition declaration. `fslc check` rejects
 `Claim belongs to User as __owner via approve`, `resource __r: Amount = 0`,

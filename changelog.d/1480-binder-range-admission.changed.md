@@ -1,4 +1,4 @@
-Breaking check-admission removal: `check`, every `verify` engine, LSP and Worker now
+Changed (#1480, breaking removal): `check`, every `verify` engine, LSP and Worker now
 refuse every integer range bound the symbolic engines cannot execute, with a located
 `semantics` error, exit 2. Refused: unplanned dependent bounds (index, field, `size()`,
 `if`, `min`, `/`, `%`, `old`, aggregates); state-dependent bounds in `ensures`,

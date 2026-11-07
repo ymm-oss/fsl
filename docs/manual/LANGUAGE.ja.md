@@ -32,8 +32,10 @@ FSL 5 の要件は **entity / lifecycle / event / rule / decide** で記述し�
 最初の宣言より前に、`fsl 5` を単独の行で書きます。その前に置けるのは空行と `//`
 コメントだけです（先頭の UTF-8 BOM も受理します）。Markdown の literate source では、
 最初の `fsl` フェンスの先頭に、同じ規則で書きます。ヘッダーは個々の requirements ブロックではなく、
-文書全体に適用されます。`fsl 4` は以前の構文を選び、ヘッダーがない文書も FSL 4 の
-ままです。`--edition current` は文書の指定に従います。明示的に指定したエディションと
+文書全体に適用されます。`fsl 4` は以前の構文を選び、ヘッダーがない文書も FSL 4 として
+構文解析します。保たれるのは構文で、4.12 の結果がすべて保たれるわけではありません。`fslc` 5.0 は
+どのエディションでも一部の形を拒否し、CLI と JSON の契約も一部変えています。一覧は
+[fslc を 4.12 から 5.0 へ上げる](#upgrading-fslc-4-12-to-5-0)にあります。`--edition current` は文書の指定に従います。明示的に指定したエディションと
 ヘッダーが食い違うと `edition_conflict`、未知の番号は `unsupported_edition` です。
 causal と AI ダイアレクトの文書はヘッダーを取りません（`edition_header_not_accepted`）。
 ヘッダーの追加だけでは旧形式の要件を変換できません。`fsl 5` の下の `process` は
@@ -618,6 +620,87 @@ instances 数から独立です — `Case` のサイズが `verify { instances C
 インターリービング下のエンティティ単位の進行には、上の `helpful` 形式を選んで
 ください。(条件付きの測度は整数式の間の選択はできますが、それ単体では `helpful`
 形式が要求するエンティティ単位の減少を証明しません。)
+
+<a id="upgrading-fslc-4-12-to-5-0"></a>
+
+### fslc を 4.12 から 5.0 へ上げる
+
+この節は、FSL 5 を採用するかどうかにかかわらず、`fslc` の実行ファイルを 4.12 から 5.0 へ
+上げる人のためのものです。`fslc` 4.12 は `fsl 5` ヘッダーを拒否していたので、4.12 が受理した
+文書はすべてヘッダーのない文書です。5.0 もヘッダーのない文書を FSL 4 として構文解析します。
+ただし、構文が保たれても結果がすべて保たれるわけではありません。5.0 は、4.12 が受理していた
+一部の形を、ヘッダーのない文書でも拒否します。CLI、JSON、終了コードの契約も一部変わります。
+文書を FSL 5 にも移す場合は、先にこの節を済ませてから
+[FSL 4 から FSL 5 への移行](#fsl4-to-fsl5-migration)に進んでください。
+
+**拒否される形を見つける。** 自分の文書すべてと、検査している詳細化それぞれについて、5.0 の
+実行ファイルを実行します。
+
+```bash
+fslc check spec.fsl
+fslc verify spec.fsl --depth 8
+fslc refine impl.fsl abs.fsl mapping.fsl
+```
+
+拒否された形は、`"result": "error"`、終了コード 2 のエンベロープになります。`kind`
+(`name`、`type`、`semantics`、`parse`)、`loc`、`message` が構文要素を示すので、下の表で
+規則を探してください。直すのはソースです。拒否を消すために property や action を削らないで
+ください。拒否された形は、どれも健全でないか曖昧な形でした。各行が示す節に書き換え方があります。
+
+| 拒否される形(issue) | 5.0 の報告 | 直し方 |
+|---|---|---|
+| `__` を含む宣言名 (#1256) | 宣言の位置で `kind: "name"` | 宣言とその参照を改名します。replay の trace や保存した出力も直します(`foo__bar` を `foo_bar` に)。§11「名前と `__`」 |
+| goal、policy、requirement、scenario、forbidden、decision の ID や glossary の alias に含まれる `__` (#1602, #1603) | ID または alias の位置で `kind: "name"` | ID または alias を改名します。§11 |
+| `enum Bool`、`type Bool`、`struct Bool`。組み込みの `Int` の上の型付きバインダー (#1480) | 宣言の位置で拒否。`type 'Int' is not a finite scalar` | 型を改名します。宣言したドメイン型の上で束縛します。§2 |
+| 記号エンジンが実行できない範囲の境界、負の `within` (#1480) | `semantics`。たとえば `binder bound is not a static integer` | 範囲の境界をリテラルと `const` で書きます。§3 |
+| どのエンジンも実行しない量化子・init・添字の形 (#1463) | 位置つきの `semantics` エラー | §3 と §4 の対応する形を使います |
+| ルートを全部代入する前の init での読み取り (#1451)。init の `forall` が、同じ `forall` で書くルートを読む形 (#1518) | `init references state variable '<name>' before it is assigned` | ルートを全部代入してから読むか、先にルート全体を初期化します。§4 |
+| relation の端点の型 (#1458)、演算子の種類とメソッドのシグネチャ (#1459)、端点の範囲が違う relation (#1522)、異なるコンテナの carrier (#1472, #1627, #1679, #1683) | 位置つきの代入可能性エラー | 両辺の端点と要素の型・範囲をそろえます。範囲が等しい数値の別名は互換のままです。§3 |
+| 定義の自由な名前を捕獲する `def` の呼び出しや `leadsTo` のバインダー (#1450, #1528) | `would capture variable` | 呼び出し側のバインダーを改名します。§3 |
+| `const` と同名のローカル束縛 (#1515) | `local binding '<name>' shadows a constant of the same name` | ローカル束縛とその使用を改名します。§3 |
+| 続きの外で使うパターン変数 (#1547)、マッチの後での再利用 (#1573) | 使用の位置でエラー | 新しい名前を使います。§3 |
+| 重複した仮引数・入力 (#1680)、構造体リテラルのフィールド (#1685、`duplicate_struct_field`)、構造体のフィールド (#1692)、`instances`・`values`・`kpi` の宣言 (#1686)、2 つ目の `implements` (#1694)、写しを失う `domain` の重複 (#1700) | 2 つ目の位置で報告 | 重複を削るか改名します。§2、§3、§11、§13 |
+| メンバーのない enum、列のない `dbsystem`、ツールのない `ai_component` (#1546)。宣言していない AI の authority ツール、未知の hard-contract 規則 (#1545) | `enum '<Name>' has no members` など | メンバー・列・ツールを宣言するか、その宣言を削ります。§2、§13.5、§13.6 |
+| `alias__x` に書く同期文 (#1334)、追加項目の `let` を読む同期引数 (#1442)、仮引数の型に合わないルートの同期引数 (#1517) | 位置つきのエラー | `alias.x` と書きます。ヘッダーの引数・`const`・状態を渡します。仮引数の型に合わせます。§11 |
+| 両側の actor が違う要件の自動対応 (#1441, #1456) | 位置つきのエラー | actor をそろえるか、明示的な action の対応を書きます。§13.2 |
+| エンティティのフィールドや関係の役割と同名の `is some(name)` パターン (#1552, #1561)。process のない型のバインダーに対する `stage(c)` (#1569) | 位置つきのエラー | フィールドでないパターン名を使います(`some(1) is some(v) and v == 1`)。`stage` はエンティティのバインダーに使います。§13.2 |
+| 型の合わない acceptance の `expect`(enum と整数の比較など)や FSL 5 の scenario の `then`(`then` は FSL 5 のみ)。acceptance、forbidden、FSL 5 の scenario の中で内部の型が合わないステップ引数。モデルの式のどこかにある、Bool でないものへの `not` と Int でないものへの単項マイナス(選ばれない分岐の中も含む) (#1439) | `semantics`。たとえば `expression of type Int is not assignable to Bool` | 式の型を合わせます。enum はメンバーと比べ、`not` には Bool、単項マイナスには Int を渡します。§13.2、§3 |
+| 未知の `check compatibility` 規則名 (#1473) | `kernel`、`fmt`、`lint`、`migrate` が終了コード 0 から 2 に変わる | 12 個の規則名のどれかを使います。§1 のデータベース層 |
+| 実在する `YYYY-MM-DD` の日付でない causal の `period.valid_until` や `--as-of` (#1422) | `--as-of` は `kind: "usage"` | 日付を `YYYY-MM-DD` で書きます。§17 |
+| `refine`: 不完全な init ルート (#1521)、自由な impl 名と同名の preserve progress のパターン名 (#1595)、同名で定義の違う型 (#1599)、要素ごとの map の下での map 全体の自由な読み取り (#1613) | `refines` や `refinement_failed` だったものが終了コード 2 | ルートのすべてのフィールドとキーを初期化します。抽象側か写像側のパターンのバインダーを改名します。型に別の名前を付けます。map 全体でなく要素を読みます。§10 |
+
+同じリリースの削除のうち、次のものは FSL 5 の構文要素だけに関わるので、4.12 の文書には
+現れません。次のエディションの関係の役割・resource・measure に含まれる `__` (#1600)、
+重複したステップの入力 (#1682)、重複した actor と要件 ID の持ち主 (#1705)、コロンの量化子を使う
+`fsl 5` ヘッダーの compose の子 (#1452)、そして `check` がすでに拒否していた次のエディションの
+4 つの移行形式を `analyze`、`conformance`、`explain`、`html`、`kernel`、`ledger`、`mutate`、
+`scenarios`、`sweep`、`testgen`、`typestate` も拒否するようになったもの (#1449) です。
+
+**CLI、JSON、終了コードの変更を見つける。** `fslc` を呼ぶスクリプトや CI のジョブで、
+最初の列の値を探してください。
+
+| 変わったもの(issue) | 4.12 | 5.0 | 対応 |
+|---|---|---|---|
+| `explain`、`typestate`、`mutate`、`testgen`、`html`、`ledger`、`scenarios`、`version` に、そのコマンドが持たないオプションを渡す (#1446, #1341) | 無視されるか、別のパーサーが読む | usage エラー、終了コード 2 | そのオプションを外します |
+| ソースを読む前に検査する、不正なオプションの値 (#1446) | `kind: "io"` または `"semantics"` | `kind: "usage"` | `usage` で照合します |
+| 3 点の `--git` 範囲 (#1446) | Git のエラー、`kind: "io"` | Git を動かす前に `--git range must be BASE..HEAD`、`kind: "usage"` | `BASE..HEAD` と書きます |
+| 読めない入力ファイル (#1709) | 経路によって `usage`、`semantics`、または OS のエラーだけ | `kind: "io"`、終了コード 2、`<path>: <error>` | `io` で照合します |
+| 自分の契約を破る実装に対する `fslc refine`、governance の `preservations[].result` (#1315) | `"violated"` | `"impl_violated"` | `impl_violated` で照合します。`verify` の `violated` はそのままです |
+| 出力の中の生成名とコンポーネント名 (#1256, #1255, #1284) | `submit__b1`、`acct__Inv` | `submit.b1`、`acct.Inv` | 保存した `analyze` の ID や `--focus` の引数も含め、ドットの名前で照合します |
+| `approval create` と `approval check` での承認対象の失敗 (#1418) | 終了コード 2 | 下流の終了コード。scenarios や HTML の検証の失敗は 1、内部の失敗は 3 | 終了コード 0 と `approval_check`、`approved` で判定します |
+| 承認レコード (#1421) | v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4 | 署名なしの v5、署名つきの v6(`path_base` つき) | 新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。`document generate --approval` には Git が必要です |
+| 相対パスの AI の `dataset.source` (#1421) | 呼び出し側から解決 | 宣言したファイルのディレクトリから解決 | リポジトリを前置したパスを書き直すか、`--records` を渡します |
+| シンボリックリンクや、`/dev/null`、`/dev/stdout`、`/dev/fd/63` のような通常ファイルでないものへの `-o` (#1419) | 書き込む | 拒否、終了コード 2。書き込める親ディレクトリが必要 | 通常ファイルに書くか、標準出力を読みます |
+| ほかに finding のないヘッダーのない文書への `lint --edition next`(または `5`) (#1434) | 終了コード 0 | `missing_edition_header`、終了コード 1 | `--edition` を付けないか、ヘッダーを書きます |
+| ヘッダーのない文書への引数なしの `fslc migrate` (#1434) | 現行エディションの計画 | `fsl 5` と process 形式の変換を計画。`migrate_manual_required` は終了コード 1 | `--edition current` を渡します |
+| 不正な `--edition` の値 (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | メッセージの照合を直します |
+| 旧形式に対する現行エディションの `check`、`verify`、Worker (#251) | 警告なし | `legacy_string_metadata`、`legacy_quantifier_colon`、`inline_action_maps` の警告。判定と終了コードは不変 | 対応は不要です。`fslc migrate` が書き換えます |
+| verify のキャッシュ | | キーに `fslc` のバージョンが入る | 上げた後の最初の実行で、結果を 1 回ずつ計算し直します |
+| 層別の Agent Skills (#1437) | FSL 4 を書く | `fsl 5` を書く | スキルを入れ直します。`fsl` スキルは FSL 4 の案内を残しています |
+
+`FSLC_UNSTABLE` と Worker の `unstable` フィールドは、4.12 と 5.0 の間のリリース前の build にだけ
+あり、4.12 にはありませんでした。5.0 はどちらも読みません。古いクライアントが送る `unstable`
+フィールドは無視します。
 
 ## 2. 型
 
@@ -2096,7 +2179,7 @@ parse の報告も command envelope を入れ子にせず finding の形にし�
 後にも行われますが、拒んだ子の bytes は solver/cache に入りません。Worker の通常の governance
 error は native と同じく kernel error を優先し、依存先の拒否がある場合だけ早く返します。
 
-**破壊的な受理の削除:** ヘッダーのない compose root が、legacy なコロン量化子を持つ
+**破壊的な受理の削除 (#1452):** ヘッダーのない compose root が、legacy なコロン量化子を持つ
 次 edition の子を import すると、以前は message のない `ok`/0 を返していました。今は
 finding の message が `legacy colon quantifier syntax is deprecated` である、子の完全な
 `unsupported_in_edition`/2 を返します。波括弧の canonical twin は、完全な
@@ -2105,7 +2188,9 @@ finding の message が `legacy colon quantifier syntax is deprecated` である
 `edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` と、
 `edition_dispatch_inventory` の
 `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`、
-`all_cells_agree_across_the_complete_native_adapters` の各 context に残します。
+`all_cells_agree_across_the_complete_native_adapters` の各 context に残します。以前の `ok` は
+リリース前の build のものです。`fslc` 4.12 は、コロンの有無にかかわらず `fsl 5` の子をすべて
+未知の宣言 `fsl` として拒否していたので、4.12 の compose がこの `ok` を失うことはありません。
 
 各 materialized tree の `fslc check <path>` による `bc14d885` から修正後の Rust
 source/test tree `a65eddd5` への比較では、**corpus の全603形を両 parser 設定で検査(各 tree 1206回)**し、
@@ -3225,8 +3310,9 @@ refinement DesignRefinesReq {
 `fair action` 宣言から来ます。
 抽象の Int/Bool 定数は P/Q、`decreases`、範囲と入れ子のフィルターでリテラルになります。
 別モデルの impl 定数との binder 衝突と、読まれる抽象の const/state の同名は拒否します。
-const と同名の local は先に `check` が拒否します。性質の pattern が、字句 scope で使う map の
-自由な impl 名と同名なら、読める続きとは別に拒否します。使う map 式の pattern が性質の binder や
+const と同名の local は先に `check` が拒否します。**破壊的な受理の削除 (#1595):** 性質の pattern が、字句 scope で使う map の
+自由な impl 名と同名なら、読める続きとは別に拒否します。たとえば `map y=x` の下の
+`y==0 ~> ((o is some(x)) or y==3)` は、以前は `refines`(exit 0)でしたが、今は拒否します。使う map 式の pattern が性質の binder や
 他の使用 map 式の pattern と同名でも拒否します。抽象/写像の pattern を改名してください。通常の scope は不変です。
 直接の refine は `respond` の位置つきエラー(exit 2、`kind:"type"`、`loc` あり)です。
 抽象の定数と state が同名の曖昧な範囲の例は refine が exit 2、抽象単独の BMC が exit 1 です。
@@ -3411,6 +3497,10 @@ compose OrderSystem {
   宣言の物理名 `alias__x` と、requirements の `branches` の action を分けた
   `submit__b1` です。作られた名前を参照することはできます(refinement の対応が
   `submit__b1` を参照するように)。
+  破壊的な受理の削除 (#1256): このような宣言は、5.0.0 より前はヘッダーのない文書を
+  含めて `check` を通っていました。宣言とその参照を改名してください(たとえば
+  `foo__bar` を `foo_bar` に)。その名前を書いた replay の trace や保存した出力も
+  直します。
   破壊的な削除 (#1600): 次のエディションの requirements では、関係の役割
   (`Claim belongs to User as __owner via approve`)、resource の名前
   (`resource __r: Amount = 0`)、measure の名前

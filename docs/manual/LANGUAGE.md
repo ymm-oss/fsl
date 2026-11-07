@@ -35,7 +35,10 @@ Put `fsl 5` on a line of its own before the first declaration. Only blank lines
 and `//` comments may precede it (a leading UTF-8 BOM is accepted). In a literate
 Markdown source it goes at the start of the first `fsl` fence, under the same rule.
 The header applies to the document, not to an individual requirements block. `fsl 4` selects the
-earlier syntax; a headerless document retains FSL 4. `--edition current` follows
+earlier syntax; a headerless document is still parsed as FSL 4. That keeps its
+syntax, not every 4.12 result: `fslc` 5.0 refuses some forms in every edition
+and changes some CLI and JSON contracts, as
+[Upgrading fslc from 4.12 to 5.0](#upgrading-fslc-4-12-to-5-0) lists. `--edition current` follows
 the document; an explicitly requested edition conflicting with its header is
 `edition_conflict`, and an unknown header number is `unsupported_edition`.
 Causal and AI-dialect documents take no header (`edition_header_not_accepted`).
@@ -650,6 +653,89 @@ only covers designs where *every* enabled action decreases the total. For
 per-entity progress under interleaving, prefer the `helpful` form above.
 (A conditional measure can select between integer expressions, but it does not
 by itself prove the per-entity decrease required by the `helpful` form.)
+
+<a id="upgrading-fslc-4-12-to-5-0"></a>
+
+### Upgrading fslc from 4.12 to 5.0
+
+This section is for upgrading the `fslc` binary from 4.12 to 5.0, whether or
+not you adopt FSL 5. `fslc` 4.12 refused an `fsl 5` header, so every document
+it accepted is headerless, and 5.0 still parses a headerless document as FSL 4.
+Keeping the syntax does not keep every result: 5.0 refuses some forms that 4.12
+accepted, headerless documents included, and it changes some CLI, JSON and
+exit-code contracts. To move a document to FSL 5 as well, finish this section
+first and then follow [the FSL 4 to FSL 5 migration](#fsl4-to-fsl5-migration).
+
+**Find the refused forms.** Run the 5.0 binary on every document you own, and
+on each refinement you check:
+
+```bash
+fslc check spec.fsl
+fslc verify spec.fsl --depth 8
+fslc refine impl.fsl abs.fsl mapping.fsl
+```
+
+A refused form is a `"result": "error"` envelope with exit 2. Its `kind`
+(`name`, `type`, `semantics` or `parse`), `loc` and `message` name the
+construct; find the rule in the table below. Repair the source. Do not delete
+a property or an action to make the refusal go away: each refused form was
+unsound or ambiguous, and the section linked from each row shows the rewrite.
+
+| Refused form (issue) | What 5.0 reports | Repair |
+|---|---|---|
+| A declared name containing `__` (#1256) | `kind: "name"` at the declaration | Rename the declaration and its references, including replay traces and stored outputs (`foo__bar` to `foo_bar`); §11, "Names and `__`" |
+| `__` in a goal, policy, requirement, scenario, forbidden or decision ID or a glossary alias (#1602, #1603) | `kind: "name"` at the ID or alias | Rename the ID or alias; §11 |
+| `enum Bool`, `type Bool`, `struct Bool`; a typed binder over the builtin `Int` (#1480) | refused at the declaration; `type 'Int' is not a finite scalar` | Rename the type; bind over a declared domain type; §2 |
+| A range bound the symbolic engines cannot execute, or a negative `within` (#1480) | `semantics`, for example `binder bound is not a static integer` | Bound the range by literals and `const`s; §3 |
+| Quantifier, init and index forms that no engine runs (#1463) | located `semantics` error | Use a supported form from §3 and §4 |
+| An init read before its root is fully assigned (#1451); a read, in an init `forall`, of a root the same `forall` writes (#1518) | `init references state variable '<name>' before it is assigned` | Read after the root is fully assigned, or initialize the whole root first; §4 |
+| Relation endpoint types (#1458), operand kinds and method signatures (#1459), relations with different endpoint bounds (#1522), container carriers that differ (#1472, #1627, #1679, #1683) | located assignability error | Give both sides the same endpoint and element types and bounds; equal-bound numeric aliases stay compatible; §3 |
+| A `def` call or a `leadsTo` binder that captures a free name of the definition (#1450, #1528) | `would capture variable` | Rename the binder at the call site; §3 |
+| A local binding named like a `const` (#1515) | `local binding '<name>' shadows a constant of the same name` | Rename the local and its uses; §3 |
+| A pattern variable used outside its continuation (#1547) or reused after a match (#1573) | located error at the use | Use a fresh name; §3 |
+| A repeated formal or input (#1680), struct-literal field (#1685, `duplicate_struct_field`), struct field (#1692), `instances`, `values` or `kpi` declaration (#1686), second `implements` (#1694) or `domain` repeat that loses a copy (#1700) | located at the second copy | Remove or rename the repeat; §2, §3, §11, §13 |
+| An enum with no members, a `dbsystem` without columns, an `ai_component` without tools (#1546); an undeclared AI authority tool or an unknown hard-contract rule (#1545) | `enum '<Name>' has no members` and the like | Declare the members, columns or tools, or remove the declaration; §2, §13.5, §13.6 |
+| A synchronized statement writing `alias__x` (#1334); a synchronized argument reading an additional-item `let` (#1442); a root synchronized argument whose type does not fit the formal (#1517) | located error | Write `alias.x`; pass header parameters, `const`s or state; match the formal's type; §11 |
+| An automatic requirements mapping whose actors differ (#1441, #1456) | located error | Make the actors agree, or write an explicit action entry; §13.2 |
+| An `is some(name)` pattern named like an entity field or relation role (#1552, #1561); `stage(c)` over a binder whose type has no process (#1569) | located error | Use a pattern name that is not a field (`some(1) is some(v) and v == 1`); apply `stage` to an entity binder; §13.2 |
+| An ill-typed acceptance `expect` (such as an enum compared with an integer) or FSL 5 scenario `then` (the `then` case is FSL 5 only); an internally ill-typed step argument in an acceptance, a forbidden or an FSL 5 scenario; `not` on a non-Bool or unary minus on a non-Int anywhere in a model expression, even in an unselected branch (#1439) | `semantics`, for example `expression of type Int is not assignable to Bool` | Make the expression well typed: compare an enum with a member, give `not` a Bool and unary minus an Int; §13.2 and §3 |
+| An unknown `check compatibility` rule name (#1473) | `kernel`, `fmt`, `lint` and `migrate` exit 2 where they exited 0 | Use one of the twelve rule names; §1, database layer |
+| A causal `period.valid_until` or `--as-of` that is not a real `YYYY-MM-DD` date (#1422) | `--as-of`: `kind: "usage"` | Write the date as `YYYY-MM-DD`; §17 |
+| `refine`: an incomplete init root (#1521); a preserved-progress pattern name matching a free implementation name (#1595); same-named types that differ (#1599); a free whole-map read under per-element maps (#1613) | exit 2 where `refines` or `refinement_failed` was reported | Initialize every field and key of the root; rename the abstract or mapping pattern binder; give the types distinct names; read elements instead of the whole map; §10 |
+
+Some removals in the same release involve FSL 5 constructs only, so no 4.12
+document has them: `__` in next-edition relation roles, resources and measures
+(#1600), repeated step inputs (#1682), repeated actors and requirement-ID owners
+(#1705), a compose child headed `fsl 5` that uses a colon quantifier
+(#1452), and the four next-edition migration forms that `analyze`,
+`conformance`, `explain`, `html`, `kernel`, `ledger`, `mutate`, `scenarios`,
+`sweep`, `testgen` and `typestate` now refuse as `check` already did (#1449).
+
+**Find the CLI, JSON and exit-code changes.** Search scripts and CI jobs that
+call `fslc` for the values in the first column:
+
+| What changed (issue) | 4.12 | 5.0 | What to do |
+|---|---|---|---|
+| Options a command does not own on `explain`, `typestate`, `mutate`, `testgen`, `html`, `ledger`, `scenarios` and `version` (#1446, #1341) | ignored or read by another parser | usage error, exit 2 | Remove the option |
+| Invalid option values checked before reading sources (#1446) | `kind: "io"` or `"semantics"` | `kind: "usage"` | Match `usage` |
+| A three-dot `--git` range (#1446) | a Git error, `kind: "io"` | `--git range must be BASE..HEAD`, `kind: "usage"`, before Git runs | Write `BASE..HEAD` |
+| An unreadable input file (#1709) | `usage`, `semantics` or a bare OS error, depending on the route | `kind: "io"`, exit 2, `<path>: <error>` | Match `io` |
+| `fslc refine` on an implementation that breaks its own contract; governance `preservations[].result` (#1315) | `"violated"` | `"impl_violated"` | Match `impl_violated`; `verify` keeps `violated` |
+| Generated and component names in outputs (#1256, #1255, #1284) | `submit__b1`, `acct__Inv` | `submit.b1`, `acct.Inv` | Match the dotted name, including stored `analyze` IDs and `--focus` arguments |
+| Approval artifact failures in `approval create` and `approval check` (#1418) | exit 2 | the downstream exit: 1 for a scenarios or HTML verification failure, 3 for an internal failure | Gate on exit 0 with `approval_check` and `approved` |
+| Approval records (#1421) | v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind | unsigned v5 or signed v6 with `path_base` | Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; `document generate --approval` needs Git |
+| A relative AI `dataset.source` (#1421) | resolved from the caller | resolved from the declaring file's directory | Rewrite repository-prefixed paths, or pass `--records` |
+| `-o` to a symlink or a non-regular file such as `/dev/null`, `/dev/stdout` or `/dev/fd/63` (#1419) | written | refused, exit 2; a writable parent directory is required | Write to a regular file, or read stdout |
+| `lint --edition next` (or `5`) on a headerless document with no other finding (#1434) | exit 0 | `missing_edition_header`, exit 1 | Omit `--edition`, or add the header |
+| Plain `fslc migrate` on a headerless document (#1434) | current-edition plan | plans `fsl 5` and the process-form conversion; `migrate_manual_required` exits 1 | Pass `--edition current` |
+| An invalid `--edition` value (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | Update a message match |
+| Current-edition `check`, `verify` and Worker on legacy forms (#251) | no warning | `legacy_string_metadata`, `legacy_quantifier_colon`, `inline_action_maps` warnings; verdict and exit unchanged | Nothing is required; `fslc migrate` rewrites them |
+| The verify cache | | the key hashes the `fslc` version | The first run after the upgrade recomputes each result once |
+| The layer Agent Skills (#1437) | write FSL 4 | write `fsl 5` | Reinstall the skills; the `fsl` skill keeps its FSL 4 guidance |
+
+`FSLC_UNSTABLE` and the Worker's `unstable` field existed only in pre-release
+builds between 4.12 and 5.0, never in 4.12. 5.0 does not read them, and an old
+client's `unstable` field is ignored.
 
 ## 2. Types
 
@@ -2282,7 +2368,7 @@ native lemma-mode implements and governance reads may follow root solver work;
 refused child bytes still never enter that solver/cache. Ordinary Worker governance
 errors retain native kernel-error precedence; only dependency refusal returns early.
 
-**Breaking removal:** a headerless compose root importing a next-edition child
+**Breaking removal (#1452):** a headerless compose root importing a next-edition child
 with a legacy colon quantifier formerly returned `ok`/0 with no message. It now
 returns the complete child `unsupported_in_edition` refusal/2, whose finding
 message is `legacy colon quantifier syntax is deprecated`. A braced canonical
@@ -2291,7 +2377,9 @@ check envelope (plus validated runtime versions). The inline shape is retained b
 `edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`
 and the `edition_dispatch_inventory` contexts
 `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
-`all_cells_agree_across_the_complete_native_adapters`.
+`all_cells_agree_across_the_complete_native_adapters`. The former `ok` is that
+of pre-release builds: `fslc` 4.12 refused every `fsl 5` child, with or without
+the colon, as the unknown declaration `fsl`, so no 4.12 compose loses it.
 
 The materialized-tree `fslc check <path>` comparison from `bc14d885` to corrected
 Rust source/test tree `a65eddd5` checked all **603 corpus forms in both parser
@@ -3462,8 +3550,9 @@ fairness or prove implementation conformance. Fairness still comes from
 lower-layer `fair action` declarations.
 Abstract Int/Bool constants become literals in P/Q, `decreases`, domains and nested filters.
 Impl-constant/read const-state collisions are refused; `check` already rejects const-namesake locals.
-Property patterns matching free impl names from lexically used maps are refused outside
-readable continuations too. Used-map RHS patterns cannot reuse property binders or sibling pattern names.
+**Breaking removal (#1595):** property patterns matching free impl names from lexically used maps are refused outside
+readable continuations too; for example, `y==0 ~> ((o is some(x)) or y==3)` under
+`map y=x` was reported `refines` (exit 0) and is now refused. Used-map RHS patterns cannot reuse property binders or sibling pattern names.
 Rename the abstract or mapping pattern binder to repair these collisions. Ordinary source scope is unchanged.
 Direct refine gives exit 2, `kind:"type"`, `loc` at `respond`. The ambiguous const/state
 bound witness gives refine exit 2 versus abstract-only BMC exit 1 `violated`.
@@ -3689,6 +3778,10 @@ compose OrderSystem {
   physical name `alias__x` of a compose component declaration and the split
   `submit__b1` of a requirements `branches` action. A generated name may still
   be referenced, as a refinement mapping does with `submit__b1`.
+  Breaking removal (#1256): such a declaration passed `check` before 5.0.0, in
+  headerless documents too. Rename it and its references (for example
+  `foo__bar` to `foo_bar`), including replay traces and stored outputs that
+  name it.
   Breaking removal (#1600): in next-edition requirements, a relation role
   (`Claim belongs to User as __owner via approve`), a resource name
   (`resource __r: Amount = 0`), and a measure name

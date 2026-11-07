@@ -1,4 +1,4 @@
-Breaking removal (#1683): `check` and the symbolic engines now answer from one carrier rule, `fsl_core::CarrierCoercion`, whose answers are `Retag`, `RebuildInt`, `MapMismatch` and `NotAssignable`, and a literal under `old(...)` that can type itself is also typed against what surrounds it, in `check` and in evaluation.
+Changed (#1683, breaking removal): `check` and the symbolic engines now answer from one carrier rule, `fsl_core::CarrierCoercion`, whose answers are `Retag`, `RebuildInt`, `MapMismatch` and `NotAssignable`, and a literal under `old(...)` that can type itself is also typed against what surrounds it, in `check` and in evaluation.
 
 Removed: a Map at any depth below `some`, Set and Seq literals and conditional arms under `old(...)`, for `m0: Map<K, Int>`, `m1: Map<K, A>`: `some(m0) == old(some(m1))`, `some(m0) != old(some(m1))`, `Set { m0 } == old(Set { m1 })`, `Seq { m0 } == old(Seq { m1 })`, `Set { m0 } == old(Set { if c then m1 else m1 })`, now fail `check` with the located assignability error (`semantics`, exit 2).
 
