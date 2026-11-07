@@ -11,11 +11,16 @@
 //! - the `fsl5-keywords` patterns hold nothing else, so a row removed from
 //!   or reserved in the table leaves the grammar too;
 //! - every repository rule is included somewhere, so the FSL 5 rules stay
-//!   reachable.
+//!   reachable;
+//! - every group holding a Japanese spelling stands between
+//!   `(?<![\p{XID_Continue}])` and `(?![\p{XID_Continue}])` (or `\s+`), so a
+//!   Japanese keyword or particle matches only as a whole identifier, as the
+//!   lexer reads it, and never inside a name (`従業員が申請を`).
 //!
 //! Not covered: whether a pattern matches where the parser reads the
-//! keyword. The grammar is regex-based and approximate; this test only keeps
-//! its vocabulary from falling behind the table.
+//! keyword, and how Oniguruma evaluates the lookarounds. The grammar is
+//! regex-based and approximate; this test checks its vocabulary and the
+//! written shape of its Japanese boundaries.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -31,10 +36,15 @@ fn grammar() -> Value {
     serde_json::from_str(&text).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
-/// The alternatives of every innermost capturing group of `regex`
-/// (`\b(a|b\s+c)\b` gives `a` and `b c`). Lookarounds and other `(?…)`
-/// groups are skipped, and so are escaped parentheses (`\(`).
-fn alternatives(regex: &str) -> Vec<String> {
+/// The lookbehind and lookahead that make a Japanese spelling a whole
+/// identifier: no identifier character directly before or after it.
+const NOT_AFTER_IDENTIFIER: &str = r"(?<![\p{XID_Continue}])";
+const NOT_BEFORE_IDENTIFIER: &str = r"(?![\p{XID_Continue}])";
+
+/// Every innermost capturing group of `regex`, as the byte range of the
+/// group including its parentheses and the text between them. Lookarounds
+/// and other `(?…)` groups are skipped, and so are escaped parentheses (`\(`).
+fn groups(regex: &str) -> Vec<(std::ops::Range<usize>, &str)> {
     let mut found = Vec::new();
     let mut open = None;
     let mut escaped = false;
@@ -44,12 +54,12 @@ fn alternatives(regex: &str) -> Vec<String> {
         }
         match ch {
             '\\' => escaped = true,
-            '(' => open = Some(index + 1),
+            '(' => open = Some(index),
             ')' => {
                 if let Some(start) = open.take() {
-                    let group = &regex[start..index];
+                    let group = &regex[start + 1..index];
                     if !group.starts_with('?') {
-                        found.extend(group.split('|').map(|alt| alt.replace("\\s+", " ")));
+                        found.push((start..index + 1, group));
                     }
                 }
             }
@@ -57,6 +67,15 @@ fn alternatives(regex: &str) -> Vec<String> {
         }
     }
     found
+}
+
+/// The alternatives of every innermost capturing group of `regex`
+/// (`\b(a|b\s+c)\b` gives `a` and `b c`).
+fn alternatives(regex: &str) -> Vec<String> {
+    groups(regex)
+        .into_iter()
+        .flat_map(|(_, group)| group.split('|').map(|alt| alt.replace("\\s+", " ")))
+        .collect()
 }
 
 /// The alternatives of every `match` in a pattern scoped `keyword.*`, below
@@ -142,4 +161,58 @@ fn every_repository_rule_is_included() {
             "the repository rule `{name}` is never included"
         );
     }
+}
+
+/// Every `match` and `begin` regex below `value`.
+fn regexes<'a>(value: &'a Value, found: &mut Vec<&'a str>) {
+    match value {
+        Value::Object(object) => {
+            for (key, child) in object {
+                match (key.as_str(), child.as_str()) {
+                    ("match" | "begin", Some(regex)) => found.push(regex),
+                    _ => regexes(child, found),
+                }
+            }
+        }
+        Value::Array(items) => {
+            for child in items {
+                regexes(child, found);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn japanese_spellings_match_only_as_whole_identifiers() {
+    let grammar = grammar();
+    let mut all = Vec::new();
+    regexes(&grammar, &mut all);
+    let mut guarded = BTreeSet::new();
+    for regex in all {
+        for (range, group) in groups(regex) {
+            if group.is_ascii() {
+                continue;
+            }
+            let after = &regex[range.end..];
+            assert!(
+                regex[..range.start].ends_with(NOT_AFTER_IDENTIFIER)
+                    && (after.starts_with(NOT_BEFORE_IDENTIFIER) || after.starts_with(r"\s+")),
+                "the Japanese group ({group}) of {regex:?} is not between \
+                 {NOT_AFTER_IDENTIFIER} and {NOT_BEFORE_IDENTIFIER} (or \\s+)"
+            );
+            guarded.extend(group.split('|'));
+        }
+    }
+    let japanese = KEYWORDS
+        .iter()
+        .filter(|keyword| keyword.status == Status::Active)
+        .map(|keyword| keyword.japanese)
+        .chain(PARTICLES.iter().map(|(_, spelling)| *spelling))
+        .filter(|spelling| !guarded.contains(spelling))
+        .collect::<Vec<_>>();
+    assert!(
+        japanese.is_empty(),
+        "{japanese:?} are in no guarded Japanese group"
+    );
 }
