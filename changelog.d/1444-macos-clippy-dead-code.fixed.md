@@ -1,1 +1,0 @@
-Fixed (#1444): Gate the large-domain trace test's next-edition helper with the same Linux-only condition as its caller, keeping macOS Clippy warning-free without suppressing dead-code diagnostics. Linux test behavior is unchanged.

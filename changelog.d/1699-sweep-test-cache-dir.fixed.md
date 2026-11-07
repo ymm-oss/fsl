@@ -1,1 +1,0 @@
-Fixed (#1699): a `sweep` test no longer names its cache directory from the process id and the clock alone, which collided on Windows, where tests run in parallel and the clock is coarse. No product behavior changes.

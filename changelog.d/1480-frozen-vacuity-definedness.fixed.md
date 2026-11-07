@@ -1,1 +1,0 @@
-Fixed (#1480): avoid reporting a frozen-state tautology when the invariant can be undefined for a typed mutable state. Preserve genuine defined tautologies and partial operations that remain unreachable under the frozen values.

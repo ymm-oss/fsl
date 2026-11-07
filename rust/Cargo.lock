@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-core"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-syntax",
  "serde_json",
@@ -350,7 +350,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-lsp"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "crossbeam-channel",
  "fsl-core",
@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-runtime"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-core",
  "serde_json",
@@ -374,14 +374,14 @@ dependencies = [
 
 [[package]]
 name = "fsl-solver"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "fsl-solver-z3"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-solver",
  "z3",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-solver-z3js"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-solver",
  "js-sys",
@@ -399,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-syntax"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -411,7 +411,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-tools"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-core",
  "fsl-syntax",
@@ -423,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-verifier"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-core",
  "fsl-runtime",
@@ -434,7 +434,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-wasm"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-core",
  "fsl-runtime",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "fslc-rust"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
