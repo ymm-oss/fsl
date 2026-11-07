@@ -2,10 +2,10 @@
 
 //! #1429 S1: ledger and HTML assurance displays require reported completeness
 //! (`docs/design/DESIGN-assurance-classes.md`, "amendment #1429 S1"). The spec
-//! model and `explain` skeleton come from the real CLI; each verification
-//! envelope is a synthetic public-renderer input, not a native-verifier capture.
-//! Expectations are literals from the accepted contract, never the production
-//! classifier.
+//! model and `explain` skeleton come from the real CLI. [`cases`] are synthetic
+//! public-renderer inputs; [`native_cases`] are `fslc verify` envelopes captured
+//! on each run. Expectations are literals from the accepted contract, never the
+//! production classifier.
 
 #[path = "support/ledger_findings.rs"]
 #[allow(dead_code)]
@@ -55,6 +55,19 @@ struct Case {
     guarantee: &'static str,
 }
 
+/// A native `fslc verify` envelope for [`SOURCE`], captured per run, with the
+/// display the contract requires for it.
+struct NativeCase {
+    name: &'static str,
+    args: &'static [&'static str],
+    exit: i32,
+    result: &'static str,
+    completeness: &'static str,
+    aggregate: &'static str,
+    properties: [&'static str; 4],
+    guarantee: &'static str,
+}
+
 #[rustfmt::skip]
 fn cases() -> Vec<Case> {
     const PROVED_SAFETY: [&str; 4] = ["proved(induction)", "proved(induction)", "bounded", "bounded"];
@@ -75,12 +88,26 @@ fn cases() -> Vec<Case> {
         Case { name: "bounded-secondary-depth-zero", input: json!({"completeness":"bounded","depth":0}), aggregate: "bounded(BMC depth 0)", properties: ["bounded(BMC depth 0)"; 4], guarantee: BOUNDED_0 },
         Case { name: "bounded-no-depth", input: json!({"completeness":"bounded"}), aggregate: "bounded", properties: ["bounded"; 4], guarantee: UNREPORTED_DEPTH },
         Case { name: "bounded-invalid-primary-masks-secondary", input: json!({"completeness":"bounded","checked_to_depth":null,"depth":3}), aggregate: "bounded", properties: ["bounded"; 4], guarantee: UNREPORTED_DEPTH },
-        // The aggregate token reads nested kernel completeness; per-element classes read only the top level.
-        Case { name: "nested-only-bounded", input: json!({"kernel":{"completeness":"bounded"},"checked_to_depth":3}), aggregate: "bounded(BMC depth 3)", properties: ["not_run"; 4], guarantee: BOUNDED_3 },
-        // Existing proved/unbounded branches are unchanged.
+        // `fslc domain check` / `fslc ai check` report completeness only in a nested
+        // `kernel` projection; the header and every row read it the same way.
+        Case { name: "nested-only-bounded", input: json!({"kernel":{"completeness":"bounded"},"checked_to_depth":3}), aggregate: "bounded(BMC depth 3)", properties: ["bounded(BMC depth 3)"; 4], guarantee: BOUNDED_3 },
+        Case { name: "nested-only-unbounded", input: json!({"kernel":{"completeness":"unbounded"}}), aggregate: "proved(induction)", properties: PROVED_SAFETY, guarantee: PROVED },
         Case { name: "unbounded", input: json!({"completeness":"unbounded"}), aggregate: "proved(induction)", properties: PROVED_SAFETY, guarantee: PROVED },
-        Case { name: "proved-without-completeness", input: json!({"result":"proved"}), aggregate: "not_run", properties: PROVED_SAFETY, guarantee: NO_REPORT },
+        // A `proved` result alone is not evidence; a row needs the completeness the header needs.
+        Case { name: "proved-without-completeness", input: json!({"result":"proved"}), aggregate: "not_run", properties: ["not_run"; 4], guarantee: NO_REPORT },
         Case { name: "ranked-leads-to", input: json!({"completeness":"unbounded","leads_to":{"Done":{"completeness":"unbounded"}}}), aggregate: "proved(induction)", properties: ["proved(induction)", "proved(induction)", "proved(induction)", "bounded"], guarantee: PROVED },
+    ]
+}
+
+#[rustfmt::skip]
+fn native_cases() -> Vec<NativeCase> {
+    vec![
+        // The explicit engine's own budget verdict claims no completed check
+        // (`completeness:"unknown"`); it renders not_run, not BMC coverage.
+        NativeCase { name: "native-explicit-unknown-budget", args: &["verify", "--engine", "explicit", "--explicit-budget", "1", "--exclude-property", "Done", "--deadlock", "ignore"], exit: 1, result: "unknown_budget", completeness: "unknown", aggregate: "not_run", properties: ["not_run"; 4], guarantee: NO_REPORT },
+        // Positive controls: native bounded and induction envelopes keep their classes.
+        NativeCase { name: "native-bmc", args: &["verify", "--depth", "3", "--deadlock", "ignore"], exit: 0, result: "verified", completeness: "bounded", aggregate: "bounded(BMC depth 3)", properties: ["bounded(BMC depth 3)"; 4], guarantee: BOUNDED_3 },
+        NativeCase { name: "native-induction-unranked-leads-to", args: &["verify", "--engine", "induction", "--depth", "3", "--deadlock", "ignore"], exit: 0, result: "proved", completeness: "unbounded", aggregate: "bounded(BMC depth 3)", properties: ["proved(induction)", "proved(induction)", "bounded(BMC depth 3)", "bounded(BMC depth 3)"], guarantee: BOUNDED_3 },
     ]
 }
 
@@ -121,13 +148,33 @@ fn ledger_and_html_assurance_require_reported_completeness() {
         fsl_core::parse_kernel_source(SOURCE, &fsl_core::FsResolver::new(&folder)).unwrap(),
     )
     .unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .arg("explain")
-        .arg(&spec)
-        .output()
-        .unwrap();
-    assert_eq!(output.status.code(), Some(0));
-    let explained: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let fslc = |args: &[&str], exit: i32| -> Value {
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(args)
+            .arg(&spec)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(exit), "fslc {args:?}");
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let explained = fslc(&["explain"], 0);
+    let mut cases = cases();
+    for native in native_cases() {
+        let input = fslc(native.args, native.exit);
+        assert_eq!(input["result"], native.result, "{}: {input}", native.name);
+        assert_eq!(
+            input["completeness"], native.completeness,
+            "{}: {input}",
+            native.name
+        );
+        cases.push(Case {
+            name: native.name,
+            input,
+            aggregate: native.aggregate,
+            properties: native.properties,
+            guarantee: native.guarantee,
+        });
+    }
     fs::remove_dir_all(&folder).unwrap();
 
     let mut failures = Vec::new();
@@ -138,7 +185,7 @@ fn ledger_and_html_assurance_require_reported_completeness() {
             ));
         }
     };
-    for case in cases() {
+    for case in cases {
         let ledger =
             fsl_tools::render_ledger("spec.fsl", &model, &case.input, &json!({}), None, &[]);
         let html =

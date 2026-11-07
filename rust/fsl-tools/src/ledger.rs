@@ -1065,15 +1065,13 @@ fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
     findings
 }
 
-/// Classify one JSON envelope (an evidence file's parsed contents, or a
-/// `fslc verify` result) into the shared assurance vocabulary (issue #171,
-/// `docs/design/DESIGN-assurance-classes.md`): `proved` / `bounded` /
-/// `replay-observed` / `statistical` / `not_run`. `pub(crate)` so
-/// `document_evidence.rs` (issue #332) reuses this exact classification
-/// rather than re-deriving it — acceptance criterion 3 ("`bounded` never
-/// displays as `proved`") reduces to this already-tested function.
-pub(crate) fn assurance_token(value: &Value) -> &'static str {
-    let completeness = value
+/// The completeness a verification envelope reports (#1429 S1): its top-level
+/// `completeness` string, else the nested `kernel` projection's, which
+/// `fslc domain check` and `fslc ai check` emit without a top-level copy. The
+/// aggregate token, the ledger guarantee line and every per-element class read
+/// completeness only through this, so the header never claims more than a row.
+fn reported_completeness(value: &Value) -> Option<&str> {
+    value
         .get("completeness")
         .and_then(Value::as_str)
         .or_else(|| {
@@ -1082,7 +1080,18 @@ pub(crate) fn assurance_token(value: &Value) -> &'static str {
                 .and_then(Value::as_object)
                 .and_then(|kernel| kernel.get("completeness"))
                 .and_then(Value::as_str)
-        });
+        })
+}
+
+/// Classify one JSON envelope (an evidence file's parsed contents, or a
+/// `fslc verify` result) into the shared assurance vocabulary (issue #171,
+/// `docs/design/DESIGN-assurance-classes.md`): `proved` / `bounded` /
+/// `replay-observed` / `statistical` / `not_run`. `pub(crate)` so
+/// `document_evidence.rs` (issue #332) reuses this exact classification
+/// rather than re-deriving it — acceptance criterion 3 ("`bounded` never
+/// displays as `proved`") reduces to this already-tested function.
+pub(crate) fn assurance_token(value: &Value) -> &'static str {
+    let completeness = reported_completeness(value);
     if completeness == Some("unbounded") {
         if value
             .get("leads_to")
@@ -1163,9 +1172,8 @@ pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) ->
     if result == Some("error") || (group == "reachables" && !reachables_evaluated(verification)) {
         return "not_run";
     }
-    if result == Some("proved")
-        || verification.get("completeness").and_then(Value::as_str) == Some("unbounded")
-    {
+    let completeness = reported_completeness(verification);
+    if completeness == Some("unbounded") {
         if matches!(group, "invariants" | "transitions") {
             return "proved";
         }
@@ -1186,7 +1194,7 @@ pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) ->
         }
         return "bounded";
     }
-    if verification.get("completeness").and_then(Value::as_str) == Some("bounded") {
+    if completeness == Some("bounded") {
         "bounded"
     } else {
         "not_run"

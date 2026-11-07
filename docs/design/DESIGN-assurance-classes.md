@@ -107,13 +107,16 @@ must never change the assurance label, only add a finding.
 
 `pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str`
 (`rust/fsl-tools/src/ledger.rs`) — per spec element against a `verify`/`prove`
-result. Under `result:"proved"` or non-error `completeness:"unbounded"`: `invariants`/`transitions` → `proved`; a
+result. Under non-error reported `completeness:"unbounded"`: `invariants`/`transitions` → `proved`; a
 `leadstos` entry → `proved` iff
 `verification["leads_to"][name]["completeness"] == "unbounded"` (ranked),
 else `bounded`; `reachables` and action coverage → `bounded` (base BMC only).
 This also corrects unranked leadsTo/reachable rows under `refinement_failed` over induction.
-Otherwise `error` → `not_run`, top-level `completeness:"bounded"` → `bounded`,
-and remaining inputs → `not_run` (amendment #1429 S1). Reachables also use `not_run` for `violated` +
+Otherwise `error` → `not_run`, reported `completeness:"bounded"` → `bounded`,
+and remaining inputs → `not_run` (amendment #1429 S1). "Reported completeness"
+is the top-level `completeness` string, else nested `kernel.completeness` —
+the same reading `assurance_token` uses, through one helper
+(`reported_completeness`), so the header never claims more than a row. Reachables also use `not_run` for `violated` +
 `invariant`/`trans`/`ensures`/`partial_op`/`type_bound`, or `explicit` deadlock.
 This infers evaluation from result kind/engine: "not evaluated" can include an earlier witness
 that the producer omits; #1565 tracks precise per-reachable status. Scenario-confirmed library
@@ -138,7 +141,16 @@ implementation alone as the contract for this corner:
 
 The per-element fallback requires reported bounded completeness; a method name,
 depth, missing result, unknown result or CTI token alone does not establish a
-completed bounded check. Existing proved/unbounded branches, ranked/unranked
+completed bounded check. Likewise `result:"proved"` alone no longer makes a row
+`proved`: a row needs the reported `completeness:"unbounded"` the aggregate
+token needs (every native induction and explicit `proved` envelope observed
+for #1429 carries it). Nested
+`kernel.completeness` is a real producer field (`fslc domain check`,
+`fslc ai check`; table below) and is honored by the token and every row alike.
+The explicit engine's native `unknown_budget` (`completeness:"unknown"`) now
+renders `not_run` rather than `bounded(BMC depth N)`; `fslc ledger`/`html`
+accept only `bmc`/`induction`, so this reaches the library renderers only.
+Existing unbounded branches, ranked/unranked
 leadsTo handling, early reachable evaluation and scenario-confirmed library
 reachable overrides retain their order and meaning. Genuine bounded CTI remains
 bounded. Aggregate/external `assurance_token` and the #995 precedence differences
