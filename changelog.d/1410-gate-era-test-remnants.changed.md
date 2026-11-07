@@ -1,1 +1,0 @@
-Changed (#1410): Remove the test wording and helper names left from the `fsl5` gate after #1434: the `fsl5_*` runners no longer say they set the gate, `edition_migrator.rs` calls `ParseOptions::stable()` directly instead of `gated_options()`, and the LSP stdio test names its legacy `FSLC_UNSTABLE` values as such. No test assertion and no product behavior changes.

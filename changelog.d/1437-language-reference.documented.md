@@ -1,7 +1,0 @@
-Documented (#1437): the published `fsl 5` edition. `docs/manual/LANGUAGE.md` and `LANGUAGE.ja.md` now describe a document headed `fsl 5`, paired English/Japanese. They cover the requirements forms with their English and Japanese keywords: entities, lifecycles, events, all rule forms, decision tables, glossaries and contextual Japanese keywords, relations, resources, projections, goals, policies and scenarios.
-
-The edition guide states that only the header selects the syntax, while `--edition` (`current` / `next`, or `4` / `5`) selects the edition policy. On a headerless document, `--edition 5` still parses FSL 4 and only applies the next edition's findings. The guide also records how JSON reports the edition (`"edition": "next"`, `"fsl_edition"`).
-
-The FSL 4 to FSL 5 migration guide covers `fslc migrate --edition 5`, its findings including `derived_terminal_added`, and `migrate_manual_required`. It also states that `causal`, `agent` and other AI-dialect declarations, `refinement` and `compose` documents are not offered a header.
-
-New sections record the FSL 5 refusals of repeated step inputs (#1682), actors and requirement-ID owners (#1705), and `concept` (#1686). The `verify` blame note now states that `violating_bindings` names the outermost quantifier only. The FSL 4 reference is retained, and the README routes to the new sections. The site renderer keeps checked FSL examples in code blocks and the prose that follows outside them.
