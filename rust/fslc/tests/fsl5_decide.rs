@@ -25,11 +25,16 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 
 #[path = "support/kernel_compare.rs"]
 mod kernel_compare;
+
+/// Separates the scratch directories one test binary makes: the tests share
+/// the process id.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn fixture_dir(example: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -37,14 +42,21 @@ fn fixture_dir(example: &str) -> PathBuf {
         .join(example)
 }
 
-/// A scratch directory, optionally holding a copy of one fixture example.
+/// A scratch directory unique to this process and call (#1414), emptied
+/// first, optionally holding a copy of one fixture example, and removed when
+/// dropped. Another `cargo test` process on the same target does not share
+/// it.
 struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(label: &str, example: Option<&str>) -> Self {
         let directory = Path::new(env!("CARGO_TARGET_TMPDIR"))
             .join("fsl5_decide")
-            .join(label);
+            .join(format!(
+                "{label}-{}-{}",
+                std::process::id(),
+                FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).expect("create scratch directory");
         if let Some(example) = example {
