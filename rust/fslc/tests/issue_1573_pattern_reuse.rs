@@ -389,8 +389,8 @@ fn accepted_envelope(fixture: &Fixture, label: &str, spec: &str) -> bool {
             == json!({
                 "fsl": "1.0", "result": "ok", "spec": spec, "warnings": [],
                 "versions": {
-                    "verifier": {"name": "fslc-rust", "version": "4.12.0"},
-                    "core": {"name": "fsl-core", "version": "4.12.0"},
+                    "verifier": {"name": "fslc-rust", "version": env!("CARGO_PKG_VERSION")},
+                    "core": {"name": "fsl-core", "version": env!("CARGO_PKG_VERSION")},
                     "solver": {"name": "z3", "backend": "native-z3", "version": "Z3 4.16.0.0"}
                 }
             })
@@ -540,6 +540,11 @@ fn sibling_constant_and_definition_rejection_priority() {
                 };
                 let fixture = Fixture::new(&case, composed);
                 let mut expected = data["envelope"].clone();
+                // The calibrated fixture records the producing release; compare
+                // the live identity with the binary under test instead.
+                for component in ["verifier", "core"] {
+                    expected["versions"][component]["version"] = json!(env!("CARGO_PKG_VERSION"));
+                }
                 expected
                     .as_object_mut()
                     .expect("envelope")
