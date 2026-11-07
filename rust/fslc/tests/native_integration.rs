@@ -37,6 +37,15 @@ fn assert_windows_release_smoke(workflow: &str) {
 /// that hands it to `body_path`. A check only in `publish` would first fail
 /// after the tag, which cannot be reused.
 fn assert_release_notes_checked_before_the_tag(workflow: &str) {
+    // A step runs from its `- ` item to the next item at the same indent.
+    fn step<'a>(job: &str, body: &'a str, name: &str) -> &'a str {
+        let start = body
+            .find(&format!("      - name: {name}\n"))
+            .unwrap_or_else(|| panic!("the {name:?} step of {job}"));
+        let rest = &body[start..];
+        let end = rest[1..].find("\n      - ").map_or(rest.len(), |at| at + 1);
+        &rest[..end]
+    }
     let job = |name: &str| {
         let start = workflow
             .find(&format!("\n  {name}:\n"))
@@ -53,16 +62,47 @@ fn assert_release_notes_checked_before_the_tag(workflow: &str) {
     let build = "./tools/release-notes.sh build --version";
     let (assemble, publish) = (job("assemble"), job("publish"));
     assert_eq!(workflow.matches(build).count(), 2);
+    // A job-level or step-level `if:` would skip the check on a dispatch, and
+    // `continue-on-error` would let a failed check pass the job.
     assert!(
-        !assemble.contains("\n    if:"),
-        "assemble must also run on workflow_dispatch"
+        !assemble.contains("\n    if:") && !assemble.contains("\n    continue-on-error:"),
+        "assemble must also run, and fail, on workflow_dispatch"
     );
-    assert!(assemble.contains("./tools/release-notes.sh workspace-version"));
-    assert!(assemble.contains(build) && publish.contains(build));
-    assert!(publish.contains("--out release-notes.md"));
+    for (job_name, body, name) in [
+        ("assemble", assemble, "Build and check the release notes"),
+        ("publish", publish, "Build the release notes"),
+    ] {
+        let notes = step(job_name, body, name);
+        assert!(
+            notes.contains(build),
+            "{job_name}: {name:?} builds the body"
+        );
+        assert!(
+            !notes.contains("\n        if:"),
+            "{job_name}: {name:?} must not be conditional"
+        );
+        assert!(
+            !notes.contains("continue-on-error"),
+            "{job_name}: {name:?} must fail its job"
+        );
+    }
     assert!(
-        publish.find("check-stale").expect("check-stale") < publish.find(build).expect("build"),
+        step("assemble", assemble, "Build and check the release notes")
+            .contains("./tools/release-notes.sh workspace-version")
+    );
+    assert!(publish.contains("--out release-notes.md"));
+    let at = |needle: &str| {
+        publish
+            .find(needle)
+            .unwrap_or_else(|| panic!("{needle} in publish"))
+    };
+    assert!(
+        at("check-stale") < at(build),
         "the stale-fragment guard runs before the notes are built"
+    );
+    assert!(
+        at(build) < at("body_path: release-notes.md"),
+        "the notes are built and checked before the release is drafted"
     );
     // An artifact uploaded before the merge-multiple download would join the
     // release unit it verifies.

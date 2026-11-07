@@ -538,9 +538,11 @@ detects the failure it exists for, alongside its accepting fixture.
    sort components and leaves the class of defect this control exists to catch — deterministic but
    nonconforming — open in the other two.
 4. **Unaggregated at release, and post-migration direct edits.** A guard in
-   `.github/workflows/release.yml` before its "Extract release notes" step: fragments still
-   present under `changelog.d/` at tag time → exit 1, `stale-fragments-present: <files>`. The
-   workflow's existing `test -s release-notes.md` stays as the second net. Continuously after
+   `.github/workflows/release.yml`'s `publish` job before its "Build the release notes" step:
+   fragments still present under `changelog.d/` at tag time → exit 1,
+   `stale-fragments-present: <files>`. `tools/release-notes.sh build` stays as the second net:
+   it fails on a missing section, a body with no non-whitespace character, or one over GitHub's
+   limit (amendment under "Single authoritative source, preserved"). Continuously after
    migration, the merge-readiness checker (migration site 6 below) — the same pre-merge job
    that runs control 1 on every pull request — also rejects a pull-request diff that **adds or
    deletes** any line inside `CHANGELOG.md`'s `## [Unreleased]` body → exit 1,

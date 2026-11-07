@@ -46,9 +46,17 @@ DEFAULT_CHANGELOG=CHANGELOG.md
 DEFAULT_SUMMARY_DIR=docs/release-notes
 DEFAULT_CARGO_TOML=rust/Cargo.toml
 
+USAGE="usage: release-notes.sh build --version X.Y.Z --repository-url URL --out FILE [--changelog FILE] [--summary-dir DIR] | workspace-version [--cargo-toml FILE] | selftest"
+
 die() {
   echo "$*" >&2
   exit 1
+}
+
+# An option given as the last argument has no value, and `shift 2` would then
+# fail under `set -e` with no message at all.
+missing_value() {
+  die "release-notes.sh: $1 needs a value"$'\n'"$USAGE"
 }
 
 # The heading line `## [X.Y.Z] ...`, or nothing. The prefix match is the one
@@ -84,11 +92,11 @@ build() {
   local summary_dir="$DEFAULT_SUMMARY_DIR"
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --version) version="${2-}"; shift 2 ;;
-      --repository-url) repository_url="${2-}"; shift 2 ;;
-      --out) out="${2-}"; shift 2 ;;
-      --changelog) changelog="${2-}"; shift 2 ;;
-      --summary-dir) summary_dir="${2-}"; shift 2 ;;
+      --version) [ "$#" -ge 2 ] || missing_value "$1"; version="$2"; shift 2 ;;
+      --repository-url) [ "$#" -ge 2 ] || missing_value "$1"; repository_url="$2"; shift 2 ;;
+      --out) [ "$#" -ge 2 ] || missing_value "$1"; out="$2"; shift 2 ;;
+      --changelog) [ "$#" -ge 2 ] || missing_value "$1"; changelog="$2"; shift 2 ;;
+      --summary-dir) [ "$#" -ge 2 ] || missing_value "$1"; summary_dir="$2"; shift 2 ;;
       *) die "release-notes.sh build: unknown argument: $1" ;;
     esac
   done
@@ -111,6 +119,10 @@ build() {
 
   local summary="$summary_dir/v$version.md" source tmp
   tmp="$(mktemp)"
+  # Removes the body on every exit that does not move it into place,
+  # including a failed move into a missing directory.
+  # shellcheck disable=SC2064 # expand $tmp now; it is local to this function.
+  trap "rm -f '$tmp'" EXIT
   if [ -f "$summary" ]; then
     source="summary $summary"
     local anchor link
@@ -123,7 +135,6 @@ build() {
     printf '%s\n\nThe complete list of changes in %s is in [CHANGELOG.md](%s).\n' \
       "$text" "$version" "$link" > "$tmp"
     if ! grep -q '[^[:space:]]' "$summary"; then
-      rm -f "$tmp"
       die "release-notes-empty: $summary has no non-whitespace content"
     fi
   else
@@ -132,16 +143,14 @@ build() {
   fi
 
   if ! grep -q '[^[:space:]]' "$tmp"; then
-    rm -f "$tmp"
     die "release-notes-empty: the body built from $source has no non-whitespace content; add $summary stating the release's reason"
   fi
   local bytes
   bytes="$(wc -c < "$tmp" | tr -d ' ')"
   if [ "$bytes" -gt "$RELEASE_BODY_LIMIT" ]; then
-    rm -f "$tmp"
     die "release-notes-too-long: the body built from $source is $bytes bytes, over GitHub's $RELEASE_BODY_LIMIT limit; add or shorten $summary"
   fi
-  mv "$tmp" "$out"
+  mv "$tmp" "$out" || die "release-notes.sh build: cannot write $out"
   echo "release-notes: $out from $source, $bytes bytes (limit $RELEASE_BODY_LIMIT)" >&2
 }
 
@@ -149,7 +158,7 @@ workspace_version() {
   local cargo_toml="$DEFAULT_CARGO_TOML"
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --cargo-toml) cargo_toml="${2-}"; shift 2 ;;
+      --cargo-toml) [ "$#" -ge 2 ] || missing_value "$1"; cargo_toml="$2"; shift 2 ;;
       *) die "release-notes.sh workspace-version: unknown argument: $1" ;;
     esac
   done
@@ -188,20 +197,30 @@ selftest() {
       return 1
     fi
   }
+  # Every rejection runs with its own TMPDIR, which must be empty afterwards:
+  # a rejected build leaves neither the output nor its temporary body.
   expect_reject() {
-    local name="$1" diagnostic="$2"; shift 2
+    local name="$1" diagnostic="$2" leftover; shift 2
     rm -f "$dir/out.md"
-    if "$0" build --repository-url "$url" --out "$dir/out.md" "$@" 2> "$dir/err"; then
+    if TMPDIR="$dir/tmp" "$0" build --repository-url "$url" --out "$dir/out.md" "$@" 2> "$dir/err"; then
       fail "$name" "expected $diagnostic, but build succeeded"
     elif ! grep -q "^$diagnostic:" "$dir/err"; then
       fail "$name" "expected $diagnostic, got:" "$dir/err"
     elif [ -e "$dir/out.md" ]; then
       fail "$name" "a rejected build left $dir/out.md behind"
     fi
+    leftover="$(find "$dir/tmp" -mindepth 1)"
+    if [ -n "$leftover" ]; then
+      fail "$name" "a rejected build left a temporary file: $leftover"
+      find "$dir/tmp" -mindepth 1 -delete
+    fi
   }
   changelog() {
     # $1: file, $2: body of the 9.9.9 section (printf %s, no added newline).
-    { printf '# Changelog\n\n## [Unreleased]\n\n## [9.9.9] - 2026-01-02\n'
+    # 9.9.90 starts with "9.9.9", so only the closing `]` of the heading
+    # match keeps its section out of 9.9.9's.
+    { printf '# Changelog\n\n## [Unreleased]\n\n## [9.9.90] - 2026-01-03\n\n- Added (#90): adjacent.\n\n'
+      printf '## [9.9.9] - 2026-01-02\n'
       printf '%s' "$2"
       printf '## [9.9.8] - 2026-01-01\n\n- Fixed (#1): older entry.\n'; } > "$1"
   }
@@ -209,7 +228,7 @@ selftest() {
   [ "$RELEASE_BODY_LIMIT" = 125000 ] || fail "limit" "RELEASE_BODY_LIMIT is $RELEASE_BODY_LIMIT"
   local filler
   filler="$(head -c "$((RELEASE_BODY_LIMIT - 1))" /dev/zero | tr '\0' x)"
-  mkdir -p "$dir/none" "$dir/notes"
+  mkdir -p "$dir/none" "$dir/notes" "$dir/tmp"
 
   # Accepting: no summary, the body is the section without its heading.
   changelog "$dir/small.md" $'\n- Added (#2): a feature.\n\n'
@@ -267,6 +286,25 @@ selftest() {
   expect_reject "invalid version" release-notes-version-invalid \
     --version 'v9.9.9' --changelog "$dir/small.md" --summary-dir "$dir/none"
 
+  # An option with no value fails with a message, not a silent `shift 2`.
+  if "$0" build --repository-url "$url" --out "$dir/out.md" --version 2> "$dir/err"; then
+    fail "missing value" "accepted --version with no value"
+  elif ! grep -q -e '--version needs a value' "$dir/err" || ! grep -q '^usage:' "$dir/err"; then
+    fail "missing value" "expected a diagnostic and the usage, got:" "$dir/err"
+  fi
+  # An output directory that does not exist fails, and the body built before
+  # the move is removed.
+  rm -rf "$dir/missing"
+  if TMPDIR="$dir/tmp" "$0" build --repository-url "$url" --version 9.9.9 \
+      --changelog "$dir/small.md" --summary-dir "$dir/none" \
+      --out "$dir/missing/out.md" 2> "$dir/err"; then
+    fail "missing out dir" "build succeeded"
+  elif ! grep -q 'cannot write' "$dir/err"; then
+    fail "missing out dir" "expected 'cannot write', got:" "$dir/err"
+  fi
+  got="$(find "$dir/tmp" -mindepth 1)"
+  [ -z "$got" ] || fail "missing out dir" "left a temporary file: $got"
+
   # A prerelease heading slugs the way GitHub renders it.
   got="$(heading_anchor '## [5.0.0-rc.1] - 2026-11-07')"
   [ "$got" = "500-rc1---2026-11-07" ] || fail "anchor" "got $got"
@@ -291,5 +329,5 @@ case "${1-}" in
   build) shift; build "$@" ;;
   workspace-version) shift; workspace_version "$@" ;;
   selftest) shift; selftest "$@" ;;
-  *) die "usage: $0 build --version X.Y.Z --repository-url URL --out FILE [--changelog FILE] [--summary-dir DIR] | workspace-version [--cargo-toml FILE] | selftest" ;;
+  *) die "$USAGE" ;;
 esac

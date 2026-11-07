@@ -131,7 +131,8 @@ a feature-flag system solely to accommodate this flow.
      fragment under `## [X.Y.Z] - YYYY-MM-DD`, leaving `[Unreleased]` and
      `changelog.d/` both empty;
    - update comparison links, and confirm
-     `tools/release-notes.sh build --version X.Y.Z` passes; add
+     `./tools/release-notes.sh build --version X.Y.Z --repository-url https://github.com/ymm-oss/fsl --out /tmp/release-notes-X.Y.Z.md`
+     passes; add
      `docs/release-notes/vX.Y.Z.md` when the section is over the limit or has
      no bullets.
 4. Run `./tools/check-native-integration.sh` and dispatch the release workflow's
@@ -161,15 +162,16 @@ After the promotion is approved and merged:
 1. Verify the requested version is valid SemVer and absent from local and remote
    tags and releases.
 2. Verify `production` HEAD has the prepared Rust workspace version, lockfile,
-   changelog, and version section, and that `tools/release-notes.sh build`
-   passes for that version.
+   changelog, and version section, and that
+   `./tools/release-notes.sh build --version X.Y.Z --repository-url https://github.com/ymm-oss/fsl --out /tmp/release-notes-X.Y.Z.md`
+   passes there.
 3. Rerun `./tools/check-native-integration.sh` on exact `production` HEAD. Dispatch
    the manual release artifact workflow from `production`, verify its `head_sha`
    equals that HEAD, and require every job to pass. Never reuse evidence from the
    pre-merge candidate for a distinct production merge commit.
 4. Regenerate a temporary notes file on the exact production HEAD with
-   `tools/release-notes.sh build`, show it to the user, and stop if the command
-   fails; never reuse notes derived from the pre-promotion candidate.
+   `./tools/release-notes.sh build --version X.Y.Z --repository-url https://github.com/ymm-oss/fsl --out /tmp/release-notes-X.Y.Z.md`,
+   show that file to the user, and stop if the command fails; never reuse notes derived from the pre-promotion candidate.
 5. Create annotated tag `vX.Y.Z` at the gated `production` HEAD.
 6. Before pushing, state the tag, commit SHA, exact notes, and that the push
    uploads a draft, verifies its remote inventory, signs and uploads the
