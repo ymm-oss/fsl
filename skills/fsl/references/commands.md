@@ -624,7 +624,10 @@ rerendering returns `generated`/`html_report` with exit 1, inline content/defaul
 metadata and no HTML file. Direct `html -o` still writes failed-baseline reports;
 write errors exit 2 and take precedence. Direct
 HTML/ledger reports retain their generated-report exit 1. Drift reasons distinguish
-spec, rendering, and renderer changes. A drifted row carries the complete baseline digest and an
+spec, rendering, and renderer changes; the renderer is the target kind's own
+`"<renderer-id>/<semver>"` (`fslc-ledger-renderer/1.0.0`), not the `fslc` release, and a
+4.x record's bare crate version (`4.12.0`) skips only that comparison while every digest
+still applies. A drifted row carries the complete baseline digest and an
 `approval diff` command, which compares the approved commit to the current
 working spec. Treat `approver` as attribution; authenticity comes from the
 repository's signed-commit/review/branch-protection policy.

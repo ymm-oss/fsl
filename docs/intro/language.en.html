@@ -842,7 +842,7 @@ call <code>fslc</code> for the values in the first column:</p>
 <td>Approval records (#1421)</td>
 <td>v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind</td>
 <td>unsigned v5 or signed v6 with <code>path_base</code></td>
-<td>Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; <code>document generate --approval</code> needs Git</td>
+<td>Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; <code>document generate --approval</code> needs Git. A 4.x record stays <code>approved</code> while its digests match; new records record a per-kind renderer version such as <code>fslc-ledger-renderer/1.0.0</code> in <code>generator_version</code> instead of the <code>fslc</code> version</td>
 </tr>
 <tr>
 <td>A relative AI <code>dataset.source</code> (#1421)</td>
@@ -2895,12 +2895,17 @@ works outside a repository.</p>
 <code>requirements_document</code> artifact to
 the fully lowered, location-insensitive kernel digest and the current clean Git
 commit. The versioned JSON sidecar also records the normalized artifact digest,
-generator/version/options, approved requirement IDs, approver, and UTC time.
+generator, renderer version and options, approved requirement IDs, approver,
+and UTC time. The renderer version is the target kind's own
+<code>"&lt;renderer-id&gt;/&lt;semver&gt;"</code> (for example <code>fslc-ledger-renderer/1.0.0</code>), not the
+<code>fslc</code> release, so upgrading <code>fslc</code> alone does not drift an approval.
 Creation regenerates the artifact and rejects a stale review file. <code>approval
 check</code> returns <code>approved</code> only while all applicable bindings match; otherwise
 it returns <code>drifted</code> with <code>spec_changed</code>, <code>rendering_changed</code>, and/or
 <code>renderer_changed</code>. A <code>requirements_document</code> also binds the claim set and exact
-reviewed bytes, with <code>claim_set_changed</code> and <code>artifact_changed</code> reasons.
+reviewed bytes, with <code>claim_set_changed</code> and <code>artifact_changed</code> reasons. A
+record written by fslc 4.x holds a bare crate version such as <code>4.12.0</code>. For that
+value only the renderer comparison is skipped; every digest still applies.
 <code>ledger --approval</code> adds the
 same status per requirement and includes the full baseline digest. <code>approval
 diff</code> materializes the approved commit and invokes the ordinary bounded semantic

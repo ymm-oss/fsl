@@ -723,7 +723,7 @@ call `fslc` for the values in the first column:
 | `fslc refine` on an implementation that breaks its own contract; governance `preservations[].result` (#1315) | `"violated"` | `"impl_violated"` | Match `impl_violated`; `verify` keeps `violated` |
 | Generated and component names in outputs (#1256, #1255, #1284) | `submit__b1`, `acct__Inv` | `submit.b1`, `acct.Inv` | Match the dotted name, including stored `analyze` IDs and `--focus` arguments |
 | Approval artifact failures in `approval create` and `approval check` (#1418) | exit 2 | the downstream exit: 1 for a scenarios or HTML verification failure, 3 for an internal failure | Gate on exit 0 with `approval_check` and `approved` |
-| Approval records (#1421) | v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind | unsigned v5 or signed v6 with `path_base` | Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; `document generate --approval` needs Git |
+| Approval records (#1421) | v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind | unsigned v5 or signed v6 with `path_base` | Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; `document generate --approval` needs Git. A 4.x record stays `approved` while its digests match; new records record a per-kind renderer version such as `fslc-ledger-renderer/1.0.0` in `generator_version` instead of the `fslc` version |
 | A relative AI `dataset.source` (#1421) | resolved from the caller | resolved from the declaring file's directory | Rewrite repository-prefixed paths, or pass `--records` |
 | `-o` to a symlink or a non-regular file such as `/dev/null`, `/dev/stdout` or `/dev/fd/63` (#1419) | written | refused, exit 2; a writable parent directory is required | Write to a regular file, or read stdout |
 | `lint --edition next` (or `5`) on a headerless document with no other finding (#1434) | exit 0 | `missing_edition_header`, exit 1 | Omit `--edition`, or add the header |
@@ -2645,12 +2645,17 @@ works outside a repository.
 `requirements_document` artifact to
 the fully lowered, location-insensitive kernel digest and the current clean Git
 commit. The versioned JSON sidecar also records the normalized artifact digest,
-generator/version/options, approved requirement IDs, approver, and UTC time.
+generator, renderer version and options, approved requirement IDs, approver,
+and UTC time. The renderer version is the target kind's own
+`"<renderer-id>/<semver>"` (for example `fslc-ledger-renderer/1.0.0`), not the
+`fslc` release, so upgrading `fslc` alone does not drift an approval.
 Creation regenerates the artifact and rejects a stale review file. `approval
 check` returns `approved` only while all applicable bindings match; otherwise
 it returns `drifted` with `spec_changed`, `rendering_changed`, and/or
 `renderer_changed`. A `requirements_document` also binds the claim set and exact
-reviewed bytes, with `claim_set_changed` and `artifact_changed` reasons.
+reviewed bytes, with `claim_set_changed` and `artifact_changed` reasons. A
+record written by fslc 4.x holds a bare crate version such as `4.12.0`. For that
+value only the renderer comparison is skipped; every digest still applies.
 `ledger --approval` adds the
 same status per requirement and includes the full baseline digest. `approval
 diff` materializes the approved commit and invokes the ordinary bounded semantic

@@ -688,7 +688,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 | 自分の契約を破る実装に対する `fslc refine`、governance の `preservations[].result` (#1315) | `"violated"` | `"impl_violated"` | `impl_violated` で照合します。`verify` の `violated` はそのままです |
 | 出力の中の生成名とコンポーネント名 (#1256, #1255, #1284) | `submit__b1`、`acct__Inv` | `submit.b1`、`acct.Inv` | 保存した `analyze` の ID や `--focus` の引数も含め、ドットの名前で照合します |
 | `approval create` と `approval check` での承認対象の失敗 (#1418) | 終了コード 2 | 下流の終了コード。scenarios や HTML の検証の失敗は 1、内部の失敗は 3 | 終了コード 0 と `approval_check`、`approved` で判定します |
-| 承認レコード (#1421) | v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4 | 署名なしの v5、署名つきの v6(`path_base` つき) | 新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。`document generate --approval` には Git が必要です |
+| 承認レコード (#1421) | v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4 | 署名なしの v5、署名つきの v6(`path_base` つき) | 新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。`document generate --approval` には Git が必要です。4.x のレコードは、ダイジェストが一致する間は `approved` のままです。新しいレコードの `generator_version` には、`fslc` のバージョンではなく `fslc-ledger-renderer/1.0.0` のような種類ごとのレンダラのバージョンを記録します |
 | 相対パスの AI の `dataset.source` (#1421) | 呼び出し側から解決 | 宣言したファイルのディレクトリから解決 | リポジトリを前置したパスを書き直すか、`--records` を渡します |
 | シンボリックリンクや、`/dev/null`、`/dev/stdout`、`/dev/fd/63` のような通常ファイルでないものへの `-o` (#1419) | 書き込む | 拒否、終了コード 2。書き込める親ディレクトリが必要 | 通常ファイルに書くか、標準出力を読みます |
 | ほかに finding のないヘッダーのない文書への `lint --edition next`(または `5`) (#1434) | 終了コード 0 | `missing_edition_header`、終了コード 1 | `--edition` を付けないか、ヘッダーを書きます |
@@ -2441,13 +2441,18 @@ spec を省略すると、変更されたすべての `.fsl` パスを比較し�
 `requirements_document` アーティファクト
 を、完全に lowering された位置非依存のカーネルダイジェストと、現在のクリーンな Git
 コミットに束縛します。バージョン付きの JSON サイドカーは、正規化された
-アーティファクトのダイジェスト、ジェネレータ/バージョン/オプション、承認された
-要件 ID、承認者、UTC 時刻も記録します。作成はアーティファクトを再生成し、古い
+アーティファクトのダイジェスト、ジェネレータ、レンダラのバージョン、オプション、
+承認された要件 ID、承認者、UTC 時刻も記録します。レンダラのバージョンは
+target の種類ごとの `"<renderer-id>/<semver>"`(例: `fslc-ledger-renderer/1.0.0`)
+で、`fslc` のリリース番号ではありません。そのため `fslc` を更新しただけでは承認は
+drift しません。作成はアーティファクトを再生成し、古い
 レビューファイルを拒否します。`approval check` は、該当するすべてのバインディングが
 一致している間だけ `approved` を返します。そうでなければ
 `spec_changed`、`rendering_changed`、`renderer_changed` を伴う `drifted` を返します。
 `requirements_document` は claim set とレビュー済みのバイト列も別々に束縛し、
 それぞれの変更を `claim_set_changed`、`artifact_changed` で示します。
+fslc 4.x が書いたレコードは `4.12.0` のような素の crate バージョンを持ちます。
+その値に対してはレンダラの比較だけを省き、ダイジェストはすべて照合します。
 `ledger --approval` は要件ごとに同じステータスを追加し、完全なベースラインの
 ダイジェストを含みます。`approval diff` は承認されたコミットを実体化し、現在の作業
 ファイルに対して通常の有界セマンティック diff を呼び出します。

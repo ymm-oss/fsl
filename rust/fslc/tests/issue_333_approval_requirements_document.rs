@@ -533,6 +533,9 @@ fn issue_1475_fixed_timestamp_record_and_document_bytes_are_preserved() {
         "target": golden["record"]["target"],
         "approval": golden["record"]["approval"],
     });
+    // The captured v3 record holds the 4.12.0 crate version; a fresh record
+    // names the document renderer instead (DESIGN-approval.md, "Renderer version").
+    expected["record"]["target"]["generator_version"] = json!("fslc-document-renderer/1.3.0");
     let mut expected_bytes =
         serde_json::to_vec_pretty(&expected["record"]).expect("authored v5 JSON");
     expected_bytes.push(b'\n');

@@ -9,6 +9,8 @@ set rather than reading the FSL source. `fslc approval` binds that reviewed
 artifact to the normalized specification that produced it. A later check can
 therefore distinguish an unchanged approval from specification, rendering, or
 renderer drift without treating a checkbox in generated Markdown as evidence.
+Renderer drift means a change of the target kind's renderer version, not of
+the `fslc` release (see "Renderer version").
 
 The implementation is native Rust. The frozen Python reference is intentionally
 unchanged.
@@ -493,8 +495,9 @@ rendering is fully deterministic, so nothing needs normalizing before hashing.
 `fsl-rcir-claim-set-v1+sha256` (issue #325) is recorded separately alongside
 the artifact digest, not folded into it, so a caller can distinguish "the
 requirements projection itself changed" (`claim_set_changed`) from "only
-presentation changed" (`rendering_changed` alone — a renderer version bump,
-label, or evidence-overlay change with no change to what the RCIR claims say)
+presentation changed" (`rendering_changed` — a label or evidence-overlay
+change, or a renderer version bump, which a new-form record also reports as
+`renderer_changed`, with no change to what the RCIR claims say)
 from "the spec moved somewhere the claim set doesn't reflect" (`spec_changed`
 without `claim_set_changed`).
 
@@ -510,13 +513,66 @@ authoritative approval-governance check `fslc approval check` performs.
 Adding the approval frontmatter binding and reference section advances the
 requirements-document renderer from evidence overlay version `1.2.0` to `1.3.0`.
 
+### Renderer version
+
+`target.generator_version` names the renderer of the target kind as
+`"<renderer-id>/<semver>"`, not the `fslc` crate version. One constant per kind
+supplies it, through `approval::renderer_version(kind)`. Creation writes that
+value and `approval check` compares the record with it, so both sides use the
+same function:
+
+| Kind | Recorded value | Constant |
+|---|---|---|
+| `ledger` | `fslc-ledger-renderer/1.0.0` | `fsl_tools::LEDGER_RENDERER{,_VERSION}` (`fsl-tools/src/ledger.rs`) |
+| `html` | `fslc-html-renderer/1.0.0` | `fsl_tools::HTML_RENDERER{,_VERSION}` (`fsl-tools/src/html.rs`) |
+| `scenarios` | `fslc-scenarios-renderer/1.0.0` | `approval::SCENARIOS_RENDERER{,_VERSION}` (`fslc/src/approval.rs`; the scenario envelope is built in fslc) |
+| `requirements_document` | `fslc-document-renderer/1.3.0` | `fsl_tools::DOCUMENT_RENDERER{,_VERSION}`, the same value the document frontmatter carries |
+
+Bump a kind's version by hand when a template string, section order, escaping,
+style or other presentation of its rendered bytes changes for the same
+verification result. Do not bump it for an `fslc` release or for a changed
+verifier result; the artifact digest already reports those as
+`rendering_changed`. Before this rule the field held `CARGO_PKG_VERSION`, so
+every release, including a patch release, marked every approval drifted with
+`renderer_changed` although the reviewed bytes were unchanged.
+`DOCUMENT_RENDERER_VERSION` was already independent of the crate version for
+the same reason.
+
+`approval_renderer_version.rs` pins each kind's recorded value together with
+the artifact digest of a fixed render. The pin forces a deliberate decision
+when the rendered bytes move: bump the version if the presentation changed,
+or update only the digest if a verifier result changed the bytes. It cannot
+enforce the bump, because either edit makes it pass again.
+
+**Legacy records.** A record written before renderer versions holds a bare
+crate version, exactly `^\d+\.\d+\.\d+$` in ASCII digits (for example
+`4.12.0`, or `4.7.0` in the v1 and v3 examples above). Such a value carries no
+renderer identity, so `approval check` and `ledger --approval` skip only the
+`renderer_changed` comparison for it. The specification, rendered-artifact,
+claim-set and reviewed-artifact bindings still apply, as do the signature and
+raw-input checks. Any other value is compared exactly, including strings
+that only resemble a version (`4.12`, `v4.12.0`, `4.12.0-rc.1`). Signed
+records are never rewritten.
+
+This relaxes legacy records on purpose. A legacy record whose crate version
+differs from the running `fslc` used to report `drifted` with
+`renderer_changed`. It now reports `approved` when every digest matches. This
+is sound for the approval statement because the rendered-artifact digest
+compares the reviewed bytes, normalized only for the execution noise listed
+under "Rendered artifact digest", with a fresh rendering by the current
+`fslc` from the recorded inputs. A `requirements_document` also carries its
+renderer version inside the hashed frontmatter. What a legacy record loses is
+the attribution "the renderer changed". It does not lose detection of any change
+to what was reviewed.
+
 ## Status and failure reasons
 
 An approval is `approved` only when all applicable bindings match:
 
 - normalized specification digest;
 - normalized rendered-artifact digest;
-- renderer version;
+- the target kind's renderer version (not compared for a legacy bare crate
+  version; see "Renderer version");
 - for `requirements_document` only: the RCIR claim-set digest.
 - for `requirements_document` only: the literal reviewed-artifact digest.
 
@@ -630,3 +686,11 @@ of the five existing drift reasons, earlier read/parse/trust/signature failures,
 editable-slot bindings, ledger record/exit order, and the lightweight generation,
 structural check and diff boundaries. The rejecting baseline distinguishes the
 raw-digest gap from the existing preservation controls.
+
+`approval_renderer_version.rs` covers the renderer-version contract. It pins each
+kind's recorded value together with its render digest. It shows that a legacy
+crate version approves only while every digest matches, and that a changed
+rendering under it is `rendering_changed`. A new-form value with another
+renderer id or version is `renderer_changed`, and so is any semver lookalike.
+The genuine 4.12.0 fixtures of #1418, #1421 and #1475 keep their approved
+outcomes unchanged at any crate version.

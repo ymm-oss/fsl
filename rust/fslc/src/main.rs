@@ -13973,6 +13973,12 @@ fn run_approval_create_from_source(
             &format!("approval references unknown requirement '{unknown}'"),
         ));
     }
+    let Some(generator_version) = approval::renderer_version(kind) else {
+        return error_exit(error_output(
+            "usage",
+            &format!("unsupported approval target '{kind}'"),
+        ));
+    };
     let record = approval::ApprovalRecord {
         schema: approval::APPROVAL_SCHEMA_V5.to_owned(),
         // A solver record reads nothing through its base, so it can be created anywhere.
@@ -13998,7 +14004,7 @@ fn run_approval_create_from_source(
                 .map(|_| approval::CLAIM_SET_DIGEST_ALGORITHM.to_owned()),
             claim_set_digest,
             generator: "fslc".to_owned(),
-            generator_version: env!("CARGO_PKG_VERSION").to_owned(),
+            generator_version,
             inputs: inputs.clone(),
         },
         approval: approval::ApprovalMetadata {
@@ -14161,7 +14167,6 @@ fn approval_evaluation(
         record_path,
         &current_spec_digest,
         &current_artifact_digest,
-        env!("CARGO_PKG_VERSION"),
         current_claim_set_digest.as_deref(),
         current_reviewed_digest.as_deref(),
     );

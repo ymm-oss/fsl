@@ -809,7 +809,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <td>承認レコード (#1421)</td>
 <td>v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4</td>
 <td>署名なしの v5、署名つきの v6(<code>path_base</code> つき)</td>
-<td>新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。<code>document generate --approval</code> には Git が必要です</td>
+<td>新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。<code>document generate --approval</code> には Git が必要です。4.x のレコードは、ダイジェストが一致する間は <code>approved</code> のままです。新しいレコードの <code>generator_version</code> には、<code>fslc</code> のバージョンではなく <code>fslc-ledger-renderer/1.0.0</code> のような種類ごとのレンダラのバージョンを記録します</td>
 </tr>
 <tr>
 <td>相対パスの AI の <code>dataset.source</code> (#1421)</td>
@@ -2691,13 +2691,18 @@ spec を省略すると、変更されたすべての <code>.fsl</code> パス�
 <code>requirements_document</code> アーティファクト
 を、完全に lowering された位置非依存のカーネルダイジェストと、現在のクリーンな Git
 コミットに束縛します。バージョン付きの JSON サイドカーは、正規化された
-アーティファクトのダイジェスト、ジェネレータ/バージョン/オプション、承認された
-要件 ID、承認者、UTC 時刻も記録します。作成はアーティファクトを再生成し、古い
+アーティファクトのダイジェスト、ジェネレータ、レンダラのバージョン、オプション、
+承認された要件 ID、承認者、UTC 時刻も記録します。レンダラのバージョンは
+target の種類ごとの <code>"&lt;renderer-id&gt;/&lt;semver&gt;"</code>(例: <code>fslc-ledger-renderer/1.0.0</code>)
+で、<code>fslc</code> のリリース番号ではありません。そのため <code>fslc</code> を更新しただけでは承認は
+drift しません。作成はアーティファクトを再生成し、古い
 レビューファイルを拒否します。<code>approval check</code> は、該当するすべてのバインディングが
 一致している間だけ <code>approved</code> を返します。そうでなければ
 <code>spec_changed</code>、<code>rendering_changed</code>、<code>renderer_changed</code> を伴う <code>drifted</code> を返します。
 <code>requirements_document</code> は claim set とレビュー済みのバイト列も別々に束縛し、
 それぞれの変更を <code>claim_set_changed</code>、<code>artifact_changed</code> で示します。
+fslc 4.x が書いたレコードは <code>4.12.0</code> のような素の crate バージョンを持ちます。
+その値に対してはレンダラの比較だけを省き、ダイジェストはすべて照合します。
 <code>ledger --approval</code> は要件ごとに同じステータスを追加し、完全なベースラインの
 ダイジェストを含みます。<code>approval diff</code> は承認されたコミットを実体化し、現在の作業
 ファイルに対して通常の有界セマンティック diff を呼び出します。
