@@ -18,6 +18,41 @@ layers still mean the same thing?" Verify a one-off hard spot with a single spec
 when the value is keeping the layers aligned, reach for the connected workflow
 (`fslc chain`) and the `fsl-delivery` skill. The two workflows are juxtaposed below.
 
+## Editions: FSL 4 and FSL 5
+
+The header selects the syntax. A document whose first non-trivia line is
+`fsl 5` (blank lines and `//` comments may precede it; document annotations and
+the dialect keyword follow it) is FSL 5. **A headerless document is FSL 4**, as
+is one headed `fsl 4`. `--edition current|next` selects the edition policy
+(which findings are reported and how severe they are), never the syntax: on a
+headerless document `--edition next` still parses FSL 4.
+
+```fsl-fragment
+fsl 5
+@requirement("REQ-CART-001", "one selected item at a time")
+spec Cart {
+  // the kernel body is written exactly as in the template below
+}
+```
+
+- **This core reference keeps the FSL 4 and kernel guidance.** Kernel `spec`
+  bodies are shared: the template under "Minimal syntax" also checks with
+  `fsl 5` on its first line.
+- **For files headed `fsl 5`, the layer skills own the forms.** Use
+  [fsl-business](../fsl-business/SKILL.md),
+  [fsl-requirements](../fsl-requirements/SKILL.md) and
+  [fsl-design](../fsl-design/SKILL.md). The FSL 5 requirements syntax is owned by
+  [fsl-requirements syntax](../fsl-requirements/references/syntax.md), with its
+  [keyword table](../fsl-requirements/references/keywords.md) and
+  [glossary](../fsl-requirements/references/glossary.md). Do not revive the
+  earlier process/transition requirements forms under `fsl 5`; they remain the
+  FSL 4 forms documented in [layers](references/layers.md).
+- **Migration is a semantic review, not a search-and-replace of edition
+  numbers.** `fslc migrate <path>... --edition next` is a dry run; add `--write`
+  only after reviewing the complete validated set. The migration guide in
+  `docs/manual/LANGUAGE.md` ("FSL 4 to FSL 5 migration") lists what is migrated,
+  what needs a manual decision, and which dialects take no header.
+
 ## Choose the right role skill first
 
 This skill is the shared language/verifier reference. For authoring from natural
@@ -30,6 +65,8 @@ language, use the narrow role skill first and return here for syntax and repair:
 | Engineering design, internal state/actions, mapping to requirements | `fsl-design` | kernel `spec`, mapping, refine/testgen handoff |
 | Design review, variants, SOLID/LSP/OCP/substitutability | `fsl-design-review` | contract-conformance judgment |
 | Verify / prove / gate a spec, judge if it is ready to hand over, measure its strength | `fsl-verify` | command sequence, result reading, completion report |
+| Existing code → design spec | `fsl-from-code` | witnessed model and implementation anchor |
+| Coordinate actual layers end to end | `fsl-delivery` | connected delivery workflow |
 
 If a PM asks for a requirements specification, do not continue into design
 artifacts unless explicitly asked. If a consultant asks for business controls, do
@@ -250,6 +287,9 @@ report format are in `../fsl-verify/SKILL.md`.
    `proved` candidates are used, rejected candidates retain counterexample/CTI
    evidence, and successful output recommends declarations to write back. Never
    treat a candidate as an assumption without this adjudication.
+   For a ranked response (`helpful`, `decreases`, their placement outside a
+   `forall` wrapper, and interleaving), follow the
+   [ranked-response recipe](references/syntax.md#ranked-response-recipe).
 ## Minimal syntax (details and the full catalog are in the [syntax reference](references/syntax.md))
 
 The following is a self-contained template that passes `fslc check` as-is (the
@@ -378,7 +418,7 @@ collection preemptively.
 - [when-to-use](references/when-to-use.md) — decide whether FSL is the right tool for the problem.
 - [commands](references/commands.md) — use extended verifier commands and interpret their JSON contracts.
 - [layers](references/layers.md) — work across business, requirements, and design layers, including NFRs.
-- [syntax](references/syntax.md) — look up the language grammar, types, expressions, semantic rules, checks, and idioms.
+- [syntax](references/syntax.md) — look up the language grammar, types, expressions, semantic rules, checks, and idioms, plus the compact [annotations and reusable predicates](references/syntax.md#annotations-and-reusable-predicates), [Option payload scope](references/syntax.md#option-payload-scope), [ranked-response recipe](references/syntax.md#ranked-response-recipe), and [compose and refinement](references/syntax.md#compose-and-refinement) sections.
 - [advanced](references/advanced.md) — use DB, domain, AI, and typestate features.
 - [nl-to-syntax](references/nl-to-syntax.md) — map confirmed natural-language requirements to FSL constructs.
 - [practices](references/practices.md) — apply optional authoring practices appropriate to the task's risk.

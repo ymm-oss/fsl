@@ -563,7 +563,7 @@ blocks, the `covers` link with its owner's title, the one-text rule for an unown
 covering its own table, and `migrate`'s `shared_requirement_id` refusal are in
 `docs/manual/LANGUAGE.md` and `docs/manual/LANGUAGE.ja.md` ("Repeated inputs, declarations and
 requirement IDs", anchor `fsl5-repeats`) and in `skills/fsl/references/syntax.md`, with the site
-regenerated; `skills-next/fsl-requirements/references/syntax.md` and
+regenerated; `skills/fsl-requirements/references/syntax.md` and
 `changelog.d/1705-requirements-repeats.changed.md` keep their records. Migration: rename one of the
 two IDs, or merge the two declarations; delete the repeated actor.
 

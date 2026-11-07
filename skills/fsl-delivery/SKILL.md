@@ -1,187 +1,130 @@
 ---
 name: fsl-delivery
-description: Orchestrate an FSL-centered delivery workflow from business planning through PM requirements, engineering design, verification, refinement, scenarios, testgen/replay, and implementation conformance. Use when the user asks to drive a feature/project "from planning to implementation" with FSL as the backbone, connect business to requirements to design to implementation, create an end-to-end FSL development plan, or coordinate the existing fsl-business, fsl-requirements, fsl-design, and fsl-design-review skills.
+description: Orchestrate FSL-centered delivery from business planning through PM requirements, engineering design, verification, refinement, scenarios, testgen/replay, and implementation conformance for files headed fsl 5. Use for planning-to-implementation workflows, connected business/requirements/design contracts, or coordination of the FSL layer and review skills.
 ---
 
 # FSL Delivery
 
-## Overview
+A headerless document is FSL 4; to migrate it, see the migration guide in `docs/manual/LANGUAGE.md` ("FSL 4 to FSL 5 migration").
 
-Use this skill as the lifecycle coordinator for FSL-based delivery. It does not
-replace the layer-specific skills; it routes work to them, preserves the layer
-boundaries, and keeps proof, refinement, and implementation-conformance claims
-separate.
-
-FSL is the checkable contract spine, not the entire product process — but that
-spine is broad by default: a spec replaces the prose business/requirements/design
-doc you would write anyway, so wide coverage across those layers needs no
-per-feature verification-ROI case. Natural language discovery, UI/API design,
-coding, and testing still happen in their normal tools; FSL supplies the
-machine-checkable contracts and counterexamples that constrain those artifacts.
-
-The resulting spec corpus is the project's living single source of truth: each
-layer is re-verified on every change (regression, drift, and cross-layer
-change-impact via `refine`), and it doubles as onboarding context for humans and AI
-approaching the flow it documents.
+Coordinate the lifecycle; do not replace the layer owners or mix model proof,
+refinement, and implementation conformance into a single green claim. FSL is the
+checkable contract spine, not the whole product process. A readable spec can
+replace a prose document even when verification risk is modest; discovery,
+UI/API design, coding and ordinary testing still use their normal tools.
+Reverify the living corpus and its seams after changes.
 
 ## Routing
 
-Before authoring a layer, read and follow the corresponding skill:
+Before authoring, read only the relevant owner:
 
-- Business process, As-Is/To-Be, controls, KPIs, goals: `../fsl-business/SKILL.md`
-- PM/PdM requirements, acceptance criteria, forbidden flows, NFR/SLA:
-  `../fsl-requirements/SKILL.md`
-- Engineering design, internal state/actions, refinement mapping, testgen/replay
-  handoff: `../fsl-design/SKILL.md`
-- Design review, variants, substitutability, SOLID/LSP/OCP judgment:
-  `../fsl-design-review/SKILL.md`
-- Cross-cutting dialect concerns — DB migration compatibility (`dbsystem`,
-  `fslc db`), Functional DDD / async effects (`domain`, `fslc domain`), AI
-  tool-boundary and agent contracts plus statistical evidence (`ai_component`/
-  `agent`, `fslc ai`): `../fsl/references/advanced.md`. These sit
-  outside the business→requirements→design progression and are not stage-gated
-  by this skill.
-- Syntax, verifier commands, JSON repair protocol: `../fsl/SKILL.md`, then its
-  topic-specific references as needed
+- [Business](../fsl-business/SKILL.md): As-Is/To-Be, actors, stages, controls,
+  policies, KPIs/goals, governance preservation.
+- [Requirements](../fsl-requirements/SKILL.md): externally observable entity/
+  lifecycle/event/rule/decide contracts, scenarios/forbidden traces, NFRs and
+  optional business implements seam.
+- [Design](../fsl-design/SKILL.md): internal kernel state/actions,
+  compose/refinement and implementation handoff.
+- [Design review](../fsl-design-review/SKILL.md): proposal/change, frozen
+  contract, substitutability and principle-based judgment.
+- [From code](../fsl-from-code/SKILL.md): existing implementation → witnessed
+  design model, owner-confirmed invariants and downward conformance anchor.
+- [Verify](../fsl-verify/SKILL.md): run sequence, results, origin self-check,
+  proof limits and final evidence table.
+- [Core](../fsl/SKILL.md): source fidelity, syntax, commands and repair.
+- Retained `fsl-requirements-document` skill from the base bundle: checked
+  requirements/spec → deterministic stakeholder document; edits only the
+  non-normative slot. It is intentionally not duplicated in this staging tree.
 
-Load only the skills needed for the current stage. Do not duplicate their syntax
-rules in this skill.
+DB compatibility, Functional DDD/effects, AI tools/agents and external evidence
+are cross-cutting [dialects](../fsl/references/advanced.md), not extra mandatory
+stages. Keep their structural/statistical/runtime claims distinct from kernel
+proof. Do not drop these routes or invent a unified composite dialect.
 
 ## Workflow
 
-1. Identify the entry point and scope:
-   - No stable business/PM material: start with business discovery.
-   - Stable business contract exists: start or update requirements.
-   - Stable requirements exist: start or update design/refinement.
-   - Code or logs exist: connect implementation conformance with `testgen` or
-     `replay`.
-   - User asks whether a change/variant is safe: use design review.
-2. Post a compact delivery memo before writing new FSL:
-   - target flow and risk reason
-   - available source artifacts
-   - planned FSL layers and filenames
-   - upper contract for each lower layer
-   - acceptance/forbidden examples and implementation anchor, if known
-   - behavior-changing assumptions and open questions
-3. Author or update one layer at a time. Do not let lower-layer detail leak upward:
-   business speaks in business stages and controls; requirements speak in
-   externally observable behavior; design speaks in internal mechanics.
-4. Verify each layer before depending on it:
-   - `fslc check <file>`
-   - `fslc lint <file>` (no findings)
-   - `fslc verify <file> --depth 8`
-   - `fslc verify <file> --engine induction`
-   Read the results with `../fsl-verify/SKILL.md`: several outcomes exit 0
-   without passing (warnings, `not_evaluated` seams, `diff` findings, `mutate`
-   survivors).
-5. Connect layers downward. Each handoff is a **refinement seam (a contract), not a
-   plain baton pass** — the seam itself is verified, and a green chain is exactly as
-   strong as the soundness of these seams:
-   - requirements implements/refines business (`implements`, reported under the
-     `implements` field of the requirements `verify` JSON)
-   - design refines requirements with an explicit mapping (`fslc refine`)
-   - implementation conforms through generated tests or event-log replay. A
-     generated suite counts only once it has executed tests against the wired
-     Adapter: unwired tests fail by default, and `--allow-unwired` makes them skip
-     (exit 0 with nothing run), so "the generated tests are green" is never the
-     conformance evidence by itself — check the executed count
-   - gate the whole chain at once with `fslc chain` when a manifest exists; give
-     `[impl]` a JUnit `report` so an all-skipped or empty run is `indeterminate`,
-     not `passed`. `evidence = "exit_code"` (flagged `exit_code_only`) is for
-     non-test commands and is never the implementation-conformance anchor
-   - **testgen layer selection:** run `fslc testgen` on the spec at the **same
-     layer granularity as the implementation** (design `spec` for design-aligned
-     code). From upper layers, reuse **`forbidden` negatives only** — they stay
-     sound under refinement; upper **positive** scenarios can falsely fail a
-     sound refinement (see `../fsl/references/impl.md` §9).
-6. Report proof categories separately. Never collapse "model is verified",
-   "design refines requirements", and "implementation conforms" into one claim.
-   Use the completion report format in `../fsl-verify/SKILL.md`.
+1. **Entry point and scope.** No stable material → discovery. Agreed business
+   contract → requirements. Agreed requirements → design. Existing code/logs →
+   extraction or conformance. A safe-change question → design review. Do not
+   fabricate an upper layer just to fill a delivery table.
+2. **Delivery memo in chat before new FSL:** target flow/risk or documentation
+   payoff, source artifacts, layers and filenames, upper contract per lower
+   layer, positive/negative examples, implementation anchor if known,
+   behavior-changing assumptions and open human decisions. Obtain confirmation
+   for choices the source does not settle.
+3. **Author one layer at a time.** Business speaks stages/controls, requirements
+   external behavior, design internal mechanics. Use `fsl 5` for kernel/business/
+   requirements examples as their owners prescribe; requirements process forms
+   are not the new edition. Do not apply layer syntax to unrelated dialects.
+4. **Verify before depending on a layer:** check → strict traceability → lint →
+   verify depth 8 → induction, then its scenarios/seams/origin audit. Fix the first
+   non-pass with the owner; exit 0 alone can carry warnings, skipped seams,
+   diff findings or surviving mutants.
+5. **Connect downward as verified seams:**
+   - Requirements implements business; require nested `refines`, not merely
+     an ordinary-looking top-level result. Preserve canonical names, actor
+     correspondence, stage order and no-bypass history maps.
+   - Design refines the **lowered** requirements kernel. Read canonical
+     explain/lowering origins before mapping; no glossary aliases in maps.
+   - Implementation conforms at the Adapter's abstraction granularity. Reuse
+     upper forbidden negatives only, not upper positive scenarios that a sound
+     refinement may realize with additional internal steps.
+   - Run chain when a manifest exists. A test-running [impl] needs a fresh JUnit
+     report with at least one executed test, no failures/errors. All-skipped/
+     empty/unwired is indeterminate, not conformance. Exit-code-only evidence
+     is for non-test commands, flagged explicitly.
+6. **Report categories separately.** Model consistency, bounded/proved scope,
+   refinement, and real implementation anchoring each need their own evidence.
+   Use [verify's completion table](../fsl-verify/SKILL.md#7-completion-report).
 
-## Stage Gates
+## Stage gates
 
-| Stage | Deliverable | Required checks |
+| Stage | Deliverable | Required evidence |
 |---|---|---|
-| Business | `business` spec with policies, KPIs, goals | check, verify, induction |
-| Requirements | `requirements` spec with REQ IDs, acceptance, forbidden, NFRs | check, verify, induction, scenarios; when `implements` is present, assert `implements.result == "refines"` in the JSON (or gate with `fslc chain`) — a failed seam exits 1 with top-level `refinement_failed` or `impl_violated` |
-| Design | kernel `spec` plus mapping to requirements | check, verify, induction, refine |
-| Implementation | Adapter or event log connected to real behavior | testgen run with ≥ 1 executed test against the wired Adapter (chain `[impl]` with `report` → `passed`, not `indeterminate`), or replay; do not claim conformance before this |
-| Review/change | proposal spec or before/after contract | verify each side, refine against frozen contract, `fslc diff --forbid behavior_removed` between before and after when they share state and action names, optional mutate/vacuity |
+| Business | business/governance contract | check, lint, bounded verify, induction; preservation when declared |
+| Requirements | requirements with source IDs, rules/decision tables, scenarios and forbidden cases | strict check, lint, verify, induction, scenarios, origin self-check; implements only on refines |
+| Design | kernel spec and explicit upper mapping | check/lint/verify/induction, refine; progress separately or explicitly preserved |
+| Implementation | real Adapter/log | actually executed conformance tests or replay; plan/scaffold alone is not an anchor |
+| Review/change | proposal or before/after | verify each, refine frozen contract; diff with explicit rejected kinds including unknown where comparable; strength controls by risk |
 
-For every layer, also run:
+For every authored layer run strict traceability using ids.txt (one source ID
+per line), lint with no findings, and explain --readable as the human source view.
+New requirements additionally needs its source→origin rule/row audit and both
+spellings checked when Japanese is delivered. For high-risk contracts add
+verify --vacuity error and mutate --by-requirement; read survivors, not just exit.
+After changes, use the verify skill's full diff policy and rerun unchanged-upper
+refinement; --forbid behavior_removed alone misses added behavior and unknowns.
 
-- `fslc verify <file> --strict-tags --requirements ids.txt` (traceability —
-  untagged declarations and unreferenced requirement IDs; `ids.txt` holds one
-  requirement ID per line, not a comma list)
-- `fslc lint <file>` (ID form — exits 1 on a non-canonical `"REQ-1: text"`
-  string tag, which `--strict-tags` accepts silently, and on an ID outside the
-  active policy. The canonical link is `@requirement("REQ-SCOPE-001", "text")`,
-  or process `covers` in the business/requirements dialects)
-- `fslc explain <file> --readable` (renders the spec as a readable digest; this is
-  the spec's documentation, not a separate report)
+## Claim discipline and human gates
 
-For high-risk contracts, add the more expensive checks:
+- Green business/requirements/design means consistency of the model under the
+  confirmed interpretation and reported bounds, not stakeholder intent truth.
+- Only refines passes a seam; unknown_budget/not_evaluated are open. Refinement
+  preserves checked safety, permits stronger guards, and is not full LSP.
+- Liveness does not automatically propagate. Verify the response-owning layer
+  or use supported preserve-progress mapping; list sizes/depth/proof scope.
+- An Adapter/log anchors only what executed at its granularity. Generated tests
+  do not establish inside-action interleaving/crash atomicity.
+- Stop for missing guard, exception, deadline, retry, ownership, lifecycle or
+  abstraction/mapping decisions. Confirm stutters and implementation projection.
+- If a counterexample could be “fixed” by weakening the upper contract, ask its
+  owner rather than silently choosing. On conformance divergence, classify
+  spec-intent mismatch, Adapter error, or code defect before editing code.
+- Representation-only finite sizes may be chosen and labeled, never silently
+  promoted into product requirements or generalized beyond the checked world.
 
-- `fslc verify <file> --vacuity error`
-- `fslc mutate <file> --by-requirement`
+## Output
 
-## Claim Discipline
-
-- A green business layer means the business model is internally consistent under
-  the stated interpretation.
-- A green requirements layer means the requirements model is internally
-  consistent; if `implements` is green, it also preserves the business contract's
-  checked safety obligations. "Green" here means `implements.result == "refines"` in the JSON — a failed seam exits 1 with
-  top-level `refinement_failed` or `impl_violated`, not a silent exit 0.
-- A green design layer means the design model is internally consistent.
-- A green `refine` means lower-layer observable behavior conforms to the upper
-  contract for checked safety behavior.
-- Liveness/progress does not automatically propagate through refinement. Verify
-  response properties at each layer that owns progress.
-- A `testgen` run that executed tests against the wired Adapter, or a `replay`
-  result, is the implementation-conformance anchor. A green run alone is not:
-  an `--allow-unwired` suite is green with every test skipped. Without an
-  Adapter or log, the implementation is not yet checked.
-
-## Human Decision Gates
-
-Stop and ask for a product/business/design decision before changing behavior when:
-
-- a guard, exception, deadline, retry rule, ownership rule, or state transition is
-  missing from the source
-- a counterexample can be fixed either by weakening a contract or by changing the
-  lower layer
-- a refinement mapping or stutter correspondence is not obvious from the source
-- an implementation Adapter must decide how to project real state into FSL state
-- an implementation-conformance run (generated tests, conformance vectors, or
-  replay) diverges from a spec whose `acceptance` / `forbidden` the owner has
-  not confirmed against intent, so the divergence may be the spec's error
-  rather than the implementation's (see `../fsl/references/impl.md` §9, "Using
-  conformance as an implementation loop for an AI agent")
-
-Representation-only modeling choices, such as finite domain sizes for model
-checking, may be chosen by the agent. Label them separately from product
-assumptions.
-
-## Output Format
-
-When reporting progress or completion, include a compact status table:
-
-| Layer | File | Result | Notes |
+| Layer | File | Result | Scope / seam / anchor |
 |---|---|---|---|
-| Business | ... | proved/verified/not used | ... |
-| Requirements | ... | proved + implements/refines | ... |
-| Design | ... | proved + refines | ... |
-| Implementation | ... | conformant/not anchored | ... |
+| Business | actual file or not used | proved / bounded / unknown | sizes and controls |
+| Requirements | actual file | result + implements | source coverage and origins |
+| Design | actual file + map | result + refine | depth/sizes/progress limits |
+| Implementation | Adapter/log | conformant / not anchored | executed tests / observed records |
 
-Then list open human decisions and the next concrete command or file to inspect.
+Then give exact commands/exits, open decisions, unshown behavior, and one next
+concrete command/file. Do not claim completion before the required evidence.
 
-## Common Prompts
-
-- "Use $fsl-delivery to take this cancellation flow from business policy to
-  implementation conformance."
-- "Use $fsl-delivery to decide which FSL layers we need for this feature."
-- "Use $fsl-delivery to connect these requirements to a design spec and generated
-  conformance tests."
-- "Use $fsl-delivery to review whether this implementation-oriented design still
-  preserves the PM requirements."
+Typical requests: take cancellation from business to implementation; select real
+layers for a feature; connect requirements/design/conformance; review whether an
+implementation-oriented design still preserves PM requirements.
