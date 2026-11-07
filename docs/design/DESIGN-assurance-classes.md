@@ -112,7 +112,8 @@ result. Under `result:"proved"` or non-error `completeness:"unbounded"`: `invari
 `verification["leads_to"][name]["completeness"] == "unbounded"` (ranked),
 else `bounded`; `reachables` and action coverage → `bounded` (base BMC only).
 This also corrects unranked leadsTo/reachable rows under `refinement_failed` over induction.
-Otherwise `error` → `not_run`, else `bounded`. Reachables also use `not_run` for `violated` +
+Otherwise `error` → `not_run`, top-level `completeness:"bounded"` → `bounded`,
+and remaining inputs → `not_run` (amendment #1429 S1). Reachables also use `not_run` for `violated` +
 `invariant`/`trans`/`ensures`/`partial_op`/`type_bound`, or `explicit` deadlock.
 This infers evaluation from result kind/engine: "not evaluated" can include an earlier witness
 that the producer omits; #1565 tracks precise per-reachable status. Scenario-confirmed library
@@ -132,6 +133,40 @@ implementation alone as the contract for this corner:
 |---|---|---|
 | `result:"error"` + `completeness:"bounded"` | `not_run` | `bounded` |
 | `result:"error"` + `completeness:"unbounded"` | `not_run` | `proved` |
+
+### Ledger guarantee text — amendment #1429 S1
+
+The per-element fallback requires reported bounded completeness; a method name,
+depth, missing result, unknown result or CTI token alone does not establish a
+completed bounded check. Existing proved/unbounded branches, ranked/unranked
+leadsTo handling, early reachable evaluation and scenario-confirmed library
+reachable overrides retain their order and meaning. Genuine bounded CTI remains
+bounded. Aggregate/external `assurance_token` and the #995 precedence differences
+above are unchanged; this amendment does not authenticate external evidence.
+
+The ledger guarantee sentence follows the existing aggregate token, except
+`result:"error"` always reports the error sentence. Proved retains its existing
+sentence. Bounded selects `checked_to_depth` when that key is present, otherwise
+`depth`, and accepts only `as_u64`; zero is valid. An invalid present primary
+value does not fall back to the secondary key. A valid depth retains the BMC
+sentence; absent/invalid depth uses the unreported-depth sentence below.
+
+| Context | Exact guarantee sentence |
+|---|---|
+| No reported formal evidence (`not_run`) | 形式的根拠なし（not_run）。検査完了の根拠は報告されていない |
+| Verification error | 形式的根拠なし（not_run）。検証はエラーで終了した |
+| Bounded, depth unreported | 有界検査の報告（bounded）。検査深さは報告されていない |
+| Replay | 観測済みログの照合のみ（replay-observed）。未観測の実行は保証しない |
+| Statistical | 固定データセットに対する統計的裏付け（statistical）。全実行は保証しない |
+
+Missing/unknown/error/replay/statistical reports must not receive an unsupported
+BMC-all-executions guarantee. This intentionally changes affected ledger/HTML
+property classes, related unevaluated requirement presentation, ledger headers
+and rendering digests. Old rendering-bound approvals must fail their existing
+drift checks rather than being silently regenerated. Native verdicts, raw
+findings, locations, exit codes, document normative claims and spec/projection
+digests remain unchanged. Producer authenticity, claimed completeness versus
+actual evidence, target binding, and #994/#995 remain unresolved beyond S1.
 
 ### Display label — `ledger::assurance_label`
 

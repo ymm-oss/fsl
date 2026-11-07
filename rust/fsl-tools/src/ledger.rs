@@ -1186,7 +1186,11 @@ pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) ->
         }
         return "bounded";
     }
-    "bounded"
+    if verification.get("completeness").and_then(Value::as_str) == Some("bounded") {
+        "bounded"
+    } else {
+        "not_run"
+    }
 }
 
 fn reachables_evaluated(verification: &Value) -> bool {
@@ -1264,16 +1268,31 @@ fn assurance_cell(
 }
 
 fn guarantee_line(verification: &Value) -> String {
-    if assurance_token(verification) == "proved" {
-        return "k帰納法で **全実行を証明済み**（深さ無制限）".to_owned();
+    if verification.get("result").and_then(Value::as_str) == Some("error") {
+        return "形式的根拠なし（not_run）。検証はエラーで終了した".to_owned();
     }
-    let depth = verification
-        .get("checked_to_depth")
-        .or_else(|| verification.get("depth"))
-        .map_or_else(|| "null".to_owned(), Value::to_string);
-    format!(
-        "BMC（有界モデル検査）: **深さ {depth} までの全実行を網羅**。それ以遠の反例は本台帳の対象外"
-    )
+    match assurance_token(verification) {
+        "proved" => "k帰納法で **全実行を証明済み**（深さ無制限）".to_owned(),
+        "bounded" => verification
+            .get("checked_to_depth")
+            .or_else(|| verification.get("depth"))
+            .and_then(Value::as_u64)
+            .map_or_else(
+                || "有界検査の報告（bounded）。検査深さは報告されていない".to_owned(),
+                |depth| {
+                    format!(
+                        "BMC（有界モデル検査）: **深さ {depth} までの全実行を網羅**。それ以遠の反例は本台帳の対象外"
+                    )
+                },
+            ),
+        "replay-observed" => {
+            "観測済みログの照合のみ（replay-observed）。未観測の実行は保証しない".to_owned()
+        }
+        "statistical" => {
+            "固定データセットに対する統計的裏付け（statistical）。全実行は保証しない".to_owned()
+        }
+        _ => "形式的根拠なし（not_run）。検査完了の根拠は報告されていない".to_owned(),
+    }
 }
 
 fn refinement_text(value: Option<&Value>) -> String {
