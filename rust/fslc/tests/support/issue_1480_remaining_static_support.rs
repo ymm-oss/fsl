@@ -63,7 +63,7 @@ pub fn simple(property: &str) -> String {
 
 fn temporal_packet(route: &str, exit: i32, p: &Value, errors: &mut Vec<String>) {
     if route == "explicit" {
-        let want = json!({"fsl":"1.0","result":"error","kind":"semantics","message":"the explicit engine does not support leadsTo properties; use --engine bmc or exclude the leadsTo property","versions":{"verifier":{"name":"fslc-rust","version":"4.12.0"},"core":{"name":"fsl-core","version":"4.12.0"},"solver":{"name":"z3","backend":"native-z3","version":"Z3 4.16.0.0"}}});
+        let want = json!({"fsl":"1.0","result":"error","kind":"semantics","message":"the explicit engine does not support leadsTo properties; use --engine bmc or exclude the leadsTo property","versions":{"verifier":{"name":"fslc-rust","version":env!("CARGO_PKG_VERSION")},"core":{"name":"fsl-core","version":env!("CARGO_PKG_VERSION")},"solver":{"name":"z3","backend":"native-z3","version":"Z3 4.16.0.0"}}});
         note(
             errors,
             "explicit unsupported full envelope",

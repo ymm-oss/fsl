@@ -35,6 +35,12 @@ if (protocolError?.message !== "initialization: probe" || workerMessageError({ e
 const dist = fileURLToPath(new URL("./dist/", import.meta.url));
 const repository = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const nativeCommandTimeoutMs = 60_000;
+// Live envelopes carry the workspace release; read it from the package
+// metadata the producers were built from instead of pinning a literal.
+const workspaceManifest = await readFile(join(repository, "rust/Cargo.toml"), "utf8");
+const workspaceVersion = /^\[workspace\.package\][^[]*?^version\s*=\s*"([^"]+)"/m
+  .exec(workspaceManifest)?.[1];
+if (!workspaceVersion) throw new Error("rust/Cargo.toml [workspace.package].version not found");
 
 async function command(executable, args, timeoutMs = 300_000, environment = process.env) {
   return new Promise((resolveCommand, reject) => {
@@ -591,8 +597,8 @@ async function publicationBoundary(socket) {
   if (!Array.isArray(outputs) || outputs.length !== requests.length) {
     throw new Error("publication request population did not execute");
   }
-  const versions = { verifier: { name: "fsl-wasm", version: "4.12.0" },
-    core: { name: "fsl-core", version: "4.12.0" },
+  const versions = { verifier: { name: "fsl-wasm", version: workspaceVersion },
+    core: { name: "fsl-core", version: workspaceVersion },
     solver: { name: "z3", backend: "z3-solver-wasm", version: "Z3 4.16.0.0" } };
   const failures = [];
   for (let header = 0; header < 3; header += 1) {
@@ -803,7 +809,7 @@ for (let index = 0; index < recursiveCases.length; index += 2) {
   }
   // Observed runtime identity and allocator footprint differ, never semantic fields.
   for (const [packet, name, backend] of [[left, "fslc-rust", "native-z3"], [right, "fsl-wasm", "z3-solver-wasm"]]) {
-    const metadata = { verifier: { name, version: "4.12.0" }, core: { name: "fsl-core", version: "4.12.0" },
+    const metadata = { verifier: { name, version: workspaceVersion }, core: { name: "fsl-core", version: workspaceVersion },
       solver: { name: "z3", backend, version: "Z3 4.16.0.0" } };
     if (differences(packet.versions, metadata).length) throw new Error(`1467 runtime identity: ${name}`);
     if (packet.cost) {
