@@ -352,32 +352,128 @@ fn generate_evidence_unmatched_file_fails_under_strict_on_a_fixture_with_no_othe
 
 #[test]
 fn generate_evidence_malformed_json_exits_two() {
-    let evidence = write_evidence("{not json");
-    let evidence_str = evidence.to_str().expect("utf8 path");
-    let output = generate(&["--evidence", evidence_str]);
-    assert_eq!(output.status.code(), Some(2));
-    let envelope = json_stdout(&output);
-    assert_eq!(envelope["code"], "FSL-DOC-EVIDENCE-INVALID");
-    let _ = std::fs::remove_file(&evidence);
+    assert_evidence_load_refusal(Some(b"{not json"), |path| {
+        serde_json::json!({
+            "fsl": "1.0",
+            "result": "error",
+            "kind": "document",
+            "code": "FSL-DOC-EVIDENCE-INVALID",
+            "message": format!(
+                "{}: invalid JSON: key must be a string at line 1 column 2",
+                path.display()
+            ),
+        })
+    });
 }
 
 #[test]
 fn generate_evidence_non_object_json_exits_two() {
-    let evidence = write_evidence("[1, 2, 3]");
-    let evidence_str = evidence.to_str().expect("utf8 path");
-    let output = generate(&["--evidence", evidence_str]);
-    assert_eq!(output.status.code(), Some(2));
-    let envelope = json_stdout(&output);
-    assert_eq!(envelope["code"], "FSL-DOC-EVIDENCE-INVALID");
-    let _ = std::fs::remove_file(&evidence);
+    for input in [b"[1, 2, 3]".as_slice(), b"[]".as_slice()] {
+        assert_evidence_load_refusal(Some(input), |path| {
+            serde_json::json!({
+                "fsl": "1.0",
+                "result": "error",
+                "kind": "document",
+                "code": "FSL-DOC-EVIDENCE-INVALID",
+                "message": format!(
+                    "{}: evidence JSON must contain an object envelope",
+                    path.display()
+                ),
+            })
+        });
+    }
 }
 
 #[test]
 fn generate_missing_evidence_file_exits_two_as_io_error() {
-    let output = generate(&["--evidence", "/nonexistent/evidence.json"]);
+    assert_evidence_load_refusal(None, |path| {
+        // Preserve the complete OS diagnostic without hard-coding a platform's
+        // wording, behind the path the IO owner prefixes (#1170).
+        let error = std::fs::read(path).expect_err("evidence must be absent");
+        serde_json::json!({
+            "fsl": "1.0",
+            "result": "error",
+            "kind": "io",
+            "message": format!("{}: {error}", path.display()),
+        })
+    });
+}
+
+#[test]
+fn generate_invalid_utf8_evidence_exits_two_as_io_error() {
+    assert_evidence_load_refusal(Some(&[0xff]), |path| {
+        serde_json::json!({
+            "fsl": "1.0",
+            "result": "error",
+            "kind": "io",
+            "message": format!(
+                "{}: invalid utf-8 sequence of 1 bytes from index 0",
+                path.display()
+            ),
+        })
+    });
+}
+
+/// #1429: loader failures preserve their full envelope and both kinds of output.
+fn assert_evidence_load_refusal(input: Option<&[u8]>, expected: impl FnOnce(&Path) -> Value) {
+    let evidence = temp_path(".invalid-evidence.json");
+    assert!(!evidence.exists(), "fresh evidence path");
+    if let Some(bytes) = input {
+        std::fs::write(&evidence, bytes).expect("write invalid evidence bytes");
+    }
+    let expected = expected(&evidence);
+    let evidence_str = evidence.to_str().expect("utf8 path");
+    let stdout_only = generate(&["--evidence", evidence_str]);
+    assert_eq!(stdout_only.status.code(), Some(2));
+    assert_eq!(
+        json_stdout(&stdout_only),
+        expected,
+        "complete generate error without an output path"
+    );
+    assert!(stdout_only.stderr.is_empty(), "{:?}", stdout_only.stderr);
+    let destination = temp_path(".refused.md");
+    assert!(!destination.exists(), "fresh output path");
+    let preserved = b"existing document output\0\xff\n";
+    for exists in [false, true] {
+        if exists {
+            std::fs::write(&destination, preserved).expect("write existing output");
+        }
+        let output = generate(&[
+            "--evidence",
+            evidence_str,
+            "-o",
+            destination.to_str().expect("utf8 path"),
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(json_stdout(&output), expected, "complete generate error");
+        assert!(output.stderr.is_empty(), "{:?}", output.stderr);
+        if exists {
+            assert_eq!(std::fs::read(&destination).unwrap(), preserved);
+        } else {
+            assert!(!destination.exists(), "refusal must not create an output");
+        }
+    }
+
+    let (artifact, _) = generate_to_file(&[]);
+    let before = std::fs::read(&artifact).expect("read valid generated document");
+    let control = check(CANCEL_SYSTEM, &artifact, &[]);
+    assert_eq!(control.status.code(), Some(0), "valid document control");
+    let output = check(CANCEL_SYSTEM, &artifact, &[&evidence]);
     assert_eq!(output.status.code(), Some(2));
-    let envelope = json_stdout(&output);
-    assert_eq!(envelope["kind"], "io");
+    assert_eq!(json_stdout(&output), expected, "complete check error");
+    assert!(output.stderr.is_empty(), "{:?}", output.stderr);
+    assert_eq!(std::fs::read(&artifact).unwrap(), before);
+    if let Some(bytes) = input {
+        assert_eq!(std::fs::read(&evidence).unwrap(), bytes);
+        std::fs::remove_file(&evidence).expect("remove invalid evidence");
+    } else {
+        assert!(
+            !evidence.exists(),
+            "loader must not create missing evidence"
+        );
+    }
+    std::fs::remove_file(destination).expect("remove preserved output");
+    std::fs::remove_file(artifact).expect("remove valid document");
 }
 
 // --- Digest separation --------------------------------------------------------

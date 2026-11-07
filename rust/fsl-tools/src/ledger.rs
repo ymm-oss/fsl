@@ -1065,15 +1065,13 @@ fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
     findings
 }
 
-/// Classify one JSON envelope (an evidence file's parsed contents, or a
-/// `fslc verify` result) into the shared assurance vocabulary (issue #171,
-/// `docs/design/DESIGN-assurance-classes.md`): `proved` / `bounded` /
-/// `replay-observed` / `statistical` / `not_run`. `pub(crate)` so
-/// `document_evidence.rs` (issue #332) reuses this exact classification
-/// rather than re-deriving it — acceptance criterion 3 ("`bounded` never
-/// displays as `proved`") reduces to this already-tested function.
-pub(crate) fn assurance_token(value: &Value) -> &'static str {
-    let completeness = value
+/// The completeness a verification envelope reports (#1429 S1): its top-level
+/// `completeness` string, else the nested `kernel` projection's, which
+/// `fslc domain check` and `fslc ai check` emit without a top-level copy. The
+/// aggregate token, the ledger guarantee line and every per-element class read
+/// completeness only through this, so the header never claims more than a row.
+fn reported_completeness(value: &Value) -> Option<&str> {
+    value
         .get("completeness")
         .and_then(Value::as_str)
         .or_else(|| {
@@ -1082,7 +1080,18 @@ pub(crate) fn assurance_token(value: &Value) -> &'static str {
                 .and_then(Value::as_object)
                 .and_then(|kernel| kernel.get("completeness"))
                 .and_then(Value::as_str)
-        });
+        })
+}
+
+/// Classify one JSON envelope (an evidence file's parsed contents, or a
+/// `fslc verify` result) into the shared assurance vocabulary (issue #171,
+/// `docs/design/DESIGN-assurance-classes.md`): `proved` / `bounded` /
+/// `replay-observed` / `statistical` / `not_run`. `pub(crate)` so
+/// `document_evidence.rs` (issue #332) reuses this exact classification
+/// rather than re-deriving it — acceptance criterion 3 ("`bounded` never
+/// displays as `proved`") reduces to this already-tested function.
+pub(crate) fn assurance_token(value: &Value) -> &'static str {
+    let completeness = reported_completeness(value);
     if completeness == Some("unbounded") {
         if value
             .get("leads_to")
@@ -1163,9 +1172,8 @@ pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) ->
     if result == Some("error") || (group == "reachables" && !reachables_evaluated(verification)) {
         return "not_run";
     }
-    if result == Some("proved")
-        || verification.get("completeness").and_then(Value::as_str) == Some("unbounded")
-    {
+    let completeness = reported_completeness(verification);
+    if completeness == Some("unbounded") {
         if matches!(group, "invariants" | "transitions") {
             return "proved";
         }
@@ -1186,7 +1194,11 @@ pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) ->
         }
         return "bounded";
     }
-    "bounded"
+    if completeness == Some("bounded") {
+        "bounded"
+    } else {
+        "not_run"
+    }
 }
 
 fn reachables_evaluated(verification: &Value) -> bool {
@@ -1264,16 +1276,31 @@ fn assurance_cell(
 }
 
 fn guarantee_line(verification: &Value) -> String {
-    if assurance_token(verification) == "proved" {
-        return "k帰納法で **全実行を証明済み**（深さ無制限）".to_owned();
+    if verification.get("result").and_then(Value::as_str) == Some("error") {
+        return "形式的根拠なし（not_run）。検証はエラーで終了した".to_owned();
     }
-    let depth = verification
-        .get("checked_to_depth")
-        .or_else(|| verification.get("depth"))
-        .map_or_else(|| "null".to_owned(), Value::to_string);
-    format!(
-        "BMC（有界モデル検査）: **深さ {depth} までの全実行を網羅**。それ以遠の反例は本台帳の対象外"
-    )
+    match assurance_token(verification) {
+        "proved" => "k帰納法で **全実行を証明済み**（深さ無制限）".to_owned(),
+        "bounded" => verification
+            .get("checked_to_depth")
+            .or_else(|| verification.get("depth"))
+            .and_then(Value::as_u64)
+            .map_or_else(
+                || "有界検査の報告（bounded）。検査深さは報告されていない".to_owned(),
+                |depth| {
+                    format!(
+                        "BMC（有界モデル検査）: **深さ {depth} までの全実行を網羅**。それ以遠の反例は本台帳の対象外"
+                    )
+                },
+            ),
+        "replay-observed" => {
+            "観測済みログの照合のみ（replay-observed）。未観測の実行は保証しない".to_owned()
+        }
+        "statistical" => {
+            "固定データセットに対する統計的裏付け（statistical）。全実行は保証しない".to_owned()
+        }
+        _ => "形式的根拠なし（not_run）。検査完了の根拠は報告されていない".to_owned(),
+    }
 }
 
 fn refinement_text(value: Option<&Value>) -> String {

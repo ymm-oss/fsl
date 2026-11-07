@@ -221,12 +221,16 @@ fn ordinary_backtick_branch_preserves_literal_markdown() {
 fn benign_ledger_whole_output_preservation() {
     // A fixed full-artifact fingerprint is filled from the reviewed baseline,
     // not used as an oracle for hostile-data corrections.
+    // #1429 S1: this completeness-free input now reports the not_run guarantee
+    // and REQ-1 class; a base/head diff of the full artifact showed only those
+    // two lines changing.
     let report = ledger(
         "spec.fsl",
         &[("evidence.json".into(), json!({"result":"verified"}))],
     );
     assert_eq!(
         fsl_tools::framed_text_digest("1428-review-benign-ledger", &report),
-        "sha256:b9b53c2819397f5594714570f706333cb469a029a8d576b8fa78273ada82a8f2"
+        "sha256:932c233ab1cfa4e930bdb60f73f280219565b94bb96d11462c50acbe2eeee798",
+        "{report}"
     );
 }
