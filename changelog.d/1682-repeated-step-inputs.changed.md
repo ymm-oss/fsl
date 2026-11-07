@@ -1,4 +1,4 @@
-Breaking removal (#1682): in next-edition requirements, `check` refuses a `scenario` or `forbidden` step that names an input twice, on every route that loads the document, with exit 2, `kind: "semantics"`, `duplicate step input 'amount' at doc.fsl:43:44` and `loc` at the repeated name. Through an inline `implements` the report is `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)` with `kind: "type"` and `loc` on the `implements`; `lint` and `fmt` omit `loc`.
+Changed (#1682, breaking): in next-edition requirements, `check` refuses a `scenario` or `forbidden` step that names an input twice, on every route that loads the document, with exit 2, `kind: "semantics"`, `duplicate step input 'amount' at doc.fsl:43:44` and `loc` at the repeated name. Through an inline `implements` the report is `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)` with `kind: "type"` and `loc` on the `implements`; `lint` and `fmt` omit `loc`.
 
 These forms passed `check` before and kept only the last value, so swapping the values changed the result:
 

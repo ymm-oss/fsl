@@ -230,6 +230,16 @@ guard passes `check`. No checked-in spec or example has the removed shape; the
 597-form base `1844fa74` / head `7b9b34b3` sweep found no corpus acceptance
 transitions.
 
+**Breaking removal (#1256):** a name declared in a `spec`, `requirements`,
+`business` or `compose` document may not contain `__`, in every edition; `check`
+rejects it at the declaration with exit 2 and `kind: "name"` (a compose
+component's declaration at the parent's `use`). `fslc` 4.12.0 accepted such a
+declaration. Observed on 2026-11-07 with `FSLC_CACHE=off`: `spec S { state {
+foo__bar: Int = 0 } ... }` checks `ok`/0 on the v4.12.0 binary and `error`/`name`/2
+on a binary built from `c505d0a6c`; the same spec spelled `foo_bar` stays
+`ok`/0. Migration: rename the declaration and its references, including replay
+traces and stored outputs that name it.
+
 **Breaking removal (#1600):** for next-edition (`fsl 5`) requirements, the
 declared-name walk of #1256 (`rust/fsl-core/src/declared_names.rs`) now also
 visits relation roles, resource names, and measure names, so `check` rejects

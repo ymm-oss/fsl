@@ -1,4 +1,4 @@
-Breaking removal (#1517): root synchronized arguments are typed against their formals before substitution, including arguments for formals the component action never reads, in root header parameter, state, constant and enum context. Numeric carriers stay compatible, and a range mismatch stays a verification result only when the component action reads the argument. Root errors point at the argument with a bare message; action and Kernel metadata do not change.
+Changed (#1517, breaking): root synchronized arguments are typed against their formals before substitution, including arguments for formals the component action never reads, in root header parameter, state, constant and enum context. Numeric carriers stay compatible, and a range mismatch stays a verification result only when the component action reads the argument. Root errors point at the argument with a bare message; action and Kernel metadata do not change.
 
 These forms passed `check` before and are now semantic errors (exit 2):
 

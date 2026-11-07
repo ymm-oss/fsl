@@ -1,4 +1,4 @@
-Escape external requirement intent, undecided reasons, approval display fields
+Fixed (#1675): escape external requirement intent, undecided reasons, approval display fields
 and paths at their Markdown context boundaries; contain quoted lines and ledger
 CR/LF/HTML data without rewriting generated markers or semantic claims. Benign
 Unicode output and glossary formatting are preserved. Affected old documents

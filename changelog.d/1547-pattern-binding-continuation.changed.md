@@ -1,4 +1,4 @@
-Changed (#1547, breaking removal): native `check` rejects pattern variables
+Changed (#1547, breaking): native `check` rejects pattern variables
 outside their true continuation, including disjunctive/comparison/implication
 escapes and non-conjunctive `requires` exports. Ten logical scope consumers and
 the DDD frontend share one operator policy. Collision reservations remain

@@ -1,4 +1,4 @@
-Preserved progress resolves abstract Int/Bool constants in P/Q, binder domains,
+Fixed (#1595): `fslc refine` preserved progress resolves abstract Int/Bool constants in P/Q, binder domains,
 supported nested filters and decreases, retaining local scope. Impl-constant binder
 collisions and read abstract constant/state ambiguities are located type errors;
 unused maps/otherwise legal locals stay admissible. Violations with an abstract constant bound

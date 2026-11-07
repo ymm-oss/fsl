@@ -1,4 +1,4 @@
-Changed (#1545, breaking removal): shared component validation rejects tool-less
+Changed (#1545, breaking): shared component validation rejects tool-less
 components, including empty authority blocks, in `ai compat`, `ai replay`,
 project `ai check` and native/Worker project checking. Standalone no-tools
 envelopes from #1546 are preserved on check and specialized-preflight paths;

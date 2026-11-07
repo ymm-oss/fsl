@@ -1,4 +1,4 @@
-Changed (#1573): breaking removal of pattern-name reuse after matches inside
+Changed (#1573, breaking): removal of pattern-name reuse after matches inside
 `not`, expression-if conditions/arms, where-to-body/of, and statement-if
 conditions or arms flowing into later statements. Rename the later binding
 and its reads; the four standalone/compose #1442 nested-if reuse routes are

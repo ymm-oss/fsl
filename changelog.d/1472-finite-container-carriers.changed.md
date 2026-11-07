@@ -1,4 +1,4 @@
-Changed (#1472, breaking removal): whole Set, Seq, Map and relation values
+Changed (#1472, breaking): whole Set, Seq, Map and relation values
 require matching carriers, including Seq capacity and both Map keys and values.
 This resolves #1627: narrow-to-wide as well as wide-to-narrow whole Set copies
 now fail check with the existing located assignability error (exit 2), rather

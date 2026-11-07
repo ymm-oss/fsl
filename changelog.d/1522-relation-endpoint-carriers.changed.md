@@ -1,4 +1,4 @@
-Changed (#1522): Different-bound relation values in conditionals, Set/Seq items,
+Changed (#1522, breaking): Different-bound relation values in conditionals, Set/Seq items,
 action/init/let assignments now fail check/verify/replay (located semantics, exit 2),
 even narrow→wide, due to engine disagreement. At the #1522 measurement,
 equal-bound aliases, scalar/Map compatibility, nominal enums and self-relation
@@ -8,4 +8,6 @@ whole-container carriers for Set/Seq/Map (including Map keys and values), reject
 that Set widening statically, and resolves #1627. Scalar compatibility remains.
 Equal-bound relation literal engine support (#1524) stays with #1467. Corpus
 removals: 0; inline acceptance removals: 10; one #1459 error changes message/location.
+Repair: declare the relations that meet in one conditional, collection or
+assignment with endpoint types of the same bounds.
 See `docs/design/DESIGN-relation-endpoint-compatibility.md`.

@@ -1,4 +1,4 @@
-Fixed (#1418): Approval artifact failures preserve their complete downstream
+Fixed (#1418, breaking): Approval artifact failures preserve their complete downstream
 JSON envelopes and exit codes through create and check.
 Their exit moves from 2 to the downstream exit: 1 for scenarios or HTML verification
 failures and 3 for internal failures. `ledger --approval` keeps exit 2 when an `html` or

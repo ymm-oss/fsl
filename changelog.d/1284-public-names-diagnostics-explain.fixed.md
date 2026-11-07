@@ -1,4 +1,4 @@
-Fixed (#1284): diagnostics and `fslc explain` spell a compose component
+Fixed (#1284, breaking): diagnostics and `fslc explain` spell a compose component
 declaration by its public name. A type-check or model-build error names
 `acct.MAXX` (was `acct__MAXX`) and prints a component type as
 `Named("t.Amount")` (was `Named("t__Amount")`); readable `explain` prints

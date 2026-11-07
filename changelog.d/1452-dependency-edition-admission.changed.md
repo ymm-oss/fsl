@@ -1,4 +1,4 @@
-Changed (#1452): compose no longer accepts a child whose own edition rejects a
+Changed (#1452, breaking): compose no longer accepts a child whose own edition rejects a
 legacy colon quantifier. The former `ok`/exit 0 becomes the complete child
 `unsupported_in_edition` refusal/exit 2 with finding message
 `legacy colon quantifier syntax is deprecated`. Its child `loc.file` keeps the

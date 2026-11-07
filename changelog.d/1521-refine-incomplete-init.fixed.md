@@ -1,4 +1,4 @@
-Fixed (#1521): `refine` refuses incomplete assigned init roots on both its
+Fixed (#1521, breaking): `refine` refuses incomplete assigned init roots on both its
 implementation and abstraction free-root paths instead of silently using defaults
 for unwritten fields, map keys, branches, or unproved forall coverage.
 The error explains that bmc and induction still return verdicts using free values.

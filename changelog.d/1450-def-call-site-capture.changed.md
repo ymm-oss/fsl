@@ -1,4 +1,4 @@
-Changed (#1450, breaking removal): `check` rejects calls whose caller action
+Changed (#1450, breaking): `check` rejects calls whose caller action
 parameters, lets, expression quantifier/aggregate binders or statement `forall`
 would capture free names in the expanded def body, excluding the def's own
 parameters. The error is exit 2, `kind: "semantics"`, and `would capture variable`

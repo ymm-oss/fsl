@@ -442,9 +442,10 @@ admits direct FSL layers and active mappings, without inventing TOML metadata.
 Log replay similarly reports mapping IO before an ordinary root parse/model
 error. Document check admits before artifact IO/frontmatter, then projects the
 captured source under the recorded display label without reading that label's path.
-Existing header/gate/conflict rules and read-error kinds are retained. Next-edition
-migration findings refuse before consumption (exit 2); this can reject previously
-ungated next-edition inputs, not current-edition syntax.
+Existing header/conflict rules and read-error kinds are retained. Next-edition
+migration findings refuse before consumption (exit 2); this can reject a
+next-edition input that an earlier pre-release build accepted, never
+current-edition syntax.
 
 Measured boundary: BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4`, built
 implementation `33e3fcc5606249a097814d91cb09b506add8e97d`; `fslc check FORM`,
@@ -577,7 +578,7 @@ implements and governance reads may follow root solver work: this is not a globa
 preflight, but refused child bytes never reach solver/cache. Worker ordinary
 governance errors preserve native kernel-error precedence; only refusal returns early.
 
-Breaking removal: headerless compose plus a next-edition legacy-colon child
+Breaking removal (#1452): headerless compose plus a next-edition legacy-colon child
 previously checked `ok`/0 without a message, but now returns the complete child
 `unsupported_in_edition`/2 and finding message
 `legacy colon quantifier syntax is deprecated`. The braced canonical twin retains
@@ -586,7 +587,8 @@ the complete successful check envelope. This inline form remains in
 and the `edition_dispatch_inventory` contexts
 `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
 `all_cells_agree_across_the_complete_native_adapters`;
-it is a consumer removal, not new grammar.
+it is a consumer removal, not new grammar. The former `ok` is that of pre-release
+builds: `fslc` 4.12 refused every `fsl 5` child as the unknown declaration `fsl`.
 
 Materialized-tree `fslc check <path>` evidence (`bc14d885` → corrected Rust
 source/test tree `a65eddd5`): **603 corpus forms × two parser configurations =1206 checks per
@@ -1198,6 +1200,14 @@ implementation expression with `i := pull(e)` exactly once; do not remap reads
 inside that inserted expression. Identity/swap no longer abort and the indexed
 chain no longer falsely refines; genuine stalls report `progress_lost`.
 
+**Breaking removal (#1595):** a preserved-progress property pattern name that
+matches a free impl name from a lexically used map is refused even outside a
+readable continuation, and a used-map RHS pattern may not reuse a property binder
+or a sibling used-map pattern name. `refine` reports a located `kind: "type"`
+error at `respond`, exit 2, where it reported `refines`, exit 0: for example
+`y==0 ~> ((o is some(x)) or y==3)` under `map y=x`. Rename the abstract or mapping
+pattern binder; ordinary source binding scope is unchanged.
+
 **Breaking removal (#1613):** a free whole-map abstract read of an indexed state
 in the pulled property is `error/type`, exit 2, at `respond`, even if an impl
 state has that spelling. The `whole-same` acceptance case (`m[i]=n[i]`,
@@ -1433,6 +1443,15 @@ never a state variable named `true`), so the declaration is rejected. `Bool` is 
 as a type name, in a composed component too: `enum Bool`, `type Bool` and `struct Bool` are refused at the declaration
 (breaking removal, #1480). No other word is reserved — `count`, `sum`, `stage`, `in`,
 `is`, `where`, `old`, `abs`, `and`, `or` are contextual and stay valid names.
+
+Breaking removal (#1256): a name declared in a `spec`, `requirements`, `business`
+or `compose` document (spec, action, parameter, `let`, state variable, property,
+type, const, enum member, struct field, process, stage, actor or `use` alias) may
+not contain `__`, in every edition. It passed check before 5.0.0; check now
+rejects it at the declaration with `kind: "name"`, exit 2 (a compose component's
+declaration at the parent's `use`). Rename it and its references (`foo__bar` to
+`foo_bar`), including replay traces and stored outputs. Referencing a generated
+name such as `submit__b1` stays legal.
 
 A next-edition relation role, resource name, or measure name must not contain
 `__`, which is reserved for the names FSL
