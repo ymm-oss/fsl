@@ -34,7 +34,8 @@ Rules the gate enforces and reports:
 must be marked, so an unmarked one is a failure at its line rather than a
 skipped fragment, and a partial snippet takes the info string
 ``fsl-fragment`` (which no checker reads; the summary counts them).
-``skills-next/`` is checked this way.
+The FSL 5 layer skills moved into ``skills/`` by #1437 are checked this way
+(``rust/fslc/tests/literate_docs_contract.rs`` lists them).
 
 Usage::
 

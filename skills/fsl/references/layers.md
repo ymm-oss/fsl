@@ -180,6 +180,8 @@ as lexical compatibility projections. This syntax and its
 report surfaces are native Rust CLI features; the frozen Python reference is
 not extended.
 
+<a id="authoring-specs-as-readable-documentation"></a>
+
 ### Authoring specs as readable documentation (requirements + design)
 
 The spec source IS the documentation: a rule you can read is also the rule that is
@@ -308,6 +310,15 @@ the whole spec and deadlock checking is unchanged (a cyclic process always has
 an enabled transition, so it can never deadlock anyway).
 
 ### requirements (the requirements layer)
+
+The examples in this section use the FSL 4 forms (headerless documents). For a document
+headed `fsl 5`, use only the
+[requirements syntax owner](../../fsl-requirements/references/syntax.md),
+[English/Japanese keywords](../../fsl-requirements/references/keywords.md) and
+[glossary](../../fsl-requirements/references/glossary.md): entity/lifecycle/event,
+concept/relation/resource, rule/decide, measures, scenario/forbidden,
+time/deadline, goal/policy and optional implements. Do not put
+process/transition requirements forms under `fsl 5`.
 
 ```fsl
 requirements ExpenseRequirements {

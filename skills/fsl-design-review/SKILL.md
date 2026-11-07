@@ -1,199 +1,152 @@
 ---
 name: fsl-design-review
-description: A procedure for design exploration and design review using FSL. Mechanically check with fslc refine whether a design proposal, variant, extension, or change breaks a stable contract (the abstract spec), and report the result in the vocabulary of design principles (SOLID — the Open/Closed Principle, the Liskov Substitution Principle, Design by Contract, etc.). Triggers include "explore this design", "do a design review", "does this follow SOLID", "is this extension/change safe", "I want to add a variant", and "is this substitutable". Use fsl-design instead when the task is to author the design-layer spec rather than review a proposal. FSL syntax is delegated to the fsl skill.
+description: Review FSL design proposals, variants, extensions, changes, and substitutability against a frozen abstract contract. Use fslc refine plus independent model verification, enabledness review and implementation anchoring where required, reporting scoped evidence in SOLID/LSP/OCP/DbC vocabulary. Use fsl-design for authoring a design from requirements; this skill owns the review procedure, not language syntax.
 ---
 
-# FSL Design Exploration — A Procedure for Translating Design Decisions into Contract-Conformance Checks
+# FSL Design Exploration — contract-conformance review
 
-The core is the following 5-step procedure. Design principles (SOLID etc.) are not
-the starting point of the procedure; they appear as judgment lenses at each step.
-This skill's job is to translate "is this design good?" into "does this design
-conform to the frozen contract?" and have fslc answer with counterexamples.
+A headerless document is FSL 4; to migrate it, see the migration guide in `docs/manual/LANGUAGE.md` ("FSL 4 to FSL 5 migration").
 
-**Prerequisite**: FSL syntax, verification commands, and repair protocol follow
-the fsl skill and its topic-specific references. This skill supplies only the
-procedure and the interpretation of results.
-If the user needs a new design-layer `.fsl` written before review, use
-`fsl-design` for authoring and return here for review/proposal judgment.
+Translate “is this design good?” into explicit contract questions. Design principles
+are judgment lenses, not properties that the verifier magically proves. Read
+[core](../fsl/SKILL.md) and its needed references for syntax/repair, and
+[verify](../fsl-verify/SKILL.md) for runs/claims. For a new design-layer file use
+[design](../fsl-design/SKILL.md), then return here. Kernel proposals are headed
+`fsl 5`; requirements surface grammar remains owned by its layer skill and maps
+through canonical lowered names.
 
-## Procedure
+## Step 1 — identify the open and closed parts
 
-### Step 1 — Translate the design question into the language of contracts
+Whether comparing proposals, adding a variant, reviewing a change or judging
+substitutability, agree in chat on:
 
-Design questions almost always fall into one of four shapes: comparing new design
-proposals / adding a variant or extension / reviewing a change to an existing design
-/ judging substitutability. In every shape, what you identify is the same:
+- **Open:** what may change, variants, extension points and changed sites.
+- **Closed:** observable state, guards, invariants and responses that must hold.
+- Action/state correspondence, intended stutters, and human-owned judgments.
 
-- **The open part**: what may change (variants, extension points, the changed site)
-- **The closed part = the contract**: what must not break
-  (invariants, guards, externally observable state)
+OCP lens: choose the stable boundary. DIP lens: identify the shared abstraction.
+Do not infer that boundary, variant roster, action mapping or extension point
+from design taste. Ask where source material does not settle it. No separate
+deliverable memo is needed; confirmation in chat suffices.
 
-Lens — OCP: decide the "range you close" here. DIP: what abstraction should the
-design proposals all depend on in common. Align with the user on the candidate
-contracts as a bullet list before proceeding (do not create a deliverable file;
-chat is fine).
+## Step 2 — freeze and verify the abstract contract
 
-Do not infer the open/closed boundary, extension points, substitutability contract,
-variant roster, or action correspondence from general design taste. If the source
-material does not say what must remain stable or how a detail action maps to an
-abstract action, ask. A refinement proof is only meaningful for the contract the
-human agreed to freeze.
+Write only observable contract state; do not import implementation mechanics.
+Check → lint/traceability → bounded verify → induction using the verification
+skill. If the abstract spec violates itself, resolve that contract first; a
+contradictory abstraction cannot support proposal review.
 
-### Step 2 — Freeze the contract as an abstract spec
+DbC lens: requires/ensures/invariant are actual contracts; implicit type bounds
+and partial-operation checks should not be duplicated as user invariants.
+Do not enumerate concrete variants in the abstract enum just to support each
+extension. Put their types in detail and project them with conditional maps.
+An owner can explicitly revise an abstraction, but that is a contract change,
+not repair of a supposedly frozen one.
 
-After the contract boundary is confirmed, write the contract as an abstract `spec`
-and push it through the fsl skill's standard workflow up to `check` → `verify` →
-`--engine induction` (proved recommended). If the contract itself is contradictory,
-the design exploration cannot even begin — a `violated` here is a defect in the
-contract, not in a design proposal.
+## Step 3 — model each proposal and its seam
 
-Lens — DbC: `requires`/`ensures`/`invariant` are the contract directly. Leave
-defense of boundaries and partial operations to the automatic checks
-(`type_bound`/`partial_op`); do not hand-write it.
+Each proposal is a detail spec plus explicit mapping file. Preserve the frozen
+abstract file. A detail-only action maps to stutter only if it changes no
+mapped abstract state. Ask about unclear correspondence. A module-addition
+extension uses supported compose/synchronization and a cross-cutting invariant;
+it is not automatically refinement or a new invented composite syntax.
 
-**Discipline for the abstract layer (break it and the "closed" part collapses
-later)**:
-- Speak only about observable state and the contract. Do not bring in
-  implementation-driven state.
-- **Do not enumerate variants with an enum**. You will end up editing the abstract
-  layer every time a variant is added. Keep the concrete type of a variant in the
-  detail layer only, and fold it in with `if c then a else b` in the mapping.
+LSP lens: refine checks trace inclusion. Detail steps must correspond to an
+enabled allowed abstract step (or genuine stutter), with equal mapped effects
+and preserved checked safety. Verify the abstract spec independently; checking
+corresponded steps is not independent verification of every abstract behavior.
 
-### Step 3 — Write each design proposal as a refinement
+**Guard strengthening is permitted by refinement.** A detail withdrawal allowed
+only against cleared funds can refuse an abstractly allowed call and still refine.
+That is not full LSP (“no stronger preconditions”). Check enabledness separately:
 
-Describe each design proposal / variant as a "detail `spec` + mapping file". Do not
-edit the abstract spec's file. Correspond actions that exist only in the detail
-layer to `stutter` only when they are confirmed not to affect observable abstract
-state. When a correspondence is unclear, ask before writing the mapping. A
-module-addition-style extension is `compose`, not refinement (synchronize/compose
-without editing the existing files, and write the cross-cutting invariant in the
-composite layer).
+- never_enabled_action catches only an action with no enabled instance through
+  depth K; bounded warning/exit 0, made failing by --vacuity error.
+- With matching before/after state/actions, diff reports behavior_removed;
+  --forbid behavior_removed,unknown gates lost/undecided enabledness.
+- Otherwise compare every detail guard to its abstract counterpart explicitly;
+  general enabledness preservation remains a separate obligation (#1232).
 
-Lens — LSP: refine checks **trace inclusion** — every step of the detail layer must
-be explained by an abstract step (or a stutter) whose guard holds and whose mapped
-effect equals the abstract action's effect, and the mapped state must keep the
-abstract invariants. Abstract postconditions therefore carry over **once the abstract
-spec is verified on its own** (refine does not re-check abstract `ensures`). That is
-only **half** of LSP. Refinement deliberately permits the detail layer to
-**strengthen a guard** (refuse in more states than the abstract contract does):
-a bank implementation that withdraws only against cleared funds has a stronger guard
-than the abstract one, and refine succeeds. A caller that relies on the abstract precondition
-can then be refused, which LSP forbids ("do not strengthen preconditions"). refine
-does not report this. To see it, check enabledness separately:
-- A `never_enabled_action` warning from `fslc verify` on the detail spec (no instance
-  of the action enabled within `--depth`) catches only the extreme case where the
-  guard became unsatisfiable. It is a warning (exit 0); `fslc verify --vacuity error`
-  turns it into a failing gate.
-- For a before/after change where both specs share state and action names,
-  `fslc diff old.fsl new.fsl` reports guard strengthening as `behavior_removed`, and
-  `--forbid behavior_removed` makes it a gate. With differing names diff returns
-  `unknown`.
-- Otherwise a partially strengthened guard needs the enabledness-preservation check
-  tracked in ymm-oss/fsl#1232, or an explicit review of each detail guard against its
-  abstract counterpart.
+SRP/ISP concern-splitting and visibility/internal discipline may guide compose,
+but fslc does not prove that the software follows these design principles.
 
-SRP/ISP: these act as discipline for splitting a spec per concern and composing,
-but **they are not checked** (fslc says nothing even if you violate them).
+## Step 4 — run checks and adjudicate the findings
 
-### Step 4 — Check, and translate the result into a design judgment
+Run `fslc refine impl.fsl abs.fsl map.fsl`, and verify each model independently.
+Include strict-tags/requirements traceability, lint, and explain --readable.
+For new requirements contracts, audit rule/decision origins against intended
+events before using the lowered contract as an abstraction.
 
-`fslc refine impl.fsl abs.fsl map.fsl` (+ `verify` each spec on its own). Also run
-`verify --strict-tags` (traceability) and `explain --readable` (the doc rendering) —
-standard practice for every review, not high-risk-only.
-The mechanical repair steps for the result follow the fsl skill's repair protocol
-table, but in design exploration you must always decide, before fixing, "**is the
-design proposal bad, or is the contract excessive?**" — either conclusion is a
-legitimate outcome of a design review. If the answer is not explicit in the source
-or prior confirmation, present the counterexample and ask; do not silently change
-the abstract contract, mapping, or detail guards to obtain a green result.
+Before changing anything ask: bad proposal, wrong mapping, or excessive/misread
+contract? The last can be a legitimate review outcome, but needs owner approval.
+Present the counterexample instead of silently changing frozen guards or mappings.
 
-| Check result | Design meaning | Report in principle vocabulary |
-|---|---|---|
-| refine succeeds | Every detail behavior is allowed by the contract (trace inclusion): each step's mapped effect equals an abstract action's effect and abstract invariants hold through the map (abstract `ensures` carry over only if the abstract spec is verified on its own) | The safety half of LSP holds; OCP's "extension without breaking the contract" holds for safety. **Not** proof of substitutability: refine allows guard strengthening (the detail layer may refuse where the contract accepts). Before reporting "substitutable", compare the detail guards with the abstract guards (see the LSP lens above) |
-| `abs_requires_failed` | The detail layer fires a step where the abstract guard is false (bypasses a guard / a control shortcut — the detail is *more permissive* than the contract) | Contract violation = not substitutable: the detail does something the contract forbids. `impl_trace` is the forbidden procedure |
-| `abs_state_mismatch` | Observable behavior diverges from the contract: the detail init maps outside the abstract initial states, a step's mapped effect differs from the abstract action's effect, or an abstract invariant breaks through the map | Contract violation = not substitutable. Also suspect a misreading of the mapping |
-| `stutter_changed_abs` | An operation claimed to be "internal detail" causes an externally visible change | A break of encapsulation. The stutter declaration is a lie |
-| `map_partial_op` | An action-correspondence argument expression is undefined for a reachable instance (e.g. a divisor that can be zero) | Not a substitutability failure — the mapping itself is broken for this instance. Fix the correspondence expression, not the implementation's behavior |
-| `abs_partial_op` | The abstract action's own body is undefined (e.g. a zero divisor) at the mapped state of a detail step whose abstract guard holds | The contract has no defined outcome there, so the step cannot be judged substitutable. Fix the abstract action (guard or total body), or keep the detail from invoking it in that state |
-| `abs_step_violation` | The abstract step itself is rejected by the contract at the mapped state: its successor breaks an abstract type bound, invariant or `trans`, its `ensures` is false, or one of those checks is undefined (`Seq` operations; `/` `%` are total there) (`abs_violation` names which) | A detail step that invokes a step the contract forbids is not substitutable, even if it leaves the mapped state unchanged. Fix the abstract action or its contract, or keep the detail from invoking it in that state |
-| `action_coverage: false` / `never_enabled_action` (from `fslc verify` on each spec, not refine) | No instance of the action is enabled within `--depth` = a dead extension point / dead procedure (bounded: not a proof that it can never fire) | Equivalent to YAGNI / dead code. Read `blocking_requires`. In a detail spec it is also the only mechanical sign of a guard strengthened away entirely (LSP lens) |
-| `unknown_cti` | The contract is true but requires an implicit premise | Discovery of an implicit design premise. If it is a domain truth, make it explicit as an auxiliary invariant |
+| Evidence | Design meaning |
+|---|---|
+| refines | Checked detail behavior is allowed by the contract at reported depth; safety half only, not full substitutability. Report guard review separately. |
+| abs_requires_failed | Detail bypasses an upper guard/control. Read impl_trace and the requirements origin if present. |
+| abs_state_mismatch | Init/effect/safety disagrees after mapping; inspect mismatch path before blaming design. |
+| stutter_changed_abs | Claimed internal step is externally visible; false encapsulation claim. |
+| map_partial_op | Undefined correspondence expression, not a substitutability judgment. |
+| abs_partial_op | Abstract body has no defined outcome at mapped enabled state. |
+| abs_step_violation | Abstract successor breaks its own contract; read abs_violation/abs_after_attempted. Even unchanged mapped state does not make a forbidden step valid. |
+| impl self-violation | Detail invalid on its own; resolve before correspondence judgment. |
+| unknown_budget | No decision within correspondence budget; never call refines. |
+| never_enabled_action / uncovered | Dead within checked depth only; fully disabled extension point or over-strong guard candidate. |
+| unknown_cti | Induction undecided; CTI start may be unreachable, not established phantom or true contract. Explore/prove candidates independently. |
+| progress_lost | Explicitly pulled upper response failed; inspect lower fairness and lasso/stall. |
 
-**Non-vacuity audit (do not take green at face value)**: even
-`verified`/`proved`/refine-success can be a hollow spec that **checks nothing of the
-contract**. Especially when you drop a design into a state machine and carry contract
-facts in ghost variables (situations that mechanically simulate a relation such as
-refinement), the carrier ghost can become a "dead variable" and the invariant easily
-turns vacuously true. For high-risk contracts:
-- Look at `fslc mutate`'s kill-rate. If it is extremely low (rule of thumb <10%) it
-  is hollow — being unable to kill mutations = the invariant is not constraining the
-  dynamic state.
-- `--vacuity` warns with `tautology_over_frozen` on "a tautological invariant that
-  depends only on a frozen variable no action ever assigns to." But other hollow
-  cases such as over-constraint and equivalent mutations are only visible with mutate.
-- When you want to confirm the non-vacuity of a specific invariant, target it with
-  `verify --property <Name>` (confirm that breaking one guard makes it violated =
-  evidence that the invariant actually bites).
+### Non-vacuity audit
 
-### Step 5 — Report proof and judgment separately
+Green verify/refine can be hollow, especially with ghost-carried contract facts.
+For important contracts inspect mutation sensitivity and vacuity:
 
-Do not mix the three categories in the report:
+- Very low kill rate is a reason to inspect dynamic constraints and equivalent/
+  dead/beyond-depth mutants, not a universal numerical correctness threshold.
+- tautology_over_frozen catches frozen-ghost tautologies; it does not cover all
+  over-constraint or equivalent-mutant cases.
+- For a specific invariant, a targeted --property run plus one known bad guard
+  mutation should produce the expected violated property. Do not present a
+  preservation test that stays green as a detector.
+- Pair tightening repairs with positive reachable witnesses. A killed negative
+  alone does not show intended behavior remains possible.
+- Liveness mutants must actually allow a pending stall; deleting fair is no
+  detector if every execution already terminates structurally.
 
-1. **What was proved** — contract conformance (trace inclusion: the safety half of
-   LSP/OCP). Attach the command and result. Do not report "substitutable" from refine
-   alone — state separately whether guard strengthening was reviewed
-2. **Counterexamples** — translate the trace into design language and present it
-   ("skip X and Y holds"). If there is a `requirement: {id, text}`, reconcile it with
-   the requirement's intent
-3. **What remains for human judgment** — the goodness of code structure such as
-   SRP/ISP/DRY/Demeter, interface design, naming. FSL is not involved
+## Step 5 — separate proof from design judgment
 
-**Do not write "proved SOLID compliance".** What you could prove is only contract
-conformance.
+Report:
 
-**What you proved is that "the design (spec) is consistent with the contract", not
-that "the implementation follows that design".** Even if verify/induction/refine are
-green, that is consistency at the spec level, not a guarantee that the real code
-honors that contract (what fslc guarantees is "the internal consistency of the spec
-as written", not "whether the spec is faithful to reality"). If implementation
-conformance is also required, **anchor** the abstract spec to the implementation:
-`fslc replay` (run the real system's execution log through the spec for a conformance
-check) or `fslc testgen` (generate an implementation-conformance pytest via an
-Adapter). A spec with no anchor stays a "consistent model" and cannot detect when the
-code diverges from it — make this distinction explicit in the report.
+1. **Checked evidence:** exact commands/exits, domain sizes, depths, bounded/proved
+   properties, seam result, and enabledness review. Never call refine alone full
+   substitutability or OCP/LSP compliance.
+2. **Counterexamples:** translate the trace into operations/control bypasses;
+   reconcile requirement ID/text with confirmed intent.
+3. **Human judgment:** SRP/ISP/DRY/KISS/Demeter, interface quality, naming and
+   whether the chosen stable boundary is the right one.
+4. **Implementation boundary:** consistency of models is not real-code conformance.
+   If required, anchor at the implementation's layer with wired testgen tests or
+   replay logs. Actually execute tests; zero executed/all-skipped is not evidence.
 
-## Principle ↔ FSL mechanism correspondence (for reference)
+Do not write “proved SOLID compliance”. Faithfulness to stakeholder intent also
+requires the confirmed memo; the verifier does not decide that intent for humans.
 
-| Principle | How FSL handles it | Strength |
-|---|---|---|
-| LSP (Liskov substitution) | `fslc refine` checks trace inclusion (postconditions, invariants, safety). Precondition weakening / no new refusals is **not** checked — refine permits guard strengthening; `never_enabled_action` catches only fully dead actions (enabledness preservation: ymm-oss/fsl#1232) | Partial (safety half checked; precondition half by review) |
-| OCP (open/closed) | abstract spec unedited + extend with detail spec / compose → conformance check with refine | Partial (same limit as LSP: an extension that refuses more still refines) |
-| Design by Contract (DbC) | requires / ensures / invariant are the language core | Native |
-| DIP (dependency inversion) | The layer chain (business ⊒ requirements ⊒ design ⊒ implementation) where detail conforms to abstract | Embodied structurally |
-| SRP / ISP | concern splitting via compose + visibility control with `internal` | Supported as discipline (not checkable) |
-| DRY / KISS / Demeter | Matters of code structure that cannot be translated into FSL's vocabulary | Out of scope |
+## Principle correspondence and optional risk checks
 
-## Recommended practices (optional — by risk and importance)
+| Principle | Mechanism / limit |
+|---|---|
+| LSP | trace inclusion safety; stronger detail guards still pass, precondition side needs review |
+| OCP | frozen abstraction plus extension/refine; same enabledness limitation |
+| DbC | native requires/ensures/invariant |
+| DIP | detail→abstract contracts embody dependency direction |
+| SRP/ISP | decomposition/compose/internal discipline, not a proved principle |
+| DRY/KISS/Demeter | software structure judgment outside FSL |
 
-- **Structural review before repair**: for AI-authored or heavily patched specs,
-  run `fslc analyze <file> --profile ai-review` alongside `check`/`verify`.
-  Findings such as `disconnected_requirement`, `unanchored_property`,
-  `progressless_cycle`, `unread_state`, and `conservation_candidate` are review
-  signals, not LSP/refinement failures. Use them to ask whether the contract has
-  traceability holes, missing progress intent, dead state clusters, or implicit
-  invariants worth proving before changing the spec. Do not weaken a contract
-  merely to remove an
-  `analyze` finding; the finding's `formal_status` is normally
-  `not_a_violation`.
-- **Variant matrix**: when there are multiple variants, push the refine of all
-  variants × the abstract contract (a mechanical check that every variant stays
-  within the contract; guard strengthening still needs the LSP-lens review). Only
-  for high-risk contracts.
-- **Repurposing for change review**: refining with the pre-change spec as abs and the
-  post-change spec as impl turns it into a check of "does this change preserve the old
-  contract?" — the safety half only: a change that refuses more still refines. Pair
-  it with `fslc diff old.fsl new.fsl --forbid behavior_removed` when the two specs
-  share state and action names (see the LSP lens).
-- **Up to proved**: pushing through to induction rather than stopping at verified
-  (bounded) is especially valuable in the abstract layer, where the contract should
-  be stable for the long term.
+For AI-authored/heavily patched specs, analyze --profile ai-review can reveal
+disconnected requirements, unanchored properties, cycles, unread state and
+conservation candidates. Keep formal_status:not_a_violation and ask the owner;
+do not weaken a contract to silence review signals. For multiple high-risk variants
+check every variant × frozen contract and guards. For before/after review use
+old as abs/new as impl plus diff with explicit forbidden kinds including unknown;
+refine alone allows additional refusals. Prefer all-depth proof for stable safety
+contracts while stating fixed sizes and progress/overflow limits.

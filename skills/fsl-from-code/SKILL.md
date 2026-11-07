@@ -1,164 +1,124 @@
 ---
 name: fsl-from-code
-description: Reverse-engineer an FSL design-layer spec from existing source code. Scope the stateful subsystem, harvest state/actions/guards/effects with source-line witnesses, surface invariants and forbidden flows as confirmation questions (never fabricated), then verify, mutation-test for hollowness, and prove conformance by replaying the generated harness against the real code. Use when the input is code and the deliverable is a spec. Do not use when starting from a requirements contract (use fsl-design), nor for business/PM requirements discovery.
+description: Reverse-engineer a witnessed FSL design-layer kernel spec from existing code, using the fsl 5 kernel form. Harvest state/actions/guards/effects, confirm cross-action invariants and negative intent with a human, verify and mutation-test, then wire and execute the real-code conformance harness. Use when code is input and a design spec is the deliverable, not requirements/business discovery or design from an upper contract.
 ---
 
-# FSL From Code — extracting a design spec from an implementation
+# FSL From Code — implementation → witnessed design model
 
-Use this skill when the input is **existing code** and the deliverable is an FSL
-**design-layer** spec. The direction is the reverse of `fsl-design`: there is no
-upper requirements contract to refine to, so the spec is anchored **downward** —
-its faithfulness is proved by replaying the generated conformance harness against
-the very code it was read from. That conformance harness is this skill's **seam**:
-the downward analogue of a refinement seam, a contract checked against real code
-rather than against an upper spec. If the user later wants an upper requirements
-contract, building that *upward* refinement seam is `fsl-design`'s job, not this
-skill's.
+A headerless document is FSL 4; to migrate it, see the migration guide in `docs/manual/LANGUAGE.md` ("FSL 4 to FSL 5 migration").
 
-Before writing syntax, read `../fsl/SKILL.md`, then use its reference index to
-load only the needed language rules, verifier workflow, and repair detail. The
-artifact this skill produces is the usual spec-first triple read **in reverse**:
-plain code → a kernel spec whose actions and invariants each carry a
-`// SRC: file:line` witness (and `// ASSUME-n:` for every bound or modeling
-choice) → the `fslc testgen` Adapter + random-walk Monitor harness that checks
-the code against the spec.
+The seam points downward: code → source-witnessed kernel spec → real-code
+conformance tests. There is no inferred upper requirements contract. If one is
+later agreed, building the upward refinement seam belongs to
+[design](../fsl-design/SKILL.md), not automatic reverse-engineering.
 
-## Boundary
+Before syntax read [core](../fsl/SKILL.md), its relevant references and
+[verify](../fsl-verify/SKILL.md). Produce:
 
-Produce only:
+- A kernel `spec` headed `fsl 5`, with `// SRC: file:line` witnesses for
+  state/actions/guards/effects and any source-grounded invariants.
+- Human-confirmed cross-action safety/history/progress intent, carried in
+  `// ASSUME-n:` comments and typed requirement/model/assumption tags.
+- A testgen Adapter wired to real code, plus executed random-walk/replay evidence.
 
-- A design-layer kernel `spec` whose state/actions/guards/effects are read from the
-  code, each tagged with a `// SRC: file:line` witness
-- Invariants and forbidden flows that the human **confirmed**, tagged with
-  `// ASSUME-n:` ledger comments
-- The `fslc testgen` conformance harness, with the Adapter wired to the real code
+Do not invent states/guards/invariants to reach green, create a business or
+requirements layer, or claim conformance from model verification alone. A kernel
+spec cannot acquire requirements-only scenario/forbidden blocks. Express confirmed
+negative intent as supported invariant/trans/history/progress properties and
+real implementation rejection tests; route separately to requirements authoring
+only when the user asks for that contract.
 
-Do not:
+## Three zones
 
-- Invent invariants, guards, states, or transition targets to make the spec look
-  complete or to make it verify. A missing rule is a question, not a default.
-- Produce a requirements or business layer, or refine upward.
-- Claim implementation conformance unless the harness actually ran green against the
-  code (a spec that only `verify`s is internally consistent, not faithful to code).
+| Zone | Evidence and boundary |
+|---|---|
+| A: harvest | Read member state/types, externally callable actions, leading guards and assignments from code; attach exact source witnesses. |
+| B: discover intent | Cross-action conservation, ordering, forbidden interaction sequences and responses are questions, not fabricated facts. A rule absent from any single line needs human confirmation. |
+| C: truth-check | Model mutation asks whether properties have teeth; executed conformance asks whether modeled behavior matches real code. Neither proves source intent by itself. |
 
-## Why this is not a transpiler — three zones
-
-Extraction is not uniform. It splits into three zones at different confidence
-levels, and conflating them is what produces a worthless spec:
-
-- **Zone A — mechanical, high-recall, traceable.** `state` (member variables and
-  their types, narrowed to bounded domain types), `action` (a method), `requires`
-  (its leading guard clauses), effects (its assignments). Read directly off the
-  code.
-- **Zone B — NOT present in the code; the actual value, and the trap.** Cross-action
-  invariants (conservation laws), forbidden interaction sequences, and `leadsTo`
-  responses. A payment count that must equal the number of claims that entered
-  payment appears on no line of an expense-claim implementation — it is a rule
-  a human recognizes. These must be **discovered and
-  confirmed**, never read off and never fabricated.
-- **Zone C — mechanical truth-check.** `fslc mutate` (do the invariants have teeth?)
-  and the conformance harness (does the modeled behavior match the code?).
-
-A spec mirrored from code alone is **hollow**: it restates what the code does, so it
-passes conformance trivially while asserting nothing a mutation can kill. The whole
-job of this skill is to force Zone B and gate the hollow result.
+A code mirror can pass conformance while checking no independent rule. Do not
+mistake that hollow quadrant for completion, but do not invent rules to escape it.
 
 ## Workflow
 
-```
-0. Gate        Apply fsl's state-machine self-check. Reject CRUD / display / glue —
-               FSL only pays off when interaction (order/flags/permissions/async/
-               retry) can reach a forbidden state. Recommend ordinary tests instead.
-1. Harvest     Read the code into a Zone-A skeleton: state vars + types, the methods
-               that are actions, their guard clauses, their effects. Record a
-               // SRC: file:line for each.
-2. Memo        Post the formalization memo (below) in chat. Zone-B is QUESTIONS, not
-               assertions; finite bounds are labeled modeling assumptions. Get human
-               confirmation before writing.  <─────────────────────────────┐
-3. Write       Write the .fsl after confirmation. Fold confirmed Zone-B rules in     │
-               as invariant/forbidden/leadsTo; carry every // SRC: and // ASSUME-n:.  │
-4. Verify      fslc check → verify --depth 8 → --engine induction. Repair via the     │
-               fsl repair protocol (decide: code misread, or rule wrong?).            │
-5. Anti-hollow fslc mutate (kill-rate) + reachable witnesses. A survivor or an        │
-               `empty_formalization` requirement is a missing rule → back to Memo ────┘
-               with a SPECIFIC question for that survivor (not a vague redo).
-6. Conformance fslc testgen → wire the Adapter's observe()/step() to the real code →
-               run the random-walk + replay. Drift means the modeled behavior left
-               the code; fix the spec (or record a deliberate abstraction).
-```
+0. **Fit.** Apply core's state-machine/documentation filter. Interaction order,
+   flags, permissions, async/retry may justify verification; an otherwise-needed
+   design document can justify a thin model. Static display/glue with no state
+   usually needs ordinary tests. Do not reject every CRUD flow categorically or
+   fabricate a forbidden state to make one qualify.
+1. **Harvest.** Scope one stateful subsystem. Identify state variables, finite
+   domains, externally callable entry points, actual guards and effects. Put a
+   `// SRC: file:line` on each candidate. Private helpers/internal calls are not
+   automatically actions. Preserve actual transaction and concurrency boundaries.
+2. **Memo in chat.** Use the question set below. Zone B is questions; domain bounds
+   are labeled choices with lost coverage stated. Get human confirmation before
+   writing behavior-changing assumptions; do not make another memo deliverable.
+3. **Write.** Kernel form only, carrying every source/assumption witness. Use confirmed
+   invariants/trans/leadsTo/ghost state as appropriate. No source comment is a
+   substitute for a checked declaration. Prefer entity/number with verify sizes
+   when those bounds are modeling rather than product truth.
+4. **Verify.** Check → strict traceability/lint → verify depth 8 → induction using
+   the core repair protocol. Decide whether a failure is a code misread, wrong
+   rule, abstraction mismatch or real code defect; ask before choosing.
+5. **Anti-hollow.** Mutate plus positive reachable witnesses. Triage surviving
+   mutants/empty_formalization into specific Zone-B questions, accounting for
+   equivalent/dead/beyond-depth mutations rather than inventing an invariant.
+6. **Conformance.** Testgen → wire reset/step/observe to actual code → run the
+   harness/random walk/replay. Classify spec/Adapter/code divergence, fix the
+   correct owner or explicitly record a deliberate abstraction. Generated tests
+   do not explore inside-action crashes/interleavings; add real-boundary tests
+   when atomicity matters.
 
-## Formalization memo (the crux — post in chat, do not make a file)
+## Formalization memo — ask explicitly
 
-This is the only stage where insight emerges; stages 4–6 merely *test* what you
-already claimed. Read the full memo discipline in `../fsl/SKILL.md`; this skill adds
-the code-extraction question set. Ask these explicitly — a free-form "what invariants
-exist?" reliably yields a Zone-A-only (hollow) spec.
+1. **Conservation:** for state written by several actions, what aggregate must
+   always agree (counter vs records, consumed vs delivered, etc.)?
+2. **Forbidden sequences:** which individually legal operations must not combine
+   into a bad state or prohibited call? What state/history property expresses
+   it, and which real-code test should attempt it?
+3. **Relational/ordering intent:** what ordering/relation must hold regardless of
+   the last action? Which source or owner confirms it?
+4. **Action/helper boundary:** what is independently callable by external users,
+   workers, queues or cron? Which internal calls must stay inside one modeled step?
+5. **Concurrency:** locks/transactions/async imply which interleavings? A sequential
+   model does not cover races. Confirm the intended atomic operations rather than
+   silently flattening multiple transactions.
+6. **Domain size:** what bugs require more than N instances? An artificial bound on
+   arbitrary lists/integers changes findable bugs, so label the loss in ASSUME-n.
+7. **Multi-entity shape:** single struct, Map of cases, multiple actors/components?
+   Do not force code into a Map-shaped example when its actual boundaries differ.
 
-**Zone-B discovery questions (these find the invariants):**
+Keep only confirmed assumptions in source. Unconfirmed invariants/response goals
+remain questions; do not claim them as extracted facts with misleading SRC tags.
 
-1. **Conservation laws.** For each state variable written by more than one action:
-   is there a global aggregate (`sum` / `count`) that must always hold? (e.g. a
-   counter equals the count of records in certain states.)
-2. **Forbidden sequences.** Is there a state that each action's guard allows
-   individually, but that a *sequence* of otherwise-valid actions must never reach?
-   (a `forbidden` flow or a cross-action `invariant`, the kind a single `requires`
-   stays silent about.)
-3. **Relational / ordering constraints.** Regardless of which action fires, is there
-   an ordering or relation between state values that is globally true?
+## Two-axis anti-hollow evidence
 
-**Scoping questions (get these wrong and the spec is valid but mis-modeled):**
-
-4. **Action vs. helper boundary.** Which methods are entry points callable by
-   external callers without depending on a prior call? Private-by-convention helpers,
-   cron/queue-triggered steps, and cross-class internal calls all blur this. Only
-   entry points become `action`s.
-5. **Concurrency.** Does the code use locks / transactions / async? FSL models
-   interleaving. Decide explicitly: are we modeling single-threaded correctness, or
-   concurrent properties? A sequential model of concurrent code silently loses the
-   races — often the whole reason to reach for FSL.
-6. **Domain sizing.** Where the real system has no natural capacity limit (an
-   unbounded list, arbitrary ints), bounding to `0..N` is **not** purely
-   representational: it decides which interaction bugs are findable at depth 8.
-   Record in `// ASSUME-n:` what bounding to N gives up — which bugs need more than N
-   instances to appear.
-7. **Multi-entity shape.** Is this one instance (→ a single `struct` in `state`), a
-   collection (→ `Map<Id, Data>` over a bounded key type), or multiple actors (→
-   `compose`)? Real code often does not align as cleanly as the `Map`-shaped example.
-
-## Two-axis anti-hollow gate
-
-Faithfulness has two orthogonal axes; they catch different failures, so run both.
-
-| | `mutate` kills | `mutate` kills **nothing** |
+| | Model mutations killed | No model mutations killed |
 |---|---|---|
-| **conformance passes** | good | **hollow** — code faithfully mirrored, zero rules captured |
-| conformance fails | invariants have teeth, but the model is a different machine | doubly broken |
+| Conformance passes | properties constrain some modeled changes and observed code agrees | hollow-mirror warning; investigate confirmed intent |
+| Conformance fails | constrained model, wrong machine/projection or code defect | both faithfulness and strength unresolved |
 
-The dangerous quadrant for code-extraction is *conformance-passes + kills-nothing*:
-exactly where a naive transpile lands. The exit from it is `mutate --by-requirement`'s
-`empty_formalization` warning driving a specific Zone-B question back into the memo.
+Inspect individual survivors and by-requirement attribution, not just one absolute
+kill-rate. A covers ID with no guard-kill credit is not by itself a missing rule;
+read the actual mutants. `empty_formalization` is observed sensitivity at this
+depth/operator set, not proof of absent intent.
 
-When the implementation is **runnable**, prefer the stronger check: mutate the
-**code** (remove an update, flip a branch) and confirm the conformance run goes red —
-this proves the spec catches what the code gets wrong, which model mutation cannot.
-Fall back to `fslc mutate` only when no runnable implementation exists (typical for
-legacy reverse-engineering). A blind second agent writing invariants from the spec's
-natural-language rendering is an option for high-stakes specs, too costly to mandate.
+When runnable code exists, mutate **code** (remove an update/flip a branch) and
+confirm the anchor rejects the expected divergence. This is stronger evidence of
+real-bug detection than model mutation alone. When the implementation cannot run,
+model mutation is still useful, but implementation conformance stays unestablished.
+Independent blind intent review is optional for high risk, not a new mandatory
+agent workflow or permission to transmit source externally.
 
-## Guardrails
+## Guardrails and handoff
 
-- **Gate first.** Most code is not a state machine worth specifying. Recommending
-  ordinary tests is a valid, common outcome — do not force a spec.
-- **Confirm before encoding.** Every Zone-B rule and every non-representational bound
-  is a question for the human first, then an `// ASSUME-n:` tag, never a silent
-  default. Treat a low `mutate` kill-rate as evidence Zone B is unfinished, not as a
-  reason to weaken the spec.
-- **Trace everything.** `// SRC: file:line` on each action and each invariant keeps
-  the spec auditable against the code it came from.
-- **Conformance honesty.** Report "design invariants proved" and "conforms to code"
-  as separate claims; make the second only after the harness ran green against the
-  real implementation.
-- **Author the extracted spec as documentation, not just a checkable model.** See
-  `../fsl/references/layers.md` → "Authoring specs as readable documentation" for the
-  tagging, ID-prefix, and quantifier conventions that keep it readable, not just
-  passing.
+- Trace every action and sourced invariant; use requirement/model tags as
+  [readable documentation](../fsl/references/layers.md#authoring-specs-as-readable-documentation).
+- Keep source fidelity and confirmed intent distinct. Weak sensitivity is a
+  question queue, not permission to weaken the model or invent policy.
+- Unwired tests fail by default; --allow-unwired skips where supported, so check
+  actual executed count. A green empty/all-skipped suite is not an anchor.
+- Report model safety/progress proof, bounded scope, mutation evidence and
+  implementation conformance separately, with exact commands and source state.
+- Without runnable code/logs, say “model checked; implementation not anchored”.
+  Do not call a faithful-looking source extraction a proof that the code follows it.

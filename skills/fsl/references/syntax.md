@@ -1,5 +1,30 @@
 ## 1. Top-level structure
 
+**Edition header.** Put `fsl 5` before the dialect and its annotations (blank
+lines and `//` comments may precede it) to write FSL 5. A headerless document,
+or one headed `fsl 4`, is FSL 4; the examples in this reference are FSL 4 unless
+they carry the header. The FSL 5 requirements forms are owned by
+[fsl-requirements syntax](../../fsl-requirements/references/syntax.md).
+
+```fsl check
+fsl 5
+@requirement("REQ-SCOPE-001", "document intent")
+spec HeaderedScope {
+  state { done: Bool }
+  init { done = false }
+  @requirement("REQ-SCOPE-002", "work can finish once")
+  action finish() {
+    requires not done
+    done = true
+  }
+  terminal { done }
+}
+```
+
+This is the only checked fence in this reference, so it is the one FSL 5
+compilation unit `tools/check-doc-fences.py` reads here; the other fences are
+FSL 4 fragments or grammar templates with `<placeholders>`, which no checker reads.
+
 The native parser selects every dialect from one shared lexer/registry. A leading
 UTF-8 BOM, whitespace, and `//` comments are trivia. Typed document annotations
 may precede the dialect keyword and attach to the document rather than affecting
@@ -176,6 +201,29 @@ two `values` bounds moved `verify` between `verified` and `violated`. An inline 
 `implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)`, `kind: "type"`, with `loc`
 on the `implements`. Migration: keep the one declaration you mean. See
 `docs/design/DESIGN-dialects.md`, §3.2.
+
+FSL 5 requirements repeats (documents headed `fsl 5`; each a breaking removal, no automatic
+migration; `docs/manual/LANGUAGE.md`, "Repeated inputs, declarations and requirement IDs", is the
+owner of the full text):
+
+- #1682: a `scenario` / `forbidden` step naming one input twice (`with`, instance first, a `で`
+  list, two `で` groups, an alias beside its canonical name, a relation role) is refused, exit 2,
+  `kind: "semantics"`, `loc` at the repeat: `duplicate step input 'amount' at doc.fsl:43:44`.
+  Different inputs in any order, and the same input in a later step, stay accepted.
+- #1705: a second `actor` of one name is refused, `kind: "parse"`: `duplicate actor 'Agent' at 4:9`.
+  One owner per requirement ID: `rule`, `decide`, `scenario`, `forbidden`, `goal`, `policy` and the
+  FSL 4 `requirement` / `acceptance` blocks own the ID after their keyword; a second owner of any kind
+  is refused at its ID, `kind: "parse"`: `duplicate requirement id 'REQ-DESK-001': this rule reuses
+  the ID of the rule at 19:8; a requirement ID has one owner at 22:8` (same-kind repeats of
+  `scenario` / `forbidden` / `goal` / `policy` keep their `kind: "semantics"` refusals). A `covers`
+  is a link: naming an owned ID with any text stays accepted and the ledger titles the ID with its
+  owner; every `covers` of an ID no declaration owns must have one text, else `requirement ID
+  'REQ-EV-1' is covered as "withdrawing" here and as "closing" at 15:5; every covers of an ID no
+  declaration owns has one text at 19:5`. `migrate --edition 5` refuses a document sharing an ID
+  between owners (`migrate_manual_required`, `reason: "shared_requirement_id"`) and never renames.
+- #1686: a `concept` written twice is refused, `kind: "semantics"`: `duplicate concept 'SmallClaim'
+  at doc.fsl:24:3`, reported ahead of a repeated bound or `kpi`; repeated bounds and `kpi` are
+  refused as above.
 
 Breaking removals (#1552, #1561): for requirements `rule ... only when` conditions,
 `check` now rejects previously accepted unsatisfiable guards that reuse an entity
@@ -1275,6 +1323,40 @@ For a generated abstract Map key such as DB `Column`, the conversion direction
 is abstract-to-implementation: convert the abstract binder before indexing the
 implementation Map (for example `Column -> DesignColumn`).
 
+### Annotations and reusable predicates
+
+_A compact summary, written for files headed `fsl 5`; the detailed rules
+elsewhere in this reference give the full detail._
+
+Use `@requirement(id, text?)`, `@undecided(reason)`, `@kind(id, text?)`, or
+custom multi-segment namespaces such as `@doc.rationale("reason")` immediately
+before supported declarations. Stacking and intervening comments are allowed.
+Document annotations attach to the document; dangling annotations report
+`FSL-ANNOTATION-TARGET`. Strings stop at a quote/newline; no escape syntax.
+
+Annotations attach to kernel init/actions/properties, business transitions,
+requirements declarations, and compose members. Native domain command/decide/
+evolve/invariant/projection/effect/saga-step, AI tool/authority/fallback/check,
+and DB migration/compatibility-rule declarations also support them. Lowered
+domain command/decide/evolve annotations union onto their action; effect/step
+annotations broadcast to generated actions. Comments are trivia, not structured
+provenance. Generic kind/custom annotations can be queried in-process through
+`KernelModel::annotations_for`; do not assume current JSON/LSP/ledger projects them.
+Requirement relations and lowering origins are different relations.
+
+`def` is file-local, non-recursive, arity-checked frontend substitution. Put
+human requirement tags on the surrounding checked declaration. Caller params,
+lets, binders and exported patterns must not capture free names in its body;
+rename the caller binding if expansion reports `would capture variable`.
+Declaration-level leadsTo binders protect P/Q/helpful/decreases/within too.
+
+Stricter edition findings reject legacy declaration-string metadata, colon/no-
+braces quantifiers and inline action maps; prefer typed tags, braced quantifiers
+and explicit seam correspondences. Use `migrate --edition 5` to inspect edits,
+then owner-approved `--write`; it refuses unsafe/incomplete rewrites. Invalid
+expression `||` / `->` means `or` / `=>`, not a blanket rewrite of structural
+compose/arrows or the domain expression language.
+
 ## 2. Types
 
 | Type | How to write | Notes |
@@ -1950,6 +2032,25 @@ observations from two mis-extracted scratch-label inputs explicit: current
 sources are the real #1458 test specs, accepted on both baseline binaries, so
 attribution is unchanged. Optional replay not run; sweep outputs not normalized.
 
+### Option payload scope
+
+_A compact summary, written for files headed `fsl 5`; the detailed rules
+elsewhere in this reference give the full detail._
+
+Equality binds no name. `o is some(v)` binds a **fresh** payload only where the
+match is true: a guarded RHS of `and` or `=>`, and conjunctive requires into
+later guards/body. Only `and` exports a binding from a true whole expression.
+No export from `or`, comparison results, negation, quantifiers/aggregates, or
+expression-if into later clauses. Do not read a condition's binding in an
+expression-if arm. Names may remain reserved even where not visible (including
+not/if/where and later statements); rename instead of rebinding. Opposite
+statement-if arms remain independent. Do not infer general composed-init
+binding lifetime guarantees from direct-spec checking.
+
+For “allow none, but payload must be 1 when present”, write
+`(o is some(v)) => v == 1` or `o == none or (o is some(v) and v == 1)`.
+`(o is some(v)) or v == 1` is undefined, not an equivalent shorthand.
+
 ## 4. Statements (init / action body)
 
 Init assignment values/keys, if conditions and forall filters/bodies require
@@ -2437,6 +2538,45 @@ branches. A guard refusal does not legitimize an ill-typed argument expression.
    `Set<SymmetricType>` state (`V` is used only when it contains no symmetric
    identity type); use it only when no identity is semantically special.
 
+### Ranked-response recipe
+
+_A compact summary, written for files headed `fsl 5`; the detailed rules
+elsewhere in this reference give the full detail._
+
+For a confirmed per-case response, the partial declaration shape is
+`leadsTo Responds { forall c: Case { level[c] > 0 ~> level[c] == 0 }`
+followed by `helpful step(c)` and `decreases level[c]`, then the final leadsTo
+closing brace. Both clauses belong **after** the forall's closing brace;
+putting them inside the response wrapper is not ranked-forall syntax.
+
+- `check` type-checks helpful arguments in the property's binder scope.
+  **Induction additionally requires state-independent arguments:** leadsTo
+  binders, constants, enum members, integer/Boolean literals, and integer
+  `+`, `-`, `*` combinations (including unary `-`). A well-typed state read
+  such as `helpful step(cursor)` can pass check/BMC yet be refused by induction.
+- Under proved invariants while P is pending and Q false, the integer rank must
+  be nonnegative and progress possible. Without helpful, **every** enabled action
+  must reach Q or preserve P and strictly decrease the rank.
+- Under interleaving, another case's valid step can leave `level[c]` unchanged.
+  Use a matching per-binding `helpful step(c)`: it must be a `fair action`,
+  enabled whenever that binding is pending, and strictly decrease its rank when
+  it fires. Other instances/actions must preserve the pending obligation unless
+  they reach Q, and must **not increase** the rank. Helpful creates no fairness.
+- With two or more distinct helpful action names, once a helpful instance is
+  enabled while pending, it must stay enabled until firing or Q holds; an
+  alternating “some helper is enabled” condition does not satisfy weak fairness
+  for any one instance.
+- Alternatively use an appropriate global rank such as
+  `decreases sum(k: Case of level[k])` when every enabled action reaches Q or
+  preserves the pending obligation and decreases the total. This avoids a
+  fixed-instance-count sum; it does not waive the progress/decrease obligations.
+
+Without decreases, response evidence remains bounded to depth. A successful rank
+proves eventual response at the checked world sizes; the base, coverage and
+`within K` deadline retain their own bounded obligations. For an expensive search
+use [scoped liveness exploration](commands.md#scoped-liveness-exploration), then
+restore full-world safety and unfiltered completion rather than shrinking the claim.
+
 ## 6. Automatic checks (checked even if not written)
 
 Type bounds (`_bounds_<var>`, including Map values, struct fields, and the Seq live
@@ -2529,6 +2669,77 @@ declarations does not mean reachable or progress checks were absent. These rows
 do not change raw evidence, assurance, envelopes or command exits. Changed
 renderings make affected approvals `drifted` for `rendering_changed` (exit 0);
 review and re-approve the ledger.
+
+## Compose and refinement
+
+_A compact summary, written for files headed `fsl 5`; the detailed rules
+elsewhere in this reference give the full detail._
+
+```fsl-fragment
+compose <Name> {
+  use <SpecName> as <alias> from "<relative.fsl>"
+  state { <local state> }
+  init { <initialization> }
+  fair action <sync>(<p>: <alias>.<Type>) =
+    <alias>.<act>(<p>) || <other>.<act>(<p>) {
+    requires <additional condition>
+    <local statements>
+  }
+  internal <alias>.<action>
+  invariant <Name> { <cross-component predicate> }
+}
+```
+
+No nested compose. Component references are checked before prefixing; a parent
+cannot rescue an undeclared child name. Sync reference arguments read header
+params/consts/state, not body lets. Additional sync statements write only local
+composition state; glue actions can read/write component `alias.var`. Init can
+initialize components but cannot overlap their init writes. Sync does not inherit
+fairness: use `fair action` explicitly; otherwise `fair_not_inherited` warns.
+Sync numeric arguments use bounded value ranges, not nominal alias names; passing
+to a narrower component can check yet violate its bound, so guard the call.
+
+```fsl-fragment
+refinement <Name> {
+  impl <ImplName>
+  abs <AbsName>
+  maps auto
+  enum conversion <conversion> <ImplEnum> -> <AbsEnum> {
+    <ImplMember> -> <AbsMember>
+  }
+  enum abstraction <abstraction> <ImplEnum> -> <AbsEnum> {
+    <ImplMember> -> <AbsMember>
+  }
+  map <abstract_scalar> = <impl expression>
+  map <abstract_map>[<key>: <Type>] = <impl expression>
+  action <impl_action>(<params>) -> <abs_action>(<expressions>)
+  action <internal_action>(<params>) -> stutter
+  preserve progress { respond <AbsLeadsTo> by <impl_action>, <other_action> }
+}
+```
+
+Explicit entries override optional auto defaults. Auto correspondence matches
+parameters **by name**, not position; arity/surplus/unmatched params reject.
+Available registered source actors must match for auto pairs; requirement text
+does not supply an actor. Explicit correspondence/stutter is not actor-checked.
+Typed correspondence formals must agree with the impl action.
+
+Same-named types must agree in kind, resolved bounds, ordered enum members and
+struct fields/types, even if unused. Use distinct names for distinct definitions.
+Distinct nominal enums need explicit `enum conversion` (exhaustive bijection)
+and `convert(name, expr)`, or `enum abstraction` (source-total many-to-one) and
+`abstract(name, expr)`. No ordinal conversion. Shared enum member names can be
+ambiguous; preserve-progress additionally rejects cross-enum member collisions.
+Raw production/causal log mappings lack a typed impl and reject enum mappings.
+For abstract Map keys convert the abstract binder toward the impl key type.
+
+Use canonical lowered names from `explain --readable --names canonical` or
+Kernel; no glossary in design/mapping. Ordinary refinement carries checked
+safety, permits strengthened guards, and is bounded by its reported depth.
+Verify each model independently. Progress only crosses when explicitly pulled
+through `preserve progress` (or verified at its owning lower layer); `by`
+names are metadata/validation, not fairness. A false internal stutter reports
+`stutter_changed_abs`; a lost pulled response reports `progress_lost`.
 
 ## 8. Idioms (reuse them as-is)
 

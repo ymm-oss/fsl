@@ -98,6 +98,14 @@ owner-only `.fslc-output-*.tmp` file beside the destination. Path interpretation
 parent creation remain command-specific. See
 [the publication contract](../../../docs/design/DESIGN-atomic-artifact-output.md).
 
+**Editions.** The document header selects the syntax (`fsl 5`, or headerless /
+`fsl 4` for FSL 4); `--edition current|next|4|5` selects the edition policy, not the
+syntax. Stricter rules follow each source's own header. Consumed child files
+retain their own edition; do not assume a parent's edition flag propagates to
+dependencies. Migration edits the requested roots, not imported children.
+Canonical mixed editions are allowed where the consumer supports those files.
+`migrate` defaults to the next edition and `lint` to the current one.
+
 Current-edition `check`, `verify`, and Worker JSON append migration
 warnings for string metadata, colon quantifiers, and inline action `maps`, without
 changing verdicts or exits. Codes and complete finding data match lint; lint still
@@ -106,12 +114,12 @@ Domain checking rejects quantified domain expressions, so it does not emit this
 colon-quantifier warning for them; metadata slots and requirement maps are not domain forms.
 
 ```
-fslc check <f>                                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
-fslc lint <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
+fslc check <f> [--edition current|next|4|5]     # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
+fslc lint <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)
 fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
                                                  # exit 0 migrated, 1 migrate_manual_required (no inputs written), 2 refused/I/O/check failure (same check-failure contract as lint)
-fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
+fslc fmt <f|-> [--edition current|next|4|5]     # canonical source on stdout; input is never mutated
 fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
 fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (default v1)
@@ -1012,6 +1020,10 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   within depth, not structurally impossible). Blame identifies; it never
   proposes a repair — do not turn a `blame` entry into a suggested guard
   weakening (that cuts against the anti-hollowing principle).
+  Both levels are shallow: only the invariant's top-level `and` is split (a
+  conjunction inside a quantifier body is one conjunct), and
+  `violating_bindings` names the outermost quantifier's failing values only —
+  `forall u: U { forall i: I { ... } }` reports `[{"u": 0}]`, with no `i`.
 - **repair routing (`trace_type`)**: every counterexample/failure result carries a
   `trace_type` discriminator — one of `invariant` | `sla` | `type_bound` | `trans`
   | `ensures` | `partial_op` | `deadlock` | `leadsTo` | `leadsTo_rank` |
@@ -1111,6 +1123,31 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `helpful_action_not_enabled`, `non_decreasing_helpful_action`,
   `non_helpful_action_increases_measure`, and — with two or more distinct
   helpful actions — `helpful_action_enabledness_not_sticky`).
+
+### Scoped liveness exploration
+
+Lasso search can grow sharply with interleavings; separate diagnosis from the
+original obligations rather than assuming every safety run is cheap:
+
+1. **Explore a stated smaller world/depth for one response**, without editing
+   the original source bounds. For a declared entity Case, a typical diagnostic
+   run is `fslc verify file.fsl --engine bmc --instances Case=1 --property Responds --depth 8`.
+   Choose the smallest world that still exhibits the relevant interaction, not
+   automatically one case. Use overrides only for declared entity/number bounds.
+   Report the effective world and depth: this result does not establish the
+   original larger-world response. Selected leadsTo is not an induction selector.
+2. **Check safety separately at the full declared world and required depth.**
+   Run each needed safety property (for example --property SafetyName) without
+   reduced bounds while isolating costly response exploration. Do not mistake
+   one selected safety pass for all safety obligations or a completed seam.
+3. **Complete the original contract unfiltered**, using its layer's required
+   check/lint/verify/induction/scenarios and refinement runs at original world
+   sizes/depths, without property selection/exclusion, from-state or reduced
+   overrides. Read requirement_traces skips and implements:not_evaluated from
+   diagnostic runs; replay the original scenarios and gate the original seams.
+   If full-scope obligations remain unresolved, report that limit. A reduced-world
+   pass, full-world safety pass or ranked eventual response is not permission
+   to claim the original deadline/liveness/seam obligation passed.
 
 ### ⚠ Liveness scales differently from safety — verify it on a reduced model
 

@@ -416,19 +416,72 @@ fn first_fsl_line(markdown: &str) -> Option<&str> {
     None
 }
 
-/// fsl 5 plan §3 S13 (decisions/043 stage 1 gate over decisions/048 J4's
-/// `skills-next/`): the next-edition skills are held to a stricter fence
-/// rule than `docs/` and `skills/`. Every `fsl` fence there must be marked
-/// and must check with the next edition enabled (`--every-fence`: an
-/// unmarked one fails instead of being skipped), and each document's first
-/// `fsl` fence opens with the `fsl 5` header, so no example there is read as
-/// the earlier edition.
+/// The FSL 5 layer skills that #1437 moved from `skills-next/` into `skills/`
+/// (fsl 5 plan §3 S13, decisions/043 stage 1 gate over decisions/048 J4).
+/// The shared `skills/fsl/` reference keeps the FSL 4 guidance, so its
+/// unmarked fences stay skipped fragments and it is not listed here.
+const FSL5_SKILL_DIRECTORIES: [&str; 7] = [
+    "skills/fsl-business",
+    "skills/fsl-delivery",
+    "skills/fsl-design",
+    "skills/fsl-design-review",
+    "skills/fsl-from-code",
+    "skills/fsl-requirements",
+    "skills/fsl-verify",
+];
+
+/// The opt-in variable #1434 removed; naming it in a skill would be a stale
+/// instruction (the half of the former `skills_next_unpackaged.rs` that
+/// still applies after the move).
+const REMOVED_GATE_VARIABLE: &str = "FSLC_UNSTABLE";
+
+fn every_file(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in
+        std::fs::read_dir(dir).unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+    {
+        let path = entry.expect("directory entry").path();
+        if path.is_dir() {
+            every_file(&path, out);
+        } else {
+            out.push(path);
+        }
+    }
+}
+
+/// The FSL 5 layer skills are held to a stricter fence rule than the rest
+/// of `docs/` and `skills/`. Every `fsl` fence there must be marked and must
+/// check (`--every-fence`: an unmarked one fails instead of being skipped),
+/// each document's first `fsl` fence opens with the `fsl 5` header, so no
+/// example there is read as FSL 4, and no file names the removed gate
+/// variable.
 #[test]
-fn next_edition_skill_fences_all_check_under_the_next_edition() {
+fn fsl5_skill_fences_all_check_under_the_fsl5_header() {
     let root = workspace_root();
-    let skills = root.join("skills-next");
     let mut documents = Vec::new();
-    markdown_files(&skills, &mut documents);
+    for directory in FSL5_SKILL_DIRECTORIES {
+        let directory = root.join(directory);
+        assert!(directory.is_dir(), "{} is missing", directory.display());
+        markdown_files(&directory, &mut documents);
+    }
+    let mut files = Vec::new();
+    for directory in FSL5_SKILL_DIRECTORIES {
+        every_file(&root.join(directory), &mut files);
+    }
+    assert!(
+        files.len() > documents.len(),
+        "the agent manifests are scanned too"
+    );
+    for file in &files {
+        let text = std::fs::read_to_string(file).expect("read skill file");
+        for (index, line) in text.lines().enumerate() {
+            assert!(
+                !line.contains(REMOVED_GATE_VARIABLE),
+                "{}:{}: names the removed {REMOVED_GATE_VARIABLE} variable",
+                file.display(),
+                index + 1
+            );
+        }
+    }
     let mut headed = 0;
     for document in &documents {
         let text = std::fs::read_to_string(document).expect("read skill document");
@@ -447,7 +500,8 @@ fn next_edition_skill_fences_all_check_under_the_next_edition() {
     let script = root.join("tools/check-doc-fences.py");
     let output = std::process::Command::new("python3")
         .arg(&script)
-        .args(["check", "--every-fence", "skills-next"])
+        .args(["check", "--every-fence"])
+        .args(FSL5_SKILL_DIRECTORIES)
         .args(["--fslc", env!("CARGO_BIN_EXE_fslc")])
         .current_dir(&root)
         .output()
@@ -456,7 +510,7 @@ fn next_edition_skill_fences_all_check_under_the_next_edition() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "check-doc-fences.py --every-fence skills-next failed\n{stdout}{stderr}"
+        "check-doc-fences.py --every-fence over the FSL 5 skills failed\n{stdout}{stderr}"
     );
     assert!(
         stdout.contains(" 0 fsl fences unmarked") && stdout.contains(" 0 failures"),

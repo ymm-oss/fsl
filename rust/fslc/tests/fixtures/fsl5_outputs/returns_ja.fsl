@@ -1,6 +1,6 @@
 fsl 5
 // returns_en.fsl in Japanese keywords, particles and glossary aliases (the
-// example of skills-next/fsl-requirements/references/glossary.md).
+// example of skills/fsl-requirements/references/glossary.md).
 要件 ReturnRequirements {
   用語集 {
     ReturnRequirements = 返品要件

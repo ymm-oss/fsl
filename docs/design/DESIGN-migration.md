@@ -6,7 +6,7 @@ Status: accepted
 
 ## Contract
 
-`fslc lint PATH... --edition current|next` reports stable diagnostics and never
+`fslc lint PATH... --edition current|next|4|5` reports stable diagnostics and never
 changes source. Exit 0 means no findings, 1 means findings exist, and 2 means an
 I/O or parse/check failure. Every finding includes its code, one of the stable
 taxonomies `deprecated`, `non_canonical`, `ambiguous_intent`, or

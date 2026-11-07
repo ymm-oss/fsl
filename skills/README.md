@@ -4,6 +4,17 @@ A place for distributable Agent Skills. They are placed at the repository root s
 they are easy to find on GitHub and can be distributed via the `gh` skill
 extension or by manual copy.
 
+## Editions
+
+The layer skills describe FSL 5: files headed `fsl 5`, which users write
+without any opt-in since #1434. **A headerless document is FSL 4.** The shared
+[`fsl/`](fsl/) reference keeps the FSL 4 and kernel guidance (kernel `spec`
+bodies are shared by both editions) and routes FSL 5 requirements syntax to
+[`fsl-requirements/references/`](fsl-requirements/references/). To move a
+document from FSL 4 to FSL 5, use the migration guide in
+[`docs/manual/LANGUAGE.md`](../docs/manual/LANGUAGE.md); migration is a
+semantic review, not a search-and-replace of edition numbers.
+
 ## Skill set
 
 FSL work is split by layer so an agent does not turn PM requirements into design
@@ -22,9 +33,9 @@ re-verified as it changes (regression, drift, cross-layer change-impact via
 
 | Skill | Use for | Main deliverable |
 |---|---|---|
-| [`fsl/`](fsl/) | shared language syntax, verifier commands, repair protocol, JSON result interpretation | core FSL reference |
-| [`fsl-business/`](fsl-business/) | business flows, As-Is/To-Be controls, policies, KPIs, goals | `business` spec |
-| [`fsl-requirements/`](fsl-requirements/) | PM/PdM requirements, acceptance criteria, forbidden flows, NFR/SLA | `requirements` spec |
+| [`fsl/`](fsl/) | shared language syntax, verifier commands, repair protocol, JSON result interpretation; the FSL 4 and kernel guidance plus the FSL 5 route | core FSL reference |
+| [`fsl-business/`](fsl-business/) | business flows, As-Is/To-Be controls, policies, KPIs, goals, governance under the `fsl 5` header | `business` spec |
+| [`fsl-requirements/`](fsl-requirements/) | PM/PdM requirements, acceptance criteria, forbidden flows, NFR/SLA in the FSL 5 forms (`entity` / `lifecycle` / `event` / `rule` / `decide` / `scenario` / `forbidden`), with the English / Japanese keyword table and the `glossary` | `requirements` spec |
 | [`fsl-design/`](fsl-design/) | engineering design, internal state/actions, refinement mapping, testgen/replay handoff | kernel `spec` + mapping |
 | [`fsl-design-review/`](fsl-design-review/) | design review, variants, SOLID/LSP/OCP/substitutability judgment | contract-conformance report |
 | [`fsl-requirements-document/`](fsl-requirements-document/) | generating a stakeholder-facing requirements document from an already-checked spec; editing only its non-normative slot | Markdown requirements document + drift check |
@@ -71,6 +82,10 @@ whole job; use `fsl-delivery/` whenever keeping the layers aligned is the delive
   guardrails
 - [`fsl-requirements/SKILL.md`](fsl-requirements/SKILL.md) — requirements-layer
   procedure and PM guardrails
+- `fsl-requirements/references/` — the FSL 5 requirements
+  [syntax](fsl-requirements/references/syntax.md), the generated
+  [English / Japanese keyword table](fsl-requirements/references/keywords.md), and
+  the [glossary](fsl-requirements/references/glossary.md) guide
 - [`fsl-design/SKILL.md`](fsl-design/SKILL.md) — design-layer procedure and
   refinement guardrails
 - [`fsl-design-review/SKILL.md`](fsl-design-review/SKILL.md) — review procedure and
@@ -88,6 +103,38 @@ whole job; use `fsl-delivery/` whenever keeping the layers aligned is the delive
   the results that look green but are not, the fix loop, prohibited shortcuts,
   mutate strength, and the completion report format
 
+## Conventions the checks hold
+
+- **Every `fsl` fence in an FSL 5 layer skill is checked.** In `fsl-business/`,
+  `fsl-delivery/`, `fsl-design/`, `fsl-design-review/`, `fsl-from-code/`,
+  `fsl-requirements/` and `fsl-verify/`, a fence whose info string starts with
+  `fsl` must be marked `fsl check` and must pass `fslc check`
+  (`tools/check-doc-fences.py check --every-fence <those directories>`, run by
+  `rust/fslc/tests/literate_docs_contract.rs`). A partial snippet uses the info
+  string `fsl-fragment`, which no checker reads. Elsewhere (including `fsl/`),
+  only fences marked `fsl check` are checked and unmarked ones are counted as
+  skipped fragments.
+- **One spec per document, headed `fsl 5`.** All fences of a document are one
+  compilation unit, as `fslc check file.md` reads them, so an FSL 5 layer
+  document holds at most one spec, and its first `fsl` fence starts with the
+  line `fsl 5`.
+- **The keyword table is generated.**
+  [`fsl-requirements/references/keywords.md`](fsl-requirements/references/keywords.md)
+  holds, between its markers, the table rendered from the parser's own table
+  (`rust/fsl-syntax/src/keywords.rs`, `KEYWORDS` and `PARTICLES`).
+  `rust/fslc/tests/fsl5_keywords.rs` renders it again and fails on any
+  difference; locally, run that test with `FSLC_SKILLS_KEYWORDS_UPDATE=1` to
+  rewrite the block after the table changes, and review the diff. When `CI` is
+  set, any set `FSLC_SKILLS_KEYWORDS_UPDATE` variable fails the test instead of
+  rewriting or comparing.
+- **The English and Japanese examples are one spec.** The example of
+  `fsl-requirements/SKILL.md` and its Japanese spelling in
+  `fsl-requirements/references/glossary.md` lower to the same kernel (spans,
+  origins and annotations aside); `fsl5_keywords.rs` checks it.
+- **No gate name.** The FSL 5 layer skills never name the opt-in variable that
+  #1434 removed; `literate_docs_contract.rs` checks every file in those
+  directories.
+
 ## Installation
 
 **Claude Code inside this repository**: no extra work is needed, because there are
@@ -98,5 +145,6 @@ the target project's `.claude/skills/`, or into the user-wide
 `~/.claude/skills/`. If you use the `gh` skill extension, specify this directory
 (`skills/`) as the distribution source.
 
-The verifier `fslc` itself is required separately (`pip install -e .` at the
-repository root; the only dependencies are lark and z3-solver).
+The verifier `fslc` itself is required separately: the native binary from the
+GitHub releases, installed by the install script or mise as described in the
+repository [README](../README.md#install).

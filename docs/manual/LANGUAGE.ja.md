@@ -18,6 +18,49 @@ FSL は、**生成 AI によって書かれ、検証され、修復される**�
 
 ## 1. 仕様の構造
 
+<a id="fsl-editions"></a>
+
+### エディションと読み始める場所
+
+エディションはソース構文を選ぶもので、`fslc` 実行ファイルのバージョンとは別です。
+FSL 5 の要件は **entity / lifecycle / event / rule / decide** で記述します。
+新しく書く場合は [§13.2](#fsl5-requirements)から
+読み始めてください。カーネルの `spec`、式、検証範囲、refinement は、本書の他の節で
+説明する共通の基盤です。§13.2 の `process` / `transition` の例は FSL 4 と移行入力の
+参照用に残しています。
+
+最初の宣言より前に、`fsl 5` を単独の行で書きます。その前に置けるのは空行と `//`
+コメントだけです（先頭の UTF-8 BOM も受理します）。Markdown の literate source では、
+最初の `fsl` フェンスの先頭に、同じ規則で書きます。ヘッダーは個々の requirements ブロックではなく、
+文書全体に適用されます。`fsl 4` は以前の構文を選び、ヘッダーがない文書も FSL 4 の
+ままです。`--edition current` は文書の指定に従います。明示的に指定したエディションと
+ヘッダーが食い違うと `edition_conflict`、未知の番号は `unsupported_edition` です。
+causal と AI ダイアレクトの文書はヘッダーを取りません（`edition_header_not_accepted`）。
+ヘッダーの追加だけでは旧形式の要件を変換できません。`fsl 5` の下の `process` は
+`mixed_requirements_forms` です。[後述の移行手順](#fsl4-to-fsl5-migration)を使ってください。
+この 4 つの拒否は、いずれも `"result": "error"`、`"kind": "parse"`、終了コード 2 の
+エンベロープです。上の名前は、`message` と `loc` と並ぶ `diagnostic_code` フィールドの値です。
+
+ヘッダーと `--edition` オプションは役割が違います。文書をどの構文で読むかを決めるのは
+**ヘッダー**だけです。`check`、`verify`、`lint`、`migrate`、`fmt` などの
+**`--edition`** は、エディションの*方針*、つまりどの finding を出し、どの重さで扱うかを
+選びます。綴りは `current`、`next`、`4`、`5` の 4 つです。ヘッダーのない文書と `fsl 4` の
+文書では `4` は `current` の別綴りで、`5` は `next` の別綴りです。このオプションを取るのは
+`check`、`verify`、`domain check`、`fmt`、`lint`、`migrate` で、いずれのヘルプにも
+`--edition {current,next,4,5}` と表示され、`cli-contract.json` にも同じ 4 つの選択肢が
+載っています。それ以外の値は usage エラー(`"kind": "usage"`、終了コード 2)で、メッセージは
+`--edition must be current, next, 4, or 5` です。JSON 出力はこのオプションを番号で書きません。
+次のエディションで読んだ結果には `"edition": "next"` が付き（現行のエディションでは付きません）、
+ヘッダーのある文書には `"fsl_edition": 4` または `5` も付きます。
+
+**ヘッダーのない**文書に `--edition 5`（または `next`）を付けても、FSL 5 の文書にはなりません。
+構文は FSL 4 のまま読むので、§13.2 の FSL 5 の要件の書き方は構文エラーになり、`fsl_edition`
+も出ません。変わるのは方針です。現行のエディションで警告になる旧形式、たとえば文字列の
+メタデータ（`legacy_string_metadata`）は、次のエディションでは `unsupported_in_edition` の
+エラーになります。`lint --edition 5` は `missing_edition_header` も報告します。FSL 5 で書くには
+ヘッダーを書くか、`fslc migrate` に追加させてください。ヘッダーのない文書を従来どおり検査するには、
+`--edition` を付けないか、`current` を指定します。
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <constant expr>
@@ -295,8 +338,8 @@ domain 宣言では、有限のバリアントに `enum Name { Member, ... }` �
 に `type Name = lo..hi` を使います。レガシーな書き方 `type Name = A | B` は現行の
 2.x エディションでは引き続き受理され、宣言全体に対して安定した
 `deprecated_domain_enum_union` 警告(正準の置き換えを含む)を生成します。
-`fslc check`、`fslc verify`、`fslc domain check` は `--edition current|next` を
-受け付けます。`next` はレガシーの union 記法を拒否します。他の対応済み consumer は
+`fslc check`、`fslc verify`、`fslc domain check` は `--edition current|next|4|5` を
+受け付けます。`next`(または `5`)はレガシーの union 記法を拒否します。他の対応済み consumer は
 source のヘッダーのエディションを使います。それらに `--edition` を追加するものではありません。
 `fslc lint` は変更を
 加えずにエディション finding を報告し、`fslc migrate --edition next` は検査済みの
@@ -1775,9 +1818,9 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 
 ```
 fslc check     <file.fsl>                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
-fslc lint      <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
-fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
@@ -2551,6 +2594,12 @@ state の budget で打ち切られた、というもので、上記のどちら
 blame は特定するだけで、修復(ガードの弱化、連言肢の削除)を提案することは決して
 ありません — それは anti-hollowing の原則に反するからです。これらはすべて JSON
 コントラクトへの厳密に追加的な変更です。
+
+この特定はどちらも浅いものです。連言肢に分けるのは invariant の最上位の `and` だけで、
+量化子の本体の中の論理積は 1 つの連言肢のままであり、その `text` は量化した式の全体です。
+`violating_bindings` が示すのは、いちばん外側の量化子の偽になった値だけです。
+`forall u: U { forall i: I { not (a[u] and b[i]) } }` では `[{"u": 0}]` を返し、`i` の値は
+含みません。入れ子の量化子を再帰的に射影することと、量化子の中を分割することは実装されていません。
 
 忠実性/意図のギャップを特定する診断は、`faithfulness_class` と
 `recommended_action` も運ぶことがあります。現在のクラスは
@@ -3893,6 +3942,388 @@ CTI を閉じるために存在する、あるいは実装のガードが抽象�
 
 ### 13.2 要件レイヤー: `requirements`(fsl-req ダイアレクト)
 
+<a id="fsl5-requirements"></a>
+
+#### FSL 5: エンティティ、出来事、原文の要件
+
+識別する対象を entity、その段階と許される辺を lifecycle、アクターの行為を event、
+原文が定める条件を rule または decide で記述します。ID と引用した原文によって、
+検証対象と要件を結び付けます。次は一つの完全な仕様です。この後の構文フェンスは、
+必要な宣言があることを前提とした断片です。
+
+```fsl check
+fsl 5
+requirements Support {
+  actor Agent
+  entity Agent
+  entity Ticket {
+    lifecycle Open -> Assigned -> Closed
+    lifecycle Assigned -> Escalated
+    lifecycle Open -> Withdrawn
+  }
+  Ticket belongs to Agent as assignee via take
+  resource desk_open: Bool = true
+
+  event take = Agent takes Ticket Open -> Assigned
+  event close = Agent closes Ticket Assigned -> Closed
+  event escalate = Agent escalates Ticket Assigned -> Escalated
+    set desk_open = false
+  event withdraw = Agent withdraws Ticket Open -> Withdrawn
+
+  rule REQ-DESK-001 "A ticket is taken only while the desk is open" {
+    allow Agent takes Ticket only when desk_open
+  }
+  rule REQ-DESK-002 "A ticket is withdrawn only after the desk has closed" {
+    allow Agent withdraws Ticket only when not desk_open
+  }
+  rule REQ-TICKET-001 "A taken ticket keeps the agent who took it" {
+    always Ticket in Assigned, Closed, Escalated has assignee
+  }
+  policy POL-TICKET-001 "Every assigned ticket is eventually closed or escalated"
+    every Ticket in Assigned must eventually be Closed or Escalated
+  goal GOAL-TICKET-001 "A ticket can be closed" some Ticket can reach Closed
+  measure closed_tickets = count Ticket in Closed
+
+  scenario AC-TICKET-001 "An agent takes and closes a ticket" {
+    Agent takes t1 with assignee 1
+    Agent closes t1
+    then t1 is Closed
+  }
+  scenario AC-DESK-001 "A ticket still open when the desk closes is withdrawn" {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent withdraws t2
+    then t2 is Withdrawn
+  }
+  forbidden FB-DESK-001 "No ticket is taken once the desk has closed" {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent takes t2 with assignee 0
+    then rejected
+  }
+  forbidden FB-DESK-002 "No ticket is withdrawn while the desk is open" {
+    Agent withdraws t1
+    then rejected
+  }
+}
+verify {
+  instances Ticket = 2
+  instances Agent = 2
+}
+```
+
+**エンティティと区分。** `entity User` は段階を持たない識別対象を宣言します。
+`entity Order { qty: Qty = 0 lifecycle Empty -> Placed }` のように本体を書く場合は、
+一つ以上の lifecycle 行と、すべてのフィールドの明示的な初期値が必要です。
+number のフィールドも省略できません。型は `Bool` か、宣言済みの `number`、`type`、`enum` です。
+最初のパスの先頭段階が初期段階で、段階は初出順に生成 enum に入ります。
+lifecycle 行を追加すると別のパスを表せます。`number Qty` の有限範囲は
+`verify { values Qty = 0..2 }`、エンティティの個数は `instances` で指定します。
+検査結果が対象とする世界は、この範囲です。
+`concept Bulk = Order where qty >= 2` と `concept Open = Order in Placed, Packed`
+は述語に名前を付けるもので、状態を追加しません。条件中ではフィールドを `qty` のように書きます。
+変換後のフィールド名は `order_qty`、`order_stage` など、正規名の `entity_field` です。
+設計と `implements` のマッピングでは、その名前を使います。
+
+**出来事。** `event place = User places Order with qty Empty -> Placed` は、
+正規の action 名 `place` と、アクター・動詞・エンティティの句を定めます。
+遷移は lifecycle の辺でなければなりません（`event_not_on_lifecycle`）。
+代わりに `in Placed` と書くと、同じ段階にとどまる出来事です。
+`with qty` は入力を同名フィールドに格納します。`with n: Qty` は型を明記した入力です。
+`n` と同名のフィールドがなければ、自動のフィールド代入は行いません。同名のフィールドが
+あれば、入力の型を明記していても代入します。入力も `set x = expr, y = expr` の更新も、
+複数ならカンマで区切ります。入力名とフィールド名が重なるときは `input qty` で入力を
+選びます（曖昧な裸の名前は `ambiguous_input_field`）。動詞を省くと event 名を使います。
+`covers REQ-ID "原文"` はトレーサビリティです。シナリオで使うものも含め、アクターを
+宣言してください（`actor_not_declared`）。通常の event は fair、`fault event` は
+fair ではありません。辺に対応する event がなければ `lifecycle_edge_without_event` の警告です。
+
+**規則。** `rule ID "原文" { statement+ }` は内部の文をすべて論理積で組み合わせます。
+同じ出来事を制約する別の rule も論理積になります。使える文は次のとおりです。
+
+| 文の断片 | 検査する意味 |
+|---|---|
+| `allow Actor verb Entity only when condition` | 条件を出来事のガードにします。 |
+| `allow Actor verb Entity only for Concept` | 区分に属することをガードにします。 |
+| `never Actor verb Entity when condition` / `for Concept` | 条件が偽であること／区分に属さないことをガードにします。 |
+| `Actor verb Entity only after Actor other Entity` | lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。 |
+| `Name: Entity enters Target only from Source, Other` | 遷移元を制限する二状態の性質です。 |
+| `Name: always Concept1 is Concept2` | 前者なら後者も成り立つという不変条件です。`Stage Entity` もケースとして使えます。 |
+| `Name: always Entity in S, T has condition` | 指定段階でフィールド条件を要求する不変条件です。`not in` は指定段階の外を選びます。relation の役名だけなら、関係が設定済みであることを表します。 |
+| `deadline age <= bound` | `time` で宣言した age に対する期限です。時間と期限の検査は §13.4 を参照してください。 |
+
+`always` と `enters` の文には名前を付けると、結果の性質名が安定します。
+出来事のガードを同時に満たせない場合、`check` は
+`rule_conflict_unsatisfiable_guard` で拒否します。`implied_by_lifecycle` は情報です。
+lifecycle が既に順序を保証する `only after` は、履歴の状態やガードを追加しません。
+lifecycle から導ける `enters` は、遷移の性質を引き続き宣言し、検査します。
+拒否を定める規則には forbidden trace を用意してください。ガード対象の出来事を試す
+trace がないと `never_rule_without_forbidden` が警告します。
+
+**決定表。** 次の断片は、提出済み申請のケースごとにアクターと許される動詞を選びます。
+エンティティ、出来事、区分は別途宣言しておきます。
+
+```fsl-fragment
+decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
+  SmallClaim => System approves
+    covers REQ-2 "A small claim is auto-approved"
+  LargeClaim => Manager approves or rejects
+    covers REQ-3 "A large claim is approved or rejected by a manager"
+} assuming amount > 0
+```
+
+行の条件には区分、`and` で結んだ区分、`Stage Entity` を使えます。
+`otherwise => Actor verb` は他の行が成り立たない場合を受け持ちます。
+表の段階から出るすべての出来事を列挙する必要があります（`decide_event_not_listed`）。
+行はフィールドの範囲を網羅し（`decide_not_exhaustive` と未網羅の値）、互いに重なっては
+なりません（`decide_overlap` と重複する値）。ガードによって成立しなくなった行は
+`decide_row_emptied` の警告です。各出来事には、それを列挙する行の条件の論理和が
+一つのガードとして加わり、他の rule のガードも適用されます。
+`assuming Q` は表の検査を Q の範囲に絞ると同時に、**その段階で Q が成り立つという
+不変条件を生成し、`verify` で証明させます**。網羅性の検査を無条件に免除する指定ではありません。
+
+**関係、資源、射影。** `Ticket belongs to Agent as assignee via take` は、各 ticket に
+最初は未設定の optional な役割を追加します。関係先は `entity` で宣言し、`via` の event の
+アクターはその関係先でなければなりません。そのため `Agent` は `actor` と `entity` の両方で
+宣言します。この event は最初の入力で相手を受け取って記録し、この event のシナリオの
+ステップでは必ず相手を指定します。`with assignee 1` は Agent のインスタンス 1 を選びます。
+値はインスタンス番号です。インスタンス名（`with assignee a1`）は拒否されます。
+`resource stock: Qty = 2` はエンティティに属さない共有状態です。event は `set` で更新し、
+ガードからも参照できます。`measure m = count Concept` または `count Entity in S, T`
+は値の射影であり、新しいカウンター、履歴フィールド、自動の不変条件を作りません。
+`kpi m = count Entity in S` も同じ種類の射影ですが、受け取るのは一つのエンティティと
+一つの段階だけです。`kpi m = count Concept` と `kpi m = count Entity in S, T` は拒否される
+ので、これらには `measure` を使ってください。goal の `some E can reach S` は到達可能性、policy の
+`every E in S must eventually be T or U` は fair な event の下での進行性です。
+どちらも ID と原文をトレーサビリティに残します。
+
+**シナリオと停止。** アクターと動詞の句は event に対応します。対応がない、または曖昧なら
+`unknown_verb`、`unknown_event_phrase`、`ambiguous_step` で知らせます。
+`t1`、`t2` などのインスタンス名は trace 内だけの名前で、初出順に割り当てます。
+`verify` の個数を超えると `scenario_instance_overflow` です。
+`then t1 is Closed` は一つのインスタンスの最終段階を検査します。複数を検査するには、
+変換後の状態をインスタンス番号で引く式を書きます（エンティティごとに最初の名前が 0 です）。
+例: `then ticket_stage[0] == Closed and ticket_stage[1] == Open`。この式ではインスタンス名を
+使えず、`then t1 is Closed and t2 is Open` は拒否されます。scenario は全ステップを実行し、
+最後の条件を満たす必要があります。失敗は `kind: "acceptance"`、ステップの失敗には
+`failed_step` が付きます。forbidden trace は途中まで実行でき、最後のステップだけを
+拒否する必要があります。最後が受理されると `kind: "forbidden"`、途中で拒否されると
+`kind: "forbidden_setup"` と `failed_step` です。`check` はこれらの trace を実行します。
+
+`terminal` を書かない場合は、意図した停止状態を自動で導きます。lifecycle を持つ
+すべてのエンティティの全インスタンスが、**出る lifecycle 辺のない段階**にあることが条件です。
+event の欠落や無効化によって、途中の段階が最終段階になることはありません。
+識別だけの entity と relation の役割は停止条件を追加しません。
+明示的な `terminal { expression }` は、導出された条件を**置き換えます**。
+論理積で追加するのではありません。process から停止条件を導かない FSL 4 requirements
+との違いです。
+
+<a id="fsl5-repeats"></a>
+
+#### 入力、宣言、要件 ID の重複
+
+FSL 4 では、重複したものを 1 つだけ残し、もう片方を黙って捨てて読んでいました。FSL 5 の
+requirements 文書は、次の重複を拒否します。どれも**破壊的な削除**で、以前は `check` を
+通っていた書き方です。自動の移行はありません。
+
+- **ステップで同じ入力を 2 度書く (#1682)。** `scenario` や `forbidden` のステップで
+  1 つの入力を 2 度書くと、終了コード 2、`kind: "semantics"` で拒否し、`loc` は 2 度目の
+  名前です。例: `duplicate step input 'amount' at doc.fsl:43:44`。`with`、インスタンスを先に
+  書く形、`で` の並び、2 つの `で` の句、別名と正式名、relation の役割が対象です。違う入力を
+  どの順で書いても、後のステップで同じ入力を書いても受理します。構文エラーのあるステップは
+  そのエラーのままです。`lint`、`fmt`、`migrate` は同じメッセージを `loc` なしで報告し、
+  この文書を inline `implements` すると
+  `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)`、
+  `kind: "type"` です。意図する値を 1 つだけ残してください。
+- **`actor` の重複 (#1705)。** 同じ名前の `actor` を 2 度書くと（別の行でも、並びの中でも）、
+  終了コード 2、`kind: "parse"` で、2 度目の名前で拒否します: `duplicate actor 'Agent' at 4:9`。
+  重複を消してください。
+- **要件 ID の持ち主は 1 つ (#1705)。** キーワードの後に書いた ID は、その宣言のものです。
+  `rule`、`decide`、`scenario`、`forbidden`、`goal`、`policy`、そして FSL 5 の文書でも書ける
+  FSL 4 の `requirement` と `acceptance` のブロックが該当します。同じ ID の 2 つ目の持ち主は、
+  種類を問わず、その ID の位置で終了コード 2、`kind: "parse"` で拒否し、両方の種類を示します:
+  `duplicate requirement id 'REQ-DESK-001': this rule reuses the ID of the rule at 19:8; a
+  requirement ID has one owner at 22:8`。同じ種類の `scenario`、`forbidden`、`goal`、`policy`
+  の 2 つ目は、従来どおりの拒否です（`duplicate acceptance id`、`duplicate forbidden id`、
+  `duplicate property name`、`kind: "semantics"`）。どちらかの ID を付け替えるか、2 つの宣言を
+  まとめてください。この規則に当たる FSL 4 の文書を `fslc migrate --edition 5` は
+  `migrate_manual_required`、`reason: "shared_requirement_id"` で拒否し、ID を付け替えることは
+  しません。
+- **`covers` は参照 (#1705)。** event や判定表の行の `covers` は、持ち主のいる ID を、どんな
+  文でも指せます。受理され、ledger と `document claims` はその ID を持ち主の題名で示し、
+  `covers` の文はその後に並べます。持ち主の**いない** ID は、言葉を `covers` からしか得ないので、
+  文書の中のその ID の `covers` はすべて同じ文でなければなりません。最初に違ったものを、後の
+  `covers` の位置で `kind: "parse"` で拒否します: `requirement ID 'REQ-EV-1' is covered as
+  "withdrawing" here and as "closing" at 15:5; every covers of an ID no declaration owns has one
+  text at 19:5`。行が自分の表の ID を別の文で `covers` するのは従来どおり拒否です:
+  `requirement annotation 'REQ-2-3' has conflicting text at 22:7`、`kind: "semantics"`。
+- **`concept`、範囲、`kpi` の重複 (#1686)。** 同じ名前の `concept` を 2 度書くと、2 度目で
+  `kind: "semantics"` で拒否します: `duplicate concept 'SmallClaim' at doc.fsl:24:3`。
+  `concept` の重複は、範囲や `kpi` の重複より先に報告します。`instances` と `values` の範囲、
+  `kpi` の重複は、FSL 4 と同じく拒否します（§13.2 の FSL 4 の参照）。意図する宣言を
+  1 つだけ残してください。
+
+#### 用語集と日本語の綴り
+
+任意の `glossary` は requirements ブロックの最初の項目に、一つだけ置けます（`misplaced_glossary`）。
+ASCII の正規名と、空白を含まない一語の別名を対応させます。フィールドの左辺は
+`Entity.field` と書きます。次は断片です。
+
+```fsl-fragment
+glossary {
+  Employee = 従業員
+  Claim = 経費申請
+  Claim.amount = 申請金額
+  submits = 提出する
+}
+```
+
+以後は、宣言と参照、式、決定表の行、シナリオ、検証範囲で別名を使えます。カーネルの
+メンバーでは、エンティティと段階の別名は解決します（`forall c: 経費申請`）が、フィールドの
+別名は解決しません。変換後の名前を書いてください（`申請金額[c]` ではなく `claim_amount[c]`）。
+正規名との混在も受理しますが、同じ名前を両方の綴りで書くと `lint --strict-names` が
+`mixed_names` で知らせます。`duplicate_alias` は一つの正規名に二つの別名がある場合、
+`alias_collision` は一つの別名が二つの正規名を指す場合です。`alias_shadows_name` は、別名が
+glossary の別の正規名か、変換後の仕様が宣言する名前と同じ場合です。アクター名と段階名は
+対象外で、その他の衝突は通常の宣言エラー（`duplicate type`）になることがあります。
+英日どちらかのキーワードや助詞と同じ別名は `alias_shadows_keyword` で拒否します。別名の宣言なしに非 ASCII の正規名を使うと
+`canonical_name_not_ascii` です。spec 名、event の宣言、性質名、要件 ID は正規名で
+揃えておくと、コードとの境界を追いやすくなります。シナリオのインスタンス名は trace 内の名前です。
+`implements … from` のマッピングと refinement ファイルは正規名だけを使います
+（`alias_in_implements`）。生成する状態・action 名は `claim_amount`、`submit` のように
+正規名を保ち、読みやすい診断では別名も併記できます。
+
+日本語のキーワードは、次の**文法上の文脈**で使えます。全箇所を一律に置換する規則では
+ありません。英語と日本語は混在できます。ヘッダー、`implements … from` とマッピング、
+カーネルのメンバー（`terminal`、`time`、`state` など）、`and` / `or` 以外の演算子は
+英語のままです。
+
+| Context / 文脈 | English | 日本語 |
+|---|---|---|
+| File blocks / ファイルのブロック | `requirements`; `glossary`; `verify` | `要件`; `用語集`; `検証` |
+| Verification world / 検証範囲 | `instances`; `values` | `個数`; `値域` |
+| Requirements members / 要件の宣言 | `type`; `enum`; `number`; `const`; `actor`; `entity`; `concept`; `resource` | `型`; `列挙`; `数値`; `定数`; `アクター`; `エンティティ`; `区分`; `資源` |
+| Requirements members / 要件の宣言 | `event`; `rule`; `decide`; `goal`; `policy`; `measure`; `kpi`; `scenario`; `forbidden` | `出来事`; `規則`; `決定表`; `目標`; `方針`; `指標`; `重要指標`; `シナリオ`; `拒否シナリオ` |
+| Entity body / エンティティの本体 | `lifecycle` | `ライフサイクル` |
+| Concept / 区分 | `in`; `where` | `段階`; `のうち` |
+| Relation / 関係 | `belongs to`; `as`; `via` | `所属先`; `役名`; `契機` |
+| Event / 出来事 | `fault`; `in`; `set`; `covers` | `異常`; `段階`; `更新`; `対応要件` |
+| Event/rule expressions / 出来事・規則の式 | `input` | `入力` |
+| Allow rule / 許可規則 | `allow`; `only when`; `only for` | `許可`; `条件`; `対象` |
+| Never rule / 禁止規則 | `never`; `when`; `for` | `禁止`; `条件`; `対象` |
+| Ordering / 順序 | `only after` | `先行条件` |
+| Entry / 遷移元の制限 | `enters`; `only from` | `遷移先`; `遷移元` |
+| Safety rule / 不変条件 | `always`; `is`; `in`; `not in`; `has` | `常に`; `は`; `段階`; `段階以外`; `必須` |
+| Deadline / 期限 | `deadline` | `期限` |
+| Decision table / 決定表 | `for`; `otherwise`; `assuming` | `対象`; `それ以外`; `仮定` |
+| Decision outcome / 決定表の結果 | `or` | `または` |
+| Goal / 目標 | `some`; `can reach` | `いずれかの`; `到達可能` |
+| Policy / 方針 | `every`; `in`; `must eventually be`; `or` | `すべての`; `段階`; `いずれ必ず`; `または` |
+| Measure / 指標 | `count`; `in` | `件数`; `段階` |
+| Scenario/forbidden / シナリオ・拒否シナリオ | `then`; `is`; `rejected` | `結果`; `は`; `拒否` |
+| Boolean expressions / 論理式 | `and`; `or` | `かつ`; `または` |
+| Inputs in events/steps / 出来事・ステップの入力 | `with` | `で` (after the input / 入力の後) |
+
+`assume` / `前提`、`out of scope` / `範囲外`、event の `environment` / `外部`、
+allow の `only as` / `立場`、never の `because` / `理由` は予約済みの綴りであり、
+使える構文ではありません。glossary の別名にも使えません。
+
+助詞は独立した語として書きます。`が` はアクター、`を` はエンティティ（ステップでは
+インスタンス）、`で` は入力、`は` は主題を表します。`に` は相手を示す印として
+認識しますが、このエディションにはその役割を受け取る句がありません。relation の入力を
+渡す書き方には使えません。
+例えば `従業員 が 経費申請 を 提出する 申請金額 で` は event の句、
+`従業員 が c1 を 提出する 申請金額 1 で` はシナリオのステップです。
+助詞を使う句では、動詞以外の各語に役割の印を付けると、語順を変えられます。
+一部だけに付けると `mixed_particles`、役割が違うと `particle_role_mismatch`、
+`従業員が` のように語につなげると `particle_needs_space` です。
+`fmt --lang ja|en` でキーワード、`--names alias|canonical` で用語の綴りを選びます。
+これは表記の変更であり、別の振る舞いを定めるものではありません。
+
+<a id="fsl4-to-fsl5-migration"></a>
+
+#### FSL 4 から FSL 5 への移行
+
+適用前に計画を確認し、移行後のファイルと refinement の接続を、check、verify、
+原文の意図を確かめる検査にかけ直します。
+
+```bash
+fslc lint requirements.fsl --edition 5
+fslc migrate requirements.fsl --edition 5
+fslc migrate requirements.fsl --edition 5 --write
+fslc check requirements.fsl
+fslc verify requirements.fsl --depth 8
+fslc verify requirements.fsl --engine induction
+```
+
+`migrate` は `--write` がなければ dry run です。dry run でも `result: "migrated"` を返し、
+`written: false` になります。終了コードだけでなく、`files[].findings[]`、
+`machine_applicable`、拒否ごとの `reason` を確認してください。`lint` は finding があると
+終了コード 1 を返すので、上のコマンドは `&&` でつなげません。拒否された process の変換は
+`result: "migrate_manual_required"` で終了コード 1、後述のコメントによる拒否は
+`result: "migration_refused"` で終了コード 2 です。`legacy_process_form` と
+`derived_terminal_added` の finding ごとの `edits` は空で、書き換えは `files[].edits` にあります。
+既存の分類と原子的な
+書き込みの契約は、§7 と [DESIGN-migration](../design/DESIGN-migration.md)を参照してください。
+
+`migrate` の既定は次のエディション（`--edition next`。上では `5` と綴っています）です。
+`lint` の既定は `current` なので、計画の finding を見るには `--edition 5` を付けます。
+ヘッダーのない文書には次のエディションで `missing_edition_header` が付くので、ほかに何も
+報告がなくても `lint --edition 5` は終了コード 1 を返します。次の 3 種類の文書には
+**ヘッダーを提案しません**。`lint` と `migrate` は、FSL 5 の公開前と同じ結果を返します。
+
+- エディションヘッダーを取らない宣言: `causal`、`agent`、そのほかの AI ダイアレクトの宣言
+  （`ai_component`、`dataset`、`evaluator` など）。ヘッダーを書くと
+  `edition_header_not_accepted` で拒否されます。
+- `refinement` の文書。ヘッダーは受け付けますが、単独で検査する対象ではないので、
+  挿入しても文書が保たれることを移行で示せません。
+- `compose` の文書。移行の契約が構成要素のソースファイルを保てないので、同じ理由です。
+
+`refinement` や `compose` の文書に手で書いたヘッダーは、そのまま読まれます。既定の
+`migrate` は process の変換も行うので、変換に判断が要る（後述の `migrate_manual_required`）
+ヘッダーのない FSL 4 の `requirements` 文書では、`fslc migrate` だけでも終了コード 1 に
+なります。現行エディションの書き換えだけを計画するには `--edition current` を付けます。
+
+| finding / 変換 | 確認する点 |
+|---|---|
+| `missing_edition_header` | 選んだエディションのヘッダーを挿入します。要件は推測しません。 |
+| `legacy_process_form` | process を entity と lifecycle のパス、各 transition を event（動詞は event 名）、ガードのある要件を `allow … only when` の rule に変換します。 |
+| `implicit_initial_value` | 選ばれていた既存のデフォルトを明記します。新しい entity 形式では各フィールドの初期値が必要です。 |
+| `legacy_string_metadata`, `legacy_quantifier_colon`, `inline_action_maps` | 既存のメタデータ、量化子、安全なローカルマッピングの変換も適用します。正規の置換先と適用可否を確認します。 |
+| `derived_terminal_added` | 入力 process に terminal がない場合、新しい lifecycle が導く停止条件を知らせます。dry run と書き込みの両方で情報として出し、機械適用できます。deadlock 警告が変わり得ます。 |
+| `migrate_manual_required` | 変換を拒否して入力を保持します。人が判断する必要のある箇所を `reason` が示します。 |
+
+process の変換は段階 enum の順序と lifecycle の辺を保ちます。ガードから区分や決定表を
+推測することはありません。複数 process による entity の共有（`process_entity_shared`）、
+修飾された process 名（`qualified_process_name`）、transition のアノテーション
+（`transition_annotation`）、フィールドと同名の入力（`input_shares_field_name`）、
+range 型の入力（`with n in 0..2`、`range_typed_input`）、要件 ID のないガード（`guard_without_requirement`）、
+stages の先頭でない initial（`initial_not_first_stage`）、デフォルトの移行後も残る
+初期値の欠落（`field_without_initial_value`）は拒否します。認識できない配置、変換先の
+不正、その他の checked kernel の変化は、それぞれ `unrecognized_process_layout`、
+`converted_form_invalid`、`kernel_changed` です。意味を明示して修正し、計画をやり直して
+ください。拒否を捨てて書き込みを強行してはいけません。process の変換は `//` コメントを
+残しますが、移動することがあります（行末のコメントは生成した宣言のそばの独立した行に
+なります）。位置を確認してください。文字列メタデータやインラインのマッピングの書き換えで
+移動が必要になるコメントは拒否します（`legacy_string_metadata`、`inline_action_maps`）。
+
+保存の検査には一つ例外があります。入力に**明示の terminal がない場合**は、上記の
+停止条件の導出を許します。そのため、無条件の kernel 同一性や deadlock 出力の同一性を
+保証する契約ではありません。入力に `terminal` があれば、その条件を保存して比較します。
+導出の finding は追加せず、明示した条件の変更は契約違反になります。
+finding は導出条件に相当する terminal 式を示すので、停止の意味の変化を確認できます。
+変換済み文書にもう一度 migration を実行しても、process の変換や停止条件の導出の finding
+は繰り返し追加しません。変換は `acceptance` と `kpi` の宣言をそのまま残し、`acceptance` は
+FSL 5 でも有効です。変換後の rule によって、入力になかった警告（`never_rule_without_forbidden`
+など）が出ることがあります。ガード対象の出来事を forbidden trace で試すと解消します。不正な式の `&&`、`||`、`->` は migration だけでは直りません。
+§7 に従って演算子を手修正してください。この変換で business、カーネル、設計、
+refinement の契約に区分や決定表が加わることはありません。
+
+#### FSL 4 要件の参照と移行入力
+
+次のヘッダーなしの例は、以前の process/transition の形式と `acceptance` ブロックです。
+`acceptance` は FSL 5 でも有効です。FSL 5 の新しい要件には上記の形式を使ってください。
+
 ```fsl
 requirements ExpenseRequirements {
   implements ExpenseToBe from "1_business.fsl" { }
@@ -3975,7 +4406,7 @@ corpus 全610形式 (specs 23、examples 195、CLI fixtures 392) は変更なし
 除外フィールドなしです。他の必須テストの元入力を改訂・省略していません。これは上記の測定
 head の証拠であり、後の統合コミットに対して未実施の sweep を行ったとの主張ではありません。
 
-- process+data プロファイルは、単一エンティティのライフサイクルに対する第一の
+- FSL 4 の process+data プロファイルは、単一エンティティのライフサイクルに対する
   requirements 形式です。`process E with f: T { ... }` は、エンティティの stage
   マップと carried フィールドを作ります。transition は、入力(`with a: T`)、
   ガード(`when`)、フィールドの更新(`set f = expr`)、トレーサビリティ

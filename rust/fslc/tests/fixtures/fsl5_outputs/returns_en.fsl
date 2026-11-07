@@ -1,5 +1,5 @@
 fsl 5
-// The returns example of skills-next/fsl-requirements/SKILL.md: two rules
+// The returns example of skills/fsl-requirements/SKILL.md: two rules
 // whose statements are a guard and a property, a decision table, a goal, a
 // policy, scenarios and forbidden traces, each under a canonical ID.
 requirements ReturnRequirements {

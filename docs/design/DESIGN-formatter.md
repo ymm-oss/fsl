@@ -4,7 +4,7 @@
 
 ## Contract
 
-`fslc fmt FILE [--edition current|next]` formats one registered FSL document to
+`fslc fmt FILE [--edition current|next|4|5]` formats one registered FSL document to
 stdout. It never changes the input file. `FILE` may be `-` for stdin.
 `fslc fmt PATH... --check` accepts one or more paths, emits a JSON
 `format_check` envelope, and exits 0 when every path is canonical, 1 when any

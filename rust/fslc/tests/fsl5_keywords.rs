@@ -15,7 +15,7 @@
 //!
 //! It also holds the requirements skill's side of the table (fsl 5 plan §3
 //! S13, decisions/045 addendum): the keyword table that
-//! `skills-next/fsl-requirements/references/keywords.md` prints is rendered
+//! `skills/fsl-requirements/references/keywords.md` prints is rendered
 //! from [`KEYWORDS`] and [`PARTICLES`], and the skill's English example and
 //! its Japanese spelling are one spec.
 
@@ -380,7 +380,7 @@ fn the_requirements_skill_prints_the_parser_keyword_table() {
         ci.as_ref().map(|value| value.to_str().unwrap_or("")),
     )
     .unwrap_or_else(|error| panic!("{error}"));
-    let path = repository().join("skills-next/fsl-requirements/references/keywords.md");
+    let path = repository().join("skills/fsl-requirements/references/keywords.md");
     let text = std::fs::read_to_string(&path).expect("read the skill's keyword table");
     let begin = text.find(TABLE_BEGIN).expect("begin marker") + TABLE_BEGIN.len();
     let end = text.find(TABLE_END).expect("end marker");
@@ -429,7 +429,7 @@ fn fenced_fsl(markdown: &str) -> String {
 /// fails here.
 #[test]
 fn the_requirements_skill_example_reads_the_same_in_japanese() {
-    let skill = repository().join("skills-next/fsl-requirements");
+    let skill = repository().join("skills/fsl-requirements");
     let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fsl5_keywords/skill-example");
     let _ = std::fs::remove_dir_all(&directory);
     std::fs::create_dir_all(&directory).expect("create scratch directory");

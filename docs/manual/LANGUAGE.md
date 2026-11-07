@@ -20,6 +20,56 @@ the implementation design of each feature can be reached from
 
 ## 1. Structure of a specification
 
+<a id="fsl-editions"></a>
+
+### Editions and where to start
+
+An edition selects source syntax; it is separate from the `fslc` executable's
+version. FSL 5 requirements use **entity / lifecycle / event / rule / decide**;
+start at [§13.2](#fsl5-requirements).
+Kernel `spec` declarations, expressions, verification bounds, and refinement
+remain the shared foundation described in the rest of this reference. The
+`process` / `transition` examples in §13.2 document FSL 4 and migration input.
+
+Put `fsl 5` on a line of its own before the first declaration. Only blank lines
+and `//` comments may precede it (a leading UTF-8 BOM is accepted). In a literate
+Markdown source it goes at the start of the first `fsl` fence, under the same rule.
+The header applies to the document, not to an individual requirements block. `fsl 4` selects the
+earlier syntax; a headerless document retains FSL 4. `--edition current` follows
+the document; an explicitly requested edition conflicting with its header is
+`edition_conflict`, and an unknown header number is `unsupported_edition`.
+Causal and AI-dialect documents take no header (`edition_header_not_accepted`).
+Adding a header alone does not convert a legacy requirements specification: a
+`process` under `fsl 5` is `mixed_requirements_forms`, so
+use [the migration guide below](#fsl4-to-fsl5-migration). Each of these four
+refusals is a `"result": "error"` envelope with `"kind": "parse"` and exit 2; the
+name above is its `diagnostic_code` field, beside the `message` and `loc`.
+
+The header and the `--edition` option do different jobs. The **header** selects
+the syntax a document is parsed with; nothing else does. The **`--edition`**
+option of `check`, `verify`, `lint`, `migrate`, `fmt` and the other commands
+that take it selects the edition *policy*: which findings apply and how severe
+they are. It takes four spellings, `current`, `next`, `4` and `5`: `4` is
+another spelling of `current` for a headerless or `fsl 4` document, and `5` is
+another spelling of `next`. The commands that take the option are `check`,
+`verify`, `domain check`, `fmt`, `lint` and `migrate`; each one's help text shows
+`--edition {current,next,4,5}` and `cli-contract.json` lists the same four
+choices. Any other value is a usage error (`"kind": "usage"`, exit 2) with the
+message `--edition must be current, next, 4, or 5`. JSON output never spells a
+number for the option: a result read under the next
+edition carries `"edition": "next"` (absent under the current edition), and a
+document that has a header also carries `"fsl_edition": 4` or `5`.
+
+On a **headerless** document, `--edition 5` (or `next`) does not make it an
+FSL 5 document. It is still parsed as FSL 4, so the FSL 5 requirements forms of
+§13.2 are refused as parse errors, and no `fsl_edition` is reported. What
+changes is the policy: a legacy form that the current edition reports as a
+warning, such as string metadata (`legacy_string_metadata`), becomes an
+`unsupported_in_edition` error under the next edition, and `lint --edition 5`
+also reports `missing_edition_header`. To write FSL 5, add the header (or let
+`fslc migrate` add it); to check a headerless document as before, omit
+`--edition` or pass `current`.
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <constant expr>
@@ -302,7 +352,7 @@ Domain declarations use `enum Name { Member, ... }` for finite variants and
 `type Name = A | B` remains accepted in the current 2.x edition and produces the
 stable `deprecated_domain_enum_union` warning over the complete declaration,
 including a canonical replacement. `fslc check`, `fslc verify`, and
-`fslc domain check` accept `--edition current|next`; `next` rejects the legacy
+`fslc domain check` accept `--edition current|next|4|5`; `next` (or `5`) rejects the legacy
 union spelling. Other covered consumers use the source header's edition; this
 does not add an `--edition` option to those commands. `fslc lint` reports the
 edition finding without mutation, and
@@ -1932,9 +1982,9 @@ additional removals in #1463.
 
 ```
 fslc check     <file.fsl|file.md>                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
-fslc lint      <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
-fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
@@ -2754,6 +2804,14 @@ probe was cut off by its state budget, not by depth — and carries its own
 Blame identifies; it never proposes a repair (weakening a guard, dropping a
 conjunct) — that would cut against the anti-hollowing principle. All of this
 is strictly additive to the JSON contract.
+
+Both levels of this localization are shallow. Only the invariant's top-level
+`and` is split into conjuncts: a conjunction inside a quantifier body stays one
+conjunct, whose `text` is the whole quantified expression. `violating_bindings`
+names the failing values of the outermost quantifier only: for
+`forall u: U { forall i: I { not (a[u] and b[i]) } }` it reports `[{"u": 0}]`,
+without a value for `i`. Recursive projection of nested quantifiers and
+splitting inside a quantifier are not implemented.
 
 Diagnostics that identify a faithfulness/intent gap may also carry
 `faithfulness_class` plus `recommended_action`. Current classes are:
@@ -4185,6 +4243,413 @@ only in prose:
 
 ### 13.2 Requirements layer: `requirements` (the fsl-req dialect)
 
+<a id="fsl5-requirements"></a>
+
+#### FSL 5: entities, events, and source requirements
+
+Use an entity for an identity, lifecycle paths for its stages and allowed edges,
+events for what an actor does, and a rule or decision table for the condition
+stated by a requirement. IDs and quoted source text keep that requirement
+traceable. The following is one complete specification; the later syntax fences
+are fragments to read in the context of their declarations.
+
+```fsl check
+fsl 5
+requirements Support {
+  actor Agent
+  entity Agent
+  entity Ticket {
+    lifecycle Open -> Assigned -> Closed
+    lifecycle Assigned -> Escalated
+    lifecycle Open -> Withdrawn
+  }
+  Ticket belongs to Agent as assignee via take
+  resource desk_open: Bool = true
+
+  event take = Agent takes Ticket Open -> Assigned
+  event close = Agent closes Ticket Assigned -> Closed
+  event escalate = Agent escalates Ticket Assigned -> Escalated
+    set desk_open = false
+  event withdraw = Agent withdraws Ticket Open -> Withdrawn
+
+  rule REQ-DESK-001 "A ticket is taken only while the desk is open" {
+    allow Agent takes Ticket only when desk_open
+  }
+  rule REQ-DESK-002 "A ticket is withdrawn only after the desk has closed" {
+    allow Agent withdraws Ticket only when not desk_open
+  }
+  rule REQ-TICKET-001 "A taken ticket keeps the agent who took it" {
+    always Ticket in Assigned, Closed, Escalated has assignee
+  }
+  policy POL-TICKET-001 "Every assigned ticket is eventually closed or escalated"
+    every Ticket in Assigned must eventually be Closed or Escalated
+  goal GOAL-TICKET-001 "A ticket can be closed" some Ticket can reach Closed
+  measure closed_tickets = count Ticket in Closed
+
+  scenario AC-TICKET-001 "An agent takes and closes a ticket" {
+    Agent takes t1 with assignee 1
+    Agent closes t1
+    then t1 is Closed
+  }
+  scenario AC-DESK-001 "A ticket still open when the desk closes is withdrawn" {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent withdraws t2
+    then t2 is Withdrawn
+  }
+  forbidden FB-DESK-001 "No ticket is taken once the desk has closed" {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent takes t2 with assignee 0
+    then rejected
+  }
+  forbidden FB-DESK-002 "No ticket is withdrawn while the desk is open" {
+    Agent withdraws t1
+    then rejected
+  }
+}
+verify {
+  instances Ticket = 2
+  instances Agent = 2
+}
+```
+
+**Entities and concepts.** `entity User` declares an identity without stages.
+A body, as in `entity Order { qty: Qty = 0 lifecycle Empty -> Placed }`, requires
+at least one lifecycle line and an explicit initializer for every field,
+including number fields. A field's type is `Bool` or a declared `number`, `type`, or `enum`.
+The first stage of the first path is initial; stages enter the generated enum
+in order of first appearance. More lifecycle lines add paths. `number Qty`
+gets its finite range from `verify { values Qty = 0..2 }`; entity instance counts
+come from `instances`. These bounds delimit the checked world.
+`concept Bulk = Order where qty >= 2` and
+`concept Open = Order in Placed, Packed` name predicates, without adding state;
+entity fields are bare names inside their conditions. Lowered fields use
+canonical `entity_field` names (for example `order_qty` and `order_stage`);
+design and `implements` mappings refer to those names.
+
+**Events.** `event place = User places Order with qty Empty -> Placed` names the
+canonical action `place` and its actor/verb/entity phrase. A move must be a
+lifecycle edge (`event_not_on_lifecycle`); `in Placed` instead describes a
+same-stage event. `with qty` stores an input in that field;
+`with n: Qty` declares an explicitly typed input. If `n` matches no entity
+field, it adds no automatic field assignment; if it matches a field, that field
+is assigned even when the input's type is explicit.
+Inputs and `set x = expr, y = expr` updates can be comma-separated. In a field/input
+collision, use `input qty` to select the input (`ambiguous_input_field` otherwise).
+An omitted verb defaults to the event name. `covers REQ-ID "source text"`
+records traceability. Declare every actor, including those used in scenarios
+(`actor_not_declared`). Ordinary events are fair; `fault event` is not fair.
+A declared edge with no event warns `lifecycle_edge_without_event`.
+
+**Rules.** A `rule ID "source text" { statement+ }` conjoins all its statements;
+separate rules guarding the same event also conjoin. The complete statement set is:
+
+| Statement fragment | Checked meaning |
+|---|---|
+| `allow Actor verb Entity only when condition` | The event requires the condition. |
+| `allow Actor verb Entity only for Concept` | The event requires membership in the concept. |
+| `never Actor verb Entity when condition` / `for Concept` | The event requires the condition to be false / the entity to be outside the concept. |
+| `Actor verb Entity only after Actor other Entity` | Unless the lifecycle already guarantees the order, a hidden per-instance history field is set by the prerequisite event and required by the later event. |
+| `Name: Entity enters Target only from Source, Other` | A two-state transition property restricts entry. |
+| `Name: always Concept1 is Concept2` | A safety invariant implies the second predicate from the first; `Stage Entity` can also name a case. |
+| `Name: always Entity in S, T has condition` | A safety invariant enforces the field condition in those stages. `not in` selects their complement; a bare relation role means it is set. |
+| `deadline age <= bound` | A deadline on an age declared in `time`; see §13.4 for time and deadline checks. |
+
+Name `always` and `enters` statements to give their properties stable result
+names. `check` rejects jointly unsatisfiable event guards with
+`rule_conflict_unsatisfiable_guard`. `implied_by_lifecycle` is informational.
+A lifecycle-implied `only after` adds no history state or guard: the lifecycle
+already enforces the order. A lifecycle-implied `enters` still declares its
+transition property, which remains checked. Exercise rejection rules with forbidden traces;
+`never_rule_without_forbidden` warns about missing probes of guarded events.
+
+**Decision tables.** This fragment chooses the actor and allowed verbs for each
+case of a submitted claim (the entities, events and concepts must be declared):
+
+```fsl-fragment
+decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
+  SmallClaim => System approves
+    covers REQ-2 "A small claim is auto-approved"
+  LargeClaim => Manager approves or rejects
+    covers REQ-3 "A large claim is approved or rejected by a manager"
+} assuming amount > 0
+```
+
+A row condition is a concept, a conjunction of concepts (`and`), or `Stage Entity`.
+`otherwise => Actor verb` covers the complement of the other rows. Each event
+leaving the table's stage must be listed (`decide_event_not_listed`). The rows
+must cover the field domains (`decide_not_exhaustive`, with uncovered values)
+and be disjoint (`decide_overlap`, with shared values). A row made impossible
+by guards warns `decide_row_emptied`. An event receives the disjunction of the
+conditions of rows listing it as one guard; its other rule guards still apply.
+`assuming Q` restricts table checking to Q **and generates a stage-conditional
+invariant that `verify` must prove**; it is not an unchecked escape from coverage.
+
+**Relations, resources, and projections.** `Ticket belongs to Agent as assignee
+via take` adds an initially unset optional role to each ticket. The related entity
+must be declared with `entity`, and the `via` event's actor must be that entity,
+so `Agent` is declared as both `actor` and `entity`. The event records its
+counterpart as its first input, and every scenario step of that event must supply
+it: `with assignee 1` selects Agent instance 1. The value is an instance number;
+an instance label (`with assignee a1`) is refused. `resource stock: Qty = 2` declares shared
+state outside any entity; events update it with `set`, and guards may read it.
+`measure m = count Concept` or `count Entity in S, T` is a projection, not a new
+counter, history field, or automatic invariant. `kpi m = count Entity in S` is the
+same kind of projection, but it takes exactly one entity and one stage:
+`kpi m = count Concept` and `kpi m = count Entity in S, T` are refused, so use
+`measure` for those forms.
+Goals (`some E can reach S`) are reachability properties; policies
+(`every E in S must eventually be T or U`) are progress properties over fair events.
+Their IDs and quoted text remain part of traceability.
+
+**Scenarios and stopping.** An actor/verb phrase resolves to an event; unknown or
+ambiguous matches report `unknown_verb`, `unknown_event_phrase`, or
+`ambiguous_step`. Instance labels (`t1`, `t2`) are local to a trace and allocated
+in order of first use; exceeding `verify` counts is `scenario_instance_overflow`.
+`then t1 is Closed` checks one instance's final stage. To check more, write an
+expression over the lowered state, indexed by instance number (the first label used
+for an entity is 0): `then ticket_stage[0] == Closed and ticket_stage[1] == Open`.
+Labels cannot appear in that expression, and `then t1 is Closed and t2 is Open` is
+refused. A scenario must execute
+every step and satisfy its final check (`kind: "acceptance"`, `failed_step` for a
+failed step). A forbidden trace must execute its prefix and reject its last
+step: an accepted last step is `kind: "forbidden"`; a rejected prefix is
+`kind: "forbidden_setup"`, with `failed_step`. `check` runs these traces.
+
+Without an authored `terminal`, requirements derive intended stopping states:
+every instance of every entity with a lifecycle must be in a stage with **no
+outgoing lifecycle edge**. Missing or disabled events do not turn a non-final
+stage into a final one. Identity-only entities and relation roles add no terminal
+condition. An explicit `terminal { expression }` **replaces** this derived
+condition; it is not conjoined with it. This differs from FSL 4 requirements,
+which derive no terminal condition from a process.
+
+<a id="fsl5-repeats"></a>
+
+#### Repeated inputs, declarations and requirement IDs
+
+An FSL 5 requirements document refuses a repeat that FSL 4 would have read by
+keeping one copy and dropping the other without a word. Each refusal below is a
+**breaking removal**: the form passed `check` before. None has an automatic
+migration.
+
+- **A step input named twice (#1682).** A `scenario` or `forbidden` step that
+  names one input twice is refused with exit 2, `kind: "semantics"`, and `loc` at
+  the repeated name, for example `duplicate step input 'amount' at doc.fsl:43:44`.
+  This covers `with`, an instance written first, a `で` list, two `で` groups, an
+  alias beside its canonical name, and a relation role. Different inputs in any
+  order, and the same input in a later step, stay accepted. A step that already
+  has a parse error keeps that error. `lint`, `fmt` and `migrate` report the same
+  message without `loc`, and an inline `implements` of the document reports
+  `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)`
+  with `kind: "type"`. Keep the one value you mean.
+- **A repeated `actor` (#1705).** A second `actor` of one name, on its own line
+  or in a list, is refused with exit 2 and `kind: "parse"` at the repeated name:
+  `duplicate actor 'Agent' at 4:9`. Delete the repeat.
+- **One owner per requirement ID (#1705).** A declaration owns the ID written
+  after its keyword: `rule`, `decide`, `scenario`, `forbidden`, `goal`, `policy`,
+  and the FSL 4 `requirement` and `acceptance` blocks that an FSL 5 document still
+  takes. A second owner of one ID, of any of these kinds, is refused at its ID
+  with exit 2 and `kind: "parse"`, naming both kinds: `duplicate requirement id
+  'REQ-DESK-001': this rule reuses the ID of the rule at 19:8; a requirement ID has
+  one owner at 22:8`. A second `scenario`, `forbidden`, `goal` or `policy` of its
+  own kind keeps its existing refusal (`duplicate acceptance id`, `duplicate
+  forbidden id`, `duplicate property name`, `kind: "semantics"`). Rename one of the
+  two IDs, or merge the two declarations; `fslc migrate --edition 5` refuses
+  an FSL 4 document that would hit this rule, with `migrate_manual_required` and
+  `reason: "shared_requirement_id"`, and never renames an ID.
+- **`covers` is a link (#1705).** An event's or a decision row's `covers` may
+  name an ID that a declaration owns, with any text; it stays accepted, and the
+  ledger and `document claims` title the ID with its owner's title, listing the
+  `covers` texts after it. An ID that **no** declaration owns takes its wording
+  only from its `covers`, so every `covers` of it in the document must have one
+  text; the first that differs is refused at the later `covers`, `kind: "parse"`:
+  `requirement ID 'REQ-EV-1' is covered as "withdrawing" here and as "closing" at
+  15:5; every covers of an ID no declaration owns has one text at 19:5`. A row
+  covering its own table's ID with another text stays refused, `requirement
+  annotation 'REQ-2-3' has conflicting text at 22:7`, `kind: "semantics"`.
+- **Repeated `concept`, bounds and `kpi` (#1686).** A `concept` written twice
+  under one name is refused at the second, `kind: "semantics"`:
+  `duplicate concept 'SmallClaim' at doc.fsl:24:3`. A repeated `concept` is
+  reported ahead of a repeated bound or `kpi`. Repeated `instances` and `values`
+  bounds and `kpi` declarations are refused as in FSL 4 (§13.2, FSL 4 reference).
+  Keep the one declaration you mean.
+
+#### Glossaries and Japanese spellings
+
+An optional `glossary` must be the first member of a requirements block, and
+there is at most one (`misplaced_glossary`). It maps canonical ASCII names to single-word aliases;
+use `Entity.field` on the left for a field. For example (fragment):
+
+```fsl-fragment
+glossary {
+  Employee = 従業員
+  Claim = 経費申請
+  Claim.amount = 申請金額
+  submits = 提出する
+}
+```
+
+Afterward, aliases can name declarations and references, expressions, decision
+rows, scenarios and verification bounds. In kernel members, entity and stage aliases
+resolve (`forall c: 経費申請`), but a field alias does not: write the lowered name
+(`claim_amount[c]`, not `申請金額[c]`). Canonical and alias spellings may mix
+(`lint --strict-names` warns `mixed_names` for a name written both ways).
+`duplicate_alias` is one canonical name with two aliases, and `alias_collision` is
+one alias on two canonical names. `alias_shadows_name` is an alias spelled like
+another glossary canonical name or a name the lowered specification declares; it
+does not cover actor or stage names, and other clashes can surface as ordinary
+declaration errors (`duplicate type`). Keywords and particles in either language
+are rejected (`alias_shadows_keyword`). A non-ASCII canonical name without an alias is
+`canonical_name_not_ascii`. Prefer canonical spellings for the spec name, event
+declarations, property names and requirement IDs so code boundaries remain easy
+to follow; scenario instance labels are local.
+`implements … from` mappings and refinement files use canonical names only
+(`alias_in_implements`). Generated state/action names remain canonical, such as
+`claim_amount` and `submit`; readable diagnostics can show an alias alongside it.
+
+The following table gives each supported Japanese keyword **in its grammatical
+context**. A spelling is not a global text replacement. English and Japanese
+keywords can mix; the header, `implements … from` and mappings, kernel members
+(`terminal`, `time`, `state`, …), and operators other than `and`/`or` stay English.
+
+| Context / 文脈 | English | 日本語 |
+|---|---|---|
+| File blocks / ファイルのブロック | `requirements`; `glossary`; `verify` | `要件`; `用語集`; `検証` |
+| Verification world / 検証範囲 | `instances`; `values` | `個数`; `値域` |
+| Requirements members / 要件の宣言 | `type`; `enum`; `number`; `const`; `actor`; `entity`; `concept`; `resource` | `型`; `列挙`; `数値`; `定数`; `アクター`; `エンティティ`; `区分`; `資源` |
+| Requirements members / 要件の宣言 | `event`; `rule`; `decide`; `goal`; `policy`; `measure`; `kpi`; `scenario`; `forbidden` | `出来事`; `規則`; `決定表`; `目標`; `方針`; `指標`; `重要指標`; `シナリオ`; `拒否シナリオ` |
+| Entity body / エンティティの本体 | `lifecycle` | `ライフサイクル` |
+| Concept / 区分 | `in`; `where` | `段階`; `のうち` |
+| Relation / 関係 | `belongs to`; `as`; `via` | `所属先`; `役名`; `契機` |
+| Event / 出来事 | `fault`; `in`; `set`; `covers` | `異常`; `段階`; `更新`; `対応要件` |
+| Event/rule expressions / 出来事・規則の式 | `input` | `入力` |
+| Allow rule / 許可規則 | `allow`; `only when`; `only for` | `許可`; `条件`; `対象` |
+| Never rule / 禁止規則 | `never`; `when`; `for` | `禁止`; `条件`; `対象` |
+| Ordering / 順序 | `only after` | `先行条件` |
+| Entry / 遷移元の制限 | `enters`; `only from` | `遷移先`; `遷移元` |
+| Safety rule / 不変条件 | `always`; `is`; `in`; `not in`; `has` | `常に`; `は`; `段階`; `段階以外`; `必須` |
+| Deadline / 期限 | `deadline` | `期限` |
+| Decision table / 決定表 | `for`; `otherwise`; `assuming` | `対象`; `それ以外`; `仮定` |
+| Decision outcome / 決定表の結果 | `or` | `または` |
+| Goal / 目標 | `some`; `can reach` | `いずれかの`; `到達可能` |
+| Policy / 方針 | `every`; `in`; `must eventually be`; `or` | `すべての`; `段階`; `いずれ必ず`; `または` |
+| Measure / 指標 | `count`; `in` | `件数`; `段階` |
+| Scenario/forbidden / シナリオ・拒否シナリオ | `then`; `is`; `rejected` | `結果`; `は`; `拒否` |
+| Boolean expressions / 論理式 | `and`; `or` | `かつ`; `または` |
+| Inputs in events/steps / 出来事・ステップの入力 | `with` | `で` (after the input / 入力の後) |
+
+`assume` / `前提`, `out of scope` / `範囲外`, event `environment` / `外部`,
+allow `only as` / `立場`, and never `because` / `理由` are reserved spellings,
+not accepted constructs. Do not use them as glossary aliases.
+
+Particles are separate words: `が` marks the actor, `を` the entity (or a step's
+instance), `で` the input, and `は` the topic. `に` is recognized as a
+counterpart marker, but no phrase of this edition accepts that role; it is not
+a way to supply a relation input.
+For example, `従業員 が 経費申請 を 提出する 申請金額 で` is an event phrase;
+`従業員 が c1 を 提出する 申請金額 1 で` is a scenario step. With particles,
+every phrase word except the verb needs its role marker, and word order can vary.
+Partial marking is `mixed_particles`, a wrong role is `particle_role_mismatch`,
+and an attached particle (`従業員が`) is `particle_needs_space`.
+`fmt --lang ja|en` selects keyword spellings; `--names alias|canonical` selects
+glossary spellings. These are spelling changes, not a new behavioral model.
+
+<a id="fsl4-to-fsl5-migration"></a>
+
+#### FSL 4 to FSL 5 migration
+
+Review the plan before applying it, then check, verify and run the source-intent
+checks again for the migrated files and their refinement seams:
+
+```bash
+fslc lint requirements.fsl --edition 5
+fslc migrate requirements.fsl --edition 5
+fslc migrate requirements.fsl --edition 5 --write
+fslc check requirements.fsl
+fslc verify requirements.fsl --depth 8
+fslc verify requirements.fsl --engine induction
+```
+
+`migrate` is a dry run unless `--write` is present; a dry run still reports
+`result: "migrated"`, with `written: false`. Inspect `files[].findings[]`,
+`machine_applicable`, and each refusal's `reason`, not only the command's exit
+status: `lint` exits 1 whenever it reports a finding, so the commands above are not
+an `&&` chain. A refused process conversion exits 1 with
+`result: "migrate_manual_required"`; the comment refusals below exit 2 with
+`result: "migration_refused"`. `legacy_process_form` and
+`derived_terminal_added` carry empty per-finding `edits`; the rewrite is in
+`files[].edits`. The existing migration taxonomies and atomic-write contract are described
+in §7 and [DESIGN-migration](../design/DESIGN-migration.md).
+
+`migrate` targets the next edition by default (`--edition next`, spelled `5`
+above); `lint` defaults to `current`, so pass `--edition 5` to see the plan's
+findings. On a headerless document the next edition adds `missing_edition_header`,
+so `lint --edition 5` exits 1 even when nothing else is reported. Three kinds of
+document are **not offered a header**, and `lint` and `migrate` report on them
+exactly as they did before FSL 5 was published:
+
+- a declaration that takes no edition header: `causal`, `agent` and the other
+  AI-dialect declarations (`ai_component`, `dataset`, `evaluator`, …). A header
+  there is refused with `edition_header_not_accepted`;
+- a `refinement` document. It accepts a header, but it is not a standalone
+  check target, so migration cannot show that inserting one preserves it;
+- a `compose` document. Its migration contract cannot keep its components'
+  source files, so the same holds.
+
+A header you write by hand on a `refinement` or `compose` document is still
+read. Because the default `migrate` also runs the process-form conversion, a
+headerless FSL 4 `requirements` document whose conversion needs a decision
+(`migrate_manual_required`, below) now makes a plain `fslc migrate` exit 1;
+pass `--edition current` to plan only the current edition's rewrites.
+
+| Finding / conversion | What to review |
+|---|---|
+| `missing_edition_header` | Inserts the selected edition header. It does not infer requirements. |
+| `legacy_process_form` | Rewrites a process as an entity and lifecycle paths, each transition as an event (its verb is the event name), and each guarded requirement as a rule with `allow … only when`. |
+| `implicit_initial_value` | Makes the chosen existing default explicit; the new entity form requires each field initializer. |
+| `legacy_string_metadata`, `legacy_quantifier_colon`, `inline_action_maps` | Existing metadata, quantifier and safe local mapping rewrites still apply; inspect their canonical replacement and applicability. |
+| `derived_terminal_added` | An informational, machine-applicable finding in both dry run and write: the new lifecycle derives terminal states where the process wrote none. This can change deadlock warnings. |
+| `migrate_manual_required` | Refuses conversion and preserves the input. Its `reason` names the case requiring a human decision. |
+
+Process conversion preserves stage enum order and lifecycle edges. It does not
+infer concepts or decision tables from guards. It refuses shared entities
+(`process_entity_shared`), qualified process names (`qualified_process_name`),
+transition annotations (`transition_annotation`), inputs sharing field names
+(`input_shares_field_name`), range-typed inputs (`with n in 0..2`, `range_typed_input`), guards
+without a requirement ID (`guard_without_requirement`), an initial stage not
+first in the stage list (`initial_not_first_stage`), and missing initializers
+that remain after default migration (`field_without_initial_value`). Unrecognized
+layouts, invalid converted forms and other checked-kernel changes are refused
+as `unrecognized_process_layout`, `converted_form_invalid`, and `kernel_changed`.
+Correct the meaning explicitly, then re-plan; do not discard the refusal to
+force a write. Process conversion keeps `//` comments but can move them (a trailing
+comment becomes its own line beside the generated member), so review their
+placement. A comment that a string-metadata or inline-map rewrite would have to
+move is refused (`legacy_string_metadata`, `inline_action_maps`).
+
+The preservation check has one explicit exception: if the input has **no authored
+terminal**, the derived terminal described above may be added. Thus the contract
+is not unconditional kernel identity or identical deadlock output. If the input
+already writes `terminal`, it is preserved and compared; no derived-terminal
+finding is added, and changing the authored condition fails the contract.
+The finding shows the equivalent terminal expression so the changed stopping
+behavior can be reviewed. Re-running migration on the converted document adds
+neither another process conversion nor another derived-terminal finding.
+Conversion leaves `acceptance` and `kpi` declarations in place; `acceptance` stays
+valid in FSL 5. Converted rules can add warnings the input did not have, such as
+`never_rule_without_forbidden`, until forbidden traces probe the guarded events.
+Invalid expression `&&`, `||`, or `->` is not made safe by migration; follow §7's
+manual operator repairs. Business, kernel, design and refinement contracts do
+not acquire concepts or decision tables through this conversion.
+
+#### FSL 4 requirements reference and migration input
+
+The following headerless example uses the earlier process/transition form and
+`acceptance` blocks. `acceptance` stays valid in FSL 5; use the FSL 5 forms above for
+new FSL 5 requirements.
+
 ```fsl
 requirements ExpenseRequirements {
   implements ExpenseToBe from "1_business.fsl" { }
@@ -4268,7 +4733,7 @@ contradictions, duplicated `argument-7` and `decision-row`. All 2,924 observatio
 fields. No other required-test input was rewritten or omitted. This is evidence at
 the named measurement head, not an unperformed sweep of later integration commits.
 
-- The process+data profile is the primary requirements form for a single-entity
+- In FSL 4, the process+data profile is the requirements form for a single-entity
   lifecycle. `process E with f: T { ... }` creates the entity stage map and
   carried fields; transitions can add an input (`with a: T`), guard (`when`),
   field update (`set f = expr`), and traceability (`covers REQ-n "text"`). A
