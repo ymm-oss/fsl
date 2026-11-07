@@ -13,8 +13,10 @@
 //! - a copy with `fsl 5` added checks like the original under
 //!   `--edition next` (exit, codes and severities), frozen in
 //!   `tests/goldens/edition_header_next.txt` so the next edition's syntax
-//!   stages change it as a reviewed diff. `FSLC_UPDATE_EDITION_GOLDEN=1`
-//!   rewrites it from the published `--edition next` run.
+//!   stages change it as a reviewed diff. Locally,
+//!   `FSLC_UPDATE_EDITION_GOLDEN=1` rewrites it from the published
+//!   `--edition next` run; when `CI` is set, any set value fails the test
+//!   instead of rewriting the golden and passing (#1413).
 //!
 //! and the header's own contract: conflicts, unknown editions, the dialects
 //! without an edition, the literate fence, `fmt`, `lint` and `migrate`.
@@ -24,6 +26,8 @@ use std::process::Command;
 
 use serde_json::Value;
 
+#[path = "support/golden_update.rs"]
+mod golden_update;
 #[path = "support/mod.rs"]
 mod support;
 use support::{corpus_files, repo_relative, root, top_level_keyword};
@@ -253,7 +257,9 @@ fn an_fsl_5_header_checks_the_corpus_as_edition_next_does() {
     let golden_path =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/edition_header_next.txt");
     let actual = format!("{}\n", next.join("\n"));
-    if std::env::var_os("FSLC_UPDATE_EDITION_GOLDEN").is_some() {
+    let update = golden_update::golden_update_requested_from_env("FSLC_UPDATE_EDITION_GOLDEN")
+        .unwrap_or_else(|error| panic!("{error}"));
+    if update {
         std::fs::write(&golden_path, &actual).expect("update edition golden");
     }
     let golden = std::fs::read_to_string(&golden_path).expect("read edition golden");
