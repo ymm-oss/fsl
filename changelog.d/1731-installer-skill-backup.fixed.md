@@ -1,4 +1,4 @@
-Fixed (#9991): `install.sh` no longer keeps the copy of a skill it replaces
+Fixed (#1731): `install.sh` no longer keeps the copy of a skill it replaces
 inside `~/.claude/skills/`. Claude Code loads every directory there as a
 skill, so a backup named `<name>.pre-native-v3` was offered next to the live
 skill as a second, stale copy. A replaced copy now goes to
