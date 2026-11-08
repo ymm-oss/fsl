@@ -798,7 +798,7 @@ call <code>fslc</code> for the values in the first column:</p>
 <tbody>
 <tr>
 <td>Options a command does not own on <code>explain</code>, <code>typestate</code>, <code>mutate</code>, <code>testgen</code>, <code>html</code>, <code>ledger</code>, <code>scenarios</code> and <code>version</code> (#1446, #1341)</td>
-<td>ignored or read by another parser</td>
+<td>some were already usage errors (<code>explain --engine</code>, <code>--no-timing</code> and <code>--deadlock</code>; <code>mutate --engine</code>); others were ignored with exit 0, for example <code>version --depth 3</code>, <code>typestate --depth 3</code>, and <code>--engine</code> on <code>scenarios</code> and <code>testgen</code></td>
 <td>usage error, exit 2</td>
 <td>Remove the option</td>
 </tr>
@@ -842,7 +842,7 @@ call <code>fslc</code> for the values in the first column:</p>
 <td>Approval records (#1421)</td>
 <td>v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind</td>
 <td>unsigned v5 or signed v6 with <code>path_base</code></td>
-<td>Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; <code>document generate --approval</code> needs Git. A 4.x record stays <code>approved</code> while its digests match; new records record a per-kind renderer version such as <code>fslc-ledger-renderer/1.0.0</code> in <code>generator_version</code> instead of the <code>fslc</code> version</td>
+<td>Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; <code>document generate --approval</code> needs Git. A 4.x record stays <code>approved</code> only while its digests match, including the artifact against a 5.0 rendering, so most 4.12 ledger, HTML and scenarios records need re-approval (below); new records record a per-kind renderer version such as <code>fslc-ledger-renderer/1.0.0</code> in <code>generator_version</code> instead of the <code>fslc</code> version</td>
 </tr>
 <tr>
 <td>A relative AI <code>dataset.source</code> (#1421)</td>
@@ -864,7 +864,7 @@ call <code>fslc</code> for the values in the first column:</p>
 </tr>
 <tr>
 <td>Plain <code>fslc migrate</code> on a headerless document (#1434)</td>
-<td>current-edition plan</td>
+<td>targets <code>next</code> too, but plans nothing: <code>"edition":"next","changed":0</code></td>
 <td>plans <code>fsl 5</code> and the process-form conversion; <code>migrate_manual_required</code> exits 1</td>
 <td>Pass <code>--edition current</code></td>
 </tr>
@@ -894,6 +894,15 @@ call <code>fslc</code> for the values in the first column:</p>
 </tr>
 </tbody>
 </table>
+<p><strong>Re-approve most 4.12 approvals.</strong> 5.0 renders most ledger, HTML and
+scenarios artifacts differently from 4.12; for example, the ledger of a spec
+that <code>implements</code> another gains an <code>## inline implements</code> section. A 4.12
+record of these kinds therefore usually reports <code>"status": "drifted"</code> with
+<code>"reasons": ["rendering_changed"]</code> and exit 0, although its spec digest still
+matches. <code>renderer_changed</code> is not reported for a 4.x record, because its
+renderer comparison is skipped. Regenerate the artifact with 5.0, review it,
+and create a new record with <code>fslc approval create</code>. A record whose artifact
+renders the same in 5.0 stays <code>approved</code>.</p>
 <p><code>FSLC_UNSTABLE</code> and the Worker's <code>unstable</code> field existed only in pre-release
 builds between 4.12 and 5.0, never in 4.12. 5.0 does not read them, and an old
 client's <code>unstable</code> field is ignored.</p></div></details>
@@ -5062,8 +5071,14 @@ The finding shows the equivalent terminal expression so the changed stopping
 behavior can be reviewed. Re-running migration on the converted document adds
 neither another process conversion nor another derived-terminal finding.
 Conversion leaves <code>acceptance</code> and <code>kpi</code> declarations in place; <code>acceptance</code> stays
-valid in FSL 5. Converted rules can add warnings the input did not have, such as
-<code>never_rule_without_forbidden</code>, until forbidden traces probe the guarded events.
+valid in FSL 5. Converted rules can add warnings the input did not have. A
+converted <code>allow … only when</code> rule warns <code>never_rule_without_forbidden</code> when no
+<code>forbidden</code> trace ends in an event it guards; <code>examples/e2e/2_requirements.fsl</code>
+gets one such warning per guarded rule, while <code>check</code> still reports <code>ok</code> with
+exit 0. For each warning, add a <code>forbidden … then rejected</code> trace whose last
+step calls a guarded event with the rule's condition false. For the migrated
+expense example, that is a trace of <code>Employee submit c1 with a 0</code> followed by
+<code>then rejected</code>; §13.2's <code>FB-DESK-002</code> has the same shape. Do not delete the rule to silence the warning.
 Invalid expression <code>&amp;&amp;</code>, <code>||</code>, or <code>-&gt;</code> is not made safe by migration; follow §7's
 manual operator repairs. Business, kernel, design and refinement contracts do
 not acquire concepts or decision tables through this conversion.</p>

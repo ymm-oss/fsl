@@ -765,7 +765,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <tbody>
 <tr>
 <td><code>explain</code>、<code>typestate</code>、<code>mutate</code>、<code>testgen</code>、<code>html</code>、<code>ledger</code>、<code>scenarios</code>、<code>version</code> に、そのコマンドが持たないオプションを渡す (#1446, #1341)</td>
-<td>無視されるか、別のパーサーが読む</td>
+<td>一部は既に usage エラー(<code>explain</code> の <code>--engine</code>、<code>--no-timing</code>、<code>--deadlock</code>。<code>mutate --engine</code>)。ほかは無視して終了コード 0。たとえば <code>version --depth 3</code>、<code>typestate --depth 3</code>、<code>scenarios</code> と <code>testgen</code> の <code>--engine</code></td>
 <td>usage エラー、終了コード 2</td>
 <td>そのオプションを外します</td>
 </tr>
@@ -809,7 +809,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <td>承認レコード (#1421)</td>
 <td>v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4</td>
 <td>署名なしの v5、署名つきの v6(<code>path_base</code> つき)</td>
-<td>新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。<code>document generate --approval</code> には Git が必要です。4.x のレコードは、ダイジェストが一致する間は <code>approved</code> のままです。新しいレコードの <code>generator_version</code> には、<code>fslc</code> のバージョンではなく <code>fslc-ledger-renderer/1.0.0</code> のような種類ごとのレンダラのバージョンを記録します</td>
+<td>新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。<code>document generate --approval</code> には Git が必要です。4.x のレコードは、5.0 で描画した成果物との照合も含めてダイジェストが一致する間だけ <code>approved</code> のままです。そのため、4.12 の ledger、HTML、scenarios のレコードの多くは承認し直しが必要です(表の下を参照)。新しいレコードの <code>generator_version</code> には、<code>fslc</code> のバージョンではなく <code>fslc-ledger-renderer/1.0.0</code> のような種類ごとのレンダラのバージョンを記録します</td>
 </tr>
 <tr>
 <td>相対パスの AI の <code>dataset.source</code> (#1421)</td>
@@ -831,7 +831,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 </tr>
 <tr>
 <td>ヘッダーのない文書への引数なしの <code>fslc migrate</code> (#1434)</td>
-<td>現行エディションの計画</td>
+<td>対象は同じく <code>next</code> だが、何も計画しない(<code>"edition":"next","changed":0</code>)</td>
 <td><code>fsl 5</code> と process 形式の変換を計画。<code>migrate_manual_required</code> は終了コード 1</td>
 <td><code>--edition current</code> を渡します</td>
 </tr>
@@ -861,6 +861,13 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 </tr>
 </tbody>
 </table>
+<p><strong>4.12 の承認の多くは承認し直します。</strong> 5.0 は、ledger、HTML、scenarios の成果物の多くを
+4.12 と違う内容で描画します。たとえば、別の仕様を <code>implements</code> する仕様の ledger には
+<code>## inline implements</code> の節が加わります。そのため、これらの種類の 4.12 のレコードは、仕様の
+ダイジェストが一致していても、たいてい <code>"status": "drifted"</code>、<code>"reasons": ["rendering_changed"]</code>、
+終了コード 0 を返します。4.x のレコードではレンダラの比較を省くので、<code>renderer_changed</code> は
+報告しません。5.0 で成果物を作り直して確認し、<code>fslc approval create</code> で新しいレコードを
+作ります。5.0 でも同じ内容に描画される成果物のレコードは <code>approved</code> のままです。</p>
 <p><code>FSLC_UNSTABLE</code> と Worker の <code>unstable</code> フィールドは、4.12 と 5.0 の間のリリース前の build にだけ
 あり、4.12 にはありませんでした。5.0 はどちらも読みません。古いクライアントが送る <code>unstable</code>
 フィールドは無視します。</p></div></details>
@@ -4734,8 +4741,14 @@ stages の先頭でない initial（<code>initial_not_first_stage</code>）、�
 finding は導出条件に相当する terminal 式を示すので、停止の意味の変化を確認できます。
 変換済み文書にもう一度 migration を実行しても、process の変換や停止条件の導出の finding
 は繰り返し追加しません。変換は <code>acceptance</code> と <code>kpi</code> の宣言をそのまま残し、<code>acceptance</code> は
-FSL 5 でも有効です。変換後の rule によって、入力になかった警告（<code>never_rule_without_forbidden</code>
-など）が出ることがあります。ガード対象の出来事を forbidden trace で試すと解消します。不正な式の <code>&amp;&amp;</code>、<code>||</code>、<code>-&gt;</code> は migration だけでは直りません。
+FSL 5 でも有効です。変換後の rule によって、入力になかった警告が出ることがあります。
+変換された <code>allow … only when</code> の rule は、ガードする出来事で終わる <code>forbidden</code> trace がないと
+<code>never_rule_without_forbidden</code> を警告します。<code>examples/e2e/2_requirements.fsl</code> では、ガードを
+持つ rule ごとに 1 件ずつ出ます。このとき <code>check</code> は <code>ok</code>、終了コード 0 のままです。警告ごとに、
+rule の条件が偽のときにガード対象の出来事を呼んで終わる <code>forbidden … then rejected</code> の trace を
+足します。変換した経費の例では、<code>Employee submit c1 with a 0</code> のあとに <code>then rejected</code> を書く
+trace です。§13.2 の <code>FB-DESK-002</code> も同じ形です。警告を消すために rule を削除しないでください。
+不正な式の <code>&amp;&amp;</code>、<code>||</code>、<code>-&gt;</code> は migration だけでは直りません。
 §7 に従って演算子を手修正してください。この変換で business、カーネル、設計、
 refinement の契約に区分や決定表が加わることはありません。</p>
 <h4 id="fsl-4">FSL 4 要件の参照と移行入力</h4>
