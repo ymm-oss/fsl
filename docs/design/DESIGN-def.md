@@ -189,25 +189,36 @@ component and adds only the unused definitions below:
 
 The duplicate and direct-recursion rows were run twice on each binary with the
 same exits; the two 5.0.0 envelopes were identical. Each rejected form, written
-as a direct spec, exits 2 on both binaries. Messages end with the definition's
-`at <line>:<column>` and `loc` is absent. For mutual recursion the definition
-the reported cycle starts at varies between runs, so the message and position
-vary too: eight runs of the compose gave `p -> q -> p at 3:3` six times and
-`q -> p -> q at 4:3` twice, and its direct-spec form varies the same way on
-both binaries. Exit and kind do not vary; the regression test compares only
-them and the message prefix for this form. Two unused forms still check with
-exit 0 on 5.0.0: a definition whose nested call would capture a binder, and an
-ill-typed body that nothing calls.
+as a direct spec, exits 2 on both binaries. `loc` is absent; the message ends
+with `at <line>:<column>`. For a repeated definition or parameter and for
+recursion that position is the definition's; for an undefined or wrong-arity
+call it is the call's (`3:13` and `4:13` above). Two unused forms still check
+with exit 0 on 5.0.0: a definition whose nested call would capture a binder,
+and an ill-typed body that nothing calls.
+
+For mutual recursion the definition the reported cycle starts at varies between
+runs, so the message and position vary too. This is a known pre-existing
+nondeterminism, also present for direct specs on 4.12.0, and is not fixed here.
+Eight runs of the compose above gave `p -> q -> p at 3:3` six times and
+`q -> p -> q at 4:3` twice. Exit and kind do not vary.
 
 PR #1527 reported a paired `check` sweep of the 597 `.fsl` files under
 `specs/`, `examples/`, and `rust/fslc/tests/fixtures/`, base `9ad07c7ad832`
 and head `89425deff637`, with no transition; the corpus has none of these
-forms. That sweep was not repeated for this record. The regression tests in
-`rust/fslc/tests/issue_1335_compose_predicate_expansion.rs`
-(`duplicate_def_matches_direct_spec_diagnostic_and_location`,
-`recursion_matches_direct_spec_even_when_unused`, and
-`unused_invalid_definitions_match_direct_spec`) compare each compose envelope
-with its direct-spec control in full.
+forms. That sweep was not repeated for this record.
+
+The regression tests are in
+`rust/fslc/tests/issue_1335_compose_predicate_expansion.rs`. They use
+component-less composes (composition state and the definitions only); 4.12.0
+`check` also exits 0 on all six of those forms. Each test checks the compose
+and a direct-spec control with the same layout, and expects exit 2 from both.
+`duplicate_def_matches_direct_spec_diagnostic_and_location`,
+`recursion_matches_direct_spec_even_when_unused`, and the repeated-parameter,
+undefined-call and wrong-arity cases of
+`unused_invalid_definitions_match_direct_spec` compare the two envelopes in full.
+Its mutual-recursion case requires each message to equal one of the two
+possible cycle messages and compares the two envelopes in full apart from
+`message`.
 
 ## Declaration-binder boundary evidence (#1528)
 
