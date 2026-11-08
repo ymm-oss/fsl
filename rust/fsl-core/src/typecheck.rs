@@ -279,25 +279,18 @@ pub(crate) fn with_expression_env<R>(
         });
     let saved = bindings
         .iter()
-        .map(|(name, _)| {
-            (
-                name,
-                env.types.get(name).cloned(),
-                env.lexical.contains(name),
-            )
-        })
+        .map(|(name, _)| (name, env.types.get(name).cloned()))
         .collect::<Vec<_>>();
     env.extend_lexical(bindings);
     let result = f(&env);
-    for (name, ty, lexical) in saved.into_iter().rev() {
+    for (name, ty) in saved.into_iter().rev() {
         match ty {
             Some(ty) => env.types.insert(name.clone(), ty),
             None => env.types.remove(name),
         };
-        if !lexical {
-            env.lexical.remove(name);
-        }
     }
+    // `base_env` marks no name lexical; every mark came from these bindings.
+    env.lexical.clear();
     BASE_ENV.with(|cell| *cell.borrow_mut() = Some((state, consts, types, env)));
     result
 }
@@ -318,6 +311,38 @@ fn enum_member_owners(model: &KernelModel, member: &str) -> Vec<String> {
 #[cfg(test)]
 #[path = "issue_1683_old_walk_tests.rs"]
 mod issue_1683_old_walk_tests;
+
+#[cfg(test)]
+mod expression_env_reuse_tests {
+    use super::*;
+
+    #[test]
+    fn reused_environment_keeps_no_lexical_mark() {
+        let source =
+            "spec M { state { x:Bool } init { x=false } action go() {} invariant P { true } }";
+        let kernel = crate::parse_kernel_source(source, &crate::FsResolver::new(".")).unwrap();
+        let model = crate::build_model(kernel).unwrap();
+        let bindings = [
+            ("x".to_owned(), TypeRef::Int),
+            ("y".to_owned(), TypeRef::Bool),
+        ];
+        with_expression_env(&model, &bindings, |env| {
+            assert!(env.lexical.contains("x") && env.lexical.contains("y"));
+        });
+        let cached = BASE_ENV
+            .with(|cell| cell.borrow_mut().take())
+            .expect("cached env");
+        let (.., env) = &cached;
+        assert!(
+            env.lexical.is_empty(),
+            "stale lexical marks: {:?}",
+            env.lexical
+        );
+        assert_eq!(env.types, base_env(&model).types);
+        BASE_ENV.with(|cell| *cell.borrow_mut() = Some(cached));
+        with_expression_env(&model, &[], |env| assert!(env.lexical.is_empty()));
+    }
+}
 
 pub(crate) fn resolve(model: &KernelModel, ty: &TypeRef) -> Result<TypeRef, TypecheckError> {
     match ty {
