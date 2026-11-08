@@ -233,9 +233,11 @@ fn dependency_edition_inventory_discovers_read_sites_and_endpoint_incidence() {
         visitor.visit_file(&syn::parse_file(&text).unwrap());
         if matches!(
             path.as_str(),
-            "fslc/src/migration.rs" | "fslc/src/source_diagnostic.rs"
+            "fslc/src/migration.rs" | "fslc/src/source_diagnostic.rs" | "fslc/src/spec_loading.rs"
         ) {
             // The one trait-provider forwarding read is not a language edge.
+            // `spec_loading.rs`'s forwards to `FsResolver` to record the import
+            // as a command input (output-target refusal).
             assert_eq!(
                 visitor
                     .endpoints

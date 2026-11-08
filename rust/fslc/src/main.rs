@@ -141,6 +141,7 @@ fn parse_optional_output(
 }
 
 fn main() {
+    output_publication::record_inputs();
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         z3_panic::record(info);
@@ -2161,8 +2162,10 @@ fn load_glossary_with_base(
     let Some(path) = path else {
         return Ok(None);
     };
-    let bytes = std::fs::read(approval::resolve_io_path(path, path_base))
+    let resolved = approval::resolve_io_path(path, path_base);
+    let bytes = std::fs::read(&resolved)
         .map_err(|error| io_error_output(&read_failure_message(path, &error)))?;
+    output_publication::note_input(&resolved);
     let digest = approval::sha256_bytes(&bytes);
     let text = String::from_utf8(bytes)
         .map_err(|error| io_error_output(&format!("{}: {error}", path.display())))?;
@@ -2225,8 +2228,10 @@ fn load_document_evidence(
     let mut files = Vec::new();
     let mut digests = Vec::new();
     for path in paths {
-        let bytes = std::fs::read(approval::resolve_io_path(path, path_base))
+        let resolved = approval::resolve_io_path(path, path_base);
+        let bytes = std::fs::read(&resolved)
             .map_err(|error| io_error_output(&read_failure_message(path, &error)))?;
+        output_publication::note_input(&resolved);
         digests.push(approval::sha256_bytes(&bytes));
         let text = String::from_utf8(bytes)
             .map_err(|error| io_error_output(&format!("{}: {error}", path.display())))?;
@@ -7646,7 +7651,19 @@ fn run_domain_generate_from_source(
         if let Err(error) = std::fs::create_dir_all(output_path) {
             return error_exit(io_error_output(&error.to_string()));
         }
-        if let Some(files) = object.get("files").and_then(Value::as_array) {
+        let files = object.get("files").and_then(Value::as_array);
+        // Refuse an input target before any file of the set is written.
+        for relative in files
+            .into_iter()
+            .flatten()
+            .filter_map(|file| file.get("path").and_then(Value::as_str))
+        {
+            if let Err(error) = output_publication::refuse_input_target(&output_path.join(relative))
+            {
+                return error_exit(io_error_output(&error.to_string()));
+            }
+        }
+        if let Some(files) = files {
             for file in files {
                 let Some(relative) = file.get("path").and_then(Value::as_str) else {
                     continue;

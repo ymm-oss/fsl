@@ -727,6 +727,7 @@ call `fslc` for the values in the first column:
 | A relative AI `dataset.source` (#1421) | resolved from the caller | resolved from the declaring file's directory | Rewrite repository-prefixed paths, or pass `--records` |
 | `-o` to a symlink or a non-regular file such as `/dev/null`, `/dev/stdout` or `/dev/fd/63` (#1419) | written | refused, exit 2; a writable parent directory is required | Write to a regular file, or read stdout |
 | `migrate --write` on a read-only input it would change (the #1419 refusal) | rewritten, `"written": true`, exit 0; the mode stays read-only | refused, `kind: "io"`, exit 2; no file of the set is written | Make the file writable first |
+| An output file that is a file the command reads, such as `html s.fsl -o s.fsl`, also through `./s.fsl`, a symlink or a hard link (#1440) | the input was replaced | refused before anything is written, `kind: "io"`, exit 2 | Write to another path |
 | `lint --edition next` (or `5`) on a headerless document with no other finding (#1434) | exit 0 | `missing_edition_header`, exit 1 | Omit `--edition`, or add the header |
 | Plain `fslc migrate` on a headerless document (#1434) | targets `next` too, but plans nothing: `"edition":"next","changed":0` | plans `fsl 5` and the process-form conversion; `migrate_manual_required` exits 1 | Pass `--edition current` |
 | An invalid `--edition` value (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | Update a message match |
@@ -2793,7 +2794,10 @@ Native artifact file output (`-o` and approval records) replaces each file compl
 write failure keeps the existing bytes. The final path component is not followed if it is a
 symlink, and every non-regular destination is refused, including `-o /dev/null`, `-o /dev/stdout`
 and process substitution such as `/dev/fd/63`. The parent directory must be writable, even to
-replace a writable existing file. These refusals are `io` errors (exit 2). Abrupt termination can
+replace a writable existing file. A destination that is the same file as an input the command
+reads (the spec, an imported file, or a file option such as `--evidence` or `--artifact`) is
+refused before anything is written; sameness is the file, so `./s.fsl`, a symlink and a hard link
+to `s.fsl` all count. These refusals are `io` errors (exit 2). Abrupt termination can
 leave an owner-only `.fslc-output-*.tmp` file beside the destination;
 `docs/design/DESIGN-atomic-artifact-output.md` records the complete contract.
 `migrate --write` refuses a read-only input that it would change with the same `io` error

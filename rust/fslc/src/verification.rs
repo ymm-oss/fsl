@@ -2220,6 +2220,7 @@ impl fsl_core::FileResolver for RecordingResolver {
     fn read(&self, path: &str) -> Result<String, fsl_core::CoreError> {
         let content = std::fs::read_to_string(self.base.join(path))
             .map_err(|error| fsl_core::CoreError::unlocated(error.to_string()))?;
+        crate::output_publication::note_input(&self.base.join(path));
         self.reads
             .borrow_mut()
             .push((PathBuf::from(path), content.clone()));

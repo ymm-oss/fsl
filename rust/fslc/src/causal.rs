@@ -208,7 +208,11 @@ pub(super) fn causal_command(
                             &period_end,
                             out.as_deref(),
                             lifecycle_out.as_deref(),
-                            &|path| std::fs::read_to_string(path),
+                            &|path| {
+                                let log = std::fs::read_to_string(path)?;
+                                crate::output_publication::note_input(path);
+                                Ok(log)
+                            },
                         ),
                         editions,
                         false,
@@ -1396,6 +1400,10 @@ fn run_causal_observe_expectations(
                         destination.display()
                     ),
                 ));
+            }
+            // Refuse an input target before any destination is written.
+            if let Err(error) = crate::output_publication::refuse_input_target(destination) {
+                return output_write_error(destination, &error, &[], &[]);
             }
         }
     }

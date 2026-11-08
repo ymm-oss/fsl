@@ -863,6 +863,12 @@ call <code>fslc</code> for the values in the first column:</p>
 <td>Make the file writable first</td>
 </tr>
 <tr>
+<td>An output file that is a file the command reads, such as <code>html s.fsl -o s.fsl</code>, also through <code>./s.fsl</code>, a symlink or a hard link (#1440)</td>
+<td>the input was replaced</td>
+<td>refused before anything is written, <code>kind: "io"</code>, exit 2</td>
+<td>Write to another path</td>
+</tr>
+<tr>
 <td><code>lint --edition next</code> (or <code>5</code>) on a headerless document with no other finding (#1434)</td>
 <td>exit 0</td>
 <td><code>missing_edition_header</code>, exit 1</td>
@@ -3038,7 +3044,10 @@ review the ledger and regenerate the approval. Newly approved ledgers stay appro
 write failure keeps the existing bytes. The final path component is not followed if it is a
 symlink, and every non-regular destination is refused, including <code>-o /dev/null</code>, <code>-o /dev/stdout</code>
 and process substitution such as <code>/dev/fd/63</code>. The parent directory must be writable, even to
-replace a writable existing file. These refusals are <code>io</code> errors (exit 2). Abrupt termination can
+replace a writable existing file. A destination that is the same file as an input the command
+reads (the spec, an imported file, or a file option such as <code>--evidence</code> or <code>--artifact</code>) is
+refused before anything is written; sameness is the file, so <code>./s.fsl</code>, a symlink and a hard link
+to <code>s.fsl</code> all count. These refusals are <code>io</code> errors (exit 2). Abrupt termination can
 leave an owner-only <code>.fslc-output-*.tmp</code> file beside the destination;
 <code>docs/design/DESIGN-atomic-artifact-output.md</code> records the complete contract.
 <code>migrate --write</code> refuses a read-only input that it would change with the same <code>io</code> error
