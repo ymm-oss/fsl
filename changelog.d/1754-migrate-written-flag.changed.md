@@ -1,4 +1,4 @@
-Fixed (#1754): `fslc migrate --write` no longer reports `"written": true` when
+Changed (#1754, breaking): `fslc migrate --write` no longer reports `"written": true` when
 it wrote nothing. The top-level `written` echoed the `--write` flag, so a run
 whose inputs needed no rewrite reported `"written": true` with `"changed": 0`.
 `written` now means a file was replaced: the top level is `true` only when at
