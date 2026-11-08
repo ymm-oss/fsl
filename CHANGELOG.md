@@ -147,24 +147,24 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   them. Parsing, diagnostics, and command output are unchanged.
 - Changed (#1371): the language-server index tests build the index with the
   server's parse options. The index and the server's responses are unchanged.
-- Changed (#9999): the lexer reads identifiers through one selectable rule whose
+- Changed (#1377): the lexer reads identifiers through one selectable rule whose
   diagnostics carry their own codes, and the language server's rename check and
   the browser harness's import scan use the same rule. The VS Code grammar now
   also highlights a declaration name written with non-ASCII letters. Parsing,
   diagnostics, and command output are unchanged.
-- Changed (#9999): the formatter, migration, lint, and language server share one
+- Changed (#1378): the formatter, migration, lint, and language server share one
   edition type, and the core library and the shared command modules take
   explicit parse options. Parsing, diagnostics, and command output are
   unchanged.
-- Changed (#9998): the requirements parser can desugar further declaration
+- Changed (#1382): the requirements parser can desugar further declaration
   forms into the existing process, acceptance and forbidden items, and the
   names a requirements process generates now come from the core naming module.
   Parsing, diagnostics, and command output of published documents are
   unchanged.
-- Changed (#9999): requirements lowering runs a name-resolution step first, and
+- Changed (#1383): requirements lowering runs a name-resolution step first, and
   the name owner keeps a per-document table of display spellings beside the
   canonical names. Parsing, diagnostics, and command output are unchanged.
-- Changed (#9996): the requirements parser can fold a further declaration form
+- Changed (#1384): the requirements parser can fold a further declaration form
   (decision tables) into the guards of existing process transitions, and the
   core checks that such a table's rows cover and partition the values of the
   fields they read, enumerating finite domains and handing larger ones to the

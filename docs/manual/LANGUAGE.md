@@ -716,22 +716,38 @@ call `fslc` for the values in the first column:
 
 | What changed (issue) | 4.12 | 5.0 | What to do |
 |---|---|---|---|
-| Options a command does not own on `explain`, `typestate`, `mutate`, `testgen`, `html`, `ledger`, `scenarios` and `version` (#1446, #1341) | ignored or read by another parser | usage error, exit 2 | Remove the option |
+| Options a command does not own on `explain`, `typestate`, `mutate`, `testgen`, `html`, `ledger`, `scenarios` and `version` (#1446, #1341) | some were already usage errors: `explain --engine`, `--no-timing` and `--deadlock`, `mutate --engine`, and `scenarios --engine induction`; others were ignored with exit 0: `version --depth 3`, `typestate --depth 3`, `testgen --engine` and `scenarios --engine bmc` | usage error, exit 2 | Remove the option |
 | Invalid option values checked before reading sources (#1446) | `kind: "io"` or `"semantics"` | `kind: "usage"` | Match `usage` |
 | A three-dot `--git` range (#1446) | a Git error, `kind: "io"` | `--git range must be BASE..HEAD`, `kind: "usage"`, before Git runs | Write `BASE..HEAD` |
 | An unreadable input file (#1709) | `usage`, `semantics` or a bare OS error, depending on the route | `kind: "io"`, exit 2, `<path>: <error>` | Match `io` |
 | `fslc refine` on an implementation that breaks its own contract; governance `preservations[].result` (#1315) | `"violated"` | `"impl_violated"` | Match `impl_violated`; `verify` keeps `violated` |
 | Generated and component names in outputs (#1256, #1255, #1284) | `submit__b1`, `acct__Inv` | `submit.b1`, `acct.Inv` | Match the dotted name, including stored `analyze` IDs and `--focus` arguments |
 | Approval artifact failures in `approval create` and `approval check` (#1418) | exit 2 | the downstream exit: 1 for a scenarios or HTML verification failure, 3 for an internal failure | Gate on exit 0 with `approval_check` and `approved` |
-| Approval records (#1421) | v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind | unsigned v5 or signed v6 with `path_base` | Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; `document generate --approval` needs Git. A 4.x record stays `approved` while its digests match; new records record a per-kind renderer version such as `fslc-ledger-renderer/1.0.0` in `generator_version` instead of the `fslc` version |
+| Approval records (#1421) | v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind | unsigned v5 or signed v6 with `path_base` | Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; `document generate --approval` needs Git. A 4.x record stays `approved` only while its digests match, including the artifact against a 5.0 rendering; a record whose artifact 5.0 renders differently needs re-approval (below); new records record a per-kind renderer version such as `fslc-ledger-renderer/1.0.0` in `generator_version` instead of the `fslc` version |
 | A relative AI `dataset.source` (#1421) | resolved from the caller | resolved from the declaring file's directory | Rewrite repository-prefixed paths, or pass `--records` |
 | `-o` to a symlink or a non-regular file such as `/dev/null`, `/dev/stdout` or `/dev/fd/63` (#1419) | written | refused, exit 2; a writable parent directory is required | Write to a regular file, or read stdout |
 | `lint --edition next` (or `5`) on a headerless document with no other finding (#1434) | exit 0 | `missing_edition_header`, exit 1 | Omit `--edition`, or add the header |
-| Plain `fslc migrate` on a headerless document (#1434) | current-edition plan | plans `fsl 5` and the process-form conversion; `migrate_manual_required` exits 1 | Pass `--edition current` |
+| Plain `fslc migrate` on a headerless document (#1434) | targets `next` too, but plans nothing: `"edition":"next","changed":0` | plans `fsl 5` and the process-form conversion; `migrate_manual_required` exits 1 | Pass `--edition current` |
 | An invalid `--edition` value (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | Update a message match |
 | Current-edition `check`, `verify` and Worker on legacy forms (#251) | no warning | `legacy_string_metadata`, `legacy_quantifier_colon`, `inline_action_maps` warnings; verdict and exit unchanged | Nothing is required; `fslc migrate` rewrites them |
 | The verify cache | | the key hashes the `fslc` version | The first run after the upgrade recomputes each result once |
 | The layer Agent Skills (#1437) | write FSL 4 | write `fsl 5` | Reinstall the skills; the `fsl` skill keeps its FSL 4 guidance |
+
+**Re-approve records whose artifact renders differently.** Where 5.0 renders a
+ledger, HTML or scenarios artifact differently from 4.12, a 4.12 record of it
+reports `"status": "drifted"` with `"reasons": ["rendering_changed"]` and exit 0,
+although its spec digest still matches. The ledger changes include the new
+legacy-form warnings (#251) listed as findings, Markdown escaping such as `\_`,
+and an `## inline implements` section for a spec that implements another.
+`renderer_changed` is never reported for a 4.x record, because its renderer
+comparison is skipped. A record whose artifact renders the same stays
+`approved`. For the 4.12 records that could be created over this repository's
+`examples/` and `specs/`, 5.0 reported `rendering_changed` for 61 of 86 ledger,
+37 of 44 HTML and 11 of 45 scenarios records, and kept the rest `approved`,
+except 14 records of specs that 5.0 refuses or whose acceptance or forbidden
+checks fail, which end in an exit-2 `error` (#1418). Regenerate a drifted
+artifact with 5.0, review it, and create a new record with
+`fslc approval create`.
 
 `FSLC_UNSTABLE` and the Worker's `unstable` field existed only in pre-release
 builds between 4.12 and 5.0, never in 4.12. 5.0 does not read them, and an old
@@ -4738,8 +4754,14 @@ The finding shows the equivalent terminal expression so the changed stopping
 behavior can be reviewed. Re-running migration on the converted document adds
 neither another process conversion nor another derived-terminal finding.
 Conversion leaves `acceptance` and `kpi` declarations in place; `acceptance` stays
-valid in FSL 5. Converted rules can add warnings the input did not have, such as
-`never_rule_without_forbidden`, until forbidden traces probe the guarded events.
+valid in FSL 5. Converted rules can add warnings the input did not have. A
+converted `allow … only when` rule warns `never_rule_without_forbidden` when no
+`forbidden` trace ends in an event it guards; `examples/e2e/2_requirements.fsl`
+gets one such warning per guarded rule, while `check` still reports `ok` with
+exit 0. For each warning, add a `forbidden … then rejected` trace whose last
+step calls a guarded event with the rule's condition false. For the migrated
+expense example, that is a trace of `Employee submit c1 with a 0` followed by
+`then rejected`; §13.2's `FB-DESK-002` has the same shape. Do not delete the rule to silence the warning.
 Invalid expression `&&`, `||`, or `->` is not made safe by migration; follow §7's
 manual operator repairs. Business, kernel, design and refinement contracts do
 not acquire concepts or decision tables through this conversion.

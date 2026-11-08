@@ -681,22 +681,35 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 
 | 変わったもの(issue) | 4.12 | 5.0 | 対応 |
 |---|---|---|---|
-| `explain`、`typestate`、`mutate`、`testgen`、`html`、`ledger`、`scenarios`、`version` に、そのコマンドが持たないオプションを渡す (#1446, #1341) | 無視されるか、別のパーサーが読む | usage エラー、終了コード 2 | そのオプションを外します |
+| `explain`、`typestate`、`mutate`、`testgen`、`html`、`ledger`、`scenarios`、`version` に、そのコマンドが持たないオプションを渡す (#1446, #1341) | 一部は既に usage エラー(`explain` の `--engine`、`--no-timing`、`--deadlock`。`mutate --engine`。`scenarios --engine induction`)。ほかは無視して終了コード 0(`version --depth 3`、`typestate --depth 3`、`testgen --engine`、`scenarios --engine bmc`) | usage エラー、終了コード 2 | そのオプションを外します |
 | ソースを読む前に検査する、不正なオプションの値 (#1446) | `kind: "io"` または `"semantics"` | `kind: "usage"` | `usage` で照合します |
 | 3 点の `--git` 範囲 (#1446) | Git のエラー、`kind: "io"` | Git を動かす前に `--git range must be BASE..HEAD`、`kind: "usage"` | `BASE..HEAD` と書きます |
 | 読めない入力ファイル (#1709) | 経路によって `usage`、`semantics`、または OS のエラーだけ | `kind: "io"`、終了コード 2、`<path>: <error>` | `io` で照合します |
 | 自分の契約を破る実装に対する `fslc refine`、governance の `preservations[].result` (#1315) | `"violated"` | `"impl_violated"` | `impl_violated` で照合します。`verify` の `violated` はそのままです |
 | 出力の中の生成名とコンポーネント名 (#1256, #1255, #1284) | `submit__b1`、`acct__Inv` | `submit.b1`、`acct.Inv` | 保存した `analyze` の ID や `--focus` の引数も含め、ドットの名前で照合します |
 | `approval create` と `approval check` での承認対象の失敗 (#1418) | 終了コード 2 | 下流の終了コード。scenarios や HTML の検証の失敗は 1、内部の失敗は 3 | 終了コード 0 と `approval_check`、`approved` で判定します |
-| 承認レコード (#1421) | v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4 | 署名なしの v5、署名つきの v6(`path_base` つき) | 新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。`document generate --approval` には Git が必要です。4.x のレコードは、ダイジェストが一致する間は `approved` のままです。新しいレコードの `generator_version` には、`fslc` のバージョンではなく `fslc-ledger-renderer/1.0.0` のような種類ごとのレンダラのバージョンを記録します |
+| 承認レコード (#1421) | v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4 | 署名なしの v5、署名つきの v6(`path_base` つき) | 新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。`document generate --approval` には Git が必要です。4.x のレコードは、5.0 で描画した成果物との照合も含めてダイジェストが一致する間だけ `approved` のままです。5.0 で成果物の描画が変わるレコードは承認し直しが必要です(表の下を参照)。新しいレコードの `generator_version` には、`fslc` のバージョンではなく `fslc-ledger-renderer/1.0.0` のような種類ごとのレンダラのバージョンを記録します |
 | 相対パスの AI の `dataset.source` (#1421) | 呼び出し側から解決 | 宣言したファイルのディレクトリから解決 | リポジトリを前置したパスを書き直すか、`--records` を渡します |
 | シンボリックリンクや、`/dev/null`、`/dev/stdout`、`/dev/fd/63` のような通常ファイルでないものへの `-o` (#1419) | 書き込む | 拒否、終了コード 2。書き込める親ディレクトリが必要 | 通常ファイルに書くか、標準出力を読みます |
 | ほかに finding のないヘッダーのない文書への `lint --edition next`(または `5`) (#1434) | 終了コード 0 | `missing_edition_header`、終了コード 1 | `--edition` を付けないか、ヘッダーを書きます |
-| ヘッダーのない文書への引数なしの `fslc migrate` (#1434) | 現行エディションの計画 | `fsl 5` と process 形式の変換を計画。`migrate_manual_required` は終了コード 1 | `--edition current` を渡します |
+| ヘッダーのない文書への引数なしの `fslc migrate` (#1434) | 対象は同じく `next` だが、何も計画しない(`"edition":"next","changed":0`) | `fsl 5` と process 形式の変換を計画。`migrate_manual_required` は終了コード 1 | `--edition current` を渡します |
 | 不正な `--edition` の値 (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | メッセージの照合を直します |
 | 旧形式に対する現行エディションの `check`、`verify`、Worker (#251) | 警告なし | `legacy_string_metadata`、`legacy_quantifier_colon`、`inline_action_maps` の警告。判定と終了コードは不変 | 対応は不要です。`fslc migrate` が書き換えます |
 | verify のキャッシュ | | キーに `fslc` のバージョンが入る | 上げた後の最初の実行で、結果を 1 回ずつ計算し直します |
 | 層別の Agent Skills (#1437) | FSL 4 を書く | `fsl 5` を書く | スキルを入れ直します。`fsl` スキルは FSL 4 の案内を残しています |
+
+**描画が変わる成果物の承認は承認し直します。** 5.0 が ledger、HTML、scenarios の成果物を
+4.12 と違う内容で描画する場合、その 4.12 のレコードは、仕様のダイジェストが一致していても
+`"status": "drifted"`、`"reasons": ["rendering_changed"]`、終了コード 0 を返します。ledger の
+変更には、新しい旧形式の警告(#251)が finding として載ること、`\_` のような Markdown の
+エスケープ、別の仕様を `implements` する仕様に加わる `## inline implements` の節があります。
+4.x のレコードではレンダラの比較を省くので、`renderer_changed` は報告しません。同じ内容に
+描画される成果物のレコードは `approved` のままです。このリポジトリの `examples/` と `specs/` で
+4.12 が作れたレコードでは、5.0 は ledger 86 件中 61 件、HTML 44 件中 37 件、scenarios 45 件中
+11 件に `rendering_changed` を報告し、残りは `approved` のままでした。ただし、5.0 が拒否する
+仕様や、acceptance か forbidden の検査が失敗する仕様の 14 件は、終了コード 2 の `error` に
+なります(#1418)。描画が変わった成果物は 5.0 で作り直して確認し、`fslc approval create` で
+新しいレコードを作ります。
 
 `FSLC_UNSTABLE` と Worker の `unstable` フィールドは、4.12 と 5.0 の間のリリース前の build にだけ
 あり、4.12 にはありませんでした。5.0 はどちらも読みません。古いクライアントが送る `unstable`
@@ -4410,8 +4423,14 @@ stages の先頭でない initial（`initial_not_first_stage`）、デフォル�
 finding は導出条件に相当する terminal 式を示すので、停止の意味の変化を確認できます。
 変換済み文書にもう一度 migration を実行しても、process の変換や停止条件の導出の finding
 は繰り返し追加しません。変換は `acceptance` と `kpi` の宣言をそのまま残し、`acceptance` は
-FSL 5 でも有効です。変換後の rule によって、入力になかった警告（`never_rule_without_forbidden`
-など）が出ることがあります。ガード対象の出来事を forbidden trace で試すと解消します。不正な式の `&&`、`||`、`->` は migration だけでは直りません。
+FSL 5 でも有効です。変換後の rule によって、入力になかった警告が出ることがあります。
+変換された `allow … only when` の rule は、ガードする出来事で終わる `forbidden` trace がないと
+`never_rule_without_forbidden` を警告します。`examples/e2e/2_requirements.fsl` では、ガードを
+持つ rule ごとに 1 件ずつ出ます。このとき `check` は `ok`、終了コード 0 のままです。警告ごとに、
+rule の条件が偽のときにガード対象の出来事を呼んで終わる `forbidden … then rejected` の trace を
+足します。変換した経費の例では、`Employee submit c1 with a 0` のあとに `then rejected` を書く
+trace です。§13.2 の `FB-DESK-002` も同じ形です。警告を消すために rule を削除しないでください。
+不正な式の `&&`、`||`、`->` は migration だけでは直りません。
 §7 に従って演算子を手修正してください。この変換で business、カーネル、設計、
 refinement の契約に区分や決定表が加わることはありません。
 
