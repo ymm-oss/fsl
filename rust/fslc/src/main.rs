@@ -902,6 +902,13 @@ fn load_migration_plan(
             plan.diagnostics.extend(findings);
         }
     }
+    // Whichever path produced it, the rewrite keeps the input's line endings
+    // and byte order mark (#1755); the Kernel check in `run_migrate_inner`
+    // runs on these bytes.
+    plan.migrated_source = plan
+        .migrated_source
+        .map(|migrated| fslc_rust::migration::keep_line_endings(&source, &migrated))
+        .filter(|migrated| *migrated != source);
     if let Some(header) = header {
         plan.diagnostics.push(header);
     }

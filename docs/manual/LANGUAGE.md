@@ -733,6 +733,7 @@ call `fslc` for the values in the first column:
 | A relative AI `dataset.source` (#1421) | resolved from the caller | resolved from the declaring file's directory | Rewrite repository-prefixed paths, or pass `--records` |
 | `-o` to a symlink or a non-regular file such as `/dev/null`, `/dev/stdout` or `/dev/fd/63` (#1419) | written | refused, exit 2; a writable parent directory is required | Write to a regular file, or read stdout |
 | `migrate --write` where no input needs a rewrite (#1754) | `"written": true` with `"changed": 0`; `files[]` entries had no `written` | `"written": false`; each `files[]` entry reports `written`, `true` only for a replaced input | Read `written` as "a file was replaced" |
+| `migrate --write` on a CRLF document (#1755) | lines it rewrote end in LF and the others keep CRLF; a document the formatter rewrote (metadata, maps, enums, quantifiers) comes back LF-only without its byte order mark | every line ends as the input's first line does; the byte order mark is kept | Nothing is required |
 | `migrate --write` on a read-only input it would change (the #1419 refusal) | rewritten, `"written": true`, exit 0; the mode stays read-only | refused, `kind: "io"`, exit 2; no file of the set is written | Make the file writable first |
 | An output file that is a file the command reads, such as `html s.fsl -o s.fsl`, also through `./s.fsl`, a symlink or a hard link (#1440) | the input was replaced | refused before anything is written, `kind: "io"`, exit 2 | Write to another path |
 | `lint --edition next` (or `5`) on a headerless document with no other finding (#1434) | exit 0 | `missing_edition_header`, exit 1 | Omit `--edition`, or add the header |
@@ -4730,7 +4731,11 @@ not whether `--write` was given: the top-level `written` is `true` only when
 `--write` replaced at least one input, and each `files[]` entry's `written` is
 `true` only for an input it replaced. An input that needs no rewrite
 (`changed: false`) is left untouched and reports `written: false`, as does every
-input of a dry run, a refusal or `migrate_manual_required`. Inspect `files[].findings[]`,
+input of a dry run, a refusal or `migrate_manual_required`. The rewrite keeps
+the input's line endings and byte order mark: every line ends as the input's
+first line does (CRLF or LF), and a UTF-8 byte order mark stays exactly when the
+input has one. The dry run's `files[].edits` replacement holds the same bytes
+`--write` writes. Inspect `files[].findings[]`,
 `machine_applicable`, and each refusal's `reason`, not only the command's exit
 status: `lint` exits 1 whenever it reports a finding, so the commands above are not
 an `&&` chain. A refused process conversion exits 1 with

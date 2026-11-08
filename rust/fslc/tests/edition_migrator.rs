@@ -1431,6 +1431,73 @@ fn written_reports_only_the_files_a_write_replaces() {
     assert_eq!(identity(&unchanged), before);
 }
 
+/// `source` with every line ending CRLF (`crlf`) and a UTF-8 byte order mark
+/// (`bom`); `source` itself uses LF and has no mark.
+fn laid_out(source: &str, crlf: bool, bom: bool) -> String {
+    assert!(!source.contains('\r') && !source.starts_with('\u{feff}'));
+    let body = if crlf {
+        source.replace('\n', "\r\n")
+    } else {
+        source.to_owned()
+    };
+    if bom { format!("\u{feff}{body}") } else { body }
+}
+
+/// `migrate --write` keeps the input's line endings and byte order mark on
+/// each path that rewrites a document (#1755): the formatter (a colon
+/// quantifier), the header insertion alone, and the process-form conversion.
+/// Before, the formatter path wrote LF without the mark and the other two
+/// left the original lines CRLF and the inserted ones LF. The written bytes
+/// are the LF migration's, laid out like the input, and equal the dry run's
+/// replacement; the LF inputs are the negative control.
+#[test]
+fn write_keeps_the_input_line_endings_and_byte_order_mark() {
+    let header_only = "spec H {\n  state { x: Bool = false }\n  action go() { x = true }\n}\n";
+    for (name, source) in [
+        ("formatter", LEGACY_COLON_QUANTIFIER.to_owned()),
+        ("header", header_only.to_owned()),
+        ("process_form", example("e2e/2_requirements.fsl")),
+    ] {
+        let directory = FixtureDir::new();
+        directory.write("1_business.fsl", &example("e2e/1_business.fsl"));
+        let migrate = |input: &str| {
+            let path = directory.write("doc.fsl", input);
+            let path_text = path.to_str().expect("UTF-8 path").to_owned();
+            let dry = run(&["migrate", &path_text, "--edition", "5"]);
+            assert_eq!(dry.status.code(), Some(0), "{name}: {:#}", json(&dry));
+            let replacement = json(&dry)["files"][0]["edits"][0]["replacement"]
+                .as_str()
+                .expect("one replacement")
+                .to_owned();
+            let write = run(&["migrate", &path_text, "--edition", "5", "--write"]);
+            assert_eq!(write.status.code(), Some(0), "{name}: {:#}", json(&write));
+            assert_eq!(json(&write)["written"], true, "{name}");
+            let written = std::fs::read(&path).expect("read migrated");
+            assert_eq!(written, replacement.as_bytes(), "{name}: dry run = write");
+            // Idempotent, and the written document still checks.
+            let again = run(&["migrate", &path_text, "--edition", "5", "--write"]);
+            assert_eq!(json(&again)["changed"], 0, "{name}: {:#}", json(&again));
+            let check = run(&["check", &path_text]);
+            assert_eq!(check.status.code(), Some(0), "{name}: {:#}", json(&check));
+            String::from_utf8(written).expect("UTF-8")
+        };
+        let lf = migrate(&source);
+        assert!(
+            !lf.contains('\r') && !lf.starts_with('\u{feff}'),
+            "{name}: an LF input stays LF without a mark"
+        );
+        assert_ne!(lf, source, "{name}: the document is rewritten");
+        for (crlf, bom) in [(true, true), (true, false), (false, true)] {
+            let written = migrate(&laid_out(&source, crlf, bom));
+            assert_eq!(
+                written,
+                laid_out(&lf, crlf, bom),
+                "{name}: crlf={crlf} bom={bom}"
+            );
+        }
+    }
+}
+
 #[cfg(unix)]
 fn entries(directory: &Path) -> Vec<PathBuf> {
     let mut paths = std::fs::read_dir(directory)
