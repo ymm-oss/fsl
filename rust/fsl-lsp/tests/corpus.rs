@@ -116,10 +116,12 @@ fn valid_corpus_declarations_match_the_authoritative_ast_role_and_scope() {
 }
 
 /// R0 for the language server (fsl 5 plan §3 S0, S11), after #1434: a
-/// corpus document has no edition header, so it is read as `fsl 4` and
+/// corpus document without an edition header is read as `fsl 4` and
 /// indexed with the published lexicon; the next edition's keywords, aliases
-/// and mappings reach no published document. (The former gate-off/gate-on
-/// comparison has no second reading to compare since the gate is gone.)
+/// and mappings reach no such document. A document whose header names
+/// `fsl 5` (`examples/fsl5/`, #1766) is indexed with the next lexicon.
+/// (The former gate-off/gate-on comparison has no second reading to compare
+/// since the gate is gone.)
 #[test]
 fn the_published_corpus_is_indexed_with_the_published_lexicon() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -138,8 +140,19 @@ fn the_published_corpus_is_indexed_with_the_published_lexicon() {
             DocumentIndex::build(&source, path.to_str(), &fsl_syntax::ParseOptions::stable())
         {
             indexed += 1;
-            if index.lexicon() != fsl_lsp::Lexicon::Published {
-                failures.push(path.display().to_string());
+            let expected =
+                match fsl_syntax::edition_header(&source, &fsl_syntax::ParseOptions::stable()) {
+                    Ok(Some(header)) if header.edition == fsl_syntax::Edition::Fsl5 => {
+                        fsl_lsp::Lexicon::Next
+                    }
+                    _ => fsl_lsp::Lexicon::Published,
+                };
+            if index.lexicon() != expected {
+                failures.push(format!(
+                    "{}: {:?}, expected {expected:?}",
+                    path.display(),
+                    index.lexicon()
+                ));
             }
         }
     }
