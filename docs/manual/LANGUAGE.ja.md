@@ -696,6 +696,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 | ほかに finding のないヘッダーのない文書への `lint --edition next`(または `5`) (#1434) | 終了コード 0 | `missing_edition_header`、終了コード 1 | `--edition` を付けないか、ヘッダーを書きます |
 | ヘッダーのない文書への引数なしの `fslc migrate` (#1434) | 対象は同じく `next` だが、何も計画しない(`"edition":"next","changed":0`) | `fsl 5` と process 形式の変換を計画。`migrate_manual_required` は終了コード 1 | `--edition current` を渡します |
 | 不正な `--edition` の値 (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | メッセージの照合を直します |
+| 引数なしの `fslc`、`fslc help`、引数なしの `fslc document` と `fslc domain` (#1756) | `usage: fslc <check\|verify> SPEC [options]`、`unknown command 'help'`、`check` や `replay` と `testgen` が抜けた usage 行 | すべてのコマンドを並べたルートの usage 行。`fslc help [COMMAND ...]` はそのコマンドのヘルプを出し、終了コード 0。usage 行はすべてのサブコマンドを並べます。`fslc help` 以外は `kind: "usage"`、終了コード 2 のままです | メッセージの照合を直します |
 | 旧形式に対する現行エディションの `check`、`verify`、Worker (#251) | 警告なし | `legacy_string_metadata`、`legacy_quantifier_colon`、`inline_action_maps` の警告。判定と終了コードは不変 | 対応は不要です。`fslc migrate` が書き換えます |
 | verify のキャッシュ | | キーに `fslc` のバージョンが入る | 上げた後の最初の実行で、結果を 1 回ずつ計算し直します |
 | 層別の Agent Skills (#1437) | FSL 4 を書く | `fsl 5` を書く | スキルを入れ直します。`fsl` スキルは FSL 4 の案内を残しています |
@@ -1915,6 +1916,7 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 ## 7. 検証器 `fslc`
 
 ```
+fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check     <file.fsl>                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
 fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set

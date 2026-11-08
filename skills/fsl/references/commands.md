@@ -119,6 +119,7 @@ Domain checking rejects quantified domain expressions, so it does not emit this
 colon-quantifier warning for them; metadata slots and requirement maps are not domain forms.
 
 ```
+fslc help [COMMAND [SUBCOMMAND]]               # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check <f> [--edition current|next|4|5]     # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
 fslc lint <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)

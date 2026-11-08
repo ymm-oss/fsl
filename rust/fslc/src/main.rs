@@ -1065,6 +1065,21 @@ fn print_cli_metadata() -> bool {
         print!("{CLI_CONTRACT}");
         return true;
     }
+    match cli_contract::help_alias(CLI_CONTRACT, &arguments) {
+        Some(Ok(help)) => {
+            print!("{help}");
+            return true;
+        }
+        Some(Err(message)) => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&error_output("usage", &message))
+                    .expect("serialize CLI argument error")
+            );
+            std::process::exit(2);
+        }
+        None => {}
+    }
     let Some(help_index) = arguments
         .iter()
         .position(|argument| matches!(argument.as_str(), "-h" | "--help"))
@@ -1102,7 +1117,7 @@ fn command() -> Result<(Value, i32), String> {
     let mut args = std::env::args().skip(1);
     let command = args
         .next()
-        .ok_or_else(|| "usage: fslc <check|verify> SPEC [options]".to_owned())?;
+        .ok_or_else(|| cli_contract::root_usage(CLI_CONTRACT))?;
     match command.as_str() {
         "version" | "-V" | "--version" => {
             println!("fslc {}", env!("CARGO_PKG_VERSION"));
@@ -1740,7 +1755,7 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
 fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
     let subcommand = args
         .next()
-        .ok_or_else(|| "usage: fslc document <generate|claims> SPEC [options]".to_owned())?;
+        .ok_or_else(|| "usage: fslc document <generate|claims|check> SPEC [options]".to_owned())?;
     // Only the three known subcommands are registered
     // (`literate_access.rs`'s `LITERATE_REGISTRY`) and reach this gate; an
     // unrecognized subcommand falls through to the match's own `_` arm and
@@ -3199,9 +3214,9 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
 
 #[allow(clippy::too_many_lines)]
 fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
-    let subcommand = args
-        .next()
-        .ok_or_else(|| "usage: fslc domain <check|analyze|expand|generate> ...".to_owned())?;
+    let subcommand = args.next().ok_or_else(|| {
+        "usage: fslc domain <check|analyze|expand|generate|replay|testgen> ...".to_owned()
+    })?;
     // Options may precede the file (#1250): each subcommand resolves it after
     // its option loop, then gates it. A stray argument keeps the wording the
     // subcommand used for it before.

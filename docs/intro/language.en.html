@@ -887,6 +887,12 @@ call <code>fslc</code> for the values in the first column:</p>
 <td>Update a message match</td>
 </tr>
 <tr>
+<td>A bare <code>fslc</code>, <code>fslc help</code>, a bare <code>fslc document</code> or <code>fslc domain</code> (#1756)</td>
+<td><code>usage: fslc &lt;check\|verify&gt; SPEC [options]</code>; <code>unknown command 'help'</code>; usage lines without <code>check</code>, or without <code>replay</code> and <code>testgen</code></td>
+<td>the root usage line that names every command; <code>fslc help [COMMAND ...]</code> prints that command's help with exit 0; usage lines naming every subcommand. The others stay <code>kind: "usage"</code>, exit 2</td>
+<td>Update a message match</td>
+</tr>
+<tr>
 <td>Current-edition <code>check</code>, <code>verify</code> and Worker on legacy forms (#251)</td>
 <td>no warning</td>
 <td><code>legacy_string_metadata</code>, <code>legacy_quantifier_colon</code>, <code>inline_action_maps</code> warnings; verdict and exit unchanged</td>
@@ -2363,7 +2369,8 @@ additional removals in #1463.</p></div></details>
 <li>A full <code>push</code> into a Seq is also detected automatically as <code>type_bound</code>
   (to guard it, write <code>requires q.size() &lt; N</code>).</li>
 </ul></div></details>
-<details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl|file.md&gt;                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
+<details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
+fslc check     &lt;file.fsl|file.md&gt;                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
 fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       &lt;file.fsl|-&gt; [--edition current|next|4|5] # canonical FSL to stdout; never mutates input

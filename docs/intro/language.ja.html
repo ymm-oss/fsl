@@ -854,6 +854,12 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <td>メッセージの照合を直します</td>
 </tr>
 <tr>
+<td>引数なしの <code>fslc</code>、<code>fslc help</code>、引数なしの <code>fslc document</code> と <code>fslc domain</code> (#1756)</td>
+<td><code>usage: fslc &lt;check\|verify&gt; SPEC [options]</code>、<code>unknown command 'help'</code>、<code>check</code> や <code>replay</code> と <code>testgen</code> が抜けた usage 行</td>
+<td>すべてのコマンドを並べたルートの usage 行。<code>fslc help [COMMAND ...]</code> はそのコマンドのヘルプを出し、終了コード 0。usage 行はすべてのサブコマンドを並べます。<code>fslc help</code> 以外は <code>kind: "usage"</code>、終了コード 2 のままです</td>
+<td>メッセージの照合を直します</td>
+</tr>
+<tr>
 <td>旧形式に対する現行エディションの <code>check</code>、<code>verify</code>、Worker (#251)</td>
 <td>警告なし</td>
 <td><code>legacy_string_metadata</code>、<code>legacy_quantifier_colon</code>、<code>inline_action_maps</code> の警告。判定と終了コードは不変</td>
@@ -2194,7 +2200,8 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 <li>満杯の Seq への <code>push</code> も <code>type_bound</code> として自動で検出されます
   (ガードするには <code>requires q.size() &lt; N</code> と書きます)。</li>
 </ul></div></details>
-<details id="7-the-verifier-fslc"><summary>7. 検証器 `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
+<details id="7-the-verifier-fslc"><summary>7. 検証器 `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
+fslc check     &lt;file.fsl&gt;                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
 fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       &lt;file.fsl|-&gt; [--edition current|next|4|5] # canonical FSL to stdout; never mutates input

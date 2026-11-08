@@ -128,7 +128,16 @@ fn help(path: &[&str], extra: &[&str]) {
 
 #[test]
 fn no_command_unknown_command_and_version() {
-    usage(&[], "usage: fslc <check|verify> SPEC [options]");
+    // #1756: a bare `fslc` is the root help's usage line, which names every
+    // top-level command, no longer `usage: fslc <check|verify> SPEC [options]`.
+    let contract: Value =
+        serde_json::from_str(include_str!("../cli-contract.json")).expect("CLI contract");
+    let root_usage = contract["root"]["help"]
+        .as_str()
+        .and_then(|help| help.lines().next())
+        .expect("root usage line");
+    assert!(root_usage.starts_with("usage: fslc [-h] [-V] {version,check,"));
+    usage(&[], root_usage);
     usage(&["bogus"], "unknown command 'bogus'");
     for flag in ["version", "-V", "--version"] {
         let run = run(&[flag]);
