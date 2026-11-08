@@ -2582,7 +2582,8 @@ native の artifact のファイル出力(`-o` と承認 record)は各ファイ�
 親ディレクトリには書き込み権限が必要で、書き込み可能な既存ファイルを置き換える場合も同じです。
 コマンドが読む入力(仕様、import されたファイル、`--evidence` や `--artifact` などのファイル指定)と
 同じファイルへの出力は、何も書く前に拒否します。同じかどうかはファイルそのもので判定するので、
-`./s.fsl`、symlink、`s.fsl` へのハードリンクも同じファイルです。これらの拒否は `io` エラー(exit 2)です。異常終了すると、所有者だけが読める `.fslc-output-*.tmp`
+`./s.fsl`、symlink、`s.fsl` へのハードリンクも同じファイルです。`implements ... from` が指す抽象仕様は、
+それを読まない `document generate` と `document claims` でも入力として扱います(#1753)。これらの拒否は `io` エラー(exit 2)です。異常終了すると、所有者だけが読める `.fslc-output-*.tmp`
 が出力先の隣に残ることがあります。完全な契約は
 `docs/design/DESIGN-atomic-artifact-output.md` にあります。
 `migrate --write` も、書き換える入力が読み取り専用なら同じ `io` エラー
