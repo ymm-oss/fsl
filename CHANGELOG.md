@@ -2536,6 +2536,26 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   propagations, stays exact, and the cross-runtime comparison is unchanged. No
   product behavior changes.
 - Fixed (#1712): tests that named temporary specs and directories from a label, the process id and the clock now also add a per-binary counter. Two tests with the same label, such as the bmc and induction tests of one #1481 cell, could build the same path when the clock read the same value, which happens on macOS, where the clock has microsecond resolution; one test's cleanup then deleted the other's file. No product behavior changes.
+- Fixed (#1730): the VS Code extension highlights FSL 5. Its TextMate grammar had not changed since #1377 and knew none of the FSL 5 requirements keywords. It now highlights the `fsl 4` / `fsl 5` header line, and after an `fsl 5` header every active keyword of `rust/fsl-syntax/src/keywords.rs` in English (a multi-word keyword such as `only when` or `belongs to` as one phrase) and in Japanese, the particles が・を・に・で・は, and the FSL 5 declaration heads with their names (`event`, `rule`, `decide`, `scenario`, `出来事`, `規則`, `決定表`, ...). A Japanese keyword or particle is highlighted only as a whole word, never inside a name such as `支払件数`. Headerless and `fsl 4` documents are tokenized exactly as before. A new test, `rust/fsl-syntax/tests/vscode_grammar_keywords.rs`, fails when the grammar misses an active keyword or particle of the table or keeps one the table no longer has.
+- Fixed (#1731): `install.sh` no longer keeps the copy of a skill it replaces
+  inside `~/.claude/skills/`. Claude Code loads every directory there as a
+  skill, so a backup named `<name>.pre-native-v3` was offered next to the live
+  skill as a second, stale copy. A replaced copy now goes to
+  `<data>/skill-backups/claude/<name>-<UTC time>` under the FSL data directory,
+  and the installer prints the path. On its next run with skills enabled, the
+  installer moves each `fsl*.pre-native-v3` that an earlier version left in
+  `~/.claude/skills/` into the same backup directory, unchanged and under the
+  same name, and prints each move. It removes nothing, and it stops before
+  linking anything when a backup path already exists. The README describes the
+  backup location. Its uninstall command now honours `FSL_DATA_DIR`,
+  `FSL_INSTALL_DIR`, `XDG_DATA_HOME` and `FSL_BIN_DIR`. It does nothing unless
+  the data directory holds a `current` link and a `releases` directory. It removes
+  a command or skill link only when the link points into that directory, then
+  removes `current` and `releases`, and keeps `skill-backups/`. It used to delete
+  a skill link another tool placed, and a real directory under a skill name, both
+  of which the installer itself leaves alone. The README's macOS
+  `xattr -d com.apple.quarantine` step no longer fails when the file has no such
+  attribute.
 - Replaced (#251): Inline branch maps in the public return example with explicit
   fair actions and local `implements` correspondences. The public refinement
   correspondences intentionally change from `submit.b1` / `submit.b2` to
@@ -2603,6 +2623,18 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   The FSL 4 to FSL 5 migration guide covers `fslc migrate --edition 5`, its findings including `derived_terminal_added`, and `migrate_manual_required`. It also states that `causal`, `agent` and other AI-dialect declarations, `refinement` and `compose` documents are not offered a header.
 
   New sections record the FSL 5 refusals of repeated step inputs (#1682), actors and requirement-ID owners (#1705), and `concept` (#1686). The `verify` blame note now states that `violating_bindings` names the outermost quantifier only. The FSL 4 reference is retained, and the README routes to the new sections. The site renderer keeps checked FSL examples in code blocks and the prose that follows outside them.
+- Documented (#1440): the "Upgrading fslc from 4.12 to 5.0" guide in
+  `docs/manual/LANGUAGE.md` and `LANGUAGE.ja.md` corrects its 4.12 column:
+  plain `fslc migrate` already targeted `next` in 4.12 but planned nothing for a
+  headerless document, and 4.12 already refused some foreign options, such as
+  `explain --engine`, while it ignored others, such as `version --depth`. The
+  guide now says that a 4.12 ledger, HTML or scenarios approval whose artifact
+  5.0 renders differently reports `drifted` with `rendering_changed` and needs
+  re-approval, with counts over the repository's `examples/` and `specs/`, and
+  that `renderer_changed` is not reported for a 4.x record. The FSL 4 to FSL 5
+  migration guidance says how to answer the `never_rule_without_forbidden`
+  warning a converted process form can add: add a `forbidden … then rejected`
+  trace for each guarded rule.
 - Documented (#1440): `docs/manual/LANGUAGE.md` and `LANGUAGE.ja.md` gain
   "Upgrading fslc from 4.12 to 5.0", for anyone moving the binary from 4.12
   whether or not they adopt FSL 5. It lists the forms 5.0.0 refuses that 4.12
