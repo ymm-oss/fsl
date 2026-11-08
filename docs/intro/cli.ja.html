@@ -87,6 +87,8 @@ and process substitution such as `/dev/fd/63`. The parent directory must be writ
 replace a writable existing file. These refusals are `io` errors (exit 2). Abrupt termination can
 leave an owner-only `.fslc-output-*.tmp` file beside the destination;
 `docs/design/DESIGN-atomic-artifact-output.md` records the complete contract.
+`migrate --write` refuses a read-only input that it would change with the same `io` error
+(`output target is read-only`, exit 2), before it writes any file of the set.
 
 Direct `ledger` and `html` return verification `result:&quot;error&quot;` as the original
 JSON error envelope and exit 2/3, before rendering or writing an artifact;

@@ -37,7 +37,14 @@ extension-agnostic behavior.
 plus a complete replacement edit for each changed file. `--write` is the only
 mutating mode. The command plans every input in memory, parses and checks the
 before/after sources, compares location-free Public Kernel JSON, prepares and
-syncs sibling temporary files, then replaces the validated set. An I/O failure
+syncs sibling temporary files, then replaces the validated set. Before it
+prepares any temporary file, every changed input must be a regular file (not a
+final symlink) that the process can write: a read-only input is refused with
+the `-o` publication helper's check and message (`output target is read-only`,
+`kind: "io"`, exit 2; `DESIGN-atomic-artifact-output.md`), since a rename needs
+only the parent directory's write access. A refusal or a temporary-file failure
+leaves every input unchanged and removes the temporary files already prepared.
+An I/O failure
 during commit restores already-replaced files from same-directory hard-link
 backups. A process or filesystem crash cannot be made transactionally atomic
 across unrelated files by a portable CLI; recoverable `.bak` files are retained

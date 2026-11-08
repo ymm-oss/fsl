@@ -726,6 +726,7 @@ call `fslc` for the values in the first column:
 | Approval records (#1421) | v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind | unsigned v5 or signed v6 with `path_base` | Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; `document generate --approval` needs Git. A 4.x record stays `approved` only while its digests match, including the artifact against a 5.0 rendering; a record whose artifact 5.0 renders differently needs re-approval (below); new records record a per-kind renderer version such as `fslc-ledger-renderer/1.0.0` in `generator_version` instead of the `fslc` version |
 | A relative AI `dataset.source` (#1421) | resolved from the caller | resolved from the declaring file's directory | Rewrite repository-prefixed paths, or pass `--records` |
 | `-o` to a symlink or a non-regular file such as `/dev/null`, `/dev/stdout` or `/dev/fd/63` (#1419) | written | refused, exit 2; a writable parent directory is required | Write to a regular file, or read stdout |
+| `migrate --write` on a read-only input it would change (the #1419 refusal) | rewritten, `"written": true`, exit 0; the mode stays read-only | refused, `kind: "io"`, exit 2; no file of the set is written | Make the file writable first |
 | `lint --edition next` (or `5`) on a headerless document with no other finding (#1434) | exit 0 | `missing_edition_header`, exit 1 | Omit `--edition`, or add the header |
 | Plain `fslc migrate` on a headerless document (#1434) | targets `next` too, but plans nothing: `"edition":"next","changed":0` | plans `fsl 5` and the process-form conversion; `migrate_manual_required` exits 1 | Pass `--edition current` |
 | An invalid `--edition` value (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | Update a message match |
@@ -2795,6 +2796,8 @@ and process substitution such as `/dev/fd/63`. The parent directory must be writ
 replace a writable existing file. These refusals are `io` errors (exit 2). Abrupt termination can
 leave an owner-only `.fslc-output-*.tmp` file beside the destination;
 `docs/design/DESIGN-atomic-artifact-output.md` records the complete contract.
+`migrate --write` refuses a read-only input that it would change with the same `io` error
+(`output target is read-only`, exit 2), before it writes any file of the set.
 
 Direct `ledger` and `html` return verification `result:"error"` as the original
 JSON error envelope and exit 2/3, before rendering or writing an artifact;

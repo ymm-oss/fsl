@@ -119,6 +119,7 @@ fslc lint <path>... [--edition current|next|4|5] [--project fsl-project.toml] # 
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)
 fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
                                                  # exit 0 migrated, 1 migrate_manual_required (no inputs written), 2 refused/I/O/check failure (same check-failure contract as lint)
+                                                 # --write refuses a read-only, symlinked or non-regular changed input before writing any input (kind io, exit 2)
 fslc fmt <f|-> [--edition current|next|4|5]     # canonical source on stdout; input is never mutated
 fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)

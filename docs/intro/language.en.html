@@ -857,6 +857,12 @@ call <code>fslc</code> for the values in the first column:</p>
 <td>Write to a regular file, or read stdout</td>
 </tr>
 <tr>
+<td><code>migrate --write</code> on a read-only input it would change (the #1419 refusal)</td>
+<td>rewritten, <code>"written": true</code>, exit 0; the mode stays read-only</td>
+<td>refused, <code>kind: "io"</code>, exit 2; no file of the set is written</td>
+<td>Make the file writable first</td>
+</tr>
+<tr>
 <td><code>lint --edition next</code> (or <code>5</code>) on a headerless document with no other finding (#1434)</td>
 <td>exit 0</td>
 <td><code>missing_edition_header</code>, exit 1</td>
@@ -3034,7 +3040,9 @@ symlink, and every non-regular destination is refused, including <code>-o /dev/n
 and process substitution such as <code>/dev/fd/63</code>. The parent directory must be writable, even to
 replace a writable existing file. These refusals are <code>io</code> errors (exit 2). Abrupt termination can
 leave an owner-only <code>.fslc-output-*.tmp</code> file beside the destination;
-<code>docs/design/DESIGN-atomic-artifact-output.md</code> records the complete contract.</p>
+<code>docs/design/DESIGN-atomic-artifact-output.md</code> records the complete contract.
+<code>migrate --write</code> refuses a read-only input that it would change with the same <code>io</code> error
+(<code>output target is read-only</code>, exit 2), before it writes any file of the set.</p>
 <p>Direct <code>ledger</code> and <code>html</code> return verification <code>result:"error"</code> as the original
 JSON error envelope and exit 2/3, before rendering or writing an artifact;
 direct <code>ledger</code> stops before ancillary replay, evidence loading, and witness preparation

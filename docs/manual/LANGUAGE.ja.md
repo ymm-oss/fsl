@@ -691,6 +691,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 | 承認レコード (#1421) | v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4 | 署名なしの v5、署名つきの v6(`path_base` つき) | 新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。`document generate --approval` には Git が必要です。4.x のレコードは、5.0 で描画した成果物との照合も含めてダイジェストが一致する間だけ `approved` のままです。5.0 で成果物の描画が変わるレコードは承認し直しが必要です(表の下を参照)。新しいレコードの `generator_version` には、`fslc` のバージョンではなく `fslc-ledger-renderer/1.0.0` のような種類ごとのレンダラのバージョンを記録します |
 | 相対パスの AI の `dataset.source` (#1421) | 呼び出し側から解決 | 宣言したファイルのディレクトリから解決 | リポジトリを前置したパスを書き直すか、`--records` を渡します |
 | シンボリックリンクや、`/dev/null`、`/dev/stdout`、`/dev/fd/63` のような通常ファイルでないものへの `-o` (#1419) | 書き込む | 拒否、終了コード 2。書き込める親ディレクトリが必要 | 通常ファイルに書くか、標準出力を読みます |
+| 書き換え対象の読み取り専用の入力への `migrate --write`(#1419 と同じ拒否) | 書き換える。`"written": true`、終了コード 0。モードは読み取り専用のまま | 拒否、`kind: "io"`、終了コード 2。集合のどのファイルも書き込まない | 先にファイルを書き込み可能にします |
 | ほかに finding のないヘッダーのない文書への `lint --edition next`(または `5`) (#1434) | 終了コード 0 | `missing_edition_header`、終了コード 1 | `--edition` を付けないか、ヘッダーを書きます |
 | ヘッダーのない文書への引数なしの `fslc migrate` (#1434) | 対象は同じく `next` だが、何も計画しない(`"edition":"next","changed":0`) | `fsl 5` と process 形式の変換を計画。`migrate_manual_required` は終了コード 1 | `--edition current` を渡します |
 | 不正な `--edition` の値 (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | メッセージの照合を直します |
@@ -2581,6 +2582,8 @@ native の artifact のファイル出力(`-o` と承認 record)は各ファイ�
 これらの拒否は `io` エラー(exit 2)です。異常終了すると、所有者だけが読める `.fslc-output-*.tmp`
 が出力先の隣に残ることがあります。完全な契約は
 `docs/design/DESIGN-atomic-artifact-output.md` にあります。
+`migrate --write` も、書き換える入力が読み取り専用なら同じ `io` エラー
+(`output target is read-only`、exit 2)で拒否し、その集合のどのファイルも書き込みません。
 
 直接の `ledger` と `html` は、検証の `result:"error"` には元の JSON エラー封筒と exit 2/3 を
 返し、描画も artifact の書き込みもしません。直接の `ledger` は付随の replay、evidence の読み込み、
