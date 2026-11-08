@@ -71,7 +71,9 @@ fn with_header(source: &str, header: &str) -> String {
 }
 
 /// Copy `specs/` and `examples/` under a scratch directory, adding `header`
-/// to every `.fsl` file (imports included) when given.
+/// to every `.fsl` file (imports included) when given. A file that already
+/// declares its edition (`examples/fsl5/`) is copied unchanged: a second
+/// header line is a parse error, not the edition under test.
 fn mirror(label: &str, header: Option<&str>) -> PathBuf {
     let target = scratch(label);
     let root = root();
@@ -92,7 +94,16 @@ fn copy_tree(from: &Path, to: &Path, header: Option<&str>) {
             header.filter(|_| path.extension().is_some_and(|extension| extension == "fsl"))
         {
             let source = std::fs::read_to_string(&path).expect("read corpus file");
-            std::fs::write(&destination, with_header(&source, header)).expect("write copy");
+            let declared = matches!(
+                fsl_syntax::edition_header(&source, &fsl_syntax::ParseOptions::stable()),
+                Ok(Some(_))
+            );
+            let copy = if declared {
+                source
+            } else {
+                with_header(&source, header)
+            };
+            std::fs::write(&destination, copy).expect("write copy");
         } else {
             std::fs::copy(&path, &destination).expect("copy corpus file");
         }
@@ -278,11 +289,17 @@ fn an_fsl_5_header_checks_the_corpus_as_edition_next_does() {
         .map(|(_, header)| header.split('\t').next().expect("row path"))
         .collect::<std::collections::BTreeSet<_>>();
     let root = root();
+    // A document with its own header keeps it in the mirror, so it is not
+    // read under an added `fsl 5`; an `fsl 5` document's surface already
+    // carries the process its entities and events lower to.
     let process_requirements = paths
         .iter()
         .filter(|path| {
             let source = std::fs::read_to_string(root.join(path)).expect("read corpus file");
             matches!(
+                fsl_syntax::edition_header(&source, &fsl_syntax::ParseOptions::stable()),
+                Ok(None)
+            ) && matches!(
                 fsl_syntax::parse_surface_document(&source),
                 Ok(fsl_syntax::SurfaceDocument::Requirements(requirements))
                     if requirements

@@ -304,6 +304,37 @@ fn assert_checked_round_trip(path: &Path, dialect: &str, source: &str, formatted
     true
 }
 
+/// The edition policies `fslc fmt` accepts for `source`: `current` follows
+/// its edition header (`fsl 4` without one), and `next` is `None` when an
+/// `fsl 4` header refuses it as `edition_conflict`. A headed document
+/// (`examples/fsl5/`) is never formatted under a policy that contradicts its
+/// header.
+fn accepted_policies(
+    path: &Path,
+    source: &str,
+) -> (fsl_syntax::Edition, Option<fsl_syntax::Edition>) {
+    let options = fsl_syntax::ParseOptions::stable();
+    let current = fsl_syntax::document_edition(source, None, fsl_syntax::Edition::Fsl4, &options)
+        .unwrap_or_else(|error| panic!("{} edition: {error}", path.display()));
+    match fsl_syntax::document_edition(
+        source,
+        Some(fsl_syntax::Edition::Fsl5),
+        fsl_syntax::Edition::Fsl4,
+        &options,
+    ) {
+        Ok(next) => (current, Some(next)),
+        Err(error) => {
+            assert_eq!(
+                current,
+                fsl_syntax::Edition::Fsl4,
+                "{}: only an `fsl 4` header refuses the next policy ({error})",
+                path.display()
+            );
+            (current, None)
+        }
+    }
+}
+
 #[test]
 fn registered_corpus_is_idempotent_comment_lossless_and_semantically_stable() {
     let root = root();
@@ -322,7 +353,8 @@ fn registered_corpus_is_idempotent_comment_lossless_and_semantically_stable() {
             continue;
         };
         *dialects.entry(dialect).or_default() += 1;
-        let formatted = match fsl_syntax::format_source(&source, fsl_syntax::Edition::Fsl4) {
+        let (current, next_policy) = accepted_policies(&path, &source);
+        let formatted = match fsl_syntax::format_source(&source, current) {
             Ok(formatted) => formatted,
             Err(fsl_syntax::FormatError::Unsafe { .. }) if dialect == "agent" => continue,
             Err(fsl_syntax::FormatError::Unsafe { message, .. })
@@ -343,14 +375,16 @@ fn registered_corpus_is_idempotent_comment_lossless_and_semantically_stable() {
             Err(fsl_syntax::FormatError::Lex(_)) if fsl_syntax::lex(&source).is_err() => continue,
             Err(error) => panic!("{}: {error}", path.display()),
         };
-        let next = fsl_syntax::format_source(&source, fsl_syntax::Edition::Fsl5)
-            .unwrap_or_else(|error| panic!("{} next: {error}", path.display()));
-        assert_eq!(
-            formatted,
-            next,
-            "{} edition policies diverged",
-            path.display()
-        );
+        if let Some(next_policy) = next_policy {
+            let next = fsl_syntax::format_source(&source, next_policy)
+                .unwrap_or_else(|error| panic!("{} next: {error}", path.display()));
+            assert_eq!(
+                formatted,
+                next,
+                "{} edition policies diverged",
+                path.display()
+            );
+        }
         assert_eq!(
             comments(&source),
             comments(&formatted),
@@ -358,8 +392,7 @@ fn registered_corpus_is_idempotent_comment_lossless_and_semantically_stable() {
             path.display()
         );
         assert_eq!(
-            fsl_syntax::format_source(&formatted, fsl_syntax::Edition::Fsl4)
-                .expect("second format"),
+            fsl_syntax::format_source(&formatted, current).expect("second format"),
             formatted,
             "{}",
             path.display()

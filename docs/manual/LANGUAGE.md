@@ -4376,6 +4376,9 @@ events for what an actor does, and a rule or decision table for the condition
 stated by a requirement. IDs and quoted source text keep that requirement
 traceable. The following is one complete specification; the later syntax fences
 are fragments to read in the context of their declarations.
+A longer worked example, one leave-request model written once with the English
+spellings and once with the Japanese spellings, is in
+[`examples/fsl5/`](https://github.com/ymm-oss/fsl/tree/main/examples/fsl5).
 
 ```fsl check
 fsl 5

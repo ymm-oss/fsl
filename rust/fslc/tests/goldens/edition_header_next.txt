@@ -57,6 +57,8 @@ examples/e2e/1_business.fsl	exit=0 result="ok" kind=null code=null edition="next
 examples/e2e/2_requirements.fsl	exit=0 result="ok" kind=null code=null edition="next" findings=[] warnings=[]
 examples/e2e/3_design.fsl	exit=2 result="error" kind="unsupported_in_edition" code=null edition="next" findings=[legacy_string_metadata:error,legacy_string_metadata:error,legacy_string_metadata:error,legacy_string_metadata:error,legacy_string_metadata:error,legacy_string_metadata:error,legacy_string_metadata:error,legacy_string_metadata:error,legacy_string_metadata:error,legacy_string_metadata:error] warnings=[]
 examples/e2e/3_refines_2.fsl	exit=2 result="error" kind="semantics" code=null edition="next" findings=[] warnings=[]
+examples/fsl5/leave_request.en.fsl	exit=0 result="ok" kind=null code=null edition="next" findings=[] warnings=[implied_by_lifecycle:info,implied_by_lifecycle:info]
+examples/fsl5/leave_request.ja.fsl	exit=0 result="ok" kind=null code=null edition="next" findings=[] warnings=[implied_by_lifecycle:info,implied_by_lifecycle:info]
 examples/gallery/adversarial/business_precedence_bypass.fsl	exit=0 result="ok" kind=null code=null edition="next" findings=[] warnings=[]
 examples/gallery/adversarial/clever_double_assignment_placement.fsl	exit=2 result="error" kind="semantics" code=null edition="next" findings=[] warnings=[]
 examples/gallery/adversarial/deep_nested_if_invariant.fsl	exit=0 result="ok" kind=null code=null edition="next" findings=[] warnings=[]
