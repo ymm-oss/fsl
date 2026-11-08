@@ -132,6 +132,15 @@ verify/prove/scenarios/Monitor behave exactly as for the hand-expanded
 expression. Put the human-facing requirement tag on the surrounding invariant
 or action; no compiler-generated predicate name appears in diagnostics.
 
+Breaking removal (#1335): compose-level defs are validated like a direct spec's
+even when unused. `fslc` 4.12 accepted (exit 0) an unused compose def with a
+repeated definition or parameter name, direct or mutual recursion, or a call in
+its body to an undefined predicate or with the wrong arity; `fslc` 5.0 rejects
+each with exit 2 and the direct-spec error (`kind: "name"`: `duplicate def`,
+`duplicate parameter in def`, `undefined predicate`; `kind: "semantics"`:
+`recursive predicate definition is not allowed`, `expects <n> argument(s), got <m>`).
+Remove or rename the repeat, break the recursion, or correct the call.
+
 Breaking removal (#1450): caller action parameters, lets, expression
 quantifier/aggregate binders and statement `forall` may not capture a free name
 in the expanded def body (excluding the def's parameters). These calls now fail
@@ -1047,6 +1056,9 @@ compose <Name> {
 Sync additional statements may assign only composition-side state: component
 targets are rejected with a located error, including physical `alias__x` names
 that previously passed `check` (breaking removal, #1334).
+
+Compose-level `def`s expand before alias resolution and sync argument
+substitution and are validated even when unused (breaking removal, #1335; see `def` above).
 
 Reference arguments may read only header parameters, consts, and state, not additional-item `let` bindings (breaking removal, #1442).
 

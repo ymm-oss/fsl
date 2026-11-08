@@ -691,6 +691,7 @@ unsound or ambiguous, and the section linked from each row shows the rewrite.
 | An init read before its root is fully assigned (#1451); a read, in an init `forall`, of a root the same `forall` writes (#1518) | `init references state variable '<name>' before it is assigned` | Read after the root is fully assigned, or initialize the whole root first; §4 |
 | Relation endpoint types (#1458), operand kinds and method signatures (#1459), relations with different endpoint bounds (#1522), container carriers that differ (#1472, #1627, #1679, #1683) | located assignability error | Give both sides the same endpoint and element types and bounds; equal-bound numeric aliases stay compatible; §3 |
 | A `def` call or a `leadsTo` binder that captures a free name of the definition (#1450, #1528) | `would capture variable` | Rename the binder at the call site; §3 |
+| An unused compose-level `def` that a direct spec refuses: a repeated definition or parameter, direct or mutual recursion, or a call in its body to an undefined predicate or with the wrong arity (#1335) | the direct-spec error, such as `duplicate def '<name>'` or `recursive predicate definition is not allowed` | Remove or rename the repeat, break the recursion, or correct the call; §3 |
 | A local binding named like a `const` (#1515) | `local binding '<name>' shadows a constant of the same name` | Rename the local and its uses; §3 |
 | A pattern variable used outside its continuation (#1547) or reused after a match (#1573) | located error at the use | Use a fresh name; §3 |
 | A repeated formal or input (#1680), struct-literal field (#1685, `duplicate_struct_field`), struct field (#1692), `instances`, `values` or `kpi` declaration (#1686), second `implements` (#1694) or `domain` repeat that loses a copy (#1700) | located at the second copy | Remove or rename the repeat; §2, §3, §11, §13 |
@@ -892,6 +893,18 @@ recursive. They are expanded before semantic checking; the verifier and
 runtime see the same kernel expression as hand expansion. Expansion rejects
 variable capture instead of inventing internal binder names. See
 [`DESIGN-def.md`](../design/DESIGN-def.md).
+
+**Breaking removal (#1335):** a compose-level `def` is checked like a direct
+spec's, even when nothing calls it. `fslc` 4.12 accepted, with exit 0, an unused
+compose `def` that repeats a definition or parameter name, is directly or
+mutually recursive, or calls an undefined predicate or calls one with the wrong
+number of arguments. `fslc` 5.0 rejects each with exit 2 and the direct-spec
+error: `kind: "name"` for `duplicate def`, `duplicate parameter in def` and
+`undefined predicate`, and `kind: "semantics"` for
+`recursive predicate definition is not allowed` and
+`expects <n> argument(s), got <m>`. Remove or rename the repeat, break the
+recursion, or correct the call, then rerun `check`. There is no compatibility
+bypass.
 
 **Breaking removal (#1450):** a call is rejected when an action parameter,
 `let`, expression quantifier/aggregate binder, or statement `forall` at the call
@@ -3672,6 +3685,10 @@ compose OrderSystem {
   Breaking removal (#1334): additional statements assigning component state via physical names such as `alias__x`, which previously passed `check`, now produce a located error too.
   Reference arguments may read only header parameters, consts, and state, not additional-item `let` bindings (breaking removal, #1442).
   Component free value reads and update roots resolve against the component's original declarations before merging, so composition cannot rescue an otherwise undeclared reference (breaking removal, #1442); public names remain legal, and an enum read that needs its owner protected still displays the source member spelling.
+- **Compose `def` (breaking removal, #1335).** A compose-level `def` expands before alias
+  resolution and synchronized argument substitution, as in a direct spec, and is validated
+  even when nothing calls it. An unused repeated, recursive or badly calling `def` that 4.12
+  accepted now fails `check` with exit 2; §3 lists the forms and errors.
 - **Root-authored synchronized arguments (breaking removal, #1517).** `check` types every
   synchronized argument against its formal parameter before substitution, including an
   argument whose formal the component action never reads. An argument can read root header

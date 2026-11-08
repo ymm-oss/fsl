@@ -421,6 +421,50 @@ fn recursion_matches_direct_spec_even_when_unused() {
     );
 }
 
+// Breaking removal (#1335): fslc 4.12.0 `check` accepted each of these unused
+// compose definitions with exit 0; they now reject as in a direct spec.
+#[test]
+fn unused_invalid_definitions_match_direct_spec() {
+    // Mutual recursion: which definition the reported cycle starts at (and so
+    // the message and its position) varies between runs, in direct specs too,
+    // so only the exit, result, kind and message prefix are compared.
+    let body = "  def p() = q()\n  def q() = p()";
+    let source = format!(
+        "compose C {{\n  state {{ support: Bool }} init {{ support = false }}\n{body}\n}}\n"
+    );
+    let direct = source.replacen("compose C", "spec C", 1);
+    let dir = scratch(
+        "issue-1335-mutual",
+        &[("c.fsl", &source), ("direct.fsl", &direct)],
+    );
+    for file in ["direct.fsl", "c.fsl"] {
+        let (result, status) = check(&dir, file);
+        assert_eq!(status, 2, "{file}: {result}");
+        assert_eq!(result["result"], "error", "{file}: {result}");
+        assert_eq!(result["kind"], "semantics", "{file}: {result}");
+        assert!(
+            result["message"]
+                .as_str()
+                .expect("message")
+                .starts_with("recursive predicate definition is not allowed: "),
+            "{file}: {result}"
+        );
+    }
+    for (body, message) in [
+        (
+            "  def p(x: Bool, x: Bool) = x",
+            "duplicate parameter in def 'p'",
+        ),
+        ("  def p() = missing()", "undefined predicate 'missing'"),
+        (
+            "  def p(x: Bool) = x\n  def q() = p()",
+            "expects 1 argument(s), got 0",
+        ),
+    ] {
+        diagnostic_contract(body, message);
+    }
+}
+
 #[test]
 fn capture_rejection_matches_direct_spec() {
     diagnostic_contract(

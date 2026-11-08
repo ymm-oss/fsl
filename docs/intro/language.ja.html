@@ -689,6 +689,11 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <td>呼び出し側のバインダーを改名します。§3</td>
 </tr>
 <tr>
+<td>通常の spec なら拒否される、使われていない compose の <code>def</code>: 定義名や引数名の重複、直接・相互の再帰、本体での未定義の述語の呼び出しやアリティの合わない呼び出し (#1335)</td>
+<td>通常の spec と同じエラー。例えば <code>duplicate def '&lt;name&gt;'</code> や <code>recursive predicate definition is not allowed</code></td>
+<td>重複を削除または改名するか、再帰をなくすか、呼び出しを直します。§3</td>
+</tr>
+<tr>
 <td><code>const</code> と同名のローカル束縛 (#1515)</td>
 <td><code>local binding '&lt;name&gt;' shadows a constant of the same name</code></td>
 <td>ローカル束縛とその使用を改名します。§3</td>
@@ -1062,6 +1067,16 @@ invariant OnlyEligible { forall c: Claim { approved[c] =&gt; eligible(c) } }
 検査の前に展開され、検証器とランタイムは手で展開したのと同じカーネル式を見ます。
 展開は、内部のバインダー名を発明する代わりに変数捕獲を拒否します。
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-def.md"><code>DESIGN-def.md</code></a> を参照。</p>
+<p><strong>破壊的な受理の削除 (#1335):</strong> compose 直下の <code>def</code> も、呼び出されていなくても
+通常の spec の <code>def</code> と同じように検査します。<code>fslc</code> 4.12 は、定義名や引数名が重複する、
+直接・相互に再帰する、未定義の述語を呼ぶ、または引数の数が合わない呼び出しをする、
+使われていない compose の <code>def</code> を exit 0 で受理していました。<code>fslc</code> 5.0 はどれも、
+通常の spec と同じエラー (exit 2) で拒否します。<code>duplicate def</code>、
+<code>duplicate parameter in def</code>、<code>undefined predicate</code> は <code>kind: "name"</code>、
+<code>recursive predicate definition is not allowed</code> と
+<code>expects &lt;n&gt; argument(s), got &lt;m&gt;</code> は <code>kind: "semantics"</code> です。重複を削除または
+改名するか、再帰をなくすか、呼び出しを直してから、<code>check</code> をやり直してください。
+互換の迂回路はありません。</p>
 <p><strong>破壊的な受理の削除 (#1450):</strong> 呼び出し側の action 引数、<code>let</code>、式内の量化子・
 集約のバインダー、statement <code>forall</code> が、展開した def 本体の自由な名前を捕まえる
 呼び出しを拒否します。def 自身の引数は自由な名前から除きます。例えば状態変数
@@ -3637,6 +3652,7 @@ CLI field の mask はありません。scope・移行・反復の証拠は
   破壊的な削除 (#1334): 以前は <code>check</code> を通った <code>alias__x</code> のような物理名による部品の状態への追加文の代入も、位置付きエラーで拒否します。
   同期参照の引数が読めるのはヘッダのパラメータ・const・状態だけで、追加項目の <code>let</code> 束縛は読めません (破壊的な削除、#1442)。
   部品の自由な値の読みと更新先の根はマージ前の部品自身の宣言に対して解決するため、未宣言の参照を合成によって有効にはできません (破壊的な削除、#1442)；公開名は引き続き使用でき、所有する enum の保護が必要な読みも表示には元の member 名を使います。</li>
+<li><strong>compose の <code>def</code> (破壊的な削除、#1335):</strong> compose 直下の <code>def</code> は、通常の spec と同じように、alias の解決と同期実引数の置換より前に展開し、呼び出されていなくても検査します。4.12 が受理していた、使われていない重複・再帰・誤った呼び出しを含む <code>def</code> は、<code>check</code> で exit 2 になります。形とエラーは §3 にあります。</li>
 <li><strong>ルートの同期実引数の検査 (破壊的な削除、#1517):</strong> <code>check</code> は、部品の action が読まない仮引数への実引数も含め、すべての同期実引数を置換前に仮引数の型で検査します。
   実引数が読めるのはルートのヘッダ引数・状態・定数・enum だけで、追加項目の <code>let</code> や <code>requires</code> の束縛は読めません。
   数値 carrier は型名にかかわらず互換のままで、数値範囲の不一致は静的エラーにしません。component の action がその引数を読むときだけ検証で報告され、読まれない引数には結果が出ません。
