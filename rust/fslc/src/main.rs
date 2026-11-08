@@ -413,16 +413,19 @@ fn parse_migration_options(
     let mut args = CommandArgs::new(args);
     let mut paths = Vec::new();
     let mut edition = None;
+    let mut current = false;
     let mut write = false;
     let mut project = None;
     let mut strict_names = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--strict-names" if !migrate => strict_names = true,
-            // `migrate` defaults to the next edition, so an explicit
-            // `current` is kept rather than read as an omitted flag.
+            // `current` follows each document's header, as in `check`; it
+            // only replaces `migrate`'s next-edition default for a headerless
+            // document, so it is not an explicit edition that can conflict.
             "--edition" => {
-                edition = Some(parse_edition(&mut args)?.unwrap_or(fsl_syntax::Edition::Fsl4));
+                edition = parse_edition(&mut args)?;
+                current = edition.is_none();
             }
             "--write" if migrate => write = true,
             "--project" if !migrate => {
@@ -458,7 +461,7 @@ fn parse_migration_options(
     Ok(MigrationOptions {
         paths,
         edition,
-        default_edition: if migrate {
+        default_edition: if migrate && !current {
             fsl_syntax::Edition::Fsl5
         } else {
             fsl_syntax::Edition::Fsl4

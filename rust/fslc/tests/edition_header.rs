@@ -412,6 +412,119 @@ fn header_conflicts_and_unknown_editions_exit_2() {
     let _ = std::fs::remove_dir_all(&directory);
 }
 
+/// #1440: `--edition current` follows the document's header in every command
+/// that takes `--edition` (`docs/manual/LANGUAGE.md`, "`--edition current`
+/// follows the document"). Only an explicit edition naming another edition
+/// than the header is `edition_conflict`: `4` on `fsl 5`, and `5` or `next`
+/// on `fsl 4`. `lint` and `migrate` once read `current` as an explicit `4`,
+/// so an `fsl 5` document was refused with "--edition 4 was requested".
+#[test]
+fn edition_current_follows_the_header_in_every_command() {
+    const DOMAIN: &str = "domain D { enum Status { Open, Closed } aggregate Doc { state { status: Status = Open } command Close {} event ClosedDoc {} decide Close { requires status == Open emits ClosedDoc } evolve ClosedDoc { status = Closed } } }\n";
+    let directory = scratch("current-follows");
+    let commands: [(&[&str], &str, &[&str]); 6] = [
+        (&["check"], LEGACY, &[]),
+        (&["verify"], LEGACY, &["--depth", "2", "--no-cache"]),
+        (&["domain", "check"], DOMAIN, &["--depth", "2"]),
+        (&["fmt"], LEGACY, &[]),
+        (&["lint"], LEGACY, &[]),
+        (&["migrate"], LEGACY, &[]),
+    ];
+    for (command, body, extra) in commands {
+        for (header, declared) in [
+            (None, None),
+            (Some("fsl 4"), Some(4)),
+            (Some("fsl 5"), Some(5)),
+        ] {
+            let file = write(
+                &directory,
+                "doc.fsl",
+                &header.map_or_else(|| body.to_owned(), |header| with_header(body, header)),
+            );
+            let run = |option: Option<&str>| {
+                let mut arguments = command.to_vec();
+                arguments.push(&file);
+                arguments.extend_from_slice(extra);
+                if let Some(option) = option {
+                    arguments.extend(["--edition", option]);
+                }
+                fslc(&directory, &arguments)
+            };
+            let cell =
+                |option: Option<&str>| format!("{command:?} {header:?} --edition {option:?}");
+            let mut outputs = std::collections::BTreeMap::new();
+            for option in [None, Some("current"), Some("next"), Some("4"), Some("5")] {
+                let (stdout, exit) = run(option);
+                let conflict = match (declared, option) {
+                    (Some(5), Some("4")) => Some("4"),
+                    (Some(4), Some("next" | "5")) => Some("5"),
+                    _ => None,
+                };
+                if let Some(requested) = conflict {
+                    let output = json(&stdout);
+                    assert_eq!(exit, 2, "{}: {stdout}", cell(option));
+                    assert_eq!(output["kind"], "parse", "{}: {stdout}", cell(option));
+                    assert_eq!(
+                        output["diagnostic_code"],
+                        fsl_syntax::EDITION_CONFLICT,
+                        "{}: {stdout}",
+                        cell(option)
+                    );
+                    assert_eq!(
+                        output["message"],
+                        format!(
+                            "the document declares 'fsl {}' but --edition {requested} was requested at 1:1",
+                            declared.unwrap()
+                        ),
+                        "{}",
+                        cell(option)
+                    );
+                } else {
+                    assert!(
+                        !stdout.contains(fsl_syntax::EDITION_CONFLICT),
+                        "{}: {stdout}",
+                        cell(option)
+                    );
+                    assert!(exit < 2, "{}: exit {exit}: {stdout}", cell(option));
+                }
+                let mut value =
+                    serde_json::from_str(&stdout).unwrap_or_else(|_| Value::String(stdout.clone()));
+                // `verify` reports elapsed times under `cost`, which differ
+                // between two runs of one command; every other field is
+                // compared, and the exclusion must find the field.
+                if command == ["verify"] && conflict.is_none() {
+                    let removed = value
+                        .as_object_mut()
+                        .and_then(|fields| fields.remove("cost"));
+                    assert!(removed.is_some(), "{}: {stdout}", cell(option));
+                }
+                outputs.insert(option, (value, exit));
+            }
+            // `current` is the omitted option, except that `migrate` defaults
+            // to the next edition: there `current` reads a headerless
+            // document as `4` does, and only the published spelling differs.
+            let current = &outputs[&Some("current")];
+            if command == ["migrate"] {
+                let mut current_output = current.0.clone();
+                assert_eq!(current_output["edition"], "current", "{current:?}");
+                let baseline = if header.is_none() { Some("4") } else { None };
+                let mut expected = outputs[&baseline].0.clone();
+                current_output["edition"] = Value::Null;
+                expected["edition"] = Value::Null;
+                assert_eq!(
+                    (current_output, current.1),
+                    (expected, outputs[&baseline].1),
+                    "{}",
+                    cell(Some("current"))
+                );
+            } else {
+                assert_eq!(current, &outputs[&None], "{}", cell(Some("current")));
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&directory);
+}
+
 #[test]
 fn fsl_stays_an_identifier_outside_the_header_line() {
     let directory = scratch("identifier");
