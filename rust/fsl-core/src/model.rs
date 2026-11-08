@@ -428,12 +428,9 @@ impl KernelModel {
         bindings: &[(String, TypeRef)],
         expected: Option<&TypeRef>,
     ) -> Result<Option<TypeRef>, ModelError> {
-        match crate::typecheck::infer_type(
-            expr,
-            &crate::typecheck::expression_env(self, bindings),
-            self,
-            expected,
-        ) {
+        match crate::typecheck::with_expression_env(self, bindings, |env| {
+            crate::typecheck::infer_type(expr, env, self, expected)
+        }) {
             Ok(ty) => Ok(Some(ty)),
             Err(error) if error.needs_context => Ok(None),
             Err(error) => Err(model_error(error.message)),
@@ -450,13 +447,9 @@ impl KernelModel {
         right: &Expr,
         bindings: &[(String, TypeRef)],
     ) -> Result<TypeRef, ModelError> {
-        crate::typecheck::binary_operand_types(
-            "==",
-            left,
-            right,
-            &crate::typecheck::expression_env(self, bindings),
-            self,
-        )
+        crate::typecheck::with_expression_env(self, bindings, |env| {
+            crate::typecheck::binary_operand_types("==", left, right, env, self)
+        })
         .map(|(ty, _)| ty)
         .map_err(|error| model_error(error.message))
     }

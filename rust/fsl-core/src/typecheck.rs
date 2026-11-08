@@ -245,6 +245,63 @@ pub(crate) fn expression_env(model: &KernelModel, bindings: &[(String, TypeRef)]
     env
 }
 
+/// `base_env` of the last model typed on this thread, with the exact inputs it read.
+type CachedBaseEnv = (
+    Vec<(String, TypeRef)>,
+    BTreeMap<String, crate::FslValue>,
+    BTreeMap<String, TypeDef>,
+    TypeEnv,
+);
+
+thread_local! {
+    static BASE_ENV: std::cell::RefCell<Option<CachedBaseEnv>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` on an environment equal to `expression_env(model, bindings)`. The
+/// symbolic engines type expressions per evaluation, and rebuilding `base_env`
+/// each time made `refine`'s progress check about 1.4x slower; it is reused
+/// while state, consts and types compare equal, and the bindings are undone
+/// afterwards.
+pub(crate) fn with_expression_env<R>(
+    model: &KernelModel,
+    bindings: &[(String, TypeRef)],
+    f: impl FnOnce(&TypeEnv) -> R,
+) -> R {
+    let cached = BASE_ENV.with(|cell| cell.borrow_mut().take());
+    let (state, consts, types, mut env) = cached
+        .filter(|(state, consts, types, _)| {
+            *state == model.state && *consts == model.consts && *types == model.types
+        })
+        .unwrap_or_else(|| {
+            let (state, consts) = (model.state.clone(), model.consts.clone());
+            (state, consts, model.types.clone(), base_env(model))
+        });
+    let saved = bindings
+        .iter()
+        .map(|(name, _)| {
+            (
+                name,
+                env.types.get(name).cloned(),
+                env.lexical.contains(name),
+            )
+        })
+        .collect::<Vec<_>>();
+    env.extend_lexical(bindings);
+    let result = f(&env);
+    for (name, ty, lexical) in saved.into_iter().rev() {
+        match ty {
+            Some(ty) => env.types.insert(name.clone(), ty),
+            None => env.types.remove(name),
+        };
+        if !lexical {
+            env.lexical.remove(name);
+        }
+    }
+    BASE_ENV.with(|cell| *cell.borrow_mut() = Some((state, consts, types, env)));
+    result
+}
+
 fn enum_member_owners(model: &KernelModel, member: &str) -> Vec<String> {
     model
         .types
