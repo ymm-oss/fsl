@@ -58,10 +58,15 @@ another spelling of `next`. The commands that take the option are `check`,
 `verify`, `domain check`, `fmt`, `lint` and `migrate`; each one's help text shows
 `--edition {current,next,4,5}` and `cli-contract.json` lists the same four
 choices. Any other value is a usage error (`"kind": "usage"`, exit 2) with the
-message `--edition must be current, next, 4, or 5`. JSON output never spells a
-number for the option: a result read under the next
+message `--edition must be current, next, 4, or 5`. JSON output reports the
+edition a document was *read* in, never the option's spelling: a result read under the next
 edition carries `"edition": "next"` (absent under the current edition), and a
-document that has a header also carries `"fsl_edition": 4` or `5`.
+document that has a header also carries `"fsl_edition": 4` or `5`. The
+`lint`, `migrate` and `fmt --check` reports always carry `edition`, `"current"`
+or `"next"`, as 4.12 did; over several documents it is `"next"` only when every
+one was read in the next edition, and `fsl_edition` appears only when every one
+declares the same header. An `edition_conflict` message quotes the option as
+typed: `the document declares 'fsl 4' but --edition next was requested`.
 
 On a **headerless** document, `--edition 5` (or `next`) does not make it an
 FSL 5 document. It is still parsed as FSL 4, so the FSL 5 requirements forms of
@@ -731,6 +736,7 @@ call `fslc` for the values in the first column:
 | `lint --edition next` (or `5`) on a headerless document with no other finding (#1434) | exit 0 | `missing_edition_header`, exit 1 | Omit `--edition`, or add the header |
 | Plain `fslc migrate` on a headerless document (#1434) | targets `next` too, but plans nothing: `"edition":"next","changed":0` | plans `fsl 5` and the process-form conversion; `migrate_manual_required` exits 1 | Pass `--edition current` |
 | An invalid `--edition` value (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | Update a message match |
+| A bare `fslc`, `fslc help`, a bare `fslc document` or `fslc domain` (#1756) | `usage: fslc <check\|verify> SPEC [options]`; `unknown command 'help'`; usage lines without `check`, or without `replay` and `testgen` | the root usage line that names every command; `fslc help [COMMAND ...]` prints that command's help with exit 0; usage lines naming every subcommand. The others stay `kind: "usage"`, exit 2 | Update a message match |
 | Current-edition `check`, `verify` and Worker on legacy forms (#251) | no warning | `legacy_string_metadata`, `legacy_quantifier_colon`, `inline_action_maps` warnings; verdict and exit unchanged | Nothing is required; `fslc migrate` rewrites them |
 | The verify cache | | the key hashes the `fslc` version | The first run after the upgrade recomputes each result once |
 | The layer Agent Skills (#1437) | write FSL 4 | write `fsl 5` | Reinstall the skills; the `fsl` skill keeps its FSL 4 guidance |
@@ -2085,6 +2091,7 @@ additional removals in #1463.
 ## 7. The verifier `fslc`
 
 ```
+fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check     <file.fsl|file.md>                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
 fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set

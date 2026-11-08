@@ -110,6 +110,10 @@ retain their own edition; do not assume a parent's edition flag propagates to
 dependencies. Migration edits the requested roots, not imported children.
 Canonical mixed editions are allowed where the consumer supports those files.
 `migrate` defaults to the next edition and `lint` to the current one.
+JSON `edition` is the edition a document was read in (`next`, or `current`/absent),
+with `fsl_edition` when it has a header; `lint`, `migrate` and `fmt --check` always
+carry `edition`, `next` only when every document was read in the next edition. An
+`edition_conflict` message quotes `--edition` as typed (`next`, `4`, `5`).
 
 Current-edition `check`, `verify`, and Worker JSON append migration
 warnings for string metadata, colon quantifiers, and inline action `maps`, without
@@ -119,6 +123,7 @@ Domain checking rejects quantified domain expressions, so it does not emit this
 colon-quantifier warning for them; metadata slots and requirement maps are not domain forms.
 
 ```
+fslc help [COMMAND [SUBCOMMAND]]               # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check <f> [--edition current|next|4|5]     # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
 fslc lint <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)

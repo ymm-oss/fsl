@@ -53,8 +53,14 @@ fn migrated(written: bool, changed: bool) -> Value {
     } else {
         vec![]
     };
-    json!({"fsl":"1.0","result":"migrated","edition":"next","changed":usize::from(changed),
-        "written":written,"files":[{"path":"plain.fsl","changed":changed,"findings":findings,"edits":edits}]})
+    let mut v = json!({"fsl":"1.0","result":"migrated","edition":"next","changed":usize::from(changed),
+        "written":written,"files":[{"path":"plain.fsl","changed":changed,"findings":findings,"edits":edits}]});
+    // #1757: an unchanged run reads the `fsl 5` header the first write
+    // added, and a report publishes a header it read, as `check` does.
+    if !changed {
+        v["fsl_edition"] = json!(5);
+    }
+    v
 }
 
 // Only these ten numeric timings varied in two d83 gate-on probes. Preserve

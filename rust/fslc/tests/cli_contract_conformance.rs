@@ -721,6 +721,114 @@ fn metadata_help_and_stable_gate_controls_are_live() {
     }
 }
 
+/// The `{a,b,...}` choice list of `line`'s last brace group.
+fn choice_list(line: &str) -> BTreeSet<String> {
+    let start = line
+        .rfind('{')
+        .unwrap_or_else(|| panic!("no choice list: {line}"));
+    let end = start + line[start..].find('}').expect("closed choice list");
+    line[start + 1..end].split(',').map(str::to_owned).collect()
+}
+
+/// #1756: root help omitted `testplan` and `counterexample`, a bare `fslc`
+/// named only `check` and `verify`, a bare `fslc document` / `fslc domain`
+/// omitted subcommands, and `fslc help` was an unknown command. Every list a
+/// user reads is checked against the contract's `commands`, so a command
+/// added there and not to the help or a usage line fails here.
+#[test]
+fn help_and_usage_name_every_command_the_contract_lists() {
+    let contract = contract();
+    let mut failures = Vec::new();
+    for node in nodes(&contract) {
+        let help = node["help"].as_str().unwrap();
+        let mut args = vec!["help".to_owned()];
+        args.extend(path(node));
+        let output = run(&args);
+        if !(output.status.success()
+            && output.stderr.is_empty()
+            && output.stdout == help.as_bytes())
+        {
+            failures.push(format!("{args:?} does not print the {} help", label(node)));
+        }
+        if children(node).is_empty() {
+            continue;
+        }
+        let names = children(node)
+            .iter()
+            .map(|child| path(child).last().unwrap().clone())
+            .collect::<BTreeSet<_>>();
+        let mut lines = help.lines();
+        let usage_line = lines.next().unwrap();
+        let listed = lines
+            .skip_while(|line| *line != "positional arguments:")
+            .nth(1)
+            .unwrap_or_default();
+        for (what, line) in [("usage line", usage_line), ("positional list", listed)] {
+            if choice_list(line) != names {
+                failures.push(format!(
+                    "{} help {what} differs from commands: {line}",
+                    label(node)
+                ));
+            }
+        }
+        // argparse describes a lone subcommand on the list line itself
+        // (`  {export}   export a ...`) instead of a row of its own.
+        let described_inline = names.len() == 1
+            && listed
+                .split_once('}')
+                .is_some_and(|(_, rest)| !rest.trim().is_empty());
+        for name in names.iter().filter(|_| !described_inline) {
+            let row = format!("    {name} ");
+            if !help
+                .lines()
+                .any(|line| line.starts_with(&row) || line == row.trim_end())
+            {
+                failures.push(format!("{} help has no row for {name}", label(node)));
+            }
+        }
+        let bare = run(&path(node));
+        let message = decoded(&bare)["message"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        let words = message
+            .split(|character: char| !(character.is_ascii_lowercase() || character == '-'))
+            .collect::<BTreeSet<_>>();
+        let missing = names
+            .iter()
+            .filter(|name| !words.contains(name.as_str()))
+            .collect::<Vec<_>>();
+        if !usage(&bare) || !missing.is_empty() {
+            failures.push(format!(
+                "bare {} usage omits {missing:?}: {message}",
+                label(node)
+            ));
+        }
+        if path(node).is_empty() && message != usage_line {
+            failures.push(format!("bare fslc is not the root usage line: {message}"));
+        }
+    }
+    // Negative controls: a word after `help` that names no command is the
+    // usage error an unknown command already is.
+    for (args, message) in [
+        (vec!["help", "bogus"], "unknown command 'bogus'"),
+        (
+            vec!["help", "document", "bogus"],
+            "unknown document subcommand 'bogus'",
+        ),
+    ] {
+        let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
+        let output = run(&args);
+        if !usage(&output) || decoded(&output)["message"] != message {
+            failures.push(format!(
+                "{args:?}: {}",
+                String::from_utf8_lossy(&output.stdout)
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn allow_unwired_is_effective_and_published_for_both_testgen_paths() {
     let contract = contract();

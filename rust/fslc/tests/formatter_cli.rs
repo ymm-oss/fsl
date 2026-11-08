@@ -318,7 +318,9 @@ fn accepted_policies(
         .unwrap_or_else(|error| panic!("{} edition: {error}", path.display()));
     match fsl_syntax::document_edition(
         source,
-        Some(fsl_syntax::Edition::Fsl5),
+        Some(fsl_syntax::EditionRequest::numbered(
+            fsl_syntax::Edition::Fsl5,
+        )),
         fsl_syntax::Edition::Fsl4,
         &options,
     ) {

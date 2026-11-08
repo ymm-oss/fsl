@@ -100,9 +100,14 @@ causal と AI ダイアレクトの文書はヘッダーを取りません（<co
 <code>check</code>、<code>verify</code>、<code>domain check</code>、<code>fmt</code>、<code>lint</code>、<code>migrate</code> で、いずれのヘルプにも
 <code>--edition {current,next,4,5}</code> と表示され、<code>cli-contract.json</code> にも同じ 4 つの選択肢が
 載っています。それ以外の値は usage エラー(<code>"kind": "usage"</code>、終了コード 2)で、メッセージは
-<code>--edition must be current, next, 4, or 5</code> です。JSON 出力はこのオプションを番号で書きません。
-次のエディションで読んだ結果には <code>"edition": "next"</code> が付き（現行のエディションでは付きません）、
-ヘッダーのある文書には <code>"fsl_edition": 4</code> または <code>5</code> も付きます。</p>
+<code>--edition must be current, next, 4, or 5</code> です。JSON 出力が示すのは文書を<em>読んだ</em>エディションで、
+オプションの綴りではありません。次のエディションで読んだ結果には <code>"edition": "next"</code> が付き
+（現行のエディションでは付きません）、ヘッダーのある文書には <code>"fsl_edition": 4</code> または <code>5</code> も付きます。
+<code>lint</code>、<code>migrate</code>、<code>fmt --check</code> の報告には、4.12 と同じく <code>edition</code>（<code>"current"</code> か <code>"next"</code>）が
+常に付きます。複数の文書を読んだときは、すべてを次のエディションで読んだ場合だけ <code>"next"</code> になり、
+<code>fsl_edition</code> はすべての文書が同じヘッダーを宣言している場合だけ付きます。<code>edition_conflict</code> の
+メッセージは、入力したとおりの綴りでオプションを示します
+(<code>the document declares 'fsl 4' but --edition next was requested</code>)。</p>
 <p><strong>ヘッダーのない</strong>文書に <code>--edition 5</code>（または <code>next</code>）を付けても、FSL 5 の文書にはなりません。
 構文は FSL 4 のまま読むので、§13.2 の FSL 5 の要件の書き方は構文エラーになり、<code>fsl_edition</code>
 も出ません。変わるのは方針です。現行のエディションで警告になる旧形式、たとえば文字列の
@@ -851,6 +856,12 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <td>不正な <code>--edition</code> の値 (#1715)</td>
 <td><code>--edition must be current or next</code></td>
 <td><code>--edition must be current, next, 4, or 5</code></td>
+<td>メッセージの照合を直します</td>
+</tr>
+<tr>
+<td>引数なしの <code>fslc</code>、<code>fslc help</code>、引数なしの <code>fslc document</code> と <code>fslc domain</code> (#1756)</td>
+<td><code>usage: fslc &lt;check\|verify&gt; SPEC [options]</code>、<code>unknown command 'help'</code>、<code>check</code> や <code>replay</code> と <code>testgen</code> が抜けた usage 行</td>
+<td>すべてのコマンドを並べたルートの usage 行。<code>fslc help [COMMAND ...]</code> はそのコマンドのヘルプを出し、終了コード 0。usage 行はすべてのサブコマンドを並べます。<code>fslc help</code> 以外は <code>kind: "usage"</code>、終了コード 2 のままです</td>
 <td>メッセージの照合を直します</td>
 </tr>
 <tr>
@@ -2194,7 +2205,8 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 <li>満杯の Seq への <code>push</code> も <code>type_bound</code> として自動で検出されます
   (ガードするには <code>requires q.size() &lt; N</code> と書きます)。</li>
 </ul></div></details>
-<details id="7-the-verifier-fslc"><summary>7. 検証器 `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc check     &lt;file.fsl&gt;                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
+<details id="7-the-verifier-fslc"><summary>7. 検証器 `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
+fslc check     &lt;file.fsl&gt;                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
 fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
 fslc fmt       &lt;file.fsl|-&gt; [--edition current|next|4|5] # canonical FSL to stdout; never mutates input

@@ -162,7 +162,7 @@ pub(crate) const DEFAULT_MAX_MUTANTS: usize = 200;
 /// document in the edition its header names.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct SharedOptions {
-    pub(crate) edition: Option<fsl_syntax::Edition>,
+    pub(crate) edition: Option<fsl_syntax::EditionRequest>,
 }
 
 impl SharedOptions {
@@ -183,8 +183,8 @@ impl SharedOptions {
 
 pub(crate) fn parse_edition(
     args: &mut impl Iterator<Item = String>,
-) -> Result<Option<fsl_syntax::Edition>, String> {
-    fsl_syntax::Edition::parse_option(
+) -> Result<Option<fsl_syntax::EditionRequest>, String> {
+    fsl_syntax::EditionRequest::parse(
         &required_option_value(args, "--edition")?,
         crate::process::parse_options(),
     )

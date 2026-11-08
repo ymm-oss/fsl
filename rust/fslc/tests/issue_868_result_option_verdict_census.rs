@@ -460,6 +460,15 @@ const CLASSIFICATIONS: &[Classification] = &[
         "parse_option",
         ResultOption
     ),
+    // #1757: `EditionRequest::parse` is `parse_option` keeping the spelling;
+    // `None` is `--edition current` (no request), not a verdict.
+    entry!(
+        Ordinary,
+        "rust/fsl-syntax/src/edition.rs",
+        134,
+        "parse",
+        ResultOption
+    ),
     entry!(
         Ordinary,
         "rust/fsl-syntax/src/edition.rs",
@@ -994,6 +1003,10 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
     // `ChainStepResults` is `Vec<Option<(Value, bool)>>`: one report slot per
     // planned chain step (`None` = never ran), not a fallible optional verdict.
     unresolved_ordinary!("rust/fslc/src/main.rs", 4207, "run_chain_steps"),
+    // #1757: `ReadEdition` is `(Edition, Option<Edition>)`, the edition one
+    // document was read in and its header's (`None` = headerless); no Result
+    // and no verdict.
+    unresolved_ordinary!("rust/fslc/src/main.rs", 396, "read_edition"),
     unresolved_ordinary!(
         "rust/fslc/src/verification.rs",
         2192,

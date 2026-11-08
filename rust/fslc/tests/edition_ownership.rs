@@ -664,8 +664,9 @@ pub(crate) fn domain_check_forwards_requested_edition_without_changing_conflicts
     let legacy = cases::legacy("deprecated_domain_enum_union", cases::DOMAIN);
     for (header, flag, conflict) in [
         ("", "next", None),
-        ("fsl 4\n", "next", Some((4, 5))),
-        ("fsl 5\n", "4", Some((5, 4))),
+        // #1757: the conflict echoes `next` as typed, not its number.
+        ("fsl 4\n", "next", Some((4, "next"))),
+        ("fsl 5\n", "4", Some((5, "4"))),
         ("fsl 5\n", "current", None),
     ] {
         let scratch = Scratch::new();

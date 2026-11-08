@@ -1870,10 +1870,15 @@ fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value 
         "values": options.scope.values,
         "strict_tags": options.strict_tags,
         "lemmas": options.lemmas,
-        "edition": options.shared.edition.map_or("current", fsl_syntax::Edition::as_str),
+        "edition": options.shared.edition.map_or("current", |request| request.edition.as_str()),
     });
-    if let (Some(edition), Value::Object(fields)) = (options.shared.edition, &mut blob) {
-        fields.insert("edition_request".to_owned(), json!(edition.number()));
+    // The request's edition, not its spelling: `next` and `5` read a document
+    // alike and share a result.
+    if let (Some(request), Value::Object(fields)) = (options.shared.edition, &mut blob) {
+        fields.insert(
+            "edition_request".to_owned(),
+            json!(request.edition.number()),
+        );
     }
     blob
 }
@@ -3291,11 +3296,15 @@ mod tests {
         assert_eq!(omitted["edition"], json!("current"), "{omitted:#}");
         assert!(omitted.get("edition_request").is_none(), "{omitted:#}");
         assert!(omitted.get("unstable").is_none(), "{omitted:#}");
-        let four = blob(Some(fsl_syntax::Edition::Fsl4));
+        let four = blob(Some(fsl_syntax::EditionRequest::numbered(
+            fsl_syntax::Edition::Fsl4,
+        )));
         assert_eq!(four["edition"], json!("current"), "{four:#}");
         assert_eq!(four["edition_request"], json!(4), "{four:#}");
         assert_ne!(four, omitted);
-        let five = blob(Some(fsl_syntax::Edition::Fsl5));
+        let five = blob(Some(fsl_syntax::EditionRequest::numbered(
+            fsl_syntax::Edition::Fsl5,
+        )));
         assert_eq!(five["edition"], json!("next"), "{five:#}");
         assert_eq!(five["edition_request"], json!(5), "{five:#}");
     }

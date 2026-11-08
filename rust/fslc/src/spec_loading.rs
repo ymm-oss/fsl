@@ -19,7 +19,7 @@ use crate::cli_output::{envelope, spec_load_error_output};
 /// inward. The callback owns envelope finalization, including nested results.
 pub(crate) fn run_admitted_roots(
     roots: Vec<(&Path, Result<String, SpecLoadError>)>,
-    requested: Option<fsl_syntax::Edition>,
+    requested: Option<fsl_syntax::EditionRequest>,
     stderr_on_success: bool,
     run: impl FnOnce(&[String], &[SourceEdition]) -> (Value, i32),
 ) -> (Value, i32) {
@@ -43,7 +43,7 @@ pub(crate) fn run_admitted_roots(
 pub(crate) fn admit_root_source(
     path: &Path,
     source: &str,
-    requested: Option<fsl_syntax::Edition>,
+    requested: Option<fsl_syntax::EditionRequest>,
 ) -> Result<SourceEdition, (Value, i32)> {
     #[cfg(test)]
     admission_observer::record(admission_observer::Event::Admission(
@@ -127,7 +127,7 @@ pub(crate) fn finish_admitted(
 pub(crate) fn run_admitted_root(
     path: &Path,
     source: Result<String, SpecLoadError>,
-    requested: Option<fsl_syntax::Edition>,
+    requested: Option<fsl_syntax::EditionRequest>,
     stderr_on_success: bool,
     run: impl FnOnce(&str) -> (Value, i32),
 ) -> (Value, i32) {

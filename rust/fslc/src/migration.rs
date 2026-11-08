@@ -604,7 +604,7 @@ pub fn apply_edition(
     result: (Value, i32),
     source: &str,
     path: &str,
-    requested: Option<Edition>,
+    requested: Option<fsl_syntax::EditionRequest>,
     options: &ParseOptions,
     envelope: &dyn Fn() -> Map<String, Value>,
     implicit_warnings: bool,
@@ -911,7 +911,7 @@ impl<R: fsl_core::FileResolver> fsl_core::FileResolver for DependencyResolver<'_
 pub fn admit_source(
     source: &str,
     path: &str,
-    requested: Option<Edition>,
+    requested: Option<fsl_syntax::EditionRequest>,
     options: &ParseOptions,
     envelope: &dyn Fn() -> Map<String, Value>,
     implicit_warnings: bool,

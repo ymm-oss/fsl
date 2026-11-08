@@ -420,8 +420,8 @@ syntax highlighting, diagnostics, outline, and go-to-definition. See
 ### Everything else
 
 `fslc` has commands not covered above — `version`, `lint`, `migrate`, `fmt`, `sweep`,
-`conformance`, `approval`, and `diff` among them. Run `fslc --help` or `fslc <command>
---help` for their current arguments, or see [`docs/README.md`](docs/README.md) for the
+`conformance`, `approval`, and `diff` among them. Run `fslc --help` or `fslc help <command>`
+(the same as `fslc <command> --help`) for their current arguments, or see [`docs/README.md`](docs/README.md) for the
 design document covering most of them (`sweep` has no entry there yet).
 
 `fslc` also has dialect-specific command groups — `ai` (AI hard-contract/agent-structure

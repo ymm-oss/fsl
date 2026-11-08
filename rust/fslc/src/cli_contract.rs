@@ -12,6 +12,11 @@ pub(crate) fn validate_argv(
     argv: &[String],
     options: ParseOptions,
 ) -> Result<(), String> {
+    // `fslc help ...` names a command path, not options: a word that names
+    // no command is its usage error.
+    if let Some(help) = help_alias(contract, argv) {
+        return help.map(|_| ());
+    }
     let contract: Value = serde_json::from_str(contract).expect("valid embedded CLI contract");
     let mut node = &contract["root"];
     let mut index = 0;
@@ -38,6 +43,46 @@ pub(crate) fn validate_argv(
     }
     let command = label(node);
     validate_tokens(&command, actions(node), &argv[index..], options)
+}
+
+/// `fslc help [COMMAND [SUBCOMMAND]]` (#1756): the help text of the command
+/// path the words name, which `fslc COMMAND [SUBCOMMAND] --help` prints. `None`
+/// unless `argv` starts with `help`. A word that names no command where one is
+/// expected is the usage error an unknown command already is; the walk stops
+/// at a command without subcommands, as `--help` ignores what follows it.
+pub(crate) fn help_alias(contract: &str, argv: &[String]) -> Option<Result<String, String>> {
+    let (first, words) = argv.split_first()?;
+    if first != "help" {
+        return None;
+    }
+    let contract: Value = serde_json::from_str(contract).expect("valid embedded CLI contract");
+    let mut node = &contract["root"];
+    for word in words {
+        if children(node).is_empty() || matches!(word.as_str(), "-h" | "--help") {
+            break;
+        }
+        let Some(child) = children(node).iter().find(|child| {
+            child["path"].as_array().and_then(|path| path.last()) == Some(&json!(word))
+        }) else {
+            return Some(Err(group_unknown(&label(node), word)));
+        };
+        node = child;
+    }
+    Some(Ok(node["help"]
+        .as_str()
+        .expect("CLI help is a string")
+        .to_owned()))
+}
+
+/// The usage error of a bare `fslc` (#1756): the first line of the root
+/// help, which names every top-level command.
+pub(crate) fn root_usage(contract: &str) -> String {
+    let contract: Value = serde_json::from_str(contract).expect("valid embedded CLI contract");
+    contract["root"]["help"]
+        .as_str()
+        .and_then(|help| help.lines().next())
+        .expect("root help has a usage line")
+        .to_owned()
 }
 
 fn children(node: &Value) -> &[Value] {
