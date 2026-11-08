@@ -1234,22 +1234,64 @@ fn inline_maps_with_parameter_comments_are_refused_without_source_changes() {
     assert_eq!(text(&requirements), original);
 }
 
+/// One refused input keeps every other input of the run as it was, although
+/// the safe one checks and would be rewritten on its own (#1764): the safe
+/// input comes first, so the run reaches the refusal only after planning it.
 #[test]
 fn multi_file_refusal_leaves_every_input_unchanged() {
     let directory = FixtureDir::new();
-    let safe_source = "domain Safe { type E = A | B }\n";
+    let safe_source = LEGACY_COLON_QUANTIFIER;
     let refused_source = "domain Refused { aggregate A { invariant bad { true && false } } }\n";
     let safe = directory.write("safe.fsl", safe_source);
     let refused = directory.write("refused.fsl", refused_source);
+    let safe_path = safe.to_str().expect("UTF-8 path");
+
+    // Positive controls: the safe input checks, and on its own migrate
+    // rewrites it.
+    let check = run(&["check", safe_path]);
+    assert_eq!(
+        check.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+    let alone = directory.write("alone.fsl", safe_source);
     let output = run(&[
         "migrate",
-        safe.to_str().expect("UTF-8 path"),
+        alone.to_str().expect("UTF-8 path"),
+        "--edition",
+        "next",
+        "--write",
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{:#}", json(&output));
+    assert_eq!(json(&output)["changed"], 1);
+    assert_ne!(text(&alone), safe_source);
+
+    let output = run(&[
+        "migrate",
+        safe_path,
         refused.to_str().expect("UTF-8 path"),
         "--edition",
         "next",
         "--write",
     ]);
-    assert_eq!(output.status.code(), Some(2));
+    let refusal = json(&output);
+    assert_eq!(output.status.code(), Some(2), "{refusal:#}");
+    assert_eq!(refusal["result"], "migration_refused", "{refusal:#}");
+    assert_eq!(refusal["written"], false, "{refusal:#}");
+    // The safe input was planned: a check failure stops the run with an
+    // error envelope that has no `files`.
+    assert_eq!(refusal["files"][0]["changed"], true, "{refusal:#}");
+    let findings = refusal["files"][1]["findings"]
+        .as_array()
+        .expect("refused file findings");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "unsupported_double_ampersand"
+                && finding["machine_applicable"] == false
+        }),
+        "{refusal:#}"
+    );
     assert_eq!(text(&safe), safe_source);
     assert_eq!(text(&refused), refused_source);
 }
@@ -1292,7 +1334,6 @@ fn multi_file_prepare_io_failure_leaves_every_input_unchanged() {
 }
 
 /// A spec that checks and that `migrate --edition next` changes.
-#[cfg(unix)]
 const LEGACY_COLON_QUANTIFIER: &str = r"spec Quantifier {
   const MAX = 1
   type Id = 0..1
