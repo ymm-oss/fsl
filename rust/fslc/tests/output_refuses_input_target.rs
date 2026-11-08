@@ -415,3 +415,68 @@ fn domain_generate_refuses_an_input_before_any_file_is_written() {
     );
     refused(&home, &argv);
 }
+
+// `document` never reads the abstraction an `implements ... from` names, yet
+// `-o` onto it would replace the user's spec with the artifact (#1753). The
+// fixture has requirement IDs, so `generate` reaches the write.
+#[test]
+fn document_refuses_the_implements_target() {
+    let home = scratch("input-target-implements");
+    copy(&home, "cancel_system.fsl", cli::PM);
+    copy(&home, "cancel_flow.fsl", "examples/pm/cancel_flow.fsl");
+    std::os::unix::fs::symlink("cancel_flow.fsl", home.join("out/flow_link.fsl")).unwrap();
+    std::fs::hard_link(
+        home.join("out/cancel_flow.fsl"),
+        home.join("out/flow_hard.fsl"),
+    )
+    .unwrap();
+    let abstraction = std::fs::read(home.join("out/cancel_flow.fsl")).unwrap();
+    let commands: [&[&str]; 2] = [
+        &["document", "claims", "cancel_system.fsl"],
+        &["document", "generate", "cancel_system.fsl"],
+    ];
+    for arguments in commands {
+        same_envelope_as_nonregular(&home, arguments, "-o", "cancel_flow.fsl");
+        for target in ["./cancel_flow.fsl", "flow_link.fsl", "flow_hard.fsl"] {
+            refused(&home, &with_target(arguments, "-o", target));
+        }
+        // The path resolves against the spec's directory, not the working one.
+        let mut from_parent: Vec<String> = arguments.iter().map(|&a| a.to_owned()).collect();
+        from_parent[2] = "out/cancel_system.fsl".to_owned();
+        from_parent.extend(["-o".to_owned(), "out/cancel_flow.fsl".to_owned()]);
+        let before = state(&home.join("out"));
+        let output = run(&home, &home, &from_parent, None);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        let message = envelope(&output)["message"].as_str().unwrap().to_owned();
+        assert!(message.ends_with(REFUSAL), "{message}");
+        assert_eq!(state(&home.join("out")), before);
+    }
+    assert_eq!(
+        std::fs::read(home.join("out/cancel_flow.fsl")).unwrap(),
+        abstraction
+    );
+    // Positive control: an unrelated path is still written, and the
+    // abstraction and its other names keep their bytes.
+    for (arguments, target, head) in [
+        (commands[0], "claims.json", "{"),
+        (commands[1], "requirements.md", "---"),
+    ] {
+        let output = run(
+            &home,
+            &home.join("out"),
+            &with_target(arguments, "-o", target),
+            None,
+        );
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        assert_eq!(envelope(&output)["output"], target);
+        let written = std::fs::read_to_string(home.join("out").join(target)).unwrap();
+        assert!(written.starts_with(head), "{target}: {written}");
+    }
+    for name in ["cancel_flow.fsl", "flow_link.fsl", "flow_hard.fsl"] {
+        assert_eq!(
+            std::fs::read(home.join("out").join(name)).unwrap(),
+            abstraction,
+            "{name}"
+        );
+    }
+}

@@ -117,8 +117,15 @@ document argument, every file an import, `use ... from`, `implements ... from`
 or refinement reference loads through the native filesystem resolver, and
 explicit file options such as `--evidence`, `--glossary`, `--approval`,
 `--trust-key`, `--signing-key`, `--artifact`, `--impl-log`, `--scope`,
-`--mapping` and `--from-log`. `domain generate` and `causal observe-expectations`
-check every destination before their first write. The prior artifact that an
+`--mapping` and `--from-log`. One file counts without being read: the
+abstraction a `requirements` document names in `implements ... from`, which
+`document generate`/`claims` (and the `requirements_document` approval
+rendering) project without loading (#1753). It is the only file a `spec` or
+`requirements` document declares, the only dialects those commands accept, and
+its path resolves against the spec's directory as the resolver's would; a
+missing abstraction records nothing, so `-o` may create it. `domain generate`
+and `causal observe-expectations` check every destination before their first
+write. The prior artifact that an
 approval record names as its reviewed target is read to compare digests, not
 as an input, so regenerating that artifact in place stays allowed.
 `migrate --write` and the verification cache do not use this helper and are
@@ -128,8 +135,9 @@ Recording starts in the native CLI's `main`, which runs one command per
 process; code that calls a command function in-process (unit tests) records
 nothing, so one test's inputs never refuse another test's outputs.
 
-Limits: a file is recorded only after it was read, and the check is not a
-guard against concurrent path mutation. Reads outside the shared helpers (for
+Limits: apart from that `implements ... from` target, a file is recorded only
+after it was read, and the check is not a guard against concurrent path
+mutation. Reads outside the shared helpers (for
 example a resolver built inside `fsl-tools`) are not recorded; each such
 command still records its primary input, which is the file those resolvers
 start from.

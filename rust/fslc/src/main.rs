@@ -2009,6 +2009,7 @@ fn load_document_claims_from_source(
     ) {
         Ok(claims) => {
             document_trace_gate(source, base)?;
+            note_implements_target(source, base);
             Ok(claims)
         }
         // The projector reports a surface-parse failure as a plain message, so
@@ -2025,6 +2026,25 @@ fn load_document_claims_from_source(
                 |error| surface_parse_error_output(&error),
             ),
         ),
+    }
+}
+
+/// Record the abstraction an `implements ... from` names as an input of the
+/// command although the document commands never read it, so `-o` onto it is
+/// refused instead of replacing the user's spec (#1753). It is the only file a
+/// `spec` or `requirements` document declares that projection does not load;
+/// imports are recorded by the resolver that reads them. The path resolves
+/// against the spec's directory, as the resolver that would read it does.
+fn note_implements_target(source: &str, base: &Path) {
+    let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+    else {
+        return;
+    };
+    for item in &requirements.items {
+        if let fsl_syntax::RequirementsItem::Implements { path, .. } = item {
+            output_publication::note_input(&base.join(path));
+        }
     }
 }
 

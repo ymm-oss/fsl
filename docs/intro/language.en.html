@@ -3047,7 +3047,8 @@ and process substitution such as <code>/dev/fd/63</code>. The parent directory m
 replace a writable existing file. A destination that is the same file as an input the command
 reads (the spec, an imported file, or a file option such as <code>--evidence</code> or <code>--artifact</code>) is
 refused before anything is written; sameness is the file, so <code>./s.fsl</code>, a symlink and a hard link
-to <code>s.fsl</code> all count. These refusals are <code>io</code> errors (exit 2). Abrupt termination can
+to <code>s.fsl</code> all count. The abstraction named by <code>implements ... from</code> counts as an input even for
+<code>document generate</code> and <code>document claims</code>, which do not read it (#1753). These refusals are <code>io</code> errors (exit 2). Abrupt termination can
 leave an owner-only <code>.fslc-output-*.tmp</code> file beside the destination;
 <code>docs/design/DESIGN-atomic-artifact-output.md</code> records the complete contract.
 <code>migrate --write</code> refuses a read-only input that it would change with the same <code>io</code> error

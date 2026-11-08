@@ -92,7 +92,9 @@ read-only files, final symlinks, and every non-regular destination are refused, 
 `-o /dev/null`, `-o /dev/stdout` and process substitution such as `/dev/fd/63`.
 A destination that is the same file as an input the command reads (the spec, an
 import, or a file option such as `--evidence`), on Unix by device and inode, so also via
-`./`, a symlink or a hard link, is refused before anything is written.
+`./`, a symlink or a hard link, is refused before anything is written. The
+`implements ... from` abstraction counts even for `document generate`/`claims`,
+which do not read it.
 The parent directory must be writable. Replacement changes the inode (other
 hard links retain old bytes); ownership/ACLs/xattrs are not guaranteed to carry
 over. Earlier completed files remain if a later output fails; there is no
