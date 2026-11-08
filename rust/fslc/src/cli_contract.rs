@@ -12,6 +12,11 @@ pub(crate) fn validate_argv(
     argv: &[String],
     options: ParseOptions,
 ) -> Result<(), String> {
+    // `fslc help ...` names a command path, not options: a word that names
+    // no command is its usage error.
+    if let Some(help) = help_alias(contract, argv) {
+        return help.map(|_| ());
+    }
     let contract: Value = serde_json::from_str(contract).expect("valid embedded CLI contract");
     let mut node = &contract["root"];
     let mut index = 0;

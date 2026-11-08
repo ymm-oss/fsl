@@ -1137,20 +1137,11 @@ fn print_cli_metadata() -> bool {
         print!("{CLI_CONTRACT}");
         return true;
     }
-    match cli_contract::help_alias(CLI_CONTRACT, &arguments) {
-        Some(Ok(help)) => {
-            print!("{help}");
-            return true;
-        }
-        Some(Err(message)) => {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&error_output("usage", &message))
-                    .expect("serialize CLI argument error")
-            );
-            std::process::exit(2);
-        }
-        None => {}
+    // An unknown word after `help` is left to `validate_argv`, which owns
+    // the usage error.
+    if let Some(Ok(help)) = cli_contract::help_alias(CLI_CONTRACT, &arguments) {
+        print!("{help}");
+        return true;
     }
     let Some(help_index) = arguments
         .iter()
