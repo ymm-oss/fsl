@@ -765,7 +765,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <tbody>
 <tr>
 <td><code>explain</code>、<code>typestate</code>、<code>mutate</code>、<code>testgen</code>、<code>html</code>、<code>ledger</code>、<code>scenarios</code>、<code>version</code> に、そのコマンドが持たないオプションを渡す (#1446, #1341)</td>
-<td>一部は既に usage エラー(<code>explain</code> の <code>--engine</code>、<code>--no-timing</code>、<code>--deadlock</code>。<code>mutate --engine</code>)。ほかは無視して終了コード 0。たとえば <code>version --depth 3</code>、<code>typestate --depth 3</code>、<code>scenarios</code> と <code>testgen</code> の <code>--engine</code></td>
+<td>一部は既に usage エラー(<code>explain</code> の <code>--engine</code>、<code>--no-timing</code>、<code>--deadlock</code>。<code>mutate --engine</code>。<code>scenarios --engine induction</code>)。ほかは無視して終了コード 0(<code>version --depth 3</code>、<code>typestate --depth 3</code>、<code>testgen --engine</code>、<code>scenarios --engine bmc</code>)</td>
 <td>usage エラー、終了コード 2</td>
 <td>そのオプションを外します</td>
 </tr>
@@ -809,7 +809,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <td>承認レコード (#1421)</td>
 <td>v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4</td>
 <td>署名なしの v5、署名つきの v6(<code>path_base</code> つき)</td>
-<td>新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。<code>document generate --approval</code> には Git が必要です。4.x のレコードは、5.0 で描画した成果物との照合も含めてダイジェストが一致する間だけ <code>approved</code> のままです。そのため、4.12 の ledger、HTML、scenarios のレコードの多くは承認し直しが必要です(表の下を参照)。新しいレコードの <code>generator_version</code> には、<code>fslc</code> のバージョンではなく <code>fslc-ledger-renderer/1.0.0</code> のような種類ごとのレンダラのバージョンを記録します</td>
+<td>新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。<code>document generate --approval</code> には Git が必要です。4.x のレコードは、5.0 で描画した成果物との照合も含めてダイジェストが一致する間だけ <code>approved</code> のままです。5.0 で成果物の描画が変わるレコードは承認し直しが必要です(表の下を参照)。新しいレコードの <code>generator_version</code> には、<code>fslc</code> のバージョンではなく <code>fslc-ledger-renderer/1.0.0</code> のような種類ごとのレンダラのバージョンを記録します</td>
 </tr>
 <tr>
 <td>相対パスの AI の <code>dataset.source</code> (#1421)</td>
@@ -861,13 +861,18 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 </tr>
 </tbody>
 </table>
-<p><strong>4.12 の承認の多くは承認し直します。</strong> 5.0 は、ledger、HTML、scenarios の成果物の多くを
-4.12 と違う内容で描画します。たとえば、別の仕様を <code>implements</code> する仕様の ledger には
-<code>## inline implements</code> の節が加わります。そのため、これらの種類の 4.12 のレコードは、仕様の
-ダイジェストが一致していても、たいてい <code>"status": "drifted"</code>、<code>"reasons": ["rendering_changed"]</code>、
-終了コード 0 を返します。4.x のレコードではレンダラの比較を省くので、<code>renderer_changed</code> は
-報告しません。5.0 で成果物を作り直して確認し、<code>fslc approval create</code> で新しいレコードを
-作ります。5.0 でも同じ内容に描画される成果物のレコードは <code>approved</code> のままです。</p>
+<p><strong>描画が変わる成果物の承認は承認し直します。</strong> 5.0 が ledger、HTML、scenarios の成果物を
+4.12 と違う内容で描画する場合、その 4.12 のレコードは、仕様のダイジェストが一致していても
+<code>"status": "drifted"</code>、<code>"reasons": ["rendering_changed"]</code>、終了コード 0 を返します。ledger の
+変更には、新しい旧形式の警告(#251)が finding として載ること、<code>\_</code> のような Markdown の
+エスケープ、別の仕様を <code>implements</code> する仕様に加わる <code>## inline implements</code> の節があります。
+4.x のレコードではレンダラの比較を省くので、<code>renderer_changed</code> は報告しません。同じ内容に
+描画される成果物のレコードは <code>approved</code> のままです。このリポジトリの <code>examples/</code> と <code>specs/</code> で
+4.12 が作れたレコードでは、5.0 は ledger 86 件中 61 件、HTML 44 件中 37 件、scenarios 45 件中
+11 件に <code>rendering_changed</code> を報告し、残りは <code>approved</code> のままでした。ただし、5.0 が拒否する
+仕様や、acceptance か forbidden の検査が失敗する仕様の 14 件は、終了コード 2 の <code>error</code> に
+なります(#1418)。描画が変わった成果物は 5.0 で作り直して確認し、<code>fslc approval create</code> で
+新しいレコードを作ります。</p>
 <p><code>FSLC_UNSTABLE</code> と Worker の <code>unstable</code> フィールドは、4.12 と 5.0 の間のリリース前の build にだけ
 あり、4.12 にはありませんでした。5.0 はどちらも読みません。古いクライアントが送る <code>unstable</code>
 フィールドは無視します。</p></div></details>

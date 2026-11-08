@@ -798,7 +798,7 @@ call <code>fslc</code> for the values in the first column:</p>
 <tbody>
 <tr>
 <td>Options a command does not own on <code>explain</code>, <code>typestate</code>, <code>mutate</code>, <code>testgen</code>, <code>html</code>, <code>ledger</code>, <code>scenarios</code> and <code>version</code> (#1446, #1341)</td>
-<td>some were already usage errors (<code>explain --engine</code>, <code>--no-timing</code> and <code>--deadlock</code>; <code>mutate --engine</code>); others were ignored with exit 0, for example <code>version --depth 3</code>, <code>typestate --depth 3</code>, and <code>--engine</code> on <code>scenarios</code> and <code>testgen</code></td>
+<td>some were already usage errors: <code>explain --engine</code>, <code>--no-timing</code> and <code>--deadlock</code>, <code>mutate --engine</code>, and <code>scenarios --engine induction</code>; others were ignored with exit 0: <code>version --depth 3</code>, <code>typestate --depth 3</code>, <code>testgen --engine</code> and <code>scenarios --engine bmc</code></td>
 <td>usage error, exit 2</td>
 <td>Remove the option</td>
 </tr>
@@ -842,7 +842,7 @@ call <code>fslc</code> for the values in the first column:</p>
 <td>Approval records (#1421)</td>
 <td>v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind</td>
 <td>unsigned v5 or signed v6 with <code>path_base</code></td>
-<td>Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; <code>document generate --approval</code> needs Git. A 4.x record stays <code>approved</code> only while its digests match, including the artifact against a 5.0 rendering, so most 4.12 ledger, HTML and scenarios records need re-approval (below); new records record a per-kind renderer version such as <code>fslc-ledger-renderer/1.0.0</code> in <code>generator_version</code> instead of the <code>fslc</code> version</td>
+<td>Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; <code>document generate --approval</code> needs Git. A 4.x record stays <code>approved</code> only while its digests match, including the artifact against a 5.0 rendering; a record whose artifact 5.0 renders differently needs re-approval (below); new records record a per-kind renderer version such as <code>fslc-ledger-renderer/1.0.0</code> in <code>generator_version</code> instead of the <code>fslc</code> version</td>
 </tr>
 <tr>
 <td>A relative AI <code>dataset.source</code> (#1421)</td>
@@ -894,15 +894,21 @@ call <code>fslc</code> for the values in the first column:</p>
 </tr>
 </tbody>
 </table>
-<p><strong>Re-approve most 4.12 approvals.</strong> 5.0 renders most ledger, HTML and
-scenarios artifacts differently from 4.12; for example, the ledger of a spec
-that <code>implements</code> another gains an <code>## inline implements</code> section. A 4.12
-record of these kinds therefore usually reports <code>"status": "drifted"</code> with
-<code>"reasons": ["rendering_changed"]</code> and exit 0, although its spec digest still
-matches. <code>renderer_changed</code> is not reported for a 4.x record, because its
-renderer comparison is skipped. Regenerate the artifact with 5.0, review it,
-and create a new record with <code>fslc approval create</code>. A record whose artifact
-renders the same in 5.0 stays <code>approved</code>.</p>
+<p><strong>Re-approve records whose artifact renders differently.</strong> Where 5.0 renders a
+ledger, HTML or scenarios artifact differently from 4.12, a 4.12 record of it
+reports <code>"status": "drifted"</code> with <code>"reasons": ["rendering_changed"]</code> and exit 0,
+although its spec digest still matches. The ledger changes include the new
+legacy-form warnings (#251) listed as findings, Markdown escaping such as <code>\_</code>,
+and an <code>## inline implements</code> section for a spec that implements another.
+<code>renderer_changed</code> is never reported for a 4.x record, because its renderer
+comparison is skipped. A record whose artifact renders the same stays
+<code>approved</code>. For the 4.12 records that could be created over this repository's
+<code>examples/</code> and <code>specs/</code>, 5.0 reported <code>rendering_changed</code> for 61 of 86 ledger,
+37 of 44 HTML and 11 of 45 scenarios records, and kept the rest <code>approved</code>,
+except 14 records of specs that 5.0 refuses or whose acceptance or forbidden
+checks fail, which end in an exit-2 <code>error</code> (#1418). Regenerate a drifted
+artifact with 5.0, review it, and create a new record with
+<code>fslc approval create</code>.</p>
 <p><code>FSLC_UNSTABLE</code> and the Worker's <code>unstable</code> field existed only in pre-release
 builds between 4.12 and 5.0, never in 4.12. 5.0 does not read them, and an old
 client's <code>unstable</code> field is ignored.</p></div></details>
