@@ -75,35 +75,49 @@ at the old `~/.fsl/.venv/bin` or `~/.fsl/.native/bin` installs (the pre-Rust, fs
 When `~/.claude/skills/<name>` already holds something other than the current link or a
 link another tool placed, such as a hand-copied skill directory, the installer moves it to
 `<data>/skill-backups/claude/<name>-<UTC time>` and prints the new path. `<data>` is
-`FSL_DATA_DIR`, else `$XDG_DATA_HOME/fsl`, else `~/.local/share/fsl`. The backup stays out
+`FSL_DATA_DIR`, else the deprecated `FSL_INSTALL_DIR`, else `$XDG_DATA_HOME/fsl`, else
+`~/.local/share/fsl`. The backup stays out
 of the skills directory because Claude Code loads every directory there as a skill. The
 installer stops before linking anything if a backup path already exists, so a backup is
 never overwritten. Earlier installers kept backups beside the links as
 `~/.claude/skills/<name>.pre-native-v3`; when skills are linked, the next run moves each one,
 unchanged and under the same name, into `<data>/skill-backups/claude/` and prints it.
 
-Uninstall, using the same `FSL_DATA_DIR`, `XDG_DATA_HOME` and `FSL_BIN_DIR` values as the
-installation (the defaults apply when they are unset). The loop removes a command or skill
-link only when it points into the FSL data directory, so a real directory and a skill link
-another tool placed stay where they are. The last line removes the data directory,
-including `skill-backups/`, so move out any backup you want to keep first. The command
-leaves the bin and skills directories themselves in place, even when they end up empty. If
-you uninstall without re-running the installer, also move or delete any
-`~/.claude/skills/fsl*.pre-native-v3` an earlier installer left behind.
+Uninstall, using the same `FSL_DATA_DIR`, `FSL_INSTALL_DIR`, `XDG_DATA_HOME` and
+`FSL_BIN_DIR` values as the installation (the defaults apply when they are unset). The
+command first checks that `<data>` is an FSL data directory, holding a `current` link and a
+`releases` directory; otherwise it prints a message and removes nothing. It removes a
+command or skill link only when the link points into `<data>`, so a real directory and a
+skill link another tool placed stay where they are. It then removes `<data>/current` and
+`<data>/releases`, and removes `<data>` itself only if nothing else is left in it.
+
+Skill backups survive the uninstall in `<data>/skill-backups/claude/`. To restore one, move
+it back, for example
+`mv <data>/skill-backups/claude/fsl-verify-<UTC time> ~/.claude/skills/fsl-verify`. To
+discard them, delete `<data>/skill-backups` and then the empty `<data>`. The command also
+leaves the bin and skills directories in place, even when they end up empty. If you
+uninstall without re-running the installer, an earlier installer's
+`~/.claude/skills/fsl*.pre-native-v3` stays where it is; move or delete it yourself.
 
 ```bash
-data_dir="${FSL_DATA_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fsl}"
+data_dir="${FSL_DATA_DIR:-${FSL_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fsl}}"
 bin_dir="${FSL_BIN_DIR:-$HOME/.local/bin}"
 skills_dir="$HOME/.claude/skills"
-for link in "$bin_dir/fslc" "$bin_dir/fslc-lsp" \
-  "$skills_dir/fsl" "$skills_dir/fsl-business" "$skills_dir/fsl-requirements" \
-  "$skills_dir/fsl-design" "$skills_dir/fsl-design-review" "$skills_dir/fsl-delivery" \
-  "$skills_dir/fsl-from-code" "$skills_dir/fsl-requirements-document" "$skills_dir/fsl-verify"; do
-  if [ -L "$link" ]; then
-    case "$(readlink "$link")" in "$data_dir"/*) rm -f "$link" ;; esac
-  fi
-done
-rm -rf "$data_dir"
+if [ -L "$data_dir/current" ] && [ -d "$data_dir/releases" ]; then
+  for link in "$bin_dir/fslc" "$bin_dir/fslc-lsp" \
+    "$skills_dir/fsl" "$skills_dir/fsl-business" "$skills_dir/fsl-requirements" \
+    "$skills_dir/fsl-design" "$skills_dir/fsl-design-review" "$skills_dir/fsl-delivery" \
+    "$skills_dir/fsl-from-code" "$skills_dir/fsl-requirements-document" "$skills_dir/fsl-verify"; do
+    if [ -L "$link" ]; then
+      case "$(readlink "$link")" in "$data_dir"/*) rm -f "$link" ;; esac
+    fi
+  done
+  rm -f "$data_dir/current"
+  rm -rf "$data_dir/releases"
+  rmdir "$data_dir" 2>/dev/null || echo "Kept $data_dir: it still holds skill-backups/ or other files."
+else
+  echo "Skipped: $data_dir is not an FSL data directory (no current link and releases directory)."
+fi
 ```
 
 A mise installation is removed with `mise uninstall` instead. Its skill links are removed

@@ -869,6 +869,12 @@ fn stage_fake_installer_release(dir: &Path) -> (PathBuf, PathBuf) {
         ),
         true,
     );
+    // A fixed clock, so a backup name is known in advance.
+    write(
+        &fakebin.join("date"),
+        "#!/bin/sh\necho 20000101T000000Z\n",
+        true,
+    );
     let checksums = Command::new("bash")
         .current_dir(&release)
         .arg("-c")
@@ -882,12 +888,23 @@ fn stage_fake_installer_release(dir: &Path) -> (PathBuf, PathBuf) {
     (release, fakebin)
 }
 
+/// Reads a small text file the test wrote or expects.
+#[cfg(unix)]
+fn read_text(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+}
+
+/// Whether anything, even a dangling link, stands at `path`.
+#[cfg(unix)]
+fn present(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok()
+}
+
 /// Runs the whole installer against a local release. A skill directory the
 /// installer replaces, and a `<name>.pre-native-v3` backup an earlier installer
 /// left beside the links, both end up under the data directory: an agent loads
 /// every directory in its skill directory as a skill. A re-run moves nothing,
 /// and an existing backup stops the run before anything is linked.
-#[cfg(unix)]
 #[cfg(unix)]
 #[test]
 fn installer_keeps_skill_backups_outside_the_skills_directory() {
@@ -940,27 +957,16 @@ fn installer_keeps_skill_backups_outside_the_skills_directory() {
     assert!(first.status.success(), "{first:?}");
     assert!(only_links(), "{:?}", entries(&skills));
     let kept = entries(&backups);
+    let copy = backups.join("fsl-20000101T000000Z");
+    let legacy = backups.join("fsl-old.pre-native-v3");
     assert_eq!(kept.len(), 2, "{kept:?}");
-    let copy = kept
-        .iter()
-        .find(|name| name.starts_with("fsl-2"))
-        .expect("the hand copy's backup");
-    assert_eq!(
-        std::fs::read_to_string(backups.join(copy).join("SKILL.md")).unwrap(),
-        "hand copy"
-    );
-    assert_eq!(
-        std::fs::read_to_string(backups.join("fsl-old.pre-native-v3/SKILL.md")).unwrap(),
-        "legacy"
-    );
-    assert!(stdout.contains(&format!(
-        "previous copy preserved at {}",
-        backups.join(copy).display()
-    )));
+    assert_eq!(read_text(&copy.join("SKILL.md")), "hand copy");
+    assert_eq!(read_text(&legacy.join("SKILL.md")), "legacy");
+    assert!(stdout.contains(&format!("previous copy preserved at {}", copy.display())));
     assert!(stdout.contains(&format!(
         "{} -> {}",
         skills.join("fsl-old.pre-native-v3").display(),
-        backups.join("fsl-old.pre-native-v3").display()
+        legacy.display()
     )));
 
     // A re-run finds every link current and moves nothing.
@@ -969,28 +975,41 @@ fn installer_keeps_skill_backups_outside_the_skills_directory() {
     assert!(only_links());
     assert_eq!(entries(&backups), kept);
 
-    // A backup already at the destination is never overwritten.
+    // A backup already at the destination is never overwritten, and the
+    // preflight stops the run before it writes even the command links: the
+    // missing `fslc` link would otherwise be recreated before the skill phase.
+    let command = home.join(".local/bin/fslc");
+    let refuse = |case: &str| {
+        let refused = install();
+        assert!(!refused.status.success(), "{case}: {refused:?}");
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("already exists"));
+        assert!(
+            !present(&command),
+            "{case}: the preflight must stop the run"
+        );
+        assert!(!present(&skills.join("fsl-verify")), "{case}");
+    };
+    std::fs::remove_file(&command).unwrap();
+    std::fs::remove_file(skills.join("fsl-verify")).unwrap();
     write(
         &skills.join("fsl-old.pre-native-v3/SKILL.md"),
         "newer",
         false,
     );
-    std::fs::remove_file(skills.join("fsl-verify")).unwrap();
-    let refused = install();
-    assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("already exists"));
+    refuse("an earlier installer's backup");
     assert_eq!(
-        std::fs::read_to_string(skills.join("fsl-old.pre-native-v3/SKILL.md")).unwrap(),
+        read_text(&skills.join("fsl-old.pre-native-v3/SKILL.md")),
         "newer"
     );
-    assert_eq!(
-        std::fs::read_to_string(backups.join("fsl-old.pre-native-v3/SKILL.md")).unwrap(),
-        "legacy"
-    );
-    assert!(
-        std::fs::symlink_metadata(skills.join("fsl-verify")).is_err(),
-        "the run must stop before linking"
-    );
+    assert_eq!(read_text(&legacy.join("SKILL.md")), "legacy");
+
+    // The same holds for a backup that this run would name.
+    std::fs::remove_dir_all(skills.join("fsl-old.pre-native-v3")).unwrap();
+    std::fs::remove_file(skills.join("fsl")).unwrap();
+    write(&skills.join("fsl/SKILL.md"), "second copy", false);
+    refuse("this run's backup name");
+    assert_eq!(read_text(&skills.join("fsl/SKILL.md")), "second copy");
+    assert_eq!(read_text(&copy.join("SKILL.md")), "hand copy");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
