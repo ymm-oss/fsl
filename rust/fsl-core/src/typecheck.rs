@@ -245,6 +245,56 @@ pub(crate) fn expression_env(model: &KernelModel, bindings: &[(String, TypeRef)]
     env
 }
 
+/// `base_env` of the last model typed on this thread, with the exact inputs it read.
+type CachedBaseEnv = (
+    Vec<(String, TypeRef)>,
+    BTreeMap<String, crate::FslValue>,
+    BTreeMap<String, TypeDef>,
+    TypeEnv,
+);
+
+thread_local! {
+    static BASE_ENV: std::cell::RefCell<Option<CachedBaseEnv>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` on an environment equal to `expression_env(model, bindings)`. The
+/// symbolic engines type expressions per evaluation, and rebuilding `base_env`
+/// each time made `refine`'s progress check about 1.4x slower; it is reused
+/// while state, consts and types compare equal, and the bindings are undone
+/// afterwards.
+pub(crate) fn with_expression_env<R>(
+    model: &KernelModel,
+    bindings: &[(String, TypeRef)],
+    f: impl FnOnce(&TypeEnv) -> R,
+) -> R {
+    let cached = BASE_ENV.with(|cell| cell.borrow_mut().take());
+    let (state, consts, types, mut env) = cached
+        .filter(|(state, consts, types, _)| {
+            *state == model.state && *consts == model.consts && *types == model.types
+        })
+        .unwrap_or_else(|| {
+            let (state, consts) = (model.state.clone(), model.consts.clone());
+            (state, consts, model.types.clone(), base_env(model))
+        });
+    let saved = bindings
+        .iter()
+        .map(|(name, _)| (name, env.types.get(name).cloned()))
+        .collect::<Vec<_>>();
+    env.extend_lexical(bindings);
+    let result = f(&env);
+    for (name, ty) in saved.into_iter().rev() {
+        match ty {
+            Some(ty) => env.types.insert(name.clone(), ty),
+            None => env.types.remove(name),
+        };
+    }
+    // `base_env` marks no name lexical; every mark came from these bindings.
+    env.lexical.clear();
+    BASE_ENV.with(|cell| *cell.borrow_mut() = Some((state, consts, types, env)));
+    result
+}
+
 fn enum_member_owners(model: &KernelModel, member: &str) -> Vec<String> {
     model
         .types
@@ -261,6 +311,38 @@ fn enum_member_owners(model: &KernelModel, member: &str) -> Vec<String> {
 #[cfg(test)]
 #[path = "issue_1683_old_walk_tests.rs"]
 mod issue_1683_old_walk_tests;
+
+#[cfg(test)]
+mod expression_env_reuse_tests {
+    use super::*;
+
+    #[test]
+    fn reused_environment_keeps_no_lexical_mark() {
+        let source =
+            "spec M { state { x:Bool } init { x=false } action go() {} invariant P { true } }";
+        let kernel = crate::parse_kernel_source(source, &crate::FsResolver::new(".")).unwrap();
+        let model = crate::build_model(kernel).unwrap();
+        let bindings = [
+            ("x".to_owned(), TypeRef::Int),
+            ("y".to_owned(), TypeRef::Bool),
+        ];
+        with_expression_env(&model, &bindings, |env| {
+            assert!(env.lexical.contains("x") && env.lexical.contains("y"));
+        });
+        let cached = BASE_ENV
+            .with(|cell| cell.borrow_mut().take())
+            .expect("cached env");
+        let (.., env) = &cached;
+        assert!(
+            env.lexical.is_empty(),
+            "stale lexical marks: {:?}",
+            env.lexical
+        );
+        assert_eq!(env.types, base_env(&model).types);
+        BASE_ENV.with(|cell| *cell.borrow_mut() = Some(cached));
+        with_expression_env(&model, &[], |env| assert!(env.lexical.is_empty()));
+    }
+}
 
 pub(crate) fn resolve(model: &KernelModel, ty: &TypeRef) -> Result<TypeRef, TypecheckError> {
     match ty {
