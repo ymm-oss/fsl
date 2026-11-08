@@ -80,11 +80,29 @@ pub(crate) fn run_prepared_roots(
     result
 }
 
+/// The native filesystem resolver, recording each import it reads as an input
+/// of the command so an output never replaces it.
+pub(crate) struct InputResolver {
+    files: fsl_core::FsResolver,
+    base: std::path::PathBuf,
+}
+
+impl fsl_core::FileResolver for InputResolver {
+    fn read(&self, path: &str) -> Result<String, fsl_core::CoreError> {
+        let source = self.files.read(path)?;
+        crate::output_publication::note_input(&self.base.join(path));
+        Ok(source)
+    }
+}
+
 pub(crate) fn dependency_resolver(
     base: &Path,
-) -> fslc_rust::migration::DependencyResolver<'static, fsl_core::FsResolver> {
+) -> fslc_rust::migration::DependencyResolver<'static, InputResolver> {
     fslc_rust::migration::DependencyResolver::native(
-        fsl_core::FsResolver::new(base),
+        InputResolver {
+            files: fsl_core::FsResolver::new(base),
+            base: base.to_owned(),
+        },
         base,
         *crate::process::parse_options(),
         &envelope,
@@ -365,19 +383,25 @@ pub(crate) fn read_spec_source_shown_as(
     path: &Path,
     shown: &Path,
 ) -> Result<String, SpecLoadError> {
-    std::fs::read_to_string(path)
-        .map_err(|error| SpecLoadError::Io(read_failure_message(shown, &error)))
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| SpecLoadError::Io(read_failure_message(shown, &error)))?;
+    crate::output_publication::note_input(path);
+    Ok(source)
 }
 
 /// Read a non-spec input file (a record, key, trace, log, evidence or
 /// artifact), reporting a failure with [`read_failure_message`].
 pub(crate) fn read_input_text(path: &Path) -> Result<String, String> {
-    std::fs::read_to_string(path).map_err(|error| read_failure_message(path, &error))
+    let text = std::fs::read_to_string(path).map_err(|error| read_failure_message(path, &error))?;
+    crate::output_publication::note_input(path);
+    Ok(text)
 }
 
 /// [`read_input_text`] for a file whose bytes are hashed or decoded later.
 pub(crate) fn read_input_bytes(path: &Path) -> Result<Vec<u8>, String> {
-    std::fs::read(path).map_err(|error| read_failure_message(path, &error))
+    let bytes = std::fs::read(path).map_err(|error| read_failure_message(path, &error))?;
+    crate::output_publication::note_input(path);
+    Ok(bytes)
 }
 
 /// The `kind:"io"` envelope for an input failure that is not a spec read:

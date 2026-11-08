@@ -101,6 +101,39 @@ schemas, and language semantics are unchanged.
   similar metadata are outside this contract. No OS-specific attribute-copying
   machinery is added.
 
+## Amendment: an input is never an output target
+
+`fslc html s.fsl -o s.fsl` used to replace the spec with the report. The helper
+now refuses, before anything is written, a target that is the same file as one
+this process read as a command input. Identity is the file, not its spelling:
+device and inode on Unix, so `./s.fsl`, `../dir/s.fsl`, a symlink to `s.fsl`
+and a hard link to it all match; elsewhere a canonicalized path, which does not
+detect a second hard-link name. The refusal is an `io` error with exit 2 and
+the message `output target is an input of this command`, in the same envelope
+as the other refusals here (including `testgen`'s envelope without `kind`).
+
+The inputs are the files read through the shared read helpers: the spec or
+document argument, every file an import, `use ... from`, `implements ... from`
+or refinement reference loads through the native filesystem resolver, and
+explicit file options such as `--evidence`, `--glossary`, `--approval`,
+`--trust-key`, `--signing-key`, `--artifact`, `--impl-log`, `--scope`,
+`--mapping` and `--from-log`. `domain generate` and `causal observe-expectations`
+check every destination before their first write. The prior artifact that an
+approval record names as its reviewed target is read to compare digests, not
+as an input, so regenerating that artifact in place stays allowed.
+`migrate --write` and the verification cache do not use this helper and are
+unchanged.
+
+Recording starts in the native CLI's `main`, which runs one command per
+process; code that calls a command function in-process (unit tests) records
+nothing, so one test's inputs never refuse another test's outputs.
+
+Limits: a file is recorded only after it was read, and the check is not a
+guard against concurrent path mutation. Reads outside the shared helpers (for
+example a resolver built inside `fsl-tools`) are not recorded; each such
+command still records its primary input, which is the file those resolvers
+start from.
+
 The guarantee is complete per-file publication, not power-loss durability.
 There is no file `fsync`, parent-directory sync, backup set, or rollback layer.
 There is also no new guarantee against concurrent path mutation or a hostile

@@ -692,6 +692,7 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 | 相対パスの AI の `dataset.source` (#1421) | 呼び出し側から解決 | 宣言したファイルのディレクトリから解決 | リポジトリを前置したパスを書き直すか、`--records` を渡します |
 | シンボリックリンクや、`/dev/null`、`/dev/stdout`、`/dev/fd/63` のような通常ファイルでないものへの `-o` (#1419) | 書き込む | 拒否、終了コード 2。書き込める親ディレクトリが必要 | 通常ファイルに書くか、標準出力を読みます |
 | 書き換え対象の読み取り専用の入力への `migrate --write`(#1419 と同じ拒否) | 書き換える。`"written": true`、終了コード 0。モードは読み取り専用のまま | 拒否、`kind: "io"`、終了コード 2。集合のどのファイルも書き込まない | 先にファイルを書き込み可能にします |
+| `html s.fsl -o s.fsl` のように、コマンドが読むファイルを出力先にする(`./s.fsl`、symlink、ハードリンク経由も含む)(#1440) | 入力を置き換える | 何も書く前に拒否、`kind: "io"`、終了コード 2 | 別のパスに書きます |
 | ほかに finding のないヘッダーのない文書への `lint --edition next`(または `5`) (#1434) | 終了コード 0 | `missing_edition_header`、終了コード 1 | `--edition` を付けないか、ヘッダーを書きます |
 | ヘッダーのない文書への引数なしの `fslc migrate` (#1434) | 対象は同じく `next` だが、何も計画しない(`"edition":"next","changed":0`) | `fsl 5` と process 形式の変換を計画。`migrate_manual_required` は終了コード 1 | `--edition current` を渡します |
 | 不正な `--edition` の値 (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | メッセージの照合を直します |
@@ -2579,7 +2580,9 @@ native の artifact のファイル出力(`-o` と承認 record)は各ファイ�
 失敗しても既存の内容を保ちます。パスの最後の要素が symlink でも辿らず、通常ファイルでない出力先は
 すべて拒否します。`-o /dev/null`、`-o /dev/stdout`、`/dev/fd/63` のようなプロセス置換も対象です。
 親ディレクトリには書き込み権限が必要で、書き込み可能な既存ファイルを置き換える場合も同じです。
-これらの拒否は `io` エラー(exit 2)です。異常終了すると、所有者だけが読める `.fslc-output-*.tmp`
+コマンドが読む入力(仕様、import されたファイル、`--evidence` や `--artifact` などのファイル指定)と
+同じファイルへの出力は、何も書く前に拒否します。同じかどうかはファイルそのもので判定するので、
+`./s.fsl`、symlink、`s.fsl` へのハードリンクも同じファイルです。これらの拒否は `io` エラー(exit 2)です。異常終了すると、所有者だけが読める `.fslc-output-*.tmp`
 が出力先の隣に残ることがあります。完全な契約は
 `docs/design/DESIGN-atomic-artifact-output.md` にあります。
 `migrate --write` も、書き換える入力が読み取り専用なら同じ `io` エラー

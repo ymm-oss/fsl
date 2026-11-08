@@ -1,16 +1,84 @@
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+// Every file this CLI process read as a command input, by file identity rather
+// than spelling, so `./s.fsl`, a hard link or a symlink to `s.fsl` all match.
+// `None` until `record_inputs`: in-process unit tests that run several commands
+// in one process would otherwise see each other's inputs.
+static INPUTS: Mutex<Option<BTreeSet<FileIdentity>>> = Mutex::new(None);
+
+#[cfg(unix)]
+type FileIdentity = (u64, u64);
+
+#[cfg(not(unix))]
+type FileIdentity = PathBuf;
+
+// Follows symlinks: an input is read through them, and an output named by one
+// would replace what it names if the final-component refusal were removed.
+#[cfg(unix)]
+fn file_identity(path: &Path) -> io::Result<FileIdentity> {
+    use std::os::unix::fs::MetadataExt as _;
+    let metadata = fs::metadata(path)?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+// Without a stable file id in std, a canonical path is the identity; it does
+// not detect a second hard-link name.
+#[cfg(not(unix))]
+fn file_identity(path: &Path) -> io::Result<FileIdentity> {
+    fs::canonicalize(path)
+}
+
+/// Start recording inputs for this process's one command invocation.
+pub(super) fn record_inputs() {
+    *INPUTS.lock().unwrap_or_else(PoisonError::into_inner) = Some(BTreeSet::new());
+}
+
+/// Record a file that was read as an input, after the read succeeded.
+pub(super) fn note_input(path: &Path) {
+    let mut inputs = INPUTS.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(inputs) = inputs.as_mut()
+        && let Ok(identity) = file_identity(path)
+    {
+        inputs.insert(identity);
+    }
+}
+
+/// Refuse an output target that is the same file as a recorded input, so a
+/// caller that publishes several files can check them all before the first.
+pub(super) fn refuse_input_target(path: &Path) -> io::Result<()> {
+    // A missing or unreadable target is no recorded input; the publication
+    // checks below report it.
+    let Ok(identity) = file_identity(path) else {
+        return Ok(());
+    };
+    if INPUTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|inputs| inputs.contains(&identity))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "output target is an input of this command",
+        ));
+    }
+    Ok(())
+}
 
 /// Publish complete artifact bytes without truncating the existing output.
 /// Parent creation and error framing remain the caller's responsibility.
 pub(super) fn publish(path: &Path, content: impl AsRef<[u8]>) -> io::Result<()> {
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+    refuse_input_target(path)?;
     let permissions = match fs::symlink_metadata(path) {
         Ok(metadata) => {
             // Do not follow a final symlink or replace a FIFO/device/directory.

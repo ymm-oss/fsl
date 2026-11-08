@@ -830,6 +830,12 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <td>先にファイルを書き込み可能にします</td>
 </tr>
 <tr>
+<td><code>html s.fsl -o s.fsl</code> のように、コマンドが読むファイルを出力先にする(<code>./s.fsl</code>、symlink、ハードリンク経由も含む)(#1440)</td>
+<td>入力を置き換える</td>
+<td>何も書く前に拒否、<code>kind: "io"</code>、終了コード 2</td>
+<td>別のパスに書きます</td>
+</tr>
+<tr>
 <td>ほかに finding のないヘッダーのない文書への <code>lint --edition next</code>(または <code>5</code>) (#1434)</td>
 <td>終了コード 0</td>
 <td><code>missing_edition_header</code>、終了コード 1</td>
@@ -2824,7 +2830,9 @@ ledger の警告は、種類ごとの1つの表示表で検出種別・要約・
 失敗しても既存の内容を保ちます。パスの最後の要素が symlink でも辿らず、通常ファイルでない出力先は
 すべて拒否します。<code>-o /dev/null</code>、<code>-o /dev/stdout</code>、<code>/dev/fd/63</code> のようなプロセス置換も対象です。
 親ディレクトリには書き込み権限が必要で、書き込み可能な既存ファイルを置き換える場合も同じです。
-これらの拒否は <code>io</code> エラー(exit 2)です。異常終了すると、所有者だけが読める <code>.fslc-output-*.tmp</code>
+コマンドが読む入力(仕様、import されたファイル、<code>--evidence</code> や <code>--artifact</code> などのファイル指定)と
+同じファイルへの出力は、何も書く前に拒否します。同じかどうかはファイルそのもので判定するので、
+<code>./s.fsl</code>、symlink、<code>s.fsl</code> へのハードリンクも同じファイルです。これらの拒否は <code>io</code> エラー(exit 2)です。異常終了すると、所有者だけが読める <code>.fslc-output-*.tmp</code>
 が出力先の隣に残ることがあります。完全な契約は
 <code>docs/design/DESIGN-atomic-artifact-output.md</code> にあります。
 <code>migrate --write</code> も、書き換える入力が読み取り専用なら同じ <code>io</code> エラー
