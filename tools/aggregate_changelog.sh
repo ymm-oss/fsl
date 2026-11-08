@@ -1034,9 +1034,11 @@ check_stale() {
 # verbatim. This applies the fragment rules to the section itself.
 #
 # Ids are the `#N` tokens inside the lead's parentheses, folded like fragment
-# ids (`#0691` is 691). A token right after `refs` is a cross-reference, not
-# the entry's own id, so `Fixed (#1678, refs #1281)` and `Fixed (#1281)` do
-# not collide. The breaking rule is narrower than "not under Fixed" on purpose:
+# ids (`#0691` is 691). Every id in a `refs` list (`refs #A`, `refs #A, #B`)
+# is a cross-reference, not the entry's own id, so `Fixed (#1678, refs #1281)`
+# and `Fixed (#1281)` do not collide. A breaking label is a label item that
+# starts with the word `breaking`; `non-breaking` and `not breaking` are not
+# breaking labels. The breaking rule is narrower than "not under Fixed" on purpose:
 # a breaking change modifies existing behavior, which is `changed`'s
 # definition in changelog.d/README.md, and readers look for breaking entries
 # there. Within a category, id order is not checked: the 5.0.0 section keeps
@@ -1115,22 +1117,39 @@ check_section_body() {
         report("changelog-section-order-invalid", "`" word "` after `" last_word "` breaks the declared category order")
       }
       if (rank[cat] > last_rank) { last_rank = rank[cat]; last_word = word }
-      if (tolower(paren) ~ /(^|[^a-z])breaking([^a-z]|$)/ && cat != "changed") {
-        report("changelog-section-breaking-outside-changed", "`" word " (" paren ")` carries a breaking label outside `Changed`")
-      }
-      t = split(paren, tok, /[ ,;]+/)
-      ids = 0
-      for (i = 1; i <= t; i++) {
-        if (tok[i] !~ /^#[0-9]+$/) continue
-        if (i > 1 && tolower(tok[i - 1]) == "refs") continue
-        id = substr(tok[i], 2) + 0
-        ids++
-        key = id SUBSEP cat
-        if (key in seen) {
-          report("changelog-section-duplicate-id", "#" id " appears twice under `" word "` (first at line " seen[key] ")")
-        } else {
-          seen[key] = NR
+      # The label is a comma-separated list of items. An item is a breaking
+      # label only when it starts with the word `breaking` (`breaking`,
+      # `breaking removal`), so `non-breaking` and `not breaking` are not.
+      # An item starting with `refs` opens a reference list: its ids, and
+      # those of the bare `#N` items that follow it (`refs #A, #B`), are
+      # cross-references, not ids of the entry itself.
+      labels = paren
+      gsub(/;/, ",", labels)
+      m = split(labels, item, ",")
+      ids = 0; breaking = 0; in_refs = 0
+      for (j = 1; j <= m; j++) {
+        s = item[j]
+        sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s)
+        ls = tolower(s)
+        if (ls ~ /^refs([ \t]|$)/) { in_refs = 1; continue }
+        if (in_refs && s ~ /^#[0-9]+$/) continue
+        in_refs = 0
+        if (ls ~ /^breaking([ \t]|$)/) breaking = 1
+        t = split(s, tok, /[ \t]+/)
+        for (i = 1; i <= t; i++) {
+          if (tok[i] !~ /^#[0-9]+$/) continue
+          id = substr(tok[i], 2) + 0
+          ids++
+          key = id SUBSEP cat
+          if (key in seen) {
+            report("changelog-section-duplicate-id", "#" id " appears twice under `" word "` (first at line " seen[key] ")")
+          } else {
+            seen[key] = NR
+          }
         }
+      }
+      if (breaking && cat != "changed") {
+        report("changelog-section-breaking-outside-changed", "`" word " (" paren ")` carries a breaking label outside `Changed`")
       }
       if (ids == 0) {
         report("changelog-section-id-missing", "`" word " (" paren ")` names no issue or pull-request id")
@@ -2268,6 +2287,23 @@ selftest_section() {
   # The 4.12.0 tail breaks three rules, so the floor is what keeps it out.
   st_expect_fail "check-section rejecting: an explicit --version below the floor is checked" \
     check_section --changelog "$tmp/good.md" --version 4.12.0
+  # A breaking label is an item that starts with `breaking`: a negated one is not.
+  st_write_section nonbrk.md "" "${good[@]:0:10}" "- Fixed (#18, non-breaking): a negated label under Fixed." "${good[@]:10}" ""
+  st_expect_pass "check-section accepting: \`non-breaking\` is not a breaking label" \
+    check_section --changelog "$tmp/nonbrk.md"
+  st_write_section notbrk.md "" "${good[@]:0:10}" "- Fixed (#19, not breaking): a negated label under Fixed." "${good[@]:10}" ""
+  st_expect_pass "check-section accepting: \`not breaking\` is not a breaking label" \
+    check_section --changelog "$tmp/notbrk.md"
+  # Every id of a `refs` list is a reference: #12 here would otherwise repeat Fixed #12.
+  st_write_section refslist.md "" "${good[@]:0:10}" "- Fixed (#20, refs #8, #12): a refs list of two ids." "${good[@]:10}" ""
+  st_expect_pass "check-section accepting: the second id of \`refs #A, #B\` is a reference" \
+    check_section --changelog "$tmp/refslist.md"
+  st_write_section refslistonly.md "" "${good[@]:0:10}" "- Fixed (refs #8, #21): only a refs list." "${good[@]:10}" ""
+  st_expect_fail "check-section rejecting: a lead whose ids are all in a refs list" \
+    check_section --changelog "$tmp/refslistonly.md"
+  st_write_section refsbrk.md "" "${good[@]:0:10}" "- Fixed (#22, refs #8, breaking): a label after a refs list." "${good[@]:10}" ""
+  st_expect_fail "check-section rejecting: a breaking label after a refs list still counts" \
+    check_section --changelog "$tmp/refsbrk.md"
 
   st_write_section dup.md "" "${good[@]}" "- Documented (#7): a second bullet for the same (id, category)." ""
   st_expect_fail "check-section rejecting: duplicate (id, category)" check_section --changelog "$tmp/dup.md"
