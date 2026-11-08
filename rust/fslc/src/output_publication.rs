@@ -21,15 +21,7 @@ pub(super) fn publish(path: &Path, content: impl AsRef<[u8]>) -> io::Result<()> 
                 ));
             }
             let permissions = metadata.permissions();
-            if permissions.readonly() {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "output target is read-only",
-                ));
-            }
-            // Replacement must not bypass the existing file's write access.
-            // Opening without truncate checks access without changing bytes.
-            OpenOptions::new().write(true).open(path)?;
+            ensure_writable(path, &permissions)?;
             Some(permissions)
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
@@ -54,6 +46,21 @@ pub(super) fn publish(path: &Path, content: impl AsRef<[u8]>) -> io::Result<()> 
         let _ = fs::remove_file(&temporary);
     }
     published
+}
+
+/// Refuse to replace an existing regular file this process cannot write.
+/// A rename onto the destination needs only parent-directory access, so every
+/// replacing writer (this helper and `migrate --write`) checks the file itself.
+pub(super) fn ensure_writable(path: &Path, permissions: &fs::Permissions) -> io::Result<()> {
+    if permissions.readonly() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "output target is read-only",
+        ));
+    }
+    // Opening without truncate checks access without changing bytes.
+    OpenOptions::new().write(true).open(path)?;
+    Ok(())
 }
 
 fn temporary_path(path: &Path, process_id: u32, nanos: u128, sequence: u64) -> PathBuf {

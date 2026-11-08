@@ -942,9 +942,12 @@ fn atomic_write_migrations(writes: &[(&Path, &str)]) -> Result<(), String> {
     if writes.is_empty() {
         return Ok(());
     }
-    let nonce = format!("{}", std::process::id());
-    let mut prepared = Vec::new();
-    for (index, (path, source)) in writes.iter().enumerate() {
+    // Refuse every target before preparing any replacement: a rename needs
+    // only parent-directory access, so the file's own write access is checked
+    // the way `-o` checks it (#1419), and a refused write set leaves no input
+    // rewritten and no temporary file behind.
+    let mut permissions = Vec::with_capacity(writes.len());
+    for (path, _) in writes {
         let metadata = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
         if !metadata.file_type().is_file() {
             return Err(format!(
@@ -952,20 +955,31 @@ fn atomic_write_migrations(writes: &[(&Path, &str)]) -> Result<(), String> {
                 path.display()
             ));
         }
+        output_publication::ensure_writable(path, &metadata.permissions())
+            .map_err(|error| error.to_string())?;
+        permissions.push(metadata.permissions());
+    }
+    let nonce = format!("{}", std::process::id());
+    let mut prepared = Vec::new();
+    for (index, ((path, source), permissions)) in writes.iter().zip(permissions).enumerate() {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let temp = parent.join(format!(".fslc-migrate-{nonce}-{index}.tmp"));
         let backup = parent.join(format!(".fslc-migrate-{nonce}-{index}.bak"));
-        let mut file = std::fs::OpenOptions::new()
+        let opened = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&temp)
-            .map_err(|error| error.to_string())?;
-        if let Err(error) = file
-            .write_all(source.as_bytes())
-            .and_then(|()| file.sync_all())
-            .and_then(|()| std::fs::set_permissions(&temp, metadata.permissions()))
-        {
-            let _ = std::fs::remove_file(&temp);
+            .open(&temp);
+        let result = opened.and_then(|mut file| {
+            file.write_all(source.as_bytes())
+                .and_then(|()| file.sync_all())
+                .and_then(|()| std::fs::set_permissions(&temp, permissions))
+                .inspect_err(|_| {
+                    let _ = std::fs::remove_file(&temp);
+                })
+        });
+        if let Err(error) = result {
+            // A failed creation never owned `temp`; earlier files' temporaries
+            // are ours and must not outlive the refused write set.
             for (_, temp, _) in &prepared {
                 let _ = std::fs::remove_file(temp);
             }

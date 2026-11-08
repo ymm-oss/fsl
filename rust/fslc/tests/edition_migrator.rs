@@ -1264,8 +1264,9 @@ fn multi_file_prepare_io_failure_leaves_every_input_unchanged() {
     std::fs::create_dir(&locked).expect("locked directory");
     let first = writable.join("first.fsl");
     let second = locked.join("second.fsl");
-    let first_source = "domain First { type E = A | B }\n";
-    let second_source = "domain Second { type E = A | B }\n";
+    // Both inputs check and change, so the exit is the prepare failure.
+    let first_source = LEGACY_COLON_QUANTIFIER;
+    let second_source = LEGACY_COLON_QUANTIFIER;
     std::fs::write(&first, first_source).expect("first fixture");
     std::fs::write(&second, second_source).expect("second fixture");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555))
@@ -1282,8 +1283,140 @@ fn multi_file_prepare_io_failure_leaves_every_input_unchanged() {
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))
         .expect("unlock directory");
     assert_eq!(output.status.code(), Some(2));
+    assert_eq!(json(&output)["kind"], "io");
     assert_eq!(text(&first), first_source);
     assert_eq!(text(&second), second_source);
+    // The first file's temporary was prepared before the second failed.
+    assert_eq!(entries(&writable), vec![first]);
+    assert_eq!(entries(&locked), vec![second]);
+}
+
+/// A spec that checks and that `migrate --edition next` changes.
+#[cfg(unix)]
+const LEGACY_COLON_QUANTIFIER: &str = r"spec Quantifier {
+  const MAX = 1
+  type Id = 0..1
+  state { ready: Map<Id, Bool> }
+  init { forall i in 0..MAX: { ready[i] = false } }
+  invariant Typed { forall i in 0..MAX: ready[i] == true or ready[i] == false }
+}
+";
+
+#[cfg(unix)]
+fn entries(directory: &Path) -> Vec<PathBuf> {
+    let mut paths = std::fs::read_dir(directory)
+        .expect("read fixture directory")
+        .map(|entry| entry.expect("fixture entry").path())
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+#[cfg(unix)]
+fn migrate_write(paths: &[&PathBuf]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .arg("migrate")
+        .args(paths)
+        .args(["--edition", "next", "--write"])
+        .output()
+        .expect("run fslc")
+}
+
+#[cfg(unix)]
+fn mode(path: &Path) -> u32 {
+    std::fs::metadata(path)
+        .expect("metadata")
+        .permissions()
+        .mode()
+        & 0o777
+}
+
+/// `migrate --write` replaces inputs by rename, which needs only the parent
+/// directory's write access. It refuses a read-only input exactly as `-o`
+/// refuses a read-only output target (#1419), instead of reporting
+/// `written: true` over a file the user marked read-only.
+#[cfg(unix)]
+#[test]
+fn readonly_input_is_refused_like_a_readonly_output_target() {
+    use std::fs::{OpenOptions, Permissions};
+    let legacy = LEGACY_COLON_QUANTIFIER;
+    let directory = FixtureDir::new();
+    let readonly = directory.write("readonly.fsl", legacy);
+    std::fs::set_permissions(&readonly, Permissions::from_mode(0o444)).expect("mark read-only");
+    let precondition = OpenOptions::new().write(true).open(&readonly);
+    if precondition.is_ok() {
+        std::fs::set_permissions(&readonly, Permissions::from_mode(0o644)).expect("restore");
+        panic!("qualification requires nonprivileged process without DAC override; not a skip");
+    }
+
+    // The #1419 reference envelope for the same refusal.
+    let artifact = directory.write("artifact.md", "previous artifact\n");
+    std::fs::set_permissions(&artifact, Permissions::from_mode(0o444)).expect("mark read-only");
+    // `document generate` needs a repository-relative source identity.
+    let reference = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "document",
+            "generate",
+            "examples/pm/cancel_system.fsl",
+            "-o",
+        ])
+        .arg(&artifact)
+        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .output()
+        .expect("run fslc");
+    assert_eq!(reference.status.code(), Some(2));
+    let reference = json(&reference);
+    assert_eq!(reference["kind"], "io", "{reference:#}");
+    assert_eq!(text(&artifact), "previous artifact\n");
+
+    let output = migrate_write(&[&readonly]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(json(&output), reference);
+    assert_eq!(text(&readonly), legacy);
+    assert_eq!(mode(&readonly), 0o444);
+
+    // A symlink to the read-only file is refused without following it.
+    let link = directory.0.join("link.fsl");
+    std::os::unix::fs::symlink("readonly.fsl", &link).expect("symlink");
+    let output = migrate_write(&[&link]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(json(&output)["kind"], "io");
+    assert_eq!(text(&readonly), legacy);
+
+    // One read-only file refuses the whole write set, in either order.
+    let writable = directory.write("writable.fsl", legacy);
+    for order in [[&writable, &readonly], [&readonly, &writable]] {
+        let output = migrate_write(&order);
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(json(&output), reference);
+        assert_eq!(text(&writable), legacy);
+        assert_eq!(text(&readonly), legacy);
+    }
+    assert_eq!(
+        entries(&directory.0),
+        vec![
+            artifact.clone(),
+            link.clone(),
+            readonly.clone(),
+            writable.clone()
+        ]
+    );
+
+    // Positive control: a writable input is still rewritten, keeping its mode.
+    std::fs::set_permissions(&writable, Permissions::from_mode(0o640)).expect("mode");
+    let output = migrate_write(&[&writable]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(json(&output)["written"], true);
+    assert!(
+        text(&writable).contains("forall i in 0..MAX {"),
+        "{}",
+        text(&writable)
+    );
+    assert_eq!(mode(&writable), 0o640);
+    assert_eq!(
+        entries(&directory.0),
+        vec![artifact, link, readonly, writable]
+    );
 }
 
 // #517: `lint`/`migrate` previously only ran checked-model validation on the
