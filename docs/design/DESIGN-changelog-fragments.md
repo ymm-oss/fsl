@@ -800,6 +800,19 @@ second record of any change. The section stays the single authoritative record,
 and the fallback without a summary is the old body byte for byte. The rollback
 below is therefore unaffected (`docs/design/RELEASE.md` §1, step 8).
 
+**Amendment (#1763, release-section check).** The controls above validate
+fragments, not the section they become. The 5.0.0 section, edited by hand after
+aggregation (#1732, #1733), listed breaking removals under `Fixed`, repeated
+#1170, #1437 and #1440 within one category, and stated several changes twice as
+`Changed` and `Fixed`. `tools/aggregate_changelog.sh check-section` now applies
+the fragment rules to each released section from 5.0.0 on: a declared category
+lead with an id, the declared category order, one (id, category) pair, and a
+`breaking` or `breaking removal` label only under `Changed`. Within a category
+it does not check id order, which the 5.0.0 section does not keep. Older
+sections predate these rules and fail them, so they are not checked. The check
+runs in the merge-readiness automation lane; `selftest` holds its accepting and
+rejecting fixtures.
+
 ## Migration: six named sites
 
 1. New `tools/aggregate_changelog` (stdlib-only) plus executable tests for all six controls,
