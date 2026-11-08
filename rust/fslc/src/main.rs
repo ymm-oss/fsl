@@ -744,6 +744,8 @@ fn run_migrate_inner(
         files.push(json!({
             "path":path,
             "changed":migrated.is_some(),
+            // Set once the write set is committed; nothing is written before.
+            "written":false,
             "findings":plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), edition)).collect::<Vec<_>>(),
             "edits":migrated.map(|replacement| vec![json!({"start":0,"end":source.len(),"replacement":replacement})]).unwrap_or_default(),
         }));
@@ -787,6 +789,11 @@ fn run_migrate_inner(
         if let Err(error) = atomic_write_migrations(&writes) {
             return error_exit(io_error_output(&error));
         }
+        // `written` reports the files replaced, not the `--write` request:
+        // an input that needs no rewrite is left untouched (#1754).
+        for (file, (_, source)) in files.iter_mut().zip(&planned) {
+            file["written"] = json!(source.is_some());
+        }
     }
     let changed = planned
         .iter()
@@ -798,7 +805,7 @@ fn run_migrate_inner(
             "result":"migrated",
             "edition":options.requested_edition(),
             "changed":changed,
-            "written":options.write,
+            "written":options.write && changed > 0,
             "files":files,
         }),
         0,

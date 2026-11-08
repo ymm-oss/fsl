@@ -35,7 +35,12 @@ extension-agnostic behavior.
 
 `fslc migrate PATH... --edition next` is a dry run. It emits the same findings
 plus a complete replacement edit for each changed file. `--write` is the only
-mutating mode. The command plans every input in memory, parses and checks the
+mutating mode, and it replaces only the changed inputs. `written` reports those
+replacements, not the `--write` flag (#1754): the top-level `written` is `true`
+only when at least one input was replaced, and each `files[]` entry's `written`
+is `true` only for a replaced input. An unchanged input is never rewritten (its
+inode and mtime stay), and a dry run, a refusal and `migrate_manual_required`
+report `written: false` everywhere. The command plans every input in memory, parses and checks the
 before/after sources, compares location-free Public Kernel JSON, prepares and
 syncs sibling temporary files, then replaces the validated set. Before it
 prepares any temporary file, every changed input must be a regular file (not a

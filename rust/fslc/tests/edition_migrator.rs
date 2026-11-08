@@ -1343,6 +1343,94 @@ const LEGACY_COLON_QUANTIFIER: &str = r"spec Quantifier {
 }
 ";
 
+/// `written` reports the files the run replaced, at the top level and on each
+/// `files[]` entry, not the `--write` request (#1754). An input that needs no
+/// rewrite is neither replaced (same inode and bytes) nor reported written.
+#[test]
+fn written_reports_only_the_files_a_write_replaces() {
+    let directory = FixtureDir::new();
+    // A fixed point of the migration: the quantifier fixture once migrated.
+    let seed = directory.write("seed.fsl", LEGACY_COLON_QUANTIFIER);
+    let seed_path = seed.to_str().expect("UTF-8 path");
+    let output = run(&["migrate", seed_path, "--edition", "next", "--write"]);
+    assert_eq!(output.status.code(), Some(0), "{:#}", json(&output));
+    let migrated = text(&seed);
+    assert_ne!(migrated, LEGACY_COLON_QUANTIFIER);
+    let unchanged = directory.write("unchanged.fsl", &migrated);
+    let changed = directory.write("changed.fsl", LEGACY_COLON_QUANTIFIER);
+    let unchanged_path = unchanged.to_str().expect("UTF-8 path");
+    let changed_path = changed.to_str().expect("UTF-8 path");
+    let identity = |path: &Path| {
+        let metadata = std::fs::metadata(path).expect("metadata");
+        #[cfg(unix)]
+        let inode = std::os::unix::fs::MetadataExt::ino(&metadata);
+        #[cfg(not(unix))]
+        let inode = 0_u64;
+        (inode, metadata.modified().expect("mtime"), text(path))
+    };
+    let written = |output: &Value| {
+        output["files"]
+            .as_array()
+            .expect("files")
+            .iter()
+            .map(|file| (file["changed"].clone(), file["written"].clone()))
+            .collect::<Vec<_>>()
+    };
+
+    // `--write` with nothing to rewrite writes nothing and says so.
+    let before = identity(&unchanged);
+    let output = run(&["migrate", unchanged_path, "--edition", "next", "--write"]);
+    let report = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{report:#}");
+    assert_eq!(report["changed"], 0, "{report:#}");
+    assert_eq!(report["written"], false, "{report:#}");
+    assert_eq!(
+        written(&report),
+        vec![(Value::Bool(false), Value::Bool(false))]
+    );
+    assert_eq!(identity(&unchanged), before);
+
+    // A dry run over both reports nothing written and writes nothing.
+    let args = ["migrate", changed_path, unchanged_path, "--edition", "next"];
+    let output = run(&args);
+    let report = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{report:#}");
+    assert_eq!(report["changed"], 1, "{report:#}");
+    assert_eq!(report["written"], false, "{report:#}");
+    assert_eq!(
+        written(&report),
+        vec![
+            (Value::Bool(true), Value::Bool(false)),
+            (Value::Bool(false), Value::Bool(false))
+        ]
+    );
+    assert_eq!(text(&changed), LEGACY_COLON_QUANTIFIER);
+
+    // Positive control: with one changed input, `written` is true, and only
+    // that input is replaced.
+    let output = run(&[
+        "migrate",
+        changed_path,
+        unchanged_path,
+        "--edition",
+        "next",
+        "--write",
+    ]);
+    let report = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{report:#}");
+    assert_eq!(report["changed"], 1, "{report:#}");
+    assert_eq!(report["written"], true, "{report:#}");
+    assert_eq!(
+        written(&report),
+        vec![
+            (Value::Bool(true), Value::Bool(true)),
+            (Value::Bool(false), Value::Bool(false))
+        ]
+    );
+    assert_eq!(text(&changed), migrated);
+    assert_eq!(identity(&unchanged), before);
+}
+
 #[cfg(unix)]
 fn entries(directory: &Path) -> Vec<PathBuf> {
     let mut paths = std::fs::read_dir(directory)
