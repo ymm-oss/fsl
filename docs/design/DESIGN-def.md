@@ -53,6 +53,20 @@ keeps the kernel and cross-file name-resolution surface unchanged.
   Non-global pattern bindings exported from `requires` or a binary left operand
   also count as caller bindings and now reject calls that capture def free names.
 
+- Breaking removal (#1335): a compose-level definition is validated by the
+  same expander as a direct spec's, before alias resolution and sync argument
+  substitution, whether or not anything calls it. `fslc` 4.12.0 `check` accepted
+  an unused compose definition with exit 0 even when a direct spec rejects it.
+  These unused forms now reject with exit 2 and the direct-spec diagnostic:
+  a repeated definition (`kind: "name"`, `duplicate def '<name>'`), a repeated
+  parameter (`name`, `duplicate parameter in def '<name>'`), direct or mutual
+  recursion (`semantics`, `recursive predicate definition is not allowed: <cycle>`),
+  and, in a definition body, a call to an undefined predicate (`name`,
+  `undefined predicate '<name>'`) or a call with the wrong arity (`semantics`,
+  `predicate '<name>' expects <n> argument(s), got <m>`). Remove or rename the
+  repeat, break the recursion, or correct the call. No compatibility bypass is
+  provided. Measurements are under "Compose definition validation evidence (#1335)".
+
 The capture rules favor an explicit local repair over silently changing meaning
 or leaking compiler-generated names into counterexamples.
 
@@ -150,6 +164,61 @@ pairs confirm those timing differences; only those numeric token spans are
 masked, preserving all other bytes. No verdict, location, assurance, solver
 counter, memory value or trace field is excluded. BMC agreement at depth 4 is
 bounded evidence; declaration-binder capture is rejected separately by #1528.
+
+## Compose definition validation evidence (#1335)
+
+#1335 (PR #1527) expands compose-level definitions with the source-local
+expander described above. The rejection rules apply to them for the first time,
+including definitions that nothing calls; PR #1527 called this a narrowing, and
+it is a breaking removal.
+
+The transition was measured with `FSLC_CACHE=off fslc check <file>` on the
+`fslc` 4.12.0 release binary and on a native 5.0.0 debug build of `main` at
+`2bcb2742c698330a4322055fa87fe313bcf0bf05`. Each compose uses one three-line
+component and adds only the unused definitions below:
+
+| Unused compose definitions | 4.12.0 | 5.0.0 |
+|---|---|---|
+| `def ready() = true` and `def ready() = false` | exit 0, `ok` | exit 2, `name`, `duplicate def 'ready'` |
+| `def looped() = looped()` | exit 0, `ok` | exit 2, `semantics`, `recursive predicate definition is not allowed: looped -> looped` |
+| `def p() = q()` and `def q() = p()` | exit 0, `ok` | exit 2, `semantics`, `recursive predicate definition is not allowed` |
+| `def p(x: Bool, x: Bool) = x` | exit 0, `ok` | exit 2, `name`, `duplicate parameter in def 'p'` |
+| `def p() = missing()` | exit 0, `ok` | exit 2, `name`, `undefined predicate 'missing'` |
+| `def p(x: Bool) = x` and `def q() = p()` | exit 0, `ok` | exit 2, `semantics`, `predicate 'p' expects 1 argument(s), got 0` |
+| `def ready() = true` (control) | exit 0, `ok` | exit 0, `ok` |
+
+The duplicate and direct-recursion rows were run twice on each binary with the
+same exits; the two 5.0.0 envelopes were identical. Each rejected form, written
+as a direct spec, exits 2 on both binaries. `loc` is absent; the message ends
+with `at <line>:<column>`. For a repeated definition or parameter and for
+recursion that position is the definition's; for an undefined or wrong-arity
+call it is the call's (`3:13` and `4:13` above). Two unused forms still check
+with exit 0 on 5.0.0: a definition whose nested call would capture a binder,
+and an ill-typed body that nothing calls.
+
+For mutual recursion the definition the reported cycle starts at varies between
+runs, so the message and position vary too. This is a known pre-existing
+nondeterminism, also present for direct specs on 4.12.0, and is not fixed here.
+Eight runs of the compose above gave `p -> q -> p at 3:3` six times and
+`q -> p -> q at 4:3` twice. Exit and kind do not vary.
+
+PR #1527 reported a paired `check` sweep of the 597 `.fsl` files under
+`specs/`, `examples/`, and `rust/fslc/tests/fixtures/`, base `9ad07c7ad832`
+and head `89425deff637`, with no transition; the corpus has none of these
+forms. That sweep was not repeated for this record.
+
+The regression tests are in
+`rust/fslc/tests/issue_1335_compose_predicate_expansion.rs`. They use
+component-less composes (composition state and the definitions only); 4.12.0
+`check` also exits 0 on all six of those forms. Each test checks the compose
+and a direct-spec control with the same layout, and expects exit 2 from both.
+`duplicate_def_matches_direct_spec_diagnostic_and_location`,
+`recursion_matches_direct_spec_even_when_unused`, and the repeated-parameter,
+undefined-call and wrong-arity cases of
+`unused_invalid_definitions_match_direct_spec` compare the two envelopes in full.
+Its mutual-recursion case requires each message to equal one of the two
+possible cycle messages and compares the two envelopes in full apart from
+`message`.
 
 ## Declaration-binder boundary evidence (#1528)
 

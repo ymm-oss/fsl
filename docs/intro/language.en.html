@@ -726,6 +726,11 @@ unsound or ambiguous, and the section linked from each row shows the rewrite.</p
 <td>Rename the binder at the call site; §3</td>
 </tr>
 <tr>
+<td>An unused compose-level <code>def</code> that a direct spec refuses: a repeated definition or parameter, direct or mutual recursion, or a call in its body to an undefined predicate or with the wrong arity (#1335)</td>
+<td>the direct-spec error, such as <code>duplicate def '&lt;name&gt;'</code> or <code>recursive predicate definition is not allowed</code></td>
+<td>Remove or rename the repeat, break the recursion, or correct the call; §3</td>
+</tr>
+<tr>
 <td>A local binding named like a <code>const</code> (#1515)</td>
 <td><code>local binding '&lt;name&gt;' shadows a constant of the same name</code></td>
 <td>Rename the local and its uses; §3</td>
@@ -1120,6 +1125,17 @@ recursive. They are expanded before semantic checking; the verifier and
 runtime see the same kernel expression as hand expansion. Expansion rejects
 variable capture instead of inventing internal binder names. See
 <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-def.md"><code>DESIGN-def.md</code></a>.</p>
+<p><strong>Breaking removal (#1335):</strong> a compose-level <code>def</code> is checked like a direct
+spec's, even when nothing calls it. <code>fslc</code> 4.12 accepted, with exit 0, an unused
+compose <code>def</code> that repeats a definition or parameter name, is directly or
+mutually recursive, or calls an undefined predicate or calls one with the wrong
+number of arguments. <code>fslc</code> 5.0 rejects each with exit 2 and the direct-spec
+error: <code>kind: "name"</code> for <code>duplicate def</code>, <code>duplicate parameter in def</code> and
+<code>undefined predicate</code>, and <code>kind: "semantics"</code> for
+<code>recursive predicate definition is not allowed</code> and
+<code>expects &lt;n&gt; argument(s), got &lt;m&gt;</code>. Remove or rename the repeat, break the
+recursion, or correct the call, then rerun <code>check</code>. There is no compatibility
+bypass.</p>
 <p><strong>Breaking removal (#1450):</strong> a call is rejected when an action parameter,
 <code>let</code>, expression quantifier/aggregate binder, or statement <code>forall</code> at the call
 site would capture a free name in the definition's expanded body. The def's own
@@ -3898,6 +3914,10 @@ as-is (design: <code>DESIGN-compose.md</code>).</p>
   Breaking removal (#1334): additional statements assigning component state via physical names such as <code>alias__x</code>, which previously passed <code>check</code>, now produce a located error too.
   Reference arguments may read only header parameters, consts, and state, not additional-item <code>let</code> bindings (breaking removal, #1442).
   Component free value reads and update roots resolve against the component's original declarations before merging, so composition cannot rescue an otherwise undeclared reference (breaking removal, #1442); public names remain legal, and an enum read that needs its owner protected still displays the source member spelling.</li>
+<li><strong>Compose <code>def</code> (breaking removal, #1335).</strong> A compose-level <code>def</code> expands before alias
+  resolution and synchronized argument substitution, as in a direct spec, and is validated
+  even when nothing calls it. An unused repeated, recursive or badly calling <code>def</code> that 4.12
+  accepted now fails <code>check</code> with exit 2; §3 lists the forms and errors.</li>
 <li><strong>Root-authored synchronized arguments (breaking removal, #1517).</strong> <code>check</code> types every
   synchronized argument against its formal parameter before substitution, including an
   argument whose formal the component action never reads. An argument can read root header

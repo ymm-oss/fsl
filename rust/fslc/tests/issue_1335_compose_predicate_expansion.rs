@@ -421,6 +421,62 @@ fn recursion_matches_direct_spec_even_when_unused() {
     );
 }
 
+// Breaking removal (#1335): fslc 4.12.0 `check` accepted each of these unused
+// compose definitions with exit 0; they now reject as in a direct spec.
+#[test]
+fn unused_invalid_definitions_match_direct_spec() {
+    // Mutual recursion: which definition the reported cycle starts at (and so
+    // the message and its position) varies between runs, in direct specs too.
+    // Each message must be one of the two cycles; every other field must
+    // match the direct-spec control exactly.
+    let body = "  def p() = q()\n  def q() = p()";
+    let source = format!(
+        "compose C {{\n  state {{ support: Bool }} init {{ support = false }}\n{body}\n}}\n"
+    );
+    let direct = source.replacen("compose C", "spec C", 1);
+    let dir = scratch(
+        "issue-1335-mutual",
+        &[("c.fsl", &source), ("direct.fsl", &direct)],
+    );
+    // The direct control keeps the compose layout, so both report the same
+    // definition positions.
+    let cycles = [
+        "recursive predicate definition is not allowed: p -> q -> p at 3:3",
+        "recursive predicate definition is not allowed: q -> p -> q at 4:3",
+    ];
+    let mut envelopes = Vec::new();
+    for file in ["direct.fsl", "c.fsl"] {
+        let (mut result, status) = check(&dir, file);
+        assert_eq!(status, 2, "{file}: {result}");
+        assert_eq!(result["result"], "error", "{file}: {result}");
+        assert_eq!(result["kind"], "semantics", "{file}: {result}");
+        let message = result
+            .as_object_mut()
+            .expect("envelope object")
+            .remove("message")
+            .expect("message");
+        assert!(
+            cycles.contains(&message.as_str().expect("message string")),
+            "{file}: unexpected message {message}"
+        );
+        envelopes.push(result);
+    }
+    assert_eq!(envelopes[1], envelopes[0]);
+    for (body, message) in [
+        (
+            "  def p(x: Bool, x: Bool) = x",
+            "duplicate parameter in def 'p'",
+        ),
+        ("  def p() = missing()", "undefined predicate 'missing'"),
+        (
+            "  def p(x: Bool) = x\n  def q() = p()",
+            "expects 1 argument(s), got 0",
+        ),
+    ] {
+        diagnostic_contract(body, message);
+    }
+}
+
 #[test]
 fn capture_rejection_matches_direct_spec() {
     diagnostic_contract(
