@@ -166,7 +166,11 @@ It also rejects a dynamic dependency on `libz3`.
    and this is the last chance to fix a wording issue
    directly in the version section (never in `[Unreleased]`, which control 4
    in `docs/design/DESIGN-changelog-fragments.md` protects even at this step, except
-   for exactly this move).
+   for exactly this move). Then run
+   `./tools/aggregate_changelog.sh check-section --version X.Y.Z`: it applies the
+   fragment rules to the section (declared category leads in order, one (id, category)
+   pair each, breaking labels only under `Changed`), and the merge-readiness automation
+   lane runs it on every released section from 5.0.0 on.
 
    **A version-only release with an empty `changelog.d/` is legitimate** (decided in review,
    #737, comment 2026-08-07, second round): the command above succeeds on an empty

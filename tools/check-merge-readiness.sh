@@ -247,6 +247,11 @@ check_automation() {
   # split check-product-gate-scope.sh's own `selftest` versus its real
   # `diff_scope` invocation uses.
   step ./tools/aggregate_changelog.sh selftest
+  # The fragment rules applied to the released CHANGELOG.md sections from
+  # 5.0.0 on (issue #1763): declared category leads in declared order, one
+  # (id, category) each, and breaking labels only under `Changed`. Pure, so it
+  # runs here rather than beside `check-pr` in merge-readiness.yml.
+  step ./tools/aggregate_changelog.sh check-section
   # Accepting/rejecting controls for the GitHub Release body that
   # release.yml's `assemble` and `publish` jobs build: summary versus
   # CHANGELOG section, emptiness, and both sides of the size limit

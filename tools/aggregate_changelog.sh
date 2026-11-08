@@ -96,6 +96,17 @@
 #   aggregate_changelog.sh check-stale
 #       Control 4's release-time half: fails if changelog.d/ still has any
 #       fragment at tag time.
+#   aggregate_changelog.sh check-section [--changelog FILE] [--version X.Y.Z]
+#       Applies the fragment rules to an aggregated `## [X.Y.Z]` section of
+#       CHANGELOG.md, where hand edits after `release` (and the pre-mechanism
+#       `[Unreleased]` body `release` moves verbatim) are not covered by
+#       `check`. Every top-level bullet must lead with a declared category
+#       word and an id, `- <Category> (#N[, ...]):`; categories must follow
+#       DECLARED_CATEGORY_ORDER; an (id, category) pair may appear once; and a
+#       `breaking` / `breaking removal` label may appear only under `Changed`.
+#       Without --version it checks every released section from
+#       CHECK_SECTION_FLOOR (5.0.0) on; older sections predate these rules and
+#       are not checked (issue #1763).
 #   aggregate_changelog.sh release --version X.Y.Z --date YYYY-MM-DD
 #       Aggregates every fragment into a new `## [X.Y.Z] - YYYY-MM-DD`
 #       section (preceded by whatever the existing `[Unreleased]` body still
@@ -1013,6 +1024,186 @@ check_stale() {
     fail "stale-fragments-present: ${files[*]}"
   fi
   echo "aggregate_changelog: check-stale PASS -- '$dir' has no fragments left"
+}
+
+# ---- release-section check (issue #1763) ----------------------------------
+#
+# `check` sees fragments, never what they become: a released section can still
+# be edited by hand (docs/design/RELEASE.md step 7; #1732 and #1733 did so for
+# 5.0.0), and `release` moves the pre-mechanism `[Unreleased]` body in
+# verbatim. This applies the fragment rules to the section itself.
+#
+# Ids are the `#N` tokens inside the lead's parentheses, folded like fragment
+# ids (`#0691` is 691). Every id in a `refs` list (`refs #A`, `refs #A, #B`)
+# is a cross-reference, not the entry's own id, so `Fixed (#1678, refs #1281)`
+# and `Fixed (#1281)` do not collide. A breaking label is a label item that
+# starts with the word `breaking`; `non-breaking` and `not breaking` are not
+# breaking labels. The breaking rule is narrower than "not under Fixed" on purpose:
+# a breaking change modifies existing behavior, which is `changed`'s
+# definition in changelog.d/README.md, and readers look for breaking entries
+# there. Within a category, id order is not checked: the 5.0.0 section keeps
+# the pre-mechanism body's and #1733's late entries where they were placed.
+#
+# Sections before CHECK_SECTION_FLOOR are not checked: they were written before
+# these rules (4.x sections use other lead shapes and repeat ids), and
+# rewriting released history is not this check's purpose.
+CHECK_SECTION_FLOOR=5.0.0
+
+# Succeeds when SemVer $1 >= $2.
+version_at_least() {
+  local a="$1" b="$2" i
+  local -a x y
+  IFS=. read -r -a x <<<"$a"
+  IFS=. read -r -a y <<<"$b"
+  for i in 0 1 2; do
+    if ((10#${x[$i]} > 10#${y[$i]})); then return 0; fi
+    if ((10#${x[$i]} < 10#${y[$i]})); then return 1; fi
+  done
+  return 0
+}
+
+# Prints the version of every `## [X.Y.Z]` heading in $1, in file order.
+released_section_versions() {
+  awk '
+    /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/ {
+      v = substr($0, 5); print substr(v, 1, index(v, "]") - 1)
+    }
+  ' "$1"
+}
+
+# Prints one diagnostic line per violation in section $2 of $1; exits 1 if
+# there was any, 2 if the section does not exist.
+check_section_body() {
+  local changelog="$1" version="$2"
+  awk -v want="$version" -v cats="${DECLARED_CATEGORY_ORDER[*]}" '
+    function report(code, msg) {
+      printf "%s: [%s] %s:%d: %s\n", code, want, FILENAME, NR, msg
+      bad++
+    }
+    BEGIN {
+      n = split(cats, c, " ")
+      for (i = 1; i <= n; i++) rank[c[i]] = i
+      heading = "## [" want "]"
+    }
+    /^## \[/ {
+      if (in_section) { in_section = 0; done = 1 }
+      if (!done && substr($0, 1, length(heading)) == heading) { in_section = 1; found = 1 }
+      next
+    }
+    !in_section { next }
+    /^[ \t]*$/ { next }
+    /^- / {
+      bullets++
+      line = $0
+      if (line !~ /^- [A-Z][a-z]+ \(/) {
+        report("changelog-section-lead-invalid", "bullet does not start with `- <Category> (`: " substr(line, 1, 60))
+        next
+      }
+      op = index(line, " (")
+      word = substr(line, 3, op - 3)
+      rest = substr(line, op + 2)
+      cl = index(rest, "):")
+      paren = substr(rest, 1, cl - 1)
+      if (cl == 0 || index(paren, "(") || index(paren, ")")) {
+        report("changelog-section-lead-invalid", "bullet lead has no `(...)`: label: " substr(line, 1, 60))
+        next
+      }
+      cat = tolower(word)
+      if (!(cat in rank)) {
+        report("changelog-section-category-undeclared", "`" word "` is not a declared category")
+        next
+      }
+      if (rank[cat] < last_rank) {
+        report("changelog-section-order-invalid", "`" word "` after `" last_word "` breaks the declared category order")
+      }
+      if (rank[cat] > last_rank) { last_rank = rank[cat]; last_word = word }
+      # The label is a comma-separated list of items. An item is a breaking
+      # label only when it starts with the word `breaking` (`breaking`,
+      # `breaking removal`), so `non-breaking` and `not breaking` are not.
+      # An item starting with `refs` opens a reference list: its ids, and
+      # those of the bare `#N` items that follow it (`refs #A, #B`), are
+      # cross-references, not ids of the entry itself.
+      labels = paren
+      gsub(/;/, ",", labels)
+      m = split(labels, item, ",")
+      ids = 0; breaking = 0; in_refs = 0
+      for (j = 1; j <= m; j++) {
+        s = item[j]
+        sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s)
+        ls = tolower(s)
+        if (ls ~ /^refs([ \t]|$)/) { in_refs = 1; continue }
+        if (in_refs && s ~ /^#[0-9]+$/) continue
+        in_refs = 0
+        if (ls ~ /^breaking([ \t]|$)/) breaking = 1
+        t = split(s, tok, /[ \t]+/)
+        for (i = 1; i <= t; i++) {
+          if (tok[i] !~ /^#[0-9]+$/) continue
+          id = substr(tok[i], 2) + 0
+          ids++
+          key = id SUBSEP cat
+          if (key in seen) {
+            report("changelog-section-duplicate-id", "#" id " appears twice under `" word "` (first at line " seen[key] ")")
+          } else {
+            seen[key] = NR
+          }
+        }
+      }
+      if (breaking && cat != "changed") {
+        report("changelog-section-breaking-outside-changed", "`" word " (" paren ")` carries a breaking label outside `Changed`")
+      }
+      if (ids == 0) {
+        report("changelog-section-id-missing", "`" word " (" paren ")` names no issue or pull-request id")
+      }
+      next
+    }
+    /^(  |\t)/ { if (bullets) next }
+    { report("changelog-section-line-invalid", "not a bullet, a continuation line or a blank line: " substr($0, 1, 60)) }
+    END {
+      if (!found) { printf "changelog-section-missing: no `## [%s]` section in %s\n", want, FILENAME; exit 2 }
+      exit (bad > 0)
+    }
+  ' "$changelog"
+}
+
+check_section() {
+  local changelog="CHANGELOG.md" version=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --changelog) [ "$#" -ge 2 ] || fail "check-section: --changelog needs a value"; changelog="$2"; shift 2 ;;
+      --version) [ "$#" -ge 2 ] || fail "check-section: --version needs a value"; version="$2"; shift 2 ;;
+      *) echo "usage: $0 check-section [--changelog FILE] [--version X.Y.Z]" >&2; exit 2 ;;
+    esac
+  done
+  [ -f "$changelog" ] || fail "check-section: '$changelog' not found"
+  local -a versions=()
+  local v listed
+  if [ -n "$version" ]; then
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "check-section: --version must be SemVer X.Y.Z, got '$version'"
+    versions=("$version")
+  else
+    listed="$(released_section_versions "$changelog")" \
+      || fail "check-section: could not list the sections of '$changelog'"
+    while IFS= read -r v; do
+      if [ -n "$v" ] && version_at_least "$v" "$CHECK_SECTION_FLOOR"; then
+        versions+=("$v")
+      fi
+    done <<<"$listed"
+    # Fail closed: a heading shape this does not recognize must not turn the
+    # check into a vacuous pass.
+    [ "${#versions[@]}" -gt 0 ] \
+      || fail "changelog-section-missing: no released section at or above $CHECK_SECTION_FLOOR in '$changelog'"
+  fi
+  local status failed=0
+  for v in "${versions[@]}"; do
+    set +e
+    check_section_body "$changelog" "$v" >&2
+    status=$?
+    set -e
+    [ "$status" -eq 0 ] || failed=1
+  done
+  [ "$failed" -eq 0 ] \
+    || fail "aggregate_changelog: check-section FAIL -- '$changelog' section(s) ${versions[*]} break the fragment rules (see above)"
+  echo "aggregate_changelog: check-section PASS -- '$changelog' section(s) ${versions[*]}: declared category leads in order, one (id, category) each, breaking labels only under Changed"
 }
 
 release() {
@@ -2064,6 +2255,88 @@ selftest_release_exclusion() {
   rm -rf "$tmp"
 }
 
+# check-section (issue #1763): each rejecting fixture breaks exactly one rule
+# of an otherwise accepted section, so its exit is attributable to that rule.
+selftest_section() {
+  local tmp; tmp="$(mktemp -d)"
+  local head='# Changelog'$'\n\n''## [Unreleased]'$'\n\n''## [5.1.0] - 2026-12-01'$'\n'
+  local tail_old=$'\n''## [4.12.0] - 2026-10-17'$'\n\n''- Fixed (#5, breaking): a 4.x lead.'$'\n''- Fixed (#5): the same id again.'$'\n''* not a bullet the rules accept'$'\n'
+  # $1 = file name, $2.. = section body lines (after the heading).
+  st_write_section() {
+    local name="$1"; shift
+    { printf '%s\n' "$head"; printf '%s\n' "$@"; printf '%s' "$tail_old"; } >"$tmp/$name"
+  }
+  local -a good=(
+    "- Added (#7): a capability."
+    "- Changed (#8, breaking removal): a form is refused."
+    "  Continuation line."
+    ""
+    "  - a nested list item inside the bullet."
+    "- Changed (#9, #10, breaking): a CLI change."
+    "- Changed (Part of #11): a staged change."
+    "- Fixed (#8): the same id in another category."
+    "- Fixed (#12, refs #8): a cross-reference is not an id of the entry."
+    "- Fixed (#13, representative decision 2026-10-26): a dated label."
+    "- Documented (#7): a write-up."
+  )
+  st_write_section good.md "" "${good[@]}" ""
+  st_expect_pass "check-section accepting: well-formed 5.1.0 section; 4.12.0 below the floor is skipped" \
+    check_section --changelog "$tmp/good.md"
+  st_expect_pass "check-section accepting: --version 5.1.0" \
+    check_section --changelog "$tmp/good.md" --version 5.1.0
+  # The 4.12.0 tail breaks three rules, so the floor is what keeps it out.
+  st_expect_fail "check-section rejecting: an explicit --version below the floor is checked" \
+    check_section --changelog "$tmp/good.md" --version 4.12.0
+  # A breaking label is an item that starts with `breaking`: a negated one is not.
+  st_write_section nonbrk.md "" "${good[@]:0:10}" "- Fixed (#18, non-breaking): a negated label under Fixed." "${good[@]:10}" ""
+  st_expect_pass "check-section accepting: \`non-breaking\` is not a breaking label" \
+    check_section --changelog "$tmp/nonbrk.md"
+  st_write_section notbrk.md "" "${good[@]:0:10}" "- Fixed (#19, not breaking): a negated label under Fixed." "${good[@]:10}" ""
+  st_expect_pass "check-section accepting: \`not breaking\` is not a breaking label" \
+    check_section --changelog "$tmp/notbrk.md"
+  # Every id of a `refs` list is a reference: #12 here would otherwise repeat Fixed #12.
+  st_write_section refslist.md "" "${good[@]:0:10}" "- Fixed (#20, refs #8, #12): a refs list of two ids." "${good[@]:10}" ""
+  st_expect_pass "check-section accepting: the second id of \`refs #A, #B\` is a reference" \
+    check_section --changelog "$tmp/refslist.md"
+  st_write_section refslistonly.md "" "${good[@]:0:10}" "- Fixed (refs #8, #21): only a refs list." "${good[@]:10}" ""
+  st_expect_fail "check-section rejecting: a lead whose ids are all in a refs list" \
+    check_section --changelog "$tmp/refslistonly.md"
+  st_write_section refsbrk.md "" "${good[@]:0:10}" "- Fixed (#22, refs #8, breaking): a label after a refs list." "${good[@]:10}" ""
+  st_expect_fail "check-section rejecting: a breaking label after a refs list still counts" \
+    check_section --changelog "$tmp/refsbrk.md"
+
+  st_write_section dup.md "" "${good[@]}" "- Documented (#7): a second bullet for the same (id, category)." ""
+  st_expect_fail "check-section rejecting: duplicate (id, category)" check_section --changelog "$tmp/dup.md"
+  st_write_section dupmulti.md "" "${good[@]:0:6}" "- Changed (#10): #10 is already in a two-id lead." "${good[@]:6}" ""
+  st_expect_fail "check-section rejecting: duplicate id inside a multi-id lead" check_section --changelog "$tmp/dupmulti.md"
+  st_write_section dupzero.md "" "${good[@]}" "- Documented (#0007): zero-padded #7." ""
+  st_expect_fail "check-section rejecting: zero-padded alias (#0007 == #7)" check_section --changelog "$tmp/dupzero.md"
+  st_write_section brkfixed.md "" "${good[@]:0:7}" "- Fixed (#14, breaking removal): refused under Fixed." "${good[@]:7}" ""
+  st_expect_fail "check-section rejecting: breaking removal under Fixed" check_section --changelog "$tmp/brkfixed.md"
+  st_write_section brkadded.md "" "- Added (#14, breaking): breaking under Added." "${good[@]}" ""
+  st_expect_fail "check-section rejecting: breaking under Added (only Changed carries it)" check_section --changelog "$tmp/brkadded.md"
+  st_write_section undeclared.md "" "${good[@]:0:7}" "- Removed (#15): not a declared category." "${good[@]:7}" ""
+  st_expect_fail "check-section rejecting: undeclared category lead" check_section --changelog "$tmp/undeclared.md"
+  st_write_section noid.md "" "${good[@]:0:7}" "- Fixed (no id): a lead without an id." "${good[@]:7}" ""
+  st_expect_fail "check-section rejecting: lead without an id" check_section --changelog "$tmp/noid.md"
+  st_write_section refsonly.md "" "${good[@]:0:7}" "- Fixed (refs #8): only a cross-reference." "${good[@]:7}" ""
+  st_expect_fail "check-section rejecting: lead with only a refs id" check_section --changelog "$tmp/refsonly.md"
+  st_write_section nolead.md "" "${good[@]:0:7}" "- Fixed #16: no parenthesised label." "${good[@]:7}" ""
+  st_expect_fail "check-section rejecting: lead without a parenthesised label" check_section --changelog "$tmp/nolead.md"
+  st_write_section order.md "" "- Fixed (#17): Fixed before Added." "${good[@]}" ""
+  st_expect_fail "check-section rejecting: categories out of declared order" check_section --changelog "$tmp/order.md"
+  st_write_section stray.md "" "${good[@]:0:7}" "A stray paragraph." "${good[@]:7}" ""
+  st_expect_fail "check-section rejecting: a line that is not a bullet or a continuation" check_section --changelog "$tmp/stray.md"
+  st_expect_fail "check-section rejecting: --version names no section" \
+    check_section --changelog "$tmp/good.md" --version 5.2.0
+  printf '%s\n' '# Changelog' '' '## [Unreleased]' "$tail_old" >"$tmp/old-only.md"
+  st_expect_fail "check-section rejecting: no released section at or above the floor" \
+    check_section --changelog "$tmp/old-only.md"
+
+  unset -f st_write_section
+  rm -rf "$tmp"
+}
+
 selftest() {
   # Several fixtures below invoke `bash -c '... | classify_product_diff'`
   # (control 1) or `bash -c "... '$SELF' check-pr"` (the control 1/4b
@@ -2096,9 +2369,10 @@ selftest() {
   # set up fragment names, but its own dedicated accepting/rejecting
   # fixtures were dead code from a `selftest` caller's perspective.
   selftest_control6
+  selftest_section
   echo
   if [ "$ST_FAILURES" -eq 0 ]; then
-    echo "aggregate_changelog: selftest PASS -- all six controls' accepting and rejecting fixtures behaved as expected"
+    echo "aggregate_changelog: selftest PASS -- all six controls' and check-section's accepting and rejecting fixtures behaved as expected"
   else
     echo "aggregate_changelog: selftest FAIL -- $ST_FAILURES assertion(s) failed" >&2
     exit 1
@@ -2109,10 +2383,11 @@ case "${1:-}" in
   check) shift; check "$@" ;;
   check-pr) shift; check_pr "$@" ;;
   check-stale) shift; check_stale "$@" ;;
+  check-section) shift; check_section "$@" ;;
   release) shift; release "$@" ;;
   selftest) shift; selftest "$@" ;;
   *)
-    echo "usage: $0 {check|check-pr|check-stale|release|selftest} [args]" >&2
+    echo "usage: $0 {check|check-pr|check-stale|check-section|release|selftest} [args]" >&2
     exit 2
     ;;
 esac

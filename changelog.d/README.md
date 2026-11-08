@@ -47,7 +47,19 @@ One fragment is one top-level bullet, whatever its internal structure. If a
 change has two genuinely separate notable effects, split it into two
 fragments (they may share an id if they land in different categories, e.g.
 `691-x.added.md` and `691-y.fixed.md`, but never the same (id, category)
-pair).
+pair). Do not split one effect into a `changed` and a `fixed` fragment that
+describe it twice.
+
+Start the body with the lead `<Category> (#<id>[, <label>]):`, the category
+word capitalized (`Fixed (#691):`). A `#N` written after `refs` in the label
+(`Fixed (#1678, refs #1281):`) is a cross-reference, not the entry's own id.
+
+**Breaking changes are `changed` fragments with a label.** Use
+`Changed (#N, breaking removal):` for a form that was accepted and is now
+refused, and `Changed (#N, breaking):` for another breaking change, such as a
+CLI, JSON, exit-code, record-format or Rust API change. Do not file a breaking
+change as `fixed` (or under any other category) even when it also corrects a
+defect: readers look for breaking entries under `Changed`.
 
 **A fragment must be a direct, non-hidden child of this directory, with a
 `.md` extension.** Anything else is rejected outright
@@ -146,3 +158,12 @@ accumulated in this directory by then. Only new entries route through
 and rejecting fixtures. `tools/aggregate_changelog.sh check` validates the
 fragments currently in this directory (name shape and duplicate ids) without
 aggregating anything.
+
+`tools/aggregate_changelog.sh check-section` applies the same rules to the
+released `CHANGELOG.md` sections from 5.0.0 on, after aggregation and any hand
+edit to a version section (issue #1763): every top-level bullet has a declared
+category lead with an id, categories follow the declared order, an (id,
+category) pair appears once, and a `breaking` or `breaking removal` label
+appears only under `Changed`. `--version X.Y.Z` checks one section. Older
+sections predate these rules and are not checked. The merge-readiness
+automation lane (`tools/check-merge-readiness.sh automation`) runs it.
