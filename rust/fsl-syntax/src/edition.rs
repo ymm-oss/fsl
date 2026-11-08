@@ -97,11 +97,49 @@ impl Edition {
     /// # Errors
     ///
     /// Returns the usage message for any other value.
-    pub fn parse_option(value: &str, _options: &ParseOptions) -> Result<Option<Self>, String> {
+    pub fn parse_option(value: &str, options: &ParseOptions) -> Result<Option<Self>, String> {
+        EditionRequest::parse(value, options).map(|request| request.map(|request| request.edition))
+    }
+}
+
+/// An explicit `--edition` request: the edition it names and the spelling
+/// that named it, so an [`EDITION_CONFLICT`] echoes what was typed (`next`,
+/// `5` or `4`) rather than a number the user did not write.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct EditionRequest {
+    pub edition: Edition,
+    /// `next`, `4` or `5`.
+    pub spelling: &'static str,
+}
+
+impl EditionRequest {
+    /// A request spelled with the edition's number (`4`, `5`).
+    #[must_use]
+    pub const fn numbered(edition: Edition) -> Self {
+        Self {
+            edition,
+            spelling: match edition {
+                Edition::Fsl4 => "4",
+                Edition::Fsl5 => "5",
+            },
+        }
+    }
+
+    /// Parse an `--edition` value, keeping its spelling. `current` is `None`,
+    /// as in [`Edition::parse_option`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the usage message for any other value.
+    pub fn parse(value: &str, _options: &ParseOptions) -> Result<Option<Self>, String> {
         match value {
             "current" => Ok(None),
-            "next" | "5" => Ok(Some(Self::Fsl5)),
-            "4" => Ok(Some(Self::Fsl4)),
+            "next" => Ok(Some(Self {
+                edition: Edition::Fsl5,
+                spelling: "next",
+            })),
+            "5" => Ok(Some(Self::numbered(Edition::Fsl5))),
+            "4" => Ok(Some(Self::numbered(Edition::Fsl4))),
             _ => Err("--edition must be current, next, 4, or 5".to_owned()),
         }
     }
@@ -159,24 +197,27 @@ pub fn edition_header(
 ///
 /// Returns [`UNSUPPORTED_EDITION`] for an unknown header and
 /// [`EDITION_CONFLICT`], at the header, when the header and `requested` name
-/// different editions.
+/// different editions. The message quotes the request as it was spelled.
 pub fn document_edition(
     source: &str,
-    requested: Option<Edition>,
+    requested: Option<EditionRequest>,
     default: Edition,
     options: &ParseOptions,
 ) -> Result<Edition, ParseError> {
     match (edition_header(source, options)?, requested) {
-        (Some(header), Some(requested)) if header.edition != requested => Err(ParseError::coded(
-            EDITION_CONFLICT,
-            format!(
-                "the document declares 'fsl {}' but --edition {} was requested",
-                header.edition.number(),
-                requested.number()
-            ),
-            header.span,
-        )),
-        (Some(EditionHeader { edition, .. }), _) | (None, Some(edition)) => Ok(edition),
+        (Some(header), Some(requested)) if header.edition != requested.edition => {
+            Err(ParseError::coded(
+                EDITION_CONFLICT,
+                format!(
+                    "the document declares 'fsl {}' but --edition {} was requested",
+                    header.edition.number(),
+                    requested.spelling
+                ),
+                header.span,
+            ))
+        }
+        (Some(EditionHeader { edition, .. }), _) => Ok(edition),
+        (None, Some(requested)) => Ok(requested.edition),
         (None, None) => Ok(default),
     }
 }
@@ -314,9 +355,14 @@ mod tests {
             );
         }
 
-        let resolve = |source: &str, requested, default| {
-            document_edition(source, requested, default, &ParseOptions::stable())
-                .map_err(|error| error.code().to_owned())
+        let resolve = |source: &str, requested: Option<Edition>, default| {
+            document_edition(
+                source,
+                requested.map(EditionRequest::numbered),
+                default,
+                &ParseOptions::stable(),
+            )
+            .map_err(|error| error.code().to_owned())
         };
         let plain = "spec S {}";
         let four = "fsl 4\nspec S {}";
@@ -339,16 +385,36 @@ mod tests {
             resolve("fsl 6\nspec S {}", Some(Fsl5), Fsl4),
             Err(UNSUPPORTED_EDITION.to_owned())
         );
-        let conflict =
-            document_edition(five, Some(Fsl4), Fsl4, &ParseOptions::stable()).unwrap_err();
-        assert_eq!(
-            conflict.message,
-            "the document declares 'fsl 5' but --edition 4 was requested"
-        );
-        assert_eq!(
-            (conflict.span.start.line, conflict.span.start.column),
-            (1, 1)
-        );
+        // #1757: the conflict echoes the request as it was spelled; `next`
+        // and `5` name one edition but are not one spelling.
+        for (source, value, expected) in [
+            (
+                five,
+                "4",
+                "the document declares 'fsl 5' but --edition 4 was requested",
+            ),
+            (
+                four,
+                "5",
+                "the document declares 'fsl 4' but --edition 5 was requested",
+            ),
+            (
+                four,
+                "next",
+                "the document declares 'fsl 4' but --edition next was requested",
+            ),
+        ] {
+            let requested = EditionRequest::parse(value, &stable).expect("valid --edition");
+            let conflict =
+                document_edition(source, requested, Fsl4, &ParseOptions::stable()).unwrap_err();
+            assert_eq!(conflict.message, expected, "--edition {value}");
+            assert_eq!(
+                (conflict.span.start.line, conflict.span.start.column),
+                (1, 1)
+            );
+        }
+        // `current` requests nothing, so it never conflicts with a header.
+        assert_eq!(EditionRequest::parse("current", &stable), Ok(None));
         assert_eq!(Fsl4.as_str(), "current");
         assert_eq!(Fsl5.as_str(), "next");
     }

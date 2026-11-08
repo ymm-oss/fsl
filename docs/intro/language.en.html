@@ -105,10 +105,15 @@ another spelling of <code>next</code>. The commands that take the option are <co
 <code>verify</code>, <code>domain check</code>, <code>fmt</code>, <code>lint</code> and <code>migrate</code>; each one's help text shows
 <code>--edition {current,next,4,5}</code> and <code>cli-contract.json</code> lists the same four
 choices. Any other value is a usage error (<code>"kind": "usage"</code>, exit 2) with the
-message <code>--edition must be current, next, 4, or 5</code>. JSON output never spells a
-number for the option: a result read under the next
+message <code>--edition must be current, next, 4, or 5</code>. JSON output reports the
+edition a document was <em>read</em> in, never the option's spelling: a result read under the next
 edition carries <code>"edition": "next"</code> (absent under the current edition), and a
-document that has a header also carries <code>"fsl_edition": 4</code> or <code>5</code>.</p>
+document that has a header also carries <code>"fsl_edition": 4</code> or <code>5</code>. The
+<code>lint</code>, <code>migrate</code> and <code>fmt --check</code> reports always carry <code>edition</code>, <code>"current"</code>
+or <code>"next"</code>, as 4.12 did; over several documents it is <code>"next"</code> only when every
+one was read in the next edition, and <code>fsl_edition</code> appears only when every one
+declares the same header. An <code>edition_conflict</code> message quotes the option as
+typed: <code>the document declares 'fsl 4' but --edition next was requested</code>.</p>
 <p>On a <strong>headerless</strong> document, <code>--edition 5</code> (or <code>next</code>) does not make it an
 FSL 5 document. It is still parsed as FSL 4, so the FSL 5 requirements forms of
 §13.2 are refused as parse errors, and no <code>fsl_edition</code> is reported. What

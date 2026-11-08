@@ -389,11 +389,12 @@ fn header_conflicts_and_unknown_editions_exit_2() {
                 "{stdout}"
             );
             assert_eq!(output["loc"]["line"], 1, "{stdout}");
-            let wanted = if requested == "next" { "5" } else { requested };
+            // #1757: the message echoes the request as typed (`next`, not
+            // its number `5`).
             assert_eq!(
                 output["message"],
                 format!(
-                    "the document declares 'fsl {declared}' but --edition {wanted} was requested at 1:1"
+                    "the document declares 'fsl {declared}' but --edition {requested} was requested at 1:1"
                 ),
                 "{stdout}"
             );
@@ -473,8 +474,9 @@ fn edition_current_follows_the_header_in_every_command() {
             for option in [None, Some("current"), Some("next"), Some("4"), Some("5")] {
                 let (stdout, exit) = run(option);
                 let conflict = match (declared, option) {
+                    // #1757: the message echoes the spelling, `next` or `5`.
                     (Some(5), Some("4")) => Some("4"),
-                    (Some(4), Some("next" | "5")) => Some("5"),
+                    (Some(4), Some(spelling @ ("next" | "5"))) => Some(spelling),
                     _ => None,
                 };
                 if let Some(requested) = conflict {
@@ -519,21 +521,22 @@ fn edition_current_follows_the_header_in_every_command() {
             }
             // `current` is the omitted option, except that `migrate` defaults
             // to the next edition: there `current` reads a headerless
-            // document as `4` does, and only the published spelling differs.
+            // document as `4` does. Since #1757 `migrate` publishes the
+            // edition it read rather than the request, so the whole output
+            // agrees, `edition` included: `next` only under `fsl 5`.
             let current = &outputs[&Some("current")];
             if command == ["migrate"] {
-                let mut current_output = current.0.clone();
-                assert_eq!(current_output["edition"], "current", "{current:?}");
-                let baseline = if header.is_none() { Some("4") } else { None };
-                let mut expected = outputs[&baseline].0.clone();
-                current_output["edition"] = Value::Null;
-                expected["edition"] = Value::Null;
                 assert_eq!(
-                    (current_output, current.1),
-                    (expected, outputs[&baseline].1),
-                    "{}",
-                    cell(Some("current"))
+                    current.0["edition"],
+                    if declared == Some(5) {
+                        "next"
+                    } else {
+                        "current"
+                    },
+                    "{current:?}"
                 );
+                let baseline = if header.is_none() { Some("4") } else { None };
+                assert_eq!(current, &outputs[&baseline], "{}", cell(Some("current")));
             } else {
                 assert_eq!(current, &outputs[&None], "{}", cell(Some("current")));
             }

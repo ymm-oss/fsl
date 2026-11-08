@@ -58,10 +58,15 @@ another spelling of `next`. The commands that take the option are `check`,
 `verify`, `domain check`, `fmt`, `lint` and `migrate`; each one's help text shows
 `--edition {current,next,4,5}` and `cli-contract.json` lists the same four
 choices. Any other value is a usage error (`"kind": "usage"`, exit 2) with the
-message `--edition must be current, next, 4, or 5`. JSON output never spells a
-number for the option: a result read under the next
+message `--edition must be current, next, 4, or 5`. JSON output reports the
+edition a document was *read* in, never the option's spelling: a result read under the next
 edition carries `"edition": "next"` (absent under the current edition), and a
-document that has a header also carries `"fsl_edition": 4` or `5`.
+document that has a header also carries `"fsl_edition": 4` or `5`. The
+`lint`, `migrate` and `fmt --check` reports always carry `edition`, `"current"`
+or `"next"`, as 4.12 did; over several documents it is `"next"` only when every
+one was read in the next edition, and `fsl_edition` appears only when every one
+declares the same header. An `edition_conflict` message quotes the option as
+typed: `the document declares 'fsl 4' but --edition next was requested`.
 
 On a **headerless** document, `--edition 5` (or `next`) does not make it an
 FSL 5 document. It is still parsed as FSL 4, so the FSL 5 requirements forms of

@@ -85,7 +85,7 @@ const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
 fn parse_specialized_verify_options(
     args: &mut CommandArgs<impl Iterator<Item = String>>,
     allow_edition: bool,
-) -> Result<(usize, String, String, Option<fsl_syntax::Edition>), String> {
+) -> Result<(usize, String, String, Option<fsl_syntax::EditionRequest>), String> {
     let mut depth = 8_usize;
     let mut deadlock = "warn".to_owned();
     let mut engine = "bmc".to_owned();
@@ -240,7 +240,7 @@ fn fmt_command() -> Option<(FmtCliOutput, i32)> {
 struct FmtOptions {
     paths: Vec<PathBuf>,
     check: bool,
-    edition: Option<fsl_syntax::Edition>,
+    edition: Option<fsl_syntax::EditionRequest>,
     /// `--lang` / `--names`: respell a next-edition requirements document.
     respelling: fsl_syntax::Respelling,
 }
@@ -319,6 +319,7 @@ fn run_fmt_inner(
     log: &fslc_rust::migration::DependencyRecords,
 ) -> (FmtCliOutput, i32) {
     let mut files = Vec::new();
+    let mut read = Vec::new();
     let mut any_changed = false;
     for path in &options.paths {
         if let Err((output, status)) = literate_access("fmt", path) {
@@ -337,6 +338,7 @@ fn run_fmt_inner(
             Ok(edition) => edition,
             Err(error) => return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2),
         };
+        read.push(read_edition(&source, edition));
         let formatted = match fsl_syntax::format_source_respelled(
             &source,
             edition,
@@ -371,16 +373,66 @@ fn run_fmt_inner(
             return (FmtCliOutput::Source(formatted), 0);
         }
     }
-    (
-        FmtCliOutput::Json(json!({
-            "fsl":"1.0",
-            "result":"format_check",
-            "edition":options.edition.map_or("current", fsl_syntax::Edition::as_str),
-            "changed":any_changed,
-            "files":files
-        })),
-        i32::from(any_changed),
-    )
+    let (output, status) = publish_read_edition(
+        (
+            json!({
+                "fsl":"1.0",
+                "result":"format_check",
+                "edition":options.edition.map_or(fsl_syntax::Edition::Fsl4, |request| request.edition).as_str(),
+                "changed":any_changed,
+                "files":files
+            }),
+            i32::from(any_changed),
+        ),
+        &read,
+    );
+    (FmtCliOutput::Json(output), status)
+}
+
+/// One document a `lint`, `migrate` or `fmt --check` run read: the edition
+/// it was read in, and the edition its header declares.
+type ReadEdition = (fsl_syntax::Edition, Option<fsl_syntax::Edition>);
+
+fn read_edition(source: &str, edition: fsl_syntax::Edition) -> ReadEdition {
+    let declared = fsl_syntax::edition_header(source, crate::parse_options())
+        .ok()
+        .flatten()
+        .map(|header| header.edition);
+    (edition, declared)
+}
+
+/// #1757: a `lint`, `migrate` or `fmt --check` report publishes the edition
+/// its documents were read in, as `check` does for its one document, not the
+/// requested `--edition`: `edition` is `next` when every document was read in
+/// the next edition and `current` otherwise, and `fsl_edition` is the header
+/// number when every document declares the same one. Unlike `check`, these
+/// reports keep `"edition": "current"`, as 4.12 published it. An error
+/// envelope, and a report that read no document (an empty `lint` directory),
+/// keep what they carry.
+fn publish_read_edition((mut output, status): (Value, i32), read: &[ReadEdition]) -> (Value, i32) {
+    let Some(&(_, first_declared)) = read.first() else {
+        return (output, status);
+    };
+    if output["result"] == "error" {
+        return (output, status);
+    }
+    if let Value::Object(envelope) = &mut output {
+        let next = read
+            .iter()
+            .all(|&(edition, _)| edition == fsl_syntax::Edition::Fsl5);
+        let edition = if next {
+            fsl_syntax::Edition::Fsl5
+        } else {
+            fsl_syntax::Edition::Fsl4
+        };
+        envelope.insert("edition".to_owned(), json!(edition.as_str()));
+        if let Some(declared) = first_declared
+            .filter(|&declared| read.iter().all(|&(_, other)| other == Some(declared)))
+        {
+            envelope.insert("fsl_edition".to_owned(), json!(declared.number()));
+        }
+    }
+    (output, status)
 }
 
 fn read_fmt_source(path: &Path) -> Result<String, String> {
@@ -399,7 +451,7 @@ struct MigrationOptions {
     paths: Vec<PathBuf>,
     /// The explicit `--edition`; `None` reads each file in its header's
     /// edition, or `default_edition` without one.
-    edition: Option<fsl_syntax::Edition>,
+    edition: Option<fsl_syntax::EditionRequest>,
     default_edition: fsl_syntax::Edition,
     write: bool,
     project: Option<PathBuf>,
@@ -475,12 +527,19 @@ fn parse_migration_options(
 
 fn run_lint(options: &MigrationOptions) -> (Value, i32) {
     let log = fslc_rust::migration::DependencyRecords::default();
-    fslc_rust::migration::finish_dependency_reports(&log, run_lint_inner(options, &log), false)
+    let mut read = Vec::new();
+    let result = run_lint_inner(options, &log, &mut read);
+    fslc_rust::migration::finish_dependency_reports(
+        &log,
+        publish_read_edition(result, &read),
+        false,
+    )
 }
 
 fn run_lint_inner(
     options: &MigrationOptions,
     log: &fslc_rust::migration::DependencyRecords,
+    read: &mut Vec<ReadEdition>,
 ) -> (Value, i32) {
     let (id_policy, policy_source) = match load_id_policy(options.project.as_deref()) {
         Ok(policy) => policy,
@@ -497,6 +556,7 @@ fn run_lint_inner(
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
         };
+        read.push(read_edition(&source, edition));
         plan.diagnostics
             .extend(fslc_rust::migration::id_policy_diagnostics(
                 &source,
@@ -640,12 +700,19 @@ fn load_id_policy(
 
 fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
     let log = fslc_rust::migration::DependencyRecords::default();
-    fslc_rust::migration::finish_dependency_reports(&log, run_migrate_inner(options, &log), false)
+    let mut read = Vec::new();
+    let result = run_migrate_inner(options, &log, &mut read);
+    fslc_rust::migration::finish_dependency_reports(
+        &log,
+        publish_read_edition(result, &read),
+        false,
+    )
 }
 
 fn run_migrate_inner(
     options: &MigrationOptions,
     log: &fslc_rust::migration::DependencyRecords,
+    read: &mut Vec<ReadEdition>,
 ) -> (Value, i32) {
     let mut planned = Vec::new();
     let mut files = Vec::new();
@@ -656,6 +723,7 @@ fn run_migrate_inner(
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
         };
+        read.push(read_edition(&source, edition));
         refused |= plan.refused();
         manual_required |= plan.manual_required();
         let migrated = plan.migrated_source.as_ref();
@@ -738,9 +806,13 @@ fn run_migrate_inner(
 }
 
 impl MigrationOptions {
-    /// The published `edition` field: the requested spelling, else the default.
+    /// The `edition` of a report that read no document: the requested
+    /// edition, else the default. `publish_read_edition` replaces it with the
+    /// edition the documents were read in.
     fn requested_edition(&self) -> &'static str {
-        self.edition.unwrap_or(self.default_edition).as_str()
+        self.edition
+            .map_or(self.default_edition, |request| request.edition)
+            .as_str()
     }
 }
 
@@ -6517,7 +6589,7 @@ fn run_check_with_tags_from_source(
     source: &str,
     strict_tags: bool,
     requirements: Option<&Path>,
-    edition: Option<fsl_syntax::Edition>,
+    edition: Option<fsl_syntax::EditionRequest>,
 ) -> (Value, i32) {
     let dependencies = fslc_rust::migration::DependencyScope::enter();
     let admission = match fslc_rust::migration::admit_source(
@@ -7534,7 +7606,7 @@ fn run_domain_check(
     depth: usize,
     deadlock: &str,
     engine: &str,
-    edition: Option<fsl_syntax::Edition>,
+    edition: Option<fsl_syntax::EditionRequest>,
 ) -> (Value, i32) {
     run_admitted_root(
         path,
@@ -19267,7 +19339,7 @@ spec InitTraceability {
         path: &Path,
         source: &str,
         engine: &str,
-        edition: Option<fsl_syntax::Edition>,
+        edition: Option<fsl_syntax::EditionRequest>,
     ) -> (Value, i32) {
         let options = CliVerifyOptions {
             depth: 4,
@@ -19329,7 +19401,7 @@ spec InitTraceability {
             ("induction", "next", "proved"),
         ] {
             let requested =
-                fsl_syntax::Edition::parse_option(edition, &fsl_syntax::ParseOptions::stable())
+                fsl_syntax::EditionRequest::parse(edition, &fsl_syntax::ParseOptions::stable())
                     .expect("a published --edition value");
             let source = if edition == "current" {
                 captured.replace(
@@ -19743,7 +19815,12 @@ spec InitTraceability {
                 1,
             ),
         ] {
-            let (output, status) = verify_snapshot(&fixture.path, &source, "bmc", Some(edition));
+            let (output, status) = verify_snapshot(
+                &fixture.path,
+                &source,
+                "bmc",
+                Some(fsl_syntax::EditionRequest::numbered(edition)),
+            );
             assert_eq!(status, 0, "{output:#}");
             assert_eq!(output["spec"], "CleanDiagnosticDomain", "{output:#}");
             if edition == fsl_syntax::Edition::Fsl5 {

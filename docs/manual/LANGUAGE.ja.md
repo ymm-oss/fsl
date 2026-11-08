@@ -51,9 +51,14 @@ causal と AI ダイアレクトの文書はヘッダーを取りません（`ed
 `check`、`verify`、`domain check`、`fmt`、`lint`、`migrate` で、いずれのヘルプにも
 `--edition {current,next,4,5}` と表示され、`cli-contract.json` にも同じ 4 つの選択肢が
 載っています。それ以外の値は usage エラー(`"kind": "usage"`、終了コード 2)で、メッセージは
-`--edition must be current, next, 4, or 5` です。JSON 出力はこのオプションを番号で書きません。
-次のエディションで読んだ結果には `"edition": "next"` が付き（現行のエディションでは付きません）、
-ヘッダーのある文書には `"fsl_edition": 4` または `5` も付きます。
+`--edition must be current, next, 4, or 5` です。JSON 出力が示すのは文書を*読んだ*エディションで、
+オプションの綴りではありません。次のエディションで読んだ結果には `"edition": "next"` が付き
+（現行のエディションでは付きません）、ヘッダーのある文書には `"fsl_edition": 4` または `5` も付きます。
+`lint`、`migrate`、`fmt --check` の報告には、4.12 と同じく `edition`（`"current"` か `"next"`）が
+常に付きます。複数の文書を読んだときは、すべてを次のエディションで読んだ場合だけ `"next"` になり、
+`fsl_edition` はすべての文書が同じヘッダーを宣言している場合だけ付きます。`edition_conflict` の
+メッセージは、入力したとおりの綴りでオプションを示します
+(`the document declares 'fsl 4' but --edition next was requested`)。
 
 **ヘッダーのない**文書に `--edition 5`（または `next`）を付けても、FSL 5 の文書にはなりません。
 構文は FSL 4 のまま読むので、§13.2 の FSL 5 の要件の書き方は構文エラーになり、`fsl_edition`

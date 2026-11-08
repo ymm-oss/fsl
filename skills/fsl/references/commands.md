@@ -110,6 +110,10 @@ retain their own edition; do not assume a parent's edition flag propagates to
 dependencies. Migration edits the requested roots, not imported children.
 Canonical mixed editions are allowed where the consumer supports those files.
 `migrate` defaults to the next edition and `lint` to the current one.
+JSON `edition` is the edition a document was read in (`next`, or `current`/absent),
+with `fsl_edition` when it has a header; `lint`, `migrate` and `fmt --check` always
+carry `edition`, `next` only when every document was read in the next edition. An
+`edition_conflict` message quotes `--edition` as typed (`next`, `4`, `5`).
 
 Current-edition `check`, `verify`, and Worker JSON append migration
 warnings for string metadata, colon quantifiers, and inline action `maps`, without
