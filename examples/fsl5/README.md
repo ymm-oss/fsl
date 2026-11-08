@@ -53,13 +53,20 @@ whose note reads "invariants proved for all depths; leadsTo checked to depth 8
 only": the two policies are liveness properties, checked to the bounded depth
 and not proved.
 
-`fslc fmt --lang en --names canonical leave_request.ja.fsl` respells the
-Japanese file with English keywords and canonical names; the result differs
-from `leave_request.en.fsl` only in the comments, the `glossary` block and the
-quoted requirement texts. `fslc kernel` gives the same Kernel JSON for both
+`fslc fmt --lang en --names canonical examples/fsl5/leave_request.ja.fsl`
+respells the Japanese file with English keywords and canonical names; the
+result differs from `leave_request.en.fsl` only in the comments, the
+`glossary` block and the quoted requirement texts. `fslc kernel` gives the same Kernel JSON for both
 files apart from source locations and those requirement texts. See the
 glossary section of [LANGUAGE.md](../../docs/manual/LANGUAGE.md#fsl5-requirements)
 for the Japanese spellings.
+
+Some words stay in English in the Japanese file, because the keyword table
+(`rust/fsl-syntax/src/keywords.rs`) has no Japanese spelling for them: `not`,
+`Bool`, `true` and `false`. The spec name, the event names (`submit`,
+`approve`, …), the property labels (`DaysInRange`, …), the requirement IDs and
+the scenario instance labels (`l1`, `l2`) also stay canonical, as the manual
+recommends for names that cross into code.
 
 ## 日本語
 
@@ -77,9 +84,17 @@ FSL 5 の要件を、英語の綴りと日本語の綴りで一度ずつ書い�
   用語集による日本語の別名
 
 実行方法は上の「How to run」と同じで、ファイル名を `leave_request.ja.fsl` に替えます。
-二つのファイルの違いは、コメント、用語集、引用した要件の原文(日本語ファイルでは
-日本語)だけです。`fslc kernel` の出力は、ソース位置と要件の原文を除いて一致します。
+日本語ファイルを `fslc fmt --lang en --names canonical examples/fsl5/leave_request.ja.fsl`
+で英語のキーワードと正規名に綴り直すと、英語ファイルとの違いはコメント、用語集、
+引用した要件の原文(日本語ファイルでは日本語)だけになります。`fslc kernel` の出力は、
+綴り直さなくても、ソース位置と要件の原文を除いて一致します。
 二つの方針(policy)は活性(liveness)の性質で、`--engine induction` でも
 有界の深さまでの確認であり、証明ではありません。
 日本語の綴りの一覧は [LANGUAGE.ja.md](../../docs/manual/LANGUAGE.ja.md#fsl5-requirements)
 の「用語集と日本語の綴り」にあります。
+
+日本語ファイルにも英語のまま残る語があります。キーワード表
+(`rust/fsl-syntax/src/keywords.rs`)に日本語の綴りがない `not`、`Bool`、`true`、
+`false` です。仕様名、出来事の名前(`submit`、`approve` など)、性質のラベル
+(`DaysInRange` など)、要件 ID、シナリオのインスタンス名(`l1`、`l2`)も、コードとの
+境界で追いやすいようにマニュアルの推奨に従って正規名のままにしています。
