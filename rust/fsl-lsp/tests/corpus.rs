@@ -115,12 +115,38 @@ fn valid_corpus_declarations_match_the_authoritative_ast_role_and_scope() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// The corpus documents read with the next lexicon: the `fsl 5`
+/// requirements pair (#1766). Pinned by path rather than derived from the
+/// parse, so a change to which documents the index reads in the next lexicon
+/// fails here.
+const NEXT_LEXICON: &[&str] = &[
+    "examples/fsl5/leave_request.en.fsl",
+    "examples/fsl5/leave_request.ja.fsl",
+];
+
+/// Corpus documents headed `fsl 5` that are not requirements documents
+/// (business, kernel `spec`, `refinement`; #1766): the Japanese keywords and
+/// the glossary are not read in them, so they keep the published lexicon.
+const HEADED_PUBLISHED: &[&str] = &[
+    "examples/fsl5/leave_design.en.fsl",
+    "examples/fsl5/leave_design.ja.fsl",
+    "examples/fsl5/leave_design_refines_request.fsl",
+    "examples/fsl5/leave_flow_asis.en.fsl",
+    "examples/fsl5/leave_flow_asis.ja.fsl",
+    "examples/fsl5/leave_flow_tobe.en.fsl",
+    "examples/fsl5/leave_flow_tobe.ja.fsl",
+    "examples/fsl5/leave_flow_tobe_refines_asis.fsl",
+    "examples/fsl5/leave_request_refines_tobe.fsl",
+];
+
 /// R0 for the language server (fsl 5 plan §3 S0, S11), after #1434: a
 /// corpus document without an edition header is read as `fsl 4` and
 /// indexed with the published lexicon; the next edition's keywords, aliases
-/// and mappings reach no such document. An `fsl 5` requirements document
-/// (`examples/fsl5/`, #1766) is indexed with the next lexicon; an `fsl 5`
-/// document of another dialect is indexed with the published one.
+/// and mappings reach no such document. Of the documents headed `fsl 5`, the
+/// requirements pair in [`NEXT_LEXICON`] is indexed with the next lexicon and
+/// the business, design and mapping documents in [`HEADED_PUBLISHED`] with
+/// the published one. A headed document in neither list fails, so a new one
+/// must be classified here.
 /// (The former gate-off/gate-on comparison has no second reading to compare
 /// since the gate is gone.)
 #[test]
@@ -134,36 +160,45 @@ fn the_published_corpus_is_indexed_with_the_published_lexicon() {
     collect(&root.join("examples"), &mut files);
     files.sort();
     let mut indexed = 0_usize;
+    let mut next_seen = Vec::new();
+    let mut headed_published_seen = Vec::new();
     let mut failures = Vec::new();
     for path in files {
         let source = std::fs::read_to_string(&path).expect("read corpus source");
+        let relative = path
+            .strip_prefix(root)
+            .expect("corpus path under the repository root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let headed = matches!(
+            fsl_syntax::edition_header(&source, &fsl_syntax::ParseOptions::stable()),
+            Ok(Some(header)) if header.edition == fsl_syntax::Edition::Fsl5
+        );
+        let in_next = NEXT_LEXICON.contains(&relative.as_str());
+        let in_headed_published = HEADED_PUBLISHED.contains(&relative.as_str());
+        if headed && !in_next && !in_headed_published {
+            failures.push(format!(
+                "{relative}: headed `fsl 5` but in neither NEXT_LEXICON nor HEADED_PUBLISHED"
+            ));
+        }
         if let Ok(index) =
             DocumentIndex::build(&source, path.to_str(), &fsl_syntax::ParseOptions::stable())
         {
             indexed += 1;
-            // The next lexicon (Japanese keywords, particles, glossary
-            // aliases) belongs to an `fsl 5` requirements document only; an
-            // `fsl 5` business, kernel `spec` or `refinement` document reads
-            // the published words.
-            let expected = match fsl_syntax::parse_document_with(
-                fsl_syntax::SourceFile::new(&source),
-                &fsl_syntax::ParseOptions::stable(),
-            ) {
-                Ok(parsed)
-                    if parsed.edition == fsl_syntax::Edition::Fsl5
-                        && matches!(
-                            parsed.surface,
-                            fsl_syntax::SurfaceDocument::Requirements(_)
-                        ) =>
-                {
-                    fsl_lsp::Lexicon::Next
-                }
-                _ => fsl_lsp::Lexicon::Published,
+            let expected = if in_next {
+                fsl_lsp::Lexicon::Next
+            } else {
+                fsl_lsp::Lexicon::Published
             };
-            if index.lexicon() != expected {
+            if index.lexicon() == expected {
+                if in_next {
+                    next_seen.push(relative.clone());
+                } else if headed {
+                    headed_published_seen.push(relative.clone());
+                }
+            } else {
                 failures.push(format!(
-                    "{}: {:?}, expected {expected:?}",
-                    path.display(),
+                    "{relative}: {:?}, expected {expected:?}",
                     index.lexicon()
                 ));
             }
@@ -171,4 +206,23 @@ fn the_published_corpus_is_indexed_with_the_published_lexicon() {
     }
     assert!(indexed >= 100, "only {indexed} corpus files were indexed");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+    assert_eq!(
+        next_seen.len(),
+        NEXT_LEXICON.len(),
+        "every NEXT_LEXICON document is indexed with the next lexicon: {next_seen:?}"
+    );
+    assert_eq!(
+        headed_published_seen.len(),
+        HEADED_PUBLISHED.len(),
+        "every HEADED_PUBLISHED document is indexed with the published lexicon: \
+         {headed_published_seen:?}"
+    );
+    assert!(
+        !next_seen.is_empty(),
+        "no document was indexed with the next lexicon"
+    );
+    assert!(
+        !headed_published_seen.is_empty(),
+        "no headed `fsl 5` document was indexed with the published lexicon"
+    );
 }

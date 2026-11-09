@@ -5225,21 +5225,22 @@ projection bindings are not source names and instead freshen on collision.
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 
 Write business processes, policies, and KPIs with zero implementation
-vocabulary (syntax details in `DESIGN-dialects.md` §3). An `fsl 5` As-Is/To-Be pair
-in English and Japanese texts, refined by the requirements of §13.2, is in
-[`examples/fsl5/`](https://github.com/ymm-oss/fsl/tree/main/examples/fsl5). A process expands into
-enum+Map+transition actions, a policy into invariant / leadsTo, and a kpi into a
-declarative count projection recorded as metadata. A contradiction in the regulations =
-an invariant violation, a dead process step = a coverage diagnosis, an
-unreachable business goal = reachable_failed, and a case left unattended = a
-leadsTo counterexample — all can be detected mechanically.
+vocabulary (syntax details in `DESIGN-dialects.md` §3). An `fsl 5` As-Is/To-Be
+pair in English and Japanese texts, refined by the requirements of §13.2, is in
+[`examples/fsl5/`](https://github.com/ymm-oss/fsl/tree/main/examples/fsl5).
+A process expands into enum+Map+transition actions, a policy into invariant /
+leadsTo, and a kpi into a declarative count projection recorded as metadata. A
+contradiction in the regulations = an invariant violation, a dead process step =
+a coverage diagnosis, an unreachable business goal = reachable_failed, and a
+case left unattended = a leadsTo counterexample — all can be detected
+mechanically.
 
 A business process is a pure stage graph, so a `transition` accepts only its
 name, source and target stages, actor and `covers` annotations. Writing `with`,
 `when` or `set` on one is a located error: those clauses carry data, the
 business dialect has nowhere to lower them, and silently dropping them would
 verify a model the author never wrote. Declare the process in a `requirements`
-spec (§13.4) to give them meaning.
+spec (§13.2) to give them meaning.
 
 For PM/consulting-facing files, use the readable stage syntax for common
 response policies and goals:

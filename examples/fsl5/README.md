@@ -77,10 +77,10 @@ refinement: each lower layer refines the one above it, checked with
 
 | File | Layer | Form |
 |---|---|---|
-| [`leave_flow_asis.en.fsl`](leave_flow_asis.en.fsl) / [`.ja.fsl`](leave_flow_asis.ja.fsl) | business, As-Is | `business` with `process` / `transition`, `control`, `policy`, `goal`, `kpi` |
-| [`leave_flow_tobe.en.fsl`](leave_flow_tobe.en.fsl) / [`.ja.fsl`](leave_flow_tobe.ja.fsl) | business, To-Be | the same forms |
-| [`leave_request.en.fsl`](leave_request.en.fsl) / [`.ja.fsl`](leave_request.ja.fsl) | requirements | `requirements` (above) |
-| [`leave_design.en.fsl`](leave_design.en.fsl) / [`.ja.fsl`](leave_design.ja.fsl) | design | kernel `spec` with `struct`, `def`, `fair action`, `invariant`, `trans`, `leadsTo`, `reachable`, `terminal` |
+| [`leave_flow_asis.en.fsl`](leave_flow_asis.en.fsl) / [`.ja.fsl`](leave_flow_asis.ja.fsl) | business, As-Is | `business` with `process` / `transition`, `control`, `policy`, `goal`, `kpi`; the `.ja.fsl` has Japanese comments and quoted texts (English keywords) |
+| [`leave_flow_tobe.en.fsl`](leave_flow_tobe.en.fsl) / [`.ja.fsl`](leave_flow_tobe.ja.fsl) | business, To-Be | the same forms; the `.ja.fsl` has Japanese comments and quoted texts (English keywords) |
+| [`leave_request.en.fsl`](leave_request.en.fsl) / [`.ja.fsl`](leave_request.ja.fsl) | requirements | `requirements` (above); the `.ja.fsl` has Japanese keywords, particles and glossary aliases |
+| [`leave_design.en.fsl`](leave_design.en.fsl) / [`.ja.fsl`](leave_design.ja.fsl) | design | kernel `spec` with `struct`, `def`, `fair action`, `invariant`, `trans`, `leadsTo`, `reachable`, `terminal`; the `.ja.fsl` has Japanese comments and quoted texts (English keywords) |
 | [`leave_flow_tobe_refines_asis.fsl`](leave_flow_tobe_refines_asis.fsl) | To-Be refines As-Is | `refinement` |
 | [`leave_request_refines_tobe.fsl`](leave_request_refines_tobe.fsl) | requirements refine To-Be | `refinement` |
 | [`leave_design_refines_request.fsl`](leave_design_refines_request.fsl) | design refines requirements | `refinement` |
@@ -169,6 +169,10 @@ FSL 5 の要件を、英語の綴りと日本語の綴りで一度ずつ書い�
 同じ休暇申請を、要件の上の業務層と、要件の下の設計層でも書いています。三つの層は
 詳細化(refinement)でつながっています。下の層が上の層を詳細化することを、
 対応付けのファイルと `fslc refine` で確かめます。
+
+`.ja.fsl` のうち日本語のキーワードで書いたのは要件層(`leave_request.ja.fsl`)
+だけです。業務層と設計層の `.ja.fsl` は、コメントと引用文だけが日本語で、キーワード
+は英語です。
 
 - `leave_flow_asis.{en,ja}.fsl`: 業務層の As-Is。現在は上長がすべての申請を決める。
   統制 `CTRL-LEAVEFLOW-001`(承認の後にだけ休暇を取得または取消する)を、迂回を
