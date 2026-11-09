@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
     Entity, EventSignature, MIXED_PARTICLES, PARTICLE_ROLE_MISMATCH, UNKNOWN_EVENT_PHRASE, Word,
-    actor_not_declared, join_names,
+    actor_not_declared, join_names, names::resolve_names,
 };
 use crate::keywords::{Kw, Particle};
 use crate::parser::{Parser, join_span};
@@ -370,70 +370,31 @@ impl Scope<'_> {
     /// `expression` with the entity's fields spelled `Entity.field`, and,
     /// when `concepts` is set, a concept's name replaced by its predicate.
     fn fields(&self, expression: Expr, span: Span, concepts: bool) -> Result<Expr, ParseError> {
-        let recurse = |expression: Expr| self.fields(expression, span, concepts);
-        let boxed = |expression: Box<Expr>| recurse(*expression).map(Box::new);
         let dotted = |field: &str| Expr::Var(format!("{}.{field}", self.entity_name));
-        Ok(match expression {
-            Expr::Var(name) if self.entity.fields.contains_key(&name) => dotted(&name),
-            Expr::Var(name)
-                if concepts && self.concepts.iter().any(|concept| concept.name == name) =>
-            {
-                self.concept(&Word { text: name, span })?
-            }
-            Expr::EnumMember {
-                type_name, member, ..
-            } if type_name == self.entity_name && self.entity.fields.contains_key(&member) => {
-                dotted(&member)
-            }
-            Expr::Field(receiver, field)
-                if matches!(receiver.as_ref(), Expr::Var(name) if name == self.entity_name)
-                    && self.entity.fields.contains_key(&field) =>
-            {
-                dotted(&field)
-            }
-            Expr::Field(receiver, field) => Expr::Field(boxed(receiver)?, field),
-            Expr::Some(value) => Expr::Some(boxed(value)?),
-            Expr::Set(values) => {
-                Expr::Set(values.into_iter().map(recurse).collect::<Result<_, _>>()?)
-            }
-            Expr::Seq(values) => {
-                Expr::Seq(values.into_iter().map(recurse).collect::<Result<_, _>>()?)
-            }
-            Expr::Index(map, key) => Expr::Index(boxed(map)?, boxed(key)?),
-            Expr::Binary { op, left, right } => Expr::Binary {
-                op,
-                left: boxed(left)?,
-                right: boxed(right)?,
-            },
-            Expr::Neg(value) => Expr::Neg(boxed(value)?),
-            Expr::Not(value) => Expr::Not(boxed(value)?),
-            Expr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                spans,
-            } => Expr::Conditional {
-                condition: boxed(condition)?,
-                then_expr: boxed(then_expr)?,
-                else_expr: boxed(else_expr)?,
-                spans,
-            },
-            Expr::Call { name, args, span } => Expr::Call {
-                name,
-                args: args.into_iter().map(recurse).collect::<Result<_, _>>()?,
-                span,
-            },
-            Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
-                name,
-                expr: boxed(expr)?,
-                span,
-            },
-            Expr::BinaryNamed { name, left, right } => Expr::BinaryNamed {
-                name,
-                left: boxed(left)?,
-                right: boxed(right)?,
-            },
-            other => other,
+        resolve_names(expression, &BTreeSet::new(), &|reference| {
+            Ok(match reference {
+                Expr::Var(name) if self.entity.fields.contains_key(name) => Some(dotted(name)),
+                Expr::Var(name)
+                    if concepts && self.concepts.iter().any(|concept| concept.name == *name) =>
+                {
+                    Some(self.concept(&Word {
+                        text: name.clone(),
+                        span,
+                    })?)
+                }
+                Expr::EnumMember {
+                    type_name, member, ..
+                } if type_name == self.entity_name && self.entity.fields.contains_key(member) => {
+                    Some(dotted(member))
+                }
+                Expr::Field(receiver, field)
+                    if matches!(receiver.as_ref(), Expr::Var(name) if name == self.entity_name)
+                        && self.entity.fields.contains_key(field) =>
+                {
+                    Some(dotted(field))
+                }
+                _ => None,
+            })
         })
     }
 

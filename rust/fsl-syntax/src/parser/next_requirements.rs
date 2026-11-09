@@ -38,6 +38,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 mod decide;
+mod names;
 mod relations;
 mod rules;
 
@@ -1918,68 +1919,38 @@ fn resolve_event_names(
     event: &str,
     span: Span,
 ) -> Result<Expr, ParseError> {
-    let recurse = |expression: Expr| {
-        resolve_event_names(expression, inputs, entity, entity_name, event, span)
-    };
-    let boxed = |expression: Box<Expr>| recurse(*expression).map(Box::new);
-    Ok(match expression {
-        Expr::Var(name) => {
-            if let Some(input) = name.strip_prefix(INPUT_MARK) {
-                if !inputs.iter().any(|candidate| candidate == input) {
-                    return Err(ParseError::new(
-                        format!("event '{event}' has no input '{input}'"),
+    names::resolve_names(expression, &BTreeSet::new(), &|reference| {
+        Ok(Some(match reference {
+            Expr::Var(name) => {
+                if let Some(input) = name.strip_prefix(INPUT_MARK) {
+                    if !inputs.iter().any(|candidate| candidate == input) {
+                        return Err(ParseError::new(
+                            format!("event '{event}' has no input '{input}'"),
+                            span,
+                        ));
+                    }
+                    Expr::Var(input.to_owned())
+                } else if inputs.contains(name) && entity.fields.contains_key(name) {
+                    return Err(ParseError::coded(
+                        AMBIGUOUS_INPUT_FIELD,
+                        format!(
+                            "'{name}' in event '{event}' is both its input and a field of \
+                             '{entity_name}'; write `input {name}` or `{entity_name}.{name}`"
+                        ),
                         span,
                     ));
+                } else {
+                    return Ok(None);
                 }
-                Expr::Var(input.to_owned())
-            } else if inputs.contains(&name) && entity.fields.contains_key(&name) {
-                return Err(ParseError::coded(
-                    AMBIGUOUS_INPUT_FIELD,
-                    format!(
-                        "'{name}' in event '{event}' is both its input and a field of \
-                         '{entity_name}'; write `input {name}` or `{entity_name}.{name}`"
-                    ),
-                    span,
-                ));
-            } else {
-                Expr::Var(name)
             }
-        }
-        Expr::EnumMember {
-            type_name, member, ..
-        } if type_name == entity_name => entity_field(entity, entity_name, &member, span)?,
-        Expr::Field(receiver, field) if matches!(receiver.as_ref(), Expr::Var(name) if name == entity_name) => {
-            entity_field(entity, entity_name, &field, span)?
-        }
-        Expr::Field(receiver, field) => Expr::Field(boxed(receiver)?, field),
-        Expr::Some(value) => Expr::Some(boxed(value)?),
-        Expr::Set(values) => Expr::Set(values.into_iter().map(recurse).collect::<Result<_, _>>()?),
-        Expr::Seq(values) => Expr::Seq(values.into_iter().map(recurse).collect::<Result<_, _>>()?),
-        Expr::Index(map, key) => Expr::Index(boxed(map)?, boxed(key)?),
-        Expr::Binary { op, left, right } => Expr::Binary {
-            op,
-            left: boxed(left)?,
-            right: boxed(right)?,
-        },
-        Expr::Neg(value) => Expr::Neg(boxed(value)?),
-        Expr::Not(value) => Expr::Not(boxed(value)?),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            spans,
-        } => Expr::Conditional {
-            condition: boxed(condition)?,
-            then_expr: boxed(then_expr)?,
-            else_expr: boxed(else_expr)?,
-            spans,
-        },
-        Expr::Call { name, args, span } => Expr::Call {
-            name,
-            args: args.into_iter().map(recurse).collect::<Result<_, _>>()?,
-            span,
-        },
-        other => other,
+            Expr::EnumMember {
+                type_name, member, ..
+            } if type_name == entity_name => entity_field(entity, entity_name, member, span)?,
+            Expr::Field(receiver, field) if matches!(receiver.as_ref(), Expr::Var(name) if name == entity_name) => {
+                entity_field(entity, entity_name, field, span)?
+            }
+            _ => return Ok(None),
+        }))
     })
 }
 
