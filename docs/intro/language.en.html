@@ -867,6 +867,18 @@ call <code>fslc</code> for the values in the first column:</p>
 <td>Write to a regular file, or read stdout</td>
 </tr>
 <tr>
+<td><code>migrate --write</code> where no input needs a rewrite (#1754)</td>
+<td><code>"written": true</code> with <code>"changed": 0</code>; <code>files[]</code> entries had no <code>written</code></td>
+<td><code>"written": false</code>; each <code>files[]</code> entry reports <code>written</code>, <code>true</code> only for a replaced input</td>
+<td>Read <code>written</code> as "a file was replaced"</td>
+</tr>
+<tr>
+<td><code>migrate --write</code> on a CRLF document (#1755)</td>
+<td>lines it rewrote end in LF and the others keep CRLF; a document the formatter rewrote (metadata, maps, enums, quantifiers) comes back LF-only without its byte order mark</td>
+<td>every line ends as the input's first line does; the byte order mark is kept</td>
+<td>Nothing is required</td>
+</tr>
+<tr>
 <td><code>migrate --write</code> on a read-only input it would change (the #1419 refusal)</td>
 <td>rewritten, <code>"written": true</code>, exit 0; the mode stays read-only</td>
 <td>refused, <code>kind: "io"</code>, exit 2; no file of the set is written</td>
@@ -5043,7 +5055,16 @@ fslc verify requirements.fsl --depth 8
 fslc verify requirements.fsl --engine induction
 </code></pre>
 <p><code>migrate</code> is a dry run unless <code>--write</code> is present; a dry run still reports
-<code>result: "migrated"</code>, with <code>written: false</code>. Inspect <code>files[].findings[]</code>,
+<code>result: "migrated"</code>, with <code>written: false</code>. <code>written</code> says what the run wrote,
+not whether <code>--write</code> was given: the top-level <code>written</code> is <code>true</code> only when
+<code>--write</code> replaced at least one input, and each <code>files[]</code> entry's <code>written</code> is
+<code>true</code> only for an input it replaced. An input that needs no rewrite
+(<code>changed: false</code>) is left untouched and reports <code>written: false</code>, as does every
+input of a dry run, a refusal or <code>migrate_manual_required</code>. The rewrite keeps
+the input's line endings and byte order mark: every line ends as the input's
+first line does (CRLF or LF), and a UTF-8 byte order mark stays exactly when the
+input has one. The dry run's <code>files[].edits</code> replacement holds the same bytes
+<code>--write</code> writes. Inspect <code>files[].findings[]</code>,
 <code>machine_applicable</code>, and each refusal's <code>reason</code>, not only the command's exit
 status: <code>lint</code> exits 1 whenever it reports a finding, so the commands above are not
 an <code>&amp;&amp;</code> chain. A refused process conversion exits 1 with

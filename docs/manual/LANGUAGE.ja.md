@@ -697,6 +697,8 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 | 承認レコード (#1421) | v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4 | 署名なしの v5、署名つきの v6(`path_base` つき) | 新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。`document generate --approval` には Git が必要です。4.x のレコードは、5.0 で描画した成果物との照合も含めてダイジェストが一致する間だけ `approved` のままです。5.0 で成果物の描画が変わるレコードは承認し直しが必要です(表の下を参照)。新しいレコードの `generator_version` には、`fslc` のバージョンではなく `fslc-ledger-renderer/1.0.0` のような種類ごとのレンダラのバージョンを記録します |
 | 相対パスの AI の `dataset.source` (#1421) | 呼び出し側から解決 | 宣言したファイルのディレクトリから解決 | リポジトリを前置したパスを書き直すか、`--records` を渡します |
 | シンボリックリンクや、`/dev/null`、`/dev/stdout`、`/dev/fd/63` のような通常ファイルでないものへの `-o` (#1419) | 書き込む | 拒否、終了コード 2。書き込める親ディレクトリが必要 | 通常ファイルに書くか、標準出力を読みます |
+| 書き換えの要る入力がない `migrate --write` (#1754) | `"changed": 0` なのに `"written": true`。`files[]` の要素に `written` はない | `"written": false`。`files[]` の各要素が `written` を持ち、置き換えた入力でだけ `true` | `written` を「ファイルを置き換えた」の意味で読みます |
+| CRLF の文書への `migrate --write` (#1755) | 書き換えた行は LF、ほかの行は CRLF のまま。整形器が書き換えた文書(メタデータ、maps、enum、量化子)は LF だけになり byte order mark も消える | 各行の改行を入力の 1 行目にそろえ、byte order mark も保つ | 対応は不要です |
 | 書き換え対象の読み取り専用の入力への `migrate --write`(#1419 と同じ拒否) | 書き換える。`"written": true`、終了コード 0。モードは読み取り専用のまま | 拒否、`kind: "io"`、終了コード 2。集合のどのファイルも書き込まない | 先にファイルを書き込み可能にします |
 | `html s.fsl -o s.fsl` のように、コマンドが読むファイルを出力先にする(`./s.fsl`、symlink、ハードリンク経由も含む)(#1440) | 入力を置き換える | 何も書く前に拒否、`kind: "io"`、終了コード 2 | 別のパスに書きます |
 | ほかに finding のないヘッダーのない文書への `lint --edition next`(または `5`) (#1434) | 終了コード 0 | `missing_edition_header`、終了コード 1 | `--edition` を付けないか、ヘッダーを書きます |
@@ -4395,7 +4397,14 @@ fslc verify requirements.fsl --engine induction
 ```
 
 `migrate` は `--write` がなければ dry run です。dry run でも `result: "migrated"` を返し、
-`written: false` になります。終了コードだけでなく、`files[].findings[]`、
+`written: false` になります。`written` は `--write` を付けたかどうかではなく、実際に書いたかどうかを
+表します。最上位の `written` は `--write` が入力を 1 つ以上置き換えたときだけ `true` で、
+`files[]` の各要素の `written` は置き換えた入力でだけ `true` です。書き換えの要らない入力
+(`changed: false`)には触れず `written: false` を返します。dry run、拒否、
+`migrate_manual_required` の入力もすべて `written: false` です。書き換えは入力の改行と
+byte order mark を保ちます。各行の改行は入力の 1 行目の改行(CRLF か LF)にそろえ、UTF-8 の
+byte order mark は入力にあるときだけ残します。dry run の `files[].edits` の置換は、`--write` が
+書くバイト列と同じです。終了コードだけでなく、`files[].findings[]`、
 `machine_applicable`、拒否ごとの `reason` を確認してください。`lint` は finding があると
 終了コード 1 を返すので、上のコマンドは `&&` でつなげません。拒否された process の変換は
 `result: "migrate_manual_required"` で終了コード 1、後述のコメントによる拒否は
