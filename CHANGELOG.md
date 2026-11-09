@@ -2647,6 +2647,10 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `migration_refused` result, the refused file's `unsupported_double_ampersand`
   finding and `written: false`, and fails when the all-or-nothing guard is
   removed. Test-only; `migrate` behavior is unchanged.
+- Fixed (#1792): the workspace's own tests compile again on Rust 1.88, the
+  declared minimum `rust-version`. A test helper used an `if let` match guard,
+  which 1.88 rejects, so the release workflow's MSRV test step failed before it
+  built any native binary. Test-only; the shipped binaries are unchanged.
 - Replaced (#251): Inline branch maps in the public return example with explicit
   fair actions and local `implements` correspondences. The public refinement
   correspondences intentionally change from `submit.b1` / `submit.b2` to
