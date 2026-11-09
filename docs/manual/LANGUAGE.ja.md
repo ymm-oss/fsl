@@ -677,7 +677,8 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 
 同じリリースの削除のうち、次のものは FSL 5 の構文要素だけに関わるので、4.12 の文書には
 現れません。次のエディションの関係の役割・resource・measure に含まれる `__` (#1600)、
-重複したステップの入力 (#1682)、重複した actor と要件 ID の持ち主 (#1705)、コロンの量化子を使う
+重複したステップの入力 (#1682)、重複した actor と要件 ID の持ち主 (#1705)、入れ子の式の形の中の
+フィールド名と入力名 (#1798。§13.2 の「破壊的削除 (#1798)」を参照)、コロンの量化子を使う
 `fsl 5` ヘッダーの compose の子 (#1452)、そして `check` がすでに拒否していた次のエディションの
 4 つの移行形式を `analyze`、`conformance`、`explain`、`html`、`kernel`、`ledger`、`mutate`、
 `scenarios`、`sweep`、`testgen`、`typestate` も拒否するようになったもの (#1449) です。
@@ -4162,6 +4163,9 @@ lifecycle 行を追加すると別のパスを表せます。`number Qty` の有
 検査結果が対象とする世界は、この範囲です。
 `concept Bulk = Order where qty >= 2` と `concept Open = Order in Placed, Packed`
 は述語に名前を付けるもので、状態を追加しません。条件中ではフィールドを `qty` のように書きます。
+どの式の形の中でも同じです（同じ名前の量化子・集計の束縛変数は、その範囲でフィールドを隠します）。
+フィールドは状態なので、量化子の範囲の境界には書けません
+（`exists x in qty..qty { ... }` は `binder bound is not a static integer`）。
 変換後のフィールド名は `order_qty`、`order_stage` など、正規名の `entity_field` です。
 設計と `implements` のマッピングでは、その名前を使います。
 
@@ -4562,6 +4566,39 @@ corpus 全610形式 (specs 23、examples 195、CLI fixtures 392) は変更なし
 追加の受理削除ではありません。全2,924観測 (731形式×両バイナリ×2回) は反復差分0、
 除外フィールドなしです。他の必須テストの元入力を改訂・省略していません。これは上記の測定
 head の証拠であり、後の統合コミットに対して未実施の sweep を行ったとの主張ではありません。
+
+**破壊的削除 (#1798):** FSL 5 の requirements 文書では、concept の条件、決定表、event の
+`only when` と `set` の式の中の名前を、どの式の形の中でも解決するようになりました。以前は
+`abs`、`min`/`max`、メソッド呼び出し、`is`、量化子、`count`/`sum` の中を飛ばしていたため、
+そこにあるフィールド名が同名の event 入力を読んでいました。`concept Eligible = Claim where
+abs(amount) > 0` と `only for Eligible` の組み合わせは、格納された `amount` が 0 の event を
+許し、`check`、BMC、induction が通っていました。このような文書は、本来どおり失敗します
+（issue のシナリオは `acceptance`、終了コード 2）。`check` を通っていた次の 3 つの形は、
+終了コード 2 で拒否します:
+
+- `amount` が event の入力でもフィールドでもあるときの `only when abs(amount) > 0` や
+  `set limit = abs(amount)`: `kind: "parse"`、`ambiguous_input_field`、
+  ``'amount' in event 'approve' is both its input and a field of 'Claim'; write `input amount` or `Claim.amount` ``。
+  位置は rule 文か set のフィールドです。`input amount` か `Claim.amount` と書いてください。
+- event の入力にも `amount` があるときの `concept C = Claim where exists x in amount..amount { x == 1 }`:
+  `kind: "semantics"`、`binder bound is not a static integer`、位置は event です。境界が
+  入力を読んでいました。フィールドは境界になりません。境界はリテラルと `const` で書きます。
+
+拒否のしかたが変わる形が 1 つあります。`amount` という名前の量化子・集計の束縛変数の内側の
+`input amount`（`exists amount in 0..0 { input amount == amount }`、同じ形の `count(...)`、
+`set limit = sum(amount in 0..0 of input amount)`）は、`input amount` を型付けできない
+`semantics` のエラーでした。今は `kind: "parse"`、`captured_by_binder`、
+`` `input amount` in event 'approve' is inside a binder named 'amount', which hides the input; rename the binder ``
+で、位置は rule 文か set のフィールドです。入力は裸の名前で読むので、束縛変数に捕捉されて
+しまうためです。決定表の `assuming` で、concept が読む名前と同じ名前の束縛変数の内側に
+その concept を書く形（`exists cap in 5..5 { Big }`、`Big` は資源 `cap` を読む）も、
+`semantics` のエラーから、表の位置での `captured_by_binder` に変わります。束縛変数の名前を
+変えてください。新たに受理する形: 入れ子の形の中の `input amount` と `Claim.amount`
+（`only when abs(input amount) > 0`、`set limit = abs(Claim.amount)`）、`assuming` の量化子の
+中に書いた concept。concept と同じ名前の束縛変数は、これまでどおり束縛変数を指します。
+`specs/`、`examples/`、`rust/fslc/tests/fixtures/` のすべての `.fsl`（655 形式、うち `fsl 5`
+は 22）の `check` の結果は、base `995146f45` と head `cb883819d` で、それぞれの
+materialized tree で実行して変わりませんでした。
 
 - FSL 4 の process+data プロファイルは、単一エンティティのライフサイクルに対する
   requirements 形式です。`process E with f: T { ... }` は、エンティティの stage

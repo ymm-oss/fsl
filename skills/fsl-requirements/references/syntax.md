@@ -94,7 +94,7 @@ The lowering names each field `entity_field` (`order_qty`,
 
 | Form | Meaning |
 |---|---|
-| **concept** `C = E` **where** `cond` | the instances of `E` for which `cond` holds; fields are named bare (`qty`) |
+| **concept** `C = E` **where** `cond` | the instances of `E` for which `cond` holds; fields are named bare (`qty`), in every expression form, and are never an event input of the same name; a field cannot be a quantifier range bound (#1798, breaking removal) |
 | **concept** `C = E` **in** `S, T` | the instances in one of the stages |
 
 A concept is expanded where it is used; it adds no state. Use concepts for the
