@@ -750,10 +750,16 @@ fn ai_project_no_tools_and_standalone_controls_keep_their_contracts() {
         }
     }
     let source = include_str!("../../fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl");
-    let message = "unknown tool 'MissingTool' in authority block at /tmp/fsl-lsp-astral.fsl:14:5";
+    // The server names the file by its path when the URI has one, else by the URI:
+    // a drive-less `file:///tmp/...` has no Windows path.
+    let uri = lsp_types::Url::parse("file:///tmp/fsl-lsp-astral.fsl").unwrap();
+    let file = uri
+        .to_file_path()
+        .map_or_else(|()| uri.to_string(), |path| path.display().to_string());
+    let message = format!("unknown tool 'MissingTool' in authority block at {file}:14:5");
     assert_eq!(
         published_diagnostics(source),
-        vec![ai_expected(message, "semantics", 13, 4)]
+        vec![ai_expected(&message, "semantics", 13, 4)]
     );
 }
 
