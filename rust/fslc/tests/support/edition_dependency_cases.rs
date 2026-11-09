@@ -788,10 +788,12 @@ pub fn stable(mut value: Value) -> (Value, BTreeSet<String>) {
                 if path.starts_with("/warnings/")
                     && path.ends_with("/message")
                     && message.starts_with("deadlock reachable at step ")
-                    && message.ends_with(')')
-                    && let Some((prefix, _)) = message.split_once(" (state: ") =>
+                    && message.ends_with(')') =>
             {
-                *message = format!("{prefix} (state: <witness>)");
+                // No `if let` match guard: the release workflow tests on the 1.88 MSRV.
+                if let Some((prefix, _)) = message.split_once(" (state: ") {
+                    *message = format!("{prefix} (state: <witness>)");
+                }
             }
             _ => {}
         }
