@@ -827,9 +827,14 @@ checks. The `build` job installs the MSRV toolchain (`1.88.0`, commit-pinned per
 that toolchain before assembling release binaries; only the shipped-unit crates are exercised at
 MSRV, while library-crate semantics remain the responsibility of PR/main CI at `1.98.0`.
 Development workflows (`ci.yml`, `merge-readiness.yml`, `pages.yml`) continue to pin
-`dtolnay/rust-toolchain@1.98.0`. The job sets `timeout-minutes: 90` to make the four-way matrix
-budget visible — measured from issue #1025 (`windows-latest` hit 61 minutes on a debug three-crate
-subset) plus `fslc-rust` test volume, not to add slack. An always-running `product gate` aggregator fails unless every required lane emitted
+`dtolnay/rust-toolchain@1.98.0`. The job sets `timeout-minutes: 150` to make the four-way matrix
+budget visible, not to add slack. The first budget, 90 minutes, came from issue #1025
+(`windows-latest` hit 61 minutes on a debug three-crate subset) plus `fslc-rust` test volume. The
+v5.0.0 candidate outgrew it on `windows-x64` (dispatch run 42591087279): the MSRV test build took
+30 minutes, the tests 57 minutes (433 test binaries, 0 failed), and the job was cancelled at 90
+minutes two minutes into the release build. The v4.12.0 Windows job, which includes that release
+build, took 32 minutes in all, so 150 minutes covers the measured 88 minutes plus one more
+release build and smoke, with headroom for runner variance. An always-running `product gate` aggregator fails unless every required lane emitted
 successful evidence; an accidentally skipped lane cannot make the workflow confidently green.
 
 Product-gate runs for merged commits are not cancelled. Each merged state therefore retains its own
