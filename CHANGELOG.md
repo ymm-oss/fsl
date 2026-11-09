@@ -1859,6 +1859,29 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `migrate_manual_required` report `written: false` at both levels. A consumer
   that read `written` as "`--write` was given" now sees `false` for a no-op
   write.
+- Changed (#1798, breaking removal): in an FSL 5 event's `only when` condition
+  or `set` expression, a bare name that is both the event's input and a field of
+  its entity is `ambiguous_input_field` (exit 2) inside every expression form,
+  as LANGUAGE.md already states; inside `abs(...)`, `min`/`max`, a method call,
+  an `is` test, a quantifier or `count`/`sum` it used to read the input silently.
+  Write `input amount` or `Claim.amount`. Nested in those forms, both used to fail
+  with a `semantics` error and now work: `Claim.amount` reads the stored field
+  and `input amount` reads the input, except inside a quantifier or aggregate
+  binder named `amount`, where it is refused with the new code
+  `captured_by_binder` because the binder would capture it. A concept condition
+  whose quantifier range bound is a field (`exists x in amount..amount { ... }`)
+  is now refused with `binder bound is not a static integer`: it used to pass
+  only by reading a same-named input. A decision table's `assuming` now expands
+  a concept named inside a quantifier or aggregate, which used to fail with a
+  `semantics` error; a binder named like something that concept reads (a
+  resource, say) is `captured_by_binder`. Inside a binder named like a concept,
+  the name is the binder: base left every name inside a quantifier unresolved,
+  so such a name was the binder there too, and `assuming exists Small in 0..0
+  { Small == 0 }` checks `ok` on both. Checking all 655 `.fsl` files under
+  `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (22 of them `fsl 5`),
+  each SHA in its own materialized tree with a binary built from it, gives the
+  same result, kind, diagnostic code and exit code on `995146f45` and on this
+  change.
 - Fixed (#251): next-edition diagnostics for already-invalid expression `||` and
   `->` keep the parse envelope and exit code while reporting
   `unsupported_in_edition`, the operator location, canonical replacement, and
@@ -2656,6 +2679,27 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   nine `issue_1517` cases waited out their 120 s deadline, and a drive-less
   `file:///tmp/...` has no Windows path. The release workflow's Windows MSRV test
   step failed on them. Test-only; the server is unchanged.
+- Fixed (#1798): in an FSL 5 `requirements` document, a field name in a
+  `concept` condition is the stored entity field in every expression form. Inside
+  `abs(...)`, `min`/`max`, a method call such as `.contains(...)`, an `is`
+  pattern test, a quantifier, or `count`/`sum`, the name used to read the event
+  input of the same name, so an `only for <Concept>` guard, and a decision-table
+  row naming the concept, admitted an event the concept excludes. `check`, BMC
+  and induction then accepted such a spec wrongly; they now refuse it (for
+  example a scenario that relies on the excluded event fails with
+  `kind: "acceptance"`, exit 2). A quantifier or aggregate binder named like a
+  field still shadows the field inside its scope. One shared resolver with no
+  catch-all now spells fields for concepts, decision tables and event
+  expressions, so a new expression form cannot skip resolution.
+- Fixed (#1799): in an FSL 5 `requirements` document, two `only after` rules
+  whose prerequisite events joined to one history field name (the events
+  `{a, b}` and a single event named `a_or_b` both gave `did_a_or_b`) shared
+  that field, so one rule's prerequisite satisfied the other: a scenario that
+  skipped the required event was `ok`, `verified` and `proved`, and a valid
+  order could be refused. Each prerequisite event set now has its own field;
+  sets whose names collide get numbered fields (`did_a_or_b_1`,
+  `did_a_or_b_2`) independent of rule order. Field names of documents without
+  such a collision are unchanged.
 - Replaced (#251): Inline branch maps in the public return example with explicit
   fair actions and local `implements` correspondences. The public refinement
   correspondences intentionally change from `submit.b1` / `submit.b2` to
