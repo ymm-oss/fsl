@@ -9,9 +9,12 @@ use std::collections::BTreeSet;
 
 use crate::{Binder, Expr, ParseError};
 
-/// How a name-resolving rewrite treats one name reference: `Some` replaces
-/// it, `None` keeps a `Var` or `EnumMember` and looks inside a field read.
-pub(in crate::parser) type ResolveName<'a> = dyn Fn(&Expr) -> Result<Option<Expr>, ParseError> + 'a;
+/// How a name-resolving rewrite treats one name reference, given the binder
+/// names in scope there: `Some` replaces it, `None` keeps a `Var` or
+/// `EnumMember` and looks inside a field read. A replacement must not name a
+/// binder in scope, which would capture it (#1798): `resolve` refuses instead.
+pub(in crate::parser) type ResolveName<'a> =
+    dyn Fn(&Expr, &BTreeSet<String>) -> Result<Option<Expr>, ParseError> + 'a;
 
 /// `expression` rebuilt through every [`Expr`] form, with `resolve` applied
 /// to each name reference -- a `Var`, an `EnumMember`, or a field read of a
@@ -48,7 +51,7 @@ pub(in crate::parser) fn resolve_names(
             Expr::Field(receiver, _) => matches!(receiver.as_ref(), Expr::Var(name) if free(name)),
             _ => false,
         };
-        if reference && let Some(resolved) = resolve(&expression)? {
+        if reference && let Some(resolved) = resolve(&expression, bound)? {
             return Ok(resolved);
         }
         Ok(match expression {
@@ -167,6 +170,19 @@ pub(in crate::parser) fn resolve_names(
     })
 }
 
+/// The bare names `expression` reads that no binder inside it binds.
+pub(in crate::parser) fn free_names(expression: &Expr) -> BTreeSet<String> {
+    let names = std::cell::RefCell::new(BTreeSet::new());
+    resolve_names(expression.clone(), &BTreeSet::new(), &|reference, _| {
+        if let Expr::Var(name) = reference {
+            names.borrow_mut().insert(name.clone());
+        }
+        Ok(None)
+    })
+    .expect("collecting names refuses none");
+    names.into_inner()
+}
+
 /// `binder` with its domain resolved in the enclosing scope `bound` and its
 /// filter in its own scope, and that scope: `bound` with the binder's name.
 fn resolve_binder(
@@ -251,7 +267,7 @@ mod tests {
 
     /// `amount` (free) becomes `Claim.amount`; everything else stays.
     fn spell(expression: Expr) -> Expr {
-        resolve_names(expression, &BTreeSet::new(), &|reference| {
+        resolve_names(expression, &BTreeSet::new(), &|reference, _| {
             Ok(match reference {
                 Expr::Var(name) if name == "amount" => Some(Expr::Var("Claim.amount".into())),
                 _ => None,
@@ -436,13 +452,62 @@ mod tests {
             },
             body: Box::new(Expr::Field(var("Claim"), "amount".into())),
         };
-        let resolved = resolve_names(expression.clone(), &BTreeSet::new(), &|reference| {
+        let resolved = resolve_names(expression.clone(), &BTreeSet::new(), &|reference, _| {
             seen.borrow_mut().push(reference.clone());
             Ok(None)
         })
         .expect("infallible");
         assert_eq!(resolved, expression);
         assert!(seen.borrow().is_empty(), "{:?}", seen.borrow());
+    }
+
+    /// `resolve` sees the binders around each reference: the filter and the
+    /// body see the binder, the domain and a sibling operand do not.
+    #[test]
+    fn resolve_sees_the_binders_in_scope_at_each_reference() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let expression = Expr::Binary {
+            op: "and".into(),
+            left: Box::new(Expr::Quantified {
+                quantifier: "exists".into(),
+                binder: Binder::Range {
+                    name: "x".into(),
+                    lo: var("lo"),
+                    hi: var("hi"),
+                    where_expr: Some(var("filter")),
+                },
+                body: Box::new(Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: Binder::Collection {
+                        name: "y".into(),
+                        collection: var("items"),
+                        where_expr: None,
+                    },
+                    value: Some(var("value")),
+                }),
+            }),
+            right: var("after"),
+        };
+        resolve_names(expression, &BTreeSet::new(), &|reference, bound| {
+            if let Expr::Var(name) = reference {
+                seen.borrow_mut()
+                    .push((name.clone(), bound.iter().cloned().collect::<Vec<_>>()));
+            }
+            Ok(None)
+        })
+        .expect("infallible");
+        let scope = |names: &[&str]| names.iter().map(|&name| name.to_owned()).collect();
+        assert_eq!(
+            seen.into_inner(),
+            vec![
+                ("lo".to_owned(), scope(&[])),
+                ("hi".to_owned(), scope(&[])),
+                ("filter".to_owned(), scope(&["x"])),
+                ("items".to_owned(), scope(&["x"])),
+                ("value".to_owned(), scope(&["x", "y"])),
+                ("after".to_owned(), scope(&[])),
+            ]
+        );
     }
 
     #[test]
@@ -454,7 +519,7 @@ mod tests {
                 span: span(),
             },
             &BTreeSet::new(),
-            &|_| Err(crate::ParseError::new("refused", span())),
+            &|_, _| Err(crate::ParseError::new("refused", span())),
         )
         .expect_err("refused");
         assert!(error.to_string().contains("refused"), "{error}");

@@ -20,8 +20,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    Entity, EventSignature, MIXED_PARTICLES, PARTICLE_ROLE_MISMATCH, UNKNOWN_EVENT_PHRASE, Word,
-    actor_not_declared, join_names, names::resolve_names,
+    CAPTURED_BY_BINDER, Entity, EventSignature, MIXED_PARTICLES, PARTICLE_ROLE_MISMATCH,
+    UNKNOWN_EVENT_PHRASE, Word, actor_not_declared, join_names,
+    names::{free_names, resolve_names},
 };
 use crate::keywords::{Kw, Particle};
 use crate::parser::{Parser, join_span};
@@ -369,18 +370,34 @@ impl Scope<'_> {
 
     /// `expression` with the entity's fields spelled `Entity.field`, and,
     /// when `concepts` is set, a concept's name replaced by its predicate.
+    /// A predicate that reads a name a binder around the concept's name
+    /// binds (a resource, say) is refused: the binder would capture it.
     fn fields(&self, expression: Expr, span: Span, concepts: bool) -> Result<Expr, ParseError> {
         let dotted = |field: &str| Expr::Var(format!("{}.{field}", self.entity_name));
-        resolve_names(expression, &BTreeSet::new(), &|reference| {
+        resolve_names(expression, &BTreeSet::new(), &|reference, bound| {
             Ok(match reference {
                 Expr::Var(name) if self.entity.fields.contains_key(name) => Some(dotted(name)),
                 Expr::Var(name)
                     if concepts && self.concepts.iter().any(|concept| concept.name == *name) =>
                 {
-                    Some(self.concept(&Word {
+                    let predicate = self.concept(&Word {
                         text: name.clone(),
                         span,
-                    })?)
+                    })?;
+                    if let Some(captured) = free_names(&predicate)
+                        .into_iter()
+                        .find(|read| bound.contains(read))
+                    {
+                        return Err(ParseError::coded(
+                            CAPTURED_BY_BINDER,
+                            format!(
+                                "concept '{name}' reads '{captured}', which the binder \
+                                 '{captured}' around it hides; rename the binder"
+                            ),
+                            span,
+                        ));
+                    }
+                    Some(predicate)
                 }
                 Expr::EnumMember {
                     type_name, member, ..

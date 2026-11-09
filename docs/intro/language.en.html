@@ -4713,6 +4713,8 @@ field, it adds no automatic field assignment; if it matches a field, that field
 is assigned even when the input's type is explicit.
 Inputs and <code>set x = expr, y = expr</code> updates can be comma-separated. In a field/input
 collision, use <code>input qty</code> to select the input (<code>ambiguous_input_field</code> otherwise).
+Inside a quantifier or aggregate binder named <code>qty</code>, <code>input qty</code> is refused
+(<code>captured_by_binder</code>): rename the binder.
 An omitted verb defaults to the event name. <code>covers REQ-ID "source text"</code>
 records traceability. Declare every actor, including those used in scenarios
 (<code>actor_not_declared</code>). Ordinary events are fair; <code>fault event</code> is not fair.
@@ -4785,7 +4787,9 @@ and be disjoint (<code>decide_overlap</code>, with shared values). A row made im
 by guards warns <code>decide_row_emptied</code>. An event receives the disjunction of the
 conditions of rows listing it as one guard; its other rule guards still apply.
 <code>assuming Q</code> restricts table checking to Q <strong>and generates a stage-conditional
-invariant that <code>verify</code> must prove</strong>; it is not an unchecked escape from coverage.</p>
+invariant that <code>verify</code> must prove</strong>; it is not an unchecked escape from coverage.
+A concept named in <code>assuming</code> inside a quantifier or aggregate binder named like
+something the concept reads (a resource, say) is refused (<code>captured_by_binder</code>).</p>
 <p><strong>Relations, resources, and projections.</strong> <code>Ticket belongs to Agent as assignee
 via take</code> adds an initially unset optional role to each ticket. The related entity
 must be declared with <code>entity</code>, and the <code>via</code> event's actor must be that entity,

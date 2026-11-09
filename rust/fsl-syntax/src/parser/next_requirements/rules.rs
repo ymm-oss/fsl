@@ -481,7 +481,7 @@ fn any_of(terms: impl IntoIterator<Item = Expr>, op: &str) -> Option<Expr> {
 /// with an input of the same name.
 fn field_names(expression: Expr, entity: &Entity, entity_name: &str) -> Expr {
     let dotted = |field: &str| Expr::Var(format!("{entity_name}.{field}"));
-    resolve_names(expression, &BTreeSet::new(), &|reference| {
+    resolve_names(expression, &BTreeSet::new(), &|reference, _| {
         Ok(match reference {
             Expr::Var(name) if entity.fields.contains_key(name) => Some(dotted(name)),
             Expr::EnumMember {

@@ -60,6 +60,10 @@ pub const MIXED_REQUIREMENTS_FORMS: &str = "mixed_requirements_forms";
 /// A bare name in an event's expression that is both one of its inputs and a
 /// field of its entity (decisions/046 Q6).
 pub const AMBIGUOUS_INPUT_FIELD: &str = "ambiguous_input_field";
+/// A quantifier or aggregate binder around a name the requirements lowering
+/// spells out -- the input of `input name`, or what a decision table's concept
+/// reads -- that would capture it (#1798).
+pub const CAPTURED_BY_BINDER: &str = "captured_by_binder";
 /// An event or scenario step whose actor no `actor` declares.
 pub const ACTOR_NOT_DECLARED: &str = "actor_not_declared";
 /// A scenario step whose verb no event declares.
@@ -1919,13 +1923,25 @@ fn resolve_event_names(
     event: &str,
     span: Span,
 ) -> Result<Expr, ParseError> {
-    names::resolve_names(expression, &BTreeSet::new(), &|reference| {
+    names::resolve_names(expression, &BTreeSet::new(), &|reference, bound| {
         Ok(Some(match reference {
             Expr::Var(name) => {
                 if let Some(input) = name.strip_prefix(INPUT_MARK) {
                     if !inputs.iter().any(|candidate| candidate == input) {
                         return Err(ParseError::new(
                             format!("event '{event}' has no input '{input}'"),
+                            span,
+                        ));
+                    }
+                    // The input is read by its bare name, which a binder of
+                    // the same name around it would capture (#1798).
+                    if bound.contains(input) {
+                        return Err(ParseError::coded(
+                            CAPTURED_BY_BINDER,
+                            format!(
+                                "`input {input}` in event '{event}' is inside a binder named \
+                                 '{input}', which hides the input; rename the binder"
+                            ),
                             span,
                         ));
                     }

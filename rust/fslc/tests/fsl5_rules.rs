@@ -1078,8 +1078,9 @@ fn three_engines(label: &str, source: &str) -> Vec<(String, Option<String>, i32)
         });
         (
             args.join(" "),
-            value["kind"]
+            value["diagnostic_code"]
                 .as_str()
+                .or_else(|| value["kind"].as_str())
                 .or_else(|| value["result"].as_str())
                 .map(str::to_owned),
             output.status.code().expect("exit code"),
@@ -1090,13 +1091,36 @@ fn three_engines(label: &str, source: &str) -> Vec<(String, Option<String>, i32)
 
 /// Every engine refuses `source` with an acceptance failure.
 fn assert_refused_everywhere(label: &str, source: &str) {
-    for (command, kind, exit) in three_engines(label, source) {
+    assert_everywhere(label, source, "acceptance", 2);
+}
+
+/// Every engine reports `outcome` (the diagnostic code, else the kind, else
+/// the result) with exit code `exit`.
+fn assert_everywhere(label: &str, source: &str, outcome: &str, exit: i32) {
+    for (command, found, code) in three_engines(label, source) {
         assert_eq!(
-            (kind.as_deref(), exit),
-            (Some("acceptance"), 2),
-            "{label}: `{command}` must refuse the scenario"
+            (found.as_deref(), code),
+            (Some(outcome), exit),
+            "{label}: `{command}`"
         );
     }
+}
+
+/// Every engine accepts `source`: `check` ok, BMC verified, induction proved.
+fn assert_accepted_everywhere(label: &str, source: &str) {
+    let found = three_engines(label, source)
+        .into_iter()
+        .map(|(_, found, code)| (found, code))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        [
+            (Some("ok".to_owned()), 0),
+            (Some("verified".to_owned()), 0),
+            (Some("proved".to_owned()), 0),
+        ],
+        "{label}"
+    );
 }
 
 /// #1798: a field name inside `abs(...)` in a concept condition read the
@@ -1209,8 +1233,9 @@ fn issue_1798_a_decision_row_concept_field_is_the_stored_field() {
 /// #1798, the same defect in an event expression: inside `abs(...)` a bare
 /// name that is both the input and a field escaped `ambiguous_input_field`
 /// and read the input, and `Claim.amount` stayed unresolved. Both spellings
-/// now resolve as they do outside `abs`, and `input amount` still reads the
-/// input.
+/// now resolve as they do outside `abs`, `input amount` reads the input
+/// (outside a binder named `amount`; see the test below), and in a `set`
+/// expression a nested `Claim.amount` reads the stored field.
 #[test]
 fn issue_1798_an_only_when_name_inside_abs_resolves_as_outside() {
     let only_when = |condition: &str| {
@@ -1228,25 +1253,129 @@ fn issue_1798_an_only_when_name_inside_abs_resolves_as_outside() {
         "input amount",
     );
     assert_refused_everywhere("issue-1798-when-field", &only_when("abs(Claim.amount) > 0"));
-    let (output, exit) = check_source("issue-1798-when-input", &only_when("abs(input amount) > 0"));
+    // The stored amount is 0, so only the input 1 satisfies the guard.
+    assert_accepted_everywhere("issue-1798-when-input", &only_when("abs(input amount) > 0"));
+    // A `set` expression resolves through the same rewrite.
+    assert_error(
+        "issue-1798-set-ambiguous",
+        &with_set("abs(amount)", "then c1 is Approved"),
+        "ambiguous_input_field",
+        "input amount",
+    );
+    // A nested `Claim.amount` there reads the stored 0, not the input 1.
+    assert_accepted_everywhere(
+        "issue-1798-set-field",
+        &with_set("abs(Claim.amount)", "then claim_limit[0] == 0"),
+    );
+    assert_refused_everywhere(
+        "issue-1798-set-field-not-input",
+        &with_set("abs(Claim.amount)", "then claim_limit[0] == 1"),
+    );
+}
+
+/// [`input_shadow_document`] with a second field `limit` that `approve`
+/// sets to `value`, and the scenario's `then` line replaced by `then`.
+fn with_set(value: &str, then: &str) -> String {
+    input_shadow_document("true", "")
+        .replace(
+            "amount: Amount = 0\n",
+            "amount: Amount = 0\n    limit: Amount = 0\n",
+        )
+        .replace(
+            "with amount Draft -> Approved",
+            &format!("with amount Draft -> Approved set limit = {value}"),
+        )
+        .replace("then c1 is Approved", then)
+}
+
+/// #1798 review B1: `input amount` is read by the bare name `amount`, so
+/// inside a quantifier or aggregate binder named `amount` the binder would
+/// capture it (`exists amount in 0..0 { input amount == amount }` compared
+/// 0 with 0, and every engine accepted the scenario approving with input 1).
+/// It is refused as `captured_by_binder`; under another binder name the
+/// input is still the input.
+#[test]
+fn issue_1798_an_input_inside_a_binder_of_its_name_is_captured_by_binder() {
+    let only_when = |condition: &str| {
+        input_shadow_document(
+            "true",
+            &format!(
+                "  rule REQ-1 \"t\" {{\n    allow Manager approves Claim only when {condition}\n  }}\n"
+            ),
+        )
+    };
+    for (label, source) in [
+        (
+            "exists",
+            only_when("exists amount in 0..0 { input amount == amount }"),
+        ),
+        (
+            "count",
+            only_when("count(amount in 0..0 where input amount == amount) > 0"),
+        ),
+        (
+            "set-sum",
+            with_set(
+                "sum(amount in 0..0 of input amount)",
+                "then claim_limit[0] == 1",
+            ),
+        ),
+    ] {
+        assert_everywhere(
+            &format!("issue-1798-captured-{label}"),
+            &source,
+            "captured_by_binder",
+            2,
+        );
+    }
+    // Controls: under the binder `x`, `input amount` is the input 1.
+    assert_refused_everywhere(
+        "issue-1798-binder-x-refuses",
+        &only_when("exists x in 0..0 { input amount == x }"),
+    );
+    assert_accepted_everywhere(
+        "issue-1798-binder-x-admits",
+        &only_when("exists x in 1..1 { input amount == x }"),
+    );
+    assert_accepted_everywhere(
+        "issue-1798-set-sum-binder-x",
+        &with_set("sum(x in 0..0 of input amount)", "then claim_limit[0] == 1"),
+    );
+}
+
+/// #1798 review: a decision table's `assuming` now expands a concept named
+/// inside a quantifier (it was left unexpanded and failed to type), and a
+/// concept whose predicate reads a name the binder around it binds is
+/// `captured_by_binder`.
+#[test]
+fn issue_1798_an_assuming_concept_inside_a_binder() {
+    let table = |assuming: &str| {
+        format!(
+            "fsl 5\nrequirements R {{\n  number Amount\n  actor Manager\n  \
+             resource cap: Amount = 1\n  entity Claim {{\n    amount: Amount = 0\n    \
+             lifecycle Draft -> Approved\n    lifecycle Draft -> Rejected\n  }}\n  \
+             concept Small = Claim where amount <= cap\n  \
+             concept Big = Claim where amount > cap\n  \
+             event approve = Manager approves Claim with amount Draft -> Approved\n  \
+             event reject = Manager rejects Claim Draft -> Rejected\n  \
+             decide REQ-1 \"t\" for Draft Claim {{\n    Small => Manager approves\n    \
+             Big => Manager rejects\n  }} assuming {assuming}\n}}\n\
+             verify {{ instances Claim = 1 values Amount = 0..2 }}\n"
+        )
+    };
+    let (output, exit) = check_source(
+        "issue-1798-assuming-nested",
+        &table("exists x in 0..0 { Small or Big }"),
+    );
     assert_eq!(
         (output["result"].as_str(), exit),
         (Some("ok"), 0),
         "{output:#}"
     );
-    // A `set` expression resolves through the same rewrite.
     assert_error(
-        "issue-1798-set-ambiguous",
-        &input_shadow_document("true", "")
-            .replace(
-                "amount: Amount = 0\n",
-                "amount: Amount = 0\n    limit: Amount = 0\n",
-            )
-            .replace(
-                "with amount Draft -> Approved",
-                "with amount Draft -> Approved set limit = abs(amount)",
-            ),
-        "ambiguous_input_field",
-        "input amount",
+        "issue-1798-assuming-captured",
+        &table("exists cap in 5..5 { Big }"),
+        "captured_by_binder",
+        "concept 'Big' reads 'cap'",
     );
 }

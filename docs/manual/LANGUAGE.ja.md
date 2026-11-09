@@ -4173,7 +4173,9 @@ lifecycle 行を追加すると別のパスを表せます。`number Qty` の有
 `n` と同名のフィールドがなければ、自動のフィールド代入は行いません。同名のフィールドが
 あれば、入力の型を明記していても代入します。入力も `set x = expr, y = expr` の更新も、
 複数ならカンマで区切ります。入力名とフィールド名が重なるときは `input qty` で入力を
-選びます（曖昧な裸の名前は `ambiguous_input_field`）。動詞を省くと event 名を使います。
+選びます（曖昧な裸の名前は `ambiguous_input_field`）。`qty` という名前の量化子・集計の
+束縛変数の内側では `input qty` を拒否します（`captured_by_binder`）。束縛変数の名前を
+変えてください。動詞を省くと event 名を使います。
 `covers REQ-ID "原文"` はトレーサビリティです。シナリオで使うものも含め、アクターを
 宣言してください（`actor_not_declared`）。通常の event は fair、`fault event` は
 fair ではありません。辺に対応する event がなければ `lifecycle_edge_without_event` の警告です。
@@ -4221,6 +4223,8 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
 一つのガードとして加わり、他の rule のガードも適用されます。
 `assuming Q` は表の検査を Q の範囲に絞ると同時に、**その段階で Q が成り立つという
 不変条件を生成し、`verify` で証明させます**。網羅性の検査を無条件に免除する指定ではありません。
+`assuming` の中で、concept が読む名前（資源など）と同じ名前の量化子・集計の束縛変数の
+内側にその concept を書くと拒否します（`captured_by_binder`）。
 
 **関係、資源、射影。** `Ticket belongs to Agent as assignee via take` は、各 ticket に
 最初は未設定の optional な役割を追加します。関係先は `entity` で宣言し、`via` の event の

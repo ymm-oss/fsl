@@ -4396,7 +4396,9 @@ lifecycle 行を追加すると別のパスを表せます。<code>number Qty</c
 <code>n</code> と同名のフィールドがなければ、自動のフィールド代入は行いません。同名のフィールドが
 あれば、入力の型を明記していても代入します。入力も <code>set x = expr, y = expr</code> の更新も、
 複数ならカンマで区切ります。入力名とフィールド名が重なるときは <code>input qty</code> で入力を
-選びます（曖昧な裸の名前は <code>ambiguous_input_field</code>）。動詞を省くと event 名を使います。
+選びます（曖昧な裸の名前は <code>ambiguous_input_field</code>）。<code>qty</code> という名前の量化子・集計の
+束縛変数の内側では <code>input qty</code> を拒否します（<code>captured_by_binder</code>）。束縛変数の名前を
+変えてください。動詞を省くと event 名を使います。
 <code>covers REQ-ID "原文"</code> はトレーサビリティです。シナリオで使うものも含め、アクターを
 宣言してください（<code>actor_not_declared</code>）。通常の event は fair、<code>fault event</code> は
 fair ではありません。辺に対応する event がなければ <code>lifecycle_edge_without_event</code> の警告です。</p>
@@ -4468,7 +4470,9 @@ trace がないと <code>never_rule_without_forbidden</code> が警告します�
 <code>decide_row_emptied</code> の警告です。各出来事には、それを列挙する行の条件の論理和が
 一つのガードとして加わり、他の rule のガードも適用されます。
 <code>assuming Q</code> は表の検査を Q の範囲に絞ると同時に、<strong>その段階で Q が成り立つという
-不変条件を生成し、<code>verify</code> で証明させます</strong>。網羅性の検査を無条件に免除する指定ではありません。</p>
+不変条件を生成し、<code>verify</code> で証明させます</strong>。網羅性の検査を無条件に免除する指定ではありません。
+<code>assuming</code> の中で、concept が読む名前（資源など）と同じ名前の量化子・集計の束縛変数の
+内側にその concept を書くと拒否します（<code>captured_by_binder</code>）。</p>
 <p><strong>関係、資源、射影。</strong> <code>Ticket belongs to Agent as assignee via take</code> は、各 ticket に
 最初は未設定の optional な役割を追加します。関係先は <code>entity</code> で宣言し、<code>via</code> の event の
 アクターはその関係先でなければなりません。そのため <code>Agent</code> は <code>actor</code> と <code>entity</code> の両方で

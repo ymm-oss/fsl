@@ -4490,6 +4490,8 @@ field, it adds no automatic field assignment; if it matches a field, that field
 is assigned even when the input's type is explicit.
 Inputs and `set x = expr, y = expr` updates can be comma-separated. In a field/input
 collision, use `input qty` to select the input (`ambiguous_input_field` otherwise).
+Inside a quantifier or aggregate binder named `qty`, `input qty` is refused
+(`captured_by_binder`): rename the binder.
 An omitted verb defaults to the event name. `covers REQ-ID "source text"`
 records traceability. Declare every actor, including those used in scenarios
 (`actor_not_declared`). Ordinary events are fair; `fault event` is not fair.
@@ -4538,6 +4540,8 @@ by guards warns `decide_row_emptied`. An event receives the disjunction of the
 conditions of rows listing it as one guard; its other rule guards still apply.
 `assuming Q` restricts table checking to Q **and generates a stage-conditional
 invariant that `verify` must prove**; it is not an unchecked escape from coverage.
+A concept named in `assuming` inside a quantifier or aggregate binder named like
+something the concept reads (a resource, say) is refused (`captured_by_binder`).
 
 **Relations, resources, and projections.** `Ticket belongs to Agent as assignee
 via take` adds an initially unset optional role to each ticket. The related entity
