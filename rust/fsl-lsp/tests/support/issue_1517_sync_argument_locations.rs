@@ -84,7 +84,11 @@ fn run(id: &str) {
     ] {
         fs::write(inputs.join(name), text).unwrap();
     }
-    let uri = format!("file://{}", inputs.join("root.fsl").display());
+    // A well-formed URI on every platform: `file://C:\...` is normalized by the
+    // server, so the published URI would never equal it on Windows.
+    let uri = lsp_types::Url::from_file_path(inputs.join("root.fsl"))
+        .expect("absolute scratch path")
+        .to_string();
     let mut diagnostics = case.error.as_ref().map_or_else(|| json!([]), |(_, _, message)| {
         json!([{"range":{"start":{"line":line,"character":start},"end":{"line":line,"character":end}},
             "severity":1,"code":"FSL-SEMANTIC","source":"fslc","message":message,"data":{"kind":"semantics"}}])
