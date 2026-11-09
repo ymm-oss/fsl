@@ -234,6 +234,13 @@ owner of the full text):
   at doc.fsl:24:3`, reported ahead of a repeated bound or `kpi`; repeated bounds and `kpi` are
   refused as above.
 
+Breaking removal (#1798), FSL 5 requirements: names nested in any expression form of a concept,
+decision table, `only when` or `set` now resolve (a bare input-and-field name is
+`ambiguous_input_field`, a field range bound is `binder bound is not a static integer`, and
+`input x` inside a binder named `x` is `captured_by_binder`); see
+[fsl-requirements syntax](../../fsl-requirements/references/syntax.md) and `docs/manual/LANGUAGE.md`,
+"Breaking removals (#1798)".
+
 Breaking removals (#1552, #1561): for requirements `rule ... only when` conditions,
 `check` now rejects previously accepted unsatisfiable guards that reuse an entity
 field's name as an `is` pattern inside a quantifier body or aggregate value. The

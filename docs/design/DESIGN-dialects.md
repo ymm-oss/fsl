@@ -577,6 +577,55 @@ regenerated; `skills/fsl-requirements/references/syntax.md` and
 `changelog.d/1705-requirements-repeats.changed.md` keep their records. Migration: rename one of the
 two IDs, or merge the two declarations; delete the repeated actor.
 
+#### Field and input names in every expression form (#1798)
+
+In `fsl 5` requirements, three rewrites spell names before lowering: concept conditions in rule
+guards (`field_names`), decision-table rows and `assuming` (`Scope::fields`), and event `only when`
+conditions and `set` expressions (`resolve_event_names`). Each recursed through some `Expr` forms
+and passed the rest through unchanged (`other => other`): `abs`/`min`/`max`, method calls, `is`,
+quantifiers, `count`/`sum`, `stage`, struct literals and `reachable`. A field name there stayed bare,
+and the lowering binds a bare name an event input shares to the input. So `concept Eligible = Claim
+where abs(amount) > 0` with `only for Eligible` read the input `amount`, not the stored field, and
+`check`, BMC and induction accepted a scenario the concept excludes. All three rewrites now go
+through one resolver, `rust/fsl-syntax/src/parser/next_requirements/names.rs`, which names every
+`Expr` form with no catch-all and tracks quantifier and aggregate binders: a binder hides a name in
+its `where` filter and body or value, not in its domain. An `is some(v)` pattern does not hide a
+field (#1552), and a pattern named like a field or an input is refused by the lowering (#1561).
+
+**Breaking removal (#1798).** Measured with `check` on base `995146f45` and head `cb883819d`
+(documents in the scratch tests of `rust/fslc/tests/fsl5_rules.rs`, `issue_1798_*`):
+
+| Form | Base | Head, exit 2 |
+|---|---|---|
+| `only when abs(amount) > 0`, `amount` both an input and a field | exit 0, `ok`, reading the input | `kind: "parse"`, `ambiguous_input_field`, at the rule statement |
+| `set limit = abs(amount)`, the same `amount` | exit 0, `ok`, reading the input | `kind: "parse"`, `ambiguous_input_field`, at the set field |
+| `concept C = Claim where exists x in amount..amount { x == 1 }`, `amount` also an input | exit 0, `ok`, the bound read the input | `kind: "semantics"`, `binder bound is not a static integer`, at the event; a field is not a static bound |
+| `only when exists amount in 0..0 { input amount == amount }`, also `count(amount in 0..0 where …)` and `set limit = sum(amount in 0..0 of input amount)` | exit 2, `semantics`, `public Kernel cannot type identifier 'input amount'` | `kind: "parse"`, new code `captured_by_binder`, at the rule statement or set field |
+| `decide … assuming exists cap in 5..5 { Big }`, `Big` reading the resource `cap` | exit 2, `semantics`, `cannot type identifier 'Big'` | `kind: "parse"`, `captured_by_binder` (`concept 'Big' reads 'cap', which the binder 'cap' around it hides`), at the table |
+
+The resolver passes each reference the binders in scope, so an `input name` inside a binder named
+`name` is refused rather than spelled as the bare `name` the binder would capture, and a concept
+expanded inside a binder that binds a name its predicate reads is refused the same way.
+`captured_by_binder` covers both. Under another binder name `input amount` reads the input.
+
+Newly accepted, base `semantics` error to head `ok`: `assuming exists x in 0..0 { Small or Big }`
+(a concept named inside a quantifier is now expanded), `only when abs(input amount) > 0`, and
+`set limit = abs(Claim.amount)`. Unchanged at `ok`: a binder named like a concept
+(`assuming exists Small in 0..0 { Small == 0 }`), which base also read as the binder, since it left
+names inside a quantifier unrewritten. A concept condition that read a same-named input through one
+of the skipped forms now reads the field, which changes `check`/`verify` verdicts (the issue's
+reproducer goes from exit 0 to `acceptance`, exit 2); that is the `fixed` part.
+
+Corpus: each SHA was materialized with `git archive <sha> | tar -x` into its own tree, and
+`FSLC_CACHE=off <binary> check <form>` ran in place there, once, with a debug `fslc` built from
+that SHA, over every `.fsl` under `specs/` (23), `examples/` (197) and `rust/fslc/tests/fixtures/`
+(435). All 655 forms kept their result, kind, diagnostic code and exit code. Only 22 of them are
+`fsl 5` documents, so the corpus says little about this surface; the forms above and the
+`issue_1798_*` tests carry the evidence. No existing required test was rewritten or removed.
+Documented in `docs/manual/LANGUAGE.md` and `docs/manual/LANGUAGE.ja.md`, `skills/fsl-verify/SKILL.md`,
+`skills/fsl-requirements/references/syntax.md` (pointed to from `skills/fsl/references/syntax.md`),
+and `changelog.d/1798-*.md`.
+
 ### 2.3 Tests (tests/test_req_dialect.py)
 
 Use the return requirements (almost the same as §2.1) as a fixture:

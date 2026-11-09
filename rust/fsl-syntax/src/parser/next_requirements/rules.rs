@@ -27,8 +27,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::super::{Parser, join_span};
 use super::{
     Entity, EventSignature, MIXED_PARTICLES, PARTICLE_ROLE_MISMATCH, Roles, UNKNOWN_EVENT_PHRASE,
-    UNKNOWN_VERB, Word, actor_not_declared, check_marked_roles, is_symbol, join_names, nearest,
-    resolve_event_names,
+    UNKNOWN_VERB, Word, actor_not_declared, check_marked_roles, is_symbol, join_names,
+    names::resolve_names, nearest, resolve_event_names,
 };
 use crate::keywords::{KeywordContext, Kw, Particle, english_of};
 use crate::{
@@ -482,50 +482,25 @@ fn any_of(terms: impl IntoIterator<Item = Expr>, op: &str) -> Option<Expr> {
 /// `entity` spelled `Entity.field`, so it reads the field even in an event
 /// with an input of the same name.
 fn field_names(expression: Expr, entity: &Entity, entity_name: &str) -> Expr {
-    let recurse = |expression: Expr| field_names(expression, entity, entity_name);
-    let boxed = |expression: Box<Expr>| Box::new(recurse(*expression));
     let dotted = |field: &str| Expr::Var(format!("{entity_name}.{field}"));
-    match expression {
-        Expr::Var(name) if entity.fields.contains_key(&name) => dotted(&name),
-        Expr::EnumMember {
-            type_name, member, ..
-        } if type_name == entity_name && entity.fields.contains_key(&member) => dotted(&member),
-        Expr::Field(receiver, field)
-            if matches!(receiver.as_ref(), Expr::Var(name) if name == entity_name)
-                && entity.fields.contains_key(&field) =>
-        {
-            dotted(&field)
-        }
-        Expr::Field(receiver, field) => Expr::Field(boxed(receiver), field),
-        Expr::Some(value) => Expr::Some(boxed(value)),
-        Expr::Set(values) => Expr::Set(values.into_iter().map(recurse).collect()),
-        Expr::Seq(values) => Expr::Seq(values.into_iter().map(recurse).collect()),
-        Expr::Index(map, key) => Expr::Index(boxed(map), boxed(key)),
-        Expr::Binary { op, left, right } => Expr::Binary {
-            op,
-            left: boxed(left),
-            right: boxed(right),
-        },
-        Expr::Neg(value) => Expr::Neg(boxed(value)),
-        Expr::Not(value) => Expr::Not(boxed(value)),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            spans,
-        } => Expr::Conditional {
-            condition: boxed(condition),
-            then_expr: boxed(then_expr),
-            else_expr: boxed(else_expr),
-            spans,
-        },
-        Expr::Call { name, args, span } => Expr::Call {
-            name,
-            args: args.into_iter().map(recurse).collect(),
-            span,
-        },
-        other => other,
-    }
+    resolve_names(expression, &BTreeSet::new(), &|reference, _| {
+        Ok(match reference {
+            Expr::Var(name) if entity.fields.contains_key(name) => Some(dotted(name)),
+            Expr::EnumMember {
+                type_name, member, ..
+            } if type_name == entity_name && entity.fields.contains_key(member) => {
+                Some(dotted(member))
+            }
+            Expr::Field(receiver, field)
+                if matches!(receiver.as_ref(), Expr::Var(name) if name == entity_name)
+                    && entity.fields.contains_key(field) =>
+            {
+                Some(dotted(field))
+            }
+            _ => None,
+        })
+    })
+    .expect("spelling fields refuses no name")
 }
 
 impl Scope<'_> {

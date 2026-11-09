@@ -38,6 +38,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 mod decide;
+mod names;
 mod relations;
 mod rules;
 
@@ -59,6 +60,10 @@ pub const MIXED_REQUIREMENTS_FORMS: &str = "mixed_requirements_forms";
 /// A bare name in an event's expression that is both one of its inputs and a
 /// field of its entity (decisions/046 Q6).
 pub const AMBIGUOUS_INPUT_FIELD: &str = "ambiguous_input_field";
+/// A quantifier or aggregate binder around a name the requirements lowering
+/// spells out -- the input of `input name`, or what a decision table's concept
+/// reads -- that would capture it (#1798).
+pub const CAPTURED_BY_BINDER: &str = "captured_by_binder";
 /// An event or scenario step whose actor no `actor` declares.
 pub const ACTOR_NOT_DECLARED: &str = "actor_not_declared";
 /// A scenario step whose verb no event declares.
@@ -1918,68 +1923,50 @@ fn resolve_event_names(
     event: &str,
     span: Span,
 ) -> Result<Expr, ParseError> {
-    let recurse = |expression: Expr| {
-        resolve_event_names(expression, inputs, entity, entity_name, event, span)
-    };
-    let boxed = |expression: Box<Expr>| recurse(*expression).map(Box::new);
-    Ok(match expression {
-        Expr::Var(name) => {
-            if let Some(input) = name.strip_prefix(INPUT_MARK) {
-                if !inputs.iter().any(|candidate| candidate == input) {
-                    return Err(ParseError::new(
-                        format!("event '{event}' has no input '{input}'"),
+    names::resolve_names(expression, &BTreeSet::new(), &|reference, bound| {
+        Ok(Some(match reference {
+            Expr::Var(name) => {
+                if let Some(input) = name.strip_prefix(INPUT_MARK) {
+                    if !inputs.iter().any(|candidate| candidate == input) {
+                        return Err(ParseError::new(
+                            format!("event '{event}' has no input '{input}'"),
+                            span,
+                        ));
+                    }
+                    // The input is read by its bare name, which a binder of
+                    // the same name around it would capture (#1798).
+                    if bound.contains(input) {
+                        return Err(ParseError::coded(
+                            CAPTURED_BY_BINDER,
+                            format!(
+                                "`input {input}` in event '{event}' is inside a binder named \
+                                 '{input}', which hides the input; rename the binder"
+                            ),
+                            span,
+                        ));
+                    }
+                    Expr::Var(input.to_owned())
+                } else if inputs.contains(name) && entity.fields.contains_key(name) {
+                    return Err(ParseError::coded(
+                        AMBIGUOUS_INPUT_FIELD,
+                        format!(
+                            "'{name}' in event '{event}' is both its input and a field of \
+                             '{entity_name}'; write `input {name}` or `{entity_name}.{name}`"
+                        ),
                         span,
                     ));
+                } else {
+                    return Ok(None);
                 }
-                Expr::Var(input.to_owned())
-            } else if inputs.contains(&name) && entity.fields.contains_key(&name) {
-                return Err(ParseError::coded(
-                    AMBIGUOUS_INPUT_FIELD,
-                    format!(
-                        "'{name}' in event '{event}' is both its input and a field of \
-                         '{entity_name}'; write `input {name}` or `{entity_name}.{name}`"
-                    ),
-                    span,
-                ));
-            } else {
-                Expr::Var(name)
             }
-        }
-        Expr::EnumMember {
-            type_name, member, ..
-        } if type_name == entity_name => entity_field(entity, entity_name, &member, span)?,
-        Expr::Field(receiver, field) if matches!(receiver.as_ref(), Expr::Var(name) if name == entity_name) => {
-            entity_field(entity, entity_name, &field, span)?
-        }
-        Expr::Field(receiver, field) => Expr::Field(boxed(receiver)?, field),
-        Expr::Some(value) => Expr::Some(boxed(value)?),
-        Expr::Set(values) => Expr::Set(values.into_iter().map(recurse).collect::<Result<_, _>>()?),
-        Expr::Seq(values) => Expr::Seq(values.into_iter().map(recurse).collect::<Result<_, _>>()?),
-        Expr::Index(map, key) => Expr::Index(boxed(map)?, boxed(key)?),
-        Expr::Binary { op, left, right } => Expr::Binary {
-            op,
-            left: boxed(left)?,
-            right: boxed(right)?,
-        },
-        Expr::Neg(value) => Expr::Neg(boxed(value)?),
-        Expr::Not(value) => Expr::Not(boxed(value)?),
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            spans,
-        } => Expr::Conditional {
-            condition: boxed(condition)?,
-            then_expr: boxed(then_expr)?,
-            else_expr: boxed(else_expr)?,
-            spans,
-        },
-        Expr::Call { name, args, span } => Expr::Call {
-            name,
-            args: args.into_iter().map(recurse).collect::<Result<_, _>>()?,
-            span,
-        },
-        other => other,
+            Expr::EnumMember {
+                type_name, member, ..
+            } if type_name == entity_name => entity_field(entity, entity_name, member, span)?,
+            Expr::Field(receiver, field) if matches!(receiver.as_ref(), Expr::Var(name) if name == entity_name) => {
+                entity_field(entity, entity_name, field, span)?
+            }
+            _ => return Ok(None),
+        }))
     })
 }
 

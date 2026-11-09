@@ -94,7 +94,7 @@ The lowering names each field `entity_field` (`order_qty`,
 
 | Form | Meaning |
 |---|---|
-| **concept** `C = E` **where** `cond` | the instances of `E` for which `cond` holds; fields are named bare (`qty`) |
+| **concept** `C = E` **where** `cond` | the instances of `E` for which `cond` holds; fields are named bare (`qty`), in every expression form, and are never an event input of the same name; a field cannot be a quantifier range bound (#1798, breaking removal) |
 | **concept** `C = E` **in** `S, T` | the instances in one of the stages |
 
 A concept is expanded where it is used; it adds no state. Use concepts for the
@@ -124,7 +124,7 @@ source's words.
 | **event** `name = Actor verb Entity A -> B` | one move along a lifecycle edge (`event_not_on_lifecycle` if it is not an edge); `name` is the canonical action name implementations see |
 | … **in** `S` | an event that stays in stage `S` |
 | … **with** `field` | an input stored in the field of that name; `with i: Type` is an input that is not a field; several inputs are a comma list |
-| **set** `x = expr, y = expr` | other updates; `input qty` names the input where a field has the same name (a bare `qty` there is `ambiguous_input_field`) |
+| **set** `x = expr, y = expr` | other updates; `input qty` names the input where a field has the same name (a bare `qty` there is `ambiguous_input_field`; `input qty` inside a binder named `qty` is `captured_by_binder`) |
 | **covers** `ID "text"` | the requirement this event carries |
 | **fault event** | not fair: something that may happen, never something that must eventually happen |
 
