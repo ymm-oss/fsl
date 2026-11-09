@@ -6,11 +6,11 @@
 // - 下位層がキュー、並列worker、レビュー、修正ループを追加しても、
 //   業務上の近道や放置が増えていないことをrefinementで確認する。
 //
-// ASSUME-1:
+// ASSUME-AGENT-001:
 // - このPoCではHumanReviewを処理済み終端として扱う。
-// ASSUME-2:
+// ASSUME-AGENT-002:
 // - 高リスクworkは副作用toolを伴うworkとして扱い、人間承認後にだけ実行する。
-// ASSUME-3:
+// ASSUME-AGENT-003:
 // - criticによる修正ループはrequirements層で1回までに制限する。
 business MultiAgentBusiness {
 

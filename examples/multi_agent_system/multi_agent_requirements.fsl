@@ -6,11 +6,11 @@
 //   副作用tool承認を表す。
 // - agentの実装詳細やqueue名はdesign層へ寄せる。
 //
-// ASSUME-1:
+// ASSUME-AGENT-001:
 // - HumanReviewは処理済み終端である。
-// ASSUME-2:
+// ASSUME-AGENT-002:
 // - 高リスクworkは副作用toolを必要とし、人間承認後にだけ実行できる。
-// ASSUME-3:
+// ASSUME-AGENT-003:
 // - criticが要求できる修正は1回までで、2回目の不合格は拒否または人間レビューに進める。
 requirements MultiAgentRequirements {
   type Work = 0..0

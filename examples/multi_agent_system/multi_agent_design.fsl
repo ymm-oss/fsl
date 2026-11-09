@@ -5,11 +5,11 @@
 // - supervisor queue、planner、worker assignment、critic queue、tool queueを
 //   明示しながら、requirements層から見える意味を変えないことをrefinementで確認する。
 //
-// ASSUME-1:
+// ASSUME-AGENT-001:
 // - 1 Work固定のPoC。複数workのqueue公平性やcapacity競合は別sliceで扱う。
-// ASSUME-2:
+// ASSUME-AGENT-002:
 // - planner_q / worker_q / critic_q / tool_q は実装の永続queueを抽象化したもの。
-// ASSUME-3:
+// ASSUME-AGENT-003:
 // - worker A/Bの成果物そのものの品質は扱わず、完了シグナルだけを扱う。
 spec MultiAgentDesign {
   const QUEUE_CAP = 2
