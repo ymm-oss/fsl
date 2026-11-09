@@ -29,7 +29,7 @@ ai_component AnnotatedRefundAgent {
     effect read_order;
   }
 
-  @requirement("REQ-REFUND-TOOL", "refund execution is a declared, schema-checked tool")
+  @requirement("REQ-REFUND-TOOL-001", "refund execution is a declared, schema-checked tool")
   tool RefundPayment irreversible {
     schema RefundPaymentV1;
     precondition order_paid;
@@ -46,22 +46,22 @@ ai_component AnnotatedRefundAgent {
   authority {
     may_suggest SearchOrder;
     may_execute SearchOrder;
-    @requirement("REQ-APPROVAL", "refunds require a human in the loop")
+    @requirement("REQ-APPROVAL-001", "refunds require a human in the loop")
     requires_human_approval RefundPayment;
-    @requirement("REQ-FORBIDDEN", "customer data deletion is never agent-initiated")
+    @requirement("REQ-FORBIDDEN-001", "customer data deletion is never agent-initiated")
     forbidden DeleteCustomerData;
   }
 
   fallback {
-    @requirement("REQ-FALLBACK", "low-confidence decisions escalate to a human")
+    @requirement("REQ-FALLBACK-001", "low-confidence decisions escalate to a human")
     when low_confidence require human_review;
     when missing_order_evidence require refuse_with_reason;
   }
 
-  @requirement("REQ-HARD-CHECK", "the hard contract enforces schema and approval rules")
+  @requirement("REQ-HARD-CHECK-001", "the hard contract enforces schema and approval rules")
   check hard {
     rule tool_authority;
-    @requirement("REQ-APPROVAL-CHECK", "human approval is verified before execution")
+    @requirement("REQ-APPROVAL-CHECK-001", "human approval is verified before execution")
     rule human_approval_required;
     rule forbidden_tool_blocked;
     rule tool_schema_declared;

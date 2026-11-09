@@ -8,11 +8,11 @@
 //   fslc verify examples/validation/order_refund.fsl --engine induction
 // ════════════════════════════════════════════════════════════════
 spec OrderRefund {
-  // ASSUME-1: single SKU. Initial stock CAP=2. Three orders, to exercise interactions.
-  // ASSUME-2: cancellation is allowed only when paid and not yet shipped (Paid). "No cancel after shipping."
-  // ASSUME-3: stock is returned immediately on cancel (not at refund completion).
-  // ASSUME-4: refunds are full-amount only. Amounts are not modeled; we track a count ledger (MODEL).
-  // ASSUME-5: "refunds within a fixed window" (original requirement R5) is a discrete-time SLA.
+  // ASSUME-REFUND-001: single SKU. Initial stock CAP=2. Three orders, to exercise interactions.
+  // ASSUME-REFUND-002: cancellation is allowed only when paid and not yet shipped (Paid). "No cancel after shipping."
+  // ASSUME-REFUND-003: stock is returned immediately on cancel (not at refund completion).
+  // ASSUME-REFUND-004: refunds are full-amount only. Amounts are not modeled; we track a count ledger (MODEL).
+  // ASSUME-REFUND-005: "refunds within a fixed window" (original requirement R5) is a discrete-time SLA.
   //           Not handled at the design layer; refundability is simply "possible if cancelled".
   //           The window check is delegated to time+deadline at the requirements layer
   //           (an initial version that brought a window flag into the design layer made
@@ -44,13 +44,14 @@ spec OrderRefund {
     requires order[o] == Paid
     order[o] = Shipped
   }
-  action cancel(o: OrderId) "ASSUME-2: no cancel after shipping" {
+  @requirement("ASSUME-REFUND-002", "no cancel after shipping")
+  action cancel(o: OrderId) {
     requires order[o] == Paid
     order[o] = Cancelled
     stock = stock + 1
   }
   action refund(o: OrderId) {
-    requires order[o] == Cancelled       // ASSUME-5: the window guard lives at the upper layer
+    requires order[o] == Cancelled       // ASSUME-REFUND-005: the window guard lives at the upper layer
     order[o] = Refunded
     refunded_total = refunded_total + 1
   }

@@ -133,7 +133,7 @@
     evolve PaymentCaptureTimedOut { payment_status = TimedOut }
 
     invariant noDuplicateCapture {
-      payment_status == Captured -> not can(RequestPaymentCapture)
+      payment_status == Captured => not can(RequestPaymentCapture)
     }
   }
 

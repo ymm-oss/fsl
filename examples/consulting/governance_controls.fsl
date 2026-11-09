@@ -2,36 +2,36 @@
 // The existing business policies are intentionally left as business rules;
 // this file shows how enterprise/control ownership can sit one layer above them.
 governance ExpenseTransformationControls {
-  authority Finance owns CTRL-1, CTRL-2
+  authority Finance owns CTRL-EXPENSE-001, CTRL-EXPENSE-002
 
-  control CTRL-1 "A submitted claim must always be adjudicated for approval or rejection"
+  control CTRL-EXPENSE-001 "A submitted claim must always be adjudicated for approval or rejection"
     owner Finance
     severity high
     applies_to Claim
-  control CTRL-2 "An approved claim must always be paid"
+  control CTRL-EXPENSE-002 "An approved claim must always be paid"
     owner Finance
     severity high
     applies_to Claim
 
   delegates AsIsExpense from "asis_expense.fsl" {
-    require CTRL-1
-    require CTRL-2
-    CTRL-1 is satisfied_by policy CTRL-1
-    CTRL-2 is satisfied_by policy CTRL-2
+    require CTRL-EXPENSE-001
+    require CTRL-EXPENSE-002
+    CTRL-EXPENSE-001 is satisfied_by policy POL-EXPENSE-001
+    CTRL-EXPENSE-002 is satisfied_by policy POL-EXPENSE-002
   }
 
   delegates ToBeExpense from "tobe_expense.fsl" {
-    require CTRL-1
-    require CTRL-2
-    CTRL-1 is satisfied_by policy CTRL-1
-    CTRL-2 is satisfied_by policy CTRL-2
+    require CTRL-EXPENSE-001
+    require CTRL-EXPENSE-002
+    CTRL-EXPENSE-001 is satisfied_by policy POL-EXPENSE-001
+    CTRL-EXPENSE-002 is satisfied_by policy POL-EXPENSE-002
   }
 
   preservation AutoApprovalPreservesControls {
     before AsIsExpense from "asis_expense.fsl"
     after ToBeExpense from "tobe_expense.fsl"
-    preserve CTRL-1
-    preserve CTRL-2
+    preserve CTRL-EXPENSE-001
+    preserve CTRL-EXPENSE-002
     checked_by refinement "tobe_refines_asis.fsl"
   }
 }

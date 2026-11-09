@@ -12,9 +12,9 @@ business ReturnHandling {
 
   kpi refunded = count Return in Refunded
 
-  policy PAY-2 "Every request is eventually decided"
+  policy POL-RETURN-002 "Every request is eventually decided"
     every Return in Requested must eventually be Approved or Rejected or Refunded
-  goal AllSettled "All cases can be completed"
+  goal GOAL-RETURN-001 "All cases can be completed"
     all Return can be Refunded or Rejected
 }
 

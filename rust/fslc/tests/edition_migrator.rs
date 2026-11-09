@@ -2215,8 +2215,10 @@ fn assert_canonical_example(name: &str) -> Value {
     assert_eq!(json(&checked)["result"], "ok");
     assert_eq!(json(&checked)["implements"]["result"], "refines");
     let lint = run(&["lint", path, "--edition", "current"]);
-    assert_eq!(lint.status.code(), Some(1), "{}", json(&lint));
+    // #608: the canonical examples also use canonical IDs, so lint is clean.
+    assert_eq!(lint.status.code(), Some(0), "{}", json(&lint));
     let lint = json(&lint);
+    assert_eq!(lint["finding_count"], 0, "{lint}");
     assert_eq!(findings_with_code(&lint, "inline_action_maps").len(), 0);
     let migrate = run(&["migrate", path, "--edition", "next"]);
     assert_eq!(migrate.status.code(), Some(0), "{}", json(&migrate));
@@ -2246,7 +2248,7 @@ fn example_contract(path: &Path, source: &str) -> Value {
 #[test]
 fn canonical_return_example_has_no_inline_maps() {
     let lint = assert_canonical_example("layers/return_system.fsl");
-    assert_eq!(findings_with_code(&lint, "non_canonical_id").len(), 4);
+    assert_eq!(findings_with_code(&lint, "non_canonical_id").len(), 0);
 }
 
 #[test]
@@ -2326,11 +2328,46 @@ const LEGACY_CANCEL_REQUIREMENTS: &str = r#"requirements CancelSystemReq {
 }
 "#;
 
+/// The legacy programs predate the #608 ID canonicalization. Rename each
+/// declared ID (each must occur exactly once) so the comparison still covers
+/// the complete Kernel and typed metadata, IDs included.
+fn with_canonical_ids(source: &str, renames: &[(&str, &str)]) -> String {
+    let mut source = source.to_owned();
+    for (keyword, old, new) in renames.iter().map(|&(old, new)| {
+        let keyword = if old.starts_with("AC-") {
+            "acceptance"
+        } else {
+            "requirement"
+        };
+        (keyword, old, new)
+    }) {
+        let from = format!("{keyword} {old} \"");
+        assert_eq!(
+            source.matches(&from).count(),
+            1,
+            "unique legacy ID {from:?}"
+        );
+        source = source.replacen(&from, &format!("{keyword} {new} \""), 1);
+    }
+    source
+}
+
 #[test]
 fn canonical_cancel_preserves_the_checked_kernel_and_typed_metadata() {
     let path = example_path("pm/cancel_system.fsl");
+    let legacy = with_canonical_ids(
+        LEGACY_CANCEL_REQUIREMENTS,
+        &[
+            ("REQ-1", "REQ-CANCEL-001"),
+            ("REQ-2", "REQ-CANCEL-002"),
+            ("REQ-3", "REQ-CANCEL-003"),
+            ("REQ-4", "REQ-CANCEL-004"),
+            ("AC-1", "AC-CANCEL-001"),
+            ("AC-2", "AC-CANCEL-002"),
+        ],
+    );
     assert_eq!(
-        example_contract(&path, LEGACY_CANCEL_REQUIREMENTS),
+        example_contract(&path, &legacy),
         example_contract(&path, &text(&path))
     );
 }
@@ -2345,7 +2382,16 @@ fn canonical_return_preserves_the_checked_kernel_and_typed_metadata() {
     assert_eq!(legacy.matches(import).count(), 1);
     // Resolve the same policy under one logical source path. Use the existing
     // migration contract: location-free Kernel plus the full typed annotations.
-    let mut before = example_contract(&path, &legacy.replace(import, "return_policy.fsl"));
+    let legacy = with_canonical_ids(
+        &legacy.replace(import, "return_policy.fsl"),
+        &[
+            ("REQ-1", "REQ-RETURN-001"),
+            ("REQ-2", "REQ-RETURN-002"),
+            ("REQ-3", "REQ-RETURN-003"),
+            ("AC-1", "AC-RETURN-001"),
+        ],
+    );
+    let mut before = example_contract(&path, &legacy);
     let after = example_contract(&path, &text(&path));
     for (old, new) in [
         ("submit__b1", "submit_small"),

@@ -171,7 +171,7 @@ pair!(
 pair!(
     legacy_goal,
     legacy_goal_control,
-    replace_once(BUSINESS, "goal AllSettled", "goal NAME"),
+    replace_once(BUSINESS, "goal GOAL-RETURN-001", "goal NAME"),
     GOAL,
     "G__x",
     "Gx"
@@ -179,7 +179,7 @@ pair!(
 pair!(
     legacy_policy,
     legacy_policy_control,
-    replace_once(BUSINESS, "policy PAY-2", "policy NAME"),
+    replace_once(BUSINESS, "policy POL-RETURN-002", "policy NAME"),
     POLICY,
     "P__x",
     "Px"

@@ -1,0 +1,67 @@
+// ════════════════════════════════════════════════════════════════
+// Cancellation flow (business layer) — sample for PM/PdM
+//
+// This file expresses a "process diagram + business rules" in a
+// checkable form. No implementation terms appear at all. Once written:
+//
+//   fslc verify examples/pm/cancel_flow.fsl --engine induction
+//
+// proves that "every rule holds under every order of progression".
+// If a rule is violated, the ID and original text of the violated
+// policy, plus the reproduction steps (trace), are returned as JSON.
+// ════════════════════════════════════════════════════════════════
+business CancelFlow {
+
+  // Participants (used to verify "who performs" each transition)
+  actor Customer, System
+
+  // Subscription is the business entity in this process. The verify block below
+  // sets the world to 3 subscriptions; a small count is enough (a rule of thumb
+  // in formal verification: bugs reproduce even in tiny worlds).
+  entity Sub
+
+  // ── Process diagram (state transitions) ─────────────────────
+  // One-to-one with the paper flow chart. Each transition is an "arrow".
+  process Sub {
+    stages Active, CancelRequested, OfferShown, Retained, Churned
+    initial Active
+
+    // Cancellation request (customer)
+    transition request_cancel Active          -> CancelRequested by Customer
+    // Showing a retention offer (system) — the cancellation path always passes through here
+    transition show_offer     CancelRequested -> OfferShown      by System
+    // Offer accepted -> retained
+    transition accept_offer   OfferShown      -> Retained        by Customer
+    // Offer declined -> cancellation completed
+    transition decline_offer  OfferShown      -> Churned         by Customer
+  }
+
+  // ── KPI ────────────────────────────────────────────────
+  // Declarative count projections for reporting/explain metadata.
+  kpi churned  = count Sub in Churned
+  kpi retained = count Sub in Retained
+
+  // ── Business rules (policies) ───────────────────────────────
+  // Written with the ID and original text. When violated, this ID and text appear in the counterexample.
+
+  // "Do not leave requests unattended" — under any order of progression,
+  // a cancellation request eventually proceeds to showing an offer (an SLA-style response rule)
+  policy POL-1 "A cancellation request must always be met with a retention offer"
+    every Sub in CancelRequested must eventually be OfferShown
+
+  // "Do not leave a shown offer unattended" — once shown, it must always be resolved
+  policy POL-2 "A shown offer must always be resolved by acceptance or decline"
+    every Sub in OfferShown must eventually be Retained or Churned
+
+  // ── Goals (states that should be reachable) ─────────────────────────
+  // Machine-confirm "can this process even reach retention in the first place?".
+  // If a rule change makes the goal unreachable, it is detected as reachable_failed.
+  goal CanRetain "There exists a case that reaches retention via a retention offer"
+    some Sub can reach Retained
+  goal CanChurn "There also exists a case that declines and reaches cancellation"
+    some Sub can reach Churned
+}
+
+verify {
+  instances Sub = 3
+}

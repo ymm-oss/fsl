@@ -52,7 +52,7 @@ domain OrderFunctionalDdd {
     }
 
     invariant noCancelAfterShipping {
-      status == Shipped -> not can(CancelOrder)
+      status == Shipped => not can(CancelOrder)
     }
   }
 

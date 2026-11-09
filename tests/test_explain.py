@@ -94,11 +94,11 @@ def test_order_workflow_non_negative_revenue_has_graceful_no_counterfactual():
 def test_cancel_flow_dialect_carries_requirement_text_in_skeleton_and_witnesses():
     out = explain_file(str(EXAMPLES / "pm" / "cancel_flow.fsl"), depth=4)
     props = _by_name(out["skeleton"]["properties"])
-    assert props["POL-1"]["requirement"] == {
-        "id": "POL-1",
+    assert props["POL-CANCEL-001"]["requirement"] == {
+        "id": "POL-CANCEL-001",
         "text": "A cancellation request must always be met with a retention offer",
     }
-    assert props["POL-1"]["body_text"] == (
+    assert props["POL-CANCEL-001"]["body_text"] == (
         "forall c: Sub: sub_stage[c] == CancelRequested ~> sub_stage[c] == OfferShown"
     )
 
@@ -125,8 +125,8 @@ def test_cancel_flow_dialect_carries_requirement_text_in_skeleton_and_witnesses(
     } in flow["transitions"]
 
     requirements = [w["requirement"] for w in out["witnesses"] if w.get("requirement")]
-    assert props["POL-1"]["requirement"] in requirements
-    assert props["CanRetain"]["requirement"] in requirements
+    assert props["POL-CANCEL-001"]["requirement"] in requirements
+    assert props["GOAL-CANCEL-001"]["requirement"] in requirements
 
 
 def test_compose_spec_source_fallback_does_not_crash():

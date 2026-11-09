@@ -87,10 +87,15 @@ impl NormalEvidenceFixture {
     fn new() -> Self {
         let directory = temp_path(".normal-evidence");
         std::fs::create_dir_all(directory.join("examples/pm")).expect("create fixture directory");
+        // The golden is frozen output from its base commit, so the inputs are
+        // the base commit's `examples/pm` bytes, pinned here: the public
+        // example may evolve independently (#608 renamed its IDs).
+        let pinned =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/issue_1475_golden/source");
         for name in ["cancel_system.fsl", "cancel_flow.fsl"] {
             let relative = Path::new("examples/pm").join(name);
             let source =
-                std::fs::read_to_string(root().join(&relative)).expect("read original source");
+                std::fs::read_to_string(pinned.join(&relative)).expect("read pinned base source");
             std::fs::write(directory.join(relative), source.replace("\r\n", "\n"))
                 .expect("copy source bytes");
         }
@@ -116,11 +121,11 @@ impl NormalEvidenceFixture {
 #[test]
 fn issue_1475_marker_in_fresh_evidence_is_a_document_refusal() {
     let evidence = write_evidence(
-        r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded","result":"verified"}"#,
+        r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded","result":"verified"}"#,
     );
     let (artifact, _) = generate_to_file(&[&evidence]);
     let before = std::fs::read(&artifact).expect("normal artifact bytes");
-    std::fs::write(&evidence, r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded","result":"verified\n<!-- fsl:bogus -->\n"}"#).expect("write hostile evidence");
+    std::fs::write(&evidence, r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded","result":"verified\n<!-- fsl:bogus -->\n"}"#).expect("write hostile evidence");
     let output = check(CANCEL_SYSTEM, &artifact, &[&evidence]);
     assert_eq!(
         output.status.code(),
@@ -245,7 +250,8 @@ fn check(spec: &str, artifact: &Path, evidence: &[&Path]) -> Output {
 
 #[test]
 fn generate_with_evidence_overlays_assurance_and_records_digest() {
-    let evidence = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (out, envelope) = generate_to_file(&[&evidence]);
     assert_eq!(envelope["result"], "generated");
     assert!(
@@ -259,9 +265,13 @@ fn generate_with_evidence_overlays_assurance_and_records_digest() {
 
     let markdown = std::fs::read_to_string(&out).expect("read generated markdown");
     assert!(markdown.contains("evidence_digest: sha256:"));
-    let start = markdown.find("### REQ-1").expect("REQ-1 section exists");
+    let start = markdown
+        .find("### REQ-CANCEL-001")
+        .expect("REQ-CANCEL-001 section exists");
     let rest = &markdown[start..];
-    let end = rest.find("### REQ-2").expect("REQ-2 section exists");
+    let end = rest
+        .find("### REQ-CANCEL-002")
+        .expect("REQ-CANCEL-002 section exists");
     assert!(rest[..end].contains("proved(induction)"));
     let _ = std::fs::remove_file(&out);
     let _ = std::fs::remove_file(&evidence);
@@ -481,10 +491,11 @@ fn assert_evidence_load_refusal(input: Option<&[u8]>, expected: impl FnOnce(&Pat
 #[test]
 fn changing_the_evidence_changes_artifact_digest_but_not_claim_set_digest() {
     let (out_none, envelope_none) = generate_to_file(&[]);
-    let evidence_a = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence_a =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (out_a, envelope_a) = generate_to_file(&[&evidence_a]);
     let evidence_b = write_evidence(
-        r#"{"requirement":{"id":"REQ-1"},"completeness":"bounded","checked_to_depth":8}"#,
+        r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"bounded","checked_to_depth":8}"#,
     );
     let (out_b, envelope_b) = generate_to_file(&[&evidence_b]);
 
@@ -514,10 +525,10 @@ fn changing_the_evidence_changes_artifact_digest_but_not_claim_set_digest() {
 #[test]
 fn evidence_file_order_does_not_change_the_recorded_digest() {
     let evidence_a = write_evidence(
-        r#"{"requirement":{"id":"REQ-1"},"completeness":"bounded","checked_to_depth":8,"result":"verified"}"#,
+        r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"bounded","checked_to_depth":8,"result":"verified"}"#,
     );
     let evidence_b = write_evidence(
-        r#"{"requirement":{"id":"REQ-1"},"completeness":"bounded","checked_to_depth":8,"result":"violated"}"#,
+        r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"bounded","checked_to_depth":8,"result":"violated"}"#,
     );
     let (out_forward, forward) = generate_to_file(&[&evidence_a, &evidence_b]);
     let (out_reversed, reversed) = generate_to_file(&[&evidence_b, &evidence_a]);
@@ -540,7 +551,8 @@ fn evidence_file_order_does_not_change_the_recorded_digest() {
 
 #[test]
 fn check_is_conformant_when_the_same_evidence_is_supplied() {
-    let evidence = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (artifact, _) = generate_to_file(&[&evidence]);
     let output = check(CANCEL_SYSTEM, &artifact, &[&evidence]);
     assert_eq!(output.status.code(), Some(0));
@@ -551,7 +563,8 @@ fn check_is_conformant_when_the_same_evidence_is_supplied() {
 
 #[test]
 fn check_reports_evidence_changed_when_the_flag_is_omitted() {
-    let evidence = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (artifact, _) = generate_to_file(&[&evidence]);
     let output = check(CANCEL_SYSTEM, &artifact, &[]);
     assert_eq!(output.status.code(), Some(1));
@@ -578,7 +591,8 @@ fn check_reports_evidence_changed_when_the_flag_is_omitted() {
 #[test]
 fn check_reports_evidence_changed_when_spurious_evidence_is_supplied() {
     let (artifact, _) = generate_to_file(&[]);
-    let evidence = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let output = check(CANCEL_SYSTEM, &artifact, &[&evidence]);
     assert_eq!(output.status.code(), Some(1));
     let envelope = json_stdout(&output);
@@ -595,10 +609,11 @@ fn check_reports_evidence_changed_when_spurious_evidence_is_supplied() {
 
 #[test]
 fn check_reports_evidence_changed_when_the_evidence_content_differs() {
-    let evidence_a = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence_a =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (artifact, _) = generate_to_file(&[&evidence_a]);
     let evidence_b = write_evidence(
-        r#"{"requirement":{"id":"REQ-1"},"completeness":"bounded","checked_to_depth":8}"#,
+        r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"bounded","checked_to_depth":8}"#,
     );
     let output = check(CANCEL_SYSTEM, &artifact, &[&evidence_b]);
     assert_eq!(output.status.code(), Some(1));
@@ -632,7 +647,8 @@ fn a_hand_edit_inside_a_claim_block_is_still_caught_even_when_evidence_also_chan
     // skip_residue_text split (fsl_tools::document_check): unlike a
     // renderer or glossary change, an evidence-only change must not mask a
     // genuine hand-edit inside a claim block.
-    let evidence = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (artifact, _) = generate_to_file(&[&evidence]);
     let text = std::fs::read_to_string(&artifact).expect("read artifact");
     assert!(text.contains("CancelForm"), "fixture text not found");

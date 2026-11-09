@@ -27,7 +27,7 @@ dbsystem AnnotatedCompat {
     }
   }
 
-  @requirement("REQ-MIGRATION", "the nickname column rollout is traceable")
+  @requirement("REQ-MIGRATION-001", "the nickname column rollout is traceable")
   migration add_nickname from 0 to 1 {
     add users.nickname nullable;
   }
@@ -54,7 +54,7 @@ dbsystem AnnotatedCompat {
     rule all_active_reads_exist;
     rule all_active_writes_exist;
     rule removed_only_after_unused;
-    @requirement("REQ-NOT-NULL", "not_null columns must be backfilled first")
+    @requirement("REQ-NOT-NULL-001", "not_null columns must be backfilled first")
     rule not_null_after_backfill;
   }
 }

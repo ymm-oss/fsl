@@ -47,7 +47,7 @@ form" shortcut (skipping the offer), and we modify the requirements layer to mat
 ```json
 {
   "result": "violated",
-  "requirement": { "id": "REQ-4", "text": "an offer is not re-presented to a contract that already received one" },
+  "requirement": { "id": "REQ-CANCEL-004", "text": "an offer is not re-presented to a contract that already received one" },
   "last_action": { "name": "quick_churn" },
   "trace": [
     { "step": 0, "state": { "scr[0]": { "st": "Browsing",    "offered": false } } },
@@ -60,7 +60,7 @@ form" shortcut (skipping the offer), and we modify the requirements layer to mat
 }
 ```
 
-How to read it: **which requirement broke (REQ-4 and its verbatim text)**, **what
+How to read it: **which requirement broke (REQ-CANCEL-004 and its verbatim text)**, **what
 broke it (quick_churn)**, **the shortest reproduction steps (3 steps)**, and on top
 of that, **a deviation from the business flow (CancelFlow)** is detected at the
 same time. In other words, "a cancellation that bypasses the offer violates both
@@ -68,8 +68,8 @@ the system requirements and the business policy" is shown in a single output.
 
 ## Key points for writing (also noted in the comments of the two files)
 
-- Write business rules as `policy POL-1 "verbatim text" ...` and requirements as
-  `requirement REQ-1 "verbatim text" { ... }`, **putting the ID and verbatim text
+- Write business rules as `policy POL-CANCEL-001 "verbatim text" ...` and requirements as
+  `requirement REQ-CANCEL-001 "verbatim text" { ... }`, **putting the ID and verbatim text
   as-is**. They are displayed verbatim on a violation.
 - "Will eventually do ~" (do-not-leave-unattended kinds) is `responds`, "always
   is ~" is `invariant`, and "should be reachable ~" is `goal`.

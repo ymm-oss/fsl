@@ -25,7 +25,7 @@ def test_nfr_sla_worker_bmc_verified():
     result = run_verify(str(SLA_WORKER), 10, "ignore")
 
     assert result["result"] == "verified"
-    assert "_deadline_NFR_1_age_1" in result["invariants_checked"]
+    assert "_deadline_NFR_SLA_001_age_1" in result["invariants_checked"]
     assert result["action_coverage"]["tick"] is True
 
 
@@ -36,9 +36,9 @@ def test_nfr_sla_worker_without_urgent_is_violated(tmp_path):
     result = run_verify(str(path), 10, "ignore")
 
     assert result["result"] == "violated"
-    assert result["invariant"] == "_deadline_NFR_1_age_1"
+    assert result["invariant"] == "_deadline_NFR_SLA_001_age_1"
     assert result["requirement"] == {
-        "id": "NFR-1",
+        "id": "NFR-SLA-001",
         "text": "submitted requests finish within 4 ticks",
     }
     assert result["last_action"]["name"] == "tick"
@@ -54,8 +54,8 @@ def test_nfr_sla_worker_deadline_boundary_bites(tmp_path):
     result = run_verify(str(path), 10, "ignore")
 
     assert result["result"] == "violated"
-    assert result["invariant"] == "_deadline_NFR_1_age_1"
-    assert result["requirement"]["id"] == "NFR-1"
+    assert result["invariant"] == "_deadline_NFR_SLA_001_age_1"
+    assert result["requirement"]["id"] == "NFR-SLA-001"
 
 
 # --- cross-layer SLA refinement (issue #56) --------------------------------

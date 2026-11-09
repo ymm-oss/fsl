@@ -33,7 +33,7 @@ requirements ReturnSystemReq {
   state { sys: Map<CaseId, RCase>, paid_count: Int }
   init { forall c: CaseId { sys[c] = RCase { st: New, amount: 0 } }  paid_count = 0 }
 
-  requirement REQ-1 "Returns at or below the threshold are auto-approved" {
+  requirement REQ-RETURN-001 "Returns at or below the threshold are auto-approved" {
     fair action submit_small(c: CaseId, a: Amount) {
       requires sys[c].st == New
       requires a > 0
@@ -47,11 +47,11 @@ requirements ReturnSystemReq {
       sys[c] = RCase { st: MgrQueue, amount: a }
     }
   }
-  requirement REQ-2 "Returns above the threshold are decided by a manager" {
+  requirement REQ-RETURN-002 "Returns above the threshold are decided by a manager" {
     fair action mgr_approve(c: CaseId) { requires sys[c].st == MgrQueue  sys[c].st = MgrApproved }
     fair action mgr_reject(c: CaseId)  { requires sys[c].st == MgrQueue  sys[c].st = MgrRejected }
   }
-  requirement REQ-3 "Payment only after approval; ledger stays consistent" {
+  requirement REQ-RETURN-003 "Payment only after approval; ledger stays consistent" {
     fair action pay(c: CaseId) {
       requires sys[c].st == AutoApproved or sys[c].st == MgrApproved
       sys[c].st = Paid
@@ -59,7 +59,7 @@ requirements ReturnSystemReq {
     }
     invariant PaidLedger { paid_count == count(c: CaseId where sys[c].st == Paid) }
   }
-  acceptance AC-1 "Small amounts are auto-approved and paid" {
+  acceptance AC-RETURN-001 "Small amounts are auto-approved and paid" {
     submit_small(0, 1)
     pay(0)
     expect sys[0].st == Paid

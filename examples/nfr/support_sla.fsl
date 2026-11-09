@@ -27,14 +27,14 @@ requirements SupportSLA {
     }
   }
 
-  requirement REQ-1 "An inquiry moves from waiting to accepted" {
+  requirement REQ-SUPPORT-001 "An inquiry moves from waiting to accepted" {
     fair action accept(c: CaseId) {
       requires cases[c] == Waiting
       cases[c] = Accepted
     }
   }
 
-  requirement REQ-2 "An operator gives a first response to an accepted case" {
+  requirement REQ-SUPPORT-002 "An operator gives a first response to an accepted case" {
     fair action respond(c: CaseId) {
       requires cases[c] == Accepted
       cases[c] = Responded
@@ -47,7 +47,7 @@ requirements SupportSLA {
     age resp_age[c: CaseId] while cases[c] == Accepted
   }
 
-  requirement REQ-3 "SLA: a case gets a first response within 3 ticks of being accepted" {
+  requirement REQ-SUPPORT-003 "SLA: a case gets a first response within 3 ticks of being accepted" {
     // Response to a case that has reached its deadline. Being urgent, tick cannot
     // advance while this is enabled.
     fair action respond_due(c: CaseId) {
@@ -59,21 +59,21 @@ requirements SupportSLA {
     deadline resp_age <= SLA_TICKS
   }
 
-  requirement REQ-4 "A case that has received a first response never reverts to accepted or waiting" {
+  requirement REQ-SUPPORT-004 "A case that has received a first response never reverts to accepted or waiting" {
     invariant NoRegress {
       forall c: CaseId { ever_responded[c] => cases[c] == Responded }
     }
   }
 
-  requirement REQ-5 "A state where every case has received a first response is reachable" {
+  requirement REQ-SUPPORT-005 "A state where every case has received a first response is reachable" {
     reachable AllResponded { forall c: CaseId { cases[c] == Responded } }
   }
 
-  leadsTo EveryAcceptedGetsResponse "REQ-3: every accepted case eventually gets a first response" {
+  leadsTo EveryAcceptedGetsResponse "REQ-SUPPORT-003: every accepted case eventually gets a first response" {
     forall c: CaseId { cases[c] == Accepted ~> cases[c] == Responded }
   }
 
-  acceptance AC-1 "Accept one case and give it a first response" {
+  acceptance AC-SUPPORT-001 "Accept one case and give it a first response" {
     accept(0)
     respond(0)
     expect cases[0] == Responded

@@ -79,7 +79,7 @@ spec SlaSpike {
       => (forall r: Req { age[r] == 0 })
   }
 
-  invariant SLA "NFR-1: an accepted request is completed within 4 ticks" {
+  invariant SLA "NFR-SLA-001: an accepted request is completed within 4 ticks" {
     forall r: Req { pending[r] => age[r] <= 4 }
   }
 

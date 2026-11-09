@@ -80,7 +80,7 @@ domain OrderAsyncEffect {
     }
 
     invariant noDuplicateCapture {
-      payment_status == Captured -> not can(RequestPaymentCapture)
+      payment_status == Captured => not can(RequestPaymentCapture)
     }
   }
 
