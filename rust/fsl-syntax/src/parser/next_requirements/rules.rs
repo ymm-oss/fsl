@@ -18,7 +18,9 @@
 //!
 //! `P only after Q` adds a ghost field `did_<events of Q>` to the entity,
 //! set by Q's events and required by P's, unless the lifecycle already
-//! orders the two (`implied_by_lifecycle`).
+//! orders the two (`implied_by_lifecycle`). Each set of Q's events has its
+//! own field; two sets whose names join alike are numbered apart
+//! ([`ghost_names`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -890,6 +892,101 @@ fn ordered_by_lifecycle(
         .all(|event| !reached.contains(event.from.as_str()))
 }
 
+/// The name of the ghost field for the prerequisite events `events`:
+/// `did_` and their names, in order, joined with `_or_`.
+fn ghost_base<'e>(events: impl IntoIterator<Item = &'e str>) -> String {
+    format!(
+        "did_{}",
+        events.into_iter().collect::<Vec<_>>().join("_or_")
+    )
+}
+
+/// The ghost field of every prerequisite set an `only after` gives a field,
+/// keyed by its entity and its exact event set.
+///
+/// [`ghost_base`] does not tell sets apart: `{a, b}` and the single event
+/// `a_or_b` both give `did_a_or_b` (#1799). A set no other set of its
+/// entity shares that name with keeps it; every set of a shared name is
+/// numbered instead (`did_a_or_b_1`, `did_a_or_b_2`, in the order of the
+/// sets), skipping the entity's declared fields and every other ghost's
+/// name, so two sets never share a field. The names depend only on the
+/// sets, not on the order the rules are written in (B.6).
+///
+/// A statement that does not resolve gives no set here; [`apply`] reports
+/// its error.
+fn ghost_names(
+    rules: &[(usize, RuleDeclaration)],
+    scope: &Scope<'_>,
+) -> BTreeMap<(String, BTreeSet<String>), String> {
+    let mut sets = BTreeMap::<String, BTreeSet<BTreeSet<String>>>::new();
+    let mut phrases = Vec::new();
+    for (_, rule) in rules {
+        for located in &rule.statements {
+            let RuleStatement::After(later, earlier) = &located.statement else {
+                continue;
+            };
+            let (Ok((entity_name, later_events)), Ok((earlier_entity, earlier_events))) = (
+                scope.phrase(later, &mut phrases),
+                scope.phrase(earlier, &mut phrases),
+            ) else {
+                continue;
+            };
+            let earlier_names = earlier_events
+                .iter()
+                .map(|event| event.name.as_str())
+                .collect::<BTreeSet<_>>();
+            if earlier_entity != entity_name
+                || ordered_by_lifecycle(
+                    &scope.entities[&entity_name],
+                    scope.events,
+                    &entity_name,
+                    &earlier_names,
+                    &later_events,
+                )
+            {
+                continue;
+            }
+            sets.entry(entity_name)
+                .or_default()
+                .insert(earlier_names.into_iter().map(str::to_owned).collect());
+        }
+    }
+    let mut names = BTreeMap::new();
+    for (entity_name, sets) in sets {
+        let mut by_base = BTreeMap::<String, Vec<BTreeSet<String>>>::new();
+        for set in sets {
+            by_base
+                .entry(ghost_base(set.iter().map(String::as_str)))
+                .or_default()
+                .push(set);
+        }
+        let mut taken = scope.entities[&entity_name]
+            .fields
+            .keys()
+            .chain(by_base.keys())
+            .cloned()
+            .collect::<BTreeSet<_>>();
+        for (base, sets) in by_base {
+            if let [set] = sets.as_slice() {
+                names.insert((entity_name.clone(), set.clone()), base);
+                continue;
+            }
+            let mut ordinal = 0_usize;
+            for set in sets {
+                let name = loop {
+                    ordinal += 1;
+                    let name = format!("{base}_{ordinal}");
+                    if taken.insert(name.clone()) {
+                        break name;
+                    }
+                };
+                names.insert((entity_name.clone(), set), name);
+            }
+        }
+    }
+    names
+}
+
 /// Apply `rules` to the desugared events: conjoin their guards, add ghost
 /// fields, and collect their properties and deadlines into `next`.
 ///
@@ -904,6 +1001,7 @@ pub(in crate::parser) fn apply(
     next: &mut NextEditionRequirements,
 ) -> Result<RulesOutcome, ParseError> {
     let mut outcome = RulesOutcome::default();
+    let ghost_names = ghost_names(&rules, scope);
     for (position, rule) in rules {
         next.rule_headers.push((rule.id.clone(), rule.id_span));
         let mut guarded = BTreeSet::new();
@@ -1025,25 +1123,31 @@ pub(in crate::parser) fn apply(
                         });
                         continue;
                     }
-                    let ghost = format!(
-                        "did_{}",
-                        earlier_names
-                            .iter()
-                            .copied()
-                            .collect::<Vec<_>>()
-                            .join("_or_")
-                    );
-                    if entity.fields.contains_key(&ghost) {
+                    let base = ghost_base(earlier_names.iter().copied());
+                    if entity.fields.contains_key(&base) {
                         return Err(ParseError::coded(
                             GENERATED_NAME_COLLISION,
                             format!(
-                                "rule {}: `{detail}` generates the field '{ghost}' of \
+                                "rule {}: `{detail}` generates the field '{base}' of \
                                  '{entity_name}', which is already declared; rename the field",
                                 rule.id
                             ),
                             span,
                         ));
                     }
+                    // One field per prerequisite set (#1799): the name is
+                    // the set's own, so reusing a field by name reuses it
+                    // only for the same set.
+                    let ghost = ghost_names
+                        .get(&(
+                            entity_name.clone(),
+                            earlier_names
+                                .iter()
+                                .map(|name| (*name).to_owned())
+                                .collect(),
+                        ))
+                        .expect("ghost_names saw every set that gets a field")
+                        .clone();
                     let ghosts = outcome.ghosts.entry(entity_name.clone()).or_default();
                     if !ghosts.iter().any(|field| field.name == ghost) {
                         ghosts.push(ProcessField {
