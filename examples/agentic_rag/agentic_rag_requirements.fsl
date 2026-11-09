@@ -92,7 +92,7 @@ requirements AgenticRagRequirements {
     }
   }
 
-  requirement REQ-1 "受け付けたユーザーリクエストはエージェントワークフローに入り、監査記録される" {
+  requirement REQ-RAG-001 "受け付けたユーザーリクエストはエージェントワークフローに入り、監査記録される" {
     // PoC用の権限付与。実システムでは認証・認可層からobserveされる値になる。
     action grant_operator(r: Req) {
       requires req[r].st == New
@@ -108,7 +108,7 @@ requirements AgenticRagRequirements {
     }
   }
 
-  requirement REQ-2 "エージェントはリクエストが副作用toolを必要とするか分類する" {
+  requirement REQ-RAG-002 "エージェントはリクエストが副作用toolを必要とするか分類する" {
     // 通常回答パス。副作用toolは不要。
     fair action classify_answer(r: Req) {
       requires req[r].st == Received
@@ -124,7 +124,7 @@ requirements AgenticRagRequirements {
     }
   }
 
-  requirement REQ-3 "回答には十分な検索証拠と許可された引用が必要である" {
+  requirement REQ-RAG-003 "回答には十分な検索証拠と許可された引用が必要である" {
     // 検索・rerank・ACL/filter・引用検査をまとめた成功イベント。
     // ここでは外部評価器の結果としてAdequate/citation_ok=trueを受け取る。
     fair action retrieve_success(r: Req) {
@@ -168,7 +168,7 @@ requirements AgenticRagRequirements {
     }
   }
 
-  requirement REQ-4 "下書き回答は最終回答前に出力ガードレールを通過しなければならない" {
+  requirement REQ-RAG-004 "下書き回答は最終回答前に出力ガードレールを通過しなければならない" {
     // 回答下書きは証拠が十分で、かつ副作用toolを必要としない場合だけ作る。
     // toolを必要とする場合はToolApprovalへ進む。
     fair action draft_answer(r: Req) {
@@ -215,7 +215,7 @@ requirements AgenticRagRequirements {
     }
   }
 
-  requirement REQ-5 "副作用toolにはoperatorロールと明示承認が必要である" {
+  requirement REQ-RAG-005 "副作用toolにはoperatorロールと明示承認が必要である" {
     // tool承認待ちへ進めるのは、証拠が十分でtoolが必要な場合だけ。
     fair action request_tool_approval(r: Req) {
       requires req[r].st == EvidenceReady
@@ -224,7 +224,7 @@ requirements AgenticRagRequirements {
       req[r].approval = Requested
     }
 
-    // 承認はoperatorだけが行える。Publicのままapprove_toolする経路はFB-5で
+    // 承認はoperatorだけが行える。Publicのままapprove_toolする経路はFB-RAG-005で
     // must-forbidとして固定している。
     fair action approve_tool(r: Req) {
       requires req[r].st == ToolApproval
@@ -253,7 +253,8 @@ requirements AgenticRagRequirements {
   // Safety: Answeredに到達した全リクエストは、証拠・引用・guard通過を満たす。
   // requiresだけでなくinvariantにもして、将来のaction追加で抜け道ができた場合に
   // 反例として見えるようにしている。
-  invariant AnswerHasEvidenceAndGuard "REQ-3: 最終回答には十分な証拠、許可された引用、通過済みガードレールが必要" {
+  @requirement("REQ-RAG-003", "最終回答には十分な証拠、許可された引用、通過済みガードレールが必要")
+  invariant AnswerHasEvidenceAndGuard {
     forall r: Req {
       req[r].st == Answered => (
         req[r].evidence == Adequate and req[r].citation_ok and req[r].guard == Passed
@@ -265,7 +266,8 @@ requirements AgenticRagRequirements {
   // mutation sliceでは、retrieve_success相当のassignmentが欠けても、
   // 後続actionが閉じるだけで見逃せる変異が残った。状態名自体に
   // 「十分な証拠と許可済み引用がある」という意味を持たせる。
-  invariant EvidenceReadyHasEvidenceAndCitation "REQ-3: EvidenceReadyは十分な証拠と許可済み引用を表す" {
+  @requirement("REQ-RAG-003", "EvidenceReadyは十分な証拠と許可済み引用を表す")
+  invariant EvidenceReadyHasEvidenceAndCitation {
     forall r: Req {
       req[r].st == EvidenceReady => (
         req[r].evidence == Adequate and req[r].citation_ok
@@ -276,7 +278,8 @@ requirements AgenticRagRequirements {
   // Safety: 下書きはEvidenceReadyからしか作れないので、下書き中も
   // 証拠と引用の前提を保つ。answer直前だけでなく、guard評価中の状態も
   // PMが読める契約として明示する。
-  invariant DraftedHasEvidenceAndCitation "REQ-3: Draftedは回答可能な証拠と引用を保持している" {
+  @requirement("REQ-RAG-003", "Draftedは回答可能な証拠と引用を保持している")
+  invariant DraftedHasEvidenceAndCitation {
     forall r: Req {
       req[r].st == Drafted => (
         req[r].evidence == Adequate and req[r].citation_ok
@@ -286,7 +289,8 @@ requirements AgenticRagRequirements {
 
   // Safety: EvidenceBadは証拠不足または引用不可の評価結果を表す。
   // design層にも同じ不変条件があり、requirements層でも状態名の意味を揃える。
-  invariant EvidenceBadMeansNoCitation "REQ-3: EvidenceBadは不十分な証拠と引用不可を表す" {
+  @requirement("REQ-RAG-003", "EvidenceBadは不十分な証拠と引用不可を表す")
+  invariant EvidenceBadMeansNoCitation {
     forall r: Req {
       req[r].st == EvidenceBad => (
         req[r].evidence == Inadequate and not req[r].citation_ok
@@ -296,7 +300,8 @@ requirements AgenticRagRequirements {
 
   // Safety: guard失敗状態ではguard値もFailedでなければならない。
   // StageだけがGuardFailed、またはguardだけがFailedという半端な状態を防ぐ。
-  invariant GuardFailedMeansFailedGuard "REQ-4: GuardFailedは出力ガードレール失敗を表す" {
+  @requirement("REQ-RAG-004", "GuardFailedは出力ガードレール失敗を表す")
+  invariant GuardFailedMeansFailedGuard {
     forall r: Req {
       req[r].st == GuardFailed => req[r].guard == Failed
     }
@@ -304,7 +309,8 @@ requirements AgenticRagRequirements {
 
   // Safety: ActionExecutedは承認済みoperatorだけ。tool実行actionのrequiresに加え、
   // 状態としても常に成り立つことを確認する。
-  invariant ToolExecutionApproved "REQ-5: 副作用tool実行にはoperator承認が必要" {
+  @requirement("REQ-RAG-005", "副作用tool実行にはoperator承認が必要")
+  invariant ToolExecutionApproved {
     forall r: Req {
       req[r].st == ActionExecuted => (
         req[r].approval == Approved and req[r].role == Operator
@@ -314,7 +320,8 @@ requirements AgenticRagRequirements {
 
   // Safety: 承認待ちstageとapproval値を同期させる。
   // Requestedは「承認待ちだが、まだ実行不可」という外部可視状態である。
-  invariant ToolApprovalMeansRequested "REQ-5: ToolApprovalはRequested承認状態を表す" {
+  @requirement("REQ-RAG-005", "ToolApprovalはRequested承認状態を表す")
+  invariant ToolApprovalMeansRequested {
     forall r: Req {
       req[r].st == ToolApproval => req[r].approval == Requested
     }
@@ -323,7 +330,8 @@ requirements AgenticRagRequirements {
   // Safety: 承認済みstageとapproval値を同期させる。
   // execute_toolのrequiresだけに依存せず、ToolApprovedという状態名自体を
   // 明示承認済みの意味に固定する。
-  invariant ToolApprovedMeansApproved "REQ-5: ToolApprovedはApproved承認状態を表す" {
+  @requirement("REQ-RAG-005", "ToolApprovedはApproved承認状態を表す")
+  invariant ToolApprovedMeansApproved {
     forall r: Req {
       req[r].st == ToolApproved => req[r].approval == Approved
     }
@@ -331,7 +339,8 @@ requirements AgenticRagRequirements {
 
   // Safety: 終端処理はreceiveを通って監査済みでなければならない。
   // grant_operatorだけで終端に入るような抜け道があればここで落ちる。
-  invariant HandledRequestsWereAudited "REQ-1: 処理済みリクエストは監査済みワークフローに入っていなければならない" {
+  @requirement("REQ-RAG-001", "処理済みリクエストは監査済みワークフローに入っていなければならない")
+  invariant HandledRequestsWereAudited {
     forall r: Req {
       (req[r].st == Answered or req[r].st == Refused or req[r].st == HumanReview or req[r].st == ActionExecuted) => req[r].audit
     }
@@ -340,7 +349,8 @@ requirements AgenticRagRequirements {
   // Transition safety: retry_retrieveはretry budgetを必ず1だけ消費する。
   // 状態不変条件だけでは「Retrievingへ戻ったがretryを減らしていない」変異を
   // 見逃しやすいため、old/newの関係として固定する。
-  trans RetryConsumesOneBudget "REQ-3: retry時はbudgetを1だけ消費する" {
+  @requirement("REQ-RAG-003", "retry時はbudgetを1だけ消費する")
+  trans RetryConsumesOneBudget {
     forall r: Req {
       (old(req[r].st) == EvidenceBad and req[r].st == Retrieving) => (
         req[r].retry == old(req[r].retry) - 1
@@ -351,7 +361,8 @@ requirements AgenticRagRequirements {
   // Transition safety: 副作用tool実行済みへ入る直前はToolApprovedでなければならない。
   // ActionExecutedの状態不変条件だけだと、承認待ちstageから直接実行する
   // shortcutを見逃す可能性があるため、遷移元stageも契約に含める。
-  trans ExecutionComesFromApprovedStage "REQ-5: ActionExecutedはToolApprovedからだけ入る" {
+  @requirement("REQ-RAG-005", "ActionExecutedはToolApprovedからだけ入る")
+  trans ExecutionComesFromApprovedStage {
     forall r: Req {
       req[r].st == ActionExecuted => (
         old(req[r].st) == ToolApproved or old(req[r].st) == ActionExecuted
@@ -362,7 +373,8 @@ requirements AgenticRagRequirements {
   // Liveness: 受け付け後、処理中状態に残り続けてはいけない。
   // 各actionをfairにしているので、enabledな処理が永久に選ばれないlassoは除外される。
   // 実運用でworker停止を許すなら、ここはSLA/deadlineや障害modeと合わせて再設計する。
-  leadsTo RequestEventuallyHandled "REQ-6: 受け付けたリクエストは最終的に回答、拒否、レビュー、またはtool実行に到達する" {
+  @requirement("REQ-RAG-006", "受け付けたリクエストは最終的に回答、拒否、レビュー、またはtool実行に到達する")
+  leadsTo RequestEventuallyHandled {
     forall r: Req {
       (req[r].st == Received or req[r].st == Classified or req[r].st == Retrieving or req[r].st == EvidenceReady or req[r].st == EvidenceBad or req[r].st == Drafted or req[r].st == GuardFailed or req[r].st == ToolApproval or req[r].st == ToolApproved)
         ~>
@@ -389,7 +401,7 @@ requirements AgenticRagRequirements {
   }
 
   // Acceptance: 正常なRAG回答パス。
-  acceptance AC-1 "証拠に基づく回答パス" {
+  acceptance AC-RAG-001 "証拠に基づく回答パス" {
     receive(0)
     classify_answer(0)
     retrieve_success(0)
@@ -400,7 +412,7 @@ requirements AgenticRagRequirements {
   }
 
   // Acceptance: 証拠不足時にretryを使い切り、人間レビューへ送るパス。
-  acceptance AC-2 "証拠不足ではリトライを使い切ってレビューへ進む" {
+  acceptance AC-RAG-002 "証拠不足ではリトライを使い切ってレビューへ進む" {
     receive(0)
     classify_answer(0)
     retrieve_empty(0)
@@ -415,7 +427,7 @@ requirements AgenticRagRequirements {
   // Acceptance: 証拠不足時にretryを使い切り、拒否で閉じるパス。
   // CanRefuseだけだとtool承認拒否でも満たせるため、低証拠拒否の正規pathを
   // executable exampleとして別に固定する。
-  acceptance AC-3 "証拠不足ではリトライを使い切って拒否へ進む" {
+  acceptance AC-RAG-003 "証拠不足ではリトライを使い切って拒否へ進む" {
     receive(0)
     classify_answer(0)
     retrieve_empty(0)
@@ -428,7 +440,7 @@ requirements AgenticRagRequirements {
   }
 
   // Acceptance: operator承認後に副作用toolを実行するパス。
-  acceptance AC-4 "承認済みoperatorによるtool実行パス" {
+  acceptance AC-RAG-004 "承認済みoperatorによるtool実行パス" {
     grant_operator(0)
     receive(0)
     classify_tool(0)
@@ -440,7 +452,7 @@ requirements AgenticRagRequirements {
   }
 
   // Must-forbid: guard pass前のanswerがrequiresで拒否されること。
-  forbidden FB-1 "出力ガードレール通過前の回答は拒否される" {
+  forbidden FB-RAG-001 "出力ガードレール通過前の回答は拒否される" {
     receive(0)
     classify_answer(0)
     retrieve_success(0)
@@ -450,7 +462,7 @@ requirements AgenticRagRequirements {
   }
 
   // Must-forbid: guard failed後のanswerが拒否されること。
-  forbidden FB-2 "出力ガードレール失敗後の回答は拒否される" {
+  forbidden FB-RAG-002 "出力ガードレール失敗後の回答は拒否される" {
     receive(0)
     classify_answer(0)
     retrieve_success(0)
@@ -461,7 +473,7 @@ requirements AgenticRagRequirements {
   }
 
   // Must-forbid: 証拠不足のままanswerできないこと。
-  forbidden FB-3 "不十分な証拠での回答は拒否される" {
+  forbidden FB-RAG-003 "不十分な証拠での回答は拒否される" {
     receive(0)
     classify_answer(0)
     retrieve_empty(0)
@@ -471,7 +483,7 @@ requirements AgenticRagRequirements {
 
   // Must-forbid: retry budgetが残っている間は、証拠不足を拒否で閉じてはいけない。
   // retry_liveness_sliceで重要だった境界条件を、本体requirementsにも戻す。
-  forbidden FB-6 "retryが残る間は証拠不足を拒否で閉じない" {
+  forbidden FB-RAG-006 "retryが残る間は証拠不足を拒否で閉じない" {
     receive(0)
     classify_answer(0)
     retrieve_empty(0)
@@ -481,7 +493,7 @@ requirements AgenticRagRequirements {
 
   // Must-forbid: retry budgetが残っている間は、人間レビューにも送らない。
   // 早期レビューを許す運用に変える場合は、このforbiddenを明示的に見直す。
-  forbidden FB-7 "retryが残る間は証拠不足をレビューで閉じない" {
+  forbidden FB-RAG-007 "retryが残る間は証拠不足をレビューで閉じない" {
     receive(0)
     classify_answer(0)
     retrieve_empty(0)
@@ -490,7 +502,7 @@ requirements AgenticRagRequirements {
   }
 
   // Must-forbid: 承認待ち状態から直接tool実行できないこと。
-  forbidden FB-4 "承認前の副作用tool実行は拒否される" {
+  forbidden FB-RAG-004 "承認前の副作用tool実行は拒否される" {
     grant_operator(0)
     receive(0)
     classify_tool(0)
@@ -501,7 +513,7 @@ requirements AgenticRagRequirements {
   }
 
   // Must-forbid: Public roleのままtool承認できないこと。
-  forbidden FB-5 "非operatorは副作用tool実行を承認できない" {
+  forbidden FB-RAG-005 "非operatorは副作用tool実行を承認できない" {
     receive(0)
     classify_tool(0)
     retrieve_success(0)

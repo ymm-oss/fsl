@@ -50,7 +50,7 @@ requirements AgenticRagLivenessRequirements {
     }
   }
 
-  requirement REQ-L1 "回答準備済みリクエストは最終的に公開回答される" {
+  requirement REQ-RAG-LIVENESS-001 "回答準備済みリクエストは最終的に公開回答される" {
     // 抽象requirementsではanswerをfairにしているので、enabledな回答公開を
     // 永久に選ばない実行はleadsTo反例から除外される。
     fair action answer(r: Req) {

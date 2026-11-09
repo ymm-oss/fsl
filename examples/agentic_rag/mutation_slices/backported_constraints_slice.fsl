@@ -63,7 +63,7 @@ requirements AgenticRagBackportedConstraintsSlice {
     }
   }
 
-  requirement REQ-3 "証拠状態、引用、retry budgetの契約を保つ" {
+  requirement REQ-RAG-003 "証拠状態、引用、retry budgetの契約を保つ" {
     // EvidenceReadyの意味を直接観測する準備action。
     // evidence/citation assignmentを消す変異は、EvidenceReadyHasEvidenceAndCitationで殺す。
     action prepare_evidence_ready(r: Req) {
@@ -156,7 +156,7 @@ requirements AgenticRagBackportedConstraintsSlice {
     }
   }
 
-  requirement REQ-4 "guard失敗状態は失敗guard値と同期する" {
+  requirement REQ-RAG-004 "guard失敗状態は失敗guard値と同期する" {
     // GuardFailedの意味を直接観測する準備action。
     action prepare_guard_failed(r: Req) {
       requires req[r].st == New
@@ -171,7 +171,7 @@ requirements AgenticRagBackportedConstraintsSlice {
     }
   }
 
-  requirement REQ-5 "副作用toolの承認stageと実行stageを保つ" {
+  requirement REQ-RAG-005 "副作用toolの承認stageと実行stageを保つ" {
     // ToolApprovalの意味を直接観測する準備action。
     action request_tool_approval(r: Req) {
       requires req[r].st == New
@@ -221,22 +221,22 @@ requirements AgenticRagBackportedConstraintsSlice {
     }
   }
 
-  acceptance AC-EVIDENCE-READY "EvidenceReadyは証拠と引用を持つ" {
+  acceptance AC-EVIDENCE-READY-001 "EvidenceReadyは証拠と引用を持つ" {
     prepare_evidence_ready(0)
     expect req[0].st == EvidenceReady
   }
 
-  acceptance AC-DRAFTED "Draftedは証拠と引用を持つ" {
+  acceptance AC-DRAFTED-001 "Draftedは証拠と引用を持つ" {
     prepare_drafted(0)
     expect req[0].st == Drafted
   }
 
-  acceptance AC-EVIDENCE-BAD "EvidenceBadは証拠不足と引用不可を持つ" {
+  acceptance AC-EVIDENCE-BAD-001 "EvidenceBadは証拠不足と引用不可を持つ" {
     prepare_evidence_bad(0)
     expect req[0].st == EvidenceBad
   }
 
-  acceptance AC-RETRY-REFUSE "retryを使い切って拒否で閉じる" {
+  acceptance AC-RETRY-REFUSE-001 "retryを使い切って拒否で閉じる" {
     prepare_evidence_bad(0)
     retry_retrieve(0)
     prepare_evidence_bad(0)
@@ -246,7 +246,7 @@ requirements AgenticRagBackportedConstraintsSlice {
     expect req[0].st == Refused
   }
 
-  acceptance AC-RETRY-REVIEW "retryを使い切ってレビューで閉じる" {
+  acceptance AC-RETRY-REVIEW-001 "retryを使い切ってレビューで閉じる" {
     prepare_evidence_bad(0)
     retry_retrieve(0)
     prepare_evidence_bad(0)
@@ -256,25 +256,25 @@ requirements AgenticRagBackportedConstraintsSlice {
     expect req[0].st == HumanReview
   }
 
-  acceptance AC-GUARD-FAILED "GuardFailedはFailed guardを持つ" {
+  acceptance AC-GUARD-FAILED-001 "GuardFailedはFailed guardを持つ" {
     prepare_guard_failed(0)
     expect req[0].st == GuardFailed
   }
 
-  acceptance AC-TOOL-EXECUTE "ToolApprovedから実行済みへ進む" {
+  acceptance AC-TOOL-EXECUTE-001 "ToolApprovedから実行済みへ進む" {
     request_tool_approval(0)
     approve_tool(0)
     execute_tool(0)
     expect req[0].st == ActionExecuted
   }
 
-  forbidden FB-EARLY-REFUSE "retryが残る間は拒否で閉じない" {
+  forbidden FB-EARLY-REFUSE-001 "retryが残る間は拒否で閉じない" {
     prepare_evidence_bad(0)
     refuse_low_evidence(0)
     expect rejected
   }
 
-  forbidden FB-EARLY-REVIEW "retryが残る間はレビューで閉じない" {
+  forbidden FB-EARLY-REVIEW-001 "retryが残る間はレビューで閉じない" {
     prepare_evidence_bad(0)
     review_low_evidence(0)
     expect rejected

@@ -83,16 +83,16 @@ business MultiAgentBusiness {
     every Work in BEffectApproved must eventually be BEffectExecuted
 
   // Positive goals: 業務として許容する主要終端が到達可能であることを確認する。
-  goal CanDeliver "低リスクworkは納品まで進める"
+  goal GOAL-AGENT-001 "低リスクworkは納品まで進める"
     some Work can reach BDelivered
 
-  goal CanReject "不適切なworkは拒否で閉じられる"
+  goal GOAL-AGENT-002 "不適切なworkは拒否で閉じられる"
     some Work can reach BRejected
 
-  goal CanReview "AIだけでは判断できないworkを人間レビューへ送れる"
+  goal GOAL-AGENT-003 "AIだけでは判断できないworkを人間レビューへ送れる"
     some Work can reach BHumanReview
 
-  goal CanExecuteEffect "承認済み副作用toolを実行できる"
+  goal GOAL-AGENT-004 "承認済み副作用toolを実行できる"
     some Work can reach BEffectExecuted
 }
 

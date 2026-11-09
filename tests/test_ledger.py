@@ -32,7 +32,7 @@ def test_ledger_sla_violation_groups_by_requirement(tmp_path):
     p = _write(tmp_path, "sla_no_urgent.fsl", src)
     md = _ledger(p, depth=10)
     assert "意図ずれ監査台帳" in md
-    assert "NFR-1" in md                      # grouped by requirement id
+    assert "NFR-SLA-001" in md                      # grouped by requirement id
     assert "🔴 要確認" in md
     assert "| sla |" in md or "`sla`" in md    # trace_type drives the row
     assert "スケジューリング前提" in md          # sla business translation
@@ -54,7 +54,7 @@ def test_ledger_verified_spec_all_confirmed():
     md = _ledger(NFR / "support_sla.fsl", depth=8)
     assert "🟢" in md
     assert "🔴 要確認" not in md               # nothing needs review
-    for rid in ("REQ-1", "REQ-3", "REQ-5"):
+    for rid in ("REQ-SUPPORT-001", "REQ-SUPPORT-003", "REQ-SUPPORT-005"):
         assert rid in md
 
 

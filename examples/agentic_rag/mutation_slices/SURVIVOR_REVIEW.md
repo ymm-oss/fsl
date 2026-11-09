@@ -25,8 +25,8 @@ CLI に依存しないため据え置き。実測値の再取得は「反映後�
 | tool approval | `ToolApproved` stageと`approval == Approved`の同期 | `ToolApprovedMeansApproved` |
 | tool approval | `ActionExecuted`へ承認待ちstageから直接入るshortcut | `ExecutionComesFromApprovedStage` |
 | retry liveness | `retry_retrieve`がretryを減らさない/違う値へ変えるshortcut | `RetryConsumesOneBudget` |
-| retry liveness | retryが残る間の早期拒否/早期レビュー | `FB-6`, `FB-7` |
-| retry liveness | 低証拠を拒否で閉じる正規pathが`CanRefuse`では見えにくい | `AC-3` |
+| retry liveness | retryが残る間の早期拒否/早期レビュー | `FB-RAG-006`, `FB-RAG-007` |
+| retry liveness | 低証拠を拒否で閉じる正規pathが`CanRefuse`では見えにくい | `AC-RAG-003` |
 
 ## 本体へ反映しなかったもの
 

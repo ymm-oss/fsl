@@ -76,7 +76,7 @@ requirements MultiAgentRequirements {
     active_agents = Set {}
   }
 
-  requirement REQ-1 "workは監査境界を通って受け付けられる" {
+  requirement REQ-AGENT-001 "workは監査境界を通って受け付けられる" {
     // receiveは監査境界。ここを通らない終端はHandledWorkWasAuditedで拒否する。
     fair action receive(w: Work) {
       requires job[w].st == New
@@ -85,7 +85,7 @@ requirements MultiAgentRequirements {
     }
   }
 
-  requirement REQ-2 "supervisorはworkのリスクと副作用要否をscopeする" {
+  requirement REQ-AGENT-002 "supervisorはworkのリスクと副作用要否をscopeする" {
     // 低リスクworkは副作用toolを必要としない。
     fair action scope_low(w: Work) {
       requires job[w].st == Received
@@ -101,7 +101,7 @@ requirements MultiAgentRequirements {
     }
   }
 
-  requirement REQ-3 "supervisorは複数workerへ委譲し、両workerの結果を集約する" {
+  requirement REQ-AGENT-003 "supervisorは複数workerへ委譲し、両workerの結果を集約する" {
     // supervisorが作業計画を作る。design層ではplanner queueに分解してよい。
     fair action plan_work(w: Work) {
       requires job[w].st == Scoped
@@ -165,7 +165,7 @@ requirements MultiAgentRequirements {
     }
   }
 
-  requirement REQ-4 "criticは成果物を承認、修正要求、拒否、人間レビューへ振り分ける" {
+  requirement REQ-AGENT-004 "criticは成果物を承認、修正要求、拒否、人間レビューへ振り分ける" {
     // criticレビューを開始する。design層ではcritic queueに分解してよい。
     fair action start_critic(w: Work) {
       requires job[w].st == Aggregated
@@ -212,7 +212,7 @@ requirements MultiAgentRequirements {
     }
   }
 
-  requirement REQ-5 "副作用toolはcritic承認後かつ人間承認後にだけ実行できる" {
+  requirement REQ-AGENT-005 "副作用toolはcritic承認後かつ人間承認後にだけ実行できる" {
     // 低リスクworkはcritic承認後に納品できる。
     fair action deliver_answer(w: Work) {
       requires job[w].st == Approved
@@ -255,21 +255,24 @@ requirements MultiAgentRequirements {
   }
 
   // Safety: 終端状態は監査境界を通っている。
-  invariant HandledWorkWasAudited "REQ-1: 終端workは監査済みでなければならない" {
+  @requirement("REQ-AGENT-001", "終端workは監査済みでなければならない")
+  invariant HandledWorkWasAudited {
     forall w: Work {
       (job[w].st == Delivered or job[w].st == Rejected or job[w].st == HumanReview or job[w].st == ToolExecuted) => job[w].audit
     }
   }
 
   // Safety: worker成果物の統合は、両workerが完了してからである。
-  invariant AggregatedMeansBothWorkersDone "REQ-3: 統合済みworkは両workerの成果物を持つ" {
+  @requirement("REQ-AGENT-003", "統合済みworkは両workerの成果物を持つ")
+  invariant AggregatedMeansBothWorkersDone {
     forall w: Work {
       job[w].st == Aggregated => (job[w].worker_a_done and job[w].worker_b_done)
     }
   }
 
   // Safety: active_agentsにはworker agentだけが入る。supervisor(0)は成果物workerではない。
-  invariant ActiveAgentsAreWorkers "REQ-3: active_agentsは成果物workerだけを含む" {
+  @requirement("REQ-AGENT-003", "active_agentsは成果物workerだけを含む")
+  invariant ActiveAgentsAreWorkers {
     forall a in active_agents {
       a == 1 or a == 2
     }
@@ -277,7 +280,8 @@ requirements MultiAgentRequirements {
 
   // Safety: Assigned中はworker A/Bがそれぞれ1回ずつ割り当てられている。
   // Setなので重複は表現できないが、exactlyOneで読み手に一意性を明示する。
-  invariant AssignedHasExactlyTwoWorkers "REQ-3: Assigned中はworker A/Bが一意に割り当てられている" {
+  @requirement("REQ-AGENT-003", "Assigned中はworker A/Bが一意に割り当てられている")
+  invariant AssignedHasExactlyTwoWorkers {
     forall w: Work {
       job[w].st == Assigned => (
         exactlyOne(a in active_agents where a == 1) and
@@ -287,35 +291,40 @@ requirements MultiAgentRequirements {
   }
 
   // Safety: critic承認なしに納品・副作用実行へ進まない。
-  invariant OutputRequiresCriticApproval "REQ-4: 納品または副作用実行にはcritic承認が必要" {
+  @requirement("REQ-AGENT-004", "納品または副作用実行にはcritic承認が必要")
+  invariant OutputRequiresCriticApproval {
     forall w: Work {
       (job[w].st == Delivered or job[w].st == ToolExecuted or job[w].st == ToolApproval or job[w].st == ToolApproved) => job[w].critic_ok
     }
   }
 
   // Safety: 副作用tool実行には人間承認が必要である。
-  invariant ToolExecutionRequiresHumanApproval "REQ-5: 副作用tool実行には人間承認が必要" {
+  @requirement("REQ-AGENT-005", "副作用tool実行には人間承認が必要")
+  invariant ToolExecutionRequiresHumanApproval {
     forall w: Work {
       job[w].st == ToolExecuted => job[w].approval == ApprovalGranted
     }
   }
 
   // Safety: ToolApprovalというstage名とapproval値を同期させる。
-  invariant ToolApprovalMeansRequested "REQ-5: ToolApprovalはRequested承認状態を表す" {
+  @requirement("REQ-AGENT-005", "ToolApprovalはRequested承認状態を表す")
+  invariant ToolApprovalMeansRequested {
     forall w: Work {
       job[w].st == ToolApproval => job[w].approval == Requested
     }
   }
 
   // Safety: ToolApprovedというstage名とapproval値を同期させる。
-  invariant ToolApprovedMeansApproved "REQ-5: ToolApprovedはApprovalGranted承認状態を表す" {
+  @requirement("REQ-AGENT-005", "ToolApprovedはApprovalGranted承認状態を表す")
+  invariant ToolApprovedMeansApproved {
     forall w: Work {
       job[w].st == ToolApproved => job[w].approval == ApprovalGranted
     }
   }
 
   // Transition safety: revise_planはrevision budgetを必ず1だけ消費する。
-  trans RevisionConsumesOneBudget "REQ-4: 修正ループに戻す時はrevision budgetを1つ消費する" {
+  @requirement("REQ-AGENT-004", "修正ループに戻す時はrevision budgetを1つ消費する")
+  trans RevisionConsumesOneBudget {
     forall w: Work {
       (old(job[w].st) == RevisionNeeded and job[w].st == Planned) => (
         job[w].revision == old(job[w].revision) + 1
@@ -325,7 +334,8 @@ requirements MultiAgentRequirements {
 
   // Liveness: 受け付け後のworkは、納品・拒否・人間レビュー・副作用実行のいずれかへ閉じる。
   // retryではなくagent coordinationのため、worker完了・critic・承認を含めて18 step以内にした。
-  leadsTo WorkEventuallyHandled "REQ-6: 受け付けたworkは最終的に処理済み終端へ到達する" {
+  @requirement("REQ-AGENT-006", "受け付けたworkは最終的に処理済み終端へ到達する")
+  leadsTo WorkEventuallyHandled {
     forall w: Work {
       (
         job[w].st == Received or job[w].st == Scoped or job[w].st == Planned or
@@ -342,7 +352,8 @@ requirements MultiAgentRequirements {
 
   // Temporal sugar: 処理中workは終端まで処理中集合から外れない。
   // 1 Work固定のPoCなので、job[0]で直接書いている。
-  until WorkOpenUntilHandled "REQ-6: 処理中workは終端まで処理中状態を保つ" {
+  @requirement("REQ-AGENT-006", "処理中workは終端まで処理中状態を保つ")
+  until WorkOpenUntilHandled {
     (
       job[0].st == Received or job[0].st == Scoped or job[0].st == Planned or
       job[0].st == Assigned or job[0].st == Aggregated or job[0].st == CriticReview or
@@ -371,7 +382,7 @@ requirements MultiAgentRequirements {
     exists w: Work { job[w].st == ToolExecuted }
   }
 
-  acceptance AC-LOW-DELIVER "低リスクworkはcritic承認後に納品される" {
+  acceptance AC-LOW-DELIVER-001 "低リスクworkはcritic承認後に納品される" {
     receive(0)
     scope_low(0)
     plan_work(0)
@@ -385,7 +396,7 @@ requirements MultiAgentRequirements {
     expect job[0].st == Delivered
   }
 
-  acceptance AC-HIGH-TOOL "高リスクworkは人間承認後に副作用toolを実行する" {
+  acceptance AC-HIGH-TOOL-001 "高リスクworkは人間承認後に副作用toolを実行する" {
     receive(0)
     scope_high(0)
     plan_work(0)
@@ -401,7 +412,7 @@ requirements MultiAgentRequirements {
     expect job[0].st == ToolExecuted
   }
 
-  acceptance AC-REVISION-REVIEW "修正後も判断できないworkは人間レビューへ進む" {
+  acceptance AC-REVISION-REVIEW-001 "修正後も判断できないworkは人間レビューへ進む" {
     receive(0)
     scope_low(0)
     plan_work(0)
@@ -421,7 +432,7 @@ requirements MultiAgentRequirements {
     expect job[0].st == HumanReview
   }
 
-  forbidden FB-AGGREGATE-EARLY "両worker完了前に統合してはならない" {
+  forbidden FB-AGGREGATE-EARLY-001 "両worker完了前に統合してはならない" {
     receive(0)
     scope_low(0)
     plan_work(0)
@@ -431,7 +442,7 @@ requirements MultiAgentRequirements {
     expect rejected
   }
 
-  forbidden FB-DELIVER-BEFORE-CRITIC "critic承認前に納品してはならない" {
+  forbidden FB-DELIVER-BEFORE-CRITIC-001 "critic承認前に納品してはならない" {
     receive(0)
     scope_low(0)
     plan_work(0)
@@ -443,7 +454,7 @@ requirements MultiAgentRequirements {
     expect rejected
   }
 
-  forbidden FB-EXECUTE-BEFORE-APPROVAL "人間承認前に副作用toolを実行してはならない" {
+  forbidden FB-EXECUTE-BEFORE-APPROVAL-001 "人間承認前に副作用toolを実行してはならない" {
     receive(0)
     scope_high(0)
     plan_work(0)

@@ -1,7 +1,7 @@
 // Agentic RAG mutation slice: retry budget と証拠不足liveness。
 //
 // 目的:
-// - 本体requirementsのREQ-3/REQ-6のうち、証拠不足時にretry budgetを消費し、
+// - 本体requirementsのREQ-RAG-003/REQ-RAG-006のうち、証拠不足時にretry budgetを消費し、
 //   budgetが尽きたらRefusedまたはHumanReviewで終端する契約を軽く検査する。
 // - retry decrementのassignment削除、retry==0 guard削除、fair削除を
 //   `fslc mutate`で短く観測する。
@@ -38,7 +38,7 @@ requirements AgenticRagRetryLivenessSlice {
     }
   }
 
-  requirement REQ-3 "証拠不足時はretry budgetを消費し、尽きたら終端する" {
+  requirement REQ-RAG-003 "証拠不足時はretry budgetを消費し、尽きたら終端する" {
     // 検索失敗・証拠不足・引用不可の抽象イベント。
     fair action retrieve_empty(r: Req) {
       requires req[r].st == Classified or req[r].st == Retrieving
@@ -114,13 +114,14 @@ requirements AgenticRagRetryLivenessSlice {
   // Temporal sugar: 1リクエスト固定sliceなので、`until`で処理中状態が終端まで
   // 保たれることを読みやすく表す。これは上のwithin付きleadsToと同じ進捗を、
   // 「終端まで処理中集合から外れない」というsafety込みで補強する。
-  until EvidenceOpenUntilClosed "REQ-3: 証拠不足pathは終端まで処理中状態を保つ" {
+  @requirement("REQ-RAG-003", "証拠不足pathは終端まで処理中状態を保つ")
+  until EvidenceOpenUntilClosed {
     (req[0].st == Classified or req[0].st == Retrieving or req[0].st == EvidenceBad)
       until
     (req[0].st == Refused or req[0].st == HumanReview)
   }
 
-  acceptance AC-RETRY-REVIEW "retryを使い切って人間レビューへ進む" {
+  acceptance AC-RETRY-REVIEW-001 "retryを使い切って人間レビューへ進む" {
     retrieve_empty(0)
     retry_retrieve(0)
     retrieve_empty(0)
@@ -130,13 +131,13 @@ requirements AgenticRagRetryLivenessSlice {
     expect req[0].st == HumanReview
   }
 
-  forbidden FB-REFUSE-BEFORE-BUDGET-EXHAUSTED "retryが残る間は拒否で閉じない" {
+  forbidden FB-REFUSE-BEFORE-BUDGET-EXHAUSTED-001 "retryが残る間は拒否で閉じない" {
     retrieve_empty(0)
     refuse_low_evidence(0)
     expect rejected
   }
 
-  forbidden FB-REVIEW-BEFORE-BUDGET-EXHAUSTED "retryが残る間はレビューで閉じない" {
+  forbidden FB-REVIEW-BEFORE-BUDGET-EXHAUSTED-001 "retryが残る間はレビューで閉じない" {
     retrieve_empty(0)
     review_low_evidence(0)
     expect rejected
