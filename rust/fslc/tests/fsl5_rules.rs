@@ -880,6 +880,125 @@ fn colliding_history_field_names_do_not_depend_on_rule_order() {
     kernel_compare::assert_same_kernel(&kernels[0], &kernels[1], "the colliding rules swapped");
 }
 
+/// #1799: the document of [`ghost_collision_document`] with one more event,
+/// `a_or_b_1` (`User logs C`), whose own field name `did_a_or_b_1` is the
+/// first number the colliding `{a, b}` and `{a_or_b}` would take. `field`
+/// is declared on `C`; `rules` follow REQ-1 and REQ-2.
+fn numbered_ghost_document(field: &str, rules: &str, steps: &str) -> String {
+    format!(
+        "fsl 5\nrequirements R {{\n  actor User\n  entity C {{\n    \
+         lifecycle Draft -> Submitted\n{field}  }}\n  \
+         event a = User pays C in Draft\n  event b = User pays C in Submitted\n  \
+         event advance = User advances C Draft -> Submitted\n  \
+         event a_or_b = User records C in Draft\n  event a_or_b_1 = User logs C in Draft\n  \
+         event x = User closes C in Draft\n  event y = User finishes C in Draft\n  \
+         event z = User files C in Draft\n{GHOST_COLLISION_RULES}{rules}  \
+         scenario AC-1 \"t\" {{\n{steps}    then c1 is Draft\n  }}\n}}\n\
+         verify {{ instances C = 1 }}\n"
+    )
+}
+
+const FILES_AFTER_LOGS: &str = "  rule REQ-3 \"File after logging\" {\n    \
+     User files C only after User logs C\n  }\n";
+
+const DECLARED_NUMBER: &str = "    did_a_or_b_1: Bool = false\n";
+
+/// #1799: a numbered field skips the name another set's field has. `{a, b}`
+/// and `{a_or_b}` share `did_a_or_b`, and `{a_or_b_1}` keeps
+/// `did_a_or_b_1`, so the two are numbered `did_a_or_b_2` and
+/// `did_a_or_b_3`. Paying does not let `User files` (REQ-3) through; logging
+/// does. Numbering `{a, b}` `did_a_or_b_1` would share REQ-3's field and
+/// accept the first scenario.
+#[test]
+fn numbered_history_fields_skip_another_sets_name() {
+    let refused = [
+        (Some("error".to_owned()), Some(1), 2),
+        (Some("error".to_owned()), Some(1), 2),
+        (Some("error".to_owned()), Some(1), 2),
+    ];
+    assert_eq!(
+        ghost_collision_verdicts(
+            "ghost-number-other-set-skip",
+            &numbered_ghost_document(
+                "",
+                FILES_AFTER_LOGS,
+                "    User pays c1\n    User files c1\n"
+            )
+        ),
+        refused
+    );
+    let accepted = [
+        (Some("ok".to_owned()), None, 0),
+        (Some("verified".to_owned()), None, 0),
+        (Some("proved".to_owned()), None, 0),
+    ];
+    assert_eq!(
+        ghost_collision_verdicts(
+            "ghost-number-other-set-order",
+            &numbered_ghost_document(
+                "",
+                FILES_AFTER_LOGS,
+                "    User pays c1\n    User records c1\n    User logs c1\n    \
+                 User closes c1\n    User finishes c1\n    User files c1\n"
+            )
+        ),
+        accepted
+    );
+}
+
+/// #1799: a numbered field skips a declared field. With `did_a_or_b_1`
+/// declared, the colliding `{a, b}` and `{a_or_b}` are numbered
+/// `did_a_or_b_2` and `did_a_or_b_3`: paying does not let `User finishes`
+/// (REQ-2) through, and recording then paying lets both rules through. A
+/// declared field the unnumbered name of a set equals is still
+/// `generated_name_collision`.
+#[test]
+fn numbered_history_fields_skip_a_declared_field() {
+    let refused = [
+        (Some("error".to_owned()), Some(1), 2),
+        (Some("error".to_owned()), Some(1), 2),
+        (Some("error".to_owned()), Some(1), 2),
+    ];
+    assert_eq!(
+        ghost_collision_verdicts(
+            "ghost-number-declared-skip",
+            &numbered_ghost_document(
+                DECLARED_NUMBER,
+                "",
+                "    User pays c1\n    User finishes c1\n"
+            )
+        ),
+        refused
+    );
+    let accepted = [
+        (Some("ok".to_owned()), None, 0),
+        (Some("verified".to_owned()), None, 0),
+        (Some("proved".to_owned()), None, 0),
+    ];
+    assert_eq!(
+        ghost_collision_verdicts(
+            "ghost-number-declared-order",
+            &numbered_ghost_document(
+                DECLARED_NUMBER,
+                "",
+                "    User records c1\n    User finishes c1\n    User pays c1\n    \
+                 User closes c1\n"
+            )
+        ),
+        accepted
+    );
+    assert_error(
+        "ghost-number-declared-base",
+        &numbered_ghost_document(
+            DECLARED_NUMBER,
+            FILES_AFTER_LOGS,
+            "    User logs c1\n    User files c1\n",
+        ),
+        "generated_name_collision",
+        "'did_a_or_b_1'",
+    );
+}
+
 /// Lowering steps (no schema change, plan §0): each guard and property a
 /// rule lowers to has an origin whose step kind is its statement's.
 #[test]
