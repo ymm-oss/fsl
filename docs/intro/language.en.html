@@ -4619,7 +4619,9 @@ traceable. The following is one complete specification; the later syntax fences
 are fragments to read in the context of their declarations.
 A longer worked example, one leave-request model written once with the English
 spellings and once with the Japanese spellings, is in
-<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a>.</p>
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a>.
+The same directory carries the leave-request business layer (As-Is and To-Be)
+and design layer, connected to it by <code>fslc refine</code>.</p>
 <pre><code class="language-fsl">fsl 5
 requirements Support {
   actor Agent
@@ -5667,7 +5669,9 @@ process/entity declaration or the relation event declaration. Hidden KPI
 projection bindings are not source names and instead freshen on collision.</p>
 <h3 id="133-consulting-layer-business-the-fsl-biz-dialect">13.3 Consulting layer: <code>business</code> (the fsl-biz dialect)</h3>
 <p>Write business processes, policies, and KPIs with zero implementation
-vocabulary (syntax details in <code>DESIGN-dialects.md</code> §3). A process expands into
+vocabulary (syntax details in <code>DESIGN-dialects.md</code> §3). An <code>fsl 5</code> As-Is/To-Be pair
+in English and Japanese texts, refined by the requirements of §13.2, is in
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a>. A process expands into
 enum+Map+transition actions, a policy into invariant / leadsTo, and a kpi into a
 declarative count projection recorded as metadata. A contradiction in the regulations =
 an invariant violation, a dead process step = a coverage diagnosis, an

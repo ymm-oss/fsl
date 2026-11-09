@@ -65,14 +65,27 @@ pub fn repo_relative(root: &Path, path: &Path) -> String {
 
 /// The file's top-level dialect keyword (`spec`, `requirements`,
 /// `refinement`, `governance`, `causal`, ...): the first token on the first
-/// non-blank, non-`//`-comment line.
+/// non-blank, non-`//`-comment line that is not an edition header (`fsl 5`),
+/// so a headed document reports its dialect rather than `fsl`.
 #[allow(dead_code)]
 pub fn top_level_keyword(source: &str) -> Option<&str> {
     source
         .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty() && !line.starts_with("//"))
+        .map(|line| line.trim_start_matches('\u{feff}').trim())
+        .filter(|line| !line.is_empty() && !line.starts_with("//"))
+        .find(|line| !is_edition_header(line))
         .and_then(|line| line.split_whitespace().next())
+}
+
+/// `fsl <number>` on a line of its own.
+#[allow(dead_code)]
+fn is_edition_header(line: &str) -> bool {
+    let mut words = line.split_whitespace();
+    words.next() == Some("fsl")
+        && words
+            .next()
+            .is_some_and(|number| number.bytes().all(|byte| byte.is_ascii_digit()))
+        && words.next().is_none()
 }
 
 /// Parse the `// key: value` header comments in the first 10 lines: the

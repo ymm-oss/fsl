@@ -118,8 +118,9 @@ fn valid_corpus_declarations_match_the_authoritative_ast_role_and_scope() {
 /// R0 for the language server (fsl 5 plan §3 S0, S11), after #1434: a
 /// corpus document without an edition header is read as `fsl 4` and
 /// indexed with the published lexicon; the next edition's keywords, aliases
-/// and mappings reach no such document. A document whose header names
-/// `fsl 5` (`examples/fsl5/`, #1766) is indexed with the next lexicon.
+/// and mappings reach no such document. An `fsl 5` requirements document
+/// (`examples/fsl5/`, #1766) is indexed with the next lexicon; an `fsl 5`
+/// document of another dialect is indexed with the published one.
 /// (The former gate-off/gate-on comparison has no second reading to compare
 /// since the gate is gone.)
 #[test]
@@ -140,13 +141,25 @@ fn the_published_corpus_is_indexed_with_the_published_lexicon() {
             DocumentIndex::build(&source, path.to_str(), &fsl_syntax::ParseOptions::stable())
         {
             indexed += 1;
-            let expected =
-                match fsl_syntax::edition_header(&source, &fsl_syntax::ParseOptions::stable()) {
-                    Ok(Some(header)) if header.edition == fsl_syntax::Edition::Fsl5 => {
-                        fsl_lsp::Lexicon::Next
-                    }
-                    _ => fsl_lsp::Lexicon::Published,
-                };
+            // The next lexicon (Japanese keywords, particles, glossary
+            // aliases) belongs to an `fsl 5` requirements document only; an
+            // `fsl 5` business, kernel `spec` or `refinement` document reads
+            // the published words.
+            let expected = match fsl_syntax::parse_document_with(
+                fsl_syntax::SourceFile::new(&source),
+                &fsl_syntax::ParseOptions::stable(),
+            ) {
+                Ok(parsed)
+                    if parsed.edition == fsl_syntax::Edition::Fsl5
+                        && matches!(
+                            parsed.surface,
+                            fsl_syntax::SurfaceDocument::Requirements(_)
+                        ) =>
+                {
+                    fsl_lsp::Lexicon::Next
+                }
+                _ => fsl_lsp::Lexicon::Published,
+            };
             if index.lexicon() != expected {
                 failures.push(format!(
                     "{}: {:?}, expected {expected:?}",

@@ -4403,6 +4403,8 @@ are fragments to read in the context of their declarations.
 A longer worked example, one leave-request model written once with the English
 spellings and once with the Japanese spellings, is in
 [`examples/fsl5/`](https://github.com/ymm-oss/fsl/tree/main/examples/fsl5).
+The same directory carries the leave-request business layer (As-Is and To-Be)
+and design layer, connected to it by `fslc refine`.
 
 ```fsl check
 fsl 5
@@ -5223,7 +5225,9 @@ projection bindings are not source names and instead freshen on collision.
 ### 13.3 Consulting layer: `business` (the fsl-biz dialect)
 
 Write business processes, policies, and KPIs with zero implementation
-vocabulary (syntax details in `DESIGN-dialects.md` §3). A process expands into
+vocabulary (syntax details in `DESIGN-dialects.md` §3). An `fsl 5` As-Is/To-Be pair
+in English and Japanese texts, refined by the requirements of §13.2, is in
+[`examples/fsl5/`](https://github.com/ymm-oss/fsl/tree/main/examples/fsl5). A process expands into
 enum+Map+transition actions, a policy into invariant / leadsTo, and a kpi into a
 declarative count projection recorded as metadata. A contradiction in the regulations =
 an invariant violation, a dead process step = a coverage diagnosis, an
