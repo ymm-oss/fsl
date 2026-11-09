@@ -2651,6 +2651,11 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   declared minimum `rust-version`. A test helper used an `if let` match guard,
   which 1.88 rejects, so the release workflow's MSRV test step failed before it
   built any native binary. Test-only; the shipped binaries are unchanged.
+- Fixed (#1794): the `fsl-lsp` stdio tests pass on Windows. Two tests built or
+  expected Unix-only file URIs: `file://C:\...` is normalized by the server, so
+  nine `issue_1517` cases waited out their 120 s deadline, and a drive-less
+  `file:///tmp/...` has no Windows path. The release workflow's Windows MSRV test
+  step failed on them. Test-only; the server is unchanged.
 - Replaced (#251): Inline branch maps in the public return example with explicit
   fair actions and local `implements` correspondences. The public refinement
   correspondences intentionally change from `submit.b1` / `submit.b2` to
