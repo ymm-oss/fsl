@@ -4483,6 +4483,9 @@ trace がないと <code>never_rule_without_forbidden</code> が警告します�
 宣言します。この event は最初の入力で相手を受け取って記録し、この event のシナリオの
 ステップでは必ず相手を指定します。<code>with assignee 1</code> は Agent のインスタンス 1 を選びます。
 値はインスタンス番号です。インスタンス名（<code>with assignee a1</code>）は拒否されます。
+一つの event が作る関係は一つまでです。同じ関係先への二つ目の関係に同じ event を <code>via</code> で
+書くと、その関係の位置で拒否します（<code>event_already_makes_relation</code>）。二つ目の関係には別の
+event を用意します。
 <code>resource stock: Qty = 2</code> はエンティティに属さない共有状態です。event は <code>set</code> で更新し、
 ガードからも参照できます。<code>measure m = count Concept</code> または <code>count Entity in S, T</code>
 は値の射影であり、新しいカウンター、履歴フィールド、自動の不変条件を作りません。

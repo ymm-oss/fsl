@@ -4553,8 +4553,10 @@ must be declared with `entity`, and the `via` event's actor must be that entity,
 so `Agent` is declared as both `actor` and `entity`. The event records its
 counterpart as its first input, and every scenario step of that event must supply
 it: `with assignee 1` selects Agent instance 1. The value is an instance number;
-an instance label (`with assignee a1`) is refused. `resource stock: Qty = 2` declares shared
-state outside any entity; events update it with `set`, and guards may read it.
+an instance label (`with assignee a1`) is refused. An event makes at most one
+relation: a second relation to the same entity via the same event is refused at
+that relation (`event_already_makes_relation`), so give it its own event.
+`resource stock: Qty = 2` declares shared state outside any entity; events update it with `set`, and guards may read it.
 `measure m = count Concept` or `count Entity in S, T` is a projection, not a new
 counter, history field, or automatic invariant. `kpi m = count Entity in S` is the
 same kind of projection, but it takes exactly one entity and one stage:

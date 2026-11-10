@@ -4800,8 +4800,10 @@ must be declared with <code>entity</code>, and the <code>via</code> event's acto
 so <code>Agent</code> is declared as both <code>actor</code> and <code>entity</code>. The event records its
 counterpart as its first input, and every scenario step of that event must supply
 it: <code>with assignee 1</code> selects Agent instance 1. The value is an instance number;
-an instance label (<code>with assignee a1</code>) is refused. <code>resource stock: Qty = 2</code> declares shared
-state outside any entity; events update it with <code>set</code>, and guards may read it.
+an instance label (<code>with assignee a1</code>) is refused. An event makes at most one
+relation: a second relation to the same entity via the same event is refused at
+that relation (<code>event_already_makes_relation</code>), so give it its own event.
+<code>resource stock: Qty = 2</code> declares shared state outside any entity; events update it with <code>set</code>, and guards may read it.
 <code>measure m = count Concept</code> or <code>count Entity in S, T</code> is a projection, not a new
 counter, history field, or automatic invariant. <code>kpi m = count Entity in S</code> is the
 same kind of projection, but it takes exactly one entity and one stage:
