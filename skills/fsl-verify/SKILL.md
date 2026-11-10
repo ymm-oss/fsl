@@ -258,6 +258,7 @@ canonical name in parentheses (`'申請（Claim）'`).
 | `unknown_verb` / `unknown_event_phrase` / `ambiguous_step` | a scenario step matches no event, no event of that actor (the message lists the actor's verbs), or several | fix the step to the event meant |
 | `scenario_instance_overflow` | a trace names more instances than `verify { instances }` allows | raise the bound or reuse an instance; never drop the step |
 | `generated_name_collision` | a generated name (`return_stage`, `order_did_pay`) collides with a declared one | rename the declaration |
+| `event_already_makes_relation` | a second relation names an event that already makes one (`… via place` twice); an event makes at most one relation | give the second relation its own event |
 | `actor_shadows_member` (warning) | an actor is spelled like an enum member | rename one |
 | `lifecycle_edge_without_event` (warning) | an edge no event takes | §2 |
 

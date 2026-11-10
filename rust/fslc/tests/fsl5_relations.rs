@@ -391,6 +391,100 @@ fn relation_resource_measure_and_goal_errors() {
     }
 }
 
+/// The #1808 document: `relations` between the `entity` lines and the event
+/// `place`, which takes `inputs` (`""` for none).
+fn place_document(relations: &str, inputs: &str) -> String {
+    format!(
+        "fsl 5\nrequirements R {{\n  number Qty\n  actor User\n  entity User\n  entity Box\n  \
+         entity Order {{\n    lifecycle Empty -> Placed\n  }}\n{relations}  event place = User \
+         places Order{inputs} Empty -> Placed\n  goal Placed1 \"An order can be placed\" some \
+         Order can reach Placed\n}}\nverify {{\n  values Qty = 0..1\n  instances Order = 1\n  \
+         instances User = 1\n  instances Box = 1\n}}\n"
+    )
+}
+
+/// #1808: an event makes at most one relation. A second relation via the
+/// same event is refused at that relation with its own code, naming the
+/// first; it was `generated_name_collision`, telling the author to rename an
+/// input the document does not write. An authored input named like the
+/// generated one keeps that code and message, and a second relation to
+/// another entity keeps the actor message.
+#[test]
+fn an_event_makes_at_most_one_relation() {
+    let buyer = "  Order belongs to User as buyer via place\n";
+    let payer = "  Order belongs to User as payer via place\n";
+    let buyer_ja = "  Order 所属先 User 役名 buyer 契機 place\n";
+    let payer_ja = "  Order 所属先 User 役名 payer 契機 place\n";
+    let second = "event 'place' already makes the relation 'buyer'; an event can make one \
+                  relation, so give 'payer' its own event at 11:3";
+    let rename = "event 'place' takes the 'User' that makes the relation 'buyer' as its input \
+                  'u', which it already has; rename the input";
+    for (label, relations, inputs, code, message) in [
+        (
+            "two-relations",
+            format!("{buyer}{payer}"),
+            "",
+            "event_already_makes_relation",
+            second.to_owned(),
+        ),
+        (
+            "two-relations-ja",
+            format!("{buyer_ja}{payer_ja}"),
+            "",
+            "event_already_makes_relation",
+            second.to_owned(),
+        ),
+        (
+            "authored-u",
+            buyer.to_owned(),
+            " with u: Qty",
+            "generated_name_collision",
+            format!("{rename} at 11:3"),
+        ),
+        (
+            "authored-u-two-relations",
+            format!("{buyer}{payer}"),
+            " with u: Qty",
+            "generated_name_collision",
+            format!("{rename} at 12:3"),
+        ),
+        (
+            "relation-to-another-entity",
+            format!("{buyer}  Order belongs to Box as stock via place\n"),
+            "",
+            "FSL-PARSE",
+            "'Order' belongs to 'Box' via 'place', but the actor of 'place' is 'User'; the event \
+             that makes a relation is done by the related entity at 12:17"
+                .to_owned(),
+        ),
+    ] {
+        let (output, exit) = fslc("check", label, &place_document(&relations, inputs));
+        assert_eq!(
+            (
+                output["result"].as_str(),
+                output["kind"].as_str(),
+                output["diagnostic_code"].as_str(),
+                output["message"].as_str(),
+                exit
+            ),
+            (
+                Some("error"),
+                Some("parse"),
+                Some(code),
+                Some(message.as_str()),
+                2
+            ),
+            "{label}: {output:#}"
+        );
+    }
+    let (output, exit) = fslc("check", "one-relation", &place_document(buyer, ""));
+    assert_eq!(
+        (output["result"].as_str(), exit),
+        (Some("ok"), 0),
+        "{output:#}"
+    );
+}
+
 /// `policy … every E in S must eventually be T or U` is a `leadsTo` that
 /// verify checks: the example's policy holds, and without `or Escalated` an
 /// escalated ticket, never closed, violates it.

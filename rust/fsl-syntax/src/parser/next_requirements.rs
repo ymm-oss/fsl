@@ -75,6 +75,9 @@ pub const AMBIGUOUS_STEP: &str = "ambiguous_step";
 /// An event whose move is not an edge, or whose stage is not a stage, of its
 /// entity's lifecycle.
 pub const EVENT_NOT_ON_LIFECYCLE: &str = "event_not_on_lifecycle";
+/// A second relation made by one event (`… via place` twice): an event makes
+/// at most one relation (#1808).
+pub const EVENT_ALREADY_MAKES_RELATION: &str = "event_already_makes_relation";
 /// Warning: a lifecycle edge no event moves along.
 pub const LIFECYCLE_EDGE_WITHOUT_EVENT: &str = "lifecycle_edge_without_event";
 /// A scenario naming more instances of an entity than `verify` bounds.
@@ -1654,12 +1657,10 @@ impl Pending {
                 input_names.push(input.text.clone());
             }
             let mut roles = Vec::new();
-            for (index, (role, target)) in relation_events
+            let made = relation_events
                 .get(&event.name.text)
-                .into_iter()
-                .flatten()
-                .enumerate()
-            {
+                .map_or(&[][..], Vec::as_slice);
+            for (index, (role, target, span)) in made.iter().enumerate() {
                 if event.actor.text != *target {
                     return Err(ParseError::new(
                         format!(
@@ -1668,6 +1669,17 @@ impl Pending {
                             entity_name.text, event.name.text, event.name.text, event.actor.text
                         ),
                         event.actor.span,
+                    ));
+                }
+                if index > 0 {
+                    return Err(ParseError::coded(
+                        EVENT_ALREADY_MAKES_RELATION,
+                        format!(
+                            "event '{}' already makes the relation '{}'; an event can make one \
+                             relation, so give '{role}' its own event",
+                            event.name.text, made[0].0
+                        ),
+                        *span,
                     ));
                 }
                 let binder = crate::entity_binder(target);

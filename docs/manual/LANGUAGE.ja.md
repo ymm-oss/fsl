@@ -4238,6 +4238,9 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
 宣言します。この event は最初の入力で相手を受け取って記録し、この event のシナリオの
 ステップでは必ず相手を指定します。`with assignee 1` は Agent のインスタンス 1 を選びます。
 値はインスタンス番号です。インスタンス名（`with assignee a1`）は拒否されます。
+一つの event が作る関係は一つまでです。同じ関係先への二つ目の関係に同じ event を `via` で
+書くと、その関係の位置で拒否します（`event_already_makes_relation`）。二つ目の関係には別の
+event を用意します。
 `resource stock: Qty = 2` はエンティティに属さない共有状態です。event は `set` で更新し、
 ガードからも参照できます。`measure m = count Concept` または `count Entity in S, T`
 は値の射影であり、新しいカウンター、履歴フィールド、自動の不変条件を作りません。
