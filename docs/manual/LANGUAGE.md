@@ -4568,7 +4568,10 @@ Goals (`some E can reach S`) are reachability properties; policies
 (`every E in S must eventually be T or U`) are progress properties over fair events.
 Their IDs and quoted text remain part of traceability.
 
-**Scenarios and stopping.** An actor/verb phrase resolves to an event; unknown or
+**Scenarios and stopping.** A step is `Actor verb instance [with input value, …]`
+(`Agent takes t1 with assignee 1`). `Actor instance verb …` is the same step
+(`Agent t1 takes with assignee 1`): of the two words, the verb is the first that is
+some event's verb. An actor/verb phrase resolves to an event; unknown or
 ambiguous matches report `unknown_verb`, `unknown_event_phrase`, or
 `ambiguous_step`. Instance labels (`t1`, `t2`) are local to a trace and allocated
 in order of first use; exceeding `verify` counts is `scenario_instance_overflow`.
@@ -4713,9 +4716,10 @@ Particles are separate words: `が` marks the actor, `を` the entity (or a step
 instance), `で` the input, and `は` the topic. `に` is recognized as a
 counterpart marker, but no phrase of this edition accepts that role; it is not
 a way to supply a relation input.
-For example, `従業員 が 経費申請 を 提出する 申請金額 で` is an event phrase;
-`従業員 が c1 を 提出する 申請金額 1 で` is a scenario step. With particles,
-every phrase word except the verb needs its role marker, and word order can vary.
+For example, `従業員 が 経費申請 を 申請金額 で 提出する` is an event phrase;
+`従業員 が c1 を 申請金額 1 で 提出する` is a scenario step. With particles,
+every phrase word except the verb needs its role marker, and word order can vary:
+`従業員 が 経費申請 を 提出する 申請金額 で` is the same event phrase.
 Partial marking is `mixed_particles`, a wrong role is `particle_role_mismatch`,
 and an attached particle (`従業員が`) is `particle_needs_space`.
 `fmt --lang ja|en` selects keyword spellings; `--names alias|canonical` selects

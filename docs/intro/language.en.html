@@ -4814,7 +4814,10 @@ same kind of projection, but it takes exactly one entity and one stage:
 Goals (<code>some E can reach S</code>) are reachability properties; policies
 (<code>every E in S must eventually be T or U</code>) are progress properties over fair events.
 Their IDs and quoted text remain part of traceability.</p>
-<p><strong>Scenarios and stopping.</strong> An actor/verb phrase resolves to an event; unknown or
+<p><strong>Scenarios and stopping.</strong> A step is <code>Actor verb instance [with input value, …]</code>
+(<code>Agent takes t1 with assignee 1</code>). <code>Actor instance verb …</code> is the same step
+(<code>Agent t1 takes with assignee 1</code>): of the two words, the verb is the first that is
+some event's verb. An actor/verb phrase resolves to an event; unknown or
 ambiguous matches report <code>unknown_verb</code>, <code>unknown_event_phrase</code>, or
 <code>ambiguous_step</code>. Instance labels (<code>t1</code>, <code>t2</code>) are local to a trace and allocated
 in order of first use; exceeding <code>verify</code> counts is <code>scenario_instance_overflow</code>.
@@ -5048,9 +5051,10 @@ not accepted constructs. Do not use them as glossary aliases.</p>
 instance), <code>で</code> the input, and <code>は</code> the topic. <code>に</code> is recognized as a
 counterpart marker, but no phrase of this edition accepts that role; it is not
 a way to supply a relation input.
-For example, <code>従業員 が 経費申請 を 提出する 申請金額 で</code> is an event phrase;
-<code>従業員 が c1 を 提出する 申請金額 1 で</code> is a scenario step. With particles,
-every phrase word except the verb needs its role marker, and word order can vary.
+For example, <code>従業員 が 経費申請 を 申請金額 で 提出する</code> is an event phrase;
+<code>従業員 が c1 を 申請金額 1 で 提出する</code> is a scenario step. With particles,
+every phrase word except the verb needs its role marker, and word order can vary:
+<code>従業員 が 経費申請 を 提出する 申請金額 で</code> is the same event phrase.
 Partial marking is <code>mixed_particles</code>, a wrong role is <code>particle_role_mismatch</code>,
 and an attached particle (<code>従業員が</code>) is <code>particle_needs_space</code>.
 <code>fmt --lang ja|en</code> selects keyword spellings; <code>--names alias|canonical</code> selects

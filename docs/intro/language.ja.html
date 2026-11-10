@@ -4496,7 +4496,10 @@ event を用意します。
 ので、これらには <code>measure</code> を使ってください。goal の <code>some E can reach S</code> は到達可能性、policy の
 <code>every E in S must eventually be T or U</code> は fair な event の下での進行性です。
 どちらも ID と原文をトレーサビリティに残します。</p>
-<p><strong>シナリオと停止。</strong> アクターと動詞の句は event に対応します。対応がない、または曖昧なら
+<p><strong>シナリオと停止。</strong> ステップは <code>Actor verb instance [with input value, …]</code> と書きます
+（<code>Agent takes t1 with assignee 1</code>）。<code>Actor instance verb …</code> も同じステップです
+（<code>Agent t1 takes with assignee 1</code>）。二語のうち、いずれかの event の動詞である最初の語が動詞です。
+アクターと動詞の句は event に対応します。対応がない、または曖昧なら
 <code>unknown_verb</code>、<code>unknown_event_phrase</code>、<code>ambiguous_step</code> で知らせます。
 <code>t1</code>、<code>t2</code> などのインスタンス名は trace 内だけの名前で、初出順に割り当てます。
 <code>verify</code> の個数を超えると <code>scenario_instance_overflow</code> です。
@@ -4720,9 +4723,10 @@ allow の <code>only as</code> / <code>立場</code>、never の <code>because</
 インスタンス）、<code>で</code> は入力、<code>は</code> は主題を表します。<code>に</code> は相手を示す印として
 認識しますが、このエディションにはその役割を受け取る句がありません。relation の入力を
 渡す書き方には使えません。
-例えば <code>従業員 が 経費申請 を 提出する 申請金額 で</code> は event の句、
-<code>従業員 が c1 を 提出する 申請金額 1 で</code> はシナリオのステップです。
+例えば <code>従業員 が 経費申請 を 申請金額 で 提出する</code> は event の句、
+<code>従業員 が c1 を 申請金額 1 で 提出する</code> はシナリオのステップです。
 助詞を使う句では、動詞以外の各語に役割の印を付けると、語順を変えられます。
+<code>従業員 が 経費申請 を 提出する 申請金額 で</code> も同じ event の句です。
 一部だけに付けると <code>mixed_particles</code>、役割が違うと <code>particle_role_mismatch</code>、
 <code>従業員が</code> のように語につなげると <code>particle_needs_space</code> です。
 <code>fmt --lang ja|en</code> でキーワード、<code>--names alias|canonical</code> で用語の綴りを選びます。

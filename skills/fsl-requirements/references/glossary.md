@@ -73,7 +73,9 @@ the words may then come in any order. A particle on a word of the wrong kind
 is `particle_role_mismatch` (`経理 を …`: an actor marked as the entity); a
 particle written onto its word (`返品を`) is read as one unknown word and
 reported as `particle_needs_space`. Without particles a phrase is read by
-position, as in English (`Customer requests Return`).
+position, as in English (`Customer requests Return`); a scenario step may
+also put its instance before the verb (`経理 r1 返金する`), as in
+`syntax.md`.
 
 ## The example in Japanese
 
@@ -121,7 +123,7 @@ fsl 5
   区分 少額返品 = 返品 のうち 返品金額 <= 自動承認上限
   区分 高額返品 = 返品 のうち 返品金額 > 自動承認上限
 
-  出来事 request      = 顧客 が 返品 を 申請する 返品金額 で   下書き -> 申請済み
+  出来事 request      = 顧客 が 返品 を 返品金額 で 申請する   下書き -> 申請済み
   出来事 auto_approve = システム が 返品 を 承認する           申請済み -> 承認済み
   出来事 mgr_approve  = 上長 が 返品 を 承認する               申請済み -> 承認済み
   出来事 reject       = 上長 が 返品 を 却下する               申請済み -> 却下済み
@@ -143,7 +145,7 @@ fsl 5
   }
 
   指標 返金件数 = 件数 返品 段階 返金済み
-  目標 GOAL-RET-001 "返品は返金まで進める" いずれかの 返品 到達可能 返金済み
+  目標 GOAL-RET-001 "返品は返金されることがある" いずれかの 返品 到達可能 返金済み
   方針 POL-RET-001 "申請された返品はいずれ決まる"
     すべての 返品 段階 申請済み いずれ必ず 承認済み または 却下済み
 
@@ -175,7 +177,9 @@ fsl 5
 ```
 
 Read it against the English example line by line: `要件` is `requirements`,
-`許可 … 条件 入力 返品金額 > 0` is `allow … only when input amount > 0`,
+`顧客 が 返品 を 返品金額 で 申請する` is `Customer requests Return with amount`
+(the input may also follow the verb, `顧客 が 返品 を 申請する 返品金額 で`, with
+the same kernel), `許可 … 条件 入力 返品金額 > 0` is `allow … only when input amount > 0`,
 `常に 返品 段階以外 下書き 必須 …` is `always Return not in Draft has …`,
 `結果 拒否` is `then rejected`. A `terminal { }`, where one is written, is a
 kernel member and stays English, but the names in it are aliases like
