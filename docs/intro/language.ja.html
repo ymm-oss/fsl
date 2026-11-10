@@ -4317,7 +4317,9 @@ CTI を閉じるために存在する、あるいは実装のガードが抽象�
 検証対象と要件を結び付けます。次は一つの完全な仕様です。この後の構文フェンスは、
 必要な宣言があることを前提とした断片です。
 休暇申請の一つのモデルを英語の綴りと日本語の綴りで一度ずつ書いた、より長い例が
-<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a> にあります。</p>
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a> にあります。
+同じディレクトリに、休暇申請の業務層(As-Is と To-Be)と設計層もあり、
+<code>fslc refine</code> でこの要件とつながっています。</p>
 <pre><code class="language-fsl">fsl 5
 requirements Support {
   actor Agent
@@ -5374,16 +5376,19 @@ relation 引数は元の event 宣言を指します。source から見えない
 この制限とは別で、衝突するときだけ fresh にします。</p>
 <h3 id="133-businessfsl-biz">13.3 業務コンサルティングレイヤー: <code>business</code>(fsl-biz ダイアレクト)</h3>
 <p>業務プロセス、ポリシー、KPI を、実装の語彙ゼロで書きます(構文の詳細は
-<code>DESIGN-dialects.md</code> §3)。process は enum+Map+transition の action へ、policy は
-invariant / leadsTo へ、kpi はメタデータとして記録される宣言的な count の射影へ
-展開されます。規程の矛盾 = invariant 違反、死んだプロセスステップ = カバレッジ
-診断、到達不能な業務ゴール = reachable_failed、放置された案件 = leadsTo の反例 —
-すべて機械的に検出できます。</p>
+<code>DESIGN-dialects.md</code> §3)。§13.2 の要件が詳細化する <code>fsl 5</code> の As-Is/To-Be の
+組を英語と日本語の引用文で書いた例が
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a> にあります。
+process は enum+Map+transition の action へ、policy は invariant / leadsTo へ、
+kpi はメタデータとして記録される宣言的な count の射影へ展開されます。規程の
+矛盾 = invariant 違反、死んだプロセスステップ = カバレッジ診断、到達不能な業務
+ゴール = reachable_failed、放置された案件 = leadsTo の反例 — すべて機械的に検出
+できます。</p>
 <p>business の process は純粋なステージグラフなので、<code>transition</code> が取るのは名前、
 遷移元と遷移先のステージ、actor、<code>covers</code> 注釈だけです。<code>with</code> / <code>when</code> / <code>set</code>
 を書くと位置付きのエラーになります。これらはデータを運ぶ節で、business ダイアレ
 クトには落とす先がなく、黙って捨てると作者が書いていないモデルを検証してしまう
-ためです。意味を与えるには <code>requirements</code> spec(§13.4)で process を宣言します。</p>
+ためです。意味を与えるには <code>requirements</code> spec(§13.2)で process を宣言します。</p>
 <p>PM/コンサルタント向けのファイルでは、よくある応答ポリシーとゴールに、読みやすい
 stage 構文を使ってください:</p>
 <pre><code class="language-fsl">business ReturnHandling {

@@ -4091,6 +4091,8 @@ CTI を閉じるために存在する、あるいは実装のガードが抽象�
 必要な宣言があることを前提とした断片です。
 休暇申請の一つのモデルを英語の綴りと日本語の綴りで一度ずつ書いた、より長い例が
 [`examples/fsl5/`](https://github.com/ymm-oss/fsl/tree/main/examples/fsl5) にあります。
+同じディレクトリに、休暇申請の業務層(As-Is と To-Be)と設計層もあり、
+`fslc refine` でこの要件とつながっています。
 
 ```fsl check
 fsl 5
@@ -4921,17 +4923,20 @@ relation 引数は元の event 宣言を指します。source から見えない
 ### 13.3 業務コンサルティングレイヤー: `business`(fsl-biz ダイアレクト)
 
 業務プロセス、ポリシー、KPI を、実装の語彙ゼロで書きます(構文の詳細は
-`DESIGN-dialects.md` §3)。process は enum+Map+transition の action へ、policy は
-invariant / leadsTo へ、kpi はメタデータとして記録される宣言的な count の射影へ
-展開されます。規程の矛盾 = invariant 違反、死んだプロセスステップ = カバレッジ
-診断、到達不能な業務ゴール = reachable_failed、放置された案件 = leadsTo の反例 —
-すべて機械的に検出できます。
+`DESIGN-dialects.md` §3)。§13.2 の要件が詳細化する `fsl 5` の As-Is/To-Be の
+組を英語と日本語の引用文で書いた例が
+[`examples/fsl5/`](https://github.com/ymm-oss/fsl/tree/main/examples/fsl5) にあります。
+process は enum+Map+transition の action へ、policy は invariant / leadsTo へ、
+kpi はメタデータとして記録される宣言的な count の射影へ展開されます。規程の
+矛盾 = invariant 違反、死んだプロセスステップ = カバレッジ診断、到達不能な業務
+ゴール = reachable_failed、放置された案件 = leadsTo の反例 — すべて機械的に検出
+できます。
 
 business の process は純粋なステージグラフなので、`transition` が取るのは名前、
 遷移元と遷移先のステージ、actor、`covers` 注釈だけです。`with` / `when` / `set`
 を書くと位置付きのエラーになります。これらはデータを運ぶ節で、business ダイアレ
 クトには落とす先がなく、黙って捨てると作者が書いていないモデルを検証してしまう
-ためです。意味を与えるには `requirements` spec(§13.4)で process を宣言します。
+ためです。意味を与えるには `requirements` spec(§13.2)で process を宣言します。
 
 PM/コンサルタント向けのファイルでは、よくある応答ポリシーとゴールに、読みやすい
 stage 構文を使ってください:

@@ -1218,5 +1218,58 @@
         ]
       }
     }
+  },
+  "examples/fsl5/leave_flow_tobe_refines_asis.fsl": {
+    "fsl": "1.0",
+    "impl": "LeaveFlowToBe",
+    "abs": "LeaveFlowAsIs",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "approve": "approve",
+      "auto_approve": "approve",
+      "cancel": "cancel",
+      "reject": "reject",
+      "submit": "submit",
+      "take": "take"
+    },
+    "edition": "next",
+    "fsl_edition": 5
+  },
+  "examples/fsl5/leave_request_refines_tobe.fsl": {
+    "fsl": "1.0",
+    "impl": "LeaveRequests",
+    "abs": "LeaveFlowToBe",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "approve": "approve",
+      "arrange": "stutter",
+      "auto_approve": "auto_approve",
+      "cancel": "cancel",
+      "reject": "reject",
+      "submit": "submit",
+      "take": "take"
+    },
+    "edition": "next",
+    "fsl_edition": 5
+  },
+  "examples/fsl5/leave_design_refines_request.fsl": {
+    "fsl": "1.0",
+    "impl": "LeaveDesign",
+    "abs": "LeaveRequests",
+    "result": "refines",
+    "checked_to_depth": 8,
+    "action_map": {
+      "assign_cover": "arrange",
+      "auto_grant": "auto_approve",
+      "file": "submit",
+      "manager_grant": "approve",
+      "manager_refuse": "reject",
+      "start_leave": "take",
+      "withdraw": "cancel"
+    },
+    "edition": "next",
+    "fsl_edition": 5
   }
 }

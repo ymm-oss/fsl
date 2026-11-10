@@ -1,0 +1,22 @@
+fsl 5
+// expected-command: refine leave_flow_tobe.en.fsl leave_flow_asis.en.fsl leave_flow_tobe_refines_asis.fsl --depth 8
+// expected-result: refines
+// The To-Be flow refines the As-Is flow: every step of the reformed flow is a
+// step the current flow already allows, so the reform keeps CTRL-LEAVEFLOW-001.
+// The system's approval of a short leave is the As-Is manager approval. The
+// history flags of the two no-bypass policies map to themselves.
+refinement LeaveFlowToBeRefinesAsIs {
+  impl LeaveFlowToBe
+  abs LeaveFlowAsIs
+
+  map leave_stage[c: Leave] = leave_stage[c]
+  map leave_stage_via_Approved[c: Leave] = leave_stage_via_Approved[c]
+  map leave_stage_via_Submitted[c: Leave] = leave_stage_via_Submitted[c]
+
+  action submit(c) -> submit(c)
+  action auto_approve(c) -> approve(c)
+  action approve(c) -> approve(c)
+  action reject(c) -> reject(c)
+  action take(c) -> take(c)
+  action cancel(c) -> cancel(c)
+}
