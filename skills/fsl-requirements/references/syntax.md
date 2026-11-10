@@ -36,7 +36,7 @@ entry per finding in `findings[]` (for example `legacy_string_metadata` for a
   number Qty
   const BULK = 2
   const SLA = 2
-  actor User, Shop, Courier, Fault
+  actor User, Shop, Courier, Weather
 
   entity User
 
@@ -113,7 +113,7 @@ source's words.
   event ship    = Shop ships Order                Packed -> Shipped
   event deliver = Courier delivers Order          Shipped -> Delivered
     covers REQ-ORD-007 "A shipped order is delivered by the courier"
-  fault event damage = Fault damages Order        in Shipped
+  fault event damage = Weather damages Order      in Shipped
     set damaged = true
   event replace = Shop replaces Order             in Shipped
     set damaged = false
@@ -126,7 +126,7 @@ source's words.
 | … **with** `field` | an input stored in the field of that name; `with i: Type` is an input that is not a field; several inputs are a comma list |
 | **set** `x = expr, y = expr` | other updates; `input qty` names the input where a field has the same name (a bare `qty` there is `ambiguous_input_field`; `input qty` inside a binder named `qty` is `captured_by_binder`) |
 | **covers** `ID "text"` | the requirement this event carries |
-| **fault event** | not fair: something that may happen, never something that must eventually happen |
+| **fault event** | not fair: something that may happen, never something that must eventually happen. The keyword makes it so, not the actor's name (`Weather`) |
 
 The verb may be left out (`Shop Order`); it then is the event name. Every
 lifecycle edge should have an event (`lifecycle_edge_without_event` warns
@@ -282,7 +282,7 @@ nothing.
     User pays o1
     Shop packs o1
     Shop ships o1
-    Fault damages o1
+    Weather damages o1
     Courier delivers o1
     then rejected
   }
@@ -303,7 +303,7 @@ verify {
 |---|---|
 | **scenario** `ID "text"` `{ steps  then check }` | a positive trace: every step must be enabled and the check must hold |
 | **forbidden** `ID "text"` `{ steps  then rejected }` | a negative trace: the steps before the last are enabled, and the last is rejected |
-| `Actor verb instance` [**with** `input value, …`] | a step; `o1`, `o2` are instance names, numbered in order of first use (more than `verify` allows is `scenario_instance_overflow`); a relation's role is an input (`with buyer 0`) |
+| `Actor verb instance` [**with** `input value, …`] | a step; `o1`, `o2` are instance names, numbered in order of first use (more than `verify` allows is `scenario_instance_overflow`); a relation's role is an input (`with buyer 0`). `Actor instance verb` is the same step (`User o1 places with buyer 0, qty 1`): of the two words, the verb is the first that is some event's verb |
 | **then** `o1` **is** `Stage` | the check after the last step: the stage of one instance. Nothing may follow it: `then o1 is Delivered and …` is refused (`kind: "parse"`) |
 | **then** `expression` | any other check after the last step, as one expression over the lowered state, joined with `and` (`AC-ORD-002`); an instance is its number, from 0 per entity in order of first use (`order_qty[0]` is `o1`'s quantity), and its name cannot be written there |
 | **verify** `{ instances E = N  values T = lo..hi }` | the finite world every command checks in; results hold for these sizes only |

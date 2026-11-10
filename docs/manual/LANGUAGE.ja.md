@@ -4247,7 +4247,10 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
 `every E in S must eventually be T or U` は fair な event の下での進行性です。
 どちらも ID と原文をトレーサビリティに残します。
 
-**シナリオと停止。** アクターと動詞の句は event に対応します。対応がない、または曖昧なら
+**シナリオと停止。** ステップは `Actor verb instance [with input value, …]` と書きます
+（`Agent takes t1 with assignee 1`）。`Actor instance verb …` も同じステップです
+（`Agent t1 takes with assignee 1`）。二語のうち、いずれかの event の動詞である最初の語が動詞です。
+アクターと動詞の句は event に対応します。対応がない、または曖昧なら
 `unknown_verb`、`unknown_event_phrase`、`ambiguous_step` で知らせます。
 `t1`、`t2` などのインスタンス名は trace 内だけの名前で、初出順に割り当てます。
 `verify` の個数を超えると `scenario_instance_overflow` です。
@@ -4382,9 +4385,10 @@ allow の `only as` / `立場`、never の `because` / `理由` は予約済み�
 インスタンス）、`で` は入力、`は` は主題を表します。`に` は相手を示す印として
 認識しますが、このエディションにはその役割を受け取る句がありません。relation の入力を
 渡す書き方には使えません。
-例えば `従業員 が 経費申請 を 提出する 申請金額 で` は event の句、
-`従業員 が c1 を 提出する 申請金額 1 で` はシナリオのステップです。
+例えば `従業員 が 経費申請 を 申請金額 で 提出する` は event の句、
+`従業員 が c1 を 申請金額 1 で 提出する` はシナリオのステップです。
 助詞を使う句では、動詞以外の各語に役割の印を付けると、語順を変えられます。
+`従業員 が 経費申請 を 提出する 申請金額 で` も同じ event の句です。
 一部だけに付けると `mixed_particles`、役割が違うと `particle_role_mismatch`、
 `従業員が` のように語につなげると `particle_needs_space` です。
 `fmt --lang ja|en` でキーワード、`--names alias|canonical` で用語の綴りを選びます。
