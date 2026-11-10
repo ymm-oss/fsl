@@ -220,22 +220,50 @@ non-deterministic traces. The migration harness therefore has three layers:
    `examples/` check/verify document supported by the Worker (standalone
    Refinement documents joined in #577 and Agent documents in #1163; causal
    models remain excluded); and
-3. bidirectional trace replay to validate non-unique Z3 witnesses semantically.
+3. solver-free replay of reachable and deadlock witnesses whose action
+   identity differs between native and the Worker (#1789).
 
 The structural diff first validates the public `versions` and `cost` schemas,
 then normalizes only elapsed time, raw backend statistics, verifier/backend
-runtime identity, replay-validated witness contents, and the concrete state
+runtime identity, witness contents as described below, and the concrete state
 embedded in a deadlock warning. Verdicts, property identity, locations,
 assurance fields, exit semantics, warning kinds, and missing fields remain
 exact. Native and browser solvers both set Z3 `random_seed=0` and
 `smt.random_seed=0`; fixed seeds reduce drift but do not make different Z3
 build targets choose the same valid witness.
 
-Replayed witness normalization retains each entry's field set, nested state
+Witness normalization (`$.trace`, `$.deadlock.trace`, and each
+`$.reachables.<name>.witness`) retains each entry's field set, nested state
 keys, action identity and source metadata, parameter types, and normalized
 change targets/shapes. It ignores concrete state values and the order of
 commuting action-bearing steps, because symmetric bindings and commuting
-actions can produce different valid traces across Z3 build targets.
+actions can produce different valid traces across Z3 build targets. This
+normalization is structural: it does not replay either witness.
+
+When the structural diff still differs inside a `$.deadlock.trace` or
+`$.reachables.<name>.witness`, the harness (`reconcileWitnesses` in
+`rust/fsl-wasm/parity.mjs`) accepts the difference only if all of these hold:
+
+- both witnesses have the same length and every entry is equal apart from its
+  action, so both reach the same goal or deadlock state at the same step;
+- each differing action carries only `name`, `params`, and `loc`, and its
+  `loc` equals the span of that action in the native `fslc kernel` export;
+- both witnesses, converted to replay trace v1, replay as `conformant` through
+  native `fslc replay` (the solver-free Monitor), with the recorded final state.
+
+Two actions with the same effect, such as `auto_approve` and `approve` in
+`Submitted -> Approved`, are the case this covers. Anything else stays a parity
+violation: witnesses that reach different states, an action carrying `origin`
+metadata, a spec without a Kernel export (compose with component files), and
+any `$.trace` counterexample. The Worker has no replay verb, so the native
+witness is not replayed on the Worker. Native `fslc replay` replays both.
+`assertWitnessReplayContract` runs before the browser starts, on
+`rust/fslc/tests/fixtures/issue_1789_worker_twin_actions.fsl`. It requires that
+the structural diff alone reject a state-identical action swap and that
+replay accept it. It also requires rejection of a witness action that is not
+enabled at its step, of a witness that replays but reaches a different state,
+and of an action location that is not the action's native span. The fixture is
+also a live parity case.
 
 Failures use `fsl-native-wasm-parity-failure.v1`: each record contains the
 case path/command/options, machine-readable JSON paths with native and Worker
