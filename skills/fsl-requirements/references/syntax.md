@@ -60,7 +60,7 @@ entry per finding in `findings[]` (for example `legacy_string_metadata` for a
 | **entity** `User` | an identity with no lifecycle; the number of instances is set by `verify { instances User = N }` |
 | **entity** `Order { field: Type = init … }` | a field of every instance; every field needs an initial value |
 | **lifecycle** `A -> B -> C` | the stages and the moves between them; one line per path, the first stage is the initial one. The stages become an enum **in the order they first appear**, which an upper layer's stage list must repeat |
-| `Order` **belongs to** `User` **as** `buyer` **via** `place` | every `Order` gets the field `buyer` (no one until `place` happens); the event `place` takes the `User` instance that does it as its first input and records it |
+| `Order` **belongs to** `User` **as** `buyer` **via** `place` | every `Order` gets the field `buyer` (no one until `place` happens); the event `place` takes the `User` instance that does it as its first input and records it. An event makes at most one relation: a second `Order belongs to User as … via place` is refused (`event_already_makes_relation`); give it its own event |
 | **resource** `stock: Qty = 2` | one value that belongs to no entity; events `set` it |
 
 Each name and each requirement ID is declared once. A second `actor` of

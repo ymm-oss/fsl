@@ -302,6 +302,32 @@ reports the source process/entity declaration, not an unwritten binder token;
 the relation-parameter refusal reports the source event. Hidden projection
 binders are not covered by this visible-name restriction.
 
+#### One relation per event (#1808)
+
+An event makes at most one relation. The event that makes a relation is done by
+the related entity and takes that entity's instance as its first input, named by
+the entity (`u` for `User`), so a second relation via the same event would need a
+second input of the same name. The alternative the issue proposed, binding every
+role the event makes to that one input so that the roles always hold the same
+instance, is not adopted.
+
+The second relation was already refused, but as a collision with an input the
+document does not write. It now has its own code. The event's relations are
+checked in the order written: the actor rule first, then this limit, then the
+collision of the generated input with an authored one.
+
+| Form | Base `f1e9ba71` | This change |
+|---|---|---|
+| `Order belongs to User as buyer via place` and `… as payer via place` (also `所属先 … 役名 … 契機 place`) | exit 2, `parse`, `generated_name_collision`, "event 'place' takes the 'User' that makes the relation 'payer' as its input 'u', which it already has; rename the input", at the event | exit 2, `parse`, `event_already_makes_relation`, "event 'place' already makes the relation 'buyer'; an event can make one relation, so give 'payer' its own event", at the second relation |
+| one relation via `place`, `place` declaring `with u: Qty` | exit 2, `generated_name_collision`, "… rename the input", at the event | unchanged |
+| `… as buyer via place` and `Order belongs to Box as stock via place` | exit 2, `parse`, the actor message (`the actor of 'place' is 'User'`), at the event's actor | unchanged |
+
+No form changes from `ok` to `error`: `fslc check` of the 655 `.fsl` files under
+`specs/`, `examples/` and `rust/fslc/tests/fixtures/`, with a binary built from
+`f1e9ba71` in its tree and one built from this change in its tree (the change
+edits no `.fsl` file), gives the same result, kind, diagnostic code and exit
+code for every file.
+
 #### Repeated scenario step inputs (#1682)
 
 **Breaking removal (#1682).** The desugaring of a `scenario` or `forbidden` step

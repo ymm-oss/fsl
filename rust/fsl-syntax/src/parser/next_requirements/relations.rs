@@ -10,7 +10,8 @@
 //!   event `place` (whose actor is the entity `User`) take the `User`
 //!   instance that does it as its first input and record it:
 //!   `buyer = some(u)`. Only that event takes the actor's instance
-//!   (decisions/048 J7, design draft Q7 (a)); `only as` stays reserved. The
+//!   (decisions/048 J7, design draft Q7 (a)); `only as` stays reserved. An
+//!   event makes at most one relation (#1808). The
 //!   role reads as a field everywhere else (`always Order not in Empty has
 //!   buyer`), and `has <role>` is `<role> != none`.
 //! - **Resource.** `resource stock: Qty = 2` is one state variable that
@@ -232,8 +233,8 @@ impl Parser<'_> {
 }
 
 /// What the relations give the event that makes them: for each event name,
-/// the relations it records, as `(role, target)`.
-pub(in crate::parser) type RelationEvents = BTreeMap<String, Vec<(String, String)>>;
+/// the relations it records, as `(role, target, span)` in the order written.
+pub(in crate::parser) type RelationEvents = BTreeMap<String, Vec<(String, String, Span)>>;
 
 /// Resolve the relations and resources before the events are desugared:
 /// each role joins its entity's fields (so a rule or a concept reads it as
@@ -322,10 +323,11 @@ pub(in crate::parser) fn resolve(
             },
         );
         declared.roles.insert(role.text.clone());
-        by_event
-            .entry(event.text.clone())
-            .or_default()
-            .push((role.text.clone(), target.text.clone()));
+        by_event.entry(event.text.clone()).or_default().push((
+            role.text.clone(),
+            target.text.clone(),
+            span,
+        ));
         next.relations.push(RelationDeclaration {
             entity: entity.text,
             target: target.text,
