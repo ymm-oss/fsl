@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Insurance benefit claim processing — business layer (L tier, kernel form for
+// refinement). Two claim instances (Claim = 0..1).
+spec InsuranceClaimBusiness {
+  type Claim = 0..1
+
+  enum BSt {
+    BReceived, BUnderReview, BApproved, BPaid, BPosted,
+    BReturned, BWithdrawn, BLapsed
+  }
+
+  state {
+    stage: Map<Claim, BSt>,
+  }
+
+  init {
+    forall c: Claim { stage[c] = BReceived }
+  }
+
+  action intake(c: Claim) {
+    requires stage[c] == BReceived
+    stage[c] = BUnderReview
+  }
+
+  action approve(c: Claim) {
+    requires stage[c] == BUnderReview
+    stage[c] = BApproved
+  }
+
+  action return_case(c: Claim) {
+    requires stage[c] == BUnderReview
+    stage[c] = BReturned
+  }
+
+  action resubmit(c: Claim) {
+    requires stage[c] == BReturned
+    stage[c] = BUnderReview
+  }
+
+  action pay(c: Claim) {
+    requires stage[c] == BApproved
+    stage[c] = BPaid
+  }
+
+  action post(c: Claim) {
+    requires stage[c] == BPaid
+    stage[c] = BPosted
+  }
+
+  action withdraw(c: Claim) {
+    requires stage[c] == BReceived or stage[c] == BUnderReview
+      or stage[c] == BReturned
+    stage[c] = BWithdrawn
+  }
+
+  action lapse(c: Claim) {
+    requires stage[c] == BReceived or stage[c] == BUnderReview
+      or stage[c] == BReturned
+    stage[c] = BLapsed
+  }
+
+  reachable CanPost {
+    exists c: Claim { stage[c] == BPosted }
+  }
+}

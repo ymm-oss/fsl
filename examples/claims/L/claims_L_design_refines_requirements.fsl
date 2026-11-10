@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: Apache-2.0
+
+refinement InsuranceClaimDesignLRefinesL {
+  impl InsuranceClaimDesignL
+  abs  InsuranceClaimL
+
+  enum abstraction claim_state DSt -> CSt {
+    DIntake       -> Intake
+    DAssessment   -> Assessment
+    DReturned     -> Returned
+    DReassessment -> Reassessment
+    DApproved     -> Approved
+    DPaySubmitted -> Paid
+    DPayConfirmed -> Posted
+    DWithdrawn    -> Withdrawn
+    DLapsed       -> Lapsed
+  }
+
+  map claim[c: Claim] = ClaimRecord {
+    st: abstract(claim_state, d[c].st),
+    days: d[c].days,
+    amount: d[c].amount,
+  }
+  map paid = paid_ghost
+  map posted = posted_ghost
+
+  action receive(c, a) -> receive(c, a)
+  action assess(c) -> assess(c)
+  action return_to_claimant(c) -> return_to_claimant(c)
+  action resubmit(c) -> resubmit(c)
+  action pay_submit(c) -> pay(c)
+  action pay_confirm(c) -> post_ledger(c)
+  action withdraw(c) -> withdraw(c)
+  action advance_day(c) -> advance_day(c)
+  action lapse(c) -> lapse(c)
+}

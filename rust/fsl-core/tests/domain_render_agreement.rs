@@ -117,6 +117,7 @@ use serde_json::Value;
 /// checked models.
 const VALID_DOMAIN_FIXTURES: &[&str] = &[
     "examples/annotations/annotated_domain.fsl",
+    "examples/claims/L/claims_L_saga.fsl",
     "examples/domain/order_async_effect.fsl",
     "examples/domain/order_fulfillment_saga.fsl",
     "examples/domain/order_functional_ddd.fsl",
