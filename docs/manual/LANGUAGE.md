@@ -712,8 +712,9 @@ unsound or ambiguous, and the section linked from each row shows the rewrite.
 Some removals in the same release involve FSL 5 constructs only, so no 4.12
 document has them: `__` in next-edition relation roles, resources and measures
 (#1600), repeated step inputs (#1682), repeated actors and requirement-ID owners
-(#1705), a compose child headed `fsl 5` that uses a colon quantifier
-(#1452), and the four next-edition migration forms that `analyze`,
+(#1705), field and input names in nested expression forms (#1798, see
+"Breaking removals (#1798)" in §13.2), a compose child headed `fsl 5` that uses
+a colon quantifier (#1452), and the four next-edition migration forms that `analyze`,
 `conformance`, `explain`, `html`, `kernel`, `ledger`, `mutate`, `scenarios`,
 `sweep`, `testgen` and `typestate` now refuse as `check` already did (#1449).
 
@@ -732,6 +733,8 @@ call `fslc` for the values in the first column:
 | Approval records (#1421) | v1 to v4: unsigned v1 or v3, signed v2 or v4, depending on the kind | unsigned v5 or signed v6 with `path_base` | Read new records with 5.0 or later only: older binaries reject them. Keep paths inside the Git root; `document generate --approval` needs Git. A 4.x record stays `approved` only while its digests match, including the artifact against a 5.0 rendering; a record whose artifact 5.0 renders differently needs re-approval (below); new records record a per-kind renderer version such as `fslc-ledger-renderer/1.0.0` in `generator_version` instead of the `fslc` version |
 | A relative AI `dataset.source` (#1421) | resolved from the caller | resolved from the declaring file's directory | Rewrite repository-prefixed paths, or pass `--records` |
 | `-o` to a symlink or a non-regular file such as `/dev/null`, `/dev/stdout` or `/dev/fd/63` (#1419) | written | refused, exit 2; a writable parent directory is required | Write to a regular file, or read stdout |
+| `migrate --write` where no input needs a rewrite (#1754) | `"written": true` with `"changed": 0`; `files[]` entries had no `written` | `"written": false`; each `files[]` entry reports `written`, `true` only for a replaced input | Read `written` as "a file was replaced" |
+| `migrate --write` on a CRLF document (#1755) | lines it rewrote end in LF and the others keep CRLF; a document the formatter rewrote (metadata, maps, enums, quantifiers) comes back LF-only without its byte order mark | every line ends as the input's first line does; the byte order mark is kept | Nothing is required |
 | `migrate --write` on a read-only input it would change (the #1419 refusal) | rewritten, `"written": true`, exit 0; the mode stays read-only | refused, `kind: "io"`, exit 2; no file of the set is written | Make the file writable first |
 | An output file that is a file the command reads, such as `html s.fsl -o s.fsl`, also through `./s.fsl`, a symlink or a hard link (#1440) | the input was replaced | refused before anything is written, `kind: "io"`, exit 2 | Write to another path |
 | `lint --edition next` (or `5`) on a headerless document with no other finding (#1434) | exit 0 | `missing_edition_header`, exit 1 | Omit `--edition`, or add the header |
@@ -4477,7 +4480,10 @@ gets its finite range from `verify { values Qty = 0..2 }`; entity instance count
 come from `instances`. These bounds delimit the checked world.
 `concept Bulk = Order where qty >= 2` and
 `concept Open = Order in Placed, Packed` name predicates, without adding state;
-entity fields are bare names inside their conditions. Lowered fields use
+entity fields are bare names inside their conditions, in every expression form
+(a quantifier or aggregate binder of the same name hides the field in its scope).
+A field is state, so it cannot be a quantifier range bound
+(`exists x in qty..qty { ... }` is `binder bound is not a static integer`). Lowered fields use
 canonical `entity_field` names (for example `order_qty` and `order_stage`);
 design and `implements` mappings refer to those names.
 
@@ -4490,6 +4496,8 @@ field, it adds no automatic field assignment; if it matches a field, that field
 is assigned even when the input's type is explicit.
 Inputs and `set x = expr, y = expr` updates can be comma-separated. In a field/input
 collision, use `input qty` to select the input (`ambiguous_input_field` otherwise).
+Inside a quantifier or aggregate binder named `qty`, `input qty` is refused
+(`captured_by_binder`): rename the binder.
 An omitted verb defaults to the event name. `covers REQ-ID "source text"`
 records traceability. Declare every actor, including those used in scenarios
 (`actor_not_declared`). Ordinary events are fair; `fault event` is not fair.
@@ -4538,6 +4546,8 @@ by guards warns `decide_row_emptied`. An event receives the disjunction of the
 conditions of rows listing it as one guard; its other rule guards still apply.
 `assuming Q` restricts table checking to Q **and generates a stage-conditional
 invariant that `verify` must prove**; it is not an unchecked escape from coverage.
+A concept named in `assuming` inside a quantifier or aggregate binder named like
+something the concept reads (a resource, say) is refused (`captured_by_binder`).
 
 **Relations, resources, and projections.** `Ticket belongs to Agent as assignee
 via take` adds an initially unset optional role to each ticket. The related entity
@@ -4726,7 +4736,16 @@ fslc verify requirements.fsl --engine induction
 ```
 
 `migrate` is a dry run unless `--write` is present; a dry run still reports
-`result: "migrated"`, with `written: false`. Inspect `files[].findings[]`,
+`result: "migrated"`, with `written: false`. `written` says what the run wrote,
+not whether `--write` was given: the top-level `written` is `true` only when
+`--write` replaced at least one input, and each `files[]` entry's `written` is
+`true` only for an input it replaced. An input that needs no rewrite
+(`changed: false`) is left untouched and reports `written: false`, as does every
+input of a dry run, a refusal or `migrate_manual_required`. The rewrite keeps
+the input's line endings and byte order mark: every line ends as the input's
+first line does (CRLF or LF), and a UTF-8 byte order mark stays exactly when the
+input has one. The dry run's `files[].edits` replacement holds the same bytes
+`--write` writes. Inspect `files[].findings[]`,
 `machine_applicable`, and each refusal's `reason`, not only the command's exit
 status: `lint` exits 1 whenever it reports a finding, so the commands above are not
 an `&&` chain. A refused process conversion exits 1 with
@@ -4891,6 +4910,44 @@ contradictions, duplicated `argument-7` and `decision-row`. All 2,924 observatio
 (731 forms on both binaries, twice) had zero repeat differences and no excluded
 fields. No other required-test input was rewritten or omitted. This is evidence at
 the named measurement head, not an unperformed sweep of later integration commits.
+
+**Breaking removals (#1798):** in an FSL 5 requirements document, a name in a
+concept condition, a decision table, or an event's `only when` or `set`
+expression is now resolved inside every expression form. Before, `abs`, `min`/`max`,
+method calls, `is`, quantifiers and `count`/`sum` were skipped, so a field name
+there read an event input of the same name: `concept Eligible = Claim where
+abs(amount) > 0` with `only for Eligible` admitted an event whose stored `amount`
+is 0, and `check`, BMC and induction passed. Such documents now fail as they
+should (the issue's scenario is `acceptance`, exit 2). Three forms that passed
+`check` are refused with exit 2:
+
+- `only when abs(amount) > 0` or `set limit = abs(amount)`, where `amount` is both
+  the event's input and a field: `kind: "parse"`, `ambiguous_input_field`,
+  ``'amount' in event 'approve' is both its input and a field of 'Claim'; write `input amount` or `Claim.amount` ``,
+  at the rule statement or the set field.
+  Write `input amount` or `Claim.amount`.
+- `concept C = Claim where exists x in amount..amount { x == 1 }` where an event
+  input is also `amount`: `kind: "semantics"`, `binder bound is not a static
+  integer`, at the event. The bound read the input; a field cannot be a bound.
+  Write the bounds with literals and `const`s.
+
+One form changes its refusal: `input amount` inside a quantifier or aggregate
+binder named `amount` (`exists amount in 0..0 { input amount == amount }`, the
+same in `count(...)`, or `set limit = sum(amount in 0..0 of input amount)`) was a
+`semantics` error that `input amount` could not be typed. It is now `kind:
+"parse"`, `captured_by_binder`,
+`` `input amount` in event 'approve' is inside a binder named 'amount', which hides the input; rename the binder ``,
+at the rule statement or the set field: the input is read by its bare name, which the binder
+would capture. A decision table's `assuming` that names a concept inside a binder
+named like something the concept reads (`exists cap in 5..5 { Big }`, `Big`
+reading the resource `cap`) is `captured_by_binder` at the table, where it was a
+`semantics` error. Rename the binder. Newly accepted: `input amount` and
+`Claim.amount` nested in those forms (`only when abs(input amount) > 0`,
+`set limit = abs(Claim.amount)`), and a concept named inside a quantifier in
+`assuming`. A binder named like a concept still names the binder. Every `.fsl`
+under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (655 forms, 22 of
+them `fsl 5`) keeps its `check` result between base `995146f45` and head
+`cb883819d`, each run in its own materialized tree.
 
 - In FSL 4, the process+data profile is the requirements form for a single-entity
   lifecycle. `process E with f: T { ... }` creates the entity stage map and

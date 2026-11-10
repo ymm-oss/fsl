@@ -54,7 +54,7 @@ fn migrated(written: bool, changed: bool) -> Value {
         vec![]
     };
     let mut v = json!({"fsl":"1.0","result":"migrated","edition":"next","changed":usize::from(changed),
-        "written":written,"files":[{"path":"plain.fsl","changed":changed,"findings":findings,"edits":edits}]});
+        "written":written,"files":[{"path":"plain.fsl","changed":changed,"written":written,"findings":findings,"edits":edits}]});
     // #1757: an unchanged run reads the `fsl 5` header the first write
     // added, and a report publishes a header it read, as `check` does.
     if !changed {
@@ -305,7 +305,9 @@ fn publication_numeric_migration_is_non_destructive_then_idempotent() {
             &["migrate", "plain.fsl", "--edition", "5", "--write"],
             gate,
         );
-        agrees &= (status, actual, stderr) == (0, migrated(true, false), String::new());
+        // The idempotent rerun writes nothing, so it reports `written: false`
+        // although `--write` was requested (#1754).
+        agrees &= (status, actual, stderr) == (0, migrated(false, false), String::new());
     }
     assert!(
         agrees,

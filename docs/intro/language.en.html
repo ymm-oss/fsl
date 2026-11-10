@@ -790,8 +790,9 @@ unsound or ambiguous, and the section linked from each row shows the rewrite.</p
 <p>Some removals in the same release involve FSL 5 constructs only, so no 4.12
 document has them: <code>__</code> in next-edition relation roles, resources and measures
 (#1600), repeated step inputs (#1682), repeated actors and requirement-ID owners
-(#1705), a compose child headed <code>fsl 5</code> that uses a colon quantifier
-(#1452), and the four next-edition migration forms that <code>analyze</code>,
+(#1705), field and input names in nested expression forms (#1798, see
+"Breaking removals (#1798)" in §13.2), a compose child headed <code>fsl 5</code> that uses
+a colon quantifier (#1452), and the four next-edition migration forms that <code>analyze</code>,
 <code>conformance</code>, <code>explain</code>, <code>html</code>, <code>kernel</code>, <code>ledger</code>, <code>mutate</code>, <code>scenarios</code>,
 <code>sweep</code>, <code>testgen</code> and <code>typestate</code> now refuse as <code>check</code> already did (#1449).</p>
 <p><strong>Find the CLI, JSON and exit-code changes.</strong> Search scripts and CI jobs that
@@ -865,6 +866,18 @@ call <code>fslc</code> for the values in the first column:</p>
 <td>written</td>
 <td>refused, exit 2; a writable parent directory is required</td>
 <td>Write to a regular file, or read stdout</td>
+</tr>
+<tr>
+<td><code>migrate --write</code> where no input needs a rewrite (#1754)</td>
+<td><code>"written": true</code> with <code>"changed": 0</code>; <code>files[]</code> entries had no <code>written</code></td>
+<td><code>"written": false</code>; each <code>files[]</code> entry reports <code>written</code>, <code>true</code> only for a replaced input</td>
+<td>Read <code>written</code> as "a file was replaced"</td>
+</tr>
+<tr>
+<td><code>migrate --write</code> on a CRLF document (#1755)</td>
+<td>lines it rewrote end in LF and the others keep CRLF; a document the formatter rewrote (metadata, maps, enums, quantifiers) comes back LF-only without its byte order mark</td>
+<td>every line ends as the input's first line does; the byte order mark is kept</td>
+<td>Nothing is required</td>
 </tr>
 <tr>
 <td><code>migrate --write</code> on a read-only input it would change (the #1419 refusal)</td>
@@ -4691,7 +4704,10 @@ gets its finite range from <code>verify { values Qty = 0..2 }</code>; entity ins
 come from <code>instances</code>. These bounds delimit the checked world.
 <code>concept Bulk = Order where qty &gt;= 2</code> and
 <code>concept Open = Order in Placed, Packed</code> name predicates, without adding state;
-entity fields are bare names inside their conditions. Lowered fields use
+entity fields are bare names inside their conditions, in every expression form
+(a quantifier or aggregate binder of the same name hides the field in its scope).
+A field is state, so it cannot be a quantifier range bound
+(<code>exists x in qty..qty { ... }</code> is <code>binder bound is not a static integer</code>). Lowered fields use
 canonical <code>entity_field</code> names (for example <code>order_qty</code> and <code>order_stage</code>);
 design and <code>implements</code> mappings refer to those names.</p>
 <p><strong>Events.</strong> <code>event place = User places Order with qty Empty -&gt; Placed</code> names the
@@ -4703,6 +4719,8 @@ field, it adds no automatic field assignment; if it matches a field, that field
 is assigned even when the input's type is explicit.
 Inputs and <code>set x = expr, y = expr</code> updates can be comma-separated. In a field/input
 collision, use <code>input qty</code> to select the input (<code>ambiguous_input_field</code> otherwise).
+Inside a quantifier or aggregate binder named <code>qty</code>, <code>input qty</code> is refused
+(<code>captured_by_binder</code>): rename the binder.
 An omitted verb defaults to the event name. <code>covers REQ-ID "source text"</code>
 records traceability. Declare every actor, including those used in scenarios
 (<code>actor_not_declared</code>). Ordinary events are fair; <code>fault event</code> is not fair.
@@ -4775,7 +4793,9 @@ and be disjoint (<code>decide_overlap</code>, with shared values). A row made im
 by guards warns <code>decide_row_emptied</code>. An event receives the disjunction of the
 conditions of rows listing it as one guard; its other rule guards still apply.
 <code>assuming Q</code> restricts table checking to Q <strong>and generates a stage-conditional
-invariant that <code>verify</code> must prove</strong>; it is not an unchecked escape from coverage.</p>
+invariant that <code>verify</code> must prove</strong>; it is not an unchecked escape from coverage.
+A concept named in <code>assuming</code> inside a quantifier or aggregate binder named like
+something the concept reads (a resource, say) is refused (<code>captured_by_binder</code>).</p>
 <p><strong>Relations, resources, and projections.</strong> <code>Ticket belongs to Agent as assignee
 via take</code> adds an initially unset optional role to each ticket. The related entity
 must be declared with <code>entity</code>, and the <code>via</code> event's actor must be that entity,
@@ -5045,7 +5065,16 @@ fslc verify requirements.fsl --depth 8
 fslc verify requirements.fsl --engine induction
 </code></pre>
 <p><code>migrate</code> is a dry run unless <code>--write</code> is present; a dry run still reports
-<code>result: "migrated"</code>, with <code>written: false</code>. Inspect <code>files[].findings[]</code>,
+<code>result: "migrated"</code>, with <code>written: false</code>. <code>written</code> says what the run wrote,
+not whether <code>--write</code> was given: the top-level <code>written</code> is <code>true</code> only when
+<code>--write</code> replaced at least one input, and each <code>files[]</code> entry's <code>written</code> is
+<code>true</code> only for an input it replaced. An input that needs no rewrite
+(<code>changed: false</code>) is left untouched and reports <code>written: false</code>, as does every
+input of a dry run, a refusal or <code>migrate_manual_required</code>. The rewrite keeps
+the input's line endings and byte order mark: every line ends as the input's
+first line does (CRLF or LF), and a UTF-8 byte order mark stays exactly when the
+input has one. The dry run's <code>files[].edits</code> replacement holds the same bytes
+<code>--write</code> writes. Inspect <code>files[].findings[]</code>,
 <code>machine_applicable</code>, and each refusal's <code>reason</code>, not only the command's exit
 status: <code>lint</code> exits 1 whenever it reports a finding, so the commands above are not
 an <code>&amp;&amp;</code> chain. A refused process conversion exits 1 with
@@ -5247,6 +5276,43 @@ contradictions, duplicated <code>argument-7</code> and <code>decision-row</code>
 (731 forms on both binaries, twice) had zero repeat differences and no excluded
 fields. No other required-test input was rewritten or omitted. This is evidence at
 the named measurement head, not an unperformed sweep of later integration commits.</p>
+<p><strong>Breaking removals (#1798):</strong> in an FSL 5 requirements document, a name in a
+concept condition, a decision table, or an event's <code>only when</code> or <code>set</code>
+expression is now resolved inside every expression form. Before, <code>abs</code>, <code>min</code>/<code>max</code>,
+method calls, <code>is</code>, quantifiers and <code>count</code>/<code>sum</code> were skipped, so a field name
+there read an event input of the same name: <code>concept Eligible = Claim where
+abs(amount) &gt; 0</code> with <code>only for Eligible</code> admitted an event whose stored <code>amount</code>
+is 0, and <code>check</code>, BMC and induction passed. Such documents now fail as they
+should (the issue's scenario is <code>acceptance</code>, exit 2). Three forms that passed
+<code>check</code> are refused with exit 2:</p>
+<ul>
+<li><code>only when abs(amount) &gt; 0</code> or <code>set limit = abs(amount)</code>, where <code>amount</code> is both
+  the event's input and a field: <code>kind: "parse"</code>, <code>ambiguous_input_field</code>,
+  <code>'amount' in event 'approve' is both its input and a field of 'Claim'; write `input amount` or `Claim.amount`</code>,
+  at the rule statement or the set field.
+  Write <code>input amount</code> or <code>Claim.amount</code>.</li>
+<li><code>concept C = Claim where exists x in amount..amount { x == 1 }</code> where an event
+  input is also <code>amount</code>: <code>kind: "semantics"</code>, <code>binder bound is not a static
+  integer</code>, at the event. The bound read the input; a field cannot be a bound.
+  Write the bounds with literals and <code>const</code>s.</li>
+</ul>
+<p>One form changes its refusal: <code>input amount</code> inside a quantifier or aggregate
+binder named <code>amount</code> (<code>exists amount in 0..0 { input amount == amount }</code>, the
+same in <code>count(...)</code>, or <code>set limit = sum(amount in 0..0 of input amount)</code>) was a
+<code>semantics</code> error that <code>input amount</code> could not be typed. It is now <code>kind:
+"parse"</code>, <code>captured_by_binder</code>,
+<code>`input amount` in event 'approve' is inside a binder named 'amount', which hides the input; rename the binder</code>,
+at the rule statement or the set field: the input is read by its bare name, which the binder
+would capture. A decision table's <code>assuming</code> that names a concept inside a binder
+named like something the concept reads (<code>exists cap in 5..5 { Big }</code>, <code>Big</code>
+reading the resource <code>cap</code>) is <code>captured_by_binder</code> at the table, where it was a
+<code>semantics</code> error. Rename the binder. Newly accepted: <code>input amount</code> and
+<code>Claim.amount</code> nested in those forms (<code>only when abs(input amount) &gt; 0</code>,
+<code>set limit = abs(Claim.amount)</code>), and a concept named inside a quantifier in
+<code>assuming</code>. A binder named like a concept still names the binder. Every <code>.fsl</code>
+under <code>specs/</code>, <code>examples/</code> and <code>rust/fslc/tests/fixtures/</code> (655 forms, 22 of
+them <code>fsl 5</code>) keeps its <code>check</code> result between base <code>995146f45</code> and head
+<code>cb883819d</code>, each run in its own materialized tree.</p>
 <ul>
 <li>In FSL 4, the process+data profile is the requirements form for a single-entity
   lifecycle. <code>process E with f: T { ... }</code> creates the entity stage map and

@@ -1,5 +1,5 @@
 // Discrete-time SLA in the requirements dialect.
-// The time block generates age counter state, init, tick, and the NFR-1
+// The time block generates age counter state, init, tick, and the NFR-SLA-001
 // deadline invariant. The hand-written kernel spike in this directory shows
 // the lower-level version with explicit tick-side work progress.
 requirements SlaWorker {
@@ -48,7 +48,7 @@ requirements SlaWorker {
     serving is some(r) => pending[r]
   }
 
-  requirement NFR-1 "submitted requests finish within 4 ticks" {
+  requirement NFR-SLA-001 "submitted requests finish within 4 ticks" {
     deadline age <= 4
   }
 

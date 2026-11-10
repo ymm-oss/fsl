@@ -1234,22 +1234,64 @@ fn inline_maps_with_parameter_comments_are_refused_without_source_changes() {
     assert_eq!(text(&requirements), original);
 }
 
+/// One refused input keeps every other input of the run as it was, although
+/// the safe one checks and would be rewritten on its own (#1764): the safe
+/// input comes first, so the run reaches the refusal only after planning it.
 #[test]
 fn multi_file_refusal_leaves_every_input_unchanged() {
     let directory = FixtureDir::new();
-    let safe_source = "domain Safe { type E = A | B }\n";
+    let safe_source = LEGACY_COLON_QUANTIFIER;
     let refused_source = "domain Refused { aggregate A { invariant bad { true && false } } }\n";
     let safe = directory.write("safe.fsl", safe_source);
     let refused = directory.write("refused.fsl", refused_source);
+    let safe_path = safe.to_str().expect("UTF-8 path");
+
+    // Positive controls: the safe input checks, and on its own migrate
+    // rewrites it.
+    let check = run(&["check", safe_path]);
+    assert_eq!(
+        check.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+    let alone = directory.write("alone.fsl", safe_source);
     let output = run(&[
         "migrate",
-        safe.to_str().expect("UTF-8 path"),
+        alone.to_str().expect("UTF-8 path"),
+        "--edition",
+        "next",
+        "--write",
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{:#}", json(&output));
+    assert_eq!(json(&output)["changed"], 1);
+    assert_ne!(text(&alone), safe_source);
+
+    let output = run(&[
+        "migrate",
+        safe_path,
         refused.to_str().expect("UTF-8 path"),
         "--edition",
         "next",
         "--write",
     ]);
-    assert_eq!(output.status.code(), Some(2));
+    let refusal = json(&output);
+    assert_eq!(output.status.code(), Some(2), "{refusal:#}");
+    assert_eq!(refusal["result"], "migration_refused", "{refusal:#}");
+    assert_eq!(refusal["written"], false, "{refusal:#}");
+    // The safe input was planned: a check failure stops the run with an
+    // error envelope that has no `files`.
+    assert_eq!(refusal["files"][0]["changed"], true, "{refusal:#}");
+    let findings = refusal["files"][1]["findings"]
+        .as_array()
+        .expect("refused file findings");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "unsupported_double_ampersand"
+                && finding["machine_applicable"] == false
+        }),
+        "{refusal:#}"
+    );
     assert_eq!(text(&safe), safe_source);
     assert_eq!(text(&refused), refused_source);
 }
@@ -1292,7 +1334,6 @@ fn multi_file_prepare_io_failure_leaves_every_input_unchanged() {
 }
 
 /// A spec that checks and that `migrate --edition next` changes.
-#[cfg(unix)]
 const LEGACY_COLON_QUANTIFIER: &str = r"spec Quantifier {
   const MAX = 1
   type Id = 0..1
@@ -1301,6 +1342,161 @@ const LEGACY_COLON_QUANTIFIER: &str = r"spec Quantifier {
   invariant Typed { forall i in 0..MAX: ready[i] == true or ready[i] == false }
 }
 ";
+
+/// `written` reports the files the run replaced, at the top level and on each
+/// `files[]` entry, not the `--write` request (#1754). An input that needs no
+/// rewrite is neither replaced (same inode and bytes) nor reported written.
+#[test]
+fn written_reports_only_the_files_a_write_replaces() {
+    let directory = FixtureDir::new();
+    // A fixed point of the migration: the quantifier fixture once migrated.
+    let seed = directory.write("seed.fsl", LEGACY_COLON_QUANTIFIER);
+    let seed_path = seed.to_str().expect("UTF-8 path");
+    let output = run(&["migrate", seed_path, "--edition", "next", "--write"]);
+    assert_eq!(output.status.code(), Some(0), "{:#}", json(&output));
+    let migrated = text(&seed);
+    assert_ne!(migrated, LEGACY_COLON_QUANTIFIER);
+    let unchanged = directory.write("unchanged.fsl", &migrated);
+    let changed = directory.write("changed.fsl", LEGACY_COLON_QUANTIFIER);
+    let unchanged_path = unchanged.to_str().expect("UTF-8 path");
+    let changed_path = changed.to_str().expect("UTF-8 path");
+    let identity = |path: &Path| {
+        let metadata = std::fs::metadata(path).expect("metadata");
+        #[cfg(unix)]
+        let inode = std::os::unix::fs::MetadataExt::ino(&metadata);
+        #[cfg(not(unix))]
+        let inode = 0_u64;
+        (inode, metadata.modified().expect("mtime"), text(path))
+    };
+    let written = |output: &Value| {
+        output["files"]
+            .as_array()
+            .expect("files")
+            .iter()
+            .map(|file| (file["changed"].clone(), file["written"].clone()))
+            .collect::<Vec<_>>()
+    };
+
+    // `--write` with nothing to rewrite writes nothing and says so.
+    let before = identity(&unchanged);
+    let output = run(&["migrate", unchanged_path, "--edition", "next", "--write"]);
+    let report = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{report:#}");
+    assert_eq!(report["changed"], 0, "{report:#}");
+    assert_eq!(report["written"], false, "{report:#}");
+    assert_eq!(
+        written(&report),
+        vec![(Value::Bool(false), Value::Bool(false))]
+    );
+    assert_eq!(identity(&unchanged), before);
+
+    // A dry run over both reports nothing written and writes nothing.
+    let args = ["migrate", changed_path, unchanged_path, "--edition", "next"];
+    let output = run(&args);
+    let report = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{report:#}");
+    assert_eq!(report["changed"], 1, "{report:#}");
+    assert_eq!(report["written"], false, "{report:#}");
+    assert_eq!(
+        written(&report),
+        vec![
+            (Value::Bool(true), Value::Bool(false)),
+            (Value::Bool(false), Value::Bool(false))
+        ]
+    );
+    assert_eq!(text(&changed), LEGACY_COLON_QUANTIFIER);
+
+    // Positive control: with one changed input, `written` is true, and only
+    // that input is replaced.
+    let output = run(&[
+        "migrate",
+        changed_path,
+        unchanged_path,
+        "--edition",
+        "next",
+        "--write",
+    ]);
+    let report = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{report:#}");
+    assert_eq!(report["changed"], 1, "{report:#}");
+    assert_eq!(report["written"], true, "{report:#}");
+    assert_eq!(
+        written(&report),
+        vec![
+            (Value::Bool(true), Value::Bool(true)),
+            (Value::Bool(false), Value::Bool(false))
+        ]
+    );
+    assert_eq!(text(&changed), migrated);
+    assert_eq!(identity(&unchanged), before);
+}
+
+/// `source` with every line ending CRLF (`crlf`) and a UTF-8 byte order mark
+/// (`bom`); `source` itself uses LF and has no mark.
+fn laid_out(source: &str, crlf: bool, bom: bool) -> String {
+    assert!(!source.contains('\r') && !source.starts_with('\u{feff}'));
+    let body = if crlf {
+        source.replace('\n', "\r\n")
+    } else {
+        source.to_owned()
+    };
+    if bom { format!("\u{feff}{body}") } else { body }
+}
+
+/// `migrate --write` keeps the input's line endings and byte order mark on
+/// each path that rewrites a document (#1755): the formatter (a colon
+/// quantifier), the header insertion alone, and the process-form conversion.
+/// Before, the formatter path wrote LF without the mark and the other two
+/// left the original lines CRLF and the inserted ones LF. The written bytes
+/// are the LF migration's, laid out like the input, and equal the dry run's
+/// replacement; the LF inputs are the negative control.
+#[test]
+fn write_keeps_the_input_line_endings_and_byte_order_mark() {
+    let header_only = "spec H {\n  state { x: Bool = false }\n  action go() { x = true }\n}\n";
+    for (name, source) in [
+        ("formatter", LEGACY_COLON_QUANTIFIER.to_owned()),
+        ("header", header_only.to_owned()),
+        ("process_form", example("e2e/2_requirements.fsl")),
+    ] {
+        let directory = FixtureDir::new();
+        directory.write("1_business.fsl", &example("e2e/1_business.fsl"));
+        let migrate = |input: &str| {
+            let path = directory.write("doc.fsl", input);
+            let path_text = path.to_str().expect("UTF-8 path").to_owned();
+            let dry = run(&["migrate", &path_text, "--edition", "5"]);
+            assert_eq!(dry.status.code(), Some(0), "{name}: {:#}", json(&dry));
+            let replacement = json(&dry)["files"][0]["edits"][0]["replacement"]
+                .as_str()
+                .expect("one replacement")
+                .to_owned();
+            let write = run(&["migrate", &path_text, "--edition", "5", "--write"]);
+            assert_eq!(write.status.code(), Some(0), "{name}: {:#}", json(&write));
+            assert_eq!(json(&write)["written"], true, "{name}");
+            let written = std::fs::read(&path).expect("read migrated");
+            assert_eq!(written, replacement.as_bytes(), "{name}: dry run = write");
+            // Idempotent, and the written document still checks.
+            let again = run(&["migrate", &path_text, "--edition", "5", "--write"]);
+            assert_eq!(json(&again)["changed"], 0, "{name}: {:#}", json(&again));
+            let check = run(&["check", &path_text]);
+            assert_eq!(check.status.code(), Some(0), "{name}: {:#}", json(&check));
+            String::from_utf8(written).expect("UTF-8")
+        };
+        let lf = migrate(&source);
+        assert!(
+            !lf.contains('\r') && !lf.starts_with('\u{feff}'),
+            "{name}: an LF input stays LF without a mark"
+        );
+        assert_ne!(lf, source, "{name}: the document is rewritten");
+        for (crlf, bom) in [(true, true), (true, false), (false, true)] {
+            let written = migrate(&laid_out(&source, crlf, bom));
+            assert_eq!(
+                written,
+                laid_out(&lf, crlf, bom),
+                "{name}: crlf={crlf} bom={bom}"
+            );
+        }
+    }
+}
 
 #[cfg(unix)]
 fn entries(directory: &Path) -> Vec<PathBuf> {
@@ -2019,8 +2215,10 @@ fn assert_canonical_example(name: &str) -> Value {
     assert_eq!(json(&checked)["result"], "ok");
     assert_eq!(json(&checked)["implements"]["result"], "refines");
     let lint = run(&["lint", path, "--edition", "current"]);
-    assert_eq!(lint.status.code(), Some(1), "{}", json(&lint));
+    // #608: the canonical examples also use canonical IDs, so lint is clean.
+    assert_eq!(lint.status.code(), Some(0), "{}", json(&lint));
     let lint = json(&lint);
+    assert_eq!(lint["finding_count"], 0, "{lint}");
     assert_eq!(findings_with_code(&lint, "inline_action_maps").len(), 0);
     let migrate = run(&["migrate", path, "--edition", "next"]);
     assert_eq!(migrate.status.code(), Some(0), "{}", json(&migrate));
@@ -2050,7 +2248,7 @@ fn example_contract(path: &Path, source: &str) -> Value {
 #[test]
 fn canonical_return_example_has_no_inline_maps() {
     let lint = assert_canonical_example("layers/return_system.fsl");
-    assert_eq!(findings_with_code(&lint, "non_canonical_id").len(), 4);
+    assert_eq!(findings_with_code(&lint, "non_canonical_id").len(), 0);
 }
 
 #[test]
@@ -2130,11 +2328,46 @@ const LEGACY_CANCEL_REQUIREMENTS: &str = r#"requirements CancelSystemReq {
 }
 "#;
 
+/// The legacy programs predate the #608 ID canonicalization. Rename each
+/// declared ID (each must occur exactly once) so the comparison still covers
+/// the complete Kernel and typed metadata, IDs included.
+fn with_canonical_ids(source: &str, renames: &[(&str, &str)]) -> String {
+    let mut source = source.to_owned();
+    for (keyword, old, new) in renames.iter().map(|&(old, new)| {
+        let keyword = if old.starts_with("AC-") {
+            "acceptance"
+        } else {
+            "requirement"
+        };
+        (keyword, old, new)
+    }) {
+        let from = format!("{keyword} {old} \"");
+        assert_eq!(
+            source.matches(&from).count(),
+            1,
+            "unique legacy ID {from:?}"
+        );
+        source = source.replacen(&from, &format!("{keyword} {new} \""), 1);
+    }
+    source
+}
+
 #[test]
 fn canonical_cancel_preserves_the_checked_kernel_and_typed_metadata() {
     let path = example_path("pm/cancel_system.fsl");
+    let legacy = with_canonical_ids(
+        LEGACY_CANCEL_REQUIREMENTS,
+        &[
+            ("REQ-1", "REQ-CANCEL-001"),
+            ("REQ-2", "REQ-CANCEL-002"),
+            ("REQ-3", "REQ-CANCEL-003"),
+            ("REQ-4", "REQ-CANCEL-004"),
+            ("AC-1", "AC-CANCEL-001"),
+            ("AC-2", "AC-CANCEL-002"),
+        ],
+    );
     assert_eq!(
-        example_contract(&path, LEGACY_CANCEL_REQUIREMENTS),
+        example_contract(&path, &legacy),
         example_contract(&path, &text(&path))
     );
 }
@@ -2149,7 +2382,16 @@ fn canonical_return_preserves_the_checked_kernel_and_typed_metadata() {
     assert_eq!(legacy.matches(import).count(), 1);
     // Resolve the same policy under one logical source path. Use the existing
     // migration contract: location-free Kernel plus the full typed annotations.
-    let mut before = example_contract(&path, &legacy.replace(import, "return_policy.fsl"));
+    let legacy = with_canonical_ids(
+        &legacy.replace(import, "return_policy.fsl"),
+        &[
+            ("REQ-1", "REQ-RETURN-001"),
+            ("REQ-2", "REQ-RETURN-002"),
+            ("REQ-3", "REQ-RETURN-003"),
+            ("AC-1", "AC-RETURN-001"),
+        ],
+    );
+    let mut before = example_contract(&path, &legacy);
     let after = example_contract(&path, &text(&path));
     for (old, new) in [
         ("submit__b1", "submit_small"),

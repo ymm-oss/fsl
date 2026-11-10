@@ -14,14 +14,14 @@ fslc verify examples/layers/return_policy.fsl --engine induction
 fslc verify examples/layers/return_system.fsl       # implements is checked at the same time
 fslc refine examples/layers/return_impl.fsl examples/layers/return_system.fsl \
             examples/layers/return_impl_refines.fsl --depth 5
-fslc scenarios examples/layers/return_system.fsl    # acceptance_AC-1 appears
+fslc scenarios examples/layers/return_system.fsl    # acceptance_AC-RETURN-001 appears
 ```
 
 Highlights:
 
 - **Requirement ID transparency**: when you break a requirements-layer guard, the
   counterexample JSON carries both
-  `requirement: {id: REQ-3, text: payment only after approval, ledger consistent}`
+  `requirement: {id: REQ-RETURN-003, text: payment only after approval, ledger consistent}`
   and `implements: {result: violated}` against the upper layer — a single
   diagnostic tells you which requirement broke and what it ripples into in the
   business layer.

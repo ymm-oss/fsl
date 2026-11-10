@@ -389,7 +389,7 @@ def test_rust_ledger_groups_native_nfr_evidence_by_requirement(tmp_path):
 
     # The SLA violation remains a failing verdict in the rendered ledger.
     assert status == 1, error
-    assert "NFR-1" in output
+    assert "NFR-SLA-001" in output
     assert "🔴 要確認" in output
     assert "`sla`" in output or "| sla |" in output
     assert "スケジューリング前提" in output
@@ -402,7 +402,7 @@ def test_rust_ledger_lists_all_verified_requirement_ids():
 
     assert status == 0, error
     assert "🔴 要確認" not in output
-    for requirement_id in ("REQ-1", "REQ-3", "REQ-5"):
+    for requirement_id in ("REQ-SUPPORT-001", "REQ-SUPPORT-003", "REQ-SUPPORT-005"):
         assert requirement_id in output
 
 

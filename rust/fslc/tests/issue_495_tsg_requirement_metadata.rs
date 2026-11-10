@@ -142,23 +142,27 @@ fn acceptance_and_forbidden_nodes_appear_and_are_covered_by_requirements() {
     assert_eq!(status, 0, "{output:#}");
     let nodes = output["nodes"].as_array().expect("nodes array");
     assert!(
-        nodes.iter().any(|node| node["id"] == "acceptance:AC-1"),
+        nodes
+            .iter()
+            .any(|node| node["id"] == "acceptance:AC-CLAIMS-001"),
         "{output:#}"
     );
     assert!(
-        nodes.iter().any(|node| node["id"] == "forbidden:NEG-1"),
+        nodes
+            .iter()
+            .any(|node| node["id"] == "forbidden:FB-CLAIMS-001"),
         "{output:#}"
     );
     let edges = output["edges"].as_array().expect("edges array");
     assert!(
         edges.iter().any(|edge| {
             edge["kind"] == "covers"
-                && edge["from"] == "requirement:REQ-ACCEPT"
-                && edge["to"] == "acceptance:AC-1"
+                && edge["from"] == "requirement:REQ-ACCEPT-001"
+                && edge["to"] == "acceptance:AC-CLAIMS-001"
         }),
         "{output:#}"
     );
-    // Well-formedness: `requirement:REQ-ACCEPT` is cited only via a
+    // Well-formedness: `requirement:REQ-ACCEPT-001` is cited only via a
     // `@requirement(...)` annotation on the acceptance case itself, never
     // as a `model.requirement_targets()` Kernel target — the enrichment
     // must create that node too, not just the edge pointing at it.
@@ -242,10 +246,10 @@ fn repeated_actions_in_one_scenario_keep_one_edge_per_step() {
     ]);
     assert_eq!(status, 0, "{output:#}");
     let edges = output["edges"].as_array().expect("edges array");
-    // `forbidden NEG-1 { submit(0) submit(0) }` — the same action twice.
+    // `forbidden FB-CLAIMS-001 { submit(0) submit(0) }` — the same action twice.
     let repeated = edges
         .iter()
-        .filter(|edge| edge["from"] == "forbidden:NEG-1" && edge["to"] == "action:submit")
+        .filter(|edge| edge["from"] == "forbidden:FB-CLAIMS-001" && edge["to"] == "action:submit")
         .collect::<Vec<_>>();
     assert_eq!(repeated.len(), 2, "{output:#}");
     assert_eq!(repeated[0]["kind"], "starts_with", "{output:#}");
@@ -282,7 +286,7 @@ fn governance_control_catalog_entries_appear_in_the_tsg() {
     ]);
     assert_eq!(status, 0, "{output:#}");
     let nodes = output["nodes"].as_array().expect("nodes array");
-    for id in ["control:CTRL-1", "control:CTRL-2"] {
+    for id in ["control:CTRL-EXPENSE-001", "control:CTRL-EXPENSE-002"] {
         let node = nodes
             .iter()
             .find(|node| node["id"] == id)
@@ -294,7 +298,7 @@ fn governance_control_catalog_entries_appear_in_the_tsg() {
         edges.iter().any(|edge| {
             edge["kind"] == "declares"
                 && edge["from"] == "spec:ExpenseTransformationControls"
-                && edge["to"] == "control:CTRL-1"
+                && edge["to"] == "control:CTRL-EXPENSE-001"
         }),
         "{output:#}"
     );

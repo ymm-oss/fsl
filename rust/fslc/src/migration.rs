@@ -990,6 +990,34 @@ fn with_declared_edition(mut output: Value, declared: Option<Edition>) -> Value 
     output
 }
 
+/// `migrated` laid out like `original` (#1755): every line ends as
+/// `original`'s first line does (CRLF when that line ends in `\r\n`,
+/// otherwise LF), and a UTF-8 byte order mark is kept exactly when `original`
+/// starts with one. The header insertion and the process-form rendering
+/// write LF lines, and the formatter writes LF and drops the mark, so without
+/// this a CRLF document came back with mixed or LF-only endings.
+#[must_use]
+pub fn keep_line_endings(original: &str, migrated: &str) -> String {
+    const BOM: char = '\u{feff}';
+    let body = migrated
+        .strip_prefix(BOM)
+        .unwrap_or(migrated)
+        .replace("\r\n", "\n");
+    let crlf = original
+        .find('\n')
+        .is_some_and(|end| original[..end].ends_with('\r'));
+    let body = if crlf {
+        body.replace('\n', "\r\n")
+    } else {
+        body
+    };
+    if original.starts_with(BOM) {
+        format!("{BOM}{body}")
+    } else {
+        body
+    }
+}
+
 /// The `missing_edition_header` finding of a document read for `edition`
 /// without an edition header: one edit inserting the header line before the
 /// first significant line. `None` unless the edition is the next one and the
@@ -2337,5 +2365,39 @@ ai_component Safe {
             .set_patterns(IdKind::Model, vec!["REQ-{scope}-{number:3}".to_owned()])
             .expect("literal model prefix");
         assert!(policy.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod line_ending_tests {
+    use super::keep_line_endings;
+
+    #[test]
+    fn the_first_line_ending_and_the_mark_decide_every_line() {
+        let migrated = "fsl 5\nspec S {\r\n}\n";
+        for (original, expected) in [
+            ("spec S {\n}\n", "fsl 5\nspec S {\n}\n"),
+            ("spec S {\r\n}\r\n", "fsl 5\r\nspec S {\r\n}\r\n"),
+            // A mixed input follows its first line.
+            ("spec S {\r\n}\n", "fsl 5\r\nspec S {\r\n}\r\n"),
+            ("spec S {\n}\r\n", "fsl 5\nspec S {\n}\n"),
+            (
+                "\u{feff}spec S {\r\n}\r\n",
+                "\u{feff}fsl 5\r\nspec S {\r\n}\r\n",
+            ),
+            // No line ending at all: LF.
+            ("spec S {}", "fsl 5\nspec S {\n}\n"),
+        ] {
+            assert_eq!(
+                keep_line_endings(original, migrated),
+                expected,
+                "{original:?}"
+            );
+        }
+        // The mark is kept only when the input has one.
+        assert_eq!(
+            keep_line_endings("spec S {\n}\n", "\u{feff}spec S {\n}\n"),
+            "spec S {\n}\n"
+        );
     }
 }

@@ -223,8 +223,8 @@ fn worked_sla_consumes_slack_and_its_lowered_boundary_bites() {
     std::fs::remove_file(path).expect("remove lowered deadline fixture");
     assert_eq!(status, 1, "{lowered:#}");
     assert_eq!(lowered["result"], "violated");
-    assert_eq!(lowered["invariant"], "_deadline_NFR_1_age_1");
-    assert_eq!(lowered["requirement"]["id"], "NFR-1");
+    assert_eq!(lowered["invariant"], "_deadline_NFR_SLA_001_age_1");
+    assert_eq!(lowered["requirement"]["id"], "NFR-SLA-001");
 }
 
 #[test]

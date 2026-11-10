@@ -19,38 +19,38 @@
 requirements AnnotatedClaims {
   state { ready: Bool }
 
-  @requirement("REQ-INIT", "the ledger starts empty")
+  @requirement("REQ-INIT-001", "the ledger starts empty")
   init { ready = false }
 
   process Claim {
     stages Draft, Submitted, Paid
     initial Draft
 
-    @requirement("REQ-SUBMIT", "submission is traceable via the new @annotation syntax")
+    @requirement("REQ-SUBMIT-001", "submission is traceable via the new @annotation syntax")
     transition submit Draft -> Submitted by Claimant
 
     // Legacy `covers` desugar and the new @requirement syntax project to the
     // same typed RequirementLink; both forms are accepted in the 2.x edition.
     transition pay Submitted -> Paid by Payer
-      covers REQ-PAY "payment closes the claim"
+      covers REQ-PAY-001 "payment closes the claim"
   }
 
   @undecided("the retry policy for a failed readiness check is still under discussion")
-  requirement REQ-READY "the ledger tracks readiness for external callers" {
+  requirement REQ-READY-001 "the ledger tracks readiness for external callers" {
     action mark_ready() {
       ready = true
     }
   }
 
-  @requirement("REQ-ACCEPT", "a submitted claim can be paid")
-  acceptance AC-1 "submit then pay reaches Paid" {
+  @requirement("REQ-ACCEPT-001", "a submitted claim can be paid")
+  acceptance AC-CLAIMS-001 "submit then pay reaches Paid" {
     submit(0)
     pay(0)
     expect Claim 0 in Paid
   }
 
   @undecided("double-submission handling is still under discussion")
-  forbidden NEG-1 "a claim cannot be submitted twice" {
+  forbidden FB-CLAIMS-001 "a claim cannot be submitted twice" {
     submit(0)
     submit(0)
     expect rejected

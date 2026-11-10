@@ -757,7 +757,8 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 </table>
 <p>同じリリースの削除のうち、次のものは FSL 5 の構文要素だけに関わるので、4.12 の文書には
 現れません。次のエディションの関係の役割・resource・measure に含まれる <code>__</code> (#1600)、
-重複したステップの入力 (#1682)、重複した actor と要件 ID の持ち主 (#1705)、コロンの量化子を使う
+重複したステップの入力 (#1682)、重複した actor と要件 ID の持ち主 (#1705)、入れ子の式の形の中の
+フィールド名と入力名 (#1798。§13.2 の「破壊的削除 (#1798)」を参照)、コロンの量化子を使う
 <code>fsl 5</code> ヘッダーの compose の子 (#1452)、そして <code>check</code> がすでに拒否していた次のエディションの
 4 つの移行形式を <code>analyze</code>、<code>conformance</code>、<code>explain</code>、<code>html</code>、<code>kernel</code>、<code>ledger</code>、<code>mutate</code>、
 <code>scenarios</code>、<code>sweep</code>、<code>testgen</code>、<code>typestate</code> も拒否するようになったもの (#1449) です。</p>
@@ -832,6 +833,18 @@ fslc refine impl.fsl abs.fsl mapping.fsl
 <td>書き込む</td>
 <td>拒否、終了コード 2。書き込める親ディレクトリが必要</td>
 <td>通常ファイルに書くか、標準出力を読みます</td>
+</tr>
+<tr>
+<td>書き換えの要る入力がない <code>migrate --write</code> (#1754)</td>
+<td><code>"changed": 0</code> なのに <code>"written": true</code>。<code>files[]</code> の要素に <code>written</code> はない</td>
+<td><code>"written": false</code>。<code>files[]</code> の各要素が <code>written</code> を持ち、置き換えた入力でだけ <code>true</code></td>
+<td><code>written</code> を「ファイルを置き換えた」の意味で読みます</td>
+</tr>
+<tr>
+<td>CRLF の文書への <code>migrate --write</code> (#1755)</td>
+<td>書き換えた行は LF、ほかの行は CRLF のまま。整形器が書き換えた文書(メタデータ、maps、enum、量化子)は LF だけになり byte order mark も消える</td>
+<td>各行の改行を入力の 1 行目にそろえ、byte order mark も保つ</td>
+<td>対応は不要です</td>
 </tr>
 <tr>
 <td>書き換え対象の読み取り専用の入力への <code>migrate --write</code>(#1419 と同じ拒否)</td>
@@ -4376,6 +4389,9 @@ lifecycle 行を追加すると別のパスを表せます。<code>number Qty</c
 検査結果が対象とする世界は、この範囲です。
 <code>concept Bulk = Order where qty &gt;= 2</code> と <code>concept Open = Order in Placed, Packed</code>
 は述語に名前を付けるもので、状態を追加しません。条件中ではフィールドを <code>qty</code> のように書きます。
+どの式の形の中でも同じです（同じ名前の量化子・集計の束縛変数は、その範囲でフィールドを隠します）。
+フィールドは状態なので、量化子の範囲の境界には書けません
+（<code>exists x in qty..qty { ... }</code> は <code>binder bound is not a static integer</code>）。
 変換後のフィールド名は <code>order_qty</code>、<code>order_stage</code> など、正規名の <code>entity_field</code> です。
 設計と <code>implements</code> のマッピングでは、その名前を使います。</p>
 <p><strong>出来事。</strong> <code>event place = User places Order with qty Empty -&gt; Placed</code> は、
@@ -4386,7 +4402,9 @@ lifecycle 行を追加すると別のパスを表せます。<code>number Qty</c
 <code>n</code> と同名のフィールドがなければ、自動のフィールド代入は行いません。同名のフィールドが
 あれば、入力の型を明記していても代入します。入力も <code>set x = expr, y = expr</code> の更新も、
 複数ならカンマで区切ります。入力名とフィールド名が重なるときは <code>input qty</code> で入力を
-選びます（曖昧な裸の名前は <code>ambiguous_input_field</code>）。動詞を省くと event 名を使います。
+選びます（曖昧な裸の名前は <code>ambiguous_input_field</code>）。<code>qty</code> という名前の量化子・集計の
+束縛変数の内側では <code>input qty</code> を拒否します（<code>captured_by_binder</code>）。束縛変数の名前を
+変えてください。動詞を省くと event 名を使います。
 <code>covers REQ-ID "原文"</code> はトレーサビリティです。シナリオで使うものも含め、アクターを
 宣言してください（<code>actor_not_declared</code>）。通常の event は fair、<code>fault event</code> は
 fair ではありません。辺に対応する event がなければ <code>lifecycle_edge_without_event</code> の警告です。</p>
@@ -4458,7 +4476,9 @@ trace がないと <code>never_rule_without_forbidden</code> が警告します�
 <code>decide_row_emptied</code> の警告です。各出来事には、それを列挙する行の条件の論理和が
 一つのガードとして加わり、他の rule のガードも適用されます。
 <code>assuming Q</code> は表の検査を Q の範囲に絞ると同時に、<strong>その段階で Q が成り立つという
-不変条件を生成し、<code>verify</code> で証明させます</strong>。網羅性の検査を無条件に免除する指定ではありません。</p>
+不変条件を生成し、<code>verify</code> で証明させます</strong>。網羅性の検査を無条件に免除する指定ではありません。
+<code>assuming</code> の中で、concept が読む名前（資源など）と同じ名前の量化子・集計の束縛変数の
+内側にその concept を書くと拒否します（<code>captured_by_binder</code>）。</p>
 <p><strong>関係、資源、射影。</strong> <code>Ticket belongs to Agent as assignee via take</code> は、各 ticket に
 最初は未設定の optional な役割を追加します。関係先は <code>entity</code> で宣言し、<code>via</code> の event の
 アクターはその関係先でなければなりません。そのため <code>Agent</code> は <code>actor</code> と <code>entity</code> の両方で
@@ -4716,7 +4736,14 @@ fslc verify requirements.fsl --depth 8
 fslc verify requirements.fsl --engine induction
 </code></pre>
 <p><code>migrate</code> は <code>--write</code> がなければ dry run です。dry run でも <code>result: "migrated"</code> を返し、
-<code>written: false</code> になります。終了コードだけでなく、<code>files[].findings[]</code>、
+<code>written: false</code> になります。<code>written</code> は <code>--write</code> を付けたかどうかではなく、実際に書いたかどうかを
+表します。最上位の <code>written</code> は <code>--write</code> が入力を 1 つ以上置き換えたときだけ <code>true</code> で、
+<code>files[]</code> の各要素の <code>written</code> は置き換えた入力でだけ <code>true</code> です。書き換えの要らない入力
+(<code>changed: false</code>)には触れず <code>written: false</code> を返します。dry run、拒否、
+<code>migrate_manual_required</code> の入力もすべて <code>written: false</code> です。書き換えは入力の改行と
+byte order mark を保ちます。各行の改行は入力の 1 行目の改行(CRLF か LF)にそろえ、UTF-8 の
+byte order mark は入力にあるときだけ残します。dry run の <code>files[].edits</code> の置換は、<code>--write</code> が
+書くバイト列と同じです。終了コードだけでなく、<code>files[].findings[]</code>、
 <code>machine_applicable</code>、拒否ごとの <code>reason</code> を確認してください。<code>lint</code> は finding があると
 終了コード 1 を返すので、上のコマンドは <code>&amp;&amp;</code> でつなげません。拒否された process の変換は
 <code>result: "migrate_manual_required"</code> で終了コード 1、後述のコメントによる拒否は
@@ -4907,6 +4934,38 @@ corpus 全610形式 (specs 23、examples 195、CLI fixtures 392) は変更なし
 追加の受理削除ではありません。全2,924観測 (731形式×両バイナリ×2回) は反復差分0、
 除外フィールドなしです。他の必須テストの元入力を改訂・省略していません。これは上記の測定
 head の証拠であり、後の統合コミットに対して未実施の sweep を行ったとの主張ではありません。</p>
+<p><strong>破壊的削除 (#1798):</strong> FSL 5 の requirements 文書では、concept の条件、決定表、event の
+<code>only when</code> と <code>set</code> の式の中の名前を、どの式の形の中でも解決するようになりました。以前は
+<code>abs</code>、<code>min</code>/<code>max</code>、メソッド呼び出し、<code>is</code>、量化子、<code>count</code>/<code>sum</code> の中を飛ばしていたため、
+そこにあるフィールド名が同名の event 入力を読んでいました。<code>concept Eligible = Claim where
+abs(amount) &gt; 0</code> と <code>only for Eligible</code> の組み合わせは、格納された <code>amount</code> が 0 の event を
+許し、<code>check</code>、BMC、induction が通っていました。このような文書は、本来どおり失敗します
+（issue のシナリオは <code>acceptance</code>、終了コード 2）。<code>check</code> を通っていた次の 3 つの形は、
+終了コード 2 で拒否します:</p>
+<ul>
+<li><code>amount</code> が event の入力でもフィールドでもあるときの <code>only when abs(amount) &gt; 0</code> や
+  <code>set limit = abs(amount)</code>: <code>kind: "parse"</code>、<code>ambiguous_input_field</code>、
+  <code>'amount' in event 'approve' is both its input and a field of 'Claim'; write `input amount` or `Claim.amount`</code>。
+  位置は rule 文か set のフィールドです。<code>input amount</code> か <code>Claim.amount</code> と書いてください。</li>
+<li>event の入力にも <code>amount</code> があるときの <code>concept C = Claim where exists x in amount..amount { x == 1 }</code>:
+  <code>kind: "semantics"</code>、<code>binder bound is not a static integer</code>、位置は event です。境界が
+  入力を読んでいました。フィールドは境界になりません。境界はリテラルと <code>const</code> で書きます。</li>
+</ul>
+<p>拒否のしかたが変わる形が 1 つあります。<code>amount</code> という名前の量化子・集計の束縛変数の内側の
+<code>input amount</code>（<code>exists amount in 0..0 { input amount == amount }</code>、同じ形の <code>count(...)</code>、
+<code>set limit = sum(amount in 0..0 of input amount)</code>）は、<code>input amount</code> を型付けできない
+<code>semantics</code> のエラーでした。今は <code>kind: "parse"</code>、<code>captured_by_binder</code>、
+<code>`input amount` in event 'approve' is inside a binder named 'amount', which hides the input; rename the binder</code>
+で、位置は rule 文か set のフィールドです。入力は裸の名前で読むので、束縛変数に捕捉されて
+しまうためです。決定表の <code>assuming</code> で、concept が読む名前と同じ名前の束縛変数の内側に
+その concept を書く形（<code>exists cap in 5..5 { Big }</code>、<code>Big</code> は資源 <code>cap</code> を読む）も、
+<code>semantics</code> のエラーから、表の位置での <code>captured_by_binder</code> に変わります。束縛変数の名前を
+変えてください。新たに受理する形: 入れ子の形の中の <code>input amount</code> と <code>Claim.amount</code>
+（<code>only when abs(input amount) &gt; 0</code>、<code>set limit = abs(Claim.amount)</code>）、<code>assuming</code> の量化子の
+中に書いた concept。concept と同じ名前の束縛変数は、これまでどおり束縛変数を指します。
+<code>specs/</code>、<code>examples/</code>、<code>rust/fslc/tests/fixtures/</code> のすべての <code>.fsl</code>（655 形式、うち <code>fsl 5</code>
+は 22）の <code>check</code> の結果は、base <code>995146f45</code> と head <code>cb883819d</code> で、それぞれの
+materialized tree で実行して変わりませんでした。</p>
 <ul>
 <li>FSL 4 の process+data プロファイルは、単一エンティティのライフサイクルに対する
   requirements 形式です。<code>process E with f: T { ... }</code> は、エンティティの stage

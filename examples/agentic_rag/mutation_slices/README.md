@@ -51,7 +51,7 @@ fslc mutate examples/agentic_rag/mutation_slices/backported_constraints_slice.fs
 （issue #485。それ以前の版は frozen Python `python -m fslc` の実測値で、
 `backported_constraints_slice.fsl`はnativeでは`check`が
 requirement注釈のtext衝突でexit 2になり、この表自体が再現不能だった。同不具合は
-`REQ-3`/`REQ-4`/`REQ-5`ブロック内の重複legacy注釈テキストを削除して修正済み）。
+`REQ-RAG-003`/`REQ-RAG-004`/`REQ-RAG-005`ブロック内の重複legacy注釈テキストを削除して修正済み）。
 mutation engineの列挙順・演算子集合がPython参照実装とnativeで異なるため、
 killed/survivedの絶対数はPython実測値と一致しない。
 

@@ -99,8 +99,8 @@ fn classifies_every_authored_target_in_cancel_system() {
         "action:decline",
         "property:invariant:CountsMatchScreens",
         "property:invariant:OfferedFlagConsistent",
-        "acceptance:AC-1",
-        "acceptance:AC-2",
+        "acceptance:AC-CANCEL-001",
+        "acceptance:AC-CANCEL-002",
         "refinement:CancelFlow",
     ]
     .into_iter()
@@ -410,24 +410,24 @@ fn acceptance_case_own_id_is_a_requirement_relation() {
     let ac1 = claims
         .claims
         .iter()
-        .find(|claim| claim.id == "acceptance:AC-1#acceptance_trace")
-        .expect("AC-1 claim exists");
-    assert_eq!(ac1.requirements, vec!["AC-1".to_owned()]);
+        .find(|claim| claim.id == "acceptance:AC-CANCEL-001#acceptance_trace")
+        .expect("AC-CANCEL-001 claim exists");
+    assert_eq!(ac1.requirements, vec!["AC-CANCEL-001".to_owned()]);
     assert!(
         claims
             .coverage
             .rendered
-            .contains(&"acceptance:AC-1".to_owned())
+            .contains(&"acceptance:AC-CANCEL-001".to_owned())
     );
     let requirement = claims
         .requirements
         .iter()
-        .find(|requirement| requirement.id == "AC-1")
-        .expect("AC-1 has its own requirement record");
+        .find(|requirement| requirement.id == "AC-CANCEL-001")
+        .expect("AC-CANCEL-001 has its own requirement record");
     assert!(
         requirement
             .claim_ids
-            .contains(&"acceptance:AC-1#acceptance_trace".to_owned())
+            .contains(&"acceptance:AC-CANCEL-001#acceptance_trace".to_owned())
     );
 }
 
@@ -574,8 +574,8 @@ fn claim_digest_changes_when_an_acceptance_step_changes() {
     assert_only_target_changed(
         &before,
         &after,
-        "acceptance:AC-1#acceptance_trace",
-        "acceptance:AC-2#acceptance_trace",
+        "acceptance:AC-CANCEL-001#acceptance_trace",
+        "acceptance:AC-CANCEL-002#acceptance_trace",
     );
 }
 

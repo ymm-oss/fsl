@@ -253,6 +253,7 @@ canonical name in parentheses (`'申請（Claim）'`).
 | message `maps auto actor mismatch …` (`kind: "type"`, no `diagnostic_code`; `check`, `verify`, `refine`, including chains) | an automatically matched event's actor differs from its abstract business transition or requirements event; actors display canonical names only | fix the declared actor to match the source contract; requirement text does not supply the actor |
 | `event_not_on_lifecycle` | an event's move is not an edge of the lifecycle (or its `in S` is not a stage) | fix the move or the lifecycle to what the source says |
 | `ambiguous_input_field` | a bare name in an event's expression is both its input and a field | write `input amount` or `Return.amount` |
+| `captured_by_binder` | `input amount` sits inside a quantifier or aggregate binder named `amount`, or a decision table's `assuming` names a concept inside a binder named like something the concept reads | rename the binder |
 | field `… needs an initial value` (parse error) | an entity field without `= init` | give the initial value the source states, or ask |
 | `unknown_verb` / `unknown_event_phrase` / `ambiguous_step` | a scenario step matches no event, no event of that actor (the message lists the actor's verbs), or several | fix the step to the event meant |
 | `scenario_instance_overflow` | a trace names more instances than `verify { instances }` allows | raise the bound or reuse an instance; never drop the step |

@@ -13,10 +13,10 @@ workflow:
 
 | File | Contents |
 |---|---|
-| [`asis_expense.fsl`](asis_expense.fsl) | Current operations (interview results): process + control policies CTRL-1/2 + KPI |
+| [`asis_expense.fsl`](asis_expense.fsl) | Current operations (interview results): process + control policies POL-EXPENSE-001/002 + KPI |
 | [`tobe_expense.fsl`](tobe_expense.fsl) | Reform proposal: adds an auto-approval lane, keeps the controls |
 | [`tobe_refines_asis.fsl`](tobe_refines_asis.fsl) | **Control check of the reform**: To-Be's business mapping table (auto-approval = approval act) |
-| [`governance_controls.fsl`](governance_controls.fsl) | Optional governance catalog: Finance owns CTRL-1/2, both business specs delegate to them, and the To-Be preservation refinement is checked |
+| [`governance_controls.fsl`](governance_controls.fsl) | Optional governance catalog: Finance owns CTRL-EXPENSE-001/002, both business specs delegate to them, and the To-Be preservation refinement is checked |
 
 ## Why this is valuable (3 points)
 

@@ -76,16 +76,16 @@ business AgenticRagBusiness {
     every Req in BActionApproved must eventually be BActionExecuted
 
   // Positive goals: 業務として許容する主要な終端が到達可能であることを確認する。
-  goal CanAnswer "根拠と安全性を満たす依頼は回答まで進める"
+  goal GOAL-RAG-001 "根拠と安全性を満たす依頼は回答まで進める"
     some Req can reach BAnswered
 
-  goal CanRefuse "回答不能または承認拒否の依頼は拒否で閉じられる"
+  goal GOAL-RAG-002 "回答不能または承認拒否の依頼は拒否で閉じられる"
     some Req can reach BRefused
 
-  goal CanReview "人間レビューへ送る業務経路が存在する"
+  goal GOAL-RAG-003 "人間レビューへ送る業務経路が存在する"
     some Req can reach BHumanReview
 
-  goal CanExecuteTool "承認済み副作用toolを実行する業務経路が存在する"
+  goal GOAL-RAG-004 "承認済み副作用toolを実行する業務経路が存在する"
     some Req can reach BActionExecuted
 }
 

@@ -35,7 +35,12 @@ extension-agnostic behavior.
 
 `fslc migrate PATH... --edition next` is a dry run. It emits the same findings
 plus a complete replacement edit for each changed file. `--write` is the only
-mutating mode. The command plans every input in memory, parses and checks the
+mutating mode, and it replaces only the changed inputs. `written` reports those
+replacements, not the `--write` flag (#1754): the top-level `written` is `true`
+only when at least one input was replaced, and each `files[]` entry's `written`
+is `true` only for a replaced input. An unchanged input is never rewritten (its
+inode and mtime stay), and a dry run, a refusal and `migrate_manual_required`
+report `written: false` everywhere. The command plans every input in memory, parses and checks the
 before/after sources, compares location-free Public Kernel JSON, prepares and
 syncs sibling temporary files, then replaces the validated set. Before it
 prepares any temporary file, every changed input must be a regular file (not a
@@ -105,7 +110,16 @@ with `machine_applicable: false`.
 
 The formatter and migrator share one byte-edit overlap/boundary validator and
 one planner for enum, logical-operator, and quantifier canonicalization. The
-migrator adds only semantic edits for metadata, mappings, and defaults. A safe
+migrator adds only semantic edits for metadata, mappings, and defaults. The
+written document keeps the input's line endings and byte order mark (#1755):
+the formatter, the header insertion and the process-form rendering produce LF
+lines, and the formatter drops a byte order mark, so the planned replacement is
+laid out again before it is checked and written. Every line ends as the input's
+first line does (CRLF when it ends in `\r\n`, otherwise LF; a mixed input
+follows its first line), and the mark is kept exactly when the input has one.
+The Kernel comparison runs on these final bytes. `fmt` is not covered: it
+still prints LF without the mark. A finding's own `edits` (such as the
+`missing_edition_header` insertion `fsl 5\n`) are not laid out again. A safe
 result must parse and check before and after, retain the location-free Public
 Kernel, format idempotently, and produce no edits on a repeated migration.
 Migration equivalence compares the typed annotation carrier while ignoring the

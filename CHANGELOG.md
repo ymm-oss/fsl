@@ -1849,6 +1849,39 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   `renderer_changed` on any other `fslc` version. Other values, such as `4.12`
   or `v4.12.0`, are still compared. Migration: a consumer that read
   `generator_version` as the `fslc` version must read `fslc --version` instead.
+- Changed (#1754, breaking): `fslc migrate --write` no longer reports `"written": true` when
+  it wrote nothing. The top-level `written` echoed the `--write` flag, so a run
+  whose inputs needed no rewrite reported `"written": true` with `"changed": 0`.
+  `written` now means a file was replaced: the top level is `true` only when at
+  least one input was replaced, and each `files[]` entry carries its own
+  `written`, `true` only for a replaced input. Unchanged inputs were already left
+  untouched (same inode and mtime); dry runs, refusals and
+  `migrate_manual_required` report `written: false` at both levels. A consumer
+  that read `written` as "`--write` was given" now sees `false` for a no-op
+  write.
+- Changed (#1798, breaking removal): in an FSL 5 event's `only when` condition
+  or `set` expression, a bare name that is both the event's input and a field of
+  its entity is `ambiguous_input_field` (exit 2) inside every expression form,
+  as LANGUAGE.md already states; inside `abs(...)`, `min`/`max`, a method call,
+  an `is` test, a quantifier or `count`/`sum` it used to read the input silently.
+  Write `input amount` or `Claim.amount`. Nested in those forms, both used to fail
+  with a `semantics` error and now work: `Claim.amount` reads the stored field
+  and `input amount` reads the input, except inside a quantifier or aggregate
+  binder named `amount`, where it is refused with the new code
+  `captured_by_binder` because the binder would capture it. A concept condition
+  whose quantifier range bound is a field (`exists x in amount..amount { ... }`)
+  is now refused with `binder bound is not a static integer`: it used to pass
+  only by reading a same-named input. A decision table's `assuming` now expands
+  a concept named inside a quantifier or aggregate, which used to fail with a
+  `semantics` error; a binder named like something that concept reads (a
+  resource, say) is `captured_by_binder`. Inside a binder named like a concept,
+  the name is the binder: base left every name inside a quantifier unresolved,
+  so such a name was the binder there too, and `assuming exists Small in 0..0
+  { Small == 0 }` checks `ok` on both. Checking all 655 `.fsl` files under
+  `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (22 of them `fsl 5`),
+  each SHA in its own materialized tree with a binary built from it, gives the
+  same result, kind, diagnostic code and exit code on `995146f45` and on this
+  change.
 - Fixed (#251): next-edition diagnostics for already-invalid expression `||` and
   `->` keep the parse envelope and exit code while reporting
   `unsupported_in_edition`, the operator location, canonical replacement, and
@@ -1858,6 +1891,20 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   while check preserves early project-gate results instead of folding model-only
   governance over them.
   Type-range endpoints, including parenthesized parts, retain generic parse diagnostics.
+- Fixed (#608): 25 more shipped examples now pass `fslc lint`, including the
+  teaching examples `examples/pm/cancel_system.fsl`, `examples/pm/cancel_flow.fsl`,
+  `examples/layers/return_policy.fsl` and `examples/layers/return_system.fsl`.
+  Their requirement, acceptance, forbidden, policy, goal, control and assumption
+  IDs use the canonical `PREFIX-SCOPE-NNN` form: `REQ-1` becomes
+  `REQ-CANCEL-001`, `goal CanRetain` becomes `goal GOAL-CANCEL-001`, and
+  `FB-EARLY-REFUSE` becomes `FB-EARLY-REFUSE-001`. Legacy `"ID: text"` tags
+  become `@requirement(...)`, and domain invariants use `=>` instead of `->`.
+  Each changed file keeps its `check` result, its `verify --depth 8` verdict and
+  property results, and its `mutate` kill rate. A new corpus test,
+  `every_corpus_spec_lints_clean_or_is_allowlisted`, fails when a `specs/` or
+  `examples/` file adds a lint finding. Each file it still allows names its
+  reason, for example a file the frozen Python reference loads, or business
+  policy IDs that `preserve progress` must reference as identifiers.
 - Fixed (#1091): a requirements document's `terminal_rule` claim is now
   attributed to its `terminal` block. `fslc document claims` reports it
   `source_backed` with the block's `source` location instead of `unknown` with
@@ -2563,6 +2610,96 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   of which the installer itself leaves alone. The README's macOS
   `xattr -d com.apple.quarantine` step no longer fails when the file has no such
   attribute.
+- Fixed (#1734): `fslc lint --edition current` and `fslc migrate --edition current` follow the document's edition header, as `check`, `verify`, `domain check` and `fmt` already did. They read `current` as an explicit `4`, so an `fsl 5` document was refused with `edition_conflict` and the message "the document declares 'fsl 5' but --edition 4 was requested", although the user had typed `current` and the upgrade guide recommends it. `current` on a headerless document still reads it as FSL 4 (for `migrate`, instead of its next-edition default), and the explicit conflicts are unchanged: `--edition 4` on an `fsl 5` document, and `--edition 5` or `next` on an `fsl 4` document, remain `edition_conflict`.
+- Fixed (#1735): `fslc migrate --write` no longer rewrites a read-only input.
+  Since `migrate` was added (3.0.0; observed on 4.12.0), it replaced a changed
+  mode-0444 file through a sibling temporary file and a rename, reported
+  `"written": true` and exited 0, leaving the new bytes read-only. It now refuses
+  such an input with the same `io` error as a read-only `-o` target (#1419):
+  `output target is read-only`, exit 2. The check runs over the whole write set
+  before any temporary file is prepared, so one read-only input leaves every input
+  unchanged; a temporary file prepared for an earlier input is also removed when a
+  later input's temporary file cannot be created. Writable inputs are rewritten
+  as before, keeping their permission bits.
+- Fixed (#1736): `fslc refine` with `preserve progress` is fast again. Since #1467 the symbolic evaluator types every equality, conditional, `let` and collection binder against the model, and each of those calls rebuilt the model's whole type environment (every state root, constant and enum member). The environment is now built once and reused while the model's state, constants and types are unchanged, so every inferred type is the one the rebuilt environment gave. On one machine `refine` of `examples/multi_agent_system` design → requirements at `--depth 8` went from 6.60 s back to 5.02 s (4.58 s in v4.12.0).
+- Fixed (#1737): native artifact output refuses a destination that is the same file as an input
+  the command reads, before anything is written: `fslc html s.fsl -o s.fsl` no
+  longer replaces the spec with the report. The spec, imported files and file
+  options such as `--evidence`, `--glossary`, `--approval` and `--artifact`
+  count, compared by file identity, so `./s.fsl`, a symlink and a hard link to
+  the input are refused too. The refusal is a `kind: "io"` error with exit 2, in
+  the envelope of the existing non-regular-target refusals; it covers `html`,
+  `ledger`, `testgen`, `counterexample export`, `document generate`/`claims`,
+  `db import`, `domain expand`/`generate`/`testgen`, `approval create` and
+  `causal observe-expectations`.
+- Fixed (#1739): the VS Code extension `.vsix` no longer ships a vulnerable
+  `brace-expansion`. The `editors/vscode` lockfile is refreshed with
+  `npm audit fix` (no `--force`, no direct-dependency or `package.json`
+  change): the runtime `vscode-languageclient` -> `minimatch@5.1.9` ->
+  `brace-expansion` moves from 2.1.1 to 2.1.7, clearing its six high
+  denial-of-service advisories, and the build-only toolchain under
+  `@vscode/vsce` and `@azure/identity` takes in-range updates of `undici`,
+  `fast-uri`, `js-yaml`, `markdown-it`, `@azure/msal-node` and `qs`.
+  `npm audit --omit=dev` now reports no advisory; the full audit drops from
+  11 (7 high, 4 moderate) to 3 moderate, all in `glob`/`minimatch` under the
+  build-only `@vscode/vsce@3.9.2`, whose fixed versions lie outside that
+  release's dependency ranges. The packaged `.vsix` keeps the same 210 files;
+  only the three `brace-expansion` files change.
+- Fixed (#1753): `fslc document generate`, `document claims` and
+  `approval create --kind requirements_document` refuse an `-o` destination that
+  is the abstraction a requirements document names in `implements ... from`, also
+  through `./`, a symlink or a hard link, although they never read that file:
+  `document claims req.fsl -o abs.fsl` no longer replaces the abstract spec with
+  the claims JSON. The refusal is the #1737 `kind: "io"` error with exit 2,
+  before anything is written.
+- Fixed (#1755): `fslc migrate --write` keeps a document's line endings and byte
+  order mark. On a CRLF document, the lines it inserted or rewrote ended in LF
+  while the other lines kept CRLF, and a document the formatter rewrote (string
+  metadata, inline maps, domain enums, colon quantifiers) came back LF-only
+  without its UTF-8 byte order mark. Every line of the written document now ends
+  as the input's first line does (CRLF or LF), the mark is kept exactly when the
+  input has one, and the dry run's replacement holds the same bytes. LF inputs
+  are written as before. `fslc fmt` is unchanged: it still prints LF without the
+  mark.
+- Fixed (#1756): `fslc --help` and the `root.help` string of `cli-contract.json` list `testplan` and `counterexample`, which already worked and were in `root.commands`. A bare `fslc` reports the root usage line, which names every top-level command, instead of `usage: fslc <check|verify> SPEC [options]`; it stays a `kind: "usage"` envelope on stdout with exit 2. `fslc help [COMMAND [SUBCOMMAND]]` prints the same help as `fslc [COMMAND ...] --help` with exit 0, where 4.12 reported `unknown command 'help'`; a word after `help` that names no command is the usual unknown-command usage error. A bare `fslc document` names `check`, and a bare `fslc domain` names `replay` and `testgen`. A conformance test now derives every root and family command list, and each bare usage line, from `cli-contract.json`, so a command missing from one fails it.
+- Fixed (#1757): `fslc lint`, `fslc migrate` and `fslc fmt --check` publish the edition a document was read in, as `check`, `verify` and `domain check` already did, instead of the requested `--edition`. An `fsl 5` document linted without `--edition` reported `"edition": "current"`, `migrate --edition current` on it said `current`, and `migrate` on an `fsl 4` document said `next`; they now report `next`, `next` and `current`, and add `"fsl_edition": 4` or `5` when the document has a header. Over several documents `edition` is `next` only when every one was read in the next edition, and `fsl_edition` appears only when every one declares the same header. These reports still always carry `edition`, so a headerless document reports what 4.12 did. An `edition_conflict` message quotes `--edition` as typed: `--edition next was requested`, where it said `--edition 5`. Exit codes and verdicts are unchanged.
+- Fixed (#1764): the `migrate` multi-file refusal test now reaches the refusal.
+  Its "safe" input failed `check`, so `migrate` exited 2 before planning the
+  refused input and the test passed for the wrong reason. The safe input now
+  checks and is rewritten when migrated alone; the test asserts the
+  `migration_refused` result, the refused file's `unsupported_double_ampersand`
+  finding and `written: false`, and fails when the all-or-nothing guard is
+  removed. Test-only; `migrate` behavior is unchanged.
+- Fixed (#1792): the workspace's own tests compile again on Rust 1.88, the
+  declared minimum `rust-version`. A test helper used an `if let` match guard,
+  which 1.88 rejects, so the release workflow's MSRV test step failed before it
+  built any native binary. Test-only; the shipped binaries are unchanged.
+- Fixed (#1794): the `fsl-lsp` stdio tests pass on Windows. Two tests built or
+  expected Unix-only file URIs: `file://C:\...` is normalized by the server, so
+  nine `issue_1517` cases waited out their 120 s deadline, and a drive-less
+  `file:///tmp/...` has no Windows path. The release workflow's Windows MSRV test
+  step failed on them. Test-only; the server is unchanged.
+- Fixed (#1798): in an FSL 5 `requirements` document, a field name in a
+  `concept` condition is the stored entity field in every expression form. Inside
+  `abs(...)`, `min`/`max`, a method call such as `.contains(...)`, an `is`
+  pattern test, a quantifier, or `count`/`sum`, the name used to read the event
+  input of the same name, so an `only for <Concept>` guard, and a decision-table
+  row naming the concept, admitted an event the concept excludes. `check`, BMC
+  and induction then accepted such a spec wrongly; they now refuse it (for
+  example a scenario that relies on the excluded event fails with
+  `kind: "acceptance"`, exit 2). A quantifier or aggregate binder named like a
+  field still shadows the field inside its scope. One shared resolver with no
+  catch-all now spells fields for concepts, decision tables and event
+  expressions, so a new expression form cannot skip resolution.
+- Fixed (#1799): in an FSL 5 `requirements` document, two `only after` rules
+  whose prerequisite events joined to one history field name (the events
+  `{a, b}` and a single event named `a_or_b` both gave `did_a_or_b`) shared
+  that field, so one rule's prerequisite satisfied the other: a scenario that
+  skipped the required event was `ok`, `verified` and `proved`, and a valid
+  order could be refused. Each prerequisite event set now has its own field;
+  sets whose names collide get numbered fields (`did_a_or_b_1`,
+  `did_a_or_b_2`) independent of rule order. Field names of documents without
+  such a collision are unchanged.
 - Replaced (#251): Inline branch maps in the public return example with explicit
   fair actions and local `implements` correspondences. The public refinement
   correspondences intentionally change from `submit.b1` / `submit.b2` to
@@ -2605,6 +2742,16 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   requirement metadata. `docs/design/DESIGN-migration.md` records the manually
   applied edits and that whole-file `fmt --check --edition next` still exits 1,
   as it does for the original example.
+- Documented (#1335): `LANGUAGE.md`, `LANGUAGE.ja.md`, the `fsl` skill's
+  `syntax.md` and `DESIGN-def.md` now record the 5.0.0 compose `def` change as
+  a breaking removal. `fslc` 4.12.0 `check` accepted, with exit 0, an unused
+  compose-level `def` with a repeated definition or parameter name, direct or
+  mutual recursion, or a call in its body to an undefined predicate or with the
+  wrong arity; 5.0.0 rejects each with exit 2 and the direct-spec error. The
+  4.12 to 5.0 table of refused forms gains a row, and `DESIGN-def.md` records the
+  measured transitions. A new regression test in
+  `issue_1335_compose_predicate_expansion.rs` covers the forms that existing
+  tests did not.
 - Documented (#1347): a requirements transition's `by X` is a free label.
   The requirements layer has no `actor` declaration and `check` does not look
   the name up, unlike `business`, which rejects a transition whose actor is not
@@ -2667,6 +2814,19 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 - Documented (#1630): distinguish user-property selection from induction's
   implicit type-bound base checks in the FSL command reference, and mark the v1
   property-selector description as historical with a link to the current contract.
+- Documented (#1766): `examples/fsl5/` ships the first `fsl 5`-headed examples: one
+  leave-request requirements model written with the English spellings
+  (`leave_request.en.fsl`) and with the Japanese keywords, particles and glossary
+  aliases (`leave_request.ja.fsl`). Both check, lint with no finding, verify to
+  depth 8 and prove their invariants by induction; their Kernel JSON is identical
+  apart from source locations and the quoted requirement texts. LANGUAGE.md,
+  LANGUAGE.ja.md, the README tree and the site's examples pages link them.
+  The corpus tests that assumed every corpus document is headerless now read a
+  headed document in its own edition: `edition_header.rs` copies it unchanged
+  instead of adding a second header, and the LSP corpus test expects the next
+  lexicon for an `fsl 5` document. `formatter_cli.rs` formats each corpus document
+  only under the edition policies `fslc fmt` accepts for it, so an `fsl 5`
+  document is no longer formatted under the `fsl 4` policy its header refuses.
 - Decided (#1612): Adopt the main merge queue with squash merging and zero required
   approvals so a single maintainer can enqueue. Record the live queue rule in the
   CI contract and fixture, retain full pull-request evidence with

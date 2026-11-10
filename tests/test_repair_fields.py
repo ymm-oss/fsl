@@ -31,7 +31,7 @@ def test_trace_type_sla_violation(tmp_path):
     # an SLA deadline is distinguished from a structural invariant
     assert r["trace_type"] == "sla"
     # backward-compat: existing fields untouched
-    assert r["requirement"] == {"id": "NFR-1", "text": "submitted requests finish within 4 ticks"}
+    assert r["requirement"] == {"id": "NFR-SLA-001", "text": "submitted requests finish within 4 ticks"}
     assert r["violation_kind"] == "invariant"
     assert r["trace"]
 

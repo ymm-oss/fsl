@@ -185,6 +185,7 @@ const MIGRATE_STDOUT: &str = r#"{
     {
       "path": "case.fsl",
       "changed": false,
+      "written": false,
       "findings": [],
       "edits": []
     }

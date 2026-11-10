@@ -709,6 +709,296 @@ fn names_a_rule_generates_are_checked_for_collisions() {
     );
 }
 
+/// #1799: a document where two `only after` prerequisite sets have one
+/// generated name. `User pays C` is the set `{a, b}` and `User records C`
+/// is the single event `recording`; with `recording` named `a_or_b`, both
+/// join to `did_a_or_b`. `rules` are the rule blocks, `steps` the scenario's
+/// steps before `then`.
+fn ghost_collision_document(recording: &str, rules: &str, steps: &str) -> String {
+    format!(
+        "fsl 5\nrequirements R {{\n  actor User\n  entity C {{ lifecycle Draft -> Submitted }}\n  \
+         event a = User pays C in Draft\n  event b = User pays C in Submitted\n  \
+         event advance = User advances C Draft -> Submitted\n  \
+         event {recording} = User records C in Draft\n  event x = User closes C in Draft\n  \
+         event y = User finishes C in Draft\n{rules}  scenario AC-1 \"t\" {{\n{steps}    \
+         then c1 is Draft\n  }}\n}}\nverify {{ instances C = 1 }}\n"
+    )
+}
+
+const GHOST_COLLISION_RULES: &str = "  rule REQ-1 \"Close after paying\" {\n    \
+     User closes C only after User pays C\n  }\n  rule REQ-2 \"Finish after recording\" {\n    \
+     User finishes C only after User records C\n  }\n";
+
+/// `check`, `verify --engine bmc` and `verify --engine induction` of
+/// `source`, as `(result, exit)` each; `check` also gives its failed step.
+fn ghost_collision_verdicts(label: &str, source: &str) -> [(Option<String>, Option<u64>, i32); 3] {
+    let scratch = Scratch::new(label, None);
+    scratch.write("doc.fsl", source);
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(args)
+            .current_dir(&scratch.0)
+            .output()
+            .expect("run fslc");
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "{label} {args:?}: invalid JSON ({error}): {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
+        (
+            value["result"].as_str().map(str::to_owned),
+            value["failed_step"].as_u64(),
+            output.status.code().expect("exit code"),
+        )
+    };
+    [
+        run(&["check", "doc.fsl"]),
+        run(&[
+            "verify",
+            "doc.fsl",
+            "--engine",
+            "bmc",
+            "--no-cache",
+            "--depth",
+            "2",
+        ]),
+        run(&["verify", "doc.fsl", "--engine", "induction", "--no-cache"]),
+    ]
+}
+
+/// #1799: a history field is keyed by its exact prerequisite event set. The
+/// scenario finishes without recording, so REQ-2 refuses its step 1 on
+/// every engine, whether the recording event is named `a_or_b` (whose
+/// `did_a_or_b` is also the name `{a, b}` joins to) or not. Before the fix,
+/// the two sets shared one field that only `a` and `b` set, so `pays`
+/// satisfied REQ-2 and the document was `ok`, `verified` and `proved`.
+#[test]
+fn only_after_sets_with_one_generated_name_keep_separate_histories() {
+    let skip = "    User pays c1\n    User finishes c1\n";
+    let refused = [
+        (Some("error".to_owned()), Some(1), 2),
+        (Some("error".to_owned()), Some(1), 2),
+        (Some("error".to_owned()), Some(1), 2),
+    ];
+    for (label, recording) in [
+        ("ghost-collision-skip", "a_or_b"),
+        ("ghost-collision-skip-control", "recording_control"),
+    ] {
+        assert_eq!(
+            ghost_collision_verdicts(
+                label,
+                &ghost_collision_document(recording, GHOST_COLLISION_RULES, skip)
+            ),
+            refused,
+            "{label}"
+        );
+    }
+}
+
+/// #1799, the reverse: recording first is the order REQ-2 asks for, so the
+/// scenario is accepted on every engine. Before the fix, `records` set no
+/// field `finishes` read, and the valid order was refused.
+#[test]
+fn only_after_sets_with_one_generated_name_accept_the_valid_order() {
+    let order = "    User records c1\n    User finishes c1\n";
+    let accepted = [
+        (Some("ok".to_owned()), None, 0),
+        (Some("verified".to_owned()), None, 0),
+        (Some("proved".to_owned()), None, 0),
+    ];
+    for (label, recording) in [
+        ("ghost-collision-order", "a_or_b"),
+        ("ghost-collision-order-control", "recording_control"),
+    ] {
+        assert_eq!(
+            ghost_collision_verdicts(
+                label,
+                &ghost_collision_document(recording, GHOST_COLLISION_RULES, order)
+            ),
+            accepted,
+            "{label}"
+        );
+    }
+}
+
+/// `value` with every array sorted, at every depth: what is left of an
+/// initialization when the order of its statements is set aside.
+fn sorted_arrays(value: &Value) -> Value {
+    match value {
+        Value::Object(object) => Value::Object(
+            object
+                .iter()
+                .map(|(key, value)| (key.clone(), sorted_arrays(value)))
+                .collect(),
+        ),
+        Value::Array(items) => {
+            let mut items = items.iter().map(sorted_arrays).collect::<Vec<_>>();
+            items.sort_by_key(Value::to_string);
+            Value::Array(items)
+        }
+        scalar => scalar.clone(),
+    }
+}
+
+/// #1799 and B.6: the history field names do not depend on the order the
+/// rules are written in, so the two rules swapped lower to the same kernel:
+/// each field has the same name, is set by the same events and is read by
+/// the same guard. The one difference set aside is the order of the
+/// fields' initial values in `init`, which follows the order the rules are
+/// met in for any two history fields, colliding or not; `init` is compared
+/// with its arrays sorted instead.
+#[test]
+fn colliding_history_field_names_do_not_depend_on_rule_order() {
+    let (first, second) = GHOST_COLLISION_RULES
+        .split_once("  rule REQ-2")
+        .expect("two rules");
+    let swapped = format!("  rule REQ-2{second}{first}");
+    let order = "    User records c1\n    User finishes c1\n";
+    let scratch = Scratch::new("ghost-collision-swapped", None);
+    let written = scratch.write(
+        "written.fsl",
+        &ghost_collision_document("a_or_b", GHOST_COLLISION_RULES, order),
+    );
+    let reversed = scratch.write(
+        "swapped.fsl",
+        &ghost_collision_document("a_or_b", &swapped, order),
+    );
+    let mut kernels = [reversed, written].map(|path| kernel_compare::kernel_v2(&path));
+    let inits = kernels.each_mut().map(|kernel| {
+        kernel
+            .as_object_mut()
+            .and_then(|kernel| kernel.remove("init"))
+            .expect("a kernel has init")
+    });
+    assert_eq!(
+        sorted_arrays(&kernel_compare::comparable(&inits[0])),
+        sorted_arrays(&kernel_compare::comparable(&inits[1])),
+        "the colliding rules swapped: init"
+    );
+    kernel_compare::assert_same_kernel(&kernels[0], &kernels[1], "the colliding rules swapped");
+}
+
+/// #1799: the document of [`ghost_collision_document`] with one more event,
+/// `a_or_b_1` (`User logs C`), whose own field name `did_a_or_b_1` is the
+/// first number the colliding `{a, b}` and `{a_or_b}` would take. `field`
+/// is declared on `C`; `rules` follow REQ-1 and REQ-2.
+fn numbered_ghost_document(field: &str, rules: &str, steps: &str) -> String {
+    format!(
+        "fsl 5\nrequirements R {{\n  actor User\n  entity C {{\n    \
+         lifecycle Draft -> Submitted\n{field}  }}\n  \
+         event a = User pays C in Draft\n  event b = User pays C in Submitted\n  \
+         event advance = User advances C Draft -> Submitted\n  \
+         event a_or_b = User records C in Draft\n  event a_or_b_1 = User logs C in Draft\n  \
+         event x = User closes C in Draft\n  event y = User finishes C in Draft\n  \
+         event z = User files C in Draft\n{GHOST_COLLISION_RULES}{rules}  \
+         scenario AC-1 \"t\" {{\n{steps}    then c1 is Draft\n  }}\n}}\n\
+         verify {{ instances C = 1 }}\n"
+    )
+}
+
+const FILES_AFTER_LOGS: &str = "  rule REQ-3 \"File after logging\" {\n    \
+     User files C only after User logs C\n  }\n";
+
+const DECLARED_NUMBER: &str = "    did_a_or_b_1: Bool = false\n";
+
+/// #1799: a numbered field skips the name another set's field has. `{a, b}`
+/// and `{a_or_b}` share `did_a_or_b`, and `{a_or_b_1}` keeps
+/// `did_a_or_b_1`, so the two are numbered `did_a_or_b_2` and
+/// `did_a_or_b_3`. Paying does not let `User files` (REQ-3) through; logging
+/// does. Numbering `{a, b}` `did_a_or_b_1` would share REQ-3's field and
+/// accept the first scenario.
+#[test]
+fn numbered_history_fields_skip_another_sets_name() {
+    let refused = [
+        (Some("error".to_owned()), Some(1), 2),
+        (Some("error".to_owned()), Some(1), 2),
+        (Some("error".to_owned()), Some(1), 2),
+    ];
+    assert_eq!(
+        ghost_collision_verdicts(
+            "ghost-number-other-set-skip",
+            &numbered_ghost_document(
+                "",
+                FILES_AFTER_LOGS,
+                "    User pays c1\n    User files c1\n"
+            )
+        ),
+        refused
+    );
+    let accepted = [
+        (Some("ok".to_owned()), None, 0),
+        (Some("verified".to_owned()), None, 0),
+        (Some("proved".to_owned()), None, 0),
+    ];
+    assert_eq!(
+        ghost_collision_verdicts(
+            "ghost-number-other-set-order",
+            &numbered_ghost_document(
+                "",
+                FILES_AFTER_LOGS,
+                "    User pays c1\n    User records c1\n    User logs c1\n    \
+                 User closes c1\n    User finishes c1\n    User files c1\n"
+            )
+        ),
+        accepted
+    );
+}
+
+/// #1799: a numbered field skips a declared field. With `did_a_or_b_1`
+/// declared, the colliding `{a, b}` and `{a_or_b}` are numbered
+/// `did_a_or_b_2` and `did_a_or_b_3`: paying does not let `User finishes`
+/// (REQ-2) through, and recording then paying lets both rules through. A
+/// declared field the unnumbered name of a set equals is still
+/// `generated_name_collision`.
+#[test]
+fn numbered_history_fields_skip_a_declared_field() {
+    let refused = [
+        (Some("error".to_owned()), Some(1), 2),
+        (Some("error".to_owned()), Some(1), 2),
+        (Some("error".to_owned()), Some(1), 2),
+    ];
+    assert_eq!(
+        ghost_collision_verdicts(
+            "ghost-number-declared-skip",
+            &numbered_ghost_document(
+                DECLARED_NUMBER,
+                "",
+                "    User pays c1\n    User finishes c1\n"
+            )
+        ),
+        refused
+    );
+    let accepted = [
+        (Some("ok".to_owned()), None, 0),
+        (Some("verified".to_owned()), None, 0),
+        (Some("proved".to_owned()), None, 0),
+    ];
+    assert_eq!(
+        ghost_collision_verdicts(
+            "ghost-number-declared-order",
+            &numbered_ghost_document(
+                DECLARED_NUMBER,
+                "",
+                "    User records c1\n    User finishes c1\n    User pays c1\n    \
+                 User closes c1\n"
+            )
+        ),
+        accepted
+    );
+    assert_error(
+        "ghost-number-declared-base",
+        &numbered_ghost_document(
+            DECLARED_NUMBER,
+            FILES_AFTER_LOGS,
+            "    User logs c1\n    User files c1\n",
+        ),
+        "generated_name_collision",
+        "'did_a_or_b_1'",
+    );
+}
+
 /// Lowering steps (no schema change, plan §0): each guard and property a
 /// rule lowers to has an origin whose step kind is its statement's.
 #[test]
@@ -1032,4 +1322,350 @@ fn a_row_a_never_rule_leaves_no_value_is_decide_row_emptied() {
         ]
     );
     assert!(emptied("row-not-emptied", "SmallClaim").is_empty());
+}
+
+/// #1798: the issue's document. The stored `amount` starts at 0 and the
+/// scenario approves with the input `amount` 1, so the scenario passes only
+/// when `condition` reads the input; read as the field, it is refused.
+fn input_shadow_document(condition: &str, members: &str) -> String {
+    format!(
+        "fsl 5\nrequirements R {{\n  number Amount\n  actor Manager\n  entity Claim {{\n    \
+         amount: Amount = 0\n    lifecycle Draft -> Approved\n    lifecycle Draft -> Rejected\n  \
+         }}\n  concept Eligible = Claim where {condition}\n  \
+         event approve = Manager approves Claim with amount Draft -> Approved\n  \
+         event reject = Manager rejects Claim Draft -> Rejected\n{members}  \
+         scenario AC-1 \"Approve with the input 1\" {{\n    Manager approves c1 with amount 1\n    \
+         then c1 is Approved\n  }}\n}}\nverify {{ instances Claim = 1 values Amount = 0..1 }}\n"
+    )
+}
+
+const ONLY_FOR_ELIGIBLE: &str =
+    "  rule REQ-1 \"Only eligible\" {\n    allow Manager approves Claim only for Eligible\n  }\n";
+
+/// `fslc <command> doc.fsl` on `source` for `check`, BMC and induction: the
+/// command, the result `kind` (else `result`) and the exit code.
+fn three_engines(label: &str, source: &str) -> Vec<(String, Option<String>, i32)> {
+    let scratch = Scratch::new(label, None);
+    scratch.write("doc.fsl", source);
+    [
+        &["check"][..],
+        &["verify", "--engine", "bmc", "--no-cache", "--depth", "2"],
+        &["verify", "--engine", "induction", "--no-cache"],
+    ]
+    .iter()
+    .map(|args| {
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(*args)
+            .arg("doc.fsl")
+            .current_dir(&scratch.0)
+            .output()
+            .expect("run fslc");
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+            panic!(
+                "{label} {args:?}: invalid JSON ({error}): {}",
+                String::from_utf8_lossy(&output.stdout)
+            )
+        });
+        (
+            args.join(" "),
+            value["diagnostic_code"]
+                .as_str()
+                .or_else(|| value["kind"].as_str())
+                .or_else(|| value["result"].as_str())
+                .map(str::to_owned),
+            output.status.code().expect("exit code"),
+        )
+    })
+    .collect()
+}
+
+/// Every engine refuses `source` with an acceptance failure.
+fn assert_refused_everywhere(label: &str, source: &str) {
+    assert_everywhere(label, source, "acceptance", 2);
+}
+
+/// Every engine reports `outcome` (the diagnostic code, else the kind, else
+/// the result) with exit code `exit`.
+fn assert_everywhere(label: &str, source: &str, outcome: &str, exit: i32) {
+    for (command, found, code) in three_engines(label, source) {
+        assert_eq!(
+            (found.as_deref(), code),
+            (Some(outcome), exit),
+            "{label}: `{command}`"
+        );
+    }
+}
+
+/// Every engine accepts `source`: `check` ok, BMC verified, induction proved.
+fn assert_accepted_everywhere(label: &str, source: &str) {
+    let found = three_engines(label, source)
+        .into_iter()
+        .map(|(_, found, code)| (found, code))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        found,
+        [
+            (Some("ok".to_owned()), 0),
+            (Some("verified".to_owned()), 0),
+            (Some("proved".to_owned()), 0),
+        ],
+        "{label}"
+    );
+}
+
+/// #1798: a field name inside `abs(...)` in a concept condition read the
+/// event input of the same name, so `only for Eligible` admitted a claim
+/// whose stored amount the concept excludes, and `check`, BMC and induction
+/// all accepted the scenario. The control is the same document without
+/// `abs`, which every engine refused before the fix too.
+#[test]
+fn issue_1798_a_concept_field_inside_abs_is_the_stored_field() {
+    assert_refused_everywhere(
+        "issue-1798-abs",
+        &input_shadow_document("abs(amount) > 0", ONLY_FOR_ELIGIBLE),
+    );
+    assert_refused_everywhere(
+        "issue-1798-control",
+        &input_shadow_document("amount > 0", ONLY_FOR_ELIGIBLE),
+    );
+}
+
+/// #1798: the field is the stored field inside every expression form a
+/// concept condition can spell here (each condition holds exactly when the
+/// value it reads is 1), and in a binder's domain; a binder named like the
+/// field shadows it in the binder's scope. A struct literal, a field read of
+/// a non-entity, `stage`, `reachable` and a user call cannot hold an
+/// `Amount` field in this document; the unit tests of
+/// `next_requirements::names` cover those forms.
+#[test]
+fn issue_1798_a_concept_field_is_the_stored_field_in_every_form() {
+    let forms = [
+        ("unary-named", "abs(amount) > 0"),
+        ("binary-named", "max(amount, 0) > 0"),
+        ("some", "some(amount) == some(1)"),
+        ("set", "Set { amount } == Set { 1 }"),
+        ("seq", "Seq { amount } == Seq { 1 }"),
+        ("index", "Seq { amount }[0] == 1"),
+        ("method-argument", "Set { 1 }.contains(amount)"),
+        ("method-receiver", "Set { amount }.contains(1)"),
+        ("method-no-argument", "Set { amount, 1 }.size() == 1"),
+        ("neg", "-amount < 0"),
+        ("not", "not (amount == 0)"),
+        ("conditional", "(if amount > 0 then true else false)"),
+        ("is", "some(amount) is some(v) and v > 0"),
+        ("quantified-body", "exists x in 1..1 { x == amount }"),
+        ("quantified-domain", "exists x in Set { amount } { x == 1 }"),
+        (
+            "quantified-where",
+            "exists x in 1..1 where x == amount { true }",
+        ),
+        ("count", "count(x in 1..1 where x == amount) > 0"),
+        ("sum", "sum(x in 1..1 of x * amount) > 0"),
+    ];
+    for (label, condition) in forms {
+        let (output, exit) = check_source(
+            &format!("issue-1798-{label}"),
+            &input_shadow_document(condition, ONLY_FOR_ELIGIBLE),
+        );
+        assert_eq!(
+            (output["kind"].as_str(), exit),
+            (Some("acceptance"), 2),
+            "{condition}: the concept must read the stored amount 0: {output:#}"
+        );
+    }
+    // A range bound is the field too, which is not static: it read the
+    // input, a parameter, and passed before the fix.
+    let (output, exit) = check_source(
+        "issue-1798-range-bound",
+        &input_shadow_document("exists x in amount..amount { x == 1 }", ONLY_FOR_ELIGIBLE),
+    );
+    assert_eq!(
+        (output["kind"].as_str(), exit),
+        (Some("semantics"), 2),
+        "{output:#}"
+    );
+    assert!(
+        output["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("binder bound is not a static integer")),
+        "{output:#}"
+    );
+    // A binder named `amount` is not the field: the concept holds, so the
+    // scenario passes.
+    let (output, exit) = check_source(
+        "issue-1798-binder-shadows",
+        &input_shadow_document("exists amount in 1..1 { amount == 1 }", ONLY_FOR_ELIGIBLE),
+    );
+    assert_eq!(
+        (output["result"].as_str(), exit),
+        (Some("ok"), 0),
+        "{output:#}"
+    );
+}
+
+/// #1798, the same defect in a decision table's row concept: the row
+/// condition read the input inside a quantifier. The control spells the
+/// condition without one.
+#[test]
+fn issue_1798_a_decision_row_concept_field_is_the_stored_field() {
+    let table = "  decide REQ-1 \"Only eligible\" for Draft Claim {\n    \
+                 Eligible => Manager approves\n    otherwise => Manager rejects\n  }\n";
+    assert_refused_everywhere(
+        "issue-1798-decide",
+        &input_shadow_document("exists x in 1..1 { x == amount }", table),
+    );
+    assert_refused_everywhere(
+        "issue-1798-decide-control",
+        &input_shadow_document("amount == 1", table),
+    );
+}
+
+/// #1798, the same defect in an event expression: inside `abs(...)` a bare
+/// name that is both the input and a field escaped `ambiguous_input_field`
+/// and read the input, and `Claim.amount` stayed unresolved. Both spellings
+/// now resolve as they do outside `abs`, `input amount` reads the input
+/// (outside a binder named `amount`; see the test below), and in a `set`
+/// expression a nested `Claim.amount` reads the stored field.
+#[test]
+fn issue_1798_an_only_when_name_inside_abs_resolves_as_outside() {
+    let only_when = |condition: &str| {
+        input_shadow_document(
+            "true",
+            &format!(
+                "  rule REQ-1 \"t\" {{\n    allow Manager approves Claim only when {condition}\n  }}\n"
+            ),
+        )
+    };
+    assert_error(
+        "issue-1798-when-ambiguous",
+        &only_when("abs(amount) > 0"),
+        "ambiguous_input_field",
+        "input amount",
+    );
+    assert_refused_everywhere("issue-1798-when-field", &only_when("abs(Claim.amount) > 0"));
+    // The stored amount is 0, so only the input 1 satisfies the guard.
+    assert_accepted_everywhere("issue-1798-when-input", &only_when("abs(input amount) > 0"));
+    // A `set` expression resolves through the same rewrite.
+    assert_error(
+        "issue-1798-set-ambiguous",
+        &with_set("abs(amount)", "then c1 is Approved"),
+        "ambiguous_input_field",
+        "input amount",
+    );
+    // A nested `Claim.amount` there reads the stored 0, not the input 1.
+    assert_accepted_everywhere(
+        "issue-1798-set-field",
+        &with_set("abs(Claim.amount)", "then claim_limit[0] == 0"),
+    );
+    assert_refused_everywhere(
+        "issue-1798-set-field-not-input",
+        &with_set("abs(Claim.amount)", "then claim_limit[0] == 1"),
+    );
+}
+
+/// [`input_shadow_document`] with a second field `limit` that `approve`
+/// sets to `value`, and the scenario's `then` line replaced by `then`.
+fn with_set(value: &str, then: &str) -> String {
+    input_shadow_document("true", "")
+        .replace(
+            "amount: Amount = 0\n",
+            "amount: Amount = 0\n    limit: Amount = 0\n",
+        )
+        .replace(
+            "with amount Draft -> Approved",
+            &format!("with amount Draft -> Approved set limit = {value}"),
+        )
+        .replace("then c1 is Approved", then)
+}
+
+/// #1798 review B1: `input amount` is read by the bare name `amount`, so
+/// inside a quantifier or aggregate binder named `amount` the binder would
+/// capture it (`exists amount in 0..0 { input amount == amount }` compared
+/// 0 with 0, and every engine accepted the scenario approving with input 1).
+/// It is refused as `captured_by_binder`; under another binder name the
+/// input is still the input.
+#[test]
+fn issue_1798_an_input_inside_a_binder_of_its_name_is_captured_by_binder() {
+    let only_when = |condition: &str| {
+        input_shadow_document(
+            "true",
+            &format!(
+                "  rule REQ-1 \"t\" {{\n    allow Manager approves Claim only when {condition}\n  }}\n"
+            ),
+        )
+    };
+    for (label, source) in [
+        (
+            "exists",
+            only_when("exists amount in 0..0 { input amount == amount }"),
+        ),
+        (
+            "count",
+            only_when("count(amount in 0..0 where input amount == amount) > 0"),
+        ),
+        (
+            "set-sum",
+            with_set(
+                "sum(amount in 0..0 of input amount)",
+                "then claim_limit[0] == 1",
+            ),
+        ),
+    ] {
+        assert_everywhere(
+            &format!("issue-1798-captured-{label}"),
+            &source,
+            "captured_by_binder",
+            2,
+        );
+    }
+    // Controls: under the binder `x`, `input amount` is the input 1.
+    assert_refused_everywhere(
+        "issue-1798-binder-x-refuses",
+        &only_when("exists x in 0..0 { input amount == x }"),
+    );
+    assert_accepted_everywhere(
+        "issue-1798-binder-x-admits",
+        &only_when("exists x in 1..1 { input amount == x }"),
+    );
+    assert_accepted_everywhere(
+        "issue-1798-set-sum-binder-x",
+        &with_set("sum(x in 0..0 of input amount)", "then claim_limit[0] == 1"),
+    );
+}
+
+/// #1798 review: a decision table's `assuming` now expands a concept named
+/// inside a quantifier (it was left unexpanded and failed to type), and a
+/// concept whose predicate reads a name the binder around it binds is
+/// `captured_by_binder`.
+#[test]
+fn issue_1798_an_assuming_concept_inside_a_binder() {
+    let table = |assuming: &str| {
+        format!(
+            "fsl 5\nrequirements R {{\n  number Amount\n  actor Manager\n  \
+             resource cap: Amount = 1\n  entity Claim {{\n    amount: Amount = 0\n    \
+             lifecycle Draft -> Approved\n    lifecycle Draft -> Rejected\n  }}\n  \
+             concept Small = Claim where amount <= cap\n  \
+             concept Big = Claim where amount > cap\n  \
+             event approve = Manager approves Claim with amount Draft -> Approved\n  \
+             event reject = Manager rejects Claim Draft -> Rejected\n  \
+             decide REQ-1 \"t\" for Draft Claim {{\n    Small => Manager approves\n    \
+             Big => Manager rejects\n  }} assuming {assuming}\n}}\n\
+             verify {{ instances Claim = 1 values Amount = 0..2 }}\n"
+        )
+    };
+    let (output, exit) = check_source(
+        "issue-1798-assuming-nested",
+        &table("exists x in 0..0 { Small or Big }"),
+    );
+    assert_eq!(
+        (output["result"].as_str(), exit),
+        (Some("ok"), 0),
+        "{output:#}"
+    );
+    assert_error(
+        "issue-1798-assuming-captured",
+        &table("exists cap in 5..5 { Big }"),
+        "captured_by_binder",
+        "concept 'Big' reads 'cap'",
+    );
 }
