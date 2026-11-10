@@ -262,6 +262,11 @@ nothing.
     Courier delivers o1
     then o1 is Delivered
   }
+  scenario AC-ORD-002 "A cancelled order keeps its quantity" {
+    User places o1 with buyer 0, qty 1
+    Shop cancels o1
+    then order_stage[0] == Cancelled and order_qty[0] == 1
+  }
   forbidden FB-ORD-001 "An unpaid order is not packed" {
     User places o1 with buyer 0, qty 1
     Shop packs o1
@@ -299,7 +304,8 @@ verify {
 | **scenario** `ID "text"` `{ steps  then check }` | a positive trace: every step must be enabled and the check must hold |
 | **forbidden** `ID "text"` `{ steps  then rejected }` | a negative trace: the steps before the last are enabled, and the last is rejected |
 | `Actor verb instance` [**with** `input value, …`] | a step; `o1`, `o2` are instance names, numbered in order of first use (more than `verify` allows is `scenario_instance_overflow`); a relation's role is an input (`with buyer 0`) |
-| **then** `o1` **is** `Stage` [**and** …] | the check after the last step |
+| **then** `o1` **is** `Stage` | the check after the last step: the stage of one instance. Nothing may follow it: `then o1 is Delivered and …` is refused (`kind: "parse"`) |
+| **then** `expression` | any other check after the last step, as one expression over the lowered state, joined with `and` (`AC-ORD-002`); an instance is its number, from 0 per entity in order of first use (`order_qty[0]` is `o1`'s quantity), and its name cannot be written there |
 | **verify** `{ instances E = N  values T = lo..hi }` | the finite world every command checks in; results hold for these sizes only |
 
 `check` runs every scenario and forbidden trace. Each failure is

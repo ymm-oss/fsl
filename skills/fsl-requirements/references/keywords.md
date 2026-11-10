@@ -15,6 +15,12 @@ How the table works:
   English word can be two keywords (`in` after `event … =` and after
   `concept … =` are different rows). Within one place each spelling means one
   keyword.
+- **`and` / `かつ` after `then`.** The scenario row is read only right after
+  `then o1 is Stage` (`結果 申請1 は 支払済み`), where it is refused: a
+  scenario checks one instance's stage. To check more, write one expression
+  after `then`, where `and` / `かつ` is the Boolean operator ("Boolean
+  operators of an expression"):
+  `結果 claim_stage[0] == 支払済み かつ claim_amount[0] == 1`.
 - **Only these words.** The header `fsl 5`, `implements … from` and its
   mapping, expression operators other than `and` / `or`, kernel members
   (`terminal`, `time`, `state`, …) and the `verify` world's `..` stay English.
