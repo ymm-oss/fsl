@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: Apache-2.0
+spec WorkerTwinActions {
+  state { submitted: Bool, approved: Bool, declined: Bool }
+  init { submitted = false approved = false declined = false }
+  action submit() {
+    requires not submitted
+    submitted = true
+  }
+  action auto_approve() {
+    requires submitted and not approved and not declined
+    approved = true
+  }
+  action approve() {
+    requires submitted and not approved and not declined
+    approved = true
+  }
+  action decline() {
+    requires submitted and not approved and not declined
+    declined = true
+  }
+  terminal { declined }
+  invariant Decided { not (approved and declined) }
+  reachable Approved { approved }
+  reachable Declined { declined }
+}

@@ -213,6 +213,220 @@ export function differences(native, wasm, path = "$") {
   return [{ path, native, wasm }];
 }
 
+const REPLAY_TRACE_SCHEMA = "https://fsl.dev/schemas/fslc/kernel/replay-trace.v1.schema.json";
+export const WITNESS_REPLAY_FIXTURE = "rust/fslc/tests/fixtures/issue_1789_worker_twin_actions.fsl";
+
+// Reachable and deadlock witnesses only: a `$.trace` counterexample stays
+// under the structural comparison alone.
+function replayableWitnessSites(native, wasm) {
+  const sites = [];
+  if (Array.isArray(native?.deadlock?.trace) && Array.isArray(wasm?.deadlock?.trace)) {
+    sites.push({
+      path: "$.deadlock.trace",
+      get: (envelope) => envelope.deadlock.trace,
+      set: (envelope, trace) => { envelope.deadlock.trace = trace; },
+    });
+  }
+  for (const name of Object.keys(native?.reachables ?? {}).sort()) {
+    if (Array.isArray(native.reachables[name]?.witness) && Array.isArray(wasm?.reachables?.[name]?.witness)) {
+      sites.push({
+        path: `$.reachables.${name}.witness`,
+        get: (envelope) => envelope.reachables[name].witness,
+        set: (envelope, trace) => { envelope.reachables[name].witness = trace; },
+      });
+    }
+  }
+  return sites;
+}
+
+function withoutAction(entry) {
+  const { action: _action, ...rest } = entry;
+  return rest;
+}
+
+export function replayTrace(spec, trace) {
+  return {
+    $schema: REPLAY_TRACE_SCHEMA,
+    schema_version: "1.0.0",
+    kernel_schema_version: "1.0.0",
+    spec,
+    initial: trace[0].state,
+    events: trace.slice(1).map((entry, index) => ({
+      tick: index + 1,
+      action: entry.action.generated_name ?? entry.action.name,
+      params: entry.action.params,
+      state: entry.state,
+    })),
+  };
+}
+
+async function witnessDisagreements(spec, nativeTrace, wasmTrace, oracle) {
+  if (nativeTrace.length !== wasmTrace.length) {
+    return [`witness lengths differ: native ${nativeTrace.length}, wasm ${wasmTrace.length}`];
+  }
+  const reasons = [];
+  for (let step = 0; step < nativeTrace.length; step += 1) {
+    const native = nativeTrace[step];
+    const wasm = wasmTrace[step];
+    if (differences(withoutAction(native), withoutAction(wasm)).length > 0) {
+      reasons.push(`step ${step} differs outside its action (state, changes, or entry fields)`);
+      continue;
+    }
+    if (differences(native.action, wasm.action).length === 0) continue;
+    for (const [side, action] of [["native", native.action], ["wasm", wasm.action]]) {
+      const keys = JSON.stringify(Object.keys(action).sort());
+      if (keys !== JSON.stringify(["loc", "name", "params"])) {
+        reasons.push(`step ${step} ${side} action carries fields replay cannot check: ${keys}`);
+        continue;
+      }
+      let locations;
+      try {
+        locations = await oracle.actionLocations();
+      } catch (error) {
+        reasons.push(`step ${step}: native action locations unavailable: ${error.message}`);
+        continue;
+      }
+      const expected = locations.get(action.name);
+      if (!expected || differences(action.loc, expected).length > 0) {
+        reasons.push(`step ${step} ${side} action '${action.name}' loc ${JSON.stringify(action.loc)} `
+          + `is not its native source location ${JSON.stringify(expected ?? null)}`);
+      }
+    }
+  }
+  if (reasons.length > 0) return reasons;
+  for (const [side, trace] of [["native", nativeTrace], ["wasm", wasmTrace]]) {
+    const replayed = await oracle.replay(replayTrace(spec, trace));
+    if (replayed.status !== 0 || replayed.envelope?.result !== "conformant"
+        || replayed.envelope.steps_checked !== trace.length - 1
+        || differences(replayed.envelope.final_state, trace.at(-1).state).length > 0) {
+      reasons.push(`${side} witness does not replay on the solver-free Monitor: `
+        + JSON.stringify(replayed.envelope ?? { status: replayed.status, stderr: replayed.stderr }));
+    }
+  }
+  return reasons;
+}
+
+// A reachable or deadlock witness whose structure differs is accepted only when
+// both witnesses have the same length and the same entries apart from the
+// action, every differing action sits at its native source location, and both
+// replay as conformant on the solver-free Monitor. Equal state sequences make
+// both witnesses reach the same goal or deadlock state at the same step.
+export async function reconcileWitnesses(native, wasm, oracle) {
+  const normalizedNative = normalizeEnvelope(native);
+  const normalizedWasm = normalizeEnvelope(wasm);
+  const unresolved = [];
+  const replayed = [];
+  for (const site of replayableWitnessSites(native, wasm)) {
+    if (differences(site.get(normalizedNative), site.get(normalizedWasm)).length === 0) continue;
+    const reasons = await witnessDisagreements(native.spec, site.get(native), site.get(wasm), oracle);
+    if (reasons.length === 0) {
+      site.set(normalizedWasm, structuredClone(site.get(normalizedNative)));
+      replayed.push(site.path);
+    } else {
+      unresolved.push(...reasons.map((reason) => ({ path: site.path, reason })));
+    }
+  }
+  return { differences: [...differences(normalizedNative, normalizedWasm), ...unresolved], replayed };
+}
+
+// #1789: positive and rejecting controls for reconcileWitnesses, replayed by
+// the real native CLI on WITNESS_REPLAY_FIXTURE.
+export async function assertWitnessReplayContract({ verify, oracleFor }) {
+  const native = await verify(WITNESS_REPLAY_FIXTURE);
+  const twins = { auto_approve: "approve", approve: "auto_approve" };
+  const sites = ["$.deadlock.trace", "$.reachables.Approved.witness"];
+  const witnesses = (envelope) => [envelope.deadlock?.trace, envelope.reachables?.Approved?.witness];
+  requireCondition(
+    native.result === "verified" && witnesses(native).every((trace) => Array.isArray(trace)
+      && trace.length === 3 && trace[2].action?.name in twins),
+    "fixture witnesses must end in one of the state-identical actions",
+    native,
+  );
+  const locations = await oracleFor(WITNESS_REPLAY_FIXTURE).actionLocations();
+  const action = (name) => ({ name, params: {}, loc: locations.get(name) });
+  const rewrite = (mutate) => {
+    const alternate = structuredClone(native);
+    for (const trace of witnesses(alternate)) mutate(trace[2], trace[1]);
+    return alternate;
+  };
+  const reconcile = (alternate) => reconcileWitnesses(native, alternate, oracleFor(WITNESS_REPLAY_FIXTURE));
+  const rejectedAt = (result, pattern) => sites.every((site) => result.differences.some(
+    (difference) => difference.path === site && pattern.test(difference.reason ?? ""),
+  ));
+
+  const swapped = rewrite((entry) => { entry.action = action(twins[entry.action.name]); });
+  requireCondition(
+    differences(normalizeEnvelope(native), normalizeEnvelope(swapped)).length > 0,
+    "the structural comparison alone must still report a state-identical action swap",
+    swapped,
+  );
+  const accepted = await reconcile(swapped);
+  requireCondition(
+    accepted.differences.length === 0 && JSON.stringify(accepted.replayed) === JSON.stringify(sites),
+    "a replay-valid state-identical action swap must be accepted",
+    accepted,
+  );
+
+  const disabled = rewrite((entry) => { entry.action = action("submit"); });
+  const disabledResult = await reconcile(disabled);
+  requireCondition(
+    disabledResult.replayed.length === 0
+      && rejectedAt(disabledResult, /does not replay.*"kind":"requires_failed"/),
+    "a witness action that is not enabled at its step must fail parity on its guard",
+    disabledResult,
+  );
+
+  const generated = rewrite((entry) => {
+    entry.action = { ...action(twins[entry.action.name]), origin: { dialect: "spec" } };
+  });
+  const generatedResult = await reconcile(generated);
+  requireCondition(
+    generatedResult.replayed.length === 0
+      && rejectedAt(generatedResult, /carries fields replay cannot check/),
+    "a differing witness action with metadata replay cannot check must fail parity",
+    generatedResult,
+  );
+
+  const changed = rewrite((entry) => {
+    entry.action = action(twins[entry.action.name]);
+    entry.changes = { ...entry.changes, declined: { from: false, to: false } };
+  });
+  const changedResult = await reconcile(changed);
+  requireCondition(
+    changedResult.replayed.length === 0 && rejectedAt(changedResult, /differs outside its action/),
+    "a witness whose changes differ while its states agree must fail parity",
+    changedResult,
+  );
+
+  const declined = rewrite((entry, previous) => {
+    entry.action = action("decline");
+    entry.state = { ...previous.state, declined: true };
+    entry.changes = { declined: { from: false, to: true } };
+  });
+  const declinedReplay = await oracleFor(WITNESS_REPLAY_FIXTURE).replay(
+    replayTrace(native.spec, declined.reachables.Approved.witness),
+  );
+  requireCondition(
+    declinedReplay.envelope?.result === "conformant",
+    "the different-state control must itself replay, so only the state comparison rejects it",
+    declinedReplay,
+  );
+  const declinedResult = await reconcile(declined);
+  requireCondition(
+    declinedResult.replayed.length === 0 && rejectedAt(declinedResult, /differs outside its action/),
+    "a replay-valid witness that reaches a different state must fail parity",
+    declinedResult,
+  );
+
+  const moved = rewrite((entry) => { entry.action.loc = { ...entry.action.loc, line: 99 }; });
+  const movedResult = await reconcile(moved);
+  requireCondition(
+    movedResult.replayed.length === 0 && rejectedAt(movedResult, /is not its native source location/),
+    "a witness action location must equal the native source location of that action",
+    movedResult,
+  );
+}
+
 export function assertNormalizerContract() {
   const base = {
     fsl: "1.0",
@@ -267,6 +481,18 @@ export function assertNormalizerContract() {
       === "$.trace.steps[0].action.loc.line",
     "trace locations must remain exact",
     differentShape,
+  );
+  // A reachable witness location drift must reach reconcileWitnesses, which
+  // accepts it only at the action's native source location
+  // (assertWitnessReplayContract).
+  const reachableEnvelope = { ...base, reachables: { Chosen: { witness: traceEnvelope.trace } } };
+  const movedReachable = structuredClone(reachableEnvelope);
+  movedReachable.reachables.Chosen.witness[1].action.loc.line = 99;
+  requireCondition(
+    differences(normalizeEnvelope(reachableEnvelope), normalizeEnvelope(movedReachable))[0]?.path
+      === "$.reachables.Chosen.witness.steps[0].action.loc.line",
+    "reachable witness locations must not be normalized",
+    movedReachable,
   );
   const differentStateKey = structuredClone(traceEnvelope);
   differentStateKey.trace[1].state = { wrong: 2 };
