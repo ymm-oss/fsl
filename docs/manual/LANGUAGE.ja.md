@@ -1939,7 +1939,7 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check     <file.fsl>                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
 fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
-fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
+fslc migrate   <path>... [--edition current|next|4|5] [--write] # dry-run edits (default edition next); --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
@@ -1962,9 +1962,9 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                                                  #   induction は全ての暗黙の型境界をベースケースでも検査
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
-fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] -o reproducer.json
                                                # slice 1: safety-invariant counterexample を reproducer.v1 へ export
-fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
+fslc sweep     <file.fsl> [--instances E=lo..hi]... [--depth lo..hi] [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance (§12)
@@ -2010,7 +2010,7 @@ fslc typestate <file.fsl> [--ts]                 # decide applicability of state
 fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
 fslc domain analyze <file.fsl>                                  # aggregate/effect ownership summary
 fslc domain expand <file.fsl> [-o out.fsl]                      # generated kernel FSL
-fslc domain generate <file.fsl> --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
+fslc domain generate <file.fsl> [--target typescript|python|kotlin|swift|rust] [-o dir] # Functional DDD scaffold
 fslc domain testgen <file.fsl> [--target vitest] [--allow-unwired] [-o out]  # domain adapter/conformance scaffold
 fslc domain replay <file.fsl> --logs events.jsonl              # domain runtime replay evidence
 fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
