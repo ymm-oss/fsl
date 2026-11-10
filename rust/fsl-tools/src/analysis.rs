@@ -5,8 +5,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::{
-    Annotations, KernelBinder as Binder, KernelExpr as Expr, KernelLValue as LValue, KernelModel,
-    KernelStatement as Statement, TypeDef, TypeRef,
+    Annotations, INIT_TARGET, KernelBinder as Binder, KernelExpr as Expr, KernelLValue as LValue,
+    KernelModel, KernelStatement as Statement, TypeDef, TypeRef,
 };
 use fsl_syntax::MetaTag;
 use serde_json::{Map, Value, json};
@@ -79,7 +79,7 @@ pub fn structural_review_findings(tsg: &Value) -> Vec<Value> {
                         let kind = node["kind"].as_str().unwrap_or_default();
                         property_kinds.contains(kind)
                             || scenario_kinds.contains(kind)
-                            || matches!(kind, "action" | "kpi" | "control")
+                            || matches!(kind, "init" | "action" | "kpi" | "control")
                     })
         });
         if !useful {
@@ -88,8 +88,8 @@ pub fn structural_review_findings(tsg: &Value) -> Vec<Value> {
                 0.8,
                 json!([id]),
                 json!({"kind":"isolated_node","node":id}),
-                "The requirement is declared but is not connected to an action, property, acceptance scenario, forbidden scenario, governance control, or refinement mapping in the structural graph.",
-                json!([{"kind":"add_traceability_anchor","template":"Attach the requirement id to a relevant action/property or add an acceptance/forbidden scenario."}]),
+                "The requirement is declared but is not connected to init, an action, property, acceptance scenario, forbidden scenario, governance control, or refinement mapping in the structural graph.",
+                json!([{"kind":"add_traceability_anchor","template":"Attach the requirement id to init or a relevant action/property, or add an acceptance/forbidden scenario."}]),
                 json!(["The requirement is invalid.","The implementation is missing behavior."]),
                 None,
             ));
@@ -348,16 +348,12 @@ pub fn structural_review_findings(tsg: &Value) -> Vec<Value> {
     findings
 }
 
-fn display(name: &str) -> String {
-    fsl_core::display_name(name)
-}
-
 /// TSG node ID of an action, `action:<key>`: every graph, review finding, and
 /// acknowledgement that refers to an action node builds the ID here, so a
 /// compose component action is `action:alias.action` everywhere.
 #[must_use]
 pub fn action_node_id(model: &KernelModel, name: &str) -> String {
-    format!("action:{}", model.action_key(name))
+    format!("action:{}", model.action_display_name(name))
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -366,7 +362,10 @@ fn node(id: String, kind: &str, name: Option<String>, loc: Option<Value>) -> Map
     result.insert("id".to_owned(), json!(id));
     result.insert("kind".to_owned(), json!(kind));
     if let Some(name) = name {
-        result.insert("label".to_owned(), json!(display(&name)));
+        result.insert(
+            "label".to_owned(),
+            json!(fsl_core::unmapped_public_spelling(&name)),
+        );
         result.insert("name".to_owned(), json!(name));
     }
     if let Some(loc) = loc {
@@ -421,9 +420,11 @@ fn public_type(model: &KernelModel, ty: &TypeRef) -> Value {
         TypeRef::Range(lo, hi) => json!(["domain", lo, hi]),
         TypeRef::Named(name) => match model.types.get(name) {
             Some(TypeDef::Domain { lo, hi, .. }) => json!(["domain", lo, hi]),
-            Some(TypeDef::Enum { .. }) => json!(["enum", display(name)]),
-            Some(TypeDef::Struct { .. }) => json!(["struct", display(name)]),
-            None => json!(["named", display(name)]),
+            Some(TypeDef::Enum { .. }) => json!(["enum", model.names().public_type(name).as_str()]),
+            Some(TypeDef::Struct { .. }) => {
+                json!(["struct", model.names().public_type(name).as_str()])
+            }
+            None => json!(["named", model.names().public_type(name).as_str()]),
         },
         TypeRef::Map(key, value) => {
             json!(["map", public_type(model, key), public_type(model, value)])
@@ -984,8 +985,22 @@ impl<'a> Builder<'a> {
                 ));
             }
         }
+        if !self.model.requirements_for(INIT_TARGET).is_empty() {
+            let mut value = node(
+                INIT_TARGET.to_owned(),
+                "init",
+                Some(INIT_TARGET.to_owned()),
+                None,
+            );
+            add_requirement_metadata(
+                &mut value,
+                &self.model.init_annotations,
+                self.model.init_meta.as_ref(),
+            );
+            self.add_node(value, true);
+        }
         for action in &self.model.actions {
-            let name = &self.model.action_key(&action.name);
+            let name = &self.model.action_display_name(&action.name);
             let label = self.model.action_display_name(&action.name);
             let action_id = action_node_id(self.model, &action.name);
             let mut value = node(
@@ -1116,16 +1131,16 @@ impl<'a> Builder<'a> {
         }
         // Requirement traceability: `requirement:<id>` nodes with `covers`
         // edges to every executable Kernel target the requirement links
-        // (`@requirement`/legacy `covers` on an action, invariant, trans,
+        // (`@requirement`/legacy `covers` on init, an action, invariant, trans,
         // reachable, or leadsTo). `requirement_targets()` is model-only
         // (it scans lowered Kernel targets, not requirements-dialect
         // surface syntax), so this reaches every dialect `build_tsg` sees,
         // not only project manifests. `property_target` returns
         // `property:<kind>:<name>` while the TSG node id is `<kind>:<name>`;
-        // strip that prefix. `init` (`INIT_TARGET`) has no TSG node, so a
-        // requirement attached only to init still gets its own node — with
-        // zero `covers` edges, which is exactly the `disconnected_requirement`
-        // review signal — rather than vanishing from the graph entirely.
+        // strip that prefix. `init` (`INIT_TARGET`) is emitted only when it
+        // carries requirement relations, so init-only requirements have a real
+        // traceability anchor, consistent with strict-tags and lint. Targets
+        // without a graph node still retain their requirement node.
         let mut requirement_targets = BTreeMap::<String, Vec<String>>::new();
         for (target, links) in self.model.requirement_targets() {
             let graph_target = target.strip_prefix("action:").map_or_else(

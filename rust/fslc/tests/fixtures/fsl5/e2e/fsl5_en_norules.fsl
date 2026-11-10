@@ -1,0 +1,50 @@
+fsl 5
+// The design draft's fsl3_en.fsl without its rules: the `rule REQ-1` and
+// `decide REQ-2-3` blocks are removed, so this lowers to lowered_norules.fsl
+// (lowered.fsl minus the requires lines those rules contribute).
+// The lifecycle has the draft's edges, split so that the stages first appear
+// in the order lowered.fsl's ClaimStage lists them (Rejected before Paid).
+requirements ExpenseRequirements {
+  implements ExpenseToBe from "1_business.fsl" {
+    action submit(c, amount) -> submit(c)
+  }
+
+  number Amount
+  const AUTO_LIMIT = 1
+  actor Employee, System, Manager, Finance
+
+  entity Claim {
+    amount: Amount = 0
+    lifecycle Draft -> Submitted -> Approved
+    lifecycle Submitted -> Rejected
+    lifecycle Approved -> Paid
+  }
+
+  concept SmallClaim = Claim where amount <= AUTO_LIMIT
+  concept LargeClaim = Claim where amount > AUTO_LIMIT
+
+  event submit       = Employee submits Claim with amount   Draft -> Submitted
+  event auto_approve = System approves Claim                Submitted -> Approved
+  event mgr_approve  = Manager approves Claim               Submitted -> Approved
+  event reject       = Manager rejects Claim                Submitted -> Rejected
+  event pay          = Finance pays Claim                   Approved -> Paid
+    covers REQ-4 "Only approved claims are paid"
+
+  kpi paid_claims = count Claim in Paid
+
+  scenario AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+    Employee submits claim1 with amount 1
+    System approves claim1
+    Finance pays claim1
+    then claim1 is Paid
+  }
+  scenario AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
+    Employee submits claim1 with amount 2
+    Manager rejects claim1
+    then claim1 is Rejected
+  }
+}
+verify {
+  instances Claim = 3
+  values Amount = 0..3
+}

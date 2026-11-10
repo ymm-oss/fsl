@@ -61,7 +61,7 @@ fn never_enabled_warning_and_action_coverage_remain_distinct_ledger_projections(
         "{rendered}"
     );
     assert!(
-        rendered.contains("空虚性の疑い（never_enabled_action）"),
+        rendered.contains("深さ内で一度も実行可能にならない（never_enabled_action）"),
         "typed warning projection missing: {rendered}"
     );
     assert!(
@@ -72,6 +72,13 @@ fn never_enabled_warning_and_action_coverage_remain_distinct_ledger_projections(
         rendered.contains("\"name\": \"blocked\"") && rendered.contains("\"loc\":"),
         "the ledger must preserve the warning's action name and location in raw evidence: {rendered}"
     );
+    assert_eq!(
+        rendered.matches("- **検出**: `coverage` — blocked").count(),
+        2
+    );
+    let details = rendered.split("## 付録:").next().unwrap();
+    assert!(!details.contains("空虚性の疑い"), "{details}");
+    assert!(!details.contains("mutate"), "{details}");
 }
 
 #[test]
@@ -92,6 +99,6 @@ fn never_enabled_warning_does_not_promote_assurance() {
     assert_eq!(
         assurance_cell(&with_warning),
         assurance_cell(&without_warning),
-        "the warning may add a vacuity trace type, but must not promote assurance"
+        "the separate coverage warning must not promote assurance"
     );
 }

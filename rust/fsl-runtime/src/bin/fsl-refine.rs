@@ -47,7 +47,7 @@ fn main() {
             let (verdict, kind) = match checked.verdict() {
                 fsl_runtime::RefinementVerdict::BudgetExhausted { .. } => ("unknown_budget", None),
                 fsl_runtime::RefinementVerdict::ImplViolated { violation, .. } => {
-                    ("impl_violation", Some(violation.kind.clone()))
+                    ("impl_violated", Some(violation.kind.clone()))
                 }
                 fsl_runtime::RefinementVerdict::Failed(failure) => {
                     ("refinement_failed", Some(failure.kind.clone()))

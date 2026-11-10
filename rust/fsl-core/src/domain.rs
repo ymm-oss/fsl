@@ -44,7 +44,8 @@ fn error_at(message: impl Into<String>, span: Span) -> CoreError {
             }],
             generated: false,
         })),
-        name_resolution: false,
+        kind: crate::CoreErrorKind::Semantics,
+        diagnostic_code: None,
     }
 }
 
@@ -468,7 +469,8 @@ impl<'a> Context<'a> {
             });
         }
         let Some(candidates) = self.enum_candidates.get(name) else {
-            return Err(error_at(format!("unknown domain symbol '{name}'"), span));
+            return Err(error_at(format!("unknown domain symbol '{name}'"), span)
+                .with_kind(crate::CoreErrorKind::UnknownDomainSymbol));
         };
         if candidates.len() != 1 {
             return Err(error_at(
@@ -486,8 +488,19 @@ impl<'a> Context<'a> {
         })
     }
 
-    fn fold_binary(op: &str, spelling: &str, mut parts: Vec<SyntaxExpr>, span: Span) -> SyntaxExpr {
-        let mut output = parts.pop().expect("non-empty fold");
+    fn fold_binary(
+        op: &str,
+        spelling: &str,
+        mut parts: Vec<SyntaxExpr>,
+        span: Span,
+        identity: bool,
+    ) -> SyntaxExpr {
+        let Some(mut output) = parts.pop() else {
+            return SyntaxExpr {
+                kind: SyntaxExprKind::Bool(identity),
+                span,
+            };
+        };
         while let Some(left) = parts.pop() {
             output = SyntaxExpr {
                 kind: SyntaxExprKind::Binary {
@@ -571,7 +584,13 @@ impl<'a> Context<'a> {
                 span: decide.loc.span(),
             }
         } else {
-            Self::parenthesize(Self::fold_binary("and", "and", pieces, decide.loc.span()))
+            Self::parenthesize(Self::fold_binary(
+                "and",
+                "and",
+                pieces,
+                decide.loc.span(),
+                true,
+            ))
         })
     }
 
@@ -586,7 +605,7 @@ impl<'a> Context<'a> {
                 Self::collect_pattern_bindings(value, source_scope, target_scope)
             }
             SyntaxExprKind::Binary { op, left, right }
-                if matches!(op.canonical.as_str(), "and") =>
+                if crate::pattern_binding_flows(&op.canonical, false) =>
             {
                 Self::collect_pattern_bindings(left, source_scope, target_scope)?;
                 let after_left = target_scope.clone();
@@ -731,7 +750,7 @@ impl<'a> Context<'a> {
                         }))
                     })
                     .collect::<Result<Vec<_>, CoreError>>()?;
-                Ok(Self::fold_binary("or", "or", comparisons, span))
+                Ok(Self::fold_binary("or", "or", comparisons, span, false))
             }
             SyntaxExprKind::Binary { op, left, right } => {
                 let right_expected = match op.canonical.as_str() {
@@ -743,7 +762,7 @@ impl<'a> Context<'a> {
                 let (left_norm, right_norm) = match left_value {
                     Ok(left_norm) => {
                         let mut right_scope = scope.clone();
-                        if matches!(op.canonical.as_str(), "and" | "=>") {
+                        if crate::pattern_binding_flows(&op.canonical, true) {
                             Self::collect_pattern_bindings(left, scope, &mut right_scope)?;
                         }
                         let right_norm = self.normalize_expr(
@@ -859,6 +878,16 @@ impl<'a> Context<'a> {
                 })
             }
             SyntaxExprKind::Struct { name, fields } => {
+                // `domain expand` and `domain analyze` render through here and
+                // build no model, so lowering's refusal does not reach them.
+                let mut seen = BTreeSet::new();
+                if let Some((field, _)) = fields.iter().find(|(field, _)| !seen.insert(&field.text))
+                {
+                    return Err(error_at(
+                        format!("duplicate field '{}.{}'", name.text, field.text),
+                        field.span,
+                    ));
+                }
                 let fields = fields
                     .iter()
                     .map(|(field, value)| {

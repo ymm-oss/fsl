@@ -42,7 +42,7 @@ use crate::claim::{Axis, Citation, Claim, workspace_root};
 use crate::properties;
 
 const TERMINAL_NOT_SELECTABLE: Citation = Citation {
-    path: "rust/fslc/src/main.rs",
+    path: "rust/fslc/src/property_selection.rs",
     anchor: "fn select_properties(",
 };
 

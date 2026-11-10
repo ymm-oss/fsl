@@ -1,0 +1,92 @@
+// original.fsl の写しで、名前だけを改名したもの（struct Order -> OrderRec、enum OSt の member に接頭辞 O）。lowering の entity 型 Order・enum OrderStage と refinement の名前空間で衝突するため。意味は同じ。
+// topic: composite workflow from order placement to return
+// scale: large
+// features: Map<_, struct>, Option field, ledger invariant, depth 8 reachable
+// deadlock-ignore-rationale: This workflow intentionally stops after its order reaches the final returned state.
+// expected-command: verify --depth 8 --deadlock ignore
+// expected-result: verified
+spec GalleryLargeOrderWorkflow {
+  type OrderId = 0..1
+  type UserId = 0..1
+  type Qty = 0..2
+  enum OSt { OEmpty, OPlaced, OApproved, OPaid, OPacked, OShipped, ODelivered, OReturnRequested, ORefunded }
+  struct OrderRec { st: OSt, qty: Qty, buyer: Option<UserId> }
+
+  state {
+    orders: Map<OrderId, OrderRec>,
+    stock: Qty,
+    paid_count: Int,
+    refund_count: Int
+  }
+
+  init {
+    forall o: OrderId { orders[o] = OrderRec { st: OEmpty, qty: 0, buyer: none } }
+    stock = 2
+    paid_count = 0
+    refund_count = 0
+  }
+
+  action place(o: OrderId, u: UserId, q: Qty) {
+    requires orders[o].st == OEmpty
+    requires q > 0
+    requires stock >= q
+    orders[o] = OrderRec { st: OPlaced, qty: q, buyer: some(u) }
+    stock = stock - q
+  }
+
+  action approve(o: OrderId) {
+    requires orders[o].st == OPlaced
+    orders[o].st = OApproved
+  }
+
+  action pay(o: OrderId) {
+    requires orders[o].st == OApproved
+    orders[o].st = OPaid
+    paid_count = paid_count + 1
+  }
+
+  action pack(o: OrderId) {
+    requires orders[o].st == OPaid
+    orders[o].st = OPacked
+  }
+
+  action ship(o: OrderId) {
+    requires orders[o].st == OPacked
+    orders[o].st = OShipped
+  }
+
+  action deliver(o: OrderId) {
+    requires orders[o].st == OShipped
+    orders[o].st = ODelivered
+  }
+
+  action request_return(o: OrderId) {
+    requires orders[o].st == ODelivered
+    orders[o].st = OReturnRequested
+  }
+
+  action refund(o: OrderId) {
+    requires orders[o].st == OReturnRequested
+    orders[o].st = ORefunded
+    stock = stock + orders[o].qty
+    refund_count = refund_count + 1
+  }
+
+  invariant PaidLedger {
+    paid_count == count(o: OrderId where
+      orders[o].st == OPaid or orders[o].st == OPacked or orders[o].st == OShipped
+      or orders[o].st == ODelivered or orders[o].st == OReturnRequested or orders[o].st == ORefunded)
+  }
+
+  invariant RefundLedger {
+    refund_count == count(o: OrderId where orders[o].st == ORefunded)
+  }
+
+  invariant BuyerKnownAfterPlace {
+    forall o: OrderId { orders[o].st != OEmpty => orders[o].buyer != none }
+  }
+
+  reachable RefundedOne {
+    exists o: OrderId { orders[o].st == ORefunded }
+  }
+}

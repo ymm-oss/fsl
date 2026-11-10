@@ -67,8 +67,99 @@ fn error_at(message: impl Into<String>, span: Span) -> CoreError {
             }],
             generated: false,
         })),
-        name_resolution: false,
+        kind: crate::CoreErrorKind::Semantics,
+        diagnostic_code: None,
     }
+}
+
+/// Refuse a value object that declares a field twice, at the repeated field. It
+/// sits on the path every domain route shares: `domain expand` and `domain analyze`
+/// build no model, so the struct's own refusal would not reach them (#1692).
+fn reject_repeated_value_object_fields(domain: &DomainSpec) -> Result<(), CoreError> {
+    for ty in domain.types.iter().filter(|ty| ty.kind == "value_object") {
+        let mut seen = BTreeSet::new();
+        if let Some(field) = ty
+            .fields
+            .iter()
+            .find(|field| !seen.insert(&field.name.text))
+        {
+            let mut error = error_at(
+                crate::model::repeated_struct_field_message(&ty.name, &field.name.text),
+                field.name.span,
+            );
+            error.kind = crate::CoreErrorKind::NameResolution;
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+const REPEATED_EVENT_FIELD: &str = "duplicate event field ";
+const REPEATED_COMMAND: &str = "duplicate command ";
+const REPEATED_EVOLVE: &str = "duplicate evolve ";
+
+/// Whether `error` refuses a repeated declaration of a domain, in the document's
+/// lowering or its parse.
+pub(crate) fn is_repeated_domain_declaration(error: &CoreError) -> bool {
+    [
+        REPEATED_EVENT_FIELD,
+        REPEATED_COMMAND,
+        REPEATED_EVOLVE,
+        fsl_syntax::REPEATED_DOMAIN_CLAUSE,
+    ]
+    .iter()
+    .any(|prefix| error.message.starts_with(prefix))
+}
+
+/// Refuse a declaration whose second copy is lost, at the repeat. An `evolve` and a
+/// `command` read the first copy, an `evolve` reads the event field's last copy and
+/// `correlation_id` its first, and `domain expand` keeps no event type. It sits on the
+/// path every domain route shares, because `domain expand` and `domain analyze` build
+/// no model (#1700).
+fn reject_repeated_declarations(domain: &DomainSpec) -> Result<(), CoreError> {
+    for aggregate in &domain.aggregates {
+        let mut commands = BTreeSet::new();
+        for command in &aggregate.commands {
+            if !commands.insert(&command.name) {
+                return Err(error_at(
+                    format!(
+                        "{REPEATED_COMMAND}'{}' in aggregate '{}'",
+                        command.name, aggregate.name
+                    ),
+                    command.loc.span(),
+                )
+                .into_name_resolution());
+            }
+        }
+        for event in &aggregate.events {
+            let mut seen = BTreeSet::new();
+            if let Some(field) = event
+                .fields
+                .iter()
+                .find(|field| !seen.insert(&field.name.text))
+            {
+                return Err(error_at(
+                    format!("{REPEATED_EVENT_FIELD}'{}.{}'", event.name, field.name.text),
+                    field.name.span,
+                )
+                .into_name_resolution());
+            }
+        }
+        let mut evolves = BTreeSet::new();
+        for evolve in &aggregate.evolves {
+            if !evolves.insert(&evolve.event) {
+                return Err(error_at(
+                    format!(
+                        "{REPEATED_EVOLVE}'{}' in aggregate '{}'",
+                        evolve.event, aggregate.name
+                    ),
+                    evolve.loc.span(),
+                )
+                .into_name_resolution());
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_domain_enums(types: &[DomainType]) -> Result<(), CoreError> {
@@ -111,6 +202,8 @@ fn span_at(loc: DomainLoc) -> Span {
 /// are `semantics`-class diagnostics (an accepted-but-unlowerable construct),
 /// not name-resolution failures.
 pub(crate) fn validate_lowerable_constructs(domain: &DomainSpec) -> Result<(), CoreError> {
+    reject_repeated_value_object_fields(domain)?;
+    reject_repeated_declarations(domain)?;
     if let Some(awaited) = domain.awaits.first() {
         return Err(error_at(
             format!(
@@ -641,7 +734,8 @@ impl<'a> Resolver<'a> {
         if let Some(value) = self.enum_value(name, expected, span)? {
             return Ok(value);
         }
-        Err(error_at(format!("unknown domain symbol '{name}'"), span))
+        Err(error_at(format!("unknown domain symbol '{name}'"), span)
+            .with_kind(crate::CoreErrorKind::UnknownDomainSymbol))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -827,7 +921,7 @@ impl<'a> Resolver<'a> {
                 let (left, right) = match left_value {
                     Ok(left_value) => {
                         let mut right_scope = scope.clone();
-                        if matches!(op.canonical.as_str(), "and" | "=>") {
+                        if crate::pattern_binding_flows(&op.canonical, true) {
                             self.collect_pattern_bindings(
                                 left,
                                 scope,
@@ -1595,7 +1689,9 @@ impl<'a> Resolver<'a> {
                 );
                 Ok(())
             }
-            SyntaxExprKind::Binary { op, left, right } if op.canonical == "and" => {
+            SyntaxExprKind::Binary { op, left, right }
+                if crate::pattern_binding_flows(&op.canonical, false) =>
+            {
                 self.collect_pattern_bindings(
                     left,
                     source_scope,
@@ -1787,10 +1883,10 @@ impl<'a> Resolver<'a> {
                 ));
             }
             LogicalType::Unknown => {
-                return Err(error_at(
-                    "cannot choose a default for an unknown type",
-                    span,
-                ));
+                return Err(
+                    error_at("cannot choose a default for an unknown type", span)
+                        .with_kind(crate::CoreErrorKind::UnresolvedTypeDefault),
+                );
             }
         })
     }
@@ -2123,9 +2219,22 @@ fn action(
     span: Span,
     annotations: Annotations,
 ) -> SpecItem {
+    authored_action(name, params, Vec::new(), items, span, annotations)
+}
+
+/// An action whose formals are authored domain fields, spans parallel to `params`.
+fn authored_action(
+    name: String,
+    params: Vec<Param>,
+    param_spans: Vec<Span>,
+    items: Vec<ActionItem>,
+    span: Span,
+    annotations: Annotations,
+) -> SpecItem {
     SpecItem::Action {
         name,
         params,
+        param_spans,
         items,
         span,
         fair: false,
@@ -2159,6 +2268,10 @@ fn field_params(resolver: &Resolver<'_>, fields: &[DomainField]) -> Result<Vec<P
         .collect()
 }
 
+fn field_spans(fields: &[DomainField]) -> Vec<Span> {
+    fields.iter().map(|field| field.name.span).collect()
+}
+
 /// Resolve a parsed domain document and lower it directly into Kernel surface AST.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn lower_domain_surface(
@@ -2181,6 +2294,7 @@ pub(crate) fn lower_domain_surface(
                     .collect(),
                 // The domain surface already records each member's span.
                 member_spans: ty.member_spans.clone(),
+                span: Some(ty.span),
                 symmetric: false,
             }),
             "range" | "external" => {
@@ -2218,6 +2332,7 @@ pub(crate) fn lower_domain_surface(
                     lo: Box::new(lo),
                     hi: Box::new(hi),
                     symmetric: false,
+                    span: None,
                 });
             }
             "value_object" => items.push(SpecItem::Struct {
@@ -2232,6 +2347,7 @@ pub(crate) fn lower_domain_surface(
                         ))
                     })
                     .collect::<Result<Vec<_>, CoreError>>()?,
+                field_spans: ty.fields.iter().map(|field| field.name.span).collect(),
                 span: span_at(ty.loc),
             }),
             other => {
@@ -2260,6 +2376,7 @@ pub(crate) fn lower_domain_surface(
             .collect(),
             // Generated effect-status members have no source text.
             member_spans: Vec::new(),
+            span: Some(span_at(effect.loc)),
             symmetric: false,
         });
         items.push(SpecItem::Type {
@@ -2267,6 +2384,7 @@ pub(crate) fn lower_domain_surface(
             lo: Box::new(Expr::Num(0)),
             hi: Box::new(Expr::Num(effect.retry.max_attempts.unwrap_or(1))),
             symmetric: false,
+            span: None,
         });
     }
 
@@ -2543,13 +2661,14 @@ fn lower_aggregate_actions(
                         .cloned(),
                 );
             }
-            items.push(action(
+            items.push(authored_action(
                 format!(
                     "{}_{}",
                     lower_name(&aggregate.name),
                     lower_name(&command.name)
                 ),
                 field_params(resolver, &command.inputs)?,
+                field_spans(&command.inputs),
                 action_items,
                 span,
                 annotations,
@@ -2631,13 +2750,14 @@ fn lower_effect_actions(
                     .iter()
                     .cloned(),
             );
-            items.push(action(
+            items.push(authored_action(
                 format!(
                     "{}_complete_{}",
                     lower_name(&effect.name),
                     lower_name(event_name)
                 ),
                 field_params(resolver, &params)?,
+                field_spans(&params),
                 action_items,
                 span,
                 annotations,
@@ -2797,13 +2917,14 @@ fn lower_saga_actions(
                 .collect::<Vec<_>>();
             action_items.extend(resolver.evolve_items(aggregate, &event_name, &scope)?);
             let annotations = evolve_annotations(aggregate, &event_name);
-            items.push(action(
+            items.push(authored_action(
                 format!(
                     "saga_{}_observe_{}",
                     lower_name(&saga.name),
                     lower_name(&event_name)
                 ),
                 field_params(resolver, &event.fields)?,
+                field_spans(&event.fields),
                 action_items,
                 span,
                 annotations,

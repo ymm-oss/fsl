@@ -82,13 +82,57 @@ As needed: `fslc explain file.fsl --depth 8 --readable`
 
 ## 7. CLI and JSON essentials
 
+Native artifact file output uses complete per-file replacement for approval
+records, document generate/claims, db import, domain expand/generate/testgen,
+testgen, HTML/ledger reports, counterexample export, and causal
+evidence/lifecycle. A write failure before replacement keeps existing bytes;
+publication failures retain the command's I/O error framing and exit 2.
+Existing regular-file permission bits and new-file umask are retained;
+read-only files, final symlinks, and every non-regular destination are refused, including
+`-o /dev/null`, `-o /dev/stdout` and process substitution such as `/dev/fd/63`.
+A destination that is the same file as an input the command reads (the spec, an
+import, or a file option such as `--evidence`), on Unix by device and inode, so also via
+`./`, a symlink or a hard link, is refused before anything is written. The
+`implements ... from` abstraction counts even for `document generate`/`claims`,
+which do not read it.
+The parent directory must be writable. Replacement changes the inode (other
+hard links retain old bytes); ownership/ACLs/xattrs are not guaranteed to carry
+over. Earlier completed files remain if a later output fails; there is no
+file-set transaction or added power-loss durability. Abrupt termination can leave an
+owner-only `.fslc-output-*.tmp` file beside the destination. Path interpretation and
+parent creation remain command-specific. See
+[the publication contract](../../../docs/design/DESIGN-atomic-artifact-output.md).
+
+**Editions.** The document header selects the syntax (`fsl 5`, or headerless /
+`fsl 4` for FSL 4); `--edition current|next|4|5` selects the edition policy, not the
+syntax. Stricter rules follow each source's own header. Consumed child files
+retain their own edition; do not assume a parent's edition flag propagates to
+dependencies. Migration edits the requested roots, not imported children.
+Canonical mixed editions are allowed where the consumer supports those files.
+`migrate` defaults to the next edition and `lint` to the current one.
+JSON `edition` is the edition a document was read in (`next`, or `current`/absent),
+with `fsl_edition` when it has a header; `lint`, `migrate` and `fmt --check` always
+carry `edition`, `next` only when every document was read in the next edition. An
+`edition_conflict` message quotes `--edition` as typed (`next`, `4`, `5`).
+
+Current-edition `check`, `verify`, and Worker JSON append migration
+warnings for string metadata, colon quantifiers, and inline action `maps`, without
+changing verdicts or exits. Codes and complete finding data match lint; lint still
+exits 1 when findings exist, not 0.
+Domain checking rejects quantified domain expressions, so it does not emit this
+colon-quantifier warning for them; metadata slots and requirement maps are not domain forms.
+
 ```
-fslc check <f>                                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
-fslc lint <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
+fslc help [COMMAND [SUBCOMMAND]]               # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
+fslc check <f> [--edition current|next|4|5]     # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
+fslc lint <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)
 fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
-                                                 # exit 0 migrated, 2 refused/I/O/check failure (same check-failure contract as lint)
-fslc fmt <f|-> [--edition current|next]         # canonical source on stdout; input is never mutated
+                                                 # exit 0 migrated, 1 migrate_manual_required (no inputs written), 2 refused/I/O/check failure (same check-failure contract as lint)
+                                                 # --write refuses a read-only, symlinked or non-regular changed input before writing any input (kind io, exit 2)
+                                                 # written (top level and per files[] entry) = a file was replaced; --write with changed: 0 reports written: false
+                                                 # keeps line endings (first line's CRLF/LF on every line) and a UTF-8 BOM; fmt still prints LF without the BOM
+fslc fmt <f|-> [--edition current|next|4|5]     # canonical source on stdout; input is never mutated
 fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
 fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (default v1)
@@ -97,7 +141,8 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
                [--property <Name>]                  # check one named property obligation
                                                     #   (invariant / trans / leadsTo / reachable;
-                                                    #    selected trans keeps induction invariants)
+                                                    #    selected trans keeps induction invariants;
+                                                    #    induction still checks every implicit type bound in its base case)
                [--exclude-property <Name>]...       # skip named invariant/trans/leadsTo/reachable
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
@@ -124,7 +169,7 @@ fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection 
                                                 # (accepting + requires_failed); formal_result:"not_run",
                                                 # assurance_effect:"none"; pass a spec at the
                                                 # implementation's layer granularity
-fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | violated | unknown_budget
+fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | impl_violated | unknown_budget
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                   # bounded semantic change report; impl_violated and
@@ -136,7 +181,7 @@ fslc chain [fsl-project.toml] [--keep-going] [--jobs N]
                                                 # manifest-driven business -> req -> design -> impl table + JSON
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
-fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction]  # self-contained HTML review report (dev audience)
+fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction] [--no-timing]  # self-contained HTML review report (dev audience)
 fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
                                                         # business audit ledger by requirement id (PM/audit)
 fslc document generate <f> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
@@ -156,7 +201,7 @@ fslc document check <f> <document.md> [--glossary glossary.json] [--evidence evi
 fslc approval create <f> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
                [--requirement ID]... [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
                                                         # bind the reviewed artifact to normalized spec + Git baseline;
-                                                        # requirements_document records schema v3/v4 with a claim_set_digest
+                                                        # new records use v5/v6; requirements_document binds a claim_set_digest
 fslc approval check <f> --record <record.json>          # approved | drifted with machine reasons
 fslc approval diff <f> --record <record.json> [--depth K]
                                                         # semantic diff from approved commit to current working spec
@@ -175,6 +220,8 @@ fslc ai replay <f> --logs events.jsonl                  # AI runtime replay evid
                                                         # check/compat/replay fail closed on invalid ai_component (exit 2)
 fslc ai eval <f> [--records <path>] [--dataset <Name>] [--slice <Name>] [--property <Name>]
                                                         # Wilson-bound check over precomputed eval JSONL
+                                                        # relative dataset.source uses the declaring FSL directory; absolute stays absolute
+                                                        # --records overrides the declaration and remains caller-relative; no path fallback
 fslc ai regress <f> [--migration <Name>] --before-records <p> --after-records <p> [--dataset <Name>]
                                                         # ai_migration.no_regression metric drop/increase check
 fslc ai compare --from <records> --to <records> [--from-label L] [--to-label L] [--dataset <Name>]
@@ -184,6 +231,23 @@ fslc ai drift <f> --logs events.jsonl [--baseline-logs p] [--window N] [--baseli
 fslc ai compat <f> [--environment <env>]                # emit a dbsystem artifact capability profile for AI compat
 fslc compat check <f> [--include-ai]                    # dbsystem compatibility check, optionally folding in AI capability profiles
 ```
+
+HTML-only `--no-timing` (default false, no alias) omits only
+`verification.cost.elapsed_s`, `verification.cost.solver.check_elapsed_s`,
+`verification.cost.properties[].elapsed_s`,
+`explained.counterfactuals[].violation.cost.elapsed_s`,
+`verification.cost.solver.memory_mb`, `verification.cost.solver.conflicts`,
+`verification.cost.solver.decisions`, and
+`verification.cost.solver.propagations` from presentation copies
+before rendering, for stdout and `-o`/`--output` files. Default HTML retains
+nondeterministic timings and solver statistics. Source/domain-state fields,
+`solver.checks`, property `kind`/`name`/`checks`, ordinary verify JSON, and exit
+codes are unchanged. Wall-clock timings and environment-dependent Z3 internal
+statistics are omitted for byte stability. Use it for
+byte-stable comparison with the same input path, source, options, and toolchain;
+it does not normalize across paths, backends, or environments. It is not a
+`testgen` or `ledger` option.
+`approval create --kind html` regenerates the default timing-bearing report and normalizes timing and ambient solver-statistic values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
 
 Each `lint` path may be a file or directory. Directories recursively expand to
 regular `*.fsl` files; symlink entries and other extensions are skipped while
@@ -207,8 +271,9 @@ of failing `initial_state_mismatch` against an arbitrary default value for
 that variable. A compose spec's component action is written `alias.action`
 (the name testgen, conformance, and the Monitor emit); the older
 `alias__action` is still accepted for the same action, and replay output,
-including `state_mismatch.action`, always uses `alias.action`. Sync actions and
-non-compose actions match their exact name only. Bare arrays/`{events}` are the
+including `state_mismatch.action`, always uses `alias.action`. A requirements
+`branches` split is likewise `submit.b1` (the name conformance emits) or
+`submit__b1`, echoed as `submit.b1`. Any other action matches its exact name. Bare arrays/`{events}` are the
 unversioned action-only compatibility adapter; testgen/verifier traces are not
 replay input.
 
@@ -229,12 +294,24 @@ means every dialect is source-complete. Requirement relations remain separate
 from origin targets. Use `fslc conformance` with the same Kernel major (conformance schema v1 or v2)
 to test an independent runtime.
 
+Public Kernel v1/v2 collection aggregate normalization retains actual add
+candidates through Set/relation-projection let aliases. Process every generated
+guard/let in order: existing scalar let captures preserve candidates across
+shadowing and state updates; they are not a new JSON node shape. Count/sum and
+binary min/max around sum must not re-enumerate only the nominal carrier.
+
 For an induction `unknown_cti`, first try `--engine explicit` — if exploration
 closes it returns `proved` with **no lemmas at all** (the invariant being
 non-inductive is irrelevant to exhaustive search). Only when explicit is
 rejected or returns `unknown_budget`, fall back to lemma hunting: pass
-candidate auxiliary invariants with repeatable `--lemma "EXPR"`. fslc proves each candidate independently (original
-init/actions + implicit bounds, without original user invariants), rejects
+candidate auxiliary invariants with repeatable `--lemma "EXPR"`. fslc first parses
+and recursively type-checks all candidates as `Bool` with the invariant checker,
+before any candidate proof or evaluation. Invalid candidates are rejected/unused
+with a nested error (type errors: `proof.kind:"semantics"`, checker message, no
+argv `loc`); later candidates continue and the target result owns the exit code.
+Lemma runs bypass persistent verification caching. fslc proves each valid
+candidate independently (original init/actions + implicit bounds, without
+original user invariants), rejects
 false/non-inductive/invalid candidates with their own evidence, and makes only
 `proved` candidates available to the target proof. A candidate is used only
 when it is false on the current CTI; `lemma_cti_exclusions` records the target,
@@ -253,16 +330,22 @@ BMC); exceeding `--explicit-budget` returns `unknown_budget` (exit 1) — never
 a silent `verified`. Violations return the same shortest-counterexample trace
 schema as BMC. Results carry `states_explored`, `max_frontier_width`, and
 `depth_reached`. Fail-closed rejections (kind `semantics`, exit 2): `leadsTo`
-properties, nondeterministic `init` (every state variable must be definitely
-assigned), and `init forall` binder domains that reference state variables
-(range bounds and collections must be compile-time constants) — use
-`--engine bmc` for those specs. A definitely-assigned but contradictory
+properties and nondeterministic `init` (every state variable must be definitely
+assigned) — use `--engine bmc` for those specs. `init forall` binder domains that
+reference state variables (range bounds and collections must be compile-time
+constants) and the other range bounds in [syntax.md](syntax.md) are refused by
+`check` and every engine alike, so switching engines does not help: rewrite the
+bound. A definitely-assigned but contradictory
 `init` (an `init forall` that writes different concrete values to the same
 non-indexed location across binder values, e.g. `forall k: K { x = k }` with
 `|K| > 1`) is also rejected, matching BMC exactly: `result:"error"`,
 `kind:"vacuous"`, `message:"init constraints are unsatisfiable"`, exit 2 —
 never `proved`. `--from-state`, `--lemma`, and `--k` do not apply to this
 engine.
+
+Init reads also obey #1518's same-forall root-read rule and its already-written
+current-key exception (see [syntax.md](syntax.md)); switching to BMC does not
+bypass these input errors.
 
 An explicit-decided envelope also carries `action_profile` separately from
 `cost`: each action has non-negative `enabled`, `fired`, and `no_op` counts.
@@ -383,10 +466,17 @@ sequential per-file loop.
 `analyze` is a structural observation layer, not a verifier. `--projection tsg`
 emits a stable Typed Semantic Graph over requirements, actions, state variables,
 properties, acceptance/forbidden scenarios, and traceability metadata.
+Init carrying requirement relations adds a node with id/kind/name/label `init`,
+a spec-to-init `declares` edge, and requirement-to-init `covers` edges. Init is
+a useful anchor for `disconnected_requirement` and is included in
+`requirement_property_graph`. Init without requirement relations adds no graph
+output; structural connectivity is not a proof of the requirement.
 `--projection action_state_graph`, `action_dependency_graph`,
 `impact_graph --focus NODE`, `requirement_property_graph`, and
 `property_state_graph` summarize deterministic components/SCCs/cycles, degree,
-and metrics over that graph. It accepts multiple files/directories in batch mode;
+and metrics over that graph. An acceptance / forbidden node of a spec whose
+traces the requirement-trace gate refuses is still projected but carries
+`"trace_gate": "unchecked"`: it is not a checked claim. It accepts multiple files/directories in batch mode;
 directories expand recursively to sorted `*.fsl` files (the `*.fsl` filter applies
 only to that expansion — an explicitly named file is always kept, whatever its
 extension) and partial failures stay visible in `files[]`/`errors[]`; a batch
@@ -394,11 +484,12 @@ that analyzed nothing never reports `result:"analyzed"`/exit 0. Standalone
 refinement mappings use `--projection
 refinement_graph`, project manifests use `--projection traceability_graph`, and
 graph projections can export DOT or Mermaid with `--format dot|mermaid`. A
-node's TSG `label` is its `fsl_core::display_name` (a db-dialect internal
+node's TSG `label` is its `fsl_core::unmapped_public_spelling` (a db-dialect internal
 separator sentinel is converted back to `__`, matching what `verify`
 reports); `--focus` accepts either a node's raw id or its displayed name. A
-compose component action and its clauses use the action's public name in both
-id and label (`action:a__b.c`, `guard:a__b.c:0`, label `a__b.c`).
+compose component action or a `branches` split and its clauses use the
+action's public name in both id and label (`action:acct.go`, `guard:acct.go:0`,
+label `acct.go`; `action:submit.b1`).
 `action_dependency_graph`'s `enables`/`conflicts_with` edges carry every
 shared read/write state bridge for the action pair in `states` (plural);
 `state` (singular) is only the first one, kept for backward compatibility.
@@ -445,15 +536,23 @@ in.
 `ledger` re-organizes `verify`/`scenarios`/`replay` findings **by
 requirement id** into a Markdown audit ledger a PM / governance / internal-audit
 reader can decide approve/reject/risk-accept from. It is a presentation layer
-(no new verification): the `trace_type` discriminator drives a per-finding
-business translation, governance columns (risk/decider) come from `control`
+(no new verification): warning kinds select their presentation from one table;
+other findings use their `trace_type` for business translation. Governance
+columns (risk/decider) come from `control`
 metadata when present (fill-in otherwise), and the guarantee limit is stated in
-positive form. Raw JSON is demoted to a collapsed appendix. `--impl-log
+positive form. A spec whose acceptance / forbidden traces the requirement-trace
+gate refuses (the `kind: "acceptance"` / `"forbidden"` / `"forbidden_setup"`
+error of `check`) gets that error and exit 2 instead of a ledger, as it does
+from `explain`, `html`, the `document` commands, and `approval create` /
+`check`; fix the case it names first. Raw JSON is demoted to a collapsed appendix,
+omitting only each finding's top-level `cost` and `cache` execution metadata.
+`--impl-log
 <trace.json>` folds a `run_replay` conformance row into the ledger, but a
 replay **error** (missing file, malformed JSON, wrong-spec trace,
 schema-invalid trace) fails the whole `ledger` command through the standard
 error envelope and exit code, the same as `--evidence`, rather than rendering
-a ledger with the implementation-log row silently missing. A **failing**
+a ledger with the implementation-log row silently missing. Nonconformance adds a
+spec-level 🔴 `conformance` finding; conformance adds none; exit stays tied to verify. A **failing**
 `--evidence` source (a definitive nonconformant/mismatch/unsupported verdict,
 not a verdict-less gate failure) adds a 🔴 要確認 finding for every
 requirement it attaches to — its own root `requirements`/`requirement.id`, or
@@ -461,7 +560,60 @@ a `requirement.id` nested inside a `findings`/`checks` array item — or a
 spec-level（仕様全体）finding when it fails with no attribution at all; it
 never silently renders green while failing evidence sits unread in the
 appendix, and never changes assurance class (that stays orthogonal to
-verdict).
+verdict). Non-`refines` preservations each add a `GOV` finding; non-`refines`
+inline `implements` adds a spec-level finding without inventing requirement
+links. `unknown_cti` is an unestablished induction finding, not a reachable
+counterexample. Attribution prefers an explicit requirement; otherwise `NameMap`
+uniquely resolves `generated_name` (when present) or public identity to the
+invariant/trans/leadsTo declaration (including rank), the property behind a
+synthetic check, or `last_action` for action checks/ensures/type_bound, while
+deadlock and unresolved/ambiguous owners stay spec-level.
+Full CTI/hint/rank-failure evidence stays in the
+appendix; only each finding's top-level `cost` and `cache` are excluded, not
+same-named nested domain fields. Added findings and corrected attribution change affected
+ledger approval digests and require review and re-approval.
+Warning presentation preserves the six vacuity and five migration families.
+`deadlock` is a deadlock finding; `never_enabled_action` is coverage, and
+`vacuity_probe_truncated` is `verification_incomplete` without mutate advice.
+Unknown or missing kinds remain generic warnings. `no_user_invariants` describes
+absent safety declarations, not an absence of reachable or progress checks.
+Changed rows make affected approvals `drifted` for `rendering_changed` (exit 0);
+review and re-approve. Raw evidence, assurance, envelopes and command exits stay
+unchanged.
+Aggregate assurance is plain `bounded` if any `leads_to` entry is not `unbounded`.
+Reachables show ⚪ 未評価 / `not_run` for `violated` + `invariant`/`trans`/`ensures`/`partial_op`/`type_bound`;
+the library also applies this to explicit deadlock. Other non-error results count as evaluated (#1565 tracks precise witness status).
+Direct `ledger` and `html` return verification `result:"error"` with the full
+JSON error envelope and exit 2/3, before rendering or output-file creation;
+direct ledger stops before ancillary replay, evidence loading, and witness preparation
+(HTML before explain too). No `-o` artifact is created. Non-error failed or
+unestablished verdicts still render reports with nonzero exit. Approval-only
+ledger rerendering for digest comparison stops at the same `result:"error"`;
+its artifact bytes can still change with the new findings and coverage rendering.
+All native full-verification callers share one stage owner; baseline adapters
+disable caching and retain default vacuity warnings. For direct reports,
+verification/error checking precedes presentation-model loading
+and trace-contract extraction: broken causal syntax keeps its parser diagnostic,
+Agent input keeps its parse refusal, unknown DB columns keep the specialized
+error without a generated-name location, and unknown AI authority tools produce
+JSON semantics errors (exit 2), not panics. Passing report artifacts, warnings,
+metadata and approval target digests are unchanged by this consolidation (#1417).
+`approval create --kind ledger|html`, `approval check`, `approval diff`, and
+`counterexample export` still lower the spec before verification or rerendering,
+retaining their old invalid-input precedence. Unknown AI tools return JSON `semantics`
+errors (exit 2); approval create's diagnostic precedence remains a separate issue.
+
+**Causal observation outputs.** After replay/artifact construction and before
+output serialization/writes, `causal observe-expectations` checks all actual
+`--out`/`--lifecycle-out` destinations in artifact order, evidence then lifecycle.
+A key is the canonicalized parent plus the file name, or the collapsed spelling when
+the parent does not exist; names differing only by case do not collide. The first
+duplicate rejects usage/2 with
+`causal output destinations collide: <first path> and <second path>` and no writes.
+Earlier input/replay errors win; valid collisions beat publication I/O errors.
+Zero artifacts do not collide from equal flags. Distinct names/bytes/assurance,
+interleaved writes and later-error partial publication remain unchanged; that error
+lists the earlier files in `written`.
 
 Digest-bound approvals are separate from assurance class and from
 the ledger's empty human-decision checkbox. `approval create` must be run from a
@@ -469,11 +621,61 @@ clean tracked Git baseline and only accepts a reviewed artifact that matches a
 fresh rendering under the recorded inputs. The sidecar uses a lowered-kernel
 digest that ignores source locations plus a normalized artifact digest for
 `ledger`, `html`, or `scenarios`. `approval check` and `ledger --approval`
-report `approved` or `drifted`; drift reasons distinguish spec, rendering, and
-renderer changes. A drifted row carries the complete baseline digest and an
+report `approved` or `drifted` after completed evaluation; signed records can report
+`signature-invalid`. `approval check` exits 0/0/1 respectively. `ledger --approval`
+renders these statuses while retaining its report/baseline exit contract; when an `html` or
+`scenarios` record's rerender stops on a failed baseline, it instead returns `result:"error"`,
+exit 2, naming the record, and leaves the `-o` file untouched. `approved`
+confirms digest binding, not a verification pass: a `--kind ledger` record can be approved
+on a failed or unestablished baseline, including `violated`, `unknown_cti`, `reachable_failed`, `refinement_failed` and `unknown_budget`, and
+the envelope carries no verdict. Gate on `fslc verify` separately. An approval gate requires
+exit 0 AND `result:"approval_check"` AND `status:"approved"`.
+Input/record/baseline/trust errors exit 2 without approval status. Aborted artifact
+evaluation in `approval create` and `approval check` preserves the complete downstream envelope/exit and writes no approval
+record: scenarios violations exit 1, internal errors exit 3, and failed HTML
+rerendering returns `generated`/`html_report` with exit 1, inline content/default
+metadata and no HTML file. Direct `html -o` still writes failed-baseline reports;
+write errors exit 2 and take precedence. Direct
+HTML/ledger reports retain their generated-report exit 1. Drift reasons distinguish
+spec, rendering, and renderer changes; the renderer is the target kind's own
+`"<renderer-id>/<semver>"` (`fslc-ledger-renderer/1.0.0`), not the `fslc` release, and a
+4.x record's bare crate version (`4.12.0`) skips only that comparison while every digest
+still applies. A drifted row carries the complete baseline digest and an
 `approval diff` command, which compares the approved commit to the current
 working spec. Treat `approver` as attribution; authenticity comes from the
 repository's signed-commit/review/branch-protection policy.
+
+New creates for all four target kinds use unsigned `fslc.approval.v5` or signed
+`fslc.approval.v6`. Both require `path_base`, the creation directory relative to
+the Git root of the spec's checkout (`.` or `/`-separated names), and the nonempty
+original spec argument verbatim as `render_source`. Target/input I/O resolves from
+the Git root of the spec being checked plus `path_base`, never the caller's directory
+or the creating checkout, so a clone, worktree or relocated checkout reads its own
+files; path spellings, input order and rendered labels stay literal. The root comes
+from the directory the spec's path names, ignoring `GIT_DIR` and similar variables; a
+spec resolving outside it, including through `core.worktree`, is refused (`semantics`,
+exit 2), a link within the checkout keeps the binding, and a link into a nested
+repository fails the path check. `document generate --approval` on v5/v6 therefore
+needs Git. A document record's creation directory, target and inputs must stay inside
+that root: at creation, absolute paths, climbing paths and links out are refused
+(`semantics`, exit 2). At check, climbing paths and links out get the same refusal, and
+an absolute form is rejected by the record reader (`io` from `approval check` and
+`ledger`, `document` from `document generate`). Solver records read nothing through
+the base and store `.` when created outside the root; their `approved` covers the spec
+and a fresh rendering, not the reviewed file on disk. A v5 record is unsigned and proves
+nothing against someone editing it: a `path_base` pointing at a same-content copy still
+reports `approved`, and v6 catches it. `render_source` is only a label: the explicit
+spec supplies the actual bytes and dependency directory. Legacy v1–v4 reads retain
+their original closed formats, signatures and invocation-relative paths, with no silent
+migration.
+
+For document records v3–v6, authoritative approval check and ledger compare raw
+input digests from the same loaded buffers used for rendering. Every earlier
+error and complete ordered drift result takes precedence. Only an
+otherwise-approved mismatch returns the existing I/O error/exit 2 with
+`approval input digest mismatch: <recorded path>`; choose glossary first, then
+evidence in recorded order. Generate remains lightweight with explicit inputs;
+structural document check and approval diff gain no stored-input reads.
 
 Every requirement id in the ledger (and every property row in `fslc html`)
 carries an **assurance class**: `proved(induction)` (k-induction,
@@ -526,7 +728,26 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
 - `mutate` applies a deterministic single mutation to the kernel AST (requires
   deletion/negation, assignment deletion, enum swap, integer/type-bound ±1,
   then/else swap, fair deletion), re-runs `build_spec` on each mutant, and reports
-  whether it is killed by BMC/acceptance/forbidden/refinement. exit is 0 unless an
+  whether it is killed by the main/acceptance/forbidden/refinement oracle.
+  The baseline uses auto with its default 1,000,000-state budget, accepting
+  verified or proved; otherwise a fresh-thread BMC rerun either verifies and
+  continues or supplies the refused baseline envelope. JSON keeps
+  `baseline:"verified"`. A boundary-probe finding wins first; after a completed
+  empty probe, explicit (50,000 states) can certify only clean main results,
+  with all reachables witnessed through K; if neither decides, the existing
+  BMC path chooses the verdict/killer. Secondary checks remain unchanged.
+  Report progress goes to stderr:
+  `mutate baseline: <verdict> (engine=<route>, <seconds>s)`, then
+  `mutate [i/N] <op> <target>: <status>[ <killer>] (engine=<route>, <seconds>s)`
+  or `mutate external [i/M] <id>: ...`. Routes are explicit, bmc, probe, none,
+  naming the main oracle. If the main oracle was clean and a later check decided
+  killed, inconclusive or error, the label is
+  `(engine=secondary, oracle=<route>, <seconds>s)`, with route explicit or bmc.
+  Counts cover evaluated records,
+  including invalid externals. No progress on command/baseline errors. Stdout is
+  unchanged except for the encoding-only residual in DESIGN-mutate §3:
+  explicit-clean can survive where BMC alone reported `build_spec`.
+  There is no mutate engine/budget CLI flag. exit is 0 unless an
   opt-in gate is requested: `--fail-on-survivors` / `--min-kill-rate R` (`R` in
   `[0, 1]`) add `gate{..., violations, passed}` and exit 1 when `passed` is
   false. Zero judged mutants fails either flag (`no_judged_mutants`), and so
@@ -559,9 +780,13 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `replace:{target,replacement,occurrence?}` instruction. Valid records use the
   same oracle; malformed JSON/instructions and parse/name/type/construction
   errors are `invalid` rather than killed (a built-in mutant that does not
-  build is `invalid` too). A mutant the oracle could not judge (Z3
+  build is `invalid` too). `invalid` means statically invalid input, including
+  static implements-map type errors with auto or explicit maps. Validation
+  precedes runtime oracles; a main or requirement kill cannot hide an invalid
+  map. Invalid inputs are excluded from `gate.judged` and `kill_rate`, independent
+  of runtime verdict order. A mutant the oracle could not judge (Z3
   unavailable, solver `unknown`/backend failure, or an
-  acceptance/forbidden/implements oracle error) is `status:"error"` with
+  acceptance/forbidden/implements evaluation failure) remains `status:"error"` with
   `error{stage, message}`, never killed, and counted in `summary.errored`
   (present only when non-zero). Precedence for one mutant: `killed` > `error`
   > `inconclusive` > `survived`.
@@ -581,13 +806,14 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   unreachable at baseline should show all of their mutants surviving with
   the existing dead-action note, not killed.
 - `verify --property Name` resolves across invariant, `trans`, `leadsTo`, and
-  `reachable` declarations and checks only the named property kind in isolation.
-  Under `--engine induction --property <trans>`, the named transition is the
-  only transition obligation, while every user invariant and implicit type
-  bound remains in the base case and induction hypothesis. This is the one
-  dependency-preserving exception to model restriction. Existing selected-
-  invariant behavior is unchanged and still drops sibling invariants. Selected
-  `leadsTo` and `reachable` remain rejected by the induction selector.
+  `reachable` declarations and restricts user declarations to the selected name.
+  Selecting an invariant drops sibling user invariants regardless of engine.
+  Under induction, selecting a `trans` retains all user invariants in the base
+  case and induction hypothesis, with no sibling transition obligations.
+  Retaining those user declarations is the one dependency-preserving exception
+  to model restriction. Independently, the induction base checks every implicit
+  type bound for any selected name; see [automatic checks](syntax.md#6-automatic-checks-checked-even-if-not-written).
+  Selected `leadsTo` and `reachable` remain rejected by the induction selector.
   `--exclude-property Name` is repeatable and acts as the cross-kind inverse:
   it removes named invariants, `trans`, `leadsTo`, and `reachable` checks from
   the run and from checked-property outputs. If both options name the same
@@ -600,6 +826,15 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   properties, so `not_evaluated` is never a pass — gate the seam on an
   unfiltered `check`/`verify` or `fslc chain`. A spec without `implements` has
   no key.
+  `--property _bounds_<root>` can select implicit bounds, including relations;
+  checked inventories include them, and induction records proved bounds in
+  `k_used`. The existing CLI limitation remains: `--exclude-property _bounds_*`
+  is rejected as `no such property` (exit 2), not a supported bound-exclusion route.
+  When property selection omits a Set/relation root bound, optional closed-grid
+  ranking does not skip lasso search. Other unselected scalar bounds are not
+  assumed by ranking. In BMC, re-framing an unchecked Set/relation root requires
+  proof that no live key escapes the new frame's finite support; that re-framing
+  check does not assume the omitted bound. Outside values remain retained.
 - `verify --instances NAME=N` / `--values NAME=LO..HI` (both repeatable)
   override the matching `entity`/`number` bound from a `verify { ... }` block
   without editing the spec — the CLI equivalent of hand-shrinking the model
@@ -650,7 +885,18 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   values}` scope (`[]` when there is none). Missing,
   unknown, or mixed classifications, including `over_constrained`, fail closed as
   `sweep_failed`. For `--values NAME=LO..HI`, it fixes `LO` and expands
-  `LO..LO`, `LO..LO+1`, ..., `LO..HI`. A spec `error` from any scope
+  `LO..LO`, `LO..LO+1`, ..., `LO..HI`. The normalized grid is limited to
+  10,000 cells: the product of every inclusive instances/value range width and
+  the inclusive depth width; an empty axis contributes 1, and the last range
+  for each trimmed name wins within each axis. Existing option, literate-input,
+  range, file-loading, and edition-admission checks come first; admission may
+  itself parse the source. The checked cell count then precedes both product
+  allocations and per-cell parsing/type/scope checks. Overflow or more than
+  10,000 cells returns `kind:"semantics"`, exit 2, and
+  `message:"sweep grid exceeds the maximum of 10000 cells"`, with no partial
+  sweep result. This limits verification calls, not per-cell states, elapsed
+  time, or the absolute depth. Admitted grids keep their existing behavior.
+  Within an admitted grid, a spec `error` from any scope
   (parse/type/semantics/io/vacuous, a mistyped `--instances`/`--values` name,
   a missing file) is returned verbatim — exit code and `kind` unchanged.
   Cells always carry `--instances`/`--values`, so a check a cell skips
@@ -659,7 +905,13 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `summary` row gets `"<section>": "not_evaluated"` and
   `sweep.not_evaluated: {sections, reasons}` is the union over cells (absent
   when nothing was skipped). `sweep_passed` says nothing about those sections —
-  check them on an unscoped run.
+  check them on an unscoped run. The envelope is a function of its inputs apart
+  from `cache` and timing execution metadata. For stable comparisons, follow
+  approval's `stable_json`: exclude `cost` and `cache` only at each verification
+  envelope's root (`sweep.results[].verification` and
+  `sweep.minimal_counterexample.verification` when present), preserving
+  same-named domain-state fields. Cache provenance is not verdict evidence.
+  Sweep has no `--no-cache`; use `FSLC_CACHE=off` to disable cache reads/writes.
 - `explain` is deterministic formatting with no LLM. JSON mode enumerates
   state/action/requires/writes/properties/implicit checks by source loc and
   structural traversal, and attaches to each user invariant the shortest
@@ -676,8 +928,19 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `--readable` emits a text view that surfaces verification bounds, fairness,
   KPI projections, branch lowering (one `branch:` line per split action),
   and a synthesized `Implements:` refinement mapping when the source
-  declares one. Invariants for which none is found are explicitly marked
-  `no counterfactual within depth K`. Counterfactual weakening checks
+  declares one. Invariants for which none is found normally carry the JSON
+  `note` `no counterfactual within depth K`. If a non-user check preempts the
+  target search and bounded concrete fallback finds no witness, the note instead
+  says `preempted by KIND NAME at step k`. If concrete startup fails, it also
+  appends `concrete search not run: nondeterministic initialization of state
+  NAME[, NAME] is unsupported`, with public names for reported free roots, or
+  `concrete search not run: initialization/initial-state checks failed: REASON`
+  for another reported startup cause. Skipped bounded init-assignment
+  removals append `init-assignment removal of bounded state NAME was not
+  analyzed` with the skip reason to either note; free initial valuations are
+  not enumerated by concrete search. A found candidate takes precedence over
+  these notes. HTML renders the same note evidence; readable mode keeps its
+  scope/skeleton view. Counterfactual weakening checks
   invariants and reachability only; `counterfactual_scope.liveness:"skipped"`
   and the readable header make explicit that `leadsTo` remains the normal
   `verify` command's responsibility.
@@ -689,8 +952,9 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   requirements dialect but never referenced. A declaration linked by `@requirement("MODEL-SCOPE-001", ...)`
   / `@requirement("ASSUME-SCOPE-001", ...)` does not become a warning. This gate
   only asks whether a tag exists, not whether it is canonical: a legacy
-  `"REQ-1: text"` string counts as tagged here, and `fslc lint` is what reports
-  it (`legacy_string_metadata`, exit 1, machine-applicable), so run both.
+  `"REQ-1: text"` string counts as tagged here; `check` also warns with
+  `legacy_string_metadata`, and `fslc lint` retains exit 1 for the finding.
+  Use its machine-applicability flag to decide whether automatic edits are safe.
 - `typestate`: determines how far a state machine (a struct field with enum values,
   scoped by field name **and** owning struct type so two structs with a same-named
   field stay independent machines / a state variable / an `Option<_>` slot) can be
@@ -772,6 +1036,10 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   within depth, not structurally impossible). Blame identifies; it never
   proposes a repair — do not turn a `blame` entry into a suggested guard
   weakening (that cuts against the anti-hollowing principle).
+  Both levels are shallow: only the invariant's top-level `and` is split (a
+  conjunction inside a quantifier body is one conjunct), and
+  `violating_bindings` names the outermost quantifier's failing values only —
+  `forall u: U { forall i: I { ... } }` reports `[{"u": 0}]`, with no `i`.
 - **repair routing (`trace_type`)**: every counterexample/failure result carries a
   `trace_type` discriminator — one of `invariant` | `sla` | `type_bound` | `trans`
   | `ensures` | `partial_op` | `deadlock` | `leadsTo` | `leadsTo_rank` |
@@ -871,6 +1139,31 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `helpful_action_not_enabled`, `non_decreasing_helpful_action`,
   `non_helpful_action_increases_measure`, and — with two or more distinct
   helpful actions — `helpful_action_enabledness_not_sticky`).
+
+### Scoped liveness exploration
+
+Lasso search can grow sharply with interleavings; separate diagnosis from the
+original obligations rather than assuming every safety run is cheap:
+
+1. **Explore a stated smaller world/depth for one response**, without editing
+   the original source bounds. For a declared entity Case, a typical diagnostic
+   run is `fslc verify file.fsl --engine bmc --instances Case=1 --property Responds --depth 8`.
+   Choose the smallest world that still exhibits the relevant interaction, not
+   automatically one case. Use overrides only for declared entity/number bounds.
+   Report the effective world and depth: this result does not establish the
+   original larger-world response. Selected leadsTo is not an induction selector.
+2. **Check safety separately at the full declared world and required depth.**
+   Run each needed safety property (for example --property SafetyName) without
+   reduced bounds while isolating costly response exploration. Do not mistake
+   one selected safety pass for all safety obligations or a completed seam.
+3. **Complete the original contract unfiltered**, using its layer's required
+   check/lint/verify/induction/scenarios and refinement runs at original world
+   sizes/depths, without property selection/exclusion, from-state or reduced
+   overrides. Read requirement_traces skips and implements:not_evaluated from
+   diagnostic runs; replay the original scenarios and gate the original seams.
+   If full-scope obligations remain unresolved, report that limit. A reduced-world
+   pass, full-world safety pass or ranked eventual response is not permission
+   to claim the original deadline/liveness/seam obligation passed.
 
 ### ⚠ Liveness scales differently from safety — verify it on a reduced model
 

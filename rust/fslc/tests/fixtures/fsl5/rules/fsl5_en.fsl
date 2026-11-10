@@ -1,0 +1,60 @@
+fsl 5
+// The rule statements no design-draft example uses: `only after` (a ghost
+// field), `never ... when` and `never ... for`, and `always ... in ... has`.
+// Its expected lowering, lowered.fsl, is written by hand (fsl 5 plan S6,
+// acceptance 3).
+requirements OrderRules {
+  number Qty
+  actor User, Shop
+
+  entity Order {
+    qty: Qty = 0
+    lifecycle Open -> Packed -> Shipped
+  }
+
+  concept Large = Order where qty > 1
+
+  event add  = User adds Order with qty   in Open
+  event pack = Shop packs Order           Open -> Packed
+  event pay  = User pays Order            in Packed
+  event ship = Shop ships Order           Packed -> Shipped
+
+  rule REQ-1 "An order ships only after it is paid" {
+    Shop ships Order only after User pays Order
+  }
+  rule REQ-2 "An empty order is not packed, and a large one takes no more items" {
+    never Shop packs Order when qty == 0
+    never User adds Order for Large
+  }
+  rule REQ-3 "A shipped order has items" {
+    always Order in Shipped has qty > 0
+  }
+
+  scenario AC-1 "A paid order ships" {
+    User adds o1 with qty 1
+    Shop packs o1
+    User pays o1
+    Shop ships o1
+    then o1 is Shipped
+  }
+
+  forbidden FB-SHIP-UNPAID "An unpaid order does not ship" {
+    User adds o1 with qty 1
+    Shop packs o1
+    Shop ships o1
+    then rejected
+  }
+  forbidden FB-PACK-EMPTY "An empty order is not packed" {
+    Shop packs o1
+    then rejected
+  }
+  forbidden FB-ADD-LARGE "A large order takes no more items" {
+    User adds o1 with qty 2
+    User adds o1 with qty 1
+    then rejected
+  }
+}
+verify {
+  instances Order = 1
+  values Qty = 0..2
+}

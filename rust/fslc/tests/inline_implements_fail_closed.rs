@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
+#[path = "support/migration_warnings.rs"]
+mod migration_warnings;
 
 const FIXTURE_DIR: &str = "rust/fslc/tests/fixtures/inline_implements_fail_closed";
 const CHAIN_FIXTURE: &str = "tests/fixtures/chain/requirements_broken_implements.fsl";
@@ -155,11 +157,12 @@ fn the_seam_is_the_only_envelope_difference_on_the_default_verify_path() {
     const EXCLUDED: [&str; 5] = ["cost", "deadlock", "implements", "result", "spec"];
 
     let arguments = ["--depth", "3", "--no-cache"];
-    let (refines, refines_status) = run(
+    let (mut refines, refines_status) = run(
         "verify",
         &[&[CHAIN_REFINES_FIXTURE][..], &arguments[..]].concat(),
     );
-    let (failing, failing_status) = run("verify", &[&[CHAIN_FIXTURE][..], &arguments[..]].concat());
+    let (mut failing, failing_status) =
+        run("verify", &[&[CHAIN_FIXTURE][..], &arguments[..]].concat());
 
     // The regression #1002 asks for: an ordinary `verify` that succeeds stops
     // succeeding when the only thing that changes is the seam.
@@ -181,17 +184,28 @@ fn the_seam_is_the_only_envelope_difference_on_the_default_verify_path() {
         ["abs", "result", "violation"]
     );
 
-    let refines = refines.as_object().expect("verify envelope is an object");
-    let failing = failing.as_object().expect("verify envelope is an object");
-
-    let mut refines_keys: Vec<&str> = refines.keys().map(String::as_str).collect();
-    let mut failing_keys: Vec<&str> = failing.keys().map(String::as_str).collect();
-    refines_keys.sort_unstable();
-    failing_keys.sort_unstable();
+    // Observed source-specific loc/byte-edit differences: requirements.fsl:17
+    // versus requirements_broken_implements.fsl:19. Validate every finding field
+    // against its own source before comparing all remaining warnings/envelope.
+    for (output, fixture) in [
+        (&mut refines, CHAIN_REFINES_FIXTURE),
+        (&mut failing, CHAIN_FIXTURE),
+    ] {
+        migration_warnings::take_migration_warnings(
+            output,
+            &repository_root().join(fixture),
+            fixture,
+            &["inline_action_maps"],
+        );
+    }
+    let refines_keys = sorted_keys(&refines);
     assert_eq!(
-        refines_keys, failing_keys,
+        refines_keys,
+        sorted_keys(&failing),
         "the seam must not add or remove a top-level key"
     );
+    let refines = refines.as_object().expect("verify envelope is an object");
+    let failing = failing.as_object().expect("verify envelope is an object");
 
     for key in EXCLUDED {
         assert!(

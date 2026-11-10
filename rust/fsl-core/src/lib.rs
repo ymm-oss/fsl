@@ -3,19 +3,24 @@
 
 //! Typed kernel lowering and semantic model for the Rust FSL port.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 
 use fsl_syntax::{
     ActionItem, AnnotationRegistry, Binder, BusinessItem, Expr, LValue, Param, ParseError,
-    RequirementsItem, SourceFile, SpecItem, StateField, Statement, SurfaceDocument, SurfaceSpec,
-    TypeExpr, VerifyItem, parse_document,
+    ParseOptions, RequirementsItem, SourceFile, SpecItem, StateField, Statement, SurfaceDocument,
+    SurfaceSpec, TypeExpr, VerifyItem, parse_document, parse_document_with,
 };
 use serde_json::Value;
 
 type InstanceOverrides = BTreeMap<String, i64>;
 type ValueOverrides = BTreeMap<String, (i64, i64)>;
 type FilteredScopeOverrides = Option<(InstanceOverrides, ValueOverrides)>;
+/// Whether patterns flow to a binary RHS or its enclosing true continuation.
+#[must_use]
+pub fn pattern_binding_flows(op: &str, right_operand: bool) -> bool {
+    op == "and" || (right_operand && op == "=>")
+}
 
 /// Re-exported so every crate that recurses over `KernelExpr` reaches the same
 /// stack guard without depending on `fsl-syntax` directly (#620).
@@ -28,28 +33,42 @@ pub use fsl_syntax::{
     Statement as KernelStatement, SymbolPath,
 };
 
+pub mod binder_range;
 mod compose;
 mod db;
+mod decision_table;
+mod declared_names;
 mod diagnostics;
 mod dialect;
 mod domain;
 mod domain_lowering;
 mod expr_text;
+mod finite_domain;
 mod model;
+mod naming;
 pub mod obligation;
 mod origin;
 mod partial_operation;
 mod public_kernel;
 mod refinement;
 mod reserved;
+mod resolve_aliases;
+mod rule_guards;
 mod trace;
 mod trace_json;
 mod typecheck;
 
 pub use compose::{
-    ComposeName, FileResolver, FsResolver, lower_compose, parse_kernel_source,
-    parse_kernel_source_with_file,
+    FileResolver, FsResolver, lower_compose, lower_compose_with_options, parse_kernel_source,
+    parse_kernel_source_with_file, parse_kernel_source_with_file_with_options,
+    parse_kernel_source_with_options,
 };
+pub use db::DB_COMPATIBILITY_RULES;
+pub use decision_table::{
+    DECIDE_NOT_EXHAUSTIVE, DECIDE_OVERLAP, DECIDE_ROW_EMPTIED, DecisionObligation,
+    DecisionTableResult, decision_table_results,
+};
+pub use declared_names::reject_declared_separator;
 pub use diagnostics::{
     ModelWarningContext, NO_USER_INVARIANTS_KIND, VACUITY_KINDS, finalize_envelope_model_warnings,
     finalize_model_warnings, insert_requirement_metadata, is_no_user_invariants_warning,
@@ -60,18 +79,30 @@ pub use dialect::{
     AiToolSets, GovernanceContract, GovernanceDelegate, GovernancePreservation,
     RequirementsTraceCase, RequirementsTraceContract, RequirementsTraceExpectation,
     RequirementsTraceStep, ai_approval_invariant_name, ai_forbidden_invariant_name, ai_tool_sets,
-    governance_contract, lower_ai_component, lower_business, lower_db, lower_domain,
-    lower_governance, lower_requirements, requirements_declared_ids, requirements_has_implements,
-    requirements_trace_contract, validate_ai_component, verify_scope_type_names,
+    governance_contract, governance_contract_with_options, lower_ai_component, lower_business,
+    lower_db, lower_domain, lower_governance, requirements_declared_ids,
+    requirements_declared_ids_with_options, requirements_has_implements,
+    requirements_has_implements_with_options, requirements_trace_contract,
+    requirements_trace_contract_with_options, rule_property_names, validate_ai_component,
+    validate_ai_component_with_location, verify_scope_type_names,
+    verify_scope_type_names_with_options,
 };
 pub use domain::{DomainDefault, domain_kernel_source, domain_type_default};
 pub use domain_lowering::{domain_effect_owns_event, event_flag, state_name};
 pub use expr_text::{binder_text, expr_text, source_binder_text, source_expr_text};
+pub use finite_domain::{DOMAIN_BOUND, SolverObligation, solver_obligations};
 pub use model::{
     ActionDef, ActionGuard, DiagnosticEdit, KernelModel, LeadsToDef, ModelError, ParamDef,
     PropertyDef, TypeDef, TypeRef, Value as FslValue, WRITE_DISTINCTNESS_UNPROVED_CODE,
-    build_model, static_leadsto_bindings,
+    build_model, check_init_collection_binder, check_init_statement_domains, check_range_admission,
+    integer_range_state_references, locate_unfolded_aggregate, state_references,
+    static_leadsto_bindings,
 };
+pub use naming::{
+    AmbiguousName, ComposeName, Glossary, NameMap, PublicName, SyntheticName,
+    unmapped_public_spelling,
+};
+pub use obligation::action_has_integer_range_binder;
 pub use origin::{
     INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
     TERMINAL_TARGET, TraceabilityRegistry, URGENT_ACTIONS_STEP, action_guard_target,
@@ -95,14 +126,59 @@ pub use public_kernel::{
 };
 pub use refinement::{
     ActionCorrespondence, ActionCorrespondenceTarget, ActionRef, ImplementsContract, ProgressMap,
-    Refinement, RefinementError, StateMap, parse_refinement, requirements_implements,
-    requirements_implements_with_bounds,
+    Refinement, RefinementError, RefinementErrorKind, StateMap, merge_refinement_model,
+    parse_refinement, parse_refinement_with_options, pull_refinement_leadsto,
+    requirements_implements, requirements_implements_with_bounds,
+    requirements_implements_with_bounds_with_options, requirements_implements_with_options,
 };
+pub use resolve_aliases::lower_requirements;
+pub use rule_guards::{GuardConflict, RULE_CONFLICT_UNSATISFIABLE_GUARD};
 pub use trace::{TraceAction, TraceChange, TraceStep};
 pub use trace_json::{
-    display_name, fsl_value_json, internal_origin_json, origin_display_name, state_json,
-    state_summary, trace_json,
+    fsl_value_json, internal_origin_json, origin_display_name, state_json, state_summary,
+    trace_json,
 };
+pub use typecheck::{CarrierCoercion, validate_boolean_expression};
+
+/// What a core frontend or lowering failure is, independent of its wording.
+///
+/// Delivery surfaces derive the public envelope (`kind`, `hint`) from this
+/// type through an exhaustive `match` with no wildcard arm, so adding a kind
+/// fails to compile until every surface states how it is reported. The message
+/// stays free to change without silently reclassifying the diagnostic, which
+/// message-text matching could not guarantee (issues 565, 1167).
+///
+/// `docs/design/DESIGN-v1.md` §7.2 fixes the public `kind` as a closed set;
+/// these kinds are finer than that set and map onto it, they do not extend it.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum CoreErrorKind {
+    /// A semantic failure with no narrower classification.
+    #[default]
+    Semantics,
+    /// A declaration that is duplicated, missing, or shadowed — the failures
+    /// `docs/design/DESIGN-v1.md` §7.2's `name` member covers (issue 565).
+    NameResolution,
+    /// A type reference that names no declared type.
+    UnknownType,
+    /// Lowering reached a declaration whose type it could not resolve, so it
+    /// cannot choose a default value for it.
+    UnresolvedTypeDefault,
+    /// A `check hard { rule ... }` clause names a rule outside the registered
+    /// hard-contract rules.
+    UnknownAiHardContractRule,
+    /// A domain expression names a symbol the domain does not declare.
+    UnknownDomainSymbol,
+    /// `--instances` / `--values` were given for a document that declares no
+    /// `entity` or `number` they could bound: a CLI argument defect rather than
+    /// a construct in the document.
+    ScopeOverrideWithoutBounds,
+    /// The top-level document is a kind the kernel lowering does not accept.
+    NotKernelLowerable,
+    /// A compose component could not be read, parsed, or lowered. Carries the
+    /// component's own kind, which the compose-level diagnostic does not adopt
+    /// (see `component_error` in `compose.rs`).
+    ComponentLoad(Box<CoreErrorKind>),
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoreError {
@@ -110,14 +186,15 @@ pub struct CoreError {
     pub line: u32,
     pub column: u32,
     pub origin: Option<Box<OriginChain>>,
-    /// Whether this is a name-resolution failure — a declaration that is
-    /// duplicated, missing, or shadowed.
+    /// The classification the frontend determined for this failure.
     ///
-    /// `docs/design/DESIGN-v1.md` §7.2 fixes `kind` as a closed set whose `name`
-    /// member covers exactly these. Carrying the classification on the error
-    /// keeps it out of message-string matching, which cannot survive a message
-    /// edit (issue 565, the direction issue 484 established).
-    pub name_resolution: bool,
+    /// Carrying it on the error keeps it out of message-string matching, which
+    /// cannot survive a message edit (issues 565, 1167).
+    pub kind: CoreErrorKind,
+    /// Stable machine-readable code for delivery surfaces that publish one
+    /// (`diagnostic_code`), when the frontend assigns it. `None` publishes no
+    /// code, which is what every pre-existing core diagnostic reports.
+    pub diagnostic_code: Option<&'static str>,
 }
 
 impl CoreError {
@@ -133,7 +210,8 @@ impl CoreError {
             line: 0,
             column: 0,
             origin: None,
-            name_resolution: false,
+            kind: CoreErrorKind::Semantics,
+            diagnostic_code: None,
         }
     }
 
@@ -145,9 +223,28 @@ impl CoreError {
 
     /// Classify this diagnostic as a name-resolution failure.
     #[must_use]
-    pub fn into_name_resolution(mut self) -> Self {
-        self.name_resolution = true;
+    pub fn into_name_resolution(self) -> Self {
+        self.with_kind(CoreErrorKind::NameResolution)
+    }
+
+    /// Classify this diagnostic.
+    #[must_use]
+    pub fn with_kind(mut self, kind: CoreErrorKind) -> Self {
+        self.kind = kind;
         self
+    }
+
+    /// Attach the stable code delivery surfaces publish as `diagnostic_code`.
+    #[must_use]
+    pub fn with_diagnostic_code(mut self, code: &'static str) -> Self {
+        self.diagnostic_code = Some(code);
+        self
+    }
+
+    /// Whether this is a name-resolution failure.
+    #[must_use]
+    pub fn is_name_resolution(&self) -> bool {
+        self.kind == CoreErrorKind::NameResolution
     }
 
     #[must_use]
@@ -189,6 +286,8 @@ impl std::error::Error for CoreError {}
 
 impl From<ParseError> for CoreError {
     fn from(error: ParseError) -> Self {
+        let diagnostic_code =
+            (error.code() == fsl_syntax::DUPLICATE_STRUCT_FIELD).then_some(error.code());
         Self {
             message: error.message,
             line: error.span.start.line,
@@ -209,7 +308,8 @@ impl From<ParseError> for CoreError {
                 lowering_steps: Vec::new(),
                 generated: false,
             })),
-            name_resolution: false,
+            kind: CoreErrorKind::Semantics,
+            diagnostic_code,
         }
     }
 }
@@ -217,6 +317,7 @@ impl From<ParseError> for CoreError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KernelSpec {
     spec: SurfaceSpec,
+    instance_sources: BTreeMap<String, String>,
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     projections: Vec<ProjectionDef>,
@@ -226,7 +327,8 @@ pub struct KernelSpec {
     /// them (per-component `fair` markers) does not survive expansion.
     /// `check`/`verify` merge these with [`model_warnings`].
     diagnostics: Vec<Value>,
-    compose_names: compose::ComposeNames,
+    names: naming::NameMap,
+    root_actuals: Vec<model::RootActual>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -242,35 +344,56 @@ pub struct ProjectionDef {
 ///
 /// This is used by native structural tools that clone and mutate the typed
 /// surface tree before re-running the ordinary semantic lowering gate.
+/// Checks only the supplied surface; it cannot recover obligations erased by
+/// a raw [`KernelSpec::into_syntax`] projection.
 ///
 /// # Errors
 ///
 /// Returns [`ModelError`] when the mutated surface is not semantically valid.
 pub fn build_surface_model(spec: SurfaceSpec) -> Result<KernelModel, ModelError> {
     build_model(KernelSpec {
+        instance_sources: BTreeMap::new(),
         spec,
         origins: OriginRegistry::default(),
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
         diagnostics: Vec::new(),
-        compose_names: compose::ComposeNames::default(),
+        names: naming::NameMap::default(),
+        root_actuals: Vec::new(),
     })
 }
 
 impl KernelSpec {
+    /// Raw, nonvalidating projection; does not serialize original-actual metadata.
     #[must_use]
     pub fn kernel_ast_v1(&self) -> Value {
         self.spec.kernel_ast_v1()
     }
 
+    /// Raw, nonvalidating surface view, without original-actual obligations.
     #[must_use]
     pub fn syntax(&self) -> &SurfaceSpec {
         &self.spec
     }
 
+    /// Raw, nonvalidating and lossy projection. Use
+    /// [`Self::into_validated_syntax`] to validate before discarding obligations.
     #[must_use]
     pub fn into_syntax(self) -> SurfaceSpec {
         self.spec
+    }
+
+    /// Validate the complete kernel before discarding private lowering metadata.
+    /// Returns the original surface, not a reconstruction of the checked model.
+    /// This performs one full core-model validation, without invoking a solver.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ModelError`] for any failure from [`build_model`], including
+    /// invalid original root actuals whose formals were unused.
+    pub fn into_validated_syntax(self) -> Result<SurfaceSpec, ModelError> {
+        build_model(self.clone())?;
+        Ok(self.spec)
     }
 
     #[must_use]
@@ -305,6 +428,9 @@ impl KernelSpec {
     #[must_use]
     pub fn with_source_file(mut self, source_file: impl AsRef<str>) -> Self {
         self.origins.set_source_file(source_file.as_ref());
+        for actual in &mut self.root_actuals {
+            actual.source_file = Some(source_file.as_ref().to_owned());
+        }
         self
     }
 }
@@ -321,13 +447,15 @@ impl KernelSpec {
 /// predicate definitions, recursion, arity mismatches, or variable capture.
 pub fn parse_direct_kernel_spec(source: &str) -> Result<KernelSpec, CoreError> {
     let parsed = parse_document(SourceFile::new(source))?;
+    reject_declared_separator(&parsed.surface, source)?;
     let SurfaceDocument::Spec(spec) = parsed.surface else {
         return Err(CoreError {
             message: "expected direct kernel spec".to_owned(),
             line: 1,
             column: 1,
             origin: None,
-            name_resolution: false,
+            kind: CoreErrorKind::Semantics,
+            diagnostic_code: None,
         });
     };
     let mut kernel = lower_direct_spec(spec)?;
@@ -353,7 +481,8 @@ fn validate_scope_override_names(
         line: 1,
         column: 1,
         origin: None,
-        name_resolution: false,
+        kind: CoreErrorKind::Semantics,
+        diagnostic_code: None,
     };
     if let Some(name) = instances
         .keys()
@@ -398,7 +527,8 @@ fn validate_direct_scope_overrides(
             line: 1,
             column: 1,
             origin: None,
-            name_resolution: false,
+            kind: CoreErrorKind::ScopeOverrideWithoutBounds,
+            diagnostic_code: None,
         });
     }
     validate_scope_override_names(&entities, &numbers, instances, values)
@@ -482,7 +612,21 @@ pub fn retain_dialect_scope_overrides(
     instances: &InstanceOverrides,
     values: &ValueOverrides,
 ) -> Result<(InstanceOverrides, ValueOverrides), CoreError> {
-    let parsed = parse_document(SourceFile::new(source))?;
+    retain_dialect_scope_overrides_with_options(source, instances, values, &ParseOptions::stable())
+}
+
+/// [`retain_dialect_scope_overrides`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`retain_dialect_scope_overrides`].
+pub fn retain_dialect_scope_overrides_with_options(
+    source: &str,
+    instances: &InstanceOverrides,
+    values: &ValueOverrides,
+    options: &ParseOptions,
+) -> Result<(InstanceOverrides, ValueOverrides), CoreError> {
+    let parsed = parse_document_with(SourceFile::new(source), options)?;
     let Some((entities, numbers)) = dialect_scope_override_names(&parsed.surface) else {
         return Ok((instances.clone(), values.clone()));
     };
@@ -582,10 +726,29 @@ pub fn filter_scope_overrides_for_abstraction(
     instances: &InstanceOverrides,
     values: &ValueOverrides,
 ) -> Result<FilteredScopeOverrides, CoreError> {
+    filter_scope_overrides_for_abstraction_with_options(
+        source,
+        instances,
+        values,
+        &ParseOptions::stable(),
+    )
+}
+
+/// [`filter_scope_overrides_for_abstraction`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`filter_scope_overrides_for_abstraction`].
+pub fn filter_scope_overrides_for_abstraction_with_options(
+    source: &str,
+    instances: &InstanceOverrides,
+    values: &ValueOverrides,
+    options: &ParseOptions,
+) -> Result<FilteredScopeOverrides, CoreError> {
     if instances.is_empty() && values.is_empty() {
         return Ok(None);
     }
-    let parsed = parse_document(SourceFile::new(source))?;
+    let parsed = parse_document_with(SourceFile::new(source), options)?;
     let (entities, numbers) = declared_entity_number_names(&parsed.surface);
     let filtered_instances: BTreeMap<String, i64> = instances
         .iter()
@@ -616,15 +779,38 @@ pub fn parse_abstraction_kernel_source_with_bounds(
     instances: &InstanceOverrides,
     values: &ValueOverrides,
 ) -> Result<KernelSpec, CoreError> {
-    let (instances, values) =
-        match filter_scope_overrides_for_abstraction(source, instances, values)? {
-            Some((instances, values)) => (instances, values),
-            None => (BTreeMap::new(), BTreeMap::new()),
-        };
+    parse_abstraction_kernel_source_with_bounds_with_options(
+        source,
+        resolver,
+        instances,
+        values,
+        &ParseOptions::stable(),
+    )
+}
+
+/// [`parse_abstraction_kernel_source_with_bounds`] under explicit
+/// [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`parse_abstraction_kernel_source_with_bounds`].
+pub fn parse_abstraction_kernel_source_with_bounds_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    instances: &InstanceOverrides,
+    values: &ValueOverrides,
+    options: &ParseOptions,
+) -> Result<KernelSpec, CoreError> {
+    let (instances, values) = match filter_scope_overrides_for_abstraction_with_options(
+        source, instances, values, options,
+    )? {
+        Some((instances, values)) => (instances, values),
+        None => (BTreeMap::new(), BTreeMap::new()),
+    };
     if instances.is_empty() && values.is_empty() {
-        parse_kernel_source(source, resolver)
+        parse_kernel_source_with_options(source, resolver, options)
     } else {
-        parse_kernel_source_with_bounds(source, &instances, &values)
+        parse_kernel_source_with_bounds_with_options(source, &instances, &values, options)
     }
 }
 
@@ -640,6 +826,20 @@ pub fn parse_kernel_source_with_bounds(
     source: &str,
     instances: &std::collections::BTreeMap<String, i64>,
     values: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Result<KernelSpec, CoreError> {
+    parse_kernel_source_with_bounds_with_options(source, instances, values, &ParseOptions::stable())
+}
+
+/// [`parse_kernel_source_with_bounds`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`parse_kernel_source_with_bounds`].
+pub fn parse_kernel_source_with_bounds_with_options(
+    source: &str,
+    instances: &std::collections::BTreeMap<String, i64>,
+    values: &std::collections::BTreeMap<String, (i64, i64)>,
+    options: &ParseOptions,
 ) -> Result<KernelSpec, CoreError> {
     fn update_bounds(
         items: &mut [VerifyItem],
@@ -672,8 +872,10 @@ pub fn parse_kernel_source_with_bounds(
         }
     }
 
-    let parsed = parse_document(SourceFile::new(source))?;
+    let parsed = parse_document_with(SourceFile::new(source), options)?;
+    reject_declared_separator(&parsed.surface, source)?;
     validate_dialect_scope_overrides(&parsed.surface, instances, values)?;
+    let instance_sources = instance_sources(&parsed.surface, instances);
     let mut kernel = match parsed.surface {
         SurfaceDocument::Spec(mut spec) => {
             validate_direct_scope_overrides(&spec, instances, values)?;
@@ -703,11 +905,64 @@ pub fn parse_kernel_source_with_bounds(
             line: 1,
             column: 1,
             origin: None,
-            name_resolution: false,
+            kind: CoreErrorKind::Semantics,
+            diagnostic_code: None,
         }),
     }?;
     kernel.annotations.extend(SPEC_TARGET, parsed.annotations);
+    kernel.instance_sources = instance_sources;
     Ok(kernel)
+}
+
+// Diagnostic-only provenance: do not change public Kernel/AST projections.
+fn instance_sources(
+    document: &SurfaceDocument,
+    overrides: &InstanceOverrides,
+) -> BTreeMap<String, String> {
+    let bounds: Vec<&[VerifyItem]> = match document {
+        SurfaceDocument::Spec(spec) => spec
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                SpecItem::VerifyBounds { items, .. } => Some(items.as_slice()),
+                _ => None,
+            })
+            .collect(),
+        SurfaceDocument::Business(business) => business
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                BusinessItem::VerifyBounds { items, .. } => Some(items.as_slice()),
+                _ => None,
+            })
+            .collect(),
+        SurfaceDocument::Requirements(requirements) => requirements
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                RequirementsItem::Common(SpecItem::VerifyBounds { items, .. }) => {
+                    Some(items.as_slice())
+                }
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    bounds
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let VerifyItem::Instances(name, count, _) = item else {
+                return None;
+            };
+            let authored = format!("verify block instances {name} = {count}");
+            let source = overrides.get(name).map_or_else(
+                || authored.clone(),
+                |value| format!("--instances {name}={value} (overrides {authored})"),
+            );
+            Some((name.clone(), source))
+        })
+        .collect()
 }
 
 /// Lower a parsed direct `spec` into the kernel representation.
@@ -727,11 +982,13 @@ fn lower_direct_spec_with_origins(
     let spec = expand_spec_domains(spec)?;
     Ok(KernelSpec {
         spec,
+        instance_sources: BTreeMap::new(),
         origins,
         annotations: AnnotationRegistry::default(),
         projections: Vec::new(),
         diagnostics: Vec::new(),
-        compose_names: compose::ComposeNames::default(),
+        names: naming::NameMap::default(),
+        root_actuals: Vec::new(),
     })
 }
 
@@ -804,6 +1061,7 @@ fn expand_spec_domains(mut spec: SurfaceSpec) -> Result<SurfaceSpec, CoreError> 
             lo: Box::new(Expr::Num(0)),
             hi: Box::new(Expr::Num(count - 1)),
             symmetric: false,
+            span: None,
         });
     }
     for (name, span) in &numbers {
@@ -818,6 +1076,7 @@ fn expand_spec_domains(mut spec: SurfaceSpec) -> Result<SurfaceSpec, CoreError> 
             lo: Box::new(lo),
             hi: Box::new(hi),
             symmetric: false,
+            span: None,
         });
     }
     // Whatever is left names no declaration. Report the first such bound in
@@ -865,11 +1124,19 @@ struct Definition {
 
 struct PredicateExpander {
     definitions: HashMap<String, Definition>,
+    locals: std::cell::RefCell<HashSet<String>>,
+    globals: HashSet<String>,
+    constants: HashSet<String>,
+    owner: std::cell::Cell<Option<Span>>,
 }
 
 impl PredicateExpander {
     fn new(spec: &SurfaceSpec) -> Result<Self, CoreError> {
         let mut definitions = HashMap::new();
+        let constants = spec.items.iter().filter_map(|item| match item {
+            SpecItem::Const { name, .. } => Some(name),
+            _ => None,
+        });
         for item in &spec.items {
             let SpecItem::Def {
                 name,
@@ -912,7 +1179,11 @@ impl PredicateExpander {
                         .into_name_resolution(),
                 );
             }
-            let bound = bound_vars(value);
+            let bound = bound_vars(value).into_iter().collect::<BTreeSet<_>>();
+            for binding in names.iter().chain(&bound) {
+                typecheck::reject_constant_shadow(binding, constants.clone())
+                    .map_err(|error| type_error_at(error, *span))?;
+            }
             if let Some(shadowed) = names.iter().filter(|name| bound.contains(*name)).min() {
                 return Err(core_error(
                     format!("def '{name}' parameter is shadowed by binder '{shadowed}'"),
@@ -930,7 +1201,23 @@ impl PredicateExpander {
                 },
             );
         }
-        let expander = Self { definitions };
+        let globals = spec
+            .items
+            .iter()
+            .flat_map(|item| match item {
+                SpecItem::State(fields) => fields.iter().map(|field| field.name.clone()).collect(),
+                SpecItem::Const { name, .. } => vec![name.clone()],
+                SpecItem::Enum { members, .. } => members.clone(),
+                _ => Vec::new(),
+            })
+            .collect();
+        let expander = Self {
+            definitions,
+            locals: std::cell::RefCell::default(),
+            globals,
+            constants: constants.cloned().collect(),
+            owner: std::cell::Cell::new(None),
+        };
         for name in expander.definitions.keys() {
             expander.validate_definition(name, &mut Vec::new())?;
         }
@@ -950,7 +1237,8 @@ impl PredicateExpander {
                 line: definition.line,
                 column: definition.column,
                 origin: None,
-                name_resolution: false,
+                kind: CoreErrorKind::Semantics,
+                diagnostic_code: None,
             });
         }
         stack.push(name.to_owned());
@@ -997,6 +1285,15 @@ impl PredicateExpander {
 
     #[allow(clippy::too_many_lines)]
     fn expand_item(&self, item: SpecItem) -> Result<SpecItem, CoreError> {
+        let bound = match &item {
+            SpecItem::LeadsTo { binders, .. } => binders
+                .iter()
+                .map(|binder| binder_name(binder).to_owned())
+                .collect(),
+            _ => HashSet::new(),
+        };
+        let owner = dialect::property_span(&item);
+        self.owner.set((owner.start.line != 0).then_some(owner));
         Ok(match item {
             SpecItem::Const { name, value } => SpecItem::Const {
                 name,
@@ -1007,15 +1304,23 @@ impl PredicateExpander {
                 lo,
                 hi,
                 symmetric,
+                span,
             } => SpecItem::Type {
                 name,
                 lo: Box::new(self.expand_expr(*lo, &mut Vec::new())?),
                 hi: Box::new(self.expand_expr(*hi, &mut Vec::new())?),
                 symmetric,
+                span,
             },
-            SpecItem::Struct { name, fields, span } => SpecItem::Struct {
+            SpecItem::Struct {
+                name,
+                fields,
+                field_spans,
+                span,
+            } => SpecItem::Struct {
                 name,
                 span,
+                field_spans,
                 fields: fields
                     .into_iter()
                     .map(|(name, ty)| Ok((name, self.expand_type(ty)?)))
@@ -1050,6 +1355,7 @@ impl PredicateExpander {
             SpecItem::Action {
                 name,
                 params,
+                param_spans,
                 items,
                 span,
                 fair,
@@ -1058,14 +1364,12 @@ impl PredicateExpander {
                 annotations,
             } => SpecItem::Action {
                 name,
+                items: self.expand_action_items(items, &params)?,
                 params: params
                     .into_iter()
                     .map(|param| self.expand_param(param))
                     .collect::<Result<_, _>>()?,
-                items: items
-                    .into_iter()
-                    .map(|item| self.expand_action_item(item))
-                    .collect::<Result<_, _>>()?,
+                param_spans,
                 span,
                 fair,
                 meta,
@@ -1162,16 +1466,16 @@ impl PredicateExpander {
                     .into_iter()
                     .map(|binder| self.expand_binder(binder, &mut Vec::new()))
                     .collect::<Result<_, _>>()?,
-                before: Box::new(self.expand_expr(*before, &mut Vec::new())?),
-                after: Box::new(self.expand_expr(*after, &mut Vec::new())?),
+                before: Box::new(self.expand_scoped_expr(*before, &bound)?),
+                after: Box::new(self.expand_scoped_expr(*after, &bound)?),
                 span,
                 meta,
                 annotations,
                 decreases: decreases
-                    .map(|expr| self.expand_expr(*expr, &mut Vec::new()).map(Box::new))
+                    .map(|expr| self.expand_scoped_expr(*expr, &bound).map(Box::new))
                     .transpose()?,
                 within: within
-                    .map(|expr| self.expand_expr(*expr, &mut Vec::new()).map(Box::new))
+                    .map(|expr| self.expand_scoped_expr(*expr, &bound).map(Box::new))
                     .transpose()?,
                 helpful: helpful
                     .into_iter()
@@ -1179,7 +1483,7 @@ impl PredicateExpander {
                         entry.args = entry
                             .args
                             .into_iter()
-                            .map(|arg| self.expand_expr(arg, &mut Vec::new()))
+                            .map(|arg| self.expand_scoped_expr(arg, &bound))
                             .collect::<Result<_, _>>()?;
                         Ok(entry)
                     })
@@ -1220,6 +1524,47 @@ impl PredicateExpander {
                 ActionItem::Statement(self.expand_statement(statement, &mut Vec::new())?)
             }
         })
+    }
+
+    fn scoped<T>(
+        &self,
+        bound: HashSet<String>,
+        f: impl FnOnce() -> Result<T, CoreError>,
+    ) -> Result<T, CoreError> {
+        let outer = self.locals.replace(bound);
+        let result = f();
+        self.locals.replace(outer);
+        result
+    }
+
+    fn bound_with(&self, name: &str) -> HashSet<String> {
+        let mut bound = self.locals.borrow().clone();
+        bound.insert(name.to_owned());
+        bound
+    }
+
+    fn expand_action_items(
+        &self,
+        items: Vec<ActionItem>,
+        params: &[Param],
+    ) -> Result<Vec<ActionItem>, CoreError> {
+        let mut bound = compose::param_names(params);
+        compose::map_scoped_action_items(items, &mut bound, &self.globals, |item, bound| {
+            self.scoped(bound.clone(), || self.expand_action_item(item))
+        })
+    }
+
+    fn expand_bound(
+        &self,
+        expr: Expr,
+        name: &str,
+        stack: &mut Vec<String>,
+    ) -> Result<Expr, CoreError> {
+        self.scoped(self.bound_with(name), || self.expand_expr(expr, stack))
+    }
+
+    fn expand_scoped_expr(&self, expr: Expr, bound: &HashSet<String>) -> Result<Expr, CoreError> {
+        self.scoped(bound.clone(), || self.expand_expr(expr, &mut Vec::new()))
     }
 
     fn expand_param(&self, param: Param) -> Result<Param, CoreError> {
@@ -1300,11 +1645,16 @@ impl PredicateExpander {
                 binder,
                 statements,
                 span,
-            } => Statement::ForAll {
-                binder: self.expand_binder(binder, stack)?,
-                statements: self.expand_statements(statements, stack)?,
-                span,
-            },
+            } => {
+                let binder = self.expand_binder(binder, stack)?;
+                self.scoped(self.bound_with(binder_name(&binder)), || {
+                    Ok(Statement::ForAll {
+                        binder,
+                        statements: self.expand_statements(statements, stack)?,
+                        span,
+                    })
+                })?
+            }
         })
     }
 
@@ -1325,10 +1675,10 @@ impl PredicateExpander {
                 type_name,
                 where_expr,
             } => Binder::Typed {
-                name,
+                name: name.clone(),
                 type_name,
                 where_expr: where_expr
-                    .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
+                    .map(|expr| self.expand_bound(*expr, &name, stack).map(Box::new))
                     .transpose()?,
             },
             Binder::Range {
@@ -1337,11 +1687,11 @@ impl PredicateExpander {
                 hi,
                 where_expr,
             } => Binder::Range {
-                name,
+                name: name.clone(),
                 lo: Box::new(self.expand_expr(*lo, stack)?),
                 hi: Box::new(self.expand_expr(*hi, stack)?),
                 where_expr: where_expr
-                    .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
+                    .map(|expr| self.expand_bound(*expr, &name, stack).map(Box::new))
                     .transpose()?,
             },
             Binder::Collection {
@@ -1349,10 +1699,10 @@ impl PredicateExpander {
                 collection,
                 where_expr,
             } => Binder::Collection {
-                name,
+                name: name.clone(),
                 collection: Box::new(self.expand_expr(*collection, stack)?),
                 where_expr: where_expr
-                    .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
+                    .map(|expr| self.expand_bound(*expr, &name, stack).map(Box::new))
                     .transpose()?,
             },
         })
@@ -1390,6 +1740,14 @@ impl PredicateExpander {
                     span,
                 ));
             }
+            for binding in args.iter().flat_map(bound_vars).collect::<BTreeSet<_>>() {
+                typecheck::reject_constant_shadow(&binding, self.constants.iter()).map_err(
+                    |mut error| {
+                        error.message = model::ExpressionErrorContext::Model.message(error.message);
+                        type_error_at(error, self.owner.get().unwrap_or(span))
+                    },
+                )?;
+            }
             let args = args
                 .into_iter()
                 .map(|arg| self.expand_expr(arg, stack))
@@ -1414,9 +1772,21 @@ impl PredicateExpander {
                     span,
                 ));
             }
-            stack.push(name);
-            let body = self.expand_expr(definition.body.clone(), stack)?;
+            stack.push(name.clone());
+            let params: HashSet<_> = definition.params.iter().cloned().collect();
+            let body = self.scoped(params.clone(), || {
+                self.expand_expr(definition.body.clone(), stack)
+            })?;
             stack.pop();
+            let free = free_vars_bound(&body, &params);
+            if let Some(captured) = free.intersection(&self.locals.borrow()).min() {
+                return Err(core_error(
+                    format!(
+                        "predicate '{name}' call would capture variable '{captured}'; rename the binder at the call site"
+                    ),
+                    span,
+                ));
+            }
             let replacements = definition
                 .params
                 .iter()
@@ -1425,6 +1795,12 @@ impl PredicateExpander {
                 .collect::<HashMap<_, _>>();
             return Ok(substitute(body, &replacements, &IndexedReplacements::new()));
         }
+        let bound = match &expr {
+            Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => {
+                self.bound_with(binder_name(binder))
+            }
+            _ => HashSet::new(),
+        };
         Ok(match expr {
             Expr::Some(expr) => Expr::Some(Box::new(self.expand_expr(*expr, stack)?)),
             Expr::Set(items) => Expr::Set(
@@ -1463,11 +1839,18 @@ impl PredicateExpander {
                     .map(|arg| self.expand_expr(arg, stack))
                     .collect::<Result<_, _>>()?,
             },
-            Expr::Binary { op, left, right } => Expr::Binary {
-                op,
-                left: Box::new(self.expand_expr(*left, stack)?),
-                right: Box::new(self.expand_expr(*right, stack)?),
-            },
+            Expr::Binary { op, left, right } => {
+                let left = self.expand_expr(*left, stack)?;
+                let bound =
+                    compose::pattern_scope(&left, &self.locals.borrow(), &self.globals, Some(&op));
+                self.scoped(bound, || {
+                    Ok(Expr::Binary {
+                        op,
+                        left: Box::new(left),
+                        right: Box::new(self.expand_expr(*right, stack)?),
+                    })
+                })?
+            }
             Expr::Neg(expr) => Expr::Neg(Box::new(self.expand_expr(*expr, stack)?)),
             Expr::Not(expr) => Expr::Not(Box::new(self.expand_expr(*expr, stack)?)),
             Expr::Conditional {
@@ -1492,7 +1875,7 @@ impl PredicateExpander {
             } => Expr::Quantified {
                 quantifier,
                 binder: self.expand_binder(binder, stack)?,
-                body: Box::new(self.expand_expr(*body, stack)?),
+                body: Box::new(self.scoped(bound, || self.expand_expr(*body, stack))?),
             },
             Expr::Aggregate {
                 kind,
@@ -1502,7 +1885,10 @@ impl PredicateExpander {
                 kind,
                 binder: self.expand_binder(binder, stack)?,
                 value: value
-                    .map(|expr| self.expand_expr(*expr, stack).map(Box::new))
+                    .map(|expr| {
+                        self.scoped(bound, || self.expand_expr(*expr, stack))
+                            .map(Box::new)
+                    })
                     .transpose()?,
             },
             Expr::UnaryNamed { name, expr, span } => Expr::UnaryNamed {
@@ -1531,13 +1917,21 @@ impl PredicateExpander {
     }
 }
 
+fn type_error_at(error: typecheck::TypecheckError, span: Span) -> CoreError {
+    CoreError {
+        origin: Some(Box::new(model::type_diagnostic_origin(span))),
+        ..core_error(error.message, span)
+    }
+}
+
 fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
     CoreError {
         message,
         line: span.start.line,
         column: span.start.column,
         origin: None,
-        name_resolution: false,
+        kind: CoreErrorKind::Semantics,
+        diagnostic_code: None,
     }
 }
 
@@ -1689,68 +2083,16 @@ pub(crate) fn free_vars(expr: &Expr) -> HashSet<String> {
     free_vars_bound(expr, &HashSet::new())
 }
 
+#[cfg(test)]
+#[path = "../tests/internal/pattern_scope_projection.rs"]
+mod pattern_scope_projection;
+
 fn free_vars_bound(expr: &Expr, bound: &HashSet<String>) -> HashSet<String> {
-    if let Expr::Var(name) = expr {
-        return if bound.contains(name) {
-            HashSet::new()
-        } else {
-            HashSet::from([name.clone()])
-        };
-    }
-    if let Expr::Quantified { binder, body, .. } = expr {
-        let (mut out, nested_bound) = free_vars_binder(binder, bound);
-        out.extend(free_vars_bound(body, &nested_bound));
-        return out;
-    }
-    if let Expr::Aggregate { binder, value, .. } = expr {
-        let (mut out, nested_bound) = free_vars_binder(binder, bound);
-        if let Some(value) = value {
-            out.extend(free_vars_bound(value, &nested_bound));
-        }
-        return out;
-    }
     let mut out = HashSet::new();
-    let _ = visit_expr_children(expr, &mut |child| {
-        out.extend(free_vars_bound(child, bound));
-        Ok(())
+    model::visit_free_names(expr, &bound.iter().cloned().collect(), &mut |name| {
+        out.insert(name.to_owned());
     });
     out
-}
-
-fn free_vars_binder(
-    binder: &Binder,
-    bound: &HashSet<String>,
-) -> (HashSet<String>, HashSet<String>) {
-    let mut nested_bound = bound.clone();
-    nested_bound.insert(binder_name(binder).to_owned());
-    let mut out = HashSet::new();
-    match binder {
-        Binder::Typed { where_expr, .. } => {
-            if let Some(filter) = where_expr {
-                out.extend(free_vars_bound(filter, &nested_bound));
-            }
-        }
-        Binder::Range {
-            lo, hi, where_expr, ..
-        } => {
-            out.extend(free_vars_bound(lo, bound));
-            out.extend(free_vars_bound(hi, bound));
-            if let Some(filter) = where_expr {
-                out.extend(free_vars_bound(filter, &nested_bound));
-            }
-        }
-        Binder::Collection {
-            collection,
-            where_expr,
-            ..
-        } => {
-            out.extend(free_vars_bound(collection, bound));
-            if let Some(filter) = where_expr {
-                out.extend(free_vars_bound(filter, &nested_bound));
-            }
-        }
-    }
-    (out, nested_bound)
 }
 
 fn binder_name(binder: &Binder) -> &str {
@@ -1781,6 +2123,21 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
     }
     match expr {
         Expr::Some(expr) => Expr::Some(Box::new(substitute(*expr, replacements, indexed))),
+        Expr::Stage {
+            process,
+            entity,
+            entity_span,
+            span,
+        } => Expr::Stage {
+            process,
+            // Rename entity binders without replacing them with field reads.
+            entity: match substitute((*entity).clone(), replacements, indexed) {
+                renamed @ Expr::Var(_) => Box::new(renamed),
+                _ => entity,
+            },
+            entity_span,
+            span,
+        },
         Expr::Set(items) => Expr::Set(
             items
                 .into_iter()
@@ -1814,7 +2171,9 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
                 && let Some((binder, state_expr)) = indexed.get(name)
             {
                 let single = HashMap::from([(binder_name(binder).to_owned(), *substituted_index)]);
-                substitute(state_expr.clone(), &single, indexed)
+                // The template is already in implementation scope. Instantiate only
+                // its binder; abstract maps must not rewrite the inserted expression.
+                substitute_expr(state_expr.clone(), &single)
             } else {
                 Expr::Index(
                     Box::new(substitute(*base, replacements, indexed)),
@@ -1916,7 +2275,8 @@ pub(crate) fn substitute<S: std::hash::BuildHasher>(
 /// Substitute free scalar variable references in an expression.
 ///
 /// Refinement uses this to pull abstract properties back through scalar state
-/// maps before bounded progress checking.
+/// maps before bounded progress checking. Requirements dialect lowering also
+/// uses it to substitute field and stage reads in guards, updates, and properties.
 #[must_use]
 pub fn substitute_expr<S: std::hash::BuildHasher>(
     expr: Expr,
@@ -1998,9 +2358,9 @@ pub(crate) fn capture_avoiding_binding_with_names<S: std::hash::BuildHasher>(
     let captures = scoped
         .values()
         .any(|replacement| free_vars(replacement).contains(&binding))
-        || scoped_indexed
-            .values()
-            .any(|(_, state_expr)| free_vars(state_expr).contains(&binding));
+        || scoped_indexed.values().any(|(binder, state_expr)| {
+            binder_name(binder) != binding && free_vars(state_expr).contains(&binding)
+        });
     if !captures {
         return (binder, contents, scoped, scoped_indexed);
     }
@@ -2108,15 +2468,60 @@ pub(crate) fn collect_binder_names(binder: &Binder, names: &mut HashSet<String>)
 }
 
 pub(crate) fn collect_names(expr: &Expr, names: &mut HashSet<String>) {
-    if let Expr::Var(name) = expr {
-        names.insert(name.clone());
-    }
-    if let Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } = expr {
-        collect_binder_names(binder, names);
-    }
-    let _ = visit_expr_children(expr, &mut |child| {
-        collect_names(child, names);
+    visit_names(expr, &mut |name, _| {
+        names.insert(name.to_owned());
+    });
+}
+
+pub(crate) fn collect_pattern_names(expr: &Expr, names: &mut HashSet<String>) {
+    visit_names(expr, &mut |name, pattern| {
+        if pattern {
+            names.insert(name.to_owned());
+        }
+    });
+}
+
+pub(crate) fn capture_names(expr: &Expr, bound: &HashSet<String>) -> HashSet<String> {
+    let mut names = free_vars_bound(expr, bound);
+    collect_pattern_names(expr, &mut names);
+    names
+}
+
+pub(crate) fn capture_binder_names(
+    binder: &Binder,
+    bound: &HashSet<String>,
+) -> (HashSet<String>, HashSet<String>) {
+    let mut names = HashSet::new();
+    let nested =
+        model::visit_free_binder_names(binder, &bound.iter().cloned().collect(), &mut |name| {
+            names.insert(name.to_owned());
+        });
+    let _ = visit_binder_exprs(binder, &mut |expr| {
+        collect_pattern_names(expr, &mut names);
         Ok(())
+    });
+    (names, nested.into_iter().collect())
+}
+
+fn visit_names(expr: &Expr, visit: &mut impl FnMut(&str, bool)) {
+    recursion::guard(|| {
+        if let Expr::Var(name) = expr {
+            visit(name, false);
+        }
+        if let Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } = expr {
+            visit(binder_name(binder), false);
+        }
+        if let Expr::Is {
+            pattern: fsl_syntax::Pattern::Some(name),
+            ..
+        } = expr
+        {
+            visit(name, true);
+        }
+        let _ = visit_expr_children(expr, &mut |child| {
+            visit_names(child, visit);
+            Ok(())
+        });
     });
 }
 

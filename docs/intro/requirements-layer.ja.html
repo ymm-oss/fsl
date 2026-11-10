@@ -31,7 +31,8 @@
     <h2 class="reveal">このページで決めること</h2>
     <div class="toc reveal">
       <a href="#boundary">1. 役割<span>業務層との違い</span></a>
-      <a href="#process">2. 基本形<span><code>process</code>・<code>transition</code>・<code>covers</code></span></a>
+      <a href="#process">2. 基本形<span><code>process</code>・<code>transition</code>・<code>covers</code>（FSL 4）</span></a>
+      <a href="#fsl5">2b. FSL 5 の書き方<span><code>entity</code>・<code>event</code>・<code>rule</code>・<code>decide</code></span></a>
       <a href="#examples">3. 受け入れ・禁止<span><code>acceptance</code> と <code>forbidden</code></span></a>
       <a href="#nfr">4. 非機能要件<span>権限・監査・容量・SLA</span></a>
       <a href="#implements">5. 業務層との接続<span><code>implements</code></span></a>
@@ -73,7 +74,12 @@
     <h2 class="reveal"><code>process</code> に入力・条件・更新・要件IDを足す</h2>
     <p class="lead narrow reveal">単一の業務対象がステージを進む要件は、<code>process Entity with field: Type</code> で書くのが基本です。</p>
 
+    <div class="callout warn reveal" style="margin-top:24px">
+      <p style="margin:0"><b>版（edition）:</b> <code>process</code> / <code>transition</code> の形と、このページのほかの例は <b>FSL 4</b> です。ヘッダーのない文書（または <code>fsl 4</code> で始まる文書）がこの構文で読まれます。<code>fsl 5</code> で始まる文書では、要件仕様の <code>process</code> は拒否され（<code>mixed_requirements_forms</code>、終了コード 2）、要件は <code>entity</code> / <code>lifecycle</code> / <code>event</code> / <code>rule</code> / <code>decide</code> で書きます。書き方は <a href="#fsl5">2b</a> にあります。詳しくは <a href="https://github.com/ymm-oss/fsl/blob/main/docs/manual/LANGUAGE.ja.md#fsl5-requirements">FSL 5 の要件層リファレンス</a> と <a href="https://github.com/ymm-oss/fsl/blob/main/docs/manual/LANGUAGE.ja.md#fsl4-to-fsl5-migration">FSL 4 から FSL 5 への移行ガイド</a> を参照してください。</p>
+    </div>
+
     <div class="panel reveal">
+      <p class="dim" style="margin:0 0 6px;font-size:14px">FSL 4（ヘッダーなし）</p>
       <pre><code>requirements ExpenseRequirements {
   number Amount
   const AUTO_LIMIT = 1
@@ -119,6 +125,77 @@ verify {
       <tr><td><code>set amount = a</code></td><td>持ち回るデータの更新。</td><td>あとで判断に使う値だけ保存します。</td></tr>
       <tr><td><code>covers REQ-EXPENSE-001 "..."</code></td><td>要件IDと原文。</td><td>診断JSON、反例、シナリオに伝わります。</td></tr>
     </table>
+
+    <div id="fsl5" style="scroll-margin-top:80px">
+      <h3 class="reveal" style="margin-top:40px">2b. 同じ要件を FSL 5 で書く</h3>
+      <p class="reveal narrow"><code>fsl 5</code> ヘッダーのもとでは、<code>entity</code> がフィールドと <code>lifecycle</code> の辺を持ち、<code>event</code> は担当者が辺を一つ進める操作です。条件は <code>rule</code> か <code>decide</code> 表に、要件IDと原文つきで書きます。<code>scenario</code> / <code>forbidden</code> が正例と負例の手順です。この仕様は <code>check</code> を通り、深さ 8 で <code>verified</code>、<code>--engine induction</code> で <code>proved</code> になります。</p>
+      <div class="panel reveal">
+        <p class="dim" style="margin:0 0 6px;font-size:14px">FSL 5</p>
+        <pre><code>fsl 5
+requirements ExpenseRequirements {
+  number Amount
+  const AUTO_LIMIT = 1
+  actor Employee, System, Manager, Finance
+
+  entity Claim {
+    amount: Amount = 0
+    lifecycle Draft -&gt; Submitted -&gt; Approved
+    lifecycle Submitted -&gt; Rejected
+    lifecycle Approved -&gt; Paid
+  }
+
+  concept SmallClaim = Claim where amount &lt;= AUTO_LIMIT
+  concept LargeClaim = Claim where amount &gt; AUTO_LIMIT
+
+  event submit       = Employee submits Claim with amount  Draft -&gt; Submitted
+  event auto_approve = System approves Claim               Submitted -&gt; Approved
+  event mgr_approve  = Manager approves Claim              Submitted -&gt; Approved
+  event reject       = Manager rejects Claim               Submitted -&gt; Rejected
+  event pay          = Finance pays Claim                  Approved -&gt; Paid
+    covers REQ-EXPENSE-005 "承認済み申請だけが支払われる"
+
+  rule REQ-EXPENSE-001 "申請者が金額を入力して経費を申請する" {
+    allow Employee submits Claim only when input amount &gt; 0
+  }
+
+  decide REQ-EXPENSE-002 "申請を誰が判断するか" for Submitted Claim {
+    SmallClaim =&gt; System approves
+      covers REQ-EXPENSE-003 "少額申請は自動承認される"
+    LargeClaim =&gt; Manager approves or rejects
+      covers REQ-EXPENSE-004 "高額申請は管理者が承認または却下する"
+  }
+
+  scenario AC-EXPENSE-001 "少額申請は支払いまで進める" {
+    Employee submits c1 with amount 1
+    System approves c1
+    Finance pays c1
+    then c1 is Paid
+  }
+  forbidden FB-EXPENSE-001 "金額0では申請できない" {
+    Employee submits c1 with amount 0
+    then rejected
+  }
+  forbidden FB-EXPENSE-002 "下書き申請は支払えない" {
+    Finance pays c1
+    then rejected
+  }
+}
+verify {
+  instances Claim = 3
+  values Amount = 0..3
+}</code></pre>
+      </div>
+      <table class="matrix reveal" style="margin-top:24px">
+        <tr><th>FSL 4</th><th>FSL 5</th></tr>
+        <tr><td><code>process Claim with amount: Amount { stages … initial … }</code></td><td><code>entity Claim { amount: Amount = 0  lifecycle Draft -&gt; Submitted … }</code>。最初のステージが初期ステージです。</td></tr>
+        <tr><td><code>transition submit Draft -&gt; Submitted by Employee with a: Amount … set amount = a</code></td><td><code>event submit = Employee submits Claim with amount Draft -&gt; Submitted</code>。入力はフィールドに保存されます。</td></tr>
+        <tr><td><code>when a &gt; 0</code> と <code>covers REQ-…</code></td><td><code>rule REQ-… "…" { allow Employee submits Claim only when input amount &gt; 0 }</code></td></tr>
+        <tr><td>しきい値ごとに遷移へ書く <code>when</code></td><td><code>decide</code> 表。場合ごとに 1 行、それぞれに <code>covers</code>。</td></tr>
+        <tr><td><code>acceptance … expect Claim 0 in Paid</code></td><td><code>scenario … then c1 is Paid</code>。番号の代わりにインスタンスのラベルを使います。</td></tr>
+        <tr><td><code>forbidden … expect rejected</code></td><td><code>forbidden … then rejected</code></td></tr>
+      </table>
+      <p class="reveal narrow" style="margin-top:16px">FSL 4 のファイルは <code>fslc migrate --edition 5 file.fsl</code> で変換案を確認できます。書き込む前に <a href="https://github.com/ymm-oss/fsl/blob/main/docs/manual/LANGUAGE.ja.md#fsl4-to-fsl5-migration">移行ガイド</a> を読んでください。</p>
+    </div>
   </div>
 </section>
 
@@ -126,7 +203,7 @@ verify {
   <div class="wrap">
     <p class="kicker reveal">3. 受け入れ・禁止</p>
     <h2 class="reveal">許す手順は <code>acceptance</code>、拒否すべき手順は <code>forbidden</code></h2>
-    <p class="lead narrow reveal">安全ルールだけでは「本来拒否されるべき操作が受け入れられた」ことを見逃す場合があります。要件層では、正例と負例を両方書きます。</p>
+    <p class="lead narrow reveal">安全ルールだけでは「本来拒否されるべき操作が受け入れられた」ことを見逃す場合があります。要件層では、正例と負例を両方書きます。下の手順は FSL 4 の形です。FSL 5 の形は <a href="#fsl5">2b</a> にあります。</p>
 
     <div class="split reveal" style="margin-top:24px">
       <div class="panel" style="margin-top:0">
@@ -159,7 +236,7 @@ verify {
   <div class="wrap">
     <p class="kicker reveal">4. 非機能要件</p>
     <h2 class="reveal">権限・監査・容量・期限は、要件層で扱う</h2>
-    <p class="lead narrow reveal">非機能要件の多くは、通常の条件や安全ルールで書けます。期限のように時間を扱うものだけ、<code>time</code> と <code>deadline</code> を使います。</p>
+    <p class="lead narrow reveal">非機能要件の多くは、通常の条件や安全ルールで書けます。期限のように時間を扱うものだけ、<code>time</code> と <code>deadline</code> を使います。下の SLA の基本形は FSL 4 の形です。</p>
 
     <table class="matrix reveal" style="margin-top:24px">
       <tr><th>非機能要件</th><th>書き方</th><th>注意</th></tr>
@@ -219,6 +296,7 @@ verify {
     <p class="kicker reveal">5. 業務層との接続</p>
     <h2 class="reveal"><code>implements</code> で、要件が業務意図を落としていないか見る</h2>
     <p class="lead narrow reveal">要件層が業務層を実装する場合、<code>implements Abs from "file" { }</code> を置きます。名前がそろっていれば、FSL が対応表を自動生成できます。</p>
+    <p class="reveal narrow">FSL 5 の要件仕様も同じ行で始めます。ただし入力を取るイベントは業務層の遷移より引数が多いため、<code>action submit(c, amount) -&gt; submit(c)</code> のような対応を明示します。また、ステージが <code>lifecycle</code> の行に初めて現れる順序を、業務層の工程と同じにします。両方のファイルは <a href="business-layer.ja.html#handoff">業務層の受け渡し</a> にあります。</p>
 
     <div class="syntax-grid reveal">
       <div class="syntax-card">

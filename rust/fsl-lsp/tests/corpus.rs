@@ -46,7 +46,7 @@ fn valid_corpus_is_parsed_and_every_identifier_is_indexed() {
     let mut failures = Vec::new();
     for path in files {
         let source = std::fs::read_to_string(&path).expect("read corpus source");
-        match DocumentIndex::build(&source, path.to_str()) {
+        match DocumentIndex::build(&source, path.to_str(), &fsl_syntax::ParseOptions::stable()) {
             Ok(index) => {
                 let missing = index.unindexed_identifiers();
                 if !missing.is_empty() {
@@ -64,5 +64,98 @@ fn valid_corpus_is_parsed_and_every_identifier_is_indexed() {
             Err(error) => failures.push(format!("{}: {error}", path.display())),
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// Issue 552: every declaration the authoritative parser accepted must be
+/// declared by the index with the same role and owning scope. The expectation
+/// comes from the surface AST (`fsl_lsp::ast_declarations`), not from the
+/// index's keyword table, so a token heuristic that drifts from the grammar
+/// fails here instead of misleading hover, completion and rename. Nothing is
+/// tolerated: a name spelled like an index keyword (`status`, `count`, `age`,
+/// ...) in a state, field, member, parameter or `let` position is a name like
+/// any other (issue 1362).
+#[test]
+fn valid_corpus_declarations_match_the_authoritative_ast_role_and_scope() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    let mut files = Vec::new();
+    collect(&root.join("specs"), &mut files);
+    collect(&root.join("examples"), &mut files);
+    files.sort();
+
+    let mut covered = 0_usize;
+    let mut failures = Vec::new();
+    for path in files {
+        let source = std::fs::read_to_string(&path).expect("read corpus source");
+        let Ok(parsed) = fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source)) else {
+            // ai-project and causal sources never reach `parse_document`; the
+            // other test already fails on a source the index rejects.
+            continue;
+        };
+        let Some(expected) = fsl_lsp::ast_declarations(&parsed.surface) else {
+            continue;
+        };
+        covered += 1;
+        let index =
+            DocumentIndex::build(&source, path.to_str(), &fsl_syntax::ParseOptions::stable())
+                .expect("index valid source");
+        failures.extend(
+            index
+                .role_scope_mismatches(&expected)
+                .into_iter()
+                .map(|mismatch| format!("{}: {mismatch}", path.display())),
+        );
+    }
+    // The spec family is most of the corpus; a dispatch change that silently
+    // routed it elsewhere would otherwise turn this test vacuous.
+    assert!(covered >= 100, "only {covered} corpus files were compared");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// R0 for the language server (fsl 5 plan §3 S0, S11), after #1434: a
+/// corpus document without an edition header is read as `fsl 4` and
+/// indexed with the published lexicon; the next edition's keywords, aliases
+/// and mappings reach no such document. A document whose header names
+/// `fsl 5` (`examples/fsl5/`, #1766) is indexed with the next lexicon.
+/// (The former gate-off/gate-on comparison has no second reading to compare
+/// since the gate is gone.)
+#[test]
+fn the_published_corpus_is_indexed_with_the_published_lexicon() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("repository root");
+    let mut files = Vec::new();
+    collect(&root.join("specs"), &mut files);
+    collect(&root.join("examples"), &mut files);
+    files.sort();
+    let mut indexed = 0_usize;
+    let mut failures = Vec::new();
+    for path in files {
+        let source = std::fs::read_to_string(&path).expect("read corpus source");
+        if let Ok(index) =
+            DocumentIndex::build(&source, path.to_str(), &fsl_syntax::ParseOptions::stable())
+        {
+            indexed += 1;
+            let expected =
+                match fsl_syntax::edition_header(&source, &fsl_syntax::ParseOptions::stable()) {
+                    Ok(Some(header)) if header.edition == fsl_syntax::Edition::Fsl5 => {
+                        fsl_lsp::Lexicon::Next
+                    }
+                    _ => fsl_lsp::Lexicon::Published,
+                };
+            if index.lexicon() != expected {
+                failures.push(format!(
+                    "{}: {:?}, expected {expected:?}",
+                    path.display(),
+                    index.lexicon()
+                ));
+            }
+        }
+    }
+    assert!(indexed >= 100, "only {indexed} corpus files were indexed");
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

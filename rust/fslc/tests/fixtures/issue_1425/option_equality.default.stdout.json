@@ -1,0 +1,144 @@
+{
+  "fsl": "1.0",
+  "result": "mutated",
+  "spec": "GalleryOptionStructuralEquality",
+  "depth": 4,
+  "baseline": "verified",
+  "mutants": [
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 13,
+        "column": 5
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_empty",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 14,
+        "column": 5
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_first",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 5
+      },
+      "target": "init assignment A->B",
+      "status": "killed",
+      "killed_by": "TruthTable",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 15,
+        "column": 5
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_same",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 15,
+        "column": 5
+      },
+      "target": "init assignment A->B",
+      "status": "killed",
+      "killed_by": "TruthTable",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 16,
+        "column": 5
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_different",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 16,
+        "column": 5
+      },
+      "target": "init assignment B->A",
+      "status": "killed",
+      "killed_by": "TruthTable",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 19,
+        "column": 5
+      },
+      "target": "keep assignment",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 19,
+        "column": 5
+      },
+      "target": "keep assignment A->B",
+      "status": "killed",
+      "killed_by": "TruthTable",
+      "requirement": null,
+      "source": "builtin"
+    }
+  ],
+  "summary": {
+    "total": 9,
+    "killed": 8,
+    "survived": 1,
+    "invalid": 0,
+    "kill_rate": 0.8889,
+    "by_source": {
+      "builtin": {
+        "total": 9,
+        "killed": 8,
+        "survived": 1,
+        "invalid": 0,
+        "kill_rate": 0.8889
+      },
+      "external": {
+        "total": 0,
+        "killed": 0,
+        "survived": 0,
+        "invalid": 0,
+        "kill_rate": null
+      }
+    }
+  },
+  "by_requirement": {},
+  "notes": [
+    "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure"
+  ]
+}

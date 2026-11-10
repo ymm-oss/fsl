@@ -2,11 +2,28 @@
 // Copyright 2026 Ryoichi Izumita
 
 use fsl_syntax::{
-    Annotation, CanonicalRewriteKind, CorrespondenceOrigin, LosslessKind, RequirementActionItem,
-    RequirementsItem, SourceEdit, Span, SurfaceDocument, TokenKind, canonical_rewrites,
-    lossless_document, source_position, source_span,
+    Annotation, CanonicalRewriteKind, CorrespondenceOrigin, Edition, LosslessKind, ParseOptions,
+    RequirementActionItem, RequirementsItem, SourceEdit, Span, SurfaceDocument, TokenKind,
+    canonical_rewrites_with, lossless_document_with, source_position, source_span,
 };
-use serde_json::{Value, json};
+use std::path::Path;
+
+use serde_json::{Map, Value, json};
+
+mod process_form;
+
+pub use process_form::{
+    ConvertedEvent, ConvertedProcess, DERIVED_TERMINAL_ADDED, LEGACY_PROCESS_FORM,
+    MIGRATE_MANUAL_REQUIRED, ManualRequired, ProcessFormConversion, ProcessFormOutcome, Site,
+    convert_process_forms, ignore_derived_terminal, ignore_generated_actor_notes,
+    plan_process_conversion, process_form_contract,
+};
+
+/// Lint: in a current-edition `requirements` document, a `requirement` or an
+/// `acceptance` reusing the ID of an earlier `requirement`, or a `requirement`
+/// reusing an `acceptance` ID. `check` accepts both; the ledger keeps one row for
+/// the ID.
+pub const SHARED_REQUIREMENT_ID: &str = "shared_requirement_id";
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum IdKind {
@@ -319,35 +336,6 @@ fn placeholder_matches(part: &IdTemplatePart, value: &str) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Edition {
-    Current,
-    Next,
-}
-
-impl Edition {
-    /// Parse the public edition spelling.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for an edition without a migration policy.
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "current" => Ok(Self::Current),
-            "next" => Ok(Self::Next),
-            _ => Err("--edition must be current or next".to_owned()),
-        }
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Current => "current",
-            Self::Next => "next",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Taxonomy {
     Deprecated,
     NonCanonical,
@@ -374,6 +362,9 @@ pub struct MigrationDiagnostic {
     pub span: Span,
     pub canonical_replacement: String,
     pub machine_applicable: bool,
+    /// Why a [`MIGRATE_MANUAL_REQUIRED`] finding cannot be rewritten, as a
+    /// stable word (`None` for every other finding).
+    pub reason: Option<&'static str>,
     pub edits: Vec<SourceEdit>,
 }
 
@@ -384,7 +375,24 @@ impl MigrationDiagnostic {
             "code": self.code,
             "kind": self.code,
             "taxonomy": self.taxonomy.as_str(),
-            "severity": if edition == Edition::Next { "error" } else { "warning" },
+            "severity": if [fsl_syntax::MISSING_EDITION_HEADER, DERIVED_TERMINAL_ADDED]
+                .contains(&self.code)
+            {
+                "info"
+            } else if [
+                SHARED_REQUIREMENT_ID,
+                fsl_syntax::MIXED_NAMES,
+                fsl_syntax::FULLWIDTH_SPACE,
+                fsl_syntax::NON_NFC_IDENTIFIER,
+            ]
+            .contains(&self.code)
+            {
+                "warning"
+            } else if edition == Edition::Fsl5 {
+                "error"
+            } else {
+                "warning"
+            },
             "edition": edition.as_str(),
             "message": self.message,
             "loc": {
@@ -402,6 +410,9 @@ impl MigrationDiagnostic {
                 "replacement": edit.replacement,
             })).collect::<Vec<_>>(),
         });
+        if let Some(reason) = self.reason {
+            value["reason"] = json!(reason);
+        }
         if self.edits.len() == 1 {
             value["suggestion"] = json!({
                 "kind":"replace",
@@ -424,11 +435,22 @@ pub struct MigrationPlan {
 }
 
 impl MigrationPlan {
+    /// A finding the planner recognizes but cannot machine-apply, other
+    /// than [`MIGRATE_MANUAL_REQUIRED`].
     #[must_use]
     pub fn refused(&self) -> bool {
+        self.diagnostics.iter().any(|diagnostic| {
+            !diagnostic.machine_applicable && diagnostic.code != MIGRATE_MANUAL_REQUIRED
+        })
+    }
+
+    /// A process form the next edition cannot take that the migrator cannot
+    /// rewrite ([`MIGRATE_MANUAL_REQUIRED`]).
+    #[must_use]
+    pub fn manual_required(&self) -> bool {
         self.diagnostics
             .iter()
-            .any(|diagnostic| !diagnostic.machine_applicable)
+            .any(|diagnostic| diagnostic.code == MIGRATE_MANUAL_REQUIRED)
     }
 }
 
@@ -439,7 +461,12 @@ impl MigrationPlan {
 /// Returns a parse or edit error. Unsupported-but-recognizable legacy syntax
 /// is represented as a non-machine-applicable diagnostic instead.
 #[allow(clippy::too_many_lines)]
-pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<MigrationPlan, String> {
+pub fn plan_migration(
+    source: &str,
+    path: &str,
+    edition: Edition,
+    options: &ParseOptions,
+) -> Result<MigrationPlan, String> {
     let unsupported = unsupported_double_ampersands(source);
     if !unsupported.is_empty() {
         return Ok(MigrationPlan {
@@ -448,7 +475,8 @@ pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<Migr
         });
     }
 
-    let document = fsl_syntax::parse_surface_document(source).map_err(|error| error.to_string())?;
+    let document = fsl_syntax::parse_surface_document_with(source, options)
+        .map_err(|error| error.to_string())?;
     if matches!(document, SurfaceDocument::Agent(_)) {
         return Ok(MigrationPlan {
             diagnostics: Vec::new(),
@@ -456,7 +484,7 @@ pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<Migr
         });
     }
     let mut diagnostics = Vec::new();
-    match canonical_rewrites(source) {
+    match canonical_rewrites_with(source, options) {
         Ok(rewrites) => diagnostics.extend(rewrites.into_iter().map(|rewrite| {
             let (code, taxonomy, message) = match rewrite.kind {
                 CanonicalRewriteKind::DomainEnum => (
@@ -482,25 +510,34 @@ pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<Migr
                 span: rewrite.span,
                 canonical_replacement: rewrite.canonical_replacement,
                 machine_applicable: true,
+                reason: None,
                 edits: rewrite.edits,
             }
         })),
-        Err(fsl_syntax::FormatError::Unsafe { message, span }) => {
-            let (code, canonical_replacement) = if message.contains("domain enum") {
-                (
+        Err(fsl_syntax::FormatError::Unsafe {
+            kind,
+            message,
+            span,
+        }) => {
+            // Exhaustive, so a new refusal kind states its code here rather
+            // than inheriting one from a word in its message (issue 1167).
+            let (code, canonical_replacement) = match kind {
+                fsl_syntax::UnsafeFormatKind::DomainEnumInteriorComment => (
                     "deprecated_domain_enum_union",
                     "move the interior comment, then use `enum Name { ... }`".to_owned(),
-                )
-            } else if message.contains("quantifier") {
-                (
+                ),
+                fsl_syntax::UnsafeFormatKind::UnbracedQuantifierEnd
+                | fsl_syntax::UnsafeFormatKind::QuantifierWithoutBody => (
                     "legacy_quantifier_colon",
                     "add an explicit brace-delimited quantifier body".to_owned(),
-                )
-            } else {
-                (
+                ),
+                fsl_syntax::UnsafeFormatKind::AgentBody
+                | fsl_syntax::UnsafeFormatKind::EditOutsideUtf8Boundary
+                | fsl_syntax::UnsafeFormatKind::OverlappingEdits
+                | fsl_syntax::UnsafeFormatKind::PhraseInteriorComment => (
                     "unsafe_source_attachment",
                     "move the comment, then rerun migrate".to_owned(),
-                )
+                ),
             };
             diagnostics.push(MigrationDiagnostic {
                 code,
@@ -509,14 +546,15 @@ pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<Migr
                 span,
                 canonical_replacement,
                 machine_applicable: false,
+                reason: None,
                 edits: Vec::new(),
             });
         }
         Err(error) => return Err(error.to_string()),
     }
-    diagnostics.extend(metadata_diagnostics(source));
-    diagnostics.extend(default_diagnostics(source, path));
-    diagnostics.extend(action_map_diagnostics(source, &document));
+    diagnostics.extend(metadata_diagnostics(source, *options));
+    diagnostics.extend(default_diagnostics(source, path, *options));
+    diagnostics.extend(action_map_diagnostics(source, &document, *options));
 
     if diagnostics
         .iter()
@@ -539,17 +577,491 @@ pub fn plan_migration(source: &str, path: &str, edition: Edition) -> Result<Migr
         .collect::<Vec<_>>();
     let rewritten =
         fsl_syntax::apply_source_edits(source, edits).map_err(|error| error.to_string())?;
-    let formatted = fsl_syntax::format_source(
-        &rewritten,
-        match edition {
-            Edition::Current => fsl_syntax::FormatEdition::Current,
-            Edition::Next => fsl_syntax::FormatEdition::Next,
-        },
-    )
-    .map_err(|error| error.to_string())?;
+    let formatted = fsl_syntax::format_source_with(&rewritten, edition, options)
+        .map_err(|error| error.to_string())?;
     Ok(MigrationPlan {
         migrated_source: (formatted != source).then_some(formatted),
         diagnostics,
+    })
+}
+
+/// Apply the edition `source` is read in to a finished `check` / `verify`
+/// result: in the next edition every migration finding is an error, otherwise
+/// deprecated domain enum unions, string metadata, colon quantifiers, and inline
+/// action maps are warnings. With `implicit_warnings`, omitted initial values
+/// also warn. The planner owns each finding's code, span, and migration safety.
+///
+/// `requested` is the `--edition` value (`None` = `current`). The document is
+/// read in its header's edition when it has one; an unreadable header already
+/// failed the document's own parse, so the request decides then. A header
+/// adds `fsl_edition`; without one the envelope keeps its published shape.
+///
+/// # Panics
+///
+/// Panics if `output` already carries a `warnings` member that is not an
+/// array.
+pub fn apply_edition(
+    result: (Value, i32),
+    source: &str,
+    path: &str,
+    requested: Option<fsl_syntax::EditionRequest>,
+    options: &ParseOptions,
+    envelope: &dyn Fn() -> Map<String, Value>,
+    implicit_warnings: bool,
+) -> (Value, i32) {
+    match admit_source(
+        source,
+        path,
+        requested,
+        options,
+        envelope,
+        implicit_warnings,
+    ) {
+        Ok(edition) => edition.finish(result),
+        Err(refusal) => refusal,
+    }
+}
+
+/// One input slot's diagnostics, classified before consumption and shared by its
+/// distinct results. Each result is moved into its finalization site once.
+#[derive(Clone, Default)]
+pub struct SourceEdition {
+    declared: Option<Edition>,
+    next: bool,
+    additions: Vec<Value>,
+}
+
+impl SourceEdition {
+    /// Diagnostics for adapters whose closed/raw output needs separate delivery.
+    #[must_use]
+    pub fn warnings(&self) -> &[Value] {
+        &self.additions
+    }
+
+    /// Retain this slot's warnings without projecting secondary-root metadata.
+    #[must_use]
+    pub fn warnings_only(&self) -> Self {
+        Self {
+            declared: None,
+            next: false,
+            additions: self.additions.clone(),
+        }
+    }
+
+    /// Finish an admitted root's open envelope without changing its verdict.
+    ///
+    /// # Panics
+    /// Panics if an existing `warnings` member is not an array.
+    #[must_use]
+    pub fn finish(&self, (mut output, status): (Value, i32)) -> (Value, i32) {
+        if !self.additions.is_empty()
+            && let Value::Object(envelope) = &mut output
+        {
+            envelope
+                .entry("warnings")
+                .or_insert_with(|| Value::Array(Vec::new()))
+                .as_array_mut()
+                .expect("warnings is an array")
+                .extend(self.additions.iter().cloned());
+        }
+        if self.next
+            && let Value::Object(envelope) = &mut output
+        {
+            envelope.insert("edition".to_owned(), json!(Edition::Fsl5.as_str()));
+        }
+        (with_declared_edition(output, self.declared), status)
+    }
+}
+
+/// Diagnostics of consumed dependencies, shared by one outer owner or explicit local log.
+#[derive(Default)]
+pub struct DependencyLog {
+    pub refusal: Option<(Value, i32)>,
+    pub warnings: Vec<Value>,
+    pub sources: std::collections::BTreeMap<String, String>,
+    warning_keys: Vec<Value>,
+}
+
+impl DependencyLog {
+    #[must_use]
+    pub fn finish(&self, result: (Value, i32)) -> (Value, i32) {
+        self.refusal.clone().unwrap_or_else(|| {
+            SourceEdition {
+                additions: self.warnings.clone(),
+                ..SourceEdition::default()
+            }
+            .finish(result)
+        })
+    }
+}
+
+pub type DependencyRecords = std::rc::Rc<std::cell::RefCell<DependencyLog>>;
+
+thread_local! {
+    static DEPENDENCIES: std::cell::RefCell<Option<DependencyRecords>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Native owners borrow a nested invocation's log; only its outer owner delivers warnings.
+pub struct DependencyScope {
+    log: DependencyRecords,
+    outer: bool,
+}
+
+impl DependencyScope {
+    #[must_use]
+    pub fn enter() -> Self {
+        DEPENDENCIES.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let outer = slot.is_none();
+            let log = slot.get_or_insert_with(DependencyRecords::default).clone();
+            Self { log, outer }
+        })
+    }
+
+    #[must_use]
+    pub fn finish(&self, result: (Value, i32), stderr: bool) -> (Value, i32) {
+        let log = self.log.borrow();
+        if let Some(refusal) = &log.refusal {
+            return refusal.clone();
+        }
+        if !self.outer {
+            return result;
+        }
+        finish_dependency_reports(&self.log, result, stderr)
+    }
+
+    /// A distinct artifact or baseline needs its own diagnostics even when nested.
+    #[must_use]
+    pub fn finish_distinct(&self, result: (Value, i32)) -> (Value, i32) {
+        self.log.borrow().finish(result)
+    }
+}
+
+impl Drop for DependencyScope {
+    fn drop(&mut self) {
+        if self.outer {
+            DEPENDENCIES.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+}
+
+/// Deliver recorded dependency findings without replacing root edition metadata.
+pub fn finish_dependency_reports(
+    log: &DependencyRecords,
+    result: (Value, i32),
+    stderr: bool,
+) -> (Value, i32) {
+    let log = log.borrow();
+    if stderr {
+        for warning in &log.warnings {
+            eprintln!("warning: {warning}");
+        }
+        result
+    } else {
+        log.finish(result)
+    }
+}
+
+/// One admission boundary for filesystem, recording, virtual and editor providers.
+pub struct DependencyResolver<'a, R> {
+    inner: R,
+    log: Option<DependencyRecords>,
+    options: ParseOptions,
+    envelope: &'a dyn Fn() -> Map<String, Value>,
+    base: Option<std::path::PathBuf>,
+    repair: bool,
+}
+
+impl<'a, R> DependencyResolver<'a, R> {
+    pub fn inner(&self) -> &R {
+        &self.inner
+    }
+
+    pub fn refusal(&self) -> Option<(Value, i32)> {
+        self.log
+            .as_ref()
+            .and_then(|log| log.borrow().refusal.clone())
+    }
+
+    #[must_use]
+    pub fn new(
+        inner: R,
+        log: DependencyRecords,
+        options: ParseOptions,
+        envelope: &'a dyn Fn() -> Map<String, Value>,
+    ) -> Self {
+        Self {
+            inner,
+            log: Some(log),
+            options,
+            envelope,
+            base: None,
+            repair: false,
+        }
+    }
+
+    #[must_use]
+    pub fn native(
+        inner: R,
+        base: &Path,
+        options: ParseOptions,
+        envelope: &'a dyn Fn() -> Map<String, Value>,
+    ) -> Self {
+        let log = DEPENDENCIES.with(|slot| slot.borrow().clone());
+        Self {
+            base: Some(base.to_owned()),
+            inner,
+            log,
+            options,
+            envelope,
+            repair: false,
+        }
+    }
+
+    #[must_use]
+    pub fn report_only(mut self) -> Self {
+        self.repair = true;
+        self
+    }
+
+    #[must_use]
+    pub fn report_to(mut self, log: DependencyRecords) -> Self {
+        self.log = Some(log);
+        self.report_only()
+    }
+}
+
+impl<R: fsl_core::FileResolver> fsl_core::FileResolver for DependencyResolver<'_, R> {
+    fn read(&self, path: &str) -> Result<String, fsl_core::CoreError> {
+        let source = self.inner.read(path)?;
+        let key = match &self.base {
+            Some(base) => base
+                .join(path)
+                .canonicalize()
+                .map_err(|error| fsl_core::CoreError::unlocated(error.to_string()))?
+                .to_string_lossy()
+                .into_owned(),
+            None => path.to_owned(),
+        };
+        let admission = admit_source(&source, path, None, &self.options, self.envelope, false);
+        let findings = match admission {
+            Ok(edition) => edition.additions,
+            Err((mut refusal, status)) => {
+                if let Some(loc) = refusal.get_mut("loc").and_then(Value::as_object_mut) {
+                    loc.insert("file".into(), json!(path));
+                }
+                if !self.repair {
+                    let codes = match refusal.get("findings") {
+                        Some(Value::Array(findings)) => findings
+                            .iter()
+                            .map(|finding| finding["code"].as_str().expect("finding code"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        None => refusal["diagnostic_code"]
+                            .as_str()
+                            .expect("parse code")
+                            .to_owned(),
+                        Some(_) => unreachable!("findings are an array"),
+                    };
+                    if let Some(log) = &self.log {
+                        let mut log = log.borrow_mut();
+                        log.sources.insert(path.to_owned(), source.clone());
+                        log.refusal.get_or_insert((refusal, status));
+                    }
+                    return Err(fsl_core::CoreError::unlocated(format!(
+                        "dependency \"{path}\" rejected by edition: {codes}"
+                    )));
+                }
+                match refusal
+                    .as_object_mut()
+                    .expect("refusal envelope")
+                    .remove("findings")
+                {
+                    Some(Value::Array(findings)) => findings,
+                    None => vec![
+                        json!({"code":refusal["diagnostic_code"],"kind":"parse","severity":"warning","message":refusal["message"],"loc":refusal["loc"]}),
+                    ],
+                    Some(_) => unreachable!("findings are an array"),
+                }
+            }
+        };
+        if !findings.is_empty()
+            && let Some(log) = &self.log
+        {
+            let mut log = log.borrow_mut();
+            log.sources.insert(path.to_owned(), source.clone());
+            for finding in findings {
+                let mut identity = finding.clone();
+                identity["loc"]["file"] = json!(key);
+                if !log.warning_keys.contains(&identity) {
+                    log.warning_keys.push(identity);
+                    log.warnings.push(finding);
+                }
+            }
+        }
+        Ok(source)
+    }
+}
+
+/// Classify and admit a caller-owned source snapshot before model/solver or I/O effects.
+/// Repair tools retain their planner projections rather than consumer refusal.
+///
+/// # Errors
+/// Returns the existing edition rejection envelope and exit 2.
+pub fn admit_source(
+    source: &str,
+    path: &str,
+    requested: Option<fsl_syntax::EditionRequest>,
+    options: &ParseOptions,
+    envelope: &dyn Fn() -> Map<String, Value>,
+    implicit_warnings: bool,
+) -> Result<SourceEdition, (Value, i32)> {
+    let edition = fsl_syntax::document_edition(source, requested, Edition::Fsl4, options).map_err(
+        |error| {
+            (
+                crate::frontend_output::render_surface_parse_error(envelope(), &error),
+                2,
+            )
+        },
+    )?;
+    let declared = fsl_syntax::edition_header(source, options)
+        .ok()
+        .flatten()
+        .map(|header| header.edition);
+    let next = edition == Edition::Fsl5;
+    let Ok(plan) = plan_migration(source, path, edition, options) else {
+        if let Err(original) = fsl_syntax::parse_surface_document_with(source, options) {
+            let error = original.clone().for_edition(source, edition, options);
+            if error != original || error.code() == fsl_syntax::EDITION_HEADER_NOT_ACCEPTED {
+                return Err((
+                    crate::frontend_output::render_surface_parse_error(envelope(), &error),
+                    2,
+                ));
+            }
+        }
+        // Ordinary parse failures belong to the existing command-specific gate.
+        return Ok(SourceEdition {
+            declared,
+            next: false,
+            additions: Vec::new(),
+        });
+    };
+    let mut additions = plan
+        .diagnostics
+        .iter()
+        .filter(|finding| {
+            next || fsl_syntax::CURRENT_EDITION_MIGRATION_CODES.contains(&finding.code)
+        })
+        .map(|finding| finding.json(path, edition))
+        .collect::<Vec<_>>();
+    if !next && implicit_warnings {
+        additions.extend(crate::frontend_output::implicit_initial_value_warnings(
+            source, path, options,
+        ));
+    }
+    if next && !additions.is_empty() {
+        let kind = if additions.iter().all(|finding| {
+            finding.get("code").and_then(Value::as_str) == Some("deprecated_domain_enum_union")
+        }) {
+            "deprecated_domain_enum_union"
+        } else {
+            "unsupported_in_edition"
+        };
+        let mut error = envelope();
+        error.insert("result".to_owned(), json!("error"));
+        error.insert("kind".to_owned(), json!(kind));
+        error.insert("edition".to_owned(), json!(edition.as_str()));
+        error.insert("findings".to_owned(), Value::Array(additions));
+        return Err((with_declared_edition(Value::Object(error), declared), 2));
+    }
+    Ok(SourceEdition {
+        declared,
+        next,
+        additions,
+    })
+}
+
+/// Record the edition a document's header declares as `fsl_edition`.
+/// Without a header the envelope is unchanged.
+fn with_declared_edition(mut output: Value, declared: Option<Edition>) -> Value {
+    if let (Some(edition), Value::Object(envelope)) = (declared, &mut output) {
+        envelope.insert("fsl_edition".to_owned(), json!(edition.number()));
+    }
+    output
+}
+
+/// `migrated` laid out like `original` (#1755): every line ends as
+/// `original`'s first line does (CRLF when that line ends in `\r\n`,
+/// otherwise LF), and a UTF-8 byte order mark is kept exactly when `original`
+/// starts with one. The header insertion and the process-form rendering
+/// write LF lines, and the formatter writes LF and drops the mark, so without
+/// this a CRLF document came back with mixed or LF-only endings.
+#[must_use]
+pub fn keep_line_endings(original: &str, migrated: &str) -> String {
+    const BOM: char = '\u{feff}';
+    let body = migrated
+        .strip_prefix(BOM)
+        .unwrap_or(migrated)
+        .replace("\r\n", "\n");
+    let crlf = original
+        .find('\n')
+        .is_some_and(|end| original[..end].ends_with('\r'));
+    let body = if crlf {
+        body.replace('\n', "\r\n")
+    } else {
+        body
+    };
+    if original.starts_with(BOM) {
+        format!("{BOM}{body}")
+    } else {
+        body
+    }
+}
+
+/// The `missing_edition_header` finding of a document read for `edition`
+/// without an edition header: one edit inserting the header line before the
+/// first significant line. `None` unless the edition is the next one and the
+/// document has no header. `None` also for a declaration that takes no
+/// header ([`fsl_syntax::EDITIONLESS_DECLARATIONS`], such as `agent`), where
+/// the header would make the document a parse error, and for a `refinement`,
+/// which is not a standalone check target, and for a `compose` document,
+/// whose Public Kernel v1 contract cannot keep its components' source files:
+/// for those two no Kernel contract can show the insertion preserves the
+/// document, so none is offered (a hand-written header is still read).
+#[must_use]
+pub fn missing_edition_header(
+    source: &str,
+    edition: Edition,
+    options: &ParseOptions,
+) -> Option<MigrationDiagnostic> {
+    if edition != Edition::Fsl5
+        || !matches!(fsl_syntax::edition_header(source, options), Ok(None))
+        || fsl_syntax::dialect_keyword_with(source, options).is_ok_and(|keyword| {
+            matches!(keyword, "refinement" | "compose")
+                || fsl_syntax::EDITIONLESS_DECLARATIONS.contains(&keyword)
+        })
+    {
+        return None;
+    }
+    let first = fsl_syntax::first_significant_offset(source);
+    let line_start = source[..first].rfind('\n').map_or_else(
+        || first.min(if source.starts_with('\u{feff}') { 3 } else { 0 }),
+        |newline| newline + 1,
+    );
+    let span = source_span(source, line_start, line_start);
+    let header = format!("fsl {}", edition.number());
+    Some(MigrationDiagnostic {
+        code: fsl_syntax::MISSING_EDITION_HEADER,
+        taxonomy: Taxonomy::NonCanonical,
+        message: format!("the document has no edition header; add '{header}'"),
+        span,
+        canonical_replacement: header.clone(),
+        machine_applicable: true,
+        reason: None,
+        edits: vec![SourceEdit {
+            span,
+            replacement: format!("{header}\n"),
+        }],
     })
 }
 
@@ -567,6 +1079,7 @@ fn unsupported_double_ampersands(source: &str) -> Vec<MigrationDiagnostic> {
                 span,
                 canonical_replacement: "and".to_owned(),
                 machine_applicable: false,
+                reason: None,
                 edits: vec![SourceEdit {
                     span,
                     replacement: "and".to_owned(),
@@ -585,6 +1098,7 @@ fn unsupported_double_ampersands(source: &str) -> Vec<MigrationDiagnostic> {
                 span,
                 canonical_replacement: "or".to_owned(),
                 machine_applicable: false,
+                reason: None,
                 edits: vec![SourceEdit {
                     span,
                     replacement: "or".to_owned(),
@@ -646,11 +1160,143 @@ struct IdOccurrence {
     is_tag: bool,
 }
 
+/// `lint --strict-names`: each place a canonical name is written as itself
+/// in a document that also writes it as its glossary alias. Off by default,
+/// because mixing is how a document moves from one spelling to the other.
+#[must_use]
+pub fn mixed_names_diagnostics(source: &str, options: &ParseOptions) -> Vec<MigrationDiagnostic> {
+    let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document_with(source, options)
+    else {
+        return Vec::new();
+    };
+    let Some(glossary) = requirements.items.iter().find_map(|item| match item {
+        fsl_syntax::RequirementsItem::Glossary(glossary) => Some(glossary),
+        _ => None,
+    }) else {
+        return Vec::new();
+    };
+    let via_alias = glossary
+        .uses
+        .iter()
+        .filter(|name| name.via_alias)
+        .map(|name| name.canonical.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    glossary
+        .uses
+        .iter()
+        .filter(|name| !name.via_alias && via_alias.contains(name.canonical.as_str()))
+        .filter_map(|name| {
+            let alias = glossary
+                .entries
+                .iter()
+                .find(|entry| entry.canonical.name == name.canonical)?
+                .alias
+                .clone();
+            Some(MigrationDiagnostic {
+                code: fsl_syntax::MIXED_NAMES,
+                taxonomy: Taxonomy::NonCanonical,
+                message: format!(
+                    "'{}' is written both as itself and as its alias '{alias}'; write one spelling",
+                    name.canonical
+                ),
+                span: name.span,
+                canonical_replacement: alias,
+                machine_applicable: false,
+                reason: None,
+                edits: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+/// [`SHARED_REQUIREMENT_ID`]: each `requirement` or `acceptance` of a
+/// current-edition `requirements` document whose ID an earlier `requirement`, or
+/// for a `requirement` an earlier `acceptance`, already owns, at its ID. Two
+/// `acceptance`s of one ID are left to `check`, which refuses them.
+#[must_use]
+pub fn shared_requirement_id_diagnostics(
+    source: &str,
+    options: &ParseOptions,
+) -> Vec<MigrationDiagnostic> {
+    let Ok(SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document_with(source, options)
+    else {
+        return Vec::new();
+    };
+    if requirements.next.is_some() {
+        return Vec::new();
+    }
+    let mut owners = std::collections::BTreeMap::<&str, (&'static str, Span)>::new();
+    let mut diagnostics = Vec::new();
+    for item in &requirements.items {
+        let (kind, id, span) = match item {
+            RequirementsItem::Requirement { id, id_span, .. } => ("requirement", id, *id_span),
+            RequirementsItem::Acceptance { id, id_span, .. } => ("acceptance", id, *id_span),
+            _ => continue,
+        };
+        let Some(&(earlier, at)) = owners.get(id.as_str()) else {
+            owners.insert(id, (kind, span));
+            continue;
+        };
+        if earlier == "acceptance" && kind == "acceptance" {
+            continue;
+        }
+        diagnostics.push(MigrationDiagnostic {
+            code: SHARED_REQUIREMENT_ID,
+            taxonomy: Taxonomy::AmbiguousIntent,
+            message: format!(
+                "requirement ID '{id}': this {kind} reuses the ID of the {earlier} at {}:{}; \
+                 the ledger keeps one row for the two",
+                at.start.line, at.start.column
+            ),
+            span,
+            canonical_replacement: "rename one of the two IDs, or merge the two declarations"
+                .to_owned(),
+            machine_applicable: false,
+            reason: None,
+            edits: Vec::new(),
+        });
+    }
+    diagnostics
+}
+
+/// The lexer's warnings (`fullwidth_space`, `non_nfc_identifier`) as lint
+/// findings: each carries the text that reads the same without it, which
+/// replaces the span without changing the document's meaning. Empty outside
+/// the next edition's identifier rule.
+#[must_use]
+pub fn lexical_warning_diagnostics(
+    source: &str,
+    options: &ParseOptions,
+) -> Vec<MigrationDiagnostic> {
+    fsl_syntax::lexical_warnings(source, options)
+        .into_iter()
+        .map(|warning| MigrationDiagnostic {
+            code: warning.code,
+            taxonomy: Taxonomy::NonCanonical,
+            message: warning.message,
+            span: warning.span,
+            canonical_replacement: warning.replacement.clone(),
+            machine_applicable: true,
+            reason: None,
+            edits: vec![SourceEdit {
+                span: warning.span,
+                replacement: warning.replacement,
+            }],
+        })
+        .collect()
+}
+
 /// Report project-policy violations without changing source identity.
 ///
 #[must_use]
-pub fn id_policy_diagnostics(source: &str, policy: &IdPolicy) -> Vec<MigrationDiagnostic> {
-    let mut diagnostics = id_occurrences(source)
+pub fn id_policy_diagnostics(
+    source: &str,
+    policy: &IdPolicy,
+    options: &ParseOptions,
+) -> Vec<MigrationDiagnostic> {
+    let mut diagnostics = id_occurrences(source, *options)
         .into_iter()
         .map(|mut occurrence| {
             if occurrence.is_tag {
@@ -672,6 +1318,7 @@ pub fn id_policy_diagnostics(source: &str, policy: &IdPolicy) -> Vec<MigrationDi
                 span: occurrence.span,
                 canonical_replacement: expected,
                 machine_applicable: false,
+                reason: None,
                 edits: Vec::new(),
             }
         })
@@ -681,18 +1328,39 @@ pub fn id_policy_diagnostics(source: &str, policy: &IdPolicy) -> Vec<MigrationDi
     diagnostics
 }
 
-fn id_occurrences(source: &str) -> Vec<IdOccurrence> {
-    let Ok(tokens) = fsl_syntax::lex(source) else {
+fn id_occurrences(source: &str, options: ParseOptions) -> Vec<IdOccurrence> {
+    let Ok(tokens) = fsl_syntax::lex_with(source, &options) else {
         // Edition diagnostics own unsupported-token reporting. Do not replace
         // those findings with a secondary ID-policy failure.
         return Vec::new();
     };
     let mut occurrences = Vec::new();
-    let document = fsl_syntax::dialect_keyword(source).ok();
+    let document = fsl_syntax::dialect_keyword_with(source, &options).ok();
+    let next_requirements = document == Some("requirements")
+        && matches!(
+            fsl_syntax::edition_header(source, &options),
+            Ok(Some(header)) if header.edition == Edition::Fsl5
+        );
     for (index, token) in tokens.iter().enumerate() {
         let TokenKind::Ident(keyword) = &token.kind else {
             continue;
         };
+        if next_requirements && let Some(kind) = next_requirements_id_kind(keyword) {
+            if let Some((id, span, next)) = requirement_id_at(source, &tokens, index + 1)
+                && matches!(
+                    tokens.get(next).map(|token| &token.kind),
+                    Some(TokenKind::String(_))
+                )
+            {
+                occurrences.push(IdOccurrence {
+                    kind,
+                    id,
+                    span,
+                    is_tag: false,
+                });
+            }
+            continue;
+        }
         if keyword == "requirement"
             && index
                 .checked_sub(1)
@@ -757,8 +1425,29 @@ fn id_occurrences(source: &str) -> Vec<IdOccurrence> {
             });
         }
     }
-    occurrences.extend(legacy_requirement_ids(source));
+    occurrences.extend(legacy_requirement_ids(source, options));
     occurrences
+}
+
+/// The kind of the ID a declaration of a next-edition requirements document
+/// starts with, `keyword ID "text"`, in either spelling: a `rule`, a
+/// decision table and a row's or an event's `covers` declare a requirement, a
+/// `scenario` an acceptance trace, a `forbidden` a forbidden one, and `goal`
+/// and `policy` their own kinds.
+fn next_requirements_id_kind(keyword: &str) -> Option<IdKind> {
+    use fsl_syntax::keywords::Kw;
+    [
+        (Kw::Rule, IdKind::Requirement),
+        (Kw::Decide, IdKind::Requirement),
+        (Kw::Covers, IdKind::Requirement),
+        (Kw::Scenario, IdKind::Acceptance),
+        (Kw::Forbidden, IdKind::Forbidden),
+        (Kw::Goal, IdKind::Goal),
+        (Kw::Policy, IdKind::Policy),
+    ]
+    .into_iter()
+    .find(|(kw, _)| keyword == kw.english() || keyword == kw.japanese())
+    .map(|(_, kind)| kind)
 }
 
 fn governance_reference_at(
@@ -877,8 +1566,8 @@ fn requirement_id_at(
     ))
 }
 
-fn legacy_requirement_ids(source: &str) -> Vec<IdOccurrence> {
-    let tree = lossless_document(source);
+fn legacy_requirement_ids(source: &str, options: ParseOptions) -> Vec<IdOccurrence> {
+    let tree = lossless_document_with(source, &options);
     let tokens = tree
         .nodes()
         .iter()
@@ -926,8 +1615,8 @@ fn legacy_requirement_ids(source: &str) -> Vec<IdOccurrence> {
     occurrences
 }
 
-fn metadata_diagnostics(source: &str) -> Vec<MigrationDiagnostic> {
-    let tree = lossless_document(source);
+fn metadata_diagnostics(source: &str, options: ParseOptions) -> Vec<MigrationDiagnostic> {
+    let tree = lossless_document_with(source, &options);
     let tokens = tree
         .nodes()
         .iter()
@@ -984,6 +1673,7 @@ fn metadata_diagnostics(source: &str) -> Vec<MigrationDiagnostic> {
                 span: node.span,
                 canonical_replacement: "move the comment, then use a typed annotation".to_owned(),
                 machine_applicable: false,
+                reason: None,
                 edits: Vec::new(),
             });
             continue;
@@ -1004,6 +1694,7 @@ fn metadata_diagnostics(source: &str) -> Vec<MigrationDiagnostic> {
             span: node.span,
             canonical_replacement: replacement,
             machine_applicable: true,
+            reason: None,
             edits: vec![
                 SourceEdit {
                     span: Span {
@@ -1022,8 +1713,12 @@ fn metadata_diagnostics(source: &str) -> Vec<MigrationDiagnostic> {
     diagnostics
 }
 
-fn default_diagnostics(source: &str, path: &str) -> Vec<MigrationDiagnostic> {
-    crate::frontend_output::implicit_initial_value_warnings(source, path)
+fn default_diagnostics(
+    source: &str,
+    path: &str,
+    options: ParseOptions,
+) -> Vec<MigrationDiagnostic> {
+    crate::frontend_output::implicit_initial_value_warnings(source, path, &options)
         .into_iter()
         .filter_map(|warning| {
             let suggestion = warning.get("suggestion")?;
@@ -1048,6 +1743,7 @@ fn default_diagnostics(source: &str, path: &str) -> Vec<MigrationDiagnostic> {
                 span: diagnostic_span,
                 canonical_replacement: warning.get("canonical_replacement")?.as_str()?.to_owned(),
                 machine_applicable: true,
+                reason: None,
                 edits: vec![SourceEdit {
                     span: source_span(source, start, end),
                     replacement,
@@ -1080,7 +1776,11 @@ fn source_offset(source: &str, line: u32, column: u32) -> Option<usize> {
     (column_bytes <= line_text.len()).then_some(line_start + column_bytes)
 }
 
-fn action_map_diagnostics(source: &str, document: &SurfaceDocument) -> Vec<MigrationDiagnostic> {
+fn action_map_diagnostics(
+    source: &str,
+    document: &SurfaceDocument,
+    options: ParseOptions,
+) -> Vec<MigrationDiagnostic> {
     let SurfaceDocument::Requirements(requirements) = document else {
         return Vec::new();
     };
@@ -1099,14 +1799,19 @@ fn action_map_diagnostics(source: &str, document: &SurfaceDocument) -> Vec<Migra
             RequirementsItem::Requirement { items, .. } => {
                 for nested in items {
                     if let fsl_syntax::RequirementBlockItem::Action(action) = nested {
-                        diagnostics.extend(action_map_diagnostic(source, action, &implements));
+                        diagnostics.extend(action_map_diagnostic(
+                            source,
+                            action,
+                            &implements,
+                            options,
+                        ));
                     }
                 }
                 continue;
             }
             _ => continue,
         };
-        diagnostics.extend(action_map_diagnostic(source, action, &implements));
+        diagnostics.extend(action_map_diagnostic(source, action, &implements, options));
     }
     diagnostics
 }
@@ -1116,6 +1821,7 @@ fn action_map_diagnostic(
     source: &str,
     action: &fsl_syntax::RequirementAction,
     implements: &[(&Vec<fsl_syntax::RefinementItem>, Span)],
+    options: ParseOptions,
 ) -> Vec<MigrationDiagnostic> {
     let mut diagnostics = Vec::new();
     for item in &action.items {
@@ -1130,6 +1836,7 @@ fn action_map_diagnostic(
                     span: branch.maps.span,
                     canonical_replacement: "write an explicit refinement correspondence".to_owned(),
                     machine_applicable: false,
+                    reason: None,
                     edits: Vec::new(),
                 });
             }
@@ -1148,6 +1855,7 @@ fn action_map_diagnostic(
             canonical_replacement: "move the mapping to an explicit implements or refinement block"
                 .to_owned(),
             machine_applicable: false,
+            reason: None,
             edits: Vec::new(),
         });
         return diagnostics;
@@ -1163,11 +1871,13 @@ fn action_map_diagnostic(
             span: maps.span,
             canonical_replacement: "remove the duplicate after choosing one correspondence".to_owned(),
             machine_applicable: false,
+            reason: None,
             edits: Vec::new(),
         });
         return diagnostics;
     }
-    let Some((maps_end, maps_text)) = maps_clause_text(source, maps.span.start.offset) else {
+    let Some((maps_end, maps_text)) = maps_clause_text(source, maps.span.start.offset, options)
+    else {
         diagnostics.push(MigrationDiagnostic {
             code: "inline_action_maps",
             taxonomy: Taxonomy::AmbiguousIntent,
@@ -1175,14 +1885,15 @@ fn action_map_diagnostic(
             span: maps.span,
             canonical_replacement: "write an explicit correspondence".to_owned(),
             machine_applicable: false,
+            reason: None,
             edits: Vec::new(),
         });
         return diagnostics;
     };
-    let Some(close) = block_close_offset(source, implements_span.start.offset) else {
+    let Some(close) = block_close_offset(source, implements_span.start.offset, options) else {
         return diagnostics;
     };
-    if comment_immediately_before(source, close) {
+    if comment_immediately_before(source, close, options) {
         diagnostics.push(MigrationDiagnostic {
             code: "inline_action_maps",
             taxonomy: Taxonomy::AmbiguousIntent,
@@ -1191,11 +1902,12 @@ fn action_map_diagnostic(
             span: maps.span,
             canonical_replacement: "move the comment, then rerun migrate".to_owned(),
             machine_applicable: false,
+            reason: None,
             edits: Vec::new(),
         });
         return diagnostics;
     }
-    let Some(params) = action_params_text(source, action.span.start.offset) else {
+    let Some(params) = action_params_text(source, action.span.start.offset, options) else {
         diagnostics.push(MigrationDiagnostic {
             code: "inline_action_maps",
             taxonomy: Taxonomy::AmbiguousIntent,
@@ -1204,6 +1916,7 @@ fn action_map_diagnostic(
             span: maps.span,
             canonical_replacement: "write an explicit correspondence".to_owned(),
             machine_applicable: false,
+            reason: None,
             edits: Vec::new(),
         });
         return diagnostics;
@@ -1218,6 +1931,7 @@ fn action_map_diagnostic(
         span: source_span(source, maps.span.start.offset, maps_end),
         canonical_replacement: replacement.clone(),
         machine_applicable: true,
+        reason: None,
         edits: vec![
             SourceEdit {
                 span: source_span(source, maps.span.start.offset, maps_end),
@@ -1232,8 +1946,8 @@ fn action_map_diagnostic(
     diagnostics
 }
 
-fn maps_clause_text(source: &str, start: usize) -> Option<(usize, String)> {
-    let tree = lossless_document(source);
+fn maps_clause_text(source: &str, start: usize, options: ParseOptions) -> Option<(usize, String)> {
+    let tree = lossless_document_with(source, &options);
     let tokens = tree
         .nodes()
         .iter()
@@ -1255,8 +1969,8 @@ fn maps_clause_text(source: &str, start: usize) -> Option<(usize, String)> {
     Some((end, source[start..end].to_owned()))
 }
 
-fn action_params_text(source: &str, start: usize) -> Option<String> {
-    let tree = lossless_document(source);
+fn action_params_text(source: &str, start: usize, options: ParseOptions) -> Option<String> {
+    let tree = lossless_document_with(source, &options);
     let tokens = tree
         .nodes()
         .iter()
@@ -1279,8 +1993,8 @@ fn action_params_text(source: &str, start: usize) -> Option<String> {
     Some(source[params_start..params_end].to_owned())
 }
 
-fn block_close_offset(source: &str, start: usize) -> Option<usize> {
-    let tree = lossless_document(source);
+fn block_close_offset(source: &str, start: usize, options: ParseOptions) -> Option<usize> {
+    let tree = lossless_document_with(source, &options);
     let tokens = tree
         .nodes()
         .iter()
@@ -1294,8 +2008,8 @@ fn block_close_offset(source: &str, start: usize) -> Option<usize> {
     Some(tokens[close].span.start.offset)
 }
 
-fn comment_immediately_before(source: &str, offset: usize) -> bool {
-    let tree = lossless_document(source);
+fn comment_immediately_before(source: &str, offset: usize, options: ParseOptions) -> bool {
+    let tree = lossless_document_with(source, &options);
     let Some(close) = tree
         .nodes()
         .iter()
@@ -1338,6 +2052,163 @@ fn matching_symbol_index(
         }
     }
     None
+}
+
+/// Whether [`kernel_contract`] keeps the kernel's `origin` records.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Origins {
+    /// Keep them (every rewrite but a process-form conversion).
+    Kept,
+    /// Drop them: a converted process form's events carry their own
+    /// lowering origins, which name the new form, not a different meaning.
+    Ignored,
+}
+
+/// The location-free checked Public Kernel a migration must keep: the
+/// kernel contract without spans, source nodes and the singular legacy
+/// requirement projection, plus each target's typed annotations.
+///
+/// # Errors
+///
+/// Returns the parse, model or `implements` error of `source`.
+pub fn kernel_contract(
+    source: &str,
+    path: &Path,
+    options: &ParseOptions,
+    origins: Origins,
+) -> Result<Value, String> {
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let resolver = fsl_core::FsResolver::new(base);
+    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+        source,
+        &resolver,
+        path.to_string_lossy(),
+        options,
+    )
+    .map_err(|error| error.to_string())?;
+    let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
+    if matches!(
+        fsl_syntax::parse_surface_document_with(source, options),
+        Ok(fsl_syntax::SurfaceDocument::Requirements(_))
+    ) {
+        fsl_core::requirements_implements_with_options(source, &resolver, &model, options)
+            .map_err(|error| error.to_string())?;
+    }
+    let mut contract = fsl_core::public_kernel_contract(
+        &kernel,
+        &model,
+        &path.to_string_lossy(),
+        source_dialect(source, options),
+    )
+    .map_err(|error| error.to_string())?;
+    remove_migration_locations(&mut contract);
+    remove_legacy_metadata_projection(&mut contract);
+    if origins == Origins::Ignored {
+        remove_origins(&mut contract);
+    }
+    Ok(json!({
+        "kernel": contract,
+        "annotations": migration_annotation_contract(&model),
+    }))
+}
+
+fn remove_migration_locations(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            for key in ["span", "source_node_id", "source_node_ids", "reverse_index"] {
+                object.remove(key);
+            }
+            object.values_mut().for_each(remove_migration_locations);
+        }
+        Value::Array(values) => values.iter_mut().for_each(remove_migration_locations),
+        _ => {}
+    }
+}
+
+fn remove_legacy_metadata_projection(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("requirement");
+            if let Some(Value::Object(origin)) = object.get_mut("origin") {
+                origin.remove("declaration");
+            }
+            object
+                .values_mut()
+                .for_each(remove_legacy_metadata_projection);
+        }
+        Value::Array(values) => values
+            .iter_mut()
+            .for_each(remove_legacy_metadata_projection),
+        _ => {}
+    }
+}
+
+fn migration_annotation_contract(model: &fsl_core::KernelModel) -> Value {
+    let mut targets = vec!["spec".to_owned(), "init".to_owned()];
+    targets.extend(
+        model
+            .actions
+            .iter()
+            .map(|action| fsl_core::action_target(&action.name)),
+    );
+    for (kind, properties) in [
+        ("invariant", &model.invariants),
+        ("trans", &model.transitions),
+        ("reachable", &model.reachables),
+    ] {
+        targets.extend(
+            properties
+                .iter()
+                .map(|property| fsl_core::property_target(kind, &property.name)),
+        );
+    }
+    targets.extend(
+        model
+            .leadstos
+            .iter()
+            .map(|property| fsl_core::property_target("leadsTo", &property.name)),
+    );
+    targets.sort();
+    targets.dedup();
+    Value::Object(
+        targets
+            .into_iter()
+            .filter_map(|target| {
+                let mut annotations = model
+                    .annotations_for(&target)
+                    .source_order()
+                    .iter()
+                    .map(fsl_syntax::Annotation::render_source)
+                    .collect::<Vec<_>>();
+                annotations.sort();
+                (!annotations.is_empty()).then(|| (target, json!(annotations)))
+            })
+            .collect(),
+    )
+}
+
+fn remove_origins(value: &mut Value) {
+    match value {
+        Value::Object(object) => {
+            object.remove("origin");
+            object.values_mut().for_each(remove_origins);
+        }
+        Value::Array(values) => values.iter_mut().for_each(remove_origins),
+        _ => {}
+    }
+}
+
+/// The Public Kernel's dialect name for `source`'s root keyword.
+#[must_use]
+pub fn source_dialect<'a>(source: &'a str, options: &ParseOptions) -> &'a str {
+    match fsl_syntax::dialect_keyword_with(source, options) {
+        Ok("spec") => "kernel",
+        Ok("dbsystem") => "db",
+        Ok("ai_component") => "ai-component",
+        Ok("agent") => "ai-agent",
+        Ok(keyword) => keyword,
+        Err(_) => "unknown",
+    }
 }
 
 #[cfg(test)]
@@ -1397,7 +2268,8 @@ business CheckoutBusiness {
   goal CanPay "goal" { true }
 }
 "#;
-        let diagnostics = id_policy_diagnostics(source, &IdPolicy::default());
+        let diagnostics =
+            id_policy_diagnostics(source, &IdPolicy::default(), &ParseOptions::stable());
         let messages = diagnostics
             .iter()
             .map(|diagnostic| diagnostic.message.as_str())
@@ -1426,7 +2298,9 @@ ai_component Safe {
   authority { forbidden DeleteCustomerData; }
   fallback { when low_confidence require human_review; }
 }";
-        assert!(id_policy_diagnostics(source, &IdPolicy::default()).is_empty());
+        assert!(
+            id_policy_diagnostics(source, &IdPolicy::default(), &ParseOptions::stable()).is_empty()
+        );
     }
 
     #[test]
@@ -1435,7 +2309,7 @@ ai_component Safe {
   policy POL-CLAIMS-001 "policy" satisfies CTRL-BAD { true }
 }"#;
         assert!(
-            id_policy_diagnostics(business, &IdPolicy::default())
+            id_policy_diagnostics(business, &IdPolicy::default(), &ParseOptions::stable())
                 .iter()
                 .any(|diagnostic| diagnostic.message.contains("control ID 'CTRL-BAD'"))
         );
@@ -1450,10 +2324,11 @@ ai_component Safe {
     preserve CTRL-BAD
   }
 }"#;
-        let messages = id_policy_diagnostics(governance, &IdPolicy::default())
-            .into_iter()
-            .map(|diagnostic| diagnostic.message)
-            .collect::<Vec<_>>();
+        let messages =
+            id_policy_diagnostics(governance, &IdPolicy::default(), &ParseOptions::stable())
+                .into_iter()
+                .map(|diagnostic| diagnostic.message)
+                .collect::<Vec<_>>();
         for expected in [
             "control ID 'CTRL-BAD'",
             "policy ID 'POL-BAD'",
@@ -1490,5 +2365,39 @@ ai_component Safe {
             .set_patterns(IdKind::Model, vec!["REQ-{scope}-{number:3}".to_owned()])
             .expect("literal model prefix");
         assert!(policy.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod line_ending_tests {
+    use super::keep_line_endings;
+
+    #[test]
+    fn the_first_line_ending_and_the_mark_decide_every_line() {
+        let migrated = "fsl 5\nspec S {\r\n}\n";
+        for (original, expected) in [
+            ("spec S {\n}\n", "fsl 5\nspec S {\n}\n"),
+            ("spec S {\r\n}\r\n", "fsl 5\r\nspec S {\r\n}\r\n"),
+            // A mixed input follows its first line.
+            ("spec S {\r\n}\n", "fsl 5\r\nspec S {\r\n}\r\n"),
+            ("spec S {\n}\r\n", "fsl 5\nspec S {\n}\n"),
+            (
+                "\u{feff}spec S {\r\n}\r\n",
+                "\u{feff}fsl 5\r\nspec S {\r\n}\r\n",
+            ),
+            // No line ending at all: LF.
+            ("spec S {}", "fsl 5\nspec S {\n}\n"),
+        ] {
+            assert_eq!(
+                keep_line_endings(original, migrated),
+                expected,
+                "{original:?}"
+            );
+        }
+        // The mark is kept only when the input has one.
+        assert_eq!(
+            keep_line_endings("spec S {\n}\n", "\u{feff}spec S {\n}\n"),
+            "spec S {\n}\n"
+        );
     }
 }

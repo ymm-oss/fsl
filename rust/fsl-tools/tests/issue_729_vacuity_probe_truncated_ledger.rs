@@ -84,12 +84,9 @@ fn an_ordinary_vacuous_implication_still_uses_the_suspected_prefix() {
 /// Negative control (c) from the implementation brief: `assurance_token`
 /// reads only `completeness`/`kernel.completeness`/`result`/`evidence.kind`/
 /// `guarantee_kind`/`status` -- never `warnings` -- so the rendered
-/// assurance-class row for the spec-level finding must be byte-identical
-/// whether the finding is an ordinary `vacuous_implication` or a
-/// `vacuity_probe_truncated` truncation. `collect_findings` maps every
-/// `warnings` entry to `trace_type: "vacuity"` regardless of `kind`, so the
-/// whole spec-level row -- not just the assurance cell -- is expected to
-/// match exactly.
+/// assurance cell must be byte-identical whether the finding is an ordinary
+/// `vacuous_implication` or a `vacuity_probe_truncated` truncation. #1497
+/// distinguishes their trace types; full expected rows pin every other cell.
 #[test]
 fn assurance_class_is_unmoved_by_a_truncated_probe_finding() {
     let with_vacuous = render(&verification_with("vacuous_implication"));
@@ -105,8 +102,58 @@ fn assurance_class_is_unmoved_by_a_truncated_probe_finding() {
 
     assert_eq!(
         spec_level_row(&with_vacuous),
-        spec_level_row(&with_truncated),
-        "the spec-level assurance row must not depend on which vacuity `kind` produced the \
-         finding: with_vacuous={with_vacuous}\n---\nwith_truncated={with_truncated}"
+        "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | bounded(BMC depth 8) | vacuity | 要確認 | ____ | 下記詳細 |"
     );
+    assert_eq!(
+        spec_level_row(&with_truncated),
+        "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | bounded(BMC depth 8) | verification_incomplete | 要確認 | ____ | 下記詳細 |"
+    );
+}
+
+#[test]
+fn non_migration_findings_keep_red_review_status_and_risk() {
+    let approvals = json!({"requirements": {}});
+    for attributed in [false, true] {
+        for mixed in [false, true] {
+            let mut verification = verification_with("vacuous_implication");
+            if mixed {
+                verification["warnings"]
+                    .as_array_mut()
+                    .expect("warnings")
+                    .push(json!({
+                        "kind": "legacy_string_metadata", "message": "migration candidate"
+                    }));
+            }
+            if attributed {
+                for warning in verification["warnings"].as_array_mut().expect("warnings") {
+                    warning["requirement"] =
+                        json!({"id": "REQ-NEG-001", "text": "Negative control"});
+                }
+            }
+            for approval in [None, Some(&approvals)] {
+                let rendered = fsl_tools::render_ledger_with_approvals(
+                    "ledger_truncated_probe.fsl",
+                    &model(),
+                    &verification,
+                    &json!({}),
+                    None,
+                    &[],
+                    approval,
+                );
+                let prefix = if attributed {
+                    "| REQ-NEG-001 |"
+                } else {
+                    "| （仕様全体） |"
+                };
+                let row = rendered
+                    .lines()
+                    .find(|line| line.starts_with(prefix))
+                    .expect("finding row");
+                assert!(row.contains("| 🔴 要確認 |"), "{row}");
+                assert!(row.contains("| 要確認 | ____ |"), "{row}");
+                assert!(row.contains("vacuity"), "{row}");
+                assert!(!row.contains("🟡 移行候補"), "{row}");
+            }
+        }
+    }
 }

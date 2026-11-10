@@ -66,12 +66,15 @@ kept in one place (`verify_cache.compute_key`); adding a semantics-affecting par
 4. **Raw entry-file source** (`sha256` of the bytes). Required because diagnostics quote
    source text by line (`_source_line_text` / `_requires_blocking_entry` slice
    `source_lines[line-1]`), and a text edit can change a quoted line without changing the AST.
-5. **All verify options**: `engine`, `depth`, `k_ind`, `deadlock_mode`, `vacuity_mode`,
+5. **All cacheable verify options**: `engine`, `depth`, `k_ind`, `deadlock_mode`, `vacuity_mode`,
    `property_name`, sorted `exclude_property_names`, `strict_tags`, the parsed
    `--instances`/`--values` overrides (defense in depth — they are already reflected in the
-   AST), ordered repeatable `--lemma` candidate expressions, and the **content hash** of the
-   `--requirements` file (not its path). Lemma order is semantic because the CTI retry loop
-   deterministically selects the first independently-proved candidate that excludes a CTI.
+   AST), and the **content hash** of the `--requirements` file (not its path).
+   Native CLI runs with any `--lemma` bypass persistent verification cache lookup and
+   storage, so candidate expressions and their order are not a live verdict-cache key
+   component. Order still matters to the uncached CTI retry loop, which deterministically
+   selects the first independently-proved candidate that excludes a CTI; see
+   `DESIGN-induction-lemmas.md`, "CLI, exit, and cache behavior".
 
 What is normalized away, and what deliberately is not: dialect surface syntax normalizes to
 the kernel (two dialect spellings with the same kernel AST + same source text share nothing in
@@ -107,10 +110,11 @@ than hashing an under-specified representation).
   layout under `<root>/verify/v3/`. Content-addressed keys make a machine-global cache
   safe across projects/worktrees; entries embed no absolute paths (results carry spec names,
   not file paths).
-- Entry: `{"schema": 1, "created": iso8601, "fslc": version, "key_inputs": {component
+- Python entry: `{"schema": 1, "created": iso8601, "fslc": version, "key_inputs": {component
   digests, for debugging}, "result": <decorated pre-envelope out>}`. Only verdict-class
   results are stored (`verified`, `proved`, `violated`, `reachable_failed`, `unknown_cti`);
   `error`/internal results are never cached.
+  Native schema v2 entries instead contain `schema: "fslc-rust-cache.v2"`, `key`, `xdepth`, `backend`, `solver_version`, and `output`, with no `created` field.
 - Writes are atomic (`tempfile` + `os.replace`); concurrent agents at worst duplicate work.
   Unreadable/corrupt entries are treated as a miss and deleted. Entries over 5 MB (huge
   traces) are not stored. Because of this, running many `fslc verify` processes in parallel
@@ -125,10 +129,31 @@ than hashing an under-specified representation).
 ## 4. Output and CLI contract
 
 - On a **hit**, the result dict is byte-identical to the stored run except one **additive**
-  field: `"cache": {"hit": true, "key": …, "created": …, "source": "exact"|"cross_depth"}`.
+  field: `"cache": {"hit": true, "key": …, "source": "exact"|"cross_depth"}`.
   `cost` keeps the original solve cost (honest: it is the cost of the evidence, not of the
   lookup). Misses emit exactly today's output — no new field — so the corpus snapshot and all
   existing contract tests are unaffected by cache-enabled runs that miss.
+- `cache` is execution provenance metadata, not verdict evidence: its presence
+  depends on ambient cache state and run order. A sweep envelope is a function
+  of its inputs apart from cache and timing metadata. Comparators use the same
+  execution-metadata exclusion as approval's `stable_json(.., true)`: remove
+  `cost` and `cache` only at the root of each verification envelope, including
+  `sweep.results[].verification` and
+  `sweep.minimal_counterexample.verification` when present. Preserve same-named
+  fields in domain state; do not recursively delete keys or remove verdict,
+  location, or assurance evidence. The workspace-wide JSON reader uses serde_json's
+  `float_roundtrip` feature to preserve stored f64 values and their serialized
+  tokens on replay, including the original solve timings. This does not change
+  the cache JSON shape, schema, or key derivation. Sweep has no `--no-cache`
+  option; use `FSLC_CACHE=off` to disable its cache reads and writes.
+- `float_roundtrip` applies workspace-wide, including Worker request parsing,
+  not just cache replay: it reads JSON f64 values accurately in scenario approval
+  normalization, AI eval/JSONL inputs, causal evidence/plan/lifecycle inputs, and
+  log replay/implementation-log/event inputs. Digests of older scenario approvals
+  or causal artifacts containing boundary decimal values can therefore change.
+  The fslc/fsl-tools test graphs already enabled this feature through the
+  `jsonschema` dev-dependency; previously those tests and distributed builds
+  parsed such numbers differently.
 - Exit codes are untouched: a hit returns the same `result` value through the same
   `exit_code()` mapping.
 - Caching is **on by default** for `fslc verify` (both engines). Rationale: the key
@@ -208,7 +233,9 @@ The sound future path (stage 3, explicitly deferred): `prove(assume_invariants=[
 re-asserts previously-proved unchanged invariants as lemmas *without* re-checking them —
 semantically justified because a prior overall-`proved` entry for the same model core
 established them as true invariants of this transition system; assuming true lemmas only
-strengthens the hypothesis. Until that lands, induction gets whole-verdict caching only.
+strengthens the hypothesis. Until that lands, induction without `--lemma` gets
+whole-verdict caching only. Native lemma-guided runs bypass the persistent cache;
+the deferred internal reuse proposal does not describe live argv-candidate caching.
 
 ## 7. Soundness argument — how the cache could lie, and why it can't
 
@@ -216,7 +243,8 @@ strengthens the hypothesis. Until that lands, induction gets whole-verdict cachi
 |---|---|
 | Spec edit not detected | Key covers raw source bytes + full post-expansion kernel AST; parse always runs; no mtime/size shortcuts anywhere. |
 | Edit to a composed/`use`d/refined component while entry file unchanged | Expansion inlines components into the AST at parse time → AST hash moves. |
-| `--instances`/`--values`/`--depth`/`--engine`/`--k`/`--deadlock`/`--vacuity`/`--property`/`--exclude-property`/`--strict-tags`/`--lemma` change | Each is an explicit key component; bounds overrides are additionally reflected in the AST they rewrite. Lemmas preserve CLI order in the key. |
+| `--instances`/`--values`/`--depth`/`--engine`/`--k`/`--deadlock`/`--vacuity`/`--property`/`--exclude-property`/`--strict-tags` change on a cacheable run | Each is an explicit key component; bounds overrides are additionally reflected in the AST they rewrite. |
+| Any native `--lemma` candidate supplied or changed | Lemma-guided runs bypass persistent cache lookup and storage entirely, so neither a no-lemma verdict nor an earlier candidate verdict can be replayed. Candidate order affects the uncached retry loop, not a live cache key. |
 | `--requirements` file edited at same path | Content hash, not path, in the key. |
 | fslc upgraded, or dev edits `bmc.py` in an editable install | Version string **and** package source fingerprint in the key. |
 | z3 / lark / Python upgraded | Versions in the key. |

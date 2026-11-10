@@ -1,6 +1,6 @@
 # Digest-bound approval records
 
-Issues: #190, #269, #333
+Issues: #190, #269, #333, #1421
 
 ## Goal
 
@@ -9,6 +9,8 @@ set rather than reading the FSL source. `fslc approval` binds that reviewed
 artifact to the normalized specification that produced it. A later check can
 therefore distinguish an unchanged approval from specification, rendering, or
 renderer drift without treating a checkbox in generated Markdown as evidence.
+Renderer drift means a change of the target kind's renderer version, not of
+the `fslc` release (see "Renderer version").
 
 The implementation is native Rust. The frozen Python reference is intentionally
 unchanged.
@@ -88,8 +90,9 @@ fslc approval check examples/e2e/2_requirements.fsl --record expense.approval.js
 fslc ledger examples/e2e/2_requirements.fsl --approval expense.approval.json
 ```
 
-`--signing-key` turns the same creation into a signed v2 record. Signed
-records then require an explicit trust anchor on *every* consuming command —
+`--signing-key` turns the same creation into a signed v6 record. Signed
+records require an explicit trust anchor for approval check, diff, ledger,
+and document generation (document check remains structural) —
 the examples below use an Ed25519 key pair the approver holds
 (`alice-private.pem` and its SPKI public half `alice-public.pem`):
 
@@ -107,21 +110,51 @@ fslc ledger examples/e2e/2_requirements.fsl --approval expense-signed.approval.j
   --trust-key alice-public.pem
 ```
 
-The direct result is `approval_check` with `status:"approved"` or
+A completed check returns `approval_check` with `status:"approved"` or
 `status:"drifted"`. A signed record can instead report
 `status:"signature-invalid"`, which exits 1 and never grants approval. Drift
-remains an analysis result and exits 0, for the same reason `diff` findings do
-(`docs/manual/LANGUAGE.md` §12): drift is the expected state during development — you
+remains an analysis result and exits 0, as ordinary nongating `diff` findings do
+(`docs/manual/LANGUAGE.md` §12). Explicit semantic/batch diff gates instead exit 1 when
+their gate fails. Drift is the expected state during development — you
 approved at one commit and kept working — and the command's job is to report
 what changed and hand you `fslc approval diff`, not to fail a build. The ledger
 renders it `⚠` accordingly, distinct from the `❌` it gives
 `signature-invalid`. This differs deliberately from `fslc document check`,
 whose `document_drifted` exits 1: there, drift means a document contradicts the
 spec it documents, which is a state to correct, not a normal step in the loop.
-Gate on drift by reading `status` from the JSON, not the exit code. A malformed,
+`status:"approved"` confirms digest binding, not a verification pass: the record binds
+digests, and the envelope carries no verification verdict. A `--kind ledger` record can be
+created and then checked `approved` at exit 0 on a failed or unestablished baseline, including
+`violated`, `unknown_cti`, `reachable_failed`, `refinement_failed` and `unknown_budget`. Approving a red
+ledger stays allowed (`docs/design/DESIGN-ledger.md`), so `fslc verify` must be gated
+separately. An approval gate requires exit 0 AND `result:"approval_check"` AND
+`status:"approved"`. `drifted` is not approval despite exit 0. A malformed,
 unsupported, wrong-spec, or locally unavailable Git-baseline record is an error
 and exits 2. A signed record without its matching trust key is also a
-configuration error and exits 2. Unknown sidecar fields are rejected so schema
+configuration error and exits 2. These errors have no approval status. Artifact evaluation
+in `approval create` and `approval check` that aborts preserves its complete downstream envelope and exit: scenarios violations exit 1,
+internal failures exit 3, and failed HTML reports retain `generated`/`html_report` and exit 1.
+A verification `result:"error"` during `--kind ledger` rerendering returns that envelope and
+its exit (2, or 3 for internal) in place of `drifted` or an artifact mismatch.
+No approval record is written and no digest-based status is invented after such a failure.
+An aborted scenarios artifact leaves root and dependency-warning finalization to
+its outer approval/report owner. Each distinct root finding and each finding from
+one distinct dependency resource is attached once, preserving complete values,
+order and locations. Dependency-edition refusals retain priority over the underlying
+artifact result. Successful scenarios artifacts retain their existing finalized root
+and dependency warnings before canonical serialization, preserving existing artifact
+digests and approval signatures.
+`fslc ledger --approval` does not propagate that envelope. When an `html` or `scenarios`
+record's rerender stops on a failed verification baseline, it returns `result:"error"`, exit 2,
+naming the record, and leaves the `-o` file untouched: passing exit 1 through would read as the
+ledger's own verdict while a stale file stayed in place. `ledger` and `requirements_document`
+records still complete, so the ledger is written and shows them `drifted`.
+Approval HTML rerendering uses no output path: inline content and default output metadata
+remain in memory, without an HTML file. Direct `html -o` instead writes its report even for a
+failed verification baseline; a write error exits 2 and outranks the baseline verdict.
+Approval-only ledger rerendering still produces a digest/evaluation at exit 0 for those failed
+or unestablished baselines, distinct from direct ledger's generated report and exit 1.
+Unknown sidecar fields are rejected so schema
 changes cannot be silently ignored.
 
 When drift is reported, compare the approved commit to the current working tree
@@ -139,7 +172,8 @@ again and must match the record's baseline digest.
 
 ## Record contract
 
-The committed sidecar follows
+New sidecars use v5 (unsigned) or v6 (signed), with repository-relative path
+context as specified below. The retained legacy unsigned solver sidecar follows
 [`schemas/fslc/approval/approval-record.v1.schema.json`](../../schemas/fslc/approval/approval-record.v1.schema.json):
 
 ```json
@@ -169,12 +203,11 @@ The committed sidecar follows
 ```
 
 Supported target kinds for v1/v2 are `ledger`, `html`, and `scenarios`.
-Omitting `--signing-key` continues to produce this exact unsigned v1
-contract; **v1/v2 are unchanged by issue #333** — a `requirements_document`
+These retained legacy contracts remain unchanged — a `requirements_document`
 target is never admitted into v1/v2's closed `kind` enum, by design (see
 below).
 
-Signed records use
+Legacy signed solver records use
 [`schemas/fslc/approval/approval-record.v2.schema.json`](../../schemas/fslc/approval/approval-record.v2.schema.json).
 They preserve the v1 `spec`, `target`, and `approval` objects and add:
 
@@ -278,6 +311,129 @@ conditional branch inside v1/v2. `spec`/`approval` are byte-identical to v1's;
   `--depth`/`--deadlock`/`--engine` for `--kind requirements_document` and
   rejects `--glossary`/`--evidence` for the other three kinds.
 
+### Repository-relative path context (v5 unsigned, v6 signed; #1421 AP1/AP2)
+
+All new `approval create` records use
+[`approval-record.v5.schema.json`](../../schemas/fslc/approval/approval-record.v5.schema.json)
+without a signing key and
+[`approval-record.v6.schema.json`](../../schemas/fslc/approval/approval-record.v6.schema.json)
+with one. Each admits the existing solver target shape (`ledger`, `html`,
+`scenarios`) or document target shape (`requirements_document`) as separate
+closed branches. The nested objects, document digests and input variants retain
+their existing contracts. Two required top-level strings add the context:
+
+- `path_base` is the invocation directory at creation, relative to the Git root
+  of the checkout holding the spec: `.` for the root, otherwise `/`-separated names
+  with no `.`, `..` or empty name and no control character. The form is text, so a
+  record reads the same on every platform, and the schema pattern and the reader
+  check the same form.
+- `render_source` is the nonempty original spec argument, verbatim, used only
+  as a rendering label. `spec.path` remains Git-repository-relative.
+
+For example, creation from a directory containing `spec.fsl` with the argument
+`./spec.fsl` preserves that exact label, a target such as `./requirements.md`,
+and input spellings such as `glossary.json` or `nested/../evidence.json`.
+Target/input I/O later uses `git_root / path_base / stored_path`, where `git_root`
+is the root of the checkout holding the spec being checked, not the caller's
+directory and not the creating checkout. A clone, a worktree or a relocated checkout
+therefore reads its own files, and nothing reads the creating checkout, which may
+be gone. The resolver does not probe caller/sidecar/repository alternatives.
+
+The root is found from the directory the spec's path names, not from where a final
+symlink leads, and with Git's location variables (`git rev-parse --local-env-vars`)
+cleared for these lookups, so a nested repository behind a link or a hook's `GIT_DIR`
+cannot choose the files. A spec resolving outside that root is refused with
+`kind:"semantics"`, exit 2. `core.worktree` remains Git's own answer for the checkout,
+so when it points away from the spec this refusal applies. A link to the spec inside the
+same checkout is safe and stays allowed: the record's `spec.path` and digest are still
+checked against the resolved file, and the document and inputs still come from that
+checkout. A link into a nested repository or submodule resolves below the outer root,
+so `approval check` and `ledger` refuse it on `spec.path`, and `document generate`, which
+does not compare `spec.path`, reads the outer checkout's files and reports their drift.
+`approval diff` keeps following the spec and reads no document. v1–v4 records keep
+their existing lookup, including the inherited environment, and their `document generate`
+route calls no Git. On v5/v6 that route needs Git for this lookup.
+
+A document record stays inside that root. Creation refuses, with `kind:"semantics"`
+and exit 2, a creation directory outside the root and a target or input that is
+absolute, climbs out of the root by its spelling, or leads out through a link. Check
+refuses a stored path or base that climbs or links out in the same way, before reading
+it. An absolute form is rejected earlier by the record reader, as `kind:"io"` from
+`approval check` and `ledger` and `kind:"document"` from `document generate`; the schema
+rejects the same forms, and the climbing and link checks need the root, so they run
+at use. The stored spelling of a target or input stays literal, including any `\` a
+Windows caller typed; a record that must read across platforms uses `/`.
+
+A solver record reads no file through its base, so it can be created anywhere: its
+target path stays a label, and outside the root it stores `.`. Its `approved` means the
+spec and a fresh rendering match the record. The reviewed file is read at creation and
+not checked afterwards.
+
+Tampering with `path_base` invalidates a v6 signature. A v5 record is unsigned and
+proves nothing against someone editing it: a changed base pointing at a copy with the
+same content reports `approved`, and a solver record reads nothing through the field.
+Use v6 when the record itself needs protecting. Not bound, by decision: a repository's
+identity, and `document generate`'s commit and `spec.path` on identical content. A spelled
+`d/../x` fails on read in a clone that has no `d`, because Git stores no empty directories.
+
+The current explicit spec still supplies the actual bytes and dependency
+directory. Reproduction uses the recorded source and evidence labels; resolved
+I/O strings never replace those labels in rendered content. Kernel source-label
+admission is unchanged: labels containing `..` or absolute source labels remain
+unsupported by current document generation. This context feature does not
+broaden that admission rule.
+
+Root migration-warning locations embedded in rendering copies also use the
+recorded source label. Public diagnostic locations and dependency-file labels
+retain their actual explicit paths; no recursive path substitution is applied.
+
+v6 covers both new strings with
+`b"fslc.approval.v6\0" || canonical_json(record_without_signature.value)`.
+Its unsigned binding is v5 with both strings retained. v2→v1 and v4→v3 bindings
+and their original signing payloads remain unchanged. v1–v4 readers retain
+their closed wire shapes, reject added context even when relabelled, and resolve
+their relative paths against the consuming invocation directory. No record is
+silently migrated, resigned, or downgraded. Older binaries reject v5/v6 as
+unsupported schemas through their existing I/O error envelope and exit 2;
+obtaining context behavior requires a new reproduction, review and approval.
+
+Authoritative approval check and ledger evaluation use contextual input I/O and,
+for documents, contextual reviewed-target I/O. Solver checks reproduce the
+canonical artifact from spec/inputs and never read the live target, while create
+still reads it. Document generation with `--approval` remains lightweight:
+only its reviewed-target read uses stored context; explicit glossary/evidence
+arguments and its rendering remain invocation-relative. It performs no extra
+rendering, stored-input reads or Git-baseline check. Document check remains
+structural without trust verification or live reviewed-target admission;
+approval diff remains signature/spec-baseline-only. Reason ordering, envelopes,
+exit policies, artifact normalization and assurance are unchanged.
+
+### Raw document-input admission (#1421 AP4–7)
+
+Authoritative approval check and ledger evaluation compare every document
+`FileInput.digest` with the raw bytes actually loaded for reproduction, including
+legacy v3/v4 and contextual v5/v6 records. The glossary digest and each evidence
+digest come from the same buffer that is parsed, without a second read. Evidence
+hashes retain recorded order for mismatch selection; the existing sorted combined
+digest and rendering bytes remain unchanged.
+
+All existing record/trust/signature/spec/Git/input-read/parse/locale/rendering and
+reviewed-target errors keep their precedence. First compute the complete existing
+evaluation, with ordered reasons `spec_changed`, `rendering_changed`,
+`renderer_changed`, `claim_set_changed`, `artifact_changed`. If it is drifted,
+return the same complete result and exit policy even when an input digest differs.
+Only an otherwise-approved evaluation with a raw mismatch becomes the existing
+`result:error`, `kind:io`, exit 2, with message
+`approval input digest mismatch: <recorded path>`. Select the glossary first,
+then evidence in its recorded order, preserving the literal path in that message.
+
+Direct drift still exits 0. Ledger retains record order and its verification and
+publication exit rules. Document generate keeps its explicit invocation inputs
+and lightweight reviewed-target admission; document check remains structural and
+approval diff remains signature/spec-baseline-only. These consumers gain no new
+stored-input reads, except that document generate resolves a contextual record's
+reviewed target from the spec's Git root. Solver targets gain no input comparison.
+
 `approval create --kind requirements_document`'s conformance gate (rather than
 the byte-equality the other three kinds use) is exactly `fslc document
 check`'s own conformance check: `fsl_tools::check_requirements_document`
@@ -315,8 +471,11 @@ fields inside reviewed domain state. HTML preserves its historical normalization
 of embedded `elapsed_s` values and normalizes solver check time, Z3 counters,
 and memory only in the top-level verify envelope. Property identities, check
 counts, and same-named fields in reviewed domain state remain bound. Ledger
-Markdown is hashed as rendered. This preserves review-visible content while
+Markdown is hashed as rendered; its renderer omits only each appendix finding's
+top-level `cost` and `cache`, retaining proof evidence and same-named domain fields.
+This preserves review-visible content while
 preventing solver timing from producing false drift.
+`approval create --kind html` regenerates the default timing-bearing report and normalizes timing and ambient solver-statistic values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
 
 The approval overlay itself is not part of a ledger target digest. The base
 ledger is rendered and hashed first, then approval status is added. This avoids
@@ -336,8 +495,9 @@ rendering is fully deterministic, so nothing needs normalizing before hashing.
 `fsl-rcir-claim-set-v1+sha256` (issue #325) is recorded separately alongside
 the artifact digest, not folded into it, so a caller can distinguish "the
 requirements projection itself changed" (`claim_set_changed`) from "only
-presentation changed" (`rendering_changed` alone — a renderer version bump,
-label, or evidence-overlay change with no change to what the RCIR claims say)
+presentation changed" (`rendering_changed` — a label or evidence-overlay
+change, or a renderer version bump, which a new-form record also reports as
+`renderer_changed`, with no change to what the RCIR claims say)
 from "the spec moved somewhere the claim set doesn't reflect" (`spec_changed`
 without `claim_set_changed`).
 
@@ -353,13 +513,66 @@ authoritative approval-governance check `fslc approval check` performs.
 Adding the approval frontmatter binding and reference section advances the
 requirements-document renderer from evidence overlay version `1.2.0` to `1.3.0`.
 
+### Renderer version
+
+`target.generator_version` names the renderer of the target kind as
+`"<renderer-id>/<semver>"`, not the `fslc` crate version. One constant per kind
+supplies it, through `approval::renderer_version(kind)`. Creation writes that
+value and `approval check` compares the record with it, so both sides use the
+same function:
+
+| Kind | Recorded value | Constant |
+|---|---|---|
+| `ledger` | `fslc-ledger-renderer/1.0.0` | `fsl_tools::LEDGER_RENDERER{,_VERSION}` (`fsl-tools/src/ledger.rs`) |
+| `html` | `fslc-html-renderer/1.0.0` | `fsl_tools::HTML_RENDERER{,_VERSION}` (`fsl-tools/src/html.rs`) |
+| `scenarios` | `fslc-scenarios-renderer/1.0.0` | `approval::SCENARIOS_RENDERER{,_VERSION}` (`fslc/src/approval.rs`; the scenario envelope is built in fslc) |
+| `requirements_document` | `fslc-document-renderer/1.3.0` | `fsl_tools::DOCUMENT_RENDERER{,_VERSION}`, the same value the document frontmatter carries |
+
+Bump a kind's version by hand when a template string, section order, escaping,
+style or other presentation of its rendered bytes changes for the same
+verification result. Do not bump it for an `fslc` release or for a changed
+verifier result; the artifact digest already reports those as
+`rendering_changed`. Before this rule the field held `CARGO_PKG_VERSION`, so
+every release, including a patch release, marked every approval drifted with
+`renderer_changed` although the reviewed bytes were unchanged.
+`DOCUMENT_RENDERER_VERSION` was already independent of the crate version for
+the same reason.
+
+`approval_renderer_version.rs` pins each kind's recorded value together with
+the artifact digest of a fixed render. The pin forces a deliberate decision
+when the rendered bytes move: bump the version if the presentation changed,
+or update only the digest if a verifier result changed the bytes. It cannot
+enforce the bump, because either edit makes it pass again.
+
+**Legacy records.** A record written before renderer versions holds a bare
+crate version, exactly `^\d+\.\d+\.\d+$` in ASCII digits (for example
+`4.12.0`, or `4.7.0` in the v1 and v3 examples above). Such a value carries no
+renderer identity, so `approval check` and `ledger --approval` skip only the
+`renderer_changed` comparison for it. The specification, rendered-artifact,
+claim-set and reviewed-artifact bindings still apply, as do the signature and
+raw-input checks. Any other value is compared exactly, including strings
+that only resemble a version (`4.12`, `v4.12.0`, `4.12.0-rc.1`). Signed
+records are never rewritten.
+
+This relaxes legacy records on purpose. A legacy record whose crate version
+differs from the running `fslc` used to report `drifted` with
+`renderer_changed`. It now reports `approved` when every digest matches. This
+is sound for the approval statement because the rendered-artifact digest
+compares the reviewed bytes, normalized only for the execution noise listed
+under "Rendered artifact digest", with a fresh rendering by the current
+`fslc` from the recorded inputs. A `requirements_document` also carries its
+renderer version inside the hashed frontmatter. What a legacy record loses is
+the attribution "the renderer changed". It does not lose detection of any change
+to what was reviewed.
+
 ## Status and failure reasons
 
 An approval is `approved` only when all applicable bindings match:
 
 - normalized specification digest;
 - normalized rendered-artifact digest;
-- renderer version;
+- the target kind's renderer version (not compared for a legacy bare crate
+  version; see "Renderer version");
 - for `requirements_document` only: the RCIR claim-set digest.
 - for `requirements_document` only: the literal reviewed-artifact digest.
 
@@ -424,7 +637,8 @@ Native integration coverage proves:
 - tampering reports `signature-invalid` and never appears approved in a ledger;
 - signed checks, semantic diffs, and ledgers report the signature status.
 
-Issue #333 adds:
+Issue #333 established the following document-target coverage; its historical
+new-create v3/v4 assertions are superseded by #1421's v5/v6 creation contract:
 
 - `requirements_document` create + check round-trips as `approved`, records
   schema `fslc.approval.v3`, and validates against
@@ -456,3 +670,27 @@ Issue #333 adds:
   unverifiable signed record; `fslc document check --approval` reproduces the
   same section and reports `approval_changed` when the flag is omitted,
   without ever verifying a signature itself.
+
+Issue #1421 AP1/AP2 adds independent CLI controls for unsigned/signed document
+creation at root/subdirectory, literal source/input labels and reviewed bytes,
+cross-CWD checks with distinct valid decoys, missing actual inputs/targets without
+fallback, every solver kind without live-target reads, closed v5/v6 schema
+validation, required context, and v1–v4 rejection of added context fields.
+`issue_1421_checkout_base` adds tampered and untampered clones and worktrees, a
+relocated and a deleted creating checkout, refusal of paths outside the root at
+creation and check, and schema/reader agreement on the stored forms.
+
+Issue #1421 AP4–7 adds controls for otherwise-approved raw mismatches in v3–v6,
+first-mismatch selection including reversed evidence order, all 31 combinations
+of the five existing drift reasons, earlier read/parse/trust/signature failures,
+editable-slot bindings, ledger record/exit order, and the lightweight generation,
+structural check and diff boundaries. The rejecting baseline distinguishes the
+raw-digest gap from the existing preservation controls.
+
+`approval_renderer_version.rs` covers the renderer-version contract. It pins each
+kind's recorded value together with its render digest. It shows that a legacy
+crate version approves only while every digest matches, and that a changed
+rendering under it is `rendering_changed`. A new-form value with another
+renderer id or version is `renderer_changed`, and so is any semver lookalike.
+The genuine 4.12.0 fixtures of #1418, #1421 and #1475 keep their approved
+outcomes unchanged at any crate version.

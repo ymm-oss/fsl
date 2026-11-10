@@ -25,17 +25,21 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.98.0
 
+      - name: Hash Cargo profiles for the rust-cache key
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         with:
           # Restore-only against `ci.yml`'s `rust-workspace` key, not a `save-if` guard.
           # (a) This workflow has no `push` trigger (see `on:` above) and never gains one
           # from `pull_request`/`merge_group` alone, so it has no path of its own to ever
           # save a main-branch copy. Guarding this step's own key with
-          # `save-if: ${{ github.event_name != 'pull_request' }}`, as `ci.yml` does, would
-          # leave every pull request permanently cold instead: the earlier fix in this
-          # branch made that mistake (see git history) before independent review caught
+          # `save-if: ${{ github.event_name != 'pull_request' &&
+          # github.event_name != 'merge_group' }}`, as `ci.yml` does, would
+          # leave every pull request permanently cold instead: an earlier PR-only guard
+          # made that mistake (see git history) before independent review caught
           # it. This job never saves at all and instead reads `ci.yml`'s `rust-workspace`
-          # entry, which successful non-pull-request `ci.yml` runs can populate.
+          # entry, which successful push/schedule/manual `ci.yml` runs can populate.
           # (b) Key derivation: `Swatinem/rust-cache` (`src/config.ts`) ignores `key` and
           # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
           # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
@@ -66,6 +70,15 @@ jobs:
           shared-key: rust-workspace
           save-if: false
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
 
       - name: Check the native-Z3-free Rust surface
         run: ./tools/check-merge-readiness.sh compile
@@ -81,17 +94,21 @@ jobs:
         with:
           components: rustfmt
 
+      - name: Hash Cargo profiles for the rust-cache key
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         with:
           # Restore-only against `ci.yml`'s `rust-workspace` key, not a `save-if` guard.
           # (a) This workflow has no `push` trigger (see `on:` above) and never gains one
           # from `pull_request`/`merge_group` alone, so it has no path of its own to ever
           # save a main-branch copy. Guarding this step's own key with
-          # `save-if: ${{ github.event_name != 'pull_request' }}`, as `ci.yml` does, would
-          # leave every pull request permanently cold instead: the earlier fix in this
-          # branch made that mistake (see git history) before independent review caught
+          # `save-if: ${{ github.event_name != 'pull_request' &&
+          # github.event_name != 'merge_group' }}`, as `ci.yml` does, would
+          # leave every pull request permanently cold instead: an earlier PR-only guard
+          # made that mistake (see git history) before independent review caught
           # it. This job never saves at all and instead reads `ci.yml`'s `rust-workspace`
-          # entry, which successful non-pull-request `ci.yml` runs can populate.
+          # entry, which successful push/schedule/manual `ci.yml` runs can populate.
           # (b) Key derivation: `Swatinem/rust-cache` (`src/config.ts`) ignores `key` and
           # `GITHUB_JOB` once `shared-key` is set, and otherwise hashes the rustc version
           # plus `CARGO|CC|CFLAGS|CXX|CMAKE|RUST`-prefixed env vars and the workspace
@@ -118,6 +135,15 @@ jobs:
           shared-key: rust-workspace
           save-if: false
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
 
       - name: Check solver-independent contracts
         run: ./tools/check-merge-readiness.sh core

@@ -17,7 +17,8 @@ spec KernelInlineInitializer {
     count = count + 1
   }
 
-  invariant ProgressCoupled "REQ-INIT-1: completion records positive progress" {
+  @requirement("REQ-INIT-001", "completion records positive progress")
+  invariant ProgressCoupled {
     status == Done => count > 0
   }
 }

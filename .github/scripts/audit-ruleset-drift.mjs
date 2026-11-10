@@ -6,7 +6,7 @@
 // rust/, the Kernel, or fslc's JSON contract, so AGENTS.md's "one Rust-native entrypoint, no
 // Python" clause (which governs tools/check-native-integration.sh) does not apply here. It
 // exists because the `main` repository ruleset drifted silently once (docs/design/DESIGN-ci.md,
-// "Required pre-merge contexts, and why the merge queue was rejected") and, without an audit,
+// "Required pre-merge contexts and merge queue adoption") and, without an audit,
 // can drift again the same way.
 //
 // The comparison path (validateContract / compareRuleset) is pure: no network, no file IO, no

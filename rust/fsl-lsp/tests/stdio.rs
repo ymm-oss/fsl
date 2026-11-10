@@ -1,9 +1,161 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{ChildStdin, ChildStdout, Command, Stdio};
+use std::io::Write;
+use std::process::{ChildStdin, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+
+#[path = "support/lsp_receiver.rs"]
+mod lsp_receiver;
+use lsp_receiver::LspReceiver;
+
+#[path = "support/test_executor.rs"]
+mod test_executor;
+
+#[allow(dead_code)] // CLI/Worker also consume this inventory's engine metadata.
+#[path = "../../fslc/tests/support/issue_1463_forms.rs"]
+mod issue_1463_forms;
+
+#[test]
+fn issue_1463_supported_forms_publish_and_clear_located_diagnostics() {
+    let cases = issue_1463_forms::cases();
+    // Each invalid didOpen/didChange is followed by a valid document, so stale
+    // errors cannot masquerade as the diagnostic for the next fixture.
+    let valid =
+        "spec Good { state { done: Bool } init { done = false } action go() { done = true } }";
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("../target/issue-1463-lsp-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("worktree-local resolver fixture");
+    let mut texts = Vec::new();
+    for c in &cases {
+        for (name, source) in &c.files {
+            std::fs::write(dir.join(name), source).expect("resolved component");
+        }
+        texts.push(c.source.as_str());
+        texts.push(valid);
+    }
+    let uri = format!("file://{}", dir.join("support.fsl").display());
+    let published = published_diagnostics_each_at(&texts, &[], &uri);
+    let (pairs, remainder) = published.as_chunks::<2>();
+    assert!(remainder.is_empty());
+    assert_eq!(pairs.len(), cases.len());
+    let mut failures = Vec::new();
+    for (c, pair) in cases.iter().zip(pairs) {
+        let errors: Vec<_> = pair[0].iter().filter(|d| d["severity"] == 1).collect();
+        assert!(
+            pair[1].iter().all(|d| d["severity"] != 1),
+            "{}: didChange failed to clear errors: {:?}",
+            c.id,
+            pair[1]
+        );
+        if c.rejection.is_some() {
+            if errors.len() != 1 {
+                failures.push(format!(
+                    "{}: expected one source rejection; produced {:?}",
+                    c.id, pair[0]
+                ));
+                continue;
+            }
+            let diagnostic = errors[0];
+            let (line, column) = issue_1463_forms::utf16_location(c);
+            assert_eq!(
+                diagnostic["data"]["kind"], "semantics",
+                "{}: {diagnostic}",
+                c.id
+            );
+            assert_eq!(diagnostic["code"], "FSL-SEMANTIC", "{}: {diagnostic}", c.id);
+            assert_eq!(
+                diagnostic["range"]["start"],
+                json!({"line":line,"character":column}),
+                "{}: {diagnostic}",
+                c.id
+            );
+            assert!(
+                diagnostic["message"]
+                    .as_str()
+                    .is_some_and(|m| !m.is_empty())
+            );
+        } else if c.expected[0] == issue_1463_forms::Outcome::Ok {
+            assert!(
+                errors.is_empty(),
+                "{}: accepted source was rejected: {errors:?}",
+                c.id
+            );
+        } else {
+            assert!(
+                !errors.is_empty(),
+                "{}: existing rejection disappeared",
+                c.id
+            );
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} failing LSP cells:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+#[path = "../../fslc/tests/support/edition_cases.rs"]
+mod edition_cases;
+
+/// Same migration cases as both primary adapters. Analysis is explicitly on:
+/// next-edition refusal must not return a model for downstream diagnostics.
+#[test]
+fn edition_findings_are_complete_utf16_warnings_or_pre_analysis_errors() {
+    let scratch = edition_cases::Scratch::new();
+    let mut probes = Vec::new();
+    for &(code, _, body) in edition_cases::WARNING_CASES {
+        let body = edition_cases::legacy(code, body).replace(
+            "\"abstract.fsl\"",
+            &json!(scratch.0.join("abstract.fsl")).to_string(),
+        );
+        for (header, edition, severity) in [
+            ("", fsl_syntax::Edition::Fsl4, 2),
+            ("fsl 4\n", fsl_syntax::Edition::Fsl4, 2),
+            ("fsl 5\n", fsl_syntax::Edition::Fsl5, 1),
+        ] {
+            probes.push((code, header, edition, severity, format!("{header}{body}")));
+        }
+    }
+    let texts = probes
+        .iter()
+        .map(|probe| probe.4.as_str())
+        .collect::<Vec<_>>();
+    let published = published_diagnostics_each(&texts, &[("FSLC_LSP_ANALYSIS_DIAGNOSTICS", "1")]);
+    let mut results = edition_cases::Results::default();
+    for ((code, header, edition, severity, source), diagnostics) in probes.iter().zip(published) {
+        let findings = edition_cases::findings(source, "/tmp/fsl-lsp-astral.fsl", *edition);
+        assert!(findings.iter().any(|f| f["code"] == *code));
+        let expected: Vec<_> = findings.iter().map(|finding| {
+                let edits = finding["loc"].as_object().unwrap();
+                let point = |line: &str, column: &str| {
+                    let line = usize::try_from(edits[line].as_u64().unwrap()).unwrap() - 1;
+                    let column = usize::try_from(edits[column].as_u64().unwrap()).unwrap() - 1;
+                    let text = source.lines().nth(line).unwrap();
+                    let utf16: usize = text.chars().take(column).map(char::len_utf16).sum();
+                    json!({"line":line,"character":utf16})
+                };
+                json!({"range":{"start":point("line","column"),"end":point("end_line","end_column")},"severity":severity,"code":finding["code"],"source":"fslc","message":finding["message"],"data":{"kind":"migration"}})
+            }).collect();
+        // Current may also have structural advisory diagnostics; those are
+        // preserved separately. On refusal NONE may run (whole array).
+        let migration: Vec<_> = diagnostics
+            .iter()
+            .filter(|d| d["data"]["kind"] == "migration")
+            .cloned()
+            .collect();
+        results.check(
+            &format!("stdio/{code}/{header:?}"),
+            (&migration, &diagnostics),
+            &expected,
+            migration == expected && (*severity != 1 || diagnostics == expected),
+        );
+    }
+    results.finish();
+}
 
 fn send(stdin: &mut ChildStdin, message: &Value) {
     let body = serde_json::to_vec(message).expect("serialize LSP message");
@@ -12,30 +164,128 @@ fn send(stdin: &mut ChildStdin, message: &Value) {
     stdin.flush().expect("flush LSP message");
 }
 
-fn receive(stdout: &mut BufReader<ChildStdout>) -> Value {
-    let mut content_length = None;
-    loop {
-        let mut header = String::new();
-        let read = stdout.read_line(&mut header).expect("read LSP header");
-        assert!(
-            read > 0,
-            "fslc-lsp closed its output (did the server panic?)"
-        );
-        if header == "\r\n" {
-            break;
-        }
-        if let Some(value) = header.strip_prefix("Content-Length: ") {
-            content_length = Some(
-                value
-                    .trim()
-                    .parse::<usize>()
-                    .expect("numeric content length"),
+fn receive(stdout: &mut LspReceiver) -> Value {
+    stdout
+        .recv(Instant::now() + Duration::from_secs(120))
+        .unwrap_or_else(|error| panic!("{error}"))
+}
+
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    test_executor::block_on_until(future, Instant::now() + Duration::from_secs(120))
+}
+
+// Independent #1434 controls. Keep the existing harness and every old body
+// intact; retain complete protocol messages as well as diagnostics.
+fn publication_transcript(texts: &[String], legacy_unstable: Option<&str>) -> Vec<Value> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"));
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command.env_remove("FSLC_LSP_ANALYSIS_DIAGNOSTICS");
+    if let Some(value) = legacy_unstable {
+        command.env("FSLC_UNSTABLE", value);
+    }
+    let mut child = command.spawn().expect("publication LSP");
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = LspReceiver::new(child.stdout.take().unwrap());
+    let mut transcript = Vec::new();
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":1,"method":"initialize",
+        "params":{"processId":null,"rootUri":null,"capabilities":{}}}),
+    );
+    transcript.push(receive(&mut stdout));
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    let uri = "file:///tmp/fsl-publication-1434.fsl";
+    for (index, text) in texts.iter().enumerate() {
+        if index == 0 {
+            send(
+                &mut stdin,
+                &json!({"jsonrpc":"2.0","method":"textDocument/didOpen",
+                "params":{"textDocument":{"uri":uri,"languageId":"fsl","version":1,"text":text}}}),
+            );
+        } else {
+            send(
+                &mut stdin,
+                &json!({"jsonrpc":"2.0","method":"textDocument/didChange",
+                "params":{"textDocument":{"uri":uri,"version":index+1},"contentChanges":[{"text":text}]}}),
             );
         }
+        let message = receive(&mut stdout);
+        assert_eq!(message["method"], "textDocument/publishDiagnostics");
+        assert_eq!(message["params"]["uri"], uri);
+        assert_eq!(message["params"]["version"], index + 1);
+        transcript.push(message);
     }
-    let mut body = vec![0_u8; content_length.expect("content length header")];
-    stdout.read_exact(&mut body).expect("read LSP body");
-    serde_json::from_slice(&body).expect("parse LSP body")
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}),
+    );
+    transcript.push(receive(&mut stdout));
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"exit","params":null}),
+    );
+    drop(stdin);
+    let output = child.wait_with_output().expect("publication LSP exit");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    println!(
+        "{}",
+        json!({"legacy_unstable":legacy_unstable,"transcript":transcript,"exit":output.status.code(),"stderr":stderr})
+    );
+    assert!(output.status.success());
+    assert_eq!(stderr, "");
+    transcript
+}
+
+#[test]
+fn publication_lsp_is_unconditional_and_keeps_astral_operator_ranges() {
+    let body = "spec S { state { flag: Bool = false } invariant Safe { not flag } }\n";
+    let line = "  @requirement(\"REQ-1\", \"日本語😀\") invariant I { true || false }";
+    let texts = vec![
+        body.to_owned(),
+        format!("fsl 4\n{body}"),
+        format!("fsl 5\n{body}"),
+        format!("fsl 5\nspec S {{ state {{ flag: Bool = false }}\n{line}\n}}\n"),
+        format!("fsl 5\n{body}"),
+        "fsl 5\nrequirements R { glossary { Flag = 注文 } state { 注文: Bool = false } invariant Safe { not 注文 } }\n".to_owned(),
+    ];
+    // Execute every packet before asserting agreement so baseline RED does
+    // not hide unknown/empty legacy-environment or didChange clearing cells.
+    let transcripts: Vec<_> = [
+        Some("fsl5"),
+        None,
+        Some(""),
+        Some("later"),
+        Some("later,fsl5"),
+    ]
+    .into_iter()
+    .map(|legacy_unstable| publication_transcript(&texts, legacy_unstable))
+    .collect();
+    let reference = &transcripts[0];
+    for index in [1, 2, 3, 5, 6] {
+        assert_eq!(reference[index]["params"]["diagnostics"], json!([]));
+    }
+    let column = line[..line.find("||").unwrap()].encode_utf16().count();
+    assert_eq!(
+        reference[4]["params"]["diagnostics"],
+        json!([{
+            "range":{"start":{"line":2,"character":column},"end":{"line":2,"character":column+2}},
+            "severity":1,"code":"unsupported_in_edition","source":"fslc",
+        "message":"expression operator '||' is unsupported in this edition; use 'or' manually, then review fslc migrate <file> --edition next for remaining edits at 3:52",
+            "data":{"kind":"parse"}
+        }])
+    );
+    for transcript in &transcripts[1..] {
+        assert_eq!(
+            transcript, reference,
+            "complete LSP messages, no exclusions"
+        );
+    }
 }
 
 #[test]
@@ -47,7 +297,7 @@ fn stdio_lifecycle_uses_latest_buffer_and_serves_symbols() {
         .spawn()
         .expect("spawn fslc-lsp");
     let mut stdin = child.stdin.take().expect("child stdin");
-    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    let mut stdout = LspReceiver::new(child.stdout.take().expect("child stdout"));
     let uri = "file:///tmp/fsl-lsp-stdio.fsl";
 
     send(
@@ -161,7 +411,7 @@ fn diagnostic_after_non_ascii_text_is_published_at_its_utf16_position() {
         .spawn()
         .expect("spawn fslc-lsp");
     let mut stdin = child.stdin.take().expect("child stdin");
-    let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+    let mut stdout = LspReceiver::new(child.stdout.take().expect("child stdout"));
     send(
         &mut stdin,
         &json!({
@@ -209,3 +459,895 @@ fn diagnostic_after_non_ascii_text_is_published_at_its_utf16_position() {
     drop(stdin);
     assert!(child.wait().expect("wait for fslc-lsp").success());
 }
+
+/// Open `text` in a fresh server and return the diagnostics the server
+/// publishes for it.
+fn published_diagnostics(text: &str) -> Vec<Value> {
+    published_diagnostics_each(&[text], &[])
+        .pop()
+        .expect("one publish")
+}
+
+#[test]
+fn legacy_expression_operator_diagnostics_use_the_operator_utf16_range() {
+    for (operator, replacement) in [("||", "or"), ("->", "=>")] {
+        let line = format!(
+            "  @requirement(\"REQ-PROBE-001\", \"日本語😀\") invariant I {{ true {operator} false }}"
+        );
+        let source = format!("fsl 5\nspec S {{\n  state {{ flag: Bool = false }}\n{line}\n}}\n");
+        let diagnostics = published_diagnostics(&source);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|d| d["code"] == "unsupported_in_edition")
+            .unwrap_or_else(|| panic!("expected edition diagnostic, produced {diagnostics:#?}"));
+        let column = line[..line.find(operator).expect("operator")]
+            .encode_utf16()
+            .count();
+        assert_eq!(
+            diagnostic["range"],
+            json!({"start":{"line":3,"character":column},"end":{"line":3,"character":column+2}})
+        );
+        assert_eq!(diagnostic["severity"], 1);
+        assert!(
+            diagnostic["message"]
+                .as_str()
+                .is_some_and(|m| m.contains(&format!("use '{replacement}'"))
+                    && m.contains("fslc migrate <file> --edition next"))
+        );
+        let canonical = source.replace(operator, replacement);
+        assert!(
+            published_diagnostics(&canonical)
+                .iter()
+                .all(|d| d["code"] != "unsupported_in_edition")
+        );
+    }
+}
+
+#[test]
+fn shared_expression_entries_publish_both_operator_endpoints() {
+    for body in [
+        "requirements R { state { flag: Bool = false } invariant I { true OP false } }",
+        "compose C { state { flag: Bool = false } invariant I { true OP false } }",
+        "business B { actor User entity Case process Case { stages New, Done initial New transition finish New -> Done by User } policy POL-PROBE-001 \"policy\" invariant { true OP false } } verify { instances Case = 1 }",
+        "refinement R { impl I abs A map flag = true OP false }",
+    ] {
+        let column = body[..body.find("OP").expect("operator marker")]
+            .encode_utf16()
+            .count();
+        for operator in ["||", "->"] {
+            let source = format!("fsl 5\n{}\n", body.replace("OP", operator));
+            let diagnostics = published_diagnostics(&source);
+            let diagnostic = diagnostics
+                .iter()
+                .find(|d| d["code"] == "unsupported_in_edition")
+                .unwrap_or_else(|| panic!("expected operator diagnostic: {diagnostics:#?}"));
+            assert_eq!(
+                diagnostic["range"],
+                json!({"start":{"line":1,"character":column},"end":{"line":1,"character":column+2}})
+            );
+        }
+    }
+}
+
+/// Open the first of `texts` in a fresh server, replace the document's text
+/// with each of the others in turn, and return the diagnostics the server
+/// publishes for each.
+fn published_diagnostics_each(texts: &[&str], environment: &[(&str, &str)]) -> Vec<Vec<Value>> {
+    published_diagnostics_each_at(texts, environment, "file:///tmp/fsl-lsp-astral.fsl")
+}
+
+fn published_diagnostics_each_at(
+    texts: &[&str],
+    environment: &[(&str, &str)],
+    uri: &str,
+) -> Vec<Vec<Value>> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"));
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command.envs(environment.iter().copied());
+    let mut child = command.spawn().expect("spawn fslc-lsp");
+    let mut stdin = child.stdin.take().expect("child stdin");
+    let mut stdout = LspReceiver::new(child.stdout.take().expect("child stdout"));
+    send(
+        &mut stdin,
+        &json!({
+            "jsonrpc":"2.0","id":1,"method":"initialize",
+            "params":{"processId":null,"rootUri":null,"capabilities":{}}
+        }),
+    );
+    assert_eq!(receive(&mut stdout)["id"], 1);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    let mut published = Vec::new();
+    for (version, text) in texts.iter().enumerate() {
+        if version == 0 {
+            send(
+                &mut stdin,
+                &json!({
+                    "jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
+                        "uri":uri,"languageId":"fsl","version":1,"text":text
+                    }}
+                }),
+            );
+        } else {
+            send(
+                &mut stdin,
+                &json!({
+                    "jsonrpc":"2.0","method":"textDocument/didChange","params":{
+                        "textDocument":{"uri":uri,"version":version + 1},
+                        "contentChanges":[{"text":text}]
+                    }
+                }),
+            );
+        }
+        let publish = receive(&mut stdout);
+        assert_eq!(publish["method"], "textDocument/publishDiagnostics");
+        assert_eq!(
+            publish["params"]["uri"],
+            json!(lsp_types::Url::parse(uri).unwrap())
+        );
+        assert_eq!(publish["params"]["version"], version + 1);
+        published.push(
+            publish["params"]["diagnostics"]
+                .as_array()
+                .expect("diagnostics array")
+                .clone(),
+        );
+    }
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","id":2,"method":"shutdown","params":null}),
+    );
+    assert_eq!(receive(&mut stdout)["id"], 2);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc":"2.0","method":"exit","params":null}),
+    );
+    drop(stdin);
+    assert!(child.wait().expect("wait for fslc-lsp").success());
+    published
+}
+
+fn ai_project(body: &str) -> String {
+    format!("{body}\nstatistical_property Q {{\n target C\n require min_samples >= 0\n}}\n")
+}
+
+fn ai_expected(message: &str, kind: &str, line: usize, character: usize) -> Value {
+    let point = json!({"line":line,"character":character});
+    json!({"range":{"start":point,"end":point},"severity":1,
+        "code":"FSL-SEMANTIC","source":"fslc","message":message,"data":{"kind":kind}})
+}
+
+#[test]
+fn ai_project_authority_and_rule_publish_and_clear() {
+    let mut failures = Vec::new();
+    for (source, message, line, column, valid) in [
+        (
+            include_str!("../../fslc/tests/fixtures/error_envelope_ai_project_unknown_tool.fsl"),
+            "unknown tool 'MissingTool' in authority block",
+            13,
+            4,
+            include_str!("../../fslc/tests/fixtures/error_envelope_ai_project_unknown_tool.fsl")
+                .replace("MissingTool", "SearchOrder"),
+        ),
+        (
+            include_str!("../../fslc/tests/fixtures/error_envelope_ai_project_invalid_rule.fsl"),
+            "unknown ai hard-contract rule 'unregistered_hard_rule' at 9:3",
+            8,
+            2,
+            include_str!("../../fslc/tests/fixtures/error_envelope_ai_project_invalid_rule.fsl")
+                .replace("unregistered_hard_rule", "tool_authority")
+                .replace(
+                    "  model model_v1;",
+                    "  tool Search { schema S; }\n  model model_v1;",
+                ),
+        ),
+    ] {
+        let found = published_diagnostics_each(&[source, &valid, &valid, source], &[]);
+        let expected = vec![ai_expected(message, "semantics", line, column)];
+        let expected = vec![expected.clone(), vec![], vec![], expected];
+        if found != expected {
+            failures.push(format!(
+                "{message}: produced {found:?}, expected {expected:?}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn ai_project_later_and_inline_ranges_are_document_utf16() {
+    for (body, marker, message) in [
+        (
+            "ai_component C { model \"日本語😀\"; tool Search { schema S; } authority { may_execute Missing; } }",
+            "may_execute",
+            "unknown tool 'Missing' in authority block",
+        ),
+        (
+            "ai_component C { model \"日本語😀\"; tool Search { schema S; } check hard { rule bogus; } }",
+            "check hard",
+            "unknown ai hard-contract rule 'bogus'",
+        ),
+    ] {
+        for newline in ["\n", "\r\n"] {
+            let source = ai_project(&format!(
+                "// 日本語😀\nai_component First {{ tool Search {{ schema S; }} }}\n\n      {body}"
+            ))
+            .replace('\n', newline);
+            let prefix = &source[..source.find(marker).unwrap()];
+            let line = prefix.bytes().filter(|&b| b == b'\n').count();
+            let last = prefix.rsplit('\n').next().unwrap();
+            let column = last.encode_utf16().count();
+            let message = if marker == "check hard" {
+                format!("{message} at {}:{}", line + 1, last.chars().count() + 1)
+            } else {
+                message.to_owned()
+            };
+            let valid = source
+                .replace("Missing", "Search")
+                .replace("bogus", "tool_authority");
+            let found = published_diagnostics_each(&[&source, &valid], &[]);
+            assert_eq!(
+                found,
+                vec![
+                    vec![ai_expected(&message, "semantics", line, column)],
+                    vec![]
+                ]
+            );
+        }
+    }
+}
+
+#[test]
+fn ai_project_unchanged_valid_must_publish_then_reject_a_change() {
+    let valid = ai_project(
+        "ai_component C { tool Search { schema S; } authority { may_execute Search; } }",
+    );
+    let invalid = valid.replace("may_execute Search", "may_execute Missing");
+    let found = published_diagnostics_each(&[&valid, &valid, &invalid, &valid], &[]);
+    let column = invalid.find("may_execute").unwrap();
+    assert_eq!(
+        found,
+        vec![
+            vec![],
+            vec![],
+            vec![ai_expected(
+                "unknown tool 'Missing' in authority block",
+                "semantics",
+                0,
+                column
+            )],
+            vec![]
+        ]
+    );
+}
+
+#[test]
+fn ai_project_no_tools_and_standalone_controls_keep_their_contracts() {
+    for body in ["ai_component C { }", "ai_component C { authority { } }"] {
+        for source in [body.to_owned(), ai_project(body)] {
+            let valid = source.replace(
+                "ai_component C {",
+                "ai_component C { tool Search { schema S; }",
+            );
+            let found = published_diagnostics_each(&[&source, &valid], &[]);
+            assert_eq!(
+                found,
+                vec![
+                    vec![ai_expected(
+                        "ai_component 'C' declares no tools",
+                        "type",
+                        0,
+                        0
+                    )],
+                    vec![]
+                ]
+            );
+        }
+    }
+    let source = include_str!("../../fslc/tests/fixtures/error_envelope_ai_unknown_tool.fsl");
+    // The server names the file by its path when the URI has one, else by the URI:
+    // a drive-less `file:///tmp/...` has no Windows path.
+    let uri = lsp_types::Url::parse("file:///tmp/fsl-lsp-astral.fsl").unwrap();
+    let file = uri
+        .to_file_path()
+        .map_or_else(|()| uri.to_string(), |path| path.display().to_string());
+    let message = format!("unknown tool 'MissingTool' in authority block at {file}:14:5");
+    assert_eq!(
+        published_diagnostics(source),
+        vec![ai_expected(&message, "semantics", 13, 4)]
+    );
+}
+
+#[test]
+fn ai_project_parse_errors_are_not_relocated_twice_and_never_build_a_model() {
+    let source =
+        ai_project("// preceding comment\n    ai_component C { authority { may_execute ; } }");
+    let published = published_diagnostics(&source);
+    assert_eq!(published.len(), 1, "{published:#?}");
+    assert_eq!(published[0]["data"]["kind"], "parse");
+    assert_eq!(
+        published[0]["range"]["start"],
+        json!({"line":1,"character":45})
+    );
+    let (_, model) = fslc_rust::source_diagnostic::diagnostics_with_model(
+        &ai_project("ai_component C { tool Search { schema S; } }"),
+        "project.fsl",
+        &fsl_core::FsResolver::new("."),
+        &fsl_syntax::ParseOptions::stable(),
+    );
+    assert!(
+        model.is_none(),
+        "projects must not acquire a synthetic model"
+    );
+}
+
+/// decisions/048 J3: a decision table the enumeration leaves to the solver
+/// (a domain past the bound; a condition reading a resource) is published as
+/// the error native `check` reports for it, code, location and message
+/// alike, where the server used to publish none. The document is published
+/// four times: native Z3 answers a question asked again in one context with
+/// another counterexample by the third or fourth time, and no publish may
+/// depend on the questions before it.
+#[test]
+fn requirements_the_solver_refutes_are_published_as_check_reports_them() {
+    let fixtures =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fslc/tests/fixtures/fsl5_solver");
+    let options = fsl_syntax::ParseOptions::stable();
+    for file in ["large_domain.fsl", "resource_condition.fsl"] {
+        let text = std::fs::read_to_string(fixtures.join(file)).expect("read fixture");
+        let resolver = fsl_core::FsResolver::new(&fixtures);
+        // On a thread of its own, as a fresh `fslc check` process asks it.
+        let native = std::thread::scope(|scope| {
+            scope
+                .spawn(|| {
+                    let mut z3 =
+                        || fsl_solver_z3::Z3Solver::new().map_err(|error| error.to_string());
+                    let admission = fslc_rust::migration::admit_source(
+                        &text,
+                        file,
+                        None,
+                        &options,
+                        &serde_json::Map::new,
+                        false,
+                    )
+                    .unwrap();
+                    let future = fslc_rust::check_stages::run_check_stages(
+                        &text,
+                        file,
+                        file,
+                        &resolver,
+                        &serde_json::Map::new,
+                        &options,
+                        &mut z3,
+                        &admission,
+                    );
+                    match block_on(future) {
+                        Err((output, 2)) => output,
+                        other => panic!("native check must reject {file}: {other:?}"),
+                    }
+                })
+                .join()
+                .expect("native check thread")
+        });
+        assert_eq!(
+            native["diagnostic_code"], "decide_not_exhaustive",
+            "{native:#}"
+        );
+        for diagnostics in published_diagnostics_each(&[text.as_str(); 4], &[]) {
+            let error = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic["severity"] == 1)
+                .unwrap_or_else(|| panic!("{file}: an error is published: {diagnostics:#?}"));
+            assert_eq!(
+                (
+                    &error["code"],
+                    &error["message"],
+                    error["range"]["start"]["line"]
+                        .as_u64()
+                        .map(|line| line + 1),
+                    error["range"]["start"]["character"]
+                        .as_u64()
+                        .map(|column| column + 1),
+                ),
+                (
+                    &native["diagnostic_code"],
+                    &native["message"],
+                    native["loc"]["line"].as_u64(),
+                    native["loc"]["column"].as_u64(),
+                ),
+                "{file}: {error:#}"
+            );
+        }
+    }
+}
+
+/// fsl 5 plan S2 acceptance 4: on a line holding a character outside the
+/// BMP (CJK Extension B `𠮷`, two UTF-16 code units), every published range
+/// is in UTF-16 code units, including the lexer's own warnings under the
+/// `fsl 5` header. Without the header the same body publishes no lexical
+/// warning.
+#[test]
+fn ranges_after_a_character_outside_the_bmp_count_utf16_units() {
+    let text = "fsl 5\nspec S {\n  state { 𠮷野\u{3000}: Int }\n}\n";
+    let range = |line: u32, start: u32, end: u32| json!({"start":{"line":line,"character":start},"end":{"line":line,"character":end}});
+
+    let published = published_diagnostics(text);
+    let warning = published
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "fullwidth_space")
+        .unwrap_or_else(|| panic!("fullwidth_space published: {published:#?}"));
+    assert_eq!(warning["severity"], 2, "{warning:#}");
+    assert_eq!(warning["range"], range(2, 13, 14), "{warning:#}");
+    assert_eq!(warning["data"]["replacement"], " ");
+
+    let error_at = |text: &str| {
+        let diagnostics = published_diagnostics(text);
+        diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic["severity"] == 1)
+            .unwrap_or_else(|| panic!("an error is published: {diagnostics:#?}"))
+            .clone()
+    };
+    // The header selects the wider identifier rule, so the
+    // lexer reads `𠮷野`; a spec has no glossary, so the name is refused as
+    // not ASCII. Its range ends after `𠮷野` at 13 UTF-16 units (12 chars).
+    let error = error_at(text);
+    assert_eq!(error["code"], "canonical_name_not_ascii", "{error:#}");
+    assert_eq!(error["range"], range(2, 10, 13), "{error:#}");
+    // Without the header `𠮷` is a lexer error.
+    let headerless = text.strip_prefix("fsl 5\n").expect("header");
+    assert_eq!(error_at(headerless)["range"], range(1, 10, 12));
+    assert!(
+        published_diagnostics(headerless)
+            .iter()
+            .all(|diagnostic| diagnostic["data"]["kind"] != "lexical")
+    );
+}
+
+/// fsl 5 plan S11: in a requirements document written with Japanese
+/// keywords and an alias holding a character outside the BMP, a diagnostic
+/// after the alias on its line is published in UTF-16 code units (`𠮷` counts
+/// twice), at the word the CLI's character column names.
+#[test]
+fn a_diagnostic_after_japanese_keywords_and_an_astral_alias_counts_utf16_units() {
+    let text = "fsl 5\n要件 R {\n  用語集 {\n    Claim = 𠮷申請\n  }\n  \
+                エンティティ 𠮷申請 { 金額: Int = 0  ライフサイクル A -> B }\n}\n";
+    let diagnostics = published_diagnostics(text);
+    let error = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "canonical_name_not_ascii")
+        .unwrap_or_else(|| panic!("canonical_name_not_ascii published: {diagnostics:#?}"));
+    assert_eq!(error["severity"], 1, "{error:#}");
+    assert_eq!(
+        error["range"],
+        json!({"start":{"line":5,"character":16},"end":{"line":5,"character":18}}),
+        "{error:#}"
+    );
+    // Without the header the first Japanese keyword is not a word.
+    let published = published_diagnostics(text.strip_prefix("fsl 5\n").expect("header"));
+    assert_eq!(
+        published[0]["range"]["start"],
+        json!({"line":0,"character":0}),
+        "{published:#?}"
+    );
+}
+
+/// fsl 5 plan S1 acceptance 5: an `fsl 5` document whose first line is a
+/// Japanese `//` comment is served without a panic, and its migration
+/// diagnostics are errors, as `--edition next` makes them. The same body
+/// without the header keeps them warnings.
+#[test]
+fn an_fsl_5_header_after_a_japanese_comment_makes_migration_diagnostics_errors() {
+    const ERROR: u64 = 1;
+    const WARNING: u64 = 2;
+    let body = "spec Quantifier {\n  type Id = 0..1\n  state { ready: Map<Id, Bool> }\n  init { forall i in 0..1: { ready[i] = false } }\n  invariant Typed { forall i in 0..1: ready[i] == true or ready[i] == false }\n}\n";
+    let migration = |diagnostics: &[Value]| {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["data"]["kind"] == "migration")
+            .map(|diagnostic| {
+                (
+                    diagnostic["code"].as_str().unwrap_or_default().to_owned(),
+                    diagnostic["severity"].as_u64().unwrap_or_default(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let headed = format!("// 日本語のコメント\nfsl 5\n{body}");
+    let published = published_diagnostics(&headed);
+    let found = migration(&published);
+    assert!(!found.is_empty(), "{published:#?}");
+    assert!(
+        found.iter().all(|(_, severity)| *severity == ERROR),
+        "{published:#?}"
+    );
+    assert!(
+        published
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != "FSL-DIALECT-UNKNOWN"),
+        "{published:#?}"
+    );
+
+    let plain = migration(&published_diagnostics(&format!(
+        "// 日本語のコメント\n{body}"
+    )));
+    assert_eq!(
+        plain
+            .iter()
+            .map(|(code, _)| code.as_str())
+            .collect::<Vec<_>>(),
+        found
+            .iter()
+            .map(|(code, _)| code.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        plain.iter().all(|(_, severity)| *severity == WARNING),
+        "{plain:?}"
+    );
+}
+
+/// #1243: the editor published no error for a forbidden the requirement-trace
+/// gate rejects, although `check` refuses the spec. It now publishes the gate's
+/// error where `check` locates it (`loc` line 19, column 3 of the gallery
+/// fixture: the `forbidden FB-1` case), and the server keeps serving
+/// (`published_diagnostics` shuts it down cleanly). With the guard restored,
+/// the gate passes and nothing is published.
+#[test]
+fn a_forbidden_the_gate_rejects_is_published_as_an_error() {
+    const ERROR: u64 = 1;
+    let fixture = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/gallery/errors/forbidden_op_accepted.fsl"),
+    )
+    .expect("read gallery fixture");
+    let published = published_diagnostics(&fixture);
+    let trace = published
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == "FSL-REQUIREMENT-TRACE")
+        .collect::<Vec<_>>();
+    assert_eq!(trace.len(), 1, "{published:#?}");
+    assert_eq!(trace[0]["severity"], ERROR);
+    assert_eq!(trace[0]["data"]["kind"], "forbidden");
+    assert_eq!(
+        trace[0]["range"]["start"],
+        json!({"line": 18, "character": 2})
+    );
+    let message = trace[0]["message"].as_str().expect("message");
+    assert!(
+        message.starts_with("forbidden 'FB-1' does not pass the requirement-trace gate: "),
+        "{message}"
+    );
+
+    let guarded = fixture.replace(
+        "requires order[o] == Paid or order[o] == Shipped",
+        "requires order[o] == Paid",
+    );
+    assert_ne!(guarded, fixture, "the fixture's weakened guard moved");
+    let published = published_diagnostics(&guarded);
+    assert!(
+        published
+            .iter()
+            .all(|diagnostic| diagnostic["code"] != "FSL-REQUIREMENT-TRACE"),
+        "{published:#?}"
+    );
+}
+
+/// #1346: publish acceptance's wrong-kind message as an error at its step,
+/// rather than the acceptance declaration or a generic not-enabled failure.
+#[test]
+fn an_acceptance_wrong_kind_step_is_published_as_a_located_error() {
+    let source = r#"requirements Shop {
+  enum Color { Red, Blue }
+  state { color: Color }
+  init { color = Red }
+  requirement REQ-1 "paint" {
+    action paint(c: Color) { requires c != color  color = c }
+  }
+  acceptance AC-1 "paint blue" {
+    paint(1)
+    expect color == Blue
+  }
+}
+"#;
+    let published = published_diagnostics(source);
+    let trace = published
+        .iter()
+        .filter(|diagnostic| diagnostic["code"] == "FSL-REQUIREMENT-TRACE")
+        .collect::<Vec<_>>();
+    assert_eq!(trace.len(), 1, "{published:#?}");
+    assert_eq!(trace[0]["severity"], 1, "{published:#?}");
+    assert_eq!(trace[0]["data"]["kind"], "acceptance", "{published:#?}");
+    assert_eq!(
+        trace[0]["range"]["start"],
+        json!({"line": 8, "character": 4}),
+        "{published:#?}"
+    );
+    assert_eq!(
+        trace[0]["message"],
+        "acceptance 'AC-1' does not pass the requirement-trace gate: argument 1 for 'c' of 'paint' is not a value of type 'Color' in acceptance, so no guard was evaluated",
+        "{published:#?}"
+    );
+}
+
+/// #1439: both spellings publish a located semantic error on the authored
+/// keyword token, not an acceptance replay error or the trace declaration.
+#[test]
+fn ill_typed_expect_and_then_publish_semantic_keyword_ranges() {
+    for (header, trace, keyword, line, end) in [
+        ("", "acceptance", "expect", 9, 10),
+        ("fsl 5\n", "scenario", "then", 10, 8),
+    ] {
+        let source = format!(
+            "{header}requirements E {{\n  enum Color {{ Red, Blue }}\n  state {{ c: Color }}\n  init {{ c = Red }}\n  requirement REQ-1 \"paint\" {{\n    action paint(x: Color) {{ c = x }}\n  }}\n  {trace} AC-1 \"type comparison\" {{\n    paint(Blue)\n    {keyword} c != 1\n  }}\n}}\n"
+        );
+        let published = published_diagnostics(&source);
+        let errors = published
+            .iter()
+            .filter(|diagnostic| diagnostic["severity"] == 1)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{keyword}: {published:#?}");
+        let error = errors[0];
+        assert_eq!(error["code"], "FSL-SEMANTIC");
+        assert_eq!(error["severity"], 1);
+        assert_eq!(error["data"]["kind"], "semantics");
+        assert_eq!(
+            error["range"],
+            json!({"start": {"line": line, "character": 4},
+                   "end": {"line": line, "character": end}})
+        );
+        assert!(error["message"].as_str().is_some_and(|message| {
+            message.contains("expression of type Int is not assignable to Named(\"Color\")")
+        }));
+    }
+}
+
+#[test]
+fn ill_typed_trace_arguments_publish_semantic_step_token_ranges() {
+    for (source, line, end, type_name) in [
+        (
+            "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { requires x != c c = x }\n  }\n  forbidden FB-1 \"internal type\" {\n    paint(if c != 1 then Red else Blue)\n    expect rejected\n  }\n}\n",
+            8,
+            9,
+            "Color",
+        ),
+        (
+            "fsl 5\nrequirements R {\n  number Amount\n  actor Employee\n  entity Claim { amount: Amount = 0 lifecycle Draft -> Submitted }\n  event submit = Employee submits Claim with amount Draft -> Submitted\n  scenario AC-1 \"internal type\" {\n    Employee submits claim1 with amount (if claim_stage[0] != 1 then 1 else 2)\n    then claim1 is Submitted\n  }\n}\nverify { instances Claim = 2 values Amount = 0..3 }\n",
+            7,
+            12,
+            "ClaimStage",
+        ),
+    ] {
+        let published = published_diagnostics(source);
+        let errors = published
+            .iter()
+            .filter(|diagnostic| diagnostic["severity"] == 1)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{published:#?}");
+        let error = errors[0];
+        assert_eq!(error["code"], "FSL-SEMANTIC");
+        assert_eq!(error["severity"], 1);
+        assert_eq!(error["data"]["kind"], "semantics");
+        assert_eq!(
+            error["range"],
+            json!({"start": {"line": line, "character": 4},
+                   "end": {"line": line, "character": end}})
+        );
+        assert!(error["message"].as_str().is_some_and(|message| {
+            message.contains(&format!(
+                "expression of type Int is not assignable to Named(\"{type_name}\")"
+            ))
+        }));
+    }
+}
+
+/// One `fslc-lsp` process driven request by request; notifications the
+/// server publishes in between (diagnostics) are skipped.
+struct Session {
+    child: std::process::Child,
+    stdin: ChildStdin,
+    stdout: LspReceiver,
+    next_id: u64,
+}
+
+impl Session {
+    fn start() -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_fslc-lsp"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn fslc-lsp");
+        let stdin = child.stdin.take().expect("child stdin");
+        let stdout = LspReceiver::new(child.stdout.take().expect("child stdout"));
+        let mut session = Self {
+            child,
+            stdin,
+            stdout,
+            next_id: 1,
+        };
+        session.request(
+            "initialize",
+            &json!({"processId":null,"rootUri":null,"capabilities":{}}),
+        );
+        send(
+            &mut session.stdin,
+            &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+        );
+        session
+    }
+
+    fn open(&mut self, uri: &str, text: &str) {
+        send(
+            &mut self.stdin,
+            &json!({
+                "jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{
+                    "uri":uri,"languageId":"fsl","version":1,"text":text
+                }}
+            }),
+        );
+    }
+
+    fn request(&mut self, method: &str, params: &Value) -> Value {
+        let id = self.next_id;
+        self.next_id += 1;
+        send(
+            &mut self.stdin,
+            &json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
+        );
+        loop {
+            let message = receive(&mut self.stdout);
+            if message["id"] == id {
+                return message["result"].clone();
+            }
+        }
+    }
+
+    fn finish(mut self) {
+        self.request("shutdown", &Value::Null);
+        send(
+            &mut self.stdin,
+            &json!({"jsonrpc":"2.0","method":"exit","params":null}),
+        );
+        drop(self.stdin);
+        assert!(self.child.wait().expect("wait for fslc-lsp").success());
+    }
+}
+
+/// Issue 1362 over the protocol: a state variable (`rejected` in
+/// `specs/rate_limiter.fsl`), a struct field (`status` in
+/// `specs/order_workflow.fsl`) and an action used as an acceptance step
+/// (`respond(0)` in `examples/nfr/support_sla.fsl`) are spelled like index
+/// keywords. Each one's use navigates to its declaration, its references are
+/// every occurrence of the name, rename rewrites exactly those, and hover
+/// names the declaration's role. The documents are opened under a directory
+/// that does not exist, so no sibling file joins the workspace.
+#[test]
+fn keyword_spelled_names_navigate_rename_and_hover_like_any_other_name() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("repository root");
+    // (corpus file, name, a use as (line, character), its declaration, role,
+    // occurrences of the name including the declaration), positions 0-based.
+    let cases = [
+        (
+            "specs/rate_limiter.fsl",
+            "rejected",
+            (28, 15),
+            (11, 4),
+            "variable",
+            6,
+        ),
+        (
+            "specs/order_workflow.fsl",
+            "status",
+            (23, 14),
+            (6, 17),
+            "property",
+            16,
+        ),
+        (
+            "examples/nfr/support_sla.fsl",
+            "respond",
+            (77, 4),
+            (37, 16),
+            "function",
+            2,
+        ),
+    ];
+    let mut session = Session::start();
+    for (file, name, (use_line, use_character), (line, character), role, occurrences) in cases {
+        let text = std::fs::read_to_string(root.join(file)).expect("read corpus file");
+        let uri = format!("file:///nonexistent-fsl-lsp-1362/{file}");
+        session.open(&uri, &text);
+        let at_use = json!({
+            "textDocument":{"uri":uri},
+            "position":{"line":use_line,"character":use_character}
+        });
+        let declaration = json!({
+            "start":{"line":line,"character":character},
+            "end":{"line":line,"character":character + name.len()}
+        });
+
+        let definition = session.request("textDocument/definition", &at_use);
+        assert_eq!(definition["uri"], uri, "{file} {name}: {definition:#}");
+        assert_eq!(definition["range"], declaration, "{file} {name}");
+
+        let mut with_context = at_use.clone();
+        with_context["context"] = json!({"includeDeclaration":true});
+        let references = session.request("textDocument/references", &with_context);
+        let references = references.as_array().expect("references array");
+        assert_eq!(
+            references.len(),
+            occurrences,
+            "{file} {name}: {references:#?}"
+        );
+        let lines = text.lines().collect::<Vec<_>>();
+        for reference in references {
+            let start = &reference["range"]["start"];
+            let line =
+                lines[usize::try_from(start["line"].as_u64().expect("line")).expect("usize")];
+            let character =
+                usize::try_from(start["character"].as_u64().expect("character")).expect("usize");
+            assert_eq!(
+                &line[character..character + name.len()],
+                name,
+                "{file}: {reference}"
+            );
+        }
+
+        let mut rename = at_use.clone();
+        rename["newName"] = json!("renamed");
+        let edit = session.request("textDocument/rename", &rename);
+        let edits = edit["changes"][&uri].as_array().expect("rename edits");
+        assert_eq!(edits.len(), occurrences, "{file} {name}: {edit:#}");
+        assert!(edits.iter().all(|edit| edit["newText"] == "renamed"));
+
+        let hover = session.request("textDocument/hover", &at_use);
+        assert!(
+            hover["contents"]["value"]
+                .as_str()
+                .is_some_and(|value| value.ends_with(&format!("**{role}** `{name}`"))),
+            "{file} {name}: {hover:#}"
+        );
+    }
+    session.finish();
+}
+
+/// fsl 5 plan S7, decisions/048 J3: the language server, which has no
+/// solver, publishes a decision table's gap with the values native `check`
+/// reports, because fsl-core enumerates the field's domain.
+#[test]
+fn a_decision_table_gap_is_published_with_its_values() {
+    let text = "fsl 5\nrequirements R {\n  number Amount\n  const AUTO_LIMIT = 1\n  \
+                actor System, Manager\n  entity Claim {\n    amount: Amount = 0\n    \
+                lifecycle Submitted -> Approved\n  }\n  \
+                concept SmallClaim = Claim where amount < AUTO_LIMIT\n  \
+                concept LargeClaim = Claim where amount > AUTO_LIMIT\n  \
+                event auto_approve = System approves Claim Submitted -> Approved\n  \
+                event mgr_approve = Manager approves Claim Submitted -> Approved\n  \
+                decide T \"who\" for Submitted Claim {\n    \
+                SmallClaim => System approves\n    LargeClaim => Manager approves\n  \
+                }\n}\nverify {\n  instances Claim = 1\n  values Amount = 0..3\n}\n";
+    let diagnostics = published_diagnostics(text);
+    let gap = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "decide_not_exhaustive")
+        .unwrap_or_else(|| panic!("decide_not_exhaustive published: {diagnostics:#?}"));
+    assert_eq!(gap["severity"], 1, "{gap:#}");
+    assert!(
+        gap["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("no row holds at amount = 1, AUTO_LIMIT = 1")),
+        "{gap:#}"
+    );
+}
+#[path = "support/issue_1517_sync_argument_locations.rs"]
+mod issue_1517_sync_argument_locations;

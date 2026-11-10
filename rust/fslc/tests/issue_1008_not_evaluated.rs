@@ -21,6 +21,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const FIXTURE_DIR: &str = "rust/fslc/tests/fixtures/issue_1008_not_evaluated";
 
@@ -195,8 +201,9 @@ fn a_cached_selected_run_replays_the_section() {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock after epoch")
         .as_nanos();
+    let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let cache = std::env::temp_dir().join(format!(
-        "fsl-issue-1008-cache-{}-{nonce}",
+        "fsl-issue-1008-cache-{}-{nonce}-{sequence}",
         std::process::id()
     ));
     std::fs::create_dir(&cache).expect("cache dir must not already exist");
@@ -403,15 +410,19 @@ fn vacuity_error_envelope_drops_the_section() {
 }
 
 fn sweep(arguments: &[&str]) -> (Value, i32) {
+    // Tests run on parallel threads and the clock is coarse on Windows, so the
+    // process id and the time alone can name the same directory twice.
+    static NEXT_CACHE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let mut full = vec!["sweep"];
     full.extend_from_slice(arguments);
     let cache = std::env::temp_dir().join(format!(
-        "fsl-issue-1008-sweep-{}-{}",
+        "fsl-issue-1008-sweep-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
-            .as_nanos()
+            .as_nanos(),
+        NEXT_CACHE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
     std::fs::create_dir(&cache).expect("sweep cache dir must not already exist");
     let result = run_with_env(&full, &[("FSLC_CACHE_DIR", cache.as_path())]);

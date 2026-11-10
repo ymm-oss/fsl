@@ -2,20 +2,28 @@
 
 use std::collections::BTreeMap;
 
+use fsl_core::binder_range::{InclusiveI64, IntegerEnvelopeFact, RangeBinding};
 use fsl_core::{
-    ActionDef, ActionGuard, FslValue, KernelLValue as LValue, KernelModel,
-    KernelStatement as Statement, ParamDef, TypeRef,
+    ActionDef, ActionGuard, FslValue, KernelExpr as Expr, KernelLValue as LValue, KernelModel,
+    KernelStatement as Statement, ParamDef, Span, TypeDef, TypeRef,
 };
-use fsl_solver::SmtSolver;
+use fsl_solver::{ModelValue, SmtSolver};
 
 use crate::VerifyError;
+use crate::bmc::CheckedStateCarriers;
 use crate::eval::{
-    EvaluationStatus, FailureClass, binder_values, binder_where, classified_evaluation_status,
-    eval, eval_expected, index_access_status, index_accessible, sequence_statuses,
+    EvaluationStatus, FailureClass, binder_candidate_binding, binder_condition,
+    binder_source_expressions, binder_values, binder_values_in, binder_where,
+    binder_where_expression, binder_where_in, classified_evaluation_status_in,
+    enumerated_binder_binding, eval, eval_binding_in, eval_expected, eval_expected_in, eval_in,
+    eval_with_bindings_in, index_access_status, index_accessible, safe_status, sequence_statuses,
 };
+use crate::value::TypedBindings as Bindings;
 use crate::value::{
-    Bindings, SymbolicState, SymbolicValue, bool_term, coerce, i64_index, ite_value, logical_equal,
-    select_finite, store_finite,
+    BindingRecord, RangeFact, SymbolicState, SymbolicValue, TypedBinding, bool_term, coerce,
+    collection_contains, collection_entries, collection_types, concrete_value, i64_index,
+    ite_value, literal_key, logical_equal, map_collections, select_finite, solver_sort,
+    store_finite, symbolic_state_with_suffix,
 };
 
 type GuardEvaluation<T> = (Vec<T>, Bindings<T>);
@@ -61,10 +69,17 @@ pub(crate) fn action_instances<S: SmtSolver>(
             for (existing_terms, existing_concrete) in bindings {
                 for value in &values {
                     let mut terms = existing_terms.clone();
-                    terms.insert(
-                        param.name().to_owned(),
+                    let binding = TypedBinding(
                         crate::value::concrete_value(solver, model, &ty, value)?,
+                        Some(ty.clone()),
                     );
+                    let binding = match value {
+                        FslValue::Int(value) => {
+                            BindingRecord::with_range_fact(binding, RangeFact::parameter(*value))
+                        }
+                        _ => binding.into(),
+                    };
+                    terms.insert(param.name().to_owned(), binding);
                     let mut concrete = existing_concrete.clone();
                     concrete.insert(param.name().to_owned(), value.clone());
                     next.push((terms, concrete));
@@ -93,16 +108,28 @@ pub(crate) fn action_guards<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     params: &Bindings<S::Term>,
 ) -> Result<GuardEvaluation<S::Term>, VerifyError> {
+    action_guards_in(solver, model, action, state, params, None)
+}
+
+pub(crate) fn action_guards_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    action: &ActionDef,
+    state: &SymbolicState<S::Term>,
+    params: &Bindings<S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<GuardEvaluation<S::Term>, VerifyError> {
     let mut bindings = params.clone();
     let mut guards = Vec::new();
     for guard in &action.guards {
         match guard {
             ActionGuard::Let(name, expr) => {
-                let value = eval(solver, model, expr, state, &mut bindings, None)?;
+                let value = eval_binding_in(solver, model, expr, state, &mut bindings, None, ctx)?;
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expr) => {
-                let value = eval(solver, model, expr, state, &mut bindings, None)?;
+                let value =
+                    eval_with_bindings_in(solver, model, expr, state, &mut bindings, None, ctx)?;
                 guards.push(bool_term(&value)?.clone());
             }
         }
@@ -137,6 +164,18 @@ pub(crate) fn classified_action_guard_definedness<S: SmtSolver>(
     params: &Bindings<S::Term>,
     class: FailureClass,
 ) -> Result<ActionGuardDefinedness<S::Term>, VerifyError> {
+    classified_action_guard_definedness_in(solver, model, action, state, params, class, None)
+}
+
+pub(crate) fn classified_action_guard_definedness_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    action: &ActionDef,
+    state: &SymbolicState<S::Term>,
+    params: &Bindings<S::Term>,
+    class: FailureClass,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<ActionGuardDefinedness<S::Term>, VerifyError> {
     let mut bindings = params.clone();
     let mut reaches_guard = solver.bool_value(true);
     let mut fully_defined = solver.bool_value(true);
@@ -146,8 +185,9 @@ pub(crate) fn classified_action_guard_definedness<S: SmtSolver>(
         let expression = match guard {
             ActionGuard::Let(_, expression) | ActionGuard::Requires(expression) => expression,
         };
-        let status =
-            classified_evaluation_status(solver, model, expression, state, &bindings, None, class)?;
+        let status = classified_evaluation_status_in(
+            solver, model, expression, state, &bindings, None, class, ctx,
+        )?;
         has_partial_operation |= status.has_partial_operation;
         first_partial = solver.or(&[
             first_partial,
@@ -157,13 +197,30 @@ pub(crate) fn classified_action_guard_definedness<S: SmtSolver>(
             fully_defined,
             solver.implies(&reaches_guard, &status.fully_defined)?,
         ])?;
-        let value = eval(solver, model, expression, state, &mut bindings, None)?;
         match guard {
             ActionGuard::Let(name, _) => {
+                let value = eval_binding_in(
+                    solver,
+                    model,
+                    expression,
+                    state,
+                    &mut bindings,
+                    Some(&status.fully_defined),
+                    ctx,
+                )?;
                 reaches_guard = solver.and(&[reaches_guard, status.fully_defined])?;
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(_) => {
+                let value = eval_with_bindings_in(
+                    solver,
+                    model,
+                    expression,
+                    state,
+                    &mut bindings,
+                    None,
+                    ctx,
+                )?;
                 reaches_guard = solver.and(&[
                     reaches_guard,
                     status.fully_defined,
@@ -218,6 +275,20 @@ pub(crate) fn classified_action_statements_evaluation_status<S: SmtSolver>(
     bindings: &Bindings<S::Term>,
     class: FailureClass,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    classified_action_statements_evaluation_status_in(
+        solver, model, action, state, bindings, class, None,
+    )
+}
+
+pub(crate) fn classified_action_statements_evaluation_status_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    action: &ActionDef,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    class: FailureClass,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     statements_evaluation_status(
         solver,
         model,
@@ -225,6 +296,7 @@ pub(crate) fn classified_action_statements_evaluation_status<S: SmtSolver>(
         state,
         &mut bindings.clone(),
         class,
+        ctx,
     )
 }
 
@@ -235,11 +307,12 @@ fn statements_evaluation_status<S: SmtSolver>(
     read_state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     class: FailureClass,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     let statuses = statements
         .iter()
         .map(|statement| {
-            statement_evaluation_status(solver, model, statement, read_state, bindings, class)
+            statement_evaluation_status(solver, model, statement, read_state, bindings, class, ctx)
         })
         .collect::<Result<Vec<_>, _>>()?;
     sequence_statuses(solver, statuses)
@@ -253,18 +326,21 @@ fn statement_evaluation_status<S: SmtSolver>(
     read_state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     class: FailureClass,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match statement {
         Statement::Assign { target, value, .. } => {
-            let value_status = classified_evaluation_status(
-                solver, model, value, read_state, bindings, None, class,
+            let value_status = classified_evaluation_status_in(
+                solver, model, value, read_state, bindings, None, class, ctx,
             )?;
             let target_ty = model
                 .state_lvalue_type(target)
                 .map_err(|error| VerifyError::new(error.message))?;
-            let _ = eval_expected(solver, model, value, &target_ty, read_state, bindings, None)?;
+            let _ = eval_expected_in(
+                solver, model, value, &target_ty, read_state, bindings, None, ctx,
+            )?;
             let target_status =
-                lvalue_evaluation_status(solver, model, target, read_state, bindings, class)?;
+                lvalue_evaluation_status(solver, model, target, read_state, bindings, class, ctx)?;
             sequence_statuses(solver, [value_status, target_status])
         }
         Statement::If {
@@ -273,10 +349,10 @@ fn statement_evaluation_status<S: SmtSolver>(
             else_statements,
             ..
         } => {
-            let condition_status = classified_evaluation_status(
-                solver, model, condition, read_state, bindings, None, class,
+            let condition_status = classified_evaluation_status_in(
+                solver, model, condition, read_state, bindings, None, class, ctx,
             )?;
-            let condition = eval(solver, model, condition, read_state, bindings, None)?;
+            let condition = eval_in(solver, model, condition, read_state, bindings, None, ctx)?;
             let then_status = statements_evaluation_status(
                 solver,
                 model,
@@ -284,6 +360,7 @@ fn statement_evaluation_status<S: SmtSolver>(
                 read_state,
                 &mut bindings.clone(),
                 class,
+                ctx,
             )?;
             let else_status = statements_evaluation_status(
                 solver,
@@ -292,6 +369,7 @@ fn statement_evaluation_status<S: SmtSolver>(
                 read_state,
                 &mut bindings.clone(),
                 class,
+                ctx,
             )?;
             let branch_defined = solver.ite(
                 bool_term(&condition)?,
@@ -318,47 +396,56 @@ fn statement_evaluation_status<S: SmtSolver>(
         Statement::ForAll {
             binder, statements, ..
         } => {
-            let mut active = solver.bool_value(true);
-            let mut fully_defined = solver.bool_value(true);
-            let mut first_partial = solver.bool_value(false);
-            let mut has_partial_operation = false;
-            for (name, value) in binder_values(solver, model, binder)? {
+            let source_status = sequence_statuses(
+                solver,
+                binder_source_expressions(binder)
+                    .into_iter()
+                    .map(|expr| {
+                        classified_evaluation_status_in(
+                            solver, model, expr, read_state, bindings, None, class, ctx,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )?;
+            let mut active = source_status.fully_defined.clone();
+            let mut fully_defined = source_status.fully_defined;
+            let mut first_partial = source_status.first_partial;
+            let mut has_partial_operation = source_status.has_partial_operation;
+            for (name, value, membership) in
+                binder_values_in(solver, model, binder, read_state, bindings, None, ctx)?
+            {
                 let mut local = bindings.clone();
-                local.insert(name, value);
-                let where_status = match binder {
-                    fsl_core::KernelBinder::Typed { where_expr, .. }
-                    | fsl_core::KernelBinder::Range { where_expr, .. }
-                    | fsl_core::KernelBinder::Collection { where_expr, .. } => {
-                        where_expr.as_deref().map_or_else(
-                            || {
-                                Ok(EvaluationStatus {
-                                    fully_defined: solver.bool_value(true),
-                                    first_partial: solver.bool_value(false),
-                                    has_partial_operation: false,
-                                })
-                            },
-                            |expression| {
-                                classified_evaluation_status(
-                                    solver, model, expression, read_state, &local, None, class,
-                                )
-                            },
-                        )?
-                    }
-                };
+                let record = binder_candidate_binding(
+                    solver, model, binder, value, read_state, None, bindings, ctx,
+                );
+                local.insert(name, record);
+                let where_reached = solver.and(&[
+                    active.clone(),
+                    membership.unwrap_or_else(|| solver.bool_value(true)),
+                ])?;
+                let where_status = binder_where_expression(binder).map_or_else(
+                    || Ok(safe_status(solver)),
+                    |expression| {
+                        classified_evaluation_status_in(
+                            solver, model, expression, read_state, &local, None, class, ctx,
+                        )
+                    },
+                )?;
                 first_partial = solver.or(&[
                     first_partial,
-                    solver.and(&[active.clone(), where_status.first_partial])?,
+                    solver.and(&[where_reached.clone(), where_status.first_partial])?,
                 ])?;
                 has_partial_operation |= where_status.has_partial_operation;
-                let where_term = binder_where(solver, model, binder, read_state, &mut local, None)?
-                    .unwrap_or_else(|| solver.bool_value(true));
+                let where_term =
+                    binder_where_in(solver, model, binder, read_state, &mut local, None, ctx)?
+                        .unwrap_or_else(|| solver.bool_value(true));
                 let body_reached = solver.and(&[
-                    active.clone(),
+                    where_reached.clone(),
                     where_status.fully_defined.clone(),
                     where_term,
                 ])?;
                 let body_status = statements_evaluation_status(
-                    solver, model, statements, read_state, &mut local, class,
+                    solver, model, statements, read_state, &mut local, class, ctx,
                 )?;
                 has_partial_operation |= body_status.has_partial_operation;
                 first_partial = solver.or(&[
@@ -366,7 +453,7 @@ fn statement_evaluation_status<S: SmtSolver>(
                     solver.and(&[body_reached.clone(), body_status.first_partial])?,
                 ])?;
                 let iteration_ok = solver.and(&[
-                    where_status.fully_defined,
+                    solver.implies(&where_reached, &where_status.fully_defined)?,
                     solver.implies(&body_reached, &body_status.fully_defined)?,
                 ])?;
                 fully_defined = solver.and(&[fully_defined, iteration_ok.clone()])?;
@@ -388,6 +475,7 @@ fn lvalue_evaluation_status<S: SmtSolver>(
     read_state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     class: FailureClass,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
     match target {
         LValue::Var(_) => Ok(EvaluationStatus {
@@ -396,10 +484,10 @@ fn lvalue_evaluation_status<S: SmtSolver>(
             has_partial_operation: false,
         }),
         LValue::Index(name, index) => {
-            let index_status = classified_evaluation_status(
-                solver, model, index, read_state, bindings, None, class,
+            let index_status = classified_evaluation_status_in(
+                solver, model, index, read_state, bindings, None, class, ctx,
             )?;
-            let index_value = eval(solver, model, index, read_state, bindings, None)?;
+            let index_value = eval_in(solver, model, index, read_state, bindings, None, ctx)?;
             let root = read_state
                 .get(name)
                 .ok_or_else(|| VerifyError::new(format!("unknown state variable '{name}'")))?;
@@ -408,7 +496,7 @@ fn lvalue_evaluation_status<S: SmtSolver>(
             sequence_statuses(solver, [index_status, access])
         }
         LValue::Field(base, _) => {
-            lvalue_evaluation_status(solver, model, base, read_state, bindings, class)
+            lvalue_evaluation_status(solver, model, base, read_state, bindings, class, ctx)
         }
     }
 }
@@ -421,14 +509,237 @@ pub(crate) fn init_evaluation_status<S: SmtSolver>(
     model: &KernelModel,
     state: &SymbolicState<S::Term>,
 ) -> Result<EvaluationStatus<S::Term>, VerifyError> {
-    statements_evaluation_status(
+    let mut result = safe_status(solver);
+    visit_init_reads(
         solver,
         model,
-        &model.init,
         state,
-        &mut Bindings::new(),
-        FailureClass::PartialOperation,
+        &mut |read, state, bindings, reached| {
+            let status = init_read_status(solver, model, read, state, bindings)?;
+            result.fully_defined = solver.and(&[
+                result.fully_defined.clone(),
+                solver.implies(reached, &status.fully_defined)?,
+            ])?;
+            result.first_partial = solver.or(&[
+                result.first_partial.clone(),
+                solver.and(&[reached.clone(), status.first_partial])?,
+            ])?;
+            result.has_partial_operation |= status.has_partial_operation;
+            Ok(status.fully_defined)
+        },
+    )?;
+    Ok(result)
+}
+
+/// Init value reads see completed assignments; statement binder sources do not.
+#[derive(Clone, Copy)]
+pub(crate) enum InitRead<'a> {
+    Expression(&'a Expr, Span),
+    Target(&'a LValue, Span),
+}
+
+type InitObserver<'a, T> =
+    dyn FnMut(InitRead<'_>, &SymbolicState<T>, &Bindings<T>, &T) -> Result<T, VerifyError> + 'a;
+
+pub(crate) fn init_read_status<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    read: InitRead<'_>,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+) -> Result<EvaluationStatus<S::Term>, VerifyError> {
+    match read {
+        InitRead::Expression(expr, _) => classified_evaluation_status_in(
+            solver,
+            model,
+            expr,
+            state,
+            bindings,
+            None,
+            FailureClass::PartialOperation,
+            None,
+        ),
+        InitRead::Target(target, _) => lvalue_evaluation_status(
+            solver,
+            model,
+            target,
+            state,
+            &mut bindings.clone(),
+            FailureClass::PartialOperation,
+            None,
+        ),
+    }
+}
+
+pub(crate) fn visit_init_reads<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    state: &SymbolicState<S::Term>,
+    observer: &mut InitObserver<'_, S::Term>,
+) -> Result<(), VerifyError> {
+    let mut state = state.clone();
+    let mut recipes = Bindings::new();
+    let mut reached = Some(solver.bool_value(true));
+    let mut observer = Some(observer);
+    for statement in &model.init {
+        collect_init_statement(
+            solver,
+            model,
+            statement,
+            &mut state,
+            &mut Bindings::new(),
+            &mut Vec::new(),
+            &mut |_, _| Ok(()),
+            &mut recipes,
+            &mut reached,
+            &mut observer,
+        )?;
+    }
+    Ok(())
+}
+
+fn init_expression_bindings<T: Clone>(recipes: &Bindings<T>, lexical: &Bindings<T>) -> Bindings<T> {
+    let mut bindings = recipes.clone();
+    for (name, record) in lexical.records() {
+        bindings.insert(name.clone(), record.clone());
+    }
+    bindings
+}
+
+/// Select only a literal or an unshadowed model-constant condition; never query SMT.
+fn init_known_condition<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    condition: &Expr,
+    bindings: &Bindings<S::Term>,
+    value: Option<&SymbolicValue<S::Term>>,
+) -> Option<bool> {
+    if let Expr::Bool(value) = condition {
+        return Some(*value);
+    }
+    let value = value.or_else(|| match condition {
+        Expr::Var(name) => bindings.get(name),
+        _ => None,
+    });
+    if let Some(SymbolicValue::Scalar { term, .. }) = value
+        && let Some(ModelValue::Bool(value)) = solver.literal_value(term)
+    {
+        return Some(value);
+    }
+    if bindings.keys().any(|name| model.consts.contains_key(name)) {
+        return None;
+    }
+    fsl_core::binder_range::constant_condition(model, condition)
+}
+
+/// Derive from the actual RHS and unconditional lexical facts, never a state carrier.
+fn init_expression_envelope<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    bindings: &Bindings<S::Term>,
+) -> Option<InclusiveI64> {
+    let lexical: Option<Vec<_>> = bindings
+        .records()
+        .map(|(name, record)| {
+            Some(RangeBinding {
+                name,
+                semantic_ty: record.binding.1.as_ref()?,
+                fact: record
+                    .range_fact
+                    .as_ref()
+                    .filter(|fact| fact.valid_when().is_none())
+                    .map(RangeFact::envelope),
+            })
+        })
+        .collect();
+    fsl_core::binder_range::init_expression_envelope(
+        model,
+        expr,
+        lexical.as_deref(),
+        &mut |condition| init_known_condition(solver, model, condition, bindings, None),
     )
+}
+
+fn init_recipe<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    expr: &Expr,
+    bindings: &Bindings<S::Term>,
+    value: SymbolicValue<S::Term>,
+    ty: &TypeRef,
+) -> Option<BindingRecord<S::Term>> {
+    let mut record =
+        enumerated_binder_binding(solver, model, TypedBinding(value, Some(ty.clone())));
+    if record.range_fact.is_none() {
+        record.range_fact = init_expression_envelope(solver, model, expr, bindings)
+            .map(|envelope| RangeFact::ParameterValue(IntegerEnvelopeFact::new(envelope)));
+    }
+    let integer = matches!(ty, TypeRef::Int | TypeRef::Range(_, _))
+        || matches!(ty, TypeRef::Named(name) if matches!(model.types.get(name), Some(TypeDef::Domain { .. })));
+    if integer
+        && !matches!(ty, TypeRef::Int)
+        && record.range_fact.as_ref().is_some_and(|fact| {
+            !fsl_core::binder_range::init_envelope_fits(model, ty, fact.envelope().envelope())
+        })
+    {
+        record.range_fact = None;
+    }
+    (!integer || record.range_fact.is_some()).then_some(record)
+}
+
+fn merge_init_recipes<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    condition: &S::Term,
+    then_recipes: &Bindings<S::Term>,
+    else_recipes: &Bindings<S::Term>,
+) -> Result<Bindings<S::Term>, VerifyError> {
+    match solver.literal_value(condition) {
+        Some(ModelValue::Bool(true)) => return Ok(then_recipes.clone()),
+        Some(ModelValue::Bool(false)) => return Ok(else_recipes.clone()),
+        _ => {}
+    }
+    let mut joined = Bindings::new();
+    for (name, left) in then_recipes.records() {
+        let Some((_, right)) = else_recipes.records().find(|(other, _)| *other == name) else {
+            continue;
+        };
+        let mut record = BindingRecord::from(TypedBinding(
+            ite_value(solver, model, condition, &left.binding.0, &right.binding.0)?,
+            left.binding.1.clone(),
+        ));
+        if let (Some(left), Some(right)) = (&left.range_fact, &right.range_fact)
+            && left.valid_when().is_none()
+            && right.valid_when().is_none()
+        {
+            let left = left.envelope().envelope();
+            let right = right.envelope().envelope();
+            record.range_fact =
+                InclusiveI64::new(left.lo().min(right.lo()), left.hi().max(right.hi()))
+                    .map(|envelope| RangeFact::ParameterValue(IntegerEnvelopeFact::new(envelope)));
+        }
+        joined.insert(name.clone(), record);
+    }
+    Ok(joined)
+}
+
+fn observe_init_read<S: SmtSolver>(
+    solver: &S,
+    read: InitRead<'_>,
+    state: &SymbolicState<S::Term>,
+    bindings: &Bindings<S::Term>,
+    reached: &mut Option<S::Term>,
+    observer: &mut Option<&mut InitObserver<'_, S::Term>>,
+) -> Result<(), VerifyError> {
+    if let Some(observer) = observer {
+        let active = reached
+            .as_ref()
+            .expect("init observer has a reached condition");
+        let defined = observer(read, state, bindings, active)?;
+        *reached = Some(solver.and(&[active.clone(), defined])?);
+    }
+    Ok(())
 }
 
 pub(crate) fn init_constraints<S: SmtSolver>(
@@ -438,110 +749,463 @@ pub(crate) fn init_constraints<S: SmtSolver>(
 ) -> Result<Vec<S::Term>, VerifyError> {
     let mut constraints = Vec::new();
     let mut bindings = Bindings::new();
+    let mut state = state.clone();
+    let mut recipes = Bindings::new();
     for statement in &model.init {
         collect_init_statement(
             solver,
             model,
             statement,
-            state,
+            &mut state,
             &mut bindings,
             &mut constraints,
+            &mut |_, _| Ok(()),
+            &mut recipes,
+            &mut None,
+            &mut None,
         )?;
     }
     Ok(constraints)
 }
 
+/// Reserve open collection slots, then apply the ordinary relational init
+/// constraints. Repeated assignments still have to agree; this is not an
+/// action-style last-writer initializer. Only fresh shape is propagated in
+/// checked dependency order; scalar values and membership remain unconstrained.
+pub(crate) fn initial_state<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    suffix: &str,
+) -> Result<SymbolicState<S::Term>, VerifyError> {
+    let mut state = symbolic_state_with_suffix(solver, model, suffix)?;
+    let mut index = 0;
+    let mut recipes = Bindings::new();
+    for statement in &model.init {
+        collect_init_statement(
+            solver,
+            model,
+            statement,
+            &mut state,
+            &mut Bindings::new(),
+            &mut Vec::new(),
+            &mut |state, assigned| {
+                for (name, value) in assigned {
+                    extend_initial_collections(
+                        solver,
+                        model,
+                        suffix,
+                        &mut index,
+                        state.get_mut(name).unwrap(),
+                        value,
+                    )?;
+                }
+                Ok(())
+            },
+            &mut recipes,
+            &mut None,
+            &mut None,
+        )?;
+    }
+    Ok(state)
+}
+
+fn extend_initial_collections<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    suffix: &str,
+    index: &mut usize,
+    state: &mut SymbolicValue<S::Term>,
+    assigned: &SymbolicValue<S::Term>,
+) -> Result<(), VerifyError> {
+    map_collections(state, assigned, &mut |state, assigned| {
+        let SymbolicValue::Collection {
+            entries: candidates,
+            ..
+        } = assigned
+        else {
+            return Ok(());
+        };
+        let (ty, mut entries) = collection_entries(solver, model, state)?;
+        let (_, grid) = collection_entries(
+            solver,
+            model,
+            &concrete_value(solver, model, &ty, &model.default_value(&ty)?)?,
+        )?;
+        let extra = candidates
+            .iter()
+            .filter(|(candidate, _)| {
+                literal_key(solver, candidate).is_none_or(|key| {
+                    !grid
+                        .iter()
+                        .any(|(candidate, _)| literal_key(solver, candidate).as_ref() == Some(&key))
+                })
+            })
+            .count();
+        for _ in entries.len()..grid.len() + extra {
+            let name = format!("__init_collection_{suffix}_{}", *index);
+            *index += 1;
+            let key = collection_types(&ty)?
+                .into_iter()
+                .enumerate()
+                .map(|(part, ty)| {
+                    Ok(SymbolicValue::Scalar {
+                        ty: ty.clone(),
+                        term: solver
+                            .constant(&format!("{name}_{part}"), &solver_sort(model, ty)?)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, VerifyError>>()?;
+            let present = solver.and(&[
+                solver.constant(&name, &fsl_solver::Sort::Bool)?,
+                solver.not(&collection_contains(solver, model, &entries, &key)?)?,
+            ])?;
+            entries.push((key, present));
+        }
+        *state = SymbolicValue::Collection { ty, entries };
+        Ok(())
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn collect_init_statement<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     statement: &Statement,
-    state: &SymbolicState<S::Term>,
+    state: &mut SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     constraints: &mut Vec<S::Term>,
+    on_assignment: &mut impl FnMut(
+        &mut SymbolicState<S::Term>,
+        &SymbolicState<S::Term>,
+    ) -> Result<(), VerifyError>,
+    recipes: &mut Bindings<S::Term>,
+    reached: &mut Option<S::Term>,
+    observer: &mut Option<&mut InitObserver<'_, S::Term>>,
 ) -> Result<(), VerifyError> {
     match statement {
-        Statement::Assign { target, value, .. } => {
-            let target_ty = model
-                .state_lvalue_type(target)
-                .map_err(|error| VerifyError::new(error.message))?;
-            let value = eval_expected(solver, model, value, &target_ty, state, bindings, None)?;
-            let mut assigned = state.clone();
-            assign(solver, model, target, value, state, &mut assigned, bindings)?;
-            constraints.extend(state_equalities(solver, model, state, &assigned)?);
+        Statement::Assign { .. } => collect_init_assignment(
+            solver,
+            model,
+            statement,
+            state,
+            bindings,
+            constraints,
+            on_assignment,
+            recipes,
+            reached,
+            observer,
+        ),
+        Statement::If { .. } => collect_init_branches(
+            solver,
+            model,
+            statement,
+            state,
+            bindings,
+            constraints,
+            on_assignment,
+            recipes,
+            reached,
+            observer,
+        ),
+        Statement::ForAll { .. } => collect_init_forall(
+            solver,
+            model,
+            statement,
+            state,
+            bindings,
+            constraints,
+            on_assignment,
+            recipes,
+            reached,
+            observer,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_init_assignment<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    statement: &Statement,
+    state: &mut SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    constraints: &mut Vec<S::Term>,
+    on_assignment: &mut impl FnMut(
+        &mut SymbolicState<S::Term>,
+        &SymbolicState<S::Term>,
+    ) -> Result<(), VerifyError>,
+    recipes: &mut Bindings<S::Term>,
+    reached: &mut Option<S::Term>,
+    observer: &mut Option<&mut InitObserver<'_, S::Term>>,
+) -> Result<(), VerifyError> {
+    let Statement::Assign {
+        target,
+        value,
+        span,
+    } = statement
+    else {
+        unreachable!("init assign collector receives its matched statement");
+    };
+    let target_ty = model
+        .state_lvalue_type(target)
+        .map_err(|error| VerifyError::new(error.message))?;
+    let mut read = init_expression_bindings(recipes, bindings);
+    observe_init_read(
+        solver,
+        InitRead::Expression(value, *span),
+        state,
+        &read,
+        reached,
+        observer,
+    )?;
+    let assigned_value = eval_expected(solver, model, value, &target_ty, state, &mut read, None)?;
+    observe_init_read(
+        solver,
+        InitRead::Target(target, *span),
+        state,
+        &read,
+        reached,
+        observer,
+    )?;
+    let mut assigned = state.clone();
+    assign(
+        solver,
+        model,
+        target,
+        assigned_value,
+        state,
+        &mut assigned,
+        &mut read,
+        None,
+    )?;
+    on_assignment(state, &assigned)?;
+    constraints.extend(state_equalities(solver, model, state, &assigned)?);
+    if let LValue::Var(name) = target {
+        let recipe = init_recipe(
+            solver,
+            model,
+            value,
+            &read,
+            assigned[name].clone(),
+            &target_ty,
+        );
+        let mut updated = Bindings::new();
+        for (other, record) in recipes.records() {
+            if other != name {
+                updated.insert(other.clone(), record.clone());
+            }
         }
-        Statement::If {
-            condition,
-            then_statements,
-            else_statements,
-            ..
-        } => {
-            let condition = eval(solver, model, condition, state, bindings, None)?;
-            let condition = bool_term(&condition)?.clone();
-            let mut then_constraints = Vec::new();
-            for statement in then_statements {
-                collect_init_statement(
-                    solver,
-                    model,
-                    statement,
-                    state,
-                    &mut bindings.clone(),
-                    &mut then_constraints,
-                )?;
-            }
-            constraints.extend(
-                then_constraints
-                    .into_iter()
-                    .map(|term| solver.implies(&condition, &term))
-                    .collect::<Result<Vec<_>, _>>()?,
-            );
-            let not_condition = solver.not(&condition)?;
-            let mut else_constraints = Vec::new();
-            for statement in else_statements {
-                collect_init_statement(
-                    solver,
-                    model,
-                    statement,
-                    state,
-                    &mut bindings.clone(),
-                    &mut else_constraints,
-                )?;
-            }
-            constraints.extend(
-                else_constraints
-                    .into_iter()
-                    .map(|term| solver.implies(&not_condition, &term))
-                    .collect::<Result<Vec<_>, _>>()?,
-            );
+        if let Some(recipe) = recipe {
+            updated.insert(name.clone(), recipe);
         }
-        Statement::ForAll {
-            binder, statements, ..
-        } => {
-            for (name, value) in binder_values(solver, model, binder)? {
-                let mut local = bindings.clone();
-                local.insert(name, value);
-                let where_term = binder_where(solver, model, binder, state, &mut local, None)?;
-                let mut body_constraints = Vec::new();
-                for statement in statements {
-                    collect_init_statement(
-                        solver,
-                        model,
-                        statement,
-                        state,
-                        &mut local,
-                        &mut body_constraints,
-                    )?;
-                }
-                if let Some(where_term) = where_term {
-                    constraints.extend(
-                        body_constraints
-                            .into_iter()
-                            .map(|term| solver.implies(&where_term, &term))
-                            .collect::<Result<Vec<_>, _>>()?,
-                    );
-                } else {
-                    constraints.extend(body_constraints);
-                }
-            }
+        *recipes = updated;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_init_branches<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    statement: &Statement,
+    state: &mut SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    constraints: &mut Vec<S::Term>,
+    on_assignment: &mut impl FnMut(
+        &mut SymbolicState<S::Term>,
+        &SymbolicState<S::Term>,
+    ) -> Result<(), VerifyError>,
+    recipes: &mut Bindings<S::Term>,
+    reached: &mut Option<S::Term>,
+    observer: &mut Option<&mut InitObserver<'_, S::Term>>,
+) -> Result<(), VerifyError> {
+    let Statement::If {
+        condition,
+        then_statements,
+        else_statements,
+        span,
+    } = statement
+    else {
+        unreachable!("init if collector receives its matched statement");
+    };
+    let mut read = init_expression_bindings(recipes, bindings);
+    observe_init_read(
+        solver,
+        InitRead::Expression(condition, *span),
+        state,
+        &read,
+        reached,
+        observer,
+    )?;
+    let value = eval(solver, model, condition, state, &mut read, None)?;
+    let selected = init_known_condition(solver, model, condition, &read, Some(&value));
+    let condition = bool_term(&value)?.clone();
+    let mut then_constraints = Vec::new();
+    let mut then_recipes = recipes.clone();
+    let mut then_reached = reached
+        .as_ref()
+        .map(|active| solver.and(&[active.clone(), condition.clone()]))
+        .transpose()?;
+    for statement in then_statements {
+        collect_init_statement(
+            solver,
+            model,
+            statement,
+            state,
+            &mut bindings.clone(),
+            &mut then_constraints,
+            on_assignment,
+            &mut then_recipes,
+            &mut then_reached,
+            observer,
+        )?;
+    }
+    constraints.extend(
+        then_constraints
+            .into_iter()
+            .map(|term| solver.implies(&condition, &term))
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    let not_condition = solver.not(&condition)?;
+    let mut else_constraints = Vec::new();
+    let mut else_recipes = recipes.clone();
+    let mut else_reached = reached
+        .as_ref()
+        .map(|active| solver.and(&[active.clone(), not_condition.clone()]))
+        .transpose()?;
+    for statement in else_statements {
+        collect_init_statement(
+            solver,
+            model,
+            statement,
+            state,
+            &mut bindings.clone(),
+            &mut else_constraints,
+            on_assignment,
+            &mut else_recipes,
+            &mut else_reached,
+            observer,
+        )?;
+    }
+    constraints.extend(
+        else_constraints
+            .into_iter()
+            .map(|term| solver.implies(&not_condition, &term))
+            .collect::<Result<Vec<_>, _>>()?,
+    );
+    *recipes = match selected {
+        Some(true) => then_recipes,
+        Some(false) => else_recipes,
+        None => merge_init_recipes(solver, model, &condition, &then_recipes, &else_recipes)?,
+    };
+    if let (Some(left), Some(right)) = (then_reached, else_reached) {
+        *reached = Some(solver.or(&[left, right])?);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn collect_init_forall<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    statement: &Statement,
+    state: &mut SymbolicState<S::Term>,
+    bindings: &mut Bindings<S::Term>,
+    constraints: &mut Vec<S::Term>,
+    on_assignment: &mut impl FnMut(
+        &mut SymbolicState<S::Term>,
+        &SymbolicState<S::Term>,
+    ) -> Result<(), VerifyError>,
+    recipes: &mut Bindings<S::Term>,
+    reached: &mut Option<S::Term>,
+    observer: &mut Option<&mut InitObserver<'_, S::Term>>,
+) -> Result<(), VerifyError> {
+    let Statement::ForAll {
+        binder,
+        statements,
+        span,
+    } = statement
+    else {
+        unreachable!("init forall collector receives its matched statement");
+    };
+    let bound_names = bindings.keys().map(String::as_str);
+    fsl_core::check_init_collection_binder(model, binder, bound_names)?;
+    for expression in binder_source_expressions(binder) {
+        observe_init_read(
+            solver,
+            InitRead::Expression(expression, *span),
+            state,
+            bindings,
+            reached,
+            observer,
+        )?;
+    }
+    for (name, value, membership) in binder_values(solver, model, binder, state, bindings, None)? {
+        let mut local = bindings.clone();
+        local.insert(name, enumerated_binder_binding(solver, model, value));
+        let membership_term = membership
+            .clone()
+            .unwrap_or_else(|| solver.bool_value(true));
+        let mut where_reached = reached
+            .as_ref()
+            .map(|active| solver.and(&[active.clone(), membership_term.clone()]))
+            .transpose()?;
+        let mut read = init_expression_bindings(recipes, &local);
+        if let Some(expression) = binder_where_expression(binder) {
+            observe_init_read(
+                solver,
+                InitRead::Expression(expression, *span),
+                state,
+                &read,
+                &mut where_reached,
+                observer,
+            )?;
+        }
+        let where_term = binder_where(solver, model, binder, state, &mut read, None)?;
+        let unconditional = membership.is_none() && where_term.is_none();
+        let filter = where_term
+            .clone()
+            .unwrap_or_else(|| solver.bool_value(true));
+        let condition = binder_condition(solver, membership, where_term)?;
+        let mut body_reached = where_reached
+            .as_ref()
+            .map(|active| solver.and(&[active.clone(), filter.clone()]))
+            .transpose()?;
+        let mut body_constraints = Vec::new();
+        let mut body_recipes = recipes.clone();
+        for statement in statements {
+            collect_init_statement(
+                solver,
+                model,
+                statement,
+                state,
+                &mut local,
+                &mut body_constraints,
+                on_assignment,
+                &mut body_recipes,
+                &mut body_reached,
+                observer,
+            )?;
+        }
+        constraints.extend(
+            body_constraints
+                .into_iter()
+                .map(|term| solver.implies(&condition, &term))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        *recipes = if unconditional {
+            body_recipes
+        } else {
+            merge_init_recipes(solver, model, &condition, &body_recipes, recipes)?
+        };
+        if let (Some(active), Some(where_active), Some(body)) =
+            (reached.as_ref(), where_reached, body_reached)
+        {
+            let iteration = solver.or(&[
+                solver.not(&membership_term)?,
+                solver.and(&[where_active, solver.or(&[solver.not(&filter)?, body])?])?,
+            ])?;
+            *reached = Some(solver.and(&[active.clone(), iteration])?);
         }
     }
     Ok(())
@@ -552,40 +1216,79 @@ pub(crate) fn transition_constraint<S: SmtSolver>(
     model: &KernelModel,
     instances: &[ActionInstance<S::Term>],
     current: &SymbolicState<S::Term>,
-    next: &SymbolicState<S::Term>,
+    next: &mut SymbolicState<S::Term>,
     choice: &S::Term,
 ) -> Result<S::Term, VerifyError> {
-    let mut clauses = Vec::new();
+    transition_constraint_in(solver, model, instances, current, next, choice, None)
+}
+
+pub(crate) fn transition_constraint_in<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    instances: &[ActionInstance<S::Term>],
+    current: &SymbolicState<S::Term>,
+    next: &mut SymbolicState<S::Term>,
+    choice: &S::Term,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
+) -> Result<S::Term, VerifyError> {
+    let mut candidates = Vec::new();
     for (instance_index, instance) in instances.iter().enumerate() {
         let action = &model.actions[instance.action_index];
         let (guards, mut bindings) =
-            action_guards(solver, model, action, current, &instance.params)?;
-        let pending = compute_updates(
+            action_guards_in(solver, model, action, current, &instance.params, ctx)?;
+        let pending = compute_updates_in(
             solver,
             model,
             &action.statements,
             current,
             current.clone(),
             &mut bindings,
+            ctx,
         )?;
-        let mut body = guards;
-        body.extend(state_equalities(solver, model, next, &pending)?);
         let selected = solver.equal(choice, &solver.int_value(i64_index(instance_index)?))?;
+        for (name, value) in &pending {
+            retain_collections(solver, model, &selected, next.get_mut(name).unwrap(), value)?;
+        }
+        candidates.push((selected, guards, pending));
+    }
+    let mut clauses = Vec::new();
+    for (selected, mut body, pending) in candidates {
+        body.extend(state_equalities(solver, model, next, &pending)?);
         clauses.push(solver.implies(&selected, &solver.and(&body)?)?);
     }
     Ok(solver.and(&clauses)?)
 }
 
-fn compute_updates<S: SmtSolver>(
+/// Fresh finite grids cannot represent an escaped member. Carry complete
+/// collection expressions into the successor, leaving other fresh fields alone.
+fn retain_collections<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    selected: &S::Term,
+    next: &mut SymbolicValue<S::Term>,
+    pending: &SymbolicValue<S::Term>,
+) -> Result<(), VerifyError> {
+    map_collections(next, pending, &mut |next, pending| {
+        if matches!(next, SymbolicValue::Collection { .. })
+            || matches!(pending, SymbolicValue::Collection { .. })
+        {
+            *next = ite_value(solver, model, selected, pending, next)?;
+        }
+        Ok(())
+    })
+}
+
+pub(crate) fn compute_updates_in<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     statements: &[Statement],
     read_state: &SymbolicState<S::Term>,
     mut pending: SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<SymbolicState<S::Term>, VerifyError> {
     for statement in statements {
-        pending = compute_statement(solver, model, statement, read_state, pending, bindings)?;
+        pending = compute_statement(solver, model, statement, read_state, pending, bindings, ctx)?;
     }
     Ok(pending)
 }
@@ -597,14 +1300,16 @@ fn compute_statement<S: SmtSolver>(
     read_state: &SymbolicState<S::Term>,
     mut pending: SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<SymbolicState<S::Term>, VerifyError> {
     match statement {
         Statement::Assign { target, value, .. } => {
             let target_ty = model
                 .state_lvalue_type(target)
                 .map_err(|error| VerifyError::new(error.message))?;
-            let assigned_value =
-                eval_expected(solver, model, value, &target_ty, read_state, bindings, None)?;
+            let assigned_value = eval_expected_in(
+                solver, model, value, &target_ty, read_state, bindings, None, ctx,
+            )?;
             assign(
                 solver,
                 model,
@@ -613,6 +1318,7 @@ fn compute_statement<S: SmtSolver>(
                 read_state,
                 &mut pending,
                 bindings,
+                ctx,
             )?;
             Ok(pending)
         }
@@ -622,22 +1328,24 @@ fn compute_statement<S: SmtSolver>(
             else_statements,
             ..
         } => {
-            let condition = eval(solver, model, condition, read_state, bindings, None)?;
-            let then_state = compute_updates(
+            let condition = eval_in(solver, model, condition, read_state, bindings, None, ctx)?;
+            let then_state = compute_updates_in(
                 solver,
                 model,
                 then_statements,
                 read_state,
                 pending.clone(),
                 &mut bindings.clone(),
+                ctx,
             )?;
-            let else_state = compute_updates(
+            let else_state = compute_updates_in(
                 solver,
                 model,
                 else_statements,
                 read_state,
                 pending,
                 &mut bindings.clone(),
+                ctx,
             )?;
             merge_states(
                 solver,
@@ -650,23 +1358,27 @@ fn compute_statement<S: SmtSolver>(
         Statement::ForAll {
             binder, statements, ..
         } => {
-            for (name, value) in binder_values(solver, model, binder)? {
+            for (name, value, membership) in
+                binder_values_in(solver, model, binder, read_state, bindings, None, ctx)?
+            {
                 let mut local = bindings.clone();
-                local.insert(name, value);
-                let where_term = binder_where(solver, model, binder, read_state, &mut local, None)?;
-                let candidate = compute_updates(
+                let record = binder_candidate_binding(
+                    solver, model, binder, value, read_state, None, bindings, ctx,
+                );
+                local.insert(name, record);
+                let where_term =
+                    binder_where_in(solver, model, binder, read_state, &mut local, None, ctx)?;
+                let condition = binder_condition(solver, membership, where_term)?;
+                let candidate = compute_updates_in(
                     solver,
                     model,
                     statements,
                     read_state,
                     pending.clone(),
                     &mut local,
+                    ctx,
                 )?;
-                pending = if let Some(where_term) = where_term {
-                    merge_states(solver, model, &where_term, &candidate, &pending)?
-                } else {
-                    candidate
-                };
+                pending = merge_states(solver, model, &condition, &candidate, &pending)?;
             }
             Ok(pending)
         }
@@ -682,6 +1394,7 @@ fn assign<S: SmtSolver>(
     read_state: &SymbolicState<S::Term>,
     target_state: &mut SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<(), VerifyError> {
     match target {
         LValue::Var(name) => {
@@ -691,7 +1404,7 @@ fn assign<S: SmtSolver>(
             target_state.insert(name.clone(), coerce(solver, model, value, ty)?);
         }
         LValue::Index(name, index_expr) => {
-            let index = eval(solver, model, index_expr, read_state, bindings, None)?;
+            let index = eval_in(solver, model, index_expr, read_state, bindings, None, ctx)?;
             let root = target_state
                 .get(name)
                 .cloned()
@@ -709,7 +1422,7 @@ fn assign<S: SmtSolver>(
                 assign_field(solver, model, root, field, value)?;
             }
             LValue::Index(name, index_expr) => {
-                let index = eval(solver, model, index_expr, read_state, bindings, None)?;
+                let index = eval_in(solver, model, index_expr, read_state, bindings, None, ctx)?;
                 let root = target_state
                     .get(name)
                     .cloned()

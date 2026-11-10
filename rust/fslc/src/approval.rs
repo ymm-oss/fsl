@@ -26,11 +26,16 @@ pub const APPROVAL_SCHEMA_V2: &str = "fslc.approval.v2";
 pub const APPROVAL_SCHEMA_V3: &str = "fslc.approval.v3";
 /// The signed counterpart of v3, mirroring how v2 is v1 plus `signature`.
 pub const APPROVAL_SCHEMA_V4: &str = "fslc.approval.v4";
+/// Creation-directory context for all four target kinds, preserving literal
+/// input paths and the original rendering label independently of I/O.
+pub const APPROVAL_SCHEMA_V5: &str = "fslc.approval.v5";
+/// The signed counterpart of v5. Both context strings are signed.
+pub const APPROVAL_SCHEMA_V6: &str = "fslc.approval.v6";
 pub const SIGNATURE_ALGORITHM: &str = "ed25519";
 pub const SPEC_DIGEST_ALGORITHM: &str = "fsl-kernel-ast-v1+sha256";
 pub const ARTIFACT_DIGEST_ALGORITHM: &str = "fsl-rendered-artifact-v1+sha256";
 /// The `target.digest_algorithm` for a `requirements_document` target
-/// (v3/v4 only): plain (unframed) `sha256` over the deterministically
+/// (v3/v4 and contextual v5/v6): plain (unframed) `sha256` over the deterministically
 /// rendered Markdown bytes — literally the same value `fslc document
 /// generate`'s own `artifact_digest` envelope field reports, so a caller can
 /// compare the two without any approval-specific machinery.
@@ -114,7 +119,7 @@ pub struct TargetBinding {
     pub reviewed_digest_algorithm: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reviewed_digest: Option<String>,
-    /// Present only for a `requirements_document` target (v3/v4): the RCIR
+    /// Present only for a `requirements_document` target: the RCIR
     /// claim-set digest (issue #325) alongside the rendered artifact's own
     /// digest, so drift in the requirements projection itself is
     /// distinguishable from drift elsewhere. `#[serde(default)]` lets a v1/v2
@@ -141,6 +146,10 @@ pub struct ApprovalMetadata {
 #[serde(deny_unknown_fields)]
 pub struct ApprovalRecord {
     pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_base: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_source: Option<String>,
     pub spec: SpecBinding,
     pub target: TargetBinding,
     pub approval: ApprovalMetadata,
@@ -158,10 +167,182 @@ pub struct DetachedSignature {
 #[serde(deny_unknown_fields)]
 pub struct ApprovalRecordV2 {
     pub schema: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path_base: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_source: Option<String>,
     pub spec: SpecBinding,
     pub target: TargetBinding,
     pub approval: ApprovalMetadata,
     pub signature: DetachedSignature,
+}
+
+// Keep legacy wire decoding closed: optional fields on the shared in-memory
+// records must not make context fields legal in v1–v4, even when null.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyApprovalRecord {
+    schema: String,
+    spec: SpecBinding,
+    target: TargetBinding,
+    approval: ApprovalMetadata,
+}
+
+impl From<LegacyApprovalRecord> for ApprovalRecord {
+    fn from(record: LegacyApprovalRecord) -> Self {
+        Self {
+            schema: record.schema,
+            path_base: None,
+            render_source: None,
+            spec: record.spec,
+            target: record.target,
+            approval: record.approval,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyApprovalRecordV2 {
+    schema: String,
+    spec: SpecBinding,
+    target: TargetBinding,
+    approval: ApprovalMetadata,
+    signature: DetachedSignature,
+}
+
+impl From<LegacyApprovalRecordV2> for ApprovalRecordV2 {
+    fn from(record: LegacyApprovalRecordV2) -> Self {
+        Self {
+            schema: record.schema,
+            path_base: None,
+            render_source: None,
+            spec: record.spec,
+            target: record.target,
+            approval: record.approval,
+            signature: record.signature,
+        }
+    }
+}
+
+impl ApprovalRecord {
+    /// Resolve only filesystem access; the stored path remains its display label.
+    /// `root` is the Git root of the spec being checked, for a contextual record.
+    #[must_use]
+    pub fn io_path(&self, root: Option<&Path>, path: &str) -> PathBuf {
+        resolve_io_path(Path::new(path), self.base_directory(root).as_deref())
+    }
+
+    /// The directory a contextual record's relative paths resolve from.
+    #[must_use]
+    pub fn base_directory(&self, root: Option<&Path>) -> Option<PathBuf> {
+        Some(root?.join(self.path_base.as_deref()?))
+    }
+}
+
+/// A stored `path_base`: `.` for the Git root, otherwise `/`-separated names below
+/// it, without control characters. The form is checked as text so a record reads the
+/// same on every platform.
+fn is_path_base(base: &str) -> bool {
+    base == "."
+        || (!has_absolute_form(base)
+            && base
+                .split('/')
+                .all(|name| !matches!(name, "" | "." | "..") && !name.contains('\\'))
+            && !base.bytes().any(|byte| byte < b' '))
+}
+
+/// Whether a stored path names a root, a drive or a UNC share on any platform.
+fn has_absolute_form(path: &str) -> bool {
+    let mut bytes = path.bytes();
+    let first = bytes.next();
+    matches!(first, Some(b'/' | b'\\'))
+        || (first.is_some_and(|byte| byte.is_ascii_alphabetic()) && bytes.next() == Some(b':'))
+}
+
+/// The stored form of `directory` below `root`, both already physical.
+#[must_use]
+pub fn repository_relative_base(root: &Path, directory: &Path) -> Option<String> {
+    let names = directory
+        .strip_prefix(root)
+        .ok()?
+        .iter()
+        .map(|name| name.to_str())
+        .collect::<Option<Vec<_>>>()?;
+    let base = if names.is_empty() {
+        ".".to_owned()
+    } else {
+        names.join("/")
+    };
+    is_path_base(&base).then_some(base)
+}
+
+/// Refuse a stored document path that lies outside the physical `root`, whether
+/// by its spelling or through a link. A missing file stays the caller's read error.
+pub fn require_inside_root(root: &Path, base: &str, path: &str) -> Result<(), String> {
+    if root
+        .join(base)
+        .canonicalize()
+        .is_ok_and(|physical| !physical.starts_with(root))
+    {
+        return Err(format!(
+            "approval path_base '{base}' lies outside the repository root"
+        ));
+    }
+    let mut depth = if base == "." {
+        0
+    } else {
+        base.split('/').count()
+    };
+    let climbs = path.split(['/', '\\']).any(|name| match name {
+        "" | "." => false,
+        ".." if depth == 0 => true,
+        ".." => {
+            depth -= 1;
+            false
+        }
+        _ => {
+            depth += 1;
+            false
+        }
+    });
+    let linked_out = root
+        .join(base)
+        .join(path)
+        .canonicalize()
+        .is_ok_and(|physical| !physical.starts_with(root));
+    if has_absolute_form(path) || climbs || linked_out {
+        return Err(format!(
+            "approval document path '{path}' lies outside the repository root"
+        ));
+    }
+    Ok(())
+}
+
+#[must_use]
+pub fn resolve_io_path(path: &Path, path_base: Option<&Path>) -> PathBuf {
+    match path_base {
+        Some(base) if path.is_relative() => base.join(path),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// Refuse a contextual document record whose target or input leaves `root`.
+pub fn require_document_paths_inside_root(
+    record: &ApprovalRecord,
+    inputs: &DocumentGenerationInputs,
+    root: &Path,
+) -> Result<(), String> {
+    let Some(base) = &record.path_base else {
+        return Ok(());
+    };
+    inputs
+        .glossary
+        .iter()
+        .chain(&inputs.evidence)
+        .map(|input| input.path.as_str())
+        .chain([record.target.path.as_str()])
+        .try_for_each(|stored| require_inside_root(root, base, stored))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -177,6 +358,8 @@ impl VersionedApprovalRecord {
             Self::V1(record) => record.clone(),
             Self::V2(record) => ApprovalRecord {
                 schema: unsigned_schema_for(&record.schema).to_owned(),
+                path_base: record.path_base.clone(),
+                render_source: record.render_source.clone(),
                 spec: record.spec.clone(),
                 target: record.target.clone(),
                 approval: record.approval.clone(),
@@ -186,13 +369,13 @@ impl VersionedApprovalRecord {
 }
 
 /// The unsigned schema a signed schema's own record binds to: v2 -> v1,
-/// v4 -> v3. Falls back to v1 for any other value (`validate_record_v2`
+/// v4 -> v3, v6 -> v5. Falls back to v1 for any other value (`validate_record_v2`
 /// rejects those before this is ever reached).
 fn unsigned_schema_for(signed_schema: &str) -> &'static str {
-    if signed_schema == APPROVAL_SCHEMA_V4 {
-        APPROVAL_SCHEMA_V3
-    } else {
-        APPROVAL_SCHEMA
+    match signed_schema {
+        APPROVAL_SCHEMA_V6 => APPROVAL_SCHEMA_V5,
+        APPROVAL_SCHEMA_V4 => APPROVAL_SCHEMA_V3,
+        _ => APPROVAL_SCHEMA,
     }
 }
 
@@ -205,7 +388,7 @@ impl TrustStore {
     pub fn load(paths: &[PathBuf]) -> Result<Self, String> {
         let mut keys = BTreeMap::new();
         for path in paths {
-            let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+            let source = crate::spec_loading::read_input_text(path)?;
             let key = VerifyingKey::from_public_key_pem(&source).map_err(|error| {
                 format!("invalid Ed25519 public key '{}': {error}", path.display())
             })?;
@@ -269,11 +452,16 @@ pub fn sha256_bytes(bytes: &[u8]) -> String {
     format!("sha256:{:x}", hasher.finalize())
 }
 
-pub fn reviewed_artifact_digest(record: &ApprovalRecord) -> Result<Option<String>, String> {
+pub fn reviewed_artifact_digest(
+    record: &ApprovalRecord,
+    root: Option<&Path>,
+) -> Result<Option<String>, String> {
     if record.target.kind != "requirements_document" {
         return Ok(None);
     }
-    let reviewed = std::fs::read(&record.target.path).map_err(|error| error.to_string())?;
+    let reviewed = std::fs::read(record.io_path(root, &record.target.path)).map_err(|error| {
+        crate::spec_loading::read_failure_message(Path::new(&record.target.path), &error)
+    })?;
     Ok(Some(sha256_bytes(&reviewed)))
 }
 
@@ -311,7 +499,7 @@ fn signature_payload(record: &ApprovalRecordV2) -> Result<Vec<u8>, String> {
         .and_then(Value::as_object_mut)
         .expect("serialized v2 signature is an object")
         .remove("value");
-    // Domain-separate by the record's own schema (v2 or v4) rather than a
+    // Domain-separate by the record's own schema (v2, v4 or v6) rather than a
     // hardcoded v2 constant, so a v4 signature can never verify against a v2
     // payload or vice versa. Byte-identical to before for existing v2
     // records, since `record.schema` is already `"fslc.approval.v2"` there.
@@ -464,11 +652,15 @@ fn normalize_number_key(source: &str, quote: &str, key: &str, replacement: &str)
 /// Comments, whitespace, source paths, and line movement do not invalidate an
 /// approval. Imported/composed specifications are covered because the resolver
 /// expands them before `kernel_ast_v1` is projected.
-pub fn spec_digest(path: &Path) -> Result<String, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-    let kernel =
-        fsl_core::parse_kernel_source(&source, &resolver).map_err(|error| error.to_string())?;
+pub fn spec_digest_from_source(path: &Path, source: &str) -> Result<String, String> {
+    let resolver =
+        crate::spec_loading::dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
+    let kernel = fsl_core::parse_kernel_source_with_options(
+        source,
+        &resolver,
+        crate::process::parse_options(),
+    )
+    .map_err(|error| error.to_string())?;
     spec_digest_kernel(&kernel)
 }
 
@@ -510,6 +702,86 @@ fn git_output(cwd: &Path, arguments: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
+/// What `git rev-parse --local-env-vars` lists: these point Git away from `cwd`.
+const GIT_LOCAL_VARIABLES: [&str; 15] = [
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CONFIG",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_GRAFT_FILE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_SHALLOW_FILE",
+    "GIT_WORK_TREE",
+];
+
+/// Run Git for a v5 or v6 record, answering for `cwd` whatever the caller's
+/// environment, so a hook's `GIT_DIR` cannot choose the checkout.
+fn checkout_git(cwd: &Path, arguments: &[&str]) -> Result<String, String> {
+    let mut command = Command::new("git");
+    command.args(arguments).current_dir(cwd);
+    for variable in GIT_LOCAL_VARIABLES {
+        command.env_remove(variable);
+    }
+    let output = command.output().map_err(|error| {
+        format!("a v5 or v6 approval record needs Git: cannot run git: {error}")
+    })?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// The checkout holding a spec's path, for a v5 or v6 record, and the spec's path in it.
+pub struct SpecCheckout {
+    pub root: PathBuf,
+    pub relative: String,
+}
+
+/// Take the root from the directory the spec's path names, not from where a final
+/// symlink leads, so a link into a nested repository cannot choose other files. The
+/// error carries its envelope kind.
+pub fn spec_checkout(path: &Path) -> Result<SpecCheckout, (&'static str, String)> {
+    let io = |error: String| (crate::spec_loading::IO_KIND, error);
+    let physical = |path: &Path| path.canonicalize().map_err(|error| io(error.to_string()));
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let root = PathBuf::from(
+        checkout_git(&physical(parent)?, &["rev-parse", "--show-toplevel"]).map_err(io)?,
+    );
+    let root = physical(&root)?;
+    let relative = physical(path)?
+        .strip_prefix(&root)
+        .map_err(|_| {
+            (
+                "semantics",
+                format!(
+                    "spec '{}' lies outside the Git repository that holds its path",
+                    path.display()
+                ),
+            )
+        })?
+        .to_string_lossy()
+        .replace('\\', "/");
+    Ok(SpecCheckout { root, relative })
+}
+
+/// Require a v5 or v6 record's recorded commit and spec, and that the spec is tracked.
+pub fn verify_checkout_baseline(root: &Path, relative: &str, commit: &str) -> Result<(), String> {
+    checkout_git(root, &["ls-files", "--error-unmatch", "--", relative])?;
+    checkout_git(root, &["cat-file", "-e", &format!("{commit}^{{commit}}")])?;
+    checkout_git(root, &["cat-file", "-e", &format!("{commit}:{relative}")])?;
+    Ok(())
+}
+
 /// Return `(repository root, repository-relative spec path, HEAD commit)`.
 pub fn git_location(path: &Path) -> Result<(PathBuf, String, String), String> {
     let absolute = path.canonicalize().map_err(|error| error.to_string())?;
@@ -529,19 +801,21 @@ pub fn git_location(path: &Path) -> Result<(PathBuf, String, String), String> {
     Ok((root, relative, commit))
 }
 
-/// Resolve the Git baseline and require all tracked content to match it.
-pub fn git_binding(path: &Path) -> Result<(PathBuf, String, String), String> {
-    let (root, relative, commit) = git_location(path)?;
-    let status = Command::new("git")
-        .args(["diff", "--quiet", "HEAD", "--"])
-        .current_dir(&root)
-        .status()
-        .map_err(|error| error.to_string())?;
-    if !status.success() {
-        return Err(
+/// Resolve the Git baseline of a new record and require all tracked content to match
+/// it. The error carries its envelope kind.
+pub fn git_binding(path: &Path) -> Result<(PathBuf, String, String), (&'static str, String)> {
+    let SpecCheckout { root, relative } = spec_checkout(path)?;
+    let io = |error: String| (crate::spec_loading::IO_KIND, error);
+    checkout_git(&root, &["ls-files", "--error-unmatch", "--", &relative]).map_err(io)?;
+    let commit = checkout_git(&root, &["rev-parse", "HEAD"]).map_err(io)?;
+    // `diff --quiet` reports a difference by its exit status, so its stderr is empty.
+    if let Err(error) = checkout_git(&root, &["diff", "--quiet", "HEAD", "--"]) {
+        return Err(io(if error.is_empty() {
             "approval creation requires a clean tracked worktree so the baseline can be reconstructed"
-                .to_owned(),
-        );
+                .to_owned()
+        } else {
+            error
+        }));
     }
     Ok((root, relative, commit))
 }
@@ -556,9 +830,10 @@ pub fn verify_git_baseline(repo: &Path, relative_path: &str, commit: &str) -> Re
 }
 
 pub fn read_record(path: &Path) -> Result<ApprovalRecord, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let record: ApprovalRecord = serde_json::from_str(&source)
+    let source = crate::spec_loading::read_input_text(path)?;
+    let record: LegacyApprovalRecord = serde_json::from_str(&source)
         .map_err(|error| format!("invalid approval record: {error}"))?;
+    let record = record.into();
     validate_record(&record)?;
     Ok(record)
 }
@@ -569,12 +844,25 @@ pub fn read_versioned_record(path: &Path) -> Result<VersionedApprovalRecord, Str
         schema: String,
     }
 
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let source = crate::spec_loading::read_input_text(path)?;
     let header: SchemaHeader = serde_json::from_str(&source)
         .map_err(|error| format!("invalid approval record: {error}"))?;
     match header.schema.as_str() {
         APPROVAL_SCHEMA | APPROVAL_SCHEMA_V3 => read_record(path).map(VersionedApprovalRecord::V1),
+        APPROVAL_SCHEMA_V5 => {
+            let record: ApprovalRecord = serde_json::from_str(&source)
+                .map_err(|error| format!("invalid approval record: {error}"))?;
+            validate_record(&record)?;
+            Ok(VersionedApprovalRecord::V1(record))
+        }
         APPROVAL_SCHEMA_V2 | APPROVAL_SCHEMA_V4 => {
+            let record: LegacyApprovalRecordV2 = serde_json::from_str(&source)
+                .map_err(|error| format!("invalid approval record: {error}"))?;
+            let record = record.into();
+            validate_record_v2(&record)?;
+            Ok(VersionedApprovalRecord::V2(record))
+        }
+        APPROVAL_SCHEMA_V6 => {
             let record: ApprovalRecordV2 = serde_json::from_str(&source)
                 .map_err(|error| format!("invalid approval record: {error}"))?;
             validate_record_v2(&record)?;
@@ -589,8 +877,33 @@ pub fn validate_record(record: &ApprovalRecord) -> Result<(), String> {
     let is_document = match record.schema.as_str() {
         APPROVAL_SCHEMA => false,
         APPROVAL_SCHEMA_V3 => true,
+        APPROVAL_SCHEMA_V5 => record.target.kind == "requirements_document",
         schema => return Err(format!("unsupported approval schema '{schema}'")),
     };
+    if record.schema == APPROVAL_SCHEMA_V5 {
+        if !record.path_base.as_deref().is_some_and(is_path_base) {
+            return Err(
+                "approval record requires a repository-relative path_base using '/'; \
+                 a record with an absolute one came from an earlier build, so create it again"
+                    .to_owned(),
+            );
+        }
+        if record.render_source.as_deref().is_none_or(str::is_empty) {
+            return Err("approval record requires a nonempty render_source".to_owned());
+        }
+        if let GenerationInputs::Document(inputs) = &record.target.inputs {
+            let stored = inputs.glossary.iter().chain(&inputs.evidence);
+            if has_absolute_form(&record.target.path)
+                || stored
+                    .into_iter()
+                    .any(|input| has_absolute_form(&input.path))
+            {
+                return Err("approval record requires relative document paths".to_owned());
+            }
+        }
+    } else if record.path_base.is_some() || record.render_source.is_some() {
+        return Err("legacy approval records must not carry path context".to_owned());
+    }
     if record.spec.digest_algorithm != SPEC_DIGEST_ALGORITHM {
         return Err(format!(
             "unsupported spec digest algorithm '{}'",
@@ -735,10 +1048,13 @@ pub fn validate_record_v2(record: &ApprovalRecordV2) -> Result<(), String> {
     let unsigned_schema = match record.schema.as_str() {
         APPROVAL_SCHEMA_V2 => APPROVAL_SCHEMA,
         APPROVAL_SCHEMA_V4 => APPROVAL_SCHEMA_V3,
+        APPROVAL_SCHEMA_V6 => APPROVAL_SCHEMA_V5,
         schema => return Err(format!("unsupported approval schema '{schema}'")),
     };
     validate_record(&ApprovalRecord {
         schema: unsigned_schema.to_owned(),
+        path_base: record.path_base.clone(),
+        render_source: record.render_source.clone(),
         spec: record.spec.clone(),
         target: record.target.clone(),
         approval: record.approval.clone(),
@@ -786,7 +1102,7 @@ fn is_canonical_utc_timestamp(value: &str) -> bool {
     let number = |start: usize, end: usize| {
         bytes[start..end].iter().try_fold(0_u32, |value, byte| {
             byte.is_ascii_digit()
-                .then_some(value * 10 + u32::from(*byte - b'0'))
+                .then(|| value * 10 + u32::from(*byte - b'0'))
         })
     };
     let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
@@ -813,25 +1129,27 @@ fn is_canonical_utc_timestamp(value: &str) -> bool {
 pub fn write_record(path: &Path, record: &ApprovalRecord) -> Result<(), String> {
     let mut encoded = serde_json::to_string_pretty(record).map_err(|error| error.to_string())?;
     encoded.push('\n');
-    std::fs::write(path, encoded).map_err(|error| error.to_string())
+    crate::output_publication::publish(path, encoded).map_err(|error| error.to_string())
 }
 
 pub fn sign_record(record: ApprovalRecord, private_key: &Path) -> Result<ApprovalRecordV2, String> {
     validate_record(&record)?;
-    let source = std::fs::read_to_string(private_key).map_err(|error| error.to_string())?;
+    let source = crate::spec_loading::read_input_text(private_key)?;
     let key = SigningKey::from_pkcs8_pem(&source).map_err(|error| {
         format!(
             "invalid Ed25519 private key '{}': {error}",
             private_key.display()
         )
     })?;
-    let signed_schema = if record.schema == APPROVAL_SCHEMA_V3 {
-        APPROVAL_SCHEMA_V4
-    } else {
-        APPROVAL_SCHEMA_V2
+    let signed_schema = match record.schema.as_str() {
+        APPROVAL_SCHEMA_V5 => APPROVAL_SCHEMA_V6,
+        APPROVAL_SCHEMA_V3 => APPROVAL_SCHEMA_V4,
+        _ => APPROVAL_SCHEMA_V2,
     };
     let mut signed = ApprovalRecordV2 {
         schema: signed_schema.to_owned(),
+        path_base: record.path_base,
+        render_source: record.render_source,
         spec: record.spec,
         target: record.target,
         approval: record.approval,
@@ -851,7 +1169,55 @@ pub fn write_record_v2(path: &Path, record: &ApprovalRecordV2) -> Result<(), Str
     validate_record_v2(record)?;
     let mut encoded = serde_json::to_string_pretty(record).map_err(|error| error.to_string())?;
     encoded.push('\n');
-    std::fs::write(path, encoded).map_err(|error| error.to_string())
+    crate::output_publication::publish(path, encoded).map_err(|error| error.to_string())
+}
+
+/// Renderer identity of the scenario JSON artifact, recorded as
+/// `"<id>/<version>"` in `target.generator_version`. The scenario envelope is
+/// built here in fslc rather than in fsl-tools. Bump the version by hand when
+/// the envelope's field layout or presentation changes for the same
+/// verification result; do not bump it for a crate release or a changed
+/// verifier result.
+pub const SCENARIOS_RENDERER: &str = "fslc-scenarios-renderer";
+/// See [`SCENARIOS_RENDERER`].
+pub const SCENARIOS_RENDERER_VERSION: &str = "1.0.0";
+
+/// The `target.generator_version` a new record of `kind` writes and the value
+/// `evaluate` compares it with: `"<renderer-id>/<semver>"` from one
+/// per-kind constant, independent of the crate version. `None` for a kind no
+/// approval record admits.
+#[must_use]
+pub fn renderer_version(kind: &str) -> Option<String> {
+    let (renderer, version) = match kind {
+        "ledger" => (
+            fsl_tools::LEDGER_RENDERER,
+            fsl_tools::LEDGER_RENDERER_VERSION,
+        ),
+        "html" => (fsl_tools::HTML_RENDERER, fsl_tools::HTML_RENDERER_VERSION),
+        "scenarios" => (SCENARIOS_RENDERER, SCENARIOS_RENDERER_VERSION),
+        "requirements_document" => (
+            fsl_tools::DOCUMENT_RENDERER,
+            fsl_tools::DOCUMENT_RENDERER_VERSION,
+        ),
+        _ => return None,
+    };
+    Some(format!("{renderer}/{version}"))
+}
+
+/// A record written before per-kind renderer versions stored the bare crate
+/// version (`^\d+\.\d+\.\d+$`, ASCII digits). Such a value carries no
+/// renderer identity, so `evaluate` skips only its `renderer_changed`
+/// comparison; every other value, including non-semver strings, is compared.
+#[must_use]
+pub fn is_legacy_crate_version(value: &str) -> bool {
+    let mut parts = 0;
+    for part in value.split('.') {
+        if part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+        parts += 1;
+    }
+    parts == 3
 }
 
 #[must_use]
@@ -860,7 +1226,6 @@ pub fn evaluate(
     record_path: &Path,
     current_spec_digest: &str,
     current_artifact_digest: &str,
-    current_generator_version: &str,
     current_claim_set_digest: Option<&str>,
     current_reviewed_digest: Option<&str>,
 ) -> Value {
@@ -871,7 +1236,12 @@ pub fn evaluate(
     if record.target.digest != current_artifact_digest {
         reasons.push("rendering_changed");
     }
-    if record.target.generator_version != current_generator_version {
+    // A legacy crate version is still bound by every digest above and below;
+    // only the renderer identity it never recorded is not compared.
+    if !is_legacy_crate_version(&record.target.generator_version)
+        && renderer_version(&record.target.kind).as_deref()
+            != Some(record.target.generator_version.as_str())
+    {
         reasons.push("renderer_changed");
     }
     if let (Some(recorded), Some(current)) =
@@ -966,12 +1336,53 @@ pub fn now_rfc3339() -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_canonical_utc_timestamp, normalized_artifact, normalized_ast, now_rfc3339,
-        requirement_ids, sha256_bytes, shell_word,
+        is_canonical_utc_timestamp, is_legacy_crate_version, normalized_artifact, normalized_ast,
+        now_rfc3339, renderer_version, requirement_ids, sha256_bytes, shell_word,
     };
     use fsl_core::{Annotation, FsResolver, action_target, build_model, parse_kernel_source};
     use fsl_syntax::{SourcePos, Span};
     use serde_json::{Value, json};
+
+    #[test]
+    fn legacy_crate_version_is_exactly_three_ascii_digit_groups() {
+        for legacy in ["4.12.0", "0.0.0", "10.200.3000"] {
+            assert!(is_legacy_crate_version(legacy), "{legacy}");
+        }
+        for other in [
+            "",
+            "4",
+            "4.12",
+            "4.12.0.1",
+            "v4.12.0",
+            "4.12.0-rc.1",
+            " 4.12.0",
+            "4.12.0 ",
+            "4..12",
+            ".4.12",
+            "4.12.",
+            "４.12.0",
+            "fslc-ledger-renderer/1.0.0",
+        ] {
+            assert!(!is_legacy_crate_version(other), "{other:?}");
+        }
+    }
+
+    #[test]
+    fn renderer_versions_are_per_kind_and_never_legacy_shaped() {
+        let versions = ["ledger", "html", "scenarios", "requirements_document"]
+            .map(|kind| renderer_version(kind).expect("admitted kind"));
+        assert_eq!(
+            versions,
+            [
+                "fslc-ledger-renderer/1.0.0",
+                "fslc-html-renderer/1.0.0",
+                "fslc-scenarios-renderer/1.0.0",
+                "fslc-document-renderer/1.3.0",
+            ]
+        );
+        assert!(versions.iter().all(|value| !is_legacy_crate_version(value)));
+        assert_eq!(renderer_version("unknown"), None);
+    }
 
     #[test]
     fn normalized_ast_removes_locations_but_preserves_metadata() {

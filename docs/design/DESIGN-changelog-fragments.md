@@ -538,9 +538,11 @@ detects the failure it exists for, alongside its accepting fixture.
    sort components and leaves the class of defect this control exists to catch — deterministic but
    nonconforming — open in the other two.
 4. **Unaggregated at release, and post-migration direct edits.** A guard in
-   `.github/workflows/release.yml` before its "Extract release notes" step: fragments still
-   present under `changelog.d/` at tag time → exit 1, `stale-fragments-present: <files>`. The
-   workflow's existing `test -s release-notes.md` stays as the second net. Continuously after
+   `.github/workflows/release.yml`'s `publish` job before its "Build the release notes" step:
+   fragments still present under `changelog.d/` at tag time → exit 1,
+   `stale-fragments-present: <files>`. `tools/release-notes.sh build` stays as the second net:
+   it fails on a missing section, a body with no non-whitespace character, or one over GitHub's
+   limit (amendment under "Single authoritative source, preserved"). Continuously after
    migration, the merge-readiness checker (migration site 6 below) — the same pre-merge job
    that runs control 1 on every pull request — also rejects a pull-request diff that **adds or
    deletes** any line inside `CHANGELOG.md`'s `## [Unreleased]` body → exit 1,
@@ -784,6 +786,33 @@ generated **compatibility snapshots** and never applied to them — and hand edi
 over `## [<version>]` headings plus `test -s`) is never changed, which is what makes the
 rollback below trivial.
 
+**Amendment (v5.0.0 release-body limit).** The consumer has since moved into
+`tools/release-notes.sh build`. The 5.0.0 section aggregated 232 fragments into
+225,185 characters. GitHub rejects a release body over 125,000 characters, and the
+inline extractor ran only at tag time, in `publish`. The script extracts the same
+section with the same `## [<version>]` prefix match. It replaces `test -s` with a
+non-whitespace check and a 125,000-byte limit. It also runs in `assemble`, so a
+`workflow_dispatch` dry run reaches it. Control 4's `check-stale` guard still runs
+before it in `publish`, now ahead of the step named "Build the release notes"
+rather than "Extract release notes". When `docs/release-notes/vX.Y.Z.md` exists,
+the body is that summary plus a link to the section, so the summary is not a
+second record of any change. The section stays the single authoritative record,
+and the fallback without a summary is the old body byte for byte. The rollback
+below is therefore unaffected (`docs/design/RELEASE.md` §1, step 8).
+
+**Amendment (#1763, release-section check).** The controls above validate
+fragments, not the section they become. The 5.0.0 section, edited by hand after
+aggregation (#1732, #1733), listed breaking removals under `Fixed`, repeated
+#1170, #1437 and #1440 within one category, and stated several changes twice as
+`Changed` and `Fixed`. `tools/aggregate_changelog.sh check-section` now applies
+the fragment rules to each released section from 5.0.0 on: a declared category
+lead with an id, the declared category order, one (id, category) pair, and a
+`breaking` or `breaking removal` label only under `Changed`. Within a category
+it does not check id order, which the 5.0.0 section does not keep. Older
+sections predate these rules and fail them, so they are not checked. The check
+runs in the merge-readiness automation lane; `selftest` holds its accepting and
+rejecting fixtures.
+
 ## Migration: six named sites
 
 1. New `tools/aggregate_changelog` (stdlib-only) plus executable tests for all six controls,
@@ -873,7 +902,7 @@ unchanged. In particular, the **section-alignment enforcement between `docs/manu
 - `.github/workflows/site-reference-freshness.yml` runs all three exact test files on every
   pull request with no path filter; its `site reference freshness` context is required
   on the `main safety and CI` ruleset (`.github/ruleset-contract.json`;
-  `docs/design/DESIGN-ci.md`, "Required pre-merge contexts, and why the merge queue was rejected").
+  `docs/design/DESIGN-ci.md`, "Required pre-merge contexts and merge queue adoption").
   A stale generated page, a `docs/manual/LANGUAGE.ja.md` misalignment that makes the generator refuse to produce one, or a broken bounded manual-chain contract therefore blocks merge.
 
 None of these read `CHANGELOG.md` or the future `changelog.d/`, and C1 writes to nothing they

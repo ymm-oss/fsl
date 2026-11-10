@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 
 use fsl_syntax::{
-    ActionTarget, Binder, ConditionalSpans, CorrespondenceOrigin, Expr, MetaTag, QualifiedName,
+    ActionTarget, Binder, ConditionalSpans, CorrespondenceOrigin, Expr, QualifiedName,
     RefinementItem, RefinementParam, RequirementAction, RequirementActionItem,
     RequirementBlockItem, RequirementsItem, Span, SurfaceDocument, SurfaceRefinement,
 };
 
 use crate::recursion;
 use crate::{
-    ActionDef, FileResolver, KernelModel, ParamDef, TypeDef, TypeRef, build_model,
-    parse_abstraction_kernel_source_with_bounds,
+    ActionDef, FileResolver, FslValue, IndexedReplacements, KernelModel, LeadsToDef, ParamDef,
+    TypeDef, TypeRef, build_model, parse_abstraction_kernel_source_with_bounds_with_options,
 };
 
 #[derive(Clone, Debug)]
@@ -95,10 +95,25 @@ pub struct ImplementsContract {
     pub refinement: Refinement,
 }
 
+/// Distinguish statically ill-typed mappings from dependency and other failures.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RefinementErrorKind {
+    Type,
+    Other,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RefinementError {
     pub message: String,
     pub span: Option<Span>,
+    pub kind: RefinementErrorKind,
+}
+
+impl RefinementError {
+    fn type_error(mut self) -> Self {
+        self.kind = RefinementErrorKind::Type;
+        self
+    }
 }
 
 impl fmt::Display for RefinementError {
@@ -121,9 +136,31 @@ pub fn parse_refinement(
     implementation: &KernelModel,
     abstraction: &KernelModel,
 ) -> Result<Refinement, RefinementError> {
-    let document = fsl_syntax::parse_surface_document(source).map_err(|error| RefinementError {
-        message: error.message,
-        span: Some(error.span),
+    parse_refinement_with_options(
+        source,
+        implementation,
+        abstraction,
+        &fsl_syntax::ParseOptions::stable(),
+    )
+}
+
+/// [`parse_refinement`] under explicit [`fsl_syntax::ParseOptions`].
+///
+/// # Errors
+///
+/// As [`parse_refinement`].
+pub fn parse_refinement_with_options(
+    source: &str,
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<Refinement, RefinementError> {
+    let document = fsl_syntax::parse_surface_document_with(source, options).map_err(|error| {
+        RefinementError {
+            message: error.message,
+            span: Some(error.span),
+            kind: RefinementErrorKind::Other,
+        }
     })?;
     let SurfaceDocument::Refinement(surface) = document else {
         return Err(refinement_error("expected refinement document", None));
@@ -146,7 +183,15 @@ fn build_refinement(
     let mut action_correspondences = BTreeMap::new();
     let mut action_sources = Vec::new();
     let mut progress = Vec::new();
-    let type_context = refinement_type_context(implementation, abstraction);
+    let preserve_progress = surface
+        .items
+        .iter()
+        .any(|item| matches!(item, RefinementItem::PreserveProgress { .. }));
+    let type_context = merge_refinement_model(implementation, abstraction, preserve_progress)
+        .map_err(|mut error| {
+            error.span = Some(surface.span);
+            error
+        })?;
     for item in surface.items {
         match item {
             RefinementItem::Impl(name) => impl_name = Some(name),
@@ -319,11 +364,19 @@ fn build_refinement(
         }
     }
     for declaration in &progress {
-        if !abstraction
+        if let Some(property) = abstraction
             .leadstos
             .iter()
-            .any(|property| property.name == declaration.leads_to)
+            .find(|property| property.name == declaration.leads_to)
         {
+            pull_refinement_leadsto(
+                implementation,
+                abstraction,
+                &state_maps,
+                property,
+                declaration.span,
+            )?;
+        } else {
             return Err(refinement_error(
                 format!("unknown abstract leadsTo '{}'", declaration.leads_to),
                 Some(declaration.span),
@@ -346,6 +399,232 @@ fn build_refinement(
         action_correspondences,
         progress,
     })
+}
+
+fn progress_collision(
+    expr: &Expr,
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    maps: &BTreeMap<String, StateMap>,
+) -> Option<String> {
+    recursion::guard(|| {
+        let binding = match expr {
+            Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => {
+                Some(crate::binder_name(binder))
+            }
+            Expr::Is {
+                pattern: fsl_syntax::Pattern::Some(name),
+                ..
+            } => Some(name.as_str()),
+            _ => None,
+        };
+        if let Some(name) = binding
+            && crate::typecheck::reject_constant_shadow(name, implementation.consts.keys()).is_err()
+        {
+            return Some(name.to_owned());
+        }
+        if let Expr::Var(name) = expr
+            && abstraction.consts.contains_key(name)
+            && maps.contains_key(name)
+        {
+            return Some(name.clone());
+        }
+        let mut found = None;
+        let _ = crate::visit_expr_children(expr, &mut |child| {
+            found = found
+                .take()
+                .or_else(|| progress_collision(child, implementation, abstraction, maps));
+            Ok(())
+        });
+        found
+    })
+}
+
+fn progress_pattern_error(expr: &Expr, maps: &BTreeMap<String, StateMap>) -> Option<String> {
+    let used = crate::free_vars(expr);
+    let active = maps.iter().filter(|(key, _)| used.contains(*key));
+    let mut patterns = HashSet::new();
+    crate::collect_pattern_names(expr, &mut patterns);
+    let mut occupied = crate::bound_vars(expr);
+    occupied.extend(patterns.iter().cloned());
+    if let Some(name) = patterns
+        .into_iter()
+        .filter(|name| {
+            active.clone().any(|(_, map)| {
+                map.binder.as_ref().map(crate::binder_name) != Some(name.as_str())
+                    && crate::free_vars(&map.expr).contains(name)
+            })
+        })
+        .min()
+    {
+        return Some(format!(
+            "rename the abstract pattern binder '{name}' to avoid mapped-name capture"
+        ));
+    }
+    for (_, map) in active {
+        let mut introduced = HashSet::new();
+        crate::collect_pattern_names(&map.expr, &mut introduced);
+        if let Some(name) = introduced.intersection(&occupied).min() {
+            return Some(format!(
+                "rename the mapping pattern binder '{name}' to avoid capture"
+            ));
+        }
+        occupied.extend(introduced);
+    }
+    None
+}
+
+fn unpullable_progress_map(
+    expr: &Expr,
+    indexed: &IndexedReplacements,
+    bound: &HashSet<String>,
+) -> Option<String> {
+    recursion::guard(|| {
+        let binding = match expr {
+            Expr::Quantified { binder, body, .. } => Some((binder, Some(body.as_ref()))),
+            Expr::Aggregate { binder, value, .. } => Some((binder, value.as_deref())),
+            _ => None,
+        };
+        if let Some((binder, body)) = binding {
+            // Domains are outside the new binding; filters and bodies are inside.
+            let domain = match binder {
+                Binder::Typed { .. } => None,
+                Binder::Range { lo, hi, .. } => unpullable_progress_map(lo, indexed, bound)
+                    .or_else(|| unpullable_progress_map(hi, indexed, bound)),
+                Binder::Collection { collection, .. } => {
+                    unpullable_progress_map(collection, indexed, bound)
+                }
+            };
+            if domain.is_some() {
+                return domain;
+            }
+            let mut local = bound.clone();
+            local.insert(crate::binder_name(binder).to_owned());
+            return crate::model::binder_scope(binder)
+                .1
+                .and_then(|filter| unpullable_progress_map(filter, indexed, &local))
+                .or_else(|| body.and_then(|body| unpullable_progress_map(body, indexed, &local)));
+        }
+        match expr {
+            Expr::Var(name) => {
+                return (indexed.contains_key(name) && !bound.contains(name)).then(|| name.clone());
+            }
+            Expr::Index(base, index)
+                if matches!(base.as_ref(), Expr::Var(name)
+                    if indexed.contains_key(name) && !bound.contains(name)) =>
+            {
+                // Only the direct base is replaced by an element template.
+                return unpullable_progress_map(index, indexed, bound);
+            }
+            Expr::Binary { op, left, right } => {
+                return unpullable_progress_map(left, indexed, bound).or_else(|| {
+                    let local =
+                        crate::compose::pattern_scope(left, bound, &HashSet::new(), Some(op));
+                    unpullable_progress_map(right, indexed, &local)
+                });
+            }
+            _ => {}
+        }
+        let mut found = None;
+        let _ = crate::visit_expr_children(expr, &mut |child| {
+            found = found
+                .take()
+                .or_else(|| unpullable_progress_map(child, indexed, bound));
+            Ok(())
+        });
+        found
+    })
+}
+
+/// Pull a progress property through state maps without changing its abstract scope.
+///
+/// # Errors
+/// Returns a located error for an unpullable whole-map read or if preserving
+/// binder scope would require public renaming.
+///
+/// # Panics
+/// Panics if model constants or the internal substitution wrapper violate their invariants.
+pub fn pull_refinement_leadsto(
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    state_maps: &BTreeMap<String, StateMap>,
+    property: &LeadsToDef,
+    span: Span,
+) -> Result<LeadsToDef, RefinementError> {
+    let mut replacements = HashMap::new();
+    for (name, value) in &abstraction.consts {
+        let literal = match value {
+            FslValue::Int(value) => Expr::Num(*value),
+            FslValue::Bool(value) => Expr::Bool(*value),
+            _ => unreachable!("constants are Int or Bool"),
+        };
+        replacements.insert(name.clone(), literal);
+    }
+    let mut indexed = IndexedReplacements::new();
+    for (name, state_map) in state_maps {
+        if let Some(binder) = &state_map.binder {
+            indexed.insert(name.clone(), (binder.clone(), state_map.expr.clone()));
+        } else {
+            replacements.insert(name.clone(), state_map.expr.clone());
+        }
+    }
+    let mut parts = vec![property.before.clone(), property.after.clone()];
+    parts.extend(property.decreases.clone());
+    let mut expr = Expr::Seq(parts);
+    for binder in property.binders.iter().rev() {
+        expr = Expr::Quantified {
+            quantifier: "forall".to_owned(),
+            binder: binder.clone(),
+            body: Box::new(expr),
+        };
+    }
+    if let Some(message) = progress_pattern_error(&expr, state_maps) {
+        return Err(refinement_error(message, Some(span)));
+    }
+    if let Some(name) = progress_collision(&expr, implementation, abstraction, state_maps) {
+        return Err(refinement_error(
+            format!("progress name '{name}' has a constant or pattern capture collision"),
+            Some(span),
+        ));
+    }
+    // Inspect abstract source only: inserted implementation expressions may
+    // legitimately read whole maps, even with the same names as abstract maps.
+    if let Some(name) = unpullable_progress_map(&expr, &indexed, &HashSet::new()) {
+        return Err(refinement_error(
+            format!("cannot pull whole-map read '{name}' through an indexed state map"),
+            Some(span),
+        )
+        .type_error());
+    }
+    expr = crate::substitute_expr_indexed(expr, &replacements, &indexed);
+    let mut pulled = property.clone();
+    pulled.binders.clear();
+    for original in &property.binders {
+        let Expr::Quantified { binder, body, .. } = expr else {
+            unreachable!()
+        };
+        let name = crate::binder_name(original);
+        if crate::binder_name(&binder) != name && crate::free_vars(&body).contains(name) {
+            return Err(refinement_error(
+                format!("progress binder '{name}' captures an implementation name"),
+                Some(span),
+            ));
+        }
+        let previous = crate::binder_name(&binder).to_owned();
+        let rename = HashMap::from([(previous, Expr::Var(name.to_owned()))]);
+        let binder = crate::rename_binder_binding(binder, name.to_owned(), &rename);
+        let body = Box::new(crate::substitute_expr(*body, &rename));
+        pulled.binders.push(binder);
+        expr = *body;
+    }
+    let Expr::Seq(mut parts) = expr else {
+        unreachable!()
+    };
+    pulled.decreases = property.decreases.as_ref().and_then(|_| parts.pop());
+    pulled.after = parts.pop().expect("after");
+    pulled.before = parts.pop().expect("before");
+    pulled.helpful.clear();
+    Ok(pulled)
 }
 
 type SurfaceEnumMapping = (
@@ -457,6 +736,7 @@ fn enum_type_members(
     span: Span,
 ) -> Result<Vec<String>, RefinementError> {
     match context.types.get(type_name) {
+        // Defense for constructed models; source empty enums fail model building first.
         Some(TypeDef::Enum { members, .. }) if members.is_empty() => Err(refinement_error(
             format!("{declaration} endpoint '{type_name}' has no members"),
             Some(span),
@@ -536,6 +816,7 @@ fn elaborate_enum_conversions_inner(
             let mut expanded = Expr::EnumMember {
                 type_name: conversion.target.clone(),
                 member: fallback_member.clone(),
+                source_bare: false,
             };
             for (source_member, target_member) in conversion.members.iter().rev() {
                 expanded = Expr::Conditional {
@@ -545,11 +826,13 @@ fn elaborate_enum_conversions_inner(
                         right: Box::new(Expr::EnumMember {
                             type_name: conversion.source.clone(),
                             member: source_member.clone(),
+                            source_bare: false,
                         }),
                     }),
                     then_expr: Box::new(Expr::EnumMember {
                         type_name: conversion.target.clone(),
                         member: target_member.clone(),
+                        source_bare: false,
                     }),
                     else_expr: Box::new(expanded),
                     spans: Box::new(ConditionalSpans {
@@ -745,21 +1028,81 @@ fn validate_refinement_expressions(
     Ok(())
 }
 
-fn refinement_type_context(implementation: &KernelModel, abstraction: &KernelModel) -> KernelModel {
+/// Combine refinement declarations without changing implementation semantics.
+/// Symmetry annotations do not change a type's definition at this boundary.
+///
+/// # Errors
+/// Returns an unlocated conflict; the frontend attaches its refinement declaration span.
+pub fn merge_refinement_model(
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    preserve_progress: bool,
+) -> Result<KernelModel, RefinementError> {
     let mut context = implementation.clone();
     for (name, definition) in &abstraction.types {
+        if let Some(existing) = implementation.types.get(name) {
+            let same = match (existing, definition) {
+                (TypeDef::Domain { lo: a, hi: b, .. }, TypeDef::Domain { lo: c, hi: d, .. }) => {
+                    a == c && b == d
+                }
+                (TypeDef::Enum { members: a, .. }, TypeDef::Enum { members: b, .. }) => a == b,
+                (TypeDef::Struct { fields: a }, TypeDef::Struct { fields: b }) => a == b,
+                _ => false,
+            };
+            if !same {
+                let public_name = implementation.names().public_type(name);
+                let message = if let Some((impl_source, abs_source)) = implementation
+                    .instance_sources
+                    .get(name)
+                    .zip(abstraction.instance_sources.get(name))
+                {
+                    let repair = if public_name.as_str() == name {
+                        format!(
+                            "align instances in the verify blocks; for verify and refine, use --instances {public_name}=N on both specs (check does not accept --instances)"
+                        )
+                    } else {
+                        "align instances in the component verify blocks".to_owned()
+                    };
+                    format!(
+                        "entity '{public_name}' has conflicting bounds in impl '{}': {impl_source} and abs '{}': {abs_source}; {repair}",
+                        implementation.name, abstraction.name
+                    )
+                } else {
+                    format!(
+                        "type '{public_name}' is declared differently in impl '{}' and abs '{}'",
+                        implementation.name, abstraction.name
+                    )
+                };
+                return Err(refinement_error(message, None).type_error());
+            }
+        }
         context
             .types
             .entry(name.clone())
             .or_insert(definition.clone());
     }
     for (name, value) in &abstraction.enum_members {
+        if preserve_progress
+            && implementation
+                .enum_members
+                .get(name)
+                .is_some_and(|existing| existing != value)
+        {
+            let public_name = implementation.names().public_identifier(name);
+            return Err(refinement_error(
+                format!(
+                    "enum member '{public_name}' is declared differently in impl '{}' and abs '{}' with preserve progress",
+                    implementation.name, abstraction.name
+                ),
+                None,
+            ).type_error());
+        }
         context
             .enum_members
             .entry(name.clone())
             .or_insert(value.clone());
     }
-    context
+    Ok(context)
 }
 
 fn validate_state_map(
@@ -789,27 +1132,34 @@ fn validate_state_map(
             | Binder::Range { name, .. }
             | Binder::Collection { name, .. } => name.clone(),
         };
-        crate::typecheck::validate_expression_type(
+        crate::typecheck::validate_expression_type_between(
             &Expr::Var(binder_name.clone()),
             &key,
             &[(binder_name.clone(), binder_ty.clone())],
             context,
+            abstraction,
         )
         .map_err(|error| invalid_state_map_at_map(state_map, "binder", &error.message))?;
         bindings.push((binder_name, binder_ty));
         expected = *value;
     }
-    crate::typecheck::validate_expression_type(&state_map.expr, &expected, &bindings, context)
-        .map_err(|error| {
-            invalid_state_map(
-                state_map,
-                "expression",
-                &error.message,
-                error
-                    .span
-                    .expect("mapped expression type errors carry source spans"),
-            )
-        })
+    crate::typecheck::validate_expression_type_between(
+        &state_map.expr,
+        &expected,
+        &bindings,
+        context,
+        abstraction,
+    )
+    .map_err(|error| {
+        invalid_state_map(
+            state_map,
+            "expression",
+            &error.message,
+            error
+                .span
+                .expect("mapped expression type errors carry source spans"),
+        )
+    })
 }
 
 fn invalid_state_map_at_map(state_map: &StateMap, part: &str, message: &str) -> RefinementError {
@@ -817,6 +1167,7 @@ fn invalid_state_map_at_map(state_map: &StateMap, part: &str, message: &str) -> 
         format!("invalid map {part} for '{}': {message}", state_map.name),
         state_map.span,
     )
+    .type_error()
 }
 
 fn invalid_state_map(
@@ -825,10 +1176,15 @@ fn invalid_state_map(
     message: &str,
     span: Span,
 ) -> RefinementError {
+    let span = state_map
+        .span
+        .filter(|_| span == crate::typecheck::unknown_span())
+        .unwrap_or(span);
     refinement_error(
         format!("invalid map {part} for '{}': {message}", state_map.name),
         Some(span),
     )
+    .type_error()
 }
 
 fn parameter_type(parameter: &ParamDef) -> TypeRef {
@@ -1048,7 +1404,13 @@ fn insert_action_correspondence(
             )
         })?;
     validate_impl_params(&source, implementation_action, context)?;
-    let target = lower_action_target(&source, implementation_action, abstraction, context)?;
+    let target = lower_action_target(
+        &source,
+        implementation_action,
+        implementation,
+        abstraction,
+        context,
+    )?;
     correspondences.insert(
         source.impl_action.clone(),
         ActionCorrespondence {
@@ -1105,6 +1467,7 @@ fn validate_impl_params(
 fn lower_action_target(
     source: &ActionCorrespondenceSource,
     implementation_action: &ActionDef,
+    implementation: &KernelModel,
     abstraction: &KernelModel,
     context: &KernelModel,
 ) -> Result<ActionCorrespondenceTarget, RefinementError> {
@@ -1141,11 +1504,12 @@ fn lower_action_target(
             for (index, (argument, parameter)) in
                 args.iter().zip(&abstraction_action.params).enumerate()
             {
-                crate::typecheck::validate_expression_type(
+                crate::typecheck::validate_expression_type_between(
                     argument,
                     &parameter_type(parameter),
                     &bindings,
                     context,
+                    abstraction,
                 )
                 .map_err(|error| {
                     refinement_error(
@@ -1158,12 +1522,15 @@ fn lower_action_target(
                         ),
                         error.span.or(Some(source.span)),
                     )
+                    .type_error()
                 })?;
             }
             if source.origin == CorrespondenceOrigin::Auto
-                && let (Some(impl_actor), Some(abs_actor)) = (
-                    action_actor(implementation_action.meta.as_ref()),
-                    action_actor(abstraction_action.meta.as_ref()),
+                && let Some((impl_actor, abs_actor)) = action_actors(
+                    implementation,
+                    implementation_action,
+                    abstraction,
+                    abstraction_action,
                 )
                 && impl_actor != abs_actor
             {
@@ -1184,17 +1551,31 @@ fn lower_action_target(
     Ok(target)
 }
 
-fn action_actor(meta: Option<&MetaTag>) -> Option<&str> {
-    meta.and_then(|tag| tag.text.as_deref())
-        .and_then(|text| text.strip_prefix("by "))
-        .map(str::trim)
-        .filter(|actor| !actor.is_empty())
+fn action_actors<'a>(
+    implementation: &'a KernelModel,
+    implementation_action: &'a ActionDef,
+    abstraction: &'a KernelModel,
+    abstraction_action: &'a ActionDef,
+) -> Option<(&'a str, &'a str)> {
+    fn actor<'a>(model: &'a KernelModel, action: &'a ActionDef) -> Option<&'a str> {
+        match model.origins().action_actor(&action.name) {
+            Some(actor) => actor.as_deref(),
+            // Only unregistered raw spec and compose actions use legacy metadata.
+            None => crate::origin::actor_from_metadata(action.meta.as_ref()),
+        }
+    }
+
+    Some((
+        actor(implementation, implementation_action)?,
+        actor(abstraction, abstraction_action)?,
+    ))
 }
 
 fn refinement_error(message: impl Into<String>, span: Option<Span>) -> RefinementError {
     RefinementError {
         message: message.into(),
         span,
+        kind: RefinementErrorKind::Other,
     }
 }
 
@@ -1235,6 +1616,89 @@ fn append_requirement_action_maps(action: &RequirementAction, items: &mut Vec<Re
     }
 }
 
+/// An enum both layers of a next-edition `implements` declare is one type
+/// of the refinement, compared member by member in order. An entity's stage
+/// enum lists its stages in the order they first appear in the `lifecycle`
+/// lines, which a reader does not see as an order; name both lists and what
+/// to change instead of the refinement's bare "declared differently".
+fn check_shared_enums(
+    next: &fsl_syntax::NextEditionRequirements,
+    implementation: &KernelModel,
+    abstraction: &KernelModel,
+    span: Span,
+) -> Result<(), RefinementError> {
+    // The merge owns acceptance; this path only enriches a rejected stage/enum diagnostic.
+    let Err(mut error) = merge_refinement_model(implementation, abstraction, false) else {
+        return Ok(());
+    };
+    error.span = Some(span);
+    for (name, definition) in &abstraction.types {
+        let (Some(TypeDef::Enum { members: here, .. }), TypeDef::Enum { members: there, .. }) =
+            (implementation.types.get(name), definition)
+        else {
+            continue;
+        };
+        if here == there {
+            continue;
+        }
+        let abs = &abstraction.name;
+        let entity = next
+            .entities
+            .iter()
+            .find(|entity| crate::naming::process_stage_enum(entity) == *name);
+        let what = entity.map_or_else(
+            || format!("enum '{name}'"),
+            |entity| format!("stage enum '{name}' of entity '{entity}'"),
+        );
+        let (noun, here_order) = entity.map_or(("members", ""), |_| {
+            (
+                "stages",
+                " (the order they first appear in the lifecycle lines)",
+            )
+        });
+        let list = |members: &[String]| members.join(", ");
+        let only = |left: &[String], right: &[String]| {
+            left.iter()
+                .filter(|member| !right.contains(member))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let (here_only, abs_only) = (only(here, there), only(there, here));
+        let message = if here_only.is_empty() && abs_only.is_empty() {
+            let fix = if entity.is_some() {
+                format!(
+                    "write the lifecycle lines so that the stages first appear in the order of '{abs}', or reorder them there"
+                )
+            } else {
+                format!("declare the members in the order of '{abs}'")
+            };
+            format!(
+                "{what} in '{}' lists its {noun} in another order than '{abs}' does: here {}{here_order}, in '{abs}' {}; implements compares them by position, so {fix}",
+                implementation.name,
+                list(here),
+                list(there),
+            )
+        } else {
+            let mut sides = Vec::new();
+            if !here_only.is_empty() {
+                sides.push(format!("only here: {}", list(&here_only)));
+            }
+            if !abs_only.is_empty() {
+                sides.push(format!("only in '{abs}': {}", list(&abs_only)));
+            }
+            format!(
+                "{what} in '{}' has other {noun} than in '{abs}': here {}{here_order}, in '{abs}' {} ({}); an enum both layers declare must list the same {noun} in the same order",
+                implementation.name,
+                list(here),
+                list(there),
+                sides.join("; "),
+            )
+        };
+        return Err(refinement_error(message, Some(span)).type_error());
+    }
+    Err(error)
+}
+
 /// Resolve a requirements-layer `implements` declaration into the abstract
 /// model and its generated refinement mapping.
 ///
@@ -1256,6 +1720,27 @@ pub fn requirements_implements(
     )
 }
 
+/// [`requirements_implements`] under `options`.
+///
+/// # Errors
+///
+/// Returns [`RefinementError`] for dependency, lowering, or mapping failures.
+pub fn requirements_implements_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    implementation: &KernelModel,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<Option<ImplementsContract>, RefinementError> {
+    requirements_implements_with_bounds_with_options(
+        source,
+        resolver,
+        implementation,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        options,
+    )
+}
+
 /// Resolve an inline `implements` contract with abstraction bounds overrides.
 ///
 /// Overrides are filtered to entity/number names declared by the abstraction
@@ -1264,7 +1749,6 @@ pub fn requirements_implements(
 /// # Errors
 ///
 /// Returns [`RefinementError`] for dependency, lowering, or mapping failures.
-#[allow(clippy::too_many_lines)]
 pub fn requirements_implements_with_bounds(
     source: &str,
     resolver: &dyn FileResolver,
@@ -1272,9 +1756,37 @@ pub fn requirements_implements_with_bounds(
     instances: &BTreeMap<String, i64>,
     values: &BTreeMap<String, (i64, i64)>,
 ) -> Result<Option<ImplementsContract>, RefinementError> {
-    let document = fsl_syntax::parse_surface_document(source).map_err(|error| RefinementError {
-        message: error.message,
-        span: Some(error.span),
+    requirements_implements_with_bounds_with_options(
+        source,
+        resolver,
+        implementation,
+        instances,
+        values,
+        &fsl_syntax::ParseOptions::stable(),
+    )
+}
+
+/// [`requirements_implements_with_bounds`] under explicit
+/// [`fsl_syntax::ParseOptions`], which also read the abstraction.
+///
+/// # Errors
+///
+/// As [`requirements_implements_with_bounds`].
+#[allow(clippy::too_many_lines)]
+pub fn requirements_implements_with_bounds_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    implementation: &KernelModel,
+    instances: &BTreeMap<String, i64>,
+    values: &BTreeMap<String, (i64, i64)>,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<Option<ImplementsContract>, RefinementError> {
+    let document = fsl_syntax::parse_surface_document_with(source, options).map_err(|error| {
+        RefinementError {
+            message: error.message,
+            span: Some(error.span),
+            kind: RefinementErrorKind::Other,
+        }
     })?;
     let SurfaceDocument::Requirements(requirements) = document else {
         return Ok(None);
@@ -1294,16 +1806,71 @@ pub fn requirements_implements_with_bounds(
     let abs_source = resolver.read(path).map_err(|error| RefinementError {
         message: error.message,
         span: Some(span),
+        kind: RefinementErrorKind::Other,
     })?;
-    let kernel =
-        parse_abstraction_kernel_source_with_bounds(&abs_source, resolver, instances, values)
-            .map_err(|error| RefinementError {
-                message: error.message,
-                span: Some(span),
-            })?;
-    let abstraction = build_model(kernel).map_err(|error| RefinementError {
-        message: error.message,
+    let kernel = parse_abstraction_kernel_source_with_bounds_with_options(
+        &abs_source,
+        resolver,
+        instances,
+        values,
+        options,
+    )
+    .map_err(|error| RefinementError {
+        // `loc` stays on the `implements`, so a repeated step input, domain
+        // declaration, value object field, struct literal field or requirements
+        // declaration in the other file has to name its own place. A domain refuses a
+        // repeated value object field while it lowers, before `build_model`; a struct
+        // literal fails to parse.
+        message: if crate::dialect::is_repeated_step_input(&error)
+            || crate::model::is_repeated_struct_field_message(&error.message)
+            || crate::domain_lowering::is_repeated_domain_declaration(&error)
+            || crate::dialect::is_repeated_declaration(&error)
+        {
+            format!(
+                "implements \"{path}\" failed to check ({} at {path}:{}:{})",
+                error.message, error.line, error.column
+            )
+        } else if error.diagnostic_code == Some(fsl_syntax::DUPLICATE_STRUCT_FIELD) {
+            format!(
+                "implements \"{path}\" failed to parse ({} at {path}:{}:{})",
+                error.message, error.line, error.column
+            )
+        } else {
+            error.message
+        },
         span: Some(span),
+        kind: RefinementErrorKind::Other,
+    })?;
+    let repeated = crate::model::duplicate_formals(&kernel);
+    let repeated_fields = crate::model::repeated_struct_fields(&kernel);
+    let abstraction = build_model(kernel).map_err(|error| {
+        // `loc` stays on the `implements`, so a repeated formal in the other
+        // file has to name its own place, as a compose wrapper does.
+        let located = repeated
+            .iter()
+            .find(|(_, message, at)| error.message == *message && error.span == Some(*at))
+            .map(|(action, message, at)| {
+                format!(
+                    "implements \"{path}\" failed to check ({action}: {message} at {path}:{}:{})",
+                    at.start.line, at.start.column
+                )
+            })
+            .or_else(|| {
+                repeated_fields
+                    .iter()
+                    .find(|(message, at)| error.message == *message && error.span == Some(*at))
+                    .map(|(message, at)| {
+                        format!(
+                            "implements \"{path}\" failed to check ({message} at {path}:{}:{})",
+                            at.start.line, at.start.column
+                        )
+                    })
+            });
+        RefinementError {
+            message: located.unwrap_or(error.message),
+            span: Some(span),
+            kind: RefinementErrorKind::Other,
+        }
     })?;
     if abstraction.name != *abs_name {
         return Err(refinement_error(
@@ -1313,6 +1880,9 @@ pub fn requirements_implements_with_bounds(
             ),
             Some(span),
         ));
+    }
+    if let Some(next) = &requirements.next {
+        check_shared_enums(next, implementation, &abstraction, span)?;
     }
     let mut items = vec![
         RefinementItem::Impl(implementation.name.clone()),
@@ -1383,6 +1953,7 @@ pub fn requirements_implements_with_bounds(
     let refinement = build_refinement(
         SurfaceRefinement {
             name: format!("{}Implements{}", implementation.name, abstraction.name),
+            span,
             items,
         },
         implementation,

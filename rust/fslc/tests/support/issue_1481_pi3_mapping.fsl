@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement PartialKeysRefines {
+  impl PartialKeys
+  abs ReviewPartialAbs
+  map c = m[1].a
+  action idle() -> idle()
+}

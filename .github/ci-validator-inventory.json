@@ -96,9 +96,11 @@
       "tier": "exempt"
     },
     {
-      "exempt_reason": "frozen-python-compatibility",
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
       "path": "tests/test_bounded_liveness_oracle.py",
-      "tier": "exempt"
+      "tier": "required"
     },
     {
       "exempt_reason": "frozen-python-compatibility",
@@ -283,9 +285,11 @@
       "tier": "exempt"
     },
     {
-      "exempt_reason": "frozen-python-compatibility",
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
       "path": "tests/test_injection_bench.py",
-      "tier": "exempt"
+      "tier": "required"
     },
     {
       "exempt_reason": "frozen-python-compatibility",
@@ -435,9 +439,18 @@
       "tier": "exempt"
     },
     {
-      "exempt_reason": "frozen-python-compatibility",
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_rust_cache_key.py",
+      "tier": "required"
+    },
+    {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
       "path": "tests/test_rust_cli_semantics.py",
-      "tier": "exempt"
+      "tier": "required"
     },
     {
       "exempt_reason": "frozen-python-compatibility",
@@ -479,6 +492,13 @@
         "tools/check-merge-readiness.sh"
       ],
       "path": "tests/test_shard_artifact_workflow.py",
+      "tier": "required"
+    },
+    {
+      "entrypoints": [
+        ".github/workflows/site-reference-freshness.yml"
+      ],
+      "path": "tests/test_site_heading_hash.py",
       "tier": "required"
     },
     {
@@ -584,6 +604,13 @@
         "tools/check-merge-readiness.sh"
       ],
       "path": "tests/test_vscode_vsix_name.py",
+      "tier": "required"
+    },
+    {
+      "entrypoints": [
+        "tools/check-merge-readiness.sh"
+      ],
+      "path": "tests/test_windows_native_shards.py",
       "tier": "required"
     },
     {

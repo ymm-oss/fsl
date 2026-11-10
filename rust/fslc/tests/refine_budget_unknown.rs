@@ -328,13 +328,13 @@ fn governance_still_refines_a_small_preservation() {
     );
 }
 
-/// Native reads a self-violating `after` spec off `refine`'s own `violated`
-/// verdict; the Worker must report the same value (`fsl-wasm` unit tests use
-/// the same sources). The top level spells it `impl_violated`, the verdict an
-/// inline `implements` seam reports for the same condition, and exits 1
-/// (issue #1303).
+/// Native reads a self-violating `after` spec off `refine`'s own
+/// `impl_violated` verdict; the Worker must report the same value (`fsl-wasm`
+/// unit tests use the same sources). The preservation and the top level use
+/// the one word an inline `implements` seam reports for the same condition
+/// (issue #1315), and the run exits 1 (issue #1303).
 #[test]
-fn governance_reports_violated_for_a_self_violating_after_spec() {
+fn governance_reports_impl_violated_for_a_self_violating_after_spec() {
     let dir = fixture("governance-violated");
     small_fixture(&dir);
     fs::write(
@@ -352,7 +352,7 @@ fn governance_reports_violated_for_a_self_violating_after_spec() {
     assert_eq!(status, 1, "{value:#}");
     assert_eq!(value["result"], "impl_violated", "{value:#}");
     assert_eq!(
-        value["governance"]["preservations"][0]["result"], "violated",
+        value["governance"]["preservations"][0]["result"], "impl_violated",
         "{value:#}"
     );
 }

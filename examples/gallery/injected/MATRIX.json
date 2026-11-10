@@ -478,8 +478,8 @@
           "status": "not-caught"
         },
         "vacuity": {
-          "signal": "verified",
-          "status": "not-caught"
+          "signal": "vacuous_implication:ImpossibleDraftShipment",
+          "status": "caught"
         },
         "verify": {
           "signal": "verified",
@@ -493,7 +493,7 @@
       "note": "The implication antecedent names mutually exclusive enum states."
     },
     {
-      "base": "examples/layers/return_system.fsl",
+      "base": "rust/fslc/tests/fixtures/legacy_return_branches.fsl",
       "detectors": {
         "forbidden_acceptance": {
           "signal": "acceptance:RET-AC-AUTO-LIMIT",
@@ -528,7 +528,7 @@
       "note": "verify/vacuity/strict-tags are blind to the auto-approval threshold boundary."
     },
     {
-      "base": "examples/layers/return_system.fsl",
+      "base": "rust/fslc/tests/fixtures/legacy_return_branches.fsl",
       "detectors": {
         "forbidden_acceptance": {
           "signal": "ok",
@@ -563,7 +563,7 @@
       "note": "The extra invariant has no source requirement tag."
     },
     {
-      "base": "examples/layers/return_system.fsl",
+      "base": "rust/fslc/tests/fixtures/legacy_return_branches.fsl",
       "detectors": {
         "forbidden_acceptance": {
           "signal": "forbidden:RET-FB-UNAPPROVED-PAY",
@@ -598,7 +598,7 @@
       "note": "The must-forbid manager-queue payment trace becomes accepted."
     },
     {
-      "base": "examples/layers/return_system.fsl",
+      "base": "rust/fslc/tests/fixtures/legacy_return_branches.fsl",
       "detectors": {
         "forbidden_acceptance": {
           "signal": "ok",
@@ -634,7 +634,7 @@
       "note": "Single-spec mutate only shows survivors; detection requires a baseline differential."
     },
     {
-      "base": "examples/layers/return_system.fsl",
+      "base": "rust/fslc/tests/fixtures/legacy_return_branches.fsl",
       "detectors": {
         "forbidden_acceptance": {
           "signal": "ok",
@@ -669,7 +669,7 @@
       "note": "Pure omission without the requirements registry is undetectable."
     },
     {
-      "base": "examples/layers/return_system.fsl",
+      "base": "rust/fslc/tests/fixtures/legacy_return_branches.fsl",
       "detectors": {
         "forbidden_acceptance": {
           "signal": "ok",
@@ -704,7 +704,7 @@
       "note": "The positive paid-return pair becomes unreachable and pay coverage is false."
     },
     {
-      "base": "examples/layers/return_system.fsl",
+      "base": "rust/fslc/tests/fixtures/legacy_return_branches.fsl",
       "detectors": {
         "forbidden_acceptance": {
           "signal": "ok",
@@ -724,8 +724,8 @@
           "status": "not-caught"
         },
         "vacuity": {
-          "signal": "verified",
-          "status": "not-caught"
+          "signal": "vacuous_implication:ImpossibleNewPaid",
+          "status": "caught"
         },
         "verify": {
           "signal": "verified",
@@ -882,26 +882,12 @@
         "not-caught": 3
       },
       "vacuity": {
-        "caught": 1,
-        "not-caught": 2
+        "caught": 3
       },
       "verify": {
         "not-caught": 3
       }
     }
   },
-  "surprises": [
-    {
-      "actual": "not-caught",
-      "detector": "vacuity",
-      "file": "examples/gallery/injected/order_workflow__unreachable_antecedent.fsl",
-      "kind": "missing-primary"
-    },
-    {
-      "actual": "not-caught",
-      "detector": "vacuity",
-      "file": "examples/gallery/injected/return_system__unreachable_antecedent.fsl",
-      "kind": "missing-primary"
-    }
-  ]
+  "surprises": []
 }

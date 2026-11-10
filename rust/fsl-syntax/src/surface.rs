@@ -123,6 +123,8 @@ pub enum SpecItem {
         lo: Box<Expr>,
         hi: Box<Expr>,
         symmetric: bool,
+        /// Authored declaration location; generated types have no source.
+        span: Option<Span>,
     },
     Enum {
         name: String,
@@ -135,11 +137,17 @@ pub enum SpecItem {
         /// construction (issue 576). Generated enums carry an empty vector;
         /// the diagnostic then keeps whatever location its origin supplies.
         member_spans: Vec<Span>,
+        /// Authored declaration location; generated enums may have no source.
+        span: Option<Span>,
         symmetric: bool,
     },
     Struct {
         name: String,
         fields: Vec<(String, TypeExpr)>,
+        /// The span of each field's name, positionally parallel to `fields`.
+        ///
+        /// A repeated field is refused at the repeated name (#1692).
+        field_spans: Vec<Span>,
         /// The `struct` declaration's own span. `TypeExpr` carries none, so a
         /// field-level type diagnostic has no closer location to report
         /// (issue 555).
@@ -156,6 +164,12 @@ pub enum SpecItem {
     Action {
         name: String,
         params: Vec<Param>,
+        /// One span per formal, parallel to `params`: the name as written, also
+        /// when a dialect lowers it from a process input, a domain command input
+        /// or an event field, and the declaration for a formal only a dialect
+        /// adds. Empty when no formal was authored or the action is built by
+        /// hand, so a formal's diagnostic falls back to `span`.
+        param_spans: Vec<Span>,
         items: Vec<ActionItem>,
         span: Span,
         fair: bool,
@@ -302,6 +316,7 @@ pub enum RefinementItem {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SurfaceRefinement {
     pub name: String,
+    pub span: Span,
     pub items: Vec<RefinementItem>,
 }
 
@@ -327,11 +342,90 @@ pub struct ProcessTransition {
     pub target: String,
     pub actor: String,
     pub inputs: Vec<Param>,
+    /// One span per input name as written, parallel to `inputs`; see
+    /// `SpecItem::Action`'s `param_spans`.
+    pub input_spans: Vec<Span>,
     pub guard: Option<Expr>,
     pub assignments: Vec<(String, Expr)>,
     pub covers: Option<ProcessCover>,
     pub span: Span,
     pub annotations: Annotations,
+    /// Set when the transition is a next-edition `event` ([`EventForm`]);
+    /// `None` for a `transition`.
+    pub event: Option<EventForm>,
+}
+
+/// How a next-edition `event` lowers where it differs from a `transition`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventForm {
+    /// The verb of the event's phrase (the event name when it is omitted).
+    pub verb: String,
+    /// `false` for a `fault event`.
+    pub fair: bool,
+    /// `false` for `in S`: the event keeps its stage and writes none.
+    pub moves: bool,
+    /// The guards rules add to the event, in source order.
+    pub rule_guards: Vec<RuleGuard>,
+}
+
+/// One guard a next-edition declaration adds to an event: a decision table
+/// (`decide`, the disjunction of the rows naming the event) or a rule
+/// statement (`allow`, `never`, `only after`). Each is one `requires` line
+/// of the event's action, after the stage guard, in the order the guards were
+/// added: decision tables first, then rule statements, each in source order.
+///
+/// The condition is written over one instance of the event's entity: a field
+/// is spelled `Entity.field` (a rule may also spell it bare), the entity's
+/// stage [`stage_reference`], and an input by its bare name.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RuleGuard {
+    /// `decide`, `allow`, `never` or `after`, which is also the kind of the
+    /// guard's lowering step.
+    pub kind: &'static str,
+    /// The requirement id of the enclosing table or rule.
+    pub requirement: String,
+    pub condition: Expr,
+    /// The statement (or the table's numbered rows, `for Submitted Claim row
+    /// 1: SmallClaim => System approves`), for the guard's origin: in
+    /// canonical names and English keywords, without particles, however the
+    /// source spelled it, so no alias or Japanese word reaches the Kernel's
+    /// provenance.
+    pub detail: String,
+    /// The statement (or the rows) as written, whitespace collapsed: the
+    /// text diagnostics and the document quote. Never an origin's detail.
+    pub written: String,
+    pub span: Span,
+}
+
+/// One property a next-edition `rule` declares: `always …` (an invariant) or
+/// `… enters … only from …` (a transition property), over every instance of
+/// `entity`, optionally named (`Name: always …`). The condition is spelled as in [`RuleGuard`]; a transition
+/// property reads the previous state with `old(…)`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RuleProperty {
+    /// `always` or `enters`, the kind of the property's lowering step.
+    pub kind: &'static str,
+    /// The name written before the statement (`Name: always …`); `None`
+    /// when the core generates one.
+    pub name: Option<String>,
+    pub requirement: String,
+    pub requirement_text: String,
+    pub requirement_span: Span,
+    pub entity: String,
+    pub condition: Expr,
+    /// The statement in canonical names and English keywords, for the
+    /// property's origin (see [`RuleGuard::detail`]).
+    pub detail: String,
+    /// The statement as written (see [`RuleGuard::written`]).
+    pub written: String,
+    pub span: Span,
+}
+
+/// How a rule condition reads the stage of the entity instance it is about.
+/// No identifier contains a space, so the spelling meets no declared name.
+#[must_use]
+pub fn stage_reference(entity: &str) -> String {
+    format!("{entity} stage")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -530,6 +624,8 @@ pub enum RequirementActionItem {
 pub struct RequirementAction {
     pub name: String,
     pub params: Vec<Param>,
+    /// One span per formal name as written; see `SpecItem::Action`'s `param_spans`.
+    pub param_spans: Vec<Span>,
     pub items: Vec<RequirementActionItem>,
     pub span: Span,
     pub fair: bool,
@@ -580,6 +676,9 @@ pub enum TimeItem {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RequirementsItem {
+    /// The next edition's `glossary` block, already applied to the rest of
+    /// the document (see [`crate::Glossary`]).
+    Glossary(crate::Glossary),
     Implements {
         name: String,
         path: String,
@@ -588,6 +687,7 @@ pub enum RequirementsItem {
     },
     Requirement {
         id: String,
+        id_span: Span,
         text: String,
         items: Vec<RequirementBlockItem>,
         span: Span,
@@ -595,6 +695,7 @@ pub enum RequirementsItem {
     },
     Acceptance {
         id: String,
+        id_span: Span,
         text: String,
         steps: Vec<AcceptanceStep>,
         expectation: AcceptanceExpectation,
@@ -603,6 +704,7 @@ pub enum RequirementsItem {
     },
     Forbidden {
         id: String,
+        id_span: Span,
         text: String,
         steps: Vec<AcceptanceStep>,
         span: Span,
@@ -622,6 +724,174 @@ pub enum RequirementsItem {
 pub struct SurfaceRequirements {
     pub name: String,
     pub items: Vec<RequirementsItem>,
+    /// What a next-edition document declared beyond the items it was
+    /// desugared into; `None` in the published edition.
+    pub next: Option<NextEditionRequirements>,
+}
+
+/// A declaration that owns the requirement ID after its keyword.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RequirementOwner {
+    pub id: String,
+    /// `rule`, `decide`, `scenario`, `forbidden`, `goal`, `policy`, `requirement` or
+    /// `acceptance`.
+    pub kind: &'static str,
+    pub title: String,
+    /// The whole declaration, from its keyword.
+    pub span: Span,
+}
+
+/// The declarations of a next-edition requirements document that do not
+/// survive as [`RequirementsItem`]s: `entity { … }`, `event`, `scenario` and
+/// `forbidden … then rejected` become `process`, `acceptance` and `forbidden`
+/// items, and this keeps the rest.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NextEditionRequirements {
+    /// Every written rule ID and its source ID span, even when no effect survives.
+    pub rule_headers: Vec<(String, Span)>,
+    /// The declaration owning each requirement ID, in source order: one per ID. A `covers`
+    /// of the ID is a link; the ID's title is its owner's (#1705).
+    pub owners: Vec<RequirementOwner>,
+    /// The declared actors.
+    pub actors: Vec<String>,
+    /// The entities declared with a body, each desugared into a `process` of
+    /// the same name.
+    pub entities: Vec<String>,
+    /// For each entity of [`Self::entities`], in the same order, its final
+    /// stages: the stages no `lifecycle` edge leaves, in stage order. The
+    /// lowering derives the document's `terminal { }` from them.
+    pub final_stages: Vec<(String, Vec<String>)>,
+    /// The concepts, expanded where a later construct uses them.
+    pub concepts: Vec<ConceptDeclaration>,
+    /// Warnings found while desugaring, in source order.
+    pub warnings: Vec<EditionWarning>,
+    /// Informational notes found while desugaring, in source order.
+    pub notes: Vec<EditionWarning>,
+    /// The properties the rules declare, in source order.
+    pub properties: Vec<RuleProperty>,
+    /// The decision tables, already folded into their events' guards; kept
+    /// for the exhaustiveness / overlap checks and the lowering's origins.
+    pub decisions: Vec<DecisionTable>,
+    /// Where the document spelled its keywords and phrases, for the
+    /// formatter.
+    pub spellings: crate::SourceSpellings,
+    /// The relations, in source order. Each role is also a data field of
+    /// its entity's `process`, written by the relation's event.
+    pub relations: Vec<RelationDeclaration>,
+    /// The resources: state that belongs to no entity, in source order.
+    pub resources: Vec<ResourceDeclaration>,
+    /// The measures, in source order.
+    pub measures: Vec<MeasureDeclaration>,
+    /// The `goal` and `policy` declarations, as the business items of the
+    /// same form ([`BusinessGoalBody::SomeStage`] and
+    /// [`BusinessPolicyBody::Eventually`]), in source order.
+    pub goals: Vec<BusinessItem>,
+    /// Each input a scenario or forbidden step names again, with the span of
+    /// the repeated name, in source order. The desugared event call carries
+    /// one value per input, so the core refuses these before lowering.
+    pub repeated_step_inputs: Vec<(String, Span)>,
+}
+
+/// `Entity belongs to Target as role via event`: each instance of `entity`
+/// records, in its field `role` (`Option<Target>`, initially `none`), the
+/// instance of `target` that did `event`. The event's actor is `target`, and
+/// the event takes that instance as its first input, named
+/// [`entity_binder`] of `target` (decisions/048 J7: only the event that
+/// makes the relation takes the actor's instance).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RelationDeclaration {
+    pub entity: String,
+    pub target: String,
+    pub role: String,
+    pub event: String,
+    pub span: Span,
+}
+
+/// `resource name: Type = initial`: one state variable of the whole
+/// document, which events `set`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResourceDeclaration {
+    pub name: String,
+    pub type_name: QualifiedName,
+    pub initial: Expr,
+    pub span: Span,
+}
+
+/// `measure name = count Concept` or `count Entity in Stage, …`: the number
+/// of instances of `entity` satisfying `condition`, a projection that adds
+/// no state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MeasureDeclaration {
+    pub name: String,
+    pub entity: String,
+    /// What is counted, the projection's stage: the concept (`Settled`) or
+    /// the stages after `in` (`Refunded`, `Paid, Packed`).
+    pub counted: String,
+    /// The condition over one instance: fields spelled `Entity.field`, the
+    /// stage [`stage_reference`].
+    pub condition: Expr,
+    pub span: Span,
+}
+
+/// The name a next-edition entity's instance is bound to where the lowering
+/// quantifies over the entity or takes an instance of it: the entity's first
+/// letter in lower case (`c` for `Claim`, `u` for `User`).
+#[must_use]
+pub fn entity_binder(entity: &str) -> String {
+    entity
+        .chars()
+        .next()
+        .map_or_else(|| "c".to_owned(), |first| first.to_lowercase().collect())
+}
+
+/// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecisionTable {
+    pub id: String,
+    pub text: String,
+    pub entity: String,
+    pub stage: String,
+    /// The rows in source order; an `otherwise` row is last.
+    pub rows: Vec<DecisionRow>,
+    /// `assuming Q`, over the entity's fields as `Entity.field` names.
+    pub assuming: Option<Expr>,
+    pub span: Span,
+}
+
+/// One row of a [`DecisionTable`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DecisionRow {
+    /// The row in canonical names and English keywords, without particles,
+    /// `SmallClaim => System approves` (see [`RuleGuard::detail`]).
+    pub source: String,
+    /// The row as written, whitespace collapsed (see [`RuleGuard::written`]).
+    pub written: String,
+    /// The row's condition at the table's stage, over the entity's fields as
+    /// `Entity.field` names (concepts expanded, their stages decided).
+    pub condition: Expr,
+    /// The events the row's outcome names.
+    pub events: Vec<String>,
+    /// `true` for `otherwise`, whose condition negates every other row.
+    pub otherwise: bool,
+    pub span: Span,
+}
+
+/// `concept Name = Entity [in Stage, …] [where condition]`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConceptDeclaration {
+    pub name: String,
+    pub entity: String,
+    pub stages: Vec<String>,
+    pub condition: Option<Expr>,
+    pub span: Span,
+}
+
+/// A coded warning about a next-edition declaration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EditionWarning {
+    pub code: &'static str,
+    pub message: String,
+    pub span: Span,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -629,12 +899,17 @@ pub struct SyncRef {
     pub alias: String,
     pub action: String,
     pub args: Vec<Expr>,
+    /// Complete authored actual ranges, including parentheses, in argument order.
+    /// Must have exactly the same cardinality as `args`.
+    pub arg_spans: Vec<Span>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyncAction {
     pub name: String,
     pub params: Vec<Param>,
+    /// One span per formal name as written; see `SpecItem::Action`'s `param_spans`.
+    pub param_spans: Vec<Span>,
     pub refs: Vec<SyncRef>,
     pub items: Vec<ActionItem>,
     pub span: Span,
@@ -881,6 +1156,7 @@ impl SpecItem {
                 lo,
                 hi,
                 symmetric,
+                span: _,
             } => {
                 let mut values = vec![
                     json!("type"),
@@ -1704,6 +1980,15 @@ impl RequirementsItem {
     #[must_use]
     pub fn kernel_ast_v1(&self) -> Value {
         match self {
+            Self::Glossary(glossary) => json!([
+                "glossary",
+                glossary
+                    .entries
+                    .iter()
+                    .map(|entry| json!([entry.canonical.written(), entry.alias]))
+                    .collect::<Vec<_>>(),
+                glossary.span.python_loc()
+            ]),
             Self::Implements {
                 name,
                 path,

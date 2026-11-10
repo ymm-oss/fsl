@@ -1,0 +1,34 @@
+{
+  "schema": "fslc.approval.v2",
+  "spec": {
+    "path": "spec.fsl",
+    "digest_algorithm": "fsl-kernel-ast-v1+sha256",
+    "digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+    "git_commit": "eaedd7c7d80d9d4915c12c0a619ff88e271f513a"
+  },
+  "target": {
+    "kind": "scenarios",
+    "path": "review.json",
+    "digest_algorithm": "fsl-rendered-artifact-v1+sha256",
+    "digest": "sha256:ef2e880d98567185daa491e894cf626af57ff97279583c8c7992180490ed8f3c",
+    "generator": "fslc",
+    "generator_version": "4.12.0",
+    "inputs": {
+      "depth": 2,
+      "deadlock": "ignore",
+      "engine": "bmc"
+    }
+  },
+  "approval": {
+    "approver": "alice",
+    "approved_at": "2026-11-01T07:12:08Z",
+    "requirements": [
+      "REQ-190"
+    ]
+  },
+  "signature": {
+    "algorithm": "ed25519",
+    "key_id": "sha256:fe812c12f3ab4ce6ac5db69ac352f906cb1b11ef43fb33e252ef7ff552263889",
+    "value": "EnDnY8UGFISKVIgGBvDxxdKxq1a-mQ-BgwxFS_yCMxqVvP3DeCI5OigBLpUToG6lkB4fc12S0vP2c_nEgLvmAQ"
+  }
+}

@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+requirements Impl {
+  implements Abs from "business.fsl" { }
+  process Case {
+    stages Open, Done
+    initial Open
+    transition approve Open -> Done by Manager
+  }
+}
+verify { instances Case = 1 }

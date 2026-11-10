@@ -17,11 +17,18 @@ mod causal;
 mod db;
 mod dispatch;
 mod domain;
+mod edition;
+mod glossary;
+mod identifier;
+pub mod keywords;
 mod lexer;
 mod literate;
 mod lossless;
+mod parse_options;
 mod parser;
 pub mod recursion;
+mod respell;
+mod source_spellings;
 mod surface;
 mod syntax_expr;
 
@@ -55,34 +62,66 @@ pub use db::{
 };
 pub use dispatch::{
     DIALECT_KEYWORDS, ParsedDocument, SourceFile, declaration_keyword, dialect_keyword,
-    parse_document, validate_frontend_registry,
+    dialect_keyword_with, legacy_expression_operator_error, parse_document, parse_document_with,
+    validate_frontend_registry,
 };
 pub use domain::{
     DomainAggregate, DomainAssignment, DomainAwait, DomainCommand, DomainDecide, DomainEffect,
     DomainError, DomainEvent, DomainEvolve, DomainField, DomainInvariant, DomainLoc,
     DomainProjection, DomainReject, DomainRetry, DomainSaga, DomainSagaCompensation,
-    DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm, parse_domain,
+    DomainSagaStep, DomainSpec, DomainStalePolicy, DomainType, DomainTypeSourceForm,
+    REPEATED_DOMAIN_CLAUSE, parse_domain,
 };
-pub use lexer::{LexError, Token, TokenKind, lex};
+pub use edition::{
+    CURRENT_EDITION_MIGRATION_CODES, EDITION_CONFLICT, EDITION_HEADER_NOT_ACCEPTED,
+    EDITIONLESS_DECLARATIONS, Edition, EditionHeader, EditionRequest, MISSING_EDITION_HEADER,
+    UNSUPPORTED_EDITION, document_edition, edition_header, first_significant_offset,
+};
+pub use glossary::{
+    ALIAS_COLLISION, ALIAS_IN_IMPLEMENTS, ALIAS_SHADOWS_KEYWORD, ALIAS_SHADOWS_NAME,
+    DUPLICATE_ALIAS, GLOSSARY_DIAGNOSTICS, Glossary, GlossaryEntry, GlossaryName,
+    KEYWORD_SPELLINGS, MISPLACED_GLOSSARY, MIXED_NAMES, NameUse, alias_at, document_glossary,
+    is_keyword_spelling,
+};
+pub use identifier::{
+    CANONICAL_NAME_NOT_ASCII, FULLWIDTH_ASCII_IDENTIFIER, FULLWIDTH_SPACE, FULLWIDTH_SYMBOL,
+    IDENTIFIER_DIAGNOSTICS, IdentifierRule, IdentifierSeverity, MIDDLE_DOT_IDENTIFIER,
+    MIXED_SCRIPT_IDENTIFIER, NON_ASCII_REQUIREMENT_ID, NON_NFC_IDENTIFIER,
+    RESERVED_IDENTIFIER_CODES,
+};
+pub use lexer::{LexError, LexWarning, Token, TokenKind, lex, lex_with, lexical_warnings};
 pub use literate::extract_literate_fsl;
 pub use lossless::{
-    CanonicalRewrite, CanonicalRewriteKind, FormatEdition, FormatError, LosslessDocument,
-    LosslessKind, LosslessNode, SourceEdit, apply_source_edits, canonical_rewrites, format_source,
-    lossless_document, source_position, source_span,
+    CanonicalRewrite, CanonicalRewriteKind, FormatError, LosslessDocument, LosslessKind,
+    LosslessNode, SourceEdit, UnsafeFormatKind, apply_source_edits, canonical_rewrites,
+    canonical_rewrites_with, format_source, format_source_respelled, format_source_with,
+    lossless_document, lossless_document_with, source_position, source_span,
 };
-pub use parser::{ParseError, parse_expr, parse_surface_document, parse_surface_spec};
+pub use parse_options::ParseOptions;
+pub use parser::{
+    ParseError, parse_expr, parse_surface_document, parse_surface_document_with, parse_surface_spec,
+};
+pub use respell::{
+    KeywordLanguage, NameForm, RESPELL_NOT_APPLICABLE, Respelling, respell_source, space_particles,
+};
+pub use source_spellings::{
+    CheckSpelling, ExpressionSpelling, KeywordSpelling, PhraseKind, PhraseSpelling, SourceSpellings,
+};
 pub use surface::{
     AcceptanceExpectation, AcceptanceStep, ActionItem, ActionTarget, BusinessGoalBody,
-    BusinessItem, BusinessPolicyBody, ComposeItem, ControlAttribute, CorrespondenceOrigin,
+    BusinessItem, BusinessPolicyBody, ComposeItem, ConceptDeclaration, ControlAttribute,
+    CorrespondenceOrigin, DecisionRow, DecisionTable, EditionWarning, EventForm,
     GovernanceArtifactRef, GovernanceDelegateItem, GovernanceItem, HelpfulAction, LValue,
-    MapsClause, MetaTag, Param, PreservationItem, ProcessCover, ProcessField, ProcessFields,
-    ProcessItem, ProcessTransition, RefinementItem, RefinementParam, RequirementAction,
-    RequirementActionItem, RequirementBlockItem, RequirementBranch, RequirementsItem, SpecItem,
-    StateField, Statement, SurfaceAgent, SurfaceBusiness, SurfaceCompose, SurfaceDocument,
-    SurfaceGovernance, SurfaceRefinement, SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef,
-    TimeItem, TypeExpr, VerifyItem,
+    MapsClause, MeasureDeclaration, MetaTag, NextEditionRequirements, Param, PreservationItem,
+    ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition, RefinementItem,
+    RefinementParam, RelationDeclaration, RequirementAction, RequirementActionItem,
+    RequirementBlockItem, RequirementBranch, RequirementOwner, RequirementsItem,
+    ResourceDeclaration, RuleGuard, RuleProperty, SpecItem, StateField, Statement, SurfaceAgent,
+    SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
+    SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
+    entity_binder, stage_reference,
 };
 pub use syntax_expr::{
-    SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue, SyntaxOperator,
-    SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind,
+    DUPLICATE_STRUCT_FIELD, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue,
+    SyntaxOperator, SyntaxPattern, SyntaxQualifiedName, SyntaxTypeExpr, SyntaxTypeExprKind,
 };

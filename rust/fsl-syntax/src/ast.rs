@@ -108,6 +108,8 @@ pub enum Expr {
     EnumMember {
         type_name: String,
         member: String,
+        /// Display-only provenance; omitted from the semantic Kernel AST.
+        source_bare: bool,
     },
     Call {
         name: String,
@@ -280,7 +282,9 @@ impl Expr {
                 ])
             }
             Self::Var(name) => Value::Array(vec![Value::from("var"), Value::from(name.as_str())]),
-            Self::EnumMember { type_name, member } => Value::Array(vec![
+            Self::EnumMember {
+                type_name, member, ..
+            } => Value::Array(vec![
                 Value::from("enum_member"),
                 Value::from(type_name.as_str()),
                 Value::from(member.as_str()),

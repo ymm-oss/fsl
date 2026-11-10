@@ -1,0 +1,34 @@
+{
+  "base_sha": "e16f65bfeae773218d23f425376ea7c23b895bff",
+  "source": "// SPDX-License-Identifier: Apache-2.0\nspec LedgerWarningKind {\n  state { done: Bool = false }\n  action finish() {\n    requires not done\n    done = true\n  }\n  @requirement(\"REQ-WARNING\", \"warning review\")\n  invariant Typed { done == true or done == false }\n}\n",
+  "record": {
+    "schema": "fslc.approval.v1",
+    "spec": {
+      "path": "spec.fsl",
+      "digest_algorithm": "fsl-kernel-ast-v1+sha256",
+      "digest": "sha256:5bc259661b582a6193970502beec77f3336460ce04f6c4f7f8508f37aa1fe497",
+      "git_commit": "c404080ce33472043472e78c615c95a3e95a8c90"
+    },
+    "target": {
+      "kind": "ledger",
+      "path": "ledger.md",
+      "digest_algorithm": "fsl-rendered-artifact-v1+sha256",
+      "digest": "sha256:f48d360de04ea357198a5129b7e868d5cb03c0e6d9b06a0c64c7ff952769ba3d",
+      "generator": "fslc",
+      "generator_version": "4.12.0",
+      "inputs": {
+        "depth": 2,
+        "deadlock": "warn",
+        "engine": "bmc"
+      }
+    },
+    "approval": {
+      "approver": "warning-reviewer",
+      "approved_at": "2026-10-29T20:50:00Z",
+      "requirements": [
+        "REQ-WARNING"
+      ]
+    }
+  },
+  "artifact": "# 意図ずれ監査台帳: LedgerWarningKind\n\n- 対象: `spec.fsl`\n- 保証限界: BMC（有界モデル検査）: **深さ 2 までの全実行を網羅**。それ以遠の反例は本台帳の対象外\n- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / `bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / `statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。詳細は `docs/design/DESIGN-assurance-classes.md`。\n- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。\n\n## リスク一覧（要件ID別）\n\n| 要件ID | 業務目的 | 状態 | 保証クラス | 検出種別 | リスク | 判断者 | 次アクション |\n|---|---|---|---|---|---|---|---|\n| REQ-WARNING | warning review | 🟢 反例なし | bounded(BMC depth 2) | — | — | — | — |\n| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | bounded(BMC depth 2) | vacuity | 要確認 | ____ | 下記詳細 |\n\n## 要件ID別詳細\n\n### （仕様全体）\n- **検出**: `vacuity` — deadlock\n  - 反例要約: 空虚性の疑い（deadlock）: deadlock reachable at step 1 (state: done=true)\n  - 業務翻訳: 性質『deadlock』が空虚に成立している疑い（中身がない可能性）。`fslc mutate` で実効性を確認する。\n  - 次アクション: add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional\n- 判断: ☐ 承認　☐ 差戻し　☐ リスク受容　／　判断者: ____　期限: ____\n\n## 付録: 生 JSON 反例（証跡）\n\n<details><summary>raw findings</summary>\n\n```json\n[\n  {\n    \"kind\": \"deadlock\",\n    \"message\": \"deadlock reachable at step 1 (state: done=true)\",\n    \"hint\": \"add an enabled action, declare intended stops in a terminal { } block, or use --deadlock=ignore if intentional\"\n  }\n]\n```\n\n</details>\n"
+}

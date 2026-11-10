@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: Apache-2.0
+requirements NarrowReq {
+  implements WideAbs from "issue_1281_budget_abs.fsl" { maps auto }
+
+  type V = 0..5
+  state { seq: Seq<V, 6> }
+  init { seq = Seq {} }
+  action push(v: V) maps push(v) {
+    requires v <= 1
+    requires seq.size() < 6
+    seq = seq.push(v)
+  }
+}

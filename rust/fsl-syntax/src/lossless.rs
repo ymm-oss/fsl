@@ -6,7 +6,11 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::{LexError, ParseError, SourceFile, Span, TokenKind, lex, parse_document};
+use crate::dispatch::parse_document_with_ids;
+use crate::parser::IdSpelling;
+use crate::{
+    Edition, LexError, ParseError, ParseOptions, SourceFile, Span, TokenKind, parse_document_with,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LosslessKind {
@@ -86,40 +90,46 @@ impl LosslessDocument {
     }
 }
 
+/// Why a formatter rewrite was refused as unsafe, independent of its wording.
+///
+/// Consumers that classify the refusal (`fslc migrate`'s diagnostic code)
+/// match on this exhaustively instead of searching the message (issue 1167).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum FormatEdition {
-    Current,
-    Next,
-}
-
-impl FormatEdition {
-    /// Parse the public CLI spelling.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error for editions that have no formatting policy.
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "current" => Ok(Self::Current),
-            "next" => Ok(Self::Next),
-            _ => Err("--edition must be current or next".to_owned()),
-        }
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Current => "current",
-            Self::Next => "next",
-        }
-    }
+pub enum UnsafeFormatKind {
+    /// An `agent` body, which has no native pretty-printer.
+    AgentBody,
+    /// A legacy colon quantifier whose unbraced body has no determinable end.
+    UnbracedQuantifierEnd,
+    /// A quantifier with neither braces nor a separator colon.
+    QuantifierWithoutBody,
+    /// A legacy domain enum whose interior comments a rewrite would move.
+    DomainEnumInteriorComment,
+    /// An edit that does not fall on UTF-8 source boundaries.
+    EditOutsideUtf8Boundary,
+    /// Edits whose spans overlap.
+    OverlappingEdits,
+    /// A phrase that a respelling reorders has a comment inside it.
+    PhraseInteriorComment,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FormatError {
     Lex(LexError),
     Parse(ParseError),
-    Unsafe { message: String, span: Span },
+    Unsafe {
+        kind: UnsafeFormatKind,
+        message: String,
+        span: Span,
+    },
+    /// The printed document would not spell a requirement-style identifier
+    /// (`REQ-1`, `AC-1`, `CTRL-1`) as written, or would read a different
+    /// one. A formatter defect: nothing is emitted. `span` locates the
+    /// identifier in the input (in the output for one the input lacks).
+    RespelledIdentifier {
+        identifier: String,
+        printed: String,
+        span: Span,
+    },
 }
 
 impl FormatError {
@@ -128,7 +138,7 @@ impl FormatError {
         match self {
             Self::Lex(error) => error.span,
             Self::Parse(error) => error.span,
-            Self::Unsafe { span, .. } => *span,
+            Self::Unsafe { span, .. } | Self::RespelledIdentifier { span, .. } => *span,
         }
     }
 }
@@ -138,9 +148,18 @@ impl fmt::Display for FormatError {
         match self {
             Self::Lex(error) => error.fmt(formatter),
             Self::Parse(error) => error.fmt(formatter),
-            Self::Unsafe { message, span } => write!(
+            Self::Unsafe { message, span, .. } => write!(
                 formatter,
                 "{message} at {}:{}",
+                span.start.line, span.start.column
+            ),
+            Self::RespelledIdentifier {
+                identifier,
+                printed,
+                span,
+            } => write!(
+                formatter,
+                "formatting would print identifier '{identifier}' as '{printed}' at {}:{}",
                 span.start.line, span.start.column
             ),
         }
@@ -154,7 +173,14 @@ impl std::error::Error for FormatError {}
 /// without losing the original bytes.
 #[must_use]
 pub fn lossless_document(source: &str) -> LosslessDocument {
-    let tokens = match lex(source) {
+    lossless_document_with(source, &ParseOptions::stable())
+}
+
+/// [`lossless_document`] under explicit [`ParseOptions`]. An edition header
+/// stays in the tree as its two tokens.
+#[must_use]
+pub fn lossless_document_with(source: &str, options: &ParseOptions) -> LosslessDocument {
+    let tokens = match crate::lexer::lex_with_header(source, *options) {
         Ok(tokens) => tokens,
         Err(error) => {
             return LosslessDocument {
@@ -172,11 +198,15 @@ pub fn lossless_document(source: &str) -> LosslessDocument {
         }
     };
     let mut nodes = Vec::new();
-    let mut offset = 0;
+    let mut position = crate::SourcePos {
+        offset: 0,
+        line: 1,
+        column: 1,
+    };
     for token in tokens {
-        push_trivia(source, offset, token.span.start.offset, &mut nodes);
+        push_trivia(source, position, token.span.start.offset, &mut nodes);
         if matches!(token.kind, TokenKind::Eof) {
-            offset = token.span.end.offset;
+            position = token.span.end;
             continue;
         }
         nodes.push(LosslessNode {
@@ -184,9 +214,9 @@ pub fn lossless_document(source: &str) -> LosslessDocument {
             text: source[token.span.start.offset..token.span.end.offset].to_owned(),
             span: token.span,
         });
-        offset = token.span.end.offset;
+        position = token.span.end;
     }
-    push_trivia(source, offset, source.len(), &mut nodes);
+    push_trivia(source, position, source.len(), &mut nodes);
     LosslessDocument {
         source: source.to_owned(),
         nodes,
@@ -194,40 +224,41 @@ pub fn lossless_document(source: &str) -> LosslessDocument {
     }
 }
 
-fn push_trivia(source: &str, start: usize, end: usize, nodes: &mut Vec<LosslessNode>) {
-    let mut offset = start;
-    while offset < end {
-        let comment = source[offset..end].starts_with("//");
-        let node_start = offset;
-        if comment {
-            while offset < end && !source[offset..end].starts_with('\n') {
-                offset += source[offset..]
-                    .chars()
-                    .next()
-                    .expect("in bounds")
-                    .len_utf8();
+fn push_trivia(
+    source: &str,
+    mut position: crate::SourcePos,
+    end: usize,
+    nodes: &mut Vec<LosslessNode>,
+) {
+    while position.offset < end {
+        let comment = source[position.offset..end].starts_with("//");
+        let start = position;
+        while position.offset < end
+            && if comment {
+                !source[position.offset..end].starts_with('\n')
+            } else {
+                !source[position.offset..end].starts_with("//")
             }
-        } else {
-            while offset < end && !source[offset..end].starts_with("//") {
-                offset += source[offset..]
-                    .chars()
-                    .next()
-                    .expect("in bounds")
-                    .len_utf8();
+        {
+            let ch = source[position.offset..].chars().next().expect("in bounds");
+            position.offset += ch.len_utf8();
+            if ch == '\n' {
+                position.line += 1;
+                position.column = 1;
+            } else {
+                position.column += 1;
             }
         }
-        let start_pos = source_position(source, node_start);
-        let end_pos = source_position(source, offset);
         nodes.push(LosslessNode {
             kind: if comment {
                 LosslessKind::LineComment
             } else {
                 LosslessKind::Whitespace
             },
-            text: source[node_start..offset].to_owned(),
+            text: source[start.offset..position.offset].to_owned(),
             span: Span {
-                start: start_pos,
-                end: end_pos,
+                start,
+                end: position,
             },
         });
     }
@@ -282,8 +313,31 @@ pub fn source_span(source: &str, start: usize, end: usize) -> Span {
 /// Returns the original lexical or parse error. Sources containing a legacy
 /// domain enum with an interior comment are refused until that structural
 /// rewrite can preserve the comment attachment unambiguously.
-pub fn format_source(source: &str, _edition: FormatEdition) -> Result<String, FormatError> {
-    let rewrites = canonical_rewrites(source)?;
+pub fn format_source(source: &str, edition: Edition) -> Result<String, FormatError> {
+    format_source_with(source, edition, &ParseOptions::stable())
+}
+
+/// [`format_source`] under explicit [`ParseOptions`]; an edition header is
+/// kept.
+///
+/// # Errors
+///
+/// As [`format_source`].
+pub fn format_source_with(
+    source: &str,
+    edition: Edition,
+    options: &ParseOptions,
+) -> Result<String, FormatError> {
+    // A particle written onto its word is the one parse error fmt repairs:
+    // the space is the whole fix (`particle_needs_space`).
+    let spaced = crate::space_particles(source, options);
+    let source = spaced.as_str();
+    let rewrites = canonical_rewrites_with(source, options).map_err(|error| match error {
+        FormatError::Parse(error) => {
+            FormatError::Parse(error.for_edition(source, edition, options))
+        }
+        other => other,
+    })?;
     let rewritten = apply_source_edits(
         source,
         rewrites
@@ -291,14 +345,132 @@ pub fn format_source(source: &str, _edition: FormatEdition) -> Result<String, Fo
             .flat_map(|rewrite| rewrite.edits)
             .collect(),
     )?;
-    let tree = lossless_document(&rewritten);
-    let parsed = parse_document(SourceFile::new(&rewritten)).map_err(FormatError::Parse)?;
-    let compact_hyphens = business_id_hyphen_offsets(&tree, parsed.keyword);
+    let tree = lossless_document_with(&rewritten, options);
+    let (parsed, read) = parse_document_with_ids(SourceFile::new(&rewritten), *options)
+        .map_err(FormatError::Parse)?;
+    let compact_hyphens = read
+        .iter()
+        .flat_map(|id| id.hyphens.iter().copied())
+        .collect();
+    // The edition's layout applies to a document read in it.
+    let next_edition = edition == Edition::Fsl5 && parsed.edition == Edition::Fsl5;
+    let continuations = if next_edition {
+        continuation_offsets(&tree, &parsed.surface)
+    } else {
+        BTreeSet::new()
+    };
     let mut formatter = Formatter::new(compact_hyphens);
+    formatter.continuations = continuations;
     formatter.write(tree.nodes());
-    let output = formatter.finish();
-    parse_document(SourceFile::new(&output)).map_err(FormatError::Parse)?;
+    let mut output = formatter.finish();
+    if matches!(crate::edition_header(&output, options), Ok(Some(_))) {
+        // The header is the first significant line; nothing but comments
+        // comes before it, and no blank line opens the document.
+        let blank = output.len() - output.trim_start_matches('\n').len();
+        output.drain(..blank);
+    }
+    let (_, printed) =
+        parse_document_with_ids(SourceFile::new(&output), *options).map_err(FormatError::Parse)?;
+    check_identifier_spellings(&read, &rewritten, &printed, &output)?;
     Ok(output)
+}
+
+/// [`format_source_with`] after the respelling `respelling` (`fmt --lang`,
+/// `fmt --names`) of a next-edition requirements document.
+///
+/// # Errors
+///
+/// As [`format_source_with`] and [`crate::respell_source`];
+/// [`crate::RESPELL_NOT_APPLICABLE`] when `edition` is not the next one.
+pub fn format_source_respelled(
+    source: &str,
+    edition: Edition,
+    options: &ParseOptions,
+    respelling: crate::Respelling,
+) -> Result<String, FormatError> {
+    if respelling == crate::Respelling::default() {
+        return format_source_with(source, edition, options);
+    }
+    let spaced = crate::space_particles(source, options);
+    let respelled = if edition == Edition::Fsl5 {
+        crate::respell_source(&spaced, options, respelling)?
+    } else {
+        return Err(crate::respell::not_applicable(source));
+    };
+    format_source_with(&respelled, edition, options)
+}
+
+/// The start offsets of the tokens that begin a line a next-edition
+/// statement continues on (an event's `covers`, a decision table row's):
+/// the formatter indents them one level deeper than the statement.
+fn continuation_offsets(
+    tree: &LosslessDocument,
+    surface: &crate::SurfaceDocument,
+) -> BTreeSet<usize> {
+    let crate::SurfaceDocument::Requirements(requirements) = surface else {
+        return BTreeSet::new();
+    };
+    let Some(next) = &requirements.next else {
+        return BTreeSet::new();
+    };
+    let statements = &next.spellings.statements;
+    let mut offsets = BTreeSet::new();
+    let mut previous_line = 0;
+    for node in tree.nodes() {
+        if !matches!(node.kind, LosslessKind::Token(_)) {
+            continue;
+        }
+        let offset = node.span.start.offset;
+        if node.span.start.line > previous_line
+            && statements
+                .iter()
+                .any(|span| span.start.offset < offset && offset < span.end.offset)
+        {
+            offsets.insert(offset);
+        }
+        previous_line = node.span.end.line;
+    }
+    offsets
+}
+
+/// Refuse an output in which a requirement-style identifier is not printed
+/// exactly as written without spaces (`REQ-1`, never `REQ - 1`; an alias
+/// that names a next-edition goal stays the alias) or the identifiers read
+/// differ from the input's, so a formatter regression fails loudly instead of
+/// writing a document whose IDs no longer read as the author wrote them.
+fn check_identifier_spellings(
+    read: &[IdSpelling],
+    input: &str,
+    printed: &[IdSpelling],
+    output: &str,
+) -> Result<(), FormatError> {
+    for (index, id) in read.iter().enumerate() {
+        let written = input[id.span.start.offset..id.span.end.offset]
+            .split_whitespace()
+            .collect::<String>();
+        let (value, text) = printed.get(index).map_or(("", ""), |id| {
+            (
+                id.value.as_str(),
+                &output[id.span.start.offset..id.span.end.offset],
+            )
+        });
+        let input = id;
+        if value != input.value || text != written {
+            return Err(FormatError::RespelledIdentifier {
+                identifier: input.value.clone(),
+                printed: text.to_owned(),
+                span: input.span,
+            });
+        }
+    }
+    if let Some(extra) = printed.get(read.len()) {
+        return Err(FormatError::RespelledIdentifier {
+            identifier: String::new(),
+            printed: extra.value.clone(),
+            span: extra.span,
+        });
+    }
+    Ok(())
 }
 
 /// Plan the syntax-only canonical rewrites shared by formatting and migration.
@@ -308,11 +480,24 @@ pub fn format_source(source: &str, _edition: FormatEdition) -> Result<String, Fo
 /// Returns the original parse failure or an unsafe-rewrite error when source
 /// trivia cannot be attached unambiguously.
 pub fn canonical_rewrites(source: &str) -> Result<Vec<CanonicalRewrite>, FormatError> {
-    let tree = lossless_document(source);
+    canonical_rewrites_with(source, &ParseOptions::stable())
+}
+
+/// [`canonical_rewrites`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`canonical_rewrites`].
+pub fn canonical_rewrites_with(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<Vec<CanonicalRewrite>, FormatError> {
+    let tree = lossless_document_with(source, options);
     if let Some(error) = tree.error() {
         return Err(FormatError::Lex(error.clone()));
     }
-    let parsed = parse_document(SourceFile::new(source)).map_err(FormatError::Parse)?;
+    let parsed =
+        parse_document_with(SourceFile::new(source), options).map_err(FormatError::Parse)?;
     refuse_opaque_agent(&tree, parsed.keyword)?;
     let mut rewrites = plan_domain_enum(&tree, parsed.keyword)?;
     rewrites.extend(plan_domain_logical(&tree, parsed.keyword));
@@ -383,6 +568,7 @@ fn refuse_opaque_agent(tree: &LosslessDocument, dialect: &str) -> Result<(), For
         && close > open + 1
     {
         return Err(FormatError::Unsafe {
+            kind: UnsafeFormatKind::AgentBody,
             message: "cannot format an agent body: no native pretty-printer exists for the \
                       recursive agent grammar yet"
                 .to_owned(),
@@ -442,6 +628,7 @@ fn plan_quantifiers(tree: &LosslessDocument) -> Result<Vec<CanonicalRewrite>, Fo
             let body_start = separator + 1;
             let Some(body_end) = quantifier_body_end(&tokens, body_start) else {
                 return Err(FormatError::Unsafe {
+                    kind: UnsafeFormatKind::UnbracedQuantifierEnd,
                     message: "cannot determine the end of an unbraced quantifier".to_owned(),
                     span: token.span,
                 });
@@ -466,6 +653,7 @@ fn plan_quantifiers(tree: &LosslessDocument) -> Result<Vec<CanonicalRewrite>, Fo
             });
         } else if brace.is_none() {
             return Err(FormatError::Unsafe {
+                kind: UnsafeFormatKind::QuantifierWithoutBody,
                 message: "cannot canonicalize a quantifier without braces or a separator colon"
                     .to_owned(),
                 span: token.span,
@@ -509,6 +697,7 @@ pub fn apply_source_edits(source: &str, mut edits: Vec<SourceEdit>) -> Result<St
             || !source.is_char_boundary(edit.span.end.offset)
     }) {
         return Err(FormatError::Unsafe {
+            kind: UnsafeFormatKind::EditOutsideUtf8Boundary,
             message: "formatter edit is outside a UTF-8 source boundary".to_owned(),
             span: edit.span,
         });
@@ -519,6 +708,7 @@ pub fn apply_source_edits(source: &str, mut edits: Vec<SourceEdit>) -> Result<St
             && pair[0].span.start.offset != pair[0].span.end.offset
     }) {
         return Err(FormatError::Unsafe {
+            kind: UnsafeFormatKind::OverlappingEdits,
             message: "overlapping formatter edits are not safe".to_owned(),
             span: Span {
                 start: edits[0].span.start,
@@ -583,6 +773,7 @@ fn plan_domain_enum(
         let original = &tree.source()[span.start.offset..span.end.offset];
         if original.contains("//") {
             return Err(FormatError::Unsafe {
+                kind: UnsafeFormatKind::DomainEnumInteriorComment,
                 message: "cannot canonicalize a legacy domain enum with interior comments"
                     .to_owned(),
                 span,
@@ -604,80 +795,6 @@ fn plan_domain_enum(
     Ok(replacements)
 }
 
-fn business_id_hyphen_offsets(tree: &LosslessDocument, dialect: &str) -> BTreeSet<usize> {
-    if dialect != "business" {
-        return BTreeSet::new();
-    }
-    let tokens = tree
-        .nodes()
-        .iter()
-        .filter(|node| matches!(node.kind, LosslessKind::Token(_)))
-        .collect::<Vec<_>>();
-    let mut offsets = BTreeSet::new();
-    let mut brace_depth = 0_usize;
-    let mut business_started = false;
-    for (index, token) in tokens.iter().enumerate() {
-        let Some(keyword) = token.ident().filter(|_| brace_depth == 1) else {
-            match token.symbol() {
-                Some("{") => {
-                    brace_depth += 1;
-                    business_started = true;
-                }
-                Some("}") => {
-                    brace_depth = brace_depth.saturating_sub(1);
-                    if business_started && brace_depth == 0 {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            continue;
-        };
-        if matches!(keyword, "control" | "policy" | "goal") {
-            collect_id_hyphens(&tokens, index + 1, &mut offsets);
-        } else if keyword == "satisfies" {
-            let mut cursor = index + 1;
-            loop {
-                cursor = collect_id_hyphens(&tokens, cursor, &mut offsets);
-                if tokens.get(cursor).and_then(|token| token.symbol()) != Some(",") {
-                    break;
-                }
-                cursor += 1;
-            }
-        }
-    }
-    offsets
-}
-
-fn collect_id_hyphens(
-    tokens: &[&LosslessNode],
-    start: usize,
-    offsets: &mut BTreeSet<usize>,
-) -> usize {
-    let Some(first) = tokens.get(start) else {
-        return start;
-    };
-    if !matches!(
-        first.kind,
-        LosslessKind::Token(TokenKind::Ident(_) | TokenKind::Int(_))
-    ) {
-        return start;
-    }
-    let mut cursor = start + 1;
-    while tokens.get(cursor).and_then(|token| token.symbol()) == Some("-")
-        && tokens.get(cursor + 1).is_some_and(|token| {
-            matches!(
-                token.kind,
-                LosslessKind::Token(TokenKind::Ident(_) | TokenKind::Int(_))
-            )
-        })
-    {
-        offsets.insert(tokens[cursor].span.start.offset);
-        cursor += 2;
-    }
-    cursor
-}
-
 struct Formatter {
     output: String,
     indent: usize,
@@ -689,6 +806,9 @@ struct Formatter {
     compact_hyphens: BTreeSet<usize>,
     type_argument_depth: usize,
     source_line_break: bool,
+    /// Tokens that start a line a statement continues on: indented one level
+    /// more ([`continuation_offsets`]).
+    continuations: BTreeSet<usize>,
 }
 
 impl Formatter {
@@ -704,6 +824,7 @@ impl Formatter {
             compact_hyphens,
             type_argument_depth: 0,
             source_line_break: false,
+            continuations: BTreeSet::new(),
         }
     }
 
@@ -759,6 +880,9 @@ impl Formatter {
         self.flush_pending();
         let at_line_start = self.line_start;
         self.write_indent();
+        if at_line_start && self.continuations.contains(&span.start.offset) {
+            self.output.push_str("  ");
+        }
         let compact_hyphen = matches!(kind, TokenKind::Symbol(symbol) if symbol == "-")
             && self.compact_hyphens.contains(&span.start.offset);
         let previous_compact_hyphen = self
@@ -953,6 +1077,62 @@ mod tests {
         );
     }
 
+    const SPACED_IDS: &str = "requirements Bank {
+  state { balance: Int }
+  init { balance = 0 }
+  requirement BANK - WITHDRAW \"withdrawals keep the balance\" {
+    action withdraw() { balance = balance-1 }
+  }
+  forbidden BANK-FB - 1 \"an empty withdrawal is rejected\" {
+    withdraw()
+    expect rejected
+  }
+}
+";
+
+    #[test]
+    fn identifiers_print_as_their_value_and_subtraction_keeps_its_spaces() {
+        let formatted = format_source(SPACED_IDS, Edition::Fsl4).expect("format");
+        assert!(formatted.contains("requirement BANK-WITHDRAW \"withdrawals"));
+        assert!(formatted.contains("forbidden BANK-FB-1 \"an empty"));
+        assert!(formatted.contains("balance = balance - 1"));
+    }
+
+    #[test]
+    fn an_output_that_respells_an_identifier_is_refused() {
+        let options = ParseOptions::stable();
+        let source = format_source(SPACED_IDS, Edition::Fsl4).expect("format");
+        let (_, read) = parse_document_with_ids(SourceFile::new(&source), options).expect("parse");
+        assert_eq!(
+            read.iter().map(|id| id.value.as_str()).collect::<Vec<_>>(),
+            ["BANK-WITHDRAW", "BANK-FB-1"]
+        );
+        assert_eq!(
+            check_identifier_spellings(&read, &source, &read, &source),
+            Ok(())
+        );
+
+        let spaced = source.replace("BANK-FB-1", "BANK-FB - 1");
+        let (_, printed) =
+            parse_document_with_ids(SourceFile::new(&spaced), options).expect("parse");
+        assert_eq!(
+            check_identifier_spellings(&read, &source, &printed, &spaced),
+            Err(FormatError::RespelledIdentifier {
+                identifier: "BANK-FB-1".to_owned(),
+                printed: "BANK-FB - 1".to_owned(),
+                span: read[1].span,
+            })
+        );
+
+        let renamed = source.replace("BANK-FB-1", "BANK-FB-2");
+        let (_, printed) =
+            parse_document_with_ids(SourceFile::new(&renamed), options).expect("parse");
+        assert!(matches!(
+            check_identifier_spellings(&read, &source, &printed, &renamed),
+            Err(FormatError::RespelledIdentifier { identifier, .. }) if identifier == "BANK-FB-1"
+        ));
+    }
+
     #[test]
     fn malformed_source_is_retained_and_formatting_refuses_it() {
         let source = "spec Broken { invariant P { x ` y } }";
@@ -961,7 +1141,7 @@ mod tests {
         assert!(matches!(tree.nodes()[0].kind, LosslessKind::Error));
         assert_eq!(tree.nodes()[0].text, source);
         assert!(matches!(
-            format_source(source, FormatEdition::Current),
+            format_source(source, Edition::Fsl4),
             Err(FormatError::Lex(_))
         ));
     }
@@ -970,8 +1150,8 @@ mod tests {
     fn formatter_is_idempotent_and_preserves_comments() {
         let source =
             include_str!("../../fslc/tests/fixtures/domain_characterization/expressions_valid.fsl");
-        let once = format_source(source, FormatEdition::Next).expect("format");
-        let twice = format_source(&once, FormatEdition::Next).expect("format twice");
+        let once = format_source(source, Edition::Fsl5).expect("format");
+        let twice = format_source(&once, Edition::Fsl5).expect("format twice");
         assert_eq!(once, twice);
         assert!(once.contains("// SPDX-License-Identifier: Apache-2.0"));
         assert!(once.contains("enum OrderStatus"));
@@ -979,10 +1159,51 @@ mod tests {
         assert!(once.contains(" => "));
     }
 
+    /// The formatter keeps an edition header and leaves the rest of the
+    /// document formatted as without it.
+    #[test]
+    fn formatter_keeps_the_edition_header() {
+        let options = ParseOptions::stable();
+        let body = "domain D {   type Status = Draft | Done; }";
+        let plain = format_source(body, Edition::Fsl4).expect("format");
+        for header in ["fsl 4", "fsl 5"] {
+            let source = format!("// note\n{header}\n\n{body}");
+            let once = format_source_with(&source, Edition::Fsl4, &options).expect("format");
+            assert_eq!(once, format!("// note\n{header}\n\n{plain}"));
+            assert_eq!(
+                format_source_with(&once, Edition::Fsl4, &options).expect("format twice"),
+                once
+            );
+            assert_eq!(
+                format_source(&source, Edition::Fsl4).expect("format"),
+                once,
+                "the entry without explicit options reads the header too"
+            );
+        }
+    }
+
+    /// With a header, only comments come before it and no blank line opens
+    /// the document; without a header the published layout is kept.
+    #[test]
+    fn formatter_opens_a_headed_document_with_its_header_line() {
+        let options = ParseOptions::stable();
+        let body = "domain D {   type Status = Draft | Done; }";
+        let plain = format_source(body, Edition::Fsl4).expect("format");
+        let source = format!("\n\n// note\n\n\nfsl   5\n\n\n{body}");
+        let once = format_source_with(&source, Edition::Fsl5, &options).expect("format");
+        assert_eq!(once, format!("// note\n\nfsl 5\n\n{plain}"));
+        let published = format_source(&format!("\n\n{body}"), Edition::Fsl4).expect("format");
+        assert_eq!(
+            published,
+            format!("\n{plain}"),
+            "the published layout is unchanged"
+        );
+    }
+
     #[test]
     fn commented_legacy_enum_is_refused_without_losing_source() {
         let source = "domain D { type Status = Draft // keep\n | Done; }";
-        let error = format_source(source, FormatEdition::Next).expect_err("unsafe rewrite");
+        let error = format_source(source, Edition::Fsl5).expect_err("unsafe rewrite");
         assert!(matches!(error, FormatError::Unsafe { .. }));
         assert_eq!(lossless_document(source).source(), source);
     }
@@ -992,8 +1213,8 @@ mod tests {
         let source = "spec LegacyQuantifierColons { const MAXI = 1 const MAXU = 1 \
             state { flag: Bool } init { forall i in 0..MAXI: { flag = false } } \
             action keep() { forall i in 0..MAXU: { flag = flag } } }";
-        let once = format_source(source, FormatEdition::Next).expect("format quantifiers");
-        let twice = format_source(&once, FormatEdition::Next).expect("format twice");
+        let once = format_source(source, Edition::Fsl5).expect("format quantifiers");
+        let twice = format_source(&once, Edition::Fsl5).expect("format twice");
         assert_eq!(once, twice);
         assert!(!once.contains("MAXI:"));
         assert!(!once.contains("MAXU:"));
@@ -1012,14 +1233,14 @@ mod tests {
         // bodies, because no native pretty-printer exists for the agent
         // grammar yet (see the next test).
         let source = "agent Planner { opaque_call() }";
-        let error = format_source(source, FormatEdition::Current).expect_err("invalid agent body");
+        let error = format_source(source, Edition::Fsl4).expect_err("invalid agent body");
         assert!(matches!(error, FormatError::Parse(_)));
     }
 
     #[test]
     fn nonempty_well_formed_agent_body_is_still_refused_pending_a_printer() {
         let source = "agent Planner { model foo; }";
-        let error = format_source(source, FormatEdition::Current).expect_err("no agent printer");
+        let error = format_source(source, Edition::Fsl4).expect_err("no agent printer");
         assert!(matches!(error, FormatError::Unsafe { .. }));
     }
 
@@ -1027,8 +1248,8 @@ mod tests {
     fn equivalent_layouts_converge_to_one_canonical_form() {
         let compact = "spec S { state { stock: Map<Int, Bool> } init { stock[0] = false } invariant P { stock[0] == false } }";
         let spaced = "spec S {\n  state { stock: Map < Int, Bool > }\n\n  init { stock [0] = false } invariant P { stock [0] == false }\n}\n";
-        let compact = format_source(compact, FormatEdition::Current).expect("compact format");
-        let spaced = format_source(spaced, FormatEdition::Current).expect("spaced format");
+        let compact = format_source(compact, Edition::Fsl4).expect("compact format");
+        let spaced = format_source(spaced, Edition::Fsl4).expect("spaced format");
         assert_eq!(compact, spaced);
         assert!(compact.contains("\n  state {"));
         assert!(compact.contains("Map<Int, Bool>"));
@@ -1038,21 +1259,21 @@ mod tests {
     #[test]
     fn detached_comment_blank_line_is_preserved() {
         let source = "spec S {\n\n  // detached\n  state { x: Bool }\n  init { x = false }\n  invariant P { x == false }\n}\n";
-        let formatted = format_source(source, FormatEdition::Current).expect("format");
+        let formatted = format_source(source, Edition::Fsl4).expect("format");
         assert!(formatted.contains("spec S {\n\n  // detached\n"));
     }
 
     #[test]
     fn trailing_comment_stays_attached_to_its_closing_brace() {
         let source = "spec S { struct Pair { left: Bool, right: Bool } // attached\n state { x: Bool } init { x = false } invariant P { x == false } }";
-        let formatted = format_source(source, FormatEdition::Current).expect("format");
+        let formatted = format_source(source, Edition::Fsl4).expect("format");
         assert!(formatted.contains("} // attached\n\n  state"));
     }
 
     #[test]
     fn domain_identifier_named_on_does_not_hide_legacy_implication() {
         let source = "domain D { implementation_profile functional_ddd type Id = 0..1 aggregate A { id Id state { on: Bool = false; } invariant P { on -> not on } } }";
-        let formatted = format_source(source, FormatEdition::Next).expect("format");
+        let formatted = format_source(source, Edition::Fsl5).expect("format");
         assert!(formatted.contains("on => not on"));
     }
 }

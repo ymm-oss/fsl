@@ -1,7 +1,7 @@
 // Agentic RAG mutation slice: 副作用tool承認。
 //
 // 目的:
-// - 本体requirementsのREQ-5のうち、operatorロール、明示承認、
+// - 本体requirementsのREQ-RAG-005のうち、operatorロール、明示承認、
 //   ToolApproved段階を経た実行、という副作用toolの安全契約を軽く検査する。
 // - `approve_tool` / `execute_tool` のrequires削除やassignment削除を
 //   `fslc mutate`で短時間に観測する。
@@ -41,7 +41,7 @@ requirements AgenticRagToolApprovalSlice {
     }
   }
 
-  requirement REQ-5 "副作用toolにはoperatorロールと明示承認が必要である" {
+  requirement REQ-RAG-005 "副作用toolにはoperatorロールと明示承認が必要である" {
     // operator権限を付与する。承認前に呼ぶ正規pathをacceptanceで使う。
     action grant_operator(r: Req) {
       requires req[r].st == New
@@ -133,7 +133,7 @@ requirements AgenticRagToolApprovalSlice {
     }
   }
 
-  acceptance AC-TOOL "operator承認後に副作用toolを実行できる" {
+  acceptance AC-TOOL-001 "operator承認後に副作用toolを実行できる" {
     grant_operator(0)
     prepare_tool_ready(0)
     request_tool_approval(0)
@@ -142,14 +142,14 @@ requirements AgenticRagToolApprovalSlice {
     expect req[0].st == ActionExecuted
   }
 
-  forbidden FB-PUBLIC-APPROVE "非operatorは承認できない" {
+  forbidden FB-PUBLIC-APPROVE-001 "非operatorは承認できない" {
     prepare_tool_ready(0)
     request_tool_approval(0)
     approve_tool(0)
     expect rejected
   }
 
-  forbidden FB-EXECUTE-BEFORE-APPROVAL "承認待ちから直接実行できない" {
+  forbidden FB-EXECUTE-BEFORE-APPROVAL-001 "承認待ちから直接実行できない" {
     grant_operator(0)
     prepare_tool_ready(0)
     request_tool_approval(0)
@@ -157,7 +157,7 @@ requirements AgenticRagToolApprovalSlice {
     expect rejected
   }
 
-  forbidden FB-EXECUTE-WITH-DOWNGRADED-APPROVAL "承認状態を戻した後は実行できない" {
+  forbidden FB-EXECUTE-WITH-DOWNGRADED-APPROVAL-001 "承認状態を戻した後は実行できない" {
     grant_operator(0)
     prepare_tool_ready(0)
     request_tool_approval(0)
@@ -167,7 +167,7 @@ requirements AgenticRagToolApprovalSlice {
     expect rejected
   }
 
-  forbidden FB-EXECUTE-WITH-PUBLIC-ROLE "operator権限を失った後は実行できない" {
+  forbidden FB-EXECUTE-WITH-PUBLIC-ROLE-001 "operator権限を失った後は実行できない" {
     grant_operator(0)
     prepare_tool_ready(0)
     request_tool_approval(0)

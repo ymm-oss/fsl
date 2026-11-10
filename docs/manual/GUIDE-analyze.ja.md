@@ -123,9 +123,16 @@ TSG は生の文法タプルではなく、**`build_spec` が返した検証済�
 つまり verify / scenarios / replay / explain と**同じ意味論ビュー**の上に立つ。
 すべての projection と findings はこの TSG から派生する。
 
-**安定ノード種別**: `spec`, `requirement`, `state`, `phys_state`, `action`, `guard`,
+**安定ノード種別**: `spec`, `requirement`, `init`, `state`, `phys_state`, `action`, `guard`,
 `effect`, `ensures`, `invariant`, `trans`, `leadsTo`, `reachable`, `acceptance`,
 `forbidden`（spec がメタデータを持てば `kpi`, `control` も）。
+
+要件の関係を持つ init に限り、id/kind/name/label が `init` のノードを生成する。
+他の対象と同じヘルパーで要件メタデータを保持し、spec からの `declares` と
+各要件からの `covers` エッジを持つ。要件の関係を持たない init はノードやエッジを
+追加しない。`@requirement` は `def` に付けられないため、初期化・モデル化の意図を
+表す `MODEL-` ID を init に記録できるようにし、`check --strict-tags` / lint と扱いを揃える。
+この接続は ID の接頭辞によらず構造上のアンカーであり、要件の証明ではない。
 
 **安定エッジ種別**: `declares`, `covers`, `has_guard`, `has_effect`, `has_ensures`,
 `reads`, `writes`, `checks`, `starts_with`, `precedes`（物理変数展開の `expands_to` など）。
@@ -145,7 +152,7 @@ TSG は生の文法タプルではなく、**`build_spec` が返した検証済�
 | projection | 何をつなぐか | 主な用途 |
 |---|---|---|
 | `action_state_graph` | 操作 ↔ 読み書きする状態変数 | 変更の**影響範囲**を掴む |
-| `requirement_property_graph` | 要件 ↔ 被覆する操作・性質・シナリオ・KPI/control | 要件の**カバレッジ**を追う |
+| `requirement_property_graph` | 要件 ↔ 被覆する init・操作・性質・シナリオ・KPI/control | 要件の**カバレッジ**を追う |
 | `property_state_graph` | 性質 ↔ 読む状態変数 | 性質が何に依存しているかを見る |
 | `refinement_graph` | refinement マッピング単体（impl/abs 名・state map・action map・stutter・progress） | マッピングの構造レビュー |
 | `traceability_graph` | プロジェクトマニフェスト（business/requirements/design ＋ refinement） | 層をまたぐ**トレーサビリティ** |
@@ -162,7 +169,7 @@ findings は**決定的なヒューリスティック**で、すべて `severity
 
 | finding_type | 何を指すか | confidence |
 |---|---|---|
-| `disconnected_requirement` | 要件ノードが操作・性質・受入/禁止シナリオ・KPI/control・governanceメタのどれにもつながっていない | 0.80 |
+| `disconnected_requirement` | 要件ノードが init・操作・性質・受入/禁止シナリオ・KPI/control・governanceメタのどれにもつながっていない | 0.80 |
 | `unanchored_property` | ユーザー性質（invariant/trans/leadsTo/reachable）が要件タグ・シナリオ・操作↔状態のどれにも錨づいていない | 0.70 |
 | `progressless_cycle` | 要件/シナリオに紐づく多操作の構造閉路に、明示的な進行（leadsTo/有界exit/terminal/fairness）が付いていない | 0.68 |
 | `unwritten_state` | 状態変数が初期化されるが、どの操作も書き込まない | 0.68–0.76 |

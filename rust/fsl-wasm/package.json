@@ -5,7 +5,7 @@
   "scripts": {
     "build": "node build.mjs",
     "test:browser": "node test-browser.mjs",
-    "test:outcome": "node --test test-browser-outcome.test.mjs",
+    "test:outcome": "node --test test-browser-outcome.test.mjs completion-wait.test.mjs test-browser-retry.test.mjs ../spikes/z3js-worker/browser-probe-outcome.test.mjs ../spikes/z3js-worker/browser-probe-run.test.mjs",
     "test:imports": "node --test spec-imports.test.mjs"
   },
   "dependencies": {

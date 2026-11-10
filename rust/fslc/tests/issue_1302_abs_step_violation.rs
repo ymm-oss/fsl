@@ -225,8 +225,8 @@ fn mutate_kills_a_mutant_that_reaches_an_abstract_step_violation() {
     let dir = scratch("mutate");
     fs::write(
         dir.join("abs.fsl"),
-        "spec MA {\n  type D = 0..4\n  state { y: Bool }\n  init { y = true }\n  \
-         action go(d: D) {\n    y = y\n    ensures d > 0\n  }\n}\n",
+        "spec MA {\n  type AD = 0..4\n  state { y: Bool }\n  init { y = true }\n  \
+         action go(d: AD) {\n    y = y\n    ensures d > 0\n  }\n}\n",
     )
     .expect("write abs");
     fs::write(

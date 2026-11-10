@@ -142,37 +142,138 @@ partial operations (and its other failure sites, such as a `Map` key outside
 the finite key domain or a checked integer overflow) are not published in the
 Public Kernel: an init failure is neither a rollback nor a `partial_op`
 violation, because there is no prior state to return to and no step to blame.
-Init definedness is a verifier obligation instead: every engine (explicit,
-`bmc`, `induction`) reports an init that some initial state cannot evaluate as
-a `semantics` error with exit code 2, and the symbolic engines locate it at the
-failing init statement (e.g. `division by zero in init at 9:5`; #1258). The
-one exception is an init that also assigns a value outside a state variable's
-type: `bmc` and `induction` assume the step-0 type bounds when they ask the
-init question, so they report the search's step-0 `type_bound` violation
-(exit 1) instead, while the explicit engine reports the init failure (exit 2).
+Init definedness is a verifier obligation instead: every engine (`explicit`,
+`auto`, `bmc`, `induction`) reports an init that some initial state cannot evaluate
+as a `semantics` error with exit code 2, and all engines locate it at the failing
+init statement with the same ` in init at L:C` suffix
+(e.g. `division by zero in init at 9:5`; #1258, #1543).
+Even with out-of-type init assignments, `bmc` and `induction` prioritize init
+undefinedness over assigned-root bounds and retain this same located message (#1597).
+If a symbolic init failure is found only beyond a stored `Seq`'s represented
+capacity, for example when init stores an over-capacity sequence and reads beyond
+its slots, these engines instead refuse without a location as
+`model sequence length exceeds capacity`.
 The schema is unchanged. Publishing init failure conditions, should a Kernel
 consumer need them, would add a field with its own `state_effect_on_failure`
 value and so a minor schema version.
 
+For binder expressions in init, symbolic diagnostics follow concrete evaluation
+order and name the first reached operation (#1607): source, then each present
+candidate's `where`, then its body/summand when selected. `forall` and `exists`
+respect their decisive-result short circuits; `count`, `unique`, and `exactlyOne`
+continue through all candidates. `sum` reports an undefined summand's operation
+before accumulation, and checks every partial sum for `integer overflow in sum`.
+These diagnostic sites retain the containing statement's location and remain
+verifier-internal; they do not add entries to `partial_operations`.
+
 ## Concrete boundary pre-pass budget
 
-Before `prepare_bmc` hands a spec to the symbolic engine, it runs a solver-free
-concrete BFS — `fsl_runtime::find_boundary_violation` — over exactly the
-`Monitor` semantics above, looking only for a `partial_op` or `type_bound`
-outcome. This exists because one such outcome cannot be represented by the
-bounded symbolic value at all: a `push` past a `Seq<T, N>`'s declared capacity
-increments the symbolic length without writing a slot
-(`rust/fsl-verifier/src/eval.rs`), so a state that reaches `len > slots.len()`
-fails closed the moment anything tries to render it —
-`rust/fsl-verifier/src/value.rs`'s `project_value` returns "model sequence
-length exceeds capacity" — rather than reporting the concrete, replayable
-`violated`/`type_bound` evidence the concrete Monitor can give directly. The
-pre-pass runs only when no `--property`/`--exclude-property _bounds_*`
-narrows the request (`selected_implicit_bounds` returns `None`); a narrowed
-request skips it and goes straight to the symbolic engine.
+Native verification has a solver-free concrete boundary BFS —
+`fsl_runtime::find_boundary_violation` — over exactly the `Monitor` semantics
+above, looking only for a `partial_op` or `type_bound`
+outcome, supplying concrete, replayable `violated`/`type_bound` evidence for
+state assignments beyond a sequence's declared capacity. Symbolic `push`
+temporaries retain every live element even past `Seq<T, N>`'s capacity; the
+state type boundary checks `len <= N`, independently of temporary storage.
+Symbolic state frames remain bounded to N slots. When a sequence's implicit
+bound is not checked, any reachable frame with `len > N` makes the symbolic
+search fail closed with a `semantics` error, "model sequence length exceeds
+capacity", before evaluating properties or actions on its incomplete data.
+It does not silently assume that bound to discard the overflowing path, nor
+use a reconstructed trace to justify a verdict on missing elements.
+This guard is deliberately more conservative than the former render-time
+failure: it can reject a selected run even when its property does not read the
+Seq, or after a reachable target was already witnessed, if a later explored
+frame overflows.
+
+The native boundary pre-pass runs when `selected_implicit_bounds` returns
+`None`, no initial state is supplied, and init is deterministic. Standalone BMC
+`--property` selections skip it. Induction instead materializes the selected user
+properties and clears selector metadata before preparing its base: every implicit
+bound assumed by its step is checked even under `--property P` or
+`--property _bounds_xs` (#1598). These induction runs can enter the pre-pass and
+receive the initial step-0 correction. Selected-trans induction additionally
+retains all user invariant hypotheses. For an induction base whose typed state
+contains no Seq (including nested types), symbolic BMC runs first (#1628).
+Only a `verified` base skips the redundant concrete search; every symbolic
+non-success or error still runs the same pre-pass with the same evidence
+priority. Seq models and standalone BMC keep the eager pre-pass. No implicit
+bound check or induction hypothesis is removed.
+`--exclude-property <user property>` alone leaves all implicit bounds checked
+and retains pre-pass eligibility: its initial-bound evidence also moves from
+step 1 / two states to step 0 / one state when the old probe found an idle
+successor. It can likewise change a depth-0 Seq projection error to a violation.
+Internally, `checked_bounds: Some(...)` can likewise omit bounds; the symbolic
+guard applies to each omitted Seq bound.
+This is not a public `--exclude-property _bounds_*` route: the current CLI
+rejects implicit-bound names in `--exclude-property` as `no such property`.
+
+Verification witness replay also carries this same bound selection (#1531),
+for BMC, induction's bounded witnesses, and explicit. The Monitor replay step
+checks only the selected implicit bounds: an omitted range bound must not roll
+back an intermediate step and turn a genuine selected-property counterexample
+into an internal trace mismatch. Explicit now rejects an explored successor
+whose omitted root Seq bound exceeds capacity with the same `semantics` error
+as BMC, before enqueueing or reporting that successor. The initial frame itself
+is not screened by explicit's new guard, but its successors are, including those
+that preserve an initial overflow unchanged. The exact selected-run verdict
+changes are recorded in
+[DESIGN-explicit-engine.md](DESIGN-explicit-engine.md#selected-bounds-and-witness-replay-1531).
+
+The existing `replay_trace`, `replay_trace_from_state`, and
+`replay_bmc_witnesses` entry points remain all-bounds wrappers; their
+`*_with_bounds` variants carry a verification run's selection (`None` still
+means all bounds). Only selected verification orchestration opts into this
+policy. Scenarios, mutation verdict replay, refinement, the `fsl-bmc` binary,
+and Worker verification continue using the all-bounds entry points. Worker
+has no property-selection option; this change adds none.
+
+Before exploring successors, the pre-pass checks only the initial state's type
+bounds using the same bounds helper as the `Monitor`; it does not evaluate user
+invariants or propagate their evaluation errors at this point. An initial
+`type_bound` violation in a model with actions is returned at step 0 with exactly
+one trace state (the initial state), no action, `exhausted: false`, and
+`states_explored: 1`, even at depth 0 (#1591). It does not wait for an enabled
+action to reproduce the invalid value. The native default `bmc` and `induction`
+paths therefore agree with explicit on this initial-bound evidence. Selections
+that bypass the pre-pass, supplied initial states, and nondeterministic init
+retain their existing routes. A valid initial state followed by an overflowing
+first action still reports step 1 and two
+trace states. With no actions, the probe skips this initial check and the
+existing verifier rejection remains exit 2 / `semantics` / `spec has no actions`
+under bmc, induction, explicit, and auto. The search budget and exhaustion
+fallthrough are unchanged.
+
+The WASM Worker's `verify` shares `find_boundary_violation`, so deterministic
+models with actions receive the same step-0/root-only initial-bound correction.
+Its caller has no property-selection or supplied-state option. This shared
+runtime change does not add either option to the Worker.
+
+This is not a replay change: the CLI's legacy empty action trace `[]` still
+does not evaluate initial-state bounds (#1591's third issue item). It is not
+evidence that the initial state satisfies its bounds. Versioned replay with an
+observed initial state has its existing safety check; the runtime's kernel
+state-trace replay rejects a completely empty trace. None of these replay
+contracts is changed by the boundary pre-pass fix.
+
+The induction engine also refuses to display an invariant, `trans`, or ranked
+`leadsTo` CTI if any state in its SAT model has missing sequence slots, returning
+the same `semantics` error rather than reconstructing a trace for a predicate
+evaluated on incomplete data. Bound-property CTIs retain supported action-based
+reconstruction; sequence length-bound failures already follow from the frame's
+length, independently of its missing suffix. This changes neither the induction
+premises nor the proof meaning. This restriction also applies to ranking even
+when every state bound is checked: a bounded pre-state does not establish
+bounds on its one-step successor. The two-state rank SAT arms screen both
+projected states before metric extraction and projection. One-state rank
+obligations instead rely on the bounded pre-state (or independent deadlock
+state); their raw step-0 projection fails closed if an internal bounds subset
+leaves that state unrepresentable. A ranking error preserves
+an existing BMC `leadsTo` violation rather than replacing it with a phantom CTI;
+on the post-induction path it is reported as the semantics error.
 
 This pre-pass is an evidence detour, not a verdict authority: it only ever
-returns `partial_op`/`type_bound`, and `prepare_bmc` consumes only the
+returns `partial_op`/`type_bound`, and `probe_bmc_boundary` consumes only the
 non-`partial_op` half (`partial_op` belongs to `verify_bounded*` itself, per
 issue #651). Nothing about it may change *whether* a spec verifies — only
 *how good the evidence looks* when it doesn't. That is what makes it safe to
@@ -181,15 +282,90 @@ usize, budget: usize) -> Result<BoundaryProbe, RuntimeError>` stops after
 visiting `budget` distinct concrete states and reports
 `BoundaryProbe { finding, exhausted, states_explored }`. Every caller must
 treat `exhausted && finding.is_none()` exactly like today's empty result:
-fall through to the symbolic engine, which finds every symbolically
-representable violation on its own, and which still fails closed on the one
-class the pre-pass alone covers (confirmed directly: a `Seq<Int, 2>`-overflow
-fixture reports `violated`/`type_bound` with a full trace by the default
-path, and `error`/"model sequence length exceeds capacity" when isolated to
-a property that must render the overflowed value — both outcomes unaffected
-by the budget). Exhaustion can only ever downgrade a would-be concrete
-`violated` to whatever the symbolic engine reports for the same spec — never
-the reverse, and never past a fail-closed error into a false green.
+fall through to the symbolic engine. Checked action-assignment overflows can
+also produce a symbolic `type_bound` witness by reconstructing the actual
+attempted value, so this class is no longer representable only by the pre-pass.
+An unchecked over-capacity frame is instead refused by the guard before any
+property query, not by an attempt to render the selected property's result.
+An unrepresentable initial frame has no preceding action to reconstruct and
+still fails closed in symbolic projection; the default concrete pre-pass, when
+it finds that initial overflow, can supply `type_bound` evidence instead.
+The issue #697 default/isolated contrast pins these different paths, not an
+inability to render checked symbolic action overflows after budget exhaustion.
+Exhaustion must never turn an undecided or fail-closed result into a false green.
+
+For a concrete initial value `xs = Seq { 0, 1 }` with capacity 1 and an idle
+action, the engine and path matter (`E` below is exit 2 / `semantics` /
+`model sequence length exceeds capacity`; `TB@n` is exit 1 / `type_bound` /
+`_bounds_xs` at step n):
+
+| Path | bmc | induction | explicit |
+|---|---|---|---|
+| Default, depth 0 | TB@0 (concrete initial check) | TB@0 (concrete initial check) | TB@0 |
+| Default, depth at least 1 | TB@0 (concrete initial check) | TB@0 (concrete initial check) | TB@0 |
+| `--property _bounds_xs` (only BMC skips the pre-pass) | E (symbolic initial projection) | TB@0 (concrete initial check, #1598) | TB@0 |
+
+**Selected-induction verdict transitions (#1598).** These are intentional
+selection-contract changes, not changes to standalone BMC or explicit:
+
+| Form under `--engine induction --property P` (or a selected bound) | Before #1598 | After #1598 |
+|---|---|---|
+| Initial bound omitted at every base depth; a shallow run can also miss P | exit 0 `proved` / `unbounded` (false proof) | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_*` |
+| Deterministic initial Seq overflow reaching the pre-pass (including `InitIdle` and the selected `_bounds_xs` row above), or an overflowing Seq successor within the base depth | exit 2 `error`, `kind: "semantics"` | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_xs` (step 0 for init) |
+| Bound fails at or before the selected property's failing step | exit 1 `unknown_cti`, or exit 1 `violated P` at the same or a later step | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_*` at the first failing base step |
+| The same base through `sweep --engine induction --property P`, or a `verify --lemma` target | exit 0 `sweep_passed`, or exit 0 `proved` for the lemma-assisted target | exit 1 `sweep_failed`, or exit 1 `violated` / `type_bound` for the target |
+
+Same-step examples under selected induction: `n: 0..1`, init 0, increment,
+`P { n <= 1 }` at depth 2 changes `violated P`@2 to `type_bound _bounds_n`@2.
+For a Set initial copy with `K = 0..1`, `init { x = 2 t = Set { x } s = t }`,
+`P { not s.contains(2) }` changes `violated P`@0 to `type_bound _bounds_s`@0.
+In both cases the exit stays 1; attribution changes at the same step.
+
+The `proved` envelope's `invariants_checked` includes all implicit bounds;
+`violated` envelopes omit that field. They identify the failed bound using
+`violation_kind` and `invariant`, with the corresponding base-state evidence.
+
+Each default TB@0 above has the one-state trace `[{step: 0, state: {xs: [0, 1]}}]`
+and `last_action: null`. This replaces the former depth-at-least-1 default
+TB@1/two-state idle trace, and changes the two symbolic engines' depth-0 default
+Seq result from exit 2 / `semantics` to exit 1 / `violated` / `type_bound`.
+The same step-0 rule applies to an initial range overflow. The regression matrix
+in `rust/fslc/tests/issue_1591_init_bound_step0.rs` covers both forms at depths
+0/1/2 under all three engines (18 cells): eight symbolic depth-1/2 cells change
+step/trace length, two symbolic depth-0 Seq cells change error to violation,
+and the other eight core cells retain step 0. The JSON schema is unchanged;
+`violated_at_step` and `checked_to_depth` now identify 0 on the corrected path.
+
+That matrix counts verdict/step/trace changes, not complete JSON-value equality.
+An initial violation formerly reported by the symbolic engine (for example a
+range overflow at depth 0, or a value repaired by the first action) is now
+rendered by the boundary renderer: `violating_bindings` is `[{}]` rather than
+`null`, and `cost.properties` is empty. The probe performs no solver checks
+(`cost.solver.checks: 0`, with solver memory unavailable/null), unlike the former
+symbolic query. Explicit retains its own `violating_bindings: null`; agreement
+above refers to the initial violation and trace, not all engine metadata.
+
+The exit-2-to-exit-1 change is not limited to Seq at depth 0. If init already
+violates a bound and the first action errors, the probe now returns the initial
+`type_bound` instead of exploring that action. For example, `n: 0..5`,
+`init { n = 9223372036854775807 }`, `action inc() { n = n + 1 }` changes bmc and
+induction at depths 1/2 (four example cells) from exit 2 / `semantics` /
+`integer overflow in addition` to exit 1 / `type_bound` / step 0 / one state.
+The no-actions case is deliberately not an exit-code change.
+
+Selecting a supported user invariant leaves the Seq bound unchecked in standalone
+BMC, which rejects the initial frame via the guard. Induction checks that bound
+in its base and, for this deterministic initial overflow, reports TB@0 instead
+of the former exit-2 `semantics` error (#1598). Explicit retains
+the concrete elements and evaluates the selected predicate at depth 0. If that
+predicate holds and an idle successor preserves the initial overflow, depth at
+least 1 now returns the same capacity `semantics` error, before closure can
+report `proved` (#1531); explicit's initial frame alone remains unguarded.
+A reachable-only induction selection is still a usage error. Before #1519,
+explicit rejected the same overflowing literal earlier with `sequence literal
+exceeds capacity` at every depth; it now reaches the concrete initial bound
+check. #1591 resolves the default pre-pass's separate step-1 versus explicit
+step-0 discrepancy; #1519 did not change that label.
 
 Before the budget, this pre-pass cloned its `Monitor` (the whole `KernelModel`
 by value) and its trace per visited BFS node; a spec whose history-recording
@@ -233,6 +409,59 @@ in-repo precedent for bounding a solver-free BFS by state count rather than
 by depth or wall time; that budget still governs only
 `verify_explicit_selected` and is unrelated to this pre-pass beyond sharing
 the same idea of an explicit `usize` cutoff surfaced in the result.
+
+### Retained Set members and relation pairs (#1541)
+
+An accepted `add` retains its computed member or pair even when it lies outside
+the receiver's declared finite carrier. Symbolic values use the valid-state grid
+plus guarded, distinct scalar candidates; membership, cardinality, extensional
+equality, removal, domain/range and relation graph consumers see the actual live
+values. This does not relax static element/endpoint typing or admit unbounded or
+composite collection forms.
+
+Literal member values, including enumerated action parameters, update existing
+carrier slots without appending an entry; nominal bounded types alone are not
+proof when state bounds are unselected. Conditional merges align known literal
+keys by value. Symbolic search may equate a complete root with a fresh frame
+whose finite support contains every live member/pair. For selected, already
+asserted root bounds, the declared carrier supplies that proof without another
+query. For unchecked roots, the candidate support includes the carrier and known
+literal keys outside it; only an UNSAT query for a live key escaping that support
+licenses re-framing. The query does not assume the omitted bound. SAT preserves
+the complete open value, and solver unknown/backend errors are not treated as
+proof. Re-framing applies only to top-level Set/relation state roots; other roots
+remain unchanged. Invalid successors are checked/projected before re-framing.
+Finite reachable support can therefore be compacted even under property selection;
+genuinely growing support still grows rather than losing outside values.
+
+Retention is paired with successor construction and evidence: complete pending
+collection expressions enter successor frames instead of being equated to an
+incapable closed grid, and projection preserves outside members. Relational init
+still requires repeated assignments to agree. Its shared planner propagates only
+fresh collection shape through the checked dependency order, including copies,
+copy chains, conditions and relation pairs; it does not execute assignments or
+propagate scalar values. Existing grid keys need no additional initial slots,
+but computed/outside candidates and copied support must remain representable.
+Concrete snapshots likewise must not discard their members. Static `check` and
+concrete init's read-before-assignment policy are unchanged: a free scalar read
+can remain an explicit/Monitor init error while symbolic engines expose an
+initial bound violation. Bound checks retain their existing state order: restored
+collection support can expose its bound before the free scalar's own bound.
+For an accepted `add` on
+the bounded receiver, storing its result back exposes `_bounds_<root>` rather
+than removing the transition. Whole-collection assignment from a wider Set or
+relation carrier remains unsupported by BMC/induction (`cannot coerce symbolic
+value`, exit 2), as on base; this repair does not add cross-carrier coercion.
+Bounded BMC/explicit success before that transition is legitimate; induction must
+not promote it to an unbounded proof of a false bound or invariant.
+
+Relations contribute implicit bounds consistently to the core obligation catalog,
+induction, property selection and reports. Thus `--property _bounds_r` is available
+for relation state `r`, `invariants_checked` includes `_bounds_r`, and a successful
+induction proof records it in `k_used`. HTML's embedded verification inventory
+changes accordingly. The existing `--exclude-property _bounds_*` rejection above
+is unchanged. Regression and rejecting controls live in
+`rust/fslc/tests/issue_1541_out_of_domain_members.rs`.
 
 ## Conformance corpus
 
@@ -322,6 +551,19 @@ aggregate JSON keeps its exact `{binding, domain, condition}` shape (`sum`
 without a filter retains `condition: null`). Adding `{binder: ...}` to the
 published `count`/`sum` kinds would be a representation change and therefore
 requires a future Public Kernel major version.
+
+For Set and relation-projection aggregates, normalization includes actual `add`
+candidates, not just declared carrier values. Public Kernel v1/v2 export uses
+existing scalar `let`/`var` nodes to capture candidates of collection let aliases,
+including chained aliases and the previous binding when a name is shadowed.
+Candidate scopes follow those captured values through guards, updates, ensures
+and partial-operation enumeration; later scalar shadowing or state updates must
+not recompute an earlier collection's candidates. Conditional candidates preserve
+branch evaluation, and membership/distinctness guards count each live value once.
+Consumers must process generated guards/lets in order. `min`/`max` around a sum
+use the same repaired sum candidates and remain binary arithmetic, not new
+collection aggregate kinds. No Public Kernel field or node shape is added.
+
 `coverage_matrix()` is itself the enforcement gate: if any feature row falls
 short of its required level, it returns `Err` naming every shortfall instead
 of producing a matrix that silently under-reports coverage. This is how
@@ -404,9 +646,27 @@ Map lookup remains a fail-closed evaluation error instead of being relabeled by
 a later partial operation.
 This keeps action-context `partial_op` classification inside the public
 `verify_bounded*` boundary without adding a production dependency on
-`fsl-runtime`. Agreement-only fallback values still let zero-capacity sequence
-terms be constructed under the broader conformance predicates. Concrete
-conformance vectors remain authoritative for exact rollback evidence that a
+`fsl-runtime`. Reached reads of an empty zero-capacity sequence are classified
+as `partial_op`; when no physical slots exist, ordinary BMC and induction
+construct fresh, unobservable read terms, not the agreement-only fallback
+values used by broader conformance predicates. Ranked `leadsTo` decreases
+measures are the narrow exception: before initial, successor, or deadlock
+measure evaluation, a path-sensitive preflight refuses only reached zero-slot
+reads whose fresh values would otherwise enter the rank evaluation. It retains
+the base semantics error (`head() on zero-capacity sequence` or
+`cannot select from an empty finite domain`). Unreached conditional or
+short-circuited reads can now prove by ranking where the base reported a
+semantics error. That narrow preflight precedes the general reached
+partial-operation measure probe (#1542), which also covers capacity-zero
+push/pop and conditional-merge temporaries with physical slots. A possible
+partial read in the rank-use region is refused as a semantics error rather
+than used as rank evidence; see
+[Seq partial operations](DESIGN-seq-partial-operations.md#symbolic-contract).
+The BMC ranking fast path discharges nothing on either refusal, as for
+other ranking errors.
+Nonempty expression temporaries retain their live elements and normal read
+semantics, independently of declared state capacity. Concrete conformance
+vectors remain authoritative for exact rollback evidence that a
 bounded symbolic representation cannot retain, such as an over-capacity
 sequence suffix. Property-context totalization is unchanged.
 The solver-free `fsl-runtime` dependency boundary remains intact.
@@ -419,10 +679,20 @@ fslc conformance spec.fsl --depth 4 > vectors.json
 ```
 
 Both commands return one JSON document and use the normal native exit contract:
-0 success, 2 parse/type/semantic/I/O error. `kernel` accepts source dialects that
+0 success, 2 usage (invalid argv)/parse/type/semantic/I/O error. `kernel` accepts source dialects that
 reach the shared lowering gate and retain truthful source provenance; `compose`
 is the explicit v1 exception described above. The output records the original
 dialect and requirement origin.
+
+DB lowering validates the closed compatibility-rule vocabulary before building
+the catalog. An unknown rule now returns an authored `semantics` error (exit 2),
+with its rule location, rather than exporting a catalog that silently omits that
+obligation. The same boundary covers every consumer of DB lowering. This is not
+full DB compatibility validation: DB-only findings and unreachable schema-window
+errors remain with the DB tools and do not newly block `kernel`. The existing
+unlocated specialized-validator envelopes of `check` and the Worker are unchanged;
+other commands retain their established lowering-error rendering (including
+message-only locations for `fmt`/`lint`/`migrate`).
 
 Rust callers can use:
 

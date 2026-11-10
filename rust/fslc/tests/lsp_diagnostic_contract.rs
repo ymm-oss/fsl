@@ -5,6 +5,75 @@ use std::process::Command;
 
 use serde_json::Value;
 
+const OPTION_SOURCE: &str = "spec OptionOperand {\n  type N = 0..2\n  state { n: N }\n  init { n = 0 }\n  action stay() { }\n  invariant P { n is none }\n}\n";
+
+#[test]
+fn trace_step_type_errors_share_native_and_lsp_identity() {
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "issue-1439-step-diagnostics-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create step diagnostic fixtures");
+    for (name, source, next_edition, type_name, line, word) in [
+        (
+            "published",
+            "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { requires x != c c = x }\n  }\n  forbidden FB-1 \"internal type\" {\n    paint(if c != 1 then Red else Blue)\n    expect rejected\n  }\n}\n",
+            false,
+            "Color",
+            9,
+            "paint",
+        ),
+        (
+            "fsl5-phrase",
+            "fsl 5\nrequirements R {\n  number Amount\n  actor Employee\n  entity Claim { amount: Amount = 0 lifecycle Draft -> Submitted }\n  event submit = Employee submits Claim with amount Draft -> Submitted\n  scenario AC-1 \"internal type\" {\n    Employee submits claim1 with amount (if claim_stage[0] != 1 then 1 else 2)\n    then claim1 is Submitted\n  }\n}\nverify { instances Claim = 2 values Amount = 0..3 }\n",
+            true,
+            "ClaimStage",
+            8,
+            "Employee",
+        ),
+    ] {
+        let path = directory.join(format!("{name}.fsl"));
+        std::fs::write(&path, source).expect("write step fixture");
+        let path = path.to_str().expect("UTF-8 path");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+        command.args(["check", path]);
+        let options = fsl_syntax::ParseOptions::stable();
+        let output = command.output().expect("native check");
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stderr.is_empty());
+        let cli: Value = serde_json::from_slice(&output.stdout).expect("native envelope");
+        let shared = fslc_rust::source_diagnostic::diagnostics(
+            source,
+            path,
+            &fsl_core::FsResolver::new(&directory),
+            &options,
+        )
+        .into_iter()
+        .find(|diagnostic| diagnostic.kind != "migration")
+        .expect("shared semantic diagnostic");
+        assert_eq!(cli["result"], "error");
+        assert_eq!(cli["kind"], "semantics");
+        assert_eq!(cli["kind"], shared.kind);
+        assert_eq!(cli["message"], shared.message);
+        assert_eq!(cli["loc"], shared.span.python_loc());
+        assert_eq!(cli["loc"], serde_json::json!({"line": line, "column": 5}));
+        assert!(shared.message.contains(&format!(
+            "expression of type Int is not assignable to Named(\"{type_name}\")"
+        )));
+        assert_eq!(shared.code, "FSL-SEMANTIC");
+        assert!(shared.located);
+        assert_eq!(
+            &source[shared.span.start.offset..shared.span.end.offset],
+            word
+        );
+        if next_edition {
+            assert_eq!(cli["edition"], "next");
+            assert_eq!(cli["fsl_edition"], 5);
+        }
+    }
+    std::fs::remove_dir_all(directory).expect("remove owned step fixtures");
+}
+
 #[test]
 fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes() {
     let directory =
@@ -12,6 +81,12 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
     std::fs::create_dir_all(&directory).expect("create diagnostic fixture directory");
     let cases = [
         ("parse", "spec Broken { state {", None, None),
+        (
+            "parse-outside-bmp",
+            "spec Broken {\n  state { 𠮷: Int }\n}",
+            Some((2, 11)),
+            None,
+        ),
         (
             "type",
             "spec Broken { state { value: Missing } init { value = 0 } }",
@@ -40,6 +115,19 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
             Some((1, 1)),
             None,
         ),
+        (
+            "acceptance-expect-type",
+            "requirements E {\n  enum Color { Red, Blue }\n  state { c: Color }\n  init { c = Red }\n  requirement REQ-1 \"paint\" {\n    action paint(x: Color) { c = x }\n  }\n  acceptance AC-1 \"type comparison\" {\n    paint(Blue)\n    expect c != 1\n  }\n}\n",
+            Some((10, 5)),
+            None,
+        ),
+        (
+            "relation-endpoint-type",
+            "spec RelEndpoint {\n  enum Color { Red, Blue }\n  type N = 0..2\n  state { r: relation N -> N }\n  init { r = Set {} }\n  action stay() { }\n  invariant P { not r.contains(1, Blue) }\n}\n",
+            Some((7, 3)),
+            None,
+        ),
+        ("option-type", OPTION_SOURCE, Some((6, 3)), None),
     ];
 
     for (name, source, expected_location, expected_hint) in cases {
@@ -56,6 +144,7 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
             source,
             path.to_str().expect("UTF-8 fixture path"),
             &resolver,
+            &fsl_syntax::ParseOptions::stable(),
         )
         .into_iter()
         .find(|diagnostic| diagnostic.kind != "migration")
@@ -64,6 +153,20 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
         assert_eq!(cli["kind"], shared.kind, "{name}");
         assert_eq!(cli["message"], shared.message, "{name}");
         assert_eq!(cli["hint"].as_str(), expected_hint, "{name}");
+        if ["relation-endpoint-type", "option-type"].contains(&name) {
+            assert_eq!(shared.code, "FSL-SEMANTIC");
+        }
+        if name == "acceptance-expect-type" {
+            assert_eq!(cli["result"], "error");
+            assert_eq!(cli["kind"], "semantics");
+            assert_eq!(shared.code, "FSL-SEMANTIC");
+            assert!(shared.located);
+            assert_eq!((shared.span.end.line, shared.span.end.column), (10, 11));
+            assert_eq!(
+                &source[shared.span.start.offset..shared.span.end.offset],
+                "expect"
+            );
+        }
         if !cli["loc"].is_null() {
             assert_eq!(cli["loc"], shared.span.python_loc(), "{name}");
         }
@@ -76,6 +179,73 @@ fn cli_and_lsp_source_diagnostics_share_identity_without_changing_cli_envelopes(
     }
 
     std::fs::remove_dir_all(directory).expect("remove diagnostic fixture directory");
+}
+
+/// fsl 5 plan S11: a requirements document written with the keyword
+/// table's Japanese keywords and a glossary alias holding a character outside
+/// the BMP. Under the `fsl 5` header the CLI and the language server report
+/// the same diagnostic, and the CLI's character column and the shared span's
+/// byte offset name the same word, the one the server converts to UTF-16.
+/// Without the header the Japanese keyword is a lexical error at the same
+/// place for both.
+#[test]
+fn japanese_keyword_diagnostics_share_cli_and_lsp_identity() {
+    let directory = std::env::temp_dir().join(format!(
+        "fsl-lsp-japanese-keyword-diagnostics-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&directory).expect("create fixture directory");
+    let source = "fsl 5\n要件 R {\n  用語集 {\n    Claim = 𠮷申請\n  }\n  \
+                  エンティティ 𠮷申請 { 金額: Int = 0  ライフサイクル A -> B }\n}\n";
+    let path = directory.join("japanese.fsl");
+    std::fs::write(&path, source).expect("write fixture");
+    let path = path.to_str().expect("UTF-8 fixture path");
+    // #1434: the former gate-off row (the header read as `fsl`, then
+    // `要件` an unexpected character) no longer exists; the headerless row
+    // keeps the negative control.
+    let headerless = directory.join("headerless.fsl");
+    std::fs::write(&headerless, source.strip_prefix("fsl 5\n").unwrap()).expect("write fixture");
+    let headerless = headerless.to_str().expect("UTF-8 fixture path").to_owned();
+    let headerless_source = source.strip_prefix("fsl 5\n").unwrap();
+    for (path, source, code, location, word) in [
+        (path, source, "canonical_name_not_ascii", (6, 16), "金額"),
+        (
+            headerless.as_str(),
+            headerless_source,
+            "FSL-PARSE",
+            (1, 1),
+            "要件",
+        ),
+    ] {
+        let options = fsl_syntax::ParseOptions::stable();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+        command.args(["check", path]);
+        let output = command.output().expect("run native check");
+        assert_eq!(output.status.code(), Some(2), "{path}");
+        let cli: Value = serde_json::from_slice(&output.stdout).expect("parse CLI envelope");
+        let resolver = fsl_core::FsResolver::new(Path::new(&directory));
+        let shared = fslc_rust::source_diagnostic::diagnostics(source, path, &resolver, &options)
+            .into_iter()
+            .find(|diagnostic| diagnostic.kind != "migration")
+            .expect("shared source diagnostic");
+        assert_eq!(cli["kind"], shared.kind, "{path}");
+        assert_eq!(cli["message"], shared.message, "{path}");
+        assert_eq!(cli["diagnostic_code"], code, "{path}");
+        assert_eq!(shared.code, code, "{path}");
+        assert_eq!(cli["loc"], shared.span.python_loc(), "{path}");
+        assert_eq!(
+            (shared.span.start.line, shared.span.start.column),
+            location,
+            "{path}"
+        );
+        assert!(
+            source.is_char_boundary(shared.span.start.offset)
+                && source[shared.span.start.offset..].starts_with(word),
+            "{path}: the span starts at byte {}",
+            shared.span.start.offset
+        );
+    }
+    std::fs::remove_dir_all(directory).expect("remove fixture directory");
 }
 
 #[test]
@@ -95,6 +265,7 @@ fn distinctness_unproved_diagnostic_shares_cli_and_lsp_identity() {
         &source,
         &fixture,
         &fsl_core::FsResolver::new(Path::new(".")),
+        &fsl_syntax::ParseOptions::stable(),
     )
     .into_iter()
     .find(|diagnostic| diagnostic.kind != "migration")
@@ -177,10 +348,15 @@ fn nested_option_payload_diagnostics_have_cli_lsp_identity() {
         );
         let cli: Value = serde_json::from_slice(&output.stdout).expect("parse CLI envelope");
         let resolver = fsl_core::FsResolver::new(Path::new(&directory));
-        let shared = fslc_rust::source_diagnostic::diagnostics(&source, path, &resolver)
-            .into_iter()
-            .find(|diagnostic| diagnostic.kind != "migration")
-            .expect("shared source diagnostic");
+        let shared = fslc_rust::source_diagnostic::diagnostics(
+            &source,
+            path,
+            &resolver,
+            &fsl_syntax::ParseOptions::stable(),
+        )
+        .into_iter()
+        .find(|diagnostic| diagnostic.kind != "migration")
+        .expect("shared source diagnostic");
 
         assert_eq!(cli["kind"], shared.kind, "{position} Option<{payload}>");
         assert_eq!(

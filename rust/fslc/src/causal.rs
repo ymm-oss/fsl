@@ -1,15 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use fsl_core::{FileResolver, FslValue, KernelExpr, KernelModel, TypeRef};
 use fslc_rust::literate_access::literate_access;
+use fslc_rust::outcome::error_exit;
+use fslc_rust::spec_load::SpecLoadError;
 use serde_json::{Map, Value, json};
 
-use super::{
-    CommandArgs, block_on_native, display, envelope, error_output, json_mismatches,
-    load_snapshot_value_object, log_action_matches, mapping_json_expr, parse_params,
-    read_jsonl_records, required_option_value,
+use crate::cli_options::{CommandArgs, required_option_value};
+use crate::cli_output::{envelope, error_output, located_error_output};
+use crate::log_replay::{
+    json_mismatches, log_action_matches, mapping_json_expr, parse_jsonl_records, parse_params,
+    untyped_replay_enum_mapping_span,
+};
+use crate::process::{block_on_native, parse_options};
+use crate::spec_loading::{
+    finish_admitted, io_error_output, load_snapshot_value_object, read_failure_message,
+    read_input_text, read_spec_source, run_admitted_root, run_admitted_roots,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -40,7 +48,9 @@ pub(super) fn causal_command(
                 Ok(path) => path,
                 Err(early_return) => return Ok(early_return),
             };
-            Ok(run_causal_check(&path))
+            Ok(run_causal_root(&path, |source| {
+                run_causal_check(&path, source)
+            }))
         }
         "analyze" => {
             let mut projection = None;
@@ -66,7 +76,7 @@ pub(super) fn causal_command(
                         &mut args,
                         "--lifecycle",
                     )?)),
-                    "--as-of" => as_of = Some(required_option_value(&mut args, "--as-of")?),
+                    "--as-of" => as_of = Some(date_option_value(&mut args, "--as-of")?),
                     _ => args.positional(option, unknown)?,
                 }
             }
@@ -74,15 +84,18 @@ pub(super) fn causal_command(
                 Ok(path) => path,
                 Err(early_return) => return Ok(early_return),
             };
-            Ok(run_causal_analyze(
-                &path,
-                projection.as_deref(),
-                profile.as_deref(),
-                &format,
-                &evidence,
-                &lifecycle,
-                as_of.as_deref(),
-            ))
+            Ok(run_causal_root(&path, |source| {
+                run_causal_analyze(
+                    &path,
+                    source,
+                    projection.as_deref(),
+                    profile.as_deref(),
+                    &format,
+                    &evidence,
+                    &lifecycle,
+                    as_of.as_deref(),
+                )
+            }))
         }
         "verify-expectations" => {
             let mut depth = 8_usize;
@@ -100,7 +113,9 @@ pub(super) fn causal_command(
                 Ok(path) => path,
                 Err(early_return) => return Ok(early_return),
             };
-            Ok(run_causal_verify_expectations(&path, depth))
+            Ok(run_causal_root(&path, |source| {
+                run_causal_verify_expectations(&path, source, depth)
+            }))
         }
         "observe-expectations" => {
             let mut from_log = None;
@@ -129,10 +144,10 @@ pub(super) fn causal_command(
                             Some(PathBuf::from(required_option_value(&mut args, "--scope")?));
                     }
                     "--period-start" => {
-                        period_start = Some(required_option_value(&mut args, "--period-start")?);
+                        period_start = Some(date_option_value(&mut args, "--period-start")?);
                     }
                     "--period-end" => {
-                        period_end = Some(required_option_value(&mut args, "--period-end")?);
+                        period_end = Some(date_option_value(&mut args, "--period-end")?);
                     }
                     "--out" => {
                         out = Some(PathBuf::from(required_option_value(&mut args, "--out")?));
@@ -151,47 +166,58 @@ pub(super) fn causal_command(
                 Err(early_return) => return Ok(early_return),
             };
             let Some(from_log) = from_log else {
-                return Ok((error_output("usage", "--from-log is required"), 2));
+                return Ok(error_exit(error_output("usage", "--from-log is required")));
             };
             let Some(mapping) = mapping else {
-                return Ok((error_output("usage", "--mapping is required"), 2));
+                return Ok(error_exit(error_output("usage", "--mapping is required")));
             };
             let Some(scope_path) = scope_path else {
-                return Ok((
-                    error_output(
-                        "usage",
-                        "--scope is required (observation scope is never inferred from log content)",
-                    ),
-                    2,
-                ));
+                return Ok(error_exit(error_output(
+                    "usage",
+                    "--scope is required (observation scope is never inferred from log content)",
+                )));
             };
             let Some(period_start) = period_start else {
-                return Ok((
-                    error_output(
-                        "usage",
-                        "--period-start is required (observation period is never inferred from log content)",
-                    ),
-                    2,
-                ));
+                return Ok(error_exit(error_output(
+                    "usage",
+                    "--period-start is required (observation period is never inferred from log content)",
+                )));
             };
             let Some(period_end) = period_end else {
-                return Ok((
-                    error_output(
-                        "usage",
-                        "--period-end is required (observation period is never inferred from log content)",
-                    ),
-                    2,
-                ));
+                return Ok(error_exit(error_output(
+                    "usage",
+                    "--period-end is required (observation period is never inferred from log content)",
+                )));
             };
-            Ok(run_causal_observe_expectations(
-                &path,
-                &from_log,
-                &mapping,
-                &scope_path,
-                &period_start,
-                &period_end,
-                out.as_deref(),
-                lifecycle_out.as_deref(),
+            Ok(run_admitted_roots(
+                vec![
+                    (&path, read_causal_source(&path)),
+                    (&mapping, read_spec_source(&mapping)),
+                ],
+                None,
+                false,
+                |sources, editions| {
+                    finish_admitted(
+                        run_causal_observe_expectations(
+                            &path,
+                            &sources[0],
+                            &from_log,
+                            &sources[1],
+                            &scope_path,
+                            &period_start,
+                            &period_end,
+                            out.as_deref(),
+                            lifecycle_out.as_deref(),
+                            &|path| {
+                                let log = std::fs::read_to_string(path)?;
+                                crate::output_publication::note_input(path);
+                                Ok(log)
+                            },
+                        ),
+                        editions,
+                        false,
+                    )
+                },
             ))
         }
         "diff" => {
@@ -222,7 +248,21 @@ pub(super) fn causal_command(
             if let Some(option) = positionals.next() {
                 return Err(unknown(&option.to_string_lossy()));
             }
-            Ok(run_causal_diff(&before, &after))
+            Ok(run_admitted_roots(
+                vec![
+                    (&before, read_causal_source(&before)),
+                    (&after, read_causal_source(&after)),
+                ],
+                None,
+                false,
+                |sources, editions| {
+                    finish_admitted(
+                        run_causal_diff(&before, &sources[0], &after, &sources[1]),
+                        editions,
+                        false,
+                    )
+                },
+            ))
         }
         "ledger" => {
             let mut plans = Vec::new();
@@ -243,7 +283,7 @@ pub(super) fn causal_command(
                         &mut args,
                         "--lifecycle",
                     )?)),
-                    "--as-of" => as_of = Some(required_option_value(&mut args, "--as-of")?),
+                    "--as-of" => as_of = Some(date_option_value(&mut args, "--as-of")?),
                     "--format" => format = required_option_value(&mut args, "--format")?,
                     _ => args.positional(option, unknown)?,
                 }
@@ -255,13 +295,16 @@ pub(super) fn causal_command(
             if format != "json" {
                 return Err("causal ledger supports only --format json".to_owned());
             }
-            Ok(run_causal_ledger(
-                &path,
-                &plans,
-                &evidence,
-                &lifecycle,
-                as_of.as_deref(),
-            ))
+            Ok(run_causal_root(&path, |source| {
+                run_causal_ledger(
+                    &path,
+                    source,
+                    &plans,
+                    &evidence,
+                    &lifecycle,
+                    as_of.as_deref(),
+                )
+            }))
         }
         other => Err(format!(
             "unknown causal subcommand '{other}' (expected check | analyze | verify-expectations | observe-expectations | diff | ledger; there is deliberately no 'causal verify')"
@@ -320,35 +363,38 @@ fn causal_error_output(error: &fsl_tools::CausalError, legacy_literate: bool) ->
     (output, 2)
 }
 
-fn load_causal_model(
+fn read_causal_source(path: &Path) -> Result<String, SpecLoadError> {
+    read_spec_source(path)
+}
+
+fn run_causal_root(path: &Path, run: impl FnOnce(&str) -> (Value, i32)) -> (Value, i32) {
+    run_admitted_root(path, read_causal_source(path), None, false, run)
+}
+
+fn load_causal_model_from_source(
     path: &Path,
+    source: &str,
 ) -> Result<(fsl_tools::CausalModel, Vec<fsl_tools::CausalWarning>), (Value, i32)> {
-    let source = std::fs::read_to_string(path).map_err(|error| {
-        (
-            error_output("io", &format!("cannot read {}: {error}", path.display())),
-            2,
-        )
-    })?;
     let base = path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = crate::spec_loading::dependency_resolver(&base);
     let legacy_literate = path.extension().and_then(std::ffi::OsStr::to_str) == Some("md");
-    fsl_tools::build_causal_model(&source, &resolver)
+    fsl_tools::build_causal_model_with_options(source, &resolver, crate::process::parse_options())
         .map_err(|error| causal_error_output(&error, legacy_literate))
 }
 
 fn merge_causal_envelope(value: Value) -> (Value, i32) {
     let Value::Object(body) = value else {
-        return (error_output("internal", "invalid causal result"), 3);
+        return error_exit(error_output("internal", "invalid causal result"));
     };
     let mut output = envelope();
     output.extend(body);
     (Value::Object(output), 0)
 }
 
-pub(super) fn run_causal_check(path: &Path) -> (Value, i32) {
-    match load_causal_model(path) {
+pub(super) fn run_causal_check(path: &Path, source: &str) -> (Value, i32) {
+    match load_causal_model_from_source(path, source) {
         Ok((model, warnings)) => {
             merge_causal_envelope(fsl_tools::causal_check_json(&model, &warnings))
         }
@@ -368,20 +414,13 @@ fn load_causal_evidence(
     as_of: Option<&str>,
 ) -> Result<LoadedEvidence, (Value, i32)> {
     let read_json = |path: &PathBuf| -> Result<Value, (Value, i32)> {
-        let source = std::fs::read_to_string(path).map_err(|error| {
-            (
-                error_output("io", &format!("cannot read {}: {error}", path.display())),
-                2,
-            )
-        })?;
+        let source = std::fs::read_to_string(path)
+            .map_err(|error| error_exit(io_error_output(&read_failure_message(path, &error))))?;
         serde_json::from_str(&source).map_err(|error| {
-            (
-                error_output(
-                    "parse",
-                    &format!("invalid JSON in {}: {error}", path.display()),
-                ),
-                2,
-            )
+            error_exit(error_output(
+                "parse",
+                &format!("invalid JSON in {}: {error}", path.display()),
+            ))
         })
     };
     let evidence_error = |error: &fsl_tools::EvidenceError| {
@@ -399,13 +438,10 @@ fn load_causal_evidence(
             .insert(artifact.evidence_id.clone(), artifact)
             .is_some()
         {
-            return Err((
-                error_output(
-                    "semantics",
-                    "duplicate evidence_id across --evidence inputs",
-                ),
-                2,
-            ));
+            return Err(error_exit(error_output(
+                "semantics",
+                "duplicate evidence_id across --evidence inputs",
+            )));
         }
     }
     for path in lifecycle_paths {
@@ -420,9 +456,10 @@ fn load_causal_evidence(
     Ok((artifacts, overlay))
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_causal_analyze(
     path: &Path,
+    source: &str,
     projection: Option<&str>,
     profile: Option<&str>,
     format: &str,
@@ -431,15 +468,12 @@ fn run_causal_analyze(
     as_of: Option<&str>,
 ) -> (Value, i32) {
     if !matches!(format, "json" | "dot" | "mermaid") {
-        return (
-            error_output(
-                "usage",
-                &format!("unsupported causal analyze format: {format}"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "usage",
+            &format!("unsupported causal analyze format: {format}"),
+        ));
     }
-    let (model, _) = match load_causal_model(path) {
+    let (model, _) = match load_causal_model_from_source(path, source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
@@ -458,34 +492,31 @@ fn run_causal_analyze(
             "causal_traceability_graph" => fsl_tools::causal_traceability_projection(&model),
             "causal_evidence_graph" => {
                 let Some((artifacts, overlay)) = &evidence else {
-                    return (
-                        error_output(
-                            "usage",
-                            "--projection causal_evidence_graph requires at least one --evidence artifact",
-                        ),
-                        2,
-                    );
+                    return error_exit(error_output(
+                        "usage",
+                        "--projection causal_evidence_graph requires at least one --evidence artifact",
+                    ));
                 };
-                fsl_tools::causal_evidence_graph(&model, artifacts, overlay)
+                Ok(fsl_tools::causal_evidence_graph(&model, artifacts, overlay))
             }
             other => {
-                return (
-                    error_output("usage", &format!("unknown causal projection '{other}'")),
-                    2,
-                );
+                return error_exit(error_output(
+                    "usage",
+                    &format!("unknown causal projection '{other}'"),
+                ));
             }
         },
         (None, Some("causal-review")) => {
             if format != "json" {
-                return (
-                    error_output(
-                        "usage",
-                        "--profile causal-review supports only --format json",
-                    ),
-                    2,
-                );
+                return error_exit(error_output(
+                    "usage",
+                    "--profile causal-review supports only --format json",
+                ));
             }
-            let mut review = fsl_tools::causal_review_json(&model);
+            let mut review = match fsl_tools::causal_review_json(&model) {
+                Ok(review) => review,
+                Err(error) => return causal_error_output(&error, false),
+            };
             if let Some((_, overlay)) = &evidence
                 && let Some(object) = review.as_object_mut()
             {
@@ -497,23 +528,24 @@ fn run_causal_analyze(
                 }
                 object.insert("causal_support".to_owned(), json!(overlay.support));
             }
-            review
+            Ok(review)
         }
         (None, Some(other)) => {
-            return (
-                error_output("usage", &format!("unknown causal profile '{other}'")),
-                2,
-            );
+            return error_exit(error_output(
+                "usage",
+                &format!("unknown causal profile '{other}'"),
+            ));
         }
         (Some(_), Some(_)) | (None, None) => {
-            return (
-                error_output(
-                    "usage",
-                    "fslc causal analyze requires exactly one of --projection or --profile",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "usage",
+                "fslc causal analyze requires exactly one of --projection or --profile",
+            ));
         }
+    };
+    let analysis = match analysis {
+        Ok(analysis) => analysis,
+        Err(error) => return causal_error_output(&error, false),
     };
     if format == "json" {
         return merge_causal_envelope(analysis);
@@ -536,17 +568,8 @@ fn run_causal_analyze(
 }
 
 #[allow(clippy::too_many_lines)]
-fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => {
-            return (
-                error_output("io", &format!("cannot read {}: {error}", path.display())),
-                2,
-            );
-        }
-    };
-    let surface = match fsl_syntax::parse_causal(&source) {
+fn run_causal_verify_expectations(path: &Path, source: &str, depth: usize) -> (Value, i32) {
+    let surface = match fsl_syntax::parse_causal(source) {
         Ok(surface) => surface,
         Err(error) => {
             return if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
@@ -556,15 +579,20 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
             };
         }
     };
-    let (model, _) = match load_causal_model(path) {
+    let (model, _) = match load_causal_model_from_source(path, source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
     let base = path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let resolver = fsl_core::FsResolver::new(base);
-    let compiled = match fsl_tools::compile_expectations(&surface, &model, &resolver) {
+    let resolver = crate::spec_loading::dependency_resolver(&base);
+    let compiled = match fsl_tools::compile_expectations(
+        &surface,
+        &model,
+        &resolver,
+        crate::process::parse_options(),
+    ) {
         Ok(compiled) => compiled,
         Err(error) => return causal_error_output(&error, false),
     };
@@ -572,7 +600,7 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
     for expectation in &compiled {
         let mut solver = match fsl_solver_z3::Z3Solver::new() {
             Ok(solver) => solver,
-            Err(error) => return (error_output("internal", &error.to_string()), 3),
+            Err(error) => return error_exit(error_output("internal", &error.to_string())),
         };
         let result = match block_on_native(fsl_verifier::verify_bounded(
             &expectation.model,
@@ -581,13 +609,10 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
         )) {
             Ok(result) => result,
             Err(error) => {
-                return (
-                    error_output(
-                        "semantics",
-                        &format!("expectation '{}': {error}", expectation.id),
-                    ),
-                    2,
-                );
+                return error_exit(error_output(
+                    "semantics",
+                    &format!("expectation '{}': {error}", expectation.id),
+                ));
             }
         };
         let violated_here = result
@@ -600,16 +625,13 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
                 .as_ref()
                 .is_some_and(|violation| violation.name != expectation.property);
         if base_violation {
-            return (
-                error_output(
-                    "semantics",
-                    &format!(
-                        "expectation '{}': the target spec itself is not clean at depth {depth}; fix the spec before checking expectations",
-                        expectation.id
-                    ),
+            return error_exit(error_output(
+                "semantics",
+                &format!(
+                    "expectation '{}': the target spec itself is not clean at depth {depth}; fix the spec before checking expectations",
+                    expectation.id
                 ),
-                2,
-            );
+            ));
         }
         expectations.push(json!({
             "id": format!("expectation:{}", expectation.id),
@@ -662,28 +684,78 @@ fn run_causal_verify_expectations(path: &Path, depth: usize) -> (Value, i32) {
     (Value::Object(output), 0)
 }
 
+fn observation_output_path(
+    base: &Path,
+    count: usize,
+    evidence_id: &str,
+    default_stem: &str,
+) -> PathBuf {
+    if count == 1 {
+        return base.to_path_buf();
+    }
+    let stem = base
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(default_stem);
+    let extension = base
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("json");
+    base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
+}
+
+/// Two outputs collide when they name one file in one physical parent. A parent
+/// that does not exist cannot be resolved, so that path compares by its spelling,
+/// with `.` and `..` collapsed because Windows collapses them when it opens a path.
+fn output_collision_key(destination: &Path) -> PathBuf {
+    if let (Some(parent), Some(name)) = (destination.parent(), destination.file_name())
+        && let Ok(parent) = parent.canonicalize()
+    {
+        return parent.join(name);
+    }
+    let mut key = PathBuf::new();
+    for component in destination.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                key.pop();
+            }
+            _ => key.push(component),
+        }
+    }
+    key
+}
+
+/// A later output's failure does not undo earlier ones, so name them with the error.
+fn output_write_error(
+    file_path: &Path,
+    error: &std::io::Error,
+    evidence_paths: &[String],
+    lifecycle_paths: &[String],
+) -> (Value, i32) {
+    let mut output = io_error_output(&format!("cannot write {}: {error}", file_path.display()));
+    let written = [evidence_paths, lifecycle_paths].concat();
+    if !written.is_empty() {
+        output["written"] = json!(written);
+    }
+    (output, 2)
+}
+
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_causal_observe_expectations(
     path: &Path,
+    source: &str,
     log_path: &Path,
-    mapping_path: &Path,
+    mapping_source: &str,
     scope_path: &Path,
     period_start: &str,
     period_end: &str,
     out_path: Option<&Path>,
     lifecycle_out_path: Option<&Path>,
+    read_log: &dyn Fn(&Path) -> std::io::Result<String>,
 ) -> (Value, i32) {
     // ── Parse causal source and compile expectations ──────────────────
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => {
-            return (
-                error_output("io", &format!("cannot read {}: {error}", path.display())),
-                2,
-            );
-        }
-    };
-    let surface = match fsl_syntax::parse_causal(&source) {
+    let surface = match fsl_syntax::parse_causal(source) {
         Ok(surface) => surface,
         Err(error) => {
             return if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
@@ -693,38 +765,39 @@ fn run_causal_observe_expectations(
             };
         }
     };
-    let (model, _) = match load_causal_model(path) {
+    let (model, _) = match load_causal_model_from_source(path, source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
     let base = path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let resolver = fsl_core::FsResolver::new(base);
-    let compiled = match fsl_tools::compile_expectations(&surface, &model, &resolver) {
+    let resolver = crate::spec_loading::dependency_resolver(&base);
+    let compiled = match fsl_tools::compile_expectations(
+        &surface,
+        &model,
+        &resolver,
+        crate::process::parse_options(),
+    ) {
         Ok(compiled) => compiled,
         Err(error) => return causal_error_output(&error, false),
     };
     if compiled.is_empty() {
-        return (
-            error_output("semantics", "causal model has no expectations to observe"),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "causal model has no expectations to observe",
+        ));
     }
 
     // ── Parse mapping and log ────────────────────────────────────────
-    let mapping_source = match std::fs::read_to_string(mapping_path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    let mapping = match fsl_syntax::parse_surface_document(&mapping_source) {
+    let mapping = match fsl_syntax::parse_surface_document_with(mapping_source, parse_options()) {
         Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
-        Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
-        Err(error) => return (error_output("parse", &error.to_string()), 2),
+        Ok(_) => return error_exit(error_output("type", "expected refinement mapping file")),
+        Err(error) => return error_exit(error_output("parse", &error.to_string())),
     };
-    if let Some(span) = crate::untyped_replay_enum_mapping_span(&mapping) {
+    if let Some(span) = untyped_replay_enum_mapping_span(&mapping) {
         return (
-            crate::located_error_output(
+            located_error_output(
                 "type",
                 "enum conversion or abstraction requires a typed impl model and is not supported by causal --from-log mappings",
                 span,
@@ -732,35 +805,32 @@ fn run_causal_observe_expectations(
             2,
         );
     }
-    let records = match read_jsonl_records(log_path) {
+    let log_raw = match read_log(log_path) {
+        Ok(raw) => raw,
+        Err(error) => return error_exit(io_error_output(&read_failure_message(log_path, &error))),
+    };
+    let records = match parse_jsonl_records(&log_raw) {
         Ok(records) => records,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
 
     // ── Parse scope ──────────────────────────────────────────────────
-    let scope_raw = match std::fs::read_to_string(scope_path) {
+    let scope_raw = match read_input_text(scope_path) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let scope: Value = match serde_json::from_str(&scope_raw) {
         Ok(scope) => scope,
         Err(error) => {
-            return (
-                error_output("io", &format!("invalid scope JSON: {error}")),
-                2,
-            );
+            return error_exit(io_error_output(&format!("invalid scope JSON: {error}")));
         }
     };
 
     // ── Provenance digests ───────────────────────────────────────────
     let model_digest = fsl_tools::canonical_json(&json!(source));
     let model_digest = sha256_digest(&model_digest);
-    let log_raw = match std::fs::read_to_string(log_path) {
-        Ok(raw) => raw,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
     let log_digest = sha256_digest(&log_raw);
-    let mapping_digest = sha256_digest(&mapping_source);
+    let mapping_digest = sha256_digest(mapping_source);
 
     // ── Build mapping lookup tables ──────────────────────────────────
     let maps_auto = mapping
@@ -803,38 +873,36 @@ fn run_causal_observe_expectations(
         let spec_source = match resolver.read(import_path) {
             Ok(source) => source,
             Err(error) => {
-                return (
-                    error_output(
-                        "io",
-                        &format!("cannot read '{}': {}", import_path, error.message),
-                    ),
-                    2,
-                );
+                return error_exit(io_error_output(&format!(
+                    "cannot read '{}': {}",
+                    import_path, error.message
+                )));
             }
         };
-        let kernel = match fsl_core::parse_kernel_source(&spec_source, &resolver) {
+        let kernel = match fsl_core::parse_kernel_source_with_options(
+            &spec_source,
+            &resolver,
+            crate::process::parse_options(),
+        ) {
             Ok(kernel) => kernel,
-            Err(error) => return (error_output("semantics", &error.to_string()), 2),
+            Err(error) => return error_exit(error_output("semantics", &error.to_string())),
         };
         match fsl_core::build_model(kernel) {
             Ok(model) => model,
-            Err(error) => return (error_output("semantics", &error.to_string()), 2),
+            Err(error) => return error_exit(error_output("semantics", &error.to_string())),
         }
     } else {
-        return (
-            error_output("semantics", "causal model has no uses imports"),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "causal model has no uses imports",
+        ));
     };
 
     // ── Replay: conformance + bounded liveness per expectation ───────
     let mut monitor = match fsl_runtime::Monitor::new(spec_model.clone()) {
         Ok(monitor) => monitor,
         Err(error) => {
-            return (
-                error_output("internal", &format!("monitor init: {error}")),
-                3,
-            );
+            return error_exit(error_output("internal", &format!("monitor init: {error}")));
         }
     };
 
@@ -844,13 +912,10 @@ fn run_causal_observe_expectations(
         match fsl_runtime::BoundedLivenessMonitor::new(expectation.model.clone()) {
             Ok(liveness) => liveness_monitors.push(liveness),
             Err(error) => {
-                return (
-                    error_output(
-                        "internal",
-                        &format!("liveness monitor for '{}': {error}", expectation.id),
-                    ),
-                    3,
-                );
+                return error_exit(error_output(
+                    "internal",
+                    &format!("liveness monitor for '{}': {error}", expectation.id),
+                ));
             }
         }
     }
@@ -872,16 +937,13 @@ fn run_causal_observe_expectations(
             }
             Ok(None) => {}
             Err(error) => {
-                return (
-                    error_output(
-                        "internal",
-                        &format!(
-                            "liveness observe init for '{}': {error}",
-                            compiled[index].id
-                        ),
+                return error_exit(error_output(
+                    "internal",
+                    &format!(
+                        "liveness observe init for '{}': {error}",
+                        compiled[index].id
                     ),
-                    3,
-                );
+                ));
             }
         }
     }
@@ -977,7 +1039,7 @@ fn run_causal_observe_expectations(
             }
             let mut observed = Map::new();
             for (name, ty) in &spec_model.state {
-                let display_name = display(name);
+                let display_name = spec_model.names().public_state(name).into_string();
                 let value = if let Some((binder, expression)) = state_maps.get::<str>(name) {
                     if binder.is_some() {
                         let TypeRef::Map(key_ty, _) = ty else {
@@ -1071,7 +1133,7 @@ fn run_causal_observe_expectations(
             };
             let enabled = match monitor.enabled() {
                 Ok(enabled) => enabled,
-                Err(error) => return (error_output("internal", &error.to_string()), 3),
+                Err(error) => return error_exit(error_output("internal", &error.to_string())),
             };
             let Some(instance) = enabled
                 .iter()
@@ -1093,7 +1155,7 @@ fn run_causal_observe_expectations(
                 );
             };
             if let Err(error) = monitor.step(instance) {
-                return (error_output("internal", &error.to_string()), 3);
+                return error_exit(error_output("internal", &error.to_string()));
             }
         }
 
@@ -1160,16 +1222,13 @@ fn run_causal_observe_expectations(
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    return (
-                        error_output(
-                            "internal",
-                            &format!(
-                                "liveness observe for '{}' at step {step}: {error}",
-                                expectation.id
-                            ),
+                    return error_exit(error_output(
+                        "internal",
+                        &format!(
+                            "liveness observe for '{}' at step {step}: {error}",
+                            expectation.id
                         ),
-                        3,
-                    );
+                    ));
                 }
             }
         }
@@ -1261,6 +1320,13 @@ fn run_causal_observe_expectations(
                 .as_object_mut()
                 .expect("artifact is object")
                 .insert("artifact_digest".to_owned(), json!(digest));
+            if let Err(error) = fsl_tools::parse_artifact(&artifact) {
+                let mut output = error_output("semantics", &error.message);
+                if let Some(object) = output.as_object_mut() {
+                    object.insert("diagnostic".to_owned(), json!(error.kind));
+                }
+                return (output, 2);
+            }
 
             // Build lifecycle record.
             let mut lifecycle_record = json!({
@@ -1290,68 +1356,82 @@ fn run_causal_observe_expectations(
         }
     }
 
+    // Plan actual destinations after replay/artifact construction, before
+    // serializing or writing any output. Reuse the exact paths for publication.
+    let output_destinations = artifacts
+        .iter()
+        .enumerate()
+        .map(|(index, artifact)| {
+            let evidence_id = artifact
+                .get("evidence_id")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let evidence = out_path.map(|base| {
+                observation_output_path(base, artifacts.len(), evidence_id, "evidence")
+            });
+            let lifecycle = lifecycle_out_path
+                .filter(|_| lifecycle_records.get(index).is_some())
+                .map(|base| {
+                    observation_output_path(base, lifecycle_records.len(), evidence_id, "lifecycle")
+                });
+            (evidence, lifecycle)
+        })
+        .collect::<Vec<_>>();
+    if output_destinations
+        .iter()
+        .any(|(evidence, lifecycle)| evidence.is_some() || lifecycle.is_some())
+    {
+        let invocation_dir = match std::env::current_dir() {
+            Ok(directory) => directory,
+            Err(error) => return error_exit(io_error_output(&error.to_string())),
+        };
+        let mut seen = std::collections::BTreeMap::new();
+        for destination in output_destinations
+            .iter()
+            .flat_map(|(evidence, lifecycle)| evidence.iter().chain(lifecycle.iter()))
+        {
+            let key = output_collision_key(&invocation_dir.join(destination));
+            if let Some(first) = seen.insert(key, destination) {
+                return error_exit(error_output(
+                    "usage",
+                    &format!(
+                        "causal output destinations collide: {} and {}",
+                        first.display(),
+                        destination.display()
+                    ),
+                ));
+            }
+            // Refuse an input target before any destination is written.
+            if let Err(error) = crate::output_publication::refuse_input_target(destination) {
+                return output_write_error(destination, &error, &[], &[]);
+            }
+        }
+    }
+
     // ── Write output files ───────────────────────────────────────────
     // One file per artifact so each is independently consumable by
     // `fslc causal analyze --evidence`. Single artifact uses --out as-is;
-    // multiple artifacts suffix the expectation id.
+    // multiple artifacts suffix the evidence id.
     let mut evidence_paths = Vec::new();
     let mut lifecycle_paths = Vec::new();
     for (index, artifact) in artifacts.iter().enumerate() {
-        let evidence_id = artifact
-            .get("evidence_id")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        if let Some(base) = out_path {
-            let file_path = if artifacts.len() == 1 {
-                base.to_path_buf()
-            } else {
-                let stem = base
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("evidence");
-                let extension = base
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("json");
-                base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
-            };
+        if let Some(file_path) = &output_destinations[index].0 {
             let out_json = serde_json::to_string_pretty(artifact).expect("valid JSON");
-            if let Err(error) = std::fs::write(&file_path, format!("{out_json}\n")) {
-                return (
-                    error_output(
-                        "io",
-                        &format!("cannot write {}: {error}", file_path.display()),
-                    ),
-                    2,
-                );
+            if let Err(error) =
+                crate::output_publication::publish(file_path, format!("{out_json}\n"))
+            {
+                return output_write_error(file_path, &error, &evidence_paths, &lifecycle_paths);
             }
             evidence_paths.push(file_path.display().to_string());
         }
-        if let Some(base) = lifecycle_out_path
+        if let Some(file_path) = &output_destinations[index].1
             && let Some(lifecycle) = lifecycle_records.get(index)
         {
-            let file_path = if lifecycle_records.len() == 1 {
-                base.to_path_buf()
-            } else {
-                let stem = base
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("lifecycle");
-                let extension = base
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("json");
-                base.with_file_name(format!("{stem}.{evidence_id}.{extension}"))
-            };
             let lifecycle_json = serde_json::to_string_pretty(lifecycle).expect("valid JSON");
-            if let Err(error) = std::fs::write(&file_path, format!("{lifecycle_json}\n")) {
-                return (
-                    error_output(
-                        "io",
-                        &format!("cannot write {}: {error}", file_path.display()),
-                    ),
-                    2,
-                );
+            if let Err(error) =
+                crate::output_publication::publish(file_path, format!("{lifecycle_json}\n"))
+            {
+                return output_write_error(file_path, &error, &evidence_paths, &lifecycle_paths);
             }
             lifecycle_paths.push(file_path.display().to_string());
         }
@@ -1434,12 +1514,13 @@ fn sha256_digest(text: &str) -> String {
 
 fn run_causal_ledger(
     path: &Path,
+    source: &str,
     plan_paths: &[PathBuf],
     evidence_paths: &[PathBuf],
     lifecycle_paths: &[PathBuf],
     as_of: Option<&str>,
 ) -> (Value, i32) {
-    let (model, _) = match load_causal_model(path) {
+    let (model, _) = match load_causal_model_from_source(path, source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
@@ -1447,20 +1528,17 @@ fn run_causal_ledger(
     // Load plan artifacts.
     let mut plans = std::collections::BTreeMap::new();
     for plan_path in plan_paths {
-        let source = match std::fs::read_to_string(plan_path) {
+        let source = match read_input_text(plan_path) {
             Ok(source) => source,
-            Err(error) => return (error_output("io", &error.to_string()), 2),
+            Err(error) => return error_exit(io_error_output(&error)),
         };
         let value: Value = match serde_json::from_str(&source) {
             Ok(value) => value,
             Err(error) => {
-                return (
-                    error_output(
-                        "io",
-                        &format!("invalid JSON in {}: {error}", plan_path.display()),
-                    ),
-                    2,
-                );
+                return error_exit(io_error_output(&format!(
+                    "invalid JSON in {}: {error}",
+                    plan_path.display()
+                )));
             }
         };
         let plan = match fsl_tools::parse_plan(&value) {
@@ -1492,16 +1570,13 @@ fn run_causal_ledger(
             if let Some(chain_digest) = value.get("artifact_digest").and_then(Value::as_str)
                 && chain_digest != plan.declared_digest
             {
-                return (
-                    error_output(
-                        "causal_plan_digest_mismatch",
-                        &format!(
-                            "lifecycle chain for plan '{plan_id}' declares artifact_digest {chain_digest} but plan has {}",
-                            plan.declared_digest
-                        ),
+                return error_exit(error_output(
+                    "causal_plan_digest_mismatch",
+                    &format!(
+                        "lifecycle chain for plan '{plan_id}' declares artifact_digest {chain_digest} but plan has {}",
+                        plan.declared_digest
                     ),
-                    2,
-                );
+                ));
             }
             let empty_artifacts = std::collections::BTreeMap::new();
             let Ok((_, status)) = fsl_tools::validate_lifecycle_chain(&value, &empty_artifacts)
@@ -1515,21 +1590,271 @@ fn run_causal_ledger(
     // Build ledger projection.
     let ledger_body = fsl_tools::build_ledger(&model, &plans, &artifacts, &overlay, as_of);
     let Value::Object(body) = ledger_body else {
-        return (error_output("internal", "invalid ledger result"), 3);
+        return error_exit(error_output("internal", "invalid ledger result"));
     };
     let mut output = envelope();
     output.extend(body);
     (Value::Object(output), 0)
 }
 
-fn run_causal_diff(before: &Path, after: &Path) -> (Value, i32) {
-    let (before_model, _) = match load_causal_model(before) {
+fn run_causal_diff(
+    before: &Path,
+    before_source: &str,
+    after: &Path,
+    after_source: &str,
+) -> (Value, i32) {
+    let (before_model, _) = match load_causal_model_from_source(before, before_source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
-    let (after_model, _) = match load_causal_model(after) {
+    let (after_model, _) = match load_causal_model_from_source(after, after_source) {
         Ok(loaded) => loaded,
         Err(error) => return error,
     };
     merge_causal_envelope(fsl_tools::causal_diff_json(&before_model, &after_model))
+}
+
+/// A date option (`--as-of`, `--period-start`, `--period-end`) names a real
+/// Gregorian date as ASCII `YYYY-MM-DD`, the same rule as an artifact's
+/// `period.valid_until`. Anything else is a usage error while options are
+/// read: never a silent "not stale", and never a written artifact (#1422).
+fn date_option_value(
+    args: &mut impl Iterator<Item = String>,
+    option: &str,
+) -> Result<String, String> {
+    let value = required_option_value(args, option)?;
+    if fsl_tools::is_calendar_date(&value) {
+        Ok(value)
+    } else {
+        Err(format!(
+            "{option} requires a valid Gregorian date in YYYY-MM-DD format, got '{value}'"
+        ))
+    }
+}
+
+#[cfg(test)]
+mod captured_log_tests {
+    use super::{run_causal_observe_expectations, run_causal_verify_expectations};
+    use serde_json::{Value, json};
+    use sha2::{Digest, Sha256};
+    use std::path::{Path, PathBuf};
+
+    const SOURCE: &str = include_str!("../../../examples/causal/incident_response.fsl");
+    const LOG: &str =
+        include_str!("../../../examples/causal/evidence/incident-observation-log.jsonl");
+    const MAPPING: &str =
+        include_str!("../../../examples/causal/evidence/incident-log-mapping.fsl");
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new(name: &str) -> Self {
+            let dir =
+                std::env::temp_dir().join(format!("captured-log-{}-{name}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("incident_system.fsl"),
+                include_str!("../../../examples/causal/incident_system.fsl"),
+            )
+            .unwrap();
+            std::fs::write(
+                dir.join("scope.json"),
+                include_str!("../../../examples/causal/evidence/incident-replay-scope.json"),
+            )
+            .unwrap();
+            Self(dir)
+        }
+        fn observe(&self, read: &dyn Fn(&Path) -> std::io::Result<String>) -> (Value, i32) {
+            run_causal_observe_expectations(
+                &self.0.join("causal.fsl"),
+                SOURCE,
+                &self.0.join("log.jsonl"),
+                MAPPING,
+                &self.0.join("scope.json"),
+                "2026-01-01",
+                "2026-03-31",
+                Some(&self.0.join("evidence.json")),
+                Some(&self.0.join("lifecycle.json")),
+                read,
+            )
+        }
+        fn artifacts(&self) -> Vec<(PathBuf, Value)> {
+            let mut files: Vec<_> = std::fs::read_dir(&self.0)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .filter(|p| {
+                    p.file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .starts_with("evidence.")
+                        || p.file_name()
+                            .unwrap()
+                            .to_str()
+                            .unwrap()
+                            .starts_with("lifecycle.")
+                })
+                .map(|p| {
+                    let value =
+                        serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+                    (p, value)
+                })
+                .collect();
+            files.sort_by(|a, b| a.0.cmp(&b.0));
+            files
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    fn digest(bytes: &[u8]) -> String {
+        format!("sha256:{:x}", Sha256::digest(bytes))
+    }
+    fn canonical(value: &Value) -> String {
+        match value {
+            Value::Object(object) => {
+                let sorted: std::collections::BTreeMap<_, _> = object.iter().collect();
+                format!(
+                    "{{{}}}",
+                    sorted
+                        .into_iter()
+                        .map(|(k, v)| format!(
+                            "{}:{}",
+                            serde_json::to_string(k).unwrap(),
+                            canonical(v)
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            }
+            Value::Array(items) => format!(
+                "[{}]",
+                items.iter().map(canonical).collect::<Vec<_>>().join(",")
+            ),
+            scalar => scalar.to_string(),
+        }
+    }
+    fn check_links(files: &[(PathBuf, Value)]) {
+        for (_, artifact) in files.iter().filter(|(p, _)| {
+            p.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("evidence.")
+        }) {
+            assert_eq!(
+                artifact["observation"]["digests"]["log"],
+                digest(LOG.as_bytes())
+            );
+            let mut payload = artifact.clone();
+            payload.as_object_mut().unwrap().remove("artifact_digest");
+            assert_eq!(
+                artifact["artifact_digest"],
+                digest(canonical(&payload).as_bytes())
+            );
+            let chain = &files
+                .iter()
+                .find(|(_, c)| {
+                    c["evidence_id"] == artifact["evidence_id"] && c["records"].is_array()
+                })
+                .unwrap()
+                .1;
+            assert_eq!(chain["artifact_digest"], artifact["artifact_digest"]);
+            let mut record = chain["records"][0].clone();
+            let recorded = record
+                .as_object_mut()
+                .unwrap()
+                .remove("record_digest")
+                .unwrap();
+            record["evidence_id"] = artifact["evidence_id"].clone();
+            record["artifact_digest"] = artifact["artifact_digest"].clone();
+            assert_eq!(recorded, digest(canonical(&record).as_bytes()));
+        }
+        assert_eq!(files.len(), 4);
+    }
+    fn capture_control(name: &str, remove: bool) {
+        let f = Fixture::new(name);
+        std::fs::write(f.0.join("log.jsonl"), LOG).unwrap();
+        let baseline = f.observe(&|p| std::fs::read_to_string(p));
+        assert_eq!(baseline.1, 0, "{}", baseline.0);
+        let artifacts = f.artifacts();
+        check_links(&artifacts);
+        let actual = f.observe(&|p| {
+            let captured = std::fs::read_to_string(p)?;
+            if remove {
+                std::fs::remove_file(p)?;
+            } else {
+                std::fs::write(p, "\n")?;
+            }
+            Ok(captured)
+        });
+        assert_eq!(
+            actual, baseline,
+            "evaluation and provenance must use captured log"
+        );
+        assert_eq!(
+            f.artifacts(),
+            artifacts,
+            "full artifact/lifecycle preservation"
+        );
+        check_links(&f.artifacts());
+    }
+    #[test]
+    fn replaced_log_uses_capture_for_evaluation_and_digest() {
+        capture_control("replace", false);
+    }
+    #[test]
+    fn removed_log_uses_capture_for_evaluation_and_digest() {
+        capture_control("remove", true);
+    }
+    #[test]
+    fn log_errors_precede_scope_errors() {
+        let f = Fixture::new("errors");
+        std::fs::write(f.0.join("scope.json"), "invalid scope").unwrap();
+        let unreadable = f.observe(&|p| std::fs::read_to_string(p));
+        assert_eq!(unreadable.1, 2);
+        assert_eq!(unreadable.0["kind"], "io");
+        // An unreadable `--from-log` names its path, as every unreadable
+        // input does (#1170 phase 2).
+        let log = f.0.join("log.jsonl");
+        assert_eq!(
+            unreadable.0["message"],
+            format!(
+                "{}: {}",
+                log.display(),
+                std::fs::read_to_string(&log).unwrap_err()
+            )
+        );
+        std::fs::write(f.0.join("log.jsonl"), "\r\n \r\nnot json\n").unwrap();
+        let malformed = f.observe(&|p| std::fs::read_to_string(p));
+        assert_eq!(malformed.1, 2);
+        assert_eq!(malformed.0["kind"], "io");
+        assert!(
+            malformed.0["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("invalid JSONL at line 3:")
+        );
+    }
+    #[test]
+    fn observe_and_verify_preserve_supplied_causal_source() {
+        let f = Fixture::new("source");
+        std::fs::write(f.0.join("log.jsonl"), LOG).unwrap();
+        let path = f.0.join("causal.fsl");
+        std::fs::write(&path, SOURCE).unwrap();
+        let observation = f.observe(&|p| std::fs::read_to_string(p));
+        let verify = run_causal_verify_expectations(&path, SOURCE, 1);
+        assert_eq!(observation.1, 0);
+        assert_eq!(verify.1, 0, "{}", verify.0);
+        for replacement in [Some("invalid causal source"), None] {
+            if let Some(raw) = replacement {
+                std::fs::write(&path, raw).unwrap();
+            } else {
+                std::fs::remove_file(&path).unwrap();
+            }
+            assert_eq!(f.observe(&|p| std::fs::read_to_string(p)), observation);
+            assert_eq!(run_causal_verify_expectations(&path, SOURCE, 1), verify);
+        }
+        assert_eq!(observation.0["formal_result"], json!("not_run"));
+    }
 }

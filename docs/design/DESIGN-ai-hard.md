@@ -110,6 +110,122 @@ ai_component RefundAgentToolSafety {
 If `check hard` is omitted, the default rule set is the five rules shown above.
 Every authority reference must name a declared `tool`.
 
+### Nonempty tool boundary (#1546)
+
+At least one tool declaration is required by shared component validation,
+both for standalone input and components embedded in an AI project. A tool-less
+`ai_component X { }`, or one with only `authority { }`, is a breaking removal:
+`check`, `ai check`, BMC, induction, scenarios, testgen and Worker checking reject it with kind type,
+exact message `ai_component 'X' declares no tools`, declaration loc and CLI
+exit 2, rather than silently creating an empty `Tool` enum. One tool with empty
+authority remains valid. This is the AI-specific side of the
+[nonempty enum model boundary](DESIGN-enum-member-identity.md#nonempty-enum-declarations-1546).
+
+Only this new AI error preserves its raw message and publishes a separate loc
+field; existing AI lowering errors such as unknown hard-rule names retain
+their semantics kind, historical location suffix and absent loc when no origin
+is recorded. This change does not promote AI assurance or alter existing rule
+diagnostic rendering.
+
+Rule and authority validation precede no-tools rejection, preserving the
+existing bad-rule/unknown-tool error and its historical per-command rendering
+even when no tools are declared. `validate_ai_component` owns the no-tools
+rejection; lowering calls it without duplicating that rule. #1545 extends the
+boundary to `ai compat`, `ai replay`, project `ai check`, and project checking
+through native `check` and the Worker. This is a **breaking removal** of their
+tool-less acceptance, including empty authority blocks. One declared tool with
+empty authority remains valid.
+
+Native `check` and the shared Worker check stages validate every parsed project
+component before reporting success. An undeclared authority tool or unknown
+hard rule now returns the same diagnostic as project `ai check` (semantics,
+exit 2), rather than `ok`. In particular, the previously accepted fixtures
+`error_envelope_ai_project_unknown_tool.fsl` and
+`error_envelope_ai_project_invalid_rule.fsl` are breaking removals from generic
+project checking. Standalone #1546 no-tools envelopes remain unchanged on
+check and specialized-preflight paths; the lowering-only duplicate-fallback
+priority exception is measured below.
+Embedded component locations use the original document's one-based lines and
+Unicode-scalar columns, not component-block coordinates or UTF-16 units. The
+project parser translates token spans once before constructing component IR,
+including nested locations and annotation UTF-8 byte offsets. For literate
+Markdown, byte offsets refer to the extracted FSL text, not the Markdown file;
+document lines and code-line columns are preserved. Unknown hard-rule messages
+remain anchored at `check hard`, not the `rule` token; parse errors are
+not translated twice. Only coordinates change: validity, diagnostic kind,
+envelope fields, exit status and assurance remain unchanged. LSP project-component
+diagnostics share this validation and consume the already-document-relative locations.
+`validate_ai_component_with_location` retains the authored failure position alongside
+the unchanged legacy error; `validate_ai_component` delegates to that single body.
+The editor publishes authority-reference, hard-rule and no-tools errors without
+building a synthetic Kernel model or invoking a solver. Fixing an invalid component
+clears its versioned diagnostics; a valid first component does not hide a later error.
+Diagnostic byte spans are converted to UTF-16 only at the editor boundary, with no
+second component offset. This adds no verification result or assurance promotion.
+
+### Boundary sweep evidence (#1545)
+
+Base B `d37a215e8df6c00222e6aafd94bc9b556c445521` and head H
+`99810256faca086360c6ca4233f935b9b56b1ec8` were independently built in their
+own git-archive trees. The command `<B-binary> check <relative-path>` in B's
+tree and `<H-binary> check <relative-path>` in H's tree covered all 597 `.fsl`
+and 30 Markdown files under `specs/`, `examples/`, `rust/fslc/tests/fixtures/`,
+plus twelve new test-inline occurrences per tree: **1,278 checks**. Four Markdown
+files contain compiler-recognized FSL fences. All 30 Markdown files were checked,
+including negative controls such as `examples/ai/README.md` (bash fences only). Cache and unstable-feature
+environment overrides were unset. Both corpus inventories and every compared
+source hash agree; no form or output field was excluded.
+
+The **three corpus ok/exit0 → error/exit2 breaking removals** are
+`error_envelope_ai_project_unknown_tool.fsl`,
+`error_envelope_ai_project_invalid_rule.fsl`, and
+`error_envelope_literate_ai_project.md` under `rust/fslc/tests/fixtures/`.
+The Markdown project reported type, exact message
+`ai_component 'EnvelopeParityLiterateProject' declares no tools`, block loc 1:1,
+exit 2 (historical #1545 frame; #1574 now reports document loc 5:1).
+The standalone literate component remains rejected as on base; both
+multi-block toggle examples remain accepted. No other Markdown acceptance changes.
+The **four new-inline breaking removals** are projects containing a tool-less
+component in the CLI and Worker-shaped tests (two occurrences), a project whose
+component declares only empty authority (one), and a valid-first project whose
+later component names an undeclared authority tool (one). The three tool-less
+occurrences reported type at component-block loc 1:1 (historical frame; #1574 now
+reports document loc 2:3 for the indented CLI project forms, while the
+first-character Worker case stays 1:1); the later invalid component
+reports the existing unlocated semantics error. There are **zero rewritten
+existing inline FSL forms**. Other observations in this **check-only** sweep
+are unchanged; the lowering-only differences below are separate. Declare an intended tool (empty authority is allowed), remove an
+unneeded component, or correct the authority/rule reference; do not rely on the
+former analyzed-project success.
+
+The same B/H binaries also ran `analyze <relative-path>` on all 18 corpus inputs
+mentioning `ai_component` (including three Markdown inputs), plus four explicit
+forms: an unselected authority reference, duplicate fallback with/without tools,
+and a compose use of an AI component. No existing parsed compose use targeted
+an AI component; the minimal probe is rejected by both binaries with
+`compose use must reference a spec at 2:3`, loc 2:3. Changed forms and the compose
+control were also run with `scenarios <relative-path> --depth 2 --deadlock ignore`
+and `explain <relative-path>`: **30 command-form pairs × 2 binaries = 60 observations** total.
+
+| Path | Forms | ok→error | error→ok | Changed error envelope |
+|---|---:|---:|---:|---:|
+| analyze | 22 | 1 | 0 | 2 |
+| scenarios | 4 | 1 | 0 | 2 |
+| explain | 4 | 1 | 0 | 2 |
+
+The one lowering-only **breaking removal** per path is a declared `Search`
+tool, `may_execute Search`, undeclared `forbidden X`, and only
+`check hard { rule tool_authority; }`: a rule that does not generate a reference
+to X no longer hides its invalid declaration. Former analyzed/scenarios/explained
+success (exit 0) becomes semantics, `unknown tool 'X' in authority block`, no loc,
+exit 2. With duplicate fallback reason x and no tools, the old type error
+`ai_component 'DupNoTools' declares no tools` at 1:1 becomes unlocated semantics
+`duplicate fallback reason 'x'` (both exit 2). With a declared tool, the old
+unlocated semantics `duplicate action 'fallback_x'` becomes that same duplicate
+reason diagnostic (both exit 2). No other lowering-only acceptance removal was
+observed; these envelope/priority changes are intentional shared validation,
+not a claim that every historical lowering diagnostic is preserved.
+
 ## Static Rules
 
 - `tool_authority`: a forbidden tool cannot also be executable.

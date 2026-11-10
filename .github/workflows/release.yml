@@ -27,7 +27,7 @@ jobs:
   build:
     name: build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -298,6 +298,28 @@ jobs:
     needs: [build, vsix, kernel-contract, skills]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      # The same body `publish` hands to `body_path`, built and checked here
+      # because this job also runs on `workflow_dispatch`: an empty body, or one
+      # over GitHub's 125,000-character limit, fails the dry run instead of the
+      # tag push, and a pushed tag cannot be reused. A dispatch has no tag, so
+      # it checks the version the workspace declares.
+      - name: Build and check the release notes
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(./tools/release-notes.sh workspace-version)"
+          fi
+          ./tools/release-notes.sh build --version "$version" \
+            --repository-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --out release-notes.md
+          # Shown on the run page for review. It is not uploaded as an
+          # artifact: the download below takes every artifact of the run, and
+          # an extra file there would change the release unit it verifies.
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Download the complete release unit
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -351,19 +373,18 @@ jobs:
         # Control 4's release-time half (docs/design/DESIGN-changelog-fragments.md):
         # a fragment still present under changelog.d/ at tag time means
         # docs/design/RELEASE.md step 7's aggregation was skipped or ran against the
-        # wrong tree. Fails loudly, before "Extract release notes" builds a
+        # wrong tree. Fails loudly, before "Build the release notes" builds a
         # notes file that would otherwise silently omit that entry.
         run: ./tools/aggregate_changelog.sh check-stale
 
-      - name: Extract release notes
+      # The same command `assemble` ran on this tree: the summary in
+      # docs/release-notes/vX.Y.Z.md plus a link to the tagged CHANGELOG.md
+      # section when that file exists, the section itself otherwise. It fails
+      # on an empty body or one over GitHub's limit.
+      - name: Build the release notes
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          awk -v heading="## [$version]" '
-            index($0, heading) == 1 { found = 1; next }
-            found && /^## \[/ { exit }
-            found { print }
-          ' CHANGELOG.md > release-notes.md
-          test -s release-notes.md
+          ./tools/release-notes.sh build --version "${GITHUB_REF_NAME#v}" \
+            --repository-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --out release-notes.md
 
       - name: Upload the complete release unit to a draft
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2

@@ -10,7 +10,21 @@
 
 use std::fmt::Write as _;
 
+use fsl_core::KernelModel;
 use serde_json::{Value, json};
+
+use crate::coverage::source_action_coverage;
+
+/// Approval renderer identity for the HTML report (`fslc approval`, recorded
+/// as `"<id>/<version>"` in `target.generator_version`). Bump the version by
+/// hand when a template string, section order, escaping, style or other
+/// presentation of the rendered bytes changes for the same verification
+/// result; do not bump it for a crate release or a changed verifier result.
+/// Deliberately independent of `CARGO_PKG_VERSION`, like
+/// `DOCUMENT_RENDERER_VERSION`.
+pub const HTML_RENDERER: &str = "fslc-html-renderer";
+/// See [`HTML_RENDERER`].
+pub const HTML_RENDERER_VERSION: &str = "1.0.0";
 
 fn escape(value: &str) -> String {
     value
@@ -644,10 +658,10 @@ fn property_group(kind: &str) -> Option<&'static str> {
 }
 
 /// One property row's own assurance class, from the ledger's per-element
-/// rule (issue #525). A reachability witness and action coverage stay
-/// `bounded` even inside an `--engine induction` report, because
-/// k-induction ranks only invariants and leadsTo; labelling them
-/// `proved(induction)` overstates the evidence in an audit artifact.
+/// rule (issue #525). Reachables use `not_run` when the result kind/engine
+/// does not report their evaluation, otherwise `bounded`, even under induction.
+/// Evaluated action coverage is also `bounded`; induction proves safety
+/// invariants/transitions and ranked `leadsTo`, not reachability witnesses.
 fn property_assurance(property: &Value, verification: &Value) -> String {
     property_group(&text(&property["kind"])).map_or_else(String::new, |group| {
         crate::ledger::assurance_label(
@@ -958,13 +972,16 @@ fn trace_timeline(trace: &[Value], violated_step: Option<u64>) -> String {
     format!("<div class=\"timeline\">{steps}</div>")
 }
 
-fn relation_graphs(trace: &[Value]) -> String {
+fn relation_graphs(trace: &[Value], state_types: &Value) -> String {
     let mut panels = String::new();
     for entry in trace {
         let Some(state) = entry["state"].as_object() else {
             continue;
         };
         for (name, value) in state {
+            if state_types[name][0].as_str() != Some("relation") {
+                continue;
+            }
             let Some(edges) = value.as_array().filter(|edges| {
                 !edges.is_empty()
                     && edges
@@ -1008,7 +1025,7 @@ fn first_reachable_witness(verification: &Value) -> Option<&Vec<Value>> {
         .find_map(|item| item.get("witness")?.as_array())
 }
 
-fn trace_section(verification: &Value) -> String {
+fn trace_section(verification: &Value, state_types: &Value) -> String {
     let counterexample = verification["trace"].as_array();
     let trace = counterexample.or_else(|| first_reachable_witness(verification));
     let banner = if counterexample.is_some() {
@@ -1040,7 +1057,7 @@ fn trace_section(verification: &Value) -> String {
             format!(
                 "{}{}",
                 trace_timeline(trace, counterexample.and_then(|_| verification["violated_at_step"].as_u64())),
-                relation_graphs(trace)
+                relation_graphs(trace, state_types)
             )
         },
     );
@@ -1205,6 +1222,7 @@ fn raw_section(explained: &Value, verification: &Value) -> String {
 pub fn render_html_report(
     file: &str,
     source: &str,
+    model: &KernelModel,
     explained: &Value,
     verification: &Value,
     undecided: &[Value],
@@ -1227,7 +1245,8 @@ pub fn render_html_report(
         .cloned()
         .unwrap_or_default();
     let domains = skeleton["domains"].as_array().cloned().unwrap_or_default();
-    let coverage = &verification["action_coverage"];
+    let raw_coverage = &verification["action_coverage"];
+    let coverage = json!(source_action_coverage(model, raw_coverage));
     let covered = coverage.as_object().map_or(0, |values| {
         values
             .values()
@@ -1263,7 +1282,7 @@ pub fn render_html_report(
                 .as_array()
                 .map_or(&[], Vec::as_slice),
         ),
-        actions_section(&actions, coverage),
+        actions_section(&actions, &coverage),
         properties_section(&properties, &checks, verification),
     ];
     if !undecided.is_empty() {
@@ -1272,7 +1291,7 @@ pub fn render_html_report(
     sections.extend([
         status_section(verification),
         String::new(),
-        trace_section(verification),
+        trace_section(verification, &skeleton["state"]),
         witness_section(explained["witnesses"].as_array().map_or(&[], Vec::as_slice)),
         counterfactual_section(
             explained["counterfactuals"]

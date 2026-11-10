@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+compose C {
+ use S as a from "dep.fsl"
+ use S as b from "dir/dep.fsl"
+ invariant Reviewed "REQ-ROOT-001: root review" { true }
+ invariant AlsoReviewed "REQ-ROOT-002: also root review" { true }
+}

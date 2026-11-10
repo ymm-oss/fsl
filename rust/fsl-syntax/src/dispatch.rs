@@ -6,23 +6,38 @@ use std::sync::LazyLock;
 
 use crate::annotation_parse::leading_annotations;
 use crate::lexer::lex_declaration_prefix;
-use crate::{Annotations, ParseError, SurfaceDocument, Token, TokenKind, lex};
+use crate::parser::IdSpelling;
+use crate::{
+    Annotations, Edition, ParseError, ParseOptions, SurfaceDocument, Token, TokenKind,
+    edition_header, lex_with,
+};
 
 /// Original source passed beside the shared token stream to a dialect frontend.
 #[derive(Clone, Copy, Debug)]
 pub struct SourceFile<'a> {
     source: &'a str,
+    /// The edition the document is read in; set by [`parse_document_with`].
+    edition: Edition,
 }
 
 impl<'a> SourceFile<'a> {
     #[must_use]
     pub const fn new(source: &'a str) -> Self {
-        Self { source }
+        Self {
+            source,
+            edition: Edition::Fsl4,
+        }
     }
 
     #[must_use]
     pub const fn source(self) -> &'a str {
         self.source
+    }
+
+    /// The edition a frontend reads this document in.
+    #[must_use]
+    pub const fn edition(self) -> Edition {
+        self.edition
     }
 }
 
@@ -30,12 +45,19 @@ impl<'a> SourceFile<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParsedDocument {
     pub keyword: &'static str,
+    /// The edition header's edition; [`Edition::Fsl4`] without one.
+    pub edition: Edition,
     pub annotations: Annotations,
     pub surface: SurfaceDocument,
 }
 
-type Frontend =
-    for<'a> fn(SourceFile<'a>, Vec<Token>, usize) -> Result<SurfaceDocument, ParseError>;
+/// A frontend returns the document and the requirement-style identifiers it
+/// read ([`IdSpelling`]); only the shared grammar has any.
+type Frontend = for<'a> fn(
+    SourceFile<'a>,
+    Vec<Token>,
+    usize,
+) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError>;
 
 #[derive(Clone, Copy)]
 struct FrontendRegistration {
@@ -97,10 +119,51 @@ fn validate_registry(registry: &[FrontendRegistration]) -> Result<(), String> {
 ///
 /// Returns a coded parse error for empty, annotation-only, or unknown documents.
 pub fn dialect_keyword(source: &str) -> Result<&'static str, ParseError> {
-    let tokens = lex(source).map_err(ParseError::from)?;
+    dialect_keyword_with(source, &ParseOptions::stable())
+}
+
+/// [`dialect_keyword`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// Returns a coded parse error for empty, annotation-only, or unknown documents.
+pub fn dialect_keyword_with(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<&'static str, ParseError> {
+    let (tokens, edition) = document_tokens(source, *options)?;
     let mut cursor = 0;
     leading_annotations(&tokens, &mut cursor)?;
-    select_frontend(&tokens, cursor).map(|registration| registration.keyword)
+    select_frontend(&tokens, cursor, edition).map(|registration| registration.keyword)
+}
+
+/// The document's token stream without its edition header, and the edition
+/// it is read in. A header naming an unknown edition, or heading a causal or
+/// AI document ([`crate::EDITIONLESS_DECLARATIONS`]), is rejected here.
+fn document_tokens(
+    source: &str,
+    options: ParseOptions,
+) -> Result<(Vec<Token>, Edition), ParseError> {
+    let header = edition_header(source, &options)?;
+    let tokens = lex_with(source, &options).map_err(ParseError::from)?;
+    let Some(header) = header else {
+        return Ok((tokens, Edition::Fsl4));
+    };
+    let mut cursor = 0;
+    leading_annotations(&tokens, &mut cursor)?;
+    if let TokenKind::Ident(keyword) = &tokens[cursor].kind
+        && crate::EDITIONLESS_DECLARATIONS.contains(&keyword.as_str())
+    {
+        return Err(ParseError::coded(
+            crate::EDITION_HEADER_NOT_ACCEPTED,
+            format!(
+                "a '{keyword}' document has no syntax edition; remove the 'fsl {}' header",
+                header.edition.number()
+            ),
+            header.span,
+        ));
+    }
+    Ok((tokens, header.edition))
 }
 
 /// Return the first significant declaration identifier, including identifiers
@@ -118,29 +181,79 @@ pub fn declaration_keyword(source: &str) -> Result<String, ParseError> {
 
 /// Lex once, select a registered frontend, and parse using that same token stream.
 ///
+/// This is the published language: it is [`parse_document_with`] under
+/// [`ParseOptions::stable`].
+///
 /// # Errors
 ///
 /// Returns lexical, annotation, dispatch, or frontend syntax errors.
 pub fn parse_document(source: SourceFile<'_>) -> Result<ParsedDocument, ParseError> {
-    LazyLock::force(&VALID_REGISTRY);
-    let tokens = lex(source.source()).map_err(ParseError::from)?;
-    let mut cursor = 0;
-    let annotations = leading_annotations(&tokens, &mut cursor)?;
-    let registration = select_frontend(&tokens, cursor)?;
-    let surface = (registration.parse)(source, tokens, cursor)?;
-    Ok(ParsedDocument {
-        keyword: registration.keyword,
-        annotations,
-        surface,
-    })
+    parse_document_with(source, &ParseOptions::stable())
 }
 
+/// [`parse_document`] under explicit [`ParseOptions`]. Every registered
+/// frontend is reached only through this function.
+///
+/// The edition header ([`crate::edition_header`]) is read first; it selects
+/// the lexer's identifier rule ([`crate::IdentifierRule::for_source`]) and is
+/// recorded as [`ParsedDocument::edition`].
+///
+/// # Errors
+///
+/// Returns edition-header, lexical, annotation, dispatch, or frontend syntax
+/// errors.
+pub fn parse_document_with(
+    source: SourceFile<'_>,
+    options: &ParseOptions,
+) -> Result<ParsedDocument, ParseError> {
+    parse_document_with_ids(source, *options).map(|(parsed, _)| parsed)
+}
+
+/// [`parse_document_with`] plus every requirement-style identifier the
+/// frontend read, in source order (for the formatter).
+pub(crate) fn parse_document_with_ids(
+    source: SourceFile<'_>,
+    options: ParseOptions,
+) -> Result<(ParsedDocument, Vec<IdSpelling>), ParseError> {
+    LazyLock::force(&VALID_REGISTRY);
+    let (tokens, edition) = document_tokens(source.source(), options)?;
+    let mut cursor = 0;
+    let annotations = leading_annotations(&tokens, &mut cursor)?;
+    let registration = select_frontend(&tokens, cursor, edition)?;
+    let source = SourceFile { edition, ..source };
+    // A requirements document checks its names against its glossary itself;
+    // every other document read in the next edition has no glossary. The
+    // frontend's own errors come first, as they do in requirements.
+    let names = if edition == Edition::Fsl5 && registration.keyword != "requirements" {
+        crate::glossary::reject_non_ascii_names(&tokens[cursor..], registration.keyword)
+    } else {
+        Ok(())
+    };
+    let (surface, ids) = (registration.parse)(source, tokens, cursor)?;
+    names?;
+    Ok((
+        ParsedDocument {
+            keyword: registration.keyword,
+            edition,
+            annotations,
+            surface,
+        },
+        ids,
+    ))
+}
+
+/// The frontend of the declaration at `cursor`. A next-edition document may
+/// open its requirements with the keyword table's Japanese `要件`.
 fn select_frontend(
     tokens: &[Token],
     cursor: usize,
+    edition: Edition,
 ) -> Result<&'static FrontendRegistration, ParseError> {
     let token = &tokens[cursor];
-    let keyword = declaration_identifier(tokens, cursor)?;
+    let mut keyword = declaration_identifier(tokens, cursor)?;
+    if edition == Edition::Fsl5 && keyword == crate::keywords::Kw::Requirements.japanese() {
+        keyword = crate::keywords::Kw::Requirements.english();
+    }
     FRONTENDS
         .iter()
         .find(|registration| registration.keyword == keyword)
@@ -193,41 +306,70 @@ fn parse_shared(
     source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
-) -> Result<SurfaceDocument, ParseError> {
-    crate::parser::parse_shared_tokens(source.source(), tokens, cursor)
+) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
+    crate::parser::parse_shared_tokens(
+        source.source(),
+        tokens,
+        cursor,
+        source.edition(),
+        source.edition() == Edition::Fsl5,
+    )
+}
+
+/// Diagnose an already-rejected legacy expression operator without changing the
+/// source's grammar edition. Used for a CLI-requested edition without a header.
+/// Returns only an expression-position diagnostic, never a replacement model.
+#[must_use]
+pub fn legacy_expression_operator_error(
+    source: &str,
+    options: &ParseOptions,
+) -> Option<ParseError> {
+    let (tokens, edition) = document_tokens(source, *options).ok()?;
+    let mut cursor = 0;
+    leading_annotations(&tokens, &mut cursor).ok()?;
+    let frontend = select_frontend(&tokens, cursor, edition).ok()?;
+    if !["spec", "requirements", "compose", "business", "refinement"].contains(&frontend.keyword) {
+        return None;
+    }
+    crate::parser::parse_shared_tokens(source, tokens, cursor, edition, true)
+        .err()
+        .filter(|error| error.code() == "unsupported_in_edition")
 }
 
 fn parse_db(
     _source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
-) -> Result<SurfaceDocument, ParseError> {
-    crate::db::parse_db_system_tokens(tokens, cursor).map(SurfaceDocument::Db)
+) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
+    crate::db::parse_db_system_tokens(tokens, cursor)
+        .map(|db| (SurfaceDocument::Db(db), Vec::new()))
 }
 
 fn parse_domain(
     _source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
-) -> Result<SurfaceDocument, ParseError> {
-    crate::domain::parse_domain_tokens(tokens, cursor).map(SurfaceDocument::Domain)
+) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
+    crate::domain::parse_domain_tokens(tokens, cursor)
+        .map(|domain| (SurfaceDocument::Domain(domain), Vec::new()))
 }
 
 fn parse_ai(
     source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
-) -> Result<SurfaceDocument, ParseError> {
+) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
     crate::ai::parse_ai_component_tokens(source.source(), tokens, cursor)
-        .map(SurfaceDocument::AiComponent)
+        .map(|component| (SurfaceDocument::AiComponent(component), Vec::new()))
 }
 
 fn parse_agent(
     source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
-) -> Result<SurfaceDocument, ParseError> {
-    crate::ai::parse_agent_tokens(source.source(), tokens, cursor).map(SurfaceDocument::Agent)
+) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
+    crate::ai::parse_agent_tokens(source.source(), tokens, cursor)
+        .map(|agent| (SurfaceDocument::Agent(agent), Vec::new()))
 }
 
 #[cfg(test)]
@@ -304,6 +446,114 @@ mod tests {
         assert_eq!(unknown.code(), "FSL-DIALECT-UNKNOWN");
         assert_eq!(unknown.span.start.column, 1);
         assert!(unknown.message.contains("spec, refinement, compose"));
+    }
+
+    /// decisions/049 D2 after #1434: a document that declares a syntax
+    /// edition in its first line is read in that edition by every document
+    /// entry, with or without explicit options; none of them reads the header
+    /// as the unknown declaration `fsl`.
+    #[test]
+    fn edition_header_is_read_by_every_document_entry() {
+        for (source, edition, keyword) in [
+            ("fsl 5\nrequirements R {}\n", Edition::Fsl5, "requirements"),
+            (
+                "fsl 4\nspec S { state { x: Int } }\n",
+                Edition::Fsl4,
+                "spec",
+            ),
+            (
+                "\u{feff}// header after trivia\nfsl 5\nrequirements R {}\n",
+                Edition::Fsl5,
+                "requirements",
+            ),
+        ] {
+            let parsed = parse_document(SourceFile::new(source)).unwrap();
+            assert_eq!((parsed.keyword, parsed.edition), (keyword, edition));
+            assert_eq!(
+                parse_document_with(SourceFile::new(source), &ParseOptions::stable()).unwrap(),
+                parsed,
+                "{source:?}"
+            );
+            assert!(crate::parse_surface_document(source).is_ok(), "{source:?}");
+            assert_eq!(dialect_keyword(source), Ok(keyword), "{source:?}");
+            assert_eq!(
+                dialect_keyword_with(source, &ParseOptions::stable()),
+                Ok(keyword)
+            );
+            let lexed = crate::lex(source).unwrap();
+            assert_eq!(
+                crate::lex_with(source, &ParseOptions::stable()).unwrap(),
+                lexed
+            );
+            assert!(
+                !lexed.iter().any(
+                    |token| matches!(&token.kind, crate::TokenKind::Ident(name) if name == "fsl")
+                ),
+                "{source:?}: the header's tokens leave the stream"
+            );
+        }
+    }
+
+    /// The header is not a declaration: its tokens leave the stream, so the
+    /// headed parse equals the headerless parse with every position
+    /// one line lower, and the identifier `fsl` stays an identifier.
+    #[test]
+    fn header_tokens_leave_the_stream_and_fsl_stays_an_identifier() {
+        let body = "spec S { const fsl = 1 state { x: Int } init { x = fsl } }";
+        let headerless =
+            parse_document_with(SourceFile::new(body), &ParseOptions::stable()).unwrap();
+        assert_eq!(headerless.edition, Edition::Fsl4);
+        assert_eq!(headerless, parse_document(SourceFile::new(body)).unwrap());
+        for header in ["fsl 4", "fsl 5"] {
+            let source = format!("{header}\n{body}");
+            let headed =
+                parse_document_with(SourceFile::new(&source), &ParseOptions::stable()).unwrap();
+            assert_eq!(headed.keyword, "spec");
+            let tokens = crate::lex_with(&source, &ParseOptions::stable()).unwrap();
+            let expected = crate::lex(body).unwrap();
+            assert_eq!(tokens.len(), expected.len());
+            for (token, original) in tokens.iter().zip(&expected) {
+                assert_eq!(token.kind, original.kind);
+                assert_eq!(token.span.start.line, original.span.start.line + 1);
+                assert_eq!(token.span.start.column, original.span.start.column);
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_editions_and_editionless_dialects_reject_the_header() {
+        let error =
+            parse_document_with(SourceFile::new("fsl 6\nspec S {}"), &ParseOptions::stable())
+                .unwrap_err();
+        assert_eq!(error.code(), crate::UNSUPPORTED_EDITION);
+        assert_eq!(
+            dialect_keyword_with("fsl 6\nspec S {}", &ParseOptions::stable()),
+            Err(error)
+        );
+        for (source, keyword) in [
+            ("fsl 5\ncausal C {}", "causal"),
+            ("fsl 4\ncausal C {}", "causal"),
+            ("fsl 5\n@a.b(c)\nai_component A {}", "ai_component"),
+            ("fsl 5\nagent A {}", "agent"),
+            ("fsl 5\ndataset D {}", "dataset"),
+        ] {
+            let error =
+                parse_document_with(SourceFile::new(source), &ParseOptions::stable()).unwrap_err();
+            assert_eq!(
+                error.code(),
+                crate::EDITION_HEADER_NOT_ACCEPTED,
+                "{source:?}"
+            );
+            assert!(
+                error.message.contains(&format!("'{keyword}'")),
+                "{}",
+                error.message
+            );
+            assert_eq!((error.span.start.line, error.span.start.column), (1, 1));
+        }
+        // The entry without explicit options rejects it the same way.
+        let error = parse_document(SourceFile::new("fsl 5\ncausal C {}")).unwrap_err();
+        assert_eq!(error.code(), crate::EDITION_HEADER_NOT_ACCEPTED);
     }
 
     #[test]

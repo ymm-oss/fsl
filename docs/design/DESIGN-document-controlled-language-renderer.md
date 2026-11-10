@@ -149,7 +149,7 @@ anywhere in the renderer. Two runs over the same `RequirementClaimSet` and
 ## Verification evidence
 
 `rust/fsl-tools/tests/document_render.rs` (29 tests): an exact byte-for-byte
-golden match of `examples/pm/cancel_system.fsl`'s REQ-2 in both locales
+golden match of `examples/pm/cancel_system.fsl`'s REQ-CANCEL-002 in both locales
 (issue #326's acceptance criterion 1 — two guards, a struct-literal update,
 and fairness, all present); requirement text and formalized meaning kept in
 separate sections; the acceptance/forbidden non-generalization disclaimer

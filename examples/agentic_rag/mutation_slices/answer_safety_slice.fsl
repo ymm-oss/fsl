@@ -1,7 +1,7 @@
 // Agentic RAG mutation slice: 回答安全性。
 //
 // 目的:
-// - 本体requirementsのREQ-3/REQ-4のうち、最終回答に必要な
+// - 本体requirementsのREQ-RAG-003/REQ-RAG-004のうち、最終回答に必要な
 //   evidence / citation_ok / output guard の契約だけを短く検査する。
 // - `fslc mutate`でanswerのrequires削除、guard結果の取り違え、
 //   assignment削除などを軽く殺せるようにする。
@@ -41,7 +41,7 @@ requirements AgenticRagAnswerSafetySlice {
     }
   }
 
-  requirement REQ-3 "最終回答には十分な証拠と許可された引用が必要である" {
+  requirement REQ-RAG-003 "最終回答には十分な証拠と許可された引用が必要である" {
     // 正常な下書き前状態を一気に作る。検索・rerank・ACL/filterは
     // 本体requirementsではretrieve_successに相当するが、このsliceでは畳み込む。
     action prepare_good_draft(r: Req) {
@@ -112,20 +112,20 @@ requirements AgenticRagAnswerSafetySlice {
     }
   }
 
-  acceptance AC-ANSWER "証拠・引用・guardが揃えば回答できる" {
+  acceptance AC-ANSWER-001 "証拠・引用・guardが揃えば回答できる" {
     prepare_good_draft(0)
     output_guard_pass(0)
     answer(0)
     expect req[0].st == Answered
   }
 
-  forbidden FB-NO-GUARD "guard通過前の回答は拒否される" {
+  forbidden FB-NO-GUARD-001 "guard通過前の回答は拒否される" {
     prepare_good_draft(0)
     answer(0)
     expect rejected
   }
 
-  forbidden FB-BAD-EVIDENCE "証拠不足の回答は拒否される" {
+  forbidden FB-BAD-EVIDENCE-001 "証拠不足の回答は拒否される" {
     prepare_good_draft(0)
     corrupt_evidence(0)
     output_guard_pass(0)
@@ -133,7 +133,7 @@ requirements AgenticRagAnswerSafetySlice {
     expect rejected
   }
 
-  forbidden FB-BAD-CITATION "引用不可の回答は拒否される" {
+  forbidden FB-BAD-CITATION-001 "引用不可の回答は拒否される" {
     prepare_good_draft(0)
     corrupt_citation(0)
     output_guard_pass(0)
@@ -141,7 +141,7 @@ requirements AgenticRagAnswerSafetySlice {
     expect rejected
   }
 
-  forbidden FB-GUARD-FAILED "guard失敗後の回答は拒否される" {
+  forbidden FB-GUARD-FAILED-001 "guard失敗後の回答は拒否される" {
     prepare_good_draft(0)
     output_guard_fail(0)
     answer(0)

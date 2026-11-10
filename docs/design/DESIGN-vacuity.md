@@ -31,9 +31,11 @@ misdescribe a blocked action as covered.
    proof that the action is permanently dead: it can disappear at K+1 when a delayed
    enabling path is reached. The existing structured `action_coverage` projection and
    this `--vacuity`-selectable warning remain distinct; neither changes assurance. Only
-   actions with an authored primary origin or a non-zero source span become public
-   findings; generated-only zero-span lowering sentinels remain visible in coverage but
-   do not produce a fabricated location or fail `--vacuity error`.
+   actions with a positive line and column in their authored primary origin, or
+   otherwise their kernel declaration span, become public findings through
+   `KernelModel::action_source_span`; generated-only zero-span lowering sentinels
+   remain visible in coverage but do not produce a fabricated location or fail
+   `--vacuity error`.
 2. **`vacuous_implication`**: the antecedent of a **user invariant** with a single `=>`
    directly under `forall*` does not become sat within depth K. The existential closure of the
    antecedent is fed to the existing `eval_expr` by wrapping the AST with
@@ -47,10 +49,11 @@ misdescribe a blocked action as covered.
    (c) spurious sat from the whole-domain Z3 encoding of a let-internal partial op works only in
    the "do not emit a warning" direction and is safe. **Coverage-false actions** (already warned
    never-enabled) and **compose-synchronized actions** are out of scope.
-5. **`tautology_over_frozen`**: a user invariant that depends only on state variables no action
-   ever assigns to, and is dynamically always true over those frozen values, is a hollow
-   invariant. This is a static pre-filter plus Z3 check; it remains pending until final warning
-   emission.
+5. **`tautology_over_frozen`**: for a user invariant mentioning at least one state variable
+   no action assigns to, prove that the expression is defined and true over every typed state
+   with those variables fixed to their initial values. Mutable references may occur, provided
+   this guarantee holds for all their typed values. This is a static pre-filter plus Z3 check;
+   it remains pending until final warning emission.
 6. **`urgency_freeze`**: for requirements `time`/`deadline`, warn only when the generated
    deadline invariants exist, the generated `tick` action has the structural guard
    `requires not(urgent_enabled)`, the deadline age variables are not assigned by non-`tick`
@@ -155,10 +158,9 @@ silently reusing the closed-search verdict.
   audit (issue #729) found exactly one product call site that ever applies a
   vacuity mode (`rust/fslc/src/verification.rs`'s `execute_cli_verification`,
   reached by both the `verify` and `sweep` CLI commands — `sweep` funnels
-  through the same `run_verify_cli`); `ledger`/`html`/`mutate` share a
-  mode-less baseline (`rust/fslc/src/main.rs`'s `run_verify`, whose signature
-  has no vacuity parameter at all) and the wasm Worker request surface has no
-  `--vacuity` option either. So `skip_vacuity_probe`
+  through the same `run_verify_cli`); no-cache baseline adapters reach this
+  same owner with the default `warn` policy, preserving the probe. The wasm
+  Worker request surface has no `--vacuity` option. So `skip_vacuity_probe`
   (`BmcOutputOptions`/`BmcRequest`/`InductionRequest`/`ExplicitRequest` in
   `rust/fslc/src/verification*.rs`) is an explicit argument threaded only
   from that one derivation point (`options.vacuity == "ignore"`, plus its
@@ -177,6 +179,10 @@ silently reusing the closed-search verdict.
   verdict; deliberately cause-neutral, matching `Reachability::Exhausted`
   not distinguishing budget cutoff from an evaluation error). `html.rs`
   renders `kind`/`message` generically and needed no change.
+  Its ledger trace type is `verification_incomplete`, with advice to inspect the
+  state space and expression evaluation rather than run mutate (#1497). The six
+  actual vacuity presentation kinds retain their rendered rows; warning kinds
+  outside that set do not acquire a vacuity claim from the ledger.
   `assurance_token` never reads `warnings`, so a truncated-probe finding
   cannot move a requirement's assurance class
   (`rust/fsl-tools/tests/issue_729_vacuity_probe_truncated_ledger.rs`).
@@ -200,6 +206,14 @@ guard as dead merely because the bound was too small. `examples/causal/funnel.fs
 `state { visits: 0..100 }` and `requires visits < 100`; at depth 8 `visits` reaches only 8, so
 Python warns — and the warning disappears when `--depth` rises. A judgment that moves with the
 bound is not evidence of a hollow spec (issue #465).
+
+For frozen invariants, the native query rejects both a false value and undefined evaluation:
+`initial constraints ∧ frozen equalities ∧ type bounds ∧ ¬(defined(P) ∧ P)` must be unsat.
+For example, with a frozen true flag and a mutable `q:Seq<Int,1>`,
+`flag and (q.head()==q.head())` is not a tautology over all typed dynamics because `q=[]`
+is allowed. `flag and (q==q)` and `flag or (q.head()==q.head())` remain genuine findings;
+the latter never reaches the partial operation under the frozen flag. No new premise is
+assumed, and Unknown still produces no finding.
 
 The native implementation (`fsl-verifier::vacuity`) therefore decides all three solver-dependent
 lanes over the **declared type space**, which is a superset of the reachable states: for clause

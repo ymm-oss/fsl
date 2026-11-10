@@ -1,0 +1,33 @@
+// lowered.fsl（impl） ⊑ original.fsl（abs）
+// field ごとの Map を、原文の struct の Map へ組み直す。段階の enum は同名の member 同士を対応させる。
+refinement LoweredRefinesOriginal {
+  impl AgenticRagToolApprovalSlice
+  abs  AgenticRagToolApprovalSlice
+
+  enum conversion stage RequestStage -> Stage {
+    New            -> New
+    EvidenceReady  -> EvidenceReady
+    ToolApproval   -> ToolApproval
+    ToolApproved   -> ToolApproved
+    ActionExecuted -> ActionExecuted
+    Refused        -> Refused
+  }
+
+  map req[r: Req] = Case {
+    st: convert(stage, request_stage[r]),
+    evidence: request_evidence[r],
+    approval: request_approval[r],
+    role: request_role[r],
+    needs_tool: request_needs_tool[r]
+  }
+
+  action grant_operator(r)            -> grant_operator(r)
+  action prepare_tool_ready(r)        -> prepare_tool_ready(r)
+  action request_tool_approval(r)     -> request_tool_approval(r)
+  action approve_tool(r)              -> approve_tool(r)
+  action deny_tool(r)                 -> deny_tool(r)
+  action downgrade_approval(r)        -> downgrade_approval(r)
+  action revoke_operator(r)           -> revoke_operator(r)
+  action make_waiting_but_approved(r) -> make_waiting_but_approved(r)
+  action execute_tool(r)              -> execute_tool(r)
+}

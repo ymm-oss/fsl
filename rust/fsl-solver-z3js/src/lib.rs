@@ -80,6 +80,7 @@ pub fn reset() {
 pub struct Z3JsTerm {
     handle: u32,
     sort: Sort,
+    literal: Option<ModelValue>,
 }
 
 #[derive(Debug)]
@@ -100,7 +101,11 @@ impl Z3JsSolver {
     }
 
     fn term(handle: u32, sort: Sort) -> Z3JsTerm {
-        Z3JsTerm { handle, sort }
+        Z3JsTerm {
+            handle,
+            sort,
+            literal: None,
+        }
     }
 }
 
@@ -167,6 +172,10 @@ fn backend_statistics() -> BackendStatistics {
 impl SmtSolver for Z3JsSolver {
     type Term = Z3JsTerm;
 
+    fn literal_value(&self, term: &Self::Term) -> Option<ModelValue> {
+        term.literal.clone()
+    }
+
     fn version(&self) -> &str {
         &self.version
     }
@@ -184,11 +193,17 @@ impl SmtSolver for Z3JsSolver {
     }
 
     fn bool_value(&self, value: bool) -> Self::Term {
-        Self::term(js_bool_value(value), Sort::Bool)
+        Z3JsTerm {
+            literal: Some(ModelValue::Bool(value)),
+            ..Self::term(js_bool_value(value), Sort::Bool)
+        }
     }
 
     fn int_value(&self, value: i64) -> Self::Term {
-        Self::term(js_int_value(value), Sort::Int)
+        Z3JsTerm {
+            literal: Some(ModelValue::Int(value)),
+            ..Self::term(js_int_value(value), Sort::Int)
+        }
     }
 
     fn constant(&self, name: &str, sort: &Sort) -> SolverResult<Self::Term> {

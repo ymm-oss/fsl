@@ -15,14 +15,21 @@ existence check. This productizes mutation as a repeatable non-triviality check.
 survivors are review data, not failures, unless an explicit gate is requested —
 see "Opt-in gate" below).
 **That is the code for its own result, not an unconditional 0.** `mutate` verifies the
-spec first and re-emits that baseline envelope unchanged when it is not `verified`, so a
+spec first using auto, with a fresh BMC rerun on refusal (§3), and re-emits the
+refused BMC baseline envelope unchanged, so a
 spec that fails its own verification exits with the baseline's code and produces no
 mutants at all. Since #1002 a failed inline `implements` seam is such a baseline
 (`refinement_failed` / `impl_violated`, exit 1).
 
 `--from` adds every external JSONL record after the selected built-in catalog.
-`--max-mutants` caps only built-in enumeration; `--max-mutants 0 --from ...`
-is the external-only adjudication form.
+Built-in mutants visit items in deterministic source order. Within an action,
+the passes visit `requires` and `let` parts first, then statement parts, then
+`fair_remove`; within each part-visiting pass, part order precedes operator
+order. There is no global part-index order across these passes.
+`--max-mutants N` judges the first N built-ins; `--max-mutants 0 --from ...`
+is the external-only adjudication form. Internally, `discovered` is the full
+catalog size, including unjudged built-ins; it drives the cap note in §5 and
+`gate.dropped` in the opt-in gate below. The cap does not truncate discovery.
 
 ## 2. Mutate the **dialect-expanded kernel AST**, not the spec dict
 
@@ -93,6 +100,20 @@ Consequences that follow from mutating the rendered text rather than the domain 
 
 ### Mutation operators (deterministic enumeration, no randomness)
 
+Native built-in mutants are retained as edits: a replacement item, a replacement
+action part, or a removed action part. Only selected mutants are materialized,
+one at a time, by cloning the enumerated base spec and applying one edit; explain
+counterfactuals likewise materialize only their selected operators. Discovery
+avoids a full spec clone for every candidate. Residual: edits are not minimal
+expression-path patches. Expression mutations retain whole rewritten expressions;
+each init mutant retains a rewritten copy of the entire init statement vector,
+and mutants of a whole top-level `if` statement retain a rewritten copy of that
+entire statement, including its branches. For these init and `if` mutants,
+retained memory still scales with that block or statement's size times its
+mutant count, so a large block can still have quadratic retained-edit cost.
+Selection order and the full discovery count remain the §1 contract; §5's cap
+note and gate accounting are unchanged.
+
 | op | error simulated | AST operation |
 |---|---|---|
 | requires removal | missing guard | delete `("requires", …)` from body |
@@ -129,21 +150,40 @@ to the same spec name as the baseline.
 Malformed JSON, duplicate/invalid ids, invalid record shapes/instructions,
 parse/name/type/semantic build errors, and a different spec name are generation
 quality failures with `status:"invalid"`. They never count as kills. Once an
-external source builds, it goes through the exact same BMC + acceptance +
+external source builds, it goes through the exact same main + acceptance +
 forbidden + refinement oracle as a built-in mutant.
 
 ## 3. Kill oracle and baseline gate
 
 Each built-in mutant = mutated AST → `build_spec`; each valid external mutant =
-mutated source → `parse_src` → `build_spec`. Both then run **`verify` (BMC,
-depth K) + acceptance/forbidden
+mutated source → `parse_src` → `build_spec`. Both then run **the main oracle
+(depth K) + acceptance/forbidden
 replay + implements refine**. If any of these returns violated/reachable_failed/
 refinement_failed, or BMC rejects the mutant with a semantic error (for example an action
 body that is undefined in a reachable state, reported as `killed_by:"build_spec"`) →
 **killed** (killer recorded). All clean → **SURVIVED**. Induction is not used (`unknown_cti`
 makes the kill decision ambiguous and slow).
-**Baseline gate**: if the pre-mutation spec is not verified, refuse (in a buggy spec every
-mutant is killed trivially, which is meaningless).
+The main oracle first keeps any concrete boundary-probe finding. Only after a
+successful, finding-free, non-exhausted probe does it try the full model with
+the shared auto-engine explicit decision, budget 50,000 states (the probe
+budget). Explicit certifies **clean only**: supported, no runtime error, no
+budget overrun, no violation, and every reachable witnessed through K. Closure
+is not required; deadlock warnings do not become mutation kills. Otherwise the
+existing bounds-only then full-model BMC path runs, each call on its own fresh
+thread-local solver context. Explicit never selects a kill or its label.
+Requirements, implements, the init-bounds override, and attribution still run
+after this main result. Exhausted probes skip the extra concrete traversal.
+Cross-engine encoding gaps remain a risk: explicit-clean may bypass a BMC-only
+`build_spec` rejection described below; full-record agreement controls must
+reject any observed drift rather than allowlist it.
+
+**Baseline gate**: run auto with its default 1,000,000-state budget and accept
+`verified` or `proved`. If auto is not accepted, rerun the existing BMC baseline
+on a fresh scoped thread using the same captured source. A verified rerun
+continues mutation and reports `engine=bmc` on stderr; otherwise re-emit that
+BMC envelope with its existing exit code. Refusing a buggy baseline avoids
+trivially killing every mutant. Mutation JSON retains `"baseline":"verified"`
+even when the baseline is proved: mutant sensitivity is still bounded by K.
 
 Parse/name/type/semantic construction failures are intercepted before the kill
 oracle and classified `invalid`, for built-in and external mutants alike
@@ -161,11 +201,11 @@ back — a state value, a trace step's action choice, or a ranking value the
 model does not provide (`stage:"bmc"`; the verifier marks these with
 `VerifyError::is_solver_failure`, distinguishing them from the semantic errors
 above, which stay kills); or the acceptance/forbidden oracle or the implements
-oracle returned an error (`stage:"requirements"` / `"implements"`, previously
+oracle could not evaluate the mutant (`stage:"requirements"` / `"implements"`, previously
 the error string itself or `refinement` as the killer for built-ins and
 `invalid` for externals). Such a mutant is published with `status:"error"`,
 `killed_by:null`, and `error:{stage,message}`; it is never killed, never
-`invalid`, excluded from both sides of `kill_rate`, counted in
+`invalid` (static input failures are distinguished below), excluded from both sides of `kill_rate`, counted in
 `summary.errored` (and per source; the key appears only when non-zero, see
 §5), and fails any requested gate. **Known residual:** a BMC error the verifier
 does not mark as a solver failure stays the `build_spec` kill. That includes
@@ -174,8 +214,16 @@ limits of the verifier rather than findings about the mutant, and the `Seq`
 length projection errors ("model sequence length is negative / exceeds
 capacity"), which are likely the same type-bound projection gap #1283 closed
 for enum ordinals; both are left for follow-ups. The rule is
-the same for both sources: a failure before the mutant builds is `invalid`, a
-failure after it builds is `error`. The init-assignment `_bounds_<state>`
+the same for both sources: statically invalid input is `invalid`, including
+failures that `check` rejects and static implements-map type errors
+(`RefinementErrorKind::Type`, #1472). The shared implements validation runs
+before runtime oracles, so an earlier main or requirement kill cannot hide
+an invalid map, with either auto or explicit maps. These mutants are excluded
+from `judged` and `kill_rate`, not counted as oracle errors. Solver/backend and
+secondary-oracle evaluation failures remain `error`, while the semantic BMC
+failures described above remain `build_spec` kills. The runtime refinement
+walk still runs after the main and requirement oracles leave the mutant clean.
+The init-assignment `_bounds_<state>`
 re-attribution applies only to judged (clean/killed) outcomes, so it cannot
 hide an error. Without a gate the run still exits 0, and a note states how many
 mutants could not be judged.
@@ -190,7 +238,7 @@ survived: it is `status:"inconclusive"` with
 against; counting it `killed` would inflate `kill_rate` (the fail-open
 direction #1251 describes for oracle failures). A later decided oracle wins
 over the cutoff (a built-in `_bounds_*` init kill stays `killed`). An implements
-oracle that returns an error rather than a verdict is `error` (above), not
+oracle that fails during evaluation rather than returning a verdict is `error` (above), not
 `inconclusive`: the two undecided states stay distinct because they call for
 different action (fix the tool or input vs. accept or raise the budget).
 
@@ -198,7 +246,8 @@ different action (fix the tool or input vs. accept or raise the budget).
 `rust/fslc/src/main.rs`) decides the `status` of every mutant that reached an
 oracle, for both sources (external records rejected before any oracle are
 published as `invalid` earlier):
-`invalid` is exclusive (the mutant never reached the oracle); otherwise
+`invalid` is exclusive (statically invalid input, including static implements-map
+type errors, independent of runtime oracle order); otherwise
 `killed` > `error` > `inconclusive` > `survived`. A decided kill beats both
 undecided states: the oracles run in order and stop at the first kill, so a
 kill is evidence the spec detects the mutant whatever a later oracle would have
@@ -250,6 +299,33 @@ per isolated model.
 
 ## 5. Output / ripple
 
+Stdout JSON is unchanged except for the encoding-only residual in §3: an
+explicit-clean mutant can survive where BMC alone reported `build_spec`.
+Mutation reports emit live progress on stderr only:
+
+```text
+mutate baseline: proved (engine=explicit, 0.100s)
+mutate [i/N] <op> <target>: <status>[ <killed_by>] (engine=explicit|bmc|probe|none, 0.100s)
+mutate [i/N] <op> <target>: <status>[ <killed_by>] (engine=secondary, oracle=explicit|bmc, 0.100s)
+mutate external [i/M] <id>: <status>[ <killed_by>] (either engine form, 0.100s)
+```
+
+The engine label names the main-oracle route. When the main oracle was clean and
+a later check (requirements, implements, the init-bounds override) decided the
+published status (`killed`, `inconclusive` or `error`), the label is
+`engine=secondary, oracle=<route>`: `secondary` says a later check decided, and
+`oracle` keeps the clean main route visible. There, `killed_by` is
+`acceptance`/`forbidden`, `refinement` or `_bounds_<state>` respectively. The
+init-bounds override can also rewrite a main-oracle kill: `killed _bounds_<state>
+(engine=bmc)` can mean BMC found another property and the override chose the
+name, so `engine=bmc` then vouches for the kill, not for that killer. `none`
+means the record never reached the oracle.
+N is the evaluated built-in count, not the cap or discovered count; M includes
+invalid external records. Timers include per-record materialization and later
+checks. External catalogs load before any progress (previously after built-ins),
+so command errors and refused baselines stay quiet. A completed mutation report
+still emits progress when a requested gate fails or a mutant has status `error`.
+
 ```json
 {"result":"mutated","spec":"…","depth":8,"baseline":"verified",
  "summary":{"total":N,"killed":K,"survived":S,"invalid":I,"kill_rate":0.75,
@@ -269,7 +345,9 @@ With `--oracle-attribution` only:
  "attribution":{"mode":"all_killers","order_independent":true}}
 ```
 
-New `src/fslc/mutate.py`. Deterministic enumeration + `--max-mutants` truncation is made
+Native mutation is implemented in `rust/fsl-tools/src/mutate.rs` and
+`rust/fslc/src/main.rs`; `src/fslc/mutate.py` is the frozen compatibility reference.
+The first-N selection from the full deterministic catalog (§1) is made
 explicit in `notes` (no silent cap). Survivors of coverage-false actions are annotated as
 "dead at baseline," and equivalent mutants go to a review queue (not a hard failure).
 The combined and per-source kill rates use `killed / (killed + survived)`;
@@ -285,7 +363,7 @@ envelope byte for byte; one policy covers both undecided counts (#1251 adopted
 `total = killed + survived + invalid + errored + inconclusive`, reading an
 absent count as 0. Built-in entries have `source:"builtin"`;
 external entries add `id`, `source:"external"`, `input_kind`, and JSONL `line`.
-Mutation uses the ordinary bounded verifier, including its normal termination
+Mutation's BMC fallback uses the ordinary bounded verifier, including its normal termination
 after the initial state when a model has no action instances.
 
 ### Opt-in gate (#1237)
@@ -323,21 +401,23 @@ reproduced from the JSON alone:
 - `--min-kill-rate R` adds `kill_rate_below_min` unless the published,
   four-decimal `summary.kill_rate` is `>= R` (so `0.75` passes `R = 0.75` and
   fails `R = 0.7501`).
-- Built-in mutants beyond `--max-mutants` are not judged; their count is
-  recorded as `gate.dropped` (and in `notes`) but does not fail the gate.
+- Built-in mutants beyond `--max-mutants` are not materialized or judged (§1);
+  their count, `discovered - min(discovered, max_mutants)`, is recorded as
+  `gate.dropped` (and in `notes`) but does not fail the gate.
 - Because survivors can now fail the run, the first `notes` entry no longer
   says they are "a review queue, not a hard failure"; it says the run
   requested a gate and that `gate.passed` decides the exit code. The ungated
   note is unchanged.
 
-A baseline that does not verify is re-emitted unchanged with its own exit code;
+A baseline refused by auto and the fresh BMC rerun is re-emitted as the BMC
+envelope with its own exit code;
 the gate never applies to it and no `gate` key appears.
 
 ### What the score means (and does not)
 
 `kill_rate` is **bounded mutant-set sensitivity**: the fraction of a selected
 finite mutant set that the existing net of checks rejects, at the selected
-`--depth`, under the BMC + acceptance + forbidden + refinement oracle. The
+`--depth`, under the explicit-clean/BMC + acceptance + forbidden + refinement oracle. The
 number moves with every one of those choices — operator mix, `--max-mutants`
 truncation, depth, and oracle composition — so it is comparable only across
 runs that hold them fixed. It is not a production defect-detection rate, not a

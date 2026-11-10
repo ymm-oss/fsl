@@ -13,9 +13,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{Value, json};
 
 use crate::causal::{
-    CausalModel, CausalWarning, Claim, Interval, Lag, Persistence, Polarity, Variable,
+    CausalError, CausalModel, CausalWarning, Claim, Interval, Lag, Persistence, Polarity, Variable,
     VariableRole, active_adjacency, reachable_from, strongly_connected_components,
 };
+use crate::causal_time::{add_claim_time, scaled_time_cmp};
 
 /// Cap for representative path listings; never affects judgments
 /// (reachability, earliest times, and cuts come from graph algorithms).
@@ -83,8 +84,13 @@ fn persistence_json(persistence: Persistence) -> Value {
 /// Earliest first response from `start` to every reachable variable over
 /// active claims with known lags (Dijkstra on `lag.min`; weights are
 /// non-negative, so cycles never shorten a first pass).
-#[must_use]
-pub fn earliest_from(model: &CausalModel, start: &str) -> BTreeMap<String, u64> {
+///
+/// # Errors
+/// Returns a located causal error if an accumulated time exceeds u64.
+pub fn earliest_from(
+    model: &CausalModel,
+    start: &str,
+) -> Result<BTreeMap<String, u64>, CausalError> {
     let adjacency = active_adjacency(model);
     let mut settled: BTreeMap<String, u64> = BTreeMap::new();
     // (distance, node) frontier; BTreeSet gives deterministic extraction.
@@ -98,26 +104,51 @@ pub fn earliest_from(model: &CausalModel, start: &str) -> BTreeMap<String, u64> 
             if let Lag::Known(interval) = claim.lag
                 && !settled.contains_key(&claim.target)
             {
-                frontier.insert((distance + interval.min, claim.target.clone()));
+                frontier.insert((
+                    add_claim_time(distance, interval.min, claim)?,
+                    claim.target.clone(),
+                ));
             }
         }
     }
-    settled
+    Ok(settled)
 }
 
 /// Latest first-pass upper bound from `start` over known-lag active claims,
 /// computed on the SCC condensation DAG. Traversing a nontrivial SCC
 /// contributes at most the sum of its internal known `lag.max` values (an
 /// upper bound for any simple traversal). Returns `(bound, via_feedback)`.
-#[must_use]
-pub fn latest_bound_from(model: &CausalModel, start: &str) -> BTreeMap<String, (u64, bool)> {
+///
+/// # Errors
+/// Returns a located causal error if an explored upper-bound sum exceeds u64.
+pub fn latest_bound_from(
+    model: &CausalModel,
+    start: &str,
+) -> Result<BTreeMap<String, (u64, bool)>, CausalError> {
     let components = strongly_connected_components(model);
     let component_of: BTreeMap<&str, usize> = components
         .iter()
         .enumerate()
         .flat_map(|(index, members)| members.iter().map(move |member| (member.as_str(), index)))
         .collect();
-    // Internal upper bound per SCC: sum of known lag.max of intra-SCC edges.
+    let Some(&start_component) = component_of.get(start) else {
+        return Ok(BTreeMap::new());
+    };
+    // Only components reached by the known-lag condensation traversal
+    // contribute internal sums; a disconnected SCC must not refuse this start.
+    let mut reachable = BTreeSet::new();
+    let mut frontier = vec![start_component];
+    while let Some(component) = frontier.pop() {
+        if !reachable.insert(component) {
+            continue;
+        }
+        for claim in model.active_claims().filter(|claim| {
+            component_of[claim.source.as_str()] == component && matches!(claim.lag, Lag::Known(_))
+        }) {
+            frontier.push(component_of[claim.target.as_str()]);
+        }
+    }
+    // Internal upper bound per reachable SCC, in active claim (ID) order.
     let mut internal: Vec<u64> = vec![0; components.len()];
     let mut nontrivial: Vec<bool> = vec![false; components.len()];
     for claim in model.active_claims() {
@@ -125,18 +156,15 @@ pub fn latest_bound_from(model: &CausalModel, start: &str) -> BTreeMap<String, (
             component_of[claim.source.as_str()],
             component_of[claim.target.as_str()],
         );
-        if source == target {
+        if source == target && reachable.contains(&source) {
             nontrivial[source] = true;
             if let Lag::Known(interval) = claim.lag {
-                internal[source] = internal[source].saturating_add(interval.max);
+                internal[source] = add_claim_time(internal[source], interval.max, claim)?;
             }
         }
     }
     // Longest path over the condensation DAG (components from Tarjan are in
     // reverse topological order, so iterate reversed for a forward order).
-    let Some(&start_component) = component_of.get(start) else {
-        return BTreeMap::new();
-    };
     let mut bound: BTreeMap<usize, (u64, bool)> = BTreeMap::new();
     bound.insert(
         start_component,
@@ -159,9 +187,9 @@ pub fn latest_bound_from(model: &CausalModel, start: &str) -> BTreeMap<String, (
                 if target_component == component {
                     continue;
                 }
-                let candidate = component_bound
-                    .saturating_add(edge_lag.max)
-                    .saturating_add(internal[target_component]);
+                let candidate = add_claim_time(component_bound, edge_lag.max, claim)?;
+                // Internal sums precede this DP; target-bound overflow names the entering edge's claim.
+                let candidate = add_claim_time(candidate, internal[target_component], claim)?;
                 let candidate_feedback = component_feedback || nontrivial[target_component];
                 let entry = bound.entry(target_component).or_insert((0, false));
                 if candidate > entry.0 {
@@ -177,7 +205,7 @@ pub fn latest_bound_from(model: &CausalModel, start: &str) -> BTreeMap<String, (
             result.insert(member.clone(), (value, feedback));
         }
     }
-    result
+    Ok(result)
 }
 
 /// Reachability over every active claim including unknown-lag edges.
@@ -353,9 +381,13 @@ impl FindingBuilder {
 }
 
 /// All `--profile causal-review` findings plus `not_evaluable` records.
-#[must_use]
+///
+/// # Errors
+/// Returns a located causal error if a consumed path or cycle time exceeds u64.
 #[allow(clippy::too_many_lines)]
-pub fn causal_review_findings(model: &CausalModel) -> (Vec<Value>, Vec<Value>) {
+pub fn causal_review_findings(
+    model: &CausalModel,
+) -> Result<(Vec<Value>, Vec<Value>), CausalError> {
     let mut builder = FindingBuilder {
         findings: Vec::new(),
     };
@@ -365,12 +397,12 @@ pub fn causal_review_findings(model: &CausalModel) -> (Vec<Value>, Vec<Value>) {
     let earliest: BTreeMap<&str, BTreeMap<String, u64>> = interventions
         .iter()
         .map(|intervention| {
-            (
+            Ok((
                 intervention.id.as_str(),
-                earliest_from(model, &intervention.id),
-            )
+                earliest_from(model, &intervention.id)?,
+            ))
         })
-        .collect();
+        .collect::<Result<_, CausalError>>()?;
     let reach_any: BTreeMap<&str, BTreeSet<String>> = interventions
         .iter()
         .map(|intervention| {
@@ -589,7 +621,7 @@ pub fn causal_review_findings(model: &CausalModel) -> (Vec<Value>, Vec<Value>) {
         }
     }
     // Feedback loop findings.
-    let loop_classes = feedback_loop_classes(model);
+    let loop_classes = feedback_loop_classes(model)?;
     for (feedback_id, (class, cycle_lag)) in &loop_classes {
         if class == "reinforcing" {
             let feedback = &model.feedbacks[feedback_id];
@@ -817,7 +849,7 @@ pub fn causal_review_findings(model: &CausalModel) -> (Vec<Value>, Vec<Value>) {
                 continue;
             };
             let response_start = lag.min;
-            let response_end = lag.max.saturating_add(persists.max);
+            let response_end = add_claim_time(lag.max, persists.max, claim)?;
             if window.max < response_start || window.min > response_end {
                 builder.push(&Finding {
                     kind: "observation_window_misses_effect",
@@ -916,13 +948,17 @@ pub fn causal_review_findings(model: &CausalModel) -> (Vec<Value>, Vec<Value>) {
                 repairs: &["estimate_lag", "ask_spec_question"],
             });
                 }
-                Some(&earliest_reach) if earliest_reach * 2 >= model.horizon => {
+                Some(&earliest_reach)
+                    if scaled_time_cmp(earliest_reach, 2, model.horizon, 1).is_ge() =>
+                {
                     let has_leading = model.variables.values().any(|candidate| {
                         candidate.observable()
                             && candidate.id != outcome.id
                             && earliest[intervention.id.as_str()]
                                 .get(&candidate.id)
-                                .is_some_and(|&reach| reach * 4 <= model.horizon)
+                                .is_some_and(|&reach| {
+                                    scaled_time_cmp(reach, 4, model.horizon, 1).is_le()
+                                })
                             && reachable_any(model, &candidate.id).contains(&outcome.id)
                     });
                     if !has_leading {
@@ -948,12 +984,16 @@ pub fn causal_review_findings(model: &CausalModel) -> (Vec<Value>, Vec<Value>) {
             }
         }
     }
-    (builder.findings, not_evaluable)
+    Ok((builder.findings, not_evaluable))
 }
 
 /// `loop_class` and cycle lag range per declared feedback.
-#[must_use]
-pub fn feedback_loop_classes(model: &CausalModel) -> BTreeMap<String, (String, Option<Interval>)> {
+///
+/// # Errors
+/// Returns a located causal error if a known cycle's time sum exceeds u64.
+pub fn feedback_loop_classes(
+    model: &CausalModel,
+) -> Result<BTreeMap<String, (String, Option<Interval>)>, CausalError> {
     let mut classes = BTreeMap::new();
     for feedback in model.feedbacks.values() {
         let claims: Vec<&Claim> = feedback
@@ -974,28 +1014,30 @@ pub fn feedback_loop_classes(model: &CausalModel) -> BTreeMap<String, (String, O
         for claim in &claims {
             lag = match (lag, claim.lag) {
                 (Some(total), Lag::Known(interval)) => Some(Interval {
-                    min: total.min + interval.min,
-                    max: total.max.saturating_add(interval.max),
+                    min: add_claim_time(total.min, interval.min, claim)?,
+                    max: add_claim_time(total.max, interval.max, claim)?,
                 }),
                 _ => None,
             };
         }
         classes.insert(feedback.id.clone(), (class.to_owned(), lag));
     }
-    classes
+    Ok(classes)
 }
 
 /// Indicator classification for observable variables, relative to the
 /// latest known outcome earliest-response `E`: `leading` when
 /// `3 * earliest <= E`, `lagging` when `3 * earliest >= 2 * E`, otherwise
 /// `intermediate`. Deterministic graph/time metadata only.
-#[must_use]
-pub fn indicator_classes(model: &CausalModel) -> BTreeMap<String, String> {
+///
+/// # Errors
+/// Returns a located causal error if a consumed earliest time exceeds u64.
+pub fn indicator_classes(model: &CausalModel) -> Result<BTreeMap<String, String>, CausalError> {
     let interventions = variables_with_role(model, VariableRole::Intervention);
     let outcomes = variables_with_role(model, VariableRole::Outcome);
     let mut earliest_of: BTreeMap<String, u64> = BTreeMap::new();
     for intervention in &interventions {
-        for (node, &value) in &earliest_from(model, &intervention.id) {
+        for (node, &value) in &earliest_from(model, &intervention.id)? {
             earliest_of
                 .entry(node.clone())
                 .and_modify(|existing| *existing = (*existing).min(value))
@@ -1008,7 +1050,7 @@ pub fn indicator_classes(model: &CausalModel) -> BTreeMap<String, String> {
         .copied()
         .max();
     let Some(reference) = outcome_earliest else {
-        return BTreeMap::new();
+        return Ok(BTreeMap::new());
     };
     let mut classes = BTreeMap::new();
     for variable in model.variables.values() {
@@ -1018,16 +1060,16 @@ pub fn indicator_classes(model: &CausalModel) -> BTreeMap<String, String> {
         let Some(&earliest) = earliest_of.get(&variable.id) else {
             continue;
         };
-        let class = if earliest * 3 <= reference {
+        let class = if scaled_time_cmp(earliest, 3, reference, 1).is_le() {
             "leading"
-        } else if earliest * 3 >= reference * 2 {
+        } else if scaled_time_cmp(earliest, 3, reference, 2).is_ge() {
             "lagging"
         } else {
             "intermediate"
         };
         classes.insert(variable.id.clone(), class.to_owned());
     }
-    classes
+    Ok(classes)
 }
 
 #[cfg(test)]
@@ -1040,7 +1082,7 @@ mod tests {
 
     fn finding_types(model_source: &str) -> Vec<String> {
         let (model, _) = build(model_source).expect("valid model");
-        let (findings, _) = causal_review_findings(&model);
+        let (findings, _) = causal_review_findings(&model).expect("review times fit");
         findings
             .iter()
             .map(|finding| finding["finding_type"].as_str().unwrap().to_owned())
@@ -1050,7 +1092,7 @@ mod tests {
     #[test]
     fn earliest_is_the_minkowski_sum_of_min_lags() {
         let (model, _) = build(VALID_MODEL).expect("valid model");
-        let earliest = earliest_from(&model, "support");
+        let earliest = earliest_from(&model, "support").expect("earliest times fit");
         assert_eq!(earliest.get("habit"), Some(&7));
         assert_eq!(earliest.get("retention"), Some(&37));
     }
@@ -1058,7 +1100,7 @@ mod tests {
     #[test]
     fn representative_path_carries_polarity_and_first_response() {
         let (model, _) = build(VALID_MODEL).expect("valid model");
-        let graph = causal_graph_projection(&model);
+        let graph = causal_graph_projection(&model).expect("graph times fit");
         let paths = graph["paths"].as_array().expect("paths");
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0]["polarity"], "positive");
@@ -1106,7 +1148,7 @@ mod tests {
     fn unknown_persistence_is_not_evaluable_not_a_finding() {
         let source = VALID_MODEL.replace("persists 90..365", "persists unknown");
         let (model, _) = build(&source).expect("valid model");
-        let (findings, not_evaluable) = causal_review_findings(&model);
+        let (findings, not_evaluable) = causal_review_findings(&model).expect("review times fit");
         assert!(
             !findings
                 .iter()
@@ -1127,7 +1169,7 @@ mod tests {
         let types = finding_types(&source);
         assert!(types.contains(&"unknown_lag_blocks_timeline".to_owned()));
         let (model, _) = build(&source).expect("valid model");
-        let timeline = causal_timeline_projection(&model);
+        let timeline = causal_timeline_projection(&model).expect("timeline times fit");
         let entries = timeline["timelines"].as_array().expect("timelines");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["first_pass"], json!("unknown"));
@@ -1240,7 +1282,7 @@ mod tests {
     #[test]
     fn indicator_classes_use_thirds_of_outcome_earliest() {
         let (model, _) = build(VALID_MODEL).expect("valid model");
-        let classes = indicator_classes(&model);
+        let classes = indicator_classes(&model).expect("indicator times fit");
         // Outcome earliest reference E = 37. habit earliest 7: 21 <= 37 -> leading.
         assert_eq!(classes.get("habit").map(String::as_str), Some("leading"));
         // retention earliest 37: 111 >= 74 -> lagging.
@@ -1264,11 +1306,11 @@ mod tests {
             ("unknown", "unknown"),
         ] {
             let (model, _) = build(&looped(polarity)).expect("valid model");
-            let classes = feedback_loop_classes(&model);
+            let classes = feedback_loop_classes(&model).expect("feedback times fit");
             let (class, lag) = &classes["F_Loop"];
             assert_eq!(class, expected, "polarity {polarity}");
             assert_eq!(*lag, Some(crate::causal::Interval { min: 67, max: 180 }));
-            let (findings, _) = causal_review_findings(&model);
+            let (findings, _) = causal_review_findings(&model).expect("review times fit");
             let damping = findings
                 .iter()
                 .any(|finding| finding["finding_type"] == "feedback_without_damping_story");
@@ -1276,7 +1318,7 @@ mod tests {
         }
         // Repetition upper bound within the horizon: 730 / 67 = 10.
         let (model, _) = build(&looped("positive")).expect("valid model");
-        let graph = causal_graph_projection(&model);
+        let graph = causal_graph_projection(&model).expect("graph times fit");
         assert_eq!(graph["feedbacks"][0]["loop_class"], "reinforcing");
         assert_eq!(graph["feedbacks"][0]["max_repetitions_within_horizon"], 10);
     }

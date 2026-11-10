@@ -1,0 +1,14 @@
+// lowered.fsl（impl） ⊑ original.fsl（abs）。状態名・action 名が一致するので恒等の対応。
+refinement LoweredRefinesOriginal {
+  impl ExpenseRequirements
+  abs  ExpenseRequirements
+
+  map claim_stage[c: Claim] = claim_stage[c]
+  map claim_amount[c: Claim] = claim_amount[c]
+
+  action submit(c, amount) -> submit(c, amount)
+  action auto_approve(c)   -> auto_approve(c)
+  action mgr_approve(c)    -> mgr_approve(c)
+  action reject(c)         -> reject(c)
+  action pay(c)            -> pay(c)
+}

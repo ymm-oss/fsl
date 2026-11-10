@@ -85,8 +85,8 @@ contextual walk (`declaration_keyword`, the quantifier/aggregate/pattern binder 
 (`textDocument/definition`, `references`, `rename`, `documentSymbol`) without a parse failure to
 surface the gap. A language feature's coupled change (grammar/lowering, typed model, semantics,
 docs) therefore also covers `rust/fsl-lsp/src/index.rs`. A new declaration or binder form still
-needs its own targeted unit test, because the corpus gate below asserts contract properties rather
-than per-construct roles (issue #504).
+needs its own targeted unit test, because the corpus gate below checks roles and scopes only for the
+dialects its AST projection covers (issue #504).
 
 The walk is keyword-driven, so a construct keyword may only start a declaration where the grammar
 puts one. Two positions in `rust/fsl-syntax` reuse those same words and stay excluded:
@@ -106,6 +106,31 @@ that a declaration keyword owning a name has actually declared that name, and fa
 construct keyword is consumed in a name position it does not occupy. It skips positions where the
 next token is not an identifier (builtin calls, annotations, block-opening `until`/`leadsTo`) and
 `action` inside a `refinement` document, where `action impl(args) -> abs` maps rather than declares.
+
+A third property compares the index with the parser instead of with the index's own keyword table
+(issue #552). `rust/fsl-lsp/src/ast_projection.rs` reads each accepted declaration's name, role,
+and owning scope (the action or `def` for its parameters and `let` bindings) from the surface AST.
+It covers the `spec`, `requirements`, and `compose` dialects, which share `SpecItem`; other
+dialects (`business`, `governance`, `refinement`, `domain`, `dbsystem`, `ai_component`, `agent`,
+`causal`) are not projected and are indexed by the token walk alone.
+
+For a covered document read in the published edition the projection decides the declarations
+(option C): the walk proposes each declaration site and its span, and a name at a site the
+projection covers becomes a symbol only when the AST declares that name with that role and owner;
+otherwise it is a reference. The walk alone still decides what the projection leaves out —
+expression binders (`forall`, aggregates, `is some(v)`), `as` names, requirement / acceptance /
+forbidden IDs, `process` / `transition` / `kpi` / `time` items, and the mapped actions of an
+`implements` block. `role_scope_mismatches` checks the other direction, so the corpus test fails
+when the walk cannot locate a declaration the parser accepted; nothing is tolerated.
+
+FSL reserves no words, so in a covered document a word spelled like an index keyword (`status`,
+`count`, `age`, `evidence`, `owner`, `rejected`, `severity`, `respond`, ...) is a name wherever the
+AST declares it: its declaration in a state, field, member, parameter, or `let` position, and its
+uses (issue #1362). It stays a keyword where the grammar reads one whatever the document declares:
+a call `word(...)` when no action or `def` is so named (`count(...)`, `old(...)`), a collection
+method `.word(...)`, the `expect rejected` that closes a `forbidden` block, and a clause keyword
+followed on its own line by the name, number, or string it introduces (`age NAME[...]`,
+`urgent NAME`, `kpi K = count NAME in ...`). The literals `true`, `false`, and `none` are never names.
 
 Open buffers take precedence over files on disk. Imports and workspace references load through a
 document resolver that first consults the store and then the filesystem relative to the owning
@@ -131,10 +156,16 @@ server never implemented it. Rename edits all references that resolve to the sel
 inside the known workspace, including the declaration. An unresolved symbol or invalid replacement
 identifier returns no edit.
 
-Diagnostics use the shared compiler classification (`parse`, `type`, or `semantics`) as their code,
-the compiler message verbatim, and the compiler source span converted from one-based FSL positions
+Diagnostics use the shared compiler diagnostic identifier (for example `FSL-SEMANTIC`) as their code;
+`data.kind` carries the classification (`parse`, `type`, or `semantics`). They retain the compiler
+message and source span, converted from one-based FSL positions
 to zero-based LSP ranges. Migration diagnostics and their machine-applicable edits are derived from
 `fsl-syntax::canonical_rewrites`; code actions apply those exact edits.
+
+AI-project diagnostics validate every component through the same validity implementation as CLI
+checking. The compiler retains the authored failure position separately from the legacy CLI error,
+so publishing a whole-document UTF-16 range does not change CLI/Worker envelopes. Projects do not
+acquire a synthetic Kernel model or solver requirement; valid edits publish an explicit empty array.
 
 ## 5. Terms, laws, and link map
 

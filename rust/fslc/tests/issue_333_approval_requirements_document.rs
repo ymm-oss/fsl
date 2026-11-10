@@ -3,8 +3,8 @@
 
 //! Integration tests for the `requirements_document` approval target kind
 //! (issue #333): `fslc approval create/check/diff --kind
-//! requirements_document`, its schema v3 (unsigned) / v4 (signed) revision,
-//! and the `claim_set_digest` drift reason. `fslc document generate/check
+//! requirements_document`, introduced in schema v3/v4 and now created with
+//! v5/v6 context, and the `claim_set_digest` drift reason. `fslc document generate/check
 //! --approval`'s own overlay contract is exercised in
 //! `rust/fslc/tests/document_approval_cli.rs`; this file covers the
 //! approval-record side only.
@@ -17,6 +17,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ed25519_dalek::SigningKey;
 use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 static NEXT_REPOSITORY: AtomicU64 = AtomicU64::new(0);
 
@@ -95,6 +96,10 @@ fn git(cwd: &Path, arguments: &[&str]) {
 }
 
 fn approval_repo() -> PathBuf {
+    approval_repo_with_date(None)
+}
+
+fn approval_repo_with_date(date: Option<&str>) -> PathBuf {
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
@@ -107,11 +112,18 @@ fn approval_repo() -> PathBuf {
         std::fs::remove_dir_all(&root).expect("remove stale temporary repository");
     }
     std::fs::create_dir_all(&root).expect("create temporary repository");
-    std::fs::copy(
-        repository_file("tests/fixtures/approval.fsl"),
-        root.join("spec.fsl"),
-    )
-    .expect("copy approval fixture");
+    if date.is_some() {
+        let source = std::fs::read_to_string(repository_file("tests/fixtures/approval.fsl"))
+            .expect("read approval fixture");
+        std::fs::write(root.join("spec.fsl"), source.replace("\r\n", "\n"))
+            .expect("write fixed LF approval fixture");
+    } else {
+        std::fs::copy(
+            repository_file("tests/fixtures/approval.fsl"),
+            root.join("spec.fsl"),
+        )
+        .expect("copy approval fixture");
+    }
     git(&root, &["init", "-q"]);
     git(
         &root,
@@ -119,8 +131,26 @@ fn approval_repo() -> PathBuf {
     );
     git(&root, &["config", "user.name", "Approval Test"]);
     git(&root, &["config", "commit.gpgsign", "false"]);
+    if date.is_some() {
+        git(&root, &["config", "core.autocrlf", "false"]);
+    }
     git(&root, &["add", "spec.fsl"]);
-    git(&root, &["commit", "-qm", "approval baseline"]);
+    if let Some(date) = date {
+        let output = Command::new("git")
+            .args(["commit", "-qm", "approval baseline"])
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .current_dir(&root)
+            .output()
+            .expect("commit fixed approval baseline");
+        assert!(
+            output.status.success(),
+            "fixed baseline: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    } else {
+        git(&root, &["commit", "-qm", "approval baseline"]);
+    }
     root
 }
 
@@ -163,6 +193,405 @@ fn generate_document(root: &Path) -> Value {
     )
 }
 
+// #1475 uses the same test-owned Git baseline as the approval tests above.
+// Drop also cleans up on a detector assertion failure.
+fn approval_root_warnings(path: &str) -> Value {
+    json!([
+        {
+            "code":"legacy_string_metadata", "kind":"legacy_string_metadata",
+            "taxonomy":"deprecated", "severity":"warning", "edition":"current",
+            "message":"legacy string metadata is deprecated; use a typed annotation",
+            "loc":{"file":path, "line":12, "column":20, "end_line":12, "end_column":63},
+            "canonical_replacement":"@requirement(\"REQ-190\", \"a pending review can be approved\")",
+            "machine_applicable":true,
+            "edits":[
+                {"start":228, "end":228, "replacement":"@requirement(\"REQ-190\", \"a pending review can be approved\")\n  "},
+                {"start":245, "end":288, "replacement":""}
+            ]
+        },
+        {
+            "code":"legacy_string_metadata", "kind":"legacy_string_metadata",
+            "taxonomy":"deprecated", "severity":"warning", "edition":"current",
+            "message":"legacy string metadata is deprecated; use a typed annotation",
+            "loc":{"file":path, "line":18, "column":30, "end_line":18, "end_column":76},
+            "canonical_replacement":"@requirement(\"REQ-190\", \"an approved review remains approved\")",
+            "machine_applicable":true,
+            "edits":[
+                {"start":369, "end":369, "replacement":"@requirement(\"REQ-190\", \"an approved review remains approved\")\n  "},
+                {"start":396, "end":442, "replacement":""}
+            ]
+        }
+    ])
+}
+
+fn base_golden() -> Value {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/issue_1475_golden/approval-fixed.json");
+    let mut expected: Value =
+        serde_json::from_slice(&std::fs::read(path).expect("read base golden"))
+            .expect("base golden JSON");
+    assert_eq!(expected["base"], "c25f8653b9c83a247321f375f98cd59f430b6326");
+    expected["observed"]["overlay"]["generate"]["warnings"] = approval_root_warnings("spec.fsl");
+    expected["observed"]["check"]["warnings"] = approval_root_warnings("spec.fsl");
+    expected["observed"].clone()
+}
+
+struct PanicAuditApproval {
+    root: PathBuf,
+    record: Value,
+    fixed_bytes: Vec<u8>,
+    markdown: Vec<u8>,
+}
+
+impl Drop for PanicAuditApproval {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.root).expect("remove panic-audit approval repository");
+    }
+}
+
+impl PanicAuditApproval {
+    fn new() -> Self {
+        // Fixed author/committer clock and LF blob yield the identical Git
+        // baseline on base and head, without excluding git_commit or digests.
+        let root = approval_repo_with_date(Some("2026-10-27T00:00:00Z"));
+        generate_document(&root);
+        let markdown = std::fs::read(root.join("requirements.md")).expect("reviewed bytes");
+        let created = successful(
+            &root,
+            &[
+                "approval",
+                "create",
+                "spec.fsl",
+                "--kind",
+                "requirements_document",
+                "--artifact",
+                "requirements.md",
+                "--approver",
+                "alice",
+                "-o",
+                "record.json",
+            ],
+        );
+        let mut record = created["record"].clone();
+        let original = std::fs::read_to_string(root.join("record.json")).expect("created record");
+        let old_timestamp = record["approval"]["approved_at"]
+            .as_str()
+            .expect("timestamp");
+        assert_eq!(original.matches(old_timestamp).count(), 1);
+        // Retain production field ordering, indentation and final newline.
+        let fixed_bytes = original
+            .replace(old_timestamp, "2026-10-27T00:00:00Z")
+            .into_bytes();
+        record["approval"]["approved_at"] = json!("2026-10-27T00:00:00Z");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fixed_bytes).expect("fixed record JSON"),
+            record
+        );
+        std::fs::write(root.join("record.json"), &fixed_bytes).expect("fix canonical timestamp");
+        Self {
+            root,
+            record,
+            fixed_bytes,
+            markdown,
+        }
+    }
+
+    fn checked(&self) -> Value {
+        let output = run(
+            &self.root,
+            &["approval", "check", "spec.fsl", "--record", "record.json"],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty());
+        let checked = json_output(&output);
+        assert_eq!(checked["status"], "approved");
+        checked
+    }
+
+    fn preserved(&self) -> (Value, Vec<u8>) {
+        let checked = self.checked();
+        let mut preserved = json!({
+            "record": self.record,
+            "record_sha256": format!("{:x}", Sha256::digest(&self.fixed_bytes)),
+            "reviewed_markdown_sha256": format!("{:x}", Sha256::digest(&self.markdown)),
+            "check": checked,
+        });
+        println!(
+            "FIXED APPROVAL RECORD\n{}\nREVIEWED MARKDOWN\n{}\nAPPROVAL CHECK {checked}",
+            String::from_utf8_lossy(&self.fixed_bytes),
+            String::from_utf8_lossy(&self.markdown)
+        );
+        assert_eq!(
+            checked,
+            self.checked(),
+            "same-binary repeat determinism, no exclusions"
+        );
+        let mut first_overlay = None;
+        for _ in 0..2 {
+            let generated = run(
+                &self.root,
+                &[
+                    "document",
+                    "generate",
+                    "spec.fsl",
+                    "--lang",
+                    "ja",
+                    "--approval",
+                    "record.json",
+                    "-o",
+                    "overlay.md",
+                ],
+            );
+            assert_eq!(
+                generated.status.code(),
+                Some(0),
+                "stdout={} stderr={}",
+                String::from_utf8_lossy(&generated.stdout),
+                String::from_utf8_lossy(&generated.stderr)
+            );
+            assert_eq!(json_output(&generated)["result"], "generated");
+            let overlay = (
+                json_output(&generated),
+                std::fs::read(self.root.join("overlay.md")).expect("overlay bytes"),
+            );
+            preserved["overlay"] = json!({"generate": overlay.0,
+                "markdown_sha256": format!("{:x}", Sha256::digest(&overlay.1))});
+            if let Some(first) = &first_overlay {
+                assert_eq!(&overlay, first, "full overlay envelope and Markdown bytes");
+            } else {
+                first_overlay = Some(overlay);
+            }
+            assert_eq!(
+                std::fs::read(self.root.join("record.json")).expect("record readback"),
+                self.fixed_bytes
+            );
+            assert_eq!(
+                std::fs::read(self.root.join("requirements.md")).expect("reviewed bytes"),
+                self.markdown
+            );
+            let record: Value =
+                serde_json::from_slice(&self.fixed_bytes).expect("canonical record");
+            assert_eq!(
+                record, self.record,
+                "all fields, including target/claim-set/reviewed digests"
+            );
+        }
+        (
+            preserved,
+            first_overlay.expect("two overlay observations").1,
+        )
+    }
+
+    fn timestamp(&self, value: &str) {
+        let mut record = self.record.clone();
+        record["approval"]["approved_at"] = json!(value);
+        let mut bytes = serde_json::to_vec_pretty(&record).expect("encode mutated timestamp");
+        bytes.push(b'\n');
+        std::fs::write(self.root.join("record.json"), bytes).expect("write mutated record");
+    }
+
+    fn timestamp_refusal(&self, value: &str) {
+        self.timestamp(value);
+        let output = run(
+            &self.root,
+            &["approval", "check", "spec.fsl", "--record", "record.json"],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "timestamp={value:?}; stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty());
+        assert_eq!(
+            json_output(&output),
+            json!({
+                "fsl":"1.0", "result":"error", "kind":"io",
+                "message":"approval record requires a canonical UTC approval timestamp",
+                "warnings":approval_root_warnings("spec.fsl")
+            })
+        );
+    }
+}
+
+// Windows cannot create newline-containing filenames (OS code 123).
+#[cfg(unix)]
+#[test]
+fn issue_1475_newline_filename_approval_uses_shared_document_refusal() {
+    let fixture = PanicAuditApproval::new();
+    fixture.checked();
+    let name = "spec.fsl\nnot-a-frontmatter-field";
+    std::fs::copy(fixture.root.join("spec.fsl"), fixture.root.join(name))
+        .expect("copy newline-named spec");
+    git(&fixture.root, &["add", "--", name]);
+    git(
+        &fixture.root,
+        &["commit", "-qm", "newline filename baseline"],
+    );
+    let accepted = run(&fixture.root, &["check", name]);
+    assert_eq!(accepted.status.code(), Some(0));
+    assert_eq!(json_output(&accepted)["result"], "ok");
+    let output = run(
+        &fixture.root,
+        &[
+            "approval",
+            "create",
+            name,
+            "--kind",
+            "requirements_document",
+            "--artifact",
+            "requirements.md",
+            "--approver",
+            "alice",
+            "-o",
+            "newline-record.json",
+        ],
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        json_output(&output),
+        json!({
+            "fsl":"1.0", "result":"error", "kind":"document",
+            "message":"malformed frontmatter line: \"not-a-frontmatter-field\"",
+            "warnings":approval_root_warnings(name)
+        })
+    );
+    assert!(!fixture.root.join("newline-record.json").exists());
+    assert_eq!(
+        std::fs::read(fixture.root.join("requirements.md")).expect("reviewed artifact"),
+        fixture.markdown
+    );
+}
+
+macro_rules! timestamp_digit_detector {
+    ($name:ident, $offset:literal) => {
+        #[test]
+        fn $name() {
+            let fixture = PanicAuditApproval::new();
+            fixture.checked(); // Prove Git, artifact binding and all digests are valid first.
+            let mut bytes = b"2026-10-27T00:00:00Z".to_vec();
+            bytes[$offset] = b'!';
+            fixture.timestamp_refusal(std::str::from_utf8(&bytes).expect("ASCII timestamp"));
+        }
+    };
+}
+timestamp_digit_detector!(issue_1475_timestamp_year_digit_one, 0);
+timestamp_digit_detector!(issue_1475_timestamp_year_digit_two, 1);
+timestamp_digit_detector!(issue_1475_timestamp_year_digit_three, 2);
+timestamp_digit_detector!(issue_1475_timestamp_year_digit_four, 3);
+timestamp_digit_detector!(issue_1475_timestamp_month_digit_one, 5);
+timestamp_digit_detector!(issue_1475_timestamp_month_digit_two, 6);
+timestamp_digit_detector!(issue_1475_timestamp_day_digit_one, 8);
+timestamp_digit_detector!(issue_1475_timestamp_day_digit_two, 9);
+timestamp_digit_detector!(issue_1475_timestamp_hour_digit_one, 11);
+timestamp_digit_detector!(issue_1475_timestamp_hour_digit_two, 12);
+timestamp_digit_detector!(issue_1475_timestamp_minute_digit_one, 14);
+timestamp_digit_detector!(issue_1475_timestamp_minute_digit_two, 15);
+timestamp_digit_detector!(issue_1475_timestamp_second_digit_one, 17);
+timestamp_digit_detector!(issue_1475_timestamp_second_digit_two, 18);
+
+#[test]
+fn issue_1475_fixed_timestamp_record_and_document_bytes_are_preserved() {
+    let golden = base_golden();
+    let mut legacy = PanicAuditApproval::new();
+    legacy.record = golden["record"].clone();
+    legacy.fixed_bytes = serde_json::to_vec_pretty(&legacy.record).expect("captured v3 JSON");
+    legacy.fixed_bytes.push(b'\n');
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&legacy.fixed_bytes)),
+        golden["record_sha256"]
+            .as_str()
+            .expect("captured record hash")
+    );
+    std::fs::write(legacy.root.join("record.json"), &legacy.fixed_bytes).expect("captured v3 read");
+    let (historical, legacy_overlay) = legacy.preserved();
+    assert_eq!(historical, golden, "full historical v3 read, no exclusions");
+    legacy.timestamp("2024-02-29T23:59:59Z");
+    legacy.checked();
+
+    let fixture = PanicAuditApproval::new();
+    let mut expected = golden.clone();
+    expected["record"] = json!({
+        "schema": "fslc.approval.v5",
+        "path_base": ".",
+        "render_source": "spec.fsl",
+        "spec": golden["record"]["spec"],
+        "target": golden["record"]["target"],
+        "approval": golden["record"]["approval"],
+    });
+    // The captured v3 record holds the 4.12.0 crate version; a fresh record
+    // names the document renderer instead (DESIGN-approval.md, "Renderer version").
+    expected["record"]["target"]["generator_version"] = json!("fslc-document-renderer/1.3.0");
+    let mut expected_bytes =
+        serde_json::to_vec_pretty(&expected["record"]).expect("authored v5 JSON");
+    expected_bytes.push(b'\n');
+    assert_eq!(
+        fixture.fixed_bytes, expected_bytes,
+        "complete fresh record bytes"
+    );
+    let record_hash = format!("{:x}", Sha256::digest(&expected_bytes));
+    expected["record_sha256"] = json!(record_hash);
+    // Same single-record digest contract as the AP7 overlay controls.
+    let combined = format!(
+        "sha256:{:x}",
+        Sha256::digest(format!("sha256:{record_hash}").as_bytes())
+    );
+    let old_digest = golden["overlay"]["generate"]["approvals"]["digest"]
+        .as_str()
+        .expect("captured approval digest");
+    let old_field = format!("approval_digest: {old_digest}\n");
+    let legacy_overlay = std::str::from_utf8(&legacy_overlay).expect("captured overlay UTF-8");
+    assert_eq!(legacy_overlay.matches(&old_field).count(), 1);
+    let expected_overlay = legacy_overlay
+        .replace(&old_field, &format!("approval_digest: {combined}\n"))
+        .into_bytes();
+    let overlay_hash = format!("{:x}", Sha256::digest(&expected_overlay));
+    expected["overlay"]["generate"]["approvals"]["digest"] = json!(combined);
+    expected["overlay"]["generate"]["artifact_digest"] = json!(format!("sha256:{overlay_hash}"));
+    expected["overlay"]["markdown_sha256"] = json!(overlay_hash);
+    let (observed, overlay) = fixture.preserved();
+    assert_eq!(observed, expected, "full fresh v5 output, no exclusions");
+    assert_eq!(
+        overlay, expected_overlay,
+        "only the known approval digest changes"
+    );
+    fixture.timestamp("2024-02-29T23:59:59Z");
+    fixture.checked();
+}
+
+#[test]
+fn issue_1475_timestamp_nondigit_above_zero_and_calendar_ranges_stay_rejected() {
+    let fixture = PanicAuditApproval::new();
+    fixture.checked();
+    for value in [
+        "A026-10-27T00:00:00Z",
+        "2026-02-29T00:00:00Z",
+        "2026-10-27T24:00:00Z",
+        "2026-10-27T00:60:00Z",
+        "2026-10-27T00:00:60Z",
+        "2026-13-27T00:00:00Z",
+        "2026-10-00T00:00:00Z",
+        "2026-10-27 00:00:00Z",
+        "2026-10-27T00:00:00",
+    ] {
+        fixture.timestamp_refusal(value);
+    }
+}
+
 fn edit_artifact(root: &Path, name: &str, from: &str, to: &str) {
     let path = root.join(name);
     let text = std::fs::read_to_string(&path).expect("read artifact");
@@ -192,7 +621,7 @@ fn requirements_document_approval_create_and_check_round_trip() {
             "requirements.approval.json",
         ],
     );
-    assert_eq!(created["record"]["schema"], "fslc.approval.v3");
+    assert_eq!(created["record"]["schema"], "fslc.approval.v5");
     assert_eq!(created["record"]["target"]["kind"], "requirements_document");
     assert_eq!(
         created["record"]["target"]["digest_algorithm"],
@@ -223,7 +652,7 @@ fn requirements_document_approval_create_and_check_round_trip() {
     );
     assert_valid_against(
         &created["record"],
-        "schemas/fslc/approval/approval-record.v3.schema.json",
+        "schemas/fslc/approval/approval-record.v5.schema.json",
     );
 
     let checked = successful(
@@ -577,10 +1006,10 @@ fn changed_glossary_content_surfaces_as_rendering_drift_not_spec_drift() {
     std::fs::remove_dir_all(root).expect("remove temporary repository");
 }
 
-// --- Signed v4 -------------------------------------------------------------
+// --- Fresh signed v6 -------------------------------------------------------
 
 #[test]
-fn signed_requirements_document_approval_uses_schema_v4_and_verifies() {
+fn signed_requirements_document_approval_uses_schema_v6_and_verifies() {
     let root = approval_repo();
     generate_document(&root);
     let (private, public) = write_signing_keys(&root, 7, "alice");
@@ -604,10 +1033,10 @@ fn signed_requirements_document_approval_uses_schema_v4_and_verifies() {
             "requirements.approval.json",
         ],
     );
-    assert_eq!(created["record"]["schema"], "fslc.approval.v4");
+    assert_eq!(created["record"]["schema"], "fslc.approval.v6");
     assert_valid_against(
         &created["record"],
-        "schemas/fslc/approval/approval-record.v4.schema.json",
+        "schemas/fslc/approval/approval-record.v6.schema.json",
     );
 
     let checked = successful(
@@ -628,7 +1057,7 @@ fn signed_requirements_document_approval_uses_schema_v4_and_verifies() {
 }
 
 #[test]
-fn tampered_v4_signature_is_rejected() {
+fn tampered_v6_signature_is_rejected() {
     let root = approval_repo();
     generate_document(&root);
     let (private, public) = write_signing_keys(&root, 9, "alice");
@@ -871,7 +1300,12 @@ fn a_ledger_kind_record_hand_edited_into_a_document_schema_is_rejected() {
     let mut record: Value =
         serde_json::from_str(&std::fs::read_to_string(&record_path).expect("read record"))
             .expect("parse record");
+    // Remove only fresh creation context so this synthetic legacy record
+    // reaches the document-kind guard instead of unknown-field rejection.
     record["schema"] = Value::String("fslc.approval.v3".to_owned());
+    let object = record.as_object_mut().expect("record object");
+    assert!(object.remove("path_base").is_some());
+    assert!(object.remove("render_source").is_some());
     std::fs::write(
         &record_path,
         serde_json::to_string_pretty(&record).expect("serialize hand-edited record"),
@@ -889,6 +1323,12 @@ fn a_ledger_kind_record_hand_edited_into_a_document_schema_is_rejected() {
         ],
     );
     assert_eq!(output["kind"], "io");
+    assert!(
+        output["message"]
+            .as_str()
+            .expect("target rejection message")
+            .contains("unsupported approval target 'ledger'")
+    );
     std::fs::remove_dir_all(root).expect("remove temporary repository");
 }
 

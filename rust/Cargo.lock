@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-core"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-syntax",
  "serde_json",
@@ -350,10 +350,11 @@ dependencies = [
 
 [[package]]
 name = "fsl-lsp"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "crossbeam-channel",
  "fsl-core",
+ "fsl-solver-z3",
  "fsl-syntax",
  "fsl-tools",
  "fslc-rust",
@@ -365,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-runtime"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-core",
  "serde_json",
@@ -373,14 +374,14 @@ dependencies = [
 
 [[package]]
 name = "fsl-solver"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "fsl-solver-z3"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-solver",
  "z3",
@@ -388,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "fsl-solver-z3js"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-solver",
  "js-sys",
@@ -398,16 +399,19 @@ dependencies = [
 
 [[package]]
 name = "fsl-syntax"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "serde",
  "serde_json",
  "stacker",
+ "unicode-ident",
+ "unicode-normalization",
+ "unicode-security",
 ]
 
 [[package]]
 name = "fsl-tools"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-core",
  "fsl-syntax",
@@ -419,21 +423,23 @@ dependencies = [
 
 [[package]]
 name = "fsl-verifier"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-core",
  "fsl-runtime",
  "fsl-solver",
  "fsl-solver-z3",
+ "fsl-syntax",
 ]
 
 [[package]]
 name = "fsl-wasm"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "fsl-core",
  "fsl-runtime",
  "fsl-solver",
+ "fsl-solver-z3",
  "fsl-solver-z3js",
  "fsl-syntax",
  "fsl-verifier",
@@ -446,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "fslc-rust"
-version = "4.12.0"
+version = "5.0.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -459,9 +465,11 @@ dependencies = [
  "fsl-verifier",
  "jsonschema",
  "libc",
+ "proc-macro2",
  "serde",
  "serde_json",
  "sha2",
+ "syn",
 ]
 
 [[package]]
@@ -1245,6 +1253,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinyvec"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
+
+[[package]]
 name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1261,6 +1275,31 @@ name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75cd3fb03d5288b3ba9a1ee103ac7e9cbb59f0b03d64f8ddfcc04dd42758a85d"
+dependencies = [
+ "tinyvec",
+]
+
+[[package]]
+name = "unicode-script"
+version = "0.5.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "383ad40bb927465ec0ce7720e033cb4ca06912855fc35db31b5755d0de75b1ee"
+
+[[package]]
+name = "unicode-security"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2e4ddba1535dd35ed8b61c52166b7155d7f4e4b8847cec6f48e71dc66d8b5e50"
+dependencies = [
+ "unicode-normalization",
+ "unicode-script",
+]
 
 [[package]]
 name = "url"

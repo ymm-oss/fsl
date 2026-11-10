@@ -19,6 +19,8 @@
 
 use serde_json::{Map, Value, json};
 
+use crate::verification_output::DiagnosticClass;
+
 /// A spec-loading failure that keeps the diagnostic class the frontend
 /// determined instead of flattening it to a message string.
 ///
@@ -51,9 +53,11 @@ pub enum SpecLoadError {
 pub struct SemanticDiagnostic {
     pub message: String,
     pub loc: Option<Value>,
-    /// Whether the failure was resolving a name, which `docs/design/DESIGN-v1.md`
-    /// §7.2 classifies `kind:"name"` (issue 565).
-    pub name_resolution: bool,
+    /// How the public `kind` and hint are determined: from the core error's
+    /// type, from the typed model's name-resolution flag (which
+    /// `docs/design/DESIGN-v1.md` §7.2 classifies `kind:"name"`, issue 565), or
+    /// from the message for a diagnostic that carries no type (issue 1167).
+    pub class: DiagnosticClass,
     pub diagnostic_code: Option<&'static str>,
     pub hint: Option<String>,
     pub quick_fix: Option<fsl_core::DiagnosticEdit>,
@@ -67,7 +71,7 @@ impl SemanticDiagnostic {
         Self {
             message: message.into(),
             loc: None,
-            name_resolution: false,
+            class: DiagnosticClass::Message,
             diagnostic_code: None,
             hint: None,
             quick_fix: None,
@@ -82,7 +86,7 @@ impl SemanticDiagnostic {
         Self {
             message: message.into(),
             loc: crate::verification_output::origin_loc(origin),
-            name_resolution: false,
+            class: DiagnosticClass::Message,
             diagnostic_code: None,
             hint: None,
             quick_fix: None,
@@ -101,15 +105,25 @@ impl SemanticDiagnostic {
         let authored_compose_error = error.origin.as_deref().is_some_and(|origin| {
             origin.dialect == "compose" && origin.id.0.starts_with("compose:error:")
         });
+        let ai_no_tools = error.message.starts_with("ai_component '")
+            && error.message.ends_with(" declares no tools");
+        let database_no_columns = error.message.starts_with("database '")
+            && error.message.ends_with(" declares no columns");
         Self {
-            message: if authored_compose_error {
+            message: if ai_no_tools || database_no_columns {
+                error.message.clone()
+            } else if authored_compose_error {
                 format!("{} at {}:{}", error.message, error.line, error.column)
             } else {
                 error.to_string()
             },
             loc: crate::verification_output::origin_loc(error.origin.as_deref()),
-            name_resolution: error.name_resolution,
-            diagnostic_code: None,
+            class: if ai_no_tools || database_no_columns {
+                DiagnosticClass::Message
+            } else {
+                DiagnosticClass::Core(error.kind.clone())
+            },
+            diagnostic_code: error.diagnostic_code,
             hint: None,
             quick_fix: None,
         }
@@ -123,7 +137,7 @@ impl SemanticDiagnostic {
         Self {
             message: error.to_string(),
             loc: crate::verification_output::model_error_loc(error),
-            name_resolution: error.name_resolution,
+            class: DiagnosticClass::model(error.name_resolution),
             diagnostic_code: error.diagnostic_code,
             hint: error.hint.as_deref().cloned(),
             quick_fix: error.quick_fix.as_deref().cloned(),
@@ -159,26 +173,43 @@ impl std::fmt::Display for SpecLoadError {
 /// document whose *component* fails to parse still lowers its own top level
 /// successfully and therefore stays `semantics`, exactly as `check` reports it.
 #[must_use]
-pub fn surface_parse_failure(source: &str) -> Option<fsl_syntax::ParseError> {
-    fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)).err()
+pub fn surface_parse_failure(
+    source: &str,
+    options: &fsl_syntax::ParseOptions,
+) -> Option<fsl_syntax::ParseError> {
+    fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(source), options).err()
 }
 
 /// Classify a kernel lowering failure, preserving a surface-parse span.
 #[must_use]
-pub fn kernel_load_error(source: &str, error: &fsl_core::CoreError) -> SpecLoadError {
-    if let Some(parse_error) = surface_parse_failure(source) {
+pub fn kernel_load_error(
+    source: &str,
+    error: &fsl_core::CoreError,
+    options: &fsl_syntax::ParseOptions,
+) -> SpecLoadError {
+    if let Some(parse_error) = surface_parse_failure(source, options) {
         return SpecLoadError::Parse(Box::new(parse_error));
     }
     // The substituted "spec has no state block" message describes the document
     // as a whole rather than the construct the lowering gate stopped at, so it
     // keeps no location; the original diagnostic keeps whatever origin the
     // frontend recorded.
-    if error.message == "top-level document has not reached the kernel lowering gate" {
-        return SpecLoadError::Semantic(Box::new(SemanticDiagnostic::unlocated(
-            "spec has no state block",
-        )));
+    if error.kind == fsl_core::CoreErrorKind::NotKernelLowerable {
+        return SpecLoadError::Semantic(Box::new(SemanticDiagnostic {
+            class: DiagnosticClass::Core(error.kind.clone()),
+            ..SemanticDiagnostic::unlocated("spec has no state block")
+        }));
     }
     SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_core_error(error)))
+}
+
+/// Render a core diagnostic without discarding its classification or origin.
+#[must_use]
+pub fn render_core_error(output: Map<String, Value>, error: &fsl_core::CoreError) -> Value {
+    render_spec_load_error(
+        output,
+        &SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_core_error(error))),
+    )
 }
 
 /// Render a classified spec-load failure into the public error envelope.
@@ -198,7 +229,7 @@ pub fn render_spec_load_error(mut output: Map<String, Value>, error: &SpecLoadEr
             output,
             &diagnostic.message,
             diagnostic.loc.clone(),
-            diagnostic.name_resolution,
+            &diagnostic.class,
             diagnostic.diagnostic_code,
             diagnostic.hint.as_deref(),
         ),

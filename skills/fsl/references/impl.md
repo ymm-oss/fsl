@@ -35,13 +35,10 @@ for design-layer positive tests.
 Wire the generated file's `Adapter` to the implementation:
 - `reset()`: bring the implementation to the same initial state as init
 - `step(action, params)`: execute one action (in composition, `"alias.action"` names
-  also arrive; `use X as a__b` with action `c` arrives as `"a__b.c"`, and a v1
+  also arrive, and a requirements `branches` split arrives as `"submit.b1"`; a v1
   `fslc replay` trace uses the same names)
 - `observe() -> dict`: project the implementation state onto the spec's logical-state
-  form (keys are state-variable names / composition uses `alias.var`, except that
-  with an alias containing `__` the key keeps the older rule: state `n` of
-  `use X as a__b` is `"a.b__n"`, while the frozen Python reference uses
-  `"a__b.n"`; enum = name
+  form (keys are state-variable names / composition uses `alias.var`; enum = name
   string, Option = None|value, Seq = list, Map = dict with string keys, struct = dict)
 
 The random-walk test uses the Monitor (the spec's concrete interpreter) as the
@@ -87,6 +84,8 @@ emit the same scenarios:
   rejected_by`, which is `requires_failed` or `bad_call`); the random walk is **baked at generation time** (the concrete Monitor
   runs the seed-fixed walk and the `(action, params, expected_state)` trace is
   embedded as a static fixture), so the tests need no `fslc`/Python at runtime.
+  Native generation rejects integers outside ±(2^53−1) before emitting an artifact
+  (exit 2, semantic-error envelope with the value and input-vector path).
   Until `makeAdapter()` is wired every test fails. Output defaults to
   `<spec>.test.ts`.
 - `swift`: a self-contained Swift Testing file (`import Testing` / `@Test` /
@@ -98,8 +97,12 @@ emit the same scenarios:
   defaults to `<SpecName>ConformanceTests.swift`.
 - `kotlin`: a self-contained kotlin.test file (multiplatform; JVM delegates to
   JUnit), same `Adapter` contract and same baked walk. Dynamic state is
-  `Map<String, Any?>` — Kotlin's `==` is deep on `List`/`Map` and distinguishes
-  `Int`/`Double`, so the partial-match helper is a plain recursion. An unwired
+  `Map<String, Any?>`. The partial-match helper recurses by expected map keys and
+  normalizes Byte/Short/Int/Long to Long through List/Map values before leaf
+  equality. List order/length and exact maps inside lists remain significant;
+  Float/Double are not coerced. Int-range literals stay unsuffixed, wider i64
+  values use `L`, and i64 minimum uses `Long.MIN_VALUE`. Adapters should read
+  numeric params through `Number` instead of casting to `Int`. An unwired
   `makeAdapter()` returns `null` and each test fails with
   `fail(ADAPTER_NOT_WIRED)`. kotlin.test has no portable runtime skip, so
   `--allow-unwired` is rejected for Kotlin (exit 2). Output defaults to
@@ -285,7 +288,14 @@ causal_evidence_graph` (or `--profile causal-review`). Artifacts
 closed `design` vocabulary, directed `support`, scope tokens, a period, and a
 digest over the canonical payload; lifecycle chains
 (`fsl-causal-evidence-lifecycle.v0`) are separate append-only, digest-linked
-records. Schema/digest/lifecycle violations fail closed (exit 2). The
+records. Schema/digest/lifecycle violations fail closed (exit 2). After
+artifact digest validation, a present `period.valid_until` must be a string
+with exactly the ASCII `YYYY-MM-DD` shape and a valid Gregorian date
+(including year `0000`); null, other types, malformed strings, and impossible
+dates fail with `causal_evidence_schema_mismatch`, even without `--as-of`.
+Digest mismatch retains precedence. Missing `valid_until` stays accepted as
+`unknown_freshness` and excludes current support; start/end date conversion
+continues to use soft timing exclusions. The
 deterministic per-claim `causal_support`
 (`untested | supported | challenged | inconclusive | mixed |
 unsupported_by_current_evidence`) counts only artifacts pinning the current
@@ -298,7 +308,10 @@ excluded from current support with `evidence_timing_not_evaluable` and casts
 no vote — it is never counted on the strength of the other conditions alone.
 A scope dimension present on only one side is
 `unassessable`, never universal. Staleness needs an explicit `--as-of` — never the wall
-clock. **Agents: `causal_support` and `formal_assurance` are separate axes;
+clock. `causal analyze` and `causal ledger` refuse an `--as-of` that is not a real
+Gregorian date in ASCII `YYYY-MM-DD` (no sign) with `kind:"usage"`, exit 2, before
+reading the model or evidence; it used to exit 0 and count nothing as stale. Start/end
+dates with a signed field are `period_date_unparsable`. **Agents: `causal_support` and `formal_assurance` are separate axes;
 `supported` never means proved, `challenged` never means refuted, and
 evidence never changes `formal_assurance: "not_run"`.**
 
@@ -321,7 +334,9 @@ using the solver-free `BoundedLivenessMonitor`. Generates per-expectation
 `support: "inconclusive"`, `assurance: "replay-observed"`, and matching
 lifecycle records. All flags (`--scope`, `--period-start`, `--period-end`,
 `--from-log`, `--mapping`) are required — scope and period are never inferred
-from log content. A nonconformant log (action not enabled, state mismatch)
+from log content. A `--period-start`/`--period-end` that is not a real Gregorian
+date in ASCII `YYYY-MM-DD` is refused with `kind:"usage"`, exit 2, and nothing
+written (new: an invalid start used to exit 0 and write an artifact). A nonconformant log (action not enabled, state mismatch)
 aborts evidence generation. **Agents: `replay-observed` is observational
 evidence only — temporal co-occurrence does not establish causality, pass does
 not mean the claim is true, violation does not refute it, and `support` stays

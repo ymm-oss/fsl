@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+requirements R4 {
+  implements ExpenseToBe from "business.fsl" { }
+  process Claim {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+    transition submit Draft -> Submitted by Employee
+    transition auto_approve Submitted -> Approved by Manager
+      covers REQ-1 "Approval authority"
+    transition mgr_approve Submitted -> Approved by Manager
+    transition reject Submitted -> Rejected by Manager
+    transition pay Approved -> Paid by Finance
+  }
+}
+verify { instances Claim = 3 }

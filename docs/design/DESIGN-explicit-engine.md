@@ -81,6 +81,17 @@ Key points:
   so the explicit engine must never silently explore only the default-seeded
   state: any spec it accepts has exactly one initial state, and everything
   else is an explicit error. The Rust port must enforce the same gate.
+  For an init read of a root never assigned anywhere in init, native explicit
+  and Monitor report `the explicit engine does not support a free initial value of state variable '<name>' (nondeterministic init); use --engine bmc`
+  (kind `semantics`, exit 2), retaining compose prefixes in the reported name.
+  This intentionally replaces the misleading before-assignment message for
+  free-root reads only (#1451); assigned-root early reads keep their exact
+  `init references state variable '<name>' before it is assigned` check refusal.
+  Check still accepts free-root reads; BMC/induction keep symbolic free values
+  (#493), and refinement's separate free-root enumeration remains unchanged
+  (#1521). Auto still falls back to BMC. For non-error BMC results,
+  `engine_fallback.reason` carries the new diagnostic; BMC error results still
+  omit fallback metadata. No free-root enumeration is added to explicit.
 - **Unsatisfiable init (fail closed, kind `vacuous`).** Definite assignment
   alone does not guarantee a consistent initial state: `init forall` executes
   once per binder value, and when two binder values write different concrete
@@ -89,15 +100,30 @@ Key points:
   value. Symbolic BMC encodes each `init forall` iteration as a constraint
   conjunct and reports the resulting UNSAT as `result:"error"`,
   `kind:"vacuous"`, `message:"init constraints are unsatisfiable"` (exit 2,
-  §3 of `docs/design/DESIGN-vacuity.md`). The Rust `fsl-runtime` Monitor (used by
-  every concrete-initial-state caller, not only this engine) detects the same
-  contradiction without a solver: it tracks the concrete value written to
+  §3 of `docs/design/DESIGN-vacuity.md`). The Rust `fsl-runtime` Monitor detects
+  the same contradiction without a solver: it tracks the concrete value written to
   each resolved lvalue location across the whole `init` block and fails with
   the identical message the instant a later write disagrees with an earlier
   one at the same location. A later write that repeats the *same* value is
   not a conflict and is accepted, so the ordinary "assign this literal for
   every binder value" idiom (`forall k: K { m[k] = 0 }`, and even a
   non-indexed `forall k: K { ready = true }`) is unaffected.
+
+Refinement's `concrete_initial_states` free-root path does not call
+`Monitor::new`. It shares the ownership, forall read-order, and assigned-root
+read-before-assignment gate, then checks completeness specifically for refinement
+(#1521), for both implementation and abstraction. Every root written anywhere in
+init must be definitely assigned in full: partial fields/keys, a missing branch,
+and empty or not-provably-nonempty forall domains are refused with
+`init does not assign state variable(s): <roots>`, not a refinement verdict.
+Singleton fixed-target assignments remain accepted when a state-independent filter
+is statically proven nonempty. State-reading filters do not establish nonemptiness
+and cannot establish complete init coverage. Never-assigned finite scalar roots
+remain free and are enumerated; Monitor construction is unchanged.
+Static filtered type/range and collection domains also establish binder-key
+coverage for assigned roots, using only their selected keys (#1520).
+For these incomplete inits, bmc and induction still return verdicts using free
+values, whereas refine refuses the init and explains that distinction in its error.
 
 ## 3. Verdict and JSON contract
 
@@ -133,6 +159,67 @@ No profile is emitted by BMC or induction, or by `auto` when it falls back to
 BMC. It is adjacent to `cost`, never nested inside solver statistics, so the
 runtime remains solver-independent.
 
+### Init evaluation failure locations (#1543)
+
+Concrete init execution appends ` in init at L:C` to evaluation failures whose
+symbolic counterparts are located by `init_definedness`: out-of-domain Map reads
+and writes, out-of-range Seq operations, empty `head`/`pop`, zero division or
+remainder, and integer overflow (including sum). Undefined quantified/aggregate
+evaluation keeps the concrete underlying failure message. Runtime message stems
+were unchanged by #1543; at that point sum and quantified/aggregate stems could
+still differ from BMC. The #1607 amendment below removes that difference.
+The separate MIN divided/remaindered by -1 panic (#1596) and bounded-target pop
+diagnostic discrepancy (#1597) are not repaired by this change. Indexed Seq
+assignment remains unreachable through a checked model.
+
+`L:C` is the start of the containing assignment, including failures in its RHS
+or target index. An `if` condition uses the `if` statement's start; a `forall`
+source or `where` uses the `forall` statement's start. Failures inside their
+bodies retain the inner statement location, not the enclosing statement's.
+These are the same span choices as BMC. The shared runtime init path applies
+this suffix to explicit, auto, Monitor/replay, scenarios, testgen, Worker,
+refinement (including requirements `implements`), causal, conformance, and
+semantic diff consumers that execute that init. It does not add a structured
+`loc`, alter error metadata, kind, or exit status, or annotate other init errors
+such as `init constraints are unsatisfiable`.
+
+**Contract change.** CLI and Worker JSON `message` values for these concrete
+init failures gain the suffix; consumers matching the old complete string must
+accept the located form. The regression matrix covers 26 failure forms,
+including an assignment inside an `if` branch, across four engines (104 cells)
+plus four paired unsatisfiable/success controls (108 tests total), and one
+separate Worker acceptance-replay cell.
+
+Existing expectations change in three CLI test files. Seven literal expectations
+in `issue_1258_init_definedness.rs` and `support/issue_1481_review5.rs` change only
+by appending the suffix (one literal serves both explicit and replay). The
+`init_failure_evidence` helper in `issue_1457_collection_binders.rs` previously
+appended the location to explicit's message to construct symbolic expectations.
+It now expects all three engines to match explicit's message and separately
+checks that explicit's message ends with the location computed from the generated
+source. No existing runtime message stem, kind, exit code, or JSON field changes.
+
+### Binder init failure messages (#1607)
+
+BMC and induction now name the concrete operation inside a quantified/aggregate
+init expression, rather than one generic binder site. Diagnostics visit the
+source first and then candidates in runtime order, guarded by membership so
+absent Set members and non-live Seq slots cannot fail. Each candidate visits
+`where` before its selected body/summand. `forall` stops on a false body and
+`exists` on a true body; `count`, `unique`, and `exactlyOne` do not stop early.
+An undefined summand reports its own operation before accumulation; `sum` checks
+every running partial sum, not only the final mathematical sum, for i64 overflow.
+All later candidate sites are unreachable after an evaluation failure.
+
+**Contract change.** Symbolic CLI and Worker JSON `message` stems change from
+`integer overflow in sum or undefined summand` to `integer overflow in sum` for
+an accumulation overflow, or to the summand's concrete failure. The old
+`undefined evaluation` stem for other binder failures becomes the source,
+filter, or body's concrete failure, such as `division by zero`. Explicit/auto
+runtime stems, the containing-statement ` in init at L:C` suffix, error kinds,
+exit codes, and JSON fields are unchanged. Definedness remains a separate
+obligation; expanding diagnostic sites does not change acceptance or verdicts.
+
 ## 4. Property semantics
 
 The engine checks the same property surface as `bmc.verify`, with identical
@@ -159,6 +246,75 @@ verdict semantics:
   the error steers the user to `--engine bmc` for the bounded lasso/stutter
   check.
 
+### Selected bounds and witness replay (#1531)
+
+Witness replay uses the same implicit-bound selection as the verification run.
+An omitted range bound does not roll back a concrete replay step: for
+`n: 0..1`, init `n = 0`, action `n = n + 1`, and invariant `P { n <= 2 }`,
+standalone BMC and explicit with `--property P` report `violated P` at step 3
+(exit 1), not a replay mismatch. Induction checks every implicit bound in its
+base (#1598): with base depth at least 2 it instead reports `violated`,
+`type_bound`, `_bounds_n` at step 2 (exit 1), replacing the former `unknown_cti`
+or later `violated P` result.
+
+An omitted Seq bound is different: if an explored successor exceeds the root
+state's `Seq<T, N>` capacity, explicit fails closed with exit 2,
+`kind: "semantics"`, `message: "model sequence length exceeds capacity"`,
+using BMC's error contract. It does not enqueue that successor or publish a
+verdict from it, even though the concrete value can retain all its elements.
+Checked Seq bounds still report the ordinary `type_bound` violation; range-bound selection is not
+replaced by global bound enforcement. The initial frame itself is not screened
+by this guard, but every explored successor is, including a successor that
+preserves an initially overflowing Seq unchanged; see
+[DESIGN-kernel-contract.md](DESIGN-kernel-contract.md#concrete-boundary-pre-pass-budget).
+
+If a genuine violation and an unchecked Seq overflow first occur on different
+successors at the same BFS depth, explicit may return either outcome according
+to exploration order: frontier states in value order, then action declaration
+order among successors of the same state. BMC checks for an overflowing path before the
+level's properties, so this is not a promise of identical cross-engine outcomes
+for that case; neither explicit outcome is green.
+
+**Contract change.** The #1519 selected-overflow regression has three literal
+forms and four explicit selected cells whose old verdicts are intentionally
+removed. All now return the semantics error above:
+
+| Form and selected run | Old explicit result | New result |
+|---|---|---|
+| SF1: init `[0]`, capacity 1, push 1; `P { xs.size() == 1 or xs.at(1) == 1 }`, depth 1, select P | exit 0 `verified` | exit 2 `error` |
+| SF2: same update; `reachable R { xs.size() == 2 and xs.at(1) == 0 }`, depth 1, select R | exit 1 `reachable_failed` | exit 2 `error` |
+| SF3: init `[]`, capacity 1, guarded pushes `1` then `0`; `P { xs.size() == 2 => xs.at(1) == 0 }`, depth 2, select P | exit 0 `verified` | exit 2 `error` |
+| Same SF3; `reachable R { xs.size() == 2 and xs.at(1) == 1 }`, depth 2, select R | exit 1 `reachable_failed` | exit 2 `error` |
+
+The #1531 reproducer is one further form: init `[]`, capacity 1, unconditional
+push 1, `P { xs.size() <= 3 }`. Selecting P changes depth 2/3 from exit 0
+`verified` to exit 2, and depth 4/5 from exit 3 replay mismatch to exit 2.
+An initially overflowing idle form is also affected:
+
+```fsl
+spec InitIdle {
+  type K = 0..1
+  state { xs: Seq<K, 1>, t: Bool }
+  init { xs = Seq { 0, 1 } t = false }
+  action idle() { t = t }
+  invariant P { xs.size() <= 5 }
+}
+```
+
+Selecting P, at depth 0 explicit remains exit 0 `verified`; at depth at least 1
+it changes from exit 0 `proved` to exit 2 `semantics` with the same capacity
+message. The recorded depths 1 and 3 are two changed cells of this one additional
+literal form, with one unchanged depth-0 control. Standalone BMC returns that
+error on this form, including at depth 0. Induction now checks all implicit
+bounds in its selected base (#1598), so it returns exit 1 `violated` /
+`type_bound`, `_bounds_xs` at step 0 with the initial state alone, including
+at depth 0; it no longer returns the former exit-2 `semantics` error.
+Other explicit initial-overflow
+forms that previously remained bounded `verified`, or later failed replay,
+likewise error when an explored successor still exceeds capacity.
+These counts describe selected acceptance cases, not a corpus-wide transition
+set or a change to runs that check all bounds.
+
 ## 5. Support matrix (fail closed)
 
 The engine executes concrete semantics via the ported interpreter
@@ -180,6 +336,11 @@ evaluate a domain the symbolic engines call ill-formed, and emit verdicts for
 specs the language rejects. Constant bounds (`0..CAP` with `const CAP`) are
 resolved before the kernel AST and remain accepted.
 
+Init reads also obey #1518's same-forall root-read rule and its
+already-written current-key exception (see [DESIGN-bridge.md](DESIGN-bridge.md));
+these read-order errors remain input rejections for symbolic verification too,
+not an explicit-only limitation that switching to BMC can bypass.
+
 ## 6. Integration
 
 - **CLI**: `fslc verify <spec> --engine explicit [--explicit-budget N]`.
@@ -196,9 +357,17 @@ resolved before the kernel AST and remain accepted.
 BFS in this codebase, and the two must not be confused. `fsl_runtime::
 find_boundary_violation`'s `CONCRETE_PROBE_BUDGET` (issue #697,
 `docs/design/DESIGN-kernel-contract.md` "Concrete boundary pre-pass budget") bounds
-the *internal* concrete pre-pass every BMC/induction `verify` run makes ahead
-of the symbolic engine, looking only for a `partial_op`/`type_bound`
-boundary outcome. Exhausting it is invisible to the caller: it falls through
+the *internal* concrete pre-pass native BMC/induction makes ahead of the symbolic
+engine when the prepared request has `checked_bounds: None`, supplies no initial
+state, and has deterministic init. Standalone BMC `--property` selections skip
+it. Induction's base retains all implicit bounds even with `--property` (#1598)
+and can still enter it; selected-trans induction also retains all user invariant
+hypotheses. `--exclude-property <user property>` alone keeps the pre-pass
+and receives its initial step-0 correction. The probe looks only for a
+`partial_op`/`type_bound` boundary outcome; its initial-state check evaluates
+only type bounds for models with actions and reports a violation at step 0 even
+at depth 0 (#1591). Models without actions retain the verifier's semantics error.
+Exhausting it is invisible to the caller: it falls through
 to the symbolic engine exactly like an ordinary empty result, and never
 becomes a public verdict. Exhausting `--explicit-budget`, by contrast, is a
 first-class outcome of a user-selected engine: `unknown_budget`, a real
@@ -281,9 +450,10 @@ relies on. On top of that, the Rust-native gates apply:
 - Verdict agreement on the corpus: explicit vs the Rust BMC engine (explicit
   `proved` subsumes BMC `verified`; `violated_at_step` equal), as Rust
   integration tests.
-- Violated traces must replay through the concrete interpreter
-  (`fsl_runtime::replay_trace`) — every counterexample is a checked concrete
-  execution.
+- Violated traces must replay through the concrete interpreter under the run's
+  bound selection (`fsl_runtime::replay_trace_with_bounds` /
+  `replay_trace_from_state_with_bounds`; legacy wrappers use all bounds) — every
+  counterexample is a checked concrete execution.
 - `tools/check-native-integration.sh` runs the Rust workspace and dependency
   checks without making the frozen Python reference a product gate.
 

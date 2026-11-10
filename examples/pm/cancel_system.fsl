@@ -33,6 +33,10 @@ requirements CancelSystemReq {
       else if scr[c].st == OfferDialog then OfferShown
       else if scr[c].st == ThanksStay  then Retained
       else Churned
+    action tap_cancel(c: Sub) -> request_cancel(c)
+    action submit_cancel(c: Sub) -> show_offer(c)
+    action accept(c: Sub) -> accept_offer(c)
+    action decline(c: Sub) -> decline_offer(c)
   }
 
   // ── System state (screens and internal flags) ──────────────────
@@ -54,28 +58,28 @@ requirements CancelSystemReq {
 
   // ── Requirements (written with the ID and original text verbatim) ──────────────────────
 
-  requirement REQ-1 "Pressing the cancel button transitions to the cancellation form" {
-    fair action tap_cancel(c: Sub) maps request_cancel(c) {
+  requirement REQ-CANCEL-001 "Pressing the cancel button transitions to the cancellation form" {
+    fair action tap_cancel(c: Sub) {
       requires scr[c].st == Browsing
       scr[c].st = CancelForm
     }
   }
 
-  requirement REQ-2 "On cancellation-form submission, show the retention offer exactly once per subscription" {
-    fair action submit_cancel(c: Sub) maps show_offer(c) {
+  requirement REQ-CANCEL-002 "On cancellation-form submission, show the retention offer exactly once per subscription" {
+    fair action submit_cancel(c: Sub) {
       requires scr[c].st == CancelForm
       requires not scr[c].offered        // No double-showing (only once)
       scr[c] = SubView { st: OfferDialog, offered: true }
     }
   }
 
-  requirement REQ-3 "Accepting the offer goes to retention (thanks screen); declining goes to the cancellation-complete screen" {
-    fair action accept(c: Sub) maps accept_offer(c) {
+  requirement REQ-CANCEL-003 "Accepting the offer goes to retention (thanks screen); declining goes to the cancellation-complete screen" {
+    fair action accept(c: Sub) {
       requires scr[c].st == OfferDialog
       scr[c].st = ThanksStay
       retain_count = retain_count + 1
     }
-    fair action decline(c: Sub) maps decline_offer(c) {
+    fair action decline(c: Sub) {
       requires scr[c].st == OfferDialog
       scr[c].st = GoodbyePage
       churn_count = churn_count + 1
@@ -87,7 +91,7 @@ requirements CancelSystemReq {
     }
   }
 
-  requirement REQ-4 "An offer is not re-shown to a subscription that has already been shown one" {
+  requirement REQ-CANCEL-004 "An offer is not re-shown to a subscription that has already been shown one" {
     // "The offered flag is always set from the offer screen onward"
     invariant OfferedFlagConsistent {
       forall c: Sub {
@@ -102,14 +106,14 @@ requirements CancelSystemReq {
   // does not hold, the failure points to the step at which it broke. These
   // flow into scenarios / testgen and become the dev team's integration-test template.
 
-  acceptance AC-1 "Acceptance flow: request -> show -> accept results in retention" {
+  acceptance AC-CANCEL-001 "Acceptance flow: request -> show -> accept results in retention" {
     tap_cancel(0)
     submit_cancel(0)
     accept(0)
     expect scr[0].st == ThanksStay and retain_count == 1
   }
 
-  acceptance AC-2 "Decline flow: request -> show -> decline completes the cancellation" {
+  acceptance AC-CANCEL-002 "Decline flow: request -> show -> decline completes the cancellation" {
     tap_cancel(1)
     submit_cancel(1)
     decline(1)

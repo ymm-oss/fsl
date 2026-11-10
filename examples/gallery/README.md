@@ -54,10 +54,10 @@ boundaries, placement of double assignments, and a `leadsTo` satisfied at the
 same time point.
 
 `adversarial/refine_mapping_boundary_map.fsl` is a regression example of the
-"full-unfolding deadlock → vacuous `refines`" bug. Incremental prefix unfolding
-now correctly returns
-`refinement_failed/abs_state_mismatch` (detecting the mismatch between the post-bump
-update result n=1 and α(n)=2 after a jump, before the boundary check). A residual
+"full-unfolding deadlock → vacuous `refines`" bug. Since #1599 it is rejected
+earlier as `error/type` (exit 2): impl N=0..2 conflicts with abs N=0..1 at the
+refinement declaration. It formerly returned `refinement_failed/abs_state_mismatch`
+(exit 1) after incremental prefix unfolding. A residual
 case with the same root cause (where a violating transition reaches the terminal
 **only on some branches**) was closed by a fix that checks each prefix using only
 the constraints up to step t (`design_bypasses_control` in

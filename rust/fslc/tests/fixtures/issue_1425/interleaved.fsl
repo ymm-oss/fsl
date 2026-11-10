@@ -1,0 +1,18 @@
+// SPDX-License-Identifier: Apache-2.0
+
+spec InterleavedMutationPasses {
+  state { n: 0..2, ready: Bool, done: Bool }
+  init {
+    n = 0
+    ready = true
+    done = false
+  }
+  fair action step() {
+    requires ready
+    n = 1
+    requires not done
+    let next = n + 1
+    ready = next > 0
+  }
+  invariant InBounds { n >= 0 and n <= 2 }
+}

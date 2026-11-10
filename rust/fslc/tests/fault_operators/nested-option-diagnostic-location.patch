@@ -1,9 +1,9 @@
 diff --git a/rust/fsl-core/src/model.rs b/rust/fsl-core/src/model.rs
 --- a/rust/fsl-core/src/model.rs
 +++ b/rust/fsl-core/src/model.rs
-@@ -671,8 +671,7 @@ impl ModelBuilder {
+@@ -794,8 +794,7 @@ impl ModelBuilder {
                                  "state variable '{}' has unsupported state type",
-                                 field.name
+                                 shown(&field.name)
                              ))
 -                            .with_origin(origin)
 -                            .at(field.span));

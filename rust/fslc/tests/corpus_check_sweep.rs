@@ -234,6 +234,459 @@ fn every_corpus_spec_checks_ok_or_declares_its_error() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+// `fslc lint` (current edition) sweep over the same corpus (issue #608).
+// Agents and readers copy the shipped examples, and the 5.0 migration guide
+// sends users to `lint`, so a corpus file must lint clean (exit 0, zero
+// findings) unless it is listed below with the exit and the finding codes
+// (with counts) it is expected to keep. Each entry says why the findings cannot
+// be fixed in the file itself. An entry is exact: a listed file that gains a
+// finding, loses one, or changes exit fails this test, so a new finding is
+// caught and a stale entry has to be updated.
+const INJECTED_VARIANT: &str = "injected-defect variant: its IDs and legacy tags are the signals \
+     `examples/gallery/injected/MATRIX.json` and its `expect-signal` header pin for \
+     injection_detector_matrix.rs";
+const FIXTURE_FAILS_TO_LOAD: &str = "error/adversarial fixture that fails to load by design, so \
+     `lint` exits 2; corpus_expectation_manifest.rs or cli_regression.rs owns the failure";
+const GALLERY_FAILURE_FIXTURE: &str = "error/adversarial gallery fixture: its subject is a \
+     `check`/`verify` failure whose documented output and tests pin these IDs";
+const LINT_UNREADABLE_DIALECT: &str = "`lint` cannot read this dialect yet (#609)";
+const POLICY_NAMED_BY_PRESERVE_PROGRESS: &str = "the policy IDs are the names the \
+     requirements->business refinement's `preserve progress { respond <name> by ... }` targets, \
+     and `respond` takes an identifier (#1782), so a canonical hyphenated POL ID would drop \
+     that liveness check";
+const GOVERNANCE_SATISFIED_BY_SCOPE_RESCAN: &str = "lint false positive (#1788): on a \
+     `CTRL-EXPENSE-001 is satisfied_by policy ...` line the canonical control ID is accepted, \
+     but its scope segment is rescanned as a second control ID `EXPENSE-001`";
+const PYTHON_CONFORMANCE_HARNESS: &str = "keeps legacy string tags because \
+     `examples/e2e/impl/test_conformance.py` loads it with the frozen Python Monitor, whose \
+     parser rejects `@requirement` (see the file header)";
+const FROZEN_PYTHON_TESTS_LOAD_IT: &str = "keeps its one legacy string tag because frozen-Python \
+     reference tests (`tests/test_*.py`) load it with the Python parser, which rejects \
+     `@requirement`";
+const BYTE_PINNED_FIXTURE: &str = "byte-identity captures pin this file's IDs: \
+     `fixtures/issue_1425/guarded_cancel.*.stdout.json` (do not regenerate) and the \
+     Python-parity pytest digest in testgen_contract.rs";
+const LEGACY_METADATA_FIXTURE: &str = "deliberate legacy-metadata fixture: \
+     `rust/fsl-wasm/test-browser.mjs` (#1449) requires exactly one `legacy_string_metadata` \
+     warning and `support/edition_dependency_cases.rs` E01 rewrites its legacy line";
+
+/// Repo-relative path, the `fslc lint` exit it keeps, the finding codes with
+/// their counts it keeps (empty when lint cannot read the file), and why.
+type LintAllowance = (
+    &'static str,
+    i32,
+    &'static [(&'static str, usize)],
+    &'static str,
+);
+const LINT_ALLOWLIST: &[LintAllowance] = &[
+    (
+        "examples/agentic_rag/agentic_rag_business.fsl",
+        1,
+        &[("non_canonical_id", 4)],
+        POLICY_NAMED_BY_PRESERVE_PROGRESS,
+    ),
+    (
+        "examples/ai/support_answer_quality.fsl",
+        2,
+        &[],
+        LINT_UNREADABLE_DIALECT,
+    ),
+    (
+        "examples/causal/incident_response.fsl",
+        2,
+        &[],
+        LINT_UNREADABLE_DIALECT,
+    ),
+    (
+        "examples/causal/marketing_funnel.fsl",
+        2,
+        &[],
+        LINT_UNREADABLE_DIALECT,
+    ),
+    (
+        "examples/causal/subscription_retention.fsl",
+        2,
+        &[],
+        LINT_UNREADABLE_DIALECT,
+    ),
+    (
+        "examples/consulting/governance_controls.fsl",
+        1,
+        &[("non_canonical_id", 4)],
+        GOVERNANCE_SATISFIED_BY_SCOPE_RESCAN,
+    ),
+    (
+        "examples/e2e/3_design.fsl",
+        1,
+        &[("legacy_string_metadata", 10)],
+        PYTHON_CONFORMANCE_HARNESS,
+    ),
+    (
+        "examples/gallery/adversarial/business_precedence_bypass.fsl",
+        1,
+        &[("non_canonical_id", 1)],
+        GALLERY_FAILURE_FIXTURE,
+    ),
+    (
+        "examples/gallery/adversarial/clever_double_assignment_placement.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/adversarial/governance_semantic_after.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/adversarial/governance_semantic_dependency.fsl",
+        1,
+        &[("non_canonical_id", 2)],
+        GALLERY_FAILURE_FIXTURE,
+    ),
+    (
+        "examples/gallery/errors/error_acceptance_false_expect.fsl",
+        1,
+        &[("non_canonical_id", 2)],
+        GALLERY_FAILURE_FIXTURE,
+    ),
+    (
+        "examples/gallery/errors/forbidden_op_accepted.fsl",
+        1,
+        &[("non_canonical_id", 2)],
+        GALLERY_FAILURE_FIXTURE,
+    ),
+    (
+        "examples/gallery/errors/governance_malformed_business.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/errors/governance_malformed_dependency.fsl",
+        1,
+        &[("non_canonical_id", 2)],
+        GALLERY_FAILURE_FIXTURE,
+    ),
+    (
+        "examples/gallery/errors/name_duplicate_state_variable.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/errors/name_reserved_declaration.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/errors/parse_missing_expression.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/errors/semantics_compose_broken_component.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/errors/semantics_compose_component_parse_failure.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/errors/semantics_duplicate_assignment.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/errors/type_struct_set_field.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/errors/type_undeclared_type.fsl",
+        2,
+        &[],
+        FIXTURE_FAILS_TO_LOAD,
+    ),
+    (
+        "examples/gallery/errors/vacuous_implication_warning.fsl",
+        1,
+        &[("legacy_string_metadata", 1), ("non_canonical_id", 1)],
+        GALLERY_FAILURE_FIXTURE,
+    ),
+    (
+        "examples/gallery/injected/bank__boundary_flip.fsl",
+        1,
+        &[("legacy_string_metadata", 2), ("non_canonical_id", 5)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/bank__fabricated_constraint.fsl",
+        1,
+        &[("legacy_string_metadata", 3), ("non_canonical_id", 5)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/bank__guard_weakening.fsl",
+        1,
+        &[("legacy_string_metadata", 2), ("non_canonical_id", 5)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/bank__invariant_weakening.fsl",
+        1,
+        &[("legacy_string_metadata", 4), ("non_canonical_id", 6)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/bank__omission.fsl",
+        1,
+        &[("legacy_string_metadata", 3), ("non_canonical_id", 4)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/bank__over_strengthened_guard.fsl",
+        1,
+        &[("legacy_string_metadata", 3), ("non_canonical_id", 5)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/bank__unreachable_antecedent.fsl",
+        1,
+        &[("legacy_string_metadata", 4), ("non_canonical_id", 6)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/order_workflow__boundary_flip.fsl",
+        1,
+        &[("legacy_string_metadata", 2), ("non_canonical_id", 5)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/order_workflow__fabricated_constraint.fsl",
+        1,
+        &[("legacy_string_metadata", 1), ("non_canonical_id", 3)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/order_workflow__guard_weakening.fsl",
+        1,
+        &[("legacy_string_metadata", 3), ("non_canonical_id", 8)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/order_workflow__invariant_weakening.fsl",
+        1,
+        &[("legacy_string_metadata", 5), ("non_canonical_id", 9)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/order_workflow__omission.fsl",
+        1,
+        &[("legacy_string_metadata", 4), ("non_canonical_id", 7)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/order_workflow__over_strengthened_guard.fsl",
+        1,
+        &[("legacy_string_metadata", 3), ("non_canonical_id", 6)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/order_workflow__unreachable_antecedent.fsl",
+        1,
+        &[("legacy_string_metadata", 3), ("non_canonical_id", 6)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/return_system__boundary_flip.fsl",
+        1,
+        &[("legacy_string_metadata", 1), ("non_canonical_id", 4)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/return_system__fabricated_constraint.fsl",
+        1,
+        &[("non_canonical_id", 1)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/return_system__guard_weakening.fsl",
+        1,
+        &[("legacy_string_metadata", 1), ("non_canonical_id", 4)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/return_system__invariant_weakening.fsl",
+        1,
+        &[("legacy_string_metadata", 1), ("non_canonical_id", 4)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/return_system__omission.fsl",
+        1,
+        &[("non_canonical_id", 2)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/return_system__over_strengthened_guard.fsl",
+        1,
+        &[("legacy_string_metadata", 2), ("non_canonical_id", 4)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/injected/return_system__unreachable_antecedent.fsl",
+        1,
+        &[("legacy_string_metadata", 1), ("non_canonical_id", 3)],
+        INJECTED_VARIANT,
+    ),
+    (
+        "examples/gallery/valid/small_forbidden_guarded_cancel.fsl",
+        1,
+        &[("non_canonical_id", 2)],
+        BYTE_PINNED_FIXTURE,
+    ),
+    (
+        "examples/multi_agent_system/multi_agent_business.fsl",
+        1,
+        &[("non_canonical_id", 6)],
+        POLICY_NAMED_BY_PRESERVE_PROGRESS,
+    ),
+    (
+        "examples/named_predicate.fsl",
+        1,
+        &[("legacy_string_metadata", 1), ("non_canonical_id", 1)],
+        LEGACY_METADATA_FIXTURE,
+    ),
+    (
+        "examples/nfr/sla_worker_design.fsl",
+        1,
+        &[("legacy_string_metadata", 1)],
+        FROZEN_PYTHON_TESTS_LOAD_IT,
+    ),
+    (
+        "examples/nfr/sla_worker_kernel.fsl",
+        1,
+        &[("legacy_string_metadata", 1)],
+        FROZEN_PYTHON_TESTS_LOAD_IT,
+    ),
+    (
+        "examples/nfr/support_sla.fsl",
+        1,
+        &[("legacy_string_metadata", 1)],
+        FROZEN_PYTHON_TESTS_LOAD_IT,
+    ),
+    (
+        "examples/ui_spike/return_ui.fsl",
+        1,
+        &[("legacy_string_metadata", 1)],
+        FROZEN_PYTHON_TESTS_LOAD_IT,
+    ),
+];
+
+fn run_lint(path: &Path) -> (Value, i32) {
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(["lint", path.to_str().expect("utf8 path")])
+        .current_dir(root())
+        .env("FSLC_CACHE", "off")
+        .output()
+        .expect("run native CLI");
+    let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+        panic!(
+            "invalid JSON for `fslc lint {}`: {error}; stderr={}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    });
+    let status = output.status.code().unwrap_or_else(|| {
+        panic!(
+            "`fslc lint {}` terminated by signal, no exit code",
+            path.display()
+        )
+    });
+    (value, status)
+}
+
+#[test]
+fn every_corpus_spec_lints_clean_or_is_allowlisted() {
+    let root = root();
+    let files = corpus_files(&root);
+    assert!(
+        files.len() > 150,
+        "corpus scan floor: found only {} .fsl files under specs/+examples/, expected 150+ \
+         (the directory walk may be broken)",
+        files.len()
+    );
+    let corpus = files
+        .iter()
+        .map(|path| repo_relative(&root, path))
+        .collect::<BTreeSet<_>>();
+    let mut failures = Vec::new();
+    let mut listed = BTreeSet::new();
+    for &(path, _, _, _) in LINT_ALLOWLIST {
+        if !listed.insert(path) {
+            failures.push(format!("{path}: listed twice in LINT_ALLOWLIST"));
+        }
+        if !corpus.contains(path) {
+            failures.push(format!("{path}: LINT_ALLOWLIST entry is not a corpus file"));
+        }
+    }
+
+    for path in &files {
+        let rel = repo_relative(&root, path);
+        let (envelope, exit) = run_lint(path);
+        let mut codes = std::collections::BTreeMap::<String, usize>::new();
+        for finding in envelope["files"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|file| file["findings"].as_array().into_iter().flatten())
+        {
+            *codes
+                .entry(finding["code"].as_str().unwrap_or("?").to_owned())
+                .or_default() += 1;
+        }
+        match LINT_ALLOWLIST
+            .iter()
+            .find(|&&(listed, _, _, _)| listed == rel)
+        {
+            Some(&(_, expected_exit, expected_codes, reason)) => {
+                let expected_codes = expected_codes
+                    .iter()
+                    .map(|&(code, count)| (code.to_owned(), count))
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                if exit != expected_exit || codes != expected_codes {
+                    failures.push(format!(
+                        "{rel}: allowlisted with lint exit {expected_exit} and findings \
+                         {expected_codes:?} ({reason}) but now exits {exit} with findings \
+                         {codes:?}; fix the new finding, or remove or update the stale entry"
+                    ));
+                }
+            }
+            None => {
+                if exit != 0 || !codes.is_empty() {
+                    failures.push(format!(
+                        "{rel}: `fslc lint` exits {exit} with findings {codes:?}; rewrite the \
+                         file in the canonical form lint asks for, or add a reasoned \
+                         LINT_ALLOWLIST entry"
+                    ));
+                }
+            }
+        }
+    }
+
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 /// Verdict Conservation Law for `fslc check` (issue #537 C2), checked
 /// without any per-file oracle: a success-class `result` must exit 0, and
 /// every failure-class `result` must exit non-zero. The envelope itself must
@@ -399,6 +852,31 @@ fn verify_result_classes_map_to_exact_public_exit_codes() {
         expected_verify_exit(&serde_json::json!({"result": "error", "kind": "internal"})),
         3
     );
+}
+
+/// Issue #901: the production table (`fslc_rust::outcome::Verdict`) and the
+/// independent public contract above agree on every verification verdict.
+/// The two are written separately on purpose, so a mutation of one table
+/// entry turns this test red as well as the product's corpus sweep.
+#[test]
+fn production_verdict_table_matches_the_public_exit_contract() {
+    use fslc_rust::outcome::Verdict;
+
+    for verdict in Verdict::ALL {
+        if !verdict.is_verification_verdict() {
+            continue;
+        }
+        let envelope = match verdict {
+            Verdict::InternalError => serde_json::json!({"result": "error", "kind": "internal"}),
+            Verdict::SpecError => serde_json::json!({"result": "error", "kind": "semantics"}),
+            _ => serde_json::json!({"result": verdict.result()}),
+        };
+        assert_eq!(
+            verdict.exit_code(),
+            expected_verify_exit(&envelope),
+            "{verdict:?}: production exit table disagrees with the public exact-exit contract"
+        );
+    }
 }
 
 /// Runs `fslc` with `args` and returns only its exit status -- `ledger`

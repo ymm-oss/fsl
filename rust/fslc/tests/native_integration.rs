@@ -32,6 +32,87 @@ fn assert_windows_release_smoke(workflow: &str) {
     assert!(workflow.contains("$verifyResult.result -ne \"verified\""));
 }
 
+/// The release body is built and checked by one script in `assemble`, which a
+/// `workflow_dispatch` dry run reaches, and again in the tag-only `publish` job
+/// that hands it to `body_path`. A check only in `publish` would first fail
+/// after the tag, which cannot be reused.
+fn assert_release_notes_checked_before_the_tag(workflow: &str) {
+    // A step runs from its `- ` item to the next item at the same indent.
+    fn step<'a>(job: &str, body: &'a str, name: &str) -> &'a str {
+        let start = body
+            .find(&format!("      - name: {name}\n"))
+            .unwrap_or_else(|| panic!("the {name:?} step of {job}"));
+        let rest = &body[start..];
+        let end = rest[1..].find("\n      - ").map_or(rest.len(), |at| at + 1);
+        &rest[..end]
+    }
+    let job = |name: &str| {
+        let start = workflow
+            .find(&format!("\n  {name}:\n"))
+            .unwrap_or_else(|| panic!("the {name} job"))
+            + 1;
+        let body = &workflow[start..];
+        let end = body
+            .match_indices("\n  ")
+            .map(|(at, _)| at)
+            .find(|&at| !body[at + 3..].starts_with(' '))
+            .unwrap_or(body.len());
+        &body[..end]
+    };
+    let build = "./tools/release-notes.sh build --version";
+    let (assemble, publish) = (job("assemble"), job("publish"));
+    assert_eq!(workflow.matches(build).count(), 2);
+    // A job-level or step-level `if:` would skip the check on a dispatch, and
+    // `continue-on-error` would let a failed check pass the job.
+    assert!(
+        !assemble.contains("\n    if:") && !assemble.contains("\n    continue-on-error:"),
+        "assemble must also run, and fail, on workflow_dispatch"
+    );
+    for (job_name, body, name) in [
+        ("assemble", assemble, "Build and check the release notes"),
+        ("publish", publish, "Build the release notes"),
+    ] {
+        let notes = step(job_name, body, name);
+        assert!(
+            notes.contains(build),
+            "{job_name}: {name:?} builds the body"
+        );
+        assert!(
+            !notes.contains("\n        if:"),
+            "{job_name}: {name:?} must not be conditional"
+        );
+        assert!(
+            !notes.contains("continue-on-error"),
+            "{job_name}: {name:?} must fail its job"
+        );
+    }
+    assert!(
+        step("assemble", assemble, "Build and check the release notes")
+            .contains("./tools/release-notes.sh workspace-version")
+    );
+    assert!(publish.contains("--out release-notes.md"));
+    let at = |needle: &str| {
+        publish
+            .find(needle)
+            .unwrap_or_else(|| panic!("{needle} in publish"))
+    };
+    assert!(
+        at("check-stale") < at(build),
+        "the stale-fragment guard runs before the notes are built"
+    );
+    assert!(
+        at(build) < at("body_path: release-notes.md"),
+        "the notes are built and checked before the release is drafted"
+    );
+    // An artifact uploaded before the merge-multiple download would join the
+    // release unit it verifies.
+    assert!(!assemble.contains("name: release-notes"));
+    let script = std::fs::read_to_string(root().join("tools/release-notes.sh"))
+        .expect("release notes script");
+    assert!(script.contains("RELEASE_BODY_LIMIT=125000"));
+    assert!(script.contains("DEFAULT_SUMMARY_DIR=docs/release-notes"));
+}
+
 /// The signed release manifest mise reads, and the two things that can make it
 /// describe something other than this release.
 fn assert_packslip_release_contract(workflow: &str, root: &Path) {
@@ -169,7 +250,10 @@ fn assert_installer_release_contract(root: &Path) {
     assert!(installer.contains("$HOME/.fsl/.venv/bin/$cmd_name"));
     assert!(!installer.contains("*\"/.venv/bin/$cmd_name\""));
     assert!(installer.contains("ln -s \"$SKILL_SRC\" \"$SKILL_DST\""));
-    assert!(installer.contains("$SKILL_DST.pre-native-v3"));
+    // A replaced skill copy is kept where no agent loads it as a skill.
+    assert!(installer.contains("SKILL_BACKUP_DIR=\"$INSTALL_DIR/skill-backups/claude\""));
+    assert!(!installer.contains("$SKILL_DST.pre-native-v3"));
+    assert!(!installer.contains("$destination.pre-native-v3"));
 
     // A symbolic link this installer did not create belongs to whatever put it
     // there. `mise skills sync` links into its own versioned payload exactly as
@@ -183,7 +267,7 @@ fn assert_installer_release_contract(root: &Path) {
         .find("if foreign_skill_link \"$destination\" \"$source\"; then")
         .expect("the guard runs before any write");
     let backup = installer
-        .find("SKILL_BACKUP=\"$SKILL_DST.pre-native-v3\"")
+        .find("SKILL_BACKUP=\"$SKILL_BACKUP_DIR/$SKILL_NAME-$BACKUP_STAMP\"")
         .expect("the backup path");
     let placement = installer
         .find("elif foreign_skill_link \"$SKILL_DST\" \"$SKILL_SRC\"; then")
@@ -481,7 +565,7 @@ fn published_schema_inventory_is_complete_and_parseable() {
     let mut schemas = Vec::new();
     collect_schemas(&root().join("schemas/fslc"), &mut schemas);
     schemas.sort();
-    assert_eq!(schemas.len(), 46, "published schema inventory changed");
+    assert_eq!(schemas.len(), 48, "published schema inventory changed");
     let mut ids = BTreeSet::new();
     for path in schemas {
         let schema: Value =
@@ -541,6 +625,7 @@ fn native_release_unit_is_atomic_pinned_and_platform_closed() {
     assert!(workflow.contains("merge-multiple: true"));
     assert!(workflow.contains("draft: true"));
     assert!(workflow.contains("body_path: release-notes.md"));
+    assert_release_notes_checked_before_the_tag(&workflow);
     assert!(workflow.contains("Verify the remote draft release unit"));
     assert!(workflow.contains("diff -u expected-assets.txt remote-assets.txt"));
     assert!(workflow.contains(
@@ -713,6 +798,218 @@ fn installer_migrates_its_own_skill_links_and_keeps_foreign_ones() {
             destination.display()
         );
     }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Writes a test file, creating its directory, and marks it executable on request.
+#[cfg(unix)]
+fn write_test_file(path: &Path, body: &str, executable: bool) {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, body).unwrap();
+    if executable {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+/// Stages a local `v9.9.9` release under `dir`: a native pair reporting the tag,
+/// a two-skill bundle, their checksums, and a `curl` and `uname` that serve it.
+/// Returns the release directory and the directory holding the fake commands.
+#[cfg(unix)]
+fn stage_fake_installer_release(dir: &Path) -> (PathBuf, PathBuf) {
+    let write = write_test_file;
+    let os = String::from_utf8(Command::new("uname").arg("-s").output().unwrap().stdout).unwrap();
+    let (target, machine) = match os.trim() {
+        "Darwin" => ("macos-arm64", "arm64"),
+        _ => ("linux-x64", "x86_64"),
+    };
+
+    // The release: a native pair reporting the tag, and a two-skill bundle.
+    let release = dir.join("release");
+    let stub = "#!/bin/sh\necho 'fslc 9.9.9'\n";
+    write(&release.join(format!("fslc-{target}")), stub, true);
+    write(&release.join(format!("fslc-lsp-{target}")), stub, true);
+    for skill in ["fsl", "fsl-verify"] {
+        write(
+            &dir.join(format!("bundle/skills/{skill}/SKILL.md")),
+            skill,
+            false,
+        );
+    }
+    let bundle = release.join("fsl-skills.tar.gz");
+    assert!(
+        Command::new("tar")
+            .arg("-czf")
+            .arg(&bundle)
+            .args(["-C", dir.join("bundle").to_str().unwrap(), "skills"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let fakebin = dir.join("fakebin");
+    write(
+        &fakebin.join("curl"),
+        "#!/usr/bin/env bash\n\
+         url=\"\"; dest=\"\"\n\
+         while [ $# -gt 0 ]; do case \"$1\" in -o) dest=\"$2\"; shift;; -*) ;; *) url=\"$1\";; esac; shift; done\n\
+         case \"$url\" in\n\
+           */releases/latest) printf '{\\n  \"tag_name\": \"v9.9.9\"\\n}\\n' > \"$dest\" ;;\n\
+           */releases/download/v9.9.9/*) cp \"$FAKE_RELEASE/${url##*/}\" \"$dest\" ;;\n\
+           *) exit 22 ;;\n\
+         esac\n",
+        true,
+    );
+    write(
+        &fakebin.join("uname"),
+        &format!(
+            "#!/bin/sh\n[ \"$1\" = -m ] && {{ echo {machine}; exit 0; }}\n\
+             for u in /usr/bin/uname /bin/uname; do [ -x \"$u\" ] && exec \"$u\" \"$@\"; done\n\
+             exit 127\n"
+        ),
+        true,
+    );
+    // A fixed clock, so a backup name is known in advance.
+    write(
+        &fakebin.join("date"),
+        "#!/bin/sh\necho 20000101T000000Z\n",
+        true,
+    );
+    let checksums = Command::new("bash")
+        .current_dir(&release)
+        .arg("-c")
+        .arg(
+            "for f in *; do if command -v shasum >/dev/null; then shasum -a 256 \"$f\"; \
+             else sha256sum \"$f\"; fi > \"$f.sha256\"; done",
+        )
+        .status()
+        .unwrap();
+    assert!(checksums.success());
+    (release, fakebin)
+}
+
+/// Reads a small text file the test wrote or expects.
+#[cfg(unix)]
+fn read_text(path: &Path) -> String {
+    std::fs::read_to_string(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+}
+
+/// Whether anything, even a dangling link, stands at `path`.
+#[cfg(unix)]
+fn present(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok()
+}
+
+/// Runs the whole installer against a local release. A skill directory the
+/// installer replaces, and a `<name>.pre-native-v3` backup an earlier installer
+/// left beside the links, both end up under the data directory: an agent loads
+/// every directory in its skill directory as a skill. A re-run moves nothing,
+/// and an existing backup stops the run before anything is linked.
+#[cfg(unix)]
+#[test]
+fn installer_keeps_skill_backups_outside_the_skills_directory() {
+    let dir = std::env::temp_dir().join(format!("fsl-installer-backup-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let write = write_test_file;
+    let (release, fakebin) = stage_fake_installer_release(&dir);
+
+    let home = dir.join("home");
+    let skills = home.join(".claude/skills");
+    let backups = home.join(".local/share/fsl/skill-backups/claude");
+    let install = || {
+        Command::new("bash")
+            .arg(root().join("install.sh"))
+            .env_clear()
+            .env("HOME", &home)
+            .env("PATH", format!("{}:/usr/bin:/bin", fakebin.display()))
+            .env("FAKE_RELEASE", &release)
+            .output()
+            .unwrap()
+    };
+    let entries = |path: &Path| -> BTreeSet<String> {
+        std::fs::read_dir(path)
+            .map(|entries| {
+                entries
+                    .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let only_links = || {
+        entries(&skills) == BTreeSet::from(["fsl".to_owned(), "fsl-verify".to_owned()])
+            && entries(&skills).iter().all(|name| {
+                std::fs::symlink_metadata(skills.join(name))
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            })
+    };
+
+    // A hand copy where a link goes, and a backup an earlier installer left.
+    write(&skills.join("fsl/SKILL.md"), "hand copy", false);
+    write(
+        &skills.join("fsl-old.pre-native-v3/SKILL.md"),
+        "legacy",
+        false,
+    );
+    let first = install();
+    let stdout = String::from_utf8_lossy(&first.stdout);
+    assert!(first.status.success(), "{first:?}");
+    assert!(only_links(), "{:?}", entries(&skills));
+    let kept = entries(&backups);
+    let copy = backups.join("fsl-20000101T000000Z");
+    let legacy = backups.join("fsl-old.pre-native-v3");
+    assert_eq!(kept.len(), 2, "{kept:?}");
+    assert_eq!(read_text(&copy.join("SKILL.md")), "hand copy");
+    assert_eq!(read_text(&legacy.join("SKILL.md")), "legacy");
+    assert!(stdout.contains(&format!("previous copy preserved at {}", copy.display())));
+    assert!(stdout.contains(&format!(
+        "{} -> {}",
+        skills.join("fsl-old.pre-native-v3").display(),
+        legacy.display()
+    )));
+
+    // A re-run finds every link current and moves nothing.
+    let again = install();
+    assert!(again.status.success(), "{again:?}");
+    assert!(only_links());
+    assert_eq!(entries(&backups), kept);
+
+    // A backup already at the destination is never overwritten, and the
+    // preflight stops the run before it writes even the command links: the
+    // missing `fslc` link would otherwise be recreated before the skill phase.
+    let command = home.join(".local/bin/fslc");
+    let refuse = |case: &str| {
+        let refused = install();
+        assert!(!refused.status.success(), "{case}: {refused:?}");
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("already exists"));
+        assert!(
+            !present(&command),
+            "{case}: the preflight must stop the run"
+        );
+        assert!(!present(&skills.join("fsl-verify")), "{case}");
+    };
+    std::fs::remove_file(&command).unwrap();
+    std::fs::remove_file(skills.join("fsl-verify")).unwrap();
+    write(
+        &skills.join("fsl-old.pre-native-v3/SKILL.md"),
+        "newer",
+        false,
+    );
+    refuse("an earlier installer's backup");
+    assert_eq!(
+        read_text(&skills.join("fsl-old.pre-native-v3/SKILL.md")),
+        "newer"
+    );
+    assert_eq!(read_text(&legacy.join("SKILL.md")), "legacy");
+
+    // The same holds for a backup that this run would name.
+    std::fs::remove_dir_all(skills.join("fsl-old.pre-native-v3")).unwrap();
+    std::fs::remove_file(skills.join("fsl")).unwrap();
+    write(&skills.join("fsl/SKILL.md"), "second copy", false);
+    refuse("this run's backup name");
+    assert_eq!(read_text(&skills.join("fsl/SKILL.md")), "second copy");
+    assert_eq!(read_text(&copy.join("SKILL.md")), "hand copy");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

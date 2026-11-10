@@ -1,0 +1,8 @@
+spec PartialMap { // SPDX-License-Identifier: Apache-2.0
+  type K = 0..1
+  struct Triple { a: Bool, b: Bool, c: Bool }
+  state { m: Map<K, Triple>, free: Bool }
+  init { forall k: K { m[k].a = true m[k].b = true } }
+  action idle() { }
+  invariant Initialized { not m[0].c }
+}

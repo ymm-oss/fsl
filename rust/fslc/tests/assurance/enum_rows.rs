@@ -96,6 +96,7 @@ define_variant_rows!(
             Expr::EnumMember {
                 type_name: "Status".to_owned(),
                 member: "Pending".to_owned(),
+                source_bare: false,
             }
         ),
         Expr::Call { .. } => (

@@ -18,6 +18,56 @@ FSL は、**生成 AI によって書かれ、検証され、修復される**�
 
 ## 1. 仕様の構造
 
+<a id="fsl-editions"></a>
+
+### エディションと読み始める場所
+
+エディションはソース構文を選ぶもので、`fslc` 実行ファイルのバージョンとは別です。
+FSL 5 の要件は **entity / lifecycle / event / rule / decide** で記述します。
+新しく書く場合は [§13.2](#fsl5-requirements)から
+読み始めてください。カーネルの `spec`、式、検証範囲、refinement は、本書の他の節で
+説明する共通の基盤です。§13.2 の `process` / `transition` の例は FSL 4 と移行入力の
+参照用に残しています。
+
+最初の宣言より前に、`fsl 5` を単独の行で書きます。その前に置けるのは空行と `//`
+コメントだけです（先頭の UTF-8 BOM も受理します）。Markdown の literate source では、
+最初の `fsl` フェンスの先頭に、同じ規則で書きます。ヘッダーは個々の requirements ブロックではなく、
+文書全体に適用されます。`fsl 4` は以前の構文を選び、ヘッダーがない文書も FSL 4 として
+構文解析します。保たれるのは構文で、4.12 の結果がすべて保たれるわけではありません。`fslc` 5.0 は
+どのエディションでも一部の形を拒否し、CLI と JSON の契約も一部変えています。一覧は
+[fslc を 4.12 から 5.0 へ上げる](#upgrading-fslc-4-12-to-5-0)にあります。`--edition current` は文書の指定に従います。明示的に指定したエディションと
+ヘッダーが食い違うと `edition_conflict`、未知の番号は `unsupported_edition` です。
+causal と AI ダイアレクトの文書はヘッダーを取りません（`edition_header_not_accepted`）。
+ヘッダーの追加だけでは旧形式の要件を変換できません。`fsl 5` の下の `process` は
+`mixed_requirements_forms` です。[後述の移行手順](#fsl4-to-fsl5-migration)を使ってください。
+この 4 つの拒否は、いずれも `"result": "error"`、`"kind": "parse"`、終了コード 2 の
+エンベロープです。上の名前は、`message` と `loc` と並ぶ `diagnostic_code` フィールドの値です。
+
+ヘッダーと `--edition` オプションは役割が違います。文書をどの構文で読むかを決めるのは
+**ヘッダー**だけです。`check`、`verify`、`lint`、`migrate`、`fmt` などの
+**`--edition`** は、エディションの*方針*、つまりどの finding を出し、どの重さで扱うかを
+選びます。綴りは `current`、`next`、`4`、`5` の 4 つです。ヘッダーのない文書と `fsl 4` の
+文書では `4` は `current` の別綴りで、`5` は `next` の別綴りです。このオプションを取るのは
+`check`、`verify`、`domain check`、`fmt`、`lint`、`migrate` で、いずれのヘルプにも
+`--edition {current,next,4,5}` と表示され、`cli-contract.json` にも同じ 4 つの選択肢が
+載っています。それ以外の値は usage エラー(`"kind": "usage"`、終了コード 2)で、メッセージは
+`--edition must be current, next, 4, or 5` です。JSON 出力が示すのは文書を*読んだ*エディションで、
+オプションの綴りではありません。次のエディションで読んだ結果には `"edition": "next"` が付き
+（現行のエディションでは付きません）、ヘッダーのある文書には `"fsl_edition": 4` または `5` も付きます。
+`lint`、`migrate`、`fmt --check` の報告には、4.12 と同じく `edition`（`"current"` か `"next"`）が
+常に付きます。複数の文書を読んだときは、すべてを次のエディションで読んだ場合だけ `"next"` になり、
+`fsl_edition` はすべての文書が同じヘッダーを宣言している場合だけ付きます。`edition_conflict` の
+メッセージは、入力したとおりの綴りでオプションを示します
+(`the document declares 'fsl 4' but --edition next was requested`)。
+
+**ヘッダーのない**文書に `--edition 5`（または `next`）を付けても、FSL 5 の文書にはなりません。
+構文は FSL 4 のまま読むので、§13.2 の FSL 5 の要件の書き方は構文エラーになり、`fsl_edition`
+も出ません。変わるのは方針です。現行のエディションで警告になる旧形式、たとえば文字列の
+メタデータ（`legacy_string_metadata`）は、次のエディションでは `unsupported_in_edition` の
+エラーになります。`lint --edition 5` は `missing_edition_header` も報告します。FSL 5 で書くには
+ヘッダーを書くか、`fslc migrate` に追加させてください。ヘッダーのない文書を従来どおり検査するには、
+`--edition` を付けないか、`current` を指定します。
+
 ```fsl
 spec <Name> ["<kind>: <intent>"] {   // optional spec-level tag → metadata badge (explain/html); never verified
   const <NAME> = <constant expr>
@@ -168,6 +218,20 @@ API/オフラインおよび有界の preservation/rollback 検査は、ダイ�
 アーティファクトプロファイルを同じスナップショットモデルでカバーします。
 `docs/design/DESIGN-db.md` を参照。
 
+`check compatibility` の12個のルール名は、lowering と DB ツールが共有する閉じた語彙です。
+未知の名前は Kernel/model や成果物を作る前に拒否され、`kernel`、`scenarios`、`explain`、
+`testgen`、ファイル入力の `fmt`/`lint`/`migrate` も exit 2 になります。lowering は記述した
+ルールの位置を持つ `semantics` error を返します。各 command は既存の lowering error と
+同じ形式で描画し、対応する envelope には `loc`、`fmt`/`lint`/`migrate` では message 内に
+位置を示します。`check` と Worker の既存の特化 validator の error は位置なしのままです。
+DB 固有の findings と schema 範囲の到達可能性検査は DB ツールに残り、Kernel export の
+追加の門にはしません。有効なルールとデフォルトの選択、修理の道具の carve-out
+(formatter の stdin を含む)は変わりません。
+直接の HTML/ledger report は、描画用の lowering より先に検証の位置なし validator 拒否を
+返します。#1473 の base/head 比較では、595個の `.fsl` ファイルで `check` の `ok`→`error`
+遷移および出力/exit の差はありませんでした。正確な commit、binary hash、command は
+`docs/design/DESIGN-db.md` に記録しています。
+
 関数型 DDD / 非同期エフェクトダイアレクト(v0。同じカーネルへ展開され、安定した
 fsl-domain findings を報告します):
 
@@ -281,8 +345,10 @@ domain 宣言では、有限のバリアントに `enum Name { Member, ... }` �
 に `type Name = lo..hi` を使います。レガシーな書き方 `type Name = A | B` は現行の
 2.x エディションでは引き続き受理され、宣言全体に対して安定した
 `deprecated_domain_enum_union` 警告(正準の置き換えを含む)を生成します。
-`fslc check`、`fslc verify`、`fslc domain check` は `--edition current|next` を
-受け付けます。`next` はレガシーの union 記法を拒否します。`fslc lint` は変更を
+`fslc check`、`fslc verify`、`fslc domain check` は `--edition current|next|4|5` を
+受け付けます。`next`(または `5`)はレガシーの union 記法を拒否します。他の対応済み consumer は
+source のヘッダーのエディションを使います。それらに `--edition` を追加するものではありません。
+`fslc lint` は変更を
 加えずにエディション finding を報告し、`fslc migrate --edition next` は検査済みの
 正準編集を提供します。空の enum と重複メンバーはエラーで、それぞれ宣言と重複
 メンバーの位置で報告されます。
@@ -458,8 +524,24 @@ leadsTo <Name> {
 ```
 
 `~>` は **leadsTo ブロック専用**です — 一般の式では使えません。
+`helpful action(args...)` の各引数は、プロパティの束縛の scope で、対応する
+action パラメータの型として `check` で検査します。従来は未検査だった位置であり、型の誤り、
+未定義の名前、禁止された pattern の shadow は `check` で拒みます。正規化される
+`count`/`sum` は、有効な空の集約も含めて単体と同じ受理を保ちます。compose の
+接頭辞付けで元の global 名との衝突の拒否を隠したり、別の宣言により拒否を増やしたり
+することはありません。
+induction はさらに、引数が状態に依存しないことを求めます。使えるのは leadsTo の
+束縛、定数、enum member、整数・真偽値リテラルと、整数の `+`、`-`、`*` の組み合わせ(単項 `-` を含む)です。
+型が正しく状態を読む引数は `check` と BMC が受け入れ、induction は拒否します。
 `within K` は応答に対する有界の締め切りで、`K` は非負の定数式でなければなりません。
 これは BMC によって検査され、ランク付き induction 証明では検査されません。
+**破壊的な受理の削除 (#1480):** 負の定数の締め切りは、エンジンへの分岐前に、所有する
+`leadsTo` 宣言の位置で `check` と全検証経路が拒否します。従来の `check` は受理する
+ことがありました。実測した削除は共有 `X1/negative-within` (`-1`、8:3) と、native の
+締め切り fixture の `-1`、`const K = -1` に対する `K`、`(0 - 1)` (各 5:3) です。
+ゼロと正のリテラル・名前付き・算術定数は受理を維持します。この変更の比較では 610 個の
+コーパスファイルの check 判定は不変で、後述の範囲受理が 2 つの fixture を動かします。
+比較と削除した全 4 inline 形式は `DESIGN-spec-domains.md` に記録しています。
 `decreases` は省略可能で、整数値の式でなければなりません。
 `fslc verify --engine induction` の下では、検証器は、証明済みの invariant の下で、
 `P` が pending かつ `Q` が偽であるときには常に、測度が非負であること、進行が可能で
@@ -544,6 +626,107 @@ instances 数から独立です — `Case` のサイズが `verify { instances C
 ください。(条件付きの測度は整数式の間の選択はできますが、それ単体では `helpful`
 形式が要求するエンティティ単位の減少を証明しません。)
 
+<a id="upgrading-fslc-4-12-to-5-0"></a>
+
+### fslc を 4.12 から 5.0 へ上げる
+
+この節は、FSL 5 を採用するかどうかにかかわらず、`fslc` の実行ファイルを 4.12 から 5.0 へ
+上げる人のためのものです。`fslc` 4.12 は `fsl 5` ヘッダーを拒否していたので、4.12 が受理した
+文書はすべてヘッダーのない文書です。5.0 もヘッダーのない文書を FSL 4 として構文解析します。
+ただし、構文が保たれても結果がすべて保たれるわけではありません。5.0 は、4.12 が受理していた
+一部の形を、ヘッダーのない文書でも拒否します。CLI、JSON、終了コードの契約も一部変わります。
+文書を FSL 5 にも移す場合は、先にこの節を済ませてから
+[FSL 4 から FSL 5 への移行](#fsl4-to-fsl5-migration)に進んでください。
+
+**拒否される形を見つける。** 自分の文書すべてと、検査している詳細化それぞれについて、5.0 の
+実行ファイルを実行します。
+
+```bash
+fslc check spec.fsl
+fslc verify spec.fsl --depth 8
+fslc refine impl.fsl abs.fsl mapping.fsl
+```
+
+拒否された形は、`"result": "error"`、終了コード 2 のエンベロープになります。`kind`
+(`name`、`type`、`semantics`、`parse`)、`loc`、`message` が構文要素を示すので、下の表で
+規則を探してください。直すのはソースです。拒否を消すために property や action を削らないで
+ください。拒否された形は、どれも健全でないか曖昧な形でした。各行が示す節に書き換え方があります。
+
+| 拒否される形(issue) | 5.0 の報告 | 直し方 |
+|---|---|---|
+| `__` を含む宣言名 (#1256) | 宣言の位置で `kind: "name"` | 宣言とその参照を改名します。replay の trace や保存した出力も直します(`foo__bar` を `foo_bar` に)。§11「名前と `__`」 |
+| goal、policy、requirement、scenario、forbidden、decision の ID や glossary の alias に含まれる `__` (#1602, #1603) | ID または alias の位置で `kind: "name"` | ID または alias を改名します。§11 |
+| `enum Bool`、`type Bool`、`struct Bool`。組み込みの `Int` の上の型付きバインダー (#1480) | 宣言の位置で拒否。`type 'Int' is not a finite scalar` | 型を改名します。宣言したドメイン型の上で束縛します。§2 |
+| 記号エンジンが実行できない範囲の境界、負の `within` (#1480) | `semantics`。たとえば `binder bound is not a static integer` | 範囲の境界をリテラルと `const` で書きます。§3 |
+| どのエンジンも実行しない量化子・init・添字の形 (#1463) | 位置つきの `semantics` エラー | §3 と §4 の対応する形を使います |
+| ルートを全部代入する前の init での読み取り (#1451)。init の `forall` が、同じ `forall` で書くルートを読む形 (#1518) | `init references state variable '<name>' before it is assigned` | ルートを全部代入してから読むか、先にルート全体を初期化します。§4 |
+| relation の端点の型 (#1458)、演算子の種類とメソッドのシグネチャ (#1459)、端点の範囲が違う relation (#1522)、異なるコンテナの carrier (#1472, #1627, #1679, #1683) | 位置つきの代入可能性エラー | 両辺の端点と要素の型・範囲をそろえます。範囲が等しい数値の別名は互換のままです。§3 |
+| 定義の自由な名前を捕獲する `def` の呼び出しや `leadsTo` のバインダー (#1450, #1528) | `would capture variable` | 呼び出し側のバインダーを改名します。§3 |
+| 通常の spec なら拒否される、使われていない compose の `def`: 定義名や引数名の重複、直接・相互の再帰、本体での未定義の述語の呼び出しやアリティの合わない呼び出し (#1335) | 通常の spec と同じエラー。例えば `duplicate def '<name>'` や `recursive predicate definition is not allowed` | 重複を削除または改名するか、再帰をなくすか、呼び出しを直します。§3 |
+| `const` と同名のローカル束縛 (#1515) | `local binding '<name>' shadows a constant of the same name` | ローカル束縛とその使用を改名します。§3 |
+| 続きの外で使うパターン変数 (#1547)、マッチの後での再利用 (#1573) | 使用の位置でエラー | 新しい名前を使います。§3 |
+| 重複した仮引数・入力 (#1680)、構造体リテラルのフィールド (#1685、`duplicate_struct_field`)、構造体のフィールド (#1692)、`instances`・`values`・`kpi` の宣言 (#1686)、2 つ目の `implements` (#1694)、写しを失う `domain` の重複 (#1700) | 2 つ目の位置で報告 | 重複を削るか改名します。§2、§3、§11、§13 |
+| メンバーのない enum、列のない `dbsystem`、ツールのない `ai_component` (#1546)。宣言していない AI の authority ツール、未知の hard-contract 規則 (#1545) | `enum '<Name>' has no members` など | メンバー・列・ツールを宣言するか、その宣言を削ります。§2、§13.5、§13.6 |
+| `alias__x` に書く同期文 (#1334)、追加項目の `let` を読む同期引数 (#1442)、仮引数の型に合わないルートの同期引数 (#1517) | 位置つきのエラー | `alias.x` と書きます。ヘッダーの引数・`const`・状態を渡します。仮引数の型に合わせます。§11 |
+| 両側の actor が違う要件の自動対応 (#1441, #1456) | 位置つきのエラー | actor をそろえるか、明示的な action の対応を書きます。§13.2 |
+| エンティティのフィールドや関係の役割と同名の `is some(name)` パターン (#1552, #1561)。process のない型のバインダーに対する `stage(c)` (#1569) | 位置つきのエラー | フィールドでないパターン名を使います(`some(1) is some(v) and v == 1`)。`stage` はエンティティのバインダーに使います。§13.2 |
+| 型の合わない acceptance の `expect`(enum と整数の比較など)や FSL 5 の scenario の `then`(`then` は FSL 5 のみ)。acceptance、forbidden、FSL 5 の scenario の中で内部の型が合わないステップ引数。モデルの式のどこかにある、Bool でないものへの `not` と Int でないものへの単項マイナス(選ばれない分岐の中も含む) (#1439) | `semantics`。たとえば `expression of type Int is not assignable to Bool` | 式の型を合わせます。enum はメンバーと比べ、`not` には Bool、単項マイナスには Int を渡します。§13.2、§3 |
+| 未知の `check compatibility` 規則名 (#1473) | `kernel`、`fmt`、`lint`、`migrate` が終了コード 0 から 2 に変わる | 12 個の規則名のどれかを使います。§1 のデータベース層 |
+| 実在する `YYYY-MM-DD` の日付でない causal の `period.valid_until` や `--as-of` (#1422) | `--as-of` は `kind: "usage"` | 日付を `YYYY-MM-DD` で書きます。§17 |
+| `refine`: 不完全な init ルート (#1521)、自由な impl 名と同名の preserve progress のパターン名 (#1595)、同名で定義の違う型 (#1599)、要素ごとの map の下での map 全体の自由な読み取り (#1613) | `refines` や `refinement_failed` だったものが終了コード 2 | ルートのすべてのフィールドとキーを初期化します。抽象側か写像側のパターンのバインダーを改名します。型に別の名前を付けます。map 全体でなく要素を読みます。§10 |
+
+同じリリースの削除のうち、次のものは FSL 5 の構文要素だけに関わるので、4.12 の文書には
+現れません。次のエディションの関係の役割・resource・measure に含まれる `__` (#1600)、
+重複したステップの入力 (#1682)、重複した actor と要件 ID の持ち主 (#1705)、入れ子の式の形の中の
+フィールド名と入力名 (#1798。§13.2 の「破壊的削除 (#1798)」を参照)、コロンの量化子を使う
+`fsl 5` ヘッダーの compose の子 (#1452)、そして `check` がすでに拒否していた次のエディションの
+4 つの移行形式を `analyze`、`conformance`、`explain`、`html`、`kernel`、`ledger`、`mutate`、
+`scenarios`、`sweep`、`testgen`、`typestate` も拒否するようになったもの (#1449) です。
+
+**CLI、JSON、終了コードの変更を見つける。** `fslc` を呼ぶスクリプトや CI のジョブで、
+最初の列の値を探してください。
+
+| 変わったもの(issue) | 4.12 | 5.0 | 対応 |
+|---|---|---|---|
+| `explain`、`typestate`、`mutate`、`testgen`、`html`、`ledger`、`scenarios`、`version` に、そのコマンドが持たないオプションを渡す (#1446, #1341) | 一部は既に usage エラー(`explain` の `--engine`、`--no-timing`、`--deadlock`。`mutate --engine`。`scenarios --engine induction`)。ほかは無視して終了コード 0(`version --depth 3`、`typestate --depth 3`、`testgen --engine`、`scenarios --engine bmc`) | usage エラー、終了コード 2 | そのオプションを外します |
+| ソースを読む前に検査する、不正なオプションの値 (#1446) | `kind: "io"` または `"semantics"` | `kind: "usage"` | `usage` で照合します |
+| 3 点の `--git` 範囲 (#1446) | Git のエラー、`kind: "io"` | Git を動かす前に `--git range must be BASE..HEAD`、`kind: "usage"` | `BASE..HEAD` と書きます |
+| 読めない入力ファイル (#1709) | 経路によって `usage`、`semantics`、または OS のエラーだけ | `kind: "io"`、終了コード 2、`<path>: <error>` | `io` で照合します |
+| 自分の契約を破る実装に対する `fslc refine`、governance の `preservations[].result` (#1315) | `"violated"` | `"impl_violated"` | `impl_violated` で照合します。`verify` の `violated` はそのままです |
+| 出力の中の生成名とコンポーネント名 (#1256, #1255, #1284) | `submit__b1`、`acct__Inv` | `submit.b1`、`acct.Inv` | 保存した `analyze` の ID や `--focus` の引数も含め、ドットの名前で照合します |
+| `approval create` と `approval check` での承認対象の失敗 (#1418) | 終了コード 2 | 下流の終了コード。scenarios や HTML の検証の失敗は 1、内部の失敗は 3 | 終了コード 0 と `approval_check`、`approved` で判定します |
+| 承認レコード (#1421) | v1〜v4。種類に応じて署名なしは v1 か v3、署名つきは v2 か v4 | 署名なしの v5、署名つきの v6(`path_base` つき) | 新しいレコードは 5.0 以降だけで読みます。古い実行ファイルは拒否します。パスは Git のルートの中に置きます。`document generate --approval` には Git が必要です。4.x のレコードは、5.0 で描画した成果物との照合も含めてダイジェストが一致する間だけ `approved` のままです。5.0 で成果物の描画が変わるレコードは承認し直しが必要です(表の下を参照)。新しいレコードの `generator_version` には、`fslc` のバージョンではなく `fslc-ledger-renderer/1.0.0` のような種類ごとのレンダラのバージョンを記録します |
+| 相対パスの AI の `dataset.source` (#1421) | 呼び出し側から解決 | 宣言したファイルのディレクトリから解決 | リポジトリを前置したパスを書き直すか、`--records` を渡します |
+| シンボリックリンクや、`/dev/null`、`/dev/stdout`、`/dev/fd/63` のような通常ファイルでないものへの `-o` (#1419) | 書き込む | 拒否、終了コード 2。書き込める親ディレクトリが必要 | 通常ファイルに書くか、標準出力を読みます |
+| 書き換えの要る入力がない `migrate --write` (#1754) | `"changed": 0` なのに `"written": true`。`files[]` の要素に `written` はない | `"written": false`。`files[]` の各要素が `written` を持ち、置き換えた入力でだけ `true` | `written` を「ファイルを置き換えた」の意味で読みます |
+| CRLF の文書への `migrate --write` (#1755) | 書き換えた行は LF、ほかの行は CRLF のまま。整形器が書き換えた文書(メタデータ、maps、enum、量化子)は LF だけになり byte order mark も消える | 各行の改行を入力の 1 行目にそろえ、byte order mark も保つ | 対応は不要です |
+| 書き換え対象の読み取り専用の入力への `migrate --write`(#1419 と同じ拒否) | 書き換える。`"written": true`、終了コード 0。モードは読み取り専用のまま | 拒否、`kind: "io"`、終了コード 2。集合のどのファイルも書き込まない | 先にファイルを書き込み可能にします |
+| `html s.fsl -o s.fsl` のように、コマンドが読むファイルを出力先にする(`./s.fsl`、symlink、ハードリンク経由も含む)(#1440) | 入力を置き換える | 何も書く前に拒否、`kind: "io"`、終了コード 2 | 別のパスに書きます |
+| ほかに finding のないヘッダーのない文書への `lint --edition next`(または `5`) (#1434) | 終了コード 0 | `missing_edition_header`、終了コード 1 | `--edition` を付けないか、ヘッダーを書きます |
+| ヘッダーのない文書への引数なしの `fslc migrate` (#1434) | 対象は同じく `next` だが、何も計画しない(`"edition":"next","changed":0`) | `fsl 5` と process 形式の変換を計画。`migrate_manual_required` は終了コード 1 | `--edition current` を渡します |
+| 不正な `--edition` の値 (#1715) | `--edition must be current or next` | `--edition must be current, next, 4, or 5` | メッセージの照合を直します |
+| 引数なしの `fslc`、`fslc help`、引数なしの `fslc document` と `fslc domain` (#1756) | `usage: fslc <check\|verify> SPEC [options]`、`unknown command 'help'`、`check` や `replay` と `testgen` が抜けた usage 行 | すべてのコマンドを並べたルートの usage 行。`fslc help [COMMAND ...]` はそのコマンドのヘルプを出し、終了コード 0。usage 行はすべてのサブコマンドを並べます。`fslc help` 以外は `kind: "usage"`、終了コード 2 のままです | メッセージの照合を直します |
+| 旧形式に対する現行エディションの `check`、`verify`、Worker (#251) | 警告なし | `legacy_string_metadata`、`legacy_quantifier_colon`、`inline_action_maps` の警告。判定と終了コードは不変 | 対応は不要です。`fslc migrate` が書き換えます |
+| verify のキャッシュ | | キーに `fslc` のバージョンが入る | 上げた後の最初の実行で、結果を 1 回ずつ計算し直します |
+| 層別の Agent Skills (#1437) | FSL 4 を書く | `fsl 5` を書く | スキルを入れ直します。`fsl` スキルは FSL 4 の案内を残しています |
+
+**描画が変わる成果物の承認は承認し直します。** 5.0 が ledger、HTML、scenarios の成果物を
+4.12 と違う内容で描画する場合、その 4.12 のレコードは、仕様のダイジェストが一致していても
+`"status": "drifted"`、`"reasons": ["rendering_changed"]`、終了コード 0 を返します。ledger の
+変更には、新しい旧形式の警告(#251)が finding として載ること、`\_` のような Markdown の
+エスケープ、別の仕様を `implements` する仕様に加わる `## inline implements` の節があります。
+4.x のレコードではレンダラの比較を省くので、`renderer_changed` は報告しません。同じ内容に
+描画される成果物のレコードは `approved` のままです。このリポジトリの `examples/` と `specs/` で
+4.12 が作れたレコードでは、5.0 は ledger 86 件中 61 件、HTML 44 件中 37 件、scenarios 45 件中
+11 件に `rendering_changed` を報告し、残りは `approved` のままでした。ただし、5.0 が拒否する
+仕様や、acceptance か forbidden の検査が失敗する仕様の 14 件は、終了コード 2 の `error` に
+なります(#1418)。描画が変わった成果物は 5.0 で作り直して確認し、`fslc approval create` で
+新しいレコードを作ります。
+
+`FSLC_UNSTABLE` と Worker の `unstable` フィールドは、4.12 と 5.0 の間のリリース前の build にだけ
+あり、4.12 にはありませんでした。5.0 はどちらも読みません。古いクライアントが送る `unstable`
+フィールドは無視します。
+
 ## 2. 型
 
 | 型 | 例 | 説明 |
@@ -566,6 +749,34 @@ instances 数から独立です — `Case` のサイズが `verify { instances C
 匿名のドメイン型として受理され、`type X = lo..hi` を宣言して `x: X` と書くのと
 等価です。
 
+`symmetric enum` を含む spec/Kernel のすべての enum 宣言は、未使用の型でもメンバーを 1 つ以上
+持たなければなりません。`enum E { }` は検査済みモデルの構築時に、`kind: "type"`、
+message `enum 'E' has no members`、enum 宣言を指す `loc` で拒否されます(CLI exit 2)。
+`check` とモデルを使うすべてのコマンド(全検証エンジン、scenarios、testgen、refine
+を含む)が同じゲートを通り、Worker の check も同じ規則を使います。これは以前の
+受理に対する**破壊的な削除**(#1546)で、従来の refinement 入力 `EmptyImpl` /
+`EmptyAbs` も含みます。意図したメンバーを宣言するか、未使用の空宣言を削除して
+ください。空のドメインにより検証を空虚にしないでください。メンバー 1 つの enum は
+引き続き有効です。domain の dialect は従来の早期の `semantics` エラーを保ち、この
+変更では分類を変えません。compose の子の空 enum は #567 に従い、公開 loc は親の
+`use` を指し、message に子の宣言の path/位置と親の path を残します。
+この空 enum の wrapper は子の path を親ファイルの directory を基準に解決して
+表示し、古い #567 の wrapper のように `use` の path 文字列をそのまま残しません。
+`symmetric enum` の宣言の先頭は `symmetric` です。
+[境界の決定](../design/DESIGN-enum-member-identity.md#nonempty-enum-declarations-1546)を参照。
+
+`dbsystem` の database は column を 1 つ以上宣言する必要があります。
+`database app { schema 0 }` と空の table だけを含む database の受理は、どちらも
+**破壊的な削除**(#1546)です。database の lowering は `Column` enum を生成する前に、
+そのままの `database 'app' declares no columns`、kind type、database 宣言を指す
+loc、CLI exit 2 を `check`、BMC、induction、explicit、scenarios、testgen、kernel
+で返します。`db check` が同じエラーを返すのは database の lowering に到達した
+場合だけで、静的な互換性の finding は引き続き先に報告されます。そのため、active な
+artifact が存在しない column を読む場合は base と同じく `violated` / exit 1 に
+なることがあります。DB の fmt/lint は既存の描画(kind semantics、message の位置の
+接尾辞、loc field なし、exit 2)を保ちます。column が 1 つある database は引き続き
+有効です。
+
 Kernel の状態フィールドは、単純で決定的な初期値のために `name: Type = expr` を
 使えます。検査の前に通常のルート代入へ正規化されるので、Monitor、明示的探索、BMC、
 induction、Public Kernel v1 は、等価な `init` ブロックと同じ意味論を観測します。
@@ -584,6 +795,19 @@ induction、Public Kernel v1 は、等価な `init` ブロックと同じ意味�
   `Option<Set/Map/Seq/struct>` は許されません
   (check 時にヒント付きで拒否されます)。省略可能なスカラーのフィールドは、
   v2.1 以降 struct の中に直接書けます。
+- **破壊的な削除 (#1692):** 同じフィールドを 2 度宣言する `struct` や `value_object` は、2 つの型が
+  同じでも、その struct を誰も読まなくても、2 度目のフィールドで拒否されます。exit 2、
+  `kind: "name"`、`duplicate struct field 'P.x'`、`loc` は 2 度目の `x` です。`check` は最初の型で値を認め、
+  範囲はその値を拒否していたため、`struct P { x: K, x: Bool }` は `check` を通り、`x: K` だけなら受理
+  される値で `verify` が `violated` を返していました。`verify`、`sweep`、`refine`、`replay`、
+  `scenarios`、`testgen`、`mutate`、`html`、`ledger`、`diff`、`migrate`、`document`、`kernel`、
+  `typestate`、`lint`、`explain`、`analyze`、`conformance`、`domain expand`、`domain analyze` はこれらの
+  形で結果を返さなくなります。`fmt` は同じメッセージを `kind: "semantics"`、`loc` なしで報告します。
+  コンポーネントでは `component "piece.fsl" failed to check (duplicate struct field 'P.x' at
+  piece.fsl:3:20) at root.fsl:2:3`、`kind: "semantics"`、`loc` は `use` です。inline の `implements` では
+  `implements "abs.fsl" failed to check (duplicate struct field 'P.x' at abs.fsl:3:20)`、`kind: "type"`、
+  `loc` は `implements` です。移行: 意図するフィールドを 1 つだけ残してください。自動移行はありません。
+  [`DESIGN-option-struct.md`](../design/DESIGN-option-struct.md) の §1 を参照してください。
 - Map の値はスカラー、入れ子の `Option<scalar>`、またはそれらのフィールドだけを持つ
   struct でなければなりません。入れ子の Map/Set/Seq/relation は拒否されます。特に
   `Map<Id, Map<K, Bool>>` は explicit-state 実行で必要な初期 Map 値を構築できないため
@@ -610,7 +834,9 @@ struct とそのフィールド、状態変数、アクションとその引数�
 これらの名前を持つ宣言はどの式からも読めなくなり、しかもその読み違えは沈黙する。
 検査が入る前は、`state { true: Bool }` と `invariant AlwaysHolds { true }` は
 `proved` を返し、`init { true = false }` は何からも読めない変数への代入になっていた。
-予約語はこの 3 語のみである。`count`、`sum`、`stage`、`in`、`is`、`where`、`old`、
+`Bool` は型名として予約されている(合成するコンポーネントの中でも同じ)。`enum Bool`、`type Bool`、`struct Bool` は宣言の位置で
+拒否する(**破壊的な削除、#1480**)。型付き binder と式がこの名前を別々に読むためである。
+予約語はこれ以外にない。`count`、`sum`、`stage`、`in`、`is`、`where`、`old`、
 `abs`、`and`、`or` は文脈依存であり、名前として引き続き有効である。`some`、`Set`、
 `Seq`、`unique`、`exactlyOne`、`forall`、`exists` は後続の構文がある場合にのみ
 認識されるため、名前として誤用してもリテラルへの沈黙した解決ではなくパースエラーになる。
@@ -628,6 +854,56 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
 検査の前に展開され、検証器とランタイムは手で展開したのと同じカーネル式を見ます。
 展開は、内部のバインダー名を発明する代わりに変数捕獲を拒否します。
 [`DESIGN-def.md`](../design/DESIGN-def.md) を参照。
+
+**破壊的な受理の削除 (#1335):** compose 直下の `def` も、呼び出されていなくても
+通常の spec の `def` と同じように検査します。`fslc` 4.12 は、定義名や引数名が重複する、
+直接・相互に再帰する、未定義の述語を呼ぶ、または引数の数が合わない呼び出しをする、
+使われていない compose の `def` を exit 0 で受理していました。`fslc` 5.0 はどれも、
+通常の spec と同じエラー (exit 2) で拒否します。`duplicate def`、
+`duplicate parameter in def`、`undefined predicate` は `kind: "name"`、
+`recursive predicate definition is not allowed` と
+`expects <n> argument(s), got <m>` は `kind: "semantics"` です。重複を削除または
+改名するか、再帰をなくすか、呼び出しを直してから、`check` をやり直してください。
+互換の迂回路はありません。
+
+**破壊的な受理の削除 (#1450):** 呼び出し側の action 引数、`let`、式内の量化子・
+集約のバインダー、statement `forall` が、展開した def 本体の自由な名前を捕まえる
+呼び出しを拒否します。def 自身の引数は自由な名前から除きます。例えば状態変数
+`on` を読む `def p(z: Bool) = (not on) or z` を `let on = ...` の下で
+`p(false)` と呼ぶ形は、呼び出し位置の `would capture variable` エラー
+(exit 2、`kind: "semantics"`) になります。呼び出し側の束縛を改名して再チェック
+してください。内部名への自動改名や互換の迂回路はありません。既存の
+`is some(x)` のパターン隠蔽の拒否は変わりません。通常の spec と、compose の
+部品・同期アクション内のソースローカルな def に適用します。
+`requires` のガード、または binary 式の左辺から後続へ出る、global でない
+`is some(v)` のパターン束縛も、この検査では呼び出し側の束縛に含めます。
+
+最終の実装では、base `11f01225e244dabde0f8dfd9aaa665bc47dccfd4` と build 済みの実装
+`dd7b47885680076412ab2f0b46ebe8854ff6758b` の各 materialized tree で、
+`specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全597個の `.fsl` を
+`check` した結果、ok→error の遷移集合は空です。新たに拒否する inline の形は、この
+corpus の結果で否定されません。`leadsTo` 宣言バインダーの経路は後の #1528 で拒否しました。
+
+**破壊的な受理の削除 (#1528):** `leadsTo` のプロパティ宣言直下のバインダーも、
+before/after の式、`helpful` の引数、`decreases`、`within` の捕獲検査に含めます。
+def 本体の自由な名前を捕まえる呼び出しは、通常の spec、compose 部品と root のプロパティ、
+`leadsTo` に下ろされる dialect のプロパティ (requirements など) で、
+呼び出し位置の `would capture variable` エラー (exit 2、`kind: "semantics"`)
+になります。宣言バインダーを改名してください。バインダーの範囲と自身の `where`
+式の展開は変わりません。`where` の捕獲エラーが、未対応のプロパティ外側バインダーの
+`where` を拒否する既存エラーより先に出る場合があります。
+元から不正な、状態を読む `within` の呼び出しでは、`unknown constant` の代わりに
+呼び出し位置の `would capture` を報告する場合があります。exit 2 / semantics は不変です。
+既に不正なパターン束縛のスコープ外参照 (#1547) もある `leadsTo` では、同様に
+`would capture` がその拒否より先に出る場合があります。exit 2 / semantics は不変です。
+
+#1528 の `check` sweep は、base `08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` と実装
+`c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286` の別々に build した `git archive` tree で実施しました。
+`specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全601個の `.fsl` は、stdout/stderr の
+全内容と exit が一致し、ok→error と error→error の診断変化はともに0件でした。
+移した既存の inline テストの1形 (合計602形) だけが ok→error に変わりました。
+これは宣言バインダーが `decreases` 内の def 呼び出しの自由な状態名を捕まえる形です。
+捕獲と無関係な受理の削除はありません。
 
 - 算術: `+ - * / %`、単項 `-`、`min(a, b)` / `max(a, b)` / `abs(a)`
   (`a//b` は `//` 以降がすべてコメントになってしまうので、除算は空白を入れて
@@ -648,8 +924,16 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   `kind: "abs_step_violation"` として報告されます。
 - 比較: `== != < <= > >=`
 - 論理: `and or not =>`
+  共通のモデル式チェッカーは、`not` のオペランドに `Bool`、単項 `-` の
+  オペランドに `Int` と互換の型 (名前付き数値範囲を含む) を要求します。
+  trace とすべてのモデル式に適用され、未選択の分岐や短絡される `and` / `or`
+  の内部も検査します。`not 1` と enum メンバー `Red` に対する `-Red` は
+  check 時の `kind: "semantics"` エラー (exit 2) であり、truthiness や enum から
+  整数への変換ではありません。型が正しい `not (c == Red)`、`-(-1)`、数値の
+  `- n` は引き続き有効です。
 - 条件: `if condition then when_true else when_false`。条件は `Bool` で、両方の
-  分岐が検査され、同じ論理型を持たなければなりません。ガード、代入、プロパティ、
+  分岐が検査され、互換な型を持たなければなりません。スカラーの整数・範囲互換は保ち、
+  有限の入れ物の値全体は後述の同じドメイン(Seq は容量も同じ)を要求します。ガード、代入、プロパティ、
   関数引数、ランキング式、定数、refinement マッピングを含む、式が受理される任意の
   場所で使えます。条件式は右結合し、各分岐は囲むデリミタまで延びます。後続の演算子
   を条件式全体に適用したいときは括弧を使ってください。具象評価は選択された分岐だけ
@@ -660,15 +944,227 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   `x` のスコープはその述語と量化・集約の本体だけです。外で名前を挙げると型エラーに
   なり、外側の名前(action の引数など)を隠す場合もその隠蔽はスコープ内に閉じます。
   充足した `exists` が witness を外側の束縛へ出すことはありません。
+  **const と同名の局所束縛は拒否します(#1515)。** 整数以外を含む全 const 型に適用する
+  breaking removal です。量化・集約のバインダー、init/action の文 `forall`、`leadsTo`
+  のバインダー、action の引数と `let`、`def` の引数は const と同名にできません。
+  requirements の action/transition の入力と indexed age のバインダーも同じ規則です。
+  component の const に prefix を付ける前、def をインライン展開する前に検査します。
+  `check` と全検証 engine は束縛名を含む同じ `semantics` エラー(exit 2)を返します。
+  位置は**束縛名の token ではなく、既存 AST が保持する所有元の span**です。式の
+  バインダーは囲む式・宣言、文のバインダーは `forall` 文、wrapper は `leadsTo` 宣言、
+  引数・let は action、def の引数は def、lowering された入力は元の transition、
+  indexed age は age キーワードを指します。component のエラーは親の `use` を指し、
+  メッセージに component の所有元の座標を残します。局所名とその参照を変更してください。
+  `const N = 2` があるなら `forall N in 0..1 { N <= 1 }` を
+  `forall k in 0..1 { k <= 1 }` に書き換えます。状態名を隠す束縛は引き続き使えます。
+  glue/sync の局所 `N` は qualified const `part.N` と衝突しません。refinement の
+  indexed-map と action-correspondence の宣言には追加の const-shadow 検査を設けず、
+  元の spec には通常の検査を適用します。既存の pattern binding の freshness 制約は
+  変えません。この拒否により、static const と字句的な束縛の読み方による engine の
+  逆の verdict を防ぎますが、一般の依存する範囲境界を追加するものではありません(#1480)。
+  source から参照できる暗黙の名前も同じ規則です。legacy process の `c`、next edition
+  の entity の頭文字を小文字にした名前(Request の `r`)、relation event の暗黙の
+  actor-instance 引数(Agent の `a`)が const と同名なら、局所の宣言が source に無くても
+  拒否します。衝突する const と、その定数を意味する参照を改名してください。instance を
+  意味する `stage(c)` は残します。`requirements R { const c = 2 process Case { ... } }`
+  の生成 init のエラー位置は process の宣言であり、const や書かれていない binder の
+  token ではありません。relation 引数のエラーは元の event の宣言を指します。見えない
+  KPI 射影の binder は別で、const と衝突するときだけ内部名を fresh にします。KPI の
+  実装が `c` を使っていたという理由だけで、利用者の const `c` を改名する必要はありません。
+  def の呼出し引数の binder は展開前に検査します。使わない・使う・複製する param の
+  違いで message や owner は変わりません。`const N = 2` があれば、
+  `def ignore(p: Bool) = true` が引数を捨てても `ignore(forall N in 0..1 { true })` を拒みます。
+  元の inline fixture の受理の縮小は次のとおりです。共有 consumer は重複して数えません。
+  compose の束縛 capture
+  (#1442)は **126** 形(63 ケースの単独・compose)で、代表は `const x = false` と
+  `action go(x: Bool) { requires x }`、入れ子の束縛も含みます。入れ子の集約(#1463、
+  CLI/LSP/Worker の共有 source)は **24** 形で、代表は `const x = false` と
+  `sum(x in 0..1 of count(y in 0..x)) == 3`。束縛ごとの helpful 引数(#1333)は
+  **2** 形(単独・compose)で、代表は `const c = 0` と `forall c: Case`、action の
+  引数 `c`、`helpful step(c)` です。
+  合計 **152** 形を受理から除きます。compose の fresh な対照 126 形は `ok` のままです。
+  書き直すときは局所の名前と参照を変えてください。衝突を隠すだけのために const を消す
+  のではありません。部分 init の 5 形(#1481)は **error→error** であり、受理の縮小
+  ではありません。同名の const を隠す外側の `flag`/`limit` の束縛に対して、従来の
+  所有権エラーより先に位置付きの const-shadow エラーを返す、診断の優先順位の変化です。
+  部分 init を有効にするものではありません。追加の受理の縮小には上の暗黙の名前と、
+  `const i = 1` に対して `forall i in 0..0 { forall j in 0..i { m[j] = true } }` とする
+  init の入れ子があります。この fixture は base `46031415` で check を通り、今は外側
+  forall の owner **5:10** で拒みます。局所名と束縛された参照を改名してください。
+  依存する範囲境界の実行制限は別です。base `46031415` と計測した祖先 `65bf2876` の
+  各 archive で native `check` を実行し、`issue_1425/interleaved.fsl` と追加された
+  `issue_1547_guard_reservations/` の3形、追加の `ai_project_*_invalid_rule.fsl` の2形を含む
+  **603** corpus 形で受理の縮小 **0**、
+  その他の出力差 **0** を確認しました。元の
+  inline は152形の縮小、126形の fresh な受理維持、5形の診断変更です。さらに暗黙名・
+  init の入れ子、実引数、未使用 def の70形を拒み、改名した70形と hidden KPI の2形は
+  受理を維持します。計測した祖先とこの文書更新の Rust 実装・corpus source は同一です。
+  完全な比較は design note に記録し、全ての除外されたプログラムの列挙とはしません。
+  この式の一般則は、`leadsTo` を外から包むバインダーの実行可能性までは約束しません。
+  `leadsTo` の外側のコレクションバインダーと、`where` 付きバインダーは `check` が拒否します。
+  対応済みのフィルターなしの型・範囲バインダーは維持し、P/Q 内のコレクション量化式は
+  この wrapper 制限には含めません。これは、従来 check は通るのにどの engine も
+  実行できなかった形の breaking removal (#1463) です。言語参照を、受理済みの
+  temporal / induction 設計の fail-closed な境界に合わせるもので、実行意味の追加ではありません。
 - 量化(有界): 正準形は `forall binder { expr }` と `exists binder { expr }`
   です。`forall i in lo..hi: expr` のような 2.x レガシーのコロン/中括弧なしの記法
   は引き続き受理されますが、非正準です。Seq のバインダーはその live なプレフィックス
   を位置順に訪れ、重複した値を保存します。
+  組み込み `Bool` のバインダーは `false`、`true` の順に列挙します。通常の量化式、
+  init/action の文 `forall`、フィルターなしの静的 `leadsTo` wrapper が対象です。
+  Bool の列挙だけで struct や動的範囲の方針は拡張しません。liveness の成功メタデータは
+  束縛ごとではなく、性質ごとに 1 エントリーのままです。
+  **check 受理の破壊的な削除 (#1480):** 式、action、`leadsTo` wrapper の `forall cell: Cell { ... }`
+  のような名前付き Struct の型バインダーは、共有検証で既存の有限スカラーの診断により、
+  所有するソース位置で拒否します。各フィールドが有限でもスカラーのドメインには
+  なりません。Bool、名前付き Enum/Range のバインダー、通常の Struct 値、Struct
+  要素を訪れるコレクションバインダーは変わりません。init 文の型付き Struct ドメインは
+  以前から拒否しており、接頭辞や位置を追加せず、既存の位置なし診断を保ちます。
+  #1480 の sweep では、これらの binder について `ok`→`error` を 8 件測定しました。base は
+  `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`、head は
+  `f101e7a93cbb50ad85e3531a1d27314559735311` です。[コーパスの遷移](../design/DESIGN-check-executable-forms.md#corpus-transitions)と
+  [ドメイン方針](../design/DESIGN-spec-domains.md#typed-struct-binder-policy-1480)を参照してください。
+- 静的な範囲境界(#1480)は、成功する場合に検査済みの定数文法で畳み込みます。
+  リテラル・定数、符号反転、`+ - * / %`、整数の `min`/`max`/`abs`、
+  `if ... then ... else ...` に対応し、条件では Bool のリテラル・定数、`not`、
+  `and`/`or`/`=>`、比較、同じ型の等値も使えます。最終値は整数であり、Bool を
+  整数へ変換しません。集約の正規化、symbolic な範囲展開、フィルターなしの静的
+  `leadsTo` wrapper が対象で、既存の concrete な算術経路は変えません。
+  符号付き i64 の算術は検査付きで、`/`/`%` は Euclidean です(`-5/2 == -3`、
+  `-5%2 == 1`)。条件式の両腕を名前・型検査しますが、算術を評価するのは選ばれた
+  腕だけです。二項の Bool 演算子は引き続き両 operand を評価します。
+  畳み込みの失敗時は入れ子の失敗も含めて各 consumer の従来の拒否・診断経路を
+  保ちます。temporal 限定の拡張は後述します。追加の Rust メソッド
+  `KernelModel::constant_integer` は現在の
+  `consts` を参照し、キャッシュしません。現在の model state への自由な読み取りは、
+  const と同じ名前であっても定数とは扱いません。const/state の同名宣言を一律に
+  拒否する規則は追加しません。
+  [設計決定](../design/DESIGN-static-binder-constant-expressions.md)も参照してください。
+  const と同じ名前の状態に対する単純な `0..n` は状態を読むので、どのエンジンでも実際の違反を報告します。
+  そのような名前を読む `leadsTo` wrapper の境界は、`check` が
+  `binder bound is not a static integer` で拒否します。base はそこで const を読み、verdict を返す
+  ことがあったので、これは破壊的な削除です(#1480)。
+- 固定された外側 `leadsTo` の範囲(#1480 temporal 拡張): フィルターなしの内側の
+  範囲では、既に束縛された wrapper の局所名を上記の検査付き文法で使えます。
+  `i in 0..1`、次に `j in 0..i` なら `(0,0), (1,0), (1,1)` の順に展開します。
+  `b: Bool`、次に `j in 0..(if b then 1 else 0)` なら
+  `(false,0), (true,0), (true,1)` です。境界は整数であり、Bool を整数へ変換しません。
+  名前付きの有限整数型と enum は宣言された型を保ちます。既存の列挙順、重複、
+  隠された束縛の復元を性質間でも維持します。バインダー自身の境界は囲む束縛を、
+  本体は新しい束縛を参照します。囲む局所名を優先し、自由な状態参照を同名の const
+  や状態の初期値で置き換えません。checked source の const-shadow 拒否は変えません。
+  依存する境界は到達可能なプレフィックスで記述順に、下限から上限へ評価します。
+  最初の算術エラーは後続の静的・型エラーより先に返します。到達しない依存算術は
+  実行しません。空のプレフィックスでも、それと独立した不正な静的式・carrier・
+  filter・collection・型のエラーは隠しません。空のプレフィックスでも、記述された
+  境界の条件と両腕を、先行する wrapper の宣言型で名前・型検査します。この検査は
+  算術を実行しません。consumer ごとの従来の診断と優先順位を
+  保ち、checked source と raw Kernel の検査範囲は区別したままです。
+  `within` は非負の宣言定数のままで、wrapper の局所名は使えません。collection/
+  filtered wrapper、struct、P/Q の量化式、init/action/集約のドメイン、explicit の
+  liveness はこの拡張の対象外です。構文や公開 Kernel/JSON schema は変えません。
+  [temporal 拡張](../design/DESIGN-static-binder-constant-expressions.md#fixed-outer-temporal-amendment-1480)
+  を参照してください。
 - 集約: `count(binder)` と `sum(binder of value)`。例は
   `count(x: T where p)`、`count(x in queue where p)`、
   `sum(x in queue of x.amount where p)` と、それらの範囲の等価形。空のドメインは
   `0` を生みます。Seq の重複は live な位置ごとに 1 回ずつ寄与し、Set のメンバー
   シップは異なるメンバーごとに 1 回寄与します。
+  Public Kernel v1/v2 の export も、`add`、関係の射影、コレクションの `let` alias を
+  通じて実際の候補を保持します。宣言されたドメインだけを列挙するのではなく、既存の
+  スカラー値の capture を使うため、後続の shadowing や状態更新で束縛済みの候補は
+  変わりません。sum を包む `min`/`max` は二項算術のままで、集約 JSON の形は増やしません。
+  記述された集約の受理 (#1480) は、実行や厳密な public Kernel/static projection
+  と区別します。境界の名前・型、Bool の filter、Int の sum 値を検査した後、
+  無条件に展開できれば展開結果も検査し (`Expanded`)、そうでなければ元の集約を
+  展開せず保持します (`Deferred`)。状態の carrier や局所名の型だけでは実行の
+  前提は成立しません。保留を理由に範囲を切り詰めたり、条件付きのゼロへ置換したりせず、
+  保留自体は source を拒否しません。保留した境界を実行できるかは、後述の範囲受理規則が決めます。両端点は下限・上限の順に検査します。
+  真に閉じた境界 `0..(1/0)` の fold 失敗は引き続き
+  `public Kernel requires static aggregate range bounds` です。空ドメインや
+  不活性な filter でも、記述されたスコープ・型エラーの優先順位を保ちます。
+  境界は囲むスコープ、filter と sum 値は新しい binder のスコープを参照します。
+  保留した filter/値の子孫にも境界だけを検査する pass を行い、入れ子の不正な
+  閉じた境界や、後続の sibling の失敗を見逃しません。到達しない通常の sum 値の
+  算術は境界として fold しません。`sum(i in 1..0 of (1/0)) == 0` は受理を保ち、
+  `sum(i in 1..0 of true)` は型エラーのままです。保存される記述 AST を保ち、
+  公開 Deferred node や JSON の形を増やしません。symbolic caller は同じ frame の
+  eligibility を成立させるか明示的に実行を拒否し、直接の concrete 評価は宣言 carrier
+  で切り詰めず実際の端点を使います。
+  [記述された集約の受理の契約](../design/DESIGN-static-binder-constant-expressions.md#authored-aggregate-admission-expanded-versus-deferred-1480)
+  を参照してください。
+- **check 受理の破壊的な削除: エンジンが実行できない範囲境界 (#1480)。**
+  `check`、すべての `verify` エンジン、LSP の診断、Worker の事前検査、検査済みモデルを読む
+  すべてのコマンドは、ソルバーの起動前に同じ規則でこれを拒否します。位置つきの `semantics`
+  エラーで、終了コードは 2 です。`conformance`、`analyze`、`explain`、`diff`、`refine`、`testgen`、
+  `mutate`、`sweep`、`scenarios`、`html`、`ledger` がそのコマンドに含まれます。`kernel`、
+  `typestate`、`lint`、`migrate`、`fmt`、`document claims` は含まれず、`replay` はこれらの
+  形式を読み込み続けます(文書化した例外です)。
+  境界を実行できるのは、定数に畳み込めるとき、または定数、整数の名前、単項マイナス、
+  `+ - *` だけからなり区間が `i64` に収まり、かつ読むすべての名前がそのスコープで
+  成立しているときです。
+  - 列挙された値はどこでも成立します。action のパラメーター、範囲または名前付き整数の
+    binder、項目が整数リテラル、定数、またはそれらの名前である Set・Seq リテラル上の binder
+    です。そのリテラルを持つ `let` を経由しても同じです。
+  - 有限の carrier を持つ状態変数は、エンジンが読み出しフレームを認証する場所でだけ
+    成立します。`invariant`、`trans`、`unless`、`requires`、`let` の右辺、`if` の条件、
+    代入です。`ensures`、`reachable`、`terminal`、`until`、leadsTo の P/Q、`decreases`、
+    `helpful` の引数では成立しません。
+  - `init` では、有限の値を持つ完了済みの代入が、その後の読み出しに対して成立します。
+    init の文 `forall` のソースは完了済みの代入を読みません。
+  - 有限の整数要素型を持つ状態 Set の binder は、状態が成立する場所で成立します。`trans` と
+    `ensures` の `old(xs)` 上の binder も同じです。それ以外では、その Set へのすべての書き込みが
+    キーをリテラルのまま保つ間だけ成立します。成立する項目の Set リテラル、その `.add`、任意の
+    `.remove`、それらの複製、それらに対する `if` が該当し、状態を読む `st.add(n)` と `Set { n }`
+    は該当しません。`init` の複製は `init` が代入した内容を引き継ぎます。action の複製はキーが
+    リテラルのフレームを読むので、`xs = xs.add(n)` と並ぶ `ys = xs` の `ys` はリテラルのままです。
+    `ensures` は action の後の状態だけを読むので、`init` の書き込みを数えません。binder のソースの
+    `.add` と `.remove` も同じ基準です。容量 0 の Seq には候補がありません。
+  - 読むフレームが残っていない `old(...)` の下では何も成立しません。2 つ目の `old` と、`trans` と
+    `ensures` の外の `old` が該当します。`P unless Q` は `P` を `old` で包むので、`P` の中の `old`
+    は 2 つ目です。`(forall x in old(xs) { count(y in 0..x) >= 0 }) unless b` は拒否します。
+  - 成立しないもの: `let` の名前(`let k = 2` も同じ)、パターン束縛、Int 型の状態、Set・Seq
+    リテラルのリテラルでない項目、それ以外の Seq の要素。
+
+  依存する境界の添字、フィールド参照、`size()`、`if`、`min`、`/`、`%`、`old(...)`、
+  集約は拒否します。組み込みの `Int` の型付き binder は `leadsTo` wrapper でも
+  `type 'Int' is not a finite scalar` で拒否します。すべてのエンジンがすでに拒否していた形式の
+  破壊的な削除です。`type Int` や `enum Int` を宣言した spec の binder は、その宣言のまま
+  残ります。候補を持たない binder
+  (`forall o in 2..0`)の filter と本体は評価されないので拒否しません。評価は先行評価なので、
+  `false => count(i in 0..m[0]) >= 0` は拒否します。集約は検査済みモデルのメッセージ
+  (`invalid model expression: 'n' is not an integer const at 8:3`、
+  `invalid model expression: public Kernel requires static aggregate range bounds at 8:3`)
+  を文の位置で返し、量化子と文 `forall` はエンジンのメッセージ
+  (`'n' is not an integer const`、`binder bound is not a static integer`)を同じ位置で
+  返します。大きさの上限はありません。`forall i in 0..(n * 100000)` は受理されたままで
+  遅いままです。範囲の列挙でメモリーが尽きる形式は `[resource]` のエラー、終了コード 2 で
+  拒否します。ソルバーの項の構築中に尽きると Z3 のバインディングが panic し、panic の文面を
+  含む `[solver-panic]` のエラー、終了コード 2 で拒否します。このエラーが示すのは panic で
+  あり、原因ではありません。拒否される境界に届く前に verdict を返していた形式は、拒否を
+  返すようになります。先に違反する別の性質、`--property` や `--exclude-property` での回避、
+  `--depth 0` が該当します。これらの形式での explicit エンジンの verdict も失われます。
+  性質の選択は、選択外の状態の境界を仮定しません。状態が実際に範囲を超える場合、bmc は境界を
+  必要とする読み出しを `[eligibility]` で拒否し、フレームを再構成できなかった状態 Set の binder を
+  `[planner]: missing-finite-fact` で拒否します。そのような読み出しがなければ、選択した性質の
+  結果を返します。induction は範囲の逸脱を `violated` として返し、explicit は具体値を読んで
+  選択した性質の結果を返します。`build_model` 単体と Runtime の生のコンストラクターは既存の
+  境界を保ちます。
+  [実行可能形式の境界](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission)を
+  参照してください。
+  破壊的な削除の sweep(#1480): Rust 1.98.0 で各 SHA の `git archive` ツリーごとにビルドした
+  バイナリで `fslc check <form>` を実行しました。base は `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`、
+  head は `f101e7a93cbb50ad85e3531a1d27314559735311`、対象は 20,179 形式です。内訳は `.fsl`
+  ファイル 646 件(`specs/` 23、`examples/` 195、`rust/fslc/tests/fixtures/` 428)と、両側で
+  ワークスペースのテストを実行して取得したモデル 19,533 件です。`ok`→`error` は 649 件で、
+  `specs/` と `examples/` にはありません。内訳は `'x' is not an integer const` 495、
+  `binder bound is not a static integer` 85、オーバーフローまたは畳み込めない境界 20、状態を読む
+  init 文 `forall` の境界 16、宣言した `Bool` 11、組み込み `Int` の型付き binder 10、Struct の
+  型付き binder 8、負の `within` 4 です。コーパスのファイルは `explicit_init_range_assigned.fsl`、
+  `explicit_init_range_unassigned.fsl` と、head だけにある `issue_1480_temporal_outer/` の 7 件
+  (`const-state-collision`、`empty-static-overflow`、`free-state`、`overflow-high`、
+  `overflow-low`、`struct-typed`、`unbounded-typed`)です。分類、base の verdict、到達できなかった
+  範囲は[コーパスの遷移](../design/DESIGN-check-executable-forms.md#corpus-transitions)を参照してください。
 - 濃度の述語: `unique(binder)` / `exactlyOne(binder)`。`unique` は一致する束縛が
   高々 1 つ、`exactlyOne` はちょうど 1 つという意味です。
 - Option: `x == none` / `x != none` / `x == some(e)` / `x != some(e)`。
@@ -677,29 +1173,411 @@ invariant OnlyEligible { forall c: Claim { approved[c] => eligible(c) } }
   であり、等値が束縛を導入することはありません。束縛が有効なのは match が真である
   論理的な後続部分だけです。例えば `(x is some(v)) => ...` や
   `(x is some(v)) and ...` の右辺では使えますが、グローバルな束縛にはなりません。
+  真になった式全体から束縛を引き継ぐ演算子は `and` だけです。したがって、後の
+  guard や action 本体へ束縛を引き継ぐ `requires` も、論理積でつながる match に
+  限られます。破壊的な受理範囲の縮小(#1547): 以前受理していた `or` の右辺、
+  `=>` の左辺が `or` や別の含意である場合の後続、比較の operand 間や比較の外、
+  量化・集約の本体や filter へ論理和から流れ込む束縛の使用を `check` が拒否します。
+  否定・量化・集約の外への漏れと、`if` の条件から腕への束縛は base でも拒否済みで、
+  新しい除去ではなく既存拒否の維持です。衝突の予約集合は可視性とは別であり、
+  読めない名前でも再宣言を拒む場合があります。破壊的な受理範囲の縮小(#1573):
+  `not` と式の `if` の中の match は、後のoperand・guard・actionの文・ensuresへ
+  名前を予約します。式のifの条件は両腕へ予約し、**thenの名前もelseへ予約**します。
+  この予約はsymbolic評価器の束縛表共有の不具合(#1577)に対して導入され、
+  評価器の束縛寿命の修復(#1622)後も維持します。量化・集約の`where`は、
+  本体や`of`があればそこへ予約します。count・unique・exactlyOneはfilterだけを持ち、
+  独立した本体/ofはありません。文のifの条件は両腕と後の文へ予約し、どちらかの腕の
+  内部の束縛も後の文へ予約します。文の反対の腕は独立のままで、候補内の名前は
+  量化・集約の外へ出ません。文の規則はinitとaction本体の両方に適用します。
+  direct specのinit入口は全init blockとinline初期化子を共通の予約walkで検査し、
+  既存のinitializer・const・map-keyの診断ownerを保ちます。composeでは同一sourceの
+  init断片間やinline→initへの予約に既知の検査欠落があり、compose自身のinitも
+  無関係なsourceのFresh決定で検査を素通りする場合があります。再束縛は不正のままです。
+  #1622は受理範囲を広げずに評価結果を修正します。composeのinitの断片への予約は別のissueで追います
+  (mergeの後に起票)。一般的なcomposed initの検査保証ではありません。
+  後の束縛名を変えてください。例えば
+  `(p is some(v)) and v == 2`を`(p is some(w)) and w == 2`にします。
+  これらの予約で名前の読める範囲は広がりません。従来の#1442の入れ子ifの例も、
+  standalone/composeの4ルートが破壊的な除去になります。元の拒否入力を残し、
+  内側の`u`だけを`w`に変えた形を受理の保存対照とします。
+  sync actionとinit以外の経路ではcomposeが独立source間の束縛を分離するため、
+  表示されるguardの著者名`v`が
+  `__v_substitution_0/1`になる場合があります。guard名の回帰例のexplainのresultと
+  通常のverifyの判定は変わりません。文のpayloadを誤って共有していた2 sourceでは、
+  checkの受理を保ったまま、誤った`violated`が分離後にholdsへ変わります。
+  本当に偽のpayload条件はviolatedのままです。これらはchecker/hygiene側の補償でした。
+  評価器の修復(#1622)により、BMC・induction・Monitor・solver不要のexplicit BFSは
+  composeの初期化も含めてpayloadの寿命を閉じます。閉じた式の後では外側の値と
+  宣言された束縛型を復元し、真の後続部分だけがpayloadを引き継ぎます。raw評価と
+  期待型付きif、比較・複合operand、引数、量化・集約の候補内の評価にも適用します。
+  論理積の`requires`は後のguard/bodyへ束縛を引き継ぎますが、`let`の右辺は引き継ぎません。
+  この評価器の修正で衝突予約・検査済み型の規則・sourceの受理範囲は緩和しません。
+  スコープ外の `v` は `kind: "semantics"`、終了コード 2、
+  メッセージは
+  `invalid model expression: public Kernel cannot type identifier 'v' at <line>:<column>`
+  です。位置は使用を含む clause または `if` の腕です。guard/postcondition は既存の
+  action 位置を既定として使いますが、より具体的な腕の span が優先される場合があります。
+  先に報告される新しい不正参照が後の衝突の message に優先しても、終了コード 2 と
+  kind semantics の拒否は保ちます。式の `if` は腕から型を推論するため、条件の束縛衝突
+  より腕の未束縛参照エラーが先に出る場合があります。入力を受理する変更ではありません。
+  `def` 本体の自由名を、真の後続部分の外にあるパターンだけが捕捉する場合、従来の
+  predicate capture エラーではなく、使用を含む clause の未束縛参照として報告します。
+  この種類の診断は message や位置が変わり得ますが、終了コード 2 と kind semantics
+  を保ちます。
+  未定義の `(o is some(v)) or v == 1` は、意図する `none` の扱いを決めて修復します。
+  不在を許し、存在する場合だけ値 1 を要求するなら `(o is some(v)) => v == 1`、
+  または等価な `o == none or (o is some(v) and v == 1)` と書きます。
+  `and` だけにすると `none` を拒否します。元の未定義の式との等価性は主張しません。
+  測定した除去と診断例は、
+  [スコープ設計](../design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547)
+  に記録しています。
+  [予約の改訂](../design/DESIGN-pattern-binding-scope.md#5-retained-pattern-reservations-1573)
+  に追加の除去とsource分離後の出力契約を記録しています。
   `v` は新しい名前でなければなりません: 状態変数・定数・enum のメンバー・action の
   引数・量化子の束縛変数・`let`・それより前のパターン束縛と同じ名前の `v` は
   `check` が拒否し、名前を変えるよう求めます。
+  requirements のフィールド置換文脈では、エンティティのフィールドや relation role と
+  同名のパターンも、lowering が元の綴りを失う前に拒否します (#1561)。event input の
+  既存の例外と、量化子・集約の合法なフィールド隠蔽は維持します。
   順序は定義されません。
-- struct: リテラル `Order { st: Open, qty: 0 }`、フィールド参照 `o.st`、
-  `==` はフィールドごとの等値
+- struct: リテラル `Order { st: Open, qty: 0 }`、フィールド参照 `o.st`、`==` はフィールドごとの等値比較。
+  **破壊的な削除 (#1685):** 同じフィールドを 2 度指定するリテラルは、どの位置でも、どの
+  エディションでも、2 度目のフィールドで拒否されます。exit 2、`kind: "parse"`、
+  `diagnostic_code: "duplicate_struct_field"`、`duplicate field 'P.x' at 5:24` です。以前は
+  最後の値だけを残して他を捨てていたため、`P { x: 1, x: 2, y: 0 }` と
+  `P { x: 2, x: 1, y: 0 }` はどちらも `check` を通り、検証結果は逆になりました。これらの形は
+  順序が逆でも、値が同じでも `check` を通っていましたが、今は拒否され、`verify`、`sweep`、`refine`、
+  `replay`、`scenarios`、`testgen`、`mutate`、`html`、`ledger`、`diff`、`migrate`、`document`、`kernel`、`typestate`、
+  `lint`、`fmt`、`explain`、`analyze`、`conformance` は結果を返さなくなります。コンポーネントでは
+  `component "piece.fsl" failed to parse (duplicate field 'P.x' at piece.fsl:6:32) at root.fsl:2:3`、
+  `kind: "semantics"` で、action が lift されていても、同期されていても、internal で参照されて
+  いなくても同じです。inline の `implements` では
+  `implements "abs.fsl" failed to parse (duplicate field 'P.x' at abs.fsl:6:33)`、`kind: "type"`、
+  `loc` は `implements` です。refinement のマッピングでは `duplicate field 'P.x'`、
+  `kind: "type"`、`loc` はそのフィールドです。`domain` の value object は `check` とすべての
+  `domain` コマンドで拒否され (`kind: "semantics"`)、`domain expand` は何も書き出しません。
+  すでに失敗していた入力は重複を報告するようになるため、kind が `parse` に変わることが
+  あります。エディタではこれは構文エラーなので、修正するまで文書のシンボルは得られません。移行: 意図する値を 1 つだけ残してください。自動移行は
+  ありません。[`DESIGN-option-struct.md`](../design/DESIGN-option-struct.md) の §8 を参照して
+  ください。
+- Set/Seq 式の実体化 (Refs #1467): 既に受理される再帰的な式は、構築・等値比較・
+  条件式の結合・メソッドとその連鎖・量化/集約 binder・`let` で、検査済みモデルの
+  推論型・期待型を使います。要素には Int、Bool、Enum、Struct、Option (`Option<Enum>` と
+  入れ子の不在)、入れ子の Set/Seq、Set-of-Seq、Seq-of-Set、relation、既存の Map 値を含みます。
+  評価前に両方の条件式の腕・入れ子の要素・`some`・`none`・空 collection へ文脈を渡します。
+  等値比較は左側が空の場合も反対側から不足する文脈を得て、項や腕の順序に依存しません。
+  Set は再帰的な論理等値で重複を除き、所属で等値を比較します。Seq は順序・重複・
+  生きた長さを保持します。不在 Option の隠れた payload と非活性 slot は等値や内部の
+  反復順序に影響しません。Set の決定的な反復順序は enum 宣言順でなく具象値の再帰的な
+  順序に従いますが、source の順序演算子は追加しません。relation の格納 grid 順序は保ちます。
+  推論された `Int` の一時値はドメイン外のメンバー・slot・容量超過の長さを切り詰めずに
+  保持します。別名への型の付け替えでは、境界検査・射影に対象型の文脈を再帰的に適用します。
+  同じ有限ドメイン・Seq 容量・Struct/Enum の名目的同一性・存在フラグ/生きた slot の
+  格納境界、容量 0 の Seq と到達した部分演算の規則は変えません。
+  文法や宣言/格納の受理範囲は変えません。Map 要素は既存の state 値や条件式による選択を
+  使うもので、新しい Map リテラル構文ではありません。エラー・位置・JSON 符号化
+  (入れ子の Option の区別を含む)・不正な enum の射影・assurance は変えません。
+  solver-free BFS の独立性と engine 固有の未対応/予算の境界も維持し、実体化によって
+  すべての spec が proved になるとは約束しません。
+  [実体化の決定](../design/DESIGN-typed-collection-materialization.md)を参照してください。
+  過去の各 SHA の固有 tree/cwd で `FSLC_CACHE=off <binary-for-SHA> check <form>` を実行し、
+  corpus 606 形と書き換えた既存テストの固有 inline 3 形を各々検査しました:
+  `a52bef4931adc67ea2b1fdca827e2318b4ae25ab`、
+  `e201c0d66834ed8c860be84e96876690487b11af`、
+  `cc7a538c3b647c1c3bed5bf2088551806442c794`。両 base->cc7 の ok->error 集合は空でした。
+  これは後続 b8 統合の検証でも、corpus 全体の engine 一致の証明でもありません。
 - Set: `Set {}` / `Set { 1, 2 }`、`.add(e)` `.remove(e)` `.contains(e)` `.size()`
+  受理された `add` は、計算結果が宣言されたドメインの外でもメンバーを保持します。
+  一時値の `contains`、`size`、削除、等値比較はその値を参照し、add の結果を元の有界 receiver へ戻すと
+  メンバーや遷移を消さずに `type_bound` / `_bounds_<var>` を報告します。スカラー引数の
+  型検査は変えず、非有界 Set の格納を追加するものではありません。
+  **破壊的な受理範囲の縮小(#1472、#1627):** Set、Seq、Map、relation の値全体は、
+  対応するドメインが同じときだけ互換です。数値別名は下限・上限が同じなら互換のままです。
+  Seq は容量も一致し、Map はキーと値の両方のドメインが一致する必要があります。
+  代入、比較、条件式の分岐、射影、refinement の全体 map はこの規則を共有します。
+  広い Set から狭い Set だけでなく、狭い Set から広い Set への全体代入も、記号変換で
+  後から失敗するのでなく check が既存の位置付き代入可能性エラー(`semantics`、終了コード2)
+  で拒否し、全 verify engine が共有します。スカラー・Option の数値互換と
+   add/contains/push の引数は変えません。refinement は両モデルの数値型を独立に解決します。
+   同名の定義衝突は#1599の共有Type-kind gateでmap検査より先に拒否します。
+   map自体のtypeエラーは#1642の作成元spanを使い、無いときだけunknown1:1を保ちます。
+   移行した4つのソースアンカーはruntimeの1:40/1:45 (`map`)、単独の4:3 (`map`)、
+   inlineの2:3 (`implements`)で、以前は1:1でした。
+  `Int`は有限のドメインを持ちません。リテラルから推論した要素型も含め、これを含む
+  Set/Seqは従来の再帰的な型互換(Seqリテラルの推論容量も含む)を保ちます。Mapにはリテラルが
+  ないので、モデルの式では片方が`Int`を持つ場合もドメインの一致が必要です(後述の#1679)。
+  refinement の map とシナリオの `expect` では、Map も従来の互換を保ちます。
+   文脈の無いSet/Seq条件式は、既知の有限な腕のドメインと容量を両方の腕の順でletを通して保ちます。
+   #1472 のドメイン推論自体はリテラルを実体化しません。base `79687655` とhead `3c99c93b` を各archiveでbuildし、
+   606 corpus形、元のinline16形、リテラル境界18形、bridge18形を各2回checkしました。
+   corpusの除去0、error→errorの診断変更0、ok→errorは9形です。元のinlineの3除去は
+   `FALSE_VACUITY` / `CondMap` (Mapキー0..0対0..2、20:41)、
+  #1522の`MAP` (Mapキー0..2対0..1、7:35)、`SET_WIDENING` (Setの0..2から0..4、6:48)。
+  さらに、受理されていた全体Seq mapのruntime `SeqWide`→`SeqAbs`、
+  runtime `SeqWider`→`SeqGuarded`、CLI単独`SEQ_WIDE_IMPL`→`SEQ_ABS`、inline
+  `seq_req(-1)`を除去します。容量2、モデルごとの要素範囲-1..2または0..3対0..2の形で、
+   従来の実行時refinement失敗を上記の作成元位置の静的エラーに変えます。
+   追加の6除去は、両方の腕の順の条件式/letコピーで、Setの0..2→0..4、容量2のSeqの0..2→0..4、
+   同じ要素ドメインのSeq容量2→3です(すべて8:3)。単独・同じドメインの対照はcheckを通り、
+   元のリテラル境界18形もbase/headで同じcheck出力を保ちます。コマンドと全除去の一覧は
+  [単一のドメイン互換の決定](../design/DESIGN-finite-container-carriers.md)を参照してください。
+  再帰的な実体化については上記の説明を参照してください。
+  **破壊的な受理範囲の縮小(#1679):** 記号評価で変換できないコンテナのドメインを持つモデルの式のうち、ここに挙げる
+  形は、bmc と induction の `cannot coerce symbolic value` ではなく、`check` が既存の位置付き代入可能性エラー
+  (`semantics`、終了コード2)で拒否します。拒否の位置は、原因の分岐があればその分岐、なければ囲んでいるガード、
+  文、プロパティです。式が評価されるかどうかにかかわらず拒否します。`check` を通って `cannot coerce` を報告する
+  経路は2つ残っており、この段落の最後に示します。`m0: Map<K, Int>`、`m1: Map<K, A>` のように、
+  値が `Int` または `Option<Int>` の Map と値が範囲の Map を組み合わせる形を拒否します。`m0 == m1`、`m0 != m1`、
+  `m0 = m1`、条件式の分岐、`m0 == old(m1)`、`(if c then m0 else m1)[0]` です。リテラルの中
+  (`some(m0) == some(m1)`、`Seq { m0 } == Seq { m1 }`、`Set { m0 } == Set { m1 }`)、兄弟の要素
+  (`Seq { m0, m1 }`、`Set { m0, m1 }`)、メソッド引数(`Seq { m0 }.contains(m1)`、`Set { m0 }.add(m1)`、
+  `Set { m0 }.remove(m1)`、`Seq { m0 }.push(m1)`)、リテラルから読み出した値(`Seq { m0 }.head() == m1`)も
+  同じです。`Int` の兄弟の分岐だけが期待型とつないでいた条件式の分岐も拒否します。`let t = Set { 0 }`、
+  `a: Set<A>`、`b: Set<B>` に対する `a == (if c then t else b)` です。`Seq` リテラル、宣言された
+  `q: Seq<Int, 2>`、異なる容量でも同じで、`sa == old(if c then q else sb)`、`some(...)`、`Seq { ... }`、
+  `Set { ... }`、メソッド引数の中の分岐も含みます。この削除で失われる判定があります。評価されない位置の不一致は
+  全エンジンが判定を返していましたが、拒否します。`type E = 1..0` のような空のドメインの `forall` と `exists`、
+  空の範囲を仮引数に持つ action、`--exclude-property` や `--property` で外れるプロパティです。`decreases` の尺度も同じです。bmc は尺度を読まず、
+  induction はランク付けに進んだときにだけ読みます。そのため、この不一致を持つ `leadsTo` は bmc で、違反が先に見つかれば
+  induction でも判定を返していましたが、拒否します。使われない
+  `let u = m0 == m1` など、削除された他の形にも explicit と `fsl-bfs` が答えていました。計測した判定の喪失は
+  [ドメイン互換の決定](../design/DESIGN-finite-container-carriers.md)にあります。他の形は判定を保ちます。
+  `a == t`、範囲や容量が異なる `q == a`、`some(t) == some(a)`、`Option<Int>` と `Option<A>`、ドメインが同じ Map や
+  範囲が同じ別名の Map です。要素の下に `Int` を持ち、リテラルとして期待型で型付けされないコレクションは、`check` を通った後に
+  `cannot coerce` を報告していましたが、今は結果を返します。`let` と `is` の束縛(`p: Option<A>` に対する
+  `Set { p }` と `let t = Set { some(0) }`、`some(Set { some(1) }) is some(x) and Set { p } == x`)、メソッドの結果と
+  引数(`Set { p, none } == Set { o }.add(none)`、`Set { Set { p } }.contains(t)`、`.add(t)`、`.remove(t)`、
+  `Seq { Seq { p } }.push(t)`)、状態への読み出し(`p = (if c then Seq { p } else t).head()`)です。ガードと
+  `invariant`、`reachable`、`trans`、`leadsTo` で、各エンジンがその位置を評価する範囲で結果を返し、`--lemma` の候補と
+  `preserve progress` のもとの map の中でも同じです。refinement の map(`map m = m`、`map same = m == y`、`map s = if c then x else y`)とシナリオの
+  `expect` は上記の規則のままです。`expect` は具象評価を受け、map も refinement の遷移では具象評価を受けますが、
+  `preserve progress` は map を記号評価します。そのため、これらの Map に対する `map same = m == y` は
+  `preserve progress` のもとでは `cannot coerce`(終了コード2)になり、それがなければ refines です。この差は
+  ドメイン互換の決定に記録しています。`--lemma` の候補も上記の規則のままです。このような不一致を持つ候補は
+  `cannot coerce` で `rejected`、`used` は false で、主の結果は変わりません。評価されない不一致を持つ候補は
+  使えるままです。**破壊的な受理範囲の縮小(#1683):** `old(...)` の中で自分の型を決められるリテラルは、`check`
+  でも評価でも周囲の期待型でも型付けされます。そのため、`some`、Set と Seq のリテラル、条件式の枝の下にある Map は、
+  深さによらず上記の規則に従います。`some(m0) == old(some(m1))`、`some(m0) != old(some(m1))`、
+  `Set { m0 } == old(Set { m1 })`、`Seq { m0 } == old(Seq { m1 })`、
+  `Set { m0 } == old(Set { if c then m1 else m1 })` は拒否されます。評価される位置では bmc と induction が
+  `cannot coerce` を報告する一方、explicit と `fsl-bfs` は `violated` を含む判定を返しており、その判定は失われます。
+  空のドメインの `forall` や `exists` の中では bmc と induction の判定も失われます。拒否はプロパティの選択より前に起きるため、
+  `--exclude-property` では避けられません。除外するはずだった形があると、その形を書き直すまで、別のプロパティの反例も
+  exit 2 の陰に隠れます。自分の型を決められないリテラルは、`old(...)` の外では通りますが中では拒否されたままです。
+  `a == old(Set {})`、`sa == old(Seq {})`、`oa == old(none)` です。範囲の値を持つリテラルは `check` を
+  通って bmc と induction で `cannot coerce` を報告していましたが、今は explicit と一致する結果を返します。`vb: 0..2`、
+  `a: Set<A>`、`sa: Seq<A, 2>` に対する `a == old(Set { vb })`、`sa == old(Seq { vb })`、`sa == old(Seq { va })` です。
+  容量を超えるリテラルは、`sb: Seq<B, 2>` に対する `sb != old(Seq { va, va, va })` のように、`old(...)` の外の同じ形と同じく
+  induction で `model sequence length exceeds capacity` になることがあります。
+  移行: 2つの値を同じドメインで宣言するか、要素を比較してください(`m0[k] == m1[k]`)。
+  mutateでは、静的に型が不正なimplementsのmapをoracleの失敗でなく`invalid`として、
+  checkで不正なmutantと同じ経路で分類します。入れ物全体のmapを持つspecの範囲変更mutantは、
+  集計上`errored`から`invalid`へ移り、`kill_rate`から除かれ、gateに`oracle_errors`を
+  追加しません。solver・評価の失敗はerrored、budgetによる打切りはinconclusiveのままです。
+  自動・明示map、単独refinement、governanceの事前検査、composeのモデルは型付きのmap検査を共有します。
+  記号的 init は、検査済みの依存順に写し・写しの連鎖・条件を通して追加されたメンバーを
+  保持しますが、関係としての init を逐次実行に置き換えません。BMC で境界を選ばない
+  ルートを re-frame するには、新しい frame の有限の support の外に生きたキーがない
+  ことの証明が必要です。この re-frame の検査は省いた境界を仮定せず、本当に増え続ける
+  support は保持します。
 - Seq: `Seq {}` / `Seq { 1, 2 }`、`.push(e)` `.pop()` `.head()` `.at(i)`
   `.contains(e)` `.size()`、`==` は長さとすべての要素の等値
 - Relation: `r.contains(a, b)`、`r.add(a, b)`、`r.remove(a, b)`、
   `reachable(r, a, b)`、`acyclic(r)`、`functional(r)`、`injective(r)`、
   `domain(r)`、`range(r)`。`reachable` と `acyclic` は自己関係
   (`relation T -> T`)を要求します。端点の型/アリティのエラーは修復ヒントを
-  含みます。`reachable(r, a, a)` は構造上**反射的ではありません**——`a` から
+  含みます。
+  受理された関係の add も、どちらかの端点のドメイン外にあるペアを保持し、domain/range と
+  グラフ操作はそのペアを参照します。add の結果を元の有界の関係へ戻すと `_bounds_<var>` 違反になります。
+  破壊的な受理範囲の縮小(#1522、関連 #1524): 関係値の型互換には、対応する両端点の
+  ドメインがそれぞれ一致する必要があります。数値別名は名前ではなく解決後の下限・上限を
+  比較するため、`N = 0..2` と `M = 0..2` は互換ですが、`A = 0..1` と `B = 0..2` は互換ではありません。
+  異なる関係ドメインを混ぜる条件式の分岐、Set/Seq の要素(入れ子を含む)、代入は、
+  `check` が位置付きの代入可能性エラー(`semantics`、終了コード 2)で拒否します。
+  `verify` と `replay` も同じ検査を共有します。通常のスカラー Int/Range 互換、
+  公称 enum、宣言された自己関係の判定は変更しません。
+  同じ境界を持つ関係のリテラルは引き続き check を通りますが、記号エンジンの残る対応は
+  #1467 に属し、この変更は key-union の実装ではありません。
+  同じ検査で action の `r = q`、init の `q = Set {} r = q`、`let x = q` に続く
+  `r = x`、let 内の異なる関係型を混ぜる条件式も拒否します。不適合な用途を持たない
+  単なる別名は引き続き受理します。narrow→wide の関係のコピーも action の代入・init・
+  let 経由で拒否します。従来は BMC/induction が変換できず、action/let を判定する
+  explicit と Monitor に一致しなかったためです。init は explicit も終了コード 2 でした。
+  #1472はこの規則をSet、Seq、Mapの値全体にも適用し、狭いSetから広いSetへのコピー
+  (#1627)も拒否します。上のドメイン互換の決定を参照してください。
+  破壊的な受理範囲の縮小の証拠は
+  [互換性の設計決定](../design/DESIGN-relation-endpoint-compatibility.md)を参照してください。
+  `r: relation A -> B` の `contains`、`add`、`remove`、`reachable` は、
+  `a` を `A`、`b` を `B` に対して独立に型検査します。不適合な端点は
+  check 時の `kind: "semantics"` エラー(終了コード 2)となり、代入可能性の
+  メッセージに `hint: use endpoints matching the relation's declared source and target types`
+  が続きます。名前付き enum は公称型のままで、数値範囲は従来の整数互換性を
+  保ちます。例えば `N` が数値範囲なら、enum の `Red` は `relation N -> N` の
+  端点にできません。この破壊的な受理範囲の縮小(#1458)は、以前受理されていた
+  型不正な式を実行時に意味付けせず拒否します。`domain(r)` の型は `Set<A>`、
+  `range(r)` の型は `Set<B>` となり、一律の `Set<Int>` ではなくなります。
+  射影上のコレクション束縛子と、その public Kernel 射影・束縛子の型注釈にも
+  端点の型が伝わります。
+  これにより `not (exists x in domain(r): reachable(r, x, x))` のような
+  enum 型を使う `domain` / `range` の記法を受理しますが、実行時の意味を変更したり、
+  不変条件の成立を保証したりはしません。数値射影は整数互換性を保ちます。
+  restack 後の境界測定の BASE は `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db`、
+  HEAD は `3a8a6019a5bed3ae62f960afedf2bdcf6d129341` です。
+  コーパス597形式の `ok` → `error` 遷移集合は**測定の結果、空**でした。
+  inline fixture 全134件も検査し、#1458 は24件(異なるソース22種)を両モードで
+  拒否します(モード・形式の組で48遷移)。従来の46遷移の集合は不変で、
+  拡張した入力により下記の数値 Set への代入を追加計上しました。
+  `count`、enum 集合リテラルとの等価比較、対応する enum Set への代入の3形式は、
+  両モードで `error` → `ok` となります(6組)。各ツリーで両モードを2回ずつ、
+  計5,848回実行し、除外なしで出力全体を比較しました。この BASE でソース変更だけを
+  戻す calibration は、意図した失敗28件と互換性維持の成功24件を検出し、完全復元後は
+  固定テスト52件が成功しました。workspace Clippy に警告はありません。
+  workspace 全3,468件の成功は `fc77124b31744f1c1728295db6f09508265b8285` で測定し、
+  空白除去後のファイル全体の一致を証明した空白のみのコミットを挟んで測定 HEAD に
+  引き継ぎました。その HEAD でビルド、CLI 適合、固定テスト2回、整形検査も成功しました。
+  以前の `8e54e862` の測定との差は、main の #1463 が BASE と HEAD の両方で
+  `explicit_init_state_collection.fsl` を拒否し、BASE の count 診断に記述位置を
+  追加したことです。#1458 の拒否・受理追加の集合は変わりません。
+  コマンド、識別情報、測定結果は
+  [設計ノート](../design/DESIGN-nested-option-support.md#relation-endpoint-expression-boundary-1458)
+  を参照してください。端点の破壊的な受理範囲の縮小に該当する式は、
+  数値の `N -> N` について `not reachable(r, Red, Blue)`、
+  `not reachable(r, Red, 1)`、`not reachable(r, 1, Blue)`、
+  `not r.contains(Red, Blue)`、`not r.contains(Red, 1)`、
+  `not r.contains(1, Blue)`、`r.add(Red, Blue).contains(Red, Blue)`、
+  `r.add(Red, 1) != r`、`r.add(1, Blue) != r`、
+  `r.remove(Red, Blue) == r`、`r.remove(Red, 1) == r`、
+  `r.remove(1, Blue) == r`、`N -> Color` について `not r.contains(1, 2)`、
+  `r.add(1, 2) != r`、`r.remove(1, 2) == r` です。
+  `Red` と `Blue` は `Color` の enum メンバーです。追加の LSP と Worker の
+  fixture は数値関係の target のみが不正な `contains` と `reachable` の再掲です。
+  射影の型付けにより、`s: relation Color -> Color` と `r: relation N -> N` に
+  対する、以前受理されていた次の enum/Int 形式も拒否されます:
+  `forall x in domain(s): not r.contains(x, x)`、
+  `forall x in range(s): not r.contains(x, x)`、
+  `not domain(s).contains(0)`、`not range(s).contains(0)`、
+  `forall x in domain(s): x != 0`、`forall x in range(s): x != 0`。
+  拡張した入力では、`s: relation Color -> Color` と `xs: Set<N>` に対する
+  `xs = domain(s)` も拒否されます(代入の位置8:19)。
+  enum 射影要素を数値端点や整数との比較に使うことはできません。
+  enum の序数ではなく、宣言された端点の型を使ってください。
+  一般に、射影要素と射影集合全体は宣言された端点の型を持ちます。enum や Bool の
+  要素を `Int` が必要な場所で使うことはできません。その集合を数値 Set が必要な場所で
+  使うこともできません。この破壊的変更は比較、順序、算術、`min`/`max`、所属、
+  集合リテラルとの等価比較、Option 比較とパターンのペイロード、数値 Set 状態への
+  代入、refinement map に適用されます。列挙した測定例だけに限りません。
+  新たに受理される形式には、有限の端点型を持つ domain/range 射影上の `count`、
+  数値射影上の `sum`、enum 集合リテラルとの等価比較、enum 型の `where` フィルター、
+  条件式で選んだ射影の所属判定、対応する型の集合として使う `let` 束縛の射影、
+  対応する enum Set への代入、および同じ型の enum Set への refinement map が
+  含まれます。enum domain/range 上の `unique` は公開済み main でも受理されており、
+  引き続き受理されます。受理は不変条件の成立を意味しません。
+  互換性を維持する enum 束縛子・巡回の記法は、
+  `not (exists x in domain(r): reachable(r, x, x))`、
+  `forall x in domain(r): not r.contains(x, Blue)`、
+  `forall y in range(r): not r.contains(1, y)` です。これらは公開済み main でも
+  受理されていたため、新規追加ではありません。
+  `reachable(r, a, a)` は構造上**反射的ではありません**——`a` から
   `a` に戻る、1本以上の辺からなる本物のパスがある場合にのみ真です(空の関係
   や非巡回の関係では、すべての `a` について `reachable(r, a, a) == false`)。
   反射的な読みだと、任意の非空ドメインで `not reachable(r, a, a)` が構造上
   充足不能になり、述語から意味が失われます。「`r` のどこにも自己ループや
   サイクルがない」を述べるには `acyclic(r)` を使ってください。
+  relation は Map ではありません。`r[a]` と `r[a] = b` は、`functional(r)` が真でも
+  `check` が拒否するため、relation のメソッドを使います。これは実行可能な index の
+  意味がないまま受理していた読み・書きの breaking removal (#1463) です。
+  Map のインデックス操作は変えません。
 - ensures / trans の内側のみ: `old(expr)` で遷移前の状態を読む
 - leadsTo ブロックの内側のみ: `P ~> Q`(応答プロパティ。一般式の演算子階層の一部ではありません)。
   Q の前に有界の締め切り `within K` を、応答本体の後に induction のランキング用の
   `decreases <int expr>` を置けます
+
+静的なオペランド・シグネチャ検査(#1459、**破壊的変更**)は、選択されない分岐、
+action の代入、`requires`/`ensures`、trace 内の式も検査します:
+
+- `is none` / `is some(x)` のオペランドには Option が必要です。新しいペイロード名の
+  束縛と後続式のスコープは変わりません。
+- `abs` のオペランドには整数互換の型が必要で、domain/range の要素も例外では
+  ありません。enum の序数や Bool を整数として扱うことはできません。
+- `acyclic`、`functional`、`injective`、`domain`、`range`、`reachable` には関係が
+  必要です。関係でない値の射影を仮の `Set<Int>` として扱うことはありません。
+  `reachable` と `acyclic` は宣言された端点型が同一の関係(`T -> T`)を要求します。
+  enum と数値が混在する関係だけでなく、数値型 `N` と `M` の範囲が同じでも
+  `N -> M` は拒否します。数値互換性だけでは自己関係になりません。
+  異種端点の `functional`/`injective`/`domain`/`range` は引き続き使えます。
+- メソッドの receiver、名前、引数個数は実行時のシグネチャに一致する必要があります:
+  Set は `contains(x)`、`add(x)`、`remove(x)`、`size()`、
+  Seq は `contains(x)`、`push(x)`、`pop()`、`head()`、`at(i)`、`size()`、
+  関係は `contains(a,b)`、`add(a,b)`、`remove(a,b)` です。Map にメソッドはありません。
+  たとえば `n.contains(0)`、`s.push(0)`、`q.add(0)`、`r.size()`、`s.contains()`、
+  `q.pop(1)`、action 内の `n = q.at()` を拒否します。
+- `count`/`sum` は展開前の束縛子、Bool フィルター、整数の加算値を検査します。
+  空の範囲や容量ゼロの Seq でも同じです。`count(i in 1..0 where 1)` や
+  `sum(i in 1..0 of true)` はエラーになります。正しく型付けされた空の集約は
+  引き続き `0` を返します。
+
+これらは実行時や acceptance replay まで遅延させない、位置付きの loader エラー
+(`kind: "semantics"`、終了コード2)です。既存の端点型ヒント、正しいメソッドの動作、
+非反射的な到達可能性は不変です。
+[設計の追補](../design/DESIGN-nested-option-support.md#static-operand-and-signature-boundary-1459)も参照してください。
+
+#1459 の型境界監査では BASE `e8cf78f0` と HEAD `33d7faa7` を比較しました。
+corpus 591件と inline 384件(計975形式)を、個別にビルドした基準・直前の親・head の
+3つの木で stable/fsl5 の各モード2回ずつ、計11,700回検査しています。
+**検査に通らなくなる corpus は空集合で、その他の corpus 出力変化もありません。
+除外した形式やフィールドはありません。** 直前の親との比較により、上記6カテゴリの
+#1459 固有の削除は **248 mode-form(124出現、異なるソース123種)**、診断の再分類は
+**60 mode-form** です。数値型 `N -> M` の削除も含みます。後者の
+`error/semantics/2` は不変ですが、位置のない実行時エラーから作成元の静的位置を持つ
+エラーになります。拡張した対象集合では、継承した #1439 は削除86・再分類11、
+#1458 は削除56・追加6 mode-form です。これらを #1459 の新規変更とは数えません。
+全件の帰属と対照検査は設計の追補に記録しています。
+
+レビュー第1回では、自己関係を選択する式の追加の隙間を閉じます。条件式の両分岐は、
+選択されない場合や入れ子でも検査し、`old`、関係の add/remove receiver、action 内の
+let 別名を経由しても同じです。then 側の自己関係型の推論で `N -> M` の分岐を
+隠すことはできません。射影の型推論エラーは作成元の外側の位置、または既存のより
+精密な内側の位置を保持し、空リテラルで本来の関係診断を置き換えません。
+範囲境界と terminal のエラーも、生成された1:1ではなく作成元の位置を使います。
+数値・Set の互換性と正しい動的な判定は不変です。対象は共有 validator が訪問する
+式の木です。第1回の基準では helpful action の存在・個数だけを検査していましたが、
+現在の main は #1527 により引数のパラメーター型も検査し、その動作を維持します。
+関係値を含む未対応の一時コレクションは別の上流課題であり、この修正で新たに
+対応するわけではありません。
+
+第1回の差分は BASE `33d7faa7` と HEAD `8caf5c2e` の比較です。非自己関係の選択に
+よる **追加の削除42 mode-form(21出現)** と、**診断の再分類24 mode-form(12出現)**
+を測定しました。後者は射影推論16・範囲境界の位置6・terminal の位置2で、
+`error/semantics/2` は不変です。corpus 591件と inline 447件(計1,038形式)を、
+直前の修正の基準木も含む4つの個別ビルドの木で両モード2回ずつ、計16,608回検査
+しました。8,304組の反復出力は全体で一致し、形式・フィールドの除外も corpus 出力の
+変化もありません。継承した変更と第1回の新規変更は設計の追補で区別しています。
+
+現在の統合監査の最終 BASE は `11f01225e244dabde0f8dfd9aaa665bc47dccfd4`、
+測定した実装は `2b7d2e98349505af7dccb7843e41ab659066f021` です。
+測定は `b1557a31b77f549d2c48823c3435217f9df4fc53` 上で行い、生成された
+言語ページ2件だけが異なる `11f01225` へ引き継ぎます。cache を無効にした
+`fslc check FORM` を stable/fsl5 各2回実行し、`specs/`、`examples/`、
+`rust/fslc/tests/fixtures/` の **597形式**と **inline 601入力**、計 **1,198入力**を
+3状態で検査しました。計 **14,376検査**と24件のバイナリ識別対照です。
+3つ目の状態は #1458 の帰属を測るための過去の基準 `9af1fa5f` です。
+corpus の出力変化はなく、形式・出力フィールドの除外もありません。最終 BASE との
+比較で #1459 は **294 mode-form(147出現、異なるソース142種)** を削除し、診断を
+**62 mode-form** 再分類します。元の空 aggregate 24出現と範囲境界2出現は main の
+#1463 が既に拒否・位置付けするため、以前の削除48・再分類4は #1459 に帰属しません。
+let/Kernel/CLI/共有行の追加出現は削除26を加えます。過去の #1458 の帰属は134入力で
+削除48・追加6、拡張した今回の入力集合では削除56・追加8のままです。
+
+共有 #1463 inventory の `X1/operand-method-types`、すなわち Bool の `done` に
+対する `invariant Capture { acyclic(done) }` は、破壊的な削除として
+`[Ok, Error, Error, Error]` から `[Error, Error, Error, Error]` へ変わり、
+check が **8:3** で拒否します。変更された共有行はこれだけです。残る136行のソースと
+resolver 依存1件(**137入力**)は、上記 BASE/実装の `fslc check FORM` で、両モード・
+両反復とも遷移やその他の出力変化がありません。継承した出力との比較では、入力パスを
+含むメッセージ292観測の差と、以前の #1458 抽出が spec でなく scratch ラベルを
+選んだ2入力に由来する16観測の差をそのまま記録します。今回は実際のテストソースを
+使い、両基準バイナリで受理されるため帰属は不変です。任意の再実行は行わず、
+sweep の出力は正規化していません。
 
 トップレベルの時相シュガー:
 
@@ -714,6 +1592,54 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 
 ## 4. 文(init / action 本体)
 
+init の代入値/キー、if 条件、forall の filter/本体では、init がどこかで代入する
+state のルートを、ルート全体への確実な代入が完了してから読みます(#1451)。
+forall の source/domain は既存の別の規則に従います。早すぎる読みは `check` が
+`init references state variable '<name>' before it is assigned`、kind
+`semantics`、exit 2 で拒否し、読みを含む文に位置づけます。通常の verify の入口も
+エンジンを選ぶ前に同じ拒否を返します。被覆はルート単位で、Map の全キー、struct
+の全 field、両分岐を必要とします。短絡評価される RHS、既代入のキーや field、
+部分代入されたルートの自由な要素やパスの読みも保守的に拒否します。特に
+`struct-other-partial`、`if-one-branch-read`、#1481 N2 は、#493 なら自由な値と
+なる読みを拒否します。既存の所有権・field・forall の拒否の優先順は保ちます。
+
+init が一度も代入しないルートは symbolic な自由値のままです。issue の
+`init { g = on }` や `if choose { x = 1 } else { x = 0 }` の未代入の
+`on`/`choose` も該当します(#493)。check は受理し、BMC/induction の symbolic な
+自由値と refine の自由ルート列挙は変わりません(#1521)。explicit と Monitor は
+従来どおり読みを拒否しますが、代入されるルートの早すぎる読みと区別し、非対応の
+非決定的 init として次のメッセージを返します。
+`the explicit engine does not support a free initial value of state variable '<name>' (nondeterministic init); use --engine bmc`
+(kind `semantics`、exit 2。compose の接頭辞も保持)。auto は引き続き BMC に
+フォールバックします。BMC の結果がエラーでない場合は、
+`engine_fallback.reason` にこの診断を転送します。BMC がエラーを返す場合は、
+従来どおりフォールバックのメタデータを付けません。
+メッセージのみの変更で、explicit の列挙機能や check の拒否は追加しません。
+binder の値が決まらない場合(filter 付き・collection の形である
+#1520、X1/X2 など)だけ、#1518 の現在のキーの規則に従う既代入キーの読みを
+このルート全体の検査から免除します。値が決まる一部の domain では全ルートの
+被覆が必要で、型全体を走る forall は受理したままです。filter 付き・collection
+の binder をキーにする書き込みは、それを入れ子にした場合も、ループ後の読みの
+ための完全な被覆になりません。有限の `K` なら、例えば
+`forall k: K where true { m[k] = true }` の後で `g = m[0]` と読む代わりに
+`forall k: K { m[k] = true } g = m[0]` と書けます。読まない未代入ルートや
+従来受理した部分 init も受理し、check に決定的な初期状態は要求しません。
+
+breaking-removal sweep (#1451): base
+`c79016efeb630c717292e9392901cfe65ab40915` と head
+`2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4` のそれぞれの materialized tree で
+`fslc check <form>` を実行。`specs/`、`examples/`、`rust/fslc/tests/fixtures/`
+の全 **597** 本は出力全体と exit が同一(400 本が exit 0、191 本が exit 2、6 本が
+exit 1)で、corpus の `ok`→`error` の集合は **空** です。別に inline 42 source
+を直接/compose の両方で検査した84形では **38** 形が `ok`→`error` になります。
+内訳は元の13形 × 2、#1481 N2 × 2、静的な部分 domain の2形 × 2、ループ後の
+coverage の3形 × 2 で、他の出力の変化はありません。
+[移行表](../design/DESIGN-bridge.md#assigned-root-read-order-1451)は、追加された
+静的な部分 domain とループ後の読みの族の書き直しも含みます。この一覧の完全性は
+測定した inline fixture 集合内のもので、全ての拒否されるプログラムの列挙ではありません。
+全代入の後へ読みを移すか、ルート全体を明示的に初期化します。従来自由だった値を
+選ぶ書き直しはモデルの範囲を狭めるため、設計上の判断が必要です。
+
 - 代入: `x = expr`、`m[k] = expr`、`m[k].field = expr`、`o.field = expr`
 - Set/Seq/relation の更新は**再代入イディオム**を使います:
   `s = s.add(x)`、`q = q.pop()`、`r = r.add(a, b)`
@@ -723,6 +1649,178 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 - `if expr { stmt... } else { stmt... }` は `init` と action 本体の両方で使えます
   (else の内側の if でネストできます)
 - `forall x: T { stmt... }`(一括初期化 / 一括更新)
+
+`init` の文 `forall` のコレクション source は、自由な状態参照を含んではなりません。
+`xs` が状態なら `forall x in xs { ... }` は、`xs` への代入の後でも、domain/本体が空でも、
+到達しない分岐の中でも `check` が拒否します。これは breaking removal (#1463) であり、
+この規則自体は init 式・フィルター・本体で代入済みの状態を読むことを禁じませんが、
+それらの読み出しにも後述の同 forall のルート読み出しの境界 (#1518) が適用されます。
+状態と同名のローカルバインダーは状態参照ではなく、source/範囲境界は外側のスコープで、
+フィルター・本体・集約値だけは新しいローカルスコープで読みます。状態に依存しない
+コレクションリテラルは引き続き使えます。この字句的区別の修正により、有効な shadow を
+symbolic/explicit が誤って拒否していた挙動も解消しますが、こちらは check の受理の縮小ではありません。
+
+**check 受理の破壊的な削除 (#1480):** init の**文** `forall` の整数範囲の境界は、
+自由な状態を読めません。状態への代入後、本体が空の場合、到達しない分岐も対象です。
+共有検証が、所有する `forall` 文の位置で既存のコンパイル時定数の診断を返します。
+既存の init 所有権・フィールド読み出しの診断を先に返します。この範囲規則は
+checked-source 受理の境界であり、Core のモデル構築だけには適用しません。
+Runtime の生のコンストラクターは、既存のエラー契約を保ちます。
+対応済みの init 右辺式での代入済み状態の読み出しは削除しません。他の位置の範囲は
+範囲受理規則に従います。外側の字句的バインダーのスコープと、既存の init 入れ子の制限は保ちます。
+#1480 の sweep では、この規則について `ok`→`error` を 16 件測定しました。base は
+`e3c19a39c9c3bf5c315c6002fd18114aa22cd654`、head は
+`f101e7a93cbb50ad85e3531a1d27314559735311` で、コーパスの
+`explicit_init_range_assigned.fsl` と `explicit_init_range_unassigned.fsl` を含みます。
+[実行可能形式の境界](../design/DESIGN-check-executable-forms.md#1480-shared-refusal-for-unsupported-binder-domains)を参照してください。
+
+init の文 `forall` のフィルターまたは本体では、**同じ forall が書く状態ルート**を
+読むことを拒否します (#1518)。代入先の key 式、右辺、`if` の条件も対象です。
+例外は、今の iteration の binder の key で、本体の中で先に書いた場所です。
+`m[k] = value` の後には `m[k]` と `m[k].flag` を読めますが、`m[k].flag = true`
+の後に読めるのはその field であり、entry 全体や他の field ではありません。
+既存の ownership の制限は維持します。例えば
+`forall k: K { m[k] = true seen[k] = m[k] }` は許しますが、読み出しを `m[1]`
+に替える、または書き込みより前に読む形は拒否します。forall より前に初期化した
+別のルートを読む形は引き続き許します。これは、従来 check-ok だった scalar map と
+entry 全体の形の **breaking removal** です。semantics message が名指しするのはルートであり、
+個々の読み出し式ではありません。
+check と verification は読み出しを含む文の位置を返します。legacy replay の位置は必須にしません。
+
+この removal は key ごとの依存性を証明せず、意図して保守的な形も含めます。
+例えば `forall k in 0..0 { m[k] = true }` の後の
+`forall k in 1..1 { m[k] = m[0] }` は、前の forall が別の key を初期化していても、
+後の forall が読むのと同じルートを書くため拒否します。また、
+`forall outer in 0..0 { forall k: K { m[k] = true seen[k] = m[k] } }`
+も、内側で書いた直後の読み出しであっても、外側の forall も `m` を書き、その binder の
+key での読み出しではないため拒否します。どちらも base の explicit と Monitor が既に、
+それぞれ `before it is assigned`、`nested forall in init is not supported` で拒否していました。
+#1518 では check でも拒否し、これらを許すための規則の精密化は行いません。
+
+規則はルートごとであり、iteration の順で食い違う形だけに限りません。
+`m` の key が `0..1` のとき、
+`m[0] = true forall k in 1..1 { m[k] = true x = m[0] }` は、base で全 engine が
+一致していた正しい init ですが、同じルートの先に初期化した別の key を読むため拒否します。
+
+決定的な concrete init では、domain が空、または静的に非空と証明できない forall の
+固定 target は、確実な代入の覆いに数えません。`0..1` の `where k == 0` のような
+静的フィルターは非空性を証明できますが、状態に依存するフィルターはできません。
+書き込みの ownership は引き続き検査します。決定的な代入が足りなければ explicit と
+Monitor は exit 2 で拒否し、既定値で埋めません。symbolic init は未代入の成分を自由な値
+として扱い、その意味に従う verdict を返します (型境界・invariant 違反は exit 1、
+許容する全ての値で成り立てば検証成功)。auto はこの explicit 未対応 init を BMC へ回せます。
+これも concrete 対応範囲の保守的な breaking removal であり、`flag = true` の後の
+`where flag and k == 0` の固定 target の書き込みは、実行時の domain が非空でも
+explicit と Monitor が `init does not assign` で拒否するのであって、誤った verdict ではありません。
+
+explicit、Monitor、refine は状態に依存しない filter 付きの型・range と collection の
+binder domain を静的に求め、init の key の覆いに使います (#1520)。選んだ key が root
+全体を覆えば、今の key を書いた後に読む形に対応し、`--engine auto` も fallback せず
+explicit を使います。空の domain は覆いを足さず、部分 domain は選んだ key だけを覆い、
+状態に依存する filter は未解決のままです。check 時の読み出し順の規則は変えません。
+同名の const を隠す外の binder に依存した入れ子の固定 target の初期化は、以前は誤って
+`refines` になりましたが、今は refine が拒否します。
+
+breaking removal の sweep (#1518): base
+`28c4eab710f8d83e766bb0e7c7e006d09d7777d8` と、head
+`9d94c5cb5447834f329002200afa0f3404d9a9a0` に production runtime の変更を加えた状態
+(`explicit.rs` の SHA-256:
+`b20b92e9945fd7a05eb8462c4a7ad3816fcd06cd2c34a871910b7b652090c17b`) を比較しました。
+coordinator がそれぞれ別の git-archive materialized tree で native binary を build し、
+`specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全 `.fsl` 597 形に
+`fslc check <form>` を実行しました。両方で 397 `ok`、**`ok`→`error` 0 件、
+`error`→`ok` 0 件、その他の変化 0 件** です。corpus の removal の集合は空であり、
+受入 fixture A1–A5 はこの removal の5形の回帰対照であり、上記の保守的な例も removal に含めます。
+
+`init` の文 `forall` の入れ子は、上記の読み出し順と ownership の規則に従う場合、
+引き続き `check` と symbolic engine が受理しますが、
+`--engine explicit` は入れ子の init forall を拒否します。`--engine auto` は、この
+文書化された explicit の制限を symbolic BMC へ回します。explicit の実行能力を
+広げるものでも、状態依存のコレクション source を受理するものでもありません。
+
+breaking removal の実測 (#1463): base `5738cc2c711b691a9d453b0190ead1a2ff77fc50` と
+測定対象の #1463 の変更 (測定した正確な head は PR に記録) の各 materialized tree で、
+corpus 597 形と inline 1016 ID (計 1613) に `FSLC_CACHE=off fslc check <form>` を
+それぞれ 2 回実行しました。両 run は exit 0、JSON の field を除外せず全報告が一致し、
+新たな入力 error は 110 (corpus 1、inline 109) でした。追加の legacy-return fixture 2 つも
+含めて差がなく、この base で全体を新しく測り直しています。
+受理とは result が `error` でないことで、exit 1 の refinement/trace verdict を入力拒否と
+混同しません。次が breaking removal の全一覧です。中括弧は選択肢の全直積を表します。
+
+| check の受理を削除した form ID の集合 | 数 |
+|---|---:|
+| `corpus/rust/fslc/tests/fixtures/explicit_init_state_collection.fsl` | 1 |
+| `inline/1457/init-stmt/{empty-body,empty-domain}/{Set,Seq}/state/{positive,negative}` | 8 |
+| `inline/L1/{Set,Seq}/{state,literal}/{false,true}` | 8 |
+| `inline/L1/{utf16-prefix,resolved-component}` | 2 |
+| `inline/L2/{z: K,z in 0..1}/{z == 1,not done,true,false}` | 8 |
+| `inline/L3/z in Set { 1 }` | 1 |
+| `inline/L3/z: K where z == 1` | 1 |
+| `inline/I1/{Set,Seq}/{false,true}/{plain,conditional,unreachable,nested}` | 16 |
+| `inline/S4/{own-source,sibling-restored,aggregate-source}` | 3 |
+| `inline/R1/read/{init,action,invariant,trans,leadsTo,reachable}/{false,true}` | 12 |
+| `inline/R1/write/{init,action}` | 2 |
+| `inline/R1/receiver/{old,conditional,domain-binder}` | 3 |
+| `inline/guard/{StateCollection,ranked-where}` | 2 |
+| `inline/aggregate-and-component-locations/case-{00,04,08,12,16,20,24,28,32,36,40,44,48,52,56,60,64,68}` | 18 |
+| `inline/aggregate-and-component-locations/case-{01,05,09,25,29,33}` | 6 |
+| `inline/aggregate-and-component-locations/case-{72,73,74}` | 3 |
+| `inline/aggregate-and-component-locations/unchecked-init/state-source` | 1 |
+| `inline/nested-aggregates-and-sync-ownership/case-{68,69,70,71}` | 4 |
+| `inline/nested-aggregates-and-sync-ownership/case-{76,77,78,79,80,81,82,83,84,85,86}` | 11 |
+
+110 件の内訳は wrapper 22、init source 31、relation index 51 (集約内 18)、空の
+リテラル範囲または容量 0 の Seq の集約内 Bool index 6 です。書かれた集約の
+binder/filter/value は空 domain でも正規化より先に既存の型規則で検査します
+(#1463 で承認された、候補数に依存しない集約 source の型検査)。型エラーを空展開で消さず、
+診断の位置は書かれた property に保ちます。
+空の Count/Sum でも、`count(x in 1..0 where x + 1)` の非 Bool filter のように、
+書かれた式の既存の型エラーをすべて報告するようになり、6 件の Bool index の削除は
+測定した corpus/inline 入力の実例であって、型エラーの種類の網羅的な一覧ではありません。
+Bool index の拒否は意図した #1459 類の縮小ですが、新しい型規則は追加していません。
+有効な空・非空 Map 集約の verdict は保全します。
+raw 検査では外側 binder の代入より先に内側の Count/Sum を列挙せず、代入待ちの名前と
+同じ pattern 名も早まって拒否しません。入れ子集約・pattern の check 対照 66 件は
+すべて受理を保ち、base/head の全 envelope が一致します。追加の削除 15 件は quantifier
+の relation index 境界 4 件と sync 展開・root の relation index 11 件だけです。
+
+全出力の差 128 ID の残り 18 は、いずれも引き続き error/semantics、exit 2 です。
+`inline/1457/boundary/nonfinite` は message/loc に書かれた位置 1:161 を追加します。
+`inline/R2/seq-write-remains-rejected` は loc 7:17 のまま必要型を Map or Relation から
+Map に修正します。`inline/aggregate-and-component-locations/case-{13,17,37,41,49,53,61,65}` は合成の 1:1 を
+property の 6:3 に直し、必要型の案内を Map/Relation/Seq から Map/Seq にします。
+`inline/aggregate-and-component-locations/case-{21,45,57,69}` は 6:3 を保ち、その案内だけを修正します。
+`inline/nested-aggregates-and-sync-ownership/case-{72,74}` は元から static aggregate bounds で拒否されており、
+位置なしから property の 6:3 で relation index を示す拒否になります。
+`inline/nested-aggregates-and-sync-ownership/case-{73,75}` は同じ既存の拒否を root use の 2:3 に anchor し、
+原因の part.Capture と piece.fsl:6:3 を保ちます。
+他の envelope field は不変です。component の拒否は所有する root の use に anchor し、
+原因の component の位置を保ち、lower 済みの `part__xs` でなく `part.xs` のような
+公開名を示します。いずれも意図した公開出力の変更です。
+model-expression の型エラーは、base の check envelope にすでに loc があったものも含め、
+所有する宣言の位置を示します。既存のものを含む component の型エラーは原因を保って
+所有する root use に anchor します。
+inline ID は #1457、集約/component・入れ子/sync の実際の出力、固定受入、書き換えた guard/constructor
+入力に由来します。範囲・ドメインの制限は
+[#1480](../design/DESIGN-check-executable-forms.md#1480-checked-range-admission) で決定しました。#1481 cell 1 は
+Map Struct のフィールド別 init を扱い、cell 2 は空の容量 0 の Seq の
+`head()`、`at(i)`、index 読み出しを修正します。通常の action/property 文脈では
+到達した読み出しは `partial_op` です。ranked decreases は、新しい slot の値が
+rank 評価に入る前に、到達した zero-slot 読み出しだけを base の意味論エラーで
+狭く拒否します。未到達の条件分岐や短絡で読まない measure は、base で意味論エラー
+だったものも ranking で proved になりました。その狭い preflight の後、#1542 は
+初期・後続・deadlock 側の measure について、ranking の pending 仮定の下で
+到達する部分演算も probe します。physical slot を持つ場合を含め、未定義になりうる
+measure は rank 値として使わず、exit 2、kind `semantics`、
+`leadsTo 'L' decreases measure may be undefined: OP` で拒否します。
+これは rank 証明 phase の拒否です。base BMC が実際の `leadsTo` 反例をすでに
+見つけていた場合、追加の rank 診断が拒否されても、元の `violated` verdict
+(exit 1)を維持します。
+短絡の guard は有効なままで、部分演算のない measure は solver check を増やしません。
+BMC は ranking エラーで何も discharge せず、自分の lasso 探索を維持します
+([Seq の部分操作](../design/DESIGN-seq-partial-operations.md)を参照)。
+他の型の穴は #1459、リテラルの形の同類は #1467 です。
+これらを #1463 の追加の削除へ混ぜていません。
 
 ## 5. 意味論
 
@@ -780,7 +1878,7 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 
 | 検査 | 内容 | 違反時 |
 |---|---|---|
-| 型境界 | すべての有界型の状態変数(Map の値、struct のフィールド、Seq の要素を含む)が範囲内にある | `violated` / `type_bound` / `_bounds_<var>` |
+| 型境界 | すべての有界型の状態変数(Map の値、struct のフィールド、Seq の要素、Set のメンバー、関係の端点を含む)が範囲内にある | `violated` / `type_bound` / `_bounds_<var>` |
 | Seq の部分演算(action および property 文脈) | `pop()`/`head()`/`at(i)`/index の時点で列が非空かつインデックスが範囲内である | `violated` / `partial_op` / `_partial_<action>`、`_partial_property_<property>`、または `_partial_property_terminal` |
 | 算術の部分演算(action 文脈限定: `requires`/本体/`ensures` のみ、§3 参照) | `/` `%` の除数が非ゼロである | `violated` / `partial_op` / `_partial_<action>` |
 | action カバレッジ | 各 action が深さ K 以内に少なくとも 1 回 enabled になる | `action_coverage` にブロックしている requires の診断 |
@@ -793,11 +1891,25 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
   先の両方)、i64 の checked overflow は、どのエンジンでも semantics エラー
   (exit 2)です(init の `if`・条件式・`and`/`or`/`=>` の到達しない側の演算は
   到達しません)。初期状態より前のステップが無いため、`partial_op` 違反には
-  なりません。`bmc` と `induction`(base case が `bmc`)は、init が非決定的な
-  場合も含め、失敗と init の文を名指しします(例: `division by zero in init at
-  9:5`)(#1258)。例外が 1 つあります。init が状態変数の型の外の値も代入する
-  とき、`bmc` と `induction` は step 0 の型境界を仮定して init を問うため、
-  その step 0 の `type_bound` 違反(exit 1)を報告します。
+  なりません。どのエンジンも同じ ` in init at L:C` の接尾辞で失敗と init の文を
+  名指しします(例: `division by zero in init at 9:5`)(#1543)。`bmc` と
+  `induction`(base case が `bmc`)は、init が非決定的な場合も同様です(#1258)。
+  init が型の外の値も代入するときも、`bmc` と `induction` は代入先の型境界より
+  init の未定義を先に報告し、他のエンジンと同じ位置つきメッセージを保ちます(#1597)。
+  init が capacity を越えた `Seq` を格納してそのスロットの外を読む場合など、
+  記号的な init の失敗が格納した `Seq` の表現可能な capacity の外でのみ見つかる
+  ときは、これらのエンジンは位置を名指さず
+  `model sequence length exceeds capacity` で拒みます。
+  量化式・集約式でも、どのエンジンも binder 全体の総称エラーではなく、最初に
+  到達した具体的な失敗を名指しします(#1607)。source を先に評価し、存在する候補
+  ごとに `where`、filter が真なら body または summand の順に評価します。
+  `forall` は最初の偽の body、`exists` は最初の真の body で止まります。
+  `count`・`unique`・`exactlyOne` は結果が確定しても途中で止まりません。
+  `sum` は最終的な数学上の和が i64 に収まる場合でも、各部分和の i64 overflow を
+  検査します(`integer overflow in sum`)。summand が未定義なら、累算より先に
+  その演算自体の失敗を報告します。位置は引き続き、それを含む init の文です。
+- i64 の最小値を `-1` で割る `MIN / -1` とその剰余 `MIN % -1` は整数の
+  overflow であり、除数がゼロのときだけ `0` に全域化する property 文脈でも同じです。
 - デッドロック警告には、どの状態で行き詰まったかが含まれます(例:
   `deadlock reachable at step 1 (state: status=ToolFault, ...)`)。完全なトレースは
   JSON の `deadlock.trace` にもあります。
@@ -824,16 +1936,15 @@ until  Name { P until Q }    // unless safety plus a leadsTo P ~> Q progress obl
 ## 7. 検証器 `fslc`
 
 ```
+fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check     <file.fsl>                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
-fslc lint      <path>... [--edition current|next] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
 fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
-fslc fmt       <file.fsl|-> [--edition current|next] # canonical FSL to stdout; never mutates input
+fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
-fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
-                                               # slice 1: safety-invariant counterexample を reproducer.v1 へ export
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -848,8 +1959,11 @@ fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [
                [--property <Name>]               # check one named property obligation —
                                                  #   invariant / trans / leadsTo / reachable;
                                                  #   induction の trans 選択は全 invariant を保持
+                                                 #   induction は全ての暗黙の型境界をベースケースでも検査
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
+fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+                                               # slice 1: safety-invariant counterexample を reproducer.v1 へ export
 fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
@@ -866,12 +1980,12 @@ fslc diff      --git BASE..HEAD [spec.fsl] [--depth K]
                                                  # revision-consistent tree materialization; omit spec for all changed .fsl
 fslc chain     [fsl-project.toml] [--keep-going] [--jobs N]
                                                  # manifest-driven cross-layer report (§10)
-fslc mutate    <file.fsl> [--by-requirement] [--oracle-attribution] [--max-mutants N]
+fslc mutate    <file.fsl> [--depth K] [--by-requirement] [--oracle-attribution] [--max-mutants N]
                [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
                                                  # built-in + external spec mutation (§15)
 fslc explain   <file.fsl> [--depth K] [--readable] # JSON by default; readable text review view (§15)
 fslc analyze   <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review (§15)
-fslc html      <file.fsl> [--depth K] [-o report.html] # self-contained review report (§15)
+fslc html      <file.fsl> [--depth K] [-o report.html] [--no-timing] # self-contained review report (§15)
 fslc ledger    <file.fsl> [--depth K] [--impl-log run.json] [--approval record.json] [--trust-key public.pem] [-o ledger.md] # business audit ledger by requirement id (§15)
 fslc document generate <file.fsl> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
                [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
@@ -887,7 +2001,7 @@ fslc document check <file.fsl> <document.md> [--glossary glossary.json] [--evide
                                                   # fresh re-render; never interprets prose (§13)
 fslc approval create <file.fsl> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
                [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
-                                                  # requirements_document records a v3/v4 revision with a claim_set_digest (§13)
+                                                  # new records use v5/v6; requirements_document binds a claim_set_digest (§13)
 fslc approval check  <file.fsl> --record <record.json> [--trust-key public.pem]
                                                   # approved (exit 0) | drifted (exit 0、分析結果)
                                                   # | signature-invalid (exit 1); DESIGN-approval.md 参照
@@ -913,6 +2027,215 @@ fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime eve
 扱います。安全と証明できないソース/コメントの移動は拒否します。`&&` は引き続き
 不正なトークンであり、そのため `and` の提案つきで報告されますが、機械適用される
 ことはありません。原子性と一括更新の手順は `docs/design/DESIGN-migration.md` を参照。
+
+spec、requirements、compose、business policy、refinement の map の式で既に不正な
+`||` / `->` は、次のエディション向けの検査で `kind: parse` のまま
+`diagnostic_code: unsupported_in_edition` を返します。位置は演算子を指し、
+`or` / `=>` への手修正後に、残る対応済みの編集を `fslc migrate <file> --edition next`
+で確認するよう提案します。この不正な式の綴りは自動変換せず、手修正までは
+lint/migrate も parse 失敗(exit 2)を維持します。これは新たな
+構文削除ではなく診断の改善です。現行の拒否と exit 2 は不変です。構造的な合成の
+`||`、対応や遷移の矢印(relation 型の匿名 range 端点を含む)、domain の式の既存の挙動は維持します。
+range 型の端点(内部の括弧付き部分式も含む)では、この不正な綴りに対して汎用の
+`FSL-PARSE` 診断を維持します。引き続き拒否され、この例外は構造的な relation の
+矢印を変更しません。
+
+現行エディションでは、`check`、`verify` と Worker の JSON に宣言の文字列
+メタデータ(`legacy_string_metadata`)、コロン量化子(`legacy_quantifier_colon`)、
+インライン action `maps` (`inline_action_maps`)の移行警告を追加します。位置、置き換え、編集、
+移行安全性は lint と共通で、verdict と終了コードは変わりません。変換を拒否する
+場合は `machine_applicable: false` を維持し、警告があることは自動移行の安全性を
+意味しません。型付き注釈、中括弧の量化子、`implements` 内の明示 action 対応を
+使ってください。lint は findings なしで exit 0、ありで 1、parse/check 失敗で 2
+のままです。
+domain の検査は量化式を拒否し、コロン量化子の警告にはしません。旧文字列メタデータと
+requirements の action 対応も、domain で受理される構文ではありません。
+
+捕捉済み root の admission は `db check`/`compat check`、`scenarios`、汎用 `testgen`、
+`kernel`、`conformance`、`testplan`、`typestate`、`explain`、単一 FSL source の
+`analyze`、trace replay、causal の6コマンドにも対応します(#1449)。
+単一 root の拡張では、AI の reader 6コマンド、domain の analyze/expand/generate/
+replay/testgen、document の check/claims/generate、db observe、log replay、
+counterexample export の処理順、mutate 成功時の警告、sweep の捕捉、直接の
+HTML/ledger の raw 警告配信という、追加の21 mode に対応しました。
+モデル構築・solver 使用・出力の副作用より前に判定し、捕捉した同じバイト列を消費します。
+causal diff は両方の引数、observation は明示的な FSL mapping も対象です。
+各 slot は独立し、同じファイルを2つの slot に渡した場合は slot ごとに1回の警告を
+許します。ヘッダー・既存の edition オプション・read error の kind の規則を維持し、
+新しい dialect とヘッダーの組み合わせを受理するものではありません。
+project analyze は TOML manifest を一度捕捉し、参照する直接の FSL layer と有効な
+mapping を投影前に受け入れます。TOML 自体の edition metadata は作りません。
+envelope の `fsl_edition` と `edition` は主の FSL root だけを表し、警告は各 slot の
+ものを保持します。全 causal root を先に準備するため、
+後の引数や mapping の read error が、先の root の parse/model error より優先されます。
+log replay もモデル構築前に root と mapping を準備するため、mapping の IO が
+通常の root の parse/model error より先になります。document check は artifact の
+IO/frontmatter より先に root を受け入れ、その捕捉済みの本文を artifact に記録された
+表示用 label で投影します。label を別のパスとして読み直しません。
+
+対応済みの拡張可能な envelope では `warnings` を一度だけ仕上げます。成功時の閉じた
+schema (`kernel`、`conformance`、`testplan`) と対応済みの raw TypeScript/readable/
+graph 出力は、stdout を変えずに stderr へ `warning: <finding-json>` を出します。
+受け入れ済みの verification は governance の後に仕上げ、domain/database check、
+scenarios、汎用 testgen は外側の結果だけを仕上げます。domain check の移行警告は、
+non-definitive なエラーを含め重複しなくなりました。Worker はモデル構築・solver 使用前に
+判定し、editor の拒否ではモデル構築や解析を行わず UTF-16 範囲を維持します。
+現行の警告は verdict・assurance・終了コードを変えません。次のエディションの移行
+finding は消費前に既存の edition error/exit 2 で拒否します。従来は判定を通らなかった
+consumer が、以前受理した次エディションの入力を拒否する場合があります。
+直接の raw HTML/ledger、document generate/claims、domain expand/testgen は、移行警告を
+stderr に出します。HTML/ledger のファイル出力 envelope は変えず、別の結果である
+baseline に警告を一度だけ保持します。承認専用の render は捕捉済み source/token を借り、
+artifact/baseline の単独実行時の診断を保持し、新しい stderr 配信をしません。
+requirements document の render は `implements` の子を読まず、先回りの走査もしません。
+mutate は authored source の結果を仕上げ、
+sweep の各 cell は一度捕捉した root の token を借用します。
+
+測定は BASE `5637daf2ce8ce3e1a2c3b1266a8442c3df7887e4` と build 済み実装
+`33e3fcc5606249a097814d91cb09b506add8e97d` の materialized tree を使います。
+cache 無効の `fslc check FORM` を、
+`specs/`、`examples/`、`rust/fslc/tests/fixtures/` の全597 `.fsl` と
+inline 309出現について、両方の木で両方のバイナリを使って実行しました(3,624検査)。
+ok→error の遷移集合は空で、corpus 57形式と inline 22出現は warnings だけが変わります。
+除外する出力フィールドはありません。親 `25f68db7fe214ed2ed66034701ed1bf06b5fbe7c`
+との consumer 比較では、次エディションの4つの移行形式(enum union、metadata、
+コロン量化子、inline maps)が analyze/conformance/explain/html/kernel/ledger/mutate/
+scenarios/sweep/testgen/typestate で、enum union だけが testplan でも拒否に変わります。
+これは check が既に拒否する45 command/form 観測の破壊的な削除です。その時点では
+raw warning、mutate 成功時の warning、sweep capture は未完了でしたが、今回対応しました。
+
+最新の sweep は、BASE `1844fa74a717ba9229e0b292d9421c0939016e5e` と実装の Rust revision
+`e04df80f35cf3a7a3b8119dc7b6513ac7272ce76` をそれぞれ clean な archive から build
+しました。cache 無効の `fslc check FORM` は、各 tree の corpus 全597 file と必須 test の
+入力29出現を、両方の tree で両方の binary に渡します。**全2,504検査**の ok→error 集合と
+stdout/stderr/exit の差は空で、除外 field はありません。29出現の内訳は、元の8出現
+(domain snapshot の include 2、scenario literal 2、empty-membership 入力2、固定の承認
+source、command-matrix helper の承認 baseline)、実際に実行した成功 table の source 20、
+強化した replay-order root 1です。include file や同じ source の反復も出現として数えます。
+
+前の測定も名前付きの履歴として残します。BASE `a42d4cede3d8d688daff3173de7bd839a6992172` と
+HEAD `e2669212315f4db9bec2c0c525ba8d44f77bacfd` は各 tree の597+29出現、全2,504検査、
+初回の BASE `c79016efeb630c717292e9392901cfe65ab40915` と実装
+`ceb03268e567487f6ec080afcf3ab034d4a5ea0c` は各 tree の597+8出現、全2,420検査でした。
+どちらも ok→error 集合は空ですが、最新の測定の代わりにはしません。
+最新の BASE/Rust revision の組でも21 mode の consumer 比較を2回、全772観測しました。各回の
+拒否への変化は、重複しない command/source 17組(要件 metadata の反復 probe を含む
+control 19出現)でした。domain analyze/expand/generate/replay/testgen の enum union
+(5組)、document claims の spec と requirements の metadata・コロン量化子・inline
+mapping(4組)、document generate の spec と requirements の metadata(2組)、document
+check の requirements metadata(1組)、replay --from-log の enum union・spec と
+requirements の metadata・コロン量化子・inline mapping(5組)です。従来 non-error だった
+consumer 入力の破壊的な削除であり、文法の削除や証明の主張ではありません。mapping だけの
+control は BASE でも error だったため、受理済み入力の削除には数えません。
+
+live な複数 root についても、analyze batch/project、approval check/create/diff と
+ledger `--approval`、chain、live diff、直接および multi-link の refine に対応します。
+延期の集合は空で、全 adapter の対照は履歴 root の3対照を含む全観測の一致を要求し、
+延期の再導入を拒みます。source 修正と同時に届ける #1513 の契約では、単一・batch diff の
+選択した Git spec の両 root(old を先に判定)と approval baseline を admission の対象にします。
+診断の source は archive path ではなく論理的な revision:path です。現行 edition の legacy
+slot ごとに完全な警告を一つ届け、同じ bytes/revision の重複 slot も警告を省きません。
+拒否はその pair の比較より先で、Git batch 全体の事前判定ではありません。先の有効な pair は
+既に実行されている場合があります。
+diff の old、refine の最初の implementation、approval diff の唯一の live root が
+主 metadata を持ちます。Git pair も old root が主です。approval baseline は警告だけを加え、
+live root の metadata を重複して仕上げません。現在の live root の admission は引き続き先で、
+record/trust/signature/path と履歴 baseline digest の検証は baseline admission より先です。
+履歴 mapping の選択と推移的な依存先の scope は変えず、文法や新しい admission framework は
+追加しません。同じ path の明示的な各出現は別 slot ですが、multi-link の
+中間 spec を link ごとに数え直しません。live Git mapping は secondary slot、
+materialize した mapping は履歴のままで、既存の絶対/相対 path の選択は変えません。
+
+live Git mapping の明示的な1出現は、最初に消費できる位置で一度だけ捕捉して、選択した
+全比較に貸します。既存の filesystem API が読める stream path も同じです。比較ごとの
+警告・IO envelope と、空 range/欠けた operand が mapping より先になる順序は維持します。
+project の mapping 準備は、file のある business/requirements/design の両端を要求します。
+投影で使わない external target の mapping は読まず判定せず、TOML の検証を追加しません。
+
+analyze batch は既存の sort と隣接 deduplication の後、全 root を file consumer より先に準備し、
+依存先の scope と診断は file ごとに保ちます。子の拒否で別 file や batch envelope を
+置き換えません。project は直接 root の警告を受け取り、TOML の edition を作りません。
+空の project/batch の既存の成功も保ちます。chain は捕捉済み bytes でグループ分けし、
+既存 scheduler に不変な source/token を渡し、実際の各 step thread 内で detail を
+wrapper より先に仕上げます。通常の chain IO は top-level 拒否にせず、従来の layer/cutoff に残します。
+
+利用側の出力には意図した変化があります。chain 以外では、project/mixed batch の準備を
+含め、後の直接入力の IO が先の parse/model error に優先します。新たに owner 内へ入った
+diff/refine/approval の依存先 read と chain refine detail は、平坦化した error の代わりに、
+子の完全な拒否・finding・edition と exit 2 を返し、受け入れた子の警告を一度届けます。
+approval diff は成功時の approval metadata を保ち、子の拒否ではそれを置き換えます。
+別々の artifact/baseline は単独実行時の診断を保ち、新しい stderr 配信はしません。
+従来判定されなかった入力を拒む場合がありますが、文法や保証を追加するものではありません。
+HTML と ledger の独立した baseline の固定は、どちらも今回には含みません。
+その強化と内部 seam の3対照は #1641 で扱います。report baseline と
+ledger の移行表示は維持します。移行 finding だけの行は vacuity/mutate の助言ではなく
+🟡 移行候補 / risk —、非移行 finding を含む行は 🔴 要確認 / 要確認 と表示します。
+依存先の admission は下記の拡張で扱い、上記の履歴 root 修正では変えません。修復の投影と
+終了コードは変えず、lint の既存の dialect 制限(#609)を維持します。公開 example の
+警告(#608)や、他の ledger warning の誤分類(#1497)を解消するものでもありません。
+
+複数 root の型境界監査では、BASE
+`796876558b83f2dedd7dafdf04ef77fced3de033` と Rust/source-test revision
+`8796f19d9646a4edffbac0719c3693a8f88c1405` を別々の materialized tree で build し、
+`fslc check FORM` を corpus 全606 file と捕捉済み inline 35,611出現に適用しました。
+両 parser 設定と観測された edition 指定を含む72,859組です。追加の
+`e16f65bfeae773218d23f425376ea7c23b895bff` はその corpus 603 file と同じ inline 入力を
+検査し、全218,571コマンドとなります。両 ok→error 集合と BASE/HEAD の完全な
+JSON/stderr/exit の差は空で、除外 field はありません。反復出現と変更した依存先 test の入力も保持します。
+
+有効な target と mapping の一度の捕捉に関する修正は、同じ main base と独立に build した
+Rust/source-test head `e47dce898889e891e9fa82a5fdd8698749e4db80` で再検査しました。
+新しい修正入力も含め、corpus 全606 file、inline 35,663出現、72,963組 / 145,926コマンドです。
+再利用した fixture の bytes は hash で検証し、CLI 検査結果自体は再利用していません。
+ok→error と完全な JSON/stderr/exit の差は空で、除外 field はありません。
+
+実際に読まれる依存先は、親が要求した edition を継承せず、**自分の**ヘッダーまたは
+現行の既定 edition で判定します(#1452)。canonical な異なる edition の混在は許します。
+compose の `use`、`implements from`、causal の `uses`、governance の delegates、
+before/after 文書と refinement mapping は、入れ子や読み直しも含め、子の bytes がモデル・
+solver・出力へ入る前に同じ admission を通します。未使用の virtual file や、consumer が読まない
+宣言上の参照を先回りして走査しません。owner のあるコマンドは子の完全な edition 拒否と
+exit 2 を返します。owner の外の strict loader も、子の path/code を原因文に含む既存の
+read-error envelope で閉じる側に倒れます。この依存先の規則と、上記の明示的 root slot の
+対応完了は別の境界です。
+
+依存先の移行警告は、外側の native owner ごと(または明示的な局所 log ごと)に、
+provider resource と完全な finding の組を一度だけ仕上げ、
+主 root の edition metadata を置き換えず、明示的な root slot をまとめません。filesystem
+では実の canonical path を key とし、子の `loc.file` は参照に書いた綴りを維持します。
+virtual lookup は provider の key を維持します。
+閉じた/raw stdout と stderr 警告の既存規則も維持します。Worker/editor の記録は呼び出しに
+局所です。editor は自分の key と関連 link の path だけを絶対化・字句正規化します。
+Store の lookup や symlink は正規化せず、file path のない buffer の label を directory と見なしません。
+完全な finding で重複を除き、読込順で最初の
+親の use と、子自身の本文による範囲・severity を関連付けます。子を拒むと
+モデル構築・解析・親への quick-fix 配信を行いません。修復ツールは consumer として子を
+拒まず、子の edit を適用せずに finding を報告し、root の planner/formatter と終了コードを維持します。
+parse の報告も command envelope を入れ子にせず finding の形にします。全参照を先に読むという
+保証ではなく、native の lemma mode の implements と governance の read は root の solver の
+後にも行われますが、拒んだ子の bytes は solver/cache に入りません。Worker の通常の governance
+error は native と同じく kernel error を優先し、依存先の拒否がある場合だけ早く返します。
+
+**破壊的な受理の削除 (#1452):** ヘッダーのない compose root が、legacy なコロン量化子を持つ
+次 edition の子を import すると、以前は message のない `ok`/0 を返していました。今は
+finding の message が `legacy colon quantifier syntax is deprecated` である、子の完全な
+`unsupported_in_edition`/2 を返します。波括弧の canonical twin は、完全な
+`fsl:1.0,result:ok,spec:C,warnings:[]` の check envelope と検証済み runtime version を
+保って成功します。この inline 形は
+`edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` と、
+`edition_dispatch_inventory` の
+`dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`、
+`all_cells_agree_across_the_complete_native_adapters` の各 context に残します。以前の `ok` は
+リリース前の build のものです。`fslc` 4.12 は、コロンの有無にかかわらず `fsl 5` の子をすべて
+未知の宣言 `fsl` として拒否していたので、4.12 の compose がこの `ok` を失うことはありません。
+
+各 materialized tree の `fslc check <path>` による `bc14d885` から修正後の Rust
+source/test tree `a65eddd5` への比較では、**corpus の全603形を両 parser 設定で検査(各 tree 1206回)**し、
+**required test の inline/included 入力を各 tree 368回**、合計 **3148回**検査しました。
+`ok`→`error` は、上記の legacy-compose の形を3 context で各2回実行した **6回だけ**で、
+**その他の遷移は0件、corpus 内も0件**です。canonical twin はすべて受理を維持します。
+正確な source tree の identity と範囲は
+[`DESIGN-migration.md`](../design/DESIGN-migration.md) の依存先 admission の節を参照してください。
 
 `fslc lint` の各 path にはファイルまたはディレクトリを指定できます。ディレクトリは
 通常ファイルの `*.fsl` へ再帰的に展開され、その走査中はシンボリックリンクの
@@ -962,19 +2285,43 @@ Public Kernel v2 はオプトインで、
 
 `verify --property Name` は invariant、`trans`、`leadsTo`、`reachable` の宣言を
 横断して解決し、指名されたプロパティ種別だけを単独で検査します。
-ただし induction には依存関係に関する規則が 1 つあります:
+ただし induction は step が仮定するすべての暗黙の `_bounds_*` をベースケースでも検査します。
+このため `--engine induction --property P` でも、選択した P ではなく `_bounds_*` の違反
+(`violation_kind: "type_bound"`、exit 1)を返すことがあります。
+**`proved` エンベロープの** `invariants_checked` にもこれらの型境界を含めますが、
+**`violated` エンベロープに `invariants_checked` はありません**。#1598 では意図的に、
+exit 0 の偽の `proved` / `unbounded` → exit 1 の `violated` / `type_bound`、
+exit 2 の `error` / `kind: "semantics"` → exit 1 の `violated` / `type_bound`
+(Seq frame の容量超過)へ変更します。
+同じベースケースを通る `sweep --engine induction --property P`
+(exit 0 `sweep_passed` → exit 1 `sweep_failed`) と `verify --lemma` の検証対象
+(exit 0 `proved` → exit 1 `violated` / `type_bound`) にも適用されます。
+さらに、`unknown_cti`、または同じ step かそれより後の `violated P` は、
+base で最初に違反する step の `violated _bounds_*` に変わります。
+同じ step の例: `n: 0..1`、init 0、インクリメント、`P { n <= 1 }`、深さ 2 では
+`P`@2 → `_bounds_n`@2。Set の初期コピーで `K = 0..1`、
+`init { x = 2 t = Set { x } s = t }`、`P { not s.contains(2) }` なら `P`@0 → `_bounds_s`@0
+です(どちらも exit 1 の `violated` のままで、種別が `type_bound` になります)。
+たとえば、決定的な Seq init の容量超過は step 0 の型境界違反になります。
+`n: 0..1`、init 0、インクリメント、`P { n <= 2 }` なら、base の深さが 2 以上のとき
+step 2 の `_bounds_n` 違反になります。単独の BMC と explicit のプロパティ選択は
+変更しません。さらに、
 `--engine induction --property <trans>` では、指名した `trans` だけが遷移の証明義務に
 なりますが、すべてのユーザー invariant と暗黙の型境界はベースケースと induction
 仮定に残ります。これにより、確立済みの状態 invariant に依存する 2 状態安全性の証明を
 維持し、選択実行のその遷移に対する verdict を all-properties induction 実行と一致させます。
-既存の `--property <invariant>` の挙動は変更しません: sibling invariant は保持せず、
-指名した invariant だけにモデルを制限します。induction selector は、選択された
+`--property <invariant>` は引き続き sibling invariant を保持せず、ユーザー invariant を
+指名したものだけに制限します。induction selector は、選択された
 `leadsTo` と `reachable` を引き続き usage error として拒否します。
 `--exclude-property Name` は繰り返し指定でき、種別を横断する逆操作として機能します:
 指名された invariant、`trans`、`leadsTo`、`reachable` プロパティを、実行と、検査済み
 プロパティの出力(`invariants_checked`、`transitions_checked`、`leads_to`、
 `reachables`)から取り除きます。`--property` と `--exclude-property` が同じ
 プロパティを指名した場合は、除外が勝ちます。
+暗黙の型境界も `--property _bounds_<var>` で選択でき、関係の境界も含みます。
+これらは `invariants_checked` と、induction で証明された場合の `k_used` に現れます。
+既存の除外制限は変えません: `--exclude-property _bounds_<var>` は `no such property`
+(exit 2)で拒否されます。除外の対象は上記の宣言済みプロパティ種別であり、暗黙の境界ではありません。
 
 **選択した run が評価しない検査(#1008)。** 検査を実行しなかったことは、それが成り立つ
 証拠にはなりません。`verify` のオプションによって宣言済みの検査が飛ばされるとき、
@@ -1000,18 +2347,34 @@ Public Kernel v2 はオプトインで、
 (`fair_not_inherited`)と同じ `no_user_invariants` の抑止を報告します。
 
 `verify --engine induction --lemma "EXPR"` は、`unknown_cti` の修復ループのための
-補助 invariant 候補を繰り返し指定で受け付けます。各式はまず、元の init/actions と
+補助 invariant 候補を繰り返し指定で受け付けます。候補の証明や評価を始める前に、
+すべての候補をパースし、invariant と同じ検査器で `Bool` として再帰的に型検査します。
+型検査を通った各式は、元の init/actions と
 暗黙の型境界に対して、元のユーザー invariant を仮定せずに独立に証明されます。偽の
 候補は、その到達可能な反例とともに `rejected` になります。帰納的でない候補は、
-それ自身の CTI とともに拒否されます。不正な候補はパース/型エラーを運びます。独立の
+それ自身の CTI とともに拒否されます。不正な候補は `rejected`、`used:false` となり、
+パース/型エラーを運びます。型エラーは `proof.result:"error"`、`proof.kind:"semantics"` と
+検査器のメッセージを持ち、argv の `loc` は付けません。パースエラーはパーサーの位置を
+保ちます。拒否されても後続の候補は処理され、終了コードはターゲットの結果が決めます。独立の
 結果が `proved` である候補だけが、元の証明に入ることができます。検証器はそれらの
 候補を各ターゲット CTI 上で評価し、その CTI 上で実際に偽である最初のものを追加して
 リトライします。JSON のフィールド `lemmas` と `lemma_cti_exclusions` は、裁定と
 正確な CTI/違反ステップを記録します。ターゲットが `proved` に達すると、
 `auxiliary_invariant_recommendation` がソースに永続化すべき宣言を出力します。この
 コマンドがファイルを書き換えることは決してありません。未検証の仮定モードは
-ありません。BMC エンジンでの `--lemma` は使用法エラーです。候補のテキストと順序は
-検証キャッシュのキーの一部です。
+ありません。BMC エンジンでの `--lemma` は使用法エラーです。lemma を使う run は
+永続検証キャッシュの参照も保存も行いません。
+#1448 では、579 個の `.fsl` を両モードで base/head 比較した `check` sweep において、
+受理されていた形式の削除はありませんでした。コマンドとリビジョンの識別情報は
+`docs/design/DESIGN-induction-lemmas.md` の "Type-validation compatibility evidence" に記録しています。
+
+sweep の envelope は、実行メタデータの `cache` と timing を除けば入力の関数です。
+安定した比較では approval の `stable_json` と同じく、各 verification envelope
+(`sweep.results[].verification` と、存在する場合の
+`sweep.minimal_counterexample.verification`)の root だけから `cost` と `cache` を
+除外し、domain state 内の同名フィールドは保持します。cache の由来は verdict の
+エビデンスではありません。sweep に `--no-cache` オプションはありません。
+cache の読み書きを止めるには `FSLC_CACHE=off` を使います。
 
 `sweep` は `verify` のオプトインのラッパーで、通常の検証を変えません。
 `--instances NAME=lo..hi`、`--values NAME=lo..hi`、`--depth lo..hi` の上書きの
@@ -1019,7 +2382,22 @@ Public Kernel v2 はオプトインで、
 失敗スコープを `sweep.minimal_counterexample` として返します。`--values` に
 ついては、sweep は下限を固定して上限を拡大します(`lo..lo`, `lo..lo+1`, ...,
 `lo..hi`)。sweep の合格は「このグリッドに反例がない」ことを意味し、非有界の証明
-ではありません。グリッド中のいずれかのスコープが spec `error`(parse / type /
+ではありません。
+
+正規化後のグリッドの上限は 10,000 セルです。各 `--instances` 範囲、各
+`--values` 範囲、深さ範囲の幅を、両端を含めて掛け合わせます。上書き指定のない
+軸は 1 と数えます。同じ軸で同じ名前を繰り返した場合は、前後の空白を除いた
+名前ごとに最後の範囲を使います。CLI オプション、literate 入力の制限、範囲、
+ファイル読み取り、edition の受け入れ検査を先に行い、その後でセル数を検査します。
+edition の受け入れ検査では、ソースを構文解析する場合もあります。セル数の検査は
+両方の直積の生成と、各セルの構文・型・scope の検査より前です。セル数を整数で
+表せない場合や 10,000 を超える場合は、`kind:"semantics"`、exit 2、
+`message:"sweep grid exceeds the maximum of 10000 cells"` を返し、部分的な
+sweep 結果は返しません。上限内のセル順序、既存エラーの返し方、判定、最小反例、
+スコープごとの集約は変わりません。この上限が制限するのは検証の呼び出し回数であり、
+各セルの状態数、経過時間、深さの値自体ではありません。
+
+上限内のグリッド中のいずれかのスコープが spec `error`(parse / type /
 semantics / io / vacuous / …)を返した場合、それは反例ではありません。`sweep` は
 その基盤のエラー envelope をそのまま返します(`result`、`kind`、`message`、
 `loc`、exit code は変更しません)。`sweep_passed`、`sweep_inconclusive`、
@@ -1096,24 +2474,82 @@ spec を省略すると、変更されたすべての `.fsl` パスを比較し�
 `vcs.materialization: "git_archive_full_tree"` を含みます。通常の 2 パス形式は
 決して Git を呼び出さず、リポジトリの外でも動作します。
 
-`approval create` は、レビュー済みの `ledger`、`html`、`scenarios` アーティファクト
+`approval create` は、レビュー済みの `ledger`、`html`、`scenarios`、
+`requirements_document` アーティファクト
 を、完全に lowering された位置非依存のカーネルダイジェストと、現在のクリーンな Git
 コミットに束縛します。バージョン付きの JSON サイドカーは、正規化された
-アーティファクトのダイジェスト、ジェネレータ/バージョン/オプション、承認された
-要件 ID、承認者、UTC 時刻も記録します。作成はアーティファクトを再生成し、古い
-レビューファイルを拒否します。`approval check` は、spec、レンダリング、レンダラの
-バインディングがすべて一致している間だけ `approved` を返します。そうでなければ
+アーティファクトのダイジェスト、ジェネレータ、レンダラのバージョン、オプション、
+承認された要件 ID、承認者、UTC 時刻も記録します。レンダラのバージョンは
+target の種類ごとの `"<renderer-id>/<semver>"`(例: `fslc-ledger-renderer/1.0.0`)
+で、`fslc` のリリース番号ではありません。そのため `fslc` を更新しただけでは
+`renderer_changed` は出ません。ただし ledger や HTML の表示の変更のように、
+更新で出力のバイト列が変わった場合は、`rendering_changed` で drift します。作成はアーティファクトを再生成し、古い
+レビューファイルを拒否します。`approval check` は、該当するすべてのバインディングが
+一致している間だけ `approved` を返します。そうでなければ
 `spec_changed`、`rendering_changed`、`renderer_changed` を伴う `drifted` を返します。
+`requirements_document` は claim set とレビュー済みのバイト列も別々に束縛し、
+それぞれの変更を `claim_set_changed`、`artifact_changed` で示します。
+fslc 4.x が書いたレコードは `4.12.0` のような素の crate バージョンを持ちます。
+その値に対してはレンダラの比較だけを省き、ダイジェストはすべて照合します。
 `ledger --approval` は要件ごとに同じステータスを追加し、完全なベースラインの
 ダイジェストを含みます。`approval diff` は承認されたコミットを実体化し、現在の作業
 ファイルに対して通常の有界セマンティック diff を呼び出します。
 `docs/design/DESIGN-approval.md` を参照。
 
-`--signing-key` がなければ、`approval create` は従来どおり無署名の
-`fslc.approval.v1` レコードを出力します。Ed25519 PKCS#8 PEM の署名鍵があれば
-`fslc.approval.v2` を出力します。そのレコードを使うすべての check、diff、ledger は
-対応する SPKI PEM の `--trust-key` を要求します。v2 の分離署名は完全な正準レコード
-をカバーし、暗号的な不一致は承認ではなく `signature-invalid` です。trust-key の
+4 種類の target すべてで、`approval create` は `--signing-key` がなければ無署名の
+`fslc.approval.v5`、Ed25519 PKCS#8 PEM の署名鍵があれば署名付きの
+`fslc.approval.v6` レコードを出力します。両スキーマは、空でない 2 つの文字列を
+必須とします。`path_base` は作成時の実行ディレクトリを、spec を含む checkout の
+Git ルートからの相対パスで表したもの（ルートなら `.`、それ以外は `/` 区切りの名前）、
+`render_source` は元の spec 引数をそのまま保存したものです。`spec.path` は
+Git リポジトリからの相対パスのままです。target と入力は、検査する spec の Git ルートに
+`path_base` をつないだ場所から読み込みます。呼び出し元のディレクトリや、レコードを
+作成した checkout は読みません。そのため clone、worktree、移動した checkout はそれぞれ
+自分のファイルを読み、そこで文書や用語集を改ざんすると `artifact_changed`、
+`rendering_changed`、または入力 digest の不一致になります。保存したパスの表記、入力順、
+レンダリングのラベルは保ちます。`render_source` は表示用のラベルに限られ、実際の
+ソースと依存先のディレクトリは明示された spec から取得します。
+
+Git ルートは spec のパスが指すディレクトリから求め、`GIT_DIR` や `GIT_WORK_TREE` などの
+Git の場所を決める環境変数は無視します。そのため、末尾のシンボリックリンクや hook の環境で
+別の checkout を選ぶことはできません。spec の実体がそのルートの外にあれば `kind:"semantics"`、
+exit 2 で拒否します。`core.worktree` が spec の外を指す場合も同じです。同じ checkout 内の spec を
+指すリンクは束縛を保ちます。spec の digest とパスを引き続き検査し、ファイルも同じ checkout から
+読むためです。入れ子のリポジトリやサブモジュールへのリンクは、同じパスの検査で失敗します。
+この検索のため、v5/v6 レコードに対する `document generate --approval` には Git が必要です。
+v1–v4 では不要です。
+
+`requirements_document` レコードでは、作成ディレクトリ、target、入力がその Git ルートの
+内側になければなりません。作成時は、絶対パス、ルートの外へ出るパス、ルートの外を指す
+リンク、ルートの外の作成ディレクトリを `kind:"semantics"`、exit 2 で拒否します。検査時は、
+外へ出る、または外へリンクする保存パスを同じように拒否します。絶対パスの形式はそれより先に
+レコードの読み込みで拒否し、`approval check` と `ledger` では `kind:"io"`、
+`document generate` では `kind:"document"` になります。`ledger`、`html`、`scenarios` の
+レコードは `path_base` を通じてファイルを読まないため、どのディレクトリからでも作成でき、
+ルートの外では `.` を保存します。これらの種類の `approved` は、spec と新しいレンダリングが
+レコードと一致することを表します。レビュー対象のファイルを読むのは作成時だけで、その後は
+検査しません。
+
+`path_base` を書き換えると v6 では署名が無効になります。v5 レコードには署名がなく、編集された
+場合には何も証明しません。`path_base` を同じ内容のコピーを指すように変えても `approved` の
+ままです。ファイルを読まないソルバー系レコードでも同様です。レコード自体を保護するには
+v6 を使ってください。
+
+従来の v1–v4 レコードは、形式、署名、実行ディレクトリを基準とする相対パスの
+解釈を変えずに読み込めます。暗黙の移行は行いません。
+
+`requirements_document` の v3–v6 では、承認を検証する approval check と ledger が、
+記録された各入力の digest を、レンダリングに使ったものと同じ生のバイト列と照合します。
+既存の先行エラーと、順序を含む drift の完全な結果を優先します。それらに問題がなく、
+通常なら承認される評価で入力 digest だけが異なる場合に限り、`result:error`、
+`kind:io`、exit 2 と `approval input digest mismatch: <recorded path>` を返します。
+不一致の選択順は glossary、続いて記録順の evidence です。document generate、
+構造を照合する document check、approval diff に保存済み入力の読み込みは追加しません。
+
+署名付き承認を使う approval check、diff、ledger、document generate は、対応する
+SPKI PEM の `--trust-key` を要求します。document check は構造の照合にとどまります。
+v6 の分離署名は 2 つの文脈情報を含む完全な正準レコードをカバーし、
+暗号的な不一致は承認ではなく `signature-invalid` です。trust-key の
 所持は署名者を認証しますが、認可は依然として組織のポリシーの問題です。正確な正準化
 と鍵のフォーマットは `docs/design/DESIGN-approval.md` で規定されています。
 
@@ -1124,19 +2560,80 @@ typestate / sweep_passed / observed_conformant /
 imported / imported_with_warnings、
 `1` = violated / reachable_failed / unknown_cti / unknown_budget / nonconformant /
 refinement_failed / impl_violated / sweep_failed / sweep_inconclusive / observed_mismatch /
-indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が無いとき)、
-`2` = spec エラー(parse / type / semantics / io / vacuous / acceptance / forbidden /
-`--vacuity error`)、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
-`imported`/`imported_with_warnings` は `fslc db import` の結果です。`impl_violated` は
+migrate_manual_required / indeterminate(`chain` の `[impl]` 層に、テストが実行された証拠が無いとき)、
+`2` = 入力エラー(usage は argv の誤り / parse / type / semantics / io / vacuous / acceptance / forbidden /
+`--vacuity error`) / migration_refused、`3` = 内部エラー。`observed_*` は `fslc db observe` の結果、
+`imported`/`imported_with_warnings` は `fslc db import` の結果です。
+`migrate_manual_required`(書き換えられない形がある)と `migration_refused` は、`fslc migrate` が
+入力を書かないときの結果です。`impl_violated` は
 inline `implements` が top-level `result` へ伝播するため列挙しています。失敗した governance の
-`preservation` も同じ対応付けで `check` / `verify` / `scenarios` に畳み込まれます(§13)。畳み込みは検証封筒を
+`preservation` も同じ対応付けで `check` / `verify` / `scenarios` / `testgen` に畳み込まれます(§13)。畳み込みは検証封筒を
 生成する場所で起きるので、`check` / `verify` に閉じません。seam が失敗する spec では、`mutate` は
 baseline の verdict をそのまま返し(baseline が `verified` でなくなるため変異を1つも生成しません)、
 `ledger` と `fslc html` は畳み込まれた検証封筒から同じ exit を引き継ぎ、`sweep` は
 真の失敗なら `sweep_failed`、深さ不足のセルしかないスコープがあれば `sweep_inconclusive` を返します。
 `scenarios` も、自身の有界実行で答えた場合と `verify` の封筒へフォールバックした場合のどちらでも、
 seam とすべての preservation を同じように自身の封筒へ畳み込みます(畳み込まれた `result`、exit 1、
-`implements` / `governance` セクション付き)。同じ `2` の
+`implements` / `governance` セクション付き)。inline `implements` がある ledger の本文は、
+governance とリスク一覧より前の `## inline implements` 節に畳み込み後の判定と
+`abs` / `result` も示します。通る seam も表示し、`refines` だけが緑です。
+この節の追加だけでは `implements` のない ledger は変わりません。ただし sentinel coverage の除去と
+判定所見の追加は別に対象の本文を変え、`implements` のない governance 文書も対象です。
+既承認の inline-implements ledger は
+描画 digest が変わり、`approval check` で `drifted`(exit 0)になります。節を確認して再承認してください。
+ledger のリスク一覧には、非 `refines` の preservation をそれぞれ `GOV` の所見、非 `refines` の
+inline seam を仕様全体の所見としても載せます。無関係な要件行は自身の状態を保ちます。
+`unknown_cti` は通常の違反と同じ宣言の持ち主の規則
+([ledger amendment](../design/DESIGN-ledger.md))で帰属する帰納証明の未確立所見であり、
+到達可能な反例ではありません。生の CTI、hint、rank_failure の証跡を保持します。
+所見の追加と帰属の訂正も、対象 ledger の承認 digest を変えるため再承認が必要です。
+ledger の警告は、種類ごとの1つの表示表で検出種別・要約・業務翻訳・助言を選びます(#1497)。
+空虚性6種と移行5種の描画は維持します。`deadlock` は停止状態の所見、
+`never_enabled_action` は既存の coverage 所見に加える coverage 警告、
+`vacuity_probe_truncated` は mutate を勧めない `verification_incomplete` になります。
+未知・欠落・文字列以外の種類も、一般の警告として残します。
+`no_user_invariants` は利用者の不変条件と遷移制約がないことを示します。
+到達可能性や進行の性質は検証している場合があります。生の警告と他の証跡、保証クラス、
+生成 artifact の封筒とコマンドの exit は変わりません。描画が変わる既存の承認は
+`rendering_changed` による `drifted`(exit 0)になります。台帳を確認して承認を作り直してください。
+新しい台帳に対する承認は `approved` のままです。
+
+native の artifact のファイル出力(`-o` と承認 record)は各ファイルを丸ごと置き換えるので、書き込みに
+失敗しても既存の内容を保ちます。パスの最後の要素が symlink でも辿らず、通常ファイルでない出力先は
+すべて拒否します。`-o /dev/null`、`-o /dev/stdout`、`/dev/fd/63` のようなプロセス置換も対象です。
+親ディレクトリには書き込み権限が必要で、書き込み可能な既存ファイルを置き換える場合も同じです。
+コマンドが読む入力(仕様、import されたファイル、`--evidence` や `--artifact` などのファイル指定)と
+同じファイルへの出力は、何も書く前に拒否します。同じかどうかはファイルそのもので判定するので、
+`./s.fsl`、symlink、`s.fsl` へのハードリンクも同じファイルです。`implements ... from` が指す抽象仕様は、
+それを読まない `document generate` と `document claims` でも入力として扱います(#1753)。これらの拒否は `io` エラー(exit 2)です。異常終了すると、所有者だけが読める `.fslc-output-*.tmp`
+が出力先の隣に残ることがあります。完全な契約は
+`docs/design/DESIGN-atomic-artifact-output.md` にあります。
+`migrate --write` も、書き換える入力が読み取り専用なら同じ `io` エラー
+(`output target is read-only`、exit 2)で拒否し、その集合のどのファイルも書き込みません。
+
+直接の `ledger` と `html` は、検証の `result:"error"` には元の JSON エラー封筒と exit 2/3 を
+返し、描画も artifact の書き込みもしません。直接の `ledger` は付随の replay、evidence の読み込み、
+witness の準備より前に止まります(`html` は explain より前に止まります)。`-o` でも
+artifact は作りません。それ以外の不成立・未確立の判定では、既存の非 0 exit で report を生成します。
+digest 比較用の承認専用 ledger 再描画も、同じ `result:"error"` で止まります。
+それ以外の判定では、digest を比較できるように描画します。
+native の完全な検証を行うすべての呼び出し元は、検証段の一つの持ち主を共有します。
+baseline の adapter は cache を無効にし、既定の vacuity 警告を保ちます。
+直接の report は、描画用 model の読み込みや trace 契約の取り出しより先に検証し、error を確認します。
+そのため壊れた causal 構文は `FSL-DIALECT-UNKNOWN` でなく `FSL-PARSE` と parser の位置を、
+Agent 入力は state 不在の semantics error でなく parse の拒否を保持します。未知の DB column は
+生成名の位置付きエラーでなく位置のない特化エラーを保持し、AI authority の未知の tool は
+panic(exit 101)でなく semantics error(exit 2)になります。
+通る report、warning、metadata と承認 artifact の digest は変わりません。
+この error の訂正は直接の `ledger` と `html` の報告だけが対象です。
+`approval create --kind ledger|html`、`approval check`、`approval diff` と
+`counterexample export` は今も検証や再描画より先に spec を lower し、既存の不正入力の error の
+優先順を保ちます。#1464 の後は、AI authority の未知の tool は panic でなく
+semantics error(exit 2)を返します。approval create の diagnostic の優先順は
+引き続き別の issue で扱います。
+`testgen` は kernel 経路でも fallback 経路でも、seam または preservation の失敗には
+`verify` と同じ失敗封筒と exit(検証の失敗は 1、契約エラーは 2、内部エラーは 3)を返し、
+ハーネスを書きません。同じ `2` の
 対応付けは `chain` のプロジェクトマニフェストリーダー(未知のセクション、認識できる
 セクションが0個、パース不能な `depth`/`refine_depth` — `docs/design/DESIGN-layers.md` §7)
 と、`ledger --impl-log` の replay 入力(replay エラーは実装ログの証跡ではなく、
@@ -1144,12 +2641,39 @@ seam とすべての preservation を同じように自身の封筒へ畳み込�
 に適用されます。
 
 `approval_check` と `approval_diff` がこの表に無いのは、exit code が `result` の
-関数ではないからです。`fslc approval check` はどの結果でも同じ `approval_check` を
-返し、判定は `status` が担います: `approved` と `drifted` が `0`、
-`signature-invalid` が `1`。drift が 0 で終わるのは、`diff` の findings と同じく
-分析出力だからです(§12)。理由と、`fslc document check` の `document_drifted` が
-異なる扱いになる理由は `docs/design/DESIGN-approval.md` にあります。exit code ではなく
-`status` でゲートしてください。
+関数ではないからです。`fslc approval check` は評価が完了した場合に `approval_check` と
+`status` を返します。`approved` と `drifted` は exit 0、`signature-invalid` は exit 1 です。
+drift は通常のゲートなし `diff` の findings と同じ分析出力です(§12)。明示的な
+semantic/batch diff のゲートは失敗時に exit 1 を返します。document の drift と扱いが
+異なる理由は `docs/design/DESIGN-approval.md` にあります。
+
+`status:"approved"` が確認するのは digest の束縛で、検証の合格ではありません。現在の spec と
+描画した artifact が record の digest と一致することだけを示し、封筒に検証の判定は含みません。
+`--kind ledger` の record は、不成立・未確立の baseline でも作成でき、`approval check` は
+exit 0 と `approved` を返します。`violated`、`unknown_cti`、`reachable_failed`、
+`refinement_failed`、`unknown_budget` もこれに含まれます。`fslc verify` は別にゲートしてください。
+承認のゲートでは、exit 0 AND `result:"approval_check"` AND `status:"approved"` をすべて
+確認してください。
+
+入力、baseline、record、trust 設定のエラーは、元のエラー封筒と exit 2 を返し、承認の
+`status` は付きません。`approval create` と `approval check` で artifact 評価が中断した場合は、下流の完全な封筒と終了コード
+(検証失敗1、内部エラー3)を保持し、承認の status も新しい record も作りません。
+`--kind ledger` の再描画で検証が `result:"error"` を返した場合は、`drifted` や artifact の
+不一致ではなく、そのエラー封筒と終了コード(2、内部エラーは3)を返します。
+HTML の再描画で検証に失敗した場合は、`generated`/`html_report`、exit 1、インラインの
+content と既定の output メタデータを返し、HTML ファイルは書きません。
+直接の HTML/ledger は検証失敗時にも report を生成して exit 1 を返し、出力の書き込み
+エラーは baseline の判定より優先して exit 2 を返します。
+`fslc ledger --approval` はこれらの結果を伝播しません。`html` または `scenarios` の record の再描画が
+検証失敗の baseline で止まると、record を名指しした `result:"error"` と exit 2 を返し、`-o` の
+ファイルには触れません。`ledger` と `requirements_document` の record は再描画が完了するので、
+ledger を書いて `drifted` と表示し、検証自身の終了コードを返します。
+
+通常の JSON 出力は、内部エラーの終了コードを正規化した後、serialize より前に、
+コマンドを考慮した封筒と終了コードの整合性を debug assertion で確認します。
+不一致では既存の panic 経路で exit 101 となり、通常の stdout JSON 封筒は出しません。
+先に生成した artifact は保持します。release build にはこの assertion はありません。
+raw/source/schema、fmt、metadata/help/version、早期の argv 拒否は既存の契約を保ちます。
 
 ### 結果の種類
 
@@ -1168,7 +2692,7 @@ seam とすべての preservation を同じように自身の封筒へ畳み込�
 | `unknown_cti` / `key_domain` | 証明済みの invariant をすべて満たす状態で、guard・本体・property・到達した `ensures` が有限キーの `Map` をキー定義域の外で添字参照する(読み出しまたは添字代入)。BMC と explicit は深さ内に入るとエラーとして報告する | 短絡する `and`/`=>`/`or`/`if` か `requires` で添字を守るか、その状態が到達不能なら除外する補助 invariant を足す |
 | `unknown_cti` / `ensures` | 証明済みの invariant をすべて満たす状態どうしの 1 step で、到達した action の `ensures` が偽になる | 本体か `ensures` を直す。始状態が到達不能なら、それを除外する補助 invariant を足す |
 | `unknown_budget` | いずれか: `--engine explicit` が閉じる前に `--explicit-budget` を超えた。または refinement の対応探索が固定の内部状態予算を超えた(CLI フラグ無し) — inline `implements Abs from "file" { }` seam(`check`/`verify`)、`fslc refine`(単体・chain)、`fslc chain` の refine 層、governance の `preservation`(§10、§13) | explicit engine の場合: 予算を上げるか、この spec には `--engine bmc`/`induction` を使う。refinement の場合: depth を下げるか、両層の `verify {}` の domain を縮める。inline `implements` seam は各層の `fslc verify` に分けることもできるが、`fslc refine` は同じ予算を共有する。`fslc diff` は打ち切られた方向を `unknown_budget` と報告し、gate を無条件に落とす(finding `unknown_budget`、exit 1)。`fslc mutate` はその mutant を `inconclusive` と報告し、`kill_rate` から外し、要求された gate を落とす |
-| `error` | parse / type / semantics / io | `loc` / `expected` / `hint` に従って直す |
+| `error` | usage(argv の誤り) / parse / type / semantics / io(コマンドが読む入力ファイルを読めない。メッセージは `<path>: <error>`) | `usage` は argv を直す。`io` は示されたパスを直す。それ以外は `loc` / `expected` / `hint` に従って直す |
 
 `--engine auto` は explicit と bmc を合成します: まず explicit を試し(より速く、
 `proved`+`closure:true` に到達できます)、explicit が単独ではその spec を判定でき
@@ -1203,6 +2727,12 @@ state の budget で打ち切られた、というもので、上記のどちら
 blame は特定するだけで、修復(ガードの弱化、連言肢の削除)を提案することは決して
 ありません — それは anti-hollowing の原則に反するからです。これらはすべて JSON
 コントラクトへの厳密に追加的な変更です。
+
+この特定はどちらも浅いものです。連言肢に分けるのは invariant の最上位の `and` だけで、
+量化子の本体の中の論理積は 1 つの連言肢のままであり、その `text` は量化した式の全体です。
+`violating_bindings` が示すのは、いちばん外側の量化子の偽になった値だけです。
+`forall u: U { forall i: I { not (a[u] and b[i]) } }` では `[{"u": 0}]` を返し、`i` の値は
+含みません。入れ子の量化子を再帰的に射影することと、量化子の中を分割することは実装されていません。
 
 忠実性/意図のギャップを特定する診断は、`faithfulness_class` と
 `recommended_action` も運ぶことがあります。現在のクラスは
@@ -1263,6 +2793,15 @@ leadsTo が宣言されていて結果が `verified` / `proved` のとき、
 ブロックしている requires 節は、それが安価な場合、最小化された unsat core によって
 特定されます。requirements の `branches` については、偽のカバレッジ診断は内部の
 分割 action の `name` を保持し、`display_name` を追加します。
+生の `action_coverage` は生成だけの sentinel の `covered:false` も保持し、verify、induction、
+Worker の JSON は変わりません。公開の coverage 所見には、著者の primary origin、なければ
+kernel action の宣言に正の行・列が必要です。名前や prefix ではない、この共通の位置判定で
+scaffolding を runtime の警告、ledger の coverage 所見、mutate の死アクションの注記、
+HTML の badge と分母から除外します。現在の CLI の mutant 列挙経路には、生成だけの
+死アクションが到達する経路はありません。
+対象 action がなければ HTML の指標は `0/0` です。HTML Raw Data は元の coverage map を保持します。
+描画が変わる ledger/HTML の既存承認は `drifted`(exit 0)になります。修正された artifact を確認して
+再承認してください。
 
 ### explicit action 実行プロファイル
 
@@ -1553,6 +3092,10 @@ refinement CartImplRefinesCart {
   `kind: "type"` エラーになります。そのペアには明示の `action ... -> ...`
   対応を書いてください。互換でない同名の状態候補も同様に `kind: "type"` エラー
   として報告されます。
+  `covers`・edition混在・composeを含むautoのactor互換性は§13.2に従います。
+  [DESIGN-refinement](../design/DESIGN-refinement.md)の
+  「#1441: source-actor auto mapping and breaking-source migration」および
+  「#1456: requirement-action own actors and breaking-source migration」も参照してください。
 - `action <impl>(<formal params>) -> <abs>(<expr>) | stutter` — すべての impl
   action に必須です。形式パラメータは裸の名前でも、impl の action 宣言に一致する
   `name: Type` の注釈でもかまいません。
@@ -1652,9 +3195,11 @@ action など)は `kind: "type"`(exit 2)です。`map_partial_op` は、action �
 `refine` はどの対応関係も検査する前に、まず impl spec が `--depth` の範囲内で
 それ自身の型境界や不変条件を破っていないか(内部的に一貫しているか)を検証しま
 す。壊れた impl を refinement mapping で意味のあるものにすることはできないため、
-これは abstraction や mapping とは独立に検査されます: `result: "violated"`
+これは abstraction や mapping とは独立に検査されます: `result: "impl_violated"`
 (exit 1)に `violation_kind` と、これが fidelity の失敗ではなく refinement
-*入力*自体の性質であることを説明する `note` を伴います。`refines` として報告さ
+*入力*自体の性質であることを説明する `note` を伴います。この結果の語は、`refine`、
+inline `implements` seam、governance の `preservation`(§13)のどこでも
+`impl_violated` の 1 つです。`refines` として報告さ
 れることはなく、`refinement_failed`(上記の `kind` 群は impl と abs の**間**の
 不一致を表すものであり、impl 単独の欠陥ではありません)に畳み込まれることもあり
 ません。`fslc diff` は同じ条件を `impl_violated` の finding として表面化させ、
@@ -1707,14 +3252,51 @@ init 対応関係の違反により)`refinement_failed` を報告するように
 別の、なお有効な abs の初期分岐と一致するため)`refines` を報告するようになる
 場合があります。
 
-状態変数のペアが 1:1 でマップされる場合でも、impl と abs には**別々の enum/struct
-型名**を与えてください。型メタデータは refinement 検査のために名前でマージされ
-ます。両側で異なるメンバーリスト(またはフィールド集合)を持って宣言された同名の
-enum(または struct)は、マージされるのではなく `kind: "type"`(exit 2)として拒否
-されます — マージすると、impl 専用のメンバーが、同じ順序位置に座っている abs の
-メンバーとして黙って再解釈されかねないからです。ドメイン型
-(`type X = lo..hi`)は異なる境界で安全に名前を共有できます。そこでの範囲外の値は
-依然として `map_out_of_bounds`/`abs_state_mismatch` として捕捉されます。抽象 action のパラメーター定義域の外に出る action 対応の引数(impl のパラメーター型が広い場合。抽象の guard が偽ならこれまでどおり先に `abs_requires_failed` になります)と、impl の `Map` を定義域の外のキーで読む状態マッピングの式(impl のキー型が狭い場合など)も、`kind: "type"` のエラーではなく `map_out_of_bounds`(exit 1)になります。
+impl/abs の同名の型は、種類、解決後の domain 境界、enum の member と順序、
+struct の field と型が一致しなければなりません。`symmetric` は比較せず、一致すれば
+impl の定義を残します。未使用でも異なる定義は `kind: "type"`(exit 2)で拒み、
+`refinement` または inline `implements` の宣言位置と両 spec の名前を示します。
+governance では外側の preservation の位置を保ちます。異なる定義には別名を付けて
+ください。**破壊的 removal (#1599):** 異なる境界の型は同名にできません。
+boundary gallery の従来の exit 1 `refinement_failed/abs_state_mismatch` は
+exit 2 `error/type` に変わります。
+progress がなければ別 enum の同名 member 宣言は引き続き可能です。曖昧な bare 参照は
+拒み、型付き conversion/abstraction は受け入れます。`preserve progress` がある
+refinement では ordinal が一致していてもこの宣言を拒みます。pulled model の safety
+違反は property 名と pulled model を示す exit 2 `error/semantics` となり、trace は
+付けず、`refines` や `progress_lost` とはしません。別の型名を使った mapping/引数の
+範囲外は従来の `map_out_of_bounds` のままで、偽の abstract guard が引き続き優先します。
+`verify { instances Item = N }` から来る entity の範囲にも同じ規則を適用します。
+衝突時は両 spec の instances と、その出所(verify block または CLI override)を示します。
+verify block の値をそろえてください。`verify` と `refine` では、両 spec に効く
+直接の spec なら `--instances Item=N` でもそろえられます。
+**`check` は `--instances` を受け付けません。**
+compose の衝突では `p.Item` のような公開名と、両 component のファイル・instances・
+verify block の出所を示します。component の verify block をそろえてください。
+compose はこの instances override に対応しません。診断の公開名表示は、内部の型・
+メンバーの識別やメンバーの構文を変えません。
+破壊的 removal: `inline_implements_bounds/impl_spec_extra.fsl` の既定の check/verify は、
+Item=1 と Item=3 の相違により、exit 1 `refinement_failed` から `implements` 宣言位置の
+exit 2 `error/type` に変わります。同じ instances を共有する override なら引き続き refines です。
+
+境界監査(#1599): base `a52bef4931adc67ea2b1fdca827e2318b4ae25ab`、
+測定した product/test head `9eaaea7d1c526ede6a13408ea414616ddadccf69`。
+corpus610形(既存606・追加4)の check、次版39 controls、typed mapping60、
+書き換えた inline20組・expression2組・受入39 cell を、両 tree で2回、
+JSON全体・stderr・exit で比較しました。既存 corpus check の ok→error は**空集合**です。
+inline check の breaking removal は、issue_1296_abs_partial_op と
+issue_1302_abs_step_violation の元の D 境界の形、および
+inline_collision_is_located_at_implements/governance_check_collision です。
+対応する verify も type error になります。refine の removal は cases1/2a/3a/3b、
+domain_bounds/domain_lower/kind_change/struct_named_type、ordinal が同じ member 衝突、
+chain 衝突、元の shared-member progress の expression_agreement です。
+改名した counterpart は従来の成功・agreement を保ちます。
+boundary/entity の refinement_failed→type error は判定分類の変更です。
+元の runtime2・CLI2・mutation3 の Seq controls は、宣言検査が先になることで
+診断が変わりますが、拒否や invalid 数・gate は変わりません。standalone の実在する
+1:1 は10 byteの `refinement` keyword全体(end1:11)で、unknown位置の代用ではありません。
+inline は `implements` token、別型名の carrier counterpart は map token を保ちます。
+既存の type error にも、読み込んだ impl/abs の名前が付くようになります。
 
 ### チェーン検査(マッピングの合成)
 
@@ -1774,6 +3356,48 @@ refinement DesignRefinesReq {
 メタデータで、impl の action を名指ししなければなりません。公平性を作ることも、
 実装のコンフォーマンスを証明することもありません。公平性は依然として下位レイヤーの
 `fair action` 宣言から来ます。
+抽象の Int/Bool 定数は P/Q、`decreases`、範囲と入れ子のフィルターでリテラルになります。
+別モデルの impl 定数との binder 衝突と、読まれる抽象の const/state の同名は拒否します。
+const と同名の local は先に `check` が拒否します。**破壊的な受理の削除 (#1595):** 性質の pattern が、字句 scope で使う map の
+自由な impl 名と同名なら、読める続きとは別に拒否します。たとえば `map y=x` の下の
+`y==0 ~> ((o is some(x)) or y==3)` は、以前は `refines`(exit 0)でしたが、今は拒否します。使う map 式の pattern が性質の binder や
+他の使用 map 式の pattern と同名でも拒否します。抽象/写像の pattern を改名してください。通常の scope は不変です。
+直接の refine は `respond` の位置つきエラー(exit 2、`kind:"type"`、`loc` あり)です。
+抽象の定数と state が同名の曖昧な範囲の例は refine が exit 2、抽象単独の BMC が exit 1 です。
+未使用の map/合法な local は受け入れ、外側の捕獲は拒否します。外側の名前を維持し、入れ子の診断は改名し得ます。
+抽象の定数を範囲で読む違反で impl の定数を改名した形と、抽象の定数を本体で読み impl に
+同名がない違反は、従来の exit 2 エラーから exit 1 `progress_lost` に変わります。
+
+indexed progress mapping は同時置換です(#1613)。`map a[i: K] = expr` に対し、
+ソースの読み出し `a[e]` は、引き込み済みの `e` で `i` を置換した `expr` になります。
+挿入した式は impl の scope にあり、抽象の mapping を再適用しません。identity/swap の
+map は stack overflow を起こさず、chain も impl の読み出しの内側で別の抽象 mapping を
+たどりません。実際に進行を失う場合は、誤った `refines` ではなく `progress_lost` です。
+
+**破壊的 removal (#1613):** 引き込む性質が indexed 抽象 state を map 全体として自由参照
+する形は、同名の impl state があっても `respond` 位置の `error/type`(exit 2)になります。
+受入例 `whole-same`(`map m[i: K] = n[i]`、性質 `m == z ~> m != z`)は、誤った
+`refines`/0 から 8:23 の type error/2 に変わります。無関係な impl state の改名では
+修復できません。ソースの binder による shadowing と、挿入される impl の式の合法な
+map 全体の読み出しは引き続き受け入れます。collection 全般の禁止ではありません。
+P/Q は対応する要素読み出しの述語で書き直し、**時間的な意味を変えないでください**。
+map 全体の等値は全キーの一致、不等値は少なくとも一つのキーの相違です。`forall` を
+`~>` の外に移すと応答義務が変わり得るため、singleton の例を一般的な移行の同値性と
+見なせません。性質や `preserve progress` を弱めず、意図した契約を維持してください。
+
+境界監査: base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` → production head
+`2aab19f2b2d286c01c1aa79497c131df334aaff1`。各 binary を自身の tree で、
+次版の構文解析を有効、キャッシュを無効にして実行しました。corpus610形
+(specs23・examples195・fixtures392)と inline54形の `fslc check <path>` は、
+**ok→error が空集合**で、出力全体が一致します。595 source の inventory で、書き換えた
+required test の inline は0形、追加は受入テスト2本のみです。別枠の corpus `refine`
+28 command は不変です。inline18組の `fslc refine impl.fsl abs.fsl map.fsl --depth 4`
+では9組が不変、9組が変化しました: abort→progress_lost が5組、誤った
+refines→progress_lost が1組、既存 error の位置・分類修正が2組、上記の
+**受入→error の whole-map removal が1組**です。710 route 全体を各SHAで2回実行し、
+CLI field の mask はありません。scope・移行・反復の証拠は
+[DESIGN-refinement §4](../design/DESIGN-refinement.md#4-implementation-notes)を参照してください。
+
 非有界の証明には、引き続き下位レイヤーの `leadsTo ... decreases ...` と
 `verify --engine induction` を使ってください。
 
@@ -1818,6 +3442,79 @@ compose OrderSystem {
   各コンポーネント action の requires / 本体 / ensures をマージします。追加の文は
   合成側の状態にのみ代入できます
   (同じコンポーネントの 2 つの action を同期させることはできません)。
+  破壊的な削除 (#1334): 以前は `check` を通った `alias__x` のような物理名による部品の状態への追加文の代入も、位置付きエラーで拒否します。
+  同期参照の引数が読めるのはヘッダのパラメータ・const・状態だけで、追加項目の `let` 束縛は読めません (破壊的な削除、#1442)。
+  部品の自由な値の読みと更新先の根はマージ前の部品自身の宣言に対して解決するため、未宣言の参照を合成によって有効にはできません (破壊的な削除、#1442)；公開名は引き続き使用でき、所有する enum の保護が必要な読みも表示には元の member 名を使います。
+- **compose の `def` (破壊的な削除、#1335):** compose 直下の `def` は、通常の spec と同じように、alias の解決と同期実引数の置換より前に展開し、呼び出されていなくても検査します。4.12 が受理していた、使われていない重複・再帰・誤った呼び出しを含む `def` は、`check` で exit 2 になります。形とエラーは §3 にあります。
+- **ルートの同期実引数の検査 (破壊的な削除、#1517):** `check` は、部品の action が読まない仮引数への実引数も含め、すべての同期実引数を置換前に仮引数の型で検査します。
+  実引数が読めるのはルートのヘッダ引数・状態・定数・enum だけで、追加項目の `let` や `requires` の束縛は読めません。
+  数値 carrier は型名にかかわらず互換のままで、数値範囲の不一致は静的エラーにしません。component の action がその引数を読むときだけ検証で報告され、読まれない引数には結果が出ません。
+  次の形は以前 `check` を通っていましたが、現在は意味エラー (終了コード 2) です。
+  - **未使用の仮引数への不正な実引数:** `a: K` への `true` や関係の添字 `part.h[0]`。未解決の名前 (`nosuch`)。追加項目の `let` だけが束縛する名前を含みます。修飾した enum member (`part.Red` や `Color.Red`。`Red` と書きます)。`part.Color` の仮引数への他の部品の enum の値 (`other.tone`、型 `other.Tone`)。条件が Bool でない条件式 (`if 1 then 0 else 0`)。不正な型の引数で呼ぶルートの `def` (`def rp(v: Int)` への `rp(true)`)。括弧、後ろの実引数、後ろの参照、後ろの action でも同じです。
+  - **置換後の本体だけ型が合っていた使用中の仮引数:** `flag: Bool` で実引数 `true` を渡す `put(a in 0..1) { flag = a }` や `put(a: K) { flag = a }`。`m: Map<C, Bool>` で enum の実引数 `R` を渡す `put(a: K) { m[a] = true }`。
+  - **重複した仮引数:** `(a: K, a: K)` に実引数 `true, 0` を渡す形。置換で最初の実引数が消えていました。
+  - **仮引数の宣言が不正な internal action:** 部品が `a: Int`、`a in 1..0`、`a: Nope`、struct 型の `a: T` を宣言し、`internal part.put` と `part.put(0)` を使う形。これらの宣言は部品単体の `check` でも拒否されます。
+
+  移行: 仮引数の型の値を渡します。ルートの外から来る値にはヘッダ引数を使います。または部品を直します。自動移行はありません。ディスク上の 610 件のコーパスに変化はありません。文言と根拠は [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md) にあります。
+  ルートの実引数エラーは、括弧を含む実引数全体か、その内側の span を指します。CLI と Worker の `loc` は先頭で、LSP は UTF-16 の始点と終点を返します。文言に部品 wrapper は付かず、action と Kernel のメタデータは変わりません。エラーの順序は、即時 lowering、モデル組立、記述順の待機実引数、init と部品の検査です。
+  Bool・範囲・名前付きの期待型がある条件式は各 arm をその型で検査します。そのため `m: Map<A, Bool>` の `m[if c then 0 else true]` は `Range(0, 1)` ではなく `Named("A")` を示します。`Int` の期待型を含むそれ以外の条件式は、引き続き各 arm を最初の arm の型で検査します。測定した入力の受理判定は変わっていません (入力は上記の設計ノートに記載)。
+  Rust API: 公開 `SyncRef` に `arg_spans` が必須です。`into_validated_syntax` は非公開メタデータを捨てる前に検査し、`syntax`・`kernel_ast_v1`・`into_syntax` は未検査で情報を失う変換のままです。移行した CLI の 3 箇所は呼び出しごとに完全なコア検査が 1 回増えますが、同じコマンドがすでに同じソースを検査しているため CLI の出力は変わりません。
+  #1517 は、マージ後の `main` で製品ゲートが通るまで開いたままです。
+- **重複した仮引数名(破壊的な削除、#1680)。** 同じ action の先行する仮引数がすでに使った名前を仮引数や入力に
+  書くと、`check` は拒否します。対象は、action、requirements の action、process の transition、event、
+  domain の command の入力、effect や saga の action が仮引数として受け取る event のフィールド、同期された
+  ルート action、インライン `implements` の抽象側の action、compose の部品のすべての action です。部品では、
+  持ち上げられた action、同期された action、`internal` で参照されない action を含みます。これらは置換や
+  `internal` で取り除かれた後は `build_model` に届いていませんでした。次の形はこれまで `check` を通り、
+  `put(a: K, a: K)` は最後の実引数を読んで最初の実引数を捨てていたため、`part.put(0, 1)` と `part.put(1, 0)` で
+  判定が食い違いました。
+  - `put(a: K, a: K)`、`put(a in 0..1, a in 0..1)`、`put(a: K, b: K, a: K)` に対する、`internal part.put` と
+    `part.put(0, 1)`(順序は問いません)。
+  - 参照のない `internal part.put`(本体の内容は問いません)。
+
+  拒否は終了コード 2、`kind: "semantics"` です。ただしインライン `implements` では、もう一方のファイルの失敗は
+  すべて `kind: "type"` です。部品では `loc` を他の部品の失敗と同じく `use` に置いて
+  `component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81) at root.fsl:2:3`
+  と報告します。インライン `implements` では `loc` を `implements` に置いて
+  `implements "abs.fsl" failed to check (step: duplicate action parameter 'x' at abs.fsl:1:77)` と報告します。
+  それ以外ではメッセージは `duplicate action parameter 'a'` で、`loc` は繰り返された名前を指します。以前は名前と
+  同じ綴りの最初のトークン、domain の command では `decide`、event では event を指していました。`lint` と
+  `fmt` のメッセージも同じで、`loc` を省くことがあります。
+
+  この拒否は文書を読み込むすべての経路に届きます。上の部品の形では、`verify` は判定を返さず、`refine` は
+  `refines` を、`replay` は `conformant` も `nonconformant` も返さなくなります。それぞれの結果で終了していた
+  `lint`、`fmt`、`conformance`、`explain`、`analyze` は終了コード 2 になります。`domain analyze` と `domain expand` は
+  モデルを組み立てないので、繰り返された command の入力でも終了コード 0 のままです。`expand` の出力は `check` が
+  拒否します。
+
+  実引数の型検査より先に報告するので、`part.put(true, 0)` は `Bool` の実引数ではなくこの拒否を報告します。即時の lowering 失敗より
+  後なので、`part.put(0)` は引数の数のエラーのままです。`def` の仮引数はすでにすべての経路で `def` の位置で
+  拒否されており、変わりません。次は実引数が失われないので受理されたままです。ログのマッピング
+  `action ev(a, a) -> put(a)` の仮引数は 1 つのログのフィールドを指します。どの action も仮引数として受け取らない
+  domain の event のフィールドもここでは受理されていましたが、下の #1700 が拒否し、他の event のフィールドの拒否も引き継ぎます。
+  移行: 仮引数にそれぞれ別の名前を付け、各実引数を対応する仮引数に渡してください。
+  計測した形とコーパスの比較は
+  [`DESIGN-sync-argument-root-validation.md`](../design/DESIGN-sync-argument-root-validation.md) にあります。
+  Rust API: `SpecItem::Action`、`SyncAction`、`RequirementAction` に `param_spans`、`ProcessTransition` に
+  `input_spans` が必須です。空は記述された仮引数がないことを表し、拒否は action を指します。
+- **コピーが失われる `domain` 宣言の繰り返し(破壊的な削除、#1700)。** `check`、`verify`、`fslc domain` の
+  すべての経路は、次の宣言を繰り返した箇所で exit 2 と位置つきで拒否し、`domain expand` は何も書き出しません。
+  - aggregate の中で、`kind: "name"` のもの: 1 つの event に対する 2 つ目の `evolve`、同じ名前の 2 つ目の
+    `command`、フィールドを 2 回宣言する `event`。
+  - 値を 1 つだけ持つ節の 2 つ目で、`kind: "parse"` のもの: `implementation_profile`、aggregate の `id`、
+    projection の `from`、effect の `reliable`、`irreversible`、`idempotency_key`、`correlation_id`、`handles`、
+    `request_event`、`success_event`、`failure_event`、`timeout_event`、`retry`、`timeout`、`outbox`、`inbox`、
+    effect のフィールド、`retry` の中の `max_attempts` と `backoff`、saga の `starts_on`、saga の step の
+    `awaits` と `timeout`。
+
+  これらは `check` を通り、コピーを 1 つだけ残していました。`evolve` を 2 つ書くと最初のものが残るので、
+  `n = 1` の次に `n = 2` と書くと不変条件 `n <= 1` は verified になり、逆の順では violated になりました。event の
+  コピーはどれを読むかが一致せず、`evolve` は最後を、`correlation_id` は最初を読んでいました。インライン
+  `implements` を通すとメッセージは相手のファイルを示し、`kind` は `"type"`、`loc` は `implements` のままです。
+  すべてのコピーを読む種類は受理されたままです。たとえば 2 つの `requires`、saga の `outbox`、同じ名前の
+  2 つの saga や aggregate です。
+  移行: 失われていたコピーを削除するか、2 つをまとめてください。
+  計測した種類とコーパスの比較は [`DESIGN-domain.md`](../design/DESIGN-domain.md) にあります。
 - 公平性は同期を通じて継承されません。fair なコンポーネント action が非 fair な
   同期 action から参照されると、`check` / `verify` は JSON の `warnings` に
   `fair_not_inherited` 警告を出します。同期 action が fair でなければならないとき
@@ -1838,19 +3535,73 @@ compose OrderSystem {
   コンポーネントで変換をモデル化してください。
 - `internal <alias>.<action>` — その action をインターリービングから除外します。
 - (`=` のない)通常の `action` も書けます(グルー action)。
-- JSON の表示: 物理名 `alias__x` は `alias.x` として出力されます(状態のキー、
-  action 名、invariant / reachable 名、トレース、シナリオ、Monitor — すべて)。
-  コンポーネントの action の公開名は alias と action 名から作るので、
-  `use X as a__b` の action `c` は `a__b.c` です。コンポーネントの action を名指す
-  すべてのコマンド — verify、sweep、scenarios、explain、testgen、conformance、
-  mutate、refine、diff、html、ledger、analyze(`action:a__b.c` のようなグラフの ID を
-  含む)、`check --strict-tags` の警告、`state_mismatch.action` を含む `replay` の出力 — がこの `alias.action` 形を
-  使います。`_requires_failed_a__b.c` のように action から作る名前も同じです。
-  状態のキーは上の規則のままなので、`use X as a__b` の状態 `n` は `a.b__n` と
-  表示されます(凍結した Python 参照実装では `a__b.n`)。
-  v1 の `replay` トレースでは、コンポーネントの action を `alias.action` と書いても
-  旧来の `alias__action` と書いてもかまいません。どちらも同じ action を指します
-  (`docs/design/DESIGN-replay-trace.md` を参照)。
+  グルー action は compose 側の状態と部品の状態を `alias.var` で直接読み書きできます。
+  compose の `init` も `alias.var` で部品の状態に初期値を与えられますが、部品自身の `init` の代入と重なる場合は二重の初期化として拒否します。
+- 名前と `__`: `spec`・`requirements`・`business`・`compose` の文書で宣言する名前
+  (spec、action、パラメータ、`let`、状態変数、property、型、const、enum の
+  メンバー、struct のフィールド、process、stage、actor、`use` の alias)には
+  `__` を含められません。`fslc check` は宣言の位置で拒否します(`kind:"name"`、
+  exit 2)。compose のコンポーネントの宣言は、親の `use` の位置で報告します。
+  `__` は lowering が作る名前のためにとってあります。compose のコンポーネントの
+  宣言の物理名 `alias__x` と、requirements の `branches` の action を分けた
+  `submit__b1` です。作られた名前を参照することはできます(refinement の対応が
+  `submit__b1` を参照するように)。
+  破壊的な受理の削除 (#1256): このような宣言は、5.0.0 より前はヘッダーのない文書を
+  含めて `check` を通っていました。宣言とその参照を改名してください(たとえば
+  `foo__bar` を `foo_bar` に)。その名前を書いた replay の trace や保存した出力も
+  直します。
+  破壊的な削除 (#1600): 次のエディションの requirements では、関係の役割
+  (`Claim belongs to User as __owner via approve`)、resource の名前
+  (`resource __r: Amount = 0`)、measure の名前
+  (`measure __m = count Claim in Approved`)にも `__` を含められません。
+  これらは以前は `check` を通っていました。`fslc check` は宣言の位置で拒否し
+  (`kind:"name"`、exit 2)、たとえば
+  `relation role name '__owner' contains '__', which is reserved for the names FSL generates ...`
+  と報告します。役割・resource・measure を `__` を含まない名前に変え、その参照も
+  更新してください。
+  破壊的な削除 (#1602/#1603): goal と policy の ID、requirement の ID
+  (次のエディションでは `rule`)、scenario の ID (legacy では `acceptance`)、
+  forbidden の ID、決定表の ID (`decide`)、glossary の alias にも適用します。
+  両エディションで、その構文が存在する位置が対象です。これらは以前は `check` を
+  通っていましたが、今は exit 2、`kind:"name"`、ID または alias の位置の構造化された
+  `loc` で拒否します。ただし、後述の legacy の位置の制限があります。
+  既存の separator のメッセージで使う位置の語は `goal`、
+  `policy`、`requirement`、`scenario`、`forbidden`、`decision`、`glossary alias` です。
+  ID または alias を `__` を含まない名前に変え、その参照も更新してください。
+  次のエディションの rule の ID は header の token の span だけから位置を求めます。
+  deadline がある rule や ID の前にコメントがある場合も同じです。明示の `requirement`
+  block も両エディションで引き続き使え、その ID を検査します。
+  deadline の有無を問いません。重複する ID の検査から外すのは rule から生成された
+  requirement の複製だけです。
+  既存構文の位置に関する既知の制限 (明示の block も対象):
+  requirement、acceptance、forbidden の ID を `REQ - __1` のように分けて
+  書いた場合も拒否しますが、fallback の位置探索は ID の token ではなく、宣言の
+  キーワードや後で繰り返された正規化済みの綴りを指す場合があります。この構文に
+  固有の位置の制限は今回の修正では直していません。
+  次のエディションの rule の property のラベルに `__` を含む場合、またはリテラルを
+  名前に使う場合 (`none:` など) は、引き続き exit 2、
+  `diagnostic_code:"invalid_rule_property_name"` で拒否します。kind は `semantics` から
+  `name` に変わり、ラベルではなく文の先頭を示す構造化された `loc` が付きます。
+  診断の文言は変わりません。ファイルを検査する場合、ほかの位置付き名前エラーと
+  同様に、メッセージの末尾は `at L:C` から `at <source-file>:L:C` に変わります。
+- JSON の表示: 作られた名前は `__` を `.` に置き換えた 1 つの綴りで、すべての
+  出力に出ます。物理名 `alias__x` は `alias.x`、`branches` で分けた
+  `submit__b1` は `submit.b1` です(状態のキー、action 名、invariant /
+  reachable 名、診断、トレース、シナリオ、Monitor — すべて)。コンポーネントの
+  宣言の公開名は alias と宣言の名前から作ります。それを名指すすべてのコマンド
+  — verify(`cost.properties[].name` を含む)、sweep、scenarios、explain、
+  testgen、conformance(`acct.Inv` のような outcome の名前を含む)、testplan、
+  mutate(target と死 action の注記)、refine、diff、html、ledger、
+  analyze(`action:acct.go`・`action:submit.b1` のようなグラフの ID を含む)、
+  `check --strict-tags` の警告、`state_mismatch.action` を含む `replay` の出力
+  — がこの形を使います。`_requires_failed_acct.go` のように action から作る
+  名前も同じです。内部名のまま出すのは Public Kernel(`fslc kernel`)だけです。
+  v1 の `replay` トレースでは、作られた action を公開の綴りで書いても内部名で
+  書いてもかまいません(`acct.go` と `acct__go`、`submit.b1` と `submit__b1`)。
+  どちらも同じ action を指します(`docs/design/DESIGN-replay-trace.md` を参照)。
+  ネイティブ実装では、これらの綴りと、`_partial_<action>`・`_bounds_<state>` の
+  ようにエンジンが作る名前を、1 つのモジュール `rust/fsl-core/src/naming.rs` が
+  持ちます。
 
 ```bash
 fslc check  specs/order_system.fsl
@@ -1897,6 +3648,10 @@ requirements の `acceptance` は**その層**の scenarios/testgen へ流れる
 fail closed です。compose は、明示の検査済み names/order ブリッジを使います。
 Public Kernel は不完全なマルチファイルの provenance を意図的に拒否するためです。
 エクスポートエラーの後のフォールバックではなく、同じアダプタに入ります。
+ウォーク、出力パスの処理、生成より前に、`testgen` は `scenarios` と同じ畳み込みで
+inline `implements` と governance preservation を検査します。失敗した場合は scenarios 形ではなく
+`verify` の生成元による失敗封筒と exit(seam/preservation の失敗は 1、契約エラーは 2、内部エラーは 3)を返し、
+ハーネスを書きません。通る文書と、non-strict で一部だけ到達したシナリオの通常の生成動作は変わりません。
 
 固定シードのウォークは 100 ステップを上限とする具象 Monitor の実行であり、
 enabled な action が無くなればそこで止まります。`--depth` には束縛され **ません**。
@@ -1922,7 +3677,9 @@ enabled な action が無くなればそこで止まります。`--depth` には
   **生成時に焼き込まれます** — 具象の Monitor が固定シードのウォークを実行し、
   `(action, params, expected_state)` のトレースが静的なフィクスチャとして埋め込ま
   れるので、生成されたテストは実行時に **`fslc`/Python を必要としません**。出力の
-  拡張子のデフォルトは `<spec>.test.ts` です。
+  拡張子のデフォルトは `<spec>.test.ts` です。ネイティブ生成では ±(2^53−1) の
+  範囲外の整数を成果物の出力前に拒否します(exit 2、既存の意味エラーエンベロープ)。
+  精度を失う JavaScript 数値を出力せず、値と入力ベクトル内のパスを示します。
 - `--target swift`: 自己完結の Swift Testing ファイルを出力します(`import Testing`、
   `@Test`、`#expect`。**XCTest ではありません**)。Vitest と同じ焼き込みウォーク
   設計です。動的な状態は `[String: Any]` で、深い等値/部分一致のヘルパーが同梱
@@ -1933,8 +3690,12 @@ enabled な action が無くなればそこで止まります。`--depth` には
   されます。出力のデフォルトは `<SpecName>ConformanceTests.swift` です。
 - `--target kotlin`: 自己完結の kotlin.test ファイルを出力します(マルチ
   プラットフォーム。JVM は JUnit に委譲します)。同じ焼き込みウォーク設計です。
-  動的な状態は `Map<String, Any?>` で、Kotlin の構造的な `==` は `List`/`Map` 上で
-  深く、`Int` と `Double` を区別するので、部分一致ヘルパーは素朴な再帰です。
+  動的な状態は `Map<String, Any?>` です。部分一致ヘルパーは期待されるマップのキーで
+  再帰し、葉の等値比較の前に List/Map の値を再帰的にたどって Byte/Short/Int/Long を
+  Long に正規化します。リストの順序/長さとリスト内のマップの完全一致は維持され、
+  Float/Double の値は強制変換しません。Int 範囲のリテラルはサフィックスなし、
+  より大きな i64 値には `L`、i64 の最小値には `Long.MIN_VALUE` を使います。
+  アダプターは数値パラメーターを `Int` にキャストせず `Number` 経由で読み取ってください。
   `makeAdapter()` が結線される(`null` を返す間)まで、各テストは
   `fail(ADAPTER_NOT_WIRED)` で失敗します。kotlin.test にはポータブルなランタイム
   スキップがないので、このターゲットでは `--allow-unwired` を拒否します(exit 2)。
@@ -2063,8 +3824,64 @@ spec 状態変数をカバーし、`action external(params) -> spec_action(exprs
 の一括代入は許されます)。Map/インデックスのターゲット(`m[K] = ...`)については、
 「ちょうど 1 回の代入」は変数単位ではなく具象キー単位です: 2 つの*異なる*キーへの
 別々のフラットな `m[K1] = ...` / `m[K2] = ...` 文は問題ありません。
-同じキーへの 2 回の代入、またはキー自体が束縛されたループ変数であるもの
-(2 つの反復がエイリアスしうる)は、引き続き拒否されます。
+同じパスで異なる代入文が同じキーに書く場合は拒否されます。
+有限のバインダーをキーとする `forall k: K { m[k] = ... }` は許されますが、その
+覆ったキーの 1 つに後続の文が書く場合は所有権の衝突です。
+struct のルートと `Map<K, Struct>` のエントリでは、所有権は
+`(root, key, field)` 単位(struct のルートには key なし)です: `forall` 内も含め
+異なる field は別々に初期化できますが、同じパスで異なる文が同じ field に書く場合や、
+ルート/エントリ全体とその field の重なる代入は拒否されます。
+field の型は引き続きスカラーまたは入れ子の `Option<scalar>` です。
+所有権は `forall` の文を 1 回だけ要約します: 同じ文による反復をまたぐ書き込みは値が
+一致すれば許され、値が食い違うと所有権の重複エラーではなく init が充足不能になります。
+解決できない Map のキー(動的なキー、`where` 付き・コレクション・定数でない範囲の
+バインダー)はルート全体の所有権を保ち、同じルートに書く他の文と衝突します。
+新しい field 単位の所有権を必要とする init は、init がどこかのパスで代入する
+全ルートが全てのパスで確実に完全になる場合だけ受理します。値全体で書くルートも
+含み、Map では全キーの全 field が必要です。一度も代入しないルートは自由のままです。
+部分的な分岐、空または非空と証明できないループ、一部のキーだけでは足りず、従来の
+所有権エラーで拒否します。1 field だけの部分 init、排他的な分岐で別々の field に
+書く形、エントリ全体を一部のキーにだけ書く形、ルート全体を片側のパスでだけ書く形
+など、従来のルート単位の規則で受理した形は、未代入の要素を symbolic な自由値とする
+挙動を維持します。
+refine は実装側・抽象側とも、部分的に代入されたルートの未代入要素を既定値で埋めず、
+init を拒否します(#1521)。bmc と induction は自由値として verdict を返す挙動を維持します。
+部分 init の要素を自由値として列挙する仕事は今後の課題です(#1579)。
+新しい受理の証明では、source・filter・キーの範囲境界が外側のバインダーに依存すると、
+同名の global const があっても保守的に未解決とします。外側の束縛の組合せは列挙しません。
+これとは独立に、frontend は const と同名の実行可能な局所束縛を engine ごとの範囲解決の
+前に拒否します(#1515)。依存する範囲境界の対応を追加するものではありません。
+新しく受理する形では、init が代入し得る全ルートについて、ルート全体が確実に代入
+されるまで `check` が読み出しを拒否します。値全体でしか書かないルートや、既に書いた
+field・エントリの読み出しも対象です。field 単位で書かないルートの早すぎる読み出しは、
+field の読み出しの門が先に拒否しない限り、従来の所有権エラーと位置で拒否します。
+field 単位で書く全ルートが最後には完全になる場合、その門を nonfield の読み出しの
+検査より先に実行するため、後の field の読み出しが前の nonfield の読み出しより
+優先されることがあります。field 単位で書くルート自体が不完全なら、保存した
+所有権エラーを返します。
+field に書いたルートのエントリ全体/ルート全体の
+読み出しも同じ規則に従い、診断に `<whole entry>` / `<whole root>` と表示します。
+従って `s.a = 1; s.b = (s.a == 1)` や、
+`forall` 内で兄弟の field を書く前の `m[k].f` の読み出しは拒否されます。バインダーの
+キーへの全 field の代入後は、現在のキーの既代入 field の読み出しを許します。
+全 field を別々に書いても、本体内のエントリ全体のコピーは #1518 の読み出し順の
+規則で拒否します。ループ外でルート全体を初期化した後のエントリ全体のコピーは
+許されます。semantics エラーはルートと field を
+示し、読み出しを含む文に位置づけます。従来のルート単位の所有権規則で受理した形は、
+所有権の検査での受理を維持します。
+explicit エンジンと Monitor は、ルートを読む前、および初期化完了時に、全エントリの
+全 field が覆われていることを要求します。従来受理した形でも、解決済みキーへの
+Map エントリの field 代入を被覆に数えるようになります。1 field のエントリからなる
+Map 全体の被覆が完全なら構築でき、不完全な被覆が残る場合は未代入の診断に
+partial-component の接尾辞が付きます。
+同じ concrete な初期化を、両側の決定的な refine、auto のエンジン選択、conformance
+vectors、testgen、requirement trace の検査も使うため、これらの結果も変わり得ます。
+auto は bounded な BMC への fallback から unbounded な explicit の閉包に変わる場合が
+あり、requirement trace の門は check/proof/testgen の結果を変える場合があります。
+Kernel の replay や conformance vectors だけでは、宣言した acceptance trace が通るとは
+言えません。完全な被覆により、従来の未代入エラーに代わって既存の domain 外のキーや
+反復書き込みの vacuity の拒否に到達する場合もあります。この concrete な診断段階の
+違いは、反復書き込みの関係的な制約を変えるものではありません。
 
 ## 13. 3層ダイアレクト(業務コンサルティング / 要件 / 設計)とトレーサビリティ
 
@@ -2101,6 +3918,13 @@ process の `covers ID "text"` は同じ型付き関係に対する正準なダ�
 宣言本体直前の旧形式 `"ID: original text"` は移行入力として引き続き受理されますが、
 `fslc lint` は `legacy_string_metadata` を報告し、`fslc migrate --edition next` は
 安全に変換できる場合に `@requirement(...)` へ変換します。
+
+`requirements` 文書で、先の `requirement` と同じ ID の `requirement` をもう一つ書く場合や、
+`acceptance` と `requirement` が ID を共有する場合も `check` は受理し、台帳はその ID の行を
+一つだけ残します。`fslc lint` は二つ目の所有者をその ID の位置で警告
+`shared_requirement_id`(taxonomy `ambiguous_intent`、機械適用不可)として報告し、
+先の所有者の位置を示します。同じ ID の `acceptance` が二つある場合は、引き続き `check`
+のエラーです。どちらかの ID を変えるか、二つの宣言を一つにまとめてください。
 
 予約された `"undecided: reason"` タグは、レビュー済みで意図的に先送りされた決定を
 マークします。これはメタデータであり、プロパティとして検証されることはありません。
@@ -2257,6 +4081,410 @@ CTI を閉じるために存在する、あるいは実装のガードが抽象�
 
 ### 13.2 要件レイヤー: `requirements`(fsl-req ダイアレクト)
 
+<a id="fsl5-requirements"></a>
+
+#### FSL 5: エンティティ、出来事、原文の要件
+
+識別する対象を entity、その段階と許される辺を lifecycle、アクターの行為を event、
+原文が定める条件を rule または decide で記述します。ID と引用した原文によって、
+検証対象と要件を結び付けます。次は一つの完全な仕様です。この後の構文フェンスは、
+必要な宣言があることを前提とした断片です。
+休暇申請の一つのモデルを英語の綴りと日本語の綴りで一度ずつ書いた、より長い例が
+[`examples/fsl5/`](https://github.com/ymm-oss/fsl/tree/main/examples/fsl5) にあります。
+
+```fsl check
+fsl 5
+requirements Support {
+  actor Agent
+  entity Agent
+  entity Ticket {
+    lifecycle Open -> Assigned -> Closed
+    lifecycle Assigned -> Escalated
+    lifecycle Open -> Withdrawn
+  }
+  Ticket belongs to Agent as assignee via take
+  resource desk_open: Bool = true
+
+  event take = Agent takes Ticket Open -> Assigned
+  event close = Agent closes Ticket Assigned -> Closed
+  event escalate = Agent escalates Ticket Assigned -> Escalated
+    set desk_open = false
+  event withdraw = Agent withdraws Ticket Open -> Withdrawn
+
+  rule REQ-DESK-001 "A ticket is taken only while the desk is open" {
+    allow Agent takes Ticket only when desk_open
+  }
+  rule REQ-DESK-002 "A ticket is withdrawn only after the desk has closed" {
+    allow Agent withdraws Ticket only when not desk_open
+  }
+  rule REQ-TICKET-001 "A taken ticket keeps the agent who took it" {
+    always Ticket in Assigned, Closed, Escalated has assignee
+  }
+  policy POL-TICKET-001 "Every assigned ticket is eventually closed or escalated"
+    every Ticket in Assigned must eventually be Closed or Escalated
+  goal GOAL-TICKET-001 "A ticket can be closed" some Ticket can reach Closed
+  measure closed_tickets = count Ticket in Closed
+
+  scenario AC-TICKET-001 "An agent takes and closes a ticket" {
+    Agent takes t1 with assignee 1
+    Agent closes t1
+    then t1 is Closed
+  }
+  scenario AC-DESK-001 "A ticket still open when the desk closes is withdrawn" {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent withdraws t2
+    then t2 is Withdrawn
+  }
+  forbidden FB-DESK-001 "No ticket is taken once the desk has closed" {
+    Agent takes t1 with assignee 0
+    Agent escalates t1
+    Agent takes t2 with assignee 0
+    then rejected
+  }
+  forbidden FB-DESK-002 "No ticket is withdrawn while the desk is open" {
+    Agent withdraws t1
+    then rejected
+  }
+}
+verify {
+  instances Ticket = 2
+  instances Agent = 2
+}
+```
+
+**エンティティと区分。** `entity User` は段階を持たない識別対象を宣言します。
+`entity Order { qty: Qty = 0 lifecycle Empty -> Placed }` のように本体を書く場合は、
+一つ以上の lifecycle 行と、すべてのフィールドの明示的な初期値が必要です。
+number のフィールドも省略できません。型は `Bool` か、宣言済みの `number`、`type`、`enum` です。
+最初のパスの先頭段階が初期段階で、段階は初出順に生成 enum に入ります。
+lifecycle 行を追加すると別のパスを表せます。`number Qty` の有限範囲は
+`verify { values Qty = 0..2 }`、エンティティの個数は `instances` で指定します。
+検査結果が対象とする世界は、この範囲です。
+`concept Bulk = Order where qty >= 2` と `concept Open = Order in Placed, Packed`
+は述語に名前を付けるもので、状態を追加しません。条件中ではフィールドを `qty` のように書きます。
+どの式の形の中でも同じです（同じ名前の量化子・集計の束縛変数は、その範囲でフィールドを隠します）。
+フィールドは状態なので、量化子の範囲の境界には書けません
+（`exists x in qty..qty { ... }` は `binder bound is not a static integer`）。
+変換後のフィールド名は `order_qty`、`order_stage` など、正規名の `entity_field` です。
+設計と `implements` のマッピングでは、その名前を使います。
+
+**出来事。** `event place = User places Order with qty Empty -> Placed` は、
+正規の action 名 `place` と、アクター・動詞・エンティティの句を定めます。
+遷移は lifecycle の辺でなければなりません（`event_not_on_lifecycle`）。
+代わりに `in Placed` と書くと、同じ段階にとどまる出来事です。
+`with qty` は入力を同名フィールドに格納します。`with n: Qty` は型を明記した入力です。
+`n` と同名のフィールドがなければ、自動のフィールド代入は行いません。同名のフィールドが
+あれば、入力の型を明記していても代入します。入力も `set x = expr, y = expr` の更新も、
+複数ならカンマで区切ります。入力名とフィールド名が重なるときは `input qty` で入力を
+選びます（曖昧な裸の名前は `ambiguous_input_field`）。`qty` という名前の量化子・集計の
+束縛変数の内側では `input qty` を拒否します（`captured_by_binder`）。束縛変数の名前を
+変えてください。動詞を省くと event 名を使います。
+`covers REQ-ID "原文"` はトレーサビリティです。シナリオで使うものも含め、アクターを
+宣言してください（`actor_not_declared`）。通常の event は fair、`fault event` は
+fair ではありません。辺に対応する event がなければ `lifecycle_edge_without_event` の警告です。
+
+**規則。** `rule ID "原文" { statement+ }` は内部の文をすべて論理積で組み合わせます。
+同じ出来事を制約する別の rule も論理積になります。使える文は次のとおりです。
+
+| 文の断片 | 検査する意味 |
+|---|---|
+| `allow Actor verb Entity only when condition` | 条件を出来事のガードにします。 |
+| `allow Actor verb Entity only for Concept` | 区分に属することをガードにします。 |
+| `never Actor verb Entity when condition` / `for Concept` | 条件が偽であること／区分に属さないことをガードにします。 |
+| `Actor verb Entity only after Actor other Entity` | lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。 |
+| `Name: Entity enters Target only from Source, Other` | 遷移元を制限する二状態の性質です。 |
+| `Name: always Concept1 is Concept2` | 前者なら後者も成り立つという不変条件です。`Stage Entity` もケースとして使えます。 |
+| `Name: always Entity in S, T has condition` | 指定段階でフィールド条件を要求する不変条件です。`not in` は指定段階の外を選びます。relation の役名だけなら、関係が設定済みであることを表します。 |
+| `deadline age <= bound` | `time` で宣言した age に対する期限です。時間と期限の検査は §13.4 を参照してください。 |
+
+`always` と `enters` の文には名前を付けると、結果の性質名が安定します。
+出来事のガードを同時に満たせない場合、`check` は
+`rule_conflict_unsatisfiable_guard` で拒否します。`implied_by_lifecycle` は情報です。
+lifecycle が既に順序を保証する `only after` は、履歴の状態やガードを追加しません。
+lifecycle から導ける `enters` は、遷移の性質を引き続き宣言し、検査します。
+拒否を定める規則には forbidden trace を用意してください。ガード対象の出来事を試す
+trace がないと `never_rule_without_forbidden` が警告します。
+
+**決定表。** 次の断片は、提出済み申請のケースごとにアクターと許される動詞を選びます。
+エンティティ、出来事、区分は別途宣言しておきます。
+
+```fsl-fragment
+decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
+  SmallClaim => System approves
+    covers REQ-2 "A small claim is auto-approved"
+  LargeClaim => Manager approves or rejects
+    covers REQ-3 "A large claim is approved or rejected by a manager"
+} assuming amount > 0
+```
+
+行の条件には区分、`and` で結んだ区分、`Stage Entity` を使えます。
+`otherwise => Actor verb` は他の行が成り立たない場合を受け持ちます。
+表の段階から出るすべての出来事を列挙する必要があります（`decide_event_not_listed`）。
+行はフィールドの範囲を網羅し（`decide_not_exhaustive` と未網羅の値）、互いに重なっては
+なりません（`decide_overlap` と重複する値）。ガードによって成立しなくなった行は
+`decide_row_emptied` の警告です。各出来事には、それを列挙する行の条件の論理和が
+一つのガードとして加わり、他の rule のガードも適用されます。
+`assuming Q` は表の検査を Q の範囲に絞ると同時に、**その段階で Q が成り立つという
+不変条件を生成し、`verify` で証明させます**。網羅性の検査を無条件に免除する指定ではありません。
+`assuming` の中で、concept が読む名前（資源など）と同じ名前の量化子・集計の束縛変数の
+内側にその concept を書くと拒否します（`captured_by_binder`）。
+
+**関係、資源、射影。** `Ticket belongs to Agent as assignee via take` は、各 ticket に
+最初は未設定の optional な役割を追加します。関係先は `entity` で宣言し、`via` の event の
+アクターはその関係先でなければなりません。そのため `Agent` は `actor` と `entity` の両方で
+宣言します。この event は最初の入力で相手を受け取って記録し、この event のシナリオの
+ステップでは必ず相手を指定します。`with assignee 1` は Agent のインスタンス 1 を選びます。
+値はインスタンス番号です。インスタンス名（`with assignee a1`）は拒否されます。
+`resource stock: Qty = 2` はエンティティに属さない共有状態です。event は `set` で更新し、
+ガードからも参照できます。`measure m = count Concept` または `count Entity in S, T`
+は値の射影であり、新しいカウンター、履歴フィールド、自動の不変条件を作りません。
+`kpi m = count Entity in S` も同じ種類の射影ですが、受け取るのは一つのエンティティと
+一つの段階だけです。`kpi m = count Concept` と `kpi m = count Entity in S, T` は拒否される
+ので、これらには `measure` を使ってください。goal の `some E can reach S` は到達可能性、policy の
+`every E in S must eventually be T or U` は fair な event の下での進行性です。
+どちらも ID と原文をトレーサビリティに残します。
+
+**シナリオと停止。** アクターと動詞の句は event に対応します。対応がない、または曖昧なら
+`unknown_verb`、`unknown_event_phrase`、`ambiguous_step` で知らせます。
+`t1`、`t2` などのインスタンス名は trace 内だけの名前で、初出順に割り当てます。
+`verify` の個数を超えると `scenario_instance_overflow` です。
+`then t1 is Closed` は一つのインスタンスの最終段階を検査します。複数を検査するには、
+変換後の状態をインスタンス番号で引く式を書きます（エンティティごとに最初の名前が 0 です）。
+例: `then ticket_stage[0] == Closed and ticket_stage[1] == Open`。この式ではインスタンス名を
+使えず、`then t1 is Closed and t2 is Open` は拒否されます。scenario は全ステップを実行し、
+最後の条件を満たす必要があります。失敗は `kind: "acceptance"`、ステップの失敗には
+`failed_step` が付きます。forbidden trace は途中まで実行でき、最後のステップだけを
+拒否する必要があります。最後が受理されると `kind: "forbidden"`、途中で拒否されると
+`kind: "forbidden_setup"` と `failed_step` です。`check` はこれらの trace を実行します。
+
+`terminal` を書かない場合は、意図した停止状態を自動で導きます。lifecycle を持つ
+すべてのエンティティの全インスタンスが、**出る lifecycle 辺のない段階**にあることが条件です。
+event の欠落や無効化によって、途中の段階が最終段階になることはありません。
+識別だけの entity と relation の役割は停止条件を追加しません。
+明示的な `terminal { expression }` は、導出された条件を**置き換えます**。
+論理積で追加するのではありません。process から停止条件を導かない FSL 4 requirements
+との違いです。
+
+<a id="fsl5-repeats"></a>
+
+#### 入力、宣言、要件 ID の重複
+
+FSL 4 では、重複したものを 1 つだけ残し、もう片方を黙って捨てて読んでいました。FSL 5 の
+requirements 文書は、次の重複を拒否します。どれも**破壊的な削除**で、以前は `check` を
+通っていた書き方です。自動の移行はありません。
+
+- **ステップで同じ入力を 2 度書く (#1682)。** `scenario` や `forbidden` のステップで
+  1 つの入力を 2 度書くと、終了コード 2、`kind: "semantics"` で拒否し、`loc` は 2 度目の
+  名前です。例: `duplicate step input 'amount' at doc.fsl:43:44`。`with`、インスタンスを先に
+  書く形、`で` の並び、2 つの `で` の句、別名と正式名、relation の役割が対象です。違う入力を
+  どの順で書いても、後のステップで同じ入力を書いても受理します。構文エラーのあるステップは
+  そのエラーのままです。`lint`、`fmt`、`migrate` は同じメッセージを `loc` なしで報告し、
+  この文書を inline `implements` すると
+  `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)`、
+  `kind: "type"` です。意図する値を 1 つだけ残してください。
+- **`actor` の重複 (#1705)。** 同じ名前の `actor` を 2 度書くと（別の行でも、並びの中でも）、
+  終了コード 2、`kind: "parse"` で、2 度目の名前で拒否します: `duplicate actor 'Agent' at 4:9`。
+  重複を消してください。
+- **要件 ID の持ち主は 1 つ (#1705)。** キーワードの後に書いた ID は、その宣言のものです。
+  `rule`、`decide`、`scenario`、`forbidden`、`goal`、`policy`、そして FSL 5 の文書でも書ける
+  FSL 4 の `requirement` と `acceptance` のブロックが該当します。同じ ID の 2 つ目の持ち主は、
+  種類を問わず、その ID の位置で終了コード 2、`kind: "parse"` で拒否し、両方の種類を示します:
+  `duplicate requirement id 'REQ-DESK-001': this rule reuses the ID of the rule at 19:8; a
+  requirement ID has one owner at 22:8`。同じ種類の `scenario`、`forbidden`、`goal`、`policy`
+  の 2 つ目は、従来どおりの拒否です（`duplicate acceptance id`、`duplicate forbidden id`、
+  `duplicate property name`、`kind: "semantics"`）。どちらかの ID を付け替えるか、2 つの宣言を
+  まとめてください。この規則に当たる FSL 4 の文書を `fslc migrate --edition 5` は
+  `migrate_manual_required`、`reason: "shared_requirement_id"` で拒否し、ID を付け替えることは
+  しません。
+- **`covers` は参照 (#1705)。** event や判定表の行の `covers` は、持ち主のいる ID を、どんな
+  文でも指せます。受理され、ledger と `document claims` はその ID を持ち主の題名で示し、
+  `covers` の文はその後に並べます。持ち主の**いない** ID は、言葉を `covers` からしか得ないので、
+  文書の中のその ID の `covers` はすべて同じ文でなければなりません。最初に違ったものを、後の
+  `covers` の位置で `kind: "parse"` で拒否します: `requirement ID 'REQ-EV-1' is covered as
+  "withdrawing" here and as "closing" at 15:5; every covers of an ID no declaration owns has one
+  text at 19:5`。行が自分の表の ID を別の文で `covers` するのは従来どおり拒否です:
+  `requirement annotation 'REQ-2-3' has conflicting text at 22:7`、`kind: "semantics"`。
+- **`concept`、範囲、`kpi` の重複 (#1686)。** 同じ名前の `concept` を 2 度書くと、2 度目で
+  `kind: "semantics"` で拒否します: `duplicate concept 'SmallClaim' at doc.fsl:24:3`。
+  `concept` の重複は、範囲や `kpi` の重複より先に報告します。`instances` と `values` の範囲、
+  `kpi` の重複は、FSL 4 と同じく拒否します（§13.2 の FSL 4 の参照）。意図する宣言を
+  1 つだけ残してください。
+
+#### 用語集と日本語の綴り
+
+任意の `glossary` は requirements ブロックの最初の項目に、一つだけ置けます（`misplaced_glossary`）。
+ASCII の正規名と、空白を含まない一語の別名を対応させます。フィールドの左辺は
+`Entity.field` と書きます。次は断片です。
+
+```fsl-fragment
+glossary {
+  Employee = 従業員
+  Claim = 経費申請
+  Claim.amount = 申請金額
+  submits = 提出する
+}
+```
+
+以後は、宣言と参照、式、決定表の行、シナリオ、検証範囲で別名を使えます。カーネルの
+メンバーでは、エンティティと段階の別名は解決します（`forall c: 経費申請`）が、フィールドの
+別名は解決しません。変換後の名前を書いてください（`申請金額[c]` ではなく `claim_amount[c]`）。
+正規名との混在も受理しますが、同じ名前を両方の綴りで書くと `lint --strict-names` が
+`mixed_names` で知らせます。`duplicate_alias` は一つの正規名に二つの別名がある場合、
+`alias_collision` は一つの別名が二つの正規名を指す場合です。`alias_shadows_name` は、別名が
+glossary の別の正規名か、変換後の仕様が宣言する名前と同じ場合です。アクター名と段階名は
+対象外で、その他の衝突は通常の宣言エラー（`duplicate type`）になることがあります。
+英日どちらかのキーワードや助詞と同じ別名は `alias_shadows_keyword` で拒否します。別名の宣言なしに非 ASCII の正規名を使うと
+`canonical_name_not_ascii` です。spec 名、event の宣言、性質名、要件 ID は正規名で
+揃えておくと、コードとの境界を追いやすくなります。シナリオのインスタンス名は trace 内の名前です。
+`implements … from` のマッピングと refinement ファイルは正規名だけを使います
+（`alias_in_implements`）。生成する状態・action 名は `claim_amount`、`submit` のように
+正規名を保ち、読みやすい診断では別名も併記できます。
+
+日本語のキーワードは、次の**文法上の文脈**で使えます。全箇所を一律に置換する規則では
+ありません。英語と日本語は混在できます。ヘッダー、`implements … from` とマッピング、
+カーネルのメンバー（`terminal`、`time`、`state` など）、`and` / `or` 以外の演算子は
+英語のままです。
+
+| Context / 文脈 | English | 日本語 |
+|---|---|---|
+| File blocks / ファイルのブロック | `requirements`; `glossary`; `verify` | `要件`; `用語集`; `検証` |
+| Verification world / 検証範囲 | `instances`; `values` | `個数`; `値域` |
+| Requirements members / 要件の宣言 | `type`; `enum`; `number`; `const`; `actor`; `entity`; `concept`; `resource` | `型`; `列挙`; `数値`; `定数`; `アクター`; `エンティティ`; `区分`; `資源` |
+| Requirements members / 要件の宣言 | `event`; `rule`; `decide`; `goal`; `policy`; `measure`; `kpi`; `scenario`; `forbidden` | `出来事`; `規則`; `決定表`; `目標`; `方針`; `指標`; `重要指標`; `シナリオ`; `拒否シナリオ` |
+| Entity body / エンティティの本体 | `lifecycle` | `ライフサイクル` |
+| Concept / 区分 | `in`; `where` | `段階`; `のうち` |
+| Relation / 関係 | `belongs to`; `as`; `via` | `所属先`; `役名`; `契機` |
+| Event / 出来事 | `fault`; `in`; `set`; `covers` | `異常`; `段階`; `更新`; `対応要件` |
+| Event/rule expressions / 出来事・規則の式 | `input` | `入力` |
+| Allow rule / 許可規則 | `allow`; `only when`; `only for` | `許可`; `条件`; `対象` |
+| Never rule / 禁止規則 | `never`; `when`; `for` | `禁止`; `条件`; `対象` |
+| Ordering / 順序 | `only after` | `先行条件` |
+| Entry / 遷移元の制限 | `enters`; `only from` | `遷移先`; `遷移元` |
+| Safety rule / 不変条件 | `always`; `is`; `in`; `not in`; `has` | `常に`; `は`; `段階`; `段階以外`; `必須` |
+| Deadline / 期限 | `deadline` | `期限` |
+| Decision table / 決定表 | `for`; `otherwise`; `assuming` | `対象`; `それ以外`; `仮定` |
+| Decision outcome / 決定表の結果 | `or` | `または` |
+| Goal / 目標 | `some`; `can reach` | `いずれかの`; `到達可能` |
+| Policy / 方針 | `every`; `in`; `must eventually be`; `or` | `すべての`; `段階`; `いずれ必ず`; `または` |
+| Measure / 指標 | `count`; `in` | `件数`; `段階` |
+| Scenario/forbidden / シナリオ・拒否シナリオ | `then`; `is`; `rejected` | `結果`; `は`; `拒否` |
+| Boolean expressions / 論理式 | `and`; `or` | `かつ`; `または` |
+| Inputs in events/steps / 出来事・ステップの入力 | `with` | `で` (after the input / 入力の後) |
+
+`assume` / `前提`、`out of scope` / `範囲外`、event の `environment` / `外部`、
+allow の `only as` / `立場`、never の `because` / `理由` は予約済みの綴りであり、
+使える構文ではありません。glossary の別名にも使えません。
+
+助詞は独立した語として書きます。`が` はアクター、`を` はエンティティ（ステップでは
+インスタンス）、`で` は入力、`は` は主題を表します。`に` は相手を示す印として
+認識しますが、このエディションにはその役割を受け取る句がありません。relation の入力を
+渡す書き方には使えません。
+例えば `従業員 が 経費申請 を 提出する 申請金額 で` は event の句、
+`従業員 が c1 を 提出する 申請金額 1 で` はシナリオのステップです。
+助詞を使う句では、動詞以外の各語に役割の印を付けると、語順を変えられます。
+一部だけに付けると `mixed_particles`、役割が違うと `particle_role_mismatch`、
+`従業員が` のように語につなげると `particle_needs_space` です。
+`fmt --lang ja|en` でキーワード、`--names alias|canonical` で用語の綴りを選びます。
+これは表記の変更であり、別の振る舞いを定めるものではありません。
+
+<a id="fsl4-to-fsl5-migration"></a>
+
+#### FSL 4 から FSL 5 への移行
+
+適用前に計画を確認し、移行後のファイルと refinement の接続を、check、verify、
+原文の意図を確かめる検査にかけ直します。
+
+```bash
+fslc lint requirements.fsl --edition 5
+fslc migrate requirements.fsl --edition 5
+fslc migrate requirements.fsl --edition 5 --write
+fslc check requirements.fsl
+fslc verify requirements.fsl --depth 8
+fslc verify requirements.fsl --engine induction
+```
+
+`migrate` は `--write` がなければ dry run です。dry run でも `result: "migrated"` を返し、
+`written: false` になります。`written` は `--write` を付けたかどうかではなく、実際に書いたかどうかを
+表します。最上位の `written` は `--write` が入力を 1 つ以上置き換えたときだけ `true` で、
+`files[]` の各要素の `written` は置き換えた入力でだけ `true` です。書き換えの要らない入力
+(`changed: false`)には触れず `written: false` を返します。dry run、拒否、
+`migrate_manual_required` の入力もすべて `written: false` です。書き換えは入力の改行と
+byte order mark を保ちます。各行の改行は入力の 1 行目の改行(CRLF か LF)にそろえ、UTF-8 の
+byte order mark は入力にあるときだけ残します。dry run の `files[].edits` の置換は、`--write` が
+書くバイト列と同じです。終了コードだけでなく、`files[].findings[]`、
+`machine_applicable`、拒否ごとの `reason` を確認してください。`lint` は finding があると
+終了コード 1 を返すので、上のコマンドは `&&` でつなげません。拒否された process の変換は
+`result: "migrate_manual_required"` で終了コード 1、後述のコメントによる拒否は
+`result: "migration_refused"` で終了コード 2 です。`legacy_process_form` と
+`derived_terminal_added` の finding ごとの `edits` は空で、書き換えは `files[].edits` にあります。
+既存の分類と原子的な
+書き込みの契約は、§7 と [DESIGN-migration](../design/DESIGN-migration.md)を参照してください。
+
+`migrate` の既定は次のエディション（`--edition next`。上では `5` と綴っています）です。
+`lint` の既定は `current` なので、計画の finding を見るには `--edition 5` を付けます。
+ヘッダーのない文書には次のエディションで `missing_edition_header` が付くので、ほかに何も
+報告がなくても `lint --edition 5` は終了コード 1 を返します。次の 3 種類の文書には
+**ヘッダーを提案しません**。`lint` と `migrate` は、FSL 5 の公開前と同じ結果を返します。
+
+- エディションヘッダーを取らない宣言: `causal`、`agent`、そのほかの AI ダイアレクトの宣言
+  （`ai_component`、`dataset`、`evaluator` など）。ヘッダーを書くと
+  `edition_header_not_accepted` で拒否されます。
+- `refinement` の文書。ヘッダーは受け付けますが、単独で検査する対象ではないので、
+  挿入しても文書が保たれることを移行で示せません。
+- `compose` の文書。移行の契約が構成要素のソースファイルを保てないので、同じ理由です。
+
+`refinement` や `compose` の文書に手で書いたヘッダーは、そのまま読まれます。既定の
+`migrate` は process の変換も行うので、変換に判断が要る（後述の `migrate_manual_required`）
+ヘッダーのない FSL 4 の `requirements` 文書では、`fslc migrate` だけでも終了コード 1 に
+なります。現行エディションの書き換えだけを計画するには `--edition current` を付けます。
+
+| finding / 変換 | 確認する点 |
+|---|---|
+| `missing_edition_header` | 選んだエディションのヘッダーを挿入します。要件は推測しません。 |
+| `legacy_process_form` | process を entity と lifecycle のパス、各 transition を event（動詞は event 名）、ガードのある要件を `allow … only when` の rule に変換します。 |
+| `implicit_initial_value` | 選ばれていた既存のデフォルトを明記します。新しい entity 形式では各フィールドの初期値が必要です。 |
+| `legacy_string_metadata`, `legacy_quantifier_colon`, `inline_action_maps` | 既存のメタデータ、量化子、安全なローカルマッピングの変換も適用します。正規の置換先と適用可否を確認します。 |
+| `derived_terminal_added` | 入力 process に terminal がない場合、新しい lifecycle が導く停止条件を知らせます。dry run と書き込みの両方で情報として出し、機械適用できます。deadlock 警告が変わり得ます。 |
+| `migrate_manual_required` | 変換を拒否して入力を保持します。人が判断する必要のある箇所を `reason` が示します。 |
+
+process の変換は段階 enum の順序と lifecycle の辺を保ちます。ガードから区分や決定表を
+推測することはありません。複数 process による entity の共有（`process_entity_shared`）、
+修飾された process 名（`qualified_process_name`）、transition のアノテーション
+（`transition_annotation`）、フィールドと同名の入力（`input_shares_field_name`）、
+range 型の入力（`with n in 0..2`、`range_typed_input`）、要件 ID のないガード（`guard_without_requirement`）、
+stages の先頭でない initial（`initial_not_first_stage`）、デフォルトの移行後も残る
+初期値の欠落（`field_without_initial_value`）は拒否します。認識できない配置、変換先の
+不正、その他の checked kernel の変化は、それぞれ `unrecognized_process_layout`、
+`converted_form_invalid`、`kernel_changed` です。意味を明示して修正し、計画をやり直して
+ください。拒否を捨てて書き込みを強行してはいけません。process の変換は `//` コメントを
+残しますが、移動することがあります（行末のコメントは生成した宣言のそばの独立した行に
+なります）。位置を確認してください。文字列メタデータやインラインのマッピングの書き換えで
+移動が必要になるコメントは拒否します（`legacy_string_metadata`、`inline_action_maps`）。
+
+保存の検査には一つ例外があります。入力に**明示の terminal がない場合**は、上記の
+停止条件の導出を許します。そのため、無条件の kernel 同一性や deadlock 出力の同一性を
+保証する契約ではありません。入力に `terminal` があれば、その条件を保存して比較します。
+導出の finding は追加せず、明示した条件の変更は契約違反になります。
+finding は導出条件に相当する terminal 式を示すので、停止の意味の変化を確認できます。
+変換済み文書にもう一度 migration を実行しても、process の変換や停止条件の導出の finding
+は繰り返し追加しません。変換は `acceptance` と `kpi` の宣言をそのまま残し、`acceptance` は
+FSL 5 でも有効です。変換後の rule によって、入力になかった警告が出ることがあります。
+変換された `allow … only when` の rule は、ガードする出来事で終わる `forbidden` trace がないと
+`never_rule_without_forbidden` を警告します。`examples/e2e/2_requirements.fsl` では、ガードを
+持つ rule ごとに 1 件ずつ出ます。このとき `check` は `ok`、終了コード 0 のままです。警告ごとに、
+rule の条件が偽のときにガード対象の出来事を呼んで終わる `forbidden … then rejected` の trace を
+足します。変換した経費の例では、`Employee submit c1 with a 0` のあとに `then rejected` を書く
+trace です。§13.2 の `FB-DESK-002` も同じ形です。警告を消すために rule を削除しないでください。
+不正な式の `&&`、`||`、`->` は migration だけでは直りません。
+§7 に従って演算子を手修正してください。この変換で business、カーネル、設計、
+refinement の契約に区分や決定表が加わることはありません。
+
+#### FSL 4 要件の参照と移行入力
+
+次のヘッダーなしの例は、以前の process/transition の形式と `acceptance` ブロックです。
+`acceptance` は FSL 5 でも有効です。FSL 5 の新しい要件には上記の形式を使ってください。
+
 ```fsl
 requirements ExpenseRequirements {
   implements ExpenseToBe from "1_business.fsl" { }
@@ -2291,7 +4519,88 @@ verify {
 }
 ```
 
-- process+data プロファイルは、単一エンティティのライフサイクルに対する第一の
+**破壊的削除 (#1552, #1561):** requirements の `rule ... only when` 条件では、量化子の
+本体または集約の値の式で、エンティティのフィールド名を `is` パターンの名前として
+再利用した、充足不能なガードを、以前は受理していても `check` で拒否するように
+なりました。競合検査用のガードは、イベントの lowering と同じく、その名前を
+マッチしたペイロードではなくフィールドとして読みます。例えば、
+`amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })`
+は、フィールドが 0 と 1 の両方であることを要求し、イベントが決して起きないのに
+受理されていました。#1552 では `rule_conflict_unsatisfiable_guard` で拒否され、
+#1561 ではフィールド置換前のパターン宣言を先に拒否します。exit 2、
+`kind: "semantics"`、メッセージは
+`pattern binding 'amount' in 'is some(amount)' shadows an entity field of the same name; rename the pattern variable`
+です。位置は保持された rule 文の所有位置であり、パターントークンを新たに復元した
+ものではありません。ペイロードを検査するには、
+フィールドと異なるパターン名を使い、`some(x) is some(amount) and amount == 1` を
+`some(x) is some(v) and v == 1` に書き換えてください。外側の条件と量化子を保った
+この式は、フィールドが 0 であり、1 に等しい `x` が存在して、そのマッチした
+ペイロード `v` が 1 に等しいことを意味し、書き換え後の例は `check` を通ります。
+以前は受理された `some(1) is some(amount) and amount == 1` も、新たな破壊的削除
+(#1561) です。宣言と継続中の参照をともに `v` に改名すれば、イベントは到達します。
+同じ規則を legacy guard、event の代入右辺、rule property、measure、decision の
+assuming と行、未使用を含む concept のフィールド
+置換前にも適用し、relation role も対象に含めます。新たなフィールド隠蔽の意味規則は
+導入しません。event input の既存の例外と、量化子・集約の合法なフィールド隠蔽は維持
+します。フィールド置換後に導入される def 内部のパターン名はフィールド別名ではなく、
+呼び出し引数に書かれたパターンは def がその引数を消去しても先に検査します。
+
+各自の materialized tree で `FSLC_CACHE=off <binary> check <form>`
+を2回実行し、base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` と測定 head
+`13676f0bca83b2433cc974468bbb00c59aef25a9` (binary SHA256
+`0cab1c914a05344d8958a6f9bd5ce5a17618f87f9f7e74e279b449fbca47f314`) を比較しました。
+corpus 全610形式 (specs 23、examples 195、CLI fixtures 392) は変更なしでした。
+元の #1552 全63形式、以前の #1561 全49形式、追加した fresh control、decision/concept
+の6形式、レビューで使った2形式を含め、inline の **27ケースが `ok`→`error`** です:
+
+| 削除されたケースのラベル | 件数 |
+|---|---:|
+| `control_is_pattern_field_name_satisfiable_matches_base` | 1 |
+| `expression-0`, `expression-1`, `expression-2`, `expression-3`, `expression-4`, `expression-5`, `expression-6`, `expression-7`, `expression-8`, `expression-9`, `expression-10`, `expression-11`, `expression-12` (and・入れ子・含意・or・not・if・コンテナ・量化子・集約) | 13 |
+| `argument-1`, `argument-4`, `argument-9` (保持・消去・間接的消去) | 3 |
+| `event-set`, `when`, `set`, `never`, `property`, `measure`, `role` | 7 |
+| `decision-assuming`, `unused-concept`, `review-original-collision` | 3 |
+
+これはケース単位の件数で、すべてが異なるプログラムとは限りません。既存の拒否5形式
+(and・含意・量化子内の矛盾、重複する `argument-7`、`decision-row`) は診断変更であり、
+追加の受理削除ではありません。全2,924観測 (731形式×両バイナリ×2回) は反復差分0、
+除外フィールドなしです。他の必須テストの元入力を改訂・省略していません。これは上記の測定
+head の証拠であり、後の統合コミットに対して未実施の sweep を行ったとの主張ではありません。
+
+**破壊的削除 (#1798):** FSL 5 の requirements 文書では、concept の条件、決定表、event の
+`only when` と `set` の式の中の名前を、どの式の形の中でも解決するようになりました。以前は
+`abs`、`min`/`max`、メソッド呼び出し、`is`、量化子、`count`/`sum` の中を飛ばしていたため、
+そこにあるフィールド名が同名の event 入力を読んでいました。`concept Eligible = Claim where
+abs(amount) > 0` と `only for Eligible` の組み合わせは、格納された `amount` が 0 の event を
+許し、`check`、BMC、induction が通っていました。このような文書は、本来どおり失敗します
+（issue のシナリオは `acceptance`、終了コード 2）。`check` を通っていた次の 3 つの形は、
+終了コード 2 で拒否します:
+
+- `amount` が event の入力でもフィールドでもあるときの `only when abs(amount) > 0` や
+  `set limit = abs(amount)`: `kind: "parse"`、`ambiguous_input_field`、
+  ``'amount' in event 'approve' is both its input and a field of 'Claim'; write `input amount` or `Claim.amount` ``。
+  位置は rule 文か set のフィールドです。`input amount` か `Claim.amount` と書いてください。
+- event の入力にも `amount` があるときの `concept C = Claim where exists x in amount..amount { x == 1 }`:
+  `kind: "semantics"`、`binder bound is not a static integer`、位置は event です。境界が
+  入力を読んでいました。フィールドは境界になりません。境界はリテラルと `const` で書きます。
+
+拒否のしかたが変わる形が 1 つあります。`amount` という名前の量化子・集計の束縛変数の内側の
+`input amount`（`exists amount in 0..0 { input amount == amount }`、同じ形の `count(...)`、
+`set limit = sum(amount in 0..0 of input amount)`）は、`input amount` を型付けできない
+`semantics` のエラーでした。今は `kind: "parse"`、`captured_by_binder`、
+`` `input amount` in event 'approve' is inside a binder named 'amount', which hides the input; rename the binder ``
+で、位置は rule 文か set のフィールドです。入力は裸の名前で読むので、束縛変数に捕捉されて
+しまうためです。決定表の `assuming` で、concept が読む名前と同じ名前の束縛変数の内側に
+その concept を書く形（`exists cap in 5..5 { Big }`、`Big` は資源 `cap` を読む）も、
+`semantics` のエラーから、表の位置での `captured_by_binder` に変わります。束縛変数の名前を
+変えてください。新たに受理する形: 入れ子の形の中の `input amount` と `Claim.amount`
+（`only when abs(input amount) > 0`、`set limit = abs(Claim.amount)`）、`assuming` の量化子の
+中に書いた concept。concept と同じ名前の束縛変数は、これまでどおり束縛変数を指します。
+`specs/`、`examples/`、`rust/fslc/tests/fixtures/` のすべての `.fsl`（655 形式、うち `fsl 5`
+は 22）の `check` の結果は、base `995146f45` と head `cb883819d` で、それぞれの
+materialized tree で実行して変わりませんでした。
+
+- FSL 4 の process+data プロファイルは、単一エンティティのライフサイクルに対する
   requirements 形式です。`process E with f: T { ... }` は、エンティティの stage
   マップと carried フィールドを作ります。transition は、入力(`with a: T`)、
   ガード(`when`)、フィールドの更新(`set f = expr`)、トレーサビリティ
@@ -2311,6 +4620,27 @@ verify {
 - `kpi NAME = count ENTITY in STAGE` は、business と requirements の両方における
   宣言的な射影です。ghost のカウンターや自動の `_kpi_*` invariant を作ることは
   ありません。
+- requirements 文書に書ける `implements` は 1 つまでです。破壊的な削除
+  ([#1694](https://github.com/ymm-oss/fsl/issues/1694)): 2 つ目の節は、別の契約を指していても
+  同じ契約を指していても、文書をパースするすべてのコマンドでその節の位置を指す
+  `kind: "parse"` エラー(exit 2)になります。例:
+  `duplicate implements 'Other' (a requirements document declares one, and 'Held' came first) at 3:3`。
+  以前は何も報告せずに読み捨てていたため、その契約は検査されず、2 つ目に書いた壊れた契約が
+  `check` を通っていました。移行: この文書が詳細化する契約を残し、それ以外は別の文書から、または
+  `fslc refine` で検査します。自動移行はありません。
+- **破壊的な削除 (#1686):** business と requirements の文書では、同じ名前の `instances` や
+  `values` の範囲、`kpi` を 2 度書くと、値が同じでも 2 度目の宣言で拒否されます。exit 2、
+  `kind: "semantics"`、`duplicate values bound for 'V' at doc.fsl:14:3`、
+  `duplicate instances bound for 'E' at doc.fsl:13:3`、または
+  `duplicate kpi 'done' at doc.fsl:9:3` で、`loc` は 2 度目の宣言です。これらの形は `check` を
+  通り、最後の宣言だけが残っていました。2 つの `values` を入れ替えると `verify` は `verified` と
+  `violated` の間で変わり、`analyze` は最後の `kpi` だけを報告していました。`verify`、`sweep`、`refine`、
+  `replay`、`scenarios`、`testgen`、`mutate`、`html`、`ledger`、`diff`、`migrate`、`document`、`kernel`、
+  `typestate`、`lint`、`fmt`、`explain`、`analyze`、`conformance` はこれらの形で結果を返さなく
+  なります。inline の `implements` では
+  `implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)`、`kind: "type"`、
+  `loc` は `implements` です。移行: 意図する宣言を 1 つだけ残してください。自動移行はありません。
+  [`DESIGN-dialects.md`](../design/DESIGN-dialects.md) の §3.2 を参照してください。
 - `implements` があると、`fslc check` と `fslc verify` はどちらも上位レイヤーへの refinement も
   実行し、結果は `implements: {abs, result}` を持ちます。値は `refines` / `refinement_failed` /
   `impl_violated` の3つです。**失敗した seam はこのフィールドの中に閉じません。**
@@ -2348,24 +4678,204 @@ verify {
   します。`maps` 節と、それに一致するインラインの `action ...` 項目の両方を持つ
   impl の action は、対応の重複であり、両方の起源と位置を名指しする
   `kind: "type"` の check 時エラーです(同じ action を 2 回列挙するマッピング
-  ファイルと同じです)。auto マップされた process の
-  transition は actor 検査されます。actor が business の action の actor と異なる
-  transition は check 時エラーです。
+  ファイルと同じです)。継ぎ目が評価されるとき、autoマップされたprocessのtransitionとeventは、両側で宣言された
+  source actorを比較します。edition(4/5)、どちら側の`covers`、`by `で始まる説明本文にも
+  依存しません。登録済みactorはmetadataに優先します。requirementのactionは、単独でも
+  ブロック内でも、自身のmetadataのactor(`by`、空白、trim後に空でないactor)だけを、
+  生成された全branchにも登録します。注釈無し、`by`で始まらない本文、空のactorは
+  actor不在として登録し、囲む要求本文やtyped `@requirement`本文からactorを補いません。
+  registry entryの無いraw spec/composeのactionだけが従来のmetadata規則を使います。
+  両actorを取得できるとき、不一致は
+  `error` / `kind: "type"`、exit 2で、既存のmessage
+  `maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'`
+  を、暗黙の`implements`または明示の`maps auto`の対応位置に報告します。スコープ無しの
+  `verify`、単独の`refine`、Workerも同じ規則です。明示のaction対応と`stutter`は
+  actorを比較せず、選択した`verify`は引き続きseamを評価しません。mappingを指定しない
+  `diff`は、該当する方向を`unknown` / `automatic_mapping_failed`として
+  `semantic_diff`/exit 0の封筒内に報告し、トップレベルの型エラーにはしません。
+  **v5.0.0の破壊的なソース変更(#1441):** `covers`、edition混在、composeとの混在lookupで
+  隠れていた不一致を拒否します。Kernel/JSON schemaは変わりません。base
+  `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`とhead
+  `9ca8630c7f45f1def54c056bf53a852853c7a60c`の完全な4-cell corpus sweepでは、各SHA自身の
+  treeの`specs/`・`examples/`・`rust/fslc/tests/fixtures/`の全`.fsl`を両binaryの
+  `fslc check`で検査しました(base 579 / head 591 forms)。corpusの
+  **`ok`→`error`は0件、`error`→`ok`も0件**です。別集合の受理拡大のクラスは、登録済み
+  transitionのmetadataのうち、`by `で始まる要求本文(covers本文と次editionのrule/decide本文)です。
+  両宣言actorが`System`で、implのcovers(B3)、businessのcovers(B4)、coversの無い抽象eventの
+  rule本文`by Manager only`(F1/p5)は、`error/type/2`から`ok/0`へ変わります。
+  有界verifyは`verified/0`と`implements refines`を返し、F1の単独refineは
+  `error/type/2`から`refines/0`へ変わります。[DESIGN-refinement](../design/DESIGN-refinement.md)の
+  「#1441: source-actor auto mapping and breaking-source migration」に
+  コマンド・測定証拠・gate方針・手動訂正を記載しています。一般に意味同値な自動移行はできず、
+  LSPでの診断配信も約束しません。
+  **v5.0.0の破壊的なソース変更(#1456):** requirement action自身のactorの不一致が
+  ブロック本文で隠れていた形を拒否します。生成branchを単独のauto mapsで対応させる形も
+  対象です。明示action対応、インラインのbranch maps、stutterの免除は変わりません。
+  逆に、自身actorが一致または不在なのにブロック本文が偽の不一致を作っていた形の受理は
+  意図した拡大です。typed requirement本文はactor宣言ではありません。公開metadataの優先順、
+  Kernel v1/v2、RCIR、spec digest、reportの帰属は保ちます。base
+  `e8cf78f0162530e264128f588981d49790f2767f`とhead
+  `b8daaa8245f374f74448fd983755689f832484cc`の各archive treeで、3 rootの全formを
+  両binaryの`fslc check`で2回sweepしました(base 591 / head 592 forms、各binary)。
+  **corpusの`ok`→`error`は0件、`error`→`ok`も0件**で、受入テストの拒否・拡大とは別集合です。
+  手動での方針確認・訂正とコマンドは[DESIGN-refinement](../design/DESIGN-refinement.md)の
+  「#1456: requirement-action own actors and breaking-source migration」を参照してください。
+  自動移行、互換bypass、猶予期間は無く、問題が出たら4.xのbinaryに戻します。
+- requirements の process 形式(edition 4)の transition の `by X` は自由なラベルで、
+  宣言された actor を指すものではありません。この形式には `actor` の宣言が無く、
+  `check` は `X` がどこかで宣言されているかを見ません。ここでいう「source actor」は
+  transitionに書いたラベルで、actorシンボルの宣言への参照ではありません。
+  (`business` の process は逆で、どの `actor` 行も宣言していない actor を使う
+  transition は check 時エラーです)。このラベルが business の actor と照合されるのは、
+  refinement がその transition を同名の business の action へ自動で対応付け、その
+  refinement が評価されたときだけです。自動の対応付けとは、`maps auto` によるものと、
+  インラインの `implements` の継ぎ目が、明示のインライン `action ... -> ...` 項目が
+  名指ししていないすべての transition を暗黙に対応付けるものです。不一致と`diff`の
+  報告形式は上述のとおりです。たとえば、インラインの継ぎ目は、範囲を選ばない
+  `check` や `verify` と `fslc scenarios` では評価されますが、`--property` などで
+  範囲を選んだ `verify` では評価されません(上述)。refinement ファイルの
+  `maps auto` は `fslc refine` や `fslc chain` の refine 層で評価されます。
+  `fslc diff` は mapping が無いと 2 つの版の間の `maps auto` の refinement を
+  自分で作るので、そこでは `by` のラベルの違いが自動対応の失敗として現れます。
+  明示の `action` 項目で対応付けた transition、business 側に同名の action が
+  無いためにインラインの継ぎ目が `stutter` へ対応付ける transition、そしてその
+  ような refinement が評価されないときには、`by` のラベルは何とも照合されません。
 - `acceptance` は、check 時に具象の Monitor によって replay 検証されます(失敗は
   `kind: "acceptance"`)。`expect <expr>` と並んで `expect <Entity> <id> in
   <Stage>` をサポートし、scenarios / testgen へ直接流れ込みます(= 受け入れ基準が
   実装のコンフォーマンステストになります)。
-  `acceptance`/`forbidden` のステップの action 引数は、数値リテラルに加えて enum
-  メンバー名と const 名を受け付けます(例: `answer(0, Triggered)` は
-  `Triggered` が `Trigger` の第 2 メンバーであるとき `answer(0, 1)` と等価です)
-  — 未定義の名前は check 時エラーです。
+  `acceptance`/`forbidden` のステップの action 引数は、パラメータの種類と一致する
+  必要があります。enum パラメータにはメンバー名を渡し、数値の ordinal は渡せません
+  (`paint(1)` は `paint(Blue)` ではありません)。const 名も、その値がパラメータの
+  種類と一致する場合に使えます。未定義の名前は check 時エラーです。acceptance の
+  ステップで種類が異なる引数を渡すと、`kind: "acceptance"`、`wrong_kind_argument`
+  オブジェクト (`parameter`, `value`, `type`)、どの引数がパラメータの型に属さず、
+  ガードが評価されなかったことを説明するトップレベルの `message`、ヒント、および
+  そのステップの `loc` を持つエラーになります。
+
+  replay 前に `expect <expr>` (および FSL 5 scenario の `then <expr>`) は、
+  invariant と同じく期待型 `Bool` で再帰的に型検査され、すべてのオペランドと
+  条件式の両分岐も検査されます。enum 状態 `c: Color` に対する `c != 1` や
+  `c == 1` のような異なる種類の比較は、既存の代入可能性メッセージと、記述した
+  `expect`/`then` キーワードの位置を持つ check 時の `kind: "semantics"`
+  エラー (exit 2) です。`Blue` が `Color` のメンバーなら `c == Blue` は型が
+  合います。式はあくまで最終状態の述語であり、初期状態や途中の状態で成立する
+  必要はありません。型が正しく偽になる述語は、引き続き replay 時に
+  `kind: "acceptance"` で失敗します。読みやすい stage 形式は変わりません。
+  互換性測定 (#1439): base `5a539bbe` に対し、`specs/`、`examples/`、
+  `rust/fslc/tests/fixtures/` 配下の各 tree の全 579 形式を両方のゲートモードで
+  検査し、ok→error 遷移はありませんでした。コマンドと測定した production の
+  識別情報は[設計ノート](../design/DESIGN-requirements-stage.md#measured-compatibility)
+  を参照してください。
+  acceptance と forbidden のすべてのステップ引数も、replay 前に lowering 済み
+  モデルに対して再帰的に型検査されます。setup/final、FSL 5 の呼び出し、句の
+  `with` 入力、助詞付き入力、混合入力、relation-role 値を含み、選択されない分岐も
+  検査します。式の内部の型を検査し、外側の型をパラメータ型には強制しません。
+  内部の不整合は既存の代入可能性メッセージを持つ `kind: "semantics"`、exit 2
+  で、位置はステップの最初に記述されたトークンです。呼び出しなら action 名、
+  actor が先頭の句なら actor、助詞で語順を変えた句なら先頭のトークン
+  (例えば後続の actor ではなく `claim1`) を指します。
+  内部で型が整合する `paint(1)` と `paint(if true then 1 else 2)` は、既存の
+  forbidden の `wrong_kind_argument` 診断を保ち、values scope のみを理由とする
+  skip も変わりません。
+
+  拡張の測定では base `5a539bbe` に対し、各 tree の corpus 579 形式と、lint のみ
+  修正した trace-step テストの全 inline fixture 21 形式を両モードで 2 回ずつ
+  検査しました (4,800 checks)。corpus の遷移は空ですが、次の inline T01–T16 は
+  **破壊的な受理の削除** (`ok` / 0 → `error` / `semantics` / 2) です。
+  mode/form 遷移は 21 件で、それ以外の全出力・exit 差や反復差はありません。
+  T01–T03、T13、T16 は両モード、それ以外は FSL 5 のみで遷移します。
+  各行は[拡張の設計ノート](../design/DESIGN-requirements-stage.md#extension-compatibility-measurement-and-breaking-removals)
+  に記録した測定上の削除に対応します。
+
+  | 削除 | 新たに拒否する型不整合の trace 形式 |
+  |---|---|
+  | T01 | acceptance の Color 引数、条件 `c != 1` |
+  | T02 | forbidden setup の Color 引数、条件 `c != 1` |
+  | T03 | forbidden final の S1: `paint(if c != 1 then Red else Blue)` |
+  | T04 | FSL 5 scenario 呼び出し、条件 `claim_stage[0] != 1` |
+  | T05 | FSL 5 scenario の with 入力、同じ stage 条件の不整合 |
+  | T06 | FSL 5 scenario の助詞付き入力、同じ条件 |
+  | T07 | FSL 5 forbidden 呼び出しの setup、同じ条件 |
+  | T08 | FSL 5 forbidden 呼び出しの final、同じ条件 |
+  | T09 | FSL 5 forbidden の with setup 入力、同じ条件 |
+  | T10 | FSL 5 forbidden の with final 入力、同じ条件 |
+  | T11 | FSL 5 forbidden の助詞付き setup 入力、同じ条件 |
+  | T12 | FSL 5 forbidden の助詞付き final 入力、同じ条件 |
+  | T13 | acceptance の数値引数: `setn(if c != 1 then 2 else 0)` |
+  | T14 | FSL 5 助詞/with 混合入力、ClaimStage 比較の不整合 |
+  | T15 | FSL 5 relation-role 値、条件 `ticket_stage[0] != 1` |
+  | T16 | acceptance の未選択分岐: `paint(if true then Blue else (if c != 1 then Red else Blue))` |
+  | T17 | native/shared 診断テストの `expect c != 1` 行 |
+  | T18 | 書き換えた Worker 診断テストの同一の `expect c != 1` 行 |
+  | T19 | step: `paint(if o is some(z) then z else Red)`、`o = none` |
+  | T20 | 期待式: `expect (if o is some(z) then z else Red) == Red`、`o = none` |
+  | T21 | 語順を変えた助詞付き入力: `claim1 を Employee が amount (if claim_stage[0] != 1 then 1 else 2) で submits` |
+
+  round 1 では、書き換えた両診断テストの全ソースと変更した共通 oracle を使う
+  テスト、および scope/語順変更の対照を追加測定しました。同じ base と変更のない
+  production コードに対し各 tree 20 形式、両モード各 2 回で 160 checks です。
+  T17–T20 は両モード、T21 は FSL 5 のみで追加の破壊的な受理の削除になります
+  (fixture 5 件 / mode-form 遷移 9 件。それ以外の差や除外はありません)。
+  T17/T18 は 2 つの書き換えたテストにある同一の FSL です。T19/T20 の診断は
+  `public Kernel cannot type identifier 'z'` です。§5 の `is some(z)` の束縛は
+  真の論理的継続 (`=>` / `and`) に限られ、条件式の `then` 分岐には及びません。
+  未選択の分岐でも同じです。invariant は既に同じ scope 逸脱を拒否しています。
+  使用箇所をサポートされた継続へ移すか、scope 外の名前を使わないでください。
+  T21 の位置は後続の `Employee` でなく先頭の `claim1` (8:5) です。
+  正確な識別情報と fixture 一覧は設計ノートを参照してください。
+
+  単項オペランドの測定 (#1439): base `5a539bbe` と最終実装をそれぞれの tree で
+  両モード各 2 回検査しました。各 tree の corpus 579 形式と inline fixture
+  51 件、計 5,040 checks です。corpus の ok→error 集合は空です。T01–T21 は
+  既存の削除のままで、次の 7 形式が追加の**破壊的な受理の削除**です。いずれも
+  両モードで `ok` / 0 → `error` / `semantics` / 2 へ遷移します (新規の mode/form
+  遷移 14 件、全体では 44 件)。全 stdout、stderr、exit にそれ以外の差、反復差、
+  除外はありません。コマンドと正確な base/head 識別情報は
+  [単項オペランドの設計ノート](../design/DESIGN-requirements-stage.md#unary-operand-typing-1439)
+  を参照してください。
+
+  | 削除 | 新たに拒否する単項型不整合の形式 |
+  |---|---|
+  | U01 | forbidden step `paint(if true then Red else (if not 1 then Red else Blue))` |
+  | U02 | forbidden step `paint(if true then Red else (if -Red > 0 then Red else Blue))` |
+  | U03 | forbidden step `paint(if c == Red or not 1 then Red else Blue)` |
+  | U04 | `paint(Blue)` 後の acceptance `expect c == Blue or not 1` |
+  | U05 | invariant `c == Red or c == Blue or not 1` |
+  | U06 | invariant `c == Red or c == Blue or -Red > 0` |
+  | U07 | `paint(Blue)` 後の acceptance `expect not (false and not 1)` |
+
+  `not` は Bool オペランド、単項マイナスは数値オペランドを使うよう修正してください。
+  評価が省略されても、型不整合のオペランドは合法になりません。
+
+  現在の rebase 測定 (#1439): BASE
+  `23eb5e41326ef4cf81a100ad0e011e81ed9fd507`、HEAD
+  `1e27d896b69b395ad8e48c570b4ddbca50e442a0` を各自の tree でビルドしました。
+  `BINARY check FORM` で各 tree の全 corpus 594 形式と inline 65 件を両モード
+  各 2 回検査しました (5,272 checks)。corpus の ok→error 集合は空です。
+  上述の以前の件数は履歴です。今回は固定テスト 5 ファイルをすべて含み、既存の
+  mode/form 削除 44 件に加え、acceptance の `expect` と FSL 5 の `then` で
+  `c != 1`、`true and c != 1`、`not (c == 1)`、
+  `if c != 1 then true else false`、`forall color: Color { color != 1 }` を拒否します。
+  enum `c: Color` に対する**破壊的な受理の削除**で、acceptance は両モード、
+  scenario は FSL 5 のみで遷移します (追加 15 件、計 59 件)。整数の代わりに同じ
+  enum のメンバーを使ってください。対応する `c == 1` fixture は期待キーワードで
+  エラーのまま、診断が `acceptance` から `semantics` へ変わります
+  (mode/form 3 件、exit 2 は不変)。全出力の差 62 件はこれですべてであり、
+  それ以外の差、反復差、除外はありません。inventory コマンドと calibration は
+  [現在の設計測定](../design/DESIGN-requirements-stage.md#rebase-compatibility-measurement-on-23eb5e41)
+  を参照してください。
+
+  未選択の分岐も含め、同じ enum のメンバーを使う比較に修正してください。
+  guard の拒否が、型不整合の引数を正当化することはありません。
 - カーネルラッパー形式は、難しいケースにだけ使ってください: 複数エンティティの
   要件、保存則、SLA/時間、carried フィールドとして表現できない履歴、明示の
   カーネル状態を必要とする振る舞い。そのフォールバックは引き続き
   `struct` / `state` / `init`、`fair action`、`branches`、明示の `maps` をサポート
   します。`branches` は action を各 when 条件で自動的に分割し
-  (`submit[a <= AUTO_LIMIT]` と表示されます)、`maps` 節が上位レイヤーへの action
-  の対応を提供します。
+  (mutation の target では `submit[a <= AUTO_LIMIT]`、それ以外の出力では分けた
+  action を `submit.b1`・`submit.b2` … と表示します)、`maps` 節が上位レイヤーへの
+  action の対応を提供します。
 - `terminal { <expr> }` は `requirements` spec のトップレベルで許され、カーネルへ
   lowering されます(§6) — カーネルと同じく、spec ごとに `terminal` ブロックは
   ちょうど 1 つです。`stage(c)` は、`c` が型付きのエンティティパラメータまたは
@@ -2378,7 +4888,35 @@ verify {
   非修飾の `stage(c)` はエラーです。
   `claims.Claim.stage(c)`(任意深さの `SymbolPath`)で 1 つを選択してください。
   存在しない process、非エンティティの引数、未知の stage メンバー、未解決の修飾子
-  は、ソース位置付きの型エラーです。
+  は、関連するソース位置をメッセージ内に含む `kind: "semantics"` のエラーとして報告され、
+  診断コードは付きません。
+
+**破壊的削除 (#1569):** process フィールド `amount` を持つ legacy requirements
+では、`exists c: Amount { stage(c) == Approved and amount == c }` のような
+transition ガードを `check` で拒否するようになりました。非エンティティの
+バインダーが、transition の暗黙のエンティティパラメータ `c` を隠します。
+`c` というフィールドは不要です。以前は、変数捕獲を避ける置換でバインダーだけが
+改名され、stage の引数は改名されませんでした。そのため `check` はガードを受理し、
+`verify` は `verified` と報告しましたが、`stage(c)` は transition 自身の
+インスタンスを黙って読んでいました。現在は `check`、`kernel`、`verify` が
+exit 2、`kind: "semantics"`、
+`stage(c) refers to type 'Amount', which has no process` で拒否します。
+バインダーとその使用箇所を一貫して `d` に改名した同じ不正なガードは、以前から
+このエラーでした。`stage(...)` にはエンティティのパラメータまたはバインダーが
+必要です。transition 自身の stage を読むには、
+`exists n: Amount { stage(c) == Approved and amount == n }` と書き、エンティティ
+には `c` を、非エンティティのバインダーには別の名前を使ってください。この
+書き換え後のガードは `check` を通ります。削除された形を持つチェックイン済みの
+spec や example はなく、base `1844fa74` / head `7b9b34b3` の 597 形式の sweep
+でも、コーパスでの受理から拒否への変化はありませんでした。
+
+暗黙のエンティティ引数 `c` は、#1515 の const 規則では source から見える局所名です。
+その process を使う requirements では同名の const を改名し、instance を意味する
+`stage(c)` は残してください。next edition の entity は頭文字を小文字にした名前を
+instance に使い、relation event は相手の actor の暗黙の instance も同じ規則で
+引数に取ります。これらも同名の const を拒み、生成 init は元の process/entity 宣言、
+relation 引数は元の event 宣言を指します。source から見えない KPI 射影の binder は
+この制限とは別で、衝突するときだけ fresh にします。
 
 ### 13.3 業務コンサルティングレイヤー: `business`(fsl-biz ダイアレクト)
 
@@ -2523,7 +5061,7 @@ governance EnterpriseReturnControls {
 `fslc check governance.fsl` は、参照されるすべてのコントロール、business ファイル、
 policy/goal、preservation ファイルを検証します。preservation ブロックはさらに、
 宣言された refinement を深さ 8 で実行し、結果を `governance.preservations` の下で
-報告します: `refines`、`refinement_failed`、`violated`(`after` の spec がそれ自身の
+報告します: `refines`、`refinement_failed`、`impl_violated`(`after` の spec がそれ自身の
 意味論を破る、§10)、`unknown_budget`(対応検査が状態の上限に達した、§10)のいずれか
 です。ブラウザの Worker も同じ値を報告します。
 
@@ -2537,7 +5075,7 @@ top-level の `result` を決め、各 preservation 自身の値は `governance.
 |---|---|---|
 | `refines`(すべての preservation) | 変わらない(`ok` / `verified` / `proved`) | 変わらない(0) |
 | `refinement_failed` | `refinement_failed` | 1 |
-| `violated` | `impl_violated`(同じ条件に inline `implements` seam が使う綴り) | 1 |
+| `impl_violated` | `impl_violated`(同じ条件に inline `implements` seam が使う語と同じ) | 1 |
 | `unknown_budget` | `unknown_budget` | 1 |
 | それ以外 | `error`、`kind: "internal"` | 3 |
 
@@ -2550,7 +5088,8 @@ governance 契約のエラー(委譲先の business ファイル、control、`sa
 畳み込まれた判定を読みます: `fslc chain` の spec レイヤーは失敗し、`fslc ledger`、
 `fslc html`、`fslc mutate` は同じ baseline から exit 1 を返し(ledger の本文もその判定と、
 すべての preservation とその結果を、失敗したものに印を付けて示します)、`fslc scenarios` は
-`verify` と同じように preservation を自身の封筒へ畳み込み、ブラウザの Worker も
+`verify` と同じように preservation を自身の封筒へ畳み込み、`testgen` は preservation の失敗時に
+kernel 経路でも verify の失敗封筒と exit を返してハーネスを書かず、ブラウザの Worker も
 `check` と `verify` を同じように畳み込みます。これは exit code を変えました: 4.11 より前は
 失敗した preservation があっても `check` は `ok`、`verify` は `verified` で、どちらも
 exit 0 であり、`verify` は `governance` セクション自体を報告していませんでした(`check` が
@@ -2815,6 +5354,82 @@ spec が必要とするフィールドです。さらに 3 つが省略可能で
 `check hard { }` ブロックも — `"description text"` タグを受け付けません。ここの
 すべてのフィールドは、§13.1 の宣言タグの規約とは違い、裸の識別子または数値です。
 
+共有の validation では、単独でも project 内でも、すべての `ai_component` が
+`tool` または `tools` でツールを 1 つ以上宣言する必要があります。
+ツールを省略した形の受理は**破壊的な削除**(#1546)です。
+`ai_component NoTools { }` と `ai_component NoTools { authority { } }` はどちらも
+カーネル lowering の前に `kind: "type"`、そのままの message
+`ai_component 'NoTools' declares no tools`、component 宣言を指す `loc` で
+拒否されます(CLI exit 2)。`check`、`ai check`、BMC、induction、scenarios、testgen は生成された
+`Tool` enum の名前でなく、この利用者の component を名指す診断を返し、Worker の
+check も一致します。ツールが 1 つ以上あれば、空の `authority { }` は引き続き有効です。
+既存の不正な hard rule と未宣言の authority tool のエラーは引き続き優先され、
+各コマンドの従来の envelope を保ちます。#1545 は同じ no-tools の拒否を
+`ai compat`、`ai replay`、project の `ai check`、native/Worker の project 検査にも
+適用します。空の authority block を含むツールの無い component の受理に対する
+**破壊的な削除**です。check と specialized-preflight の道では、単独の component に対する
+#1546 の envelope は変えません。lowering だけの道での fallback 重複の優先順位の例外は
+下記の実測に示します。
+native の `check` と共有 Worker 検査段階は、未宣言の authority tool または未知の
+hard rule を持つ project 内のすべての component も拒否し、`ok` ではなく project の
+`ai check` と同じ診断(semantics、exit 2)を返します。generic な project 検査で従来
+受理した fixture `error_envelope_ai_project_unknown_tool.fsl` と
+`error_envelope_ai_project_invalid_rule.fsl` の受理も削除されます。
+埋め込まれた component の位置は元の文書全体を指します。行と列は 1 始まりで、
+列は byte や UTF-16 単位ではなく Unicode scalar value を数えます。project parser は
+component IR を作る前に token の span を一度だけ移し、ネストした位置と annotation の
+UTF-8 byte offset も元の文書に揃えます。ただし literate Markdown の byte offset は
+抽出後の FSL text が基準であり、文書の行と code 行内の列を保ちます。
+未知の hard rule の message は `check hard` を
+指し、既存の parse error を二重には移しません。座標だけの修正であり、受理・拒否、
+診断の kind、envelope の field、exit status、assurance は変えません。エディタは共有
+validator による project 内の component の検査結果を文書全体の位置で表示し、model は
+`None` のままです。
+
+**境界 sweep の実測 (#1545):** B
+`d37a215e8df6c00222e6aafd94bc9b556c445521` と H
+`99810256faca086360c6ca4233f935b9b56b1ec8` を、それぞれ独立した git archive の
+tree で build しました。B の tree で `<B-binary> check <relative-path>`、H の
+tree で `<H-binary> check <relative-path>` を実行し、`specs/`、`examples/`、
+`rust/fslc/tests/fixtures/` の全597 `.fsl`、Markdown 30件、新しい test の inline 入力
+12出現を各 tree で検査しました(**計1,278検査**)。Markdown の4件は compiler が
+FSL fence を認識します。bash fence だけの `examples/ai/README.md` も含め、30件を
+すべて検査しました。cache と unstable の環境上書きは unset、
+除外した出力 field はありません。corpus の ok/exit0 → error/exit2 はちょうど
+**3件**で、`error_envelope_ai_project_unknown_tool.fsl`、
+`error_envelope_ai_project_invalid_rule.fsl`、`error_envelope_literate_ai_project.md` です。
+Markdown project は type、`ai_component 'EnvelopeParityLiterateProject' declares no tools`、
+block 内 loc 1:1、exit 2 を返しました(当時の #1545 の座標系であり、#1574 以後は文書の
+loc 5:1 です)。単独の literate component の拒否と、複数 block の
+toggle 2件の受理は変わりません。新しい test の inline の削除は
+**4出現**です: CLI 側と Worker-shaped 側のツールの無い component を含む project
+(2出現)、空の authority だけの component を含む project(1出現)、正常な最初の
+component の後ろに不正な component がある project(1出現)。書き直した既存の inline
+FSL は0件です。ツールの無い3出現は当時 block 内 loc 1:1 の type でした。
+#1574 以後は字下げされた CLI project の形では文書の loc 2:3 となり、文書先頭の
+Worker の形は 1:1 のままです。後ろの未宣言 tool は
+loc なしの semantics を返します。この check だけの sweep で、それ以外の exit/result と stdout/stderr 全文は
+変わりません。意図した tool を宣言するか不要な component を除き、不明な tool/rule
+の参照を修正してください。
+
+lowering だけの道も同じ validation 全体を使います。同じ B/H で `analyze <relative-path>`
+を AI に言及する corpus 18入力と明示的な4形式に実行し、変化した形式と compose の対照を
+`scenarios <relative-path> --depth 2 --deadlock ignore` と `explain <relative-path>` でも
+比較しました。コマンドと形式の30組 × 2バイナリ = 計60観測で、
+analyze(22形式)、scenarios(4形式)、explain(4形式)は各々
+**ok→error 1、error→ok 0、error の envelope 変化2** です。破壊的削除は
+`tool_authority` だけを選んで生成された参照から隠れていた未宣言 authority tool X で、
+成功の代わりに semantics、`unknown tool 'X' in authority block`、loc なし、exit 2 を
+返します。ツール無しで fallback x が重複すると、
+type/`ai_component 'DupNoTools' declares no tools`/loc 1:1 から
+semantics/`duplicate fallback reason 'x'`/loc なしへ変わります(ともに exit 2)。ツールが
+ある場合は、loc なしの semantics/`duplicate action 'fallback_x'` から
+semantics/`duplicate fallback reason 'x'`/loc なしに変わります(ともに exit 2)。
+AI component を use する compose は引き続き
+`compose use must reference a spec at 2:3`、loc 2:3 で拒否されます。ほかの lowering の
+受理削除は観測していません。check だけの一致を、これらの意図した診断変更にまで
+一般化しないでください。
+
 `ai_component` はまた、どのハードルールが明示的で個別に報告される invariant を
 得るかを宣言できます:
 
@@ -2887,7 +5502,20 @@ fslc ai compat examples/ai/support_answer_quality.fsl --environment prod
 選択された `statistical_property` が宣言する `slice`/`min_samples`/
 `ci_lower`/`ci_upper` の要件を、事前計算された JSONL（`--records`、または
 宣言された `dataset` の `source` ファイル）に対して Wilson 区間つきで検査
-します。`fslc ai regress` は選択された `ai_migration` が宣言する集約の
+します。
+
+宣言された `dataset.source` が相対パスなら、宣言元 FSL ファイルのディレクトリ
+（パス上の親で、シンボリックリンク経由ならリンクの隣）を基準に読み込みます。
+絶対パスはそのまま使います。明示した `--records` は宣言より
+優先し、実行ディレクトリを基準とします。宣言に source がない場合や、外部の source
+を指定した場合も同じです。property/dataset の選択は、引き続き records の読み込みより
+先に行います。上書き指定がなければ、source がない場合と外部の `://` source に対する
+既存の拒否を保ち、実行ディレクトリやリポジトリ、ファイルの有無による代替探索は
+行いません。そのため、文書の正例では `source "support_eval_v3.jsonl"` と宣言します。
+従来のリポジトリ接頭辞付き宣言は、表記を明示的に移行するか、実行ディレクトリ基準の
+`--records` を指定する必要があります。暗黙の付け替えは行いません。
+
+`fslc ai regress` は選択された `ai_migration` が宣言する集約の
 `no_regression` メトリクス低下/増加の節を検査します。`fslc ai compare` は
 閾値の主張なしにメトリクスの差分を報告します。`fslc ai drift` は選択された
 `observed_property` が宣言する `observed`/`drift` の要件をランタイムの
@@ -3025,15 +5653,15 @@ DESIGN-*.md があります)。
   (exit 2)で終わります。以前の版はエンジンが到達した判定を報告していました。BMC では
   深さが違反に届けば `violated`(exit 1)、届かなければ `verified`(exit 0)、
   `--engine induction` ではその判定です。この検査を走らせる他のコマンドも exit 2 で
-  止まります(`scenarios` と `testgen` は scenario もテストファイルも出力せず、`html` と
-  `ledger` はレポートを書き出します)。ただし次の 3 つは exit 2 に
-  なりません。`explain` は exit 0 のままで witness はありません(既知の欠落 #1242:
-  `explain` は gate のエラーを捨て、`html` の witness 欄も同じです)。
-  `approval create --kind ledger` は exit 0 で、エラーを載せた ledger を記録します。
-  深さが違反に届く場合は以前は exit 2 でしたが、それはその ledger が実時間の
-  `elapsed_s` を埋め込むためでした(forbidden の gate が落ちる ledger を承認できてよいかは
-  #1243 で扱います)。以前に作った ledger の記録の `approval check` は `drifted`
-  (exit 0)です。`fslc diff` はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
+  止まります(`scenarios` と `testgen` は scenario もテストファイルも出力しません)。
+  **#1242 / #1243 から(破壊的変更)** `explain`、`html`、`ledger`、`document` の各コマンド、
+  どの種類の `approval create` / `check` も同じで、gate のエラーを出力し、レポート・ledger・
+  文書・記録を書き出しません(以前は `explain` が exit 0 で witness なし、`html` と `ledger` は
+  レポートを書き出し、`document` の各コマンドはその case を claim として出し、
+  `approval create --kind ledger` / `requirements_document` は承認を記録し、ledger の記録の
+  `approval check` は `drifted`(exit 0)でした)。言語サーバーはこのエラーを
+  `FSL-REQUIREMENT-TRACE` の診断として示し、`fslc analyze` はその case をグラフに出したうえで
+  各ノードに `"trace_gate": "unchecked"` を付けます。`fslc diff` はその違反を報告します(後述)。各コマンドの変更前と変更後の、exit と
   出力の実測は
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。
   scenario の `rejected_by`(testgen が assert します)は、
@@ -3062,20 +5690,14 @@ DESIGN-*.md があります)。
   検証が通れば exit 0、通らなければ exit 1 で、`scenarios`、`testgen`、
   `counterexample export`、`approval create` は exit 2 になることもありました。
   今は `check`、`verify`(どのエンジンでも)、`sweep`、`chain`、`scenarios`、`testgen`、
-  `mutate` の baseline、`counterexample export`、`html`、`ledger`、
-  `approval create --kind scenarios` / `html` が exit 2 になり、仕様の残りの
-  部分についての判定・反例・scenario・テスト・mutant を報告しません。`html`、`ledger`、
-  `approval create --kind html` の stdout は生成結果(`result: "generated"`)で、エラーは
-  レポートの中に載ります(`html` と `ledger` はレポートを書き出します)。`chain` はエラーを
-  `[requirements]` 層の `detail` に載せ、それ以外はエラー(`error` / `kind: "forbidden"`)を
-  出力します。以前に作った `scenarios` / `html` の記録の `approval check` は
-  exit 2 です。exit 2 にならないのは次の 3 つです。`explain` は exit 0 のままで、witness は
-  ありません(既知の欠落 #1242: `explain` は gate のエラーを捨て、`html` の witness 欄も
-  同じです)。`approval create --kind ledger` は exit 0 で、エラーを載せた ledger を
-  記録します。仕様の残りの部分に違反がある spec では以前は exit 2 でしたが、それは
-  その ledger が実時間の `elapsed_s` を埋め込むためでした(forbidden の gate が落ちる
-  ledger を承認できてよいかは #1243 で扱います)。以前に作った ledger の記録の `approval check` は
-  `drifted`(exit 0)です。
+  `mutate` の baseline、`counterexample export`、`explain`、`html`、`ledger`、`document` の
+  各コマンド、どの種類の `approval create` / `check` も exit 2 になり、仕様の残りの
+  部分についての判定・反例・scenario・テスト・mutant・説明・レポート・ledger・文書・記録を
+  報告しません。`chain` はエラーを `[requirements]` 層の `detail` に載せ、それ以外はエラー
+  (`error` / `kind: "forbidden"`)を出力し、言語サーバーは `FSL-REQUIREMENT-TRACE` の診断として
+  示します(`explain`、`html`、`ledger`、`document` の各コマンド、
+  `approval create --kind ledger` / `requirements_document`、ledger の記録の
+  `approval check` は #1242 / #1243 からです。変更前と変更後は設計ノートの §2.1 にあります)。
   `fslc diff` はどちらのステップでも forbidden の判定を変えるので、
   `--forbid unknown` の exit が変わることがあります。各コマンドの変更前と変更後の実測は
   [`DESIGN-forbidden.md`](../design/DESIGN-forbidden.md) §2.1 にあります。
@@ -3087,12 +5709,17 @@ DESIGN-*.md があります)。
   `vacuous_leadsto`(トリガーが到達不能)、`always_true_requires`
   (先行する節の文脈の下で常に真であるガード)、
   `tautology_over_frozen`(どの action も変えない状態の上の、動的に
-  トートロジーである invariant)、`urgency_freeze`(urgency が時間を凍結するために
+  トートロジーである invariant。固定した値の下で、型が許す状態全体について
+  式が定義され、真である必要がある)、`urgency_freeze`(urgency が時間を凍結するために
   死んでいると証明された、生成された deadline の `tick`)、
   `vacuous_deadline`(生成 deadline の age が全遷移で 0 のままと証明される)、
   `vacuity_probe_truncated`†を警告します。
   `error` は exit 2 です。→
   [`DESIGN-vacuity.md`](../design/DESIGN-vacuity.md)
+
+  `never_enabled_action` の所見は source-backed action だけが対象です(著者の primary origin、
+  次に kernel 宣言を調べ、正の行・列を要求します)。生成だけの sentinel は生の coverage 証跡に
+  残りますが、これらの警告、ledger coverage 所見、HTML の badge・coverage 分母には含めません。
 
   † `vacuity_probe_truncated`: `vacuous_implication`/`vacuous_leadsto` の
   到達性 probe は、spec 内の全 antecedent/trigger にまたがって 1 回の
@@ -3116,6 +5743,22 @@ DESIGN-*.md があります)。
   「invariant が欠けている場所」なのではなくレビューキューです: 生存者は
   等価ミュータント、ベースラインで死んでいる振る舞い、深さの境界を超えて
   初めて見える効果、あるいは本物の制約不足かもしれません。
+  ベースラインは auto(既定 1,000,000 状態)で `verified` または `proved` を
+  受理します。受理できなければ新しいスレッドで BMC を再実行し、verified なら
+  続行し、それ以外はそのベースライン envelope を返します。JSON は
+  `baseline:"verified"` のままです。各ミュータントではまず boundary probe の所見を
+  採用し、所見なしで完了した場合に explicit(50,000 状態)を試し、全 reachable が
+  K 以内で目撃されたときだけ clean を確定します。いずれでも決まらない場合は
+  既存の BMC 経路が verdict と kill label を選びます。後続の検査も引き続き
+  実行します。受理されたベースラインと評価した各ミュータントの
+  進捗は stderr に `engine=explicit|bmc|probe|none` と秒数で出ます。engine は
+  main oracle の経路です。main oracle が clean で後続検査が `killed`・`inconclusive`・
+  `error` を決めたミュータントは `engine=secondary, oracle=explicit|bmc` と出て、
+  その経路も読み取れます。stdout は
+  [`DESIGN-mutate` §3](../design/DESIGN-mutate.md#3-kill-oracle-and-baseline-gate) の
+  encoding-only residual(BMC 単独では `build_spec` だったものが explicit-clean で
+  生存し得る)を除いて変わりません。
+  ベースライン拒否やコマンドエラーでは進捗を出しません。
   `--from mutants.jsonl` はさらに、完全な `mutated_spec`、または正確な
   `replace:{target,replacement,occurrence?}` 命令として表現された、外部で生成
   された変異を裁定します。valid な外部ミュータントは、同じ
@@ -3123,9 +5766,13 @@ DESIGN-*.md があります)。
   パース、名前、型、構築のエラーは `invalid` で、決して killed にはならず、
   combined/per-source のキル率の分母から除外されます(これらは spec の強さでは
   なく、外部ジェネレーターの品質を測ります)。構築できない組み込みミュータントも
-  同じく `invalid` です。オラクルが判定できなかったミュータント(Z3 を作れない、
+  同じく `invalid` です。`invalid` は静的に不正な入力を意味し、implements の map の
+  静的な型の誤り(auto と明示の maps)も含みます。この検査は実行時のオラクルより先に
+  行うため、main や requirement による kill が不正な map を判定済みに変えることは
+  ありません。実行時の判定の順に依らず、`gate.judged` と `kill_rate` から除外します。
+  オラクルが判定できなかったミュータント(Z3 を作れない、
   solver の `unknown`/backend の失敗、acceptance/forbidden/implements オラクルの
-  エラー)は `status:"error"` と `error{stage, message}` になり、決して killed には
+  評価の失敗)は引き続き `status:"error"` と `error{stage, message}` になり、決して killed には
   ならず、`kill_rate` から除外され、`summary.errored`(`summary.inconclusive` と同じく非 0 のときだけ出ます)に数えられ、要求された
   gate を不合格にします(`oracle_errors`)。
   すべてのエントリは `source:"builtin"|"external"` を運びます。`--max-mutants` は
@@ -3160,6 +5807,10 @@ DESIGN-*.md があります)。
   [`DESIGN-explain.md`](../design/DESIGN-explain.md)
 - **`fslc analyze`** — 構造的な観測 JSON を出力します。`--projection tsg` は、
   要件、action、状態、プロパティ、シナリオの Typed Semantic Graph を返します。
+  要件の関係を持つ init には、id/kind/name/label が `init` のノード、spec から init への
+  `declares` エッジ、要件から init への `covers` エッジも生成されます。これは
+  `disconnected_requirement` に対する有効なアンカーで、`requirement_property_graph`
+  にも含まれます。要件の関係を持たない init はグラフ出力を追加しません。
   グラフの射影は、連結成分、SCC、代表的なサイクル、次数、そしてサイクルランクや
   ファンイン/ファンアウトのハブのような構造メトリクスを返します。
   `--projection action_dependency_graph` は、構造的な action の enable/競合の
@@ -3212,7 +5863,23 @@ DESIGN-*.md があります)。
   レポート: ステータスのサマリー、state/action/プロパティのテーブル、action から
   状態への書き込みグラフ、トレースのタイムライン、witness の例、counterfactual、
   ソース、生の JSON。読み手に CLI の実行を要求することなく、PR、設計レビュー、
-  非専門家によるプロジェクトレビューに使うためのものです。→
+  非専門家によるプロジェクトレビューに使うためのものです。既定では非決定的な
+  timing を保持します。HTML 専用の `--no-timing`(既定 false、別名なし)は、
+  `verification.cost.elapsed_s`、
+  `verification.cost.solver.check_elapsed_s`、
+  `verification.cost.properties[].elapsed_s`、
+  `explained.counterfactuals[].violation.cost.elapsed_s`、
+  `verification.cost.solver.memory_mb`、`verification.cost.solver.conflicts`、
+  `verification.cost.solver.decisions`、
+  `verification.cost.solver.propagations` だけを、描画前の
+  presentation 用の写しから省きます。stdout と `-o`/`--output` のファイルの両方に
+  効きます。ソースや domain state のフィールド、`solver.checks`、プロパティの
+  `kind`/`name`/`checks` は保持し、通常の verify JSON や exit code は変えません。
+  実時間の timing と実行環境に依存する Z3 内部の統計を省きますが、既定の HTML は
+  timing と solver の統計をすべて保持します。
+  同じ入力パス、ソース、オプション、toolchain での byte が安定した比較を支援する
+  もので、異なるパス、backend、環境の間の正規化ではありません。
+  `approval create --kind html` は既定の timing 入りレポートを再生成し、timing と実行環境に依存する solver 統計の値を正規化しても key は除かないため、`--no-timing` の artifact を fresh rendering と不一致として拒否します。→
   [`DESIGN-html-report.md`](../design/DESIGN-html-report.md)
 
 書く前の規律(形式化メモ、自然言語→構文の逆引き、推奨プラクティス)は
@@ -3241,8 +5908,20 @@ DESIGN-*.md があります)。
 します。
 ネイティブ Rust のコマンドは、この判定を、非公開のパーサー/モデルの構造ではなく、
 バージョン付きの公開 Kernel JSON v1 コントラクトから行い、未対応の Kernel
-スキーマバージョンでは fail closed します。その JSON レポートと TypeScript の
-バイト列は、凍結された参照実装の出力と互換のままです。
+スキーマバージョンでは fail closed します。凍結された参照実装に比べて、ネイティブの
+判定は以前から、enum フィールドを所有 struct ごとに区別し、選言項のいずれかが
+エンティティを制約しない場合は選言ガードを落とします。
+#680 から、ローカルなガードを持つ状態保存 action は、
+`state_preserving: true` 付きの自己ループのレポート項目と、入力の正確な状態を保存する
+ジェネリックな TypeScript シグネチャとして現れます。#1431 では予約語のエスケープ
+(衝突しない識別子の割り当てを含む)とモデル由来のパラメーター型を追加しています。
+JSON の `typescript` フィールドにも、これらすべての TypeScript の違いが含まれます。
+コマンドのエンベロープと既存レポートフィールドの形(ソース名の `params` を含む)は
+互換のままですが、以前からの判定規則により、レポートの値、含まれるエンティティ、
+applicability、summary の件数は異なり得ます。
+ネイティブのエンティティ順はアルファベット順です(凍結された参照実装は宣言順です)。
+JSON も TypeScript も、凍結された参照実装との
+バイト単位の一致は主張しません。
 → [`DESIGN-typestate.md`](../design/DESIGN-typestate.md)
 
 ## 17. causal プロファイル(レビュー専用の因果仮説グラフ)
@@ -3315,11 +5994,34 @@ lag が `unknown` で比較する `lag_min` が無い場合は、timing eligibil
 で current support から除外され、票を投じません。同一 source lineage は 1 票に
 collapse されます(lineage 内の矛盾は `inconclusive`)。staleness は明示的な
 `--as-of` 日付に対してだけ判定され、実行環境の時計は決して使いません。
+`causal analyze` と `causal ledger` は、ASCII の `YYYY-MM-DD`(符号やほかの
+文字を含まない)で書かれた実在するグレゴリオ暦の日付ではない `--as-of` の値を、
+model や evidence を読む前に `kind:"usage"`・exit 2 で拒否します。以前はこうした
+値でも exit 0 になり、stale と数えられる evidence はありませんでした。
+`causal observe-expectations` も同じ規則に反する `--period-start` と
+`--period-end` を同じ形で拒否し、何も書き出しません。以前は不正な
+`--period-start` でも exit 0 になり、artifact が書き出されていました。
 claim 側または artifact 側の片方だけに存在する scope dimension は
 `unassessable` であり、欠落を universal として扱いません。
 **`causal_support` と `formal_assurance` は直交する 2 軸**です: evidence は
 `formal_assurance: "not_run"` を決して変えず、どの support 値も verdict では
 ありません。
+
+`causal observe-expectations` は replay と artifact 構築の後、出力のシリアライズや
+書き込みの前に、実際の `--out`/`--lifecycle-out` 出力先をすべて計算します。
+artifact が1つなら指定パス、複数なら従来の `<stem>.<evidence_id>.<extension>`
+（既定の拡張子は `json`）を使います。衝突判定のキーは、canonicalize した親ディレクトリと
+ファイル名の組です。したがって `sub/../a.json` や、`self -> .` のときの `self/a.json` は
+`a.json` と衝突します。親が存在しない場合は、実行ディレクトリ基準の表記から `.` と `..` を
+畳んだものをキーにします。大文字と小文字だけが違う名前は、大文字小文字を区別しない
+ファイルシステムでも衝突とは判定しません。artifact 順に
+evidence、lifecycle の順で調べ、最初の重複を `kind:"usage"`、exit 2 と
+`causal output destinations collide: <first path> and <second path>` で拒否します。
+この拒否では全出力先の既存バイト列と存在状態を保ちます。既存の model/input/replay
+エラーが先で、有効な衝突は出力先・公開の I/O エラーより先に拒否します。
+artifact が0なら、出力フラグが同じでも衝突にはなりません。異なる出力先への書き込みは
+従来どおり evidence/lifecycle の交互順です。後の書き込みに失敗しても先の書き込みは
+戻さず、そのエラーの `written` に列挙します。それ以外の名前、バイト列、digest、assurance は変えません。
 
 人間は claim から観測可能な契約を `expectation` として切り出し、既存の
 verifier で検査できます — **claim そのものは決して lowering されません**:

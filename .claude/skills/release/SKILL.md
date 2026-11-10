@@ -35,7 +35,11 @@ aligned in the same pull request.
   compatibility reference to PyPI or the Rust crates to crates.io.
 - Release native binaries for macOS arm64, Linux x64, Linux arm64, and Windows
   x64 only. Intel macOS (`macos-x64`) is not supported.
-- Populate the GitHub Release body from the matching non-empty changelog section.
+- Build the GitHub Release body with `tools/release-notes.sh`. When
+  `docs/release-notes/vX.Y.Z.md` exists, the body is that summary plus a link to
+  the tagged `CHANGELOG.md` section; otherwise it is the matching changelog
+  section. Either way it must be non-empty and within GitHub's 125,000-character
+  limit (`docs/design/RELEASE.md` §1, step 8).
 - Fix defects upstream in `main` first, then promote downstream. Use the hotfix
   exception only when unreleased `main` cannot safely ship.
 - Stop before a push, production merge, tag, release publication, or branch
@@ -106,21 +110,38 @@ a feature-flag system solely to accommodate this flow.
    use it as the promotion pull request head, and perform both identity checks.
    Do not open a moving `main -> production` pull request. If unrelated changes
    land, rerun the gate or replace the candidate.
-3. Confirm the release commit preparation is already on `main`:
+3. Confirm the release commit preparation from `docs/design/RELEASE.md` §1 is
+   already on `main`:
+   - the chosen version's SemVer reason is recorded in the release pull
+     request; a major release states the rationale §1, step 3 requires;
    - bump `rust/Cargo.toml`'s workspace version and regenerate `rust/Cargo.lock`
      with Cargo; do not bump the frozen `pyproject.toml` package for a native
      GitHub Release;
+   - bump the VS Code extension to the same version with
+     `npm version X.Y.Z --no-git-tag-version` in `editors/vscode`;
+   - regenerate the domain characterization baseline
+     (`UPDATE_DOMAIN_CHARACTERIZATION=1`) and the induction contract golden
+     (`UPDATE_INDUCTION_CLI_CONTRACT=1`), each diff containing version strings
+     only;
+   - the release commit touches no product-surface path outside
+     `is_release_bump_path`; a test that hard-codes the version is fixed in an
+     earlier pull request, not admitted to that set;
    - ran `tools/aggregate_changelog.sh release --version X.Y.Z --date YYYY-MM-DD`,
      moving `[Unreleased]` entries and aggregating every `changelog.d/`
      fragment under `## [X.Y.Z] - YYYY-MM-DD`, leaving `[Unreleased]` and
      `changelog.d/` both empty;
-   - update comparison links and confirm the matching changelog section is a
-     non-empty Release body.
+   - update comparison links, and confirm
+     `./tools/release-notes.sh build --version X.Y.Z --repository-url https://github.com/ymm-oss/fsl --out /tmp/release-notes-X.Y.Z.md`
+     passes; add
+     `docs/release-notes/vX.Y.Z.md` when the section is over the limit or has
+     no bullets.
 4. Run `./tools/check-native-integration.sh` and dispatch the release workflow's
    manual artifact build. Verify the completed run's `head_sha` equals the
    recorded candidate SHA; discard and rerun evidence produced from a moving
    branch after it advances. Confirm all four native targets, the Agent Skill
-   bundle, the VS Code extension, and both Kernel bundles pass.
+   bundle, the VS Code extension, both Kernel bundles, and the `assemble` job
+   pass; `assemble` verifies the complete release unit and checks the release
+   body.
    `workflow_dispatch` is non-publishing and must never attach Release assets, even for a tag ref. Add
    focused formal, mutation, platform, or compatibility evidence when the
    changed contract requires it.
@@ -141,14 +162,16 @@ After the promotion is approved and merged:
 1. Verify the requested version is valid SemVer and absent from local and remote
    tags and releases.
 2. Verify `production` HEAD has the prepared Rust workspace version, lockfile,
-   changelog, and non-empty version section.
+   changelog, and version section, and that
+   `./tools/release-notes.sh build --version X.Y.Z --repository-url https://github.com/ymm-oss/fsl --out /tmp/release-notes-X.Y.Z.md`
+   passes there.
 3. Rerun `./tools/check-native-integration.sh` on exact `production` HEAD. Dispatch
    the manual release artifact workflow from `production`, verify its `head_sha`
    equals that HEAD, and require every job to pass. Never reuse evidence from the
    pre-merge candidate for a distinct production merge commit.
-4. Regenerate a temporary notes file from the exact production HEAD's matching
-   changelog section, show it to the user, and stop if it is empty; never reuse
-   notes derived from the pre-promotion candidate.
+4. Regenerate a temporary notes file on the exact production HEAD with
+   `./tools/release-notes.sh build --version X.Y.Z --repository-url https://github.com/ymm-oss/fsl --out /tmp/release-notes-X.Y.Z.md`,
+   show that file to the user, and stop if the command fails; never reuse notes derived from the pre-promotion candidate.
 5. Create annotated tag `vX.Y.Z` at the gated `production` HEAD.
 6. Before pushing, state the tag, commit SHA, exact notes, and that the push
    uploads a draft, verifies its remote inventory, signs and uploads the
@@ -159,7 +182,9 @@ After the promotion is approved and merged:
    publication and version.
 8. Observe every release job. If a job fails transiently, inspect it and rerun
    only the failed jobs; do not retag.
-9. Verify the Release body is non-empty and matches the changelog section.
+9. Verify the Release body is non-empty and matches the notes file from step 4:
+   the summary plus a link that opens the tagged changelog section, or that
+   section itself.
 10. Verify exactly the four supported native `fslc`/`fslc-lsp` asset pairs and
     checksums, the Agent Skill bundle and checksum, the VS Code extension,
     both Kernel bundles, and both packslip bundles. Reject any

@@ -1,0 +1,61 @@
+{
+  "fsl": "1.0",
+  "result": "mutated",
+  "spec": "GalleryTinyTrafficLight",
+  "depth": 4,
+  "baseline": "verified",
+  "mutants": [
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 10,
+        "column": 10
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_light",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 10,
+        "column": 10
+      },
+      "target": "init assignment Red->Green",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "killed": 1,
+    "survived": 1,
+    "invalid": 0,
+    "kill_rate": 0.5,
+    "by_source": {
+      "builtin": {
+        "total": 2,
+        "killed": 1,
+        "survived": 1,
+        "invalid": 0,
+        "kill_rate": 0.5
+      },
+      "external": {
+        "total": 0,
+        "killed": 0,
+        "survived": 0,
+        "invalid": 0,
+        "kill_rate": null
+      }
+    }
+  },
+  "by_requirement": {},
+  "notes": [
+    "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure",
+    "mutant cap 2 reached: 18 dropped"
+  ]
+}

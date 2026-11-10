@@ -469,9 +469,8 @@ fn explicit_rejects_partial_component_init_coverage() {
             && message.contains("partial component initialization is rejected")
     }));
 
-    // A where-filtered forall can skip iterations at runtime, so it can
-    // never be used to prove full coverage even though every reachable
-    // binding happens to satisfy the filter here.
+    // Static filtering counts only selected keys; this domain omits a map key
+    // and therefore still cannot establish full initialization coverage.
     let (result, status) = verify(
         &fixture_path("explicit_partial_where.fsl"),
         "explicit",

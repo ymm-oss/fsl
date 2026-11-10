@@ -20,6 +20,11 @@ uses the same grammar and AST transformer as invariant bodies. A candidate is
 normalized as a synthetic invariant named `AuxiliaryLemmaN` (with a
 collision-free suffix if the source already uses that name).
 
+All candidates are parsed and recursively type-checked against the built model
+with expected `Bool`, using the invariant expression checker, before the first
+candidate proof or concrete evaluation. A type-invalid candidate is never
+adjudicated, evaluated, used, recommended, or recorded in CTI exclusions.
+
 Each candidate is checked independently in a derived proof view containing:
 
 - the original state, init, actions, types, and implicit type-bound invariants;
@@ -97,6 +102,9 @@ A rejected candidate has `status:"rejected"`, `used:false`, and its proof
 result verbatim except for nondeterministic elapsed cost. A false lemma thus
 retains `result:"violated"`, `violation_kind`, and `trace`; a non-inductive
 lemma retains its `unknown_cti`; invalid syntax/types retain an `error` result.
+Type errors have `proof.kind:"semantics"` and the checker's assignability
+message, without a `loc` for an argv expression. Parse errors retain their
+expression-relative parser location. Neither error aborts later candidates.
 
 When the target reaches `proved` using at least one lemma, the result also
 contains:
@@ -121,8 +129,38 @@ explicit human/agent edit and review step.
   `unknown_cti`/`violated` is 1, and an input/spec error is 2.
 - Rejected candidates do not by themselves change the exit code if the target
   can still be proved with other candidates.
-- Candidate strings and their order are part of the persistent verification
-  cache key. A no-lemma result can never satisfy a lemma-guided request.
+- Lemma-guided runs bypass the persistent verification cache (both lookup and
+  storage), so neither a no-lemma result nor a pre-type-validation candidate
+  verdict can be replayed for a lemma-guided request.
+
+## Type-validation compatibility evidence (#1448)
+
+This corrects an argv expression boundary, not an accepted `.fsl` form. The
+base/head `check` sweep found **no `ok` to `error` transitions** and no other
+output or exit differences, with no excluded fields. Each tree contained the
+same 579 forms under `specs/`, `examples/`, and `rust/fslc/tests/fixtures/`.
+Each form was checked once per tree in each of the published and private FSL 5
+gate modes: 2,316 invocations. No existing required test or inline fixture was
+rewritten, renamed, removed, or stopped; the new lemma regression tests were
+also calibrated by reverting the production change.
+
+The measured base SHA was `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9`;
+the measured head used that same underlying SHA plus the production diff
+SHA-256 `bc56d58ea30cb9d82d5edb637ab96dc8ab3bab35845e05df0ebbe8aa5686366a`
+(the implementation recorded by the commit containing this note). The base
+was materialized with `git archive BASE | tar -x -C BASE_TREE`. Each executable
+ran from its own revision's tree, with inventory command
+`rg --files specs examples rust/fslc/tests/fixtures -g '*.fsl'`, then
+`env -u FSLC_UNSTABLE FSLC_CACHE=off REVISION_BINARY check FORM` and
+`env FSLC_UNSTABLE=fsl5 FSLC_CACHE=off REVISION_BINARY check FORM` for every
+inventoried form. Binary SHA-256 identities:
+
+- Base: `d4f8ada816cc6367d318cd35732d6a08a27b617f11ade6c803555ced0a333124`.
+- Head: `40a2faac888d5851fef5ca349dc715b34683015f2148b7e4f450c1c0c01f6766`.
+
+The argv behavior, which plain `check` cannot exercise, is covered separately
+by `rust/fslc/tests/issue_1448_lemma_types.rs`: six detectors fail with the
+production change reverted and two well-typed preservation controls still pass.
 
 ## Non-goals
 

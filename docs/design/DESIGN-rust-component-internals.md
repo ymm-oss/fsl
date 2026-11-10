@@ -768,6 +768,47 @@ native binary: argument parsing
   evaluation. Follow-up #441 is the separate, independently revertible implementation issue and may
   centralize only regular-command stdout and exit delivery; metadata/help, `fmt`, command-family
   parsing, semantic results, stderr side channels, Worker transport, and LSP remain outside it.
+- **IO classification owner (#1170):** `spec_loading.rs` is the binary's one owner of how a file
+  that the binary reads itself is reported: `kind:"io"` with `read_failure_message`'s
+  `<path>: <error>`. `read_spec_source` (and `read_spec_source_shown_as` for a git-tree checkout,
+  which names the user's path or `<commit>:<path>`, never the temporary tree), `read_input_text`, `read_input_bytes`, `io_error_output`, and
+  `io_error_detail` render it through the library's `SpecLoadError::Io`; `IO_KIND` gives the kind
+  to the helpers that return a `(kind, message)` pair (`approval::spec_checkout`,
+  `approval::git_binding`, `load_state_snapshot`). The binary spells `io` nowhere else. Phase 2
+  retired the historical spellings: the bare OS error (`ai`, `fmt`, `replay --trace`/`--from-log`,
+  approval records, keys and artifacts, `diff`, `refine`, `verify --from-state`), causal's
+  `cannot read <path>: <error>`, the domain commands' #780-era `semantics` read failure, and
+  `approval create --kind requirements_document`'s `usage` for an unreadable `--artifact`,
+  `--glossary` or `--evidence`. The error envelope and the error exit have their own owners (next
+  item). `tests/issue_1170_error_policy_owners.rs`
+  rejects a `"io"` literal or `SpecLoadError::Io(..)` outside an exact allowlist of owner
+  functions, even inside `spec_loading.rs`, and counts the hand-written envelope and exit-literal
+  sites per file, letting those counts only go down. Still open: reads reported under another
+  kind (`ai` log and record inputs and `db observe --trace` as `parse`, `lint --project` as
+  `config`), an import or `compose` component that cannot be read (`fsl-core`'s
+  `FsResolver::read`: `semantics` with the importer's `loc`, which `io` would drop), the
+  `file not found: <path>` spelling for a missing file only (`chain` manifest, `analyze`,
+  `verify --from-state`, `--requirements`), failures labeled `io` that are not file reads, and the
+  library-side `literate_access` IO envelope, which cannot call the binary's owner.
+- **Error exit and envelope owners (#1170, no output change):** `fslc_rust::outcome` owns the
+  error exit. `error_exit` pairs an error envelope with the code the `Verdict` table gives it (2 for
+  every `kind` but `internal`, 3 for `internal`), and `normalized_exit_status` is the process-exit
+  normalization formerly in `main.rs`. `cli_output.rs` owns the error envelope: `error_output`, and
+  `error_detail` for an error nested in another command's output (`chain`'s layer `detail`).
+  `chain_step_input_error` builds `chain`'s failed-layer record for a layer input error; the
+  record for a refine run that fails and `run_impl_command`'s records are still built where they
+  are produced. In `main.rs`, `causal.rs`, `refinement.rs`, and `verification.rs`, a pair of
+  `error_output("<kind>", ..)` or `io_error_output(..)` with a literal `2` or `3` became
+  `error_exit(..)` where the literal equals the table's code. Other shapes keep their literal even
+  when it equals the table's code: a bare `(output, 2)`, a pair built from
+  `surface_parse_error_output` or `semantic_error_output`, `process::exit`, and an `"exit_code"`
+  field. So does the one pair whose literal differs (`run_document_claims`' `internal` error with
+  2), whose change would be a behavior decision, and every literal in the other files. The
+  ratchet's `error-exit-literal` pins hold what is left: `main.rs` 170, `verification.rs` 29,
+  `causal.rs` 14, `check_stages.rs` 8, `refinement.rs` 3, `migration.rs` 3, `literate_access.rs` 3,
+  `frontend_output.rs` 2, and one each in `bin/fsl-bmc.rs`, `bin/fsl-replay-actions.rs`,
+  `cli_options.rs`, `coverage.rs`, `spec_loading.rs`, and `verification_output.rs`. The
+  `error-envelope` pins hold 2 in `main.rs` (those two `chain` records) and the other files' sites.
 - `LiterateState`, atomic migration, verify cache, approval trust, and solver execution remain
   distinct state/failure owners rather than a single application state.
 - **Candidate experiment (not authorization):** if selected through the C2 gate, first make
@@ -878,8 +919,10 @@ a third delivery concern, or a real production follow-up contradicts the expecte
 
 #### Outcome classification (#537 C2)
 
-The Verdict Conservation Law — a failure-class `result` must not exit zero, and a success-class
-`result` must not exit non-zero — needs one definition of those two classes. The crate has 65
+The Verdict Conservation Law forbids a failure-class exit zero. Ordinary success-class
+outputs exit zero; generated HTML/ledger reports may exit one for a failed or unestablished
+verification baseline. This requires one envelope classifier plus the finite command-aware
+exit check specified below (#1418). The crate has 65
 distinct registered top-level `result` values: 5 sibling-field cases, 39 unconditional successes,
 and 21 unconditional failures, counted by deduplicating `rust/fslc/src/outcome.rs`'s match-arm
 literals as of 2026-07-30 at `9d7e623`. #596 recorded the consequence from inside: its
@@ -895,6 +938,36 @@ conservation check whose class definition lives in the test is the stale-check s
 enum OutcomeClass { Success, Failure }
 fn outcome_class(output: &Value) -> OutcomeClass
 ```
+
+`exit_status_matches(command, subcommand, output, status)` checks the final normal-JSON
+pair after the existing internal-error normalization and before serialization. Canonical
+`Verdict` exits are exact; approval checks accept only approved/drifted with exit 0 or
+signature-invalid with exit 1, and approval diff's signature-invalid envelope exits 1. Format/lint/diff/mutation use their
+existing sibling-field decisions; registered ordinary successes require exit 0, registered failures
+require nonzero, except `migrate_manual_required`, which requires exactly exit 1 and leaves
+all migration inputs unwritten. Missing or unknown results are rejected.
+
+Batch diff separates semantic classification from its operational exit. `outcome_class`
+continues to read the parent semantic `gate.passed`; a private exit predicate requires
+nonempty `comparisons`, with each child either `semantic_diff` with a boolean gate
+(exit 0/1) or `error` (exit 2). The parent boolean gate must agree with all semantic
+child gates; errors contribute no semantic gate violation. The batch exit is exactly
+the maximum child exit, so semantic failure plus error exits 2, and even a nested
+internal error exits 2, not 3. Empty/malformed/missing/unknown/nested-batch children
+or inconsistent parent gates are rejected. Top-level internal errors still exit 3.
+
+The generated-report exception permits only exits 0/1 and requires both dispatch context and kind:
+`html`/`html_report`, `ledger`/`audit_ledger`, or approval create/check propagating `html_report`.
+`ledger --approval` refuses an overlay record's failed rerender with an error. Other generated artifacts require exit 0.
+Approval-only ledger digest rendering retains its existing successful artifact/evaluation exit 0,
+even for a failed or unestablished baseline, except a verification `result:"error"`, which it
+returns (`docs/design/DESIGN-ledger.md`, amendment #1418). There is no new schema or verification run.
+
+Normal `run` uses `debug_assert!`: a debug mismatch panics through the existing exit 101 path,
+before a normal stdout JSON envelope is emitted. Release builds have no assertion guarantee.
+Producer artifacts and earlier effects are retained. Raw/schema/source delivery, fmt,
+metadata/help/version, and early argv rejection keep their existing producer contracts and do
+not acquire new guards; the raw producer-status rule above is unchanged.
 
 The lib placement is forced by the requirement it exists to serve. `approval`, `causal`,
 `code_audit`, and `verification` are bin modules declared in `main.rs`, reachable only from the

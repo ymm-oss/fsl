@@ -406,6 +406,10 @@ app spec.
 
 ### 7.1 CLI
 
+> **Historical `--property` interface (v1).** The invariant-only selector
+> below records the v1 design, not the current CLI contract. For current
+> property-selection rules, see the [language reference, §7](../manual/LANGUAGE.md#7-the-verifier-fslc).
+
 ```
 fslc check  <file.fsl>                          # syntax/name/type check only (for the fast loop)
 fslc verify <file.fsl> [--depth K]              # BMC (default K=8)
@@ -418,7 +422,7 @@ fslc verify <file.fsl> [--depth K]              # BMC (default K=8)
 
 - Output is always a **single JSON object to stdout** (same as v0).
 - Exit codes: `0` = verified / proved (including all reachable satisfied),
-  `1` = violated / reachable_failed, `2` = spec error (parse/type/…),
+  `1` = violated / reachable_failed, `2` = input error (usage for invalid argv / parse/type/…),
   `3` = verifier internal error.
 - Because BMC checks in order from depth 0, the returned counterexample is the
   **shortest** (stated explicitly as a guarantee: the shorter the trace handed
@@ -517,7 +521,7 @@ Differences from v0:
 {
   "fsl": "1.0",
   "result": "error",
-  "kind": "type",            // "parse" | "name" | "type" | "semantics" | "io" | "internal"
+  "kind": "type",            // "usage" | "parse" | "name" | "type" | "semantics" | "io" | "internal"
   "loc": { "line": 12, "column": 18 },
   "message": "Map<Int, ...> on 'stock' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`"
 }

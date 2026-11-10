@@ -12,12 +12,150 @@ use fsl_syntax::{
 use crate::{
     INIT_TARGET, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite,
     ProjectionDef, SPEC_TARGET, TERMINAL_TARGET, TraceabilityRegistry, action_target, expr_text,
-    property_target, state_target, type_target,
+    init_statement_target, property_target, state_target, type_target,
 };
 
 /// Stable semantic diagnostic code for a conservative write-alias rejection where
 /// index distinctness across `forall` iterations could not be proved (issue #698).
 pub const WRITE_DISTINCTNESS_UNPROVED_CODE: &str = "FSL-SEMANTIC-WRITE-DISTINCTNESS-UNPROVED";
+
+/// Original root actual, retained independently of substituted component bodies.
+/// File identity is private metadata, never a component presentation origin.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct RootActual {
+    pub(crate) action: String,
+    pub(crate) ordinal: usize,
+    pub(crate) expr: Expr,
+    pub(crate) formal: Param,
+    /// Component declaration ownership, separate from the root expression's span.
+    pub(crate) formal_action: String,
+    pub(crate) formal_span: Span,
+    pub(crate) span: Span,
+    pub(crate) source_file: Option<String>,
+}
+
+/// The first formal whose name an earlier formal already took, at that formal's
+/// own span, or at `fallback` for a list without authored spans.
+pub(crate) fn duplicate_formal<'a>(
+    params: &'a [Param],
+    spans: &[Span],
+    fallback: Span,
+) -> Option<(&'a str, Span)> {
+    let mut names = BTreeSet::new();
+    params.iter().enumerate().find_map(|(index, param)| {
+        let (Param::Typed(name, _) | Param::Range(name, _, _)) = param;
+        (!names.insert(name))
+            .then(|| (name.as_str(), spans.get(index).copied().unwrap_or(fallback)))
+    })
+}
+
+/// The first struct field whose name an earlier field already took, at that
+/// field's own span, or at `fallback` for a list without authored spans (#1692).
+pub(crate) fn repeated_struct_field<'a>(
+    fields: &'a [(String, TypeExpr)],
+    spans: &[Span],
+    fallback: Span,
+) -> Option<(&'a str, Span)> {
+    let mut names = BTreeSet::new();
+    fields.iter().enumerate().find_map(|(index, (name, _))| {
+        (!names.insert(name))
+            .then(|| (name.as_str(), spans.get(index).copied().unwrap_or(fallback)))
+    })
+}
+
+pub(crate) fn repeated_struct_field_message(name: &str, field: &str) -> String {
+    format!("duplicate struct field '{name}.{field}'")
+}
+
+/// Whether `message` is the refusal `repeated_struct_field_message` writes.
+pub(crate) fn is_repeated_struct_field_message(message: &str) -> bool {
+    message.starts_with("duplicate struct field '")
+}
+
+/// Each struct's repeated field in `kernel`, as the refusal's message and the
+/// repeated name's span.
+pub(crate) fn repeated_struct_fields(kernel: &crate::KernelSpec) -> Vec<(String, Span)> {
+    kernel
+        .spec
+        .items
+        .iter()
+        .filter_map(|item| {
+            let SpecItem::Struct {
+                name,
+                fields,
+                field_spans,
+                span,
+            } = item
+            else {
+                return None;
+            };
+            repeated_struct_field(fields, field_spans, *span)
+                .map(|(field, at)| (repeated_struct_field_message(name, field), at))
+        })
+        .collect()
+}
+
+pub(crate) fn duplicate_formal_message(formal: &str) -> String {
+    format!("duplicate action parameter '{formal}'")
+}
+
+/// Whether `error` is the refusal `duplicate_formal` describes for these formals.
+fn is_duplicate_formal_refusal(
+    error: &ModelError,
+    params: &[Param],
+    spans: &[Span],
+    fallback: Span,
+) -> bool {
+    duplicate_formal(params, spans, fallback).is_some_and(|(formal, at)| {
+        error.span == Some(at) && error.message == duplicate_formal_message(formal)
+    })
+}
+
+/// Each action's repeated formal in `kernel`, as the action's public name, the
+/// refusal's message and the repeated name's span.
+pub(crate) fn duplicate_formals(kernel: &crate::KernelSpec) -> Vec<(String, String, Span)> {
+    kernel
+        .spec
+        .items
+        .iter()
+        .filter_map(|item| {
+            let SpecItem::Action {
+                name,
+                params,
+                param_spans,
+                span,
+                ..
+            } = item
+            else {
+                return None;
+            };
+            duplicate_formal(params, param_spans, *span)
+                .map(|(formal, at)| (shown(name), duplicate_formal_message(formal), at))
+        })
+        .collect()
+}
+
+/// Context shared by ordinary model validation and pre-prefix compose errors.
+pub(crate) enum ExpressionErrorContext<'a> {
+    Model,
+    Init,
+    InlineInitializer(&'a str),
+}
+
+impl ExpressionErrorContext<'_> {
+    pub(crate) fn message(self, mut message: String) -> String {
+        let prefix = match self {
+            Self::Model => "invalid model expression".to_owned(),
+            Self::Init => "invalid init statement".to_owned(),
+            Self::InlineInitializer(name) => {
+                format!("invalid inline initializer for '{}'", shown(name))
+            }
+        };
+        message.insert_str(0, ": ");
+        message.insert_str(0, &prefix);
+        message
+    }
+}
 
 /// A machine-applicable source edit carried by a typed model diagnostic.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -59,6 +197,17 @@ pub enum TypeRef {
     Option(Box<Self>),
 }
 
+impl TypeRef {
+    /// Index key/value types. Sequence writes retain their existing rejection.
+    pub(crate) fn index_types(&self, allow_sequence: bool) -> Option<(Self, Self)> {
+        match self {
+            Self::Map(key, value) => Some((key.as_ref().clone(), value.as_ref().clone())),
+            Self::Seq(item, _) if allow_sequence => Some((Self::Int, item.as_ref().clone())),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TypeDef {
     Domain {
@@ -82,6 +231,13 @@ pub enum ParamDef {
 }
 
 impl ParamDef {
+    pub(crate) fn ty(&self) -> TypeRef {
+        match self {
+            Self::Typed { ty, .. } => ty.clone(),
+            Self::Range { lo, hi, .. } => TypeRef::Range(*lo, *hi),
+        }
+    }
+
     #[must_use]
     pub fn name(&self) -> &str {
         match self {
@@ -144,6 +300,7 @@ pub struct LeadsToDef {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct KernelModel {
     pub name: String,
+    pub(crate) instance_sources: BTreeMap<String, String>,
     pub consts: BTreeMap<String, Value>,
     pub types: BTreeMap<String, TypeDef>,
     pub enum_members: BTreeMap<String, Value>,
@@ -162,10 +319,200 @@ pub struct KernelModel {
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     traceability: TraceabilityRegistry,
-    compose_names: crate::compose::ComposeNames,
+    names: crate::NameMap,
 }
 
 impl KernelModel {
+    /// The domain a typed binder enumerates. A binder names its type as text, and
+    /// `Bool` is the builtin: declaring a type of that name is refused.
+    #[must_use]
+    pub fn typed_binder_type(&self, type_name: &str) -> TypeRef {
+        if type_name == "Bool" {
+            TypeRef::Bool
+        } else {
+            TypeRef::Named(type_name.to_owned())
+        }
+    }
+
+    /// The value of a static binder bound, or the engines' refusal of it.
+    ///
+    /// `spell` renders a name in the message: engines keep the Kernel name,
+    /// a checked diagnostic its public spelling.
+    ///
+    /// # Errors
+    /// Returns the legacy static-bound message.
+    pub fn static_binder_bound(
+        &self,
+        expr: &Expr,
+        spell: &mut dyn FnMut(&str) -> String,
+    ) -> Result<i64, String> {
+        if let Ok(value) = self.constant_integer(expr) {
+            return Ok(value);
+        }
+        self.legacy_static_binder_bound(expr, spell)
+    }
+
+    // A failed common fold must recurse only through the original adapter.
+    fn legacy_static_binder_bound(
+        &self,
+        expr: &Expr,
+        spell: &mut dyn FnMut(&str) -> String,
+    ) -> Result<i64, String> {
+        match expr {
+            Expr::Num(value) => Ok(*value),
+            Expr::Var(name) => match self.consts.get(name) {
+                Some(Value::Int(value)) => Ok(*value),
+                _ => Err(format!("'{}' is not an integer const", spell(name))),
+            },
+            Expr::Neg(inner) => self
+                .legacy_static_binder_bound(inner, spell)?
+                .checked_neg()
+                .ok_or_else(|| "integer overflow in static negation".to_owned()),
+            Expr::Binary { op, left, right } => {
+                let left = self.legacy_static_binder_bound(left, spell)?;
+                let right = self.legacy_static_binder_bound(right, spell)?;
+                match op.as_str() {
+                    "+" => left.checked_add(right),
+                    "-" => left.checked_sub(right),
+                    "*" => left.checked_mul(right),
+                    _ => None,
+                }
+                .ok_or_else(|| "invalid static integer expression".to_owned())
+            }
+            _ => Err("binder bound is not a static integer".to_owned()),
+        }
+    }
+
+    /// Describe an integer range without enumerating candidates or executing state.
+    ///
+    /// Uses current lexical/state/constant provenance, full endpoint type validation
+    /// and checked compact envelopes. Returned prerequisites are caller eligibility,
+    /// never membership or established facts. Unknown plans change no admission or
+    /// execution policy; even empty plans retain endpoint-status obligations.
+    #[must_use]
+    pub fn plan_integer_range(
+        &self,
+        lo: &Expr,
+        hi: &Expr,
+        lexical: &[crate::binder_range::RangeBinding<'_>],
+    ) -> crate::binder_range::RangePlan {
+        crate::binder_range::plan(self, lo, hi, lexical)
+    }
+
+    /// Evaluate a checked constant expression as an integer using current `consts`.
+    ///
+    /// Uses the same typed, checked arithmetic as constant declarations, including
+    /// Euclidean division/remainder. Both conditional arms are type-checked, but
+    /// only the selected arm's arithmetic is evaluated. No state or lexical
+    /// bindings are substituted and no result is cached. Free reads of current
+    /// model state are nonconstant, even when a constant has the same name.
+    ///
+    /// # Errors
+    /// Returns [`ModelError`] for a nonconstant or noninteger result, invalid
+    /// types/names, division by zero, or checked arithmetic overflow.
+    pub fn constant_integer(&self, expr: &Expr) -> Result<i64, ModelError> {
+        if !state_references(expr, self, []).is_empty() {
+            return Err(model_error("expression is not constant"));
+        }
+        const_int(expr, &self.consts)
+    }
+
+    /// Infer an expression using the checked model and its current lexical bindings.
+    /// Returns `None` when the expression requires an expected type.
+    ///
+    /// # Errors
+    /// Returns shared inference errors other than a missing expected context.
+    pub fn expression_type(
+        &self,
+        expr: &Expr,
+        bindings: &[(String, TypeRef)],
+        expected: Option<&TypeRef>,
+    ) -> Result<Option<TypeRef>, ModelError> {
+        match crate::typecheck::with_expression_env(self, bindings, |env| {
+            crate::typecheck::infer_type(expr, env, self, expected)
+        }) {
+            Ok(ty) => Ok(Some(ty)),
+            Err(error) if error.needs_context => Ok(None),
+            Err(error) => Err(model_error(error.message)),
+        }
+    }
+
+    /// Infer equality's operand context, including the empty-left right-context retry.
+    ///
+    /// # Errors
+    /// Returns the shared operand-inference error if neither side supplies context.
+    pub fn equality_operand_type(
+        &self,
+        left: &Expr,
+        right: &Expr,
+        bindings: &[(String, TypeRef)],
+    ) -> Result<TypeRef, ModelError> {
+        crate::typecheck::with_expression_env(self, bindings, |env| {
+            crate::typecheck::binary_operand_types("==", left, right, env, self)
+        })
+        .map(|(ty, _)| ty)
+        .map_err(|error| model_error(error.message))
+    }
+
+    /// Compare complete carriers, resolving numeric aliases without enumerating values.
+    ///
+    /// # Errors
+    /// Returns an error if a named type is not defined in this model.
+    pub fn same_carrier(&self, actual: &TypeRef, expected: &TypeRef) -> Result<bool, ModelError> {
+        crate::typecheck::same_carrier(actual, expected, self)
+            .map_err(|error| model_error(error.message))
+    }
+
+    /// What reading a value of `actual` as `expected` takes: the one carrier rule
+    /// `check` and symbolic coercion answer from (#1683).
+    ///
+    /// # Errors
+    /// Returns an error when either type names an unknown type.
+    pub fn carrier_coercion(
+        &self,
+        actual: &TypeRef,
+        expected: &TypeRef,
+    ) -> Result<crate::CarrierCoercion, ModelError> {
+        crate::typecheck::carrier_coercion(actual, expected, self)
+            .map_err(|error| model_error(error.message))
+    }
+
+    /// Whether a state type contributes an implicit verifier bound property.
+    #[must_use]
+    pub fn type_has_bounds(&self, ty: &TypeRef) -> bool {
+        match ty {
+            TypeRef::Int | TypeRef::Bool => false,
+            TypeRef::Range(_, _)
+            | TypeRef::Set(_)
+            | TypeRef::Seq(_, _)
+            | TypeRef::Relation(_, _) => true,
+            TypeRef::Option(inner) => self.type_has_bounds(inner),
+            TypeRef::Map(_, value) => self.type_has_bounds(value),
+            TypeRef::Named(name) => match self.types.get(name) {
+                Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
+                Some(TypeDef::Struct { fields }) => {
+                    fields.iter().any(|(_, ty)| self.type_has_bounds(ty))
+                }
+                None => false,
+            },
+        }
+    }
+
+    pub(crate) fn component_item_span(&self, target: &str) -> Option<Span> {
+        self.origins
+            .primary_for(&crate::origin::component_check_target(target))?
+            .secondary
+            .first()?
+            .span
+    }
+
+    pub(crate) fn error_at_target(&self, message: String, span: Span, target: &str) -> ModelError {
+        model_error(message).at(span).with_origin(
+            self.origins
+                .diagnostic_origin(&crate::origin::component_check_target(target))
+                .or_else(|| self.origins.diagnostic_origin(target)),
+        )
+    }
     pub(crate) fn resolve_surface_type(&self, ty: &TypeExpr) -> Result<TypeRef, ModelError> {
         resolve_type(ty, &self.types, &self.consts)
     }
@@ -188,9 +535,39 @@ impl KernelModel {
                         member: member.clone(),
                     })
                     .collect()),
-                _ => Err(model_error(format!("type '{name}' is not a finite scalar"))),
+                _ => Err(model_error(format!(
+                    "type '{}' is not a finite scalar",
+                    shown(name)
+                ))),
             },
             _ => Err(model_error("type is not a finite scalar")),
+        }
+    }
+
+    /// Whether `value` is one of [`KernelModel::domain_values`]`(ty)`,
+    /// decided without listing the domain.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`ModelError`] [`KernelModel::domain_values`] returns for
+    /// `ty`.
+    pub fn domain_contains(&self, ty: &TypeRef, value: &Value) -> Result<bool, ModelError> {
+        let in_range =
+            |lo: i64, hi: i64| matches!(value, Value::Int(value) if lo <= *value && *value <= hi);
+        match ty {
+            TypeRef::Bool => Ok(matches!(value, Value::Bool(_))),
+            TypeRef::Range(lo, hi) => Ok(in_range(*lo, *hi)),
+            TypeRef::Named(name) => match self.types.get(name) {
+                Some(TypeDef::Domain { lo, hi, .. }) => Ok(in_range(*lo, *hi)),
+                Some(TypeDef::Enum { members, .. }) => Ok(matches!(
+                    value,
+                    Value::Enum { type_name, member }
+                        if type_name == name && members.contains(member)
+                )),
+                // Not a finite scalar: `domain_values`' own error.
+                _ => self.domain_values(ty).map(|_| false),
+            },
+            _ => self.domain_values(ty).map(|_| false),
         }
     }
 
@@ -236,7 +613,7 @@ impl KernelModel {
                         type_name: name.clone(),
                         member: member.clone(),
                     })
-                    .ok_or_else(|| model_error(format!("enum '{name}' has no members"))),
+                    .ok_or_else(|| model_error(format!("enum '{}' has no members", shown(name)))),
                 Some(TypeDef::Struct { fields }) => Ok(Value::Struct {
                     type_name: name.clone(),
                     fields: fields
@@ -244,7 +621,7 @@ impl KernelModel {
                         .map(|(field, ty)| Ok((field.clone(), self.default_value(ty)?)))
                         .collect::<Result<_, ModelError>>()?,
                 }),
-                None => Err(model_error(format!("unknown type '{name}'"))),
+                None => Err(model_error(format!("unknown type '{}'", shown(name)))),
             },
             TypeRef::Map(key, value) => Ok(Value::Map(
                 self.map_key_values(key)?
@@ -269,27 +646,25 @@ impl KernelModel {
     /// Return the resolved type of a state update target.
     ///
     /// The target's index expression is checked separately. This helper owns
-    /// only the state-root/Map-or-relation/struct-field lookup shared by the
+    /// only the state-root/Map/struct-field lookup shared by the
     /// typechecker and symbolic transition evaluator.
     ///
     /// # Errors
     ///
     /// Returns a [`ModelError`] when the target does not name a state location
-    /// with a resolvable Map, relation, or struct-field type.
+    /// with a resolvable Map or struct-field type.
     pub fn state_lvalue_type(&self, target: &LValue) -> Result<TypeRef, ModelError> {
         match target {
             LValue::Var(name) => self
                 .state_type(name)
                 .cloned()
-                .ok_or_else(|| model_error(format!("unknown update target '{name}'"))),
+                .ok_or_else(|| unknown_update_target(name)),
             LValue::Index(name, _) => match self.state_type(name) {
-                Some(TypeRef::Map(_, value) | TypeRef::Relation(_, value)) => {
-                    Ok(value.as_ref().clone())
-                }
-                Some(_) => Err(model_error(
-                    "indexed update target requires Map or Relation",
-                )),
-                None => Err(model_error(format!("unknown update target '{name}'"))),
+                Some(ty) => ty
+                    .index_types(false)
+                    .map(|(_, value)| value)
+                    .ok_or_else(|| model_error("indexed update target requires Map")),
+                None => Err(unknown_update_target(name)),
             },
             LValue::Field(base, field) => {
                 let TypeRef::Named(name) = self.state_lvalue_type(base)? else {
@@ -323,125 +698,88 @@ impl KernelModel {
         self.origins.primary_for(&action_target(name))
     }
 
+    /// The authored location for an action coverage finding: prefer its
+    /// primary origin, then its kernel declaration. Generated-only scaffolding
+    /// with zero source positions has no public finding location.
+    #[must_use]
+    pub fn action_source_span(&self, action: &ActionDef) -> Option<Span> {
+        self.action_origin(&action.name)
+            .and_then(|origin| origin.primary.as_ref().and_then(|site| site.span))
+            .filter(|span| span.start.line > 0 && span.start.column > 0)
+            .or_else(|| {
+                (action.span.start.line > 0 && action.span.start.column > 0).then_some(action.span)
+            })
+    }
+
+    /// The owner of this model's internal-to-public name mapping.
+    #[must_use]
+    pub fn names(&self) -> &crate::NameMap {
+        &self.names
+    }
+
     /// Structural compose identity of an action, or `None` when the action is
     /// not a compose component action (a direct spec action or a sync action).
     #[must_use]
     pub fn compose_action(&self, name: &str) -> Option<&crate::ComposeName> {
-        self.compose_names.actions.get(name)
+        self.names.compose_action(name)
     }
 
-    /// Public spelling of `name` when it is, or was built from, the compose
-    /// component action `action`; `None` for every other name.
-    ///
-    /// This is the only place a component action's public spelling is
-    /// produced; [`Self::action_display_name`], [`Self::action_key`], and
-    /// [`Self::action_scoped_display_name`] differ only in how they render a
-    /// name no component owns. [`crate::display_name`] parses the
-    /// non-injective internal name and misspells an alias that contains `__`.
-    ///
-    /// `name` is either the action itself or a name the Monitor or the
-    /// verifier built while `action` stepped: a kind prefix followed by the
-    /// internal action name (`_requires_failed_<action>`,
-    /// `_partial_<action>`). The prefix is kept and the
-    /// action suffix is respelled from the structural table, so no list of
-    /// prefixes has to track the builders.
+    /// See [`crate::NameMap::component_public_name`].
     #[must_use]
     pub fn component_public_name(&self, name: &str, action: &str) -> Option<String> {
-        let component = self.compose_action(action)?;
-        let prefix = name.strip_suffix(action)?;
-        (prefix.is_empty() || prefix.starts_with('_') && prefix.ends_with('_'))
-            .then(|| format!("{prefix}{}", component.display()))
+        self.names
+            .component_public_name(name, action)
+            .map(crate::PublicName::into_string)
     }
 
-    /// Public name of an action in a human-facing field: `alias.action` for a
-    /// compose component action, the [`crate::display_name`] rendering
-    /// otherwise.
+    /// See [`crate::NameMap::public_action`].
     #[must_use]
     pub fn action_display_name(&self, name: &str) -> String {
-        self.component_public_name(name, name)
-            .unwrap_or_else(|| crate::display_name(name))
+        self.names.public_action(name).into_string()
     }
 
-    /// Public name of an action in an identifier field (a replay echo, a
-    /// graph node ID, a claim key, a mutation target): `alias.action` for a
-    /// compose component action, the exact Kernel name otherwise.
-    #[must_use]
-    pub fn action_key(&self, name: &str) -> String {
-        self.component_public_name(name, name)
-            .unwrap_or_else(|| name.to_owned())
-    }
-
-    /// Public spelling of a violation, CTI, or mutation-kill name produced
-    /// while `action` stepped (see [`Self::component_public_name`]), or the
-    /// [`crate::display_name`] rendering of any other name.
+    /// See [`crate::NameMap::public_violation`].
     #[must_use]
     pub fn action_scoped_display_name(&self, name: &str, action: Option<&str>) -> String {
-        action
-            .and_then(|action| self.component_public_name(name, action))
-            .unwrap_or_else(|| crate::display_name(name))
-    }
-
-    /// Public spelling of a name derived from a compose component
-    /// declaration: an action, a state variable, a property, or the
-    /// `_bounds_<state>` name built from a state variable. `None` for every
-    /// other name.
-    ///
-    /// Actions use their structural `alias.action`; state and property names
-    /// keep the [`crate::display_name`] rendering every other output uses.
-    #[must_use]
-    pub fn compose_public_name(&self, name: &str) -> Option<String> {
-        let declared = |name: &str| self.compose_names.declarations.contains(name);
-        self.component_public_name(name, name)
-            .or_else(|| declared(name).then(|| crate::display_name(name)))
-            .or_else(|| {
-                let state = name.strip_prefix("_bounds_")?;
-                declared(state).then(|| format!("_bounds_{}", crate::display_name(state)))
-            })
+        self.names.public_violation(name, action).into_string()
     }
 
     /// Give a model rebuilt from this model's lowered surface spec (a mutant
     /// or a counterfactual candidate) the compose component names of
     /// `original`; the surface spec does not carry them.
     pub fn inherit_compose_names(&mut self, original: &Self) {
-        self.compose_names.clone_from(&original.compose_names);
+        self.names.clone_from(&original.names);
     }
 
-    /// Resolve an action name written in a v1 replay trace.
-    ///
-    /// A compose component action matches its canonical `alias.action` or its
-    /// pre-#1234 `alias__action` spelling, both looked up from the structural
-    /// table; every other action matches only its exact Kernel name.
+    /// Resolve an action name written in a v1 replay trace (see
+    /// [`crate::NameMap::resolve_action`]).
     ///
     /// # Errors
     ///
     /// Returns a message naming every candidate when the spelling matches more
     /// than one action, so the caller fails closed instead of picking one.
     pub fn resolve_replay_action(&self, spelling: &str) -> Result<Option<&ActionDef>, String> {
-        let candidates = self
-            .actions
-            .iter()
-            .filter(|action| match self.compose_action(&action.name) {
-                Some(component) => {
-                    component.display() == spelling || component.legacy() == spelling
-                }
-                None => action.name == spelling,
-            })
-            .collect::<Vec<_>>();
-        match candidates.as_slice() {
-            [] => Ok(None),
-            [action] => Ok(Some(action)),
-            many => Err(format!(
-                "action '{spelling}' is ambiguous: it matches {}",
-                many.iter()
-                    .map(|action| format!(
-                        "'{}' (internal '{}')",
-                        self.action_display_name(&action.name),
-                        action.name
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )),
-        }
+        let resolved = self
+            .names
+            .resolve_action(
+                spelling,
+                self.actions.iter().map(|action| action.name.as_str()),
+            )
+            .map_err(|ambiguous| {
+                format!(
+                    "action '{spelling}' is ambiguous: it matches {}",
+                    ambiguous
+                        .candidates
+                        .iter()
+                        .map(|name| format!(
+                            "'{}' (internal '{name}')",
+                            self.action_display_name(name)
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?;
+        Ok(resolved.and_then(|name| self.actions.iter().find(|action| action.name == name)))
     }
 
     #[must_use]
@@ -516,62 +854,230 @@ impl KernelModel {
 ///
 /// # Errors
 ///
-/// Returns [`ModelError`] for dynamic/filtering binders or unsupported
+/// Returns [`ModelError`] for free-state/filtering binders or unsupported
 /// collection domains.
 pub fn static_leadsto_bindings(
     model: &KernelModel,
     property: &LeadsToDef,
 ) -> Result<Vec<BTreeMap<String, Value>>, ModelError> {
+    model.static_leadsto_bindings_with(property, |_, _, _| Ok(()), |_, _, _| Ok(()))
+}
+
+impl KernelModel {
+    /// Enumerate fixed temporal bindings with additional read-only rejection checks.
+    ///
+    /// For wholly independent properties, binder checks retain the legacy prepass;
+    /// otherwise they precede Core's own guards at each written binder. Their
+    /// optional pair borrows a range's two independent bounds for legacy checks.
+    /// Bound checks precede reachable lower/upper folds; `Some` borrows the actual
+    /// enclosing row for a dependent bound; `None` denotes an independent bound.
+    /// Empty prefixes still validate dependent endpoint types without evaluating
+    /// their arithmetic, and visit independent bounds and written binder checks.
+    /// Hooks cannot approve an input that Core rejects or rewrite its rows.
+    ///
+    /// # Errors
+    /// Propagates hook errors unchanged and Core errors through `E::from`.
+    pub fn static_leadsto_bindings_with<E: From<ModelError>>(
+        &self,
+        property: &LeadsToDef,
+        check_binder: impl FnMut(usize, &Binder, Option<(&Expr, &Expr)>) -> Result<(), E>,
+        check_bound: impl FnMut(usize, &Expr, Option<&BTreeMap<String, Value>>) -> Result<(), E>,
+    ) -> Result<Vec<BTreeMap<String, Value>>, E> {
+        traverse_leadsto_bindings(self, property, check_binder, check_bound)
+    }
+}
+
+fn traverse_leadsto_bindings<E: From<ModelError>>(
+    model: &KernelModel,
+    property: &LeadsToDef,
+    mut check_binder: impl FnMut(usize, &Binder, Option<(&Expr, &Expr)>) -> Result<(), E>,
+    mut check_bound: impl FnMut(usize, &Expr, Option<&BTreeMap<String, Value>>) -> Result<(), E>,
+) -> Result<Vec<BTreeMap<String, Value>>, E> {
     let mut expanded = vec![BTreeMap::new()];
-    for binder in &property.binders {
-        if match binder {
-            Binder::Typed { where_expr, .. }
-            | Binder::Range { where_expr, .. }
-            | Binder::Collection { where_expr, .. } => where_expr.is_some(),
-        } {
-            return Err(model_error(
-                "where filters are not implemented in bounded leadsTo",
-            ));
+    let dependent = leadsto_has_dependent_bounds(property);
+    let mut outer = BTreeSet::new();
+    let mut locals = Vec::new();
+    if !dependent {
+        for (index, binder) in property.binders.iter().enumerate() {
+            let bounds = match binder {
+                Binder::Range { lo, hi, .. } => Some((lo.as_ref(), hi.as_ref())),
+                _ => None,
+            };
+            check_binder(index, binder, bounds)?;
         }
-        let (name, values) = match binder {
+    }
+    for (index, binder) in property.binders.iter().enumerate() {
+        if dependent {
+            let bounds = match binder {
+                Binder::Range { lo, hi, .. }
+                    if !leadsto_uses_outer(lo, &outer) && !leadsto_uses_outer(hi, &outer) =>
+                {
+                    Some((lo.as_ref(), hi.as_ref()))
+                }
+                _ => None,
+            };
+            check_binder(index, binder, bounds)?;
+        }
+        check_leadsto_binder(binder)?;
+        let mut next = Vec::new();
+        match binder {
             Binder::Typed {
                 name, type_name, ..
-            } => (
-                name,
-                model.domain_values(&TypeRef::Named(type_name.name.clone()))?,
-            ),
+            } => {
+                let type_name = crate::typecheck::qualified_name(type_name)
+                    .map_err(|error| model_error(error.message))?;
+                let ty = model.typed_binder_type(&type_name);
+                model.domain_contains(&ty, &Value::Int(0))?;
+                if !expanded.is_empty() {
+                    let values = model.domain_values(&ty)?;
+                    for binding in &expanded {
+                        for value in &values {
+                            let mut candidate = binding.clone();
+                            candidate.insert(name.clone(), value.clone());
+                            next.push(candidate);
+                        }
+                    }
+                }
+                locals.push((name.clone(), ty));
+            }
             Binder::Range { name, lo, hi, .. } => {
-                let lo = static_leadsto_int(lo, model)?;
-                let hi = static_leadsto_int(hi, model)?;
-                (name, (lo..=hi).map(Value::Int).collect())
+                if expanded.is_empty() {
+                    for endpoint in [lo, hi] {
+                        if leadsto_uses_outer(endpoint, &outer) {
+                            crate::typecheck::validate_planner_integer_endpoint(
+                                endpoint, &locals, model,
+                            )
+                            .map_err(|error| model_error(error.message))?;
+                        } else {
+                            check_bound(index, endpoint, None)?;
+                            static_leadsto_int(endpoint, model)?;
+                        }
+                    }
+                }
+                for binding in &expanded {
+                    let lo = scoped_leadsto_int(
+                        lo,
+                        model,
+                        &outer,
+                        &locals,
+                        binding,
+                        index,
+                        &mut check_bound,
+                    )?;
+                    let hi = scoped_leadsto_int(
+                        hi,
+                        model,
+                        &outer,
+                        &locals,
+                        binding,
+                        index,
+                        &mut check_bound,
+                    )?;
+                    for value in lo..=hi {
+                        let mut candidate = binding.clone();
+                        candidate.insert(name.clone(), Value::Int(value));
+                        next.push(candidate);
+                    }
+                }
+                locals.push((name.clone(), TypeRef::Int));
             }
-            Binder::Collection { .. } => {
-                return Err(model_error(
-                    "collection binders are not implemented in bounded leadsTo",
-                ));
-            }
-        };
-        let mut next = Vec::new();
-        for binding in expanded {
-            for value in &values {
-                let mut candidate = binding.clone();
-                candidate.insert(name.clone(), value.clone());
-                next.push(candidate);
-            }
+            Binder::Collection { .. } => unreachable!("leadsTo binder was checked"),
         }
+        outer.insert(binder_scope(binder).0.to_owned());
         expanded = next;
     }
     Ok(expanded)
 }
 
+pub(crate) fn leadsto_has_dependent_bounds(property: &LeadsToDef) -> bool {
+    let mut outer = BTreeSet::new();
+    property.binders.iter().any(|binder| {
+        let found = matches!(
+            binder,
+            Binder::Range { lo, hi, .. }
+                if leadsto_uses_outer(lo, &outer) || leadsto_uses_outer(hi, &outer)
+        );
+        outer.insert(binder_scope(binder).0.to_owned());
+        found
+    })
+}
+
+pub(crate) fn leadsto_uses_outer(expr: &Expr, outer: &BTreeSet<String>) -> bool {
+    let mut dependent = false;
+    visit_free_names(expr, &BTreeSet::new(), &mut |name| {
+        dependent |= outer.contains(name);
+    });
+    dependent
+}
+
+pub(crate) fn scoped_leadsto_int<E: From<ModelError>>(
+    expr: &Expr,
+    model: &KernelModel,
+    outer: &BTreeSet<String>,
+    locals: &[(String, TypeRef)],
+    binding: &BTreeMap<String, Value>,
+    index: usize,
+    check_bound: &mut impl FnMut(usize, &Expr, Option<&BTreeMap<String, Value>>) -> Result<(), E>,
+) -> Result<i64, E> {
+    let dependent = leadsto_uses_outer(expr, outer);
+    check_bound(index, expr, dependent.then_some(binding))?;
+    if !dependent {
+        return Ok(static_leadsto_int(expr, model)?);
+    }
+    crate::typecheck::validate_planner_integer_endpoint(expr, locals, model)
+        .map_err(|error| model_error(error.message))?;
+    if let Some(name) = state_references(expr, model, binding.keys().map(String::as_str)).first() {
+        let error = model_error(format!("'{}' is not an integer constant", shown(name)));
+        return Err(error.into());
+    }
+    let mut constants = model.consts.clone();
+    constants.extend(
+        binding
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone())),
+    );
+    Ok(const_int(expr, &constants)?)
+}
+
+fn check_leadsto_binder(binder: &Binder) -> Result<(), ModelError> {
+    if binder_scope(binder).1.is_some() {
+        return Err(model_error(
+            "leadsTo wrapper binders do not support where filters",
+        ));
+    }
+    if matches!(binder, Binder::Collection { .. }) {
+        return Err(model_error(
+            "leadsTo wrapper binders do not support collection domains",
+        ));
+    }
+    Ok(())
+}
+
 fn static_leadsto_int(expr: &Expr, model: &KernelModel) -> Result<i64, ModelError> {
+    if let Some(name) = state_references(expr, model, []).first() {
+        return Err(model_error(format!(
+            "'{}' is not an integer constant",
+            shown(name)
+        )));
+    }
+    if let Ok(value) = model.constant_integer(expr) {
+        return Ok(value);
+    }
+    legacy_static_leadsto_int(expr, model)
+}
+
+// Failed folds retain the original recursion and diagnostic precedence.
+fn legacy_static_leadsto_int(expr: &Expr, model: &KernelModel) -> Result<i64, ModelError> {
     match expr {
         Expr::Num(value) => Ok(*value),
         Expr::Var(name) => match model.consts.get(name) {
             Some(Value::Int(value)) => Ok(*value),
-            _ => Err(model_error(format!("'{name}' is not an integer constant"))),
+            _ => Err(model_error(format!(
+                "'{}' is not an integer constant",
+                shown(name)
+            ))),
         },
-        Expr::Neg(value) => static_leadsto_int(value, model)?
+        Expr::Neg(value) => legacy_static_leadsto_int(value, model)?
             .checked_neg()
             .ok_or_else(|| model_error("integer overflow in leadsTo binder")),
         _ => Err(model_error(
@@ -593,7 +1099,7 @@ pub struct ModelError {
     /// that `docs/design/DESIGN-v1.md` §7.2 guarantees (issue 555).
     pub span: Option<Span>,
     /// Whether this is a name-resolution failure. See
-    /// [`crate::CoreError::name_resolution`] (issue 565).
+    /// [`crate::CoreErrorKind::NameResolution`] (issue 565).
     pub name_resolution: bool,
     /// Stable machine-readable classification when the frontend knows it.
     pub diagnostic_code: Option<&'static str>,
@@ -612,6 +1118,50 @@ impl ModelError {
     }
 
     fn with_origin(mut self, origin: Option<crate::OriginChain>) -> Self {
+        if let (Some(origin), Some(cause_span)) = (&origin, self.span)
+            && origin.dialect == "compose"
+            && let Some(site) = &origin.primary
+            && let (Some(use_span), [kind, path, declaration]) =
+                (site.span, site.declaration_path.as_slice())
+            && kind == "use"
+        {
+            let empty_enum =
+                self.message.starts_with("enum '") && self.message.ends_with(" has no members");
+            let resolved_path = if empty_enum {
+                site.source_file
+                    .as_deref()
+                    .and_then(|file| std::path::Path::new(file).parent())
+                    .map(|parent| parent.join(path).to_string_lossy().into_owned())
+            } else {
+                None
+            };
+            let cause = crate::CoreError {
+                message: if empty_enum {
+                    format!("enum '{declaration}' has no members")
+                } else {
+                    format!("{declaration}: {}", self.message)
+                },
+                line: cause_span.start.line,
+                column: cause_span.start.column,
+                origin: None,
+                kind: crate::CoreErrorKind::Semantics,
+                diagnostic_code: self.diagnostic_code,
+            };
+            let mut anchored = crate::compose::component_error(
+                resolved_path.as_deref().unwrap_or(path),
+                use_span,
+                &cause,
+                "failed to check",
+            );
+            if let (Some(file), Some(anchor_origin)) = (&site.source_file, &mut anchored.origin) {
+                anchor_origin.set_source_file(file);
+            }
+            self.message = anchored.message;
+            self.span = Some(use_span);
+            self.origin = anchored.origin;
+            self.name_resolution = false;
+            return self;
+        }
         self.origin = origin.map(Box::new);
         self
     }
@@ -709,34 +1259,40 @@ pub fn build_model(kernel: KernelSpec) -> Result<KernelModel, ModelError> {
 
 struct ModelBuilder {
     spec: SurfaceSpec,
+    instance_sources: BTreeMap<String, String>,
     origins: OriginRegistry,
     annotations: AnnotationRegistry,
     projections: Vec<ProjectionDef>,
-    compose_names: crate::compose::ComposeNames,
+    names: crate::NameMap,
     consts: BTreeMap<String, Value>,
     types: BTreeMap<String, TypeDef>,
     enum_members: BTreeMap<String, Value>,
+    root_actuals: Vec<RootActual>,
 }
 
 impl ModelBuilder {
     fn new(kernel: KernelSpec) -> Self {
         let KernelSpec {
             spec,
+            instance_sources,
             origins,
             annotations,
             projections,
             diagnostics: _,
-            compose_names,
+            names,
+            root_actuals,
         } = kernel;
         Self {
             spec,
+            instance_sources,
             origins,
             annotations,
             projections,
-            compose_names,
+            names,
             consts: BTreeMap::new(),
             types: BTreeMap::new(),
             enum_members: BTreeMap::new(),
+            root_actuals,
         }
     }
 
@@ -746,6 +1302,7 @@ impl ModelBuilder {
         // `none` is unreadable from every expression, and the misreading is
         // silent rather than an error (issue #570).
         crate::reserved::check_reserved_names(&self.spec)?;
+        crate::reserved::check_type_names(&self.spec)?;
         reject_duplicate_property_names(&self.spec)?;
         self.collect_consts()?;
         self.collect_types()?;
@@ -815,7 +1372,7 @@ impl ModelBuilder {
                         if state.iter().any(|(existing, _)| existing == &field.name) {
                             return Err(model_error(format!(
                                 "duplicate state variable '{}'",
-                                field.name
+                                shown(&field.name)
                             ))
                             .with_origin(self.origins.diagnostic_origin(&state_target(&field.name)))
                             // The redeclaration, not the first binding: the
@@ -833,7 +1390,7 @@ impl ModelBuilder {
                         if !self.legal_state_type(&resolved) {
                             return Err(model_error(format!(
                                 "state variable '{}' has unsupported state type",
-                                field.name
+                                shown(&field.name)
                             ))
                             .with_origin(origin)
                             .at(field.span));
@@ -842,7 +1399,7 @@ impl ModelBuilder {
                             if let Some(form) = unsupported_inline_form(initializer) {
                                 return Err(model_error(format!(
                                     "inline initializer for '{}' does not allow {form}; use init",
-                                    field.name
+                                    shown(&field.name)
                                 ))
                                 .with_origin(Some(source_origin(
                                     &field.name,
@@ -852,8 +1409,9 @@ impl ModelBuilder {
                             }
                             if let Some(name) = first_state_reference(initializer, &state_names) {
                                 return Err(model_error(format!(
-                                    "inline initializer for '{}' must not read state root '{name}'",
-                                    field.name
+                                    "inline initializer for '{}' must not read state root '{}'",
+                                    shown(&field.name),
+                                    shown(&name)
                                 ))
                                 .with_origin(Some(source_origin(
                                     &field.name,
@@ -864,7 +1422,7 @@ impl ModelBuilder {
                             if let Some(conflict_span) = explicit_init_writes.get(&field.name) {
                                 return Err(model_error(format!(
                                     "state root '{}' is assigned by both an inline initializer and init",
-                                    field.name
+                                    shown(&field.name)
                                 ))
                                 .with_origin(Some(source_origin(
                                     &field.name,
@@ -902,6 +1460,7 @@ impl ModelBuilder {
                 SpecItem::Action {
                     name,
                     params,
+                    param_spans,
                     items,
                     fair,
                     meta,
@@ -911,13 +1470,27 @@ impl ModelBuilder {
                 } => {
                     let origin = self.origins.diagnostic_origin(&action_target(name));
                     if !action_names.insert(name) {
-                        return Err(
-                            model_error(format!("duplicate action '{name}'")).with_origin(origin)
-                        );
+                        return Err(model_error(format!("duplicate action '{}'", shown(name)))
+                            .with_origin(origin));
                     }
                     let mut action = self
-                        .action(name, params, items, *span, *fair, meta.clone())
-                        .map_err(|error| error.with_origin(origin))?;
+                        .action(
+                            name,
+                            (params, param_spans),
+                            items,
+                            *span,
+                            *fair,
+                            meta.clone(),
+                        )
+                        .map_err(|error| {
+                            // The origin names the declaration the action was
+                            // lowered from, not the repeated name `span` holds.
+                            if is_duplicate_formal_refusal(&error, params, param_spans, *span) {
+                                error
+                            } else {
+                                error.with_origin(origin)
+                            }
+                        })?;
                     // Carried outside `action` so its argument list stays
                     // within the workspace Clippy budget; `sync` is a compose
                     // marker, not part of the action's own lowering.
@@ -1080,7 +1653,26 @@ impl ModelBuilder {
         }
         inline_init.extend(init);
         let init = inline_init;
-        let model = KernelModel {
+        // Resolve every retained formal during declaration assembly, even when
+        // its component action is internal and absent from the public actions.
+        let root_actuals = self
+            .root_actuals
+            .iter()
+            .map(|actual| {
+                self.action_param(&actual.formal)
+                    .map(|formal| (actual.clone(), formal.ty()))
+                    .map_err(|error| {
+                        let origin =
+                            self.origins
+                                .diagnostic_origin(&crate::origin::component_check_target(
+                                    &action_target(&actual.formal_action),
+                                ));
+                        error.at(actual.formal_span).with_origin(origin)
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut model = KernelModel {
+            instance_sources: self.instance_sources,
             name: self.spec.name,
             consts: self.consts,
             types: self.types,
@@ -1100,31 +1692,96 @@ impl ModelBuilder {
             origins: self.origins,
             annotations: self.annotations,
             traceability,
-            compose_names: self.compose_names,
+            names: self.names,
         };
+        // This queue was collected in authored action/reference/argument order.
+        // Only header params are bindings: body lets/requires cannot admit an
+        // original actual, and no partially assembled model is used here.
+        for (ordinal, (actual, expected)) in root_actuals.into_iter().enumerate() {
+            debug_assert_eq!(actual.ordinal, ordinal);
+            let header = model
+                .actions
+                .iter()
+                .find(|action| action.name == actual.action)
+                .ok_or_else(|| model_error("root actual has no synchronized action"))?;
+            let bindings = header
+                .params
+                .iter()
+                .map(|param| (param.name().to_owned(), param.ty()))
+                .collect::<Vec<_>>();
+            crate::typecheck::validate_authored_actual(
+                &actual.expr,
+                &model,
+                &bindings,
+                &expected,
+                actual.span,
+            )
+            .map_err(|error| {
+                let span = error.span.unwrap_or(actual.span);
+                model_error(ExpressionErrorContext::Model.message(error.message))
+                    .with_origin(Some(type_diagnostic_origin(span)))
+                    .at(span)
+            })?;
+        }
         let inline_initializers = inline_initializers
             .into_iter()
             .map(|(index, name, span)| (index, (name, span)))
             .collect::<BTreeMap<_, _>>();
+        let mut init_phase = crate::typecheck::ValidationPhase::init_statements();
         for (index, statement) in model.init.iter().enumerate() {
-            crate::typecheck::validate_statement_types(statement, &model).map_err(|error| {
+            let checked =
+                crate::typecheck::validate_statement_types(statement, &model, &mut init_phase);
+            checked.map_err(|error| {
                 let origin = error.span.map(type_diagnostic_origin);
-                if let Some((name, _)) = inline_initializers.get(&index) {
-                    model_error(format!(
-                        "invalid inline initializer for '{name}': {}",
-                        error.message
-                    ))
-                    .with_origin(origin)
+                let context = if let Some((name, _)) = inline_initializers.get(&index) {
+                    ExpressionErrorContext::InlineInitializer(name)
                 } else {
-                    model_error(format!("invalid init statement: {}", error.message))
-                        .with_origin(origin)
+                    ExpressionErrorContext::Init
+                };
+                let mut failure = model_error(context.message(error.message)).with_origin(origin);
+                if let Some(span) = error.span {
+                    failure = failure.at(span);
                 }
+                if let Some(component) =
+                    model
+                        .origins
+                        .diagnostic_origin(&crate::origin::component_check_target(
+                            &init_statement_target(index),
+                        ))
+                {
+                    failure = failure.with_origin(Some(component));
+                }
+                failure
             })?;
         }
         crate::typecheck::validate_model_expression_types(&model).map_err(|error| {
             let origin = error.span.map(type_diagnostic_origin);
-            model_error(format!("invalid model expression: {}", error.message)).with_origin(origin)
+            model_error(ExpressionErrorContext::Model.message(error.message)).with_origin(origin)
         })?;
+        for (index, statement) in model.init.iter().enumerate() {
+            check_init_binders(
+                std::slice::from_ref(statement),
+                &model,
+                &BTreeSet::new(),
+                false,
+            )
+            .map_err(|error| {
+                error.with_origin(model.origins.diagnostic_origin(
+                    &crate::origin::component_check_target(&init_statement_target(index)),
+                ))
+            })?;
+        }
+        for property in &model.leadstos {
+            for binder in &property.binders {
+                check_leadsto_binder(binder).map_err(|error| {
+                    model.error_at_target(
+                        error.message,
+                        property.span,
+                        &property_target("leadsTo", &property.name),
+                    )
+                })?;
+            }
+        }
         for projection in &model.projections {
             crate::typecheck::validate_expression_type(
                 &projection.expr,
@@ -1140,6 +1797,8 @@ impl ModelBuilder {
                 .with_origin(Some(type_diagnostic_origin(projection.span)))
             })?;
         }
+        model.origins.discard_component_check_targets();
+        model.names.pattern_scopes.clear();
         Ok(model)
     }
 
@@ -1147,7 +1806,7 @@ impl ModelBuilder {
         for item in &self.spec.items {
             if let SpecItem::Const { name, value } = item {
                 if self.consts.contains_key(name) {
-                    return Err(model_error(format!("duplicate const '{name}'")));
+                    return Err(model_error(format!("duplicate const '{}'", shown(name))));
                 }
                 let value = eval_const(value, &self.consts)?;
                 self.consts.insert(name.clone(), value);
@@ -1156,6 +1815,7 @@ impl ModelBuilder {
         Ok(())
     }
 
+    #[allow(clippy::too_many_lines)]
     fn collect_types(&mut self) -> Result<(), ModelError> {
         let items = self.spec.items.clone();
         for item in &items {
@@ -1165,6 +1825,7 @@ impl ModelBuilder {
                     lo,
                     hi,
                     symmetric,
+                    ..
                 } => {
                     let origin = self.origins.diagnostic_origin(&type_target(name));
                     self.insert_type(
@@ -1185,9 +1846,24 @@ impl ModelBuilder {
                     name,
                     members,
                     member_spans,
+                    span,
                     symmetric,
                 } => {
                     let origin = self.origins.diagnostic_origin(&type_target(name));
+                    if members.is_empty() {
+                        let mut error =
+                            model_error(format!("enum '{}' has no members", shown(name)));
+                        if let Some(span) = span {
+                            error = error.at(*span);
+                        }
+                        let origin = self
+                            .origins
+                            .diagnostic_origin(&crate::origin::component_check_target(
+                                &type_target(name),
+                            ))
+                            .or(origin);
+                        return Err(error.with_origin(origin));
+                    }
                     self.insert_type(
                         name,
                         TypeDef::Enum {
@@ -1225,8 +1901,20 @@ impl ModelBuilder {
             }
         }
         for item in &items {
-            if let SpecItem::Struct { name, fields, span } = item {
+            if let SpecItem::Struct {
+                name,
+                fields,
+                field_spans,
+                span,
+            } = item
+            {
                 let origin = self.origins.diagnostic_origin(&type_target(name));
+                if let Some((field, at)) = repeated_struct_field(fields, field_spans, *span) {
+                    return Err(model_error(repeated_struct_field_message(name, field))
+                        .with_origin(origin)
+                        .into_name_resolution()
+                        .at(at));
+                }
                 // `TypeExpr` carries no span of its own, so the declaration's
                 // span is the closest true location a field-level type
                 // diagnostic can report (issue 555).
@@ -1336,7 +2024,7 @@ impl ModelBuilder {
 
     fn insert_type(&mut self, name: &str, definition: TypeDef) -> Result<(), ModelError> {
         if self.types.insert(name.to_owned(), definition).is_some() {
-            Err(model_error(format!("duplicate type '{name}'")))
+            Err(model_error(format!("duplicate type '{}'", shown(name))))
         } else {
             Ok(())
         }
@@ -1349,7 +2037,7 @@ impl ModelBuilder {
     fn action(
         &self,
         name: &str,
-        params: &[Param],
+        (params, param_spans): (&[Param], &[Span]),
         items: &[ActionItem],
         span: Span,
         fair: bool,
@@ -1358,14 +2046,14 @@ impl ModelBuilder {
         let mut parameter_names = BTreeSet::new();
         let params = params
             .iter()
-            .map(|param| {
+            .enumerate()
+            .map(|(index, param)| {
                 let parameter_name = match param {
                     Param::Typed(name, _) | Param::Range(name, _, _) => name,
                 };
                 if !parameter_names.insert(parameter_name) {
-                    return Err(model_error(format!(
-                        "duplicate action parameter '{parameter_name}'"
-                    )));
+                    return Err(model_error(duplicate_formal_message(parameter_name))
+                        .at(param_spans.get(index).copied().unwrap_or(span)));
                 }
                 self.action_param(param)
             })
@@ -1763,7 +2451,7 @@ fn resolve_type(
         TypeExpr::Bool => TypeRef::Bool,
         TypeExpr::Name(name) => {
             if !types.contains_key(name) {
-                return Err(model_error(format!("unknown type '{name}'")));
+                return Err(model_error(format!("unknown type '{}'", shown(name))));
             }
             TypeRef::Named(name.clone())
         }
@@ -1977,7 +2665,9 @@ fn write_is_injective_for_binder(target: &LValue, binder: &Binder) -> bool {
 /// deadlines).
 fn static_index_identity(expr: &Expr, constants: &BTreeMap<String, Value>) -> Option<Value> {
     match expr {
-        Expr::EnumMember { type_name, member } => Some(Value::Enum {
+        Expr::EnumMember {
+            type_name, member, ..
+        } => Some(Value::Enum {
             type_name: type_name.clone(),
             member: member.clone(),
         }),
@@ -2064,7 +2754,7 @@ fn source_origin(name: &str, primary: Span, secondary: Option<Span>) -> OriginCh
     }
 }
 
-fn type_diagnostic_origin(span: Span) -> OriginChain {
+pub(crate) fn type_diagnostic_origin(span: Span) -> OriginChain {
     OriginChain {
         id: OriginId(format!(
             "kernel:type-diagnostic:{}:{}",
@@ -2114,17 +2804,393 @@ fn statement_root_spans(statements: &[Statement]) -> Vec<(String, Span)> {
 }
 
 fn first_state_reference(expr: &Expr, state_names: &BTreeSet<String>) -> Option<String> {
-    if let Expr::Var(name) = expr
-        && state_names.contains(name)
-    {
-        return Some(name.clone());
-    }
-    expr_children(expr)
-        .into_iter()
-        .find_map(|child| first_state_reference(child, state_names))
+    let mut references = Vec::new();
+    collect_state_references(expr, state_names, &mut references);
+    references.into_iter().next()
 }
 
-fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
+fn collect_state_references(
+    expr: &Expr,
+    state_names: &BTreeSet<String>,
+    references: &mut Vec<String>,
+) {
+    visit_free_names(expr, &BTreeSet::new(), &mut |name| {
+        if state_names.contains(name) {
+            references.push(name.to_owned());
+        }
+    });
+}
+
+/// Visit free variable occurrences in source order, including duplicates.
+pub(crate) fn visit_free_names(
+    expr: &Expr,
+    bound: &BTreeSet<String>,
+    visit: &mut impl FnMut(&str),
+) {
+    visit_scoped_free_names(expr, bound, false, &mut |name, _| visit(name));
+}
+
+fn visit_scoped_free_names(
+    expr: &Expr,
+    bound: &BTreeSet<String>,
+    in_range_source: bool,
+    visit: &mut impl FnMut(&str, bool),
+) {
+    crate::recursion::guard(|| visit_free_names_inner(expr, bound, in_range_source, visit));
+}
+
+fn visit_free_names_inner(
+    expr: &Expr,
+    bound: &BTreeSet<String>,
+    in_range_source: bool,
+    visit: &mut impl FnMut(&str, bool),
+) {
+    if let Expr::Binary { op, left, right } = expr {
+        visit_scoped_free_names(left, bound, in_range_source, visit);
+        let local = crate::compose::pattern_scope(
+            left,
+            &bound.iter().cloned().collect(),
+            &std::collections::HashSet::new(),
+            Some(op),
+        );
+        visit_scoped_free_names(right, &local.into_iter().collect(), in_range_source, visit);
+        return;
+    }
+    if let Expr::Var(name) = expr
+        && !bound.contains(name)
+    {
+        visit(name, in_range_source);
+    }
+    let scoped = match expr {
+        Expr::Quantified { binder, body, .. } => Some((binder, Some(body.as_ref()))),
+        Expr::Aggregate { binder, value, .. } => Some((binder, value.as_deref())),
+        _ => None,
+    };
+    if let Some((binder, body)) = scoped {
+        let local = visit_free_binder_names_inner(binder, bound, in_range_source, visit);
+        if let Some(body) = body {
+            visit_scoped_free_names(body, &local, in_range_source, visit);
+        }
+    } else {
+        for child in expr_children(expr) {
+            visit_scoped_free_names(child, bound, in_range_source, visit);
+        }
+    }
+}
+
+pub(crate) fn visit_free_binder_names(
+    binder: &Binder,
+    bound: &BTreeSet<String>,
+    visit: &mut impl FnMut(&str),
+) -> BTreeSet<String> {
+    visit_free_binder_names_inner(binder, bound, false, &mut |name, _| visit(name))
+}
+
+fn visit_free_binder_names_inner(
+    binder: &Binder,
+    bound: &BTreeSet<String>,
+    in_range_source: bool,
+    visit: &mut impl FnMut(&str, bool),
+) -> BTreeSet<String> {
+    let (name, filter) = binder_scope(binder);
+    let mut sources = binder_exprs(binder);
+    if filter.is_some() {
+        sources.pop();
+    }
+    for source in sources {
+        visit_scoped_free_names(
+            source,
+            bound,
+            in_range_source || matches!(binder, Binder::Range { .. }),
+            visit,
+        );
+    }
+    let mut local = bound.clone();
+    local.insert(name.to_owned());
+    if let Some(filter) = filter {
+        visit_scoped_free_names(filter, &local, in_range_source, visit);
+    }
+    local
+}
+
+/// Free state references, excluding enclosing locals, in lexicographic name order.
+#[must_use]
+pub fn state_references<'a>(
+    expr: &Expr,
+    model: &KernelModel,
+    bound_names: impl IntoIterator<Item = &'a str>,
+) -> BTreeSet<String> {
+    let mut state_names = model
+        .state
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<BTreeSet<_>>();
+    for name in bound_names {
+        state_names.remove(name);
+    }
+    let mut references = Vec::new();
+    collect_state_references(expr, &state_names, &mut references);
+    references.into_iter().collect()
+}
+
+/// Direct free bounded-integer state references within integer Range sources.
+///
+/// This syntactic projection carries no eligibility or runtime evidence.
+#[must_use]
+pub fn integer_range_state_references<'a>(
+    expr: &Expr,
+    model: &KernelModel,
+    bound_names: impl IntoIterator<Item = &'a str>,
+) -> BTreeSet<String> {
+    let bounded_states = model
+        .state
+        .iter()
+        .filter(|(_, ty)| {
+            matches!(
+                crate::typecheck::resolve(model, ty),
+                Ok(TypeRef::Range(_, _))
+            )
+        })
+        .map(|(name, _)| name.as_str())
+        .collect::<BTreeSet<_>>();
+    let bound = bound_names.into_iter().map(str::to_owned).collect();
+    let mut references = BTreeSet::new();
+    visit_scoped_free_names(expr, &bound, false, &mut |name, in_source| {
+        if in_source && bounded_states.contains(name) {
+            references.insert(name.to_owned());
+        }
+    });
+    collect_set_binder_references(expr, model, &bound, &mut references);
+    references
+}
+
+/// A binder over a state Set feeds a nested range through its certified carrier.
+fn collect_set_binder_references(
+    expr: &Expr,
+    model: &KernelModel,
+    bound: &BTreeSet<String>,
+    references: &mut BTreeSet<String>,
+) {
+    crate::recursion::guard(|| {
+        let scoped = match expr {
+            Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => Some(binder),
+            _ => None,
+        };
+        if let Some(Binder::Collection { collection, .. }) = scoped
+            && let Some((_, name)) = crate::binder_range::state_set_source(collection)
+            && !bound.contains(name)
+            && crate::binder_range::state_set_element_envelope(model, name).is_some()
+            && expr_children(expr)
+                .into_iter()
+                .any(|child| !std::ptr::eq(child, collection.as_ref()) && has_range_binder(child))
+        {
+            references.insert(name.to_owned());
+        }
+        for child in expr_children(expr) {
+            collect_set_binder_references(child, model, bound, references);
+        }
+    });
+}
+
+fn has_range_binder(expr: &Expr) -> bool {
+    crate::recursion::guard(|| {
+        matches!(
+            expr,
+            Expr::Quantified {
+                binder: Binder::Range { .. },
+                ..
+            } | Expr::Aggregate {
+                binder: Binder::Range { .. },
+                ..
+            }
+        ) || expr_children(expr).into_iter().any(has_range_binder)
+    })
+}
+
+/// Reject state-dependent collection domains in an init statement's `forall`.
+///
+/// Model construction and unchecked-model verifier/runtime entries share this rule.
+///
+/// # Errors
+/// Returns the shared diagnostic for the first state name in lexicographic order.
+pub fn check_init_collection_binder<'a>(
+    model: &KernelModel,
+    binder: &Binder,
+    bound_names: impl IntoIterator<Item = &'a str>,
+) -> Result<(), ModelError> {
+    let Binder::Collection { collection, .. } = binder else {
+        return Ok(());
+    };
+    if let Some(name) = state_references(collection, model, bound_names).first() {
+        return Err(model_error(format!(
+            "init forall over a state collection is not supported; state variable '{}' is not allowed",
+            shown(name)
+        )));
+    }
+    Ok(())
+}
+
+/// Check deferred init-statement integer-range and finite-scalar domains.
+///
+/// Checked frontends apply this after their existing ownership/read preflight.
+/// `origins` must be captured from the Kernel spec before model construction
+/// discards component check targets.
+///
+/// # Errors
+/// Returns the first deferred domain diagnostic at its statement and component origin.
+pub fn check_init_statement_domains(
+    model: &KernelModel,
+    origins: &OriginRegistry,
+) -> Result<(), ModelError> {
+    for (index, statement) in model.init.iter().enumerate() {
+        check_init_binders(
+            std::slice::from_ref(statement),
+            model,
+            &BTreeSet::new(),
+            true,
+        )
+        .map_err(|error| {
+            error.with_origin(
+                origins.diagnostic_origin(&crate::origin::component_check_target(
+                    &init_statement_target(index),
+                )),
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// Refuse every integer range bound the symbolic engines cannot execute.
+///
+/// This is checked-source admission, not model construction: `build_model` and
+/// raw Runtime constructors keep their own boundaries. Scopes, facts and spans
+/// come from the validation walk; eligibility is [`crate::binder_range::RangePlan::is_executable`].
+/// `origins` must be captured before model construction discards component
+/// check targets.
+///
+/// # Errors
+/// Returns the first refusal in init, action and property validation order.
+pub fn check_range_admission(
+    model: &mut KernelModel,
+    origins: &OriginRegistry,
+) -> Result<(), ModelError> {
+    let retained = std::mem::replace(&mut model.origins, origins.clone());
+    let init = crate::typecheck::admit_init_ranges(model).map_err(|(index, error)| {
+        let mut failure = range_refusal_error(error, ExpressionErrorContext::Init);
+        if let Some(component) = origins.diagnostic_origin(&crate::origin::component_check_target(
+            &init_statement_target(index),
+        )) {
+            failure = failure.with_origin(Some(component));
+        }
+        failure
+    });
+    let result = init.and_then(|()| {
+        crate::typecheck::admit_model_ranges(model)
+            .map_err(|error| range_refusal_error(error, ExpressionErrorContext::Model))
+    });
+    model.origins = retained;
+    result
+}
+
+/// Locate the aggregate bound a Kernel projection could not fold.
+///
+/// `build_model` leaves such a bound to admission and execution, so a projection
+/// of a model reads it unlocated. This names its source position again.
+///
+/// # Errors
+/// Returns the first expanding aggregate whose bound does not fold, located.
+pub fn locate_unfolded_aggregate(model: &KernelModel) -> Result<(), ModelError> {
+    crate::typecheck::locate_unfolded_aggregate(model)
+        .map_err(|error| range_refusal_error(error, ExpressionErrorContext::Model))
+}
+
+/// An aggregate keeps the Core validation spelling; a quantifier or statement
+/// binder keeps the engine's message, now with its owning location.
+fn range_refusal_error(
+    error: crate::typecheck::TypecheckError,
+    context: ExpressionErrorContext<'_>,
+) -> ModelError {
+    if error.unprefixed_range_refusal {
+        let mut failure = model_error(error.message);
+        failure.span = error.span;
+        failure.origin = error.target_origin;
+        return failure;
+    }
+    let origin = error.span.map(type_diagnostic_origin);
+    let mut failure = model_error(context.message(error.message)).with_origin(origin);
+    if let Some(span) = error.span {
+        failure = failure.at(span);
+    }
+    failure
+}
+
+fn check_init_binders(
+    statements: &[Statement],
+    model: &KernelModel,
+    bound_names: &BTreeSet<String>,
+    deferred_only: bool,
+) -> Result<(), ModelError> {
+    for statement in statements {
+        match statement {
+            Statement::ForAll {
+                binder,
+                statements,
+                span,
+            } => {
+                if deferred_only && let Binder::Range { lo, hi, .. } = binder {
+                    let mut references =
+                        state_references(lo, model, bound_names.iter().map(String::as_str));
+                    references.extend(state_references(
+                        hi,
+                        model,
+                        bound_names.iter().map(String::as_str),
+                    ));
+                    if let Some(name) = references.first() {
+                        return Err(model_error(format!(
+                            "init forall range bounds must be compile-time constants; state variable '{}' is not allowed",
+                            shown(name)
+                        ))
+                        .at(*span));
+                    }
+                }
+                if deferred_only
+                    && let Binder::Typed { type_name, .. } = binder
+                    && matches!(
+                        model.types.get(&type_name.name),
+                        Some(TypeDef::Struct { .. })
+                    )
+                {
+                    model
+                        .domain_values(&TypeRef::Named(type_name.name.clone()))
+                        .map_err(|error| error.at(*span))?;
+                }
+                if !deferred_only {
+                    check_init_collection_binder(
+                        model,
+                        binder,
+                        bound_names.iter().map(String::as_str),
+                    )
+                    .map_err(|error| error.at(*span))?;
+                }
+                let mut local = bound_names.clone();
+                local.insert(binder_scope(binder).0.to_owned());
+                check_init_binders(statements, model, &local, deferred_only)?;
+            }
+            Statement::If {
+                then_statements,
+                else_statements,
+                ..
+            } => {
+                check_init_binders(then_statements, model, bound_names, deferred_only)?;
+                check_init_binders(else_statements, model, bound_names, deferred_only)?;
+            }
+            Statement::Assign { .. } => {}
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
     let unsupported = match expr {
         Expr::Quantified { .. } => Some("a quantified expression"),
         Expr::Aggregate { .. } => Some("a binder or aggregate expression"),
@@ -2145,7 +3211,7 @@ fn unsupported_inline_form(expr: &Expr) -> Option<&'static str> {
     })
 }
 
-fn expr_children(expr: &Expr) -> Vec<&Expr> {
+pub(crate) fn expr_children(expr: &Expr) -> Vec<&Expr> {
     match expr {
         Expr::Some(expr)
         | Expr::Neg(expr)
@@ -2205,6 +3271,20 @@ fn binder_exprs(binder: &Binder) -> Vec<&Expr> {
         } => std::iter::once(collection.as_ref())
             .chain(where_expr.iter().map(AsRef::as_ref))
             .collect(),
+    }
+}
+
+pub(crate) fn binder_scope(binder: &Binder) -> (&str, Option<&Expr>) {
+    match binder {
+        Binder::Typed {
+            name, where_expr, ..
+        }
+        | Binder::Range {
+            name, where_expr, ..
+        }
+        | Binder::Collection {
+            name, where_expr, ..
+        } => (name, where_expr.as_deref()),
     }
 }
 
@@ -2286,7 +3366,7 @@ fn eval_const_typed(
             Some(value @ Value::Int(_)) => Ok(typed(ConstType::Int, value)),
             Some(value @ Value::Bool(_)) => Ok(typed(ConstType::Bool, value)),
             Some(_) => Err(model_error("unsupported constant value type")),
-            None => Err(model_error(format!("unknown constant '{name}'"))),
+            None => Err(model_error(format!("unknown constant '{}'", shown(name)))),
         },
         Expr::Neg(value) => {
             let value = eval_const_typed(value, consts, evaluate)?;
@@ -2429,7 +3509,9 @@ fn eval_const_binary(op: &str, left: &Value, right: &Value) -> Result<Value, Mod
             if right == 0 {
                 return Err(model_error("division by zero"));
             }
-            Ok(Value::Int(left.div_euclid(right)))
+            left.checked_div_euclid(right)
+                .map(Value::Int)
+                .ok_or_else(|| model_error("integer overflow in division"))
         }
         "%" => {
             let left = as_int(left)?;
@@ -2437,7 +3519,9 @@ fn eval_const_binary(op: &str, left: &Value, right: &Value) -> Result<Value, Mod
             if right == 0 {
                 return Err(model_error("remainder by zero"));
             }
-            Ok(Value::Int(left.rem_euclid(right)))
+            left.checked_rem_euclid(right)
+                .map(Value::Int)
+                .ok_or_else(|| model_error("integer overflow in remainder"))
         }
         "==" => Ok(Value::Bool(left == right)),
         "!=" => Ok(Value::Bool(left != right)),
@@ -2519,8 +3603,10 @@ fn reject_duplicate_property_names(spec: &SurfaceSpec) -> Result<(), ModelError>
         for name in names {
             if let Some((first_kind, first_span)) = seen.get(&name) {
                 return Err(model_error(format!(
-                    "duplicate property name '{name}': {kind} reuses the name of the {first_kind} declared at {}:{}",
-                    first_span.start.line, first_span.start.column
+                    "duplicate property name '{}': {kind} reuses the name of the {first_kind} declared at {}:{}",
+                    shown(&name),
+                    first_span.start.line,
+                    first_span.start.column
                 ))
                 .at(span));
             }
@@ -2530,7 +3616,17 @@ fn reject_duplicate_property_names(spec: &SurfaceSpec) -> Result<(), ModelError>
     Ok(())
 }
 
-fn model_error(message: impl Into<String>) -> ModelError {
+/// A Kernel name as a diagnostic shows it: the public spelling every output
+/// uses (`acct.bal` for the compose component state `acct__bal`).
+fn shown(name: &str) -> String {
+    crate::unmapped_public_spelling(name)
+}
+
+pub(crate) fn unknown_update_target(name: &str) -> ModelError {
+    model_error(format!("unknown update target '{}'", shown(name)))
+}
+
+pub(crate) fn model_error(message: impl Into<String>) -> ModelError {
     ModelError {
         message: message.into(),
         origin: None,
@@ -2545,7 +3641,8 @@ fn model_error(message: impl Into<String>) -> ModelError {
 fn reject_map_int_key(name: &str, ty: &TypeExpr, span: Span) -> Result<(), ModelError> {
     if contains_map_int_key(ty) {
         return Err(model_error(format!(
-            "Map<Int, ...> on '{name}' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`"
+            "Map<Int, ...> on '{}' is rejected; use a bounded domain type as key; declare `type K = 0..<max>` and use `Map<K, ...>`",
+            shown(name)
         ))
         .at(span));
     }
@@ -2565,6 +3662,86 @@ fn contains_map_int_key(ty: &TypeExpr) -> bool {
         }
         TypeExpr::Set(inner) | TypeExpr::Seq(inner, _) | TypeExpr::Option(inner) => {
             contains_map_int_key(inner)
+        }
+    }
+}
+
+#[cfg(test)]
+mod action_source_span_tests {
+    use super::*;
+    use crate::{FsResolver, build_model, parse_kernel_source};
+
+    fn model() -> KernelModel {
+        build_model(
+            parse_kernel_source(
+                "spec Source { state { x: Bool } init { x = false } action step() { x = true } }",
+                &FsResolver::new("."),
+            )
+            .expect("parse kernel"),
+        )
+        .expect("build model")
+    }
+
+    fn span(line: u32, column: u32) -> Span {
+        let position = SourcePos {
+            offset: 0,
+            line,
+            column,
+        };
+        Span {
+            start: position,
+            end: position,
+        }
+    }
+
+    fn set_origin(model: &mut KernelModel, primary: Option<Span>) {
+        let mut origin = OriginChain::generated_only("test-action", "test");
+        origin.primary = primary.map(|span| OriginSite {
+            source_file: None,
+            span: Some(span),
+            dialect: "test".to_owned(),
+            declaration_path: vec!["step".to_owned()],
+        });
+        model.origins = OriginRegistry::default();
+        model
+            .origins
+            .bind(action_target(&model.actions[0].name), origin);
+    }
+
+    #[test]
+    fn authored_origin_wins_over_kernel_and_zero_spans() {
+        let mut model = model();
+        let authored = span(7, 3);
+        set_origin(&mut model, Some(authored));
+        assert_eq!(model.action_source_span(&model.actions[0]), Some(authored));
+        model.actions[0].span = span(0, 0);
+        assert_eq!(model.action_source_span(&model.actions[0]), Some(authored));
+    }
+
+    #[test]
+    fn generated_only_sentinel_has_no_source_span() {
+        let mut model = model();
+        set_origin(&mut model, None);
+        for position in [span(0, 0), span(0, 3), span(7, 0)] {
+            model.actions[0].span = position;
+            assert_eq!(model.action_source_span(&model.actions[0]), None);
+        }
+    }
+
+    #[test]
+    fn kernel_declaration_is_used_without_a_positive_origin() {
+        let mut model = model();
+        let declaration = model.actions[0].span;
+        assert_eq!(
+            model.action_source_span(&model.actions[0]),
+            Some(declaration)
+        );
+        for primary in [None, Some(span(0, 0)), Some(span(0, 3)), Some(span(7, 0))] {
+            set_origin(&mut model, primary);
+            assert_eq!(
+                model.action_source_span(&model.actions[0]),
+                Some(declaration)
+            );
         }
     }
 }
@@ -2613,8 +3790,8 @@ mod compose_name_tests {
         let mut model = model();
         // A checked model cannot hold this table (the internal names would be
         // duplicate actions); inject it to pin the fail-closed branch.
-        model.compose_names.actions.insert(
-            "right__go".to_owned(),
+        model.names.insert_action_identity(
+            "right__go",
             ComposeName {
                 alias: "left".to_owned(),
                 name: "go".to_owned(),
@@ -2627,5 +3804,489 @@ mod compose_name_tests {
             error,
             "action 'left.go' is ambiguous: it matches 'left.go' (internal 'left__go'), 'left.go' (internal 'right__go')"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fsl_syntax::{AggregateKind, ConditionalSpans, Pattern, QualifiedName};
+
+    #[test]
+    fn diagnostic_only_component_targets_do_not_change_public_provenance() {
+        let mut kernel = crate::parse_direct_kernel_spec(
+            "spec P { state { done: Bool } init { done = false } action go() {} }",
+        )
+        .expect("parse");
+        let model = build_model(kernel.clone()).expect("model");
+        let before = crate::public_kernel_contract_for_version(
+            &kernel,
+            &model,
+            "root.fsl",
+            "kernel",
+            crate::PublicKernelVersion::V2,
+        )
+        .expect("v2");
+        for target in [
+            "property:invariant:part__Capture".to_owned(),
+            crate::action_guard_target("go", 0),
+            crate::action_statement_target("go", 0),
+            crate::origin::action_ensure_target("go", 0),
+        ] {
+            kernel.origins.bind(
+                crate::origin::component_check_target(&target),
+                OriginChain::generated_only("diagnostic-context", "compose"),
+            );
+        }
+        let model = build_model(kernel.clone()).expect("checked model");
+        assert!(
+            model
+                .origins
+                .targets()
+                .all(|(target, _)| !crate::origin::is_component_check_target(target))
+        );
+        let after = crate::public_kernel_contract_for_version(
+            &kernel,
+            &model,
+            "root.fsl",
+            "kernel",
+            crate::PublicKernelVersion::V2,
+        )
+        .expect("v2");
+        assert_eq!(
+            before, after,
+            "diagnostic ownership must not promote public provenance assurance"
+        );
+    }
+
+    fn var(name: &str) -> Expr {
+        Expr::Var(name.to_owned())
+    }
+
+    fn collection(name: &str, source: Expr, filter: Option<Expr>) -> Binder {
+        Binder::Collection {
+            name: name.to_owned(),
+            collection: Box::new(source),
+            where_expr: filter.map(Box::new),
+        }
+    }
+
+    fn references(expr: &Expr) -> Vec<String> {
+        let mut found = Vec::new();
+        collect_state_references(expr, &BTreeSet::from(["a".into(), "z".into()]), &mut found);
+        found
+    }
+
+    fn model() -> KernelModel {
+        let resolver = crate::FsResolver::new(".");
+        build_model(crate::parse_kernel_source(
+            "spec References { type K = 0..1 state { z: K, a: K } init { z = 0 a = 0 } action go() {} }",
+            &resolver,
+        ).expect("parse")).expect("model")
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // Explicit inventory of all 24 AST variants and their edges.
+    fn state_reference_edges_cover_every_expression_variant() {
+        // These are AST traversal probes, not necessarily well-typed evaluation inputs.
+        let z = || Box::new(var("z"));
+        let a = || Box::new(var("a"));
+        let span = synthetic_span();
+        let cases = [
+            (Expr::Num(1), vec![]),
+            (Expr::Bool(true), vec![]),
+            (Expr::None, vec![]),
+            (Expr::Some(z()), vec!["z"]),
+            (Expr::Set(vec![var("z"), var("a")]), vec!["z", "a"]),
+            (Expr::Seq(vec![var("z"), var("a")]), vec!["z", "a"]),
+            (
+                Expr::Struct {
+                    name: "R".into(),
+                    fields: vec![("x".into(), var("z")), ("y".into(), var("a"))],
+                },
+                vec!["z", "a"],
+            ),
+            (var("z"), vec!["z"]),
+            (
+                Expr::EnumMember {
+                    type_name: "E".into(),
+                    member: "One".into(),
+                    source_bare: false,
+                },
+                vec![],
+            ),
+            (
+                Expr::Call {
+                    name: "p".into(),
+                    args: vec![var("z"), var("a")],
+                    span,
+                },
+                vec!["z", "a"],
+            ),
+            (Expr::Index(z(), a()), vec!["z", "a"]),
+            (Expr::Field(z(), "x".into()), vec!["z"]),
+            (
+                Expr::Method {
+                    receiver: z(),
+                    name: "contains".into(),
+                    args: vec![var("a")],
+                },
+                vec!["z", "a"],
+            ),
+            (
+                Expr::Binary {
+                    op: "and".into(),
+                    left: z(),
+                    right: a(),
+                },
+                vec!["z", "a"],
+            ),
+            (Expr::Neg(z()), vec!["z"]),
+            (Expr::Not(z()), vec!["z"]),
+            (
+                Expr::Conditional {
+                    condition: z(),
+                    then_expr: a(),
+                    else_expr: z(),
+                    spans: Box::new(ConditionalSpans {
+                        condition: span,
+                        then_expr: span,
+                        else_expr: span,
+                    }),
+                },
+                vec!["z", "a", "z"],
+            ),
+            (
+                Expr::Is {
+                    expr: z(),
+                    pattern: Pattern::Some("fresh".into()),
+                },
+                vec!["z"],
+            ),
+            (
+                Expr::Quantified {
+                    quantifier: "forall".into(),
+                    binder: collection("z", Expr::Seq(vec![var("z"), var("a")]), Some(var("z"))),
+                    body: z(),
+                },
+                vec!["z", "a"],
+            ),
+            (
+                Expr::Aggregate {
+                    kind: AggregateKind::Sum,
+                    binder: collection("z", Expr::Seq(vec![var("z"), var("a")]), Some(var("z"))),
+                    value: Some(a()),
+                },
+                vec!["z", "a", "a"],
+            ),
+            (
+                Expr::Stage {
+                    process: None,
+                    entity: z(),
+                    entity_span: span,
+                    span,
+                },
+                vec!["z"],
+            ),
+            (
+                Expr::UnaryNamed {
+                    name: "old".into(),
+                    expr: z(),
+                    span,
+                },
+                vec!["z"],
+            ),
+            (
+                Expr::BinaryNamed {
+                    name: "min".into(),
+                    left: z(),
+                    right: a(),
+                },
+                vec!["z", "a"],
+            ),
+            (
+                Expr::TernaryNamed {
+                    name: "rel_reachable".into(),
+                    first: z(),
+                    second: a(),
+                    third: z(),
+                },
+                vec!["z", "a", "z"],
+            ),
+        ];
+        assert_eq!(cases.len(), 24);
+        for (expr, expected) in cases {
+            assert_eq!(references(&expr), expected, "{expr:?}");
+            assert_eq!(
+                first_state_reference(&expr, &BTreeSet::from(["a".into(), "z".into()])).as_deref(),
+                expected.first().copied()
+            );
+        }
+    }
+
+    #[test]
+    fn state_reference_scope_covers_typed_range_and_all_aggregates() {
+        let binders = [
+            Binder::Typed {
+                name: "z".into(),
+                type_name: QualifiedName {
+                    namespace: None,
+                    name: "K".into(),
+                },
+                where_expr: Some(Box::new(var("z"))),
+            },
+            Binder::Range {
+                name: "z".into(),
+                lo: Box::new(var("z")),
+                hi: Box::new(var("a")),
+                where_expr: Some(Box::new(var("z"))),
+            },
+            collection("z", Expr::Seq(vec![var("z"), var("a")]), Some(var("z"))),
+        ];
+        for (index, binder) in binders.into_iter().enumerate() {
+            for kind in [
+                AggregateKind::Count,
+                AggregateKind::Sum,
+                AggregateKind::Unique,
+                AggregateKind::ExactlyOne,
+            ] {
+                let expr = Expr::Aggregate {
+                    kind,
+                    binder: binder.clone(),
+                    value: (kind == AggregateKind::Sum).then(|| Box::new(var("z"))),
+                };
+                assert_eq!(
+                    references(&expr),
+                    if index == 0 { vec![] } else { vec!["z", "a"] }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn state_reference_scope_restores_names_after_nested_shadowing() {
+        let inner = Expr::Quantified {
+            quantifier: "exists".into(),
+            binder: collection("z", Expr::Seq(vec![var("z")]), Some(var("z"))),
+            body: Box::new(var("z")),
+        };
+        let outer = Expr::Quantified {
+            quantifier: "forall".into(),
+            binder: collection("z", Expr::Seq(vec![var("z")]), Some(var("z"))),
+            body: Box::new(Expr::Binary {
+                op: "and".into(),
+                left: Box::new(inner),
+                right: Box::new(var("a")),
+            }),
+        };
+        let expr = Expr::Seq(vec![outer, var("z"), var("a")]);
+        assert_eq!(references(&expr), ["z", "a", "z", "a"]);
+        let model = model();
+        assert_eq!(
+            state_references(&expr, &model, [])
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["a", "z"]
+        );
+        assert_eq!(
+            state_references(&expr, &model, ["z"])
+                .into_iter()
+                .collect::<Vec<_>>(),
+            ["a"]
+        );
+        assert!(state_references(&expr, &model, ["a", "z"]).is_empty());
+    }
+
+    #[test]
+    fn init_collection_guard_distinguishes_local_and_free_state_names() {
+        let model = model();
+        let binder = collection("item", Expr::Seq(vec![var("z"), var("a")]), None);
+        assert!(
+            check_init_collection_binder(&model, &binder, [])
+                .unwrap_err()
+                .message
+                .contains("'a'")
+        );
+        assert!(
+            check_init_collection_binder(&model, &binder, ["a"])
+                .unwrap_err()
+                .message
+                .contains("'z'")
+        );
+        assert!(check_init_collection_binder(&model, &binder, ["a", "z"]).is_ok());
+    }
+
+    #[test]
+    fn unchecked_leadsto_models_share_the_source_support_rule() {
+        let model = model();
+        let binders = [
+            collection("item", Expr::Seq(vec![Expr::Num(1)]), None),
+            Binder::Range {
+                name: "item".into(),
+                lo: Box::new(Expr::Num(0)),
+                hi: Box::new(Expr::Num(1)),
+                where_expr: Some(Box::new(Expr::Bool(false))),
+            },
+        ];
+        for binder in binders {
+            let property = LeadsToDef {
+                name: "Capture".into(),
+                span: synthetic_span(),
+                binders: vec![binder.clone()],
+                before: Expr::Bool(true),
+                after: Expr::Bool(true),
+                meta: None,
+                annotations: Annotations::default(),
+                decreases: None,
+                within: Some(1),
+                helpful: vec![],
+            };
+            assert_eq!(
+                static_leadsto_bindings(&model, &property).unwrap_err(),
+                check_leadsto_binder(&binder).unwrap_err()
+            );
+        }
+    }
+
+    #[test]
+    fn shared_index_types_preserve_map_and_sequence_capabilities() {
+        let map = TypeRef::Map(Box::new(TypeRef::Bool), Box::new(TypeRef::Int));
+        let relation = TypeRef::Relation(Box::new(TypeRef::Bool), Box::new(TypeRef::Int));
+        let seq = TypeRef::Seq(Box::new(TypeRef::Bool), 2);
+        for allow_sequence in [false, true] {
+            assert_eq!(
+                map.index_types(allow_sequence),
+                Some((TypeRef::Bool, TypeRef::Int))
+            );
+            assert!(relation.index_types(allow_sequence).is_none());
+        }
+        assert_eq!(seq.index_types(true), Some((TypeRef::Int, TypeRef::Bool)));
+        assert!(seq.index_types(false).is_none());
+        let mut model = model();
+        model.state.push(("h".into(), relation));
+        assert!(
+            model
+                .state_lvalue_type(&LValue::Index("h".into(), Expr::Bool(false)))
+                .is_err()
+        );
+    }
+}
+
+#[cfg(test)]
+mod static_constant_integer_tests {
+    use super::*;
+
+    fn binary(op: &str, left: Expr, right: Expr) -> Expr {
+        Expr::Binary {
+            op: op.into(),
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+
+    fn conditional(selected: bool, then_expr: Expr, else_expr: Expr) -> Expr {
+        Expr::Conditional {
+            condition: Box::new(Expr::Bool(selected)),
+            then_expr: Box::new(then_expr),
+            else_expr: Box::new(else_expr),
+            spans: Box::new(fsl_syntax::ConditionalSpans {
+                condition: synthetic_span(),
+                then_expr: synthetic_span(),
+                else_expr: synthetic_span(),
+            }),
+        }
+    }
+
+    #[test]
+    fn integer_api_uses_current_constants_and_rejects_nonintegers() {
+        let kernel = crate::parse_direct_kernel_spec(
+            "spec A { const N = 1 state { d: Bool = false } action go() {} }",
+        )
+        .unwrap();
+        let mut model = build_model(kernel).unwrap();
+        let expression = binary("+", Expr::Var("N".into()), Expr::Num(1));
+        assert_eq!(model.constant_integer(&expression).unwrap(), 2);
+        model.consts.insert("N".into(), Value::Int(2));
+        assert_eq!(model.constant_integer(&expression).unwrap(), 3);
+        assert_eq!(
+            model
+                .constant_integer(&Expr::Bool(false))
+                .unwrap_err()
+                .message,
+            "constant expression must be an integer"
+        );
+        assert_eq!(
+            model
+                .constant_integer(&Expr::Var("missing".into()))
+                .unwrap_err()
+                .message,
+            "unknown constant 'missing'"
+        );
+        let zero = binary("/", Expr::Num(1), Expr::Num(0));
+        assert_eq!(
+            model
+                .constant_integer(&conditional(false, zero.clone(), Expr::Num(1)))
+                .unwrap(),
+            1
+        );
+        assert!(
+            model
+                .constant_integer(&conditional(true, zero, Expr::Num(1)))
+                .is_err()
+        );
+        assert!(
+            model
+                .constant_integer(&conditional(true, Expr::Num(1), Expr::Bool(false)))
+                .is_err()
+        );
+        let eager = binary(
+            "and",
+            Expr::Bool(false),
+            binary("==", binary("/", Expr::Num(1), Expr::Num(0)), Expr::Num(0)),
+        );
+        assert!(
+            model
+                .constant_integer(&conditional(true, Expr::Num(1), eager))
+                .is_err()
+        );
+        for (op, expected) in [("/", -3), ("%", 1)] {
+            assert_eq!(
+                model
+                    .constant_integer(&binary(op, Expr::Num(-5), Expr::Num(2)))
+                    .unwrap(),
+                expected
+            );
+        }
+        let overflow = Expr::Neg(Box::new(conditional(
+            true,
+            Expr::Num(i64::MIN),
+            Expr::Num(0),
+        )));
+        assert!(model.constant_integer(&overflow).is_err());
+        assert_eq!(
+            static_leadsto_int(&overflow, &model).unwrap_err().message,
+            "leadsTo range binder must use static integer bounds"
+        );
+    }
+
+    #[test]
+    fn integer_api_does_not_substitute_a_state_shadowed_constant() {
+        let source = "spec A { const n = 0 type K = 0..1 state { n: K } init { n=1 } action go() { n=1 } invariant P { forall i in 0..abs(n) { i==0 } } }";
+        let mut model = build_model(crate::parse_direct_kernel_spec(source).unwrap()).unwrap();
+        let Expr::Quantified {
+            binder: Binder::Range { hi, .. },
+            ..
+        } = &model.invariants[0].expr
+        else {
+            panic!("reviewer range")
+        };
+        let bound = hi.clone();
+        assert_eq!(model.consts["n"], Value::Int(0));
+        assert_eq!(
+            model.constant_integer(&bound).unwrap_err().message,
+            "expression is not constant"
+        );
+        model.state.clear();
+        assert_eq!(model.constant_integer(&bound).unwrap(), 0);
     }
 }

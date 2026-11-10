@@ -27,10 +27,12 @@ use fsl_solver::SmtSolver;
 
 use crate::VerifyError;
 use crate::eval::{
-    binder_values, binder_where, eval, evaluation_status, i64_term_is_in_range, index_accessible,
-    method_definedness,
+    binder_source_expressions, binder_values, binder_where, binder_where_expression,
+    confine_binary_rhs, enumerated_binder_binding, eval, eval_with_bindings, evaluation_status,
+    i64_term_is_in_range, index_accessible, method_definedness,
 };
-use crate::value::{Bindings, SymbolicState, SymbolicValue, bool_term, int_term};
+use crate::transition::{InitRead, init_read_status, visit_init_reads};
+use crate::value::{SymbolicState, SymbolicValue, TypedBindings as Bindings, bool_term, int_term};
 
 /// One place an init evaluation can fail.
 pub(crate) struct InitFailureSite<T> {
@@ -214,18 +216,26 @@ pub(crate) fn init_failure_sites<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
 ) -> Result<Vec<InitFailureSite<S::Term>>, VerifyError> {
     let mut sites = Vec::new();
-    let reached = solver.bool_value(true);
-    for statement in &model.init {
-        statement_sites(
-            solver,
-            model,
-            statement,
-            state,
-            &Bindings::new(),
-            &reached,
-            &mut sites,
-        )?;
-    }
+    visit_init_reads(
+        solver,
+        model,
+        state,
+        &mut |read, state, bindings, reached| {
+            let mut local = Vec::new();
+            let span = match read {
+                InitRead::Expression(expr, span) => {
+                    expression_sites(solver, model, expr, state, bindings, reached, &mut local)?;
+                    span
+                }
+                InitRead::Target(target, span) => {
+                    lvalue_sites(solver, model, target, state, bindings, reached, &mut local)?;
+                    span
+                }
+            };
+            extend_located_sites(&mut sites, local, span);
+            Ok(init_read_status(solver, model, read, state, bindings)?.fully_defined)
+        },
+    )?;
     Ok(sites)
 }
 
@@ -236,148 +246,19 @@ fn located(message: &str, span: Span) -> String {
     )
 }
 
-#[allow(clippy::too_many_lines)]
-fn statement_sites<S: SmtSolver>(
-    solver: &S,
-    model: &KernelModel,
-    statement: &Statement,
-    state: &SymbolicState<S::Term>,
-    bindings: &Bindings<S::Term>,
-    reached: &S::Term,
-    sites: &mut Vec<InitFailureSite<S::Term>>,
-) -> Result<(), VerifyError> {
-    match statement {
-        Statement::Assign {
-            target,
-            value,
-            span,
-        } => {
-            let mut local = Vec::new();
-            expression_sites(solver, model, value, state, bindings, reached, &mut local)?;
-            let value_defined =
-                evaluation_status(solver, model, value, state, bindings, None)?.fully_defined;
-            let target_reached = solver.and(&[reached.clone(), value_defined])?;
-            lvalue_sites(
-                solver,
-                model,
-                target,
-                state,
-                bindings,
-                &target_reached,
-                &mut local,
-            )?;
-            sites.extend(
-                local
-                    .into_iter()
-                    .map(|(condition, message)| InitFailureSite {
-                        condition,
-                        message: located(message, *span),
-                    }),
-            );
-        }
-        Statement::If {
-            condition,
-            then_statements,
-            else_statements,
-            span,
-        } => {
-            let mut local = Vec::new();
-            expression_sites(
-                solver, model, condition, state, bindings, reached, &mut local,
-            )?;
-            sites.extend(
-                local
-                    .into_iter()
-                    .map(|(condition, message)| InitFailureSite {
-                        condition,
-                        message: located(message, *span),
-                    }),
-            );
-            let condition_defined =
-                evaluation_status(solver, model, condition, state, bindings, None)?.fully_defined;
-            let value = eval(solver, model, condition, state, &mut bindings.clone(), None)?;
-            let value = bool_term(&value)?.clone();
-            let then_reached =
-                solver.and(&[reached.clone(), condition_defined.clone(), value.clone()])?;
-            for statement in then_statements {
-                statement_sites(
-                    solver,
-                    model,
-                    statement,
-                    state,
-                    bindings,
-                    &then_reached,
-                    sites,
-                )?;
-            }
-            let else_reached =
-                solver.and(&[reached.clone(), condition_defined, solver.not(&value)?])?;
-            for statement in else_statements {
-                statement_sites(
-                    solver,
-                    model,
-                    statement,
-                    state,
-                    bindings,
-                    &else_reached,
-                    sites,
-                )?;
-            }
-        }
-        Statement::ForAll {
-            binder,
-            statements,
-            span,
-        } => {
-            let where_expr = match binder {
-                Binder::Typed { where_expr, .. }
-                | Binder::Range { where_expr, .. }
-                | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
-            };
-            for (name, value) in binder_values(solver, model, binder)? {
-                let mut local = bindings.clone();
-                local.insert(name, value);
-                let mut body_reached = reached.clone();
-                if let Some(where_expr) = where_expr {
-                    let mut where_sites = Vec::new();
-                    expression_sites(
-                        solver,
-                        model,
-                        where_expr,
-                        state,
-                        &local,
-                        reached,
-                        &mut where_sites,
-                    )?;
-                    sites.extend(where_sites.into_iter().map(|(condition, message)| {
-                        InitFailureSite {
-                            condition,
-                            message: located(message, *span),
-                        }
-                    }));
-                    let where_defined =
-                        evaluation_status(solver, model, where_expr, state, &local, None)?
-                            .fully_defined;
-                    let where_term =
-                        binder_where(solver, model, binder, state, &mut local.clone(), None)?
-                            .unwrap_or_else(|| solver.bool_value(true));
-                    body_reached = solver.and(&[body_reached, where_defined, where_term])?;
-                }
-                for statement in statements {
-                    statement_sites(
-                        solver,
-                        model,
-                        statement,
-                        state,
-                        &local,
-                        &body_reached,
-                        sites,
-                    )?;
-                }
-            }
-        }
-    }
-    Ok(())
+fn extend_located_sites<T>(
+    sites: &mut Vec<InitFailureSite<T>>,
+    local: Vec<(T, &'static str)>,
+    span: Span,
+) {
+    sites.extend(
+        local
+            .into_iter()
+            .map(|(condition, message)| InitFailureSite {
+                condition,
+                message: located(message, span),
+            }),
+    );
 }
 
 fn lvalue_sites<S: SmtSolver>(
@@ -626,15 +507,18 @@ fn expression_sites_inner<S: SmtSolver>(
             let left_defined = defined(solver, model, left, state, &local)?;
             let right_reached = match op.as_str() {
                 "and" | "=>" => {
-                    let left_value = eval(solver, model, left, state, &mut local, None)?;
+                    let left_value =
+                        eval_with_bindings(solver, model, left, state, &mut local, None)?;
                     bool_term(&left_value)?.clone()
                 }
                 "or" => {
-                    let left_value = eval(solver, model, left, state, &mut local, None)?;
+                    let left_value =
+                        eval_with_bindings(solver, model, left, state, &mut local, None)?;
                     solver.not(bool_term(&left_value)?)?
                 }
                 _ => solver.bool_value(true),
             };
+            confine_binary_rhs(op, bindings, &mut local);
             let right_reached =
                 solver.and(&[reached.clone(), left_defined.clone(), right_reached])?;
             expression_sites(solver, model, right, state, &local, &right_reached, sites)?;
@@ -710,18 +594,72 @@ fn expression_sites_inner<S: SmtSolver>(
                 sites,
             )
         }
-        // A binder expression is one site: its range, `where`, body, and (for
-        // `sum`) accumulation are not named separately.
-        Expr::Quantified { .. } | Expr::Aggregate { .. } => {
-            let message = match expr {
-                Expr::Aggregate {
-                    kind: AggregateKind::Sum,
-                    ..
-                } => "integer overflow in sum or undefined summand",
-                _ => "undefined evaluation",
-            };
-            let undefined = solver.not(&defined(solver, model, expr, state, bindings)?)?;
-            sites.push((solver.and(&[reached.clone(), undefined])?, message));
+        Expr::Quantified { binder, .. } | Expr::Aggregate { binder, .. } => {
+            let mut active = reached.clone();
+            for source in binder_source_expressions(binder) {
+                expression_sites(solver, model, source, state, bindings, &active, sites)?;
+                active = solver.and(&[active, defined(solver, model, source, state, bindings)?])?;
+            }
+            let mut sum = solver.int_value(0);
+            for (name, candidate, membership) in
+                binder_values(solver, model, binder, state, bindings, None)?
+            {
+                let mut local = bindings.clone();
+                local.insert(name, enumerated_binder_binding(solver, model, candidate));
+                // Symbolic candidates include absent members and non-live slots.
+                let membership = membership.unwrap_or_else(|| solver.bool_value(true));
+                let present = solver.and(&[active.clone(), membership.clone()])?;
+                let mut where_defined = solver.bool_value(true);
+                if let Some(filter) = binder_where_expression(binder) {
+                    expression_sites(solver, model, filter, state, &local, &present, sites)?;
+                    where_defined = defined(solver, model, filter, state, &local)?;
+                }
+                let filter = binder_where(solver, model, binder, state, &mut local, None)?
+                    .unwrap_or_else(|| solver.bool_value(true));
+                let selected = solver.and(&[present, where_defined.clone(), filter.clone()])?;
+                let mut body_continues = solver.bool_value(true);
+                let value = match expr {
+                    Expr::Quantified { body, .. } => Some(body.as_ref()),
+                    Expr::Aggregate { value, .. } => value.as_deref(),
+                    _ => unreachable!(),
+                };
+                if let Some(value) = value {
+                    expression_sites(solver, model, value, state, &local, &selected, sites)?;
+                    let value_defined = defined(solver, model, value, state, &local)?;
+                    let value = eval(solver, model, value, state, &mut local, None)?;
+                    let result_continues = if let Expr::Quantified { quantifier, .. } = expr {
+                        if quantifier == "forall" {
+                            bool_term(&value)?.clone()
+                        } else {
+                            solver.not(bool_term(&value)?)?
+                        }
+                    } else {
+                        // Check every prefix, not just the final mathematical sum.
+                        let next_sum = solver.add(&sum, int_term(&value)?)?;
+                        let in_range = i64_term_is_in_range(solver, &next_sum)?;
+                        sites.push((
+                            solver.and(&[
+                                selected.clone(),
+                                value_defined.clone(),
+                                solver.not(&in_range)?,
+                            ])?,
+                            "integer overflow in sum",
+                        ));
+                        sum = solver.ite(&selected, &next_sum, &sum)?;
+                        in_range
+                    };
+                    body_continues = solver.and(&[value_defined, result_continues])?;
+                }
+                // Only quantifiers stop on a decisive result; all stop on error.
+                let candidate_continues = solver.or(&[
+                    solver.not(&membership)?,
+                    solver.and(&[
+                        where_defined,
+                        solver.or(&[solver.not(&filter)?, body_continues])?,
+                    ])?,
+                ])?;
+                active = solver.and(&[active, candidate_continues])?;
+            }
             Ok(())
         }
     }

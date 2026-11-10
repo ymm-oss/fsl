@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+compose Abs {
+  use Types as types from "compose-sync-types.fsl"
+  internal types.go
+  state { done: Bool }
+  init { done = false }
+  action approve(c: types.CaseId) = types.go(c) "ABS-1: by System" { done = true }
+}

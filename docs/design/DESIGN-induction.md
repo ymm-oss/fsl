@@ -40,6 +40,12 @@ Run the existing BMC at depth `K_bmc` as-is (code reuse). If violated, return th
 usual violated JSON and stop (the counterexample is a real trace, and returning
 it here is best).
 
+The native non-Seq base runs symbolic BMC first and omits the concrete boundary
+probe only on `verified` (#1628). Every assumed implicit bound is still checked
+at every base frame. Any non-success or error retains the existing concrete
+probe and evidence priority; typed state containing Seq, including nested Seq,
+keeps the eager probe. This changes cost, not verdicts, witnesses or proof scope.
+
 Note: the base of textbook k-induction is "up to depth k-1," but in FSL we take
 **base = ordinary BMC (depth K_bmc ≥ k)**. The deeper the base is run, the more
 false CTIs (violations that are actually reachable) can be detected first as
@@ -85,6 +91,36 @@ ranking argument only proves the response while the pending obligation remains
 inside the ranked region. Fairness is not consulted here; every enabled action
 must make progress or establish `Q`.
 
+Before evaluating each initial, successor or independent deadlock-side measure,
+ranking runs the existing zero-slot Seq preflight, then a general
+property-context partial-operation probe (#1542). The probe inherits the
+rank frame's invariant assumptions and, for the initial/successor pair, its
+transition constraint. The initial probe uses `P(s) ∧ ¬Q(s)`; the successor
+probe additionally assumes `¬Q(s')`, since a successor resolving the obligation
+does not use its measure. It does not assume `P(s')`: a pending-not-preserved
+failure still reports the successor measure. The deadlock frame uses its own pending condition
+without being constrained by the selected transition. Successors do not gain
+an extra invariant assumption. `if` branches and `and`/`or`/`=>` operands retain
+their usual short-circuit reachability and first-failure ordering.
+
+A possible reached partial operation refuses the induction rank-proof phase with exit 2, kind
+`semantics`, and `leadsTo 'L' decreases measure may be undefined: OP`
+(`head()`, `pop()`, `at()`, or `index`), before that value can enter a rank
+query, proof or failure witness. The earlier zero-slot preflight keeps its
+existing messages and precedence; see the
+[ranked decreases exception](DESIGN-seq-partial-operations.md#symbolic-contract).
+Measures without partial operations add no solver checks. Property `/` and `%`
+remain total; this probe does not add an i64-overflow or Map key-domain proof.
+If the base BMC has already found a real `leadsTo` counterexample, a refused
+optional rank diagnosis preserves that original `violated` verdict (exit 1).
+
+Helpful argument state independence is an induction-only restriction (#1483):
+`check` validates action parameter types, not state independence; BMC accepts well-typed state reads.
+Induction uses `HELPFUL_ARG_HINT` and `eval_state_independent` in rust/fsl-verifier/src/induction.rs
+to refuse state reads and select a fixed action instance for each leadsTo binding.
+Allowed arguments include leadsTo binders, constants, enum members, integer/Boolean literals,
+and integer `+`, `-`, `*` combinations (including unary `-`).
+
 **With one or more `helpful action(args)` lines**, the third obligation is
 relaxed for non-matching actions, and two extra obligations are added to
 compensate (`bmc.py` `_prove_leadsto_rank_helpful_fairness`,
@@ -119,11 +155,16 @@ the measure up by more than the helpful action brings it down each time it
 fires, so `Q` would never be reached even though the helpful action keeps
 firing under fairness.
 
-Failure of any of these is `unknown_cti` / `rank_failure`:
+A failed obligation with a representable witness is `unknown_cti` /
+`rank_failure`:
 `progress_action_not_fair`, `helpful_action_not_enabled`,
 `helpful_action_enabledness_not_sticky`, `non_decreasing_helpful_action`, or
 `non_helpful_action_increases_measure` (§2.6 of `DESIGN-temporal.md`, §10 of
 `LANGUAGE.md`).
+An unrepresentable rank model with missing sequence slots is instead a ranking
+error: after induction it becomes a `semantics` error, while an optional rank
+diagnosis of a BMC `leadsTo` violation leaves that original violation intact.
+See the [Kernel contract's projection and fallback policy](DESIGN-kernel-contract.md#concrete-boundary-pre-pass-budget).
 
 ### 2.4 Soundness notes (for implementers)
 
@@ -131,9 +172,9 @@ Failure of any of these is `unknown_cti` / `rank_failure`:
 - Include `_bounds_*` in Inv too. Since variables of bounded type become free
   variables in the step case, without assuming the bounds a large number of false
   CTIs originating from "ghost states out of range" appear. (The **check** of the
-  bounds is borne by the base case, so putting them into the step premise causes
-  no masking — because bounds violations across all reachable states are already
-  detected in the base.)
+  bounds is borne by the base case, and the step proves their preservation;
+  together these establish the bounds across all reachable states, so assuming
+  them in the step premise does not mask violations.)
 - Among the physical-encoding constraints of enum / Option (e.g. enum value ∈
   [0, n-1], value is don't-care when `present == false`), add those that should
   always hold as a type to the step premise. Otherwise CTIs that are impossible
@@ -176,7 +217,15 @@ the induction engine's (§2.3, §4).
 pre-state, exactly the properties the same BMC run checks at every unrolled
 step: every user invariant, and each `_bounds_*` the run's property
 selection keeps (`checked_bounds`; a bound the run does not check is not
-assumed, because an unrolled state may then violate it). BMC reaches the
+assumed, because an unrolled state may then violate it). The ranking's fresh
+collection states use closed carrier grids. Consequently the optional discharge
+requires every Set/relation root bound to be selected; if any such bound is
+omitted, it withdraws no lasso probes. Other unselected bounds are not assumed:
+scalar terms remain unconstrained by their declared ranges, so the ranking must
+succeed without those premises. This guard does not refuse the model or change
+the lasso search, and prevents an outside member from disabling a helpful action
+in a state the ranking cannot represent.
+The ordinary induction ranking still assumes all bounds. BMC reaches the
 lasso search only after every one of those checks came back `unsat` at every
 step, so every unrolled state satisfies the ranking's premise. Take any
 candidate lasso: a pending step `p`, a loop `states[i..j]` with
@@ -217,9 +266,14 @@ the stall is reported exactly as before (`stutter: true`).
 
 **Fail-closed fallback.** The ranking stops at its first failing property;
 only the properties proved before it are discharged, and every other
-`leadsTo` keeps the full search. A ranking error (unsupported measure,
-solver `unknown`, fail-closed `where` filters) discharges nothing and is not
-reported — the BMC run then produces whatever it produced before, including
+`leadsTo` keeps the full search. Collection wrapper binders and `where` filters
+are now rejected at the shared source check boundary (#1463), before ranking;
+the earlier general finite-binder language-reference wording did not state
+this restriction. This breaking removal does not implement filtered liveness.
+A ranking error (unsupported or potentially partial measure, solver `unknown`,
+a missing-slot sequence rank model, or a fail-closed `where` filter injected into an unchecked model)
+discharges nothing and is not reported — the BMC run then produces whatever it
+produced before, including
 its own error. The same holds when the pre-pass cannot run at all (no
 thread, no solver) and when it panics: the run proceeds without it (the
 panic message still reaches stderr). The pre-pass never reports a verdict or
@@ -322,7 +376,50 @@ selected invariant, so a division that only a dropped invariant protects is
 reported as `_partial_<action>` there — a sound-side change, since the
 narrowed run claims nothing the dropped invariant would have to carry.
 Selecting a `trans` keeps every invariant as hypothesis
-(`selected_transition_induction_model`). Of the non-partial undefinedness BMC
+(`selected_transition_induction_model`). In every induction run, the base case
+checks all implicit `_bounds_*` that the step assumes, even under `--property P`.
+User-property selection still removes sibling user invariants; it does not remove
+these bound dependencies. The same checked bounds support definedness, key-domain,
+and ranking premises. Standalone BMC and explicit selection are unchanged.
+
+**Contract change (#1598).** Previously, `--engine induction --property P` could
+check only P in the base while assuming every bound in the step. If a bound fails
+within the base depth, the run now returns `violated` / `bounded`,
+`violation_kind: "type_bound"`, naming that `_bounds_*` (exit 1). The intentional
+verdict transitions are:
+
+| Selected-induction form | Before #1598 | After #1598 |
+|---|---|---|
+| Initial bound omitted at every base depth; a shallow run can also miss P | exit 0 `proved` / `unbounded` (false proof) | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_*` |
+| Deterministic initial Seq overflow reaching the pre-pass, or an overflowing Seq successor within the base depth | exit 2 `error`, `kind: "semantics"` | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_*` |
+| Same base via `sweep --engine induction --property P` or a `verify --lemma` target | exit 0 `sweep_passed`, or exit 0 `proved` for the lemma-assisted target | exit 1 `sweep_failed`, or exit 1 `violated` / `type_bound` for the target |
+| Bound fails at or before the selected property's failing step | exit 1 `unknown_cti`, or exit 1 `violated P` at the same or a later step | exit 1 `violated` / `bounded`, `type_bound`, `_bounds_*` at the first failing base step |
+
+The old selected base never checked the initial bound at any depth; a shallow
+depth only hid P's failure. Sweep and lemma-assisted verification share the new
+base check: for a spec that initializes `v: 0..3` to 5,
+`sweep --engine induction --property P --depth 2..3` changes
+from exit 0 `sweep_passed` to exit 1 `sweep_failed`, with `_bounds_v` at step 0;
+adding `--lemma` does not bypass the target's bound check.
+
+Two same-step attribution examples under `--engine induction --property P`:
+
+- `n: 0..1`, init 0, increment, `P { n <= 1 }`, depth 2:
+  before `violated P` at step 2, after `violated` / `type_bound`, `_bounds_n` at step 2.
+- Set initial copy, `K = 0..1`, `init { x = 2 t = Set { x } s = t }`,
+  `P { not s.contains(2) }`: before `violated P` at step 0, after
+  `violated` / `type_bound`, `_bounds_s` at step 0.
+
+The deterministic `InitIdle` Seq form now reports `_bounds_xs` at step 0; the
+range example `n: 0..1`, init 0, increment, `P { n <= 2 }` reports `_bounds_n`
+at step 2 when the base depth is at least 2. The engine/path and transition tables
+in [the Kernel contract](DESIGN-kernel-contract.md#concrete-boundary-pre-pass-budget)
+record the selected Seq paths. Base failure evidence and replay use the same
+all-bound selection. On a **`proved` envelope**, `invariants_checked` includes
+those implicit bounds; a **`violated` envelope has no `invariants_checked`**.
+Valid bounds still support the same inductive proofs.
+
+Of the non-partial undefinedness BMC
 fails closed on, a finite `Map` index outside its key domain is asked by
 §2.6.1; checked i64 overflow is not asked, and `proved` reports it in
 `not_covered` (§2.6.2, #1263).
@@ -540,11 +637,16 @@ If a ranked `leadsTo` is proved, the ordinary `leads_to` entry is upgraded:
 - `proved` is the only induction result with `completeness:"unbounded"`.
   `unknown_cti` and base-case failures remain `completeness:"bounded"` and carry
   `checked_to_depth` for the base BMC depth.
-- Failed ranked `leadsTo` obligations return `unknown_cti` with
-  `violation_kind:"leadsTo_rank"` and `rank_failure` naming the failed
+- Failed ranked `leadsTo` obligations with a representable witness return
+  `unknown_cti` with `violation_kind:"leadsTo_rank"` and `rank_failure` naming the failed
   obligation (`unbounded_below`, `deadlock`, `non_decreasing_action`, or
   `pending_not_preserved`). Transition-progress failures include `last_action`,
   `measure_before`, `measure_after`, and a two-state CTI.
+- Missing-slot sequence rank models are not reported as CTIs: the native
+  post-induction path returns an error of kind `semantics` (exit 2), and the
+  optional rank-diagnosis path retains the original BMC `leadsTo` violation.
+  See the [Kernel contract](DESIGN-kernel-contract.md#concrete-boundary-pre-pass-budget)
+  for the one-state and two-state projection policy.
 - Consistency with the existing schema: the `violated` shape is completely
   identical to BMC (it is so automatically because the base case returns it).
 
@@ -560,7 +662,10 @@ New function `prove(spec, k_ind, base_depth, deadlock_mode)`:
    and T onto a shared solver.
 3. Per invariant: push / ¬inv_i(σ_k) / check / pop.
 4. All invariant checks unsat → check ranked `leadsTo` obligations, if any.
-   Failed ranking obligations return `unknown_cti`.
+   A failed ranking obligation with a representable witness returns `unknown_cti`;
+   an unrepresentable missing-slot rank model returns a `semantics` error instead.
+   In the native CLI's separate rank diagnosis of a BMC `leadsTo` violation,
+   a ranking error keeps that original BMC violation rather than replacing it.
 5. All unsat → reshape the verify result dict to `result: "proved"` and return.
    Any sat → extract the CTI and `unknown_cti`.
 6. When incrementing k, you can reuse by **only adding** σ_{k+1} and Inv(σ_k)·

@@ -87,6 +87,7 @@ pub fn build_expression(id: &str, source: &str, build_kind: ExpressionBuild) -> 
     **right = Expr::EnumMember {
         type_name: "Status".to_owned(),
         member: "Pending".to_owned(),
+        source_bare: false,
     };
 
     build_surface_model(syntax).unwrap_or_else(|error| {

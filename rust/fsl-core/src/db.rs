@@ -9,10 +9,29 @@ use fsl_syntax::{
 };
 
 use crate::{
-    INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite, SPEC_TARGET,
-    TERMINAL_TARGET, action_guard_target, action_statement_target, action_target,
+    CoreError, INIT_TARGET, LoweringStep, OriginChain, OriginId, OriginRegistry, OriginSite,
+    SPEC_TARGET, TERMINAL_TARGET, action_guard_target, action_statement_target, action_target,
     init_statement_target, property_target, state_target, type_target,
 };
+
+/// Closed vocabulary of `check compatibility` rule names, in diagnostic order.
+///
+/// This validates rule selection, not DB-only compatibility findings. Default
+/// rule selection remains a separate concern for lowering and the DB tools.
+pub const DB_COMPATIBILITY_RULES: &[&str] = &[
+    "all_active_reads_exist",
+    "all_active_writes_exist",
+    "api_calls_accepted",
+    "api_responses_expected",
+    "artifact_capabilities_provided",
+    "data_preserved",
+    "destructive_operations_annotated",
+    "not_null_after_backfill",
+    "offline_payloads_accepted",
+    "preservation_transforms_annotated",
+    "removed_only_after_unused",
+    "rollback_equivalent",
+];
 
 fn safe(name: &str) -> String {
     let mut output = name
@@ -50,7 +69,7 @@ fn invariant_name(parts: &[&str]) -> String {
         // `__` is reserved for composed-name display (`component__name` ->
         // `component.name`). Keep the database dialect's public double
         // underscores through parsing and restore them at presentation time.
-        .join("QqDbSepqQ")
+        .join(crate::naming::DB_SEPARATOR)
 }
 
 fn entry_name_parts(entry: &DbEnvironmentArtifact) -> Vec<String> {
@@ -215,7 +234,29 @@ fn compatibility_expr(window: (i64, i64), member: &str) -> Expr {
 /// Build the executable database catalog directly as typed surface IR plus
 /// source-backed origins. No generated FSL source is involved.
 #[allow(clippy::too_many_lines)]
-pub(crate) fn lower_db_surface(system: &DbSystem) -> (SurfaceSpec, OriginRegistry) {
+pub(crate) fn lower_db_surface(
+    system: &DbSystem,
+) -> Result<(SurfaceSpec, OriginRegistry), CoreError> {
+    for rule in &system.check.rules {
+        if !DB_COMPATIBILITY_RULES.contains(&rule.name.as_str()) {
+            let mut error = crate::core_error(
+                format!(
+                    "unknown db compatibility rule '{}'; supported rules: {}",
+                    rule.name,
+                    DB_COMPATIBILITY_RULES.join(", ")
+                ),
+                rule.span,
+            );
+            error.origin = Some(Box::new(db_origin(
+                rule.span,
+                vec![system.name.clone(), "check".to_owned(), rule.name.clone()],
+                "validate_db_compatibility_rule",
+                false,
+                Vec::new(),
+            )));
+            return Err(error);
+        }
+    }
     let columns = system
         .database
         .tables
@@ -223,6 +264,24 @@ pub(crate) fn lower_db_surface(system: &DbSystem) -> (SurfaceSpec, OriginRegistr
         .flat_map(|table| table.columns.iter())
         .map(|column| ((column.table.clone(), column.name.clone()), column))
         .collect::<BTreeMap<_, _>>();
+    if columns.is_empty() {
+        let mut error = crate::core_error(
+            format!("database '{}' declares no columns", system.database.name),
+            system.database.span,
+        );
+        error.origin = Some(Box::new(db_origin(
+            system.database.span,
+            vec![
+                system.name.clone(),
+                "database".to_owned(),
+                system.database.name.clone(),
+            ],
+            "validate_db_columns",
+            false,
+            Vec::new(),
+        )));
+        return Err(error);
+    }
     let artifacts = system
         .artifacts
         .iter()
@@ -303,11 +362,13 @@ pub(crate) fn lower_db_surface(system: &DbSystem) -> (SurfaceSpec, OriginRegistr
             lo: Box::new(Expr::Num(schema_lo)),
             hi: Box::new(Expr::Num(schema_hi)),
             symmetric: false,
+            span: None,
         },
         SpecItem::Enum {
             name: "Column".to_owned(),
             members: columns.keys().map(column_member).collect(),
             member_spans: Vec::new(),
+            span: Some(system.database.span),
             symmetric: false,
         },
         SpecItem::State(vec![
@@ -578,6 +639,7 @@ pub(crate) fn lower_db_surface(system: &DbSystem) -> (SurfaceSpec, OriginRegistr
         items.push(SpecItem::Action {
             name: action_name,
             params: Vec::new(),
+            param_spans: Vec::new(),
             items: action_items,
             span: migration.span,
             fair: false,
@@ -627,6 +689,7 @@ pub(crate) fn lower_db_surface(system: &DbSystem) -> (SurfaceSpec, OriginRegistr
         items.push(SpecItem::Action {
             name: action_name,
             params: Vec::new(),
+            param_spans: Vec::new(),
             items: action_items,
             span: system.database.span,
             fair: false,
@@ -836,7 +899,7 @@ pub(crate) fn lower_db_surface(system: &DbSystem) -> (SurfaceSpec, OriginRegistr
         span: terminal_span,
     });
 
-    (
+    Ok((
         SurfaceSpec {
             name: system.name.clone(),
             meta: Some(metadata(
@@ -847,5 +910,5 @@ pub(crate) fn lower_db_surface(system: &DbSystem) -> (SurfaceSpec, OriginRegistr
             items,
         },
         registry,
-    )
+    ))
 }

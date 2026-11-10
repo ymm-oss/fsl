@@ -14,12 +14,13 @@ use fsl_core::{
     ActionDef, ActionGuard, Annotation, Annotations, FsResolver, INIT_TARGET, KernelModel,
     KernelSpec, OriginChain, ParamDef, PublicKernelVersion, RequirementLink, RequirementsTraceCase,
     RequirementsTraceContract, RequirementsTraceExpectation, TERMINAL_TARGET, TypeDef, TypeRef,
-    action_target, build_model, display_name, parse_kernel_source, property_target,
-    public_kernel_contract_for_version, public_kernel_expression, requirements_trace_contract,
+    action_target, build_model, parse_kernel_source_with_options, property_target,
+    public_kernel_contract_for_version, public_kernel_expression,
+    requirements_trace_contract_with_options,
 };
 use fsl_syntax::{
-    Expr, ParsedDocument, RequirementsItem, SourceFile, SourcePos, Span, SpecItem, SurfaceDocument,
-    VerifyItem, parse_document,
+    Expr, ParseOptions, ParsedDocument, RequirementOwner, RequirementsItem, SourceFile, SourcePos,
+    Span, SpecItem, SurfaceDocument, VerifyItem, parse_document_with,
 };
 use serde_json::{Value, json};
 
@@ -166,7 +167,28 @@ pub fn project_requirement_claims_from_source(
     source_path: Option<&str>,
     resolver_root: &Path,
 ) -> Result<RequirementClaimSet, DocumentProjectionError> {
-    let parsed = parse_document(SourceFile::new(source))
+    project_requirement_claims_from_source_with_options(
+        source,
+        source_path,
+        resolver_root,
+        &ParseOptions::stable(),
+    )
+}
+
+/// [`project_requirement_claims_from_source`] under explicit
+/// [`ParseOptions`]: the parse, the lowering and the trace contract all read
+/// `source` under the same options.
+///
+/// # Errors
+///
+/// As [`project_requirement_claims_from_source`].
+pub fn project_requirement_claims_from_source_with_options(
+    source: &str,
+    source_path: Option<&str>,
+    resolver_root: &Path,
+    options: &ParseOptions,
+) -> Result<RequirementClaimSet, DocumentProjectionError> {
+    let parsed = parse_document_with(SourceFile::new(source), options)
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     if !matches!(
         &parsed.surface,
@@ -177,29 +199,77 @@ pub fn project_requirement_claims_from_source(
         });
     }
     let resolver = FsResolver::new(resolver_root);
-    let kernel = parse_kernel_source(source, &resolver)
+    let kernel = parse_kernel_source_with_options(source, &resolver, options)
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     let model = build_model(kernel.clone())
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     let (dialect, implements_names, analysis_scope) =
         projection_context_from_parsed(&parsed, &model)?;
-    project_requirement_claims(&DocumentInput {
-        kernel: &kernel,
-        model: &model,
-        source,
-        source_path,
-        dialect,
-        implements_names,
-        analysis_scope,
-    })
+    project_requirement_claims_with_options(
+        &DocumentInput {
+            kernel: &kernel,
+            model: &model,
+            source,
+            source_path,
+            dialect,
+            implements_names,
+            analysis_scope,
+        },
+        options,
+    )
     .map_err(DocumentProjectionError::Other)
+}
+
+/// The declaration owning each requirement ID of a next-edition `requirements` document,
+/// by ID; empty for any other document. A `covers` of an owned ID keeps its own text in
+/// the kernel, and the ledger and the documents title the ID with its owner's (#1705).
+#[must_use]
+pub fn requirement_owners(
+    source: &str,
+    options: &ParseOptions,
+) -> BTreeMap<String, RequirementOwner> {
+    match fsl_syntax::parse_surface_document_with(source, options) {
+        Ok(SurfaceDocument::Requirements(requirements)) => requirements
+            .next
+            .map(|next| {
+                next.owners
+                    .into_iter()
+                    .map(|owner| (owner.id.clone(), owner))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => BTreeMap::new(),
+    }
+}
+
+/// Put the owner's title, cited at the owner, first among an owned ID's statements; the
+/// `covers` texts linking to the ID follow it.
+fn title_with_owner(
+    requirement: &mut Requirement,
+    owners: &BTreeMap<String, RequirementOwner>,
+    source_path: Option<&str>,
+) {
+    let Some(owner) = owners.get(&requirement.id) else {
+        return;
+    };
+    requirement
+        .statements
+        .retain(|statement| statement.text.as_deref() != Some(owner.title.as_str()));
+    requirement.statements.insert(
+        0,
+        RequirementStatement {
+            text: Some(owner.title.clone()),
+            source: Some(source_ref_span(source_path, owner.span)),
+        },
+    );
 }
 
 fn projection_context(
     source: &str,
     model: &KernelModel,
+    options: ParseOptions,
 ) -> Result<(DocumentDialect, Vec<String>, AnalysisScope), DocumentProjectionError> {
-    let parsed = parse_document(SourceFile::new(source))
+    let parsed = parse_document_with(SourceFile::new(source), &options)
         .map_err(|error| DocumentProjectionError::Other(error.to_string()))?;
     projection_context_from_parsed(&parsed, model)
 }
@@ -438,7 +508,10 @@ fn push_action_claim(
 ) {
     let _ = dialect;
     let target = action_target(&action.name);
-    let claim_id = format!("action:{}#operation", model.action_key(&action.name));
+    let claim_id = format!(
+        "action:{}#operation",
+        model.action_display_name(&action.name)
+    );
     let links = model.requirements_for(&target);
     let kind_ids = kind_ids_from(model.annotations_for(&target));
     let requirement_ids = record_links(&links, &kind_ids, &claim_id, source_path, agg);
@@ -468,7 +541,8 @@ fn push_action_claim(
         .collect();
     let fairness = if action.fair { "weak" } else { "none" };
 
-    let subject_core = json!({"action": model.action_key(&action.name), "parameters": parameters});
+    let subject_core =
+        json!({"action": model.action_display_name(&action.name), "parameters": parameters});
     let enablement = json!({"mode": "all", "expressions": expressions});
     let effects = json!({"commit": "simultaneous", "reads": "pre_state", "statements": statements});
     let postconditions_value = Value::Array(postconditions);
@@ -498,7 +572,7 @@ fn push_action_claim(
             kind: ClaimKind::Operation,
             requirements: requirement_ids,
             subject: json!({
-                "action": model.action_key(&action.name),
+                "action": model.action_display_name(&action.name),
                 "display_name": model.action_display_name(&action.name),
                 "parameters": parameters,
             }),
@@ -559,7 +633,10 @@ fn push_property_claim(
             id: claim_id,
             kind: claim_kind,
             requirements: requirement_ids,
-            subject: json!({"property": name, "display_name": display_name(name)}),
+            subject: json!({
+                "property": name,
+                "display_name": model.names().public_property(name).as_str(),
+            }),
             enablement: None,
             effects: None,
             postconditions: None,
@@ -600,8 +677,17 @@ fn push_terminal_claim(
         "semantic_targets": [&target],
     });
     let claim_digest = framed_digest(CLAIM_DIGEST_ALGORITHM, &core);
-    let provenance = provenance_for(model, std::slice::from_ref(&target), None, source_path);
-    let source = source_from_origin(model, &target, source_path);
+    let provenance = provenance_for(
+        model,
+        std::slice::from_ref(&target),
+        model.terminal_span,
+        source_path,
+    );
+    let source = source_from_origin(model, &target, source_path).or_else(|| {
+        model
+            .terminal_span
+            .map(|span| source_ref_span(source_path, span))
+    });
 
     built.push(BuiltClaim {
         claim: Claim {
@@ -840,14 +926,32 @@ pub(crate) fn project_trace_case_payload(
 pub fn project_requirement_claims(
     input: &DocumentInput<'_>,
 ) -> Result<RequirementClaimSet, String> {
-    let trace = requirements_trace_contract(input.source).map_err(|error| error.to_string())?;
-    project_requirement_claims_with_trace(input, trace.as_ref())
+    project_requirement_claims_with_options(input, &ParseOptions::stable())
+}
+
+/// [`project_requirement_claims`] with the trace contract read under
+/// explicit [`ParseOptions`], the options `input.source` was lowered under.
+///
+/// # Errors
+///
+/// As [`project_requirement_claims`].
+pub fn project_requirement_claims_with_options(
+    input: &DocumentInput<'_>,
+    options: &ParseOptions,
+) -> Result<RequirementClaimSet, String> {
+    // Ungated here: the requirement-trace gate replays traces on
+    // `fsl-runtime`, which this crate does not depend on. `fslc` runs the gate
+    // before every document command and fails closed on its refusal.
+    let trace = requirements_trace_contract_with_options(input.source, options)
+        .map_err(|error| error.to_string())?;
+    project_requirement_claims_with_trace(input, trace.as_ref(), *options)
 }
 
 #[allow(clippy::too_many_lines)]
 fn project_requirement_claims_with_trace(
     input: &DocumentInput<'_>,
     trace_contract: Option<&RequirementsTraceContract>,
+    options: ParseOptions,
 ) -> Result<RequirementClaimSet, String> {
     let model = input.model;
     let source_path = input.source_path;
@@ -975,7 +1079,10 @@ fn project_requirement_claims_with_trace(
                 id: claim_id,
                 kind: ClaimKind::ProgressRule,
                 requirements: requirement_ids,
-                subject: json!({"property": property.name, "display_name": display_name(&property.name)}),
+                subject: json!({
+                    "property": property.name,
+                    "display_name": model.names().public_property(&property.name).as_str(),
+                }),
                 enablement: None,
                 effects: None,
                 postconditions: None,
@@ -999,15 +1106,15 @@ fn project_requirement_claims_with_trace(
     }
 
     if let Some(contract) = trace_contract {
-        for case in &contract.acceptance {
+        for case in contract.unchecked_acceptance() {
             universe.push(format!("acceptance:{}", case.id));
         }
-        for case in &contract.forbidden {
+        for case in contract.unchecked_forbidden() {
             universe.push(format!("forbidden:{}", case.id));
         }
         push_trace_claims(
             TraceCaseKind::Acceptance,
-            &contract.acceptance,
+            contract.unchecked_acceptance(),
             model,
             source_path,
             &mut agg,
@@ -1016,7 +1123,7 @@ fn project_requirement_claims_with_trace(
         )?;
         push_trace_claims(
             TraceCaseKind::Forbidden,
-            &contract.forbidden,
+            contract.unchecked_forbidden(),
             model,
             source_path,
             &mut agg,
@@ -1101,6 +1208,7 @@ fn project_requirement_claims_with_trace(
         .collect();
 
     // Requirements section, aggregated across every target/trace case above.
+    let owners = requirement_owners(input.source, &options);
     let requirements: Vec<Requirement> = agg
         .into_iter()
         .map(|(id, entry)| Requirement {
@@ -1115,6 +1223,10 @@ fn project_requirement_claims_with_trace(
                 .collect(),
             claim_ids: entry.claim_ids.into_iter().collect(),
             kinds: entry.kinds.into_iter().collect(),
+        })
+        .map(|mut requirement| {
+            title_with_owner(&mut requirement, &owners, source_path);
+            requirement
         })
         .collect();
 
@@ -1256,9 +1368,10 @@ pub(crate) fn project_renderer_contract(
     source: &str,
     source_path: Option<&str>,
     trace: Option<&RequirementsTraceContract>,
+    options: ParseOptions,
 ) -> Result<RequirementClaimSet, String> {
     let (dialect, implements_names, analysis_scope) =
-        projection_context(source, model).map_err(|error| error.to_string())?;
+        projection_context(source, model, options).map_err(|error| error.to_string())?;
     project_requirement_claims_with_trace(
         &DocumentInput {
             kernel,
@@ -1270,5 +1383,6 @@ pub(crate) fn project_renderer_contract(
             analysis_scope,
         },
         trace,
+        options,
     )
 }

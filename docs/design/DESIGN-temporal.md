@@ -123,6 +123,27 @@ violation_stutter := ∃ j ≤ K, ∃ p ≤ j:
 checked **independently for each binding** (if even one has a counterexample it
 is violated; the counterexample JSON includes `bindings`).
 
+The #1480 fixed-outer amendment permits an unfiltered inner range to
+use prior wrapper locals with checked integer arithmetic and typed Boolean
+conditions (see [the coupled decision](DESIGN-static-binder-constant-expressions.md#fixed-outer-temporal-amendment-1480)).
+For `i in 0..1` then `j in 0..i`, instance order is `(0,0), (1,0), (1,1)`;
+Bool order is `false`, then `true`. Each assignment retains declared types and
+restores shadowed bindings before another property. Free state cannot supply a
+bound, even through a same-spelled const. `within` remains a nonnegative
+constant of the declaration and cannot depend on a wrapper local.
+
+Reachable dependent bounds run in binder order, lower before upper. Their first
+arithmetic error precedes later static/type failures; unreachable dependent math
+is skipped, while independent invalid domains remain errors even after an empty
+prefix. Endpoint conditions and both arms still require name/type checks with
+prior declared wrapper types after an empty prefix; these checks do not execute
+arithmetic. Existing consumer-specific legacy errors retain their priority.
+Collection/filtered wrappers, P/Q quantifiers, action/init/aggregate domains and
+explicit liveness are not extended. It
+makes no new unbounded temporal proof or assurance claim: bounded
+liveness metadata remains property-keyed, and an overall induction `proved`
+result alone does not establish unbounded response for a depth-bounded entry.
+
 ### 2.5.1 Symmetry Reduction
 
 A finite domain or enum may be declared symmetric:
@@ -337,8 +358,13 @@ requires `Q` in the same observation as `P`.
 This is deliberately only bounded prefix monitoring. A trace that ends early
 reports pending obligations, and declarations without `within` are reported as
 unchecked rather than inferred from a finite prefix. Action and stutter
-observations both advance the logical clock. Unsupported collection binders or
-`where` filters fail closed. Differential tests feed a native BMC
+observations both advance the logical clock. Collection wrapper binders and
+`where` filters are rejected during checked-model construction (#1463), with
+the same core rule used by CLI, LSP and Worker. This is a breaking removal of
+previously check-ok forms, not new response semantics. The static runtime
+expander retains that shared fail-closed rule for callers that mutate a model
+after construction. Expression quantifiers inside P/Q are not wrapper binders.
+Differential tests feed a native BMC
 counterexample into the monitor and require identical property, binding,
 trigger, and deadline evidence. The external contract and JSON fields are
 specified in `DESIGN-replay-trace.md`.

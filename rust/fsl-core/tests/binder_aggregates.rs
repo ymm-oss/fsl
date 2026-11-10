@@ -391,20 +391,338 @@ spec AggregatePartialOperations {
 }
 
 #[test]
-fn checked_model_rejects_dynamic_aggregate_ranges_in_every_expression_position() {
+fn authored_dynamic_aggregate_ranges_preserve_ast_but_strict_projection_rejects_them() {
     let sources = [
         "spec DynamicInit { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = count(i in lo..hi) } action stay() { lo = lo hi = hi total = total } invariant I { true } }",
         "spec DynamicAction { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = 0 } action stay() { lo = lo hi = hi total = count(i in lo..hi) } invariant I { true } }",
         "spec DynamicProperty { state { lo: Int, hi: Int, total: Int } init { lo = 0 hi = 2 total = 0 } action stay() { lo = lo hi = hi total = total } invariant I { count(i in lo..hi) >= 0 } }",
     ];
 
-    for source in sources {
+    for (position, source) in sources.into_iter().enumerate() {
         let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse source");
-        let error = build_model(kernel).expect_err("dynamic aggregate range must fail closed");
-        assert!(
-            error.message.contains("'lo' is not an integer const"),
-            "{}",
-            error.message
+        let model = build_model(kernel.clone()).expect("authored dynamic range is deferred");
+        let stored = if position < 2 {
+            let statements = if position == 0 {
+                &model.init
+            } else {
+                &model.actions[0].statements
+            };
+            let fsl_core::KernelStatement::Assign {
+                target: fsl_core::KernelLValue::Var(name),
+                value,
+                ..
+            } = &statements[2]
+            else {
+                panic!("third statement must remain the total assignment");
+            };
+            assert_eq!(name, "total");
+            value
+        } else {
+            &model.invariants[0].expr
+        };
+        let authored = fsl_syntax::parse_expr(if position == 2 {
+            "count(i in lo..hi) >= 0"
+        } else {
+            "count(i in lo..hi)"
+        })
+        .expect("parse unchanged authored expression");
+        assert_eq!(stored, &authored, "authored AST at position {position}");
+        assert_eq!(
+            public_kernel_contract(&kernel, &model, "dynamic-aggregate.fsl", "spec"),
+            Err(fsl_core::PublicKernelError {
+                message: "'lo' is not an integer const".into(),
+                span: None,
+            }),
+            "strict projection must retain its complete rejection at position {position}"
+        );
+    }
+}
+
+// #1569: these tests exercise the unresolved Stage AST directly, before dialect
+// lowering can accidentally resolve a stale operand to an outer entity binder.
+mod stage_substitution {
+    use super::*;
+
+    fn stage(name: &str) -> KernelExpr {
+        let span = serde_json::from_value(serde_json::json!({
+            "start": { "offset": 10, "line": 2, "column": 3 },
+            "end": { "offset": 18, "line": 2, "column": 11 },
+        }))
+        .expect("span");
+        KernelExpr::Stage {
+            process: Some(Box::new(
+                fsl_core::SymbolPath::new(["Claim".into()], span).unwrap(),
+            )),
+            entity: Box::new(KernelExpr::Var(name.into())),
+            entity_span: span,
+            span,
+        }
+    }
+
+    fn binary(op: &str, left: KernelExpr, right: KernelExpr) -> KernelExpr {
+        KernelExpr::Binary {
+            op: op.into(),
+            left: Box::new(left),
+            right: Box::new(right),
+        }
+    }
+
+    fn condition(name: &str) -> KernelExpr {
+        binary(
+            "and",
+            binary("==", stage(name), KernelExpr::Var("Approved".into())),
+            binary("==", KernelExpr::Var("amount".into()), KernelExpr::Num(0)),
+        )
+    }
+
+    fn replacement() -> HashMap<String, KernelExpr> {
+        HashMap::from([(
+            "amount".into(),
+            KernelExpr::Index(
+                Box::new(KernelExpr::Var("claim_amount".into())),
+                Box::new(KernelExpr::Var("c".into())),
+            ),
+        )])
+    }
+
+    fn expected_condition(name: &str) -> KernelExpr {
+        binary(
+            "and",
+            binary("==", stage(name), KernelExpr::Var("Approved".into())),
+            binary("==", replacement()["amount"].clone(), KernelExpr::Num(0)),
+        )
+    }
+
+    fn binder(kind: usize, name: &str, filter: Option<KernelExpr>) -> KernelBinder {
+        let where_expr = filter.map(Box::new);
+        match kind {
+            0 => KernelBinder::Typed {
+                name: name.into(),
+                type_name: fsl_core::QualifiedName {
+                    namespace: None,
+                    name: "Claim".into(),
+                },
+                where_expr,
+            },
+            1 => KernelBinder::Range {
+                name: name.into(),
+                lo: Box::new(KernelExpr::Num(0)),
+                hi: Box::new(KernelExpr::Num(1)),
+                where_expr,
+            },
+            2 => KernelBinder::Collection {
+                name: name.into(),
+                collection: Box::new(KernelExpr::Var("claims".into())),
+                where_expr,
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    fn name_and_filter(binder: &KernelBinder) -> (&str, &Option<Box<KernelExpr>>) {
+        match binder {
+            KernelBinder::Typed {
+                name, where_expr, ..
+            }
+            | KernelBinder::Range {
+                name, where_expr, ..
+            }
+            | KernelBinder::Collection {
+                name, where_expr, ..
+            } => (name, where_expr),
+        }
+    }
+
+    #[test]
+    fn detector_free_stage_operand_is_substituted_with_metadata_preserved() {
+        assert_eq!(
+            substitute_expr(
+                stage("x"),
+                &HashMap::from([("x".into(), KernelExpr::Var("y".into()))])
+            ),
+            stage("y")
+        );
+    }
+
+    #[test]
+    fn detector_free_stage_operand_in_every_binder_filter_is_substituted() {
+        for kind in 0..3 {
+            let expr = KernelExpr::Quantified {
+                quantifier: "exists".into(),
+                binder: binder(kind, "d", Some(stage("x"))),
+                body: Box::new(KernelExpr::Bool(true)),
+            };
+            let result = substitute_expr(
+                expr,
+                &HashMap::from([("x".into(), KernelExpr::Var("y".into()))]),
+            );
+            let KernelExpr::Quantified { binder, .. } = result else {
+                panic!("quantifier")
+            };
+            assert_eq!(
+                name_and_filter(&binder).1.as_deref(),
+                Some(&stage("y")),
+                "binder kind {kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn detector_quantifier_renames_stage_with_binder_in_body_and_filter() {
+        for kind in 0..3 {
+            let expr = KernelExpr::Quantified {
+                quantifier: "exists".into(),
+                binder: binder(kind, "c", Some(condition("c"))),
+                body: Box::new(condition("c")),
+            };
+            let KernelExpr::Quantified { binder, body, .. } = substitute_expr(expr, &replacement())
+            else {
+                panic!("quantifier")
+            };
+            let (fresh, filter) = name_and_filter(&binder);
+            assert_ne!(fresh, "c");
+            let expected = expected_condition(fresh);
+            assert_eq!(*body, expected, "body, binder kind {kind}");
+            assert_eq!(
+                filter.as_deref(),
+                Some(&expected),
+                "filter, binder kind {kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn detector_aggregate_renames_stage_with_binder_in_value_and_filter() {
+        for kind in 0..3 {
+            let expr = KernelExpr::Aggregate {
+                kind: KernelAggregateKind::Sum,
+                binder: binder(kind, "c", Some(condition("c"))),
+                value: Some(Box::new(stage("c"))),
+            };
+            let KernelExpr::Aggregate { binder, value, .. } = substitute_expr(expr, &replacement())
+            else {
+                panic!("aggregate")
+            };
+            let (fresh, filter) = name_and_filter(&binder);
+            assert_ne!(fresh, "c");
+            assert_eq!(
+                value.as_deref(),
+                Some(&stage(fresh)),
+                "value, binder kind {kind}"
+            );
+            assert_eq!(
+                filter.as_deref(),
+                Some(&expected_condition(fresh)),
+                "filter, binder kind {kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn detector_nested_shadowing_stage_reads_follow_their_own_binders() {
+        // The inner c shadows the outer c; the d scope still reads the outer c.
+        let inner = KernelExpr::Quantified {
+            quantifier: "exists".into(),
+            binder: binder(0, "c", None),
+            body: Box::new(condition("c")),
+        };
+        let middle = KernelExpr::Quantified {
+            quantifier: "forall".into(),
+            binder: binder(0, "d", None),
+            body: Box::new(binary("and", stage("c"), inner)),
+        };
+        let outer = KernelExpr::Quantified {
+            quantifier: "exists".into(),
+            binder: binder(0, "c", None),
+            body: Box::new(middle),
+        };
+        let KernelExpr::Quantified {
+            binder: outer_binder,
+            body,
+            ..
+        } = substitute_expr(outer, &replacement())
+        else {
+            panic!("outer")
+        };
+        let outer_name = name_and_filter(&outer_binder).0;
+        assert_ne!(outer_name, "c");
+        let KernelExpr::Quantified {
+            binder: middle_binder,
+            body,
+            ..
+        } = *body
+        else {
+            panic!("middle")
+        };
+        assert_eq!(name_and_filter(&middle_binder).0, "d");
+        let KernelExpr::Binary { left, right, .. } = *body else {
+            panic!("and")
+        };
+        assert_eq!(*left, stage(outer_name));
+        let KernelExpr::Quantified {
+            binder: inner_binder,
+            body,
+            ..
+        } = *right
+        else {
+            panic!("inner")
+        };
+        let inner_name = name_and_filter(&inner_binder).0;
+        assert_ne!(inner_name, "c");
+        assert_eq!(*body, expected_condition(inner_name));
+    }
+
+    #[test]
+    fn control_noncapturing_stage_binder_and_free_replacement_stay_distinct() {
+        let expr = KernelExpr::Quantified {
+            quantifier: "exists".into(),
+            binder: binder(0, "d", Some(condition("d"))),
+            body: Box::new(condition("d")),
+        };
+        let expected = KernelExpr::Quantified {
+            quantifier: "exists".into(),
+            binder: binder(0, "d", Some(expected_condition("d"))),
+            body: Box::new(expected_condition("d")),
+        };
+        assert_eq!(substitute_expr(expr, &replacement()), expected);
+    }
+
+    #[test]
+    fn control_stage_operand_ignores_non_variable_replacements_but_keeps_renames() {
+        assert_eq!(
+            substitute_expr(
+                stage("x"),
+                &HashMap::from([("x".into(), KernelExpr::Var("y".into()))])
+            ),
+            stage("y")
+        );
+        let captured = KernelExpr::Quantified {
+            quantifier: "exists".into(),
+            binder: binder(0, "c", None),
+            body: Box::new(condition("c")),
+        };
+        let KernelExpr::Quantified { binder, body, .. } = substitute_expr(captured, &replacement())
+        else {
+            panic!("quantifier")
+        };
+        let fresh = name_and_filter(&binder).0;
+        assert_ne!(fresh, "c");
+        assert_eq!(*body, expected_condition(fresh));
+
+        let field_read = KernelExpr::Index(
+            Box::new(KernelExpr::Var("claim_c".into())),
+            Box::new(KernelExpr::Var("x".into())),
+        );
+        let fields = HashMap::from([("x".into(), field_read.clone())]);
+        assert_eq!(
+            substitute_expr(KernelExpr::Var("x".into()), &fields),
+            field_read,
+            "the field replacement still applies to ordinary variable reads"
+        );
+        assert_eq!(
+            substitute_expr(stage("x"), &fields),
+            stage("x"),
+            "a field read must not replace the typed entity operand of stage"
         );
     }
 }

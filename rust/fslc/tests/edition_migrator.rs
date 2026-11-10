@@ -8,7 +8,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt as _;
 
+use fsl_core::FslValue;
+use fsl_runtime::{EnabledAction, Monitor};
 use serde_json::Value;
+
+#[path = "support/id_spelling.rs"]
+mod id_spelling;
+use id_spelling::compact_hyphen_runs;
 
 struct FixtureDir(PathBuf);
 
@@ -58,8 +64,600 @@ fn json(output: &Output) -> Value {
     })
 }
 
+/// The findings of `output`'s first file other than `missing_edition_header`,
+/// which every headerless document gets for the next edition since #1434.
+fn without_missing_header(output: &Value) -> Vec<Value> {
+    output["files"][0]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .filter(|finding| finding["code"] != fsl_syntax::MISSING_EDITION_HEADER)
+        .cloned()
+        .collect()
+}
+
+/// Whether `output`'s first file reports `missing_edition_header` once.
+fn reports_missing_header_once(output: &Value) -> bool {
+    output["files"][0]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .filter(|finding| finding["code"] == fsl_syntax::MISSING_EDITION_HEADER)
+        .count()
+        == 1
+}
+
 fn text(path: &Path) -> String {
     std::fs::read_to_string(path).expect("read fixture")
+}
+
+fn edition_command(verb: &str) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    command.arg(verb);
+    command
+}
+
+fn run_edition(path: &str, verb: &str, edition: Option<&str>, extra: &[&str]) -> Output {
+    let mut command = edition_command(verb);
+    command.arg(path);
+    if let Some(edition) = edition {
+        command.args(["--edition", edition]);
+    }
+    command.args(extra).output().expect("run fslc")
+}
+
+#[test]
+fn lint_and_migrate_share_next_operator_diagnostics_without_rewriting() {
+    let directory = FixtureDir::new();
+    for operator in ["||", "->"] {
+        let source = format!(
+            "spec S {{ state {{ flag: Bool = false }} action finish() {{ flag = true }} invariant I {{ true {operator} false }} }}\n"
+        );
+        let path = directory.write("legacy.fsl", &source);
+        for verb in ["lint", "migrate"] {
+            let output = run_edition(path.to_str().expect("path"), verb, Some("next"), &[]);
+            assert_eq!(output.status.code(), Some(2));
+            let output = json(&output);
+            assert_eq!(output["result"], "error");
+            assert_eq!(output["kind"], "parse");
+            assert_eq!(
+                output["diagnostic_code"], "unsupported_in_edition",
+                "{verb}: {output:#}"
+            );
+            assert_eq!(
+                text(&path),
+                source,
+                "invalid expressions require manual repair"
+            );
+        }
+    }
+}
+
+#[test]
+fn relation_range_arrows_remain_structural_in_every_edition_entry() {
+    let directory = FixtureDir::new();
+    for endpoints in [
+        "0..1 -> 0..1",
+        "0..1 -> Bool",
+        "0..(1) -> Bool",
+        "0..N -> Bool",
+        "Node -> Node",
+    ] {
+        let body = format!(
+            "spec Relation {{ const N = 1 type Node = 0..1 state {{ edges: relation {endpoints} = Set {{}} }} action hold() {{ edges = edges }} invariant Typed {{ true }} }}\n"
+        );
+        for (prefix, edition) in [("fsl 5\n", None), ("", None), ("", Some("next"))] {
+            let source = format!("{prefix}{body}");
+            let path = directory.write("relation.fsl", &source);
+            let output = run_edition(path.to_str().expect("path"), "check", edition, &[]);
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "expected accepted {endpoints}, produced {}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert_eq!(json(&output)["result"], "ok");
+            let options = fsl_syntax::ParseOptions::stable();
+            assert!(
+                fsl_syntax::legacy_expression_operator_error(&source, &options).is_none(),
+                "relation arrow is not an expression operator"
+            );
+            let malformed =
+                source.replace("invariant Typed { true }", "invariant Typed { true == }");
+            assert!(
+                fsl_syntax::legacy_expression_operator_error(&malformed, &options).is_none(),
+                "must not replace a later real parse error with a relation diagnostic"
+            );
+            let path = directory.write("malformed.fsl", &malformed);
+            let error = run_edition(path.to_str().expect("path"), "check", edition, &[]);
+            assert_eq!(error.status.code(), Some(2));
+            assert_eq!(json(&error)["diagnostic_code"], "FSL-PARSE");
+        }
+        // Conversion control: the migrator inserts a header; this is separate
+        // from the current-edition checks above.
+        let path = directory.write("migrating.fsl", &body);
+        let migrated = run_edition(
+            path.to_str().expect("path"),
+            "migrate",
+            Some("next"),
+            &["--write"],
+        );
+        assert_eq!(
+            migrated.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&migrated.stdout)
+        );
+        assert_eq!(json(&migrated)["result"], "migrated");
+        assert!(text(&path).starts_with("fsl 5\n"));
+        let checked = run_edition(path.to_str().expect("path"), "check", None, &[]);
+        assert_eq!(checked.status.code(), Some(0));
+        assert_eq!(json(&checked)["result"], "ok");
+    }
+}
+
+#[test]
+fn action_correspondence_range_parameter_precedes_a_structural_arrow() {
+    let directory = FixtureDir::new();
+    directory.write("abstract.fsl", "spec A { state { done: Bool = false } action finish(i in 0..1) { done = true } invariant Typed { true } }\n");
+    let body = "requirements C { implements A from \"abstract.fsl\" { map done = done action finish(i: 0..1) -> finish(i) } state { done: Bool = false } action finish(i in 0..1) { done = true } invariant Typed { true } }\n";
+    for (prefix, edition) in [("fsl 5\n", None), ("", None), ("", Some("next"))] {
+        let source = format!("{prefix}{body}");
+        let path = directory.write("parameter.fsl", &source);
+        let output = run_edition(path.to_str().expect("path"), "check", edition, &[]);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        assert_eq!(json(&output)["result"], "ok");
+        let options = fsl_syntax::ParseOptions::stable();
+        assert!(fsl_syntax::legacy_expression_operator_error(&source, &options).is_none());
+    }
+}
+
+#[test]
+fn next_edition_legacy_expression_operators_have_actionable_parse_diagnostics() {
+    let directory = FixtureDir::new();
+    for body in [
+        "spec Probe { state { flag: Bool = false } action finish() { flag = true } invariant I { (flag or false) and (flag => true) } }",
+        "requirements Probe { state { flag: Bool = false } action finish() { flag = true } invariant I { (flag or false) and (flag => true) } }",
+        "compose Probe { state { flag: Bool = false } invariant I { (flag or false) and (flag => true) } }",
+        "business Probe { actor User entity Case process Case { stages New, Done initial New transition finish New -> Done by User } policy POL-PROBE-001 \"operator probe\" invariant { (true or false) and (true => true) } } verify { instances Case = 1 }",
+        "refinement Probe { impl I abs A map flag = (flag or false) and (flag => true) action finish() -> finish() }",
+        "requirements Probe { entity Case { flag: Bool = false lifecycle New -> Done } concept Ready = Case where (flag or false) and (flag => true) } verify { instances Case = 1 }",
+    ] {
+        let readable = body.contains("concept Ready");
+        let verb = if body.starts_with("refinement") {
+            "fmt"
+        } else {
+            "check"
+        };
+        for (canonical, legacy, replacement) in [(" or ", " || ", "or"), (" => ", " -> ", "=>")] {
+            for headed in [false, true] {
+                if readable && !headed {
+                    continue;
+                }
+                let prefix = if headed {
+                    "fsl 5\n// 日本語😀\n"
+                } else {
+                    "// 日本語😀\n"
+                };
+                let invoke = |source: &str, edition: Option<&str>| {
+                    let path = directory.write("operator.fsl", source);
+                    run_edition(
+                        path.to_str().expect("path"),
+                        verb,
+                        edition,
+                        if verb == "fmt" { &["--check"] } else { &[] },
+                    )
+                };
+                assert_canonical_operator_twin(&directory, &format!("{prefix}{body}\n"), headed);
+                let source = format!("{prefix}{}\n", body.replace(canonical, legacy));
+                let output = invoke(&source, (!headed).then_some("next"));
+                assert_eq!(output.status.code(), Some(2));
+                let output = json(&output);
+                assert_eq!(output["result"], "error");
+                assert_eq!(output["kind"], "parse");
+                assert_eq!(
+                    output["diagnostic_code"], "unsupported_in_edition",
+                    "expected edition diagnostic, produced {output:#}"
+                );
+                let start = prefix.len() + body.find(canonical).expect("expression operator") + 1;
+                let line_start = source[..start].rfind('\n').map_or(0, |i| i + 1);
+                assert_eq!(
+                    output["loc"]["line"],
+                    source[..start].matches('\n').count() + 1
+                );
+                assert_eq!(
+                    output["loc"]["column"],
+                    source[line_start..start].chars().count() + 1
+                );
+                assert_operator_endpoints(&source, start);
+                let message = output["message"].as_str().expect("message");
+                assert!(
+                    message.contains(&format!("use '{replacement}'"))
+                        && message.contains("fslc migrate <file> --edition next"),
+                    "{message}"
+                );
+                if !headed {
+                    let current = invoke(&source, Some("current"));
+                    assert_eq!(current.status.code(), Some(2));
+                    assert_eq!(json(&current)["diagnostic_code"], "FSL-PARSE");
+                }
+            }
+        }
+    }
+}
+
+fn assert_next_legacy_rejection(path: &str, headed: bool, code: &str) {
+    let output = run_edition(path, "check", Some("next"), &[]);
+    assert_eq!(output.status.code(), Some(2));
+    let output = json(&output);
+    assert_eq!(output["result"], "error");
+    if headed {
+        assert_eq!(output["kind"], "parse");
+        assert_eq!(output["diagnostic_code"], "edition_conflict");
+        assert!(output.get("findings").is_none());
+    } else {
+        assert_eq!(output["kind"], "unsupported_in_edition");
+        let findings = output["findings"].as_array().expect("findings");
+        assert_eq!(findings.len(), 1, "{output:#}");
+        assert_eq!(findings[0]["code"], code);
+        assert_eq!(findings[0]["severity"], "error");
+    }
+}
+
+fn assert_token_location(finding: &Value, source: &str, token: &str) {
+    let offset = source.find(token).expect("legacy token");
+    let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    assert_eq!(
+        finding["loc"]["line"],
+        source[..offset].matches('\n').count() + 1
+    );
+    assert_eq!(
+        finding["loc"]["column"],
+        source[line_start..offset].chars().count() + 1
+    );
+    assert_eq!(
+        finding["loc"]["end_column"],
+        source[line_start..offset].chars().count() + token.chars().count() + 1
+    );
+}
+
+#[test]
+fn current_edition_exposes_legacy_findings_without_changing_success() {
+    let directory = FixtureDir::new();
+    directory.write(
+        "abstract.fsl",
+        "spec Abstract { state { done: Bool = false } action finish() { done = true } }\n",
+    );
+    for (body, code, token) in [
+        (
+            "spec S { state { done: Bool = false } action finish() \"REQ-PROBE-001: 完了\" { done = true } }\n",
+            "legacy_string_metadata",
+            "\"REQ-PROBE-001: 完了\"",
+        ),
+        (
+            "spec S { state { done: Bool = false } action finish() { done = true } invariant Typed { forall i in 0..1: done == true or done == false } }\n",
+            "legacy_quantifier_colon",
+            "forall",
+        ),
+        (
+            "requirements S { implements Abstract from \"abstract.fsl\" { map done = done } state { done: Bool = false } action complete() maps finish() { done = true } }\n",
+            "inline_action_maps",
+            "maps finish()",
+        ),
+    ] {
+        for (prefix, edition) in [
+            ("// 日本語\n", None),
+            ("// 日本語\n", Some("current")),
+            ("fsl 4\n// 日本語\n", None),
+        ] {
+            let source = format!("{prefix}{body}");
+            let path = directory.write("current.fsl", &source);
+            let path = path.to_str().expect("path");
+            let invoke = |verb: &str, extra: &[&str]| run_edition(path, verb, edition, extra);
+            // Preservation: lint already reports these findings, including exit 1.
+            let lint = invoke("lint", &[]);
+            assert_eq!(lint.status.code(), Some(1));
+            let lint = json(&lint);
+            let findings = lint["files"][0]["findings"].as_array().expect("findings");
+            assert_eq!(lint["finding_count"], findings.len());
+            let expected = findings
+                .iter()
+                .filter(|f| f["code"] == code)
+                .collect::<Vec<_>>();
+            assert_eq!(expected.len(), 1, "{lint:#}");
+            let expected = expected[0];
+            assert_token_location(expected, &source, token);
+            assert_eq!(expected["severity"], "warning");
+            assert_eq!(expected["edition"], "current");
+            for (verb, extra) in [
+                ("check", vec![]),
+                ("verify", vec!["--depth", "2", "--no-cache"]),
+            ] {
+                let output = invoke(verb, &extra);
+                assert_eq!(
+                    output.status.code(),
+                    Some(0),
+                    "{}",
+                    String::from_utf8_lossy(&output.stdout)
+                );
+                let output = json(&output);
+                let warnings = output["warnings"].as_array().expect("warnings");
+                let actual = warnings
+                    .iter()
+                    .filter(|f| f.get("code").is_some())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    actual,
+                    vec![expected],
+                    "{verb}: expected {code}, produced {output:#}"
+                );
+                assert_eq!(
+                    output.get("fsl_edition").is_some(),
+                    prefix.starts_with("fsl 4")
+                );
+                if code == "legacy_string_metadata" {
+                    assert!(
+                        warnings.iter().any(|f| f["kind"] == "no_user_invariants"),
+                        "existing warning retained: {output:#}"
+                    );
+                }
+            }
+            // Preservation: the existing next-edition rejection stays exit 2.
+            assert_next_legacy_rejection(path, prefix.starts_with("fsl 4"), code);
+        }
+    }
+}
+
+fn assert_operator_endpoints(source: &str, offset: usize) {
+    let options = fsl_syntax::ParseOptions::stable();
+    let error = fsl_syntax::parse_surface_document_with(source, &options)
+        .expect_err("legacy operator")
+        .for_edition(source, fsl_syntax::Edition::Fsl5, &options);
+    let line = source[..offset].matches('\n').count() + 1;
+    let start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    let column = source[start..offset].chars().count() + 1;
+    assert_eq!(error.span.start.offset, offset);
+    assert_eq!(error.span.end.offset, offset + 2);
+    assert_eq!(
+        (error.span.start.line as usize, error.span.end.line as usize),
+        (line, line)
+    );
+    assert_eq!(
+        (
+            error.span.start.column as usize,
+            error.span.end.column as usize
+        ),
+        (column, column + 2)
+    );
+}
+
+fn assert_canonical_operator_twin(directory: &FixtureDir, source: &str, headed: bool) {
+    let path = directory.write("canonical.fsl", source);
+    let verb = if source.contains("refinement Probe") {
+        "refine"
+    } else {
+        "check"
+    };
+    let mut command = edition_command(verb);
+    let expected = if source.contains("refinement Probe") {
+        // Match the negative twin's fmt --check entry as well as proving the
+        // mapping below. Normalize layout first so a positive check exits 0.
+        let mut layout = edition_command("fmt");
+        layout.arg(path.to_str().expect("path"));
+        if !headed {
+            layout.args(["--edition", "next"]);
+        }
+        let formatted = layout.output().expect("format canonical twin");
+        assert_eq!(formatted.status.code(), Some(0));
+        let formatted = String::from_utf8(formatted.stdout).expect("formatted FSL");
+        let formatted = directory.write("canonical-format.fsl", &formatted);
+        let checked = run_edition(
+            formatted.to_str().expect("path"),
+            "fmt",
+            (!headed).then_some("next"),
+            &["--check"],
+        );
+        assert_eq!(checked.status.code(), Some(0));
+        assert_eq!(json(&checked)["result"], "format_check");
+        assert_eq!(json(&checked)["changed"], false);
+        let model = |name| {
+            format!(
+                "spec {name} {{ state {{ flag: Bool = false }} action finish() {{ flag = true }} invariant Typed {{ true }} }}\n"
+            )
+        };
+        let implementation = directory.write("implementation.fsl", &model("I"));
+        let abstraction = directory.write("abstraction.fsl", &model("A"));
+        command.args([
+            implementation.to_str().expect("path"),
+            abstraction.to_str().expect("path"),
+            path.to_str().expect("path"),
+            "--depth",
+            "2",
+        ]);
+        "refines"
+    } else {
+        command.arg(path.to_str().expect("path"));
+        if !headed {
+            command.args(["--edition", "next"]);
+        }
+        "ok"
+    };
+    let output = command.output().expect("canonical command");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "canonical twin: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert_eq!(json(&output)["result"], expected);
+}
+
+#[test]
+fn domain_quantifier_rejection_and_warning_absence_match_the_base_contract() {
+    let directory = FixtureDir::new();
+    let source = concat!(
+        "// SPDX-License-Identifier: Apache-2.0\n",
+        "// Domain check's current projection rejects quantified expressions (exit 2).\n",
+        "domain D { aggregate A { state { ready: Bool = false } command Finish {} event Finished {} decide Finish { emits Finished } evolve Finished { ready = true } invariant Typed { forall i in 0..1: ready == true or ready == false } } }\n"
+    );
+    let path = directory.write("quantifier.fsl", source);
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "domain",
+            "check",
+            path.to_str().expect("path"),
+            "--depth",
+            "2",
+        ])
+        .output()
+        .expect("domain check");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let output = json(&output);
+    let offset = source.find("forall i").expect("quantifier");
+    let line = source[..offset].matches('\n').count() + 1;
+    let start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+    let column = source[start..offset].chars().count() + 1;
+    assert_eq!(
+        output,
+        serde_json::json!({
+            "fsl":"1.0", "result":"error", "kind":"semantics",
+            "message":format!("unsupported domain expression construct at {line}:{column}"),
+            "loc":{"line":line,"column":column}
+        }),
+        "the base rejects this domain form without migration warnings"
+    );
+}
+
+#[test]
+fn current_domain_warnings_exclude_unrelated_planner_codes() {
+    let directory = FixtureDir::new();
+    let source = "domain D { enum E { A, B } aggregate X { state { e: E = A } command Finish {} event Finished {} decide Finish { requires e == A || e == B emits Finished } evolve Finished { e = B } invariant I { e == A -> e == A } } }\n";
+    let path = directory.write("logical.fsl", source);
+    let path = path.to_str().expect("path");
+    let lint = run_edition(path, "lint", None, &[]);
+    assert_eq!(lint.status.code(), Some(1));
+    assert!(
+        json(&lint)["files"][0]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .any(|f| f["code"] == "legacy_logical_operator")
+    );
+    for args in [
+        vec!["check", path],
+        vec!["verify", path, "--depth", "2", "--no-cache"],
+        vec!["domain", "check", path, "--depth", "2"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(&args)
+            .output()
+            .expect("run fslc");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+        let output = json(&output);
+        let warnings = if args[0] == "domain" {
+            assert!(
+                output.get("warnings").is_none(),
+                "unexpected domain edition warnings: {output:#}"
+            );
+            &output["kernel"]["warnings"]
+        } else {
+            &output["warnings"]
+        };
+        let codes = warnings
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .filter_map(|f| f["code"].as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            codes.is_empty(),
+            "unrelated planner findings leaked: {output:#}"
+        );
+    }
+}
+
+#[test]
+fn current_warnings_preserve_refusals_and_ignore_canonical_and_literal_forms() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let directory = FixtureDir::new();
+    let branch = directory.write("branches.fsl", "requirements Branch { state { done: Bool = false } action complete() { branches { when not done { done = true } maps stutter } } }\n");
+    for (path, status, result) in [
+        (branch, 0, "ok"),
+        (
+            root.join("tests/fixtures/action_correspondence_duplicate.fsl"),
+            2,
+            "error",
+        ),
+    ] {
+        let path = path.to_str().expect("path");
+        let check = run(&["check", path]);
+        assert_eq!(check.status.code(), Some(status));
+        let lint = run(&["lint", path]);
+        assert_eq!(lint.status.code(), Some(1));
+        let lint = json(&lint);
+        let expected = lint["files"][0]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .filter(|f| f["code"] == "inline_action_maps")
+            .collect::<Vec<_>>();
+        assert!(expected.iter().any(|f| f["machine_applicable"] == false));
+        let check = json(&check);
+        assert_eq!(check["result"], result);
+        let actual = check["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .filter(|f| f["code"] == "inline_action_maps")
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected, "{check:#}");
+    }
+    let source = r#"// forall i in 0..1: || -> maps finish()
+spec Canonical {
+  state { done: Bool = false }
+  @requirement("REQ-PROBE-001", "literal maps finish() forall i: -> ||")
+  action finish() { done = true }
+  invariant Typed { forall i in 0..1 { done == true or done == false } }
+}
+"#;
+    let path = directory.write("canonical.fsl", source);
+    for verb in ["check", "lint"] {
+        let output = run(&[verb, path.to_str().expect("path")]);
+        assert_eq!(output.status.code(), Some(0));
+        let output = json(&output);
+        let findings = if verb == "lint" {
+            &output["files"][0]["findings"]
+        } else {
+            &output["warnings"]
+        };
+        assert!(
+            findings
+                .as_array()
+                .expect("findings")
+                .iter()
+                .all(|f| !matches!(
+                    f["code"].as_str(),
+                    Some(
+                        "legacy_string_metadata" | "legacy_quantifier_colon" | "inline_action_maps"
+                    )
+                ))
+        );
+    }
 }
 
 #[test]
@@ -196,6 +794,49 @@ fn string_metadata_uses_typed_annotations_without_changing_public_kernel() {
 }
 
 #[test]
+fn migrate_writes_requirement_ids_as_written() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    for fixture in [
+        "tests/fixtures/fsl5/e2e/original.fsl",
+        "../../examples/gallery/injected/bank__boundary_flip.fsl",
+    ] {
+        let original = text(&root.join(fixture));
+        let ids = compact_hyphen_runs(&original);
+        assert!(!ids.is_empty(), "{fixture} spells no IDs");
+        let directory = FixtureDir::new();
+        // original.fsl implements the business layer beside it.
+        directory.write(
+            "1_business.fsl",
+            &text(&root.join("tests/fixtures/fsl5/e2e/1_business.fsl")),
+        );
+        let path = directory.write("spec.fsl", &original);
+        let migrated = run(&[
+            "migrate",
+            path.to_str().expect("UTF-8 path"),
+            "--edition",
+            "next",
+            "--write",
+        ]);
+        assert!(
+            migrated.status.success(),
+            "{fixture}: {}",
+            String::from_utf8_lossy(&migrated.stdout)
+        );
+        assert_eq!(json(&migrated)["written"], true, "{fixture}");
+        // #1434: the next edition's process-form conversion may write an ID
+        // in more places (a rule names its requirement); every ID is still
+        // spelled as written and none is added or respelled.
+        let distinct =
+            |ids: Vec<String>| ids.into_iter().collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            distinct(compact_hyphen_runs(&text(&path))),
+            distinct(ids),
+            "{fixture}"
+        );
+    }
+}
+
+#[test]
 fn builtin_id_policy_reports_each_surface_kind_without_rewriting_ids() {
     let directory = FixtureDir::new();
     let path = directory.write(
@@ -231,9 +872,20 @@ fn builtin_id_policy_reports_each_surface_kind_without_rewriting_ids() {
                 && finding["edits"].as_array().is_some_and(Vec::is_empty))
     }));
 
+    // #1434: the next edition inserts only the missing header; no ID is
+    // rewritten.
     let migrate = run(&["migrate", path_text, "--edition", "next"]);
     assert!(migrate.status.success());
-    assert_eq!(json(&migrate)["changed"], 0);
+    let migrate = json(&migrate);
+    assert_eq!(migrate["changed"], 1);
+    assert!(reports_missing_header_once(&migrate), "{migrate:#}");
+    assert_eq!(
+        migrate["files"][0]["edits"][0]["replacement"]
+            .as_str()
+            .map(|text| text.replacen("fsl 5\n", "", 1)),
+        Some(text(&path)),
+        "{migrate:#}"
+    );
 }
 
 #[test]
@@ -280,13 +932,16 @@ verify {
         "--edition",
         "next",
     ]);
-    assert!(
-        output.status.success(),
+    // #1434: each distinct file reports its missing header once, so a
+    // duplicate path would show as a third finding.
+    assert_eq!(
+        output.status.code(),
+        Some(1),
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );
     let output = json(&output);
-    assert_eq!(output["finding_count"], 0);
+    assert_eq!(output["finding_count"], 2);
     assert_eq!(
         output["files"]
             .as_array()
@@ -413,7 +1068,8 @@ fn invalid_double_ampersand_and_ambiguous_maps_are_explicit_refusals() {
     let invalid_text = invalid.to_str().expect("UTF-8 path");
     let lint = run(&["lint", invalid_text, "--edition", "next"]);
     assert_eq!(lint.status.code(), Some(1));
-    let finding = &json(&lint)["files"][0]["findings"][0];
+    let findings = without_missing_header(&json(&lint));
+    let finding = &findings[0];
     assert_eq!(finding["taxonomy"], "unsupported_in_edition");
     assert_eq!(finding["canonical_replacement"], "and");
     assert_eq!(finding["machine_applicable"], false);
@@ -431,7 +1087,7 @@ fn invalid_double_ampersand_and_ambiguous_maps_are_explicit_refusals() {
     ]);
     assert_eq!(duplicate_output.status.code(), Some(2));
     assert_eq!(
-        json(&duplicate_output)["files"][0]["findings"][0]["taxonomy"],
+        without_missing_header(&json(&duplicate_output))[0]["taxonomy"],
         "ambiguous_intent"
     );
 }
@@ -447,10 +1103,7 @@ fn ai_native_legacy_operator_attempt_reports_each_unsupported_token() {
         "next",
     ]);
     assert_eq!(output.status.code(), Some(1));
-    let findings = json(&output)["files"][0]["findings"]
-        .as_array()
-        .expect("findings")
-        .clone();
+    let findings = without_missing_header(&json(&output));
     assert_eq!(findings.len(), 2);
     assert_eq!(
         findings
@@ -581,22 +1234,64 @@ fn inline_maps_with_parameter_comments_are_refused_without_source_changes() {
     assert_eq!(text(&requirements), original);
 }
 
+/// One refused input keeps every other input of the run as it was, although
+/// the safe one checks and would be rewritten on its own (#1764): the safe
+/// input comes first, so the run reaches the refusal only after planning it.
 #[test]
 fn multi_file_refusal_leaves_every_input_unchanged() {
     let directory = FixtureDir::new();
-    let safe_source = "domain Safe { type E = A | B }\n";
+    let safe_source = LEGACY_COLON_QUANTIFIER;
     let refused_source = "domain Refused { aggregate A { invariant bad { true && false } } }\n";
     let safe = directory.write("safe.fsl", safe_source);
     let refused = directory.write("refused.fsl", refused_source);
+    let safe_path = safe.to_str().expect("UTF-8 path");
+
+    // Positive controls: the safe input checks, and on its own migrate
+    // rewrites it.
+    let check = run(&["check", safe_path]);
+    assert_eq!(
+        check.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+    let alone = directory.write("alone.fsl", safe_source);
     let output = run(&[
         "migrate",
-        safe.to_str().expect("UTF-8 path"),
+        alone.to_str().expect("UTF-8 path"),
+        "--edition",
+        "next",
+        "--write",
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{:#}", json(&output));
+    assert_eq!(json(&output)["changed"], 1);
+    assert_ne!(text(&alone), safe_source);
+
+    let output = run(&[
+        "migrate",
+        safe_path,
         refused.to_str().expect("UTF-8 path"),
         "--edition",
         "next",
         "--write",
     ]);
-    assert_eq!(output.status.code(), Some(2));
+    let refusal = json(&output);
+    assert_eq!(output.status.code(), Some(2), "{refusal:#}");
+    assert_eq!(refusal["result"], "migration_refused", "{refusal:#}");
+    assert_eq!(refusal["written"], false, "{refusal:#}");
+    // The safe input was planned: a check failure stops the run with an
+    // error envelope that has no `files`.
+    assert_eq!(refusal["files"][0]["changed"], true, "{refusal:#}");
+    let findings = refusal["files"][1]["findings"]
+        .as_array()
+        .expect("refused file findings");
+    assert!(
+        findings.iter().any(|finding| {
+            finding["code"] == "unsupported_double_ampersand"
+                && finding["machine_applicable"] == false
+        }),
+        "{refusal:#}"
+    );
     assert_eq!(text(&safe), safe_source);
     assert_eq!(text(&refused), refused_source);
 }
@@ -611,8 +1306,9 @@ fn multi_file_prepare_io_failure_leaves_every_input_unchanged() {
     std::fs::create_dir(&locked).expect("locked directory");
     let first = writable.join("first.fsl");
     let second = locked.join("second.fsl");
-    let first_source = "domain First { type E = A | B }\n";
-    let second_source = "domain Second { type E = A | B }\n";
+    // Both inputs check and change, so the exit is the prepare failure.
+    let first_source = LEGACY_COLON_QUANTIFIER;
+    let second_source = LEGACY_COLON_QUANTIFIER;
     std::fs::write(&first, first_source).expect("first fixture");
     std::fs::write(&second, second_source).expect("second fixture");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555))
@@ -629,8 +1325,294 @@ fn multi_file_prepare_io_failure_leaves_every_input_unchanged() {
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755))
         .expect("unlock directory");
     assert_eq!(output.status.code(), Some(2));
+    assert_eq!(json(&output)["kind"], "io");
     assert_eq!(text(&first), first_source);
     assert_eq!(text(&second), second_source);
+    // The first file's temporary was prepared before the second failed.
+    assert_eq!(entries(&writable), vec![first]);
+    assert_eq!(entries(&locked), vec![second]);
+}
+
+/// A spec that checks and that `migrate --edition next` changes.
+const LEGACY_COLON_QUANTIFIER: &str = r"spec Quantifier {
+  const MAX = 1
+  type Id = 0..1
+  state { ready: Map<Id, Bool> }
+  init { forall i in 0..MAX: { ready[i] = false } }
+  invariant Typed { forall i in 0..MAX: ready[i] == true or ready[i] == false }
+}
+";
+
+/// `written` reports the files the run replaced, at the top level and on each
+/// `files[]` entry, not the `--write` request (#1754). An input that needs no
+/// rewrite is neither replaced (same inode and bytes) nor reported written.
+#[test]
+fn written_reports_only_the_files_a_write_replaces() {
+    let directory = FixtureDir::new();
+    // A fixed point of the migration: the quantifier fixture once migrated.
+    let seed = directory.write("seed.fsl", LEGACY_COLON_QUANTIFIER);
+    let seed_path = seed.to_str().expect("UTF-8 path");
+    let output = run(&["migrate", seed_path, "--edition", "next", "--write"]);
+    assert_eq!(output.status.code(), Some(0), "{:#}", json(&output));
+    let migrated = text(&seed);
+    assert_ne!(migrated, LEGACY_COLON_QUANTIFIER);
+    let unchanged = directory.write("unchanged.fsl", &migrated);
+    let changed = directory.write("changed.fsl", LEGACY_COLON_QUANTIFIER);
+    let unchanged_path = unchanged.to_str().expect("UTF-8 path");
+    let changed_path = changed.to_str().expect("UTF-8 path");
+    let identity = |path: &Path| {
+        let metadata = std::fs::metadata(path).expect("metadata");
+        #[cfg(unix)]
+        let inode = std::os::unix::fs::MetadataExt::ino(&metadata);
+        #[cfg(not(unix))]
+        let inode = 0_u64;
+        (inode, metadata.modified().expect("mtime"), text(path))
+    };
+    let written = |output: &Value| {
+        output["files"]
+            .as_array()
+            .expect("files")
+            .iter()
+            .map(|file| (file["changed"].clone(), file["written"].clone()))
+            .collect::<Vec<_>>()
+    };
+
+    // `--write` with nothing to rewrite writes nothing and says so.
+    let before = identity(&unchanged);
+    let output = run(&["migrate", unchanged_path, "--edition", "next", "--write"]);
+    let report = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{report:#}");
+    assert_eq!(report["changed"], 0, "{report:#}");
+    assert_eq!(report["written"], false, "{report:#}");
+    assert_eq!(
+        written(&report),
+        vec![(Value::Bool(false), Value::Bool(false))]
+    );
+    assert_eq!(identity(&unchanged), before);
+
+    // A dry run over both reports nothing written and writes nothing.
+    let args = ["migrate", changed_path, unchanged_path, "--edition", "next"];
+    let output = run(&args);
+    let report = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{report:#}");
+    assert_eq!(report["changed"], 1, "{report:#}");
+    assert_eq!(report["written"], false, "{report:#}");
+    assert_eq!(
+        written(&report),
+        vec![
+            (Value::Bool(true), Value::Bool(false)),
+            (Value::Bool(false), Value::Bool(false))
+        ]
+    );
+    assert_eq!(text(&changed), LEGACY_COLON_QUANTIFIER);
+
+    // Positive control: with one changed input, `written` is true, and only
+    // that input is replaced.
+    let output = run(&[
+        "migrate",
+        changed_path,
+        unchanged_path,
+        "--edition",
+        "next",
+        "--write",
+    ]);
+    let report = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{report:#}");
+    assert_eq!(report["changed"], 1, "{report:#}");
+    assert_eq!(report["written"], true, "{report:#}");
+    assert_eq!(
+        written(&report),
+        vec![
+            (Value::Bool(true), Value::Bool(true)),
+            (Value::Bool(false), Value::Bool(false))
+        ]
+    );
+    assert_eq!(text(&changed), migrated);
+    assert_eq!(identity(&unchanged), before);
+}
+
+/// `source` with every line ending CRLF (`crlf`) and a UTF-8 byte order mark
+/// (`bom`); `source` itself uses LF and has no mark.
+fn laid_out(source: &str, crlf: bool, bom: bool) -> String {
+    assert!(!source.contains('\r') && !source.starts_with('\u{feff}'));
+    let body = if crlf {
+        source.replace('\n', "\r\n")
+    } else {
+        source.to_owned()
+    };
+    if bom { format!("\u{feff}{body}") } else { body }
+}
+
+/// `migrate --write` keeps the input's line endings and byte order mark on
+/// each path that rewrites a document (#1755): the formatter (a colon
+/// quantifier), the header insertion alone, and the process-form conversion.
+/// Before, the formatter path wrote LF without the mark and the other two
+/// left the original lines CRLF and the inserted ones LF. The written bytes
+/// are the LF migration's, laid out like the input, and equal the dry run's
+/// replacement; the LF inputs are the negative control.
+#[test]
+fn write_keeps_the_input_line_endings_and_byte_order_mark() {
+    let header_only = "spec H {\n  state { x: Bool = false }\n  action go() { x = true }\n}\n";
+    for (name, source) in [
+        ("formatter", LEGACY_COLON_QUANTIFIER.to_owned()),
+        ("header", header_only.to_owned()),
+        ("process_form", example("e2e/2_requirements.fsl")),
+    ] {
+        let directory = FixtureDir::new();
+        directory.write("1_business.fsl", &example("e2e/1_business.fsl"));
+        let migrate = |input: &str| {
+            let path = directory.write("doc.fsl", input);
+            let path_text = path.to_str().expect("UTF-8 path").to_owned();
+            let dry = run(&["migrate", &path_text, "--edition", "5"]);
+            assert_eq!(dry.status.code(), Some(0), "{name}: {:#}", json(&dry));
+            let replacement = json(&dry)["files"][0]["edits"][0]["replacement"]
+                .as_str()
+                .expect("one replacement")
+                .to_owned();
+            let write = run(&["migrate", &path_text, "--edition", "5", "--write"]);
+            assert_eq!(write.status.code(), Some(0), "{name}: {:#}", json(&write));
+            assert_eq!(json(&write)["written"], true, "{name}");
+            let written = std::fs::read(&path).expect("read migrated");
+            assert_eq!(written, replacement.as_bytes(), "{name}: dry run = write");
+            // Idempotent, and the written document still checks.
+            let again = run(&["migrate", &path_text, "--edition", "5", "--write"]);
+            assert_eq!(json(&again)["changed"], 0, "{name}: {:#}", json(&again));
+            let check = run(&["check", &path_text]);
+            assert_eq!(check.status.code(), Some(0), "{name}: {:#}", json(&check));
+            String::from_utf8(written).expect("UTF-8")
+        };
+        let lf = migrate(&source);
+        assert!(
+            !lf.contains('\r') && !lf.starts_with('\u{feff}'),
+            "{name}: an LF input stays LF without a mark"
+        );
+        assert_ne!(lf, source, "{name}: the document is rewritten");
+        for (crlf, bom) in [(true, true), (true, false), (false, true)] {
+            let written = migrate(&laid_out(&source, crlf, bom));
+            assert_eq!(
+                written,
+                laid_out(&lf, crlf, bom),
+                "{name}: crlf={crlf} bom={bom}"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+fn entries(directory: &Path) -> Vec<PathBuf> {
+    let mut paths = std::fs::read_dir(directory)
+        .expect("read fixture directory")
+        .map(|entry| entry.expect("fixture entry").path())
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+#[cfg(unix)]
+fn migrate_write(paths: &[&PathBuf]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .arg("migrate")
+        .args(paths)
+        .args(["--edition", "next", "--write"])
+        .output()
+        .expect("run fslc")
+}
+
+#[cfg(unix)]
+fn mode(path: &Path) -> u32 {
+    std::fs::metadata(path)
+        .expect("metadata")
+        .permissions()
+        .mode()
+        & 0o777
+}
+
+/// `migrate --write` replaces inputs by rename, which needs only the parent
+/// directory's write access. It refuses a read-only input exactly as `-o`
+/// refuses a read-only output target (#1419), instead of reporting
+/// `written: true` over a file the user marked read-only.
+#[cfg(unix)]
+#[test]
+fn readonly_input_is_refused_like_a_readonly_output_target() {
+    use std::fs::{OpenOptions, Permissions};
+    let legacy = LEGACY_COLON_QUANTIFIER;
+    let directory = FixtureDir::new();
+    let readonly = directory.write("readonly.fsl", legacy);
+    std::fs::set_permissions(&readonly, Permissions::from_mode(0o444)).expect("mark read-only");
+    let precondition = OpenOptions::new().write(true).open(&readonly);
+    if precondition.is_ok() {
+        std::fs::set_permissions(&readonly, Permissions::from_mode(0o644)).expect("restore");
+        panic!("qualification requires nonprivileged process without DAC override; not a skip");
+    }
+
+    // The #1419 reference envelope for the same refusal.
+    let artifact = directory.write("artifact.md", "previous artifact\n");
+    std::fs::set_permissions(&artifact, Permissions::from_mode(0o444)).expect("mark read-only");
+    // `document generate` needs a repository-relative source identity.
+    let reference = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args([
+            "document",
+            "generate",
+            "examples/pm/cancel_system.fsl",
+            "-o",
+        ])
+        .arg(&artifact)
+        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .output()
+        .expect("run fslc");
+    assert_eq!(reference.status.code(), Some(2));
+    let reference = json(&reference);
+    assert_eq!(reference["kind"], "io", "{reference:#}");
+    assert_eq!(text(&artifact), "previous artifact\n");
+
+    let output = migrate_write(&[&readonly]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(json(&output), reference);
+    assert_eq!(text(&readonly), legacy);
+    assert_eq!(mode(&readonly), 0o444);
+
+    // A symlink to the read-only file is refused without following it.
+    let link = directory.0.join("link.fsl");
+    std::os::unix::fs::symlink("readonly.fsl", &link).expect("symlink");
+    let output = migrate_write(&[&link]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(json(&output)["kind"], "io");
+    assert_eq!(text(&readonly), legacy);
+
+    // One read-only file refuses the whole write set, in either order.
+    let writable = directory.write("writable.fsl", legacy);
+    for order in [[&writable, &readonly], [&readonly, &writable]] {
+        let output = migrate_write(&order);
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(json(&output), reference);
+        assert_eq!(text(&writable), legacy);
+        assert_eq!(text(&readonly), legacy);
+    }
+    assert_eq!(
+        entries(&directory.0),
+        vec![
+            artifact.clone(),
+            link.clone(),
+            readonly.clone(),
+            writable.clone()
+        ]
+    );
+
+    // Positive control: a writable input is still rewritten, keeping its mode.
+    std::fs::set_permissions(&writable, Permissions::from_mode(0o640)).expect("mode");
+    let output = migrate_write(&[&writable]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(json(&output)["written"], true);
+    assert!(
+        text(&writable).contains("forall i in 0..MAX {"),
+        "{}",
+        text(&writable)
+    );
+    assert_eq!(mode(&writable), 0o640);
+    assert_eq!(
+        entries(&directory.0),
+        vec![artifact, link, readonly, writable]
+    );
 }
 
 // #517: `lint`/`migrate` previously only ran checked-model validation on the
@@ -656,7 +1638,18 @@ fn genuinely_valid_unchanged_input_still_passes_lint_and_migrate() {
 
     assert_eq!(run(&["check", path]).status.code(), Some(0));
 
+    // #1434: headerless, the next edition reports only the missing header;
+    // headed `fsl 5`, the same body is unchanged with no finding.
     let migrated = run(&["migrate", path, "--edition", "next"]);
+    assert_eq!(migrated.status.code(), Some(0));
+    let migrated = json(&migrated);
+    assert_eq!(migrated["result"], "migrated", "{migrated:#}");
+    assert!(reports_missing_header_once(&migrated), "{migrated:#}");
+    assert!(without_missing_header(&migrated).is_empty(), "{migrated:#}");
+
+    let headed = directory.write("sound5.fsl", &format!("fsl 5\n{source}"));
+    let headed = headed.to_str().expect("UTF-8 path");
+    let migrated = run(&["migrate", headed, "--edition", "next"]);
     assert_eq!(migrated.status.code(), Some(0));
     let migrated = json(&migrated);
     assert_eq!(migrated["result"], "migrated", "{migrated:#}");
@@ -668,7 +1661,7 @@ fn genuinely_valid_unchanged_input_still_passes_lint_and_migrate() {
         "{migrated:#}"
     );
 
-    let linted = run(&["lint", path, "--edition", "next"]);
+    let linted = run(&["lint", headed, "--edition", "next"]);
     assert_eq!(linted.status.code(), Some(0));
     assert_eq!(json(&linted)["finding_count"], 0);
 }
@@ -796,6 +1789,124 @@ fn valid_spec_with_legacy_syntax_still_migrates_and_lints() {
     );
 }
 
+/// #1434: an `agent` document takes no edition header
+/// (`EDITIONLESS_DECLARATIONS`), so the next edition owes it none. `lint`
+/// and `migrate` report nothing and `--write` leaves it unchanged; a header
+/// inserted by hand is refused, which is why none may be planned.
+#[test]
+fn agent_documents_are_not_offered_an_edition_header() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = text(&root.join("../../examples/ai/recursive_support_agent.fsl"));
+    assert!(source.starts_with("agent "), "fixture is an agent document");
+    let directory = FixtureDir::new();
+    let path = directory.write("agent.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(0), "{}", json(&linted));
+    assert_eq!(json(&linted)["finding_count"], 0);
+    for edition in ["next", "5"] {
+        let migrated = run(&["migrate", path, "--edition", edition, "--write"]);
+        assert_eq!(migrated.status.code(), Some(0), "{}", json(&migrated));
+        let migrated = json(&migrated);
+        assert_eq!(migrated["changed"], 0, "{migrated:#}");
+        assert_eq!(
+            migrated["files"][0]["findings"],
+            Value::Array(Vec::new()),
+            "{migrated:#}"
+        );
+        assert_eq!(text(Path::new(path)), source);
+    }
+    let headed = directory.write("headed.fsl", &format!("fsl 5\n{source}"));
+    let checked = run(&["check", headed.to_str().expect("UTF-8 path")]);
+    assert_eq!(checked.status.code(), Some(2));
+    assert_eq!(
+        json(&checked)["diagnostic_code"],
+        fsl_syntax::EDITION_HEADER_NOT_ACCEPTED
+    );
+}
+
+/// #1434: a `refinement` document is not a standalone check target, so the
+/// next edition offers it no edition header either: `lint` and `migrate`
+/// report nothing and `--write` leaves it unchanged. A header written by
+/// hand is still read (the document checks exactly as without one).
+#[test]
+fn refinement_documents_are_not_offered_an_edition_header() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = text(&root.join("../../specs/cart_refines.fsl"));
+    assert!(source.starts_with("refinement "), "fixture is a refinement");
+    let directory = FixtureDir::new();
+    let path = directory.write("refines.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(0), "{}", json(&linted));
+    assert_eq!(json(&linted)["finding_count"], 0);
+    for edition in ["next", "5"] {
+        let migrated = run(&["migrate", path, "--edition", edition, "--write"]);
+        assert_eq!(migrated.status.code(), Some(0), "{}", json(&migrated));
+        let migrated = json(&migrated);
+        assert_eq!(migrated["changed"], 0, "{migrated:#}");
+        assert_eq!(
+            migrated["files"][0]["findings"],
+            Value::Array(Vec::new()),
+            "{migrated:#}"
+        );
+        assert_eq!(text(Path::new(path)), source);
+    }
+    let headed = directory.write("headed.fsl", &format!("fsl 5\n{source}"));
+    let checked = json(&run(&["check", headed.to_str().expect("UTF-8 path")]));
+    let plain = json(&run(&["check", path]));
+    assert_eq!(
+        (&checked["kind"], &checked["message"]),
+        (&plain["kind"], &plain["message"]),
+        "{checked:#}"
+    );
+    assert_eq!(checked["fsl_edition"], 5, "{checked:#}");
+}
+
+/// #1434: a `compose` document (dialect keyword `compose`) is offered no
+/// edition header either: its Public Kernel v1 migration contract cannot keep
+/// the components' source files, so `migrate` could not show the insertion
+/// preserves it. `lint` and `migrate` report nothing, `--write` leaves it
+/// unchanged, and a hand-written header is still read.
+#[test]
+fn compose_documents_are_not_offered_an_edition_header() {
+    let fixtures =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/issue_1573_inventory");
+    let directory = FixtureDir::new();
+    for name in ["a.fsl", "b.fsl"] {
+        directory.write(name, &text(&fixtures.join(name)));
+    }
+    let source = text(&fixtures.join("s.fsl"));
+    assert_eq!(
+        fsl_syntax::dialect_keyword(&source),
+        Ok("compose"),
+        "fixture is a compose document"
+    );
+    let path = directory.write("s.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    let plain = run(&["check", path]);
+    assert_eq!(plain.status.code(), Some(0), "{}", json(&plain));
+    let linted = run(&["lint", path, "--edition", "next"]);
+    assert_eq!(linted.status.code(), Some(0), "{}", json(&linted));
+    assert_eq!(json(&linted)["finding_count"], 0);
+    for edition in ["next", "5"] {
+        let migrated = run(&["migrate", path, "--edition", edition, "--write"]);
+        assert_eq!(migrated.status.code(), Some(0), "{}", json(&migrated));
+        let migrated = json(&migrated);
+        assert_eq!(migrated["changed"], 0, "{migrated:#}");
+        assert_eq!(
+            migrated["files"][0]["findings"],
+            Value::Array(Vec::new()),
+            "{migrated:#}"
+        );
+        assert_eq!(text(Path::new(path)), source);
+    }
+    let headed = directory.write("headed.fsl", &format!("fsl 5\n{source}"));
+    let checked = json(&run(&["check", headed.to_str().expect("UTF-8 path")]));
+    assert_eq!(checked["result"], "ok", "{checked:#}");
+    assert_eq!(checked["fsl_edition"], 5, "{checked:#}");
+}
+
 /// Regression control: a `refinement`-dialect input (no `state` block —
 /// `fslc check` itself fails "spec has no state block" for this dialect,
 /// since a refinement spec is not a standalone check target) must keep
@@ -819,4 +1930,697 @@ fn refinement_dialect_is_still_not_a_standalone_lint_migrate_target() {
         run(&["lint", path, "--edition", "next"]).status.code(),
         Some(0)
     );
+}
+
+// Requirements `process` forms under `--edition 5` (fsl 5 plan §3 S9): the
+// migration rewrites them into `entity` / `event` / `rule … allow`, keeps the
+// checked kernel, and refuses what it cannot rewrite without touching a file.
+
+fn e2e_fixture(name: &str) -> String {
+    std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/fsl5/e2e")
+            .join(name),
+    )
+    .expect("read e2e fixture")
+}
+
+/// `fslc kernel` of `path` without what a rewrite may move: locations,
+/// source nodes, origins and the singular legacy requirement projection.
+fn located_free_kernel(path: &Path) -> Value {
+    fn strip(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                for key in [
+                    "span",
+                    "source_node_id",
+                    "source_node_ids",
+                    "reverse_index",
+                    "origin",
+                    "requirement",
+                ] {
+                    object.remove(key);
+                }
+                object.values_mut().for_each(strip);
+            }
+            Value::Array(values) => values.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    let output = run(&["kernel", path.to_str().expect("UTF-8 path")]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let mut kernel = json(&output);
+    strip(&mut kernel);
+    kernel
+}
+
+#[test]
+fn edition_5_rewrites_the_e2e_process_form_into_entity_events_and_rules_keeping_the_kernel() {
+    let directory = FixtureDir::new();
+    directory.write("1_business.fsl", &e2e_fixture("1_business.fsl"));
+    let original_source = e2e_fixture("original.fsl");
+    let original = directory.write("original.fsl", &original_source);
+    let path = original.to_str().expect("UTF-8 path");
+    let before = located_free_kernel(&original);
+
+    // #1434: `--edition 5` needs no opt-in; a migration for the current
+    // edition rewrites no process, and a plan without `--write` writes
+    // nothing.
+    let current = json(&run(&["migrate", path, "--edition", "current"]));
+    assert!(
+        current["files"][0]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .all(|finding| finding["code"] != "legacy_process_form"),
+        "{current:#}"
+    );
+    let planned = run(&["migrate", path, "--edition", "5"]);
+    assert_eq!(planned.status.code(), Some(0), "{:#}", json(&planned));
+    assert_eq!(text(&original), original_source);
+
+    let output = run(&["migrate", path, "--edition", "5", "--write"]);
+    let migrated = json(&output);
+    assert_eq!(output.status.code(), Some(0), "{migrated:#}");
+    assert_eq!(migrated["result"], "migrated", "{migrated:#}");
+    let findings = migrated["files"][0]["findings"]
+        .as_array()
+        .expect("findings");
+    let process = findings
+        .iter()
+        .find(|finding| finding["code"] == "legacy_process_form")
+        .unwrap_or_else(|| panic!("no process finding: {migrated:#}"));
+    assert_eq!(process["loc"]["line"], 34, "{process:#}");
+
+    let rewritten = text(&original);
+    assert!(rewritten.contains("\nfsl 5\nrequirements"), "{rewritten}");
+    for expected in [
+        "  actor Employee, System, Manager, Finance\n",
+        "  entity Claim {\n    amount: Amount = 0\n    lifecycle Draft -> Submitted -> Approved\n    \
+         lifecycle Submitted -> Rejected\n    lifecycle Approved -> Paid\n  }\n",
+        "  event submit = Employee submit Claim with a: Amount Draft -> Submitted\n    set amount = a\n",
+        "  event pay = Finance pay Claim Approved -> Paid\n",
+        "    allow Employee submit Claim only when a > 0\n",
+        "    allow Manager mgr_approve Claim only when amount > AUTO_LIMIT\n    \
+         allow Manager reject Claim only when amount > AUTO_LIMIT\n",
+    ] {
+        assert!(
+            rewritten.contains(expected),
+            "missing {expected:?} in:\n{rewritten}"
+        );
+    }
+    assert!(
+        rewritten
+            .lines()
+            .map(str::trim_start)
+            .all(|line| { !line.starts_with("process ") && !line.starts_with("transition ") }),
+        "{rewritten}"
+    );
+
+    let checked = run(&["check", path]);
+    assert_eq!(checked.status.code(), Some(0), "{:#}", json(&checked));
+    assert_eq!(json(&checked)["result"], "ok");
+    // The edition derives the terminal states from the lifecycle's final
+    // stages, which the process form never did: the one difference.
+    let mut after = located_free_kernel(&original);
+    assert!(before["properties"]["terminal"].is_null(), "{before:#}");
+    let terminal = after["properties"]["terminal"].take().to_string();
+    for stage in ["\"Rejected\"", "\"Paid\""] {
+        assert!(terminal.contains(stage), "{stage} in {terminal}");
+    }
+    assert_eq!(after, before);
+
+    let again = json(&run(&["migrate", path, "--edition", "5"]));
+    assert_eq!(again["changed"], 0, "{again:#}");
+}
+
+#[test]
+fn edition_5_process_forms_it_cannot_rewrite_are_manual_required_and_no_file_is_written() {
+    let cases = [
+        (
+            "guard_without_requirement",
+            6,
+            "requirements Guarded {\n  number Amount\n  process Claim with amount: Amount = 0 {\n    \
+             stages Draft, Submitted\n    initial Draft\n    transition submit Draft -> Submitted by Employee\n      \
+             with a: Amount\n      when a > 0\n      set amount = a\n  }\n}\n\
+             verify {\n  instances Claim = 2\n  values Amount = 0..2\n}\n",
+        ),
+        (
+            "input_shares_field_name",
+            6,
+            "requirements Shadow {\n  number Amount\n  process Claim with amount: Amount = 0 {\n    \
+             stages Draft, Submitted\n    initial Draft\n    transition submit Draft -> Submitted by Employee\n      \
+             with amount: Amount\n      set amount = amount\n      covers REQ-1 \"submit\"\n  }\n}\n\
+             verify {\n  instances Claim = 2\n  values Amount = 0..2\n}\n",
+        ),
+        (
+            "process_entity_shared",
+            2,
+            "requirements Shared {\n  process claims.Claim {\n    stages Draft, Paid\n    initial Draft\n    \
+             transition pay Draft -> Paid by Finance\n  }\n  process legacy.Claim {\n    stages Open, Closed\n    \
+             initial Open\n    transition close Open -> Closed by Clerk\n  }\n}\n\
+             verify { instances Claim = 2 }\n",
+        ),
+        (
+            "initial_not_first_stage",
+            2,
+            "requirements Late {\n  process Claim {\n    stages Paid, Draft\n    initial Draft\n    \
+             transition pay Draft -> Paid by Finance\n  }\n}\nverify { instances Claim = 2 }\n",
+        ),
+        (
+            "transition_annotation",
+            6,
+            "requirements Annotated {\n  process Claim {\n    stages Draft, Paid\n    initial Draft\n    \
+             @requirement(\"REQ-PAY\", \"payment closes the claim\")\n    \
+             transition pay Draft -> Paid by Finance\n  }\n}\nverify { instances Claim = 1 }\n",
+        ),
+    ];
+    let directory = FixtureDir::new();
+    let convertible_source = "requirements Plain {\n  process Claim {\n    stages Draft, Paid\n    \
+                              initial Draft\n    transition pay Draft -> Paid by Finance\n  }\n}\n\
+                              verify { instances Claim = 1 }\n";
+    let convertible = directory.write("convertible.fsl", convertible_source);
+    for (reason, line, source) in cases {
+        let path = directory.write(&format!("{reason}.fsl"), source);
+        let path = path.as_path();
+        let checked = run(&["check", path.to_str().expect("UTF-8 path")]);
+        assert_eq!(
+            checked.status.code(),
+            Some(0),
+            "{reason}: {:#}",
+            json(&checked)
+        );
+
+        let output = run(&[
+            "migrate",
+            convertible.to_str().expect("UTF-8 path"),
+            path.to_str().expect("UTF-8 path"),
+            "--edition",
+            "5",
+            "--write",
+        ]);
+        let migrated = json(&output);
+        assert_eq!(output.status.code(), Some(1), "{reason}: {migrated:#}");
+        assert_eq!(migrated["result"], "migrate_manual_required", "{reason}");
+        assert_eq!(migrated["written"], false, "{reason}");
+        let manual = migrated["files"][1]["findings"]
+            .as_array()
+            .expect("findings")
+            .iter()
+            .filter(|finding| finding["code"] == "migrate_manual_required")
+            .collect::<Vec<_>>();
+        assert!(!manual.is_empty(), "{reason}: {migrated:#}");
+        assert!(
+            manual.iter().all(
+                |finding| finding["reason"] == reason && finding["machine_applicable"] == false
+            ),
+            "{reason}: {migrated:#}"
+        );
+        assert_eq!(manual[0]["loc"]["line"], line, "{reason}: {migrated:#}");
+        assert_eq!(migrated["files"][1]["changed"], false, "{reason}");
+        assert_eq!(text(path), source, "{reason}: the file is left as it was");
+        assert_eq!(
+            text(&convertible),
+            convertible_source,
+            "{reason}: no other input of the run is written"
+        );
+    }
+}
+
+/// Acceptance 3: the migration's own kernel contract is what stops a wrong
+/// rewrite. A converter that dropped one guard yields a document that still
+/// checks, so only the contract can tell.
+#[test]
+fn dropping_one_guard_in_the_process_form_converter_fails_the_kernel_contract() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/e2e/2_requirements.fsl");
+    let source = text(&path);
+    let options = fsl_syntax::ParseOptions::stable();
+    let conversion = fslc_rust::migration::plan_process_conversion(&source, &options)
+        .expect("the e2e process form is rewritable")
+        .expect("the e2e document has a process");
+    let faithful = conversion.render(&source, &options);
+    assert_eq!(
+        fslc_rust::migration::process_form_contract(&source, &faithful, &path, &options),
+        Ok(true),
+        "equal but for the derived terminal"
+    );
+
+    let mut faulty = conversion;
+    let event = faulty.processes[0]
+        .events
+        .iter_mut()
+        .find(|event| event.name == "mgr_approve")
+        .expect("mgr_approve event");
+    assert!(event.guard.take().is_some(), "mgr_approve is guarded");
+    let dropped = faulty.render(&source, &options);
+    assert!(
+        !dropped.contains("allow Manager mgr_approve Claim"),
+        "{dropped}"
+    );
+    let (reason, _) =
+        fslc_rust::migration::process_form_contract(&source, &dropped, &path, &options)
+            .expect_err("a dropped guard changes the kernel");
+    assert_eq!(reason, "kernel_changed");
+}
+
+fn example(name: &str) -> String {
+    text(&example_path(name))
+}
+
+fn example_path(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples")
+        .join(name)
+}
+
+fn findings_with_code<'a>(migrated: &'a Value, code: &str) -> Vec<&'a Value> {
+    migrated["files"][0]["findings"]
+        .as_array()
+        .expect("findings")
+        .iter()
+        .filter(|finding| finding["code"] == code)
+        .collect()
+}
+
+fn assert_canonical_example(name: &str) -> Value {
+    let path = example_path(name);
+    let path = path.to_str().expect("UTF-8 path");
+    let checked = run(&["check", path]);
+    assert_eq!(checked.status.code(), Some(0), "{}", json(&checked));
+    assert_eq!(json(&checked)["result"], "ok");
+    assert_eq!(json(&checked)["implements"]["result"], "refines");
+    let lint = run(&["lint", path, "--edition", "current"]);
+    // #608: the canonical examples also use canonical IDs, so lint is clean.
+    assert_eq!(lint.status.code(), Some(0), "{}", json(&lint));
+    let lint = json(&lint);
+    assert_eq!(lint["finding_count"], 0, "{lint}");
+    assert_eq!(findings_with_code(&lint, "inline_action_maps").len(), 0);
+    let migrate = run(&["migrate", path, "--edition", "next"]);
+    assert_eq!(migrate.status.code(), Some(0), "{}", json(&migrate));
+    // #1434: the headerless example changes only by its missing header.
+    assert_eq!(json(&migrate)["changed"], 1);
+    assert!(reports_missing_header_once(&json(&migrate)));
+    assert_eq!(
+        json(&migrate)["files"][0]["edits"][0]["replacement"]
+            .as_str()
+            .map(|text| text.replacen("fsl 5\n", "", 1)),
+        Some(text(Path::new(path)))
+    );
+    assert!(findings_with_code(&json(&migrate), "inline_action_maps").is_empty());
+    lint
+}
+
+fn example_contract(path: &Path, source: &str) -> Value {
+    fslc_rust::migration::kernel_contract(
+        source,
+        path,
+        &fsl_syntax::ParseOptions::default(),
+        fslc_rust::migration::Origins::Kept,
+    )
+    .expect("checked example contract")
+}
+
+#[test]
+fn canonical_return_example_has_no_inline_maps() {
+    let lint = assert_canonical_example("layers/return_system.fsl");
+    assert_eq!(findings_with_code(&lint, "non_canonical_id").len(), 0);
+}
+
+#[test]
+fn canonical_cancel_example_has_no_inline_maps() {
+    assert_canonical_example("pm/cancel_system.fsl");
+}
+
+// The pre-canonicalization program at 5a539bbe, without comments/layout. Keep
+// this independent of the public example so metadata or semantic loss is caught.
+const LEGACY_CANCEL_REQUIREMENTS: &str = r#"requirements CancelSystemReq {
+  implements CancelFlow from "cancel_flow.fsl" {
+    map sub_stage[c: Sub] =
+      if scr[c].st == Browsing then Active
+      else if scr[c].st == CancelForm then CancelRequested
+      else if scr[c].st == OfferDialog then OfferShown
+      else if scr[c].st == ThanksStay then Retained
+      else Churned
+  }
+  type Sub = 0..2
+  enum Screen { Browsing, CancelForm, OfferDialog, ThanksStay, GoodbyePage }
+  struct SubView { st: Screen, offered: Bool }
+  state { scr: Map<Sub, SubView>, churn_count: Int, retain_count: Int }
+  init {
+    forall c: Sub { scr[c] = SubView { st: Browsing, offered: false } }
+    churn_count = 0
+    retain_count = 0
+  }
+  requirement REQ-1 "Pressing the cancel button transitions to the cancellation form" {
+    fair action tap_cancel(c: Sub) maps request_cancel(c) {
+      requires scr[c].st == Browsing
+      scr[c].st = CancelForm
+    }
+  }
+  requirement REQ-2 "On cancellation-form submission, show the retention offer exactly once per subscription" {
+    fair action submit_cancel(c: Sub) maps show_offer(c) {
+      requires scr[c].st == CancelForm
+      requires not scr[c].offered
+      scr[c] = SubView { st: OfferDialog, offered: true }
+    }
+  }
+  requirement REQ-3 "Accepting the offer goes to retention (thanks screen); declining goes to the cancellation-complete screen" {
+    fair action accept(c: Sub) maps accept_offer(c) {
+      requires scr[c].st == OfferDialog
+      scr[c].st = ThanksStay
+      retain_count = retain_count + 1
+    }
+    fair action decline(c: Sub) maps decline_offer(c) {
+      requires scr[c].st == OfferDialog
+      scr[c].st = GoodbyePage
+      churn_count = churn_count + 1
+    }
+    invariant CountsMatchScreens {
+      churn_count == count(c: Sub where scr[c].st == GoodbyePage)
+        and retain_count == count(c: Sub where scr[c].st == ThanksStay)
+    }
+  }
+  requirement REQ-4 "An offer is not re-shown to a subscription that has already been shown one" {
+    invariant OfferedFlagConsistent {
+      forall c: Sub {
+        (scr[c].st == OfferDialog or scr[c].st == ThanksStay or scr[c].st == GoodbyePage)
+          => scr[c].offered
+      }
+    }
+  }
+  acceptance AC-1 "Acceptance flow: request -> show -> accept results in retention" {
+    tap_cancel(0)
+    submit_cancel(0)
+    accept(0)
+    expect scr[0].st == ThanksStay and retain_count == 1
+  }
+  acceptance AC-2 "Decline flow: request -> show -> decline completes the cancellation" {
+    tap_cancel(1)
+    submit_cancel(1)
+    decline(1)
+    expect scr[1].st == GoodbyePage and churn_count == 1
+  }
+}
+"#;
+
+/// The legacy programs predate the #608 ID canonicalization. Rename each
+/// declared ID (each must occur exactly once) so the comparison still covers
+/// the complete Kernel and typed metadata, IDs included.
+fn with_canonical_ids(source: &str, renames: &[(&str, &str)]) -> String {
+    let mut source = source.to_owned();
+    for (keyword, old, new) in renames.iter().map(|&(old, new)| {
+        let keyword = if old.starts_with("AC-") {
+            "acceptance"
+        } else {
+            "requirement"
+        };
+        (keyword, old, new)
+    }) {
+        let from = format!("{keyword} {old} \"");
+        assert_eq!(
+            source.matches(&from).count(),
+            1,
+            "unique legacy ID {from:?}"
+        );
+        source = source.replacen(&from, &format!("{keyword} {new} \""), 1);
+    }
+    source
+}
+
+#[test]
+fn canonical_cancel_preserves_the_checked_kernel_and_typed_metadata() {
+    let path = example_path("pm/cancel_system.fsl");
+    let legacy = with_canonical_ids(
+        LEGACY_CANCEL_REQUIREMENTS,
+        &[
+            ("REQ-1", "REQ-CANCEL-001"),
+            ("REQ-2", "REQ-CANCEL-002"),
+            ("REQ-3", "REQ-CANCEL-003"),
+            ("REQ-4", "REQ-CANCEL-004"),
+            ("AC-1", "AC-CANCEL-001"),
+            ("AC-2", "AC-CANCEL-002"),
+        ],
+    );
+    assert_eq!(
+        example_contract(&path, &legacy),
+        example_contract(&path, &text(&path))
+    );
+}
+
+#[test]
+fn canonical_return_preserves_the_checked_kernel_and_typed_metadata() {
+    let path = example_path("layers/return_system.fsl");
+    let legacy = text(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legacy_return_branches.fsl"),
+    );
+    let import = "../../../../examples/layers/return_policy.fsl";
+    assert_eq!(legacy.matches(import).count(), 1);
+    // Resolve the same policy under one logical source path. Use the existing
+    // migration contract: location-free Kernel plus the full typed annotations.
+    let legacy = with_canonical_ids(
+        &legacy.replace(import, "return_policy.fsl"),
+        &[
+            ("REQ-1", "REQ-RETURN-001"),
+            ("REQ-2", "REQ-RETURN-002"),
+            ("REQ-3", "REQ-RETURN-003"),
+            ("AC-1", "AC-RETURN-001"),
+        ],
+    );
+    let mut before = example_contract(&path, &legacy);
+    let after = example_contract(&path, &text(&path));
+    for (old, new) in [
+        ("submit__b1", "submit_small"),
+        ("submit__b2", "submit_large"),
+    ] {
+        let action = before["kernel"]["actions"]
+            .as_array_mut()
+            .expect("actions")
+            .iter_mut()
+            .find(|action| action["name"] == old)
+            .expect("legacy branch");
+        assert_eq!(action["fair"], true);
+        action["name"] = new.into();
+        let annotations = before["annotations"].as_object_mut().expect("annotations");
+        let inherited = annotations
+            .remove(&fsl_core::action_target(old))
+            .expect("inherited requirement annotations");
+        assert!(
+            annotations
+                .insert(fsl_core::action_target(new), inherited)
+                .is_none()
+        );
+    }
+    before["kernel"]["actions"]
+        .as_array_mut()
+        .expect("actions")
+        .sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
+    assert_eq!(before, after);
+}
+
+fn return_candidates(monitor: &Monitor) -> Vec<EnabledAction> {
+    monitor
+        .enabled_where(|_, params| params.get("c") == Some(&FslValue::Int(0)))
+        .expect("enabled return actions")
+}
+
+fn return_step(monitor: &mut Monitor, name: &str, amount: Option<i64>) {
+    let action = return_candidates(monitor)
+        .into_iter()
+        .find(|action| {
+            action.action == name
+                && amount.is_none_or(|value| action.params.get("a") == Some(&FslValue::Int(value)))
+        })
+        .expect("expected return action is enabled");
+    let result = monitor.step(&action).expect("return step");
+    assert_eq!(result.violation, None, "{result:?}");
+}
+
+fn return_stage(monitor: &Monitor) -> &str {
+    let FslValue::Map(cases) = &monitor.state["sys"] else {
+        panic!("case map")
+    };
+    let FslValue::Struct { fields, .. } = &cases[&FslValue::Int(0)] else {
+        panic!("case record")
+    };
+    let FslValue::Enum { member, .. } = &fields["st"] else {
+        panic!("case stage")
+    };
+    member
+}
+
+#[test]
+fn canonical_return_threshold_payment_and_manager_guards() {
+    let path = example_path("layers/return_system.fsl");
+    let resolver = fsl_core::FsResolver::new(path.parent().expect("example directory"));
+    let kernel = fsl_core::parse_kernel_source(&text(&path), &resolver).expect("return kernel");
+    let model = fsl_core::build_model(kernel).expect("return model");
+    for amount in 0..=3 {
+        let mut monitor = Monitor::new(model.clone()).expect("deterministic return init");
+        let submits = return_candidates(&monitor)
+            .into_iter()
+            .filter(|action| action.params.get("a") == Some(&FslValue::Int(amount)))
+            .map(|action| action.action)
+            .collect::<Vec<_>>();
+        if amount == 0 {
+            assert!(submits.is_empty(), "zero is not a valid submission");
+            continue;
+        }
+        let submit = if amount == 1 {
+            "submit_small"
+        } else {
+            "submit_large"
+        };
+        assert_eq!(submits, [submit]);
+        return_step(&mut monitor, submit, Some(amount));
+        assert_eq!(
+            return_stage(&monitor),
+            if amount == 1 {
+                "AutoApproved"
+            } else {
+                "MgrQueue"
+            }
+        );
+        let enabled = return_candidates(&monitor)
+            .into_iter()
+            .map(|action| action.action)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            enabled,
+            if amount == 1 {
+                vec!["pay"]
+            } else {
+                vec!["mgr_approve", "mgr_reject"]
+            }
+        );
+        if amount > 1 {
+            let mut rejected = monitor.clone();
+            return_step(&mut rejected, "mgr_reject", None);
+            assert_eq!(return_stage(&rejected), "MgrRejected");
+            assert!(return_candidates(&rejected).is_empty());
+            return_step(&mut monitor, "mgr_approve", None);
+            assert_eq!(return_stage(&monitor), "MgrApproved");
+        }
+        return_step(&mut monitor, "pay", None);
+        assert_eq!(return_stage(&monitor), "Paid");
+        assert_eq!(monitor.state["paid_count"], FslValue::Int(1));
+        assert!(return_candidates(&monitor).is_empty());
+    }
+}
+
+/// decisions 053: the edition derives the terminal states of a process form
+/// without `terminal { }` from its lifecycle's final stages, which changes
+/// verify's deadlock verdict on the e2e requirements. The migration says so,
+/// in the plan and when it writes, without changing its exit status.
+#[test]
+fn edition_5_migration_reports_the_terminal_it_derives_for_a_process_form_without_one() {
+    let directory = FixtureDir::new();
+    directory.write("1_business.fsl", &example("e2e/1_business.fsl"));
+    let source = example("e2e/2_requirements.fsl");
+    assert!(
+        !source.contains("terminal"),
+        "the e2e process form has none"
+    );
+    let path = directory.write("2_requirements.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+
+    let mut reported = Vec::new();
+    for write in [false, true] {
+        let mut args = vec!["migrate", path, "--edition", "5"];
+        if write {
+            args.push("--write");
+        }
+        let output = run(&args);
+        let migrated = json(&output);
+        assert_eq!(output.status.code(), Some(0), "{migrated:#}");
+        assert_eq!(migrated["result"], "migrated", "{migrated:#}");
+        assert_eq!(migrated["written"], write, "{migrated:#}");
+        let added = findings_with_code(&migrated, "derived_terminal_added");
+        assert_eq!(added.len(), 1, "{migrated:#}");
+        let finding = added[0];
+        assert_eq!(finding["severity"], "info", "{finding:#}");
+        assert_eq!(finding["machine_applicable"], true, "{finding:#}");
+        assert_eq!(finding["loc"]["line"], 34, "at the process: {finding:#}");
+        let message = finding["message"].as_str().expect("message");
+        for expected in ["'Claim' in Rejected or Paid", "deadlock"] {
+            assert!(message.contains(expected), "{expected:?} in {message}");
+        }
+        assert_eq!(
+            finding["canonical_replacement"],
+            "terminal { forall c: Claim { stage(c) == Rejected or stage(c) == Paid } }"
+        );
+        reported.push(finding.clone());
+    }
+    assert_eq!(
+        reported[0], reported[1],
+        "the plan reports what --write does"
+    );
+
+    // The written document is the edition's own form: nothing more to derive.
+    let again = json(&run(&["migrate", path, "--edition", "5"]));
+    assert_eq!(again["changed"], 0, "{again:#}");
+    assert!(
+        findings_with_code(&again, "derived_terminal_added").is_empty(),
+        "{again:#}"
+    );
+}
+
+/// A process form that writes its terminal states keeps them: the rewrite
+/// adds no terminal and reports none.
+#[test]
+fn edition_5_migration_of_a_process_form_with_terminal_reports_no_derived_terminal() {
+    let directory = FixtureDir::new();
+    let source = example("requirements_stage.fsl");
+    assert!(source.contains("terminal {"), "the fixture writes one");
+    let path = directory.write("requirements_stage.fsl", &source);
+    let path = path.to_str().expect("UTF-8 path");
+    for write in [false, true] {
+        let mut args = vec!["migrate", path, "--edition", "5"];
+        if write {
+            args.push("--write");
+        }
+        let output = run(&args);
+        let migrated = json(&output);
+        assert_eq!(output.status.code(), Some(0), "{migrated:#}");
+        assert_eq!(
+            findings_with_code(&migrated, "legacy_process_form").len(),
+            1,
+            "the process is rewritten: {migrated:#}"
+        );
+        assert!(
+            findings_with_code(&migrated, "derived_terminal_added").is_empty(),
+            "{migrated:#}"
+        );
+    }
+}
+
+/// The derived terminal is the one kernel difference the process-form
+/// contract forgives, and only where the process form wrote no terminal: a
+/// rewrite that changed a written terminal fails it.
+#[test]
+fn the_process_form_contract_compares_a_terminal_the_process_form_writes() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/requirements_stage.fsl");
+    let source = text(&path);
+    let options = fsl_syntax::ParseOptions::stable();
+    let conversion = fslc_rust::migration::plan_process_conversion(&source, &options)
+        .expect("the process form is rewritable")
+        .expect("the document has a process");
+    let faithful = conversion.render(&source, &options);
+    assert_eq!(
+        fslc_rust::migration::process_form_contract(&source, &faithful, &path, &options),
+        Ok(false),
+        "equal, terminal included"
+    );
+
+    let written = "forall c: Claim { stage(c) == Approved or stage(c) == Rejected }";
+    assert_eq!(faithful.matches(written).count(), 1, "{faithful}");
+    let narrowed = faithful.replace(written, "forall c: Claim { stage(c) == Approved }");
+    let (reason, _) =
+        fslc_rust::migration::process_form_contract(&source, &narrowed, &path, &options)
+            .expect_err("a changed written terminal changes the kernel");
+    assert_eq!(reason, "kernel_changed");
 }

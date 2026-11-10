@@ -19,15 +19,10 @@ on:
   merge_group:
     # Unfiltered: GitHub does not support `paths`/`paths-ignore` on
     # `merge_group` (docs/design/DESIGN-ci.md), and only `main` could ever have a
-    # queue, so an unfiltered trigger is equivalent. Dormant -- no merge
-    # queue exists on `main`. One was configured on the `main` ruleset on
-    # 2026-08-05 and removed the same day: every merge would have taken the
-    # admin-bypass path, so the queue would never have validated anything --
-    # measured, not predicted. Reviving it needs a human-review-policy
-    # change, not a CI change, so this trigger stays inert rather than
-    # removed. See docs/design/DESIGN-ci.md, "Required pre-merge contexts, and why
-    # the merge queue was rejected" and its "The merge queue was tried,
-    # measured against this repository's workflow, and rejected" subsection.
+    # queue, so an unfiltered trigger is equivalent. The queue was adopted
+    # on 2026-10-29 after the review policy changed to permit a single
+    # maintainer to enqueue. See docs/design/DESIGN-ci.md,
+    # "Merge queue adoption (2026-10-29)" for the decision and earlier history.
   schedule:
     - cron: "17 18 * * *"
   workflow_dispatch:
@@ -44,18 +39,15 @@ permissions:
 # merge.
 #
 # The four heavy jobs (`rust-workspace`, `wasm`, `semantic-mutation`,
-# `fsl-logic`) also trigger on `merge_group`, which stays inert: a merge
-# queue was tried on the `main` ruleset on 2026-08-05 and rejected the same
-# day, because an administrator's merge bypasses the queue entirely and the
-# ordinary enqueue path is unsatisfiable under this repository's
-# single-approver review policy. Reviving the queue would require changing
-# that human review policy, not this workflow, so the trigger and
-# `tools/check-product-gate-scope.sh`'s `queue-entry-stub` branch stay ready
-# rather than removed. `pull_request` events run the complete evidence in
-# full, exactly as before. See docs/design/DESIGN-ci.md, "Required pre-merge
-# contexts, and why the merge queue was rejected" and its "The merge queue
-# was tried, measured against this repository's workflow, and rejected"
-# subsection.
+# `fsl-logic`) also trigger on the active queue's `merge_group` events.
+# FSL_MERGE_QUEUE_CI stays unset: pull requests retain their full pre-merge
+# evidence, and each merge group independently computes diff_scope in
+# `tools/check-product-gate-scope.sh`. Its `queue-entry-stub` branch must
+# stay off whether or not admin queue bypass remains possible. The bypass
+# premise comes from #717 on 2026-08-05 (`gh pr merge --admin`, 7b140af),
+# not a check against current ruleset 19090811. Its live capture shows
+# bypass_actors empty and current_user_can_bypass "never". See docs/design/DESIGN-ci.md,
+# "Merge queue adoption (2026-10-29)".
 #
 # Only the cross-platform matrix — `native Z3 4.16` on macOS and Windows — stays
 # post-merge under FSL_OPTIMISTIC_CI, reported by the post-merge CI reporter.
@@ -100,28 +92,55 @@ jobs:
         with:
           components: clippy,rustfmt
 
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. The live audit's created_at order has no documented
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615).
+          # The live audit's created_at order has no documented
           # tie-breaker; a tied boundary can produce a duplicate ID, rejected immediately, or
           # different paired observations, which retry once and fail closed if still different;
           # an identical mixed state can repeat as an undetectable residual. See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: rust-workspace
 
       - name: Check Rust workspace (non-test phases)
         if: steps.scope.outputs.run == 'true'
         run: ./tools/check-native-integration.sh rust-checks
+
+      - uses: actions/setup-python@v5
+        if: steps.scope.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install native Python test dependencies
+        if: steps.scope.outputs.run == 'true'
+        run: python -m pip install ".[dev]"
+
+      - name: Check native CLI Python expectations
+        if: steps.scope.outputs.run == 'true'
+        run: ./tools/check-merge-readiness.sh native-python
 
   rust-tests:
     name: rust tests (${{ matrix.shard }}/3)
@@ -143,23 +162,46 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
         run: ./tools/check-product-gate-scope.sh >>"$GITHUB_OUTPUT"
 
+      # This job's test binaries fill the whole disk on some hosted runners. Nothing
+      # here uses these toolchains, and the runner carries its own .NET runtime. See
+      # docs/design/DESIGN-ci.md, "Runner disk budget".
+      - name: Free runner disk for the test-binary build
+        if: steps.scope.outputs.run == 'true'
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup
+          df -h /
+
       - uses: dtolnay/rust-toolchain@1.98.0
         if: steps.scope.outputs.run == 'true'
+
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
 
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: rust-workspace
 
       - name: Cache pinned cargo-nextest CLI
@@ -172,11 +214,18 @@ jobs:
 
       - name: Install pinned cargo-nextest CLI
         if: steps.nextest-cache.outputs.cache-hit != 'true' && steps.scope.outputs.run == 'true'
-        run: cargo install cargo-nextest --version 0.9.143 --locked
+        # rust-cache restores ~/.cargo/bin, so the binary can exist when its own cache missed.
+        run: cargo install cargo-nextest --version 0.9.143 --locked --force
 
       - name: Run Rust test shard
         if: steps.scope.outputs.run == 'true'
         run: ./tools/check-native-integration.sh rust-tests ${{ matrix.shard }}/3
+
+      - name: Report runner disk use
+        if: always() && steps.scope.outputs.run == 'true'
+        run: |
+          df -h /
+          du -sh rust/target ~/.cargo/registry || true
 
       - name: Record test-shard provenance
         if: steps.scope.outputs.run == 'true'
@@ -286,20 +335,33 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
 
       - uses: actions/setup-node@v4
         if: steps.scope.outputs.run == 'true'
@@ -323,7 +385,8 @@ jobs:
 
       - name: Install pinned wasm-bindgen CLI
         if: steps.wasm-bindgen-cache.outputs.cache-hit != 'true' && steps.scope.outputs.run == 'true'
-        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+        # rust-cache restores ~/.cargo/bin, so the binary can exist when its own cache missed.
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
       - name: Check WASM integration
         id: integration
@@ -373,26 +436,38 @@ jobs:
     # the next Windows run (31570480618 attempt 1) was warm and completed in 34m39s; this
     # is a recovery path, not evidence that the current tree has a successful
     # cold-build duration within 60 minutes.
-    # 90, not 60: the warm test step alone takes 45-57 minutes (#1322).
+    # 90, not 60: macOS jobs measured 37-57 minutes (#1322).
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@1.98.0
 
+      - name: Hash Cargo profiles for the rust-cache key
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: rust-native-z3
           # Run 31527197290 attempt 1's old 40-minute cold Windows job was cancelled and its
           # post step was skipped (`9 skipped Post Run Swatinem/rust-cache@v2`).
@@ -413,13 +488,17 @@ jobs:
         working-directory: rust
         run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
 
-  rust-native-z3-windows:
-    name: native Z3 4.16 (windows-latest)
+  rust-native-z3-windows-shards:
+    name: native Z3 4.16 (windows-latest, ${{ matrix.part }})
     if: >-
       (github.event_name != 'pull_request' && github.event_name != 'merge_group') ||
       github.base_ref == 'production' ||
       vars.FSL_OPTIMISTIC_CI != 'enabled'
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [long-poles, rest]
     # ubuntu-latest is covered by the full rust-workspace test gate above.
     # Raised rather than narrowed, for the same reason `production-native-z3-linux`
     # below gives: a gate that runs out of wall clock reports a failure it did not
@@ -442,26 +521,46 @@ jobs:
     # the next Windows run (31570480618 attempt 1) was warm and completed in 34m39s; this
     # is a recovery path, not evidence that the current tree has a successful
     # cold-build duration within 60 minutes.
-    # 90, not 60: the warm test step alone takes 45-57 minutes (#1322).
+    # #1532: unsplit jobs measured 54-79 min, then hit 90 min twice at 11f01225.
+    # Measured 2026-11-05 on main push and dispatch runs (cf63f1769..b2337fdc6): rest
+    # succeeded in 49-89 min (10 runs) and hit 90 min once; long-poles took 15-31 min.
+    # All 11 shard logs read (8 runs) restored one cache key with a full match, and
+    # the rest shard's per-binary times differed by a median 1.64x between its 49- and
+    # 85-minute runs, so the spread tracks runner speed, not cache or build. Five more
+    # binaries (1698 s of the 89-minute rest run) therefore moved to long-poles.
+    # Projection on the slowest observed runners, not a measurement: long-poles about
+    # 60 min, rest about 61 min (90 per shard).
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@1.98.0
 
+      - name: Hash Cargo profiles for the rust-cache key
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: rust-native-z3
           # Run 31527197290 attempt 1's old 40-minute cold Windows job was cancelled and its
           # post step was skipped (`9 skipped Post Run Swatinem/rust-cache@v2`).
@@ -478,9 +577,40 @@ jobs:
           # flag with timeout increases; see docs/design/DESIGN-ci.md, "Actions cache budget".
           cache-on-failure: true
 
-      - name: Test pinned native solver and BMC crates
+      - name: Check live long-pole names and run the long-pole binaries
+        if: matrix.part == 'long-poles'
+        shell: bash
         working-directory: rust
-        run: cargo test --locked -p fsl-solver-z3 -p fsl-verifier -p fslc-rust
+        run: |
+          cargo test --locked --no-fail-fast -p fslc-rust --test fsl5_glossary --test issue_1442_compose_binding_capture_matrix --test issue_1480_check_engine_agreement --test issue_697_all_properties_memory --test issue_1467_composite_values --test issue_1467_frozen_lexical --test refine_corpus_parity -- --list > "$RUNNER_TEMP/windows-long-poles.txt"
+          python ../tools/check_windows_long_poles.py --list-output "$RUNNER_TEMP/windows-long-poles.txt" --names ../tools/windows-native-long-poles.txt
+          cargo test --locked --no-fail-fast -p fslc-rust --test fsl5_glossary --test issue_1442_compose_binding_capture_matrix --test issue_1480_check_engine_agreement --test issue_697_all_properties_memory --test issue_1467_composite_values --test issue_1467_frozen_lexical --test refine_corpus_parity
+
+      - name: Test pinned native solver and BMC crates except long poles
+        if: matrix.part == 'rest'
+        shell: bash
+        working-directory: rust
+        run: |
+          python ../tools/check_windows_long_poles.py --names ../tools/windows-native-long-poles.txt --emit-skip-args > "$RUNNER_TEMP/windows-skip-args.txt"
+          mapfile -t skips < "$RUNNER_TEMP/windows-skip-args.txt"
+          skips=("${skips[@]%$'\r'}")
+          cargo test --locked --no-fail-fast -p fsl-solver-z3 -p fsl-verifier -p fslc-rust -- --exact "${skips[@]}"
+
+  rust-native-z3-windows:
+    name: native Z3 4.16 (windows-latest)
+    needs: rust-native-z3-windows-shards
+    if: >-
+      always() && ((github.event_name != 'pull_request' && github.event_name != 'merge_group') ||
+      github.base_ref == 'production' ||
+      vars.FSL_OPTIMISTIC_CI != 'enabled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require all Windows shards to succeed
+        env:
+          SHARDS_RESULT: ${{ needs.rust-native-z3-windows-shards.result }}
+        run: bash tools/require-shard-success.sh "$SHARDS_RESULT"
 
   production-native-z3-linux:
     name: native Z3 4.16 (ubuntu-latest)
@@ -501,19 +631,31 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.98.0
 
+      - name: Hash Cargo profiles for the rust-cache key
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
 
       - name: Test pinned native solver and BMC crates
         working-directory: rust
@@ -524,10 +666,11 @@ jobs:
   # curated control matrix plus generic mutants intersecting their diff.
   # Push, schedule, and manual runs execute the complete accepted P2 pilot
   # scope. `semantic-mutation-operators` shards the curated fault-operator
-  # controls three ways; `semantic-mutation-mutants` runs the generic
-  # cargo-mutants half complete and unsharded, because it is already at
-  # roughly the operator lane's floor and sharding it would add cargo-mutants
-  # partitioning risk for no wall-clock gain. The `semantic-mutation` job
+  # controls three ways; `semantic-mutation-mutants` partitions the GLOBAL
+  # generic inventory three ways with exact executed-ID cohort validation.
+  # A shard with mutants pays a cold baseline; a zero-mutant shard seeds third-party
+  # units and still compiles all first-party code. Parallel wall-clock gain is not assumed.
+  # The `semantic-mutation` job
   # below aggregates both under the exact required-context name expression
   # and keeps its job id unchanged, so `product-gate`'s `needs:` list and the
   # `main` ruleset's required-context set both keep working without any
@@ -555,20 +698,33 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
         if: steps.scope.outputs.run == 'true'
 
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
-          # Saving is restricted to non-pull-request events. Actions cache visibility is
+          # Saving excludes pull_request and merge_group. Actions cache visibility is
           # current ref, base branch, and default branch; for a main-targeting pull request,
           # base/default are both `main`, while sibling pull-request caches remain unreadable.
           # At the 2026-08-06 incident, `ci.yml`'s four shared keys together stored about
           # 6.9 GiB per pull request against a 10 GiB repository limit. Two concurrent
           # pull requests therefore evicted `main`'s caches, after which every run built
           # cold: measured +8 to +16 min per shard. Save-enabled `ci.yml` steps save on
-          # non-`pull_request` events. See
+          # push, schedule and workflow_dispatch, not PR or queue refs (issue #1615). See
           # docs/design/DESIGN-ci.md, "Actions cache budget", and issue #747.
-          save-if: ${{ github.event_name != 'pull_request' }}
+          save-if: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: semantic-mutation
           # Under the old 30-minute budget, a cold operators run was cancelled at
           # 30.2 minutes and its post save was skipped. `cache-on-failure: true`
@@ -619,11 +775,15 @@ jobs:
           overwrite: true
 
   semantic-mutation-mutants:
-    name: mutation mutants
+    name: mutation mutants (${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     # 150, not 90: a changed-scope run with no critical-path line mutant escalates to
     # the complete P2 scope, which ran past 90 minutes on PR #1318 (#1319).
     timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -639,6 +799,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.0
         if: steps.scope.outputs.run == 'true'
 
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
+
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
         with:
@@ -649,18 +813,28 @@ jobs:
           # restored `No cache found.`, then its successful post step uploaded
           # 2,922,378,363 B while all three operators shards were cancelled and
           # their post steps skipped. This job's rust/target-scoped evidence
-          # (`rust/target/semantic-mutation.*`, kept there solely because the
-          # artifact-upload glob below requires it) must not enter a future cache
+          # (`rust/target/semantic-mutation.*`, uploaded through the published
+          # report-directory output below) must not enter a future cache
           # save. `cache-on-failure` is absent because `save-if: false` bypasses
           # the save path. See docs/design/DESIGN-ci.md, "Actions cache budget", and
           # issue #747.
           save-if: false
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
           shared-key: semantic-mutation
 
       - name: Install pinned semantic mutation runner
         if: steps.scope.outputs.run == 'true'
-        run: cargo install cargo-mutants --version 27.1.0 --locked
+        # rust-cache restores ~/.cargo/bin, so the binary can exist when its own cache missed.
+        run: cargo install cargo-mutants --version 27.1.0 --locked --force
 
       - name: Build change diff
         if: steps.scope.outputs.run == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production'))
@@ -672,22 +846,24 @@ jobs:
         run: git diff --relative=rust --binary "$BASE_SHA...$HEAD_SHA" -- rust >"$RUNNER_TEMP/semantic-mutation.diff"
 
       - name: Calibrate changed implementation semantics
+        id: changed
         if: steps.scope.outputs.run == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production'))
         env:
           FSL_MUTATION_DIFF: ${{ runner.temp }}/semantic-mutation.diff
           FSL_MUTATION_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-        run: ./tools/run-semantic-mutation-gate.sh changed --lane mutants
+        run: ./tools/run-semantic-mutation-gate.sh changed --lane mutants --shard ${{ matrix.shard }}/3
 
       - name: Calibrate complete accepted implementation scope
+        id: complete
         if: steps.scope.outputs.run == 'true' && github.event_name != 'merge_group' && (github.event_name != 'pull_request' || github.base_ref == 'production')
-        run: ./tools/run-semantic-mutation-gate.sh complete --lane mutants
+        run: ./tools/run-semantic-mutation-gate.sh complete --lane mutants --shard ${{ matrix.shard }}/3
 
       - name: Preserve mutation evidence
         if: always() && steps.scope.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: semantic-mutation-mutants-${{ github.run_id }}-${{ github.run_attempt }}
-          path: rust/target/semantic-mutation.*/**
+          name: semantic-mutation-mutants-${{ matrix.shard }}-${{ github.run_id }}
+          path: ${{ steps.changed.outputs.report || steps.complete.outputs.report }}
           if-no-files-found: error
           retention-days: 14
           overwrite: true
@@ -745,6 +921,17 @@ jobs:
         if: steps.scope.outputs.run == 'true'
         run: ./tools/check-shard-artifact-cohort.sh semantic semantic-mutation-operators "${{ github.run_id }}" "${{ github.run_attempt }}" "$(git rev-parse HEAD)" 3
 
+      - name: Download mutant shard evidence
+        if: steps.scope.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: semantic-mutation-mutants-*-${{ github.run_id }}
+          path: semantic-mutation-mutants
+
+      - name: Verify mutant shard completeness
+        if: steps.scope.outputs.run == 'true'
+        run: ./tools/check-shard-artifact-cohort.sh mutants semantic-mutation-mutants "${{ github.run_id }}" "${{ github.run_attempt }}" "$(git rev-parse HEAD)" 3
+
   # M13 deterministic finite-model agreement (#673). The report begins
   # incomplete and becomes complete only after every selected case and edge
   # executes, so a truncated shard cannot read green.
@@ -766,6 +953,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.98.0
         if: steps.scope.outputs.run == 'true'
+
+      - name: Hash Cargo profiles for the rust-cache key
+        if: steps.scope.outputs.run == 'true'
+        run: node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml
 
       - uses: Swatinem/rust-cache@v2
         if: steps.scope.outputs.run == 'true'
@@ -796,6 +987,15 @@ jobs:
           shared-key: rust-workspace
           save-if: false
           workspaces: rust -> target
+          # Cache key generation: `prefix-key` is the manual generation, bumped to
+          # discard every entry at once; `env-vars` adds `FSL_CARGO_PROFILE_HASH`
+          # (previous step) to rust-cache's env hash, so an edit to rust/Cargo.toml's
+          # `[profile.*]` sections -- which rust-cache's own key hashes omit -- re-keys
+          # automatically. Every saving and restore-only step uses both inputs, or the
+          # restore-only ones stop matching. See docs/design/DESIGN-ci.md,
+          # "Cache key generation".
+          prefix-key: v1-rust
+          env-vars: FSL_CARGO_PROFILE_HASH
 
       - name: Run bounded pull-request generation
         if: steps.scope.outputs.run == 'true' && (github.event_name == 'merge_group' || (github.event_name == 'pull_request' && github.base_ref != 'production'))

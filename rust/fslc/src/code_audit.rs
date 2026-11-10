@@ -7,6 +7,8 @@ use fsl_core::KernelModel;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::cli_output::analysis_display_path;
+
 const MARKER: &str = "@fsl.trace ";
 const ASSURANCES: [&str; 4] = [
     "source_backed",
@@ -79,7 +81,7 @@ fn parse_file(path: &Path, traces: &mut Vec<LocatedTrace>) -> Result<(), CodeAud
         let text = std::str::from_utf8(line).map_err(|_| {
             CodeAuditError::Semantics(format!(
                 "{}:{}: code trace marker line is not UTF-8",
-                crate::analysis_display_path(path),
+                analysis_display_path(path),
                 line_index + 1
             ))
         })?;
@@ -92,14 +94,14 @@ fn parse_file(path: &Path, traces: &mut Vec<LocatedTrace>) -> Result<(), CodeAud
         let trace: CodeTrace = serde_json::from_str(json_text).map_err(|error| {
             CodeAuditError::Semantics(format!(
                 "{}:{}: malformed code trace annotation: {error}",
-                crate::analysis_display_path(path),
+                analysis_display_path(path),
                 line_index + 1
             ))
         })?;
         if trace.schema != "fsl-code-trace.v0" {
             return Err(CodeAuditError::Semantics(format!(
                 "{}:{}: unsupported code trace schema '{}'",
-                crate::analysis_display_path(path),
+                analysis_display_path(path),
                 line_index + 1,
                 trace.schema
             )));
@@ -107,21 +109,21 @@ fn parse_file(path: &Path, traces: &mut Vec<LocatedTrace>) -> Result<(), CodeAud
         if trace.requirement_id.is_empty() || trace.kernel_target.is_empty() {
             return Err(CodeAuditError::Semantics(format!(
                 "{}:{}: requirement_id and kernel_target must be non-empty",
-                crate::analysis_display_path(path),
+                analysis_display_path(path),
                 line_index + 1
             )));
         }
         if !ASSURANCES.contains(&trace.origin_assurance.as_str()) {
             return Err(CodeAuditError::Semantics(format!(
                 "{}:{}: unsupported origin_assurance '{}'",
-                crate::analysis_display_path(path),
+                analysis_display_path(path),
                 line_index + 1,
                 trace.origin_assurance
             )));
         }
         traces.push(LocatedTrace {
             trace,
-            file: crate::analysis_display_path(path),
+            file: analysis_display_path(path),
             line: line_index + 1,
             column: text[..marker_index].chars().count() + 1,
         });
@@ -314,7 +316,7 @@ fn assurance_coverage(
 pub(crate) fn analyze(model: &KernelModel, code_path: &Path) -> Result<Value, CodeAuditError> {
     let mut files = Vec::new();
     collect_files(code_path, &mut files)?;
-    files.sort_by_key(|path| crate::analysis_display_path(path));
+    files.sort_by_key(|path| analysis_display_path(path));
 
     let mut traces = Vec::new();
     for file in &files {
@@ -349,7 +351,7 @@ pub(crate) fn analyze(model: &KernelModel, code_path: &Path) -> Result<Value, Co
         "projection":"code_audit",
         "schema_version":"code-audit.v0",
         "formal_status":"not_a_violation",
-        "code_path":crate::analysis_display_path(code_path),
+        "code_path":analysis_display_path(code_path),
         "files_scanned":files.len(),
         "requirements":requirement_rows,
         "coverage":{

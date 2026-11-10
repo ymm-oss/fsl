@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+requirements Impl {
+  implements Abs from "business.fsl" { }
+  state { done: Bool }
+  init { done = false }
+  action approve() "REQ-1: by Manager" { done = true }
+}

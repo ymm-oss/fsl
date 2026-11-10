@@ -1,298 +1,95 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::fmt::Write as _;
-use std::future::Future;
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
-use std::pin::pin;
-use std::task::{Context, Poll, Waker};
 use std::time::Instant;
 
 use fsl_core::{
-    Annotations, FslValue, KernelExpr, KernelLValue, KernelModel, KernelSpec, KernelStatement,
-    ModelWarningContext, ParamDef, TraceStep, TypeDef, TypeRef, finalize_envelope_model_warnings,
-    finalize_model_warnings, insert_requirement_metadata, model_warnings, requirement_metadata,
+    Annotations, FslValue, KernelExpr, KernelLValue, KernelModel, KernelStatement,
+    ModelWarningContext, ParamDef, TypeDef, TypeRef, finalize_model_warnings,
+    insert_requirement_metadata, model_warnings, requirement_metadata,
 };
 use fslc_rust::literate_access::literate_access;
-use fslc_rust::outcome::{OutcomeClass, SweepCellClass, outcome_class, sweep_cell_class};
-use fslc_rust::spec_load::{
-    SemanticDiagnostic, SpecLoadError, kernel_load_error, surface_parse_failure,
+use fslc_rust::outcome::{
+    FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, error_exit,
+    exit_status_matches, is_error_exit, normalized_exit_status, outcome_class, sweep_cell_class,
 };
-use fslc_rust::verification_output::UnenabledStep;
+use fslc_rust::spec_load::{SpecLoadError, kernel_load_error, surface_parse_failure};
+use fslc_rust::verification_output::{
+    CheckedTraceContract, DiagnosticClass, TraceGate, UnenabledStep,
+};
 use serde_json::{Map, Value, json};
 
 mod approval;
 mod causal;
+mod cli_contract;
+mod cli_options;
+mod cli_output;
 mod code_audit;
+mod explain_lowering;
+mod log_replay;
+mod name_display;
+mod output_publication;
+mod process;
+mod property_selection;
+mod refinement;
+mod spec_loading;
+mod strict_tags;
 mod verification;
+mod z3_panic;
 
 use causal::{causal_command, run_causal_check};
-use verification::{
-    BmcRequest, DeadlockMode, ExplicitRequest, InductionRequest, ModelSelection,
-    VerificationEngine, run_auto_filtered, run_bmc_filtered, run_explicit_filtered,
-    run_induction_filtered, run_verify_cli, run_verify_cli_from_source,
+use cli_options::{
+    AnalyzeOptions, ChainOptions, CheckOptions, CliVerifyOptions, CommandArgs, CompatCheckOptions,
+    ConformanceOptions, DEFAULT_EXPLICIT_BUDGET, DiffOptions, KernelOptions, MutationFamilyOptions,
+    RefineOptions, ReplayOptions, ReportOptions, ScopeBounds, SharedOptions, SweepOptions,
+    TestplanOptions, VerifyCommandOptions, parse_edition, parse_sweep_range, required_option_value,
 };
+use cli_output::{
+    analysis_display_path, display_binding, envelope, error_detail, error_output,
+    located_error_output, semantic_error_output, spec_load_error_output,
+    surface_parse_error_output, trace_last_action,
+};
+use fslc_rust::migration::SourceEdition;
+use log_replay::{
+    json_mismatches, log_action_matches, mapping_json_expr, parse_param_value, parse_params,
+    read_jsonl_records, untyped_replay_enum_mapping_span,
+};
+use process::{STACK_SIZE, block_on_native, parse_options};
+use property_selection::is_bounds_name;
+#[cfg(test)]
+use refinement::run_refine;
+use refinement::{
+    abs_violation_json, fold_governance_from_source, implements_error_output,
+    implements_result_from_source_with_bounds, mismatch_paths, run_refine_from_sources,
+};
+use spec_loading::{
+    admit_root_source, dependency_resolver, finish_admitted, raw_delivery_allowed,
+    run_admitted_root, run_admitted_roots, run_prepared_roots,
+};
+use spec_loading::{
+    io_error_detail, io_error_output, read_failure_message, read_input_bytes, read_input_text,
+    read_spec_source_shown_as,
+};
+use spec_loading::{
+    load_kernel_model_from_source, load_model_from_source, load_model_scoped_from_source,
+    load_replay_model_from_source, load_snapshot_value_object, read_spec_source,
+    require_trace_gate, snapshot_value, validate_requirement_trace_source,
+};
+use strict_tags::strict_tag_warnings_from_source;
+use verification::{run_verify_cli_admitted, run_verify_cli_from_source};
 
 const CLI_CONTRACT: &str = include_str!("../cli-contract.json");
-const DEFAULT_EXPLICIT_BUDGET: usize = 1_000_000;
-
-/// `mutate`'s built-in mutant cap when `--max-mutants` is omitted. Must equal
-/// the `max_mutants` default the published CLI contract advertises
-/// (`rust/fslc/cli-contract.json`), which `docs/design/DESIGN-mutate.md`,
-/// `skills/fsl/references/commands.md`, and the frozen `src/fslc/mutate.py`
-/// (`DEFAULT_MAX_MUTANTS`) all fix at 200: a smaller runtime default silently
-/// evaluates a different mutant set and reports a different kill rate
-/// (issue #524).
-const DEFAULT_MAX_MUTANTS: usize = 200;
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-struct ScopeBounds {
-    instances: std::collections::BTreeMap<String, i64>,
-    values: std::collections::BTreeMap<String, (i64, i64)>,
-}
-
-#[derive(Clone, Debug)]
-struct CliVerifyOptions {
-    depth: usize,
-    deadlock: String,
-    engine: String,
-    explicit_budget: usize,
-    k_ind: usize,
-    vacuity: String,
-    property: Option<String>,
-    exclude_properties: Vec<String>,
-    scope: ScopeBounds,
-    strict_tags: bool,
-    requirements: Option<PathBuf>,
-    use_cache: bool,
-    lemmas: Vec<String>,
-    from_state: Option<PathBuf>,
-    edition: String,
-}
-
-impl Default for CliVerifyOptions {
-    fn default() -> Self {
-        Self {
-            depth: 8,
-            deadlock: "warn".to_owned(),
-            engine: "bmc".to_owned(),
-            explicit_budget: DEFAULT_EXPLICIT_BUDGET,
-            k_ind: 1,
-            vacuity: "warn".to_owned(),
-            property: None,
-            exclude_properties: Vec::new(),
-            scope: ScopeBounds::default(),
-            strict_tags: false,
-            requirements: None,
-            use_cache: true,
-            lemmas: Vec::new(),
-            from_state: None,
-            edition: "current".to_owned(),
-        }
-    }
-}
-
-fn required_option_value(
-    args: &mut impl Iterator<Item = String>,
-    option: &str,
-) -> Result<String, String> {
-    args.next()
-        .ok_or_else(|| format!("{option} requires a value"))
-}
-
-/// One subcommand's arguments, with options and positionals in any order
-/// (#1250, #1301).
-///
-/// Every usage line in `cli-contract.json` lists options before positionals,
-/// and the frozen Python CLI (argparse) accepts either order, so a native
-/// command must too. The command's own `match` arms stay the only owner of
-/// each option's arity: a value-taking arm pulls its value with
-/// `Iterator::next` (`--depth 3` never turns `3` into a positional, and
-/// `--depth` with nothing after it stays `--depth requires a value`). Every
-/// token the arms do not recognise goes through [`CommandArgs::positional`] —
-/// the shape `parse_migration_options` already had — so `-` (stdin) and any
-/// token not starting with `-` is a positional, while any other `-`-prefixed
-/// token stays that command's unknown-option usage error. A bare `--` ends
-/// option parsing as in argparse: every later token is a positional, which is
-/// how a path that starts with `-` is passed.
-struct CommandArgs<I: Iterator<Item = String>> {
-    args: std::iter::Fuse<I>,
-    positionals: Vec<String>,
-}
-
-impl<I: Iterator<Item = String>> CommandArgs<I> {
-    fn new(args: I) -> Self {
-        Self {
-            args: args.fuse(),
-            positionals: Vec::new(),
-        }
-    }
-
-    /// Keep `token` as a positional, or reject it with the command's
-    /// unknown-option message.
-    fn positional(
-        &mut self,
-        token: String,
-        unknown: impl FnOnce(&str) -> String,
-    ) -> Result<(), String> {
-        if token == "-" || !token.starts_with('-') {
-            self.positionals.push(token);
-            Ok(())
-        } else {
-            Err(unknown(&token))
-        }
-    }
-
-    /// The positionals in command-line order (those after `--` last).
-    fn into_positionals(mut self) -> std::vec::IntoIter<String> {
-        self.positionals.extend(self.args);
-        self.positionals.into_iter()
-    }
-
-    /// The single positional of a one-spec command. A missing one keeps the
-    /// command's own usage message; a second one is reported the way the
-    /// command reported a stray argument before #1250.
-    fn single_positional(
-        self,
-        missing: impl FnOnce() -> String,
-        extra: impl FnOnce(&str) -> String,
-    ) -> Result<PathBuf, String> {
-        let mut positionals = self.into_positionals();
-        let path = positionals.next().ok_or_else(missing)?;
-        if let Some(argument) = positionals.next() {
-            return Err(extra(&argument));
-        }
-        Ok(PathBuf::from(path))
-    }
-}
-
-impl<I: Iterator<Item = String>> Iterator for CommandArgs<I> {
-    type Item = String;
-
-    fn next(&mut self) -> Option<String> {
-        let token = self.args.next()?;
-        if token == "--" {
-            self.positionals.extend(self.args.by_ref());
-            return None;
-        }
-        Some(token)
-    }
-}
-
-fn parse_instance_override(raw: &str) -> Result<(String, i64), String> {
-    let (name, value) = raw
-        .split_once('=')
-        .ok_or_else(|| format!("invalid --instances value '{raw}': expected NAME=N"))?;
-    let value = value
-        .parse::<i64>()
-        .map_err(|_| format!("invalid --instances value '{raw}': N must be an integer"))?;
-    if name.trim().is_empty() || value < 1 {
-        return Err(format!(
-            "invalid --instances value '{raw}': expected a non-empty NAME and N >= 1"
-        ));
-    }
-    Ok((name.trim().to_owned(), value))
-}
-
-fn parse_verify_options(
-    args: &mut CommandArgs<impl Iterator<Item = String>>,
-) -> Result<CliVerifyOptions, String> {
-    let mut options = CliVerifyOptions::default();
-    while let Some(option) = args.next() {
-        match option.as_str() {
-            "--depth" => {
-                options.depth = required_option_value(args, "--depth")?
-                    .parse()
-                    .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-            }
-            "--deadlock" => {
-                options.deadlock = required_option_value(args, "--deadlock")?;
-                if !matches!(options.deadlock.as_str(), "warn" | "error" | "ignore") {
-                    return Err("--deadlock must be warn, error, or ignore".to_owned());
-                }
-            }
-            "--engine" => {
-                options.engine = required_option_value(args, "--engine")?;
-                if !matches!(
-                    options.engine.as_str(),
-                    "bmc" | "induction" | "explicit" | "auto"
-                ) {
-                    return Err("--engine must be bmc, induction, explicit, or auto".to_owned());
-                }
-            }
-            "--explicit-budget" => {
-                options.explicit_budget = required_option_value(args, "--explicit-budget")?
-                    .parse()
-                    .map_err(|_| "--explicit-budget must be a positive integer".to_owned())?;
-                if options.explicit_budget == 0 {
-                    return Err("--explicit-budget must be a positive integer".to_owned());
-                }
-            }
-            "--k" => {
-                options.k_ind = required_option_value(args, "--k")?
-                    .parse()
-                    .map_err(|_| "--k must be a positive integer".to_owned())?;
-                if options.k_ind == 0 {
-                    return Err("--k must be a positive integer".to_owned());
-                }
-            }
-            "--vacuity" => {
-                options.vacuity = required_option_value(args, "--vacuity")?;
-                if !matches!(options.vacuity.as_str(), "warn" | "error" | "ignore") {
-                    return Err("--vacuity must be warn, error, or ignore".to_owned());
-                }
-            }
-            "--property" => options.property = Some(required_option_value(args, "--property")?),
-            "--exclude-property" => options
-                .exclude_properties
-                .push(required_option_value(args, "--exclude-property")?),
-            "--instances" => {
-                let raw = required_option_value(args, "--instances")?;
-                let (name, value) = parse_instance_override(&raw)?;
-                options.scope.instances.insert(name, value);
-            }
-            "--values" => {
-                let raw = required_option_value(args, "--values")?;
-                let (name, value) = parse_sweep_range(&raw, "--values")?;
-                options.scope.values.insert(name, value);
-            }
-            "--strict-tags" => options.strict_tags = true,
-            "--requirements" => {
-                options.requirements = Some(PathBuf::from(required_option_value(
-                    args,
-                    "--requirements",
-                )?));
-            }
-            "--no-cache" => options.use_cache = false,
-            "--lemma" => options.lemmas.push(required_option_value(args, "--lemma")?),
-            "--from-state" => {
-                options.from_state =
-                    Some(PathBuf::from(required_option_value(args, "--from-state")?));
-            }
-            "--edition" => options.edition = parse_edition(args)?,
-            _ => args.positional(option, |option| format!("unknown verify option '{option}'"))?,
-        }
-    }
-    Ok(options)
-}
-
-fn parse_edition(args: &mut impl Iterator<Item = String>) -> Result<String, String> {
-    let edition = required_option_value(args, "--edition")?;
-    if matches!(edition.as_str(), "current" | "next") {
-        Ok(edition)
-    } else {
-        Err("--edition must be current or next".to_owned())
-    }
-}
 
 fn parse_specialized_verify_options(
     args: &mut CommandArgs<impl Iterator<Item = String>>,
     allow_edition: bool,
-) -> Result<(usize, String, String, String), String> {
+) -> Result<(usize, String, String, Option<fsl_syntax::EditionRequest>), String> {
     let mut depth = 8_usize;
     let mut deadlock = "warn".to_owned();
     let mut engine = "bmc".to_owned();
-    let mut edition = "current".to_owned();
+    let mut edition = None;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--depth" => {
@@ -343,26 +140,13 @@ fn parse_optional_output(
     Ok(output)
 }
 
-/// The stack every `fslc` run gets, on every platform.
-///
-/// 8 MiB is the Linux and macOS default for a process's main thread. Windows
-/// gives 1 MiB, and `fslc refine` needs more than that on
-/// `examples/agentic_rag` and `examples/multi_agent_system`: the same command
-/// on the same bytes returned `refines` on Linux and aborted with
-/// `has overflowed its stack` on Windows (issue #617). A verifier whose answer
-/// depends on which machine ran it is the failure this repository spends most
-/// of its effort on, and platform-dependent *crashing* is that failure in its
-/// crudest form.
-///
-/// This makes the platforms agree at the Unix value. It does not make the
-/// recursion bounded: `refine`'s depth grows with the spec's structure rather
-/// than with `--depth` (measured — it aborts at `--depth 2` exactly as at 4,
-/// while `specs/cart_*` survives at `--depth 8`), so a large enough spec will
-/// exhaust any fixed stack. That is issue #620, and it wants a depth guard
-/// that reports `kind:"internal"` instead of aborting.
-const STACK_SIZE: usize = 8 * 1024 * 1024;
-
 fn main() {
+    output_publication::record_inputs();
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        z3_panic::record(info);
+        default_hook(info);
+    }));
     // `run` on an explicitly sized thread rather than the process's main
     // thread, whose size the OS picks.
     let worker = std::thread::Builder::new()
@@ -371,6 +155,16 @@ fn main() {
         .spawn(run)
         .expect("spawn the fslc worker thread");
     if worker.join().is_err() {
+        // The bindings unwrap the null Z3 returns when it cannot allocate a term. No limit
+        // keeps a wide range from getting there, so that is a refusal and not a crash.
+        if let Some(message) = z3_panic::take_refusal() {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&semantic_error_output(&message))
+                    .expect("serialize solver panic error")
+            );
+            std::process::exit(2);
+        }
         // The panic message has already been printed by the default hook.
         // Exit as a panicking `main` would, so a crash is never mistaken for
         // a verdict.
@@ -381,6 +175,15 @@ fn main() {
 fn run() {
     if print_cli_metadata() {
         return;
+    }
+    let argv = std::env::args().skip(1).collect::<Vec<_>>();
+    if let Err(message) = cli_contract::validate_argv(CLI_CONTRACT, &argv, *parse_options()) {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&error_output("usage", &message))
+                .expect("serialize CLI argument error")
+        );
+        std::process::exit(2);
     }
     if let Some((output, status)) = fmt_command() {
         match output {
@@ -397,9 +200,18 @@ fn run() {
     }
     let (output, reported_status) = match command() {
         Ok(result) => result,
-        Err(error) => (error_output("usage", &error), 2),
+        Err(error) => error_exit(error_output("usage", &error)),
     };
     let status = normalized_exit_status(&output, reported_status);
+    debug_assert!(
+        exit_status_matches(
+            argv.first().map_or("", String::as_str),
+            argv.get(1).map(String::as_str),
+            &output,
+            status,
+        ),
+        "CLI output and exit status disagree: {output:?}, exit {status}",
+    );
     println!(
         "{}",
         serde_json::to_string_pretty(&output).expect("serialize CLI output")
@@ -428,22 +240,37 @@ fn fmt_command() -> Option<(FmtCliOutput, i32)> {
 struct FmtOptions {
     paths: Vec<PathBuf>,
     check: bool,
-    edition: fsl_syntax::FormatEdition,
+    edition: Option<fsl_syntax::EditionRequest>,
+    /// `--lang` / `--names`: respell a next-edition requirements document.
+    respelling: fsl_syntax::Respelling,
 }
 
 fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, String> {
     let mut args = CommandArgs::new(args);
     let mut paths = Vec::new();
     let mut check = false;
-    let mut edition = fsl_syntax::FormatEdition::Current;
+    let mut edition = None;
+    let mut respelling = fsl_syntax::Respelling::default();
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--check" => check = true,
-            "--edition" => {
-                edition = fsl_syntax::FormatEdition::parse(&required_option_value(
-                    &mut args,
-                    "--edition",
-                )?)?;
+            "--edition" => edition = parse_edition(&mut args)?,
+            "--lang" => {
+                respelling.language =
+                    Some(match required_option_value(&mut args, "--lang")?.as_str() {
+                        "ja" => fsl_syntax::KeywordLanguage::Japanese,
+                        "en" => fsl_syntax::KeywordLanguage::English,
+                        _ => return Err("--lang must be ja or en".to_owned()),
+                    });
+            }
+            "--names" => {
+                respelling.names = Some(
+                    match required_option_value(&mut args, "--names")?.as_str() {
+                        "alias" => fsl_syntax::NameForm::Alias,
+                        "canonical" => fsl_syntax::NameForm::Canonical,
+                        _ => return Err("--names must be alias or canonical".to_owned()),
+                    },
+                );
             }
             option if option.starts_with('-') && option != "-" => {
                 return Err(format!("unknown fmt option '{option}'"));
@@ -453,7 +280,7 @@ fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, S
     }
     paths.extend(args.into_positionals().map(PathBuf::from));
     if paths.is_empty() {
-        return Err("usage: fslc fmt FILE [--check] [--edition current|next]".to_owned());
+        return Err("usage: fslc fmt FILE [--check] [--edition current|next|4|5]".to_owned());
     }
     if !check && paths.len() != 1 {
         return Err("fmt accepts multiple paths only with --check".to_owned());
@@ -467,11 +294,32 @@ fn parse_fmt_options(args: impl Iterator<Item = String>) -> Result<FmtOptions, S
         paths,
         check,
         edition,
+        respelling,
     })
 }
 
 fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
+    let log = fslc_rust::migration::DependencyRecords::default();
+    let (output, status) = run_fmt_inner(options, &log);
+    match output {
+        FmtCliOutput::Json(output) => {
+            let (output, status) =
+                fslc_rust::migration::finish_dependency_reports(&log, (output, status), false);
+            (FmtCliOutput::Json(output), status)
+        }
+        FmtCliOutput::Source(source) => {
+            fslc_rust::migration::finish_dependency_reports(&log, (Value::Null, status), true);
+            (FmtCliOutput::Source(source), status)
+        }
+    }
+}
+
+fn run_fmt_inner(
+    options: &FmtOptions,
+    log: &fslc_rust::migration::DependencyRecords,
+) -> (FmtCliOutput, i32) {
     let mut files = Vec::new();
+    let mut read = Vec::new();
     let mut any_changed = false;
     for path in &options.paths {
         if let Err((output, status)) = literate_access("fmt", path) {
@@ -479,19 +327,42 @@ fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
         }
         let source = match read_fmt_source(path) {
             Ok(source) => source,
-            Err(error) => return (FmtCliOutput::Json(error_output("io", &error)), 2),
+            Err(error) => return (FmtCliOutput::Json(io_error_output(&error)), 2),
         };
-        let formatted = match fsl_syntax::format_source(&source, options.edition) {
+        let edition = match fsl_syntax::document_edition(
+            &source,
+            options.edition,
+            fsl_syntax::Edition::Fsl4,
+            crate::parse_options(),
+        ) {
+            Ok(edition) => edition,
+            Err(error) => return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2),
+        };
+        read.push(read_edition(&source, edition));
+        let formatted = match fsl_syntax::format_source_respelled(
+            &source,
+            edition,
+            crate::parse_options(),
+            options.respelling,
+        ) {
             Ok(formatted) => formatted,
             Err(fsl_syntax::FormatError::Parse(error)) => {
                 return (FmtCliOutput::Json(surface_parse_error_output(&error)), 2);
             }
             Err(error) => return (FmtCliOutput::Json(format_error_output(&error)), 2),
         };
-        if let Err(error) = validate_fmt_semantics(&source, path) {
+        // The document fmt reads: the one parse error it repairs (a particle
+        // written onto its word) repaired.
+        let read = fsl_syntax::space_particles(&source, crate::parse_options());
+        if let Err(error) = validate_fmt_semantics(&read, path, log) {
             return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
         }
-        if let Err(error) = validate_fmt_semantics(&formatted, path) {
+        if let Err(error) = validate_fmt_semantics(&formatted, path, log) {
+            return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
+        }
+        if options.respelling != fsl_syntax::Respelling::default()
+            && let Err(error) = validate_respelled_kernel(&read, &formatted, path)
+        {
             return (FmtCliOutput::Json(semantic_error_output(&error)), 2);
         }
         let changed = source != formatted;
@@ -502,16 +373,66 @@ fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
             return (FmtCliOutput::Source(formatted), 0);
         }
     }
-    (
-        FmtCliOutput::Json(json!({
-            "fsl":"1.0",
-            "result":"format_check",
-            "edition":options.edition.as_str(),
-            "changed":any_changed,
-            "files":files
-        })),
-        i32::from(any_changed),
-    )
+    let (output, status) = publish_read_edition(
+        (
+            json!({
+                "fsl":"1.0",
+                "result":"format_check",
+                "edition":options.edition.map_or(fsl_syntax::Edition::Fsl4, |request| request.edition).as_str(),
+                "changed":any_changed,
+                "files":files
+            }),
+            i32::from(any_changed),
+        ),
+        &read,
+    );
+    (FmtCliOutput::Json(output), status)
+}
+
+/// One document a `lint`, `migrate` or `fmt --check` run read: the edition
+/// it was read in, and the edition its header declares.
+type ReadEdition = (fsl_syntax::Edition, Option<fsl_syntax::Edition>);
+
+fn read_edition(source: &str, edition: fsl_syntax::Edition) -> ReadEdition {
+    let declared = fsl_syntax::edition_header(source, crate::parse_options())
+        .ok()
+        .flatten()
+        .map(|header| header.edition);
+    (edition, declared)
+}
+
+/// #1757: a `lint`, `migrate` or `fmt --check` report publishes the edition
+/// its documents were read in, as `check` does for its one document, not the
+/// requested `--edition`: `edition` is `next` when every document was read in
+/// the next edition and `current` otherwise, and `fsl_edition` is the header
+/// number when every document declares the same one. Unlike `check`, these
+/// reports keep `"edition": "current"`, as 4.12 published it. An error
+/// envelope, and a report that read no document (an empty `lint` directory),
+/// keep what they carry.
+fn publish_read_edition((mut output, status): (Value, i32), read: &[ReadEdition]) -> (Value, i32) {
+    let Some(&(_, first_declared)) = read.first() else {
+        return (output, status);
+    };
+    if output["result"] == "error" {
+        return (output, status);
+    }
+    if let Value::Object(envelope) = &mut output {
+        let next = read
+            .iter()
+            .all(|&(edition, _)| edition == fsl_syntax::Edition::Fsl5);
+        let edition = if next {
+            fsl_syntax::Edition::Fsl5
+        } else {
+            fsl_syntax::Edition::Fsl4
+        };
+        envelope.insert("edition".to_owned(), json!(edition.as_str()));
+        if let Some(declared) = first_declared
+            .filter(|&declared| read.iter().all(|&(_, other)| other == Some(declared)))
+        {
+            envelope.insert("fsl_edition".to_owned(), json!(declared.number()));
+        }
+    }
+    (output, status)
 }
 
 fn read_fmt_source(path: &Path) -> Result<String, String> {
@@ -522,15 +443,20 @@ fn read_fmt_source(path: &Path) -> Result<String, String> {
             .map_err(|error| error.to_string())?;
         Ok(source)
     } else {
-        std::fs::read_to_string(path).map_err(|error| error.to_string())
+        read_input_text(path)
     }
 }
 
 struct MigrationOptions {
     paths: Vec<PathBuf>,
-    edition: fslc_rust::migration::Edition,
+    /// The explicit `--edition`; `None` reads each file in its header's
+    /// edition, or `default_edition` without one.
+    edition: Option<fsl_syntax::EditionRequest>,
+    default_edition: fsl_syntax::Edition,
     write: bool,
     project: Option<PathBuf>,
+    /// `lint --strict-names`: report `mixed_names` (no opt-in since #1434).
+    strict_names: bool,
 }
 
 fn parse_migration_options(
@@ -539,20 +465,20 @@ fn parse_migration_options(
 ) -> Result<MigrationOptions, String> {
     let mut args = CommandArgs::new(args);
     let mut paths = Vec::new();
-    let mut edition = if migrate {
-        fslc_rust::migration::Edition::Next
-    } else {
-        fslc_rust::migration::Edition::Current
-    };
+    let mut edition = None;
+    let mut current = false;
     let mut write = false;
     let mut project = None;
+    let mut strict_names = false;
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            "--strict-names" if !migrate => strict_names = true,
+            // `current` follows each document's header, as in `check`; it
+            // only replaces `migrate`'s next-edition default for a headerless
+            // document, so it is not an explicit edition that can conflict.
             "--edition" => {
-                edition = fslc_rust::migration::Edition::parse(&required_option_value(
-                    &mut args,
-                    "--edition",
-                )?)?;
+                edition = parse_edition(&mut args)?;
+                current = edition.is_none();
             }
             "--write" if migrate => write = true,
             "--project" if !migrate => {
@@ -573,9 +499,9 @@ fn parse_migration_options(
     paths.extend(args.into_positionals().map(PathBuf::from));
     if paths.is_empty() {
         return Err(if migrate {
-            "usage: fslc migrate FILE... [--edition current|next] [--write]".to_owned()
+            "usage: fslc migrate FILE... [--edition current|next|4|5] [--write]".to_owned()
         } else {
-            "usage: fslc lint FILE... [--edition current|next] [--project fsl-project.toml]"
+            "usage: fslc lint FILE... [--edition current|next|4|5] [--project fsl-project.toml]"
                 .to_owned()
         });
     }
@@ -588,44 +514,85 @@ fn parse_migration_options(
     Ok(MigrationOptions {
         paths,
         edition,
+        default_edition: if migrate && !current {
+            fsl_syntax::Edition::Fsl5
+        } else {
+            fsl_syntax::Edition::Fsl4
+        },
         write,
         project,
+        strict_names,
     })
 }
 
 fn run_lint(options: &MigrationOptions) -> (Value, i32) {
+    let log = fslc_rust::migration::DependencyRecords::default();
+    let mut read = Vec::new();
+    let result = run_lint_inner(options, &log, &mut read);
+    fslc_rust::migration::finish_dependency_reports(
+        &log,
+        publish_read_edition(result, &read),
+        false,
+    )
+}
+
+fn run_lint_inner(
+    options: &MigrationOptions,
+    log: &fslc_rust::migration::DependencyRecords,
+    read: &mut Vec<ReadEdition>,
+) -> (Value, i32) {
     let (id_policy, policy_source) = match load_id_policy(options.project.as_deref()) {
         Ok(policy) => policy,
-        Err(error) => return (error_output("config", &error), 2),
+        Err(error) => return error_exit(error_output("config", &error)),
     };
     let paths = match expand_lint_paths(&options.paths) {
         Ok(paths) => paths,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let mut files = Vec::new();
     let mut finding_count = 0_usize;
     for path in &paths {
-        let (source, mut plan) = match load_migration_plan(path, options.edition) {
+        let (source, mut plan, edition) = match load_migration_plan(path, options, log) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
         };
+        read.push(read_edition(&source, edition));
         plan.diagnostics
             .extend(fslc_rust::migration::id_policy_diagnostics(
-                &source, &id_policy,
+                &source,
+                &id_policy,
+                crate::parse_options(),
             ));
+        plan.diagnostics
+            .extend(fslc_rust::migration::lexical_warning_diagnostics(
+                &source,
+                crate::parse_options(),
+            ));
+        plan.diagnostics
+            .extend(fslc_rust::migration::shared_requirement_id_diagnostics(
+                &source,
+                crate::parse_options(),
+            ));
+        if options.strict_names {
+            plan.diagnostics
+                .extend(fslc_rust::migration::mixed_names_diagnostics(
+                    &source,
+                    crate::parse_options(),
+                ));
+        }
         plan.diagnostics
             .sort_by_key(|diagnostic| diagnostic.span.start.offset);
         finding_count += plan.diagnostics.len();
         files.push(json!({
             "path": path,
-            "findings": plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), options.edition)).collect::<Vec<_>>(),
+            "findings": plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), edition)).collect::<Vec<_>>(),
         }));
     }
     (
         json!({
             "fsl":"1.0",
             "result":"lint",
-            "edition":options.edition.as_str(),
+            "edition":options.requested_edition(),
             "finding_count":finding_count,
             "id_policy":{
                 "source":policy_source,
@@ -732,25 +699,54 @@ fn load_id_policy(
 }
 
 fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
+    let log = fslc_rust::migration::DependencyRecords::default();
+    let mut read = Vec::new();
+    let result = run_migrate_inner(options, &log, &mut read);
+    fslc_rust::migration::finish_dependency_reports(
+        &log,
+        publish_read_edition(result, &read),
+        false,
+    )
+}
+
+fn run_migrate_inner(
+    options: &MigrationOptions,
+    log: &fslc_rust::migration::DependencyRecords,
+    read: &mut Vec<ReadEdition>,
+) -> (Value, i32) {
     let mut planned = Vec::new();
     let mut files = Vec::new();
     let mut refused = false;
+    let mut manual_required = false;
     for path in &options.paths {
-        let (source, plan) = match load_migration_plan(path, options.edition) {
+        let (source, plan, edition) = match load_migration_plan(path, options, log) {
             Ok(loaded) => loaded,
             Err(error) => return (error, 2),
         };
+        read.push(read_edition(&source, edition));
         refused |= plan.refused();
+        manual_required |= plan.manual_required();
         let migrated = plan.migrated_source.as_ref();
+        let origins = if plan
+            .diagnostics
+            .iter()
+            .any(|finding| finding.code == fslc_rust::migration::LEGACY_PROCESS_FORM)
+        {
+            fslc_rust::migration::Origins::Ignored
+        } else {
+            fslc_rust::migration::Origins::Kept
+        };
         if let Some(migrated) = migrated
-            && let Err(error) = validate_migration_semantics(&source, migrated, path)
+            && let Err(error) = validate_migration_semantics(&source, migrated, path, origins)
         {
             return (semantic_error_output(&error), 2);
         }
         files.push(json!({
             "path":path,
             "changed":migrated.is_some(),
-            "findings":plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), options.edition)).collect::<Vec<_>>(),
+            // Set once the write set is committed; nothing is written before.
+            "written":false,
+            "findings":plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), edition)).collect::<Vec<_>>(),
             "edits":migrated.map(|replacement| vec![json!({"start":0,"end":source.len(),"replacement":replacement})]).unwrap_or_default(),
         }));
         planned.push((path.clone(), migrated.cloned()));
@@ -760,11 +756,25 @@ fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
             json!({
                 "fsl":"1.0",
                 "result":"migration_refused",
-                "edition":options.edition.as_str(),
+                "edition":options.requested_edition(),
                 "written":false,
                 "files":files,
             }),
             2,
+        );
+    }
+    // A process form the migrator cannot rewrite leaves every input as it
+    // is, like a refusal, but the inputs are valid: the author rewrites them.
+    if manual_required {
+        return (
+            json!({
+                "fsl":"1.0",
+                "result":fslc_rust::migration::MIGRATE_MANUAL_REQUIRED,
+                "edition":options.requested_edition(),
+                "written":false,
+                "files":files,
+            }),
+            1,
         );
     }
     if options.write {
@@ -777,7 +787,12 @@ fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
             })
             .collect::<Vec<_>>();
         if let Err(error) = atomic_write_migrations(&writes) {
-            return (error_output("io", &error), 2);
+            return error_exit(io_error_output(&error));
+        }
+        // `written` reports the files replaced, not the `--write` request:
+        // an input that needs no rewrite is left untouched (#1754).
+        for (file, (_, source)) in files.iter_mut().zip(&planned) {
+            file["written"] = json!(source.is_some());
         }
     }
     let changed = planned
@@ -788,23 +803,54 @@ fn run_migrate(options: &MigrationOptions) -> (Value, i32) {
         json!({
             "fsl":"1.0",
             "result":"migrated",
-            "edition":options.edition.as_str(),
+            "edition":options.requested_edition(),
             "changed":changed,
-            "written":options.write,
+            "written":options.write && changed > 0,
             "files":files,
         }),
         0,
     )
 }
 
+impl MigrationOptions {
+    /// The `edition` of a report that read no document: the requested
+    /// edition, else the default. `publish_read_edition` replaces it with the
+    /// edition the documents were read in.
+    fn requested_edition(&self) -> &'static str {
+        self.edition
+            .map_or(self.default_edition, |request| request.edition)
+            .as_str()
+    }
+}
+
 fn load_migration_plan(
     path: &Path,
-    edition: fslc_rust::migration::Edition,
-) -> Result<(String, fslc_rust::migration::MigrationPlan), Value> {
+    options: &MigrationOptions,
+    log: &fslc_rust::migration::DependencyRecords,
+) -> Result<
+    (
+        String,
+        fslc_rust::migration::MigrationPlan,
+        fsl_syntax::Edition,
+    ),
+    Value,
+> {
     let source = std::fs::read_to_string(path)
-        .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
-    let plan = fslc_rust::migration::plan_migration(&source, &path.to_string_lossy(), edition)
-        .map_err(|error| migration_plan_error_output(&source, path, &error))?;
+        .map_err(|error| io_error_output(&format!("{}: {error}", path.display())))?;
+    let edition = fsl_syntax::document_edition(
+        &source,
+        options.edition,
+        options.default_edition,
+        crate::parse_options(),
+    )
+    .map_err(|error| surface_parse_error_output(&error))?;
+    let mut plan = fslc_rust::migration::plan_migration(
+        &source,
+        &path.to_string_lossy(),
+        edition,
+        crate::parse_options(),
+    )
+    .map_err(|error| migration_plan_error_output(&source, path, &error, edition))?;
     // A refused plan (`plan.refused()`) means `plan_migration` itself already
     // found a legacy construct it cannot machine-apply — e.g. `&&`, which is
     // not tokenizable under the current grammar at all and is recognized via
@@ -814,10 +860,59 @@ fn load_migration_plan(
     // `&&`, with a confusing generic parse error) on exactly the construct
     // `migrate`/`lint` already correctly report as `migration_refused`/an
     // `unsupported_in_edition` finding, so skip it in that case.
-    if !plan.refused() {
-        validate_migration_input_semantics(&source, path)?;
+    let refused = plan.refused();
+    if !refused {
+        validate_migration_input_semantics(&source, path, log)?;
     }
-    Ok((source, plan))
+    let header =
+        fslc_rust::migration::missing_edition_header(&source, edition, crate::parse_options());
+    let conversion = if refused {
+        fslc_rust::migration::ProcessFormOutcome::Unchanged
+    } else {
+        fslc_rust::migration::convert_process_forms(
+            &source,
+            plan.migrated_source.as_deref().unwrap_or(&source),
+            path,
+            edition,
+            crate::parse_options(),
+        )
+    };
+    match conversion {
+        fslc_rust::migration::ProcessFormOutcome::Unchanged => {
+            if header.is_some() && !refused {
+                let migrated = plan.migrated_source.as_deref().unwrap_or(&source);
+                plan.migrated_source = fslc_rust::migration::missing_edition_header(
+                    migrated,
+                    edition,
+                    crate::parse_options(),
+                )
+                .map(|insertion| fsl_syntax::apply_source_edits(migrated, insertion.edits))
+                .transpose()
+                .map_err(|error| {
+                    migration_plan_error_output(&source, path, &error.to_string(), edition)
+                })?;
+            }
+        }
+        fslc_rust::migration::ProcessFormOutcome::Converted { source, findings } => {
+            plan.migrated_source = Some(source);
+            plan.diagnostics.extend(findings);
+        }
+        fslc_rust::migration::ProcessFormOutcome::ManualRequired(findings) => {
+            plan.migrated_source = None;
+            plan.diagnostics.extend(findings);
+        }
+    }
+    // Whichever path produced it, the rewrite keeps the input's line endings
+    // and byte order mark (#1755); the Kernel check in `run_migrate_inner`
+    // runs on these bytes.
+    plan.migrated_source = plan
+        .migrated_source
+        .map(|migrated| fslc_rust::migration::keep_line_endings(&source, &migrated))
+        .filter(|migrated| *migrated != source);
+    if let Some(header) = header {
+        plan.diagnostics.push(header);
+    }
+    Ok((source, plan, edition))
 }
 
 /// Unconditional structural pre-flight shared by `run_lint` and `run_migrate`
@@ -829,8 +924,11 @@ fn load_migration_plan(
 /// was previously only validated on the changed-file path
 /// (`validate_migration_semantics`), never on an unchanged one.
 ///
-/// Mirrors `run_check`'s own gate exactly, so the same input gets the same
-/// verdict on both commands: `parse`/`build_model` failures are
+/// Validates standalone Kernel/model well-formedness, not every stage of
+/// `run_check`: dialect-specific compatibility findings remain with their
+/// specialized validators. Lowering itself rejects unknown DB rule names, so
+/// those cannot silently pass an unchanged migration plan either.
+/// `parse`/`build_model` failures are
 /// `kind:"semantics"` (`load_model`'s convention); an unresolvable
 /// requirements `implements ... from` target is `kind:"type"`
 /// (`implements_error_output`'s convention), located when a span is
@@ -839,22 +937,37 @@ fn load_migration_plan(
 /// (`fslc check specs/cart_refines.fsl` itself fails "spec has no state
 /// block"; neither `check` nor `fmt --check` nor this pre-flight treats
 /// that as a `lint`/`migrate` defect).
-fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), Value> {
-    let dialect = fsl_syntax::dialect_keyword(source)
+fn validate_migration_input_semantics(
+    source: &str,
+    path: &Path,
+    log: &fslc_rust::migration::DependencyRecords,
+) -> Result<(), Value> {
+    let dialect = fsl_syntax::dialect_keyword_with(source, crate::parse_options())
         .map_err(|error| semantic_error_output(&error.to_string()))?;
     if matches!(dialect, "refinement" | "agent") {
         return Ok(());
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, path.to_string_lossy())
-        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let resolver = dependency_resolver(base).report_to(log.clone());
+    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+        source,
+        &resolver,
+        path.to_string_lossy(),
+        crate::parse_options(),
+    )
+    .map_err(|error| semantic_error_output(&error.to_string()))?;
     let model = fsl_core::build_model(kernel).map_err(|error| model_error_output(&error))?;
     if matches!(
-        fsl_syntax::parse_surface_document(source),
+        fsl_syntax::parse_surface_document_with(source, crate::parse_options()),
         Ok(fsl_syntax::SurfaceDocument::Requirements(_))
     ) {
-        fsl_core::requirements_implements(source, &resolver, &model).map_err(|error| {
+        fsl_core::requirements_implements_with_options(
+            source,
+            &resolver,
+            &model,
+            crate::parse_options(),
+        )
+        .map_err(|error| {
             error.span.map_or_else(
                 || error_output("type", &error.message),
                 |span| located_error_output("type", &error.message, span),
@@ -864,9 +977,24 @@ fn validate_migration_input_semantics(source: &str, path: &Path) -> Result<(), V
     Ok(())
 }
 
-fn validate_migration_semantics(before: &str, after: &str, path: &Path) -> Result<(), String> {
-    let before = migration_kernel_contract(before, path)?;
-    let after = migration_kernel_contract(after, path)?;
+/// The migration contract over the whole rewrite: `origins` is
+/// [`fslc_rust::migration::Origins::Ignored`] when a process form was
+/// converted, whose events carry their own lowering origins.
+fn validate_migration_semantics(
+    before: &str,
+    after: &str,
+    path: &Path,
+    origins: fslc_rust::migration::Origins,
+) -> Result<(), String> {
+    let contract = |source| {
+        fslc_rust::migration::kernel_contract(source, path, crate::parse_options(), origins)
+    };
+    let mut before = contract(before)?;
+    let mut after = contract(after)?;
+    if origins == fslc_rust::migration::Origins::Ignored {
+        fslc_rust::migration::ignore_derived_terminal(&before, &mut after);
+        fslc_rust::migration::ignore_generated_actor_notes(&mut before, &after);
+    }
     if before == after {
         Ok(())
     } else {
@@ -877,112 +1005,16 @@ fn validate_migration_semantics(before: &str, after: &str, path: &Path) -> Resul
     }
 }
 
-fn migration_kernel_contract(source: &str, path: &Path) -> Result<Value, String> {
-    let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, path.to_string_lossy())
-        .map_err(|error| error.to_string())?;
-    let model = fsl_core::build_model(kernel.clone()).map_err(|error| error.to_string())?;
-    if matches!(
-        fsl_syntax::parse_surface_document(source),
-        Ok(fsl_syntax::SurfaceDocument::Requirements(_))
-    ) {
-        fsl_core::requirements_implements(source, &resolver, &model)
-            .map_err(|error| error.to_string())?;
-    }
-    let mut contract = fsl_core::public_kernel_contract(
-        &kernel,
-        &model,
-        &path.to_string_lossy(),
-        source_dialect(source),
-    )
-    .map_err(|error| error.to_string())?;
-    remove_migration_locations(&mut contract);
-    remove_legacy_metadata_projection(&mut contract);
-    Ok(json!({
-        "kernel": contract,
-        "annotations": migration_annotation_contract(&model),
-    }))
-}
-
-fn remove_migration_locations(value: &mut Value) {
-    match value {
-        Value::Object(object) => {
-            for key in ["span", "source_node_id", "source_node_ids", "reverse_index"] {
-                object.remove(key);
-            }
-            object.values_mut().for_each(remove_migration_locations);
+fn migration_plan_error_output(
+    source: &str,
+    path: &Path,
+    message: &str,
+    edition: fsl_syntax::Edition,
+) -> Value {
+    let mut output = match fsl_syntax::parse_surface_document_with(source, crate::parse_options()) {
+        Err(error) => {
+            surface_parse_error_output(&error.for_edition(source, edition, crate::parse_options()))
         }
-        Value::Array(values) => values.iter_mut().for_each(remove_migration_locations),
-        _ => {}
-    }
-}
-
-fn remove_legacy_metadata_projection(value: &mut Value) {
-    match value {
-        Value::Object(object) => {
-            object.remove("requirement");
-            if let Some(Value::Object(origin)) = object.get_mut("origin") {
-                origin.remove("declaration");
-            }
-            object
-                .values_mut()
-                .for_each(remove_legacy_metadata_projection);
-        }
-        Value::Array(values) => values
-            .iter_mut()
-            .for_each(remove_legacy_metadata_projection),
-        _ => {}
-    }
-}
-
-fn migration_annotation_contract(model: &fsl_core::KernelModel) -> Value {
-    let mut targets = vec!["spec".to_owned(), "init".to_owned()];
-    targets.extend(
-        model
-            .actions
-            .iter()
-            .map(|action| fsl_core::action_target(&action.name)),
-    );
-    for (kind, properties) in [
-        ("invariant", &model.invariants),
-        ("trans", &model.transitions),
-        ("reachable", &model.reachables),
-    ] {
-        targets.extend(
-            properties
-                .iter()
-                .map(|property| fsl_core::property_target(kind, &property.name)),
-        );
-    }
-    targets.extend(
-        model
-            .leadstos
-            .iter()
-            .map(|property| fsl_core::property_target("leadsTo", &property.name)),
-    );
-    targets.sort();
-    targets.dedup();
-    Value::Object(
-        targets
-            .into_iter()
-            .filter_map(|target| {
-                let mut annotations = model
-                    .annotations_for(&target)
-                    .source_order()
-                    .iter()
-                    .map(fsl_syntax::Annotation::render_source)
-                    .collect::<Vec<_>>();
-                annotations.sort();
-                (!annotations.is_empty()).then(|| (target, json!(annotations)))
-            })
-            .collect(),
-    )
-}
-
-fn migration_plan_error_output(source: &str, path: &Path, message: &str) -> Value {
-    let mut output = match fsl_syntax::parse_surface_document(source) {
-        Err(error) => surface_parse_error_output(&error),
         Ok(_) => semantic_error_output(message),
     };
     let object = output.as_object_mut().expect("error envelope");
@@ -997,9 +1029,12 @@ fn atomic_write_migrations(writes: &[(&Path, &str)]) -> Result<(), String> {
     if writes.is_empty() {
         return Ok(());
     }
-    let nonce = format!("{}", std::process::id());
-    let mut prepared = Vec::new();
-    for (index, (path, source)) in writes.iter().enumerate() {
+    // Refuse every target before preparing any replacement: a rename needs
+    // only parent-directory access, so the file's own write access is checked
+    // the way `-o` checks it (#1419), and a refused write set leaves no input
+    // rewritten and no temporary file behind.
+    let mut permissions = Vec::with_capacity(writes.len());
+    for (path, _) in writes {
         let metadata = std::fs::symlink_metadata(path).map_err(|error| error.to_string())?;
         if !metadata.file_type().is_file() {
             return Err(format!(
@@ -1007,20 +1042,31 @@ fn atomic_write_migrations(writes: &[(&Path, &str)]) -> Result<(), String> {
                 path.display()
             ));
         }
+        output_publication::ensure_writable(path, &metadata.permissions())
+            .map_err(|error| error.to_string())?;
+        permissions.push(metadata.permissions());
+    }
+    let nonce = format!("{}", std::process::id());
+    let mut prepared = Vec::new();
+    for (index, ((path, source), permissions)) in writes.iter().zip(permissions).enumerate() {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let temp = parent.join(format!(".fslc-migrate-{nonce}-{index}.tmp"));
         let backup = parent.join(format!(".fslc-migrate-{nonce}-{index}.bak"));
-        let mut file = std::fs::OpenOptions::new()
+        let opened = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&temp)
-            .map_err(|error| error.to_string())?;
-        if let Err(error) = file
-            .write_all(source.as_bytes())
-            .and_then(|()| file.sync_all())
-            .and_then(|()| std::fs::set_permissions(&temp, metadata.permissions()))
-        {
-            let _ = std::fs::remove_file(&temp);
+            .open(&temp);
+        let result = opened.and_then(|mut file| {
+            file.write_all(source.as_bytes())
+                .and_then(|()| file.sync_all())
+                .and_then(|()| std::fs::set_permissions(&temp, permissions))
+                .inspect_err(|_| {
+                    let _ = std::fs::remove_file(&temp);
+                })
+        });
+        if let Err(error) = result {
+            // A failed creation never owned `temp`; earlier files' temporaries
+            // are ours and must not outlive the refused write set.
             for (_, temp, _) in &prepared {
                 let _ = std::fs::remove_file(temp);
             }
@@ -1055,19 +1101,45 @@ fn atomic_write_migrations(writes: &[(&Path, &str)]) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_fmt_semantics(source: &str, path: &Path) -> Result<(), String> {
-    let dialect = fsl_syntax::dialect_keyword(source).map_err(|error| error.to_string())?;
+fn validate_fmt_semantics(
+    source: &str,
+    path: &Path,
+    log: &fslc_rust::migration::DependencyRecords,
+) -> Result<(), String> {
+    let dialect = fsl_syntax::dialect_keyword_with(source, crate::parse_options())
+        .map_err(|error| error.to_string())?;
     if path.as_os_str() == "-" || matches!(dialect, "refinement" | "agent") {
         return Ok(());
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base).report_to(log.clone());
     let source_file = path.to_string_lossy();
-    let kernel = fsl_core::parse_kernel_source_with_file(source, &resolver, source_file)
-        .map_err(|error| error.to_string())?;
+    let kernel = fsl_core::parse_kernel_source_with_file_with_options(
+        source,
+        &resolver,
+        source_file,
+        crate::parse_options(),
+    )
+    .map_err(|error| error.to_string())?;
     fsl_core::build_model(kernel)
         .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+/// The contract of `fmt --lang` / `--names`: the respelled document lowers
+/// to the same checked kernel, apart from locations and lowering origins
+/// (which quote the source as written), as migrate's.
+fn validate_respelled_kernel(before: &str, after: &str, path: &Path) -> Result<(), String> {
+    if path.as_os_str() == "-" {
+        return Ok(());
+    }
+    validate_migration_semantics(before, after, path, fslc_rust::migration::Origins::Ignored)
+        .map_err(|_| {
+            format!(
+                "respelling changed the checked Public Kernel for '{}'; nothing was written",
+                path.display()
+            )
+        })
 }
 
 fn print_cli_metadata() -> bool {
@@ -1077,6 +1149,12 @@ fn print_cli_metadata() -> bool {
         .is_some_and(|argument| argument == "--cli-contract")
     {
         print!("{CLI_CONTRACT}");
+        return true;
+    }
+    // An unknown word after `help` is left to `validate_argv`, which owns
+    // the usage error.
+    if let Some(Ok(help)) = cli_contract::help_alias(CLI_CONTRACT, &arguments) {
+        print!("{help}");
         return true;
     }
     let Some(help_index) = arguments
@@ -1111,70 +1189,57 @@ fn print_cli_metadata() -> bool {
     true
 }
 
-#[allow(clippy::too_many_lines, clippy::while_let_on_iterator)]
+#[allow(clippy::too_many_lines)]
 fn command() -> Result<(Value, i32), String> {
     let mut args = std::env::args().skip(1);
     let command = args
         .next()
-        .ok_or_else(|| "usage: fslc <check|verify> SPEC [options]".to_owned())?;
+        .ok_or_else(|| cli_contract::root_usage(CLI_CONTRACT))?;
     match command.as_str() {
         "version" | "-V" | "--version" => {
             println!("fslc {}", env!("CARGO_PKG_VERSION"));
             std::process::exit(0);
         }
         "check" => {
-            let arguments = args.collect::<Vec<_>>();
-            let mut args = CommandArgs::new(arguments.iter().cloned());
-            let mut strict_tags = false;
-            let mut requirements = None;
-            let mut edition = "current".to_owned();
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--strict-tags" => strict_tags = true,
-                    "--requirements" => {
-                        requirements = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--requirements",
-                        )?));
-                    }
-                    "--edition" => edition = parse_edition(&mut args)?,
-                    _ => args
-                        .positional(option, |option| format!("unknown check option '{option}'"))?,
-                }
-            }
-            let display_path = args.single_positional(
-                || "usage: fslc check SPEC [options]".to_owned(),
-                |argument| format!("unknown check option '{argument}'"),
-            )?;
+            let options = CheckOptions::parse(args)?;
+            let display_path = options.display_path;
             let literate_guard = match literate_access("check", &display_path) {
                 Ok(guard) => guard,
                 Err(early_return) => return Ok(early_return),
             };
             let path = literate_guard
                 .as_ref()
-                .map_or(&display_path, |state| &state.path);
-            let source = match read_spec_source(path) {
+                .map_or_else(|| display_path.clone(), |state| state.path.clone());
+            let source = match literate_guard
+                .map_or_else(|| read_spec_source(&path), |state| Ok(state.source))
+            {
                 Ok(source) => source,
                 Err(error) => return Ok((spec_load_error_output(&error), 2)),
             };
             // Standalone causal models are never kernel specs; route them to
             // the causal checker instead of failing dialect dispatch.
             if fsl_syntax::is_causal_source(&source) {
-                if arguments.len() > 1 {
+                if options.argument_count > 1 {
                     return Err(
                         "fslc check on a causal model accepts no options; use fslc causal check"
                             .to_owned(),
                     );
                 }
-                return Ok(run_causal_check(path));
+                return Ok(run_admitted_root(
+                    &display_path,
+                    Ok(source),
+                    None,
+                    false,
+                    |source| run_causal_check(&path, source),
+                ));
             }
             Ok(with_version_metadata(run_check_with_tags_from_source(
-                path,
+                &path,
                 &display_path,
                 &source,
-                strict_tags,
-                requirements.as_deref(),
-                &edition,
+                options.strict_tags,
+                options.requirements.as_deref(),
+                options.shared.edition,
             )))
         }
         "lint" => {
@@ -1196,118 +1261,49 @@ fn command() -> Result<(Value, i32), String> {
             Ok(run_migrate(&options))
         }
         "kernel" => {
-            let mut args = CommandArgs::new(args);
-            let mut version = fsl_core::PublicKernelVersion::V1;
-            while let Some(argument) = args.next() {
-                match argument.as_str() {
-                    "--kernel-version" => {
-                        let value = required_option_value(&mut args, "--kernel-version")?;
-                        version = match fsl_core::PublicKernelVersion::parse(&value) {
-                            Ok(version) => version,
-                            Err(error) => {
-                                return Ok((semantic_error_output(&error.to_string()), 2));
-                            }
-                        };
-                    }
-                    _ => args.positional(argument, |option| {
-                        format!("unknown kernel option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || "usage: fslc kernel SPEC [--kernel-version MAJOR]".to_owned(),
-                |value| format!("unexpected kernel argument '{value}'"),
-            )?;
-            if let Err(early_return) = literate_access("kernel", &path) {
+            let options = match KernelOptions::parse(args)? {
+                Ok(options) => options,
+                Err(early_return) => return Ok(early_return),
+            };
+            if let Err(early_return) = literate_access("kernel", &options.path) {
                 return Ok(early_return);
             }
-            Ok(run_kernel_contract(&path, version))
+            Ok(run_kernel_contract(&options.path, options.version))
         }
         "conformance" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 4_usize;
-            let mut version = fsl_core::PublicKernelVersion::V1;
-            while let Some(argument) = args.next() {
-                match argument.as_str() {
-                    "--depth" => {
-                        depth = required_option_value(&mut args, "--depth")?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-                    }
-                    "--kernel-version" => {
-                        let value = required_option_value(&mut args, "--kernel-version")?;
-                        version = match fsl_core::PublicKernelVersion::parse(&value) {
-                            Ok(version) => version,
-                            Err(error) => {
-                                return Ok((semantic_error_output(&error.to_string()), 2));
-                            }
-                        };
-                    }
-                    _ => args.positional(argument, |option| {
-                        format!("unknown conformance option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || "usage: fslc conformance SPEC [--depth N] [--kernel-version MAJOR]".to_owned(),
-                |value| format!("unexpected conformance argument '{value}'"),
-            )?;
-            if let Err(early_return) = literate_access("conformance", &path) {
+            let options = match ConformanceOptions::parse(args)? {
+                Ok(options) => options,
+                Err(early_return) => return Ok(early_return),
+            };
+            if let Err(early_return) = literate_access("conformance", &options.path) {
                 return Ok(early_return);
             }
-            Ok(run_conformance(&path, depth, version))
+            Ok(run_conformance(
+                &options.path,
+                options.depth,
+                options.version,
+            ))
         }
         "testplan" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 4_usize;
-            while let Some(argument) = args.next() {
-                match argument.as_str() {
-                    "--depth" => {
-                        depth = required_option_value(&mut args, "--depth")?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-                    }
-                    _ => args.positional(argument, |option| {
-                        format!("unknown testplan option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || "usage: fslc testplan SPEC [--depth N]".to_owned(),
-                |value| format!("unexpected testplan argument '{value}'"),
-            )?;
-            if let Err(early_return) = literate_access("testplan", &path) {
+            let options = TestplanOptions::parse(args)?;
+            if let Err(early_return) = literate_access("testplan", &options.path) {
                 return Ok(early_return);
             }
-            Ok(run_testplan(&path, depth))
+            Ok(run_testplan(&options.path, options.depth))
         }
         "counterexample" => counterexample_command(args),
         "approval" => approval_command(args),
         "document" => document_command(args),
         "db" => db_command(args),
         "compat" => {
-            if args.next().as_deref() != Some("check") {
-                return Err("usage: fslc compat check DBSYSTEM [--include-ai]".to_owned());
-            }
-            let mut args = CommandArgs::new(args);
-            let mut include_ai = false;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--include-ai" => include_ai = true,
-                    _ => args.positional(option, |option| {
-                        format!("unknown compat check option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || "compat check requires a dbsystem".to_owned(),
-                |option| format!("unknown compat check option '{option}'"),
-            )?;
-            if let Err(early_return) = literate_access("compat check", &path) {
+            let options = CompatCheckOptions::parse(args)?;
+            if let Err(early_return) = literate_access("compat check", &options.path) {
                 return Ok(early_return);
             }
-            let (mut result, status) = run_db_check(&path, 8, "warn", "bmc");
-            if include_ai && let Value::Object(result) = &mut result {
+            let (mut result, status) = run_db_check(&options.path, 8, "warn", "bmc");
+            if options.include_ai
+                && let Value::Object(result) = &mut result
+            {
                 result.insert(
                     "compat".to_owned(),
                     json!({"include_ai":true,"source":"dbsystem artifact capability model"}),
@@ -1319,94 +1315,42 @@ fn command() -> Result<(Value, i32), String> {
         "causal" => causal_command(args),
         "domain" => domain_command(args),
         "explain" | "mutate" | "typestate" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 8_usize;
-            let mut readable = false;
-            let mut max_mutants = DEFAULT_MAX_MUTANTS;
-            let mut by_requirement = false;
-            let mut oracle_attribution = false;
-            let mut typescript_only = false;
-            let mut external_mutants = None;
-            let mut gate = MutationGate::default();
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    // Issue #1237: the opt-in mutation gate belongs to `mutate`
-                    // alone; the other two commands sharing this loop reject it
-                    // instead of silently accepting a flag that cannot apply.
-                    "--fail-on-survivors" | "--min-kill-rate" if command != "mutate" => {
-                        return Err(format!("unknown {command} option '{option}'"));
-                    }
-                    "--fail-on-survivors" => gate.fail_on_survivors = true,
-                    "--min-kill-rate" => {
-                        let rate = args
-                            .next()
-                            .ok_or_else(|| "--min-kill-rate requires a value".to_owned())?
-                            .parse::<f64>()
-                            .ok()
-                            .filter(|rate| rate.is_finite() && (0.0..=1.0).contains(rate))
-                            .ok_or_else(|| {
-                                "--min-kill-rate must be a number between 0 and 1".to_owned()
-                            })?;
-                        gate.min_kill_rate = Some(rate);
-                    }
-                    "--depth" => {
-                        depth = args
-                            .next()
-                            .ok_or_else(|| "--depth requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-                    }
-                    "--readable" => readable = true,
-                    "--max-mutants" => {
-                        max_mutants = args
-                            .next()
-                            .ok_or_else(|| "--max-mutants requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--max-mutants must be an integer".to_owned())?;
-                    }
-                    "--by-requirement" => by_requirement = true,
-                    "--oracle-attribution" => oracle_attribution = true,
-                    "--from" => {
-                        external_mutants = Some(PathBuf::from(
-                            args.next()
-                                .ok_or_else(|| "--from requires a JSONL path".to_owned())?,
-                        ));
-                    }
-                    "--ts" => typescript_only = true,
-                    _ => args.positional(option, |option| {
-                        format!("unknown {command} option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || format!("fslc {command} requires a spec"),
-                |option| format!("unknown {command} option '{option}'"),
-            )?;
-            if let Err(early_return) = literate_access(&command, &path) {
+            let options = MutationFamilyOptions::parse(&command, args)?;
+            let path = &options.path;
+            if let Err(early_return) = literate_access(&command, path) {
                 return Ok(early_return);
             }
             let result = match command.as_str() {
-                "explain" => run_explain(&path, depth, readable),
-                "mutate" => run_mutate(
-                    &path,
-                    depth,
-                    max_mutants,
-                    by_requirement,
-                    oracle_attribution,
-                    external_mutants.as_deref(),
-                    gate,
+                "explain" => run_explain(
+                    path,
+                    options.depth,
+                    options.readable,
+                    options.names,
+                    options.lowering,
                 ),
-                "typestate" => run_typestate(&path),
+                "mutate" => run_mutate(
+                    path,
+                    options.depth,
+                    options.max_mutants,
+                    options.by_requirement,
+                    options.oracle_attribution,
+                    options.external_mutants.as_deref(),
+                    MutationGate {
+                        fail_on_survivors: options.fail_on_survivors,
+                        min_kill_rate: options.min_kill_rate,
+                    },
+                ),
+                "typestate" => run_typestate(path, options.typescript_only),
                 _ => unreachable!(),
             };
-            if readable
+            if options.readable
                 && raw_delivery_allowed(&result)
                 && let Some(text) = result.0.get("readable").and_then(Value::as_str)
             {
                 println!("{text}");
                 std::process::exit(result.1);
             }
-            if typescript_only
+            if options.typescript_only
                 && raw_delivery_allowed(&result)
                 && let Some(entities) = result.0.get("entities").and_then(Value::as_array)
             {
@@ -1420,118 +1364,47 @@ fn command() -> Result<(Value, i32), String> {
             Ok(result)
         }
         "testgen" | "html" | "ledger" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 8_usize;
-            let mut output = None;
-            let mut target = "pytest".to_owned();
-            let mut unwired = fsl_tools::UnwiredAdapter::Fail;
-            let mut engine = "bmc".to_owned();
-            let mut impl_log = None;
-            let mut evidence = Vec::new();
-            let mut approval_records = Vec::new();
-            let mut trust_keys = Vec::new();
-            let mut deadlock = if command == "ledger" {
-                "ignore".to_owned()
-            } else {
-                "warn".to_owned()
-            };
-            let mut strict = false;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--depth" => {
-                        depth = args
-                            .next()
-                            .ok_or_else(|| "--depth requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-                    }
-                    "-o" | "--output" => {
-                        output = Some(PathBuf::from(
-                            args.next()
-                                .ok_or_else(|| "--output requires a path".to_owned())?,
-                        ));
-                    }
-                    "--target" => {
-                        target = args
-                            .next()
-                            .ok_or_else(|| "--target requires a value".to_owned())?;
-                    }
-                    "--engine" => {
-                        engine = args
-                            .next()
-                            .ok_or_else(|| "--engine requires a value".to_owned())?;
-                        if !matches!(engine.as_str(), "bmc" | "induction") {
-                            return Err("--engine must be bmc or induction".to_owned());
-                        }
-                    }
-                    "--deadlock" => {
-                        deadlock = args
-                            .next()
-                            .ok_or_else(|| "--deadlock requires a value".to_owned())?;
-                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
-                            return Err("--deadlock must be warn, error, or ignore".to_owned());
-                        }
-                    }
-                    "--impl-log" if command == "ledger" => {
-                        impl_log = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--impl-log",
-                        )?));
-                    }
-                    "--evidence" if command == "ledger" => evidence.push(PathBuf::from(
-                        required_option_value(&mut args, "--evidence")?,
-                    )),
-                    "--approval" if command == "ledger" => approval_records.push(PathBuf::from(
-                        required_option_value(&mut args, "--approval")?,
-                    )),
-                    "--trust-key" if command == "ledger" => trust_keys.push(PathBuf::from(
-                        required_option_value(&mut args, "--trust-key")?,
-                    )),
-                    "--strict" => strict = true,
-                    "--allow-unwired" if command == "testgen" => {
-                        unwired = fsl_tools::UnwiredAdapter::Skip;
-                    }
-                    _ => args.positional(option, |option| {
-                        format!("unknown {command} option '{option}'")
-                    })?,
-                }
-            }
-            let path = args.single_positional(
-                || format!("fslc {command} requires a spec"),
-                |option| format!("unknown {command} option '{option}'"),
-            )?;
-            if let Err(early_return) = literate_access(&command, &path) {
+            let options = ReportOptions::parse(&command, args)?;
+            let path = &options.path;
+            if let Err(early_return) = literate_access(&command, path) {
                 return Ok(early_return);
             }
             let result = match command.as_str() {
                 "testgen" => run_testgen(
-                    &path,
-                    depth,
+                    path,
+                    options.depth,
                     TestgenTarget {
-                        name: &target,
-                        unwired,
+                        name: &options.target,
+                        unwired: options.unwired,
                     },
-                    &deadlock,
-                    strict,
-                    output.as_deref(),
+                    &options.deadlock,
+                    options.strict,
+                    options.output.as_deref(),
                 ),
-                "html" => run_html_report(&path, depth, &deadlock, &engine, output.as_deref()),
+                "html" => run_html_report_with_timing(
+                    path,
+                    options.depth,
+                    &options.deadlock,
+                    &options.engine,
+                    options.output.as_deref(),
+                    options.no_timing,
+                ),
                 "ledger" => run_ledger_report(
                     &LedgerReportRequest {
-                        path: &path,
-                        depth,
-                        deadlock_mode: &deadlock,
-                        engine: &engine,
-                        impl_log: impl_log.as_deref(),
-                        evidence_paths: &evidence,
-                        output_path: output.as_deref(),
+                        path,
+                        depth: options.depth,
+                        deadlock_mode: &options.deadlock,
+                        engine: &options.engine,
+                        impl_log: options.impl_log.as_deref(),
+                        evidence_paths: &options.evidence,
+                        output_path: options.output.as_deref(),
                     },
-                    &approval_records,
-                    &trust_keys,
+                    &options.approval_records,
+                    &options.trust_keys,
                 ),
                 _ => unreachable!(),
             };
-            if output.is_none()
+            if options.output.is_none()
                 && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
                 && let Some(content) = result.0.get("content").and_then(Value::as_str)
@@ -1542,72 +1415,35 @@ fn command() -> Result<(Value, i32), String> {
             Ok(result)
         }
         "analyze" => {
-            let mut args = CommandArgs::new(args);
-            let mut projection = "tsg".to_owned();
-            let mut focus = None;
-            let mut output_format = "json".to_owned();
-            let mut profile = None;
-            let mut export_kind = None;
-            let mut code = None;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--projection" => {
-                        projection = args
-                            .next()
-                            .ok_or_else(|| "--projection requires a value".to_owned())?;
-                    }
-                    "--focus" => focus = Some(required_option_value(&mut args, "--focus")?),
-                    "--format" => {
-                        output_format = args
-                            .next()
-                            .ok_or_else(|| "--format requires a value".to_owned())?;
-                    }
-                    "--profile" => profile = Some(required_option_value(&mut args, "--profile")?),
-                    "--export" => {
-                        export_kind = Some(required_option_value(&mut args, "--export")?);
-                    }
-                    "--code" => {
-                        code = Some(PathBuf::from(required_option_value(&mut args, "--code")?));
-                    }
-                    _ => args.positional(option, |option| {
-                        format!("unknown analyze option '{option}'")
-                    })?,
-                }
-            }
-            let paths = args
-                .into_positionals()
-                .map(PathBuf::from)
-                .collect::<Vec<_>>();
-            if paths.is_empty() {
-                return Err("fslc analyze requires a spec".to_owned());
-            }
-            for path in &paths {
+            let options = AnalyzeOptions::parse(args)?;
+            let paths = &options.paths;
+            for path in paths {
                 if let Err(early_return) = literate_access("analyze", path) {
                     return Ok(early_return);
                 }
             }
             let result = if paths.len() != 1 || paths[0].is_dir() {
                 run_analyze_batch(
-                    &paths,
-                    &projection,
-                    focus.as_deref(),
-                    &output_format,
-                    profile.as_deref(),
-                    export_kind.as_deref(),
-                    code.as_deref(),
+                    paths,
+                    &options.projection,
+                    options.focus.as_deref(),
+                    &options.output_format,
+                    options.profile.as_deref(),
+                    options.export_kind.as_deref(),
+                    options.code.as_deref(),
                 )
             } else {
                 run_analyze(
                     &paths[0],
-                    &projection,
-                    focus.as_deref(),
-                    &output_format,
-                    profile.as_deref(),
-                    export_kind.as_deref(),
-                    code.as_deref(),
+                    &options.projection,
+                    options.focus.as_deref(),
+                    &options.output_format,
+                    options.profile.as_deref(),
+                    options.export_kind.as_deref(),
+                    options.code.as_deref(),
                 )
             };
-            if output_format != "json"
+            if options.output_format != "json"
                 && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("analyzed")
                 && let Some(content) = result.0.get("content").and_then(Value::as_str)
@@ -1618,368 +1454,166 @@ fn command() -> Result<(Value, i32), String> {
             Ok(result)
         }
         "diff" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 8_usize;
-            let mut git_range = None;
-            let mut mapping = None;
-            let mut forbid = Vec::new();
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--depth" => {
-                        depth = args
-                            .next()
-                            .ok_or_else(|| "--depth requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--depth must be an integer".to_owned())?;
-                    }
-                    "--git" => {
-                        git_range = Some(required_option_value(&mut args, "--git")?);
-                    }
-                    "--mapping" => {
-                        mapping = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--mapping",
-                        )?));
-                    }
-                    "--forbid" => {
-                        forbid.extend(
-                            required_option_value(&mut args, "--forbid")?
-                                .split(',')
-                                .map(str::trim)
-                                .filter(|item| !item.is_empty())
-                                .map(str::to_owned),
-                        );
-                    }
-                    _ => {
-                        args.positional(option, |option| {
-                            format!("unknown diff option '{option}'")
-                        })?;
-                    }
-                }
-            }
-            let paths = args
-                .into_positionals()
-                .map(PathBuf::from)
-                .collect::<Vec<_>>();
-            for path in &paths {
+            let options = DiffOptions::parse(args)?;
+            let paths = &options.paths;
+            for path in paths {
                 if let Err(early_return) = literate_access("diff", path) {
                     return Ok(early_return);
                 }
             }
-            if let Some(range) = git_range {
+            if let Some(range) = &options.git_range {
                 if paths.len() > 1 {
-                    return Ok((
-                        error_output("usage", "--git accepts at most one spec path"),
-                        2,
-                    ));
+                    return Ok(error_exit(error_output(
+                        "usage",
+                        "--git accepts at most one spec path",
+                    )));
                 }
                 Ok(run_diff_git(
-                    &range,
+                    range,
                     paths.first().map(PathBuf::as_path),
-                    depth,
-                    mapping.as_deref(),
-                    &forbid,
+                    options.depth,
+                    options.mapping.as_deref(),
+                    &options.forbid,
                 ))
             } else if paths.len() == 2 {
                 Ok(run_diff(
                     &paths[0],
                     &paths[1],
-                    depth,
-                    mapping.as_deref(),
-                    &forbid,
+                    options.depth,
+                    options.mapping.as_deref(),
+                    &options.forbid,
                 ))
             } else {
-                Ok((
-                    error_output("usage", "diff requires OLD NEW or --git BASE..HEAD [SPEC]"),
-                    2,
-                ))
+                Ok(error_exit(error_output(
+                    "usage",
+                    "diff requires OLD NEW or --git BASE..HEAD [SPEC]",
+                )))
             }
         }
         "chain" => {
-            let mut args = CommandArgs::new(args);
-            let mut keep_going = false;
-            let mut jobs = 1_usize;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--keep-going" => keep_going = true,
-                    "--jobs" => {
-                        jobs = args
-                            .next()
-                            .ok_or_else(|| "--jobs requires a value".to_owned())?
-                            .parse()
-                            .ok()
-                            .filter(|jobs| *jobs > 0)
-                            .ok_or_else(|| "--jobs must be a positive integer".to_owned())?;
-                    }
-                    _ => args
-                        .positional(option, |option| format!("unknown chain option '{option}'"))?,
-                }
-            }
-            let mut positionals = args.into_positionals();
-            let path = PathBuf::from(
-                positionals
-                    .next()
-                    .unwrap_or_else(|| "fsl-project.toml".to_owned()),
-            );
-            if let Some(argument) = positionals.next() {
-                return Err(format!("unexpected chain argument '{argument}'"));
-            }
-            let result = run_project_chain(&path, keep_going, jobs);
+            let options = ChainOptions::parse(args)?;
+            let result = run_project_chain(&options.path, options.keep_going, options.jobs);
             eprintln!("{}", format_chain_table(&result.0));
             Ok(result)
         }
         "refine" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = 8_usize;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--depth" => {
-                        depth = args
-                            .next()
-                            .ok_or_else(|| "--depth requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--depth must be a non-negative integer".to_owned())?;
-                    }
-                    _ => args
-                        .positional(option, |option| format!("unknown refine option '{option}'"))?,
-                }
-            }
-            let mut positionals = args.into_positionals().map(PathBuf::from);
-            let mut operand = || {
-                positionals
-                    .next()
-                    .ok_or_else(|| "refine requires IMPL ABS MAPPING".to_owned())
-            };
-            let path = operand()?;
-            let abstraction = operand()?;
-            let mapping = operand()?;
-            let rest = positionals.collect::<Vec<_>>();
-            for candidate in [&path, &abstraction, &mapping].into_iter().chain(&rest) {
+            let options = RefineOptions::parse(args)?;
+            for candidate in [&options.path, &options.abstraction, &options.mapping]
+                .into_iter()
+                .chain(&options.rest)
+            {
                 if let Err(early_return) = literate_access("refine", candidate) {
                     return Ok(early_return);
                 }
             }
-            if rest.is_empty() {
-                Ok(run_refine(&path, &abstraction, &mapping, depth))
-            } else if rest.len() % 2 != 0 {
-                Ok((
-                    error_output(
-                        "io",
-                        "refine chain must list (abs map) pairs after the first mapping",
-                    ),
-                    2,
+            if options.rest.is_empty() {
+                Ok(run_refine_admitted(
+                    &options.path,
+                    &options.abstraction,
+                    &options.mapping,
+                    options.depth,
                 ))
+            } else if options.rest.len() % 2 != 0 {
+                Ok(error_exit(error_output(
+                    "usage",
+                    "refine chain must list (abs map) pairs after the first mapping",
+                )))
             } else {
                 Ok(run_refine_chain(
-                    &path,
-                    &abstraction,
-                    &mapping,
-                    &rest,
-                    depth,
+                    &options.path,
+                    &options.abstraction,
+                    &options.mapping,
+                    &options.rest,
+                    options.depth,
                 ))
             }
         }
         "replay" => {
-            let mut args = CommandArgs::new(args);
-            let mut trace = None;
-            let mut from_log = None;
-            let mut mapping = None;
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--trace" => {
-                        trace = Some(PathBuf::from(required_option_value(&mut args, "--trace")?));
-                    }
-                    "--from-log" => {
-                        from_log = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--from-log",
-                        )?));
-                    }
-                    "--mapping" => {
-                        mapping = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--mapping",
-                        )?));
-                    }
-                    _ => args
-                        .positional(option, |option| format!("unknown replay option '{option}'"))?,
-                }
-            }
-            let path = args.single_positional(
-                || "usage: fslc replay SPEC --trace TRACE.json".to_owned(),
-                |option| format!("unknown replay option '{option}'"),
-            )?;
-            if let Err(early_return) = literate_access("replay", &path) {
+            let options = ReplayOptions::parse(args)?;
+            let path = &options.path;
+            if let Err(early_return) = literate_access("replay", path) {
                 return Ok(early_return);
             }
-            if trace.is_some() && from_log.is_some() {
-                return Ok((
-                    error_output("usage", "--trace and --from-log are mutually exclusive"),
-                    2,
-                ));
+            if options.trace.is_some() && options.from_log.is_some() {
+                return Ok(error_exit(error_output(
+                    "usage",
+                    "--trace and --from-log are mutually exclusive",
+                )));
             }
-            if let Some(log) = from_log {
-                let Some(mapping) = mapping else {
-                    return Ok((
-                        error_output("usage", "--mapping is required with --from-log"),
-                        2,
-                    ));
+            if let Some(log) = &options.from_log {
+                let Some(mapping) = &options.mapping else {
+                    return Ok(error_exit(error_output(
+                        "usage",
+                        "--mapping is required with --from-log",
+                    )));
                 };
-                Ok(run_log_replay(&path, &log, &mapping))
-            } else if let Some(trace) = trace {
-                if mapping.is_some() {
-                    return Ok((
-                        error_output("usage", "--mapping is only valid with --from-log"),
-                        2,
-                    ));
+                Ok(run_log_replay(path, log, mapping))
+            } else if let Some(trace) = &options.trace {
+                if options.mapping.is_some() {
+                    return Ok(error_exit(error_output(
+                        "usage",
+                        "--mapping is only valid with --from-log",
+                    )));
                 }
-                Ok(run_replay(&path, &trace))
+                Ok(run_replay(path, trace))
             } else {
-                Ok((
-                    error_output("usage", "one of --trace or --from-log is required"),
-                    2,
-                ))
+                Ok(error_exit(error_output(
+                    "usage",
+                    "one of --trace or --from-log is required",
+                )))
             }
         }
         "sweep" => {
-            let mut args = CommandArgs::new(args);
-            let mut depth = "0..8".to_owned();
-            let mut deadlock = "warn".to_owned();
-            let mut engine = "bmc".to_owned();
-            let mut k_ind = 1_usize;
-            let mut vacuity = "warn".to_owned();
-            let mut property = None;
-            let mut strict_tags = false;
-            let mut requirements = None;
-            let mut instances = Vec::new();
-            let mut values = Vec::new();
-            while let Some(option) = args.next() {
-                match option.as_str() {
-                    "--depth" => {
-                        depth = args
-                            .next()
-                            .ok_or_else(|| "--depth requires a value".to_owned())?;
-                    }
-                    "--deadlock" => {
-                        deadlock = args
-                            .next()
-                            .ok_or_else(|| "--deadlock requires a value".to_owned())?;
-                        if !matches!(deadlock.as_str(), "warn" | "error" | "ignore") {
-                            return Err("--deadlock must be warn, error, or ignore".to_owned());
-                        }
-                    }
-                    "--engine" => {
-                        engine = args
-                            .next()
-                            .ok_or_else(|| "--engine requires a value".to_owned())?;
-                        if !matches!(engine.as_str(), "bmc" | "induction") {
-                            return Err("--engine must be bmc or induction".to_owned());
-                        }
-                    }
-                    "--k" => {
-                        k_ind = args
-                            .next()
-                            .ok_or_else(|| "--k requires a value".to_owned())?
-                            .parse()
-                            .map_err(|_| "--k must be a positive integer".to_owned())?;
-                        if k_ind == 0 {
-                            return Err("--k must be a positive integer".to_owned());
-                        }
-                    }
-                    "--instances" => instances.push(
-                        args.next()
-                            .ok_or_else(|| "--instances requires a value".to_owned())?,
-                    ),
-                    "--values" => values.push(
-                        args.next()
-                            .ok_or_else(|| "--values requires a value".to_owned())?,
-                    ),
-                    "--property" => {
-                        property = Some(required_option_value(&mut args, "--property")?);
-                    }
-                    "--vacuity" => {
-                        vacuity = required_option_value(&mut args, "--vacuity")?;
-                        if !matches!(vacuity.as_str(), "warn" | "error" | "ignore") {
-                            return Err("--vacuity must be warn, error, or ignore".to_owned());
-                        }
-                    }
-                    "--strict-tags" => strict_tags = true,
-                    "--requirements" => {
-                        requirements = Some(PathBuf::from(required_option_value(
-                            &mut args,
-                            "--requirements",
-                        )?));
-                    }
-                    _ => args
-                        .positional(option, |option| format!("unknown sweep option '{option}'"))?,
-                }
-            }
-            let path = args.single_positional(
-                || "usage: fslc sweep SPEC [options]".to_owned(),
-                |option| format!("unknown sweep option '{option}'"),
-            )?;
-            if let Err(early_return) = literate_access("sweep", &path) {
+            let options = SweepOptions::parse(args)?;
+            if let Err(early_return) = literate_access("sweep", &options.path) {
                 return Ok(early_return);
             }
             Ok(run_sweep(
-                &path,
-                &depth,
-                &deadlock,
-                &engine,
-                k_ind,
-                &vacuity,
-                property.as_deref(),
-                strict_tags,
-                requirements.as_deref(),
-                &instances,
-                &values,
+                &options.path,
+                &options.depth,
+                &options.deadlock,
+                &options.engine,
+                options.k_ind,
+                &options.vacuity,
+                options.property.as_deref(),
+                options.strict_tags,
+                options.requirements.as_deref(),
+                &options.instances,
+                &options.values,
             ))
         }
         "verify" | "scenarios" => {
-            let mut args = CommandArgs::new(args);
-            let options = parse_verify_options(&mut args)?;
-            let display_path = args.single_positional(
-                || format!("usage: fslc {command} SPEC [options]"),
-                |option| format!("unknown verify option '{option}'"),
-            )?;
+            let VerifyCommandOptions {
+                display_path,
+                verify: options,
+            } = VerifyCommandOptions::parse(&command, args)?;
             let literate_guard = match literate_access(&command, &display_path) {
                 Ok(guard) => guard,
                 Err(early_return) => return Ok(early_return),
             };
             let path = literate_guard
                 .as_ref()
-                .map_or(&display_path, |state| &state.path);
+                .map_or_else(|| display_path.clone(), |state| state.path.clone());
             Ok(if command == "verify" {
-                let source = match read_spec_source(path) {
+                let source = match literate_guard
+                    .map_or_else(|| read_spec_source(&path), |state| Ok(state.source))
+                {
                     Ok(source) => source,
                     Err(error) => return Ok((spec_load_error_output(&error), 2)),
                 };
-                let result = run_verify_cli_from_source(path, &display_path, &source, &options);
-                with_version_metadata(apply_domain_edition_from_source(
-                    result,
-                    &source,
+                with_version_metadata(run_verify_cli_from_source(
+                    &path,
                     &display_path,
-                    &options.edition,
+                    &source,
+                    &options,
                 ))
             } else {
-                if options.engine != "bmc"
-                    || options.explicit_budget != DEFAULT_EXPLICIT_BUDGET
-                    || options.k_ind != 1
-                    || options.vacuity != "warn"
-                    || options.property.is_some()
-                    || !options.exclude_properties.is_empty()
-                    || !options.scope.instances.is_empty()
-                    || !options.scope.values.is_empty()
-                    || options.strict_tags
-                    || options.requirements.is_some()
-                    || !options.use_cache
-                    || !options.lemmas.is_empty()
-                    || options.from_state.is_some()
-                    || options.edition != "current"
-                {
+                if !options.only_depth_and_deadlock() {
                     return Err("scenarios accepts only --depth and --deadlock".to_owned());
                 }
-                run_scenarios(path, options.depth, &options.deadlock)
+                let source = literate_guard
+                    .map_or_else(|| read_spec_source(&path), |state| Ok(state.source));
+                run_scenarios(&path, source, options.depth, &options.deadlock)
             })
         }
         _ => Err(format!("unknown command '{command}'")),
@@ -2095,7 +1729,16 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                             .to_owned(),
                     );
                 }
-                document_generation_inputs(&artifact, glossary.as_deref(), &evidence_paths)?
+                match document_generation_inputs(&artifact, glossary.as_deref(), &evidence_paths) {
+                    Ok(inputs) => inputs,
+                    Err(DocumentInputError::Usage(message)) => return Err(message),
+                    Err(DocumentInputError::Io(message)) => {
+                        return Ok((
+                            io_error_output(&message),
+                            fslc_rust::outcome::SPEC_ERROR_EXIT,
+                        ));
+                    }
+                }
             } else {
                 if glossary.is_some() || !evidence_paths.is_empty() {
                     return Err(
@@ -2189,7 +1832,7 @@ fn approval_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
 fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
     let subcommand = args
         .next()
-        .ok_or_else(|| "usage: fslc document <generate|claims> SPEC [options]".to_owned())?;
+        .ok_or_else(|| "usage: fslc document <generate|claims|check> SPEC [options]".to_owned())?;
     // Only the three known subcommands are registered
     // (`literate_access.rs`'s `LITERATE_REGISTRY`) and reach this gate; an
     // unrecognized subcommand falls through to the match's own `_` arm and
@@ -2268,17 +1911,20 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             if let Err(early_return) = gate(&path) {
                 return Ok(early_return);
             }
-            let result = run_document_generate(
-                &path,
-                locale,
-                strict,
-                strict_rendering,
-                glossary.as_deref(),
-                &evidence_paths,
-                &approval_paths,
-                &trust_keys,
-                output.as_deref(),
-            );
+            let result = run_admitted_root(&path, read_spec_source(&path), None, false, |source| {
+                run_document_generate(
+                    &path,
+                    source,
+                    locale,
+                    strict,
+                    strict_rendering,
+                    glossary.as_deref(),
+                    &evidence_paths,
+                    &approval_paths,
+                    &trust_keys,
+                    output.as_deref(),
+                )
+            });
             if output.is_none()
                 && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
@@ -2327,7 +1973,13 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
             if let Err(early_return) = gate(&path) {
                 return Ok(early_return);
             }
-            let result = run_document_claims(&path, output.as_deref());
+            let result = run_admitted_root(
+                &path,
+                read_spec_source(&path),
+                None,
+                output.is_none(),
+                |source| run_document_claims(&path, source, output.as_deref()),
+            );
             if output.is_none()
                 && raw_delivery_allowed(&result)
                 && result.0.get("result").and_then(Value::as_str) == Some("generated")
@@ -2381,12 +2033,21 @@ fn document_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i3
                     option.display()
                 ));
             }
-            Ok(run_document_check(
+            Ok(run_admitted_root(
                 &path,
-                &artifact,
-                glossary.as_deref(),
-                &evidence_paths,
-                &approval_paths,
+                read_spec_source(&path),
+                None,
+                false,
+                |source| {
+                    run_document_check(
+                        &path,
+                        source,
+                        &artifact,
+                        glossary.as_deref(),
+                        &evidence_paths,
+                        &approval_paths,
+                    )
+                },
             ))
         }
         _ => Err(format!("unknown document subcommand '{subcommand}'")),
@@ -2419,38 +2080,83 @@ fn document_projection_error_output(error: &fsl_tools::DocumentProjectionError) 
     }
 }
 
-fn load_document_claims(path: &Path) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
-    load_document_claims_with_label(path, &path.to_string_lossy())
-}
-
-/// Like [`load_document_claims`], but projects under an explicit label
+/// Projects caller-owned source under an explicit label
 /// rather than `path`'s own spelling. `fslc document check` (issue #329)
 /// needs this: every rendered `出典`/`Source:` line carries the label
 /// verbatim, so re-projecting under a *different* spelling of the same file
 /// (e.g. a relative-path difference from running `check` in another
 /// directory than `generate`) would report false drift. `check` re-projects
 /// under the label the artifact's own frontmatter recorded instead.
-fn load_document_claims_with_label(
+fn load_document_claims_from_source(
     path: &Path,
+    source: &str,
     label: &str,
-) -> Result<(String, fsl_tools::RequirementClaimSet), Value> {
-    let source = read_spec_source(path).map_err(|error| spec_load_error_output(&error))?;
+) -> Result<fsl_tools::RequirementClaimSet, Value> {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    match fsl_tools::project_requirement_claims_from_source(&source, Some(label), base) {
-        Ok(claims) => Ok((source, claims)),
+    match fsl_tools::project_requirement_claims_from_source_with_options(
+        source,
+        Some(label),
+        base,
+        crate::parse_options(),
+    ) {
+        Ok(claims) => {
+            document_trace_gate(source, base)?;
+            note_implements_target(source, base);
+            Ok(claims)
+        }
         // The projector reports a surface-parse failure as a plain message, so
         // recover the span and emit the same `kind:"parse"` envelope `check`
         // emits instead of a location-free `semantics` error.
-        Err(error) => Err(surface_parse_failure(&source).map_or_else(
-            || {
-                document_model_failure(&source, base).map_or_else(
-                    || document_projection_error_output(&error),
-                    |failure| model_error_output(&failure),
-                )
-            },
-            |error| surface_parse_error_output(&error),
-        )),
+        Err(error) => Err(
+            surface_parse_failure(source, crate::parse_options()).map_or_else(
+                || {
+                    document_model_failure(source, base).map_or_else(
+                        || document_projection_error_output(&error),
+                        |failure| model_error_output(&failure),
+                    )
+                },
+                |error| surface_parse_error_output(&error),
+            ),
+        ),
     }
+}
+
+/// Record the abstraction an `implements ... from` names as an input of the
+/// command although the document commands never read it, so `-o` onto it is
+/// refused instead of replacing the user's spec (#1753). It is the only file a
+/// `spec` or `requirements` document declares that projection does not load;
+/// imports are recorded by the resolver that reads them. The path resolves
+/// against the spec's directory, as the resolver that would read it does.
+fn note_implements_target(source: &str, base: &Path) {
+    let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+    else {
+        return;
+    };
+    for item in &requirements.items {
+        if let fsl_syntax::RequirementsItem::Implements { path, .. } = item {
+            output_publication::note_input(&base.join(path));
+        }
+    }
+}
+
+/// The requirement-trace gate for every `document` command and the
+/// `requirements_document` approval, which all project through
+/// [`load_document_claims_from_source`]: the document states a claim per
+/// acceptance / forbidden case, so a spec whose traces the gate refuses gets
+/// the gate's error (exit 2) instead of a document (#1243). The model is built
+/// the way the document commands build theirs. A requirements check the
+/// solver refutes rejects the spec after the gate, as `check` orders them.
+fn document_trace_gate(source: &str, base: &Path) -> Result<(), Value> {
+    let resolver = dependency_resolver(base);
+    let kernel =
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+            .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let model = fsl_core::build_model(kernel).map_err(|error| model_error_output(&error))?;
+    require_trace_gate(source, &model).and_then(|_checked| {
+        spec_loading::reject_refuted_requirements(source, &model)
+            .map_err(|error| spec_load_error_output(&error))
+    })
 }
 
 /// Recover the typed-model diagnostic behind a document-projection failure that
@@ -2464,8 +2170,12 @@ fn load_document_claims_with_label(
 /// projection failure that is not a model failure, leaving the projector's own
 /// envelope in place.
 fn document_model_failure(source: &str, base: &Path) -> Option<fsl_core::ModelError> {
-    let resolver = fsl_core::FsResolver::new(base);
-    fsl_core::build_model(fsl_core::parse_kernel_source(source, &resolver).ok()?).err()
+    let resolver = dependency_resolver(base);
+    fsl_core::build_model(
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+            .ok()?,
+    )
+    .err()
 }
 
 fn document_diagnostics_error(
@@ -2553,13 +2263,24 @@ fn load_glossary(
     path: Option<&Path>,
     expected_locale: fsl_tools::Locale,
 ) -> Result<Option<(fsl_tools::Glossary, String)>, Value> {
+    load_glossary_with_base(path, expected_locale, None)
+}
+
+fn load_glossary_with_base(
+    path: Option<&Path>,
+    expected_locale: fsl_tools::Locale,
+    path_base: Option<&Path>,
+) -> Result<Option<(fsl_tools::Glossary, String)>, Value> {
     let Some(path) = path else {
         return Ok(None);
     };
-    let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+    let resolved = approval::resolve_io_path(path, path_base);
+    let bytes = std::fs::read(&resolved)
+        .map_err(|error| io_error_output(&read_failure_message(path, &error)))?;
+    output_publication::note_input(&resolved);
     let digest = approval::sha256_bytes(&bytes);
     let text = String::from_utf8(bytes)
-        .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+        .map_err(|error| io_error_output(&format!("{}: {error}", path.display())))?;
     let glossary = fsl_tools::parse_glossary(&text)
         .map_err(|issues| document_glossary_issue_error(&issues))?;
     if glossary.locale != expected_locale {
@@ -2583,6 +2304,13 @@ fn document_evidence_error(message: &str) -> Value {
 
 type EvidenceFiles = Vec<(String, Value)>;
 
+struct LoadedDocumentEvidence {
+    files: EvidenceFiles,
+    digest: String,
+    // Original input order, from the same buffers parsed into `files`.
+    input_digests: Vec<String>,
+}
+
 /// Load and parse every `--evidence` file (issue #332) — each must be a JSON
 /// object envelope in the same shape `fslc ledger --evidence` already
 /// accepts; this module classifies nothing itself (`fsl_tools::ledger`'s
@@ -2592,16 +2320,33 @@ type EvidenceFiles = Vec<(String, Value)>;
 /// *set* given in a different `--evidence` order still yields the same
 /// `evidence_digest` frontmatter value.
 fn load_evidence(paths: &[PathBuf]) -> Result<Option<(EvidenceFiles, String)>, Value> {
+    load_evidence_with_base(paths, None)
+}
+
+fn load_evidence_with_base(
+    paths: &[PathBuf],
+    path_base: Option<&Path>,
+) -> Result<Option<(EvidenceFiles, String)>, Value> {
+    Ok(load_document_evidence(paths, path_base)?.map(|loaded| (loaded.files, loaded.digest)))
+}
+
+fn load_document_evidence(
+    paths: &[PathBuf],
+    path_base: Option<&Path>,
+) -> Result<Option<LoadedDocumentEvidence>, Value> {
     if paths.is_empty() {
         return Ok(None);
     }
     let mut files = Vec::new();
     let mut digests = Vec::new();
     for path in paths {
-        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        let resolved = approval::resolve_io_path(path, path_base);
+        let bytes = std::fs::read(&resolved)
+            .map_err(|error| io_error_output(&read_failure_message(path, &error)))?;
+        output_publication::note_input(&resolved);
         digests.push(approval::sha256_bytes(&bytes));
         let text = String::from_utf8(bytes)
-            .map_err(|error| error_output("io", &format!("{}: {error}", path.display())))?;
+            .map_err(|error| io_error_output(&format!("{}: {error}", path.display())))?;
         let value = serde_json::from_str::<Value>(&text).map_err(|error| {
             document_evidence_error(&format!("{}: invalid JSON: {error}", path.display()))
         })?;
@@ -2613,9 +2358,14 @@ fn load_evidence(paths: &[PathBuf]) -> Result<Option<(EvidenceFiles, String)>, V
         }
         files.push((path.display().to_string(), value));
     }
-    digests.sort();
-    let combined = approval::sha256_bytes(digests.join("\n").as_bytes());
-    Ok(Some((files, combined)))
+    let mut sorted_digests = digests.clone();
+    sorted_digests.sort();
+    let combined = approval::sha256_bytes(sorted_digests.join("\n").as_bytes());
+    Ok(Some(LoadedDocumentEvidence {
+        files,
+        digest: combined,
+        input_digests: digests,
+    }))
 }
 
 fn document_approval_error(message: &str) -> Value {
@@ -2661,18 +2411,18 @@ struct LoadedApproval {
 /// file's own digest before hashing them together, the same order-
 /// independent scheme `load_evidence`/`load_glossary` already use.
 fn load_approvals(
+    spec_path: &Path,
     paths: &[PathBuf],
     trust_keys: &[PathBuf],
 ) -> Result<Option<(Vec<LoadedApproval>, String)>, Value> {
     if paths.is_empty() {
         return Ok(None);
     }
-    let trust =
-        approval::TrustStore::load(trust_keys).map_err(|error| error_output("io", &error))?;
+    let trust = approval::TrustStore::load(trust_keys).map_err(|error| io_error_output(&error))?;
     let mut loaded = Vec::new();
     let mut digests = Vec::new();
     for path in paths {
-        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        let bytes = read_input_bytes(path).map_err(|error| io_error_output(&error))?;
         digests.push(approval::sha256_bytes(&bytes));
         let versioned = approval::read_versioned_record(path)
             .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
@@ -2681,7 +2431,7 @@ fn load_approvals(
             approval::VersionedApprovalRecord::V2(record) => {
                 let verified = trust
                     .verify(record)
-                    .map_err(|error| error_output("io", &error))?;
+                    .map_err(|error| io_error_output(&error))?;
                 if !verified {
                     return Err(document_approval_error(&format!(
                         "{}: signature is invalid or untrusted",
@@ -2698,8 +2448,20 @@ fn load_approvals(
                 record.target.kind
             )));
         }
-        let current_reviewed_digest = approval::reviewed_artifact_digest(&record)
-            .map_err(|error| error_output("io", &error))?;
+        // Only a contextual record needs the checkout root, to read its reviewed target.
+        let root = match &record.path_base {
+            Some(base) => {
+                let root = approval::spec_checkout(spec_path)
+                    .map_err(|(kind, error)| error_output(kind, &error))?
+                    .root;
+                approval::require_inside_root(&root, base, &record.target.path)
+                    .map_err(|error| error_output("semantics", &error))?;
+                Some(root)
+            }
+            None => None,
+        };
+        let current_reviewed_digest = approval::reviewed_artifact_digest(&record, root.as_deref())
+            .map_err(|error| io_error_output(&error))?;
         loaded.push(LoadedApproval {
             record,
             record_path: path.display().to_string(),
@@ -2715,6 +2477,7 @@ fn load_approvals(
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_document_generate(
     path: &Path,
+    source: &str,
     locale: fsl_tools::Locale,
     strict: bool,
     strict_rendering: bool,
@@ -2724,8 +2487,8 @@ fn run_document_generate(
     trust_keys: &[PathBuf],
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let (source, claims) = match load_document_claims(path) {
-        Ok(parts) => parts,
+    let claims = match load_document_claims_from_source(path, source, &path.to_string_lossy()) {
+        Ok(claims) => claims,
         Err(output) => return (output, 2),
     };
     if let Some(error) = document_diagnostics_error(&claims, strict) {
@@ -2765,11 +2528,13 @@ fn run_document_generate(
         }
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
-    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
-        Ok(kernel) => kernel,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
-    };
+    let resolver = dependency_resolver(base);
+    let kernel =
+        match fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+        {
+            Ok(kernel) => kernel,
+            Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
         Err(error) => return (model_error_output(&error), 2),
@@ -2804,18 +2569,19 @@ fn run_document_generate(
     let applied_evidence = loaded_evidence
         .as_ref()
         .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
-    let rendered = match fsl_tools::render_requirements_document(
+    let rendered = match fsl_tools::render_requirements_document_with_options(
         &claims,
         &kernel,
         &model,
-        &source,
+        source,
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
         None,
+        crate::parse_options(),
     ) {
         Ok(rendered) => rendered,
-        Err(error) => return (error_output("document", &error), 2),
+        Err(error) => return error_exit(error_output("document", &error)),
     };
     if strict_rendering && rendered.formula_fallback_count > 0 {
         let mut output = error_output(
@@ -2833,7 +2599,7 @@ fn run_document_generate(
     }
     let pre_approval_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
 
-    let loaded_approvals = match load_approvals(approval_paths, trust_keys) {
+    let loaded_approvals = match load_approvals(path, approval_paths, trust_keys) {
         Ok(loaded) => loaded,
         Err(output) => return (output, 2),
     };
@@ -2885,27 +2651,28 @@ fn run_document_generate(
             records: &applied_approvals_vec,
             digest: combined_digest,
         };
-        match fsl_tools::render_requirements_document(
+        match fsl_tools::render_requirements_document_with_options(
             &claims,
             &kernel,
             &model,
-            &source,
+            source,
             locale,
             applied_glossary.as_ref(),
             applied_evidence.as_ref(),
             Some(&applied_approvals),
+            crate::parse_options(),
         ) {
             Ok(rendered) => rendered,
-            Err(error) => return (error_output("document", &error), 2),
+            Err(error) => return error_exit(error_output("document", &error)),
         }
     } else {
         rendered
     };
     let artifact_digest = approval::sha256_bytes(rendered.markdown.as_bytes());
     if let Some(path) = output_path
-        && let Err(error) = std::fs::write(path, &rendered.markdown)
+        && let Err(error) = output_publication::publish(path, &rendered.markdown)
     {
-        return (error_output("io", &error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("generated"));
@@ -2989,9 +2756,9 @@ fn run_document_generate(
     (Value::Object(output), 0)
 }
 
-fn run_document_claims(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
-    let (_, claims) = match load_document_claims(path) {
-        Ok(parts) => parts,
+fn run_document_claims(path: &Path, source: &str, output_path: Option<&Path>) -> (Value, i32) {
+    let claims = match load_document_claims_from_source(path, source, &path.to_string_lossy()) {
+        Ok(claims) => claims,
         Err(output) => return (output, 2),
     };
     let content = match serde_json::to_string_pretty(&claims) {
@@ -2999,9 +2766,9 @@ fn run_document_claims(path: &Path, output_path: Option<&Path>) -> (Value, i32) 
         Err(error) => return (error_output("internal", &error.to_string()), 2),
     };
     if let Some(path) = output_path
-        && let Err(error) = std::fs::write(path, &content)
+        && let Err(error) = output_publication::publish(path, &content)
     {
-        return (error_output("io", &error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("generated"));
@@ -3047,7 +2814,7 @@ fn load_approvals_for_check(
     let mut applied = Vec::new();
     let mut digests = Vec::new();
     for path in paths {
-        let bytes = std::fs::read(path).map_err(|error| error_output("io", &error.to_string()))?;
+        let bytes = read_input_bytes(path).map_err(|error| io_error_output(&error))?;
         digests.push(approval::sha256_bytes(&bytes));
         let versioned = approval::read_versioned_record(path)
             .map_err(|error| document_approval_error(&format!("{}: {error}", path.display())))?;
@@ -3085,14 +2852,15 @@ fn load_approvals_for_check(
 #[allow(clippy::too_many_lines)]
 fn run_document_check(
     spec_path: &Path,
+    source: &str,
     artifact: &Path,
     glossary_path: Option<&Path>,
     evidence_paths: &[PathBuf],
     approval_paths: &[PathBuf],
 ) -> (Value, i32) {
-    let artifact_text = match std::fs::read_to_string(artifact) {
+    let artifact_text = match read_input_text(artifact) {
         Ok(text) => text,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let frontmatter = match fsl_tools::parse_frontmatter_only(&artifact_text) {
         Ok(frontmatter) => frontmatter,
@@ -3125,16 +2893,18 @@ fn run_document_check(
         .source
         .clone()
         .unwrap_or_else(|| spec_path.to_string_lossy().into_owned());
-    let (source, claims) = match load_document_claims_with_label(spec_path, &spec_label) {
-        Ok(parts) => parts,
+    let claims = match load_document_claims_from_source(spec_path, source, &spec_label) {
+        Ok(claims) => claims,
         Err(output) => return (output, 2),
     };
     let base = spec_path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
-    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
-        Ok(kernel) => kernel,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
-    };
+    let resolver = dependency_resolver(base);
+    let kernel =
+        match fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+        {
+            Ok(kernel) => kernel,
+            Err(error) => return (semantic_error_output(&error.to_string()), 2),
+        };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
         Err(error) => return (model_error_output(&error), 2),
@@ -3160,18 +2930,19 @@ fn run_document_check(
     let applied_approvals = loaded_approvals
         .as_ref()
         .map(|(records, digest)| fsl_tools::AppliedApprovals { records, digest });
-    let rendered = match fsl_tools::render_requirements_document(
+    let rendered = match fsl_tools::render_requirements_document_with_options(
         &claims,
         &kernel,
         &model,
-        &source,
+        source,
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
         applied_approvals.as_ref(),
+        crate::parse_options(),
     ) {
         Ok(rendered) => rendered,
-        Err(error) => return (error_output("document", &error), 2),
+        Err(error) => return error_exit(error_output("document", &error)),
     };
 
     let report =
@@ -3345,6 +3116,9 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
         let mut from_label = None;
         let mut to_label = None;
         while let Some(option) = args.next() {
+            if option == "--" {
+                break;
+            }
             let value = args
                 .next()
                 .ok_or_else(|| format!("{option} requires a value"))?;
@@ -3517,9 +3291,9 @@ fn ai_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), St
 
 #[allow(clippy::too_many_lines)]
 fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32), String> {
-    let subcommand = args
-        .next()
-        .ok_or_else(|| "usage: fslc domain <check|analyze|expand|generate> ...".to_owned())?;
+    let subcommand = args.next().ok_or_else(|| {
+        "usage: fslc domain <check|analyze|expand|generate|replay|testgen> ...".to_owned()
+    })?;
     // Options may precede the file (#1250): each subcommand resolves it after
     // its option loop, then gates it. A stray argument keeps the wording the
     // subcommand used for it before.
@@ -3542,7 +3316,7 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
                 Ok(path) => path,
                 Err(early_return) => return Ok(early_return),
             };
-            Ok(run_domain_check(&path, depth, &deadlock, &engine, &edition))
+            Ok(run_domain_check(&path, depth, &deadlock, &engine, edition))
         }
         "analyze" => {
             while let Some(option) = args.next() {
@@ -3699,27 +3473,23 @@ fn domain_command(mut args: impl Iterator<Item = String>) -> Result<(Value, i32)
     }
 }
 
-fn parse_sweep_range(raw: &str, flag: &str) -> Result<(String, (i64, i64)), String> {
-    let (name, range) = raw
-        .split_once('=')
-        .ok_or_else(|| format!("invalid {flag} value '{raw}': expected NAME=LO..HI"))?;
-    let (lo, hi) = range
-        .split_once("..")
-        .ok_or_else(|| format!("invalid {flag} value '{raw}': expected NAME=LO..HI"))?;
-    let lo = lo
-        .trim()
-        .parse::<i64>()
-        .map_err(|_| format!("invalid {flag} value '{raw}': bounds must be integers"))?;
-    let hi = hi
-        .trim()
-        .parse::<i64>()
-        .map_err(|_| format!("invalid {flag} value '{raw}': bounds must be integers"))?;
-    if name.trim().is_empty() || lo > hi {
-        return Err(format!(
-            "invalid {flag} value '{raw}': lower bound must be <= upper bound"
-        ));
-    }
-    Ok((name.trim().to_owned(), (lo, hi)))
+const MAX_SWEEP_CELLS: usize = 10_000;
+
+fn checked_sweep_cell_count(
+    depth_lo: usize,
+    depth_hi: usize,
+    instance_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
+    value_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> Option<usize> {
+    let depth_count = depth_hi.checked_sub(depth_lo)?.checked_add(1)?;
+    let cells = instance_ranges
+        .values()
+        .chain(value_ranges.values())
+        .try_fold(depth_count, |cells, (lo, hi)| {
+            let width = usize::try_from(i128::from(*hi) - i128::from(*lo) + 1).ok()?;
+            cells.checked_mul(width)
+        })?;
+    (cells <= MAX_SWEEP_CELLS).then_some(cells)
 }
 
 fn integer_combinations(
@@ -3756,52 +3526,40 @@ fn run_sweep(
     value_args: &[String],
 ) -> (Value, i32) {
     let Some((depth_lo, depth_hi)) = depth_range.split_once("..") else {
-        return (
-            error_output(
-                "semantics",
-                &format!("invalid --depth value '{depth_range}': expected LO..HI"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("invalid --depth value '{depth_range}': expected LO..HI"),
+        ));
     };
     let parsed_depth = depth_lo
         .trim()
         .parse::<usize>()
         .and_then(|lo| depth_hi.trim().parse::<usize>().map(|hi| (lo, hi)));
     let Ok((depth_lo, depth_hi)) = parsed_depth else {
-        return (
-            error_output(
-                "semantics",
-                "invalid --depth value: bounds must be integers",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "invalid --depth value: bounds must be integers",
+        ));
     };
     if depth_lo > depth_hi {
-        return (
-            error_output(
-                "semantics",
-                &format!("invalid --depth value '{depth_range}': expected 0 <= LO <= HI"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("invalid --depth value '{depth_range}': expected 0 <= LO <= HI"),
+        ));
     }
     let mut instance_ranges = std::collections::BTreeMap::new();
     for argument in instance_args {
         let (name, range) = match parse_sweep_range(argument, "--instances") {
             Ok(value) => value,
-            Err(error) => return (error_output("semantics", &error), 2),
+            Err(error) => return error_exit(error_output("semantics", &error)),
         };
         if range.0 < 1 {
-            return (
-                error_output(
-                    "semantics",
-                    &format!(
-                        "invalid --instances value '{argument}': instance lower bound must be >= 1"
-                    ),
+            return error_exit(error_output(
+                "semantics",
+                &format!(
+                    "invalid --instances value '{argument}': instance lower bound must be >= 1"
                 ),
-                2,
-            );
+            ));
         }
         instance_ranges.insert(name, range);
     }
@@ -3809,12 +3567,60 @@ fn run_sweep(
     for argument in value_args {
         let (name, range) = match parse_sweep_range(argument, "--values") {
             Ok(value) => value,
-            Err(error) => return (error_output("semantics", &error), 2),
+            Err(error) => return error_exit(error_output("semantics", &error)),
         };
         value_ranges.insert(name, range);
     }
-    let instance_combinations = integer_combinations(&instance_ranges);
-    let value_upper_combinations = integer_combinations(&value_ranges);
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            run_sweep_grid_from_source(
+                path,
+                &sources[0],
+                &editions[0],
+                depth_lo,
+                depth_hi,
+                deadlock_mode,
+                engine,
+                k_ind,
+                vacuity_mode,
+                property,
+                strict_tags,
+                requirements,
+                &instance_ranges,
+                &value_ranges,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+fn run_sweep_grid_from_source(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    depth_lo: usize,
+    depth_hi: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    k_ind: usize,
+    vacuity_mode: &str,
+    property: Option<&str>,
+    strict_tags: bool,
+    requirements: Option<&Path>,
+    instance_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
+    value_ranges: &std::collections::BTreeMap<String, (i64, i64)>,
+) -> (Value, i32) {
+    if checked_sweep_cell_count(depth_lo, depth_hi, instance_ranges, value_ranges).is_none() {
+        return error_exit(error_output(
+            "semantics",
+            &format!("sweep grid exceeds the maximum of {MAX_SWEEP_CELLS} cells"),
+        ));
+    }
+    let instance_combinations = integer_combinations(instance_ranges);
+    let value_upper_combinations = integer_combinations(value_ranges);
     let mut results = Vec::new();
     let mut minimal = None;
     let mut spec_name = None;
@@ -3860,9 +3666,10 @@ fn run_sweep(
                     use_cache: true,
                     lemmas: Vec::new(),
                     from_state: None,
-                    edition: "current".to_owned(),
+                    shared: SharedOptions::default(),
                 };
-                let (mut verification, status) = run_verify_cli(path, path, &options);
+                let (mut verification, status) =
+                    run_verify_cli_admitted(path, path, source, &options, Some(edition));
                 if verification.get("result").and_then(Value::as_str) == Some("error") {
                     // A spec error (parse/type/semantics/io/vacuous/…) is not a
                     // counterexample: folding it into the sweep grid let a single
@@ -4146,8 +3953,13 @@ fn parse_manifest_depth(layer: &str, key: &str, raw: &str) -> Result<usize, Stri
 fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32) {
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
-        Err(_) => {
-            let mut output = error_output("io", &format!("file not found: {}", path.display()));
+        Err(error) => {
+            let message = if error.kind() == std::io::ErrorKind::NotFound {
+                format!("file not found: {}", path.display())
+            } else {
+                read_failure_message(path, &error)
+            };
+            let mut output = io_error_output(&message);
             if let Value::Object(output) = &mut output {
                 output.insert("manifest".to_owned(), json!(path.display().to_string()));
             }
@@ -4227,7 +4039,11 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
     };
-    let mut results = run_chain_steps(&steps, &sections, base, keep_going, jobs);
+    let roots = match prepare_project_roots(&sections, base, read_spec_source) {
+        Ok(roots) => roots,
+        Err(refusal) => return refusal,
+    };
+    let mut results = run_chain_steps(&steps, &sections, base, roots, keep_going, jobs);
     let mut layers = Vec::new();
     for (index, slot) in results.iter_mut().enumerate() {
         // Every step up to and including the first failure has run at any
@@ -4265,7 +4081,8 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         layer
             .get("exit_code")
             .and_then(Value::as_i64)
-            .is_some_and(|code| matches!(code, 2 | 3))
+            .and_then(|code| i32::try_from(code).ok())
+            .is_some_and(is_error_exit)
     });
     // A run whose only failures are `indeterminate` layers (an `[impl]`
     // report that records no executed test, issue #1200) did not find a
@@ -4274,17 +4091,17 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
         .iter()
         .filter(|layer| layer.get("status").and_then(Value::as_str) == Some("failed"))
         .all(|layer| layer.get("result").and_then(Value::as_str) == Some("indeterminate"));
-    let result = if failed_layers.is_empty() {
-        "verified"
+    let verdict = if failed_layers.is_empty() {
+        Verdict::Verified
     } else if has_error {
-        "error"
+        Verdict::SpecError
     } else if all_indeterminate {
-        "indeterminate"
+        Verdict::Indeterminate
     } else {
-        "violated"
+        Verdict::Violated
     };
     let mut output = envelope();
-    output.insert("result".to_owned(), json!(result));
+    output.insert("result".to_owned(), json!(verdict.result()));
     output.insert("manifest".to_owned(), json!(path.display().to_string()));
     output.insert("keep_going".to_owned(), json!(keep_going));
     // An `[impl]` layer that opted into exit-code evidence passed or failed on
@@ -4317,14 +4134,8 @@ fn run_project_chain(path: &Path, keep_going: bool, jobs: usize) -> (Value, i32)
             );
         }
     }
-    let status = if failed_layers.is_empty() {
-        0
-    } else if has_error {
-        2
-    } else {
-        1
-    };
-    (Value::Object(output), status)
+    // The run's exit code is its verdict's, from the one table (#901).
+    (Value::Object(output), verdict.exit_code())
 }
 
 /// The result slot of each planned chain step, in manifest order. `None` is a
@@ -4342,11 +4153,7 @@ type ChainStepResults = Vec<Option<(Value, bool)>>;
 /// the root file's bytes is conservative: it covers every pair that can share
 /// a key, plus some that cannot. Refine and `impl` steps never touch the
 /// cache.
-fn chain_step_groups(
-    steps: &[(String, String)],
-    sections: &std::collections::BTreeMap<String, ManifestSection>,
-    base: &Path,
-) -> Vec<Vec<usize>> {
+fn chain_step_groups(steps: &[(String, String)], roots: &[ProjectRoot]) -> Vec<Vec<usize>> {
     let mut groups = Vec::<Vec<usize>>::new();
     let mut by_source = std::collections::BTreeMap::<Vec<u8>, usize>::new();
     for (index, (kind, layer)) in steps.iter().enumerate() {
@@ -4354,9 +4161,14 @@ fn chain_step_groups(
             continue;
         }
         let source = (kind == "spec")
-            .then(|| sections[layer].values.get("file"))
+            .then(|| {
+                roots
+                    .iter()
+                    .find(|root| root.layer == layer && !root.mapping)
+            })
             .flatten()
-            .and_then(|file| std::fs::read(base.join(file)).ok());
+            .and_then(|root| root.source.as_ref().ok())
+            .map(|source| source.as_bytes().to_vec());
         match source {
             Some(source) => {
                 if let Some(&group) = by_source.get(&source) {
@@ -4388,12 +4200,17 @@ fn run_chain_step_isolated(
     layer: &str,
     sections: &std::collections::BTreeMap<String, ManifestSection>,
     base: &Path,
+    roots: &[ProjectRoot],
 ) -> (Value, bool) {
     std::thread::scope(|scope| {
         let step = std::thread::Builder::new()
             .stack_size(STACK_SIZE)
             .name("fslc-chain-step".to_owned())
-            .spawn_scoped(scope, || run_chain_step(kind, layer, sections, base))
+            .spawn_scoped(scope, || {
+                #[cfg(test)]
+                let _observer = install_root_observer(roots, "step", layer);
+                run_chain_step(kind, layer, sections, base, roots)
+            })
             .expect("spawn a chain step thread");
         step.join()
             .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
@@ -4447,6 +4264,7 @@ fn run_chain_steps(
     steps: &[(String, String)],
     sections: &std::collections::BTreeMap<String, ManifestSection>,
     base: &Path,
+    roots: Vec<ProjectRoot>,
     keep_going: bool,
     jobs: usize,
 ) -> ChainStepResults {
@@ -4456,7 +4274,7 @@ fn run_chain_steps(
     let mut results: ChainStepResults = vec![None; steps.len()];
     if jobs <= 1 {
         for (index, (kind, layer)) in steps.iter().enumerate() {
-            let result = run_chain_step_isolated(kind, layer, sections, base);
+            let result = run_chain_step_isolated(kind, layer, sections, base, &roots);
             let failed = result.1;
             results[index] = Some(result);
             if failed && !keep_going {
@@ -4465,8 +4283,8 @@ fn run_chain_steps(
         }
         return results;
     }
-    let groups = Arc::new(chain_step_groups(steps, sections, base));
-    let shared = Arc::new((steps.to_vec(), sections.clone(), base.to_path_buf()));
+    let groups = Arc::new(chain_step_groups(steps, &roots));
+    let shared = Arc::new((steps.to_vec(), sections.clone(), base.to_path_buf(), roots));
     let next_group = Arc::new(AtomicUsize::new(0));
     let cutoff = Arc::new(AtomicUsize::new(usize::MAX));
     let (sender, receiver) = std::sync::mpsc::channel::<ChainStepMessage>();
@@ -4482,15 +4300,17 @@ fn run_chain_steps(
             .stack_size(STACK_SIZE)
             .name(format!("fslc-chain-{worker}"))
             .spawn(move || {
-                let (steps, sections, base) = &*shared;
+                let (steps, sections, base, roots) = &*shared;
                 while let Some(group) = groups.get(next_group.fetch_add(1, Ordering::SeqCst)) {
                     for &index in group {
                         if index > cutoff.load(Ordering::SeqCst) {
                             break;
                         }
                         let (kind, layer) = &steps[index];
+                        #[cfg(test)]
+                        let _observer = install_root_observer(roots, "worker", layer);
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            run_chain_step_isolated(kind, layer, sections, base)
+                            run_chain_step_isolated(kind, layer, sections, base, roots)
                         }));
                         let ends_serial_loop = result
                             .as_ref()
@@ -4547,9 +4367,31 @@ fn run_chain_steps(
         && let Some(index) = steps.iter().position(|(kind, _)| kind == "impl")
     {
         let (kind, layer) = &steps[index];
-        results[index] = Some(run_chain_step(kind, layer, sections, base));
+        results[index] = Some(run_chain_step(kind, layer, sections, base, &shared.3));
     }
     results
+}
+
+fn chain_step_file(section: &ManifestSection, layer: &str, base: &Path) -> Result<PathBuf, Value> {
+    section
+        .values
+        .get("file")
+        .map(|file| base.join(file))
+        .ok_or_else(|| io_error_detail(&format!("[{layer}] file is required")))
+}
+
+fn chain_step_input_error(layer: &str, kind: &str, detail: &Value) -> (Value, bool) {
+    (
+        json!({
+            "layer": layer,
+            "kind": kind,
+            "status": "failed",
+            "result": "error",
+            "exit_code": 2,
+            "detail": detail,
+        }),
+        true,
+    )
 }
 
 /// Runs one planned chain step and returns its `layers[]` entry plus whether
@@ -4569,13 +4411,15 @@ fn run_chain_step(
     layer: &str,
     sections: &std::collections::BTreeMap<String, ManifestSection>,
     base: &Path,
+    roots: &[ProjectRoot],
 ) -> (Value, bool) {
     let section = &sections[layer];
     if kind == "spec" {
-        if let Some(file) = section.values.get("file") {
-            let file_path = base.join(file);
-            let (detail, status, check_kind, depth) =
-                if let Some(raw_depth) = section.values.get("depth") {
+        match chain_step_file(section, layer, base) {
+            Ok(file_path) => {
+                let (detail, status, check_kind, depth) = if let Some(raw_depth) =
+                    section.values.get("depth")
+                {
                     match parse_manifest_depth(layer, "depth", raw_depth) {
                         Ok(depth) => {
                             // Issue #1147: go through the same options path
@@ -4591,56 +4435,48 @@ fn run_chain_step(
                                     .to_owned(),
                                 ..CliVerifyOptions::default()
                             };
-                            let (detail, status) = run_verify_cli(&file_path, &file_path, &options);
+                            let root = project_root(roots, layer, false);
+                            let (detail, status) = run_prepared_project_roots(&[root], |sources| {
+                                run_verify_cli_admitted(
+                                    &file_path, &file_path, sources[0], &options, None,
+                                )
+                            });
                             (detail, status, "verify", Some(depth))
                         }
-                        Err(message) => (
-                            json!({"result": "error", "kind": "parse", "message": message}),
-                            2,
-                            "verify",
-                            None,
-                        ),
+                        Err(message) => (error_detail("parse", &message), 2, "verify", None),
                     }
                 } else {
-                    let (detail, status) = run_check(&file_path, &file_path);
+                    let root = project_root(roots, layer, false);
+                    let (detail, status) = run_prepared_project_roots(&[root], |sources| {
+                        run_check_from_source(&file_path, &file_path, sources[0], &root.edition)
+                    });
                     (detail, status, "check", None)
                 };
-            let passed = chain_layer_passes(&detail, status);
-            let layer_status = if passed { "passed" } else { "failed" };
-            let result = detail.get("result").cloned().unwrap_or(Value::Null);
-            let effective_status = if passed { 0 } else { status.max(1) };
-            let mut entry = json!({
-                "layer": layer,
-                "kind": check_kind,
-                "file": file_path.display().to_string(),
-                "status": layer_status,
-                "result": result,
-                "exit_code": effective_status,
-                "detail": detail,
-            });
-            if let Some(depth) = depth
-                && let Value::Object(entry) = &mut entry
-            {
-                entry.insert("depth".to_owned(), json!(depth));
-            }
-            (entry, !passed)
-        } else {
-            let detail = json!({
-                "result": "error",
-                "kind": "io",
-                "message": format!("[{layer}] file is required"),
-            });
-            (
-                json!({
+                let passed = chain_layer_passes(&detail, status);
+                let layer_status = if passed { "passed" } else { "failed" };
+                let result = detail.get("result").cloned().unwrap_or(Value::Null);
+                let effective_status = if passed {
+                    SUCCESS_EXIT
+                } else {
+                    status.max(FAILURE_EXIT)
+                };
+                let mut entry = json!({
                     "layer": layer,
-                    "kind": "check",
-                    "status": "failed",
-                    "result": "error",
-                    "exit_code": 2,
+                    "kind": check_kind,
+                    "file": file_path.display().to_string(),
+                    "status": layer_status,
+                    "result": result,
+                    "exit_code": effective_status,
                     "detail": detail,
-                }),
-                true,
-            )
+                });
+                if let Some(depth) = depth
+                    && let Value::Object(entry) = &mut entry
+                {
+                    entry.insert("depth".to_owned(), json!(depth));
+                }
+                (entry, !passed)
+            }
+            Err(detail) => chain_step_input_error(layer, "check", &detail),
         }
     } else if kind == "refine" {
         let target = section
@@ -4654,24 +4490,20 @@ fn run_chain_step(
                 .and_then(|target| target.values.get("file"))
                 .is_none()
         {
-            let detail = json!({
-                "result": "error",
-                "kind": "io",
-                "message": format!("[{layer}] unknown refine_against layer: {target}"),
-            });
-            (
-                json!({
-                    "layer": format!("{layer}->{target}"),
-                    "kind": "refine",
-                    "status": "failed",
-                    "result": "error",
-                    "exit_code": 2,
-                    "detail": detail,
-                }),
-                true,
-            )
+            let detail =
+                io_error_detail(&format!("[{layer}] unknown refine_against layer: {target}"));
+            chain_step_input_error(&format!("{layer}->{target}"), "refine", &detail)
         } else {
-            let file_path = base.join(&section.values["file"]);
+            let file_path = match chain_step_file(section, layer, base) {
+                Ok(path) => path,
+                Err(detail) => {
+                    return chain_step_input_error(
+                        &format!("{layer}->{target}"),
+                        "refine",
+                        &detail,
+                    );
+                }
+            };
             let target_path = base.join(&target_section.expect("checked").values["file"]);
             let mapping_path = base.join(mapping.expect("checked"));
             // Precedence: an explicit `refine_depth` or `depth` on this layer wins
@@ -4688,8 +4520,19 @@ fn run_chain_step(
             };
             match depth_result {
                 Ok(depth) => {
-                    let (detail, status) =
-                        run_refine(&file_path, &target_path, &mapping_path, depth);
+                    let inputs = [
+                        project_root(roots, layer, false),
+                        project_root(roots, target, false),
+                        project_root(roots, layer, true),
+                    ];
+                    let (detail, status) = run_prepared_project_roots(&inputs, |sources| {
+                        run_refine_from_sources(
+                            &file_path,
+                            &target_path,
+                            [sources[0], sources[1], sources[2]],
+                            depth,
+                        )
+                    });
                     let passed = chain_layer_passes(&detail, status);
                     (
                         json!({
@@ -4702,25 +4545,15 @@ fn run_chain_step(
                             "depth": depth,
                             "status": if passed { "passed" } else { "failed" },
                             "result": detail.get("result").cloned().unwrap_or(Value::Null),
-                            "exit_code": if passed { 0 } else { status.max(1) },
+                            "exit_code": if passed { SUCCESS_EXIT } else { status.max(FAILURE_EXIT) },
                             "detail": detail,
                         }),
                         !passed,
                     )
                 }
                 Err(message) => {
-                    let detail = json!({"result": "error", "kind": "parse", "message": message});
-                    (
-                        json!({
-                            "layer": format!("{layer}->{target}"),
-                            "kind": "refine",
-                            "status": "failed",
-                            "result": "error",
-                            "exit_code": 2,
-                            "detail": detail,
-                        }),
-                        true,
-                    )
+                    let detail = error_detail("parse", &message);
+                    chain_step_input_error(&format!("{layer}->{target}"), "refine", &detail)
                 }
             }
         }
@@ -4728,24 +4561,12 @@ fn run_chain_step(
         let command = section.values.get("command").cloned().unwrap_or_default();
         match impl_evidence(section) {
             Err(message) => {
-                let detail = json!({"result": "error", "kind": "parse", "message": message});
-                (
-                    json!({
-                        "layer": "impl", "kind": "command", "status": "failed",
-                        "result": "error", "exit_code": 2, "detail": detail,
-                    }),
-                    true,
-                )
+                let detail = error_detail("parse", &message);
+                chain_step_input_error("impl", "command", &detail)
             }
             Ok(_) if command.is_empty() => {
-                let detail = json!({"result": "error", "kind": "io", "message": "[impl] command is required"});
-                (
-                    json!({
-                        "layer": "impl", "kind": "command", "status": "failed",
-                        "result": "error", "exit_code": 2, "detail": detail,
-                    }),
-                    true,
-                )
+                let detail = io_error_detail("[impl] command is required");
+                chain_step_input_error("impl", "command", &detail)
             }
             Ok(evidence) => run_impl_command(&command, &evidence, base),
         }
@@ -4818,7 +4639,7 @@ fn run_impl_command(command: &str, evidence: &ImplEvidence, base: &Path) -> (Val
     let completed = match completed {
         Ok(completed) => completed,
         Err(error) => {
-            let detail = json!({"result": "error", "kind": "io", "message": error.to_string()});
+            let detail = io_error_detail(&error.to_string());
             return (
                 json!({
                     "layer": "impl", "kind": "command", "command": command,
@@ -5099,31 +4920,38 @@ fn format_chain_table(result: &Value) -> String {
 
 #[allow(clippy::too_many_lines)]
 fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_replay_from_source(path, &source, trace_path)
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_replay_from_source(path, &sources[0], trace_path),
+                editions,
+                false,
+            )
+        },
+    )
 }
 
 /// Replay one trace against one caller-owned root-source snapshot.
 #[allow(clippy::too_many_lines)]
 fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Value, i32) {
-    let model = match load_model_from_source(path, source) {
+    let model = match load_replay_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let raw = match std::fs::read_to_string(trace_path) {
+    let raw = match read_input_text(trace_path) {
         Ok(raw) => raw,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let data = match serde_json::from_str::<Value>(&raw) {
         Ok(data) => data,
-        Err(error) => return (error_output("io", &format!("invalid JSON: {error}")), 2),
+        Err(error) => return error_exit(io_error_output(&format!("invalid JSON: {error}"))),
     };
     let trace = match fslc_rust::replay_trace::parse_replay_trace(data) {
         Ok(trace) => trace,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let versioned = matches!(
         trace.contract,
@@ -5133,25 +4961,19 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
         fslc_rust::replay_trace::ReplayTraceContract::Legacy => (None, Vec::new()),
         fslc_rust::replay_trace::ReplayTraceContract::V1 { spec, initial, .. } => {
             if spec != &model.name {
-                return (
-                    error_output(
-                        "io",
-                        &format!(
-                            "replay trace spec '{spec}' does not match checked spec '{}'",
-                            model.name
-                        ),
-                    ),
-                    2,
-                );
+                return error_exit(io_error_output(&format!(
+                    "replay trace spec '{spec}' does not match checked spec '{}'",
+                    model.name
+                )));
             }
             let initial_state = match load_snapshot_value_object(initial, &model) {
                 Ok(state) => state,
-                Err(error) => return (error_output("io", &error), 2),
+                Err(error) => return error_exit(io_error_output(&error)),
             };
             let initial = fslc_rust::state_json(&initial_state);
             let events = match validate_versioned_replay_events(&model, &trace.events) {
                 Ok(events) => events,
-                Err(error) => return (error_output("io", &error), 2),
+                Err(error) => return error_exit(io_error_output(&error)),
             };
             (Some((initial_state, initial)), events)
         }
@@ -5209,14 +5031,14 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                     json!({
                         "kind":violation.kind,
                         "check":"safety",
-                        "name":display(&violation.name),
+                        "name":model.names().public_violation(&violation.name, None).into_string(),
                         "tick":0,
                     }),
                     expected,
                 );
             }
             Ok(None) => {}
-            Err(error) => return (error_output("internal", &error.to_string()), 3),
+            Err(error) => return error_exit(error_output("internal", &error.to_string())),
         }
         if let Some(liveness) = &mut bounded_liveness {
             match liveness.observe(&monitor.state, 0) {
@@ -5229,7 +5051,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                     );
                 }
                 Ok(None) => {}
-                Err(error) => return (error_output("internal", &error.to_string()), 3),
+                Err(error) => return error_exit(error_output("internal", &error.to_string())),
             }
         }
     }
@@ -5246,7 +5068,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                             json!({
                                 "kind":violation.kind,
                                 "check":"safety",
-                                "name":display(&violation.name),
+                                "name":model.names().public_violation(&violation.name, None).into_string(),
                                 "action":Value::Null,
                                 "params":{},
                                 "transition":"stutter",
@@ -5254,7 +5076,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                         );
                     }
                     Ok(None) => {}
-                    Err(error) => return (error_output("internal", &error.to_string()), 3),
+                    Err(error) => return error_exit(error_output("internal", &error.to_string())),
                 }
                 (Value::Null, "stutter")
             }
@@ -5264,15 +5086,15 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
             } => {
                 let resolved = match model.resolve_replay_action(action_name) {
                     Ok(resolved) => resolved,
-                    Err(error) => return (error_output("io", &error), 2),
+                    Err(error) => return error_exit(io_error_output(&error)),
                 };
                 let Some(action) = resolved.or_else(|| {
                     (!versioned)
                         .then(|| {
-                            model
-                                .actions
-                                .iter()
-                                .find(|action| display(&action.name) == *action_name)
+                            model.actions.iter().find(|action| {
+                                model.names().public_action(&action.name).into_string()
+                                    == *action_name
+                            })
                         })
                         .flatten()
                 }) else {
@@ -5319,7 +5141,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                 };
                 let stepped = match monitor.attempt(&action.name, &parsed) {
                     Ok(stepped) => stepped,
-                    Err(error) => return (error_output("internal", &error.to_string()), 3),
+                    Err(error) => return error_exit(error_output("internal", &error.to_string())),
                 };
                 if let Some(violation) = stepped.violation {
                     return replay_failure(
@@ -5336,7 +5158,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                         }),
                     );
                 }
-                (json!(model.action_key(&action.name)), "action")
+                (json!(model.action_display_name(&action.name)), "action")
             }
         };
         if let Some(state) = &event.state {
@@ -5345,7 +5167,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
             } else {
                 match replay_snapshot_json(state, &model) {
                     Ok(observed) => observed,
-                    Err(error) => return (error_output("io", &error), 2),
+                    Err(error) => return error_exit(io_error_output(&error)),
                 }
             };
             let expected = fslc_rust::state_json(&monitor.state);
@@ -5379,7 +5201,7 @@ fn run_replay_from_source(path: &Path, source: &str, trace_path: &Path) -> (Valu
                     );
                 }
                 Ok(None) => {}
-                Err(error) => return (error_output("internal", &error.to_string()), 3),
+                Err(error) => return error_exit(error_output("internal", &error.to_string())),
             }
         }
     }
@@ -5501,288 +5323,42 @@ fn replay_snapshot_json(
     load_snapshot_value_object(snapshot, model).map(|state| fslc_rust::state_json(&state))
 }
 
-#[allow(clippy::too_many_lines)]
-fn mapping_json_expr(
-    expr: &KernelExpr,
-    raw: &Map<String, Value>,
-    bindings: &Map<String, Value>,
-    model: &KernelModel,
-) -> Result<Value, String> {
-    match expr {
-        KernelExpr::Num(value) => Ok(json!(value)),
-        KernelExpr::Bool(value) => Ok(json!(value)),
-        KernelExpr::None => Ok(Value::Null),
-        KernelExpr::Some(value) => mapping_json_expr(value, raw, bindings, model),
-        KernelExpr::Var(name) => bindings
-            .get(name)
-            .or_else(|| raw.get(name))
-            .cloned()
-            .or_else(|| model.enum_members.get(name).map(fslc_rust::fsl_value_json))
-            .ok_or_else(|| format!("mapped state is missing '{name}'")),
-        KernelExpr::Field(value, field) => mapping_json_expr(value, raw, bindings, model)?
-            .as_object()
-            .and_then(|object| object.get(field))
-            .cloned()
-            .ok_or_else(|| format!("mapped state is missing field '{field}'")),
-        KernelExpr::Index(value, index) => {
-            let value = mapping_json_expr(value, raw, bindings, model)?;
-            let index = mapping_json_expr(index, raw, bindings, model)?;
-            if let Some(object) = value.as_object() {
-                let key = index.as_str().map_or_else(
-                    || {
-                        index.as_i64().map_or_else(
-                            || index.as_bool().map(|value| value.to_string()),
-                            |value| Some(value.to_string()),
-                        )
-                    },
-                    |value| Some(value.to_owned()),
-                );
-                return key
-                    .and_then(|key| object.get(&key).cloned())
-                    .ok_or_else(|| "mapped state is missing indexed key".to_owned());
-            }
-            if let (Some(array), Some(index)) = (value.as_array(), index.as_u64()) {
-                return array
-                    .get(usize::try_from(index).map_err(|error| error.to_string())?)
-                    .cloned()
-                    .ok_or_else(|| "mapped array index is out of range".to_owned());
-            }
-            Err("indexed mapping expression requires an object or array".to_owned())
-        }
-        KernelExpr::Binary { op, left, right } => {
-            let left = mapping_json_expr(left, raw, bindings, model)?;
-            let right = mapping_json_expr(right, raw, bindings, model)?;
-            match op.as_str() {
-                "+" | "-" | "*" | "/" | "%" => {
-                    let left = left
-                        .as_i64()
-                        .ok_or_else(|| "mapping arithmetic requires integers".to_owned())?;
-                    let right = right
-                        .as_i64()
-                        .ok_or_else(|| "mapping arithmetic requires integers".to_owned())?;
-                    match op.as_str() {
-                        "+" => left.checked_add(right),
-                        "-" => left.checked_sub(right),
-                        "*" => left.checked_mul(right),
-                        "/" if right != 0 => left.checked_div(right),
-                        "%" if right != 0 => left.checked_rem(right),
-                        _ => None,
-                    }
-                    .map(|value| json!(value))
-                    .ok_or_else(|| "invalid mapping arithmetic".to_owned())
-                }
-                "==" => Ok(json!(left == right)),
-                "!=" => Ok(json!(left != right)),
-                "<" | "<=" | ">" | ">=" => {
-                    let left = left
-                        .as_i64()
-                        .ok_or_else(|| "mapping comparison requires integers".to_owned())?;
-                    let right = right
-                        .as_i64()
-                        .ok_or_else(|| "mapping comparison requires integers".to_owned())?;
-                    Ok(json!(match op.as_str() {
-                        "<" => left < right,
-                        "<=" => left <= right,
-                        ">" => left > right,
-                        _ => left >= right,
-                    }))
-                }
-                "and" | "or" | "=>" => {
-                    let left = left
-                        .as_bool()
-                        .ok_or_else(|| "mapping logic requires Booleans".to_owned())?;
-                    let right = right
-                        .as_bool()
-                        .ok_or_else(|| "mapping logic requires Booleans".to_owned())?;
-                    Ok(json!(match op.as_str() {
-                        "and" => left && right,
-                        "or" => left || right,
-                        _ => !left || right,
-                    }))
-                }
-                _ => Err(format!("unsupported mapping operator '{op}'")),
-            }
-        }
-        KernelExpr::Not(value) => Ok(json!(
-            !mapping_json_expr(value, raw, bindings, model)?
-                .as_bool()
-                .ok_or_else(|| "mapping not requires Boolean".to_owned())?
-        )),
-        KernelExpr::Neg(value) => Ok(json!(
-            -mapping_json_expr(value, raw, bindings, model)?
-                .as_i64()
-                .ok_or_else(|| "mapping negation requires integer".to_owned())?
-        )),
-        KernelExpr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            if mapping_json_expr(condition, raw, bindings, model)?
-                .as_bool()
-                .ok_or_else(|| "mapping condition requires Boolean".to_owned())?
-            {
-                mapping_json_expr(then_expr, raw, bindings, model)
-            } else {
-                mapping_json_expr(else_expr, raw, bindings, model)
-            }
-        }
-        KernelExpr::Set(items) | KernelExpr::Seq(items) => items
-            .iter()
-            .map(|item| mapping_json_expr(item, raw, bindings, model))
-            .collect::<Result<Vec<_>, _>>()
-            .map(Value::Array),
-        KernelExpr::Struct { fields, .. } => fields
-            .iter()
-            .map(|(name, value)| {
-                Ok((
-                    name.clone(),
-                    mapping_json_expr(value, raw, bindings, model)?,
-                ))
-            })
-            .collect::<Result<Map<_, _>, String>>()
-            .map(Value::Object),
-        _ => Err("unsupported JSON log mapping expression".to_owned()),
-    }
-}
-
-fn json_mismatches(expected: &Value, observed: &Value, path: &str) -> Vec<Value> {
-    if let (Some(expected), Some(observed)) = (expected.as_object(), observed.as_object()) {
-        let keys = expected
-            .keys()
-            .chain(observed.keys())
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>();
-        return keys
-            .into_iter()
-            .flat_map(|key| {
-                let child = if path.is_empty() {
-                    key.clone()
-                } else {
-                    format!("{path}.{key}")
-                };
-                match (expected.get(&key), observed.get(&key)) {
-                    (Some(left), Some(right)) => json_mismatches(left, right, &child),
-                    (left, right) => vec![json!({
-                        "path": child,
-                        "expected": left.cloned().unwrap_or(Value::Null),
-                        "observed": right.cloned().unwrap_or(Value::Null),
-                    })],
-                }
-            })
-            .collect();
-    }
-    if expected == observed {
-        Vec::new()
-    } else {
-        vec![json!({"path":path,"expected":expected,"observed":observed})]
-    }
-}
-
-fn read_jsonl_records(path: &Path) -> Result<Vec<(usize, Value)>, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    source
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| !line.trim().is_empty())
-        .map(|(index, line)| {
-            serde_json::from_str(line)
-                .map(|record| (index + 1, record))
-                .map_err(|error| format!("invalid JSONL at line {}: {error}", index + 1))
-        })
-        .collect()
-}
-
-pub(crate) fn untyped_replay_enum_mapping_span(
-    mapping: &fsl_syntax::SurfaceRefinement,
-) -> Option<fsl_syntax::Span> {
-    for item in &mapping.items {
-        match item {
-            fsl_syntax::RefinementItem::EnumConversion { span, .. }
-            | fsl_syntax::RefinementItem::EnumAbstraction { span, .. } => return Some(*span),
-            fsl_syntax::RefinementItem::Map { binder, expr, .. } => {
-                if let Some(span) = binder
-                    .as_ref()
-                    .and_then(untyped_replay_binder_enum_mapping_span)
-                    .or_else(|| untyped_replay_expr_enum_mapping_span(expr))
-                {
-                    return Some(span);
-                }
-            }
-            fsl_syntax::RefinementItem::Action {
-                target: fsl_syntax::ActionTarget::Action(_, args),
-                ..
-            } => {
-                if let Some(span) = args.iter().find_map(untyped_replay_expr_enum_mapping_span) {
-                    return Some(span);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-fn untyped_replay_expr_enum_mapping_span(expr: &fsl_syntax::Expr) -> Option<fsl_syntax::Span> {
-    ["convert", "abstract"]
-        .into_iter()
-        .find_map(|name| fsl_core::expression_call_span(expr, name))
-}
-
-fn untyped_replay_binder_enum_mapping_span(
-    binder: &fsl_syntax::Binder,
-) -> Option<fsl_syntax::Span> {
-    match binder {
-        fsl_syntax::Binder::Typed { where_expr, .. } => where_expr
-            .as_deref()
-            .and_then(untyped_replay_expr_enum_mapping_span),
-        fsl_syntax::Binder::Range {
-            lo, hi, where_expr, ..
-        } => untyped_replay_expr_enum_mapping_span(lo)
-            .or_else(|| untyped_replay_expr_enum_mapping_span(hi))
-            .or_else(|| {
-                where_expr
-                    .as_deref()
-                    .and_then(untyped_replay_expr_enum_mapping_span)
-            }),
-        fsl_syntax::Binder::Collection {
-            collection,
-            where_expr,
-            ..
-        } => untyped_replay_expr_enum_mapping_span(collection).or_else(|| {
-            where_expr
-                .as_deref()
-                .and_then(untyped_replay_expr_enum_mapping_span)
-        }),
-    }
-}
-
-pub(crate) fn located_error_output(kind: &str, message: &str, span: fsl_syntax::Span) -> Value {
-    let mut output = error_output(kind, message);
-    output.as_object_mut().expect("error envelope").extend([
-        ("loc".to_owned(), span.python_loc()),
-        ("span".to_owned(), json!(span)),
-    ]);
-    output
-}
-
-#[allow(clippy::too_many_lines)]
 fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, i32) {
+    run_admitted_roots(
+        vec![
+            (path, read_spec_source(path)),
+            (mapping_path, read_spec_source(mapping_path)),
+        ],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_log_replay_from_sources(path, &sources[0], log_path, &sources[1]),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_log_replay_from_sources(
+    path: &Path,
+    source: &str,
+    log_path: &Path,
+    mapping_source: &str,
+) -> (Value, i32) {
     const NOTE: &str = "leadsTo properties are not checked by replay (finite logs only)";
-    let model = match load_model(path) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let mapping_source = match std::fs::read_to_string(mapping_path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    let mapping = match fsl_syntax::parse_surface_document(&mapping_source) {
-        Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
-        Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
-        Err(error) => return (error_output("parse", &error.to_string()), 2),
-    };
+    let mapping =
+        match fsl_syntax::parse_surface_document_with(mapping_source, crate::parse_options()) {
+            Ok(fsl_syntax::SurfaceDocument::Refinement(mapping)) => mapping,
+            Ok(_) => return error_exit(error_output("type", "expected refinement mapping file")),
+            Err(error) => return error_exit(error_output("parse", &error.to_string())),
+        };
     if let Some(span) = untyped_replay_enum_mapping_span(&mapping) {
         return (
             located_error_output(
@@ -5795,7 +5371,7 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
     }
     let records = match read_jsonl_records(log_path) {
         Ok(records) => records,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let maps_auto = mapping
         .items
@@ -5915,7 +5491,7 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
             }
             let mut observed = Map::new();
             for (name, ty) in &model.state {
-                let display_name = display(name);
+                let display_name = model.names().public_state(name).into_string();
                 let value = if let Some((binder, expression)) = state_maps.get(name.as_str()) {
                     if binder.is_some() {
                         let TypeRef::Map(key_ty, _) = ty else {
@@ -5999,7 +5575,7 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
             };
             let enabled = match monitor.enabled() {
                 Ok(enabled) => enabled,
-                Err(error) => return (error_output("internal", &error.to_string()), 3),
+                Err(error) => return error_exit(error_output("internal", &error.to_string())),
             };
             let Some(instance) = enabled
                 .iter()
@@ -6011,7 +5587,7 @@ fn run_log_replay(path: &Path, log_path: &Path, mapping_path: &Path) -> (Value, 
                 );
             };
             if let Err(error) = monitor.step(instance) {
-                return (error_output("internal", &error.to_string()), 3);
+                return error_exit(error_output("internal", &error.to_string()));
             }
         }
         let expected = fslc_rust::state_json(&monitor.state);
@@ -6086,30 +5662,48 @@ fn replay_failure_with_state(
     (Value::Object(output), 1)
 }
 
-#[allow(clippy::too_many_lines)]
-fn run_scenarios(path: &Path, depth: usize, deadlock_mode: &str) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
+// `path` is the existing logical diagnostic/resolver context; `source` owns
+// the extracted root for literate input, without reading a synthetic sibling.
+fn run_scenarios(
+    path: &Path,
+    source: Result<String, SpecLoadError>,
+    depth: usize,
+    deadlock_mode: &str,
+) -> (Value, i32) {
+    run_admitted_roots(vec![(path, source)], None, false, |sources, editions| {
+        finish_admitted(
+            run_scenarios_from_source(path, &sources[0], depth, deadlock_mode),
+            editions,
+            false,
+        )
+    })
+}
+
+fn run_scenarios_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+) -> (Value, i32) {
     let (output, status) =
-        run_scenarios_mode_from_source(path, &source, depth, deadlock_mode, false);
-    fold_scenarios_refinements(path, &source, depth, output, status)
+        run_scenarios_mode_from_source(path, source, depth, deadlock_mode, false);
+    fold_scenarios_refinements(path, source, depth, output, status)
 }
 
 /// Fold inline `implements` and governance preservations into a `scenarios`
 /// envelope exactly as `verify` does (issue #1314).
 ///
 /// `run_scenarios_mode_from_source` answers from its own bounded run and falls
-/// back to `run_verify_from_source` only when the document's kernel fails;
-/// that fallback already attaches and folds both. Without this the kernel
-/// path ignored them, so the same document exited 0 or 1 depending on an
+/// back to admitted verification only when the document's kernel fails;
+/// that fallback folds both before the outer consumer finalizes warnings. Without
+/// this the kernel path ignored them, so the same document exited 0 or 1 depending on an
 /// unrelated path. Only the kernel path's own `result:"scenarios"` envelope
 /// is folded here, in `run_verify_from_source`'s order (seam, then
 /// preservations) and through the same owners, so there is no second
 /// mapping; any other envelope is an error or the already-folded fallback.
-/// The `testgen` / `explain` / `ledger` callers of the builder are not
-/// changed.
+/// `testgen` uses this same fold as a gate, returning the verify owner's
+/// envelope on failure before generating a harness. The `explain` / `ledger`
+/// callers of the builder are unchanged.
 fn fold_scenarios_refinements(
     path: &Path,
     source: &str,
@@ -6158,25 +5752,48 @@ fn run_scenarios_mode_from_source(
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    match validate_requirement_traces_from_source(path, source, &model) {
-        Ok((Some(failure), _)) => return (failure, 2),
-        Ok((None, _)) => {}
-        Err(error) => return (semantic_error_output(&error), 2),
-    }
+    let trace_contract = match require_trace_gate(source, &model) {
+        Ok(contract) => contract,
+        Err(refusal) => return (refusal, 2),
+    };
+    scenarios_from_checked_traces(
+        path,
+        source,
+        &model,
+        trace_contract.as_ref(),
+        depth,
+        deadlock_mode,
+        allow_unreached,
+    )
+}
+
+/// The scenarios envelope of a model whose requirement traces already passed
+/// the gate: only the gate hands out `trace_contract`, which the acceptance /
+/// forbidden scenarios are built from.
+#[allow(clippy::too_many_lines)]
+fn scenarios_from_checked_traces(
+    path: &Path,
+    source: &str,
+    model: &KernelModel,
+    trace_contract: Option<&CheckedTraceContract>,
+    depth: usize,
+    deadlock_mode: &str,
+    allow_unreached: bool,
+) -> (Value, i32) {
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return (error_output("internal", &error.to_string()), 3),
+        Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
-    let result = match block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth)) {
+    let result = match block_on_native(fsl_verifier::verify_bounded(model, &mut solver, depth)) {
         Ok(result) => result,
-        Err(error) => return (error_output("semantics", &error.to_string()), 2),
+        Err(error) => return error_exit(error_output("semantics", &error.to_string())),
     };
     if result.violation.is_some()
         || result.leadsto_violation.is_some()
         || (!allow_unreached && result.reachables.values().any(Option::is_none))
         || (deadlock_mode == "error" && result.deadlock_step.is_some())
     {
-        return run_verify_from_source(
+        return run_verify_admitted_from_source(
             path,
             source,
             depth,
@@ -6184,18 +5801,20 @@ fn run_scenarios_mode_from_source(
             "bmc",
             DEFAULT_EXPLICIT_BUDGET,
             1,
+            None,
         );
     }
-    if let Err(error) = fslc_rust::verification_output::replay_bmc_witnesses(&model, &result, None)
-    {
-        return (error_output("internal", &error), 3);
+    if let Err(error) = fslc_rust::verification_output::replay_bmc_witnesses(model, &result, None) {
+        return error_exit(error_output("internal", &error));
     }
     let covers = match fsl_runtime::action_cover_traces(model.clone(), depth) {
         Ok(covers) => covers,
-        Err(error) => return (error_output("internal", &error.to_string()), 3),
+        Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
     let reachables =
-        fslc_rust::verification_output::sorted_by_published(&result.reachables, display);
+        fslc_rust::verification_output::sorted_by_published(&result.reachables, |name| {
+            model.names().public_property(name)
+        });
     let mut scenario_warnings = reachables
         .iter()
         .filter(|(_, _, witness)| witness.is_none())
@@ -6214,7 +5833,7 @@ fn run_scenarios_mode_from_source(
                 // Never enabled (blocked by an unsatisfiable `requires`), not merely
                 // uncovered — say so, matching `fsl_runtime::verification_warnings`'s
                 // wording for the same diagnosis on the verify path.
-                fsl_runtime::never_enabled_action_warning(&model, action, depth)
+                fsl_runtime::never_enabled_action_warning(model, action, depth)
             } else {
                 Some(json!({
                     "message": format!(
@@ -6229,11 +5848,11 @@ fn run_scenarios_mode_from_source(
     for (published, name, witness) in reachables.iter().filter_map(|(published, name, witness)| {
         witness.as_ref().map(|witness| (published, name, witness))
     }) {
-        let mut scenario = scenario_from_trace(&model, &witness.trace);
+        let mut scenario = scenario_from_trace(model, &witness.trace);
         scenario.insert("name".to_owned(), json!(format!("reach_{published}")));
         scenario.insert("kind".to_owned(), json!("reachable"));
-        scenario.insert("property".to_owned(), json!(published));
-        scenario.insert("final_check".to_owned(), json!(published));
+        scenario.insert("property".to_owned(), json!(published.as_str()));
+        scenario.insert("final_check".to_owned(), json!(published.as_str()));
         if let Some(property) = model
             .reachables
             .iter()
@@ -6247,9 +5866,9 @@ fn run_scenarios_mode_from_source(
         }
         scenarios.push(Value::Object(scenario));
     }
-    let (responses, missing_responses) = match fsl_runtime::leadsto_response_traces(&model, depth) {
+    let (responses, missing_responses) = match fsl_runtime::leadsto_response_traces(model, depth) {
         Ok(result) => result,
-        Err(error) => return (error_output("internal", &error.to_string()), 3),
+        Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
     // Both lists come keyed by internal property name (`p2__Back` before
     // `p__Back`); print them in the order of the name they print (`p.Back`
@@ -6264,10 +5883,12 @@ fn run_scenarios_mode_from_source(
             .push(response);
     }
     let responses =
-        fslc_rust::verification_output::sorted_by_published(&responses_by_property, display)
-            .into_iter()
-            .flat_map(|(_, _, responses)| responses)
-            .collect::<Vec<_>>();
+        fslc_rust::verification_output::sorted_by_published(&responses_by_property, |name| {
+            model.names().public_property(name)
+        })
+        .into_iter()
+        .flat_map(|(_, _, responses)| responses)
+        .collect::<Vec<_>>();
     let mut missing_by_property = std::collections::BTreeMap::<String, Vec<_>>::new();
     for (property, binding, triggered) in missing_responses {
         missing_by_property
@@ -6276,10 +5897,12 @@ fn run_scenarios_mode_from_source(
             .push((property, binding, triggered));
     }
     let missing_responses =
-        fslc_rust::verification_output::sorted_by_published(&missing_by_property, display)
-            .into_iter()
-            .flat_map(|(_, _, missing)| missing)
-            .collect::<Vec<_>>();
+        fslc_rust::verification_output::sorted_by_published(&missing_by_property, |name| {
+            model.names().public_property(name)
+        })
+        .into_iter()
+        .flat_map(|(_, _, missing)| missing)
+        .collect::<Vec<_>>();
     // One warning per (property, binding) with no response witness —
     // collapsing to one warning per property would hide every binding but
     // the first with a trace (issue #526). Word the two causes differently:
@@ -6291,21 +5914,21 @@ fn run_scenarios_mode_from_source(
             json!({
                 "message": format!(
                     "leadsTo {} has no response scenario within depth {depth} for binding {{{binding_text}}}",
-                    display(property)
+                    model.names().public_property(property).into_string()
                 ),
             })
         } else {
             json!({
                 "message": format!(
                     "leadsTo {} binding {{{binding_text}}}: antecedent never holds within depth {depth}",
-                    display(property)
+                    model.names().public_property(property).into_string()
                 ),
                 "hint": "the antecedent is unreachable for this binding within the bound; check the property or increase --depth",
             })
         }
     }));
     for response in responses {
-        let mut scenario = scenario_from_trace(&model, &response.trace);
+        let mut scenario = scenario_from_trace(model, &response.trace);
         let mut suffix = String::new();
         for (name, value) in &response.bindings {
             suffix.push('_');
@@ -6314,10 +5937,24 @@ fn run_scenarios_mode_from_source(
         }
         scenario.insert(
             "name".to_owned(),
-            json!(format!("respond_{}{suffix}", display(&response.property))),
+            json!(format!(
+                "respond_{}{suffix}",
+                model
+                    .names()
+                    .public_property(&response.property)
+                    .into_string()
+            )),
         );
         scenario.insert("kind".to_owned(), json!("leadsTo"));
-        scenario.insert("property".to_owned(), json!(display(&response.property)));
+        scenario.insert(
+            "property".to_owned(),
+            json!(
+                model
+                    .names()
+                    .public_property(&response.property)
+                    .into_string()
+            ),
+        );
         if let Some(property) = model
             .leadstos
             .iter()
@@ -6348,7 +5985,7 @@ fn run_scenarios_mode_from_source(
         let Some(trace) = covers.get(name) else {
             continue;
         };
-        let mut scenario = scenario_from_trace(&model, trace);
+        let mut scenario = scenario_from_trace(model, trace);
         scenario.insert(
             "name".to_owned(),
             json!(format!("cover_{}", model.action_display_name(name))),
@@ -6361,7 +5998,7 @@ fn run_scenarios_mode_from_source(
     if let Some(trace) = &result.deadlock_trace
         && deadlock_mode != "ignore"
     {
-        let mut scenario = scenario_from_trace(&model, trace);
+        let mut scenario = scenario_from_trace(model, trace);
         scenario.insert("name".to_owned(), json!("deadlock_terminal"));
         scenario.insert("kind".to_owned(), json!("deadlock"));
         scenario.insert(
@@ -6370,7 +6007,7 @@ fn run_scenarios_mode_from_source(
         );
         scenarios.push(Value::Object(scenario));
     }
-    match requirement_trace_scenarios_from_source(source, &model) {
+    match requirement_trace_scenarios(trace_contract, model) {
         Ok(requirement_scenarios) => scenarios.extend(requirement_scenarios),
         Err(error) => return (semantic_error_output(&error), 2),
     }
@@ -6387,18 +6024,43 @@ fn run_scenarios_mode_from_source(
     (Value::Object(output), 0)
 }
 
-#[allow(clippy::too_many_lines)]
-fn requirement_trace_scenarios_from_source(
+/// The scenarios envelope that explain and ledger embed, for a model whose
+/// requirement traces passed the gate (the caller holds `trace_contract`).
+///
+/// The status is not returned: past the gate, a non-zero status is a
+/// violation (the scenarios envelope is then the `verify` envelope, which
+/// has no scenarios) or an internal error, and both consumers report the
+/// spec's verification separately. A gate refusal never reaches here.
+fn witness_scenarios(
+    path: &Path,
     source: &str,
     model: &KernelModel,
+    trace_contract: Option<&CheckedTraceContract>,
+    depth: usize,
+    deadlock_mode: &str,
+) -> Value {
+    let (scenarios, _status_past_the_gate) = scenarios_from_checked_traces(
+        path,
+        source,
+        model,
+        trace_contract,
+        depth,
+        deadlock_mode,
+        false,
+    );
+    scenarios
+}
+
+#[allow(clippy::too_many_lines)]
+fn requirement_trace_scenarios(
+    contract: Option<&CheckedTraceContract>,
+    model: &KernelModel,
 ) -> Result<Vec<Value>, String> {
-    let Some(contract) =
-        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
-    else {
+    let Some(contract) = contract else {
         return Ok(Vec::new());
     };
     let mut scenarios = Vec::new();
-    for case in &contract.acceptance {
+    for case in contract.acceptance() {
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
         let initial = fslc_rust::state_json(&monitor.state);
         let mut steps = Vec::new();
@@ -6431,7 +6093,10 @@ fn requirement_trace_scenarios_from_source(
                     case.id,
                     steps.len(),
                     violation.kind,
-                    display(&violation.name),
+                    model
+                        .names()
+                        .public_violation(&violation.name, None)
+                        .into_string(),
                 ));
             }
             steps.push(
@@ -6449,7 +6114,7 @@ fn requirement_trace_scenarios_from_source(
             "expected_states":states,
         }));
     }
-    for case in &contract.forbidden {
+    for case in contract.forbidden() {
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
         let initial = fslc_rust::state_json(&monitor.state);
         let mut steps = Vec::new();
@@ -6482,7 +6147,10 @@ fn requirement_trace_scenarios_from_source(
                     case.id,
                     steps.len(),
                     violation.kind,
-                    display(&violation.name),
+                    model
+                        .names()
+                        .public_violation(&violation.name, None)
+                        .into_string(),
                 ));
             }
             steps.push(
@@ -6500,7 +6168,7 @@ fn requirement_trace_scenarios_from_source(
             .iter()
             .find(|action| {
                 action.name == final_step.name
-                    || display(&action.name) == final_step.name
+                    || model.names().public_action(&action.name).into_string() == final_step.name
                     || action.name.starts_with(&format!("{}__b", final_step.name))
             })
             .ok_or_else(|| format!("unknown forbidden action '{}'", final_step.name))?;
@@ -6522,7 +6190,10 @@ fn requirement_trace_scenarios_from_source(
                     "forbidden '{}' final step violated {} '{}' after validation",
                     case.id,
                     violation.kind,
-                    display(&violation.name),
+                    model
+                        .names()
+                        .public_violation(&violation.name, None)
+                        .into_string(),
                 ),
                 None => format!(
                     "forbidden '{}' final step was accepted after validation",
@@ -6535,7 +6206,7 @@ fn requirement_trace_scenarios_from_source(
             &monitor,
             final_step,
             &arguments,
-            &contract.scope_types,
+            contract.scope_types(),
         )?
         .rejected_by()
         .ok_or_else(|| {
@@ -6597,15 +6268,6 @@ fn scenario_from_trace(model: &KernelModel, trace: &[fsl_core::TraceStep]) -> Ma
     scenario
 }
 
-fn display_binding(value: &fsl_core::FslValue) -> String {
-    match value {
-        fsl_core::FslValue::Int(value) => value.to_string(),
-        fsl_core::FslValue::Bool(value) => value.to_string(),
-        fsl_core::FslValue::Enum { member, .. } => member.clone(),
-        _ => "value".to_owned(),
-    }
-}
-
 /// Renders a quantified-property binding map for a scenario-completeness
 /// warning message (issue #526), e.g. `p=1`.
 fn format_bindings(binding: &fsl_runtime::Bindings) -> String {
@@ -6616,35 +6278,29 @@ fn format_bindings(binding: &fsl_runtime::Bindings) -> String {
         .join(", ")
 }
 
-/// `path` is read for source content (for a literate `.md` input, this is the
-/// materialized, blanked `.literate.fsl` sibling — its line positions match
-/// the original document). `display_path` is stamped into every user-visible
-/// label (`file` fields, embedded `at file:line:col` text) so the machine-
-/// readable output always names the document the caller actually passed in,
-/// never the transient materialization.
-fn run_check(path: &Path, display_path: &Path) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_check_from_source(path, display_path, &source)
-}
-
 /// Check one caller-owned root-source snapshot.
 ///
 /// The displayed path intentionally remains independent of the path used to
-/// resolve imports, including for materialized literate sources.
-fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Value, i32) {
-    let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+/// resolve imports, including for captured literate sources.
+fn run_check_from_source(
+    path: &Path,
+    display_path: &Path,
+    source: &str,
+    admission: &SourceEdition,
+) -> (Value, i32) {
+    let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
     // The validity stages are shared with the Worker (issue #1163); only the
     // success envelope is composed here.
-    match fslc_rust::check_stages::run_check_stages(
+    match crate::process::block_on_native(fslc_rust::check_stages::run_check_stages(
         source,
         &path.to_string_lossy(),
         &display_path.to_string_lossy(),
         &resolver,
         &envelope,
-    ) {
+        crate::parse_options(),
+        &mut spec_loading::z3_solver,
+        admission,
+    )) {
         Ok(fslc_rust::check_stages::CheckedSpec { kernel, model }) => {
             let mut output = envelope();
             output.insert("result".to_owned(), json!("ok"));
@@ -6653,10 +6309,11 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
                 Ok(implements) => implements,
                 Err(error) => return (implements_error_output(&error), 2),
             };
-            let warning_ctx = match ModelWarningContext::from_source(&model, source) {
-                Ok(ctx) => ctx,
-                Err(error) => return (semantic_error_output(&error.to_string()), 2),
-            };
+            let warning_ctx =
+                match ModelWarningContext::from_source(&model, source, crate::parse_options()) {
+                    Ok(ctx) => ctx,
+                    Err(error) => return (semantic_error_output(&error.to_string()), 2),
+                };
             let model_level_warnings =
                 finalize_model_warnings(model_warnings(&model), &warning_ctx);
             let warnings = kernel
@@ -6667,7 +6324,7 @@ fn run_check_from_source(path: &Path, display_path: &Path, source: &str) -> (Val
                 .collect::<Vec<_>>();
             output.insert("warnings".to_owned(), Value::Array(warnings));
             let Ok((output, status)) = attach_check_implements(output, implements) else {
-                return (error_output("internal", "check envelope"), 3);
+                return error_exit(error_output("internal", "check envelope"));
             };
             let mut output = Value::Object(output);
             match fold_governance_from_source(path, source, &mut output) {
@@ -6701,29 +6358,43 @@ fn portable_cli_source_path(path: &Path) -> Result<String, String> {
 }
 
 fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    // `lower_ai_component` indexes `members[tool_name]` for every
-    // authority-block tool reference and panics if the tool is undeclared
-    // (issue #1015). Validate an `ai_component` document's authority names
-    // before lowering, the same way `run_check_from_source` does through
-    // `validate_specialized_document_from_source` — but narrowed to the AI
-    // frontend alone, so this stays scoped to the one lowering path that can
-    // panic and does not also start rejecting a `dbsystem` document `kernel`
-    // previously accepted (`validate_specialized_document_from_source` would
-    // additionally run `validate_db`, which `kernel` has never called). A
-    // parse failure or any other document kind falls through unchanged to
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        true,
+        |sources, editions| {
+            finish_admitted(
+                run_kernel_contract_from_source(path, &sources[0], version),
+                editions,
+                true,
+            )
+        },
+    )
+}
+
+fn run_kernel_contract_from_source(
+    path: &Path,
+    source: &str,
+    version: fsl_core::PublicKernelVersion,
+) -> (Value, i32) {
+    // This AI-only validation guard originated in #1015. Lowering now returns
+    // a CoreError instead of panicking on an undeclared authority tool lookup
+    // (#1464), but retain the guard to preserve the existing validator envelope.
+    // Like `run_check_from_source`, validate authority names before lowering,
+    // but do not use the full `validate_specialized_document_from_source` gate:
+    // it additionally runs full `validate_db`, including DB-only schema-window
+    // validation that is deliberately not a Kernel-export gate. Unknown DB rule
+    // names are already rejected by lowering itself (#1473). A parse failure or
+    // any other document kind falls through unchanged to
     // `parse_kernel_source` below, keeping its own `kind:"parse"` envelope.
     if let Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) =
-        parse_surface_document_from_source(path, &source)
+        parse_surface_document_from_source(path, source)
         && let Err(error) = fsl_core::validate_ai_component(&component)
     {
-        return (semantic_error_output(&error.to_string()), 2);
+        return (core_error_output(&error), 2);
     }
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
+    let resolver = dependency_resolver(base);
     let portable_path = if version == fsl_core::PublicKernelVersion::V2 {
         match portable_cli_source_path(path) {
             Ok(path) => Some(path),
@@ -6733,14 +6404,21 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         None
     };
     let parsed = portable_path.as_ref().map_or_else(
-        || fsl_core::parse_kernel_source(&source, &resolver),
-        |source_file| fsl_core::parse_kernel_source_with_file(&source, &resolver, source_file),
+        || fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options()),
+        |source_file| {
+            fsl_core::parse_kernel_source_with_file_with_options(
+                source,
+                &resolver,
+                source_file,
+                crate::parse_options(),
+            )
+        },
     );
     let kernel = match parsed {
         Ok(kernel) => kernel,
         Err(error) => {
             return (
-                spec_load_error_output(&kernel_load_error(&source, &error)),
+                spec_load_error_output(&kernel_load_error(source, &error, crate::parse_options())),
                 2,
             );
         }
@@ -6749,12 +6427,15 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
         Ok(model) => model,
         Err(error) => return (model_error_output(&error), 2),
     };
+    if let Err(error) = spec_loading::reject_refuted_requirements(source, &model) {
+        return (spec_load_error_output(&error), 2);
+    }
     let source_path = portable_path.unwrap_or_else(|| path.to_string_lossy().into_owned());
     match fsl_core::public_kernel_contract_for_version(
         &kernel,
         &model,
         &source_path,
-        source_dialect(&source),
+        source_dialect(source),
         version,
     ) {
         Ok(mut contract) => {
@@ -6763,7 +6444,15 @@ fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (
             object.insert("result".to_owned(), json!("kernel"));
             (contract, 0)
         }
-        Err(error) => (semantic_error_output(&error.to_string()), 2),
+        Err(error) => (projection_error_output(&model, &error), 2),
+    }
+}
+
+/// A projection failure on an aggregate bound keeps that bound's source location.
+fn projection_error_output(model: &fsl_core::KernelModel, error: &impl std::fmt::Display) -> Value {
+    match fsl_core::locate_unfolded_aggregate(model) {
+        Err(refusal) => model_error_output(&refusal),
+        Ok(()) => semantic_error_output(&error.to_string()),
     }
 }
 
@@ -6772,7 +6461,27 @@ fn run_conformance(
     depth: usize,
     version: fsl_core::PublicKernelVersion,
 ) -> (Value, i32) {
-    let model = match load_model(path) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        true,
+        |sources, editions| {
+            finish_admitted(
+                run_conformance_from_source(path, &sources[0], depth, version),
+                editions,
+                true,
+            )
+        },
+    )
+}
+
+fn run_conformance_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    version: fsl_core::PublicKernelVersion,
+) -> (Value, i32) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -6789,11 +6498,22 @@ fn run_conformance(
 }
 
 fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    if source_dialect(&source) == "compose" {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        true,
+        |sources, editions| {
+            finish_admitted(
+                run_testplan_from_source(path, &sources[0], depth),
+                editions,
+                true,
+            )
+        },
+    )
+}
+
+fn run_testplan_from_source(path: &Path, source: &str, depth: usize) -> (Value, i32) {
+    if source_dialect(source) == "compose" {
         return (
             semantic_error_output(
                 "advanced test planning requires truthful Public Kernel export; compose unsupported",
@@ -6801,7 +6521,7 @@ fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
             2,
         );
     }
-    let (kernel, model) = match load_kernel_model_from_source(path, &source) {
+    let (kernel, model) = match load_kernel_model_from_source(path, source) {
         Ok(parts) => parts,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -6810,7 +6530,7 @@ fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
         &kernel,
         &model,
         &source_path,
-        source_dialect(&source),
+        source_dialect(source),
     ) {
         Ok(mut contract) => {
             let object = contract.as_object_mut().expect("public Kernel object");
@@ -6835,212 +6555,7 @@ fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
 }
 
 fn source_dialect(source: &str) -> &str {
-    match fsl_syntax::dialect_keyword(source) {
-        Ok("spec") => "kernel",
-        Ok("dbsystem") => "db",
-        Ok("ai_component") => "ai-component",
-        Ok("agent") => "ai-agent",
-        Ok(keyword) => keyword,
-        Err(_) => "unknown",
-    }
-}
-
-#[allow(clippy::too_many_lines)]
-fn strict_tag_warnings(
-    model: &KernelModel,
-    source_path: &Path,
-    requirements: Option<&Path>,
-) -> Result<Vec<Value>, String> {
-    let source = std::fs::read_to_string(source_path).map_err(|error| error.to_string())?;
-    strict_tag_warnings_from_source(model, &source, requirements)
-}
-
-/// Collect every requirement ID that some declaration or trace case references.
-///
-/// The two halves are not the same shape. The first enumerates the `KernelModel` collections
-/// that carry annotations, so a newly added annotation-bearing collection has to be added here
-/// as well. The second reads a trace case's whole annotation set rather than its `id`, because
-/// lowering synthesises the case's own `Requirement{id,text}` into that set before extending it
-/// with the surface annotations (`fsl_core::dialect::trace_case_annotations`) -- so one read
-/// yields both the owned and the linked IDs, and neither can be forgotten separately.
-fn referenced_requirement_ids(
-    model: &KernelModel,
-    source: &str,
-) -> std::collections::BTreeSet<String> {
-    let mut referenced = std::collections::BTreeSet::new();
-    for annotations in model
-        .actions
-        .iter()
-        .map(|item| &item.annotations)
-        .chain(model.invariants.iter().map(|item| &item.annotations))
-        .chain(model.transitions.iter().map(|item| &item.annotations))
-        .chain(model.leadstos.iter().map(|item| &item.annotations))
-        .chain(model.reachables.iter().map(|item| &item.annotations))
-        .chain(std::iter::once(&model.init_annotations))
-    {
-        referenced.extend(
-            annotations
-                .requirements()
-                .expect("checked model annotations are valid")
-                .into_iter()
-                .map(|requirement| requirement.id),
-        );
-    }
-    if let Ok(Some(contract)) = fsl_core::requirements_trace_contract(source) {
-        for case in contract.acceptance.into_iter().chain(contract.forbidden) {
-            referenced.extend(
-                case.annotations
-                    .requirements()
-                    .expect("checked trace case annotations are valid")
-                    .into_iter()
-                    .map(|requirement| requirement.id),
-            );
-        }
-    }
-    referenced
-}
-
-fn strict_tag_warnings_from_source(
-    model: &KernelModel,
-    source: &str,
-    requirements: Option<&Path>,
-) -> Result<Vec<Value>, String> {
-    let mut warnings = Vec::new();
-    // The hint names the canonical link form from `docs/design/DESIGN-id-policy.md`.
-    // It used to propose the `"REQ-1: original requirement"` string slot, which
-    // that policy classifies as non-canonical migration input and `fslc lint`
-    // reports as `legacy_string_metadata` — so the repair this diagnostic asked
-    // for was the one the next gate rejects.
-    let hint = "tag the declaration with a typed annotation such as @requirement(\"REQ-SCOPE-001\", \"original requirement\"); use a MODEL-/ASSUME-prefixed id for modeling intent, or process `covers` in the business/requirements dialects. The legacy \"REQ-1: text\" string slot is non-canonical (fslc lint reports it as legacy_string_metadata)";
-    for (element, name, span, annotations) in model
-        .actions
-        .iter()
-        .map(|item| ("action", item.name.as_str(), &item.span, &item.annotations))
-        .chain(model.invariants.iter().map(|item| {
-            (
-                "invariant",
-                item.name.as_str(),
-                &item.span,
-                &item.annotations,
-            )
-        }))
-        .chain(
-            model
-                .transitions
-                .iter()
-                .map(|item| ("trans", item.name.as_str(), &item.span, &item.annotations)),
-        )
-        .chain(
-            model
-                .leadstos
-                .iter()
-                .map(|item| ("leadsTo", item.name.as_str(), &item.span, &item.annotations)),
-        )
-        .chain(model.reachables.iter().map(|item| {
-            (
-                "reachable",
-                item.name.as_str(),
-                &item.span,
-                &item.annotations,
-            )
-        }))
-    {
-        if annotations.source_order().is_empty() && !name.starts_with('_') {
-            warnings.push(json!({
-                "kind": "untagged",
-                "element": element,
-                "name": if element == "action" {
-                    model.action_display_name(name)
-                } else {
-                    display(name)
-                },
-                "loc": span.python_loc(),
-                "hint": hint,
-            }));
-        }
-    }
-
-    let referenced = referenced_requirement_ids(model, source);
-    // `Declared` = requirement-block IDs auto-collected from the requirements dialect
-    // (docs/design/DESIGN-strict-tags.md section 2 calls this "essential" for catching an
-    // empty block) union `--requirements` file IDs. Both halves run regardless of
-    // whether `--requirements` was passed; only the file half is optional. The file
-    // half keeps reporting in its original file-line order, so an established
-    // `--requirements` file's warning order is undisturbed; IDs that reach
-    // `Declared` only through auto-collection are reported afterward, in a fixed
-    // (sorted) order.
-    let declared_from_blocks = fsl_core::requirements_declared_ids(source).unwrap_or_default();
-    let mut declared_from_file: Vec<String> = Vec::new();
-    if let Some(path) = requirements {
-        let source = std::fs::read_to_string(path).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                format!("file not found: {}", path.display())
-            } else {
-                error.to_string()
-            }
-        })?;
-        declared_from_file.extend(
-            source
-                .lines()
-                .map(str::trim)
-                .filter(|line| !line.is_empty())
-                .map(str::to_owned),
-        );
-    }
-    for requirement in &declared_from_file {
-        if !referenced.contains(requirement.as_str()) {
-            warnings.push(json!({
-                "kind": "unreferenced_requirement",
-                "element": "requirement",
-                "name": requirement,
-                "loc": Value::Null,
-                "hint": "no declaration tag, acceptance, or forbidden block references this requirement ID",
-            }));
-        }
-    }
-    for requirement in &declared_from_blocks {
-        if declared_from_file.iter().any(|line| line == requirement) {
-            continue;
-        }
-        if !referenced.contains(requirement.as_str()) {
-            warnings.push(json!({
-                "kind": "unreferenced_requirement",
-                "element": "requirement",
-                "name": requirement,
-                "loc": Value::Null,
-                "hint": "no declaration tag, acceptance, or forbidden block references this requirement ID",
-            }));
-        }
-    }
-    Ok(warnings)
-}
-
-fn add_strict_tag_warnings(
-    output: &mut Value,
-    model: &KernelModel,
-    source_path: &Path,
-    strict_tags: bool,
-    requirements: Option<&Path>,
-) -> Result<(), String> {
-    if !strict_tags
-        || !matches!(
-            output.get("result").and_then(Value::as_str),
-            Some("ok" | "verified" | "proved")
-        )
-    {
-        return Ok(());
-    }
-    let additions = strict_tag_warnings(model, source_path, requirements)?;
-    let Some(envelope) = output.as_object_mut() else {
-        return Ok(());
-    };
-    envelope
-        .entry("warnings")
-        .or_insert_with(|| Value::Array(Vec::new()))
-        .as_array_mut()
-        .expect("warnings is an array")
-        .extend(additions);
-    Ok(())
+    fslc_rust::migration::source_dialect(source, crate::parse_options())
 }
 
 fn add_strict_tag_warnings_from_source(
@@ -7079,91 +6594,40 @@ fn run_check_with_tags_from_source(
     source: &str,
     strict_tags: bool,
     requirements: Option<&Path>,
-    edition: &str,
+    edition: Option<fsl_syntax::EditionRequest>,
 ) -> (Value, i32) {
-    let (mut output, status) = run_check_from_source(path, display_path, source);
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let admission = match fslc_rust::migration::admit_source(
+        source,
+        &display_path.to_string_lossy(),
+        edition,
+        crate::parse_options(),
+        &envelope,
+        true,
+    ) {
+        Ok(admission) => admission,
+        Err(refusal) => return refusal,
+    };
+    let (mut output, status) = run_check_from_source(path, display_path, source, &admission);
     if status == 0 && strict_tags {
         let model = match load_model_from_source(path, source) {
             Ok(model) => model,
-            Err(error) => return (spec_load_error_output(&error), 2),
+            Err(error) => return dependencies.finish((spec_load_error_output(&error), 2), false),
         };
         if let Err(error) =
             add_strict_tag_warnings_from_source(&mut output, &model, source, true, requirements)
         {
-            return (error_output("io", &error), 2);
+            return error_exit(io_error_output(&error));
         }
     }
-    apply_domain_edition_from_source((output, status), source, display_path, edition)
-}
-
-fn apply_domain_edition_from_source(
-    (mut output, status): (Value, i32),
-    source: &str,
-    display_path: &Path,
-    edition: &str,
-) -> (Value, i32) {
-    let migration_edition = if edition == "next" {
-        fslc_rust::migration::Edition::Next
-    } else {
-        fslc_rust::migration::Edition::Current
-    };
-    let Ok(plan) = fslc_rust::migration::plan_migration(
-        source,
-        &display_path.to_string_lossy(),
-        migration_edition,
-    ) else {
-        return (output, status);
-    };
-    let mut additions = plan
-        .diagnostics
-        .iter()
-        .filter(|finding| edition == "next" || finding.code == "deprecated_domain_enum_union")
-        .map(|finding| finding.json(&display_path.to_string_lossy(), migration_edition))
-        .collect::<Vec<_>>();
-    if edition != "next" {
-        additions.extend(fslc_rust::frontend_output::implicit_initial_value_warnings(
-            source,
-            &display_path.to_string_lossy(),
-        ));
-    }
-    if edition == "next" && !additions.is_empty() {
-        let kind = if additions.iter().all(|finding| {
-            finding.get("code").and_then(Value::as_str) == Some("deprecated_domain_enum_union")
-        }) {
-            "deprecated_domain_enum_union"
-        } else {
-            "unsupported_in_edition"
-        };
-        let mut error = envelope();
-        error.insert("result".to_owned(), json!("error"));
-        error.insert("kind".to_owned(), json!(kind));
-        error.insert("edition".to_owned(), json!(edition));
-        error.insert("findings".to_owned(), Value::Array(additions));
-        return (Value::Object(error), 2);
-    }
-    if !additions.is_empty()
-        && let Value::Object(envelope) = &mut output
-    {
-        envelope
-            .entry("warnings")
-            .or_insert_with(|| Value::Array(Vec::new()))
-            .as_array_mut()
-            .expect("warnings is an array")
-            .extend(additions);
-    }
-    if edition == "next"
-        && let Value::Object(envelope) = &mut output
-    {
-        envelope.insert("edition".to_owned(), json!(edition));
-    }
-    (output, status)
+    dependencies.finish(admission.finish((output, status)), false)
 }
 
 fn parse_surface_document_from_source(
     path: &Path,
     source: &str,
 ) -> Result<fsl_syntax::SurfaceDocument, String> {
-    fsl_syntax::parse_surface_document(source).map_err(|error| {
+    fsl_syntax::parse_surface_document_with(source, crate::parse_options()).map_err(|error| {
         format!(
             "{} at {}:{}:{}",
             error.message,
@@ -7174,29 +6638,10 @@ fn parse_surface_document_from_source(
     })
 }
 
-fn parse_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, String> {
-    let source = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    parse_surface_document_from_source(path, &source)
-}
-
-/// Load a dialect surface document without flattening a parser diagnostic at
-/// the command boundary.  The legacy string-returning helper above is kept
-/// for callers that deliberately own a non-envelope result; spec-input
-/// commands must retain the parser's class and span through this path.
-fn load_surface_document(path: &Path) -> Result<fsl_syntax::SurfaceDocument, SpecLoadError> {
-    // This loader's caller contract predates the typed `io` envelope. Keep a
-    // read failure distinct from a parse failure without widening #780 beyond
-    // its declared parse-only surface.
-    let source = std::fs::read_to_string(path)
-        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))?;
-    load_surface_document_from_source(path, &source)
-}
-
 /// Load a dialect surface document from an already-captured source string.
 ///
 /// Domain-projection commands (#796) must validate and project from the same
-/// snapshot they read, so they call this instead of re-reading `path` through
-/// [`load_surface_document`]. `path` is still needed here (not just for
+/// snapshot they read, without re-reading `path`. `path` is still needed here (not just for
 /// diagnostics): a literate (`.md`) document keeps the pre-#780 unlocated
 /// `semantics` classification instead of a located `parse` envelope, and that
 /// dispatch is keyed on the extension, not the content.
@@ -7208,20 +6653,14 @@ fn load_surface_document_from_source(
         return parse_surface_document_from_source(path, source)
             .map_err(SpecLoadError::unlocated_semantic);
     }
-    fsl_syntax::parse_surface_document(source)
+    fsl_syntax::parse_surface_document_with(source, crate::parse_options())
         .map_err(|error| SpecLoadError::Parse(Box::new(error)))
 }
 
-fn validate_specialized_document_from_source(path: &Path, source: &str) -> Result<(), String> {
-    fslc_rust::check_stages::validate_specialized_document(source, &path.display().to_string())
-}
-
 fn run_db_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_db_check_from_source(path, &source, depth, deadlock, engine)
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_db_check_from_source(path, source, depth, deadlock, engine)
+    })
 }
 
 /// Check one caller-owned database root-source snapshot.
@@ -7239,13 +6678,13 @@ fn run_db_check_from_source(
     };
     let mut result = match fsl_tools::check_db(&system) {
         Ok(Value::Object(result)) => result,
-        Ok(_) => return (error_output("internal", "invalid database result"), 3),
+        Ok(_) => return error_exit(error_output("internal", "invalid database result")),
         Err(error) => return (semantic_error_output(&error.to_string()), 2),
     };
     let status = if result.get("result").and_then(Value::as_str) == Some("violated") {
         1
     } else {
-        let (kernel, kernel_status) = run_verify_from_source(
+        let (kernel, kernel_status) = run_verify_admitted_from_source(
             path,
             source,
             depth,
@@ -7253,6 +6692,7 @@ fn run_db_check_from_source(
             engine,
             DEFAULT_EXPLICIT_BUDGET,
             1,
+            None,
         );
         // Issue #600. The rule and its rationale live with the rest of the
         // outcome vocabulary; `run_domain_check` calls the same predicate.
@@ -7282,7 +6722,17 @@ fn run_db_check_from_source(
 }
 
 fn run_db_observe(path: &Path, trace: &Path) -> (Value, i32) {
-    let system = match load_surface_document(path) {
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        false,
+        |source| run_db_observe_from_source(path, source, trace),
+    )
+}
+
+fn run_db_observe_from_source(path: &Path, source: &str, trace: &Path) -> (Value, i32) {
+    let system = match load_surface_document_from_source(path, source) {
         Ok(fsl_syntax::SurfaceDocument::Db(system)) => system,
         Ok(_) => return (semantic_error_output("expected a dbsystem document"), 2),
         Err(error) => return (spec_load_error_output(&error), 2),
@@ -7292,7 +6742,7 @@ fn run_db_observe(path: &Path, trace: &Path) -> (Value, i32) {
         .and_then(|source| serde_json::from_str(&source).map_err(|error| error.to_string()))
     {
         Ok(payload) => payload,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     match fsl_tools::observe_db(&system, &payload) {
         Ok(Value::Object(result)) => {
@@ -7303,10 +6753,10 @@ fn run_db_observe(path: &Path, trace: &Path) -> (Value, i32) {
             );
             (Value::Object(output), status)
         }
-        Ok(_) => (
-            error_output("internal", "invalid database observation result"),
-            3,
-        ),
+        Ok(_) => error_exit(error_output(
+            "internal",
+            "invalid database observation result",
+        )),
         Err(error) => (semantic_error_output(&error.to_string()), 2),
     }
 }
@@ -7317,9 +6767,9 @@ fn run_db_import(
     requested_format: &str,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
+    let source = match read_input_text(path) {
         Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let format = if requested_format == "auto" {
         if path.extension().and_then(std::ffi::OsStr::to_str) == Some("prisma") {
@@ -7338,9 +6788,9 @@ fn run_db_import(
     }
     let imported = fsl_tools::import_db(&source, name, format);
     if let Some(output_path) = output_path
-        && let Err(error) = std::fs::write(output_path, &imported.source)
+        && let Err(error) = output_publication::publish(output_path, &imported.source)
     {
-        return (error_output("io", &error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     let mut output = envelope();
     output.insert(
@@ -7363,33 +6813,9 @@ fn run_db_import(
     (Value::Object(output), 0)
 }
 
-/// Whether a producer's output may be delivered as raw bytes instead of its
-/// JSON envelope (issue #537 C2, Verdict Conservation Law).
-///
-/// Raw delivery *replaces* the envelope that would otherwise carry a failure's
-/// `kind`/`message`/`loc`, so every raw-output path must first confirm the
-/// producer succeeded. This is an **additional** conjunct and never a
-/// replacement for the structural field guard a site already has: `db import`
-/// prints raw source only for `result:"imported"` and keeps the JSON envelope
-/// for `imported_with_warnings`, which is also success-class.
-///
-/// Three of the nine raw-output sites previously had no guard at all
-/// (`--readable`, `--ts`, `domain expand`). Measured rather than assumed: no
-/// failure path can currently reach any of those extractions, because the
-/// extracted field is inserted at exactly one place in each producer, after
-/// every error return -- `"readable"` in `run_explain`, `"entities"` in
-/// `fsl_tools::analyze_typestate`, `"kernel_source"` in `run_domain_expand`.
-/// The guard therefore records an invariant that was until now unstated. It is
-/// not idle: `fsl-tools/src/domain.rs` builds a `result:"violated"` envelope
-/// that also carries `kernel_source`, so the invariant is one routing change
-/// away from breaking.
-fn raw_delivery_allowed(result: &(Value, i32)) -> bool {
-    outcome_class(&result.0).is_success()
-}
-
 fn wrap_specialized(result: Value) -> (Value, i32) {
     let Value::Object(mut result) = result else {
-        return (error_output("internal", "invalid specialized result"), 3);
+        return error_exit(error_output("internal", "invalid specialized result"));
     };
     result.retain(|_, value| !value.is_null());
     // Issue #601. This used to carry its own failure list ending in `_ => 0`,
@@ -7446,17 +6872,33 @@ fn ai_project_parse_failure(
 }
 
 fn run_ai_check(path: &Path, depth: usize, deadlock: &str, engine: &str) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    if fslc_rust::frontend_output::is_ai_project(&source) {
-        return run_ai_project_check(&source, path);
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_check_from_source(path, source, depth, deadlock, engine)
+    })
+}
+
+fn run_ai_check_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock: &str,
+    engine: &str,
+) -> (Value, i32) {
+    if fslc_rust::frontend_output::is_ai_project(source) {
+        return run_ai_project_check(source, path);
     }
-    match load_surface_document(path) {
+    match load_surface_document_from_source(path, source) {
         Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => {
-            let (kernel, status) =
-                run_verify(path, depth, deadlock, engine, DEFAULT_EXPLICIT_BUDGET, 1);
+            let (kernel, status) = run_verify_admitted_from_source(
+                path,
+                source,
+                depth,
+                deadlock,
+                engine,
+                DEFAULT_EXPLICIT_BUDGET,
+                1,
+                None,
+            );
             if status == 2 {
                 return (kernel, status);
             }
@@ -7503,13 +6945,20 @@ fn read_json_events(path: &Path) -> Result<Vec<Value>, String> {
 }
 
 fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    if fslc_rust::frontend_output::is_ai_project(&source) {
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_replay_from_source(path, source, logs, selected_component)
+    })
+}
+
+fn run_ai_replay_from_source(
+    path: &Path,
+    source: &str,
+    logs: &Path,
+    selected_component: Option<&str>,
+) -> (Value, i32) {
+    if fslc_rust::frontend_output::is_ai_project(source) {
         let project = match fslc_rust::frontend_output::parse_checked_ai_project(
-            &source,
+            source,
             &ai_project_name(path),
         ) {
             Ok(project) => project,
@@ -7518,7 +6967,7 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
         if let Some(failure) = reject_invalid_ai_components(&project.components) {
             return failure;
         }
-        let summary = ai_project_summary(&source);
+        let summary = ai_project_summary(source);
         if selected_component.is_some_and(|selected| selected != summary.component) {
             return (
                 semantic_error_output(&format!(
@@ -7530,7 +6979,7 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
         }
         let events = match read_json_events(logs) {
             Ok(events) => events,
-            Err(error) => return (error_output("parse", &error), 2),
+            Err(error) => return error_exit(error_output("parse", &error)),
         };
         let mut findings = Vec::new();
         for (index, event) in events.iter().enumerate() {
@@ -7552,7 +7001,7 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
             json!({"result":if findings.is_empty(){"replay_conformant"}else{"replay_nonconformant"},"dialect":"fsl-ai-hard.v0","finding_schema_version":"fsl-ai-finding.v0","event_schema_version":"fsl-ai-event.v0","ai_component":summary.component,"events_checked":events.len(),"formal_result":"not_run","evidence":{"kind":"runtime_replay","formal_proof":false},"assumptions":[],"findings":findings}),
         );
     }
-    let component = match load_surface_document(path) {
+    let component = match load_surface_document_from_source(path, source) {
         Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => component,
         Ok(_) => {
             return (
@@ -7576,7 +7025,7 @@ fn run_ai_replay(path: &Path, logs: &Path, selected_component: Option<&str>) -> 
     }
     let events = match read_json_events(logs) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     wrap_specialized(fsl_tools::replay_ai(&component, &events))
 }
@@ -7719,11 +7168,11 @@ fn run_ai_compare(
 ) -> (Value, i32) {
     let before_events = match read_json_events(before) {
         Ok(value) => value,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     let after_events = match read_json_events(after) {
         Ok(value) => value,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     let left = metric_summaries(&before_events, dataset);
     let right = metric_summaries(&after_events, dataset);
@@ -7744,14 +7193,12 @@ fn ai_project_name(path: &Path) -> String {
     fslc_rust::frontend_output::ai_project_name(&path.to_string_lossy()).to_owned()
 }
 
-fn load_ai_project(path: &Path) -> Result<fsl_syntax::AiProject, (Value, i32)> {
-    let source = std::fs::read_to_string(path)
-        .map_err(|error| (error_output("io", &error.to_string()), 2))?;
+fn load_ai_project(path: &Path, source: &str) -> Result<fsl_syntax::AiProject, (Value, i32)> {
     if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
-        return fsl_syntax::parse_ai_project(&source, &ai_project_name(path))
+        return fsl_syntax::parse_ai_project(source, &ai_project_name(path))
             .map_err(|error| (semantic_error_output(&error.message), 2));
     }
-    match fsl_syntax::parse_ai_project(&source, &ai_project_name(path)) {
+    match fsl_syntax::parse_ai_project(source, &ai_project_name(path)) {
         Ok(project) => Ok(project),
         Err(error) => Err((surface_parse_error_output(&error), 2)),
     }
@@ -7769,7 +7216,20 @@ fn run_ai_eval(
     property: Option<&str>,
     slice: Option<&str>,
 ) -> (Value, i32) {
-    let project = match load_ai_project(path) {
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_eval_from_source(path, source, records, dataset, property, slice)
+    })
+}
+
+fn run_ai_eval_from_source(
+    path: &Path,
+    source: &str,
+    records: Option<&Path>,
+    dataset: Option<&str>,
+    property: Option<&str>,
+    slice: Option<&str>,
+) -> (Value, i32) {
+    let project = match load_ai_project(path, source) {
         Ok(project) => project,
         Err(failure) => return failure,
     };
@@ -7797,7 +7257,14 @@ fn run_ai_eval(
                     2,
                 );
             }
-            Some(source) => PathBuf::from(source),
+            Some(source) => {
+                let source = Path::new(source);
+                if source.is_absolute() {
+                    source.to_path_buf()
+                } else {
+                    path.parent().unwrap_or_else(|| Path::new(".")).join(source)
+                }
+            }
             None => {
                 return (
                     semantic_error_output(&format!(
@@ -7810,7 +7277,7 @@ fn run_ai_eval(
     };
     let events = match read_json_events(&records_path) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     match fsl_tools::evaluate_statistical_property(selected, &events, &dataset_name, slice) {
         Ok(result) => wrap_specialized(result),
@@ -7829,7 +7296,20 @@ fn run_ai_regress(
     dataset: Option<&str>,
     migration: Option<&str>,
 ) -> (Value, i32) {
-    let project = match load_ai_project(path) {
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_regress_from_source(path, source, before, after, dataset, migration)
+    })
+}
+
+fn run_ai_regress_from_source(
+    path: &Path,
+    source: &str,
+    before: &Path,
+    after: &Path,
+    dataset: Option<&str>,
+    migration: Option<&str>,
+) -> (Value, i32) {
+    let project = match load_ai_project(path, source) {
         Ok(project) => project,
         Err(failure) => return failure,
     };
@@ -7839,11 +7319,11 @@ fn run_ai_regress(
     };
     let before_events = match read_json_events(before) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     let after_events = match read_json_events(after) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     match fsl_tools::evaluate_migration(selected, &before_events, &after_events, dataset) {
         Ok(result) => wrap_specialized(result),
@@ -7868,7 +7348,30 @@ fn run_ai_drift(
     window: Option<&str>,
     baseline_label: Option<&str>,
 ) -> (Value, i32) {
-    let project = match load_ai_project(path) {
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_drift_from_source(
+            path,
+            source,
+            current,
+            baseline,
+            property,
+            window,
+            baseline_label,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_ai_drift_from_source(
+    path: &Path,
+    source: &str,
+    current: &Path,
+    baseline: Option<&Path>,
+    property: Option<&str>,
+    window: Option<&str>,
+    baseline_label: Option<&str>,
+) -> (Value, i32) {
+    let project = match load_ai_project(path, source) {
         Ok(project) => project,
         Err(failure) => return failure,
     };
@@ -7878,12 +7381,12 @@ fn run_ai_drift(
     };
     let current_events = match read_json_events(current) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
     let baseline_events = match baseline {
         Some(path) => match read_json_events(path) {
             Ok(events) => events,
-            Err(error) => return (error_output("parse", &error), 2),
+            Err(error) => return error_exit(error_output("parse", &error)),
         },
         None => Vec::new(),
     };
@@ -7902,18 +7405,20 @@ fn run_ai_drift(
 /// all, previously produced a syntactically empty profile that reported
 /// success indistinguishably from a genuine clean result).
 fn run_ai_compat(path: &Path, environment: Option<&str>) -> (Value, i32) {
-    let source = match std::fs::read_to_string(path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_ai_compat_from_source(path, source, environment)
+    })
+}
+
+fn run_ai_compat_from_source(path: &Path, source: &str, environment: Option<&str>) -> (Value, i32) {
     let components: Vec<fsl_syntax::AiComponent> =
-        if fslc_rust::frontend_output::is_ai_project(&source) {
-            match fsl_syntax::parse_ai_project(&source, &ai_project_name(path)) {
+        if fslc_rust::frontend_output::is_ai_project(source) {
+            match fsl_syntax::parse_ai_project(source, &ai_project_name(path)) {
                 Ok(project) => project.components,
                 Err(error) => return (semantic_error_output(&error.message), 2),
             }
         } else {
-            match load_surface_document(path) {
+            match load_surface_document_from_source(path, source) {
                 Ok(fsl_syntax::SurfaceDocument::AiComponent(component)) => vec![component],
                 Ok(_) => {
                     return (
@@ -8054,19 +7559,6 @@ fn parse_domain_document_from_source(
     }
 }
 
-/// Capture the one source snapshot that a domain projection command may use.
-///
-/// The AST projected by `domain analyze` / `domain expand` and the checked
-/// Kernel validation must originate from this same string. Re-reading `path`
-/// after parsing would permit an atomic save to validate different content.
-fn read_domain_command_input(
-    path: &Path,
-) -> Result<(String, fsl_syntax::DomainSpec), SpecLoadError> {
-    let source = read_domain_command_source(path)?;
-    let domain = parse_domain_document_from_source(path, &source)?;
-    Ok((source, domain))
-}
-
 /// Capture a domain command's one root-source snapshot.
 ///
 /// All command-specific projections (the domain AST, checked Kernel/model,
@@ -8074,11 +7566,9 @@ fn read_domain_command_input(
 /// this value. Dependencies resolved by `FsResolver` are intentionally outside
 /// this root-input contract.
 fn read_domain_command_source(path: &Path) -> Result<String, SpecLoadError> {
-    // This command's caller contract predates the typed `io` envelope, same as
-    // `load_surface_document` above. Keep a read failure classified as
-    // `semantics` without widening #780 beyond its declared parse-only scope.
-    std::fs::read_to_string(path)
-        .map_err(|error| SpecLoadError::unlocated_semantic(error.to_string()))
+    // A read failure is `kind:"io"` here as on every other command (#1170
+    // phase 2 retired the #780-era `semantics` classification).
+    read_spec_source(path)
 }
 
 fn domain_scaffold_inputs_from_source(
@@ -8121,55 +7611,66 @@ fn run_domain_check(
     depth: usize,
     deadlock: &str,
     engine: &str,
-    edition: &str,
+    edition: Option<fsl_syntax::EditionRequest>,
 ) -> (Value, i32) {
-    let source = match read_domain_command_source(path) {
-        Ok(source) => source,
-        // `apply_domain_edition` cannot enrich an unreadable root document;
-        // returning the established load error directly also keeps this
-        // command to its single attempted root-path read.
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        edition,
+        false,
+        |source| run_domain_check_from_source(path, source, depth, deadlock, engine),
+    )
+}
+
+fn run_domain_check_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock: &str,
+    engine: &str,
+) -> (Value, i32) {
+    let domain = match parse_domain_document_from_source(path, source) {
+        Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let domain = match parse_domain_document_from_source(path, &source) {
-        Ok(domain) => domain,
-        Err(error) => {
-            return apply_domain_edition_from_source(
-                (spec_load_error_output(&error), 2),
-                &source,
-                path,
-                edition,
-            );
-        }
-    };
-    let (kernel, status) = run_verify_from_source(
+    let (kernel, status) = run_verify_admitted_from_source(
         path,
-        &source,
+        source,
         depth,
         deadlock,
         engine,
         DEFAULT_EXPLICIT_BUDGET,
         1,
+        None,
     );
     // Issue #515. The rule and its rationale live with the rest of the outcome
     // vocabulary; `run_db_check` calls the same predicate.
     if !fslc_rust::outcome::is_definitive_kernel_verdict(status) {
-        return apply_domain_edition_from_source((kernel, status), &source, path, edition);
+        return (kernel, status);
     }
-    let result = match fsl_tools::check_domain(&domain, &fslc_rust::outcome::project_kernel(kernel))
-    {
+    match fsl_tools::check_domain(&domain, &fslc_rust::outcome::project_kernel(kernel)) {
         Ok(result) => wrap_specialized(result),
         Err(error) => (core_error_output(&error), 2),
-    };
-    apply_domain_edition_from_source(result, &source, path, edition)
+    }
 }
 
 fn run_domain_analyze(path: &Path) -> (Value, i32) {
-    match read_domain_command_input(path) {
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        false,
+        |source| run_domain_analyze_from_source(path, source),
+    )
+}
+
+fn run_domain_analyze_from_source(path: &Path, source: &str) -> (Value, i32) {
+    match parse_domain_document_from_source(path, source) {
         // #726's renderer-side fail-closed guard; #798 slice 1 made the
         // specialized projection agree with direct lowering, so the former
         // #796 post-validation against `load_kernel_model_from_source` is
         // no longer required at this boundary.
-        Ok((_source, domain)) => match fsl_tools::analyze_domain(&domain) {
+        Ok(domain) => match fsl_tools::analyze_domain(&domain) {
             Ok(result) => wrap_specialized(result),
             Err(error) => (domain_projection_error_output(path, &error), 2),
         },
@@ -8178,8 +7679,22 @@ fn run_domain_analyze(path: &Path) -> (Value, i32) {
 }
 
 fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
-    let (_input_source, domain) = match read_domain_command_input(path) {
-        Ok(input) => input,
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        output_path.is_none(),
+        |source| run_domain_expand_from_source(path, source, output_path),
+    )
+}
+
+fn run_domain_expand_from_source(
+    path: &Path,
+    source: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let domain = match parse_domain_document_from_source(path, source) {
+        Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     let source = match fsl_tools::domain_kernel_source(&domain) {
@@ -8187,9 +7702,9 @@ fn run_domain_expand(path: &Path, output_path: Option<&Path>) -> (Value, i32) {
         Err(error) => return (domain_projection_error_output(path, &error), 2),
     };
     if let Some(output_path) = output_path
-        && let Err(error) = std::fs::write(output_path, &source)
+        && let Err(error) = output_publication::publish(output_path, &source)
     {
-        return (error_output("io", &error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     let mut result = json!({"result":"expanded","dialect":"fsl-domain-effect.v0","domain":domain.name,"kernel_source":source,"assumptions":[]});
     if let Some(output_path) = output_path
@@ -8207,39 +7722,60 @@ fn run_domain_generate(
     target: &str,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let source = match read_domain_command_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let domain = match parse_domain_document_from_source(path, &source) {
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        false,
+        |source| run_domain_generate_from_source(path, source, profile, target, output_path),
+    )
+}
+
+fn run_domain_generate_from_source(
+    path: &Path,
+    source: &str,
+    profile: &str,
+    target: &str,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let domain = match parse_domain_document_from_source(path, source) {
         Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     if profile != "functional-ddd" {
-        return (
-            error_output(
-                "semantics",
-                &format!("unsupported domain profile: {profile}"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("unsupported domain profile: {profile}"),
+        ));
     }
-    let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, &source, &domain) {
+    let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, source, &domain) {
         Ok(input) => input,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     let mut result = match fsl_tools::domain_scaffold(&kernel, &metadata, target) {
         Ok(result) => result,
-        Err(error) => return (error_output("semantics", &error), 2),
+        Err(error) => return error_exit(error_output("semantics", &error)),
     };
     if let Some(output_path) = output_path {
         let Value::Object(object) = &mut result else {
-            return (error_output("internal", "invalid scaffold result"), 3);
+            return error_exit(error_output("internal", "invalid scaffold result"));
         };
         if let Err(error) = std::fs::create_dir_all(output_path) {
-            return (error_output("io", &error.to_string()), 2);
+            return error_exit(io_error_output(&error.to_string()));
         }
-        if let Some(files) = object.get("files").and_then(Value::as_array) {
+        let files = object.get("files").and_then(Value::as_array);
+        // Refuse an input target before any file of the set is written.
+        for relative in files
+            .into_iter()
+            .flatten()
+            .filter_map(|file| file.get("path").and_then(Value::as_str))
+        {
+            if let Err(error) = output_publication::refuse_input_target(&output_path.join(relative))
+            {
+                return error_exit(io_error_output(&error.to_string()));
+            }
+        }
+        if let Some(files) = files {
             for file in files {
                 let Some(relative) = file.get("path").and_then(Value::as_str) else {
                     continue;
@@ -8248,15 +7784,15 @@ fn run_domain_generate(
                 if let Some(parent) = destination.parent()
                     && let Err(error) = std::fs::create_dir_all(parent)
                 {
-                    return (error_output("io", &error.to_string()), 2);
+                    return error_exit(io_error_output(&error.to_string()));
                 }
-                if let Err(error) = std::fs::write(
-                    destination,
+                if let Err(error) = output_publication::publish(
+                    &destination,
                     file.get("content")
                         .and_then(Value::as_str)
                         .unwrap_or_default(),
                 ) {
-                    return (error_output("io", &error.to_string()), 2);
+                    return error_exit(io_error_output(&error.to_string()));
                 }
             }
         }
@@ -8846,21 +8382,27 @@ fn domain_replay_event_mismatch_finding(
     )
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
-    let source = match read_domain_command_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let domain = match parse_domain_document_from_source(path, &source) {
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        false,
+        |source| run_domain_replay_from_source(path, source, logs),
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_domain_replay_from_source(path: &Path, source: &str, logs: &Path) -> (Value, i32) {
+    let domain = match parse_domain_document_from_source(path, source) {
         Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     let events = match read_json_events(logs) {
         Ok(events) => events,
-        Err(error) => return (error_output("parse", &error), 2),
+        Err(error) => return error_exit(error_output("parse", &error)),
     };
-    let model = match load_model_from_source(path, &source) {
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
@@ -9228,7 +8770,6 @@ fn run_domain_replay(path: &Path, logs: &Path) -> (Value, i32) {
     }))
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_domain_testgen(
     path: &Path,
     depth: usize,
@@ -9237,16 +8778,41 @@ fn run_domain_testgen(
     strict: bool,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let source = match read_domain_command_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let domain = match parse_domain_document_from_source(path, &source) {
+    run_admitted_root(
+        path,
+        read_domain_command_source(path),
+        None,
+        output_path.is_none(),
+        |source| {
+            run_domain_testgen_from_source(
+                path,
+                source,
+                depth,
+                target,
+                deadlock_mode,
+                strict,
+                output_path,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_domain_testgen_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    target: TestgenTarget<'_>,
+    deadlock_mode: &str,
+    strict: bool,
+    output_path: Option<&Path>,
+) -> (Value, i32) {
+    let domain = match parse_domain_document_from_source(path, source) {
         Ok(domain) => domain,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     let (generic, generic_status) =
-        run_testgen_from_source(path, &source, depth, target, deadlock_mode, strict, None);
+        run_testgen_from_source(path, source, depth, target, deadlock_mode, strict, None);
     if generic_status != 0 {
         // Same reasoning as run_testgen above: `domain testgen` must not
         // re-wrap a genuine violated/reachable_failed/internal result from
@@ -9315,7 +8881,7 @@ fn run_domain_testgen(
     );
     if target.name == "vitest" {
         let mut prefix = "// Auto-generated fsl-domain conformance scaffold.\n// Wire makeAdapter() to the generated aggregate adapter or your implementation adapter.\n\n".to_owned();
-        let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, &source, &domain) {
+        let (kernel, metadata) = match domain_scaffold_inputs_from_source(path, source, &domain) {
             Ok(input) => input,
             Err(error) => return (spec_load_error_output(&error), 2),
         };
@@ -9361,25 +8927,31 @@ fn run_domain_testgen(
     (result, status)
 }
 
-fn type_ref_text(ty: &TypeRef) -> String {
+fn type_ref_text(model: &KernelModel, ty: &TypeRef) -> String {
     match ty {
         TypeRef::Int => "Int".to_owned(),
         TypeRef::Bool => "Bool".to_owned(),
-        TypeRef::Named(name) => name.clone(),
+        TypeRef::Named(name) => model.names().public_type(name).into_string(),
         TypeRef::Range(lo, hi) => format!("{lo}..{hi}"),
         TypeRef::Map(key, value) => {
-            format!("Map<{}, {}>", type_ref_text(key), type_ref_text(value))
+            format!(
+                "Map<{}, {}>",
+                type_ref_text(model, key),
+                type_ref_text(model, value)
+            )
         }
         TypeRef::Relation(left, right) => {
             format!(
                 "relation {} -> {}",
-                type_ref_text(left),
-                type_ref_text(right)
+                type_ref_text(model, left),
+                type_ref_text(model, right)
             )
         }
-        TypeRef::Set(value) => format!("Set<{}>", type_ref_text(value)),
-        TypeRef::Seq(value, length) => format!("Seq<{}, {length}>", type_ref_text(value)),
-        TypeRef::Option(value) => format!("Option<{}>", type_ref_text(value)),
+        TypeRef::Set(value) => format!("Set<{}>", type_ref_text(model, value)),
+        TypeRef::Seq(value, length) => {
+            format!("Seq<{}, {length}>", type_ref_text(model, value))
+        }
+        TypeRef::Option(value) => format!("Option<{}>", type_ref_text(model, value)),
     }
 }
 
@@ -9389,9 +8961,13 @@ fn public_type(model: &KernelModel, ty: &TypeRef) -> Value {
         TypeRef::Bool => json!(["bool"]),
         TypeRef::Named(name) => match model.types.get(name) {
             Some(TypeDef::Domain { lo, hi, .. }) => json!(["domain", lo, hi]),
-            Some(TypeDef::Enum { .. }) => json!(["enum", fslc_rust::display_name(name)]),
-            Some(TypeDef::Struct { .. }) => json!(["struct", fslc_rust::display_name(name)]),
-            None => json!(["named", fslc_rust::display_name(name)]),
+            Some(TypeDef::Enum { .. }) => {
+                json!(["enum", model.names().public_type(name).into_string()])
+            }
+            Some(TypeDef::Struct { .. }) => {
+                json!(["struct", model.names().public_type(name).into_string()])
+            }
+            None => json!(["named", model.names().public_type(name).into_string()]),
         },
         TypeRef::Range(lo, hi) => json!(["domain", lo, hi]),
         TypeRef::Map(key, value) => {
@@ -9420,7 +8996,7 @@ fn statement_writes(statements: &[KernelStatement]) -> Vec<String> {
         for statement in statements {
             match statement {
                 KernelStatement::Assign { target, .. } => {
-                    writes.insert(fslc_rust::display_name(statement_root(target)));
+                    writes.insert(fsl_core::unmapped_public_spelling(statement_root(target)));
                 }
                 KernelStatement::If {
                     then_statements,
@@ -9452,18 +9028,18 @@ fn param_skeleton(model: &KernelModel, param: &ParamDef) -> Value {
             let (type_name, lo, hi) = match ty {
                 TypeRef::Named(type_name) => match model.types.get(type_name) {
                     Some(TypeDef::Domain { lo, hi, .. }) => {
-                        (fslc_rust::display_name(type_name), *lo, *hi)
+                        (model.names().public_type(type_name).into_string(), *lo, *hi)
                     }
                     Some(TypeDef::Enum { members, .. }) => (
-                        fslc_rust::display_name(type_name),
+                        model.names().public_type(type_name).into_string(),
                         0,
                         i64::try_from(members.len()).unwrap_or_default() - 1,
                     ),
-                    _ => (fslc_rust::display_name(type_name), 0, 0),
+                    _ => (model.names().public_type(type_name).into_string(), 0, 0),
                 },
                 TypeRef::Range(lo, hi) => ("Int".to_owned(), *lo, *hi),
                 TypeRef::Bool => ("Bool".to_owned(), 0, 1),
-                _ => (type_ref_text(ty), 0, 0),
+                _ => (type_ref_text(model, ty), 0, 0),
             };
             json!({"name":name,"type":type_name,"lo":lo,"hi":hi})
         }
@@ -9514,7 +9090,9 @@ fn enum_member(expr: &KernelExpr, members: &[String]) -> Option<String> {
     let KernelExpr::Var(name) = expr else {
         return None;
     };
-    members.contains(name).then(|| display(name))
+    members
+        .contains(name)
+        .then(|| fsl_core::unmapped_public_spelling(name))
 }
 
 fn model_stage_flows(model: &KernelModel) -> Vec<Value> {
@@ -9561,9 +9139,9 @@ fn model_stage_flows(model: &KernelModel) -> Vec<Value> {
         }
         if !transitions.is_empty() {
             flows.push(json!({
-                "state": display(state),
-                "type": display(type_name),
-                "stages": members.iter().map(|member| display(member)).collect::<Vec<_>>(),
+                "state": model.names().public_state(state).into_string(),
+                "type": model.names().public_type(type_name).into_string(),
+                "stages": members.iter().map(|member| model.names().public_identifier(member).into_string()).collect::<Vec<_>>(),
                 "transitions": transitions,
             }));
         }
@@ -9650,7 +9228,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
             let mut value = json!({
                 "name": origin
                     .and_then(fslc_rust::origin_display_name)
-                    .map_or_else(|| fslc_rust::display_name(&property.name), str::to_owned),
+                    .map_or_else(|| model.names().public_property(&property.name).into_string(), str::to_owned),
                 "kind":kind,
                 "body_text":fslc_rust::source_expr_text(model,&property.expr),
                 "requirement":Value::Null
@@ -9663,7 +9241,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
             {
                 value.insert(
                     "generated_name".to_owned(),
-                    json!(fslc_rust::display_name(&property.name)),
+                    json!(model.names().public_property(&property.name).into_string()),
                 );
                 value.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
             }
@@ -9671,7 +9249,7 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
         }));
     }
     for property in &model.leadstos {
-        let mut value = json!({"name":fslc_rust::display_name(&property.name),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::source_expr_text(model,&property.before),fslc_rust::source_expr_text(model,&property.after)),"requirement":Value::Null});
+        let mut value = json!({"name":model.names().public_property(&property.name).into_string(),"kind":"leadsTo","body_text":format!("{} ~> {}",fslc_rust::source_expr_text(model,&property.before),fslc_rust::source_expr_text(model,&property.after)),"requirement":Value::Null});
         if let Value::Object(value) = &mut value {
             insert_requirement_metadata(value, &property.annotations, property.meta.as_ref());
             // Present only for a `leadsTo ... within`, never as a null filler:
@@ -9697,12 +9275,12 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
                 Some(if entity_domains.contains(name) {
                     format!(
                         "{}: {count} instances ({lo}..{hi})",
-                        fslc_rust::display_name(name)
+                        model.names().public_type(name).into_string()
                     )
                 } else {
                     format!(
                         "{}: values {lo}..{hi} ({count} values)",
-                        fslc_rust::display_name(name)
+                        model.names().public_type(name).into_string()
                     )
                 })
             }
@@ -9714,15 +9292,16 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
         .iter()
         .filter(|(_, ty)| !matches!(ty, TypeRef::Int | TypeRef::Bool))
         .map(|(name, _)| {
-            let target = fslc_rust::display_name(name);
-            json!({"kind":"type_bound","name":format!("_bounds_{target}"),"target":target,"requirement":Value::Null})
+            let target = model.names().public_state(name).into_string();
+            let bound = model.names().public_synthetic(&fsl_core::SyntheticName::Bounds { state: name });
+            json!({"kind":"type_bound","name":bound.as_str(),"target":target,"requirement":Value::Null})
         })
         .collect::<Vec<_>>();
     for action in &model.actions {
         for (span, text) in action_partial_op_sites(model, action) {
             let mut entry = json!({
                 "kind":"partial_op",
-                "name":model.action_scoped_display_name(&format!("_partial_{}", action.name), Some(&action.name)),
+                "name":model.action_scoped_display_name(&fsl_core::SyntheticName::PartialAction { action: &action.name }.internal(), Some(&action.name)),
                 "action":model.action_display_name(&action.name),
                 "loc":span.python_loc(),
                 "text":text,
@@ -9736,14 +9315,14 @@ fn model_skeleton(model: &KernelModel, spec_kind: &str) -> Value {
     }
     json!({
         "spec_kind":spec_kind,
-        "state":model.state.iter().map(|(name,ty)|(fslc_rust::display_name(name),public_type(model,ty))).collect::<Map<_,_>>(),
+        "state":model.state.iter().map(|(name,ty)|(model.names().public_state(name).into_string(),public_type(model,ty))).collect::<Map<_,_>>(),
         "actions":actions,"properties":properties,"auto_checks":auto_checks,
         "domains":domains,
         "enums":model.types.iter().filter_map(|(name,ty)| {
             if let TypeDef::Enum{members,..}=ty {
                 Some((
-                    fslc_rust::display_name(name),
-                    json!(members.iter().map(|member|fslc_rust::display_name(member)).collect::<Vec<_>>()),
+                    model.names().public_type(name).into_string(),
+                    json!(members.iter().map(|member|model.names().public_identifier(member).into_string()).collect::<Vec<_>>()),
                 ))
             } else {
                 None
@@ -9798,7 +9377,8 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
                                     .chain(model.invariants.iter())
                                     .chain(model.transitions.iter())
                                     .find(|property| {
-                                        fslc_rust::display_name(&property.name) == name
+                                        model.names().public_property(&property.name).into_string()
+                                            == name
                                     })
                                     .map(|property| {
                                         requirement_metadata(
@@ -9862,7 +9442,12 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
     let order = model
         .reachables
         .iter()
-        .map(|property| format!("reach_{}", fslc_rust::display_name(&property.name)))
+        .map(|property| {
+            format!(
+                "reach_{}",
+                model.names().public_property(&property.name).into_string()
+            )
+        })
         .chain(
             model
                 .actions
@@ -10116,16 +9701,22 @@ fn reachable_counterfactuals_from_source(
         return json!([]);
     };
     let document = match parsed {
-        fsl_syntax::SurfaceDocument::Spec(spec) => spec,
-        fsl_syntax::SurfaceDocument::Business(_)
+        fsl_syntax::SurfaceDocument::Spec(_)
+        | fsl_syntax::SurfaceDocument::Business(_)
         | fsl_syntax::SurfaceDocument::Requirements(_)
         | fsl_syntax::SurfaceDocument::Compose(_) => {
-            let resolver =
-                fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-            let Ok(kernel) = fsl_core::parse_kernel_source(source, &resolver) else {
+            let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
+            let Ok(kernel) = fsl_core::parse_kernel_source_with_options(
+                source,
+                &resolver,
+                crate::parse_options(),
+            ) else {
                 return json!([]);
             };
-            kernel.into_syntax()
+            let Ok(document) = kernel.into_validated_syntax() else {
+                return json!([]);
+            };
+            document
         }
         _ => return json!([]),
     };
@@ -10156,37 +9747,36 @@ fn reachable_counterfactuals_from_source(
         if result.violation.is_some() || result.leadsto_violation.is_some() {
             continue;
         }
-        let Some(property) = model.reachables.iter().find(|property| {
+        for property in model.reachables.iter().filter(|property| {
             result
                 .reachables
                 .get(&property.name)
                 .is_some_and(Option::is_none)
-        }) else {
-            continue;
-        };
-        let line = usize::try_from(candidate.span.start.line).unwrap_or_default();
-        let mut weakening = json!({
-            "op":candidate.op,
-            "loc":candidate.span.python_loc(),
-            "target":candidate.target,
-            "source_text":lines.get(line.saturating_sub(1)).map(|line|line.trim()),
-        });
-        if let Some(origin) = candidate.origin
-            && let Value::Object(value) = &mut weakening
-        {
-            value.insert("origin".to_owned(), json!(origin));
-            value.insert("label".to_owned(), json!("init weakening"));
+        }) {
+            let line = usize::try_from(candidate.span.start.line).unwrap_or_default();
+            let mut weakening = json!({
+                "op":candidate.op,
+                "loc":candidate.span.python_loc(),
+                "target":candidate.target,
+                "source_text":lines.get(line.saturating_sub(1)).map(|line|line.trim()),
+            });
+            if let Some(origin) = candidate.origin
+                && let Value::Object(value) = &mut weakening
+            {
+                value.insert("origin".to_owned(), json!(origin));
+                value.insert("label".to_owned(), json!("init weakening"));
+            }
+            let mut item = json!({
+                "property":model.names().public_property(&property.name).into_string(),
+                "weakening":weakening,
+                "result":"reachable_failed",
+                "requirement":Value::Null,
+            });
+            if let Value::Object(item) = &mut item {
+                insert_requirement_metadata(item, &property.annotations, property.meta.as_ref());
+            }
+            output.push(item);
         }
-        let mut item = json!({
-            "property":fslc_rust::display_name(&property.name),
-            "weakening":weakening,
-            "result":"reachable_failed",
-            "requirement":Value::Null,
-        });
-        if let Value::Object(item) = &mut item {
-            insert_requirement_metadata(item, &property.annotations, property.meta.as_ref());
-        }
-        output.push(item);
     }
     Value::Array(output)
 }
@@ -10196,122 +9786,7 @@ fn expression_state_roots(
     model: &KernelModel,
     expr: &KernelExpr,
 ) -> std::collections::BTreeSet<String> {
-    fn collect(expr: &KernelExpr, roots: &mut std::collections::BTreeSet<String>) {
-        match expr {
-            KernelExpr::Var(name) => {
-                roots.insert(name.clone());
-            }
-            KernelExpr::Some(value)
-            | KernelExpr::Neg(value)
-            | KernelExpr::Not(value)
-            | KernelExpr::Field(value, _)
-            | KernelExpr::Stage { entity: value, .. }
-            | KernelExpr::UnaryNamed { expr: value, .. } => collect(value, roots),
-            KernelExpr::Index(base, index)
-            | KernelExpr::BinaryNamed {
-                left: base,
-                right: index,
-                ..
-            }
-            | KernelExpr::Binary {
-                left: base,
-                right: index,
-                ..
-            } => {
-                collect(base, roots);
-                collect(index, roots);
-            }
-            KernelExpr::Conditional {
-                condition,
-                then_expr,
-                else_expr,
-                ..
-            }
-            | KernelExpr::TernaryNamed {
-                first: condition,
-                second: then_expr,
-                third: else_expr,
-                ..
-            } => {
-                collect(condition, roots);
-                collect(then_expr, roots);
-                collect(else_expr, roots);
-            }
-            KernelExpr::Set(items) | KernelExpr::Seq(items) => {
-                for item in items {
-                    collect(item, roots);
-                }
-            }
-            KernelExpr::Struct { fields, .. } => {
-                for (_, value) in fields {
-                    collect(value, roots);
-                }
-            }
-            KernelExpr::Call { args, .. } | KernelExpr::Method { args, .. } => {
-                if let KernelExpr::Method { receiver, .. } = expr {
-                    collect(receiver, roots);
-                }
-                for arg in args {
-                    collect(arg, roots);
-                }
-            }
-            KernelExpr::Is { expr, .. } => collect(expr, roots),
-            KernelExpr::Quantified { binder, body, .. } => {
-                collect_binder(binder, roots);
-                collect(body, roots);
-            }
-            KernelExpr::Aggregate { binder, value, .. } => {
-                collect_binder(binder, roots);
-                if let Some(value) = value {
-                    collect(value, roots);
-                }
-            }
-            KernelExpr::Num(_)
-            | KernelExpr::Bool(_)
-            | KernelExpr::None
-            | KernelExpr::EnumMember { .. } => {}
-        }
-    }
-    fn collect_binder(
-        binder: &fsl_core::KernelBinder,
-        roots: &mut std::collections::BTreeSet<String>,
-    ) {
-        match binder {
-            fsl_core::KernelBinder::Typed { where_expr, .. } => {
-                if let Some(expr) = where_expr {
-                    collect(expr, roots);
-                }
-            }
-            fsl_core::KernelBinder::Range {
-                lo, hi, where_expr, ..
-            } => {
-                collect(lo, roots);
-                collect(hi, roots);
-                if let Some(expr) = where_expr {
-                    collect(expr, roots);
-                }
-            }
-            fsl_core::KernelBinder::Collection {
-                collection,
-                where_expr,
-                ..
-            } => {
-                collect(collection, roots);
-                if let Some(expr) = where_expr {
-                    collect(expr, roots);
-                }
-            }
-        }
-    }
-    let state = model
-        .state
-        .iter()
-        .map(|(name, _)| name)
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut roots = std::collections::BTreeSet::new();
-    collect(expr, &mut roots);
-    roots.retain(|name| state.contains(name));
-    roots
+    fsl_core::state_references(expr, model, [])
 }
 
 fn executed_assignments<'a>(
@@ -10388,7 +9863,7 @@ fn trace_blame_json(
                 continue;
             }
             effects.push(json!({
-                "target": display(root),
+                "target": model.names().public_state(root).into_string(),
                 "text": format!("{} = {}", tag_lvalue_text(target), fslc_rust::expr_text(value)),
                 "loc": span.python_loc(),
             }));
@@ -10413,12 +9888,44 @@ fn trace_blame_json(
     )
 }
 
+fn concrete_search_unavailable_note(
+    model: &KernelModel,
+    error: &fsl_runtime::RuntimeError,
+) -> String {
+    if let Some(roots) = error
+        .message
+        .strip_prefix("init does not assign state variable(s): ")
+    {
+        let roots = roots
+            .strip_suffix(" (partial component initialization is rejected by the explicit engine)")
+            .unwrap_or(roots)
+            .split(", ")
+            .map(|root| model.names().public_state(root).into_string())
+            .collect::<Vec<_>>();
+        return format!(
+            "concrete search not run: nondeterministic initialization of state {} is unsupported",
+            roots.join(", "),
+        );
+    }
+    let mut message = error.message.clone();
+    for (root, _) in &model.state {
+        message = message.replace(
+            &format!("'{root}'"),
+            &format!("'{}'", model.names().public_state(root).as_str()),
+        );
+    }
+    format!("concrete search not run: initialization/initial-state checks failed: {message}")
+}
+
 fn canonical_concrete_violation_trace(
     model: &KernelModel,
     invariant: &str,
     steps: usize,
-) -> Option<Vec<fsl_core::TraceStep>> {
-    let initial = fsl_runtime::Monitor::new(model.clone()).ok()?;
+) -> Result<Option<Vec<fsl_core::TraceStep>>, fsl_runtime::RuntimeError> {
+    let initial = fsl_runtime::Monitor::new(model.clone())?;
+    if initial.current_violation()?.is_some() {
+        return Ok(None);
+    }
     let initial_trace = vec![fsl_core::TraceStep {
         step: 0,
         state: initial.state.clone(),
@@ -10431,22 +9938,36 @@ fn canonical_concrete_violation_trace(
         if step >= steps {
             continue;
         }
-        for enabled in monitor.enabled().ok()? {
+        let Ok(candidates) = monitor.candidates() else {
+            continue;
+        };
+        for candidate in candidates {
+            let fsl_runtime::ActionCandidate::Enabled(enabled) = candidate else {
+                continue;
+            };
             let mut child = monitor.clone();
-            let result = child.step(&enabled).ok()?;
+            let Ok(result) = child.step(&enabled) else {
+                continue;
+            };
             let mut child_trace = trace.clone();
-            child_trace.push(fsl_core::TraceStep {
-                step: step + 1,
-                state: result.state,
-                action: Some(fsl_core::TraceAction {
-                    name: enabled.action,
-                    params: enabled.params,
-                }),
-                changes: std::collections::BTreeMap::new(),
-            });
+            child_trace.push(fsl_runtime::trace_step_from_result(
+                step + 1,
+                &monitor.state,
+                &enabled,
+                &result,
+            ));
             if let Some(violation) = result.violation {
                 if violation.name == invariant && violation.step == steps {
-                    return Some(child_trace);
+                    // Concrete evidence must also satisfy terminal trans/ensures.
+                    // If this rejects a solver-target canonicalization, its
+                    // caller keeps the BMC trace and its first-violation order.
+                    let mut checks = monitor.clone();
+                    checks.model.invariants.clear();
+                    if let Ok(checked) = checks.step(&enabled)
+                        && checked.violation.is_none()
+                    {
+                        return Ok(Some(child_trace));
+                    }
                 }
                 continue;
             }
@@ -10455,7 +9976,7 @@ fn canonical_concrete_violation_trace(
             }
         }
     }
-    None
+    Ok(None)
 }
 
 fn canonicalize_initial_int_violation(
@@ -10564,13 +10085,11 @@ fn invariant_violation_explanation(
     let mut explanation = Map::new();
     explanation.insert("violation_kind".to_owned(), json!(violation.kind));
     let origin = model.property_origin("invariant", &violation.name);
+    let public_name = model.names().public_violation(&violation.name, None);
+    let invariant = origin.and_then(fslc_rust::origin_display_name);
     explanation.insert(
         "invariant".to_owned(),
-        json!(
-            origin
-                .and_then(fslc_rust::origin_display_name)
-                .map_or_else(|| display(&violation.name), str::to_owned)
-        ),
+        json!(invariant.unwrap_or(public_name.as_str())),
     );
     explanation.insert(
         "loc".to_owned(),
@@ -10583,7 +10102,7 @@ fn invariant_violation_explanation(
             ),
     );
     if let Some(origin) = origin {
-        explanation.insert("generated_name".to_owned(), json!(display(&violation.name)));
+        explanation.insert("generated_name".to_owned(), json!(public_name.as_str()));
         explanation.insert("origin".to_owned(), fslc_rust::internal_origin_json(origin));
     }
     explanation.insert("violated_at_step".to_owned(), json!(violation.step));
@@ -10614,16 +10133,22 @@ fn invariant_counterfactuals_from_source(
         return json!([]);
     };
     let document = match parsed {
-        fsl_syntax::SurfaceDocument::Spec(spec) => spec,
-        fsl_syntax::SurfaceDocument::Business(_)
+        fsl_syntax::SurfaceDocument::Spec(_)
+        | fsl_syntax::SurfaceDocument::Business(_)
         | fsl_syntax::SurfaceDocument::Requirements(_)
         | fsl_syntax::SurfaceDocument::Compose(_) => {
-            let resolver =
-                fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-            let Ok(kernel) = fsl_core::parse_kernel_source(source, &resolver) else {
+            let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
+            let Ok(kernel) = fsl_core::parse_kernel_source_with_options(
+                source,
+                &resolver,
+                crate::parse_options(),
+            ) else {
                 return json!([]);
             };
-            kernel.into_syntax()
+            let Ok(document) = kernel.into_validated_syntax() else {
+                return json!([]);
+            };
+            document
         }
         _ => return json!([]),
     };
@@ -10632,6 +10157,10 @@ fn invariant_counterfactuals_from_source(
     };
     let lines = source.lines().collect::<Vec<_>>();
     let mut found = std::collections::BTreeMap::<String, ((usize, usize, u32), Value)>::new();
+    let mut preemptions = std::collections::BTreeMap::<String, String>::new();
+    let mut unavailable =
+        std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+    let mut skipped_init_roots = std::collections::BTreeSet::new();
     for candidate in fsl_tools::enumerate_builtin_mutants(&document)
         .into_iter()
         .filter(|candidate| {
@@ -10644,99 +10173,164 @@ fn invariant_counterfactuals_from_source(
         let Some(span) = candidate.span else {
             continue;
         };
+        let mutated_spec = candidate.materialize(&document);
         let removed_init_root = (candidate.op == "assignment_remove"
             && candidate.action.as_deref() == Some("init"))
-        .then(|| removed_init_assignment_root(&document, &candidate.spec))
+        .then(|| removed_init_assignment_root(&document, &mutated_spec))
         .flatten();
-        if removed_init_root
-            .as_ref()
-            .and_then(|root| original.state.iter().find(|(name, _)| name == root))
-            .is_some_and(|(_, ty)| type_has_symbolic_bounds(&original, ty))
-        {
+        if let Some(root) = removed_init_root.as_ref().filter(|root| {
+            original
+                .state
+                .iter()
+                .any(|(name, ty)| name == *root && type_has_symbolic_bounds(&original, ty))
+        }) {
+            skipped_init_roots.insert(root.clone());
             continue;
         }
         let started = Instant::now();
-        let Ok(mut model) = fsl_core::build_surface_model(candidate.spec) else {
+        let Ok(mut model) = fsl_core::build_surface_model(mutated_spec) else {
             continue;
         };
         model.inherit_compose_names(names);
         model.leadstos.clear();
-        let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
-            continue;
-        };
-        let Ok(result) = block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
-        else {
-            continue;
-        };
-        let Some(violation) = result.violation.as_ref() else {
-            continue;
-        };
-        if !original
-            .invariants
-            .iter()
-            .any(|property| property.name == violation.name)
-        {
-            continue;
-        }
-        let mut canonical_violation = violation.clone();
-        if let Some(trace) = canonical_concrete_violation_trace(
-            &model,
-            &violation.name,
-            violation.trace.len().saturating_sub(1),
-        ) {
-            canonical_violation.trace = trace;
-        } else if let Some(root) = removed_init_root.as_deref() {
-            canonicalize_initial_int_violation(&model, &mut canonical_violation, root);
-        }
-        let (trace, explanation) =
-            invariant_violation_explanation(&model, &canonical_violation, started);
-        let line = usize::try_from(span.start.line).unwrap_or_default();
-        let op = match candidate.op.as_str() {
-            "assignment_remove" => "assignment-removal",
-            "requires_remove" => "requires-removal",
-            "fair_remove" => "fair-removal",
-            _ => unreachable!("filtered weakening operator"),
-        };
-        let mut weakening = json!({
-            "op": op,
-            "loc": span.python_loc(),
-            "target": public_mutant_target(names, &candidate.target, candidate.action.as_deref()),
-            "source_text": lines.get(line.saturating_sub(1)).map(|line| line.trim()),
-        });
-        if candidate.action.as_deref() == Some("init")
-            && let Value::Object(value) = &mut weakening
-        {
-            value.insert("origin".to_owned(), json!("init"));
-            value.insert("label".to_owned(), json!("init weakening"));
-        }
-        let priority = match op {
-            "assignment-removal" => 0,
-            "requires-removal" => 1,
-            "fair-removal" => 2,
-            _ => 99,
-        };
-        let key = (canonical_violation.trace.len(), priority, span.start.line);
-        let property = original
-            .invariants
-            .iter()
-            .find(|property| property.name == violation.name);
-        let mut item = json!({
-            "invariant": display(&violation.name),
-            "weakening": weakening,
-            "trace": trace,
-            "requirement": Value::Null,
-            "violation": explanation,
-        });
-        if let Some(property) = property
-            && let Value::Object(item) = &mut item
-        {
-            insert_requirement_metadata(item, &property.annotations, property.meta.as_ref());
-        }
-        if found
-            .get(&violation.name)
-            .is_none_or(|(current, _)| key < *current)
-        {
-            found.insert(violation.name.clone(), (key, item));
+        // The bounded verifier reports only its first violation. Analyze each
+        // user invariant separately so another invariant cannot hide its
+        // counterfactual, while preserving the per-invariant ranking below.
+        for property in &original.invariants {
+            let mut model = model.clone();
+            model
+                .invariants
+                .retain(|candidate| candidate.name == property.name);
+            let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+                continue;
+            };
+            let Ok(result) =
+                block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
+            else {
+                continue;
+            };
+            let Some(violation) = result.violation.as_ref() else {
+                continue;
+            };
+            let canonical_violation =
+                if violation.kind == "invariant" && violation.name == property.name {
+                    let mut canonical_violation = violation.clone();
+                    if let Ok(Some(trace)) = canonical_concrete_violation_trace(
+                        &model,
+                        &violation.name,
+                        violation.trace.len().saturating_sub(1),
+                    ) {
+                        canonical_violation.trace = trace;
+                    } else if let Some(root) = removed_init_root.as_deref() {
+                        canonicalize_initial_int_violation(&model, &mut canonical_violation, root);
+                    }
+                    canonical_violation
+                } else if matches!(
+                    violation.kind.as_str(),
+                    "type_bound" | "trans" | "partial_op" | "ensures"
+                ) {
+                    preemptions.entry(property.name.clone()).or_insert_with(|| {
+                        format!(
+                            "preempted by {} {} at step {}",
+                            violation.kind,
+                            model
+                                .names()
+                                .public_violation(&violation.name, violation.last_action.as_deref())
+                                .as_str(),
+                            violation.step,
+                        )
+                    });
+                    // The first failing non-user check need not be on the path
+                    // that breaks this target. Concrete search discards unsafe
+                    // children but keeps exploring the other enabled actions.
+                    let mut concrete_trace = None;
+                    for steps in 0..=depth {
+                        match canonical_concrete_violation_trace(&model, &property.name, steps) {
+                            Ok(Some(trace)) => {
+                                concrete_trace = Some(trace);
+                                break;
+                            }
+                            Ok(None) => {}
+                            Err(error) => {
+                                unavailable
+                                    .entry(property.name.clone())
+                                    .or_default()
+                                    .insert(concrete_search_unavailable_note(&model, &error));
+                                break;
+                            }
+                        }
+                    }
+                    let Some(trace) = concrete_trace else {
+                        continue;
+                    };
+                    fsl_verifier::BmcViolation {
+                        kind: "invariant".to_owned(),
+                        name: property.name.clone(),
+                        step: trace.len().saturating_sub(1),
+                        last_action: trace
+                            .last()
+                            .and_then(|entry| entry.action.as_ref())
+                            .map(|action| action.name.clone()),
+                        trace,
+                        leads_to: None,
+                    }
+                } else {
+                    continue;
+                };
+            let violation = &canonical_violation;
+            let (trace, explanation) =
+                invariant_violation_explanation(&model, &canonical_violation, started);
+            let line = usize::try_from(span.start.line).unwrap_or_default();
+            let op = match candidate.op.as_str() {
+                "assignment_remove" => "assignment-removal",
+                "requires_remove" => "requires-removal",
+                "fair_remove" => "fair-removal",
+                _ => unreachable!("filtered weakening operator"),
+            };
+            let mut weakening = json!({
+                "op": op,
+                "loc": span.python_loc(),
+                "target": names
+                    .names()
+                    .public_action_target(&candidate.target, candidate.action.as_deref())
+                    .as_str(),
+                "source_text": lines.get(line.saturating_sub(1)).map(|line| line.trim()),
+            });
+            if candidate.action.as_deref() == Some("init")
+                && let Value::Object(value) = &mut weakening
+            {
+                value.insert("origin".to_owned(), json!("init"));
+                value.insert("label".to_owned(), json!("init weakening"));
+            }
+            let priority = match op {
+                "assignment-removal" => 0,
+                "requires-removal" => 1,
+                "fair-removal" => 2,
+                _ => 99,
+            };
+            let key = (canonical_violation.trace.len(), priority, span.start.line);
+            let property = original
+                .invariants
+                .iter()
+                .find(|property| property.name == violation.name);
+            let mut item = json!({
+                "invariant": model.names().public_violation(&violation.name, None).into_string(),
+                "weakening": weakening,
+                "trace": trace,
+                "requirement": Value::Null,
+                "violation": explanation,
+            });
+            if let Some(property) = property
+                && let Value::Object(item) = &mut item
+            {
+                insert_requirement_metadata(item, &property.annotations, property.meta.as_ref());
+            }
+            if found
+                .get(&violation.name)
+                .is_none_or(|(current, _)| key < *current)
+            {
+                found.insert(violation.name.clone(), (key, item));
+            }
         }
     }
     Value::Array(
@@ -10746,12 +10340,27 @@ fn invariant_counterfactuals_from_source(
             .map(|property| {
                 found.get(&property.name).map_or_else(
                     || {
+                        let mut note = preemptions.get(&property.name).cloned().unwrap_or_else(|| {
+                            format!("no counterfactual within depth {depth}")
+                        });
+                        if let Some(reasons) = unavailable.get(&property.name) {
+                            for reason in reasons {
+                                let _ = write!(note, "; {reason}");
+                            }
+                        }
+                        for root in &skipped_init_roots {
+                            let _ = write!(
+                                note,
+                                "; init-assignment removal of bounded state {} was not analyzed (skipped: nondeterministic initialization is unsupported by concrete search)",
+                                names.names().public_state(root).as_str(),
+                            );
+                        }
                         let mut item = json!({
-                            "invariant": display(&property.name),
+                            "invariant": original.names().public_property(&property.name).into_string(),
                             "weakening": null,
                             "trace": null,
                             "requirement": Value::Null,
-                            "note": format!("no counterfactual within depth {depth}"),
+                            "note": note,
                         });
                         if let Value::Object(item) = &mut item {
                             insert_requirement_metadata(
@@ -10793,12 +10402,77 @@ fn readable_implements_text_from_source(
 }
 
 #[allow(clippy::too_many_lines)]
-fn run_explain(path: &Path, depth: usize, readable: bool) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
+fn run_explain(
+    path: &Path,
+    depth: usize,
+    readable: bool,
+    names: Option<name_display::NameSpelling>,
+    lowering: bool,
+) -> (Value, i32) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        readable,
+        |sources, editions| {
+            finish_admitted(
+                run_explain_from_source_with_names(
+                    path,
+                    &sources[0],
+                    depth,
+                    readable,
+                    names,
+                    lowering,
+                ),
+                editions,
+                readable,
+            )
+        },
+    )
+}
+
+/// `explain --lowering`: only where each lowered `requires` and property
+/// came from ([`explain_lowering::lowering`]).
+fn run_explain_lowering_from_source(path: &Path, source: &str) -> (Value, i32) {
+    let (_kernel, model) = match load_kernel_model_from_source(path, source) {
+        Ok(loaded) => loaded,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    run_explain_from_source(path, &source, depth, readable)
+    let mut output = envelope();
+    output.insert("result".to_owned(), json!("explained"));
+    output.insert("spec".to_owned(), json!(model.name));
+    output.insert("lowering".to_owned(), explain_lowering::lowering(&model));
+    (Value::Object(output), 0)
+}
+
+/// [`run_explain_from_source`] spelled for a reader: a document with a
+/// glossary shows aliases unless `--names canonical` asks for the canonical
+/// names everywhere, including where explain quotes the source (a document
+/// without one always shows canonical names).
+fn run_explain_from_source_with_names(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    readable: bool,
+    names: Option<name_display::NameSpelling>,
+    lowering: bool,
+) -> (Value, i32) {
+    let (mut output, status) = if lowering {
+        run_explain_lowering_from_source(path, source)
+    } else {
+        run_explain_from_source(path, source, depth, readable)
+    };
+    // Only a model with a glossary is respelled (`respell` leaves any other
+    // output as it is).
+    if status == 0
+        && let Ok((_, model)) = load_kernel_model_from_source(path, source)
+    {
+        name_display::respell(
+            &mut output,
+            model.names().glossary(),
+            names.unwrap_or(name_display::NameSpelling::Alias),
+        );
+    }
+    (output, status)
 }
 
 /// Explain one caller-owned root-source snapshot.
@@ -10817,9 +10491,16 @@ fn run_explain_from_source(
         Ok(loaded) => loaded,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
+    // Witnesses come from the checked acceptance / forbidden cases, so a spec
+    // whose traces the gate refuses gets the gate's error, not an explanation
+    // without them (#1242).
+    let trace_contract = match require_trace_gate(source, &model) {
+        Ok(contract) => contract,
+        Err(refusal) => return (refusal, 2),
+    };
     let spec_kind = source_dialect(source);
     let skeleton = model_skeleton(&model, spec_kind);
-    let (scenarios, _) = run_scenarios_mode_from_source(path, source, depth, "warn", false);
+    let scenarios = witness_scenarios(path, source, &model, trace_contract.as_ref(), depth, "warn");
     let mut output = envelope();
     output.insert("result".to_owned(), json!("explained"));
     output.insert("spec".to_owned(), json!(model.name));
@@ -10881,9 +10562,14 @@ fn run_explain_from_source(
         }
         text.push_str("\nState:\n");
         let mut state = model.state.iter().collect::<Vec<_>>();
-        state.sort_by_key(|(name, _)| display(name));
+        state.sort_by_key(|(name, _)| model.names().public_state(name).into_string());
         for (name, ty) in state {
-            let _ = writeln!(text, "  - {}: {}", display(name), type_ref_text(ty));
+            let _ = writeln!(
+                text,
+                "  - {}: {}",
+                model.names().public_state(name).into_string(),
+                type_ref_text(&model, ty)
+            );
         }
         if let Some(implements) = readable_implements_text_from_source(path, source, &model, depth)
         {
@@ -10904,7 +10590,9 @@ fn run_explain_from_source(
                 .params
                 .iter()
                 .map(|param| match param {
-                    ParamDef::Typed { name, ty } => format!("{name}: {}", type_ref_text(ty)),
+                    ParamDef::Typed { name, ty } => {
+                        format!("{name}: {}", type_ref_text(&model, ty))
+                    }
                     ParamDef::Range { name, lo, hi } => format!("{name}: {lo}..{hi}"),
                 })
                 .collect::<Vec<_>>()
@@ -10924,6 +10612,12 @@ fn run_explain_from_source(
                     let _ = writeln!(text, "    branch: {detail}");
                 }
             }
+            // Where each lowered `requires` and property came from: only a
+            // next-edition document's lowering has such steps, so for any
+            // other document these lines and suffixes are empty.
+            for line in explain_lowering::action_lines(&model, &action.name) {
+                let _ = writeln!(text, "    {line}");
+            }
             for requirement in action
                 .annotations
                 .requirements()
@@ -10941,11 +10635,12 @@ fn run_explain_from_source(
             }
             if !action.requires.is_empty() {
                 text.push_str("    requires:\n");
-                for requirement in &action.requires {
+                for (index, requirement) in action.requires.iter().enumerate() {
                     let _ = writeln!(
                         text,
-                        "      - requires {}",
-                        fslc_rust::expr_text(requirement)
+                        "      - requires {}{}",
+                        fslc_rust::expr_text(requirement),
+                        explain_lowering::requires_suffix(&model, &action.name, index)
                     );
                 }
             }
@@ -10978,8 +10673,15 @@ fn run_explain_from_source(
         if !properties.is_empty() {
             text.push_str("\nProperties:\n");
             for (kind, name, body) in properties {
-                let _ = writeln!(text, "  - {kind} {}", display(name));
+                let _ = writeln!(
+                    text,
+                    "  - {kind} {}",
+                    model.names().public_property(name).into_string()
+                );
                 let _ = writeln!(text, "    body: {body}");
+                for line in explain_lowering::property_lines(&model, kind, name) {
+                    let _ = writeln!(text, "    {line}");
+                }
             }
         }
         let checks = model
@@ -10993,7 +10695,7 @@ fn run_explain_from_source(
                 let _ = writeln!(
                     text,
                     "  - type_bound: {} (implicit bounded-domain check)",
-                    display(name)
+                    model.names().public_state(name).into_string()
                 );
             }
         }
@@ -11008,8 +10710,8 @@ fn run_explain_from_source(
 /// (Z3 could not be created, the solver answered `unknown` or failed, or a
 /// secondary oracle errored). `Error` is never a kill: it is published as
 /// `status:"error"`, excluded from both sides of `kill_rate`, and fails any
-/// requested gate. `Invalid` is a built-in mutant that never reached the
-/// oracle because it does not lower/build, classified like an external one.
+/// requested gate. `Invalid` is a mutant with statically invalid input,
+/// including a type-invalid refinement map, classified like a check refusal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MutationOracle {
     Clean,
@@ -11043,6 +10745,14 @@ impl OracleFailure {
 }
 
 impl MutationOracle {
+    fn refinement_error(error: fsl_core::RefinementError) -> Self {
+        if error.kind == fsl_core::RefinementErrorKind::Type {
+            Self::Invalid(error.message)
+        } else {
+            Self::Error(OracleFailure::new("implements", error.message))
+        }
+    }
+
     fn killed(killed_by: impl Into<String>, killer_requirements: Vec<String>) -> Self {
         Self::Killed {
             killed_by: killed_by.into(),
@@ -11089,7 +10799,19 @@ fn native_mutation_bmc(
     model: &KernelModel,
     depth: usize,
 ) -> Result<fsl_verifier::BmcResult, BmcFailure> {
-    mutation_bmc_with_solver(fsl_solver_z3::Z3Solver::new, model, depth)
+    // Z3's default context is thread-local: solver history must not choose a
+    // different killer for the same mutant later in this run.
+    std::thread::scope(|scope| {
+        let check = std::thread::Builder::new()
+            .stack_size(STACK_SIZE)
+            .spawn_scoped(scope, || {
+                mutation_bmc_with_solver(fsl_solver_z3::Z3Solver::new, model, depth)
+            })
+            .expect("spawn a mutation BMC thread");
+        check
+            .join()
+            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    })
 }
 
 /// One mutation BMC call on a freshly created solver. A solver that cannot be
@@ -11195,7 +10917,7 @@ fn mutation_model_verdict(
         }) {
             return (
                 MutationOracle::killed(
-                    display(&property.name),
+                    model.names().public_property(&property.name).into_string(),
                     annotation_requirement_ids(&property.annotations),
                 ),
                 None,
@@ -11204,7 +10926,10 @@ fn mutation_model_verdict(
         if let Some(violation) = result.leadsto_violation {
             return (
                 MutationOracle::killed(
-                    display(&violation.name),
+                    model
+                        .names()
+                        .public_violation(&violation.name, None)
+                        .into_string(),
                     property_requirements(&model, &violation.name),
                 ),
                 None,
@@ -11249,7 +10974,23 @@ impl BoundaryKiller {
 struct MainOracle {
     outcome: MutationOracle,
     boundary_killer: Option<BoundaryKiller>,
+    engine: &'static str,
 }
+
+/// The `engine=` text on a mutant's progress line: the main oracle's route,
+/// unless the main oracle was clean and a later check (requirements,
+/// implements, the init-bounds override) decided the published `status`. That
+/// status did not come from the route, so the line says `secondary` and keeps
+/// the route visible beside it.
+fn mutation_progress_engine(main: &MainOracle, status: &str) -> String {
+    if main.outcome.is_clean() && status != "survived" {
+        format!("secondary, oracle={}", main.engine)
+    } else {
+        main.engine.to_owned()
+    }
+}
+
+const MUTATION_EXPLICIT_BUDGET: usize = fsl_runtime::CONCRETE_PROBE_BUDGET;
 
 /// A built-in mutant that does not lower/build never reaches the oracle: it is
 /// `Invalid`, exactly like an external mutant that fails to build (#1251).
@@ -11257,6 +10998,7 @@ fn mutation_oracle(
     spec: fsl_syntax::SurfaceSpec,
     depth: usize,
     names: &KernelModel,
+    explicit_budget: Option<usize>,
     bmc: &mut MutationBmc<'_>,
 ) -> MainOracle {
     let mut model = match fsl_core::lower_direct_spec(spec)
@@ -11268,31 +11010,50 @@ fn mutation_oracle(
             return MainOracle {
                 outcome: MutationOracle::Invalid(message),
                 boundary_killer: None,
+                engine: "none",
             };
         }
     };
     model.inherit_compose_names(names);
-    mutation_oracle_for_model(model, depth, bmc)
+    mutation_oracle_for_model(model, depth, explicit_budget, bmc)
 }
 
 fn mutation_oracle_for_model(
     model: KernelModel,
     depth: usize,
+    explicit_budget: Option<usize>,
     bmc: &mut MutationBmc<'_>,
 ) -> MainOracle {
+    let probe =
+        fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET);
     if let Ok(fsl_runtime::BoundaryProbe {
         finding: Some((violation, trace)),
         ..
-    }) = fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
+    }) = &probe
     {
         return MainOracle {
             outcome: MutationOracle::killed(
-                trace_last_action(&trace)
+                trace_last_action(trace)
                     .and_then(|action| model.component_public_name(&violation.name, action))
                     .unwrap_or_else(|| violation.name.clone()),
                 property_requirements(&model, &violation.name),
             ),
-            boundary_killer: Some(BoundaryKiller::Label(violation.name)),
+            boundary_killer: Some(BoundaryKiller::Label(violation.name.clone())),
+            engine: "probe",
+        };
+    }
+    if let Some(budget) = explicit_budget
+        && matches!(probe, Ok(ref probe) if !probe.exhausted)
+        && let verification::ExplicitFirst::Ran(Ok(result)) =
+            verification::explicit_first(&model, depth, budget, None)
+        && !result.budget_exceeded
+        && result.violation.is_none()
+        && result.reachables.values().all(Option::is_some)
+    {
+        return MainOracle {
+            outcome: MutationOracle::Clean,
+            boundary_killer: None,
+            engine: "explicit",
         };
     }
     let mut automatic = model.clone();
@@ -11311,11 +11072,13 @@ fn mutation_oracle_for_model(
         return MainOracle {
             outcome: automatic_result,
             boundary_killer,
+            engine: "bmc",
         };
     }
     MainOracle {
         outcome: mutation_model_oracle(model, depth, bmc),
         boundary_killer: None,
+        engine: "bmc",
     }
 }
 
@@ -11431,7 +11194,7 @@ fn collect_oracle_killers(
         killers.insert(killer.label(model));
     }
     for property in &model.invariants {
-        let label = display(&property.name);
+        let label = model.names().public_property(&property.name).into_string();
         if isolated_oracle_kills(
             isolate_model_for_invariant(model, &property.name),
             depth,
@@ -11442,7 +11205,7 @@ fn collect_oracle_killers(
         }
     }
     for property in &model.reachables {
-        let label = display(&property.name);
+        let label = model.names().public_property(&property.name).into_string();
         if isolated_oracle_kills(
             isolate_model_for_reachable(model, &property.name),
             depth,
@@ -11453,7 +11216,7 @@ fn collect_oracle_killers(
         }
     }
     for property in &model.transitions {
-        let label = display(&property.name);
+        let label = model.names().public_property(&property.name).into_string();
         if isolated_oracle_kills(
             isolate_model_for_transition(model, &property.name),
             depth,
@@ -11464,7 +11227,7 @@ fn collect_oracle_killers(
         }
     }
     for property in &model.leadstos {
-        let label = display(&property.name);
+        let label = model.names().public_property(&property.name).into_string();
         if isolated_oracle_kills(
             isolate_model_for_leadsto(model, &property.name),
             depth,
@@ -11545,8 +11308,10 @@ fn aggregate_by_obligation(mutants: &[Value]) -> Map<String, Value> {
         .collect()
 }
 
+/// The requirements of the case of the rejected `contract` that `failure`
+/// reports.
 fn requirement_trace_failure_requirements(
-    source: &str,
+    contract: &fsl_core::RequirementsTraceContract,
     failure: &Value,
 ) -> Result<Vec<String>, String> {
     let id = failure
@@ -11557,12 +11322,9 @@ fn requirement_trace_failure_requirements(
         .get("kind")
         .and_then(Value::as_str)
         .ok_or_else(|| "requirement trace failure has no kind".to_owned())?;
-    let contract = fsl_core::requirements_trace_contract(source)
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| "requirement trace failure has no trace contract".to_owned())?;
     let cases = match kind {
-        "acceptance" => &contract.acceptance,
-        "forbidden" | "forbidden_setup" => &contract.forbidden,
+        "acceptance" => contract.unchecked_acceptance(),
+        "forbidden" | "forbidden_setup" => contract.unchecked_forbidden(),
         _ => return Err(format!("unknown requirement trace failure kind '{kind}'")),
     };
     let case = cases.iter().find(|case| case.id == id).ok_or_else(|| {
@@ -11579,7 +11341,9 @@ fn apply_requirement_mutation_oracle(
     if !outcome.is_clean() {
         return Ok(());
     }
-    if let (Some(failure), _) = validate_requirement_trace_source(source, model)? {
+    if let TraceGate::Rejected { failure, contract } =
+        validate_requirement_trace_source(source, model)?
+    {
         let kind = failure
             .get("kind")
             .and_then(Value::as_str)
@@ -11590,7 +11354,7 @@ fn apply_requirement_mutation_oracle(
             } else {
                 "acceptance"
             },
-            requirement_trace_failure_requirements(source, &failure)?,
+            requirement_trace_failure_requirements(&contract, &failure)?,
         );
     }
     Ok(())
@@ -11626,14 +11390,15 @@ impl ImplementsOracle {
 /// Run the acceptance/forbidden oracle and then the implements oracle on a
 /// mutant the BMC oracle left clean, for built-in and external mutants alike.
 /// A secondary oracle that returns `Err` has not judged the mutant, so its
-/// error becomes `Error` (stage `requirements` / `implements`) — never a kill
-/// and never `invalid` (#1251). An implements walk cut off by its budget is
+/// evaluation failure becomes `Error` — never a kill (#1251). A typed static
+/// map error instead follows the check-time `Invalid` path (#1472).
+/// An implements walk cut off by its budget is
 /// not an error: the outcome stays as it is and the `inconclusive` detail is
 /// returned alongside it (#1262).
 fn apply_secondary_mutation_oracles(
     mut outcome: MutationOracle,
     requirement: impl FnOnce(&mut MutationOracle) -> Result<(), String>,
-    implements: impl FnOnce(&mut MutationOracle) -> Result<ImplementsOracle, String>,
+    implements: impl FnOnce(&mut MutationOracle) -> Result<ImplementsOracle, MutationOracle>,
 ) -> (MutationOracle, Option<Value>) {
     if !outcome.is_clean() {
         return (outcome, None);
@@ -11646,10 +11411,7 @@ fn apply_secondary_mutation_oracles(
     }
     match implements(&mut outcome) {
         Ok(oracle) => (outcome, oracle.inconclusive_detail()),
-        Err(message) => (
-            MutationOracle::Error(OracleFailure::new("implements", message)),
-            None,
-        ),
+        Err(failure) => (failure, None),
     }
 }
 
@@ -11660,19 +11422,18 @@ fn apply_implements_mutation_oracle(
     model: &KernelModel,
     depth: usize,
     outcome: &mut MutationOracle,
-) -> Result<ImplementsOracle, String> {
+) -> Result<ImplementsOracle, MutationOracle> {
     if !outcome.is_clean() {
         return Ok(ImplementsOracle::Decided);
     }
-    let resolver = fsl_core::FsResolver::new(base);
-    let Some(contract) = fsl_core::requirements_implements(source, &resolver, model)
-        .map_err(|error| error.to_string())?
-    else {
+    let Some(contract) = mutation_implements_contract(source, base, model)? else {
         return Ok(ImplementsOracle::Decided);
     };
     let checked =
         fsl_runtime::check_refinement(model, &contract.abstraction, &contract.refinement, depth)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                MutationOracle::Error(OracleFailure::new("implements", error.to_string()))
+            })?;
     let killer_requirements = match checked.verdict() {
         fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
             return Ok(ImplementsOracle::Inconclusive { states_explored });
@@ -11698,6 +11459,37 @@ fn apply_implements_mutation_oracle(
     Ok(ImplementsOracle::Decided)
 }
 
+fn mutation_implements_contract(
+    source: &str,
+    base: &Path,
+    model: &KernelModel,
+) -> Result<Option<fsl_core::ImplementsContract>, MutationOracle> {
+    fsl_core::requirements_implements_with_options(
+        source,
+        &dependency_resolver(base),
+        model,
+        crate::parse_options(),
+    )
+    .map_err(MutationOracle::refinement_error)
+}
+
+/// Static validity precedes every runtime oracle, even one that would kill.
+fn mutation_oracle_after_implements_check(
+    source: &str,
+    base: &Path,
+    model: &KernelModel,
+    oracle: impl FnOnce() -> MainOracle,
+) -> MainOracle {
+    match mutation_implements_contract(source, base, model) {
+        Ok(_) => oracle(),
+        Err(outcome) => MainOracle {
+            outcome,
+            boundary_killer: None,
+            engine: "none",
+        },
+    }
+}
+
 /// The one place the published `status` of a mutant that reached an oracle is
 /// decided, for built-in and external mutants alike, together with the detail
 /// object to publish under the returned key (`error`, `invalid`, or
@@ -11706,7 +11498,7 @@ fn apply_implements_mutation_oracle(
 /// as `invalid` before this point.
 ///
 /// Precedence for one mutant (#1251, #1262):
-/// `invalid` (never reached the oracle) — exclusive; otherwise
+/// `invalid` (statically invalid input, including maps) — exclusive; otherwise
 /// `killed` > `error` > `inconclusive` > `survived`.
 ///
 /// - A decided kill beats both undecided states: the oracles run in order and
@@ -11818,7 +11610,7 @@ fn with_undecided_counts(mut object: Value, errored: usize, inconclusive: usize)
 
 fn requirement_kill_index(
     model: &KernelModel,
-    trace_contract: Option<&fsl_core::RequirementsTraceContract>,
+    trace_contract: Option<&CheckedTraceContract>,
 ) -> Map<String, Value> {
     let mut result = Map::new();
     for annotations in model
@@ -11841,9 +11633,9 @@ fn requirement_kill_index(
     }
     if let Some(contract) = trace_contract {
         for requirement in contract
-            .acceptance
+            .acceptance()
             .iter()
-            .chain(&contract.forbidden)
+            .chain(contract.forbidden())
             .flat_map(trace_case_requirement_ids)
         {
             result.entry(requirement).or_insert(json!({"kills":0}));
@@ -11926,9 +11718,10 @@ fn removed_init_assignment_root(
 /// that failure into a type-bound kill and hide it (#1251, #1283).
 fn apply_init_bounds_override(outcome: MutationOracle, root: &str) -> MutationOracle {
     match outcome {
-        MutationOracle::Clean | MutationOracle::Killed { .. } => {
-            MutationOracle::killed(format!("_bounds_{root}"), Vec::new())
-        }
+        MutationOracle::Clean | MutationOracle::Killed { .. } => MutationOracle::killed(
+            fsl_core::SyntheticName::Bounds { state: root }.internal(),
+            Vec::new(),
+        ),
         MutationOracle::Error(_) | MutationOracle::Invalid(_) => outcome,
     }
 }
@@ -11951,18 +11744,6 @@ fn type_has_symbolic_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
 
 /// A built-in mutant's `target` (`<action> assignment`, `<action> requires
 /// #1`, ...) with its leading action spelled the way identifier fields spell it.
-fn public_mutant_target(model: &KernelModel, target: &str, action: Option<&str>) -> String {
-    action
-        .and_then(|action| {
-            let rest = target.strip_prefix(action)?;
-            Some(format!(
-                "{}{rest}",
-                model.component_public_name(action, action)?
-            ))
-        })
-        .unwrap_or_else(|| target.to_owned())
-}
-
 fn mutation_action_labels(
     document: &fsl_syntax::SurfaceDocument,
 ) -> std::collections::BTreeMap<String, String> {
@@ -12097,7 +11878,7 @@ fn replace_external_source(
 
 #[allow(clippy::too_many_lines)]
 fn load_external_mutations(path: &Path, baseline: &str) -> Result<Vec<ExternalMutation>, String> {
-    let raw = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let raw = read_input_text(path)?;
     let mut output = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     for (index, line) in raw.lines().enumerate() {
@@ -12269,13 +12050,14 @@ fn external_mutation_model(
     base: &Path,
     expected_name: &str,
 ) -> Result<KernelModel, Value> {
-    let document = fsl_syntax::parse_surface_document(source).map_err(|error| {
-        if error.span.start.offset >= source.len() {
-            invalid_mutation_detail("parse", "Unexpected end-of-input. Expected one of: ", None)
-        } else {
-            invalid_mutation_detail("parse", error.message, Some(error.span.python_loc()))
-        }
-    })?;
+    let document = fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+        .map_err(|error| {
+            if error.span.start.offset >= source.len() {
+                invalid_mutation_detail("parse", "Unexpected end-of-input. Expected one of: ", None)
+            } else {
+                invalid_mutation_detail("parse", error.message, Some(error.span.python_loc()))
+            }
+        })?;
     let Some(name) = surface_document_name(&document) else {
         return Err(invalid_mutation_detail(
             "semantics",
@@ -12290,16 +12072,16 @@ fn external_mutation_model(
             None,
         ));
     }
-    let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source(source, &resolver).map_err(|error| {
-        let message = error.to_string();
-        let kind = if message.contains("unknown type") {
-            "type"
-        } else {
-            "semantics"
-        };
-        invalid_mutation_detail(kind, message, None)
-    })?;
+    let resolver = dependency_resolver(base);
+    let kernel =
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+            .map_err(|error| {
+                invalid_mutation_detail(
+                    external_mutant_core_error_kind(&error.kind),
+                    error.to_string(),
+                    None,
+                )
+            })?;
     fsl_core::build_model(kernel).map_err(|error| {
         let message = error.to_string();
         let kind = if message.contains("unknown type") || message.contains("type mismatch") {
@@ -12309,6 +12091,31 @@ fn external_mutation_model(
         };
         invalid_mutation_detail(kind, message, None)
     })
+}
+
+/// The `kind` an external mutant's lowering failure reports in its
+/// `invalid` detail.
+///
+/// This is the classification the detail has always reported, now read from
+/// the type instead of searching the rendered message for "unknown type"
+/// (issue 1167). It intentionally differs from `check`'s for two kinds — a
+/// component that failed on an unresolved type is `type` here, `semantics`
+/// there, and a name-resolution failure is `semantics` here — because the
+/// published detail must not change in a refactor. Exhaustive like
+/// [`fslc_rust::verification_output::core_error_class`], so a new kind must
+/// state its class here too.
+fn external_mutant_core_error_kind(kind: &fsl_core::CoreErrorKind) -> &'static str {
+    use fsl_core::CoreErrorKind;
+    match kind {
+        CoreErrorKind::UnknownType | CoreErrorKind::UnresolvedTypeDefault => "type",
+        CoreErrorKind::ComponentLoad(cause) => external_mutant_core_error_kind(cause),
+        CoreErrorKind::Semantics
+        | CoreErrorKind::NameResolution
+        | CoreErrorKind::UnknownAiHardContractRule
+        | CoreErrorKind::UnknownDomainSymbol
+        | CoreErrorKind::ScopeOverrideWithoutBounds
+        | CoreErrorKind::NotKernelLowerable => "semantics",
+    }
 }
 
 /// The opt-in `fslc mutate` gate (issue #1237). With neither flag set the
@@ -12391,6 +12198,7 @@ fn run_mutate(
         path,
         MutateOptions {
             depth,
+            explicit_budget: Some(MUTATION_EXPLICIT_BUDGET),
             max_mutants,
             by_requirement,
             oracle_attribution,
@@ -12406,6 +12214,7 @@ fn run_mutate(
 #[derive(Clone, Copy)]
 struct MutateOptions<'a> {
     depth: usize,
+    explicit_budget: Option<usize>,
     max_mutants: usize,
     by_requirement: bool,
     oracle_attribution: bool,
@@ -12413,14 +12222,26 @@ struct MutateOptions<'a> {
     gate: MutationGate,
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_mutate_with(
     path: &Path,
     options: MutateOptions<'_>,
     bmc: &mut MutationBmc<'_>,
 ) -> (Value, i32) {
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_mutate_from_source(path, source, options, bmc)
+    })
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_mutate_from_source(
+    path: &Path,
+    source: &str,
+    options: MutateOptions<'_>,
+    bmc: &mut MutationBmc<'_>,
+) -> (Value, i32) {
     let MutateOptions {
         depth,
+        explicit_budget,
         max_mutants,
         by_requirement,
         oracle_attribution,
@@ -12434,20 +12255,40 @@ fn run_mutate_with(
     // `verified` result and the enumerated mutant set on different file
     // contents. `FsResolver` still reads compose/import/implements
     // dependencies with their own independent read semantics.
-    let mut source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return mutate_error(spec_load_error_output(&error)),
-    };
-    let (baseline, status) = run_verify_from_source(
+    let mut source = source.to_owned();
+    let baseline_started = std::time::Instant::now();
+    let (mut baseline, mut status) = run_verify_admitted_from_source(
         path,
         &source,
         depth,
         "warn",
-        "bmc",
+        "auto",
         DEFAULT_EXPLICIT_BUDGET,
         1,
+        None,
     );
-    if status != 0 || baseline.get("result").and_then(Value::as_str) != Some("verified") {
+    if status != 0 || !matches!(baseline["result"].as_str(), Some("verified" | "proved")) {
+        (baseline, status) = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(STACK_SIZE)
+                .spawn_scoped(scope, || {
+                    run_verify_admitted_from_source(
+                        path,
+                        &source,
+                        depth,
+                        "warn",
+                        "bmc",
+                        DEFAULT_EXPLICIT_BUDGET,
+                        1,
+                        None,
+                    )
+                })
+                .expect("spawn mutation baseline BMC thread")
+                .join()
+                .expect("mutation baseline BMC thread panicked")
+        });
+    }
+    if status != 0 || !matches!(baseline["result"].as_str(), Some("verified" | "proved")) {
         // The baseline envelope is re-emitted verbatim, so its own `result`
         // decides the exit code through `docs/manual/LANGUAGE.md`'s table: `violated`
         // and the other row-1 verdicts exit 1, and a *spec error* keeps the
@@ -12455,13 +12296,16 @@ fn run_mutate_with(
         let baseline_status = mutate_exit_status(&baseline, status);
         return (baseline, baseline_status);
     }
+    let baseline_elapsed = baseline_started.elapsed().as_secs_f64();
     let model = match load_model_from_source(path, &source) {
         Ok(model) => model,
         Err(error) => return mutate_error(spec_load_error_output(&error)),
     };
-    let trace_contract = match fsl_core::requirements_trace_contract(&source) {
+    // The accepted baseline already passed this gate on the same source and
+    // model; it runs again because only the gate hands out the checked cases.
+    let trace_contract = match require_trace_gate(&source, &model) {
         Ok(contract) => contract,
-        Err(error) => return mutate_error(core_error_output(&error)),
+        Err(refusal) => return mutate_error(refusal),
     };
     let document = match parse_surface_document_from_source(path, &source) {
         Ok(document) => document,
@@ -12474,10 +12318,16 @@ fn run_mutate_with(
         fsl_syntax::SurfaceDocument::Business(_)
         | fsl_syntax::SurfaceDocument::Requirements(_)
         | fsl_syntax::SurfaceDocument::Compose(_) => {
-            let resolver =
-                fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-            match fsl_core::parse_kernel_source(&source, &resolver) {
-                Ok(kernel) => kernel.into_syntax(),
+            let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
+            match fsl_core::parse_kernel_source_with_options(
+                &source,
+                &resolver,
+                crate::parse_options(),
+            ) {
+                Ok(kernel) => match kernel.into_validated_syntax() {
+                    Ok(spec) => spec,
+                    Err(error) => return mutate_error(model_error_output(&error)),
+                },
                 Err(error) => return mutate_error(core_error_output(&error)),
             }
         }
@@ -12502,7 +12352,7 @@ fn run_mutate_with(
                 Err(error) => return mutate_error(core_error_output(&error)),
             };
             let Ok(fsl_syntax::SurfaceDocument::Spec(rendered_spec)) =
-                fsl_syntax::parse_surface_document(&rendered)
+                fsl_syntax::parse_surface_document_with(&rendered, crate::parse_options())
             else {
                 return mutate_error(error_output(
                     "internal",
@@ -12520,11 +12370,21 @@ fn run_mutate_with(
             ));
         }
     };
+    let candidates = match external_mutants
+        .map(|path| load_external_mutations(path, &source))
+        .transpose()
+    {
+        Ok(candidates) => candidates.unwrap_or_default(),
+        Err(error) => return mutate_error(io_error_output(&error)),
+    };
+    eprintln!(
+        "mutate baseline: {} (engine={}, {baseline_elapsed:.3}s)",
+        baseline["result"].as_str().unwrap_or("verified"),
+        baseline["engine"].as_str().unwrap_or("bmc"),
+    );
     let all_mutants = fsl_tools::enumerate_builtin_mutants(&spec);
     let discovered = all_mutants.len();
-    let dead_actions = baseline
-        .get("action_coverage")
-        .and_then(Value::as_object)
+    let dead_actions = fsl_tools::source_action_coverage(&model, &baseline["action_coverage"])
         .into_iter()
         .flatten()
         .filter(|(_, covered)| **covered != Value::Bool(true))
@@ -12538,24 +12398,34 @@ fn run_mutate_with(
     let mut public_mutants = Vec::new();
     let source_lines = source.lines().collect::<Vec<_>>();
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    for mutant in all_mutants.into_iter().take(max_mutants) {
-        let mutated_spec = mutant.spec.clone();
-        let main = mutation_oracle(mutant.spec, depth, &model, bmc);
+    for (index, mutant) in all_mutants.into_iter().take(max_mutants).enumerate() {
+        let started = std::time::Instant::now();
+        let mutated_spec = mutant.materialize(&spec);
+        let mutated_model = fsl_core::lower_direct_spec(mutated_spec.clone())
+            .ok()
+            .and_then(|kernel| fsl_core::build_model(kernel).ok());
+        let mut oracle =
+            || mutation_oracle(mutated_spec.clone(), depth, &model, explicit_budget, bmc);
+        let main = if let Some(mutated_model) = &mutated_model {
+            mutation_oracle_after_implements_check(&source, base, mutated_model, oracle)
+        } else {
+            oracle()
+        };
         let mut outcome = main.outcome.clone();
         let mut inconclusive = None;
         if outcome.is_clean()
-            && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
-            && let Ok(mutated_model) = fsl_core::build_model(kernel)
+            && let Some(mutated_model) = &mutated_model
         {
             // A requirement/implements oracle error used to become the kill
             // label itself (the error string, or `refinement`); it is an
-            // oracle error now (#1251). An implements cutoff stays
+            // evaluation failures remain oracle errors (#1251); statically
+            // ill-typed maps are invalid (#1472). An implements cutoff stays
             // `inconclusive` (#1262).
             (outcome, inconclusive) = apply_secondary_mutation_oracles(
                 outcome,
-                |outcome| apply_requirement_mutation_oracle(&source, &mutated_model, outcome),
+                |outcome| apply_requirement_mutation_oracle(&source, mutated_model, outcome),
                 |outcome| {
-                    apply_implements_mutation_oracle(&source, base, &mutated_model, depth, outcome)
+                    apply_implements_mutation_oracle(&source, base, mutated_model, depth, outcome)
                 },
             );
         }
@@ -12577,12 +12447,18 @@ fn run_mutate_with(
             outcome = apply_init_bounds_override(outcome, &root);
         }
         let (status, detail) = mutant_status(&outcome, inconclusive);
+        let progress_engine = mutation_progress_engine(&main, status);
         let target = mutant
             .action
             .as_ref()
             .and_then(|action| action_labels.get(action).map(|label| (action, label)))
             .map_or_else(
-                || public_mutant_target(&model, &mutant.target, mutant.action.as_deref()),
+                || {
+                    model
+                        .names()
+                        .public_action_target(&mutant.target, mutant.action.as_deref())
+                        .into_string()
+                },
                 |(action, label)| mutant.target.replacen(action, label, 1),
             );
         let mut public = json!({
@@ -12614,10 +12490,10 @@ fn run_mutate_with(
             insert_requirement_metadata(public, annotations, mutant.requirement.as_ref());
         }
         if status == "survived"
-            && mutant
-                .action
-                .as_ref()
-                .is_some_and(|action| dead_actions.contains(action))
+            && mutant.action.as_ref().is_some_and(|action| {
+                // `action_coverage` keys are public names (#1255).
+                dead_actions.contains(model.action_display_name(action).as_str())
+            })
             && let Value::Object(public) = &mut public
         {
             public.insert(
@@ -12630,9 +12506,7 @@ fn run_mutate_with(
             && let Ok(kernel) = fsl_core::lower_direct_spec(mutated_spec.clone())
             && let Ok(mutated_model) = fsl_core::build_model(kernel)
         {
-            let bounds_override = outcome
-                .killed_by()
-                .filter(|killer| killer.starts_with("_bounds_"));
+            let bounds_override = outcome.killed_by().filter(|killer| is_bounds_name(killer));
             let killers = collect_oracle_killers(
                 &mutated_model,
                 depth,
@@ -12646,11 +12520,24 @@ fn run_mutate_with(
                 public.insert("killers".to_owned(), json!(killers));
             }
         }
+        // A killed mutant of a guard a next-edition rule or decision table
+        // added also counts for that rule's or table's ID: the guard is how
+        // the requirement is formalized, whichever oracle caught the change.
         let killer_requirements = match outcome {
             MutationOracle::Killed {
                 killer_requirements,
                 ..
-            } => killer_requirements,
+            } => {
+                let mut credited = killer_requirements;
+                if let (Some(action), Some(index)) = (mutant.action.as_deref(), mutant.guard) {
+                    for requirement in explain_lowering::guard_requirements(&model, action, index) {
+                        if !credited.contains(&requirement) {
+                            credited.push(requirement);
+                        }
+                    }
+                }
+                credited
+            }
             _ => Vec::new(),
         };
         for requirement in killer_requirements {
@@ -12662,15 +12549,27 @@ fn run_mutate_with(
                 entry.insert("kills".to_owned(), json!(kills + 1));
             }
         }
+        mutation_progress(
+            &public,
+            index,
+            discovered.min(max_mutants),
+            &progress_engine,
+            started,
+        );
         public_mutants.push(public);
     }
-    if let Some(external_path) = external_mutants {
-        let candidates = match load_external_mutations(external_path, &source) {
-            Ok(candidates) => candidates,
-            Err(error) => return mutate_error(error_output("io", &error)),
-        };
-        for candidate in candidates {
+    {
+        let count = candidates.len();
+        for (index, candidate) in candidates.into_iter().enumerate() {
+            let started = std::time::Instant::now();
             if let Some(invalid) = candidate.invalid.clone() {
+                mutation_progress(
+                    &external_mutant_public(&candidate, "invalid", None, None),
+                    index,
+                    count,
+                    "none",
+                    started,
+                );
                 public_mutants.push(external_mutant_public(
                     &candidate,
                     "invalid",
@@ -12680,6 +12579,13 @@ fn run_mutate_with(
                 continue;
             }
             let Some(mutated_source) = candidate.source.as_deref() else {
+                mutation_progress(
+                    &external_mutant_public(&candidate, "invalid", None, None),
+                    index,
+                    count,
+                    "none",
+                    started,
+                );
                 public_mutants.push(external_mutant_public(
                     &candidate,
                     "invalid",
@@ -12695,6 +12601,13 @@ fn run_mutate_with(
             let mutated_model = match external_mutation_model(mutated_source, base, &model.name) {
                 Ok(model) => model,
                 Err(invalid) => {
+                    mutation_progress(
+                        &external_mutant_public(&candidate, "invalid", None, None),
+                        index,
+                        count,
+                        "none",
+                        started,
+                    );
                     public_mutants.push(external_mutant_public(
                         &candidate,
                         "invalid",
@@ -12706,9 +12619,15 @@ fn run_mutate_with(
             };
             // The mutant built, so from here on it is judged exactly like a
             // built-in one: a semantic BMC error is the `build_spec` kill, any
-            // oracle failure is `error` (neither `invalid` nor killed, #1251),
+            // evaluation failure is `error` (#1251), a static map type error
+            // is `invalid` (#1472),
             // and an implements cutoff is `inconclusive` (#1262).
-            let main = mutation_oracle_for_model(mutated_model.clone(), depth, bmc);
+            let main = mutation_oracle_after_implements_check(
+                mutated_source,
+                base,
+                &mutated_model,
+                || mutation_oracle_for_model(mutated_model.clone(), depth, explicit_budget, bmc),
+            );
             let (outcome, inconclusive) = apply_secondary_mutation_oracles(
                 main.outcome.clone(),
                 |outcome| {
@@ -12749,7 +12668,7 @@ fn run_mutate_with(
                         depth,
                         mutated_source,
                         base,
-                        Some(killed_by.as_str()).filter(|killer| killer.starts_with("_bounds_")),
+                        Some(killed_by.as_str()).filter(|killer| is_bounds_name(killer)),
                         &main,
                         bmc,
                     );
@@ -12758,6 +12677,13 @@ fn run_mutate_with(
                     }
                 }
             }
+            mutation_progress(
+                &public,
+                index,
+                count,
+                &mutation_progress_engine(&main, status),
+                started,
+            );
             public_mutants.push(public);
         }
     }
@@ -12842,36 +12768,84 @@ fn run_mutate_with(
     (output, status)
 }
 
-fn run_typestate(path: &Path) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
+fn mutation_progress(
+    public: &Value,
+    index: usize,
+    count: usize,
+    engine: &str,
+    started: std::time::Instant,
+) {
+    let label = if public["source"] == "builtin" {
+        format!(
+            "[{}/{count}] {} {}",
+            index + 1,
+            public["op"].as_str().unwrap_or(""),
+            public["target"].as_str().unwrap_or("")
+        )
+    } else {
+        format!(
+            "external [{}/{count}] {}",
+            index + 1,
+            public["id"].as_str().unwrap_or("")
+        )
     };
+    let killer = public["killed_by"]
+        .as_str()
+        .map_or_else(String::new, |name| format!(" {name}"));
+    eprintln!(
+        "mutate {label}: {}{killer} (engine={engine}, {:.3}s)",
+        public["status"].as_str().unwrap_or(""),
+        started.elapsed().as_secs_f64()
+    );
+}
+
+fn run_typestate(path: &Path, typescript_only: bool) -> (Value, i32) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        typescript_only,
+        |sources, editions| {
+            finish_admitted(
+                run_typestate_from_source(path, &sources[0]),
+                editions,
+                typescript_only,
+            )
+        },
+    )
+}
+
+fn run_typestate_from_source(path: &Path, source: &str) -> (Value, i32) {
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
-    let kernel = match fsl_core::parse_kernel_source(&source, &resolver) {
-        Ok(kernel) => kernel,
-        Err(error) => {
-            return (
-                spec_load_error_output(&kernel_load_error(&source, &error)),
-                2,
-            );
-        }
-    };
+    let resolver = dependency_resolver(base);
+    let kernel =
+        match fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+        {
+            Ok(kernel) => kernel,
+            Err(error) => {
+                return (
+                    spec_load_error_output(&kernel_load_error(
+                        source,
+                        &error,
+                        crate::parse_options(),
+                    )),
+                    2,
+                );
+            }
+        };
     let model = match fsl_core::build_model(kernel.clone()) {
         Ok(model) => model,
         Err(error) => return (model_error_output(&error), 2),
     };
+    if let Err(error) = spec_loading::reject_refuted_requirements(source, &model) {
+        return (spec_load_error_output(&error), 2);
+    }
     let path_text = path.to_string_lossy();
-    let contract = match fsl_core::public_kernel_contract(
-        &kernel,
-        &model,
-        &path_text,
-        source_dialect(&source),
-    ) {
-        Ok(contract) => contract,
-        Err(error) => return (semantic_error_output(&error.to_string()), 2),
-    };
+    let contract =
+        match fsl_core::public_kernel_contract(&kernel, &model, &path_text, source_dialect(source))
+        {
+            Ok(contract) => contract,
+            Err(error) => return (projection_error_output(&model, &error), 2),
+        };
     let report = match fsl_tools::analyze_typestate(&contract) {
         Ok(report) => report,
         Err(error) => return (semantic_error_output(&error), 2),
@@ -12891,9 +12865,9 @@ fn generated_content_result(
     output_path: Option<&Path>,
 ) -> (Value, i32) {
     if let Some(path) = output_path
-        && let Err(error) = std::fs::write(path, content)
+        && let Err(error) = output_publication::publish(path, content)
     {
-        return (error_output("io", &error.to_string()), 2);
+        return error_exit(io_error_output(&error.to_string()));
     }
     let mut output = envelope();
     output.insert("result".to_owned(), json!("generated"));
@@ -13112,32 +13086,53 @@ fn run_counterexample_export(
     deadlock_mode: &str,
     output_path: &Path,
 ) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    if let Some(message) = fslc_rust::reproducer::reproducer_source_preflight_error(&source, engine)
-    {
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_counterexample_export_from_source(
+            path,
+            source,
+            depth,
+            engine,
+            deadlock_mode,
+            output_path,
+        )
+    })
+}
+
+fn run_counterexample_export_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    engine: &str,
+    deadlock_mode: &str,
+    output_path: &Path,
+) -> (Value, i32) {
+    if let Some(message) = fslc_rust::reproducer::reproducer_source_preflight_error(
+        source,
+        engine,
+        crate::parse_options(),
+    ) {
         return (semantic_error_output(&message), 2);
     }
-    let (_, model) = match load_kernel_model_from_source(path, &source) {
+    let (kernel, model) = match load_kernel_model_from_source(path, source) {
         Ok(parts) => parts,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
     if let Some(message) = fslc_rust::reproducer::reproducer_preflight_error(&model) {
         return (semantic_error_output(&message), 2);
     }
-    let spec_digest = match approval::spec_digest(path) {
+    let spec_digest = match approval::spec_digest_kernel(&kernel) {
         Ok(digest) => digest,
         Err(error) => return (semantic_error_output(&error), 2),
     };
-    let (mut verify_output, status) = run_verify(
+    let (mut verify_output, status) = run_verify_admitted_from_source(
         path,
+        source,
         depth,
         deadlock_mode,
         engine,
         DEFAULT_EXPLICIT_BUDGET,
         1,
+        None,
     );
     if status == 2 {
         return (verify_output, status);
@@ -13155,10 +13150,10 @@ fn run_counterexample_export(
     };
     let serialized = match serde_json::to_string_pretty(&artifact) {
         Ok(serialized) => serialized,
-        Err(error) => return (error_output("internal", &error.to_string()), 3),
+        Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
-    if let Err(error) = std::fs::write(output_path, serialized) {
-        return (error_output("io", &error.to_string()), 2);
+    if let Err(error) = output_publication::publish(output_path, serialized) {
+        return error_exit(io_error_output(&error.to_string()));
     }
     if let Value::Object(ref mut map) = verify_output {
         map.insert(
@@ -13187,22 +13182,30 @@ fn run_testgen(
     strict: bool,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_testgen_from_source(
-        path,
-        &source,
-        depth,
-        target,
-        deadlock_mode,
-        strict,
-        output_path,
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        output_path.is_none(),
+        |sources, editions| {
+            finish_admitted(
+                run_testgen_from_source(
+                    path,
+                    &sources[0],
+                    depth,
+                    target,
+                    deadlock_mode,
+                    strict,
+                    output_path,
+                ),
+                editions,
+                output_path.is_none(),
+            )
+        },
     )
 }
 
 /// Generate a test scaffold from one caller-owned root-source snapshot.
+#[allow(clippy::too_many_lines)]
 fn run_testgen_from_source(
     path: &Path,
     source: &str,
@@ -13230,6 +13233,21 @@ fn run_testgen_from_source(
         // way for the same reason.
         return (scenarios, status);
     }
+    let (scenarios, status) = fold_scenarios_refinements(path, source, depth, scenarios, status);
+    if status != 0 {
+        // Use the same failure-envelope owner as the kernel-failure path,
+        // not the scenarios-shaped fold result. Gate before walk or writes.
+        return run_verify_admitted_from_source(
+            path,
+            source,
+            depth,
+            deadlock_mode,
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+            None,
+        );
+    }
     let walk = match fslc_rust::testgen_trace_vectors(&model) {
         Ok(fslc_rust::TestgenWalk::Clean(walk)) => walk,
         Ok(fslc_rust::TestgenWalk::Violated { violation, trace }) => {
@@ -13248,7 +13266,7 @@ fn run_testgen_from_source(
             model
                 .state
                 .iter()
-                .map(|(name, _)| fsl_core::display_name(name))
+                .map(|(name, _)| model.names().public_state(name).into_string())
                 .collect(),
             model
                 .actions
@@ -13338,18 +13356,87 @@ fn testgen_path_context(
     }
 }
 
-fn run_html_report(
+/// Direct reports expose verification errors, not successful artifact envelopes.
+/// Approval-only ledger rerendering deliberately does not use this gate.
+fn report_verification_error(verification: &Value, status: i32) -> Option<(Value, i32)> {
+    (verification["result"] == "error").then(|| (verification.clone(), status))
+}
+
+/// Baselines are distinct results. Direct-report errors stay open for the
+/// outer owner; approval-only renderers retain their own admission and finish.
+fn report_verification_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    edition: Option<&SourceEdition>,
+) -> (Value, i32) {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let result = if edition.is_some() {
+        run_verify_admitted_from_source(
+            path,
+            source,
+            depth,
+            deadlock_mode,
+            engine,
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+            None,
+        )
+    } else {
+        run_verify_from_source(
+            path,
+            source,
+            depth,
+            deadlock_mode,
+            engine,
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        )
+    };
+    dependencies.finish_distinct(match edition {
+        Some(edition) if result.0["result"] != "error" => edition.finish(result),
+        _ => result,
+    })
+}
+
+fn finish_admitted_report(result: (Value, i32), editions: &[SourceEdition]) -> (Value, i32) {
+    if result.0["result"] == "generated" {
+        result
+    } else {
+        finish_admitted(result, editions, false)
+    }
+}
+
+fn run_html_report_with_timing(
     path: &Path,
     depth: usize,
     deadlock_mode: &str,
     engine: &str,
     output_path: Option<&Path>,
+    no_timing: bool,
 ) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_html_report_from_source(path, &source, depth, deadlock_mode, engine, output_path)
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        output_path.is_none(),
+        |sources, editions| {
+            finish_admitted_report(
+                run_html_report_from_source_with_timing(
+                    path,
+                    &sources[0],
+                    depth,
+                    deadlock_mode,
+                    engine,
+                    output_path,
+                    no_timing,
+                    Some(&editions[0]),
+                ),
+                editions,
+            )
+        },
+    )
 }
 
 /// Render one HTML report from one caller-owned root-source snapshot.
@@ -13357,6 +13444,7 @@ fn run_html_report(
 /// Model lowering, verification, explanation, and rendered source all derive
 /// from `source`. Dependency files loaded by `FsResolver` deliberately retain
 /// their independent read semantics.
+#[cfg(test)]
 fn run_html_report_from_source(
     path: &Path,
     source: &str,
@@ -13365,19 +13453,63 @@ fn run_html_report_from_source(
     engine: &str,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    let model = match load_model_from_source(path, source) {
-        Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let (verification, verification_status) = run_verify_from_source(
+    run_html_report_from_source_with_timing(
         path,
         source,
         depth,
         deadlock_mode,
         engine,
-        DEFAULT_EXPLICIT_BUDGET,
-        1,
-    );
+        output_path,
+        false,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_html_report_from_source_with_timing(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    output_path: Option<&Path>,
+    no_timing: bool,
+    edition: Option<&SourceEdition>,
+) -> (Value, i32) {
+    run_html_report_from_source_with_label(
+        path,
+        source,
+        depth,
+        deadlock_mode,
+        engine,
+        output_path,
+        no_timing,
+        edition,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_html_report_from_source_with_label(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    output_path: Option<&Path>,
+    no_timing: bool,
+    edition: Option<&SourceEdition>,
+    render_source: Option<&str>,
+) -> (Value, i32) {
+    let (mut verification, verification_status) =
+        report_verification_from_source(path, source, depth, deadlock_mode, engine, edition);
+    if let Some(error) = report_verification_error(&verification, verification_status) {
+        return error;
+    }
+    let model = match load_model_from_source(path, source) {
+        Ok(model) => model,
+        Err(error) => return (spec_load_error_output(&error), 2),
+    };
     let (mut explained, explain_status) = run_explain_from_source(path, source, depth, false);
     if explain_status != 0 {
         return (explained, explain_status);
@@ -13393,11 +13525,20 @@ fn run_html_report_from_source(
             }
         }
     }
+    relabel_approval_rendering_warnings(&mut verification, path, render_source);
+    relabel_approval_rendering_warnings(&mut explained, path, render_source);
+    let timing_free = no_timing.then(|| html_report_without_timing(&explained, &verification));
+    let (explained_view, verification_view) = timing_free
+        .as_ref()
+        .map_or((&explained, &verification), |(explained, verification)| {
+            (explained, verification)
+        });
     let html = fsl_tools::render_html_report(
-        &path.display().to_string(),
+        render_source.unwrap_or(&path.to_string_lossy()),
         source,
-        &explained,
-        &verification,
+        &model,
+        explained_view,
+        verification_view,
         &fsl_tools::undecided_declarations(&model),
     );
     let (result, status) = generated_content_result(
@@ -13421,8 +13562,56 @@ fn run_html_report_from_source(
     )
 }
 
-fn load_file_input(path: &Path) -> Result<approval::FileInput, String> {
-    let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+/// Strip known execution timings and ambient solver statistics from presentation
+/// copies, never source text or same-named fields in domain state. Keep the
+/// authoritative envelopes intact for verification outcome and exit-code handling.
+fn html_report_without_timing(explained: &Value, verification: &Value) -> (Value, Value) {
+    let mut explained = explained.clone();
+    let mut verification = verification.clone();
+    if let Some(cost) = verification.get_mut("cost").and_then(Value::as_object_mut) {
+        cost.remove("elapsed_s");
+        if let Some(solver) = cost.get_mut("solver").and_then(Value::as_object_mut) {
+            solver.remove("check_elapsed_s");
+            solver.remove("memory_mb");
+            solver.remove("conflicts");
+            solver.remove("decisions");
+            solver.remove("propagations");
+        }
+        if let Some(properties) = cost.get_mut("properties").and_then(Value::as_array_mut) {
+            for property in properties {
+                if let Some(property) = property.as_object_mut() {
+                    property.remove("elapsed_s");
+                }
+            }
+        }
+    }
+    if let Some(counterfactuals) = explained
+        .get_mut("counterfactuals")
+        .and_then(Value::as_array_mut)
+    {
+        for counterfactual in counterfactuals {
+            if let Some(cost) = counterfactual
+                .get_mut("violation")
+                .and_then(|violation| violation.get_mut("cost"))
+                .and_then(Value::as_object_mut)
+            {
+                cost.remove("elapsed_s");
+            }
+        }
+    }
+    (explained, verification)
+}
+
+/// Why `approval create --kind requirements_document` could not record its
+/// inputs: a file that cannot be read is `kind:"io"` (#1170 phase 2); a
+/// readable artifact with unusable frontmatter stays a usage error.
+enum DocumentInputError {
+    Io(String),
+    Usage(String),
+}
+
+fn load_file_input(path: &Path) -> Result<approval::FileInput, DocumentInputError> {
+    let bytes = read_input_bytes(path).map_err(DocumentInputError::Io)?;
     Ok(approval::FileInput {
         path: path.display().to_string(),
         digest: approval::sha256_bytes(&bytes),
@@ -13439,13 +13628,15 @@ fn document_generation_inputs(
     artifact_path: &Path,
     glossary_path: Option<&Path>,
     evidence_paths: &[PathBuf],
-) -> Result<approval::GenerationInputs, String> {
-    let artifact_text =
-        std::fs::read_to_string(artifact_path).map_err(|error| error.to_string())?;
-    let frontmatter =
-        fsl_tools::parse_frontmatter_only(&artifact_text).map_err(|error| error.to_string())?;
+) -> Result<approval::GenerationInputs, DocumentInputError> {
+    let artifact_text = read_input_text(artifact_path).map_err(DocumentInputError::Io)?;
+    let frontmatter = fsl_tools::parse_frontmatter_only(&artifact_text)
+        .map_err(|error| DocumentInputError::Usage(error.to_string()))?;
     if frontmatter.view != "requirements" {
-        return Err(format!("unsupported document view '{}'", frontmatter.view));
+        return Err(DocumentInputError::Usage(format!(
+            "unsupported document view '{}'",
+            frontmatter.view
+        )));
     }
     let glossary = glossary_path.map(load_file_input).transpose()?;
     let evidence = evidence_paths
@@ -13462,42 +13653,58 @@ fn document_generation_inputs(
     ))
 }
 
+struct RenderedApprovalDocument {
+    claims: fsl_tools::RequirementClaimSet,
+    markdown: String,
+    input_digest_mismatch: Option<String>,
+}
+
 /// Re-render a `requirements` document deterministically from `(spec,
 /// inputs)` alone, with no `--strict` gate and no approval overlay — used by
 /// both `fslc approval create --kind requirements_document` (to build the
 /// canonical rendering a reviewed artifact must conform to) and `fslc
-/// approval check`/`fslc document generate --approval` (to reproduce the
-/// same rendering's digest at check time). Returns the claims (needed for
+/// approval check` (to reproduce the same rendering's digest at check time).
+/// The generate overlay compares its own invocation rendering instead.
+/// Returns the claims (needed for
 /// `fsl_tools::check_requirements_document`'s conformance gate at create
 /// time) alongside the canonical Markdown.
 fn render_document_for_approval(
     path: &Path,
+    source: &str,
     inputs: &approval::DocumentGenerationInputs,
-) -> Result<(fsl_tools::RequirementClaimSet, String), Value> {
+    path_base: Option<&Path>,
+    render_source: Option<&str>,
+) -> Result<RenderedApprovalDocument, Value> {
     let locale = fsl_tools::Locale::parse(&inputs.lang).ok_or_else(|| {
         error_output(
             "document",
             &format!("unsupported document lang '{}'", inputs.lang),
         )
     })?;
-    let (source, claims) = load_document_claims(path)?;
-    let loaded_glossary = load_glossary(
+    let claims = load_document_claims_from_source(
+        path,
+        source,
+        render_source.unwrap_or(&path.to_string_lossy()),
+    )?;
+    let loaded_glossary = load_glossary_with_base(
         inputs
             .glossary
             .as_ref()
             .map(|file| Path::new(file.path.as_str())),
         locale,
+        path_base,
     )?;
     let evidence_paths: Vec<PathBuf> = inputs
         .evidence
         .iter()
         .map(|file| PathBuf::from(&file.path))
         .collect();
-    let loaded_evidence = load_evidence(&evidence_paths)?;
+    let loaded_evidence = load_document_evidence(&evidence_paths, path_base)?;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
-    let kernel = fsl_core::parse_kernel_source(&source, &resolver)
-        .map_err(|error| semantic_error_output(&error.to_string()))?;
+    let resolver = dependency_resolver(base);
+    let kernel =
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+            .map_err(|error| semantic_error_output(&error.to_string()))?;
     let model =
         fsl_core::build_model(kernel.clone()).map_err(|error| model_error_output(&error))?;
     let applied_glossary = loaded_glossary
@@ -13505,100 +13712,196 @@ fn render_document_for_approval(
         .map(|(glossary, digest)| fsl_tools::AppliedGlossary { glossary, digest });
     let applied_evidence = loaded_evidence
         .as_ref()
-        .map(|(files, digest)| fsl_tools::AppliedEvidence { files, digest });
-    let rendered = fsl_tools::render_requirements_document(
+        .map(|loaded| fsl_tools::AppliedEvidence {
+            files: &loaded.files,
+            digest: &loaded.digest,
+        });
+    let rendered = fsl_tools::render_requirements_document_with_options(
         &claims,
         &kernel,
         &model,
-        &source,
+        source,
         locale,
         applied_glossary.as_ref(),
         applied_evidence.as_ref(),
         None,
+        crate::parse_options(),
     )
     .map_err(|error| error_output("document", &error))?;
-    Ok((claims, rendered.markdown))
+    // Retain a candidate only; authoritative evaluation owns its late admission.
+    let mut input_digest_mismatch = match (&inputs.glossary, &loaded_glossary) {
+        (Some(input), Some((_, observed))) if input.digest != *observed => Some(input.path.clone()),
+        _ => None,
+    };
+    if input_digest_mismatch.is_none()
+        && let Some(loaded) = &loaded_evidence
+    {
+        for (input, observed) in inputs.evidence.iter().zip(&loaded.input_digests) {
+            if input.digest != *observed {
+                input_digest_mismatch = Some(input.path.clone());
+                break;
+            }
+        }
+    }
+    Ok(RenderedApprovalDocument {
+        claims,
+        markdown: rendered.markdown,
+        input_digest_mismatch,
+    })
 }
 
 /// Reproduce a target's canonical rendering fresh from `(spec, inputs)` —
 /// the shared re-render dispatch `approval create`'s conformance gate and
-/// `approval check`/`approval diff`'s drift comparison both call. Returns the
+/// `approval check`'s drift comparison both call. Returns the
 /// rendered bytes plus, for `requirements_document` only, the RCIR claim-set
 /// digest that rendering used (`None` for the three solver-driven kinds,
 /// which have no RCIR concept at all).
 fn approval_artifact(
     path: &Path,
+    source: &str,
+    edition: &SourceEdition,
     kind: &str,
     inputs: &approval::GenerationInputs,
-) -> Result<(Vec<u8>, Option<String>), Value> {
+    render_source: Option<&str>,
+) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
     if kind == "requirements_document" {
         let approval::GenerationInputs::Document(document_inputs) = inputs else {
-            return Err(error_output(
+            return Err(error_exit(error_output(
                 "usage",
                 "requirements_document approval requires document generation inputs",
-            ));
+            )));
         };
-        let (claims, markdown) = render_document_for_approval(path, document_inputs)?;
-        return Ok((markdown.into_bytes(), Some(claims.spec.claim_set_digest)));
+        let rendered =
+            render_document_for_approval(path, source, document_inputs, None, render_source)
+                .map_err(|error| (error, 2))?;
+        return Ok((
+            rendered.markdown.into_bytes(),
+            Some(rendered.claims.spec.claim_set_digest),
+        ));
     }
     let approval::GenerationInputs::Solver(inputs) = inputs else {
-        return Err(error_output(
+        return Err(error_exit(error_output(
             "usage",
             "ledger/html/scenarios approval requires solver generation inputs",
-        ));
+        )));
     };
-    let (result, status) = match kind {
-        "ledger" => generate_unapproved_ledger_report(&LedgerReportRequest {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let (mut result, status) = dependencies.finish_distinct(match kind {
+        "ledger" => {
+            let request = LedgerReportRequest {
+                path,
+                depth: inputs.depth,
+                deadlock_mode: &inputs.deadlock,
+                engine: &inputs.engine,
+                impl_log: None,
+                evidence_paths: &[],
+                output_path: None,
+            };
+            if render_source.is_some() {
+                generate_unapproved_ledger_report_from_source_with_label(
+                    &request,
+                    source,
+                    Some(edition),
+                    render_source,
+                )
+            } else {
+                generate_unapproved_ledger_report_from_source(&request, source, Some(edition))
+            }
+        }
+        "html" => run_html_report_from_source_with_label(
             path,
-            depth: inputs.depth,
-            deadlock_mode: &inputs.deadlock,
-            engine: &inputs.engine,
-            impl_log: None,
-            evidence_paths: &[],
-            output_path: None,
-        }),
-        "html" => run_html_report(path, inputs.depth, &inputs.deadlock, &inputs.engine, None),
-        "scenarios" => run_scenarios(path, inputs.depth, &inputs.deadlock),
+            source,
+            inputs.depth,
+            &inputs.deadlock,
+            &inputs.engine,
+            None,
+            false,
+            Some(edition),
+            render_source,
+        ),
+        "scenarios" => {
+            let result = run_scenarios_from_source(path, source, inputs.depth, &inputs.deadlock);
+            if result.1 == 0 {
+                // Canonical artifacts retain their existing finalized warning bytes.
+                edition.finish(result)
+            } else {
+                // Borrow the enclosing log, preserving refusal priority.
+                // The outer owner finalizes this escaping failure's warnings.
+                return Err(dependencies.finish(result, false));
+            }
+        }
         _ => {
-            return Err(error_output(
+            return Err(error_exit(error_output(
                 "usage",
                 &format!("unsupported approval target '{kind}'"),
-            ));
+            )));
         }
-    };
+    });
     if status != 0 {
-        return Err(result);
+        return Err((result, status));
     }
+    relabel_approval_rendering_warnings(&mut result, path, render_source);
     let bytes = if matches!(kind, "ledger" | "html") {
         result
             .get("content")
             .and_then(Value::as_str)
             .map(|content| content.as_bytes().to_vec())
-            .ok_or_else(|| error_output("internal", "generated artifact has no content"))?
+            .ok_or_else(|| {
+                error_exit(error_output(
+                    "internal",
+                    "generated artifact has no content",
+                ))
+            })?
     } else {
         let mut encoded = serde_json::to_vec_pretty(&result)
-            .map_err(|error| error_output("internal", &error.to_string()))?;
+            .map_err(|error| error_exit(error_output("internal", &error.to_string())))?;
         encoded.push(b'\n');
         encoded
     };
     Ok((bytes, None))
 }
 
-fn approval_spec_digest(path: &Path) -> Result<String, SpecLoadError> {
+/// Root migration warnings can themselves be rendered as evidence. Change only
+/// their display locations in approval-rendering copies, never the public
+/// diagnostic envelope or dependency-file locations.
+fn relabel_approval_rendering_warnings(
+    output: &mut Value,
+    path: &Path,
+    render_source: Option<&str>,
+) {
+    let Some(label) = render_source else {
+        return;
+    };
+    let Some(warnings) = output.get_mut("warnings").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for warning in warnings {
+        if let Some(file) = warning.get_mut("loc").and_then(|loc| loc.get_mut("file"))
+            && file.as_str() == Some(path.to_string_lossy().as_ref())
+        {
+            *file = json!(label);
+        }
+    }
+}
+
+fn approval_spec_digest(path: &Path, source: &str) -> Result<String, SpecLoadError> {
     if path.extension().and_then(std::ffi::OsStr::to_str) == Some("md") {
-        return approval::spec_digest(path).map_err(SpecLoadError::unlocated_semantic);
+        return approval::spec_digest_from_source(path, source)
+            .map_err(SpecLoadError::unlocated_semantic);
     }
-    let source = read_spec_source(path)?;
-    if fsl_syntax::extract_literate_fsl(&source).is_some() {
-        return approval::spec_digest(path).map_err(SpecLoadError::unlocated_semantic);
+    if fsl_syntax::extract_literate_fsl(source).is_some() {
+        return approval::spec_digest_from_source(path, source)
+            .map_err(SpecLoadError::unlocated_semantic);
     }
-    let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-    let kernel = fsl_core::parse_kernel_source(&source, &resolver).map_err(|error| {
-        surface_parse_failure(&source).map_or_else(
-            || SpecLoadError::unlocated_semantic(error.to_string()),
-            |error| SpecLoadError::Parse(Box::new(error)),
-        )
-    })?;
+    let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
+    let kernel =
+        fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+            .map_err(|error| {
+                surface_parse_failure(source, crate::parse_options()).map_or_else(
+                    || SpecLoadError::unlocated_semantic(error.to_string()),
+                    |error| SpecLoadError::Parse(Box::new(error)),
+                )
+            })?;
     approval::spec_digest_kernel(&kernel).map_err(SpecLoadError::unlocated_semantic)
 }
 
@@ -13617,134 +13920,188 @@ fn run_approval_create(
         kind,
         "ledger" | "html" | "scenarios" | "requirements_document"
     ) {
-        return (
-            error_output(
-                "usage",
-                "--kind must be ledger, html, scenarios, or requirements_document",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "usage",
+            "--kind must be ledger, html, scenarios, or requirements_document",
+        ));
     }
     if approver.trim().is_empty() {
-        return (error_output("usage", "--approver must not be empty"), 2);
+        return error_exit(error_output("usage", "--approver must not be empty"));
     }
-    let model = match load_model(path) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_approval_create_from_source(
+                    path,
+                    &sources[0],
+                    &editions[0],
+                    kind,
+                    artifact_path,
+                    approver,
+                    selected_requirements,
+                    inputs,
+                    output_path,
+                    signing_key,
+                ),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn run_approval_create_from_source(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    kind: &str,
+    artifact_path: &Path,
+    approver: &str,
+    selected_requirements: &[String],
+    inputs: &approval::GenerationInputs,
+    output_path: Option<&Path>,
+    signing_key: Option<&Path>,
+) -> (Value, i32) {
+    let creation_directory = match std::env::current_dir().and_then(|cwd| cwd.canonicalize()) {
+        Ok(directory) => directory,
+        Err(error) => return error_exit(io_error_output(&error.to_string())),
+    };
+    let render_source = path.to_string_lossy();
+    let model = match load_model_from_source(path, source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let (_repo, relative_path, git_commit) = match approval::git_binding(path) {
+    let (repo, relative_path, git_commit) = match approval::git_binding(path) {
         Ok(binding) => binding,
-        Err(error) => return (error_output("io", &error), 2),
+        Err((kind, error)) => return (error_output(kind, &error), 2),
     };
-    let digest = match approval::spec_digest(path) {
+    let stored_base = approval::repository_relative_base(&repo, &creation_directory);
+    let digest = match approval::spec_digest_from_source(path, source) {
         Ok(digest) => digest,
         Err(error) => return (semantic_error_output(&error), 2),
     };
 
-    let (target_digest_bytes, target_digest_algorithm, reviewed_digest, claim_set_digest, schema) =
-        if kind == "requirements_document" {
-            let approval::GenerationInputs::Document(document_inputs) = inputs else {
-                return (
-                    error_output(
-                        "usage",
-                        "--kind requirements_document requires document generation inputs",
-                    ),
-                    2,
-                );
-            };
-            let (claims, fresh_markdown) = match render_document_for_approval(path, document_inputs)
-            {
-                Ok(result) => result,
-                Err(error) => return (error, 2),
-            };
-            let reviewed_text = match std::fs::read_to_string(artifact_path) {
-                Ok(text) => text,
-                Err(error) => return (error_output("io", &error.to_string()), 2),
-            };
-            let report = match fsl_tools::check_requirements_document(
-                &reviewed_text,
-                &claims,
-                &fresh_markdown,
-            ) {
-                Ok(report) => report,
-                Err(error) => return (document_schema_error(&error.to_string()), 2),
-            };
-            if !report.is_conformant() {
-                let mut output = error_output(
-                    "semantics",
-                    "reviewed document does not conform to a fresh rendering with the recorded inputs",
-                );
-                output
-                    .as_object_mut()
-                    .expect("approval error envelope")
-                    .insert(
-                        "reasons".to_owned(),
-                        serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
-                    );
-                return (output, 2);
-            }
-            (
-                fresh_markdown.into_bytes(),
-                approval::REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM,
-                Some(approval::sha256_bytes(reviewed_text.as_bytes())),
-                Some(claims.spec.claim_set_digest),
-                approval::APPROVAL_SCHEMA_V3,
-            )
-        } else {
-            let approval::GenerationInputs::Solver(_) = inputs else {
-                return (
-                    error_output(
-                        "usage",
-                        "--kind ledger/html/scenarios requires solver generation inputs",
-                    ),
-                    2,
-                );
-            };
-            let (expected_artifact, _) = match approval_artifact(path, kind, inputs) {
-                Ok(artifact) => artifact,
-                Err(error) => return (error, 2),
-            };
-            let reviewed_artifact = match std::fs::read(artifact_path) {
-                Ok(artifact) => artifact,
-                Err(error) => return (error_output("io", &error.to_string()), 2),
-            };
-            let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact)
-            {
-                Ok(artifact) => artifact,
-                Err(error) => return (error_output("semantics", &error), 2),
-            };
-            let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact)
-            {
-                Ok(artifact) => artifact,
-                Err(error) => return (error_output("internal", &error), 3),
-            };
-            if normalized_reviewed != normalized_expected {
-                return (
-                    error_output(
-                        "semantics",
-                        "reviewed artifact does not match a fresh rendering with the recorded inputs",
-                    ),
-                    2,
-                );
-            }
-            (
-                normalized_reviewed,
-                approval::ARTIFACT_DIGEST_ALGORITHM,
-                None,
-                None,
-                approval::APPROVAL_SCHEMA,
-            )
+    let (target_digest_bytes, target_digest_algorithm, reviewed_digest, claim_set_digest) = if kind
+        == "requirements_document"
+    {
+        let approval::GenerationInputs::Document(document_inputs) = inputs else {
+            return error_exit(error_output(
+                "usage",
+                "--kind requirements_document requires document generation inputs",
+            ));
         };
+        let RenderedApprovalDocument {
+            claims,
+            markdown: fresh_markdown,
+            ..
+        } = match render_document_for_approval(
+            path,
+            source,
+            document_inputs,
+            Some(&creation_directory),
+            Some(&render_source),
+        ) {
+            Ok(result) => result,
+            Err(error) => return (error, 2),
+        };
+        let Some(base) = stored_base.as_deref() else {
+            return error_exit(error_output(
+                "semantics",
+                "a requirements_document approval must be created inside the spec's Git repository",
+            ));
+        };
+        let inputs_inside_root = document_inputs
+            .glossary
+            .iter()
+            .chain(&document_inputs.evidence)
+            .map(|input| input.path.as_str())
+            .try_for_each(|input| approval::require_inside_root(&repo, base, input))
+            .and_then(|()| {
+                approval::require_inside_root(&repo, base, &artifact_path.to_string_lossy())
+            });
+        if let Err(error) = inputs_inside_root {
+            return error_exit(error_output("semantics", &error));
+        }
+        let reviewed_text = match read_input_text(artifact_path) {
+            Ok(text) => text,
+            Err(error) => return error_exit(io_error_output(&error)),
+        };
+        let report = match fsl_tools::check_requirements_document(
+            &reviewed_text,
+            &claims,
+            &fresh_markdown,
+        ) {
+            Ok(report) => report,
+            Err(error) => return (document_schema_error(&error.to_string()), 2),
+        };
+        if !report.is_conformant() {
+            let mut output = error_output(
+                "semantics",
+                "reviewed document does not conform to a fresh rendering with the recorded inputs",
+            );
+            output
+                .as_object_mut()
+                .expect("approval error envelope")
+                .insert(
+                    "reasons".to_owned(),
+                    serde_json::to_value(&report.reasons).expect("serialize drift reasons"),
+                );
+            return (output, 2);
+        }
+        (
+            fresh_markdown.into_bytes(),
+            approval::REQUIREMENTS_DOCUMENT_DIGEST_ALGORITHM,
+            Some(approval::sha256_bytes(reviewed_text.as_bytes())),
+            Some(claims.spec.claim_set_digest),
+        )
+    } else {
+        let approval::GenerationInputs::Solver(_) = inputs else {
+            return error_exit(error_output(
+                "usage",
+                "--kind ledger/html/scenarios requires solver generation inputs",
+            ));
+        };
+        let (expected_artifact, _) =
+            match approval_artifact(path, source, edition, kind, inputs, Some(&render_source)) {
+                Ok(artifact) => artifact,
+                Err(error) => return error,
+            };
+        let reviewed_artifact = match read_input_bytes(artifact_path) {
+            Ok(artifact) => artifact,
+            Err(error) => return error_exit(io_error_output(&error)),
+        };
+        let normalized_reviewed = match approval::normalized_artifact(kind, &reviewed_artifact) {
+            Ok(artifact) => artifact,
+            Err(error) => return error_exit(error_output("semantics", &error)),
+        };
+        let normalized_expected = match approval::normalized_artifact(kind, &expected_artifact) {
+            Ok(artifact) => artifact,
+            Err(error) => return error_exit(error_output("internal", &error)),
+        };
+        if normalized_reviewed != normalized_expected {
+            return error_exit(error_output(
+                "semantics",
+                "reviewed artifact does not match a fresh rendering with the recorded inputs",
+            ));
+        }
+        (
+            normalized_reviewed,
+            approval::ARTIFACT_DIGEST_ALGORITHM,
+            None,
+            None,
+        )
+    };
 
     let available = approval::requirement_ids(&model);
     if available.is_empty() {
-        return (
-            error_output(
-                "semantics",
-                "approval creation requires at least one requirement ID in the specification",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "approval creation requires at least one requirement ID in the specification",
+        ));
     }
     let mut requirements = if selected_requirements.is_empty() {
         available.clone()
@@ -13757,16 +14114,22 @@ fn run_approval_create(
         .iter()
         .find(|requirement| !available.contains(*requirement))
     {
-        return (
-            error_output(
-                "semantics",
-                &format!("approval references unknown requirement '{unknown}'"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("approval references unknown requirement '{unknown}'"),
+        ));
     }
+    let Some(generator_version) = approval::renderer_version(kind) else {
+        return error_exit(error_output(
+            "usage",
+            &format!("unsupported approval target '{kind}'"),
+        ));
+    };
     let record = approval::ApprovalRecord {
-        schema: schema.to_owned(),
+        schema: approval::APPROVAL_SCHEMA_V5.to_owned(),
+        // A solver record reads nothing through its base, so it can be created anywhere.
+        path_base: Some(stored_base.unwrap_or_else(|| ".".to_owned())),
+        render_source: Some(render_source.into_owned()),
         spec: approval::SpecBinding {
             path: relative_path,
             digest_algorithm: approval::SPEC_DIGEST_ALGORITHM.to_owned(),
@@ -13787,7 +14150,7 @@ fn run_approval_create(
                 .map(|_| approval::CLAIM_SET_DIGEST_ALGORITHM.to_owned()),
             claim_set_digest,
             generator: "fslc".to_owned(),
-            generator_version: env!("CARGO_PKG_VERSION").to_owned(),
+            generator_version,
             inputs: inputs.clone(),
         },
         approval: approval::ApprovalMetadata {
@@ -13809,15 +14172,15 @@ fn run_approval_create(
     let record = if let Some(signing_key) = signing_key {
         let record = match approval::sign_record(record, signing_key) {
             Ok(record) => record,
-            Err(error) => return (error_output("io", &error), 2),
+            Err(error) => return error_exit(io_error_output(&error)),
         };
         if let Err(error) = approval::write_record_v2(&destination, &record) {
-            return (error_output("io", &error), 2);
+            return error_exit(io_error_output(&error));
         }
         serde_json::to_value(record).expect("approval v2 serializes")
     } else {
         if let Err(error) = approval::write_record(&destination, &record) {
-            return (error_output("io", &error), 2);
+            return error_exit(io_error_output(&error));
         }
         serde_json::to_value(record).expect("approval v1 serializes")
     };
@@ -13829,19 +14192,71 @@ fn run_approval_create(
     (Value::Object(output), 0)
 }
 
+fn solver_approval_artifact(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    record: &approval::ApprovalRecord,
+) -> Result<(Vec<u8>, Option<String>), (Value, i32)> {
+    approval_artifact(
+        path,
+        source,
+        edition,
+        &record.target.kind,
+        &record.target.inputs,
+        record.render_source.as_deref(),
+    )
+}
+
+/// Locate the record's repository and require its baseline there. A v5 or v6 record
+/// uses the checkout holding the spec's path; v1-v4 records keep following the spec.
+fn approval_repository(
+    path: &Path,
+    record: &approval::ApprovalRecord,
+) -> Result<PathBuf, (Value, i32)> {
+    let io = |error: String| error_exit(io_error_output(&error));
+    let contextual = record.path_base.is_some();
+    let (repo, relative_path) = if contextual {
+        let checkout = approval::spec_checkout(path)
+            .map_err(|(kind, error)| (error_output(kind, &error), 2))?;
+        (checkout.root, checkout.relative)
+    } else {
+        let (repo, relative_path, _head) = approval::git_location(path).map_err(io)?;
+        (repo, relative_path)
+    };
+    if record.spec.path != relative_path {
+        return Err(error_exit(error_output(
+            "semantics",
+            &format!(
+                "approval record targets '{}' but current spec is '{relative_path}'",
+                record.spec.path
+            ),
+        )));
+    }
+    let commit = &record.spec.git_commit;
+    if contextual {
+        approval::verify_checkout_baseline(&repo, &relative_path, commit).map_err(io)?;
+    } else {
+        approval::verify_git_baseline(&repo, &relative_path, commit).map_err(io)?;
+    }
+    Ok(repo)
+}
+
 fn approval_evaluation(
     path: &Path,
+    source: &str,
+    edition: &SourceEdition,
     record_path: &Path,
     trust: &approval::TrustStore,
-) -> Result<Value, Value> {
-    let versioned =
-        approval::read_versioned_record(record_path).map_err(|error| error_output("io", &error))?;
+) -> Result<Value, (Value, i32)> {
+    let versioned = approval::read_versioned_record(record_path)
+        .map_err(|error| error_exit(io_error_output(&error)))?;
     let (record, signature_status, key_id) = match &versioned {
         approval::VersionedApprovalRecord::V1(record) => (record.clone(), "unsigned", Value::Null),
         approval::VersionedApprovalRecord::V2(record) => {
             let verified = trust
                 .verify(record)
-                .map_err(|error| error_output("io", &error))?;
+                .map_err(|error| error_exit(io_error_output(&error)))?;
             if !verified {
                 return Ok(json!({
                     "status": "signature-invalid",
@@ -13863,37 +14278,52 @@ fn approval_evaluation(
             )
         }
     };
-    let (repo, relative_path, _head) =
-        approval::git_location(path).map_err(|error| error_output("io", &error))?;
-    if record.spec.path != relative_path {
-        return Err(error_output(
-            "semantics",
-            &format!(
-                "approval record targets '{}' but current spec is '{relative_path}'",
-                record.spec.path
-            ),
-        ));
-    }
-    approval::verify_git_baseline(&repo, &relative_path, &record.spec.git_commit)
-        .map_err(|error| error_output("io", &error))?;
+    let repo = approval_repository(path, &record)?;
     let current_spec_digest =
-        approval_spec_digest(path).map_err(|error| spec_load_error_output(&error))?;
-    let (artifact, current_claim_set_digest) =
-        approval_artifact(path, &record.target.kind, &record.target.inputs)?;
+        approval_spec_digest(path, source).map_err(|error| (spec_load_error_output(&error), 2))?;
+    let (artifact, current_claim_set_digest, input_digest_mismatch) =
+        if let approval::GenerationInputs::Document(inputs) = &record.target.inputs {
+            approval::require_document_paths_inside_root(&record, inputs, &repo)
+                .map_err(|error| error_exit(error_output("semantics", &error)))?;
+            let rendered = render_document_for_approval(
+                path,
+                source,
+                inputs,
+                record.base_directory(Some(&repo)).as_deref(),
+                record.render_source.as_deref(),
+            )
+            .map_err(|error| (error, 2))?;
+            (
+                rendered.markdown.into_bytes(),
+                Some(rendered.claims.spec.claim_set_digest),
+                rendered.input_digest_mismatch,
+            )
+        } else {
+            let (artifact, claim_set_digest) =
+                solver_approval_artifact(path, source, edition, &record)?;
+            (artifact, claim_set_digest, None)
+        };
     let normalized_artifact = approval::normalized_artifact(&record.target.kind, &artifact)
-        .map_err(|error| error_output("internal", &error))?;
+        .map_err(|error| error_exit(error_output("internal", &error)))?;
     let current_artifact_digest = approval::sha256_bytes(&normalized_artifact);
-    let current_reviewed_digest =
-        approval::reviewed_artifact_digest(&record).map_err(|error| error_output("io", &error))?;
+    let current_reviewed_digest = approval::reviewed_artifact_digest(&record, Some(&repo))
+        .map_err(|error| error_exit(io_error_output(&error)))?;
     let mut evaluation = approval::evaluate(
         &record,
         record_path,
         &current_spec_digest,
         &current_artifact_digest,
-        env!("CARGO_PKG_VERSION"),
         current_claim_set_digest.as_deref(),
         current_reviewed_digest.as_deref(),
     );
+    // Every earlier error and every complete drift result takes precedence.
+    if evaluation["status"] == "approved"
+        && let Some(path) = input_digest_mismatch
+    {
+        return Err(error_exit(io_error_output(&format!(
+            "approval input digest mismatch: {path}"
+        ))));
+    }
     let output = evaluation
         .as_object_mut()
         .expect("approval evaluation object");
@@ -13903,13 +14333,40 @@ fn approval_evaluation(
 }
 
 fn run_approval_check(path: &Path, record_path: &Path, trust_keys: &[PathBuf]) -> (Value, i32) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_approval_check_from_source(
+                    path,
+                    &sources[0],
+                    &editions[0],
+                    record_path,
+                    trust_keys,
+                ),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+fn run_approval_check_from_source(
+    path: &Path,
+    source: &str,
+    edition: &SourceEdition,
+    record_path: &Path,
+    trust_keys: &[PathBuf],
+) -> (Value, i32) {
     let trust = match approval::TrustStore::load(trust_keys) {
         Ok(trust) => trust,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
-    let evaluation = match approval_evaluation(path, record_path, &trust) {
+    let evaluation = match approval_evaluation(path, source, edition, record_path, &trust) {
         Ok(evaluation) => evaluation,
-        Err(error) => return (error, 2),
+        Err(error) => return error,
     };
     let mut output = envelope();
     output.insert("result".to_owned(), json!("approval_check"));
@@ -13923,15 +14380,18 @@ fn run_approval_check(path: &Path, record_path: &Path, trust_keys: &[PathBuf]) -
 
 fn approval_overlay(
     path: &Path,
+    source: &str,
+    edition: &SourceEdition,
     record_paths: &[PathBuf],
     trust_keys: &[PathBuf],
-) -> Result<Value, Value> {
-    let trust =
-        approval::TrustStore::load(trust_keys).map_err(|error| error_output("io", &error))?;
+) -> Result<Value, (Value, i32)> {
+    let trust = approval::TrustStore::load(trust_keys)
+        .map_err(|error| error_exit(io_error_output(&error)))?;
     let mut requirements = Map::new();
     let mut records = Vec::new();
     for record_path in record_paths {
-        let evaluation = approval_evaluation(path, record_path, &trust)?;
+        let evaluation = approval_evaluation(path, source, edition, record_path, &trust)
+            .map_err(|failure| overlay_evaluation_error(record_path, failure))?;
         for requirement in evaluation
             .get("requirements")
             .and_then(Value::as_array)
@@ -13946,6 +14406,22 @@ fn approval_overlay(
     Ok(json!({"requirements": requirements, "records": records}))
 }
 
+/// A record's artifact rerender can stop on a failed verification baseline with
+/// a non-error envelope and exit 1. Passing that through would read as the ledger's
+/// own exit 1 although no ledger was written, so it is refused here instead.
+fn overlay_evaluation_error(record_path: &Path, failure: (Value, i32)) -> (Value, i32) {
+    if failure.0["result"] == "error" {
+        return failure;
+    }
+    error_exit(error_output(
+        "semantics",
+        &format!(
+            "approval record '{}' cannot be evaluated: rerendering its artifact stopped on a failed verification baseline, so no ledger was written",
+            record_path.display()
+        ),
+    ))
+}
+
 struct LedgerReportRequest<'a> {
     path: &'a Path,
     depth: usize,
@@ -13957,6 +14433,8 @@ struct LedgerReportRequest<'a> {
 }
 
 struct PreparedLedgerReport {
+    /// The declaration owning each requirement ID, which titles its ledger row.
+    owners: std::collections::BTreeMap<String, fsl_syntax::RequirementOwner>,
     model: KernelModel,
     verification: Value,
     verification_status: i32,
@@ -13966,10 +14444,11 @@ struct PreparedLedgerReport {
 }
 
 /// The direct `fslc ledger` entry point. Unlike
-/// `generate_unapproved_ledger_report` (which `approval_artifact` also calls
+/// `generate_unapproved_ledger_report_from_source` (which `approval_artifact` also calls
 /// to reproduce a target's canonical rendering purely for a digest
 /// comparison -- a verdict mismatch there is legitimate drift evidence for
-/// `approval check`/`create`, not a hard error), this is the command a user
+/// `approval check`/`create`, not a hard error, although a verification
+/// `result:"error"` still is), this is the command a user
 /// or CI gate actually runs and reads the exit code of, so it must not hide
 /// a violated/unknown verification baseline behind the unconditional exit 0
 /// `generated_content_result` gives every generated artifact (issue #592).
@@ -13996,19 +14475,45 @@ fn run_ledger_report_from_source(
     approval_paths: &[PathBuf],
     trust_keys: &[PathBuf],
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source) {
+    run_admitted_roots(
+        vec![(request.path, Ok(source.to_owned()))],
+        None,
+        request.output_path.is_none(),
+        |sources, editions| {
+            finish_admitted_report(
+                run_ledger_report_admitted_from_source(
+                    request,
+                    &sources[0],
+                    approval_paths,
+                    trust_keys,
+                    &editions[0],
+                ),
+                editions,
+            )
+        },
+    )
+}
+
+fn run_ledger_report_admitted_from_source(
+    request: &LedgerReportRequest<'_>,
+    source: &str,
+    approval_paths: &[PathBuf],
+    trust_keys: &[PathBuf],
+    edition: &SourceEdition,
+) -> (Value, i32) {
+    let prepared = match prepare_ledger_report_from_source(request, source, Some(edition)) {
         Ok(prepared) => prepared,
-        Err(error) => return (error, 2),
+        Err(error) => return error,
     };
     let approvals = if approval_paths.is_empty() {
         None
     } else {
-        match approval_overlay(request.path, approval_paths, trust_keys) {
+        match approval_overlay(request.path, source, edition, approval_paths, trust_keys) {
             Ok(approvals) => Some(approvals),
-            Err(error) => return (error, 2),
+            Err(error) => return error,
         }
     };
-    let (result, status) = render_ledger_report(request, &prepared, approvals.as_ref());
+    let (result, status) = render_ledger_report(request, &prepared, approvals.as_ref(), None);
     if status != 0 {
         // An `io` failure writing `-o` (the only non-zero
         // `generated_content_result` can itself report) outranks the
@@ -14019,7 +14524,7 @@ fn run_ledger_report_from_source(
     // baseline `mutate` already shares through `mutate_exit_status`:
     // `prepared.verification` carries the identical `result` vocabulary
     // (`verified`/`proved`/`violated`/`unknown_cti`/`unknown_budget`/`error`)
-    // because both call the same `run_verify`. Reusing the mapping here
+    // because both use `run_verify_admitted_from_source`. Reusing the mapping here
     // instead of writing a second one is the fix issue #592 asked for.
     (
         result,
@@ -14027,43 +14532,56 @@ fn run_ledger_report_from_source(
     )
 }
 
-fn generate_unapproved_ledger_report(request: &LedgerReportRequest<'_>) -> (Value, i32) {
-    let source = match read_spec_source(request.path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    generate_unapproved_ledger_report_from_source(request, &source)
-}
-
 /// Generate the approval-rendering form from one caller-owned root snapshot.
 fn generate_unapproved_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
+    edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
-    let prepared = match prepare_ledger_report_from_source(request, source) {
+    generate_unapproved_ledger_report_from_source_with_label(request, source, edition, None)
+}
+
+fn generate_unapproved_ledger_report_from_source_with_label(
+    request: &LedgerReportRequest<'_>,
+    source: &str,
+    edition: Option<&SourceEdition>,
+    render_source: Option<&str>,
+) -> (Value, i32) {
+    let mut prepared = match prepare_ledger_report_from_source(request, source, edition) {
         Ok(prepared) => prepared,
-        Err(error) => return (error, 2),
+        Err(error) => return error,
     };
-    render_ledger_report(request, &prepared, None)
+    relabel_approval_rendering_warnings(&mut prepared.verification, request.path, render_source);
+    relabel_approval_rendering_warnings(&mut prepared.scenarios, request.path, render_source);
+    render_ledger_report(request, &prepared, None, render_source)
 }
 
 fn prepare_ledger_report_from_source(
     request: &LedgerReportRequest<'_>,
     source: &str,
-) -> Result<PreparedLedgerReport, Value> {
-    let model = match load_model_from_source(request.path, source) {
-        Ok(model) => model,
-        Err(error) => return Err(spec_load_error_output(&error)),
-    };
-    let (verification, verification_status) = run_verify_from_source(
+    edition: Option<&SourceEdition>,
+) -> Result<PreparedLedgerReport, (Value, i32)> {
+    let (verification, verification_status) = report_verification_from_source(
         request.path,
         source,
         request.depth,
         request.deadlock_mode,
         request.engine,
-        DEFAULT_EXPLICIT_BUDGET,
-        1,
+        edition,
     );
+    // Preserve this error before replay, evidence or witnesses. Only
+    // `result:"error"` stops here: a failed or unestablished verdict still renders,
+    // so direct reports exit nonzero and approval-only digests stay comparable.
+    if let Some(error) = report_verification_error(&verification, verification_status) {
+        return Err(error);
+    }
+    let model = match load_model_from_source(request.path, source) {
+        Ok(model) => model,
+        Err(error) => return Err((spec_load_error_output(&error), 2)),
+    };
+    // A ledger row per acceptance / forbidden case is a claim about that case,
+    // so a spec whose traces the gate refuses gets no ledger (#1243).
+    let trace_contract = require_trace_gate(source, &model).map_err(|error| (error, 2))?;
     let replay = match request.impl_log {
         Some(trace) => {
             let (detail, status) = run_replay_from_source(request.path, source, trace);
@@ -14071,7 +14589,7 @@ fn prepare_ledger_report_from_source(
             // evidence; io/parse/internal errors (>=2) must fail the ledger
             // command instead of silently omitting the implementation-log row.
             if status >= 2 {
-                return Err(detail);
+                return Err((detail, 2));
             }
             Some(detail)
         }
@@ -14081,31 +14599,32 @@ fn prepare_ledger_report_from_source(
         .evidence_paths
         .iter()
         .map(|evidence_path| {
-            let source = std::fs::read_to_string(evidence_path)
-                .map_err(|error| error_output("io", &error.to_string()))?;
+            let source = read_input_text(evidence_path).map_err(|error| io_error_output(&error))?;
             let value = serde_json::from_str::<Value>(&source)
-                .map_err(|error| error_output("io", &format!("invalid JSON: {error}")))?;
+                .map_err(|error| io_error_output(&format!("invalid JSON: {error}")))?;
             if !value.is_object() {
-                return Err(error_output(
-                    "io",
+                return Err(io_error_output(
                     "evidence JSON must contain an object envelope",
                 ));
             }
             Ok((evidence_path.clone(), value))
         })
-        .collect::<Result<Vec<_>, Value>>()?;
-    let (scenarios, _) = run_scenarios_mode_from_source(
+        .collect::<Result<Vec<_>, Value>>()
+        .map_err(|error| (error, 2))?;
+    let scenarios = witness_scenarios(
         request.path,
         source,
+        &model,
+        trace_contract.as_ref(),
         request.depth,
         request.deadlock_mode,
-        false,
     );
     let evidence = evidence
         .into_iter()
         .map(|(source, value)| (source.display().to_string(), value))
         .collect::<Vec<_>>();
     Ok(PreparedLedgerReport {
+        owners: fsl_tools::requirement_owners(source, crate::parse_options()),
         model,
         verification,
         verification_status,
@@ -14119,15 +14638,17 @@ fn render_ledger_report(
     request: &LedgerReportRequest<'_>,
     prepared: &PreparedLedgerReport,
     approvals: Option<&Value>,
+    render_source: Option<&str>,
 ) -> (Value, i32) {
-    let content = fsl_tools::render_ledger_with_approvals(
-        &request.path.display().to_string(),
+    let content = fsl_tools::render_ledger_with_owners(
+        render_source.unwrap_or(&request.path.to_string_lossy()),
         &prepared.model,
         &prepared.verification,
         &prepared.scenarios,
         prepared.replay.as_ref(),
         &prepared.evidence,
         approvals,
+        &prepared.owners,
     );
     generated_content_result(
         "audit_ledger",
@@ -14182,9 +14703,14 @@ fn expression_identifiers(value: &Value) -> std::collections::BTreeSet<String> {
 
 fn tag_lvalue_text(target: &KernelLValue) -> String {
     match target {
-        KernelLValue::Var(name) => name.clone(),
+        // The same spelling `expr_text` gives the root on the right-hand side.
+        KernelLValue::Var(name) => fsl_core::unmapped_public_spelling(name),
         KernelLValue::Index(name, index) => {
-            format!("{name}[{}]", fslc_rust::expr_text(index))
+            format!(
+                "{}[{}]",
+                fsl_core::unmapped_public_spelling(name),
+                fslc_rust::expr_text(index)
+            )
         }
         KernelLValue::Field(base, field) => format!("{}.{}", tag_lvalue_text(base), field),
     }
@@ -14258,7 +14784,7 @@ fn tag_review_output(model: &KernelModel) -> Value {
         tag_statement_effects(&action.statements, &[], &mut effects);
         declarations.push(json!({
             "kind":"action",
-            "name":model.action_key(&action.name),
+            "name":model.action_display_name(&action.name),
             "node_id":fsl_tools::action_node_id(model, &action.name),
             "tag":tag,
             "tags":tags,
@@ -15134,16 +15660,70 @@ fn add_scenario_items(
     node_additions: &mut Vec<Value>,
     edge_additions: &mut Vec<Value>,
 ) {
-    let Ok(Some(contract)) = fsl_core::requirements_trace_contract(source) else {
-        return;
+    // The graph is structure, not a verdict, so a contract the gate refuses is
+    // still projected, with every case node marked `trace_gate: "unchecked"`
+    // (#1243). A contract that does not parse projects no case.
+    let unchecked = match validate_requirement_trace_source(source, model) {
+        Ok(TraceGate::NotRequirements) => return,
+        Ok(TraceGate::Passed(contract)) => {
+            let cases = [
+                ("acceptance", contract.acceptance()),
+                ("forbidden", contract.forbidden()),
+            ];
+            add_scenario_cases(
+                model,
+                spec_id,
+                &cases,
+                false,
+                known_ids,
+                node_additions,
+                edge_additions,
+            );
+            return;
+        }
+        Ok(TraceGate::Rejected { contract, .. }) => contract,
+        Err(_) => {
+            match fsl_core::requirements_trace_contract_with_options(source, crate::parse_options())
+            {
+                Ok(Some(contract)) => contract,
+                Ok(None) | Err(_) => return,
+            }
+        }
     };
-    for (kind, cases) in [
-        ("acceptance", &contract.acceptance),
-        ("forbidden", &contract.forbidden),
-    ] {
+    let cases = [
+        ("acceptance", unchecked.unchecked_acceptance()),
+        ("forbidden", unchecked.unchecked_forbidden()),
+    ];
+    add_scenario_cases(
+        model,
+        spec_id,
+        &cases,
+        true,
+        known_ids,
+        node_additions,
+        edge_additions,
+    );
+}
+
+/// The nodes and edges of [`add_scenario_items`]' cases; `unchecked` marks
+/// cases of a contract the requirement-trace gate did not pass.
+fn add_scenario_cases(
+    model: &KernelModel,
+    spec_id: &str,
+    cases: &[(&str, &[fsl_core::RequirementsTraceCase])],
+    unchecked: bool,
+    known_ids: &mut std::collections::BTreeSet<String>,
+    node_additions: &mut Vec<Value>,
+    edge_additions: &mut Vec<Value>,
+) {
+    for &(kind, cases) in cases {
         for case in cases {
             let id = format!("{kind}:{}", case.id);
-            node_additions.push(project_analysis_node(&id, kind, &case.id));
+            let mut node = project_analysis_node(&id, kind, &case.id);
+            if unchecked {
+                node["trace_gate"] = json!("unchecked");
+            }
+            node_additions.push(node);
             known_ids.insert(id.clone());
             edge_additions.push(project_analysis_edge(spec_id, "declares", &id));
             for requirement in requirement_metadata(&case.annotations, None) {
@@ -15209,7 +15789,8 @@ fn add_control_items(
     node_additions: &mut Vec<Value>,
     edge_additions: &mut Vec<Value>,
 ) {
-    let Ok(document) = fsl_syntax::parse_surface_document(source) else {
+    let Ok(document) = fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+    else {
         return;
     };
     let controls: Vec<&String> = match &document {
@@ -15310,13 +15891,142 @@ fn prefixed_analysis_edge(layer: &str, edge: &Value) -> Value {
     edge
 }
 
+const PROJECT_ANALYSIS_LAYERS: [&str; 3] = ["business", "requirements", "design"];
+
+struct ProjectRoot {
+    layer: &'static str,
+    mapping: bool,
+    path: PathBuf,
+    source: Result<String, SpecLoadError>,
+    edition: SourceEdition,
+    #[cfg(test)]
+    observer: Option<spec_loading::admission_observer::Handle>,
+}
+
+#[cfg(test)]
+fn install_root_observer(
+    roots: &[ProjectRoot],
+    hop: &'static str,
+    layer: &str,
+) -> spec_loading::admission_observer::Guard {
+    use spec_loading::admission_observer::{self, Event};
+    let guard = admission_observer::install(roots.first().and_then(|root| root.observer.clone()));
+    admission_observer::record(Event::Hop(
+        hop,
+        layer.to_owned(),
+        std::thread::current().id(),
+        roots.as_ptr() as usize,
+        roots
+            .iter()
+            .filter_map(|root| {
+                root.source
+                    .as_ref()
+                    .ok()
+                    .map(|source| source.as_ptr() as usize)
+            })
+            .collect(),
+    ));
+    guard
+}
+
+impl ProjectRoot {
+    fn source(&self) -> Result<&str, (Value, i32)> {
+        self.source
+            .as_deref()
+            .map_err(|error| (spec_load_error_output(error), 2))
+    }
+}
+
+fn prepare_project_roots(
+    sections: &std::collections::BTreeMap<String, ManifestSection>,
+    base: &Path,
+    read_mapping: fn(&Path) -> Result<String, SpecLoadError>,
+) -> Result<Vec<ProjectRoot>, (Value, i32)> {
+    let mut roots = Vec::new();
+    for mapping in [false, true] {
+        for layer in PROJECT_ANALYSIS_LAYERS {
+            let Some(section) = sections.get(layer) else {
+                continue;
+            };
+            let file = if mapping {
+                section
+                    .values
+                    .get("refine_against")
+                    .filter(|target| PROJECT_ANALYSIS_LAYERS.contains(&target.as_str()))
+                    .and_then(|target| sections.get(target))
+                    .filter(|target| {
+                        target.values.contains_key("file") && section.values.contains_key("file")
+                    })
+                    .and_then(|_| section.values.get("mapping"))
+            } else {
+                section.values.get("file")
+            };
+            if let Some(file) = file {
+                let path = base.join(file);
+                let source = if mapping {
+                    read_mapping(&path)
+                } else {
+                    read_spec_source(&path)
+                };
+                roots.push(ProjectRoot {
+                    layer,
+                    mapping,
+                    path,
+                    source,
+                    edition: SourceEdition::default(),
+                    #[cfg(test)]
+                    observer: spec_loading::admission_observer::current(),
+                });
+            }
+        }
+    }
+    for root in &mut roots {
+        if let Ok(source) = &root.source {
+            root.edition = admit_root_source(&root.path, source, None)?;
+        }
+    }
+    Ok(roots)
+}
+
+fn project_root<'a>(roots: &'a [ProjectRoot], layer: &str, mapping: bool) -> &'a ProjectRoot {
+    roots
+        .iter()
+        .find(|root| root.layer == layer && root.mapping == mapping)
+        .expect("prepared manifest slot")
+}
+
+fn run_prepared_project_roots(
+    roots: &[&ProjectRoot],
+    run: impl FnOnce(&[&str]) -> (Value, i32),
+) -> (Value, i32) {
+    let sources = match roots
+        .iter()
+        .map(|root| root.source())
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(sources) => sources,
+        Err(error) => return error,
+    };
+    let editions = roots
+        .iter()
+        .map(|root| root.edition.clone())
+        .collect::<Vec<_>>();
+    run_prepared_roots(&editions, false, || {
+        finish_admitted(run(&sources), &editions, false)
+    })
+}
+
+struct ProjectSources {
+    sections: std::collections::BTreeMap<String, ManifestSection>,
+    roots: Vec<ProjectRoot>,
+}
+
 #[allow(clippy::too_many_lines)]
-fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
-    let source = read_spec_source(path)?;
-    // The manifest is TOML, not a specification; its message already names the
-    // manifest line, and a `loc` here would be read as a position in the `.fsl`
-    // file the envelope is reporting on.
-    let sections = parse_project_manifest(&source).map_err(SpecLoadError::unlocated_semantic)?;
+fn project_traceability_output(
+    path: &Path,
+    prepared: &ProjectSources,
+) -> Result<Value, SpecLoadError> {
+    let sections = &prepared.sections;
     let base = path.parent().unwrap_or_else(|| Path::new("."));
     let manifest = analysis_display_path(path);
     let mut nodes = std::collections::BTreeMap::new();
@@ -15329,7 +16039,7 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
         .insert("path".to_owned(), json!(manifest));
     insert_analysis_item(&mut nodes, manifest_node);
     let mut layers = std::collections::BTreeMap::new();
-    for layer in ["business", "requirements", "design"] {
+    for layer in PROJECT_ANALYSIS_LAYERS {
         let Some(file) = sections
             .get(layer)
             .and_then(|section| section.values.get("file"))
@@ -15337,15 +16047,18 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
             continue;
         };
         let layer_path = base.join(file);
-        let layer_source = read_spec_source(&layer_path)?;
-        let model = load_model_from_source(&layer_path, &layer_source)?;
+        let layer_source = project_root(&prepared.roots, layer, false)
+            .source
+            .as_deref()
+            .expect("readable project slot");
+        let model = load_model_from_source(&layer_path, layer_source)?;
         // `build_tsg` projects `requirement`/`kpi` nodes and `covers` edges
         // (#495) from `model.requirement_targets()`/`model.projections`, but it
         // only ever sees the lowered `KernelModel`. The source-only kinds run
         // through the same enrichment the standalone path uses, per layer and
         // on the unprefixed graph, so both input forms yield the same
         // vocabulary and the layer prefix below still applies uniformly (#558).
-        let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, &layer_source);
+        let tsg = enrich_tsg_from_source(fsl_tools::build_tsg(&model), &model, layer_source);
         let display = analysis_display_path(&layer_path);
         let file_id = format!("file:{layer}:{display}");
         let mut file_node = project_analysis_node(&file_id, "file", &display);
@@ -15397,7 +16110,7 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
             },
         );
     }
-    for layer in ["business", "requirements", "design"] {
+    for layer in PROJECT_ANALYSIS_LAYERS {
         let Some(section) = sections.get(layer) else {
             continue;
         };
@@ -15416,17 +16129,24 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
         // from the manifest the envelope reports on. Their spans exist but
         // index a different source, and `loc` carries no file, so emitting one
         // would point a repair agent into the wrong document.
-        let document =
-            parse_surface_document(&mapping_path).map_err(SpecLoadError::unlocated_semantic)?;
+        let mapping_source = project_root(&prepared.roots, layer, true)
+            .source
+            .as_deref()
+            .expect("readable project mapping");
+        let document = parse_surface_document_from_source(&mapping_path, mapping_source)
+            .map_err(SpecLoadError::unlocated_semantic)?;
         let fsl_syntax::SurfaceDocument::Refinement(refinement) = document else {
             return Err(SpecLoadError::unlocated_semantic(
                 "expected refinement mapping",
             ));
         };
-        let mapping_source = read_spec_source(&mapping_path)?;
-        let checked_refinement =
-            fsl_core::parse_refinement(&mapping_source, &implementation.model, &abstraction.model)
-                .map_err(|error| SpecLoadError::unlocated_semantic(error.message))?;
+        let checked_refinement = fsl_core::parse_refinement_with_options(
+            mapping_source,
+            &implementation.model,
+            &abstraction.model,
+            crate::parse_options(),
+        )
+        .map_err(|error| SpecLoadError::unlocated_semantic(error.message))?;
         let display = analysis_display_path(&mapping_path);
         let refinement_id = format!("refinement:{layer}->{target}:{}", refinement.name);
         let file_id = format!("file:{layer}->{target}:{display}");
@@ -15535,7 +16255,7 @@ fn project_traceability_output(path: &Path) -> Result<Value, SpecLoadError> {
         }
         for correspondence in checked_refinement.action_correspondences.values() {
             let name = &correspondence.impl_action.0;
-            let key = implementation.model.action_key(name);
+            let key = implementation.model.action_display_name(name);
             let map_id = format!("action_map:{layer}->{target}:{key}");
             let mut map_node = project_analysis_node(&map_id, "action_map", &key);
             if let Value::Object(object) = &mut map_node {
@@ -15687,7 +16407,46 @@ fn analysis_acceptance_predicates_from_source(
         .collect()
 }
 
-#[allow(clippy::too_many_lines)]
+struct PreparedAnalysis {
+    source: String,
+    project: Option<ProjectSources>,
+    editions: Vec<SourceEdition>,
+}
+
+fn prepare_analysis(path: &Path) -> Result<PreparedAnalysis, (Value, i32)> {
+    let source = read_spec_source(path).map_err(|error| (spec_load_error_output(&error), 2))?;
+    let (project, editions) = if path.extension().and_then(std::ffi::OsStr::to_str) == Some("toml")
+    {
+        let sections = parse_project_manifest(&source).map_err(|error| {
+            (
+                spec_load_error_output(&SpecLoadError::unlocated_semantic(error)),
+                2,
+            )
+        })?;
+        let roots = prepare_project_roots(
+            &sections,
+            path.parent().unwrap_or_else(|| Path::new(".")),
+            read_spec_source,
+        )?;
+        for root in &roots {
+            root.source()?;
+        }
+        let editions = roots
+            .iter()
+            .map(|root| root.edition.warnings_only())
+            .collect();
+        (Some(ProjectSources { sections, roots }), editions)
+    } else {
+        (None, vec![admit_root_source(path, &source, None)?])
+    };
+    Ok(PreparedAnalysis {
+        source,
+        project,
+        editions,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 fn run_analyze(
     path: &Path,
     projection: &str,
@@ -15697,13 +16456,13 @@ fn run_analyze(
     export_kind: Option<&str>,
     code_path: Option<&Path>,
 ) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
+    let prepared = match prepare_analysis(path) {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
     };
-    run_analyze_from_source(
+    run_prepared_analysis(
         path,
-        &source,
+        &prepared,
         projection,
         focus,
         output_format,
@@ -15713,11 +16472,42 @@ fn run_analyze(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_prepared_analysis(
+    path: &Path,
+    prepared: &PreparedAnalysis,
+    projection: &str,
+    focus: Option<&str>,
+    output_format: &str,
+    profile: Option<&str>,
+    export_kind: Option<&str>,
+    code_path: Option<&Path>,
+) -> (Value, i32) {
+    run_prepared_roots(&prepared.editions, output_format != "json", || {
+        let result = run_analyze_from_source(
+            path,
+            &prepared.source,
+            projection,
+            focus,
+            output_format,
+            profile,
+            export_kind,
+            code_path,
+            prepared.project.as_ref(),
+        );
+        if prepared.editions.is_empty() {
+            result
+        } else {
+            finish_admitted(result, &prepared.editions, output_format != "json")
+        }
+    })
+}
+
 /// Analyze one caller-owned root-source snapshot.
 ///
 /// The tag-review model, refinement surface, ordinary model, and AI-review
-/// acceptance predicates all derive from `source`. Project-manifest analysis
-/// and its referenced layer files retain their own input contract.
+/// acceptance predicates derive from `source`; manifest layers and mappings
+/// use the prepared slots captured before analysis begins.
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn run_analyze_from_source(
     path: &Path,
@@ -15728,124 +16518,90 @@ fn run_analyze_from_source(
     profile: Option<&str>,
     export_kind: Option<&str>,
     code_path: Option<&Path>,
+    project: Option<&ProjectSources>,
 ) -> (Value, i32) {
     if !matches!(output_format, "json" | "dot" | "mermaid") {
-        return (
-            error_output(
-                "semantics",
-                &format!("unsupported analyze format: {output_format}"),
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            &format!("unsupported analyze format: {output_format}"),
+        ));
     }
     if projection == "code_audit" {
         if code_path.is_none() {
-            return (
-                error_output(
-                    "semantics",
-                    "--projection code_audit requires --code <dir|file>",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "--projection code_audit requires --code <dir|file>",
+            ));
         }
         if output_format != "json" || focus.is_some() || profile.is_some() || export_kind.is_some()
         {
-            return (
-                error_output(
-                    "semantics",
-                    "code_audit cannot be combined with --focus, --profile, --export, or non-JSON --format",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "code_audit cannot be combined with --focus, --profile, --export, or non-JSON --format",
+            ));
         }
     } else if code_path.is_some() {
-        return (
-            error_output(
-                "semantics",
-                "--code is supported only with --projection code_audit",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "--code is supported only with --projection code_audit",
+        ));
     }
     if focus.is_some() && profile.is_none() && projection != "impact_graph" {
-        return (
-            error_output(
-                "semantics",
-                "--focus is supported only with --projection impact_graph",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "--focus is supported only with --projection impact_graph",
+        ));
     }
     if profile.is_some() && output_format != "json" {
-        return (
-            error_output(
-                "semantics",
-                "DOT/Mermaid export is supported for graph projections, not profiles",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "DOT/Mermaid export is supported for graph projections, not profiles",
+        ));
     }
     if profile.is_some() && focus.is_some() {
-        return (
-            error_output(
-                "semantics",
-                "--focus is supported only with graph projections, not profiles",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "--focus is supported only with graph projections, not profiles",
+        ));
     }
     if path.extension().and_then(std::ffi::OsStr::to_str) == Some("toml") {
         if export_kind.is_some() {
-            return (
-                error_output(
-                    "semantics",
-                    "tag-review export requires an FSL specification",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "tag-review export requires an FSL specification",
+            ));
         }
         if profile.is_some() {
-            return (
-                error_output(
-                    "semantics",
-                    "project traceability analysis does not support --profile",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "project traceability analysis does not support --profile",
+            ));
         }
         if projection != "traceability_graph" {
-            return (
-                error_output(
-                    "semantics",
-                    "project manifests support only --projection traceability_graph",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "project manifests support only --projection traceability_graph",
+            ));
         }
-        let analysis = match project_traceability_output(path) {
-            Ok(analysis) => analysis,
-            Err(error) => return (spec_load_error_output(&error), 2),
-        };
+        let analysis =
+            match project_traceability_output(path, project.expect("prepared project analysis")) {
+                Ok(analysis) => analysis,
+                Err(error) => return (spec_load_error_output(&error), 2),
+            };
         return finish_analysis(analysis, None, projection, output_format);
     }
     if let Some(export_kind) = export_kind {
         if export_kind != "tag-review" {
-            return (
-                error_output(
-                    "semantics",
-                    &format!("unsupported analyze export: {export_kind}"),
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                &format!("unsupported analyze export: {export_kind}"),
+            ));
         }
         if profile.is_some() || focus.is_some() || output_format != "json" || projection != "tsg" {
-            return (
-                error_output(
-                    "semantics",
-                    "--export tag-review cannot be combined with --profile, --focus, --projection, or non-JSON --format",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "--export tag-review cannot be combined with --profile, --focus, --projection, or non-JSON --format",
+            ));
         }
         let model = match load_model_from_source(path, source) {
             Ok(model) => model,
@@ -15867,13 +16623,10 @@ fn run_analyze_from_source(
             return (Value::Object(output), 0);
         }
         if !matches!(projection, "tsg" | "refinement_graph") {
-            return (
-                error_output(
-                    "semantics",
-                    "refinement mappings support only --projection refinement_graph (or the default tsg alias)",
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                "refinement mappings support only --projection refinement_graph (or the default tsg alias)",
+            ));
         }
         let name = refinement.name.clone();
         return finish_analysis(
@@ -15891,10 +16644,10 @@ fn run_analyze_from_source(
         let analysis = match code_audit::analyze(&model, code_path.expect("checked above")) {
             Ok(analysis) => analysis,
             Err(code_audit::CodeAuditError::Io(message)) => {
-                return (error_output("io", &message), 2);
+                return error_exit(io_error_output(&message));
             }
             Err(code_audit::CodeAuditError::Semantics(message)) => {
-                return (error_output("semantics", &message), 2);
+                return error_exit(error_output("semantics", &message));
             }
         };
         return finish_analysis(
@@ -15906,10 +16659,10 @@ fn run_analyze_from_source(
     }
     if let Some(profile) = profile {
         if profile != "ai-review" {
-            return (
-                error_output("semantics", &format!("unsupported profile: {profile}")),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                &format!("unsupported profile: {profile}"),
+            ));
         }
         let acceptance = analysis_acceptance_predicates_from_source(path, source);
         return (ai_review_output(&model, &acceptance, source), 0);
@@ -15930,10 +16683,10 @@ fn run_analyze_from_source(
             };
             (error_output(kind, &message), 2)
         }
-        Ok(_) => (
-            error_output("internal", "analysis result must be an object"),
-            3,
-        ),
+        Ok(_) => error_exit(error_output(
+            "internal",
+            "analysis result must be an object",
+        )),
     }
 }
 
@@ -15946,18 +16699,6 @@ fn collect_analysis_files(path: &Path, files: &mut Vec<PathBuf>) -> std::io::Res
         files.push(path.to_path_buf());
     }
     Ok(())
-}
-
-fn analysis_display_path(path: &Path) -> String {
-    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let root = std::env::current_dir()
-        .ok()
-        .and_then(|path| path.canonicalize().ok());
-    root.as_deref()
-        .and_then(|root| resolved.strip_prefix(root).ok())
-        .unwrap_or(&resolved)
-        .to_string_lossy()
-        .replace('\\', "/")
 }
 
 fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
@@ -15974,6 +16715,9 @@ fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
         "profile",
         "schema_version",
         "formal_status",
+        "warnings",
+        "edition",
+        "fsl_edition",
     ] {
         if let Some(value) = result.get(key) {
             entry.insert(key.to_owned(), value.clone());
@@ -16001,7 +16745,7 @@ fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
             );
         }
     } else {
-        for key in ["kind", "message", "loc", "expected", "hint"] {
+        for key in ["kind", "message", "loc", "expected", "hint", "findings"] {
             if let Some(value) = result.get(key) {
                 entry.insert(key.to_owned(), value.clone());
             }
@@ -16010,6 +16754,7 @@ fn analysis_batch_entry(path: &Path, result: &Value) -> Value {
     Value::Object(entry)
 }
 
+#[allow(clippy::too_many_lines)]
 fn run_analyze_batch(
     paths: &[PathBuf],
     projection: &str,
@@ -16020,45 +16765,36 @@ fn run_analyze_batch(
     code_path: Option<&Path>,
 ) -> (Value, i32) {
     if projection == "code_audit" || code_path.is_some() {
-        return (
-            error_output(
-                "semantics",
-                "code_audit accepts exactly one specification file",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "code_audit accepts exactly one specification file",
+        ));
     }
     if export_kind.is_some() {
-        return (
-            error_output(
-                "semantics",
-                "tag-review export accepts exactly one specification file",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "tag-review export accepts exactly one specification file",
+        ));
     }
     if output_format != "json" {
-        return (
-            error_output("semantics", "batch analyze supports only --format json"),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "batch analyze supports only --format json",
+        ));
     }
     if focus.is_some() {
-        return (
-            error_output(
-                "semantics",
-                "batch analyze does not support --focus; run impact_graph per file",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "batch analyze does not support --focus; run impact_graph per file",
+        ));
     }
     let mut files = Vec::new();
     for path in paths {
         if !path.exists() {
-            return (
-                error_output("io", &format!("file not found: {}", path.display())),
-                2,
-            );
+            return error_exit(io_error_output(&format!(
+                "file not found: {}",
+                path.display()
+            )));
         }
         if path.is_dir() {
             // `.fsl`-only filtering applies only to directory expansion — an
@@ -16067,7 +16803,7 @@ fn run_analyze_batch(
             // manifest) or reject it with a real error (anything else),
             // instead of it silently vanishing from `files`/`errors`.
             if let Err(error) = collect_analysis_files(path, &mut files) {
-                return (error_output("io", &error.to_string()), 2);
+                return error_exit(io_error_output(&error.to_string()));
             }
         } else {
             files.push(path.clone());
@@ -16078,14 +16814,24 @@ fn run_analyze_batch(
         left.canonicalize().unwrap_or_else(|_| left.clone())
             == right.canonicalize().unwrap_or_else(|_| right.clone())
     });
+    let prepared = match files
+        .iter()
+        .map(|path| prepare_analysis(path))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(prepared) => prepared,
+        Err(error) => return error,
+    };
     let mut entries = Vec::new();
     let mut errors = Vec::new();
-    for path in files {
-        let (result, _) = run_analyze(&path, projection, None, "json", profile, None, None);
-        entries.push(analysis_batch_entry(&path, &result));
+    for (path, prepared) in files.iter().zip(&prepared) {
+        let (result, _) = run_prepared_analysis(
+            path, prepared, projection, None, "json", profile, None, None,
+        );
+        entries.push(analysis_batch_entry(path, &result));
         if result.get("result").and_then(Value::as_str) != Some("analyzed") {
             errors.push(json!({
-                "file":analysis_display_path(&path),
+                "file":analysis_display_path(path),
                 "result":result.get("result"),
                 "kind":result.get("kind"),
                 "message":result.get("message"),
@@ -16133,17 +16879,14 @@ fn finish_analysis(
 ) -> (Value, i32) {
     if output_format != "json" {
         if analysis["nodes"].as_array().is_none_or(Vec::is_empty) || !analysis["edges"].is_array() {
-            return (
-                error_output(
-                    "semantics",
-                    &format!("--format {output_format} requires a graph projection"),
-                ),
-                2,
-            );
+            return error_exit(error_output(
+                "semantics",
+                &format!("--format {output_format} requires a graph projection"),
+            ));
         }
         let content = match fsl_tools::export_analysis_graph(&analysis, output_format) {
             Ok(content) => content,
-            Err(message) => return (error_output("semantics", &message), 2),
+            Err(message) => return error_exit(error_output("semantics", &message)),
         };
         let mut output = envelope();
         output.insert("result".to_owned(), json!("analyzed"));
@@ -16166,10 +16909,10 @@ fn finish_analysis(
         return (Value::Object(output), 0);
     }
     let Value::Object(analysis) = analysis else {
-        return (
-            error_output("internal", "analysis result must be an object"),
-            3,
-        );
+        return error_exit(error_output(
+            "internal",
+            "analysis result must be an object",
+        ));
     };
     let mut output = envelope();
     output.insert("result".to_owned(), json!("analyzed"));
@@ -16212,12 +16955,12 @@ fn diff_shape_mismatch(implementation: &KernelModel, abstraction: &KernelModel) 
     let implementation_state = implementation
         .state
         .iter()
-        .map(|(name, _)| display(name))
+        .map(|(name, _)| implementation.names().public_state(name).into_string())
         .collect::<std::collections::BTreeSet<_>>();
     let abstraction_state = abstraction
         .state
         .iter()
-        .map(|(name, _)| display(name))
+        .map(|(name, _)| abstraction.names().public_state(name).into_string())
         .collect::<std::collections::BTreeSet<_>>();
     let implementation_actions = implementation
         .actions
@@ -16273,7 +17016,12 @@ fn semantic_diff_direction(
         );
         &generated
     };
-    let mapping = match fsl_core::parse_refinement(source, implementation, abstraction) {
+    let mapping = match fsl_core::parse_refinement_with_options(
+        source,
+        implementation,
+        abstraction,
+        crate::parse_options(),
+    ) {
         Ok(mapping) => mapping,
         Err(error) if automatic => {
             return Ok((
@@ -16660,13 +17408,17 @@ fn forbidden_violation_finding(
             &format!(
                 "NEW forbidden setup violated {} '{}'",
                 violation.kind,
-                display(&violation.name)
+                monitor
+                    .model
+                    .names()
+                    .public_violation(&violation.name, None)
+                    .into_string()
             ),
         );
     }
     // #1213: NEW enables the final step the OLD guard rejected; that it then
     // stops with a violation is not a rejection.
-    let violation = json!({"kind":violation.kind,"name":display(&violation.name)});
+    let violation = json!({"kind":violation.kind,"name":monitor.model.names().public_violation(&violation.name, None).into_string()});
     forbidden_relaxed(case, accepted_trace, monitor, Some(violation))
 }
 
@@ -16691,12 +17443,15 @@ fn forbidden_diff_findings(
     (old_source, old): (&str, &KernelModel),
     (new_source, new): (&str, &KernelModel),
 ) -> Result<Vec<Value>, String> {
+    // Ungated (#1239): OLD's forbidden cases are replayed by
+    // `forbidden_case_finding`, not by the requirement-trace gate.
     let Some(contract) =
-        fsl_core::requirements_trace_contract(old_source).map_err(|error| error.to_string())?
+        fsl_core::requirements_trace_contract_with_options(old_source, crate::parse_options())
+            .map_err(|error| error.to_string())?
     else {
         return Ok(Vec::new());
     };
-    for case in &contract.forbidden {
+    for case in contract.unchecked_forbidden() {
         if case.steps.is_empty() {
             return Err(format!(
                 "forbidden '{}' must have at least one step",
@@ -16707,14 +17462,15 @@ fn forbidden_diff_findings(
     // `None` when NEW's entity / number types are not in its source (#1229):
     // no NEW `bad_call` can then be told from a step outside a verify scope.
     let new_scope_types =
-        fsl_core::verify_scope_type_names(new_source).map_err(|error| error.to_string())?;
+        fsl_core::verify_scope_type_names_with_options(new_source, crate::parse_options())
+            .map_err(|error| error.to_string())?;
     Ok(contract
-        .forbidden
+        .unchecked_forbidden()
         .iter()
         .filter_map(|case| {
             forbidden_case_finding(
                 case,
-                (old, &contract.scope_types),
+                (old, contract.scope_types()),
                 (new, new_scope_types.as_ref()),
             )
         })
@@ -16747,7 +17503,8 @@ fn add_verify_items(scope: &mut RawScope, items: &[fsl_syntax::VerifyItem]) {
 }
 
 fn declared_raw_scope(source: &str) -> RawScope {
-    let Ok(document) = fsl_syntax::parse_surface_document(source) else {
+    let Ok(document) = fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+    else {
         return RawScope::default();
     };
     let mut scope = RawScope::default();
@@ -16825,7 +17582,6 @@ fn public_scope(scope: &ScopeBounds) -> Value {
     })
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_diff(
     old: &Path,
     new: &Path,
@@ -16833,28 +17589,76 @@ fn run_diff(
     mapping: Option<&Path>,
     forbid: &[String],
 ) -> (Value, i32) {
-    let old_source = match std::fs::read_to_string(old) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    let new_source = match std::fs::read_to_string(new) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
+    let mut roots = vec![(old, read_spec_source(old)), (new, read_spec_source(new))];
+    roots.extend(mapping.map(|path| (path, read_spec_source(path))));
+    run_admitted_roots(roots, None, false, |sources, editions| {
+        finish_admitted(
+            run_diff_from_sources(
+                [(old, &sources[0]), (new, &sources[1])],
+                depth,
+                sources.get(2).map(String::as_str),
+                forbid,
+            ),
+            editions,
+            false,
+        )
+    })
+}
+
+fn run_historical_diff(
+    [(old, old_label), (new, new_label)]: [(&Path, &Path); 2],
+    depth: usize,
+    mapping_source: Option<&str>,
+    forbid: &[String],
+) -> (Value, i32) {
+    let mut sources = Vec::new();
+    let mut editions = Vec::new();
+    // Admit the explicit slots without introducing a historical dependency scope.
+    for (path, label) in [(old, old_label), (new, new_label)] {
+        let source = match read_spec_source_shown_as(path, label) {
+            Ok(source) => source,
+            Err(error) => return (spec_load_error_output(&error), 2),
+        };
+        let edition = match admit_root_source(label, &source, None) {
+            Ok(edition) => edition,
+            Err(error) => return error,
+        };
+        sources.push(source);
+        editions.push(edition);
+    }
+    finish_admitted(
+        run_diff_from_sources(
+            [(old, &sources[0]), (new, &sources[1])],
+            depth,
+            mapping_source,
+            forbid,
+        ),
+        &editions,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_diff_from_sources(
+    [(old, old_source), (new, new_source)]: [(&Path, &str); 2],
+    depth: usize,
+    mapping_source: Option<&str>,
+    forbid: &[String],
+) -> (Value, i32) {
     // The declared scope's `values` bounds are resolved against each spec's
     // own built model (the same evaluator `check` uses for
     // `SpecItem::Type`), not re-folded from the raw AST here, so a const
     // bound compares and overrides the same way a literal one does.
-    let old_model_declared = match load_model(old) {
+    let old_model_declared = match load_model_from_source(old, old_source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let new_model = match load_model(new) {
+    let new_model = match load_model_from_source(new, new_source) {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let old_scope = resolve_scope(declared_raw_scope(&old_source), &old_model_declared);
-    let new_scope = resolve_scope(declared_raw_scope(&new_source), &new_model);
+    let old_scope = resolve_scope(declared_raw_scope(old_source), &old_model_declared);
+    let new_scope = resolve_scope(declared_raw_scope(new_source), &new_model);
     let scope_changed = old_scope != new_scope;
     let overrides = ScopeBounds {
         instances: new_scope
@@ -16880,36 +17684,38 @@ fn run_diff(
     // that bound to the resolved `lo..hi` and shift the field's initial value
     // in the re-scoped old model; dropping it keeps the old document's bound.
     let old_model = if scope_changed {
-        let loadable = match fsl_core::retain_dialect_scope_overrides(
-            &old_source,
+        let loadable = match fsl_core::retain_dialect_scope_overrides_with_options(
+            old_source,
             &overrides.instances,
             &overrides.values,
+            crate::parse_options(),
         ) {
             Ok((instances, values)) => ScopeBounds { instances, values },
             Err(error) => {
                 return (
-                    spec_load_error_output(&kernel_load_error(&old_source, &error)),
+                    spec_load_error_output(&kernel_load_error(
+                        old_source,
+                        &error,
+                        crate::parse_options(),
+                    )),
                     2,
                 );
             }
         };
-        match load_model_scoped(old, &loadable) {
+        match load_model_scoped_from_source(old, old_source, &loadable) {
             Ok(model) => model,
             Err(error) => return (spec_load_error_output(&error), 2),
         }
     } else {
         old_model_declared
     };
-    let mapping_source = match mapping.map(std::fs::read_to_string).transpose() {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
     let mut explicit_direction = None;
-    if let Some(source) = mapping_source.as_deref() {
-        let surface = match fsl_syntax::parse_surface_document(source) {
+    if let Some(source) = mapping_source {
+        let surface = match fsl_syntax::parse_surface_document_with(source, crate::parse_options())
+        {
             Ok(fsl_syntax::SurfaceDocument::Refinement(surface)) => surface,
-            Ok(_) => return (error_output("type", "expected refinement mapping file"), 2),
-            Err(error) => return (error_output("parse", &error.to_string()), 2),
+            Ok(_) => return error_exit(error_output("type", "expected refinement mapping file")),
+            Err(error) => return error_exit(error_output("parse", &error.to_string())),
         };
         let implementation = surface.items.iter().find_map(|item| match item {
             fsl_syntax::RefinementItem::Impl(name) => Some(name.as_str()),
@@ -16931,10 +17737,10 @@ fn run_diff(
                 Some("old_to_new")
             }
             _ => {
-                return (
-                    error_output("type", "diff mapping must map NEW to OLD or OLD to NEW"),
-                    2,
-                );
+                return error_exit(error_output(
+                    "type",
+                    "diff mapping must map NEW to OLD or OLD to NEW",
+                ));
             }
         };
     }
@@ -16943,22 +17749,22 @@ fn run_diff(
         &old_model,
         depth,
         (explicit_direction == Some("new_to_old"))
-            .then_some(mapping_source.as_deref())
+            .then_some(mapping_source)
             .flatten(),
     ) {
         Ok(result) => result,
-        Err(error) => return (error_output("type", &error), 2),
+        Err(error) => return error_exit(error_output("type", &error)),
     };
     let (old_result, old_public, old_raw) = match semantic_diff_direction(
         &old_model,
         &new_model,
         depth,
         (explicit_direction == Some("old_to_new"))
-            .then_some(mapping_source.as_deref())
+            .then_some(mapping_source)
             .flatten(),
     ) {
         Ok(result) => result,
-        Err(error) => return (error_output("type", &error), 2),
+        Err(error) => return error_exit(error_output("type", &error)),
     };
     let mut findings = Vec::new();
     for (direction, result, public, raw, kind) in [
@@ -17001,9 +17807,9 @@ fn run_diff(
         }
     }
     findings.extend(compare_diff_invariants(&old_model, &new_model));
-    match forbidden_diff_findings((&old_source, &old_model), (&new_source, &new_model)) {
+    match forbidden_diff_findings((old_source, &old_model), (new_source, &new_model)) {
         Ok(forbidden_findings) => findings.extend(forbidden_findings),
-        Err(error) => return (error_output("type", &error), 2),
+        Err(error) => return error_exit(error_output("type", &error)),
     }
     if scope_changed {
         findings.push(json!({
@@ -17026,16 +17832,13 @@ fn run_diff(
         .cloned()
         .collect::<Vec<_>>();
     if !unknown_forbid.is_empty() {
-        return (
-            error_output(
-                "semantics",
-                &format!(
-                    "unknown --forbid finding kind(s): {}",
-                    unknown_forbid.join(", ")
-                ),
+        return error_exit(error_output(
+            "semantics",
+            &format!(
+                "unknown --forbid finding kind(s): {}",
+                unknown_forbid.join(", ")
             ),
-            2,
-        );
+        ));
     }
     let mut forbidden = forbid.to_vec();
     forbidden.sort();
@@ -17142,20 +17945,41 @@ fn materialize_git_tree(repo: &Path, revision: &str, destination: &Path) -> Resu
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
 fn run_approval_diff(
     path: &Path,
     record_path: &Path,
     depth: usize,
     trust_keys: &[PathBuf],
 ) -> (Value, i32) {
+    run_admitted_roots(
+        vec![(path, read_spec_source(path))],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_approval_diff_from_source(path, &sources[0], record_path, depth, trust_keys),
+                editions,
+                false,
+            )
+        },
+    )
+}
+
+#[allow(clippy::too_many_lines)]
+fn run_approval_diff_from_source(
+    path: &Path,
+    source: &str,
+    record_path: &Path,
+    depth: usize,
+    trust_keys: &[PathBuf],
+) -> (Value, i32) {
     let versioned = match approval::read_versioned_record(record_path) {
         Ok(record) => record,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let trust = match approval::TrustStore::load(trust_keys) {
         Ok(trust) => trust,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let (record, signature_status, key_id) = match &versioned {
         approval::VersionedApprovalRecord::V1(record) => (record.clone(), "unsigned", Value::Null),
@@ -17173,24 +17997,21 @@ fn run_approval_diff(
                 output.insert("key_id".to_owned(), json!(record.signature.key_id));
                 return (Value::Object(output), 1);
             }
-            Err(error) => return (error_output("io", &error), 2),
+            Err(error) => return error_exit(io_error_output(&error)),
         },
     };
     let (repo, relative_path, _head) = match approval::git_location(path) {
         Ok(location) => location,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     if relative_path != record.spec.path {
-        return (
-            error_output(
-                "semantics",
-                &format!(
-                    "approval record targets '{}' but current spec is '{relative_path}'",
-                    record.spec.path
-                ),
+        return error_exit(error_output(
+            "semantics",
+            &format!(
+                "approval record targets '{}' but current spec is '{relative_path}'",
+                record.spec.path
             ),
-            2,
-        );
+        ));
     }
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -17200,23 +18021,22 @@ fn run_approval_diff(
     let base_tree = root.join("base");
     if let Err(error) = materialize_git_tree(&repo, &record.spec.git_commit, &base_tree) {
         let _ = std::fs::remove_dir_all(&root);
-        return (error_output("io", &error), 2);
+        return error_exit(io_error_output(&error));
     }
     let old = base_tree.join(&record.spec.path);
     if !old.is_file() {
         let _ = std::fs::remove_dir_all(&root);
-        return (
-            error_output(
-                "io",
-                &format!(
-                    "approved spec '{}' is missing from baseline {}",
-                    record.spec.path, record.spec.git_commit
-                ),
-            ),
-            2,
-        );
+        return error_exit(io_error_output(&format!(
+            "approved spec '{}' is missing from baseline {}",
+            record.spec.path, record.spec.git_commit
+        )));
     }
-    let materialized_digest = match approval::spec_digest(&old) {
+    let baseline_label = PathBuf::from(format!("{}:{}", record.spec.git_commit, record.spec.path));
+    // Name the baseline by commit and path, not by the temporary tree.
+    let materialized_digest = match std::fs::read_to_string(&old)
+        .map_err(|error| read_failure_message(&baseline_label, &error))
+        .and_then(|source| approval::spec_digest_from_source(&old, &source))
+    {
         Ok(digest) => digest,
         Err(error) => {
             let _ = std::fs::remove_dir_all(&root);
@@ -17225,35 +18045,46 @@ fn run_approval_diff(
     };
     if materialized_digest != record.spec.digest {
         let _ = std::fs::remove_dir_all(&root);
-        return (
-            error_output(
-                "semantics",
-                "approval baseline commit does not match the recorded specification digest",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "approval baseline commit does not match the recorded specification digest",
+        ));
     }
-    let (mut result, status) = run_diff(&old, path, depth, None, &[]);
-    if let Value::Object(output) = &mut result {
-        if let Some(Value::Object(old)) = output.get_mut("old") {
-            old.insert(
-                "file".to_owned(),
-                json!(format!("{}:{}", record.spec.git_commit, record.spec.path)),
-            );
-        }
-        output.insert(
-            "approval".to_owned(),
-            json!({
-                "record": record_path.display().to_string(),
-                "baseline_digest": record.spec.digest,
-                "baseline_commit": record.spec.git_commit,
-                "signature_status": signature_status,
-                "key_id": key_id,
-            }),
+    let result =
+        run_admitted_roots(
+            vec![(
+                &baseline_label,
+                read_spec_source_shown_as(&old, &baseline_label),
+            )],
+            None,
+            false,
+            |sources, editions| {
+                let (mut result, status) = editions[0].warnings_only().finish(
+                    run_diff_from_sources([(&old, &sources[0]), (path, source)], depth, None, &[]),
+                );
+                if let Value::Object(output) = &mut result {
+                    if let Some(Value::Object(old)) = output.get_mut("old") {
+                        old.insert(
+                            "file".to_owned(),
+                            json!(baseline_label.display().to_string()),
+                        );
+                    }
+                    output.insert(
+                        "approval".to_owned(),
+                        json!({
+                            "record": record_path.display().to_string(),
+                            "baseline_digest": record.spec.digest,
+                            "baseline_commit": record.spec.git_commit,
+                            "signature_status": signature_status,
+                            "key_id": key_id,
+                        }),
+                    );
+                }
+                (result, status)
+            },
         );
-    }
     let _ = std::fs::remove_dir_all(&root);
-    (result, status)
+    result
 }
 
 #[allow(clippy::too_many_lines)]
@@ -17265,26 +18096,30 @@ fn run_diff_git(
     forbid: &[String],
 ) -> (Value, i32) {
     let Some((base_input, head_input)) = range.split_once("..") else {
-        return (error_output("io", "--git range must be BASE..HEAD"), 2);
+        return error_exit(error_output("usage", "--git range must be BASE..HEAD"));
     };
-    if base_input.is_empty() || head_input.is_empty() || head_input.contains("..") {
-        return (error_output("io", "--git range must be BASE..HEAD"), 2);
+    if range.contains("...")
+        || base_input.is_empty()
+        || head_input.is_empty()
+        || head_input.contains("..")
+    {
+        return error_exit(error_output("usage", "--git range must be BASE..HEAD"));
     }
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
+        Err(error) => return error_exit(io_error_output(&error.to_string())),
     };
     let repo = match git_stdout(&["rev-parse", "--show-toplevel"], &cwd) {
         Ok(repo) => PathBuf::from(repo),
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let base = match git_stdout(&["rev-parse", "--verify", base_input], &repo) {
         Ok(commit) => commit,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let head = match git_stdout(&["rev-parse", "--verify", head_input], &repo) {
         Ok(commit) => commit,
-        Err(error) => return (error_output("io", &error), 2),
+        Err(error) => return error_exit(io_error_output(&error)),
     };
     let specs = if let Some(spec) = spec {
         let relative = spec
@@ -17307,7 +18142,7 @@ fn run_diff_git(
             &repo,
         ) {
             Ok(changed) => changed,
-            Err(error) => return (error_output("io", &error), 2),
+            Err(error) => return error_exit(io_error_output(&error)),
         };
         changed
             .lines()
@@ -17320,10 +18155,7 @@ fn run_diff_git(
             .collect::<Vec<_>>()
     };
     if specs.is_empty() {
-        return (
-            error_output("io", "Git range contains no changed .fsl files"),
-            2,
-        );
+        return error_exit(io_error_output("Git range contains no changed .fsl files"));
     }
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -17335,7 +18167,7 @@ fn run_diff_git(
         .and_then(|()| materialize_git_tree(&repo, &head, &head_tree))
     {
         let _ = std::fs::remove_dir_all(&root);
-        return (error_output("io", &error), 2);
+        return error_exit(io_error_output(&error));
     }
     let vcs = json!({
         "kind":"git","range":range,
@@ -17345,19 +18177,22 @@ fn run_diff_git(
     });
     let mut comparisons = Vec::new();
     let mut status = 0;
+    let mut live_mapping = None;
     for relative in &specs {
         let old = base_tree.join(relative);
         let new = head_tree.join(relative);
         if !old.is_file() || !new.is_file() {
             let _ = std::fs::remove_dir_all(&root);
-            return (
-                error_output(
-                    "io",
-                    &format!("'{relative}' must exist in both revisions for semantic diff"),
-                ),
-                2,
-            );
+            return error_exit(io_error_output(&format!(
+                "'{relative}' must exist in both revisions for semantic diff"
+            )));
         }
+        let old_label = PathBuf::from(format!("{base_input}:{relative}"));
+        let new_label = PathBuf::from(format!("{head_input}:{relative}"));
+        let roots = [
+            (old.as_path(), old_label.as_path()),
+            (new.as_path(), new_label.as_path()),
+        ];
         let resolved_mapping = mapping.map(|path| {
             if path.is_absolute() {
                 path.to_path_buf()
@@ -17370,8 +18205,45 @@ fn run_diff_git(
                 }
             }
         });
-        let (mut comparison, comparison_status) =
-            run_diff(&old, &new, depth, resolved_mapping.as_deref(), forbid);
+        let (mut comparison, comparison_status) = if let Some(path) = resolved_mapping.as_deref() {
+            if path.starts_with(&head_tree) {
+                // Show the mapping as the caller named it: the materialized
+                // tree's temporary path is gone when the command returns.
+                match read_spec_source_shown_as(path, mapping.unwrap_or(path)) {
+                    Ok(source) => run_historical_diff(roots, depth, Some(&source), forbid),
+                    Err(error) => (spec_load_error_output(&error), 2),
+                }
+            } else {
+                let captured = live_mapping.get_or_insert_with(|| {
+                    let source = read_spec_source(path)
+                        .map_err(|error| (spec_load_error_output(&error), 2))?;
+                    let edition = admit_root_source(path, &source, None)?;
+                    Ok::<_, (Value, i32)>((source, edition))
+                });
+                match captured {
+                    Ok((source, edition)) => {
+                        run_prepared_roots(std::slice::from_ref(edition), false, || {
+                            edition.warnings_only().finish(run_historical_diff(
+                                roots,
+                                depth,
+                                Some(source.as_str()),
+                                forbid,
+                            ))
+                        })
+                    }
+                    Err(error) => error.clone(),
+                }
+            }
+        } else {
+            run_historical_diff(roots, depth, None, forbid)
+        };
+        if comparison_status == 2
+            && comparison.get("edition").is_some()
+            && comparison["findings"].is_array()
+        {
+            let _ = std::fs::remove_dir_all(&root);
+            return (comparison, comparison_status);
+        }
         status = status.max(comparison_status);
         if let Value::Object(output) = &mut comparison {
             output.insert(
@@ -17421,104 +18293,11 @@ fn run_diff_git(
     )
 }
 
-fn validate_requirement_traces_from_source(
-    _path: &Path,
-    source: &str,
-    model: &KernelModel,
-) -> Result<(Option<Value>, bool), String> {
-    validate_requirement_trace_source(source, model)
-}
-
 fn requirement_step_match(
     monitor: &fsl_runtime::Monitor,
     step: &fsl_core::RequirementsTraceStep,
 ) -> Result<(Vec<FslValue>, Option<fsl_runtime::EnabledAction>), String> {
     fslc_rust::verification_output::requirement_step_match(monitor, step)
-}
-
-fn validate_requirement_trace_source(
-    source: &str,
-    model: &KernelModel,
-) -> Result<(Option<Value>, bool), String> {
-    fslc_rust::verification_output::validate_requirement_trace_source(&envelope(), source, model)
-}
-
-/// Derive governance output from one caller-owned root-source snapshot.
-fn governance_result_from_source(
-    path: &Path,
-    source: &str,
-    depth: usize,
-) -> Result<Option<Value>, fslc_rust::verification_output::GovernanceOutputError> {
-    let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
-    fslc_rust::verification_output::governance_output(source, &resolver, |preservation| {
-        let (result, status) = run_refine(
-            &base.join(&preservation.after_path),
-            &base.join(&preservation.before_path),
-            &base.join(&preservation.refinement_path),
-            depth,
-        );
-        preservation_refine_result(&result, status, preservation.span)
-    })
-}
-
-/// A preservation's `result` from its `run_refine` envelope and exit, or the
-/// governance diagnostic for a refinement that did not reach a verdict:
-/// status 2 is a document error (located `type`, exit 2), status 3 an
-/// internal one (located `internal`, exit 3, issue #1303).
-fn preservation_refine_result(
-    result: &Value,
-    status: i32,
-    span: fsl_syntax::Span,
-) -> Result<Value, fslc_rust::verification_output::GovernanceOutputError> {
-    if status > 1 {
-        let message = result
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("governance preservation refinement failed");
-        let (line, column) = (span.start.line, span.start.column);
-        return Err(if status == 2 {
-            fslc_rust::verification_output::GovernanceOutputError::new(message, line, column)
-        } else {
-            fslc_rust::verification_output::GovernanceOutputError::internal(message, line, column)
-        });
-    }
-    Ok(result
-        .get("result")
-        .cloned()
-        .unwrap_or_else(|| json!("error")))
-}
-
-/// Evaluate a governance document's preservations and fold them into a
-/// `check`/`verify` envelope (issue #1303).
-///
-/// Returns the exit code the fold implies, `None` to leave the caller's own
-/// exit alone (no governance document, every preservation `refines`, or an
-/// envelope that already fails), or the governance diagnostic envelope with
-/// its exit (2 for any contract error `check` reports, 3 for an internal
-/// refinement failure). An `error` envelope is
-/// returned untouched without running any preservation: the run already
-/// failed for a reason of its own. Preservations always run at depth 8, the
-/// depth `docs/manual/LANGUAGE.md` §13 publishes, whatever `--depth` the
-/// command was given for the document's own kernel.
-fn fold_governance_from_source(
-    path: &Path,
-    source: &str,
-    output: &mut Value,
-) -> Result<Option<i32>, (Value, i32)> {
-    if output.get("result").and_then(Value::as_str) == Some("error") {
-        return Ok(None);
-    }
-    match governance_result_from_source(path, source, 8) {
-        Ok(Some(governance)) => Ok(fslc_rust::verification_output::attach_governance(
-            output, governance,
-        )),
-        Ok(None) => Ok(None),
-        Err(error) => Err((
-            fslc_rust::verification_output::render_governance_error(envelope(), &error),
-            error.exit_status(),
-        )),
-    }
 }
 
 fn attach_check_implements(
@@ -17551,462 +18330,33 @@ fn implements_result_from_source(
     implements_result_from_source_with_bounds(path, source, model, depth, &ScopeBounds::default())
 }
 
-fn implements_result_from_source_with_bounds(
-    path: &Path,
-    source: &str,
-    model: &KernelModel,
-    depth: usize,
-    scope: &ScopeBounds,
-) -> Result<Option<Value>, fslc_rust::verification_output::RequirementsImplementsError> {
-    let resolver = fsl_core::FsResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
-    fslc_rust::verification_output::requirements_implements_output_with_bounds(
-        source,
-        &resolver,
-        model,
-        depth,
-        &scope.instances,
-        &scope.values,
-    )
-}
-
-fn implements_error_output(
-    error: &fslc_rust::verification_output::RequirementsImplementsError,
-) -> Value {
-    fslc_rust::verification_output::render_requirements_implements_error(envelope(), error)
-}
-
-/// `{"kind", "name"}` of the abstract step's own violation behind an
-/// `abs_step_violation` (issue #1302), with the name spelled the way the
-/// abstraction's own `verify` would report it (scoped to the corresponded
-/// abstract action, so a compose component keeps its public name).
-fn abs_violation_json(
-    abstraction: &KernelModel,
-    action_map: &std::collections::BTreeMap<String, String>,
-    failure: &fsl_runtime::RefinementFailure,
-    violation: &fsl_runtime::Violation,
-) -> Value {
-    let abs_action = failure
-        .impl_action
-        .as_ref()
-        .and_then(|action| action_map.get(&action.name))
-        .map(String::as_str);
-    json!({
-        "kind": violation.kind,
-        "name": abstraction.action_scoped_display_name(&violation.name, abs_action),
-    })
-}
-
-fn mismatch_paths(
-    model: &KernelModel,
-    expected: Option<&std::collections::BTreeMap<String, FslValue>>,
-    actual: Option<&std::collections::BTreeMap<String, FslValue>>,
-) -> Vec<String> {
-    fn collect(
-        model: &KernelModel,
-        ty: &TypeRef,
-        expected: Option<&FslValue>,
-        actual: Option<&FslValue>,
-        path: &str,
-        paths: &mut Vec<String>,
-    ) {
-        if expected == actual {
-            return;
-        }
-        if let (
-            TypeRef::Map(_, value_ty),
-            Some(FslValue::Map(expected)),
-            Some(FslValue::Map(actual)),
-        ) = (ty, expected, actual)
-        {
-            let mut keys = expected.keys().chain(actual.keys()).collect::<Vec<_>>();
-            keys.sort();
-            keys.dedup();
-            for key in keys {
-                let key_text = display_binding(key);
-                let expected_value = expected.get(key);
-                let actual_value = actual.get(key);
-                if expected_value == actual_value {
-                    continue;
-                }
-                if let (
-                    TypeRef::Named(type_name),
-                    Some(FslValue::Struct {
-                        fields: expected_fields,
-                        ..
-                    }),
-                    Some(FslValue::Struct {
-                        fields: actual_fields,
-                        ..
-                    }),
-                ) = (value_ty.as_ref(), expected_value, actual_value)
-                    && let Some(fields) = model.struct_fields(type_name)
-                {
-                    for (field, _) in fields {
-                        if expected_fields.get(field) != actual_fields.get(field) {
-                            paths.push(format!("{path}[{key_text}].{field}"));
-                        }
-                    }
-                    continue;
-                }
-                paths.push(format!("{path}[{key_text}]"));
-            }
-            return;
-        }
-        paths.push(path.to_owned());
-    }
-
-    let mut paths = Vec::new();
-    for (name, ty) in &model.state {
-        collect(
-            model,
-            ty,
-            expected.and_then(|state| state.get(name)),
-            actual.and_then(|state| state.get(name)),
-            &display(name),
-            &mut paths,
-        );
-    }
-    paths
-}
-
-/// Render `RefinementCheck::impl_violation`: the implementation itself
-/// violates a type bound, invariant, `trans`, or `ensures` within `depth`,
-/// discovered before any refinement correspondence was even attempted. Not
-/// `refines` and not `refinement_failed` (#466) — this is a property of the
-/// refinement *input*, so it is reported with the same shape `fslc verify`
-/// uses for a `violated` result plus an explanatory `note`, matching the
-/// frozen Python reference's `refine()` (`src/fslc/refine.py`, accepted as
-/// [1.2.9] in CHANGELOG.md).
-fn impl_self_violation_output(
-    implementation: &KernelModel,
-    violation: &fsl_runtime::Violation,
-    trace: &[TraceStep],
-    depth: usize,
-) -> Map<String, Value> {
-    let mut output = envelope();
-    output.insert("impl".to_owned(), json!(implementation.name));
-    output.insert("result".to_owned(), json!("violated"));
-    output.insert("violation_kind".to_owned(), json!(violation.kind));
-    let name = implementation.action_scoped_display_name(&violation.name, trace_last_action(trace));
-    if violation.kind == "trans" {
-        output.insert("trans".to_owned(), json!(name));
-    }
-    output.insert("invariant".to_owned(), json!(name));
-    output.insert("violated_at_step".to_owned(), json!(violation.step));
-    output.insert("checked_to_depth".to_owned(), json!(depth));
-    output.insert(
-        "impl_trace".to_owned(),
-        fslc_rust::trace_json(implementation, trace),
-    );
-    output.insert(
-        "note".to_owned(),
-        json!(
-            "this result is a property of the impl spec itself (a refinement input), not a refinement failure; verify the impl spec independently before checking refinement"
-        ),
-    );
-    output.insert("trace_type".to_owned(), json!("refinement"));
-    output
-}
-
-/// `fslc refine`'s verdict when the correspondence walk hit
-/// `fsl_runtime::IMPLEMENTS_SEARCH_BUDGET` before deciding within the depth:
-/// the same `unknown_budget` / `states_explored` vocabulary (and exit 1) the
-/// inline `implements` seam reports for the same cutoff. The progress stage
-/// is not run: a safety correspondence that was never decided cannot be the
-/// premise of a progress check.
-fn refine_budget_output(
-    checked: &fsl_runtime::RefinementCheck,
-    states_explored: usize,
-) -> Map<String, Value> {
-    let mut output = envelope();
-    output.insert("impl".to_owned(), json!(checked.implementation()));
-    output.insert("abs".to_owned(), json!(checked.abstraction()));
-    output.insert("result".to_owned(), json!("unknown_budget"));
-    output.insert("states_explored".to_owned(), json!(states_explored));
-    output.insert(
-        "hint".to_owned(),
-        json!("refinement correspondence search reached its fixed state budget before deciding within the depth; lower --depth or narrow the verify {} domains (instances/values) of both specs"),
-    );
-    output
-}
-
-#[allow(clippy::too_many_lines)]
-fn run_refine(
-    implementation_path: &Path,
-    abstraction_path: &Path,
-    mapping_path: &Path,
+fn run_refine_admitted(
+    implementation: &Path,
+    abstraction: &Path,
+    mapping: &Path,
     depth: usize,
 ) -> (Value, i32) {
-    let implementation = match load_model(implementation_path) {
-        Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let abstraction = match load_model(abstraction_path) {
-        Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let source = match std::fs::read_to_string(mapping_path) {
-        Ok(source) => source,
-        Err(error) => return (error_output("io", &error.to_string()), 2),
-    };
-    let mapping = match fsl_core::parse_refinement(&source, &implementation, &abstraction) {
-        Ok(mapping) => mapping,
-        Err(error) => {
-            return (
-                error.span.map_or_else(
-                    || error_output("type", &error.message),
-                    |span| located_error_output("type", &error.message, span),
+    run_admitted_roots(
+        vec![
+            (implementation, read_spec_source(implementation)),
+            (abstraction, read_spec_source(abstraction)),
+            (mapping, read_spec_source(mapping)),
+        ],
+        None,
+        false,
+        |sources, editions| {
+            finish_admitted(
+                run_refine_from_sources(
+                    implementation,
+                    abstraction,
+                    [&sources[0], &sources[1], &sources[2]],
+                    depth,
                 ),
-                2,
-            );
-        }
-    };
-    let checked =
-        match fsl_runtime::check_refinement(&implementation, &abstraction, &mapping, depth) {
-            Ok(checked) => checked,
-            Err(error) => return (error_output("type", &error.to_string()), 2),
-        };
-    let failure = match checked.verdict() {
-        fsl_runtime::RefinementVerdict::ImplViolated { violation, trace } => {
-            return (
-                Value::Object(impl_self_violation_output(
-                    &implementation,
-                    violation,
-                    trace,
-                    checked.depth(),
-                )),
-                1,
-            );
-        }
-        fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
-            return (
-                Value::Object(refine_budget_output(&checked, states_explored)),
-                1,
-            );
-        }
-        fsl_runtime::RefinementVerdict::Failed(failure) => Some(failure),
-        fsl_runtime::RefinementVerdict::Refines => None,
-    };
-    let progress = if failure.is_none() && !mapping.progress.is_empty() {
-        let mut solver = match fsl_solver_z3::Z3Solver::new() {
-            Ok(solver) => solver,
-            Err(error) => return (error_output("internal", &error.to_string()), 3),
-        };
-        match block_on_native(fsl_verifier::check_refinement_progress(
-            &implementation,
-            &abstraction,
-            &mapping,
-            &mut solver,
-            depth,
-        )) {
-            Ok(progress) => Some(progress),
-            Err(error) => return (error_output("semantics", &error.to_string()), 2),
-        }
-    } else {
-        None
-    };
-    let mut output = envelope();
-    output.insert("impl".to_owned(), json!(checked.implementation()));
-    output.insert("abs".to_owned(), json!(checked.abstraction()));
-    if let Some(failure) = failure {
-        output.insert("result".to_owned(), json!("refinement_failed"));
-        output.insert("kind".to_owned(), json!(failure.kind));
-        if let Some(at) = &failure.at {
-            output.insert("at".to_owned(), json!(at));
-        }
-        output.insert("violated_at_step".to_owned(), json!(failure.step));
-        if let Some(action) = &failure.impl_action {
-            let definition = implementation
-                .actions
-                .iter()
-                .find(|definition| definition.name == action.name);
-            output.insert(
-                "impl_action".to_owned(),
-                json!({
-                    "name": implementation.action_display_name(&action.name),
-                    "params": action.params.iter().map(|(name, value)| (
-                        name.clone(), fslc_rust::fsl_value_json(value)
-                    )).collect::<Map<_, _>>(),
-                    "loc": definition.map(|definition| definition.span.python_loc()),
-                }),
-            );
-        }
-        if let Some(state) = &failure.alpha_before {
-            output.insert("abs_before".to_owned(), fslc_rust::state_json(state));
-        }
-        if let Some(state) = &failure.alpha_after_expected {
-            output.insert(
-                "abs_after_expected".to_owned(),
-                fslc_rust::state_json(state),
-            );
-        }
-        if let Some(state) = &failure.alpha_after_actual {
-            output.insert("abs_after_actual".to_owned(), fslc_rust::state_json(state));
-        }
-        // `abs_step_violation` (issue #1302): the abstract step's own
-        // violation and the successor it rejected. The latter is not an
-        // expected state, so it is a separate key, never `abs_after_expected`.
-        if let Some(violation) = &failure.abs_violation {
-            output.insert(
-                "abs_violation".to_owned(),
-                abs_violation_json(&abstraction, checked.action_map(), failure, violation),
-            );
-        }
-        if let Some(state) = &failure.alpha_after_attempted {
-            output.insert(
-                "abs_after_attempted".to_owned(),
-                fslc_rust::state_json(state),
-            );
-        }
-        output.insert(
-            "mismatch".to_owned(),
-            Value::Array(
-                mismatch_paths(
-                    &abstraction,
-                    failure.alpha_after_expected.as_ref(),
-                    failure.alpha_after_actual.as_ref(),
-                )
-                .into_iter()
-                .map(Value::String)
-                .collect(),
-            ),
-        );
-        output.insert(
-            "impl_trace".to_owned(),
-            fslc_rust::trace_json(&implementation, &failure.impl_trace),
-        );
-        output.insert(
-            "hint".to_owned(),
-            json!("the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"),
-        );
-        output.insert("trace_type".to_owned(), json!("refinement"));
-        return (Value::Object(output), 1);
-    }
-    if let Some(violation) = progress
-        .as_ref()
-        .and_then(|progress| progress.violation.as_ref())
-    {
-        let Some(details) = &violation.leads_to else {
-            return (
-                error_output("internal", "missing refinement progress diagnostics"),
-                3,
-            );
-        };
-        if let Err(error) = fsl_runtime::replay_trace(implementation.clone(), &violation.trace) {
-            return (error_output("internal", &error.to_string()), 3);
-        }
-        let declaration = mapping
-            .progress
-            .iter()
-            .find(|declaration| declaration.leads_to == violation.name);
-        let property = abstraction
-            .leadstos
-            .iter()
-            .find(|property| property.name == violation.name);
-        output.insert("result".to_owned(), json!("refinement_failed"));
-        output.insert("kind".to_owned(), json!("progress_lost"));
-        output.insert(
-            "progress_failure".to_owned(),
-            json!(if details.stutter {
-                "deadlock_or_stall_blocks_progress"
-            } else {
-                "lasso_blocks_progress"
-            }),
-        );
-        output.insert("violation_kind".to_owned(), json!("leadsTo"));
-        output.insert("invariant".to_owned(), json!(display(&violation.name)));
-        output.insert(
-            "bindings".to_owned(),
-            Value::Object(
-                details
-                    .bindings
-                    .iter()
-                    .map(|(name, value)| (name.clone(), fslc_rust::fsl_value_json(value)))
-                    .collect(),
-            ),
-        );
-        output.insert("pending_since".to_owned(), json!(details.pending_since));
-        output.insert("stutter".to_owned(), json!(details.stutter));
-        output.insert(
-            "impl_trace".to_owned(),
-            fslc_rust::trace_json(&implementation, &violation.trace),
-        );
-        output.insert(
-            "progress".to_owned(),
-            json!({
-                "leadsTo": display(&violation.name),
-                "actions": declaration
-                    .map(|item| item.actions.iter().map(|action| action.0.clone()).collect::<Vec<_>>())
-                    .unwrap_or_default(),
-            }),
-        );
-        output.insert(
-            "hint".to_owned(),
-            json!("the impl refines the abstract safety contract, but admits an execution where the pulled-back abstract leadsTo remains pending. Fairness must come from lower-layer `fair action` declarations for the implementation actions named by preserve progress; action mappings do not create fairness or prove implementation conformance by themselves"),
-        );
-        if let Some(property) = property {
-            output.insert("loc".to_owned(), property.span.python_loc());
-        }
-        if let Some(loop_start) = details.loop_start {
-            output.insert("loop_start".to_owned(), json!(loop_start));
-        }
-        output.insert(
-            "faithfulness_class".to_owned(),
-            json!("liveness_not_refined"),
-        );
-        output.insert(
-            "recommended_action".to_owned(),
-            json!(
-                "re-prove liveness at each layer or add preserve progress to the refinement mapping"
-            ),
-        );
-        output.insert("trace_type".to_owned(), json!("refinement"));
-        return (Value::Object(output), 1);
-    }
-    output.insert("result".to_owned(), json!("refines"));
-    output.insert("checked_to_depth".to_owned(), json!(checked.depth()));
-    output.insert(
-        "action_map".to_owned(),
-        Value::Object(
-            fslc_rust::verification_output::sorted_by_published(checked.action_map(), |name| {
-                implementation.action_display_name(name)
-            })
-            .into_iter()
-            .map(|(name, _, target)| (name, json!(abstraction.action_display_name(target))))
-            .collect(),
-        ),
-    );
-    if checked.abs_has_ensures() {
-        output.insert(
-            "note".to_owned(),
-            json!("abs ensures are checked only on the abstract steps the impl's transitions correspond to within checked_to_depth; verify/prove the abstract spec separately"),
-        );
-    }
-    if let Some(progress) = progress
-        && !progress.checked.is_empty()
-    {
-        output.insert(
-            "progress".to_owned(),
-            Value::Object(
-                fslc_rust::verification_output::sorted_by_published(&progress.checked, display)
-                    .into_iter()
-                    .map(|(name, _, actions)| {
-                        (
-                            name,
-                            json!({
-                                "checked_to_depth": depth,
-                                "actions": actions
-                                    .iter()
-                                    .map(|action| implementation.action_key(action))
-                                    .collect::<Vec<_>>(),
-                            }),
-                        )
-                    })
-                    .collect(),
-            ),
-        );
-    }
-    (Value::Object(output), 0)
+                editions,
+                false,
+            )
+        },
+    )
 }
 
 fn run_refine_chain(
@@ -18025,13 +18375,41 @@ fn run_refine_chain(
         specifications.push(pair[0].clone());
         mappings.push(pair[1].clone());
     }
+    let mut roots = specifications
+        .iter()
+        .map(|path| (path.as_path(), read_spec_source(path)))
+        .collect::<Vec<_>>();
+    roots.extend(
+        mappings
+            .iter()
+            .map(|path| (path.as_path(), read_spec_source(path))),
+    );
+    run_admitted_roots(roots, None, false, |sources, editions| {
+        finish_admitted(
+            run_refine_chain_from_sources(&specifications, &mappings, sources, depth),
+            editions,
+            false,
+        )
+    })
+}
+
+fn run_refine_chain_from_sources(
+    specifications: &[PathBuf],
+    mappings: &[PathBuf],
+    sources: &[String],
+    depth: usize,
+) -> (Value, i32) {
     let mut names = Vec::new();
     let mut composed = std::collections::BTreeMap::<String, String>::new();
     for index in 0..mappings.len() {
-        let (link, status) = run_refine(
+        let (link, status) = run_refine_from_sources(
             &specifications[index],
             &specifications[index + 1],
-            &mappings[index],
+            [
+                &sources[index],
+                &sources[index + 1],
+                &sources[specifications.len() + index],
+            ],
             depth,
         );
         let impl_name = link
@@ -18059,7 +18437,7 @@ fn run_refine_chain(
                     "kind": link.get("kind").cloned().unwrap_or(Value::Null),
                 }),
             );
-            return (Value::Object(failed), status.max(1));
+            return (Value::Object(failed), status.max(FAILURE_EXIT));
         }
         let action_map = link
             .get("action_map")
@@ -18112,130 +18490,13 @@ fn run_refine_chain(
     (Value::Object(output), 0)
 }
 
-fn select_properties(
-    model: &mut KernelModel,
-    selected: Option<&str>,
-    excluded: &[String],
-) -> Result<(), String> {
-    let available = model
-        .state
-        .iter()
-        .filter(|(_, ty)| has_bounds(model, ty))
-        .map(|(name, _)| format!("_bounds_{}", display(name)))
-        .chain(model.invariants.iter().map(|item| display(&item.name)))
-        .chain(model.transitions.iter().map(|item| display(&item.name)))
-        .chain(model.leadstos.iter().map(|item| display(&item.name)))
-        .chain(model.reachables.iter().map(|item| display(&item.name)))
-        .collect::<Vec<_>>();
-    if let Some(name) = selected {
-        if !available.iter().any(|candidate| candidate == name) {
-            let mut display_available = available.clone();
-            display_available.sort();
-            display_available.dedup();
-            return Err(format!(
-                "no such property: {name} (available: {})",
-                display_available.join(", ")
-            ));
-        }
-        model.invariants.retain(|item| display(&item.name) == name);
-        model.transitions.retain(|item| display(&item.name) == name);
-        model.leadstos.retain(|item| display(&item.name) == name);
-        model.reachables.retain(|item| display(&item.name) == name);
-    }
-    if !excluded.is_empty() {
-        let selected_available = model
-            .invariants
-            .iter()
-            .map(|item| display(&item.name))
-            .chain(model.transitions.iter().map(|item| display(&item.name)))
-            .chain(model.leadstos.iter().map(|item| display(&item.name)))
-            .chain(model.reachables.iter().map(|item| display(&item.name)))
-            .collect::<Vec<_>>();
-        let mut missing = excluded
-            .iter()
-            .filter(|name| {
-                !selected_available
-                    .iter()
-                    .any(|candidate| candidate == *name)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        missing.sort();
-        missing.dedup();
-        if !missing.is_empty() {
-            return Err(format!(
-                "no such property: {} (available: {})",
-                missing.join(", "),
-                selected_available.join(", ")
-            ));
-        }
-        model
-            .invariants
-            .retain(|item| !excluded.contains(&display(&item.name)));
-        model
-            .transitions
-            .retain(|item| !excluded.contains(&display(&item.name)));
-        model
-            .leadstos
-            .retain(|item| !excluded.contains(&display(&item.name)));
-        model
-            .reachables
-            .retain(|item| !excluded.contains(&display(&item.name)));
-    }
-    Ok(())
-}
-
-fn selected_implicit_bounds(
-    model: &KernelModel,
-    selected: Option<&str>,
-    excluded: &[String],
-) -> Option<std::collections::BTreeSet<String>> {
-    if selected.is_none() && !excluded.iter().any(|name| name.starts_with("_bounds_")) {
-        return None;
-    }
-    let mut bounds = model
-        .state
-        .iter()
-        .filter(|(_, ty)| has_bounds(model, ty))
-        .map(|(name, _)| format!("_bounds_{name}"))
-        .collect::<std::collections::BTreeSet<_>>();
-    if let Some(selected) = selected {
-        bounds.retain(|name| display(name) == selected);
-    }
-    bounds.retain(|name| !excluded.contains(&display(name)));
-    Some(bounds)
-}
-
-#[allow(clippy::too_many_lines)]
-fn run_verify(
-    path: &Path,
-    depth: usize,
-    deadlock_mode: &str,
-    engine: &str,
-    explicit_budget: usize,
-    k_ind: usize,
-) -> (Value, i32) {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_verify_from_source(
-        path,
-        &source,
-        depth,
-        deadlock_mode,
-        engine,
-        explicit_budget,
-        k_ind,
-    )
-}
-
 /// Verify one caller-owned root-source snapshot.
 ///
 /// The specialized validation, Kernel/model lowering, requirements metadata,
 /// and selected verification engine all derive from `source`. Dependency files
 /// loaded by `FsResolver` deliberately retain their independent read semantics.
-#[allow(clippy::too_many_lines)]
+/// The shared CLI pipeline owns the stages; baseline callers disable caching
+/// and retain the default `warn` vacuity policy, including its probe (#729).
 fn run_verify_from_source(
     path: &Path,
     source: &str,
@@ -18245,221 +18506,46 @@ fn run_verify_from_source(
     explicit_budget: usize,
     k_ind: usize,
 ) -> (Value, i32) {
-    // Causal sources deliberately sit outside `parse_document`'s dialect
-    // registry.  Classify their syntax failure with their own parser before
-    // the generic dispatcher would report the unrelated unknown-dialect
-    // diagnostic.  A valid causal source keeps the existing verify behavior.
-    if fsl_syntax::is_causal_source(source)
-        && let Err(error) = fsl_syntax::parse_causal(source)
-    {
-        return causal::causal_parse_error_output(&error, false);
-    }
-    match fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source)) {
-        Err(error) => return (surface_parse_error_output(&error), 2),
-        Ok(fsl_syntax::ParsedDocument {
-            surface: fsl_syntax::SurfaceDocument::Agent(_),
-            ..
-        }) => {
-            return (
-                error_output(
-                    "parse",
-                    "agent documents cannot be verified as Kernel specs",
-                ),
-                2,
-            );
-        }
-        Ok(_) => {}
-    }
-    if let Err(error) = validate_specialized_document_from_source(path, source) {
-        return (semantic_error_output(&error), 2);
-    }
-    // Preserve the established precedence of usage diagnostics over a Kernel
-    // load failure: the former path-based implementation reached engine
-    // selection before its engine loaded the model. Keep the error deferred,
-    // but never re-read `path` to obtain it.
-    let loaded_model = load_kernel_model_from_source(path, source);
-    let (implements, compose_warnings) = match &loaded_model {
-        Ok((kernel, model)) => {
-            match validate_requirement_traces_from_source(path, source, model) {
-                Ok((Some(failure), _)) => return (failure, 2),
-                Ok((None, _)) => {}
-                Err(error) => return (semantic_error_output(&error), 2),
-            }
-            let implements = match implements_result_from_source(path, source, model, depth) {
-                Ok(implements) => implements,
-                Err(error) => return (implements_error_output(&error), 2),
-            };
-            (implements, kernel.diagnostics().to_vec())
-        }
-        Err(_) => (None, Vec::new()),
-    };
-    let deadlock = match DeadlockMode::parse(deadlock_mode) {
-        Ok(mode) => mode,
-        Err(error) => return (error_output("usage", &error), 2),
-    };
-    let engine = match VerificationEngine::parse(engine) {
-        Ok(engine) => engine,
-        Err(error) => return (error_output("usage", &error), 2),
-    };
-    let (_, model) = match loaded_model {
-        Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    let selection = ModelSelection {
-        path,
-        model: Some(&model),
-        scope: None,
-        property: None,
-        excluded: &[],
-    };
-    // This is the `ledger`/`html`/`mutate` baseline (`run_verify` has no
-    // `--vacuity` option at all): per the invariant recorded on
-    // `BmcOutputOptions::skip_vacuity_probe` (issue #729), it must always
-    // compute the reachability probe.
-    let skip_vacuity_probe = false;
-    let (mut output, status) = match engine {
-        VerificationEngine::Bmc => run_bmc_filtered(BmcRequest {
-            selection,
-            depth,
-            deadlock,
-            initial_state: None,
-            skip_vacuity_probe,
-        }),
-        VerificationEngine::Induction => run_induction_filtered(InductionRequest {
-            selection,
-            depth,
-            deadlock,
-            k: k_ind,
-            auxiliary: &[],
-            skip_vacuity_probe,
-        }),
-        VerificationEngine::Explicit => run_explicit_filtered(ExplicitRequest {
-            selection,
-            depth,
-            deadlock,
-            budget: explicit_budget,
-            skip_vacuity_probe,
-        }),
-        VerificationEngine::Auto => run_auto_filtered(ExplicitRequest {
-            selection,
-            depth,
-            deadlock,
-            budget: explicit_budget,
-            skip_vacuity_probe,
-        }),
-    };
-    if let Value::Object(envelope) = &mut output
-        && envelope.get("result").and_then(Value::as_str) != Some("error")
-        && !compose_warnings.is_empty()
-        && let Some(Value::Array(warnings)) = envelope.get_mut("warnings")
-    {
-        // Compose-lowering warnings (e.g. `fair_not_inherited`) are computed
-        // while lowering, before the checked KernelModel drops the per-
-        // component information that produced them, so they cannot be
-        // recovered from `model`/`fsl_runtime::verification_warnings` alone.
-        warnings.splice(0..0, compose_warnings);
-    }
-    let mut implements_exit = None;
-    if let Value::Object(envelope) = &mut output
-        && envelope.get("result").and_then(Value::as_str) != Some("error")
-        && let Some(implements) = implements
-    {
-        implements_exit =
-            fslc_rust::verification_output::attach_requirements_implements(&mut output, implements);
-    }
-    if let Ok(ctx) = ModelWarningContext::from_source(&model, source) {
-        finalize_envelope_model_warnings(&mut output, &ctx);
-    }
-    let status = implements_exit.unwrap_or(status);
-    // The `ledger`/`html`/`mutate` baseline folds a failed governance
-    // preservation exactly as `check` and `verify` do (issue #1303).
-    match fold_governance_from_source(path, source, &mut output) {
-        Ok(folded) => {
-            let status = folded.unwrap_or(status);
-            (output, status)
-        }
-        Err(error) => error,
-    }
+    run_admitted_roots(
+        vec![(path, Ok(source.to_owned()))],
+        None,
+        false,
+        |sources, editions| {
+            run_verify_admitted_from_source(
+                path,
+                &sources[0],
+                depth,
+                deadlock_mode,
+                engine,
+                explicit_budget,
+                k_ind,
+                Some(&editions[0]),
+            )
+        },
+    )
 }
 
-fn apply_vacuity_mode(output: &mut Value, mode: &str) -> Option<i32> {
-    let findings = output
-        .get("warnings")
-        .and_then(Value::as_array)
-        .map(|warnings| {
-            warnings
-                .iter()
-                .filter(|warning| {
-                    warning
-                        .get("kind")
-                        .and_then(Value::as_str)
-                        .is_some_and(fsl_core::is_vacuity_kind)
-                })
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if mode == "ignore" {
-        if let Some(warnings) = output.get_mut("warnings").and_then(Value::as_array_mut) {
-            warnings.retain(|warning| {
-                !warning
-                    .get("kind")
-                    .and_then(Value::as_str)
-                    .is_some_and(fsl_core::is_vacuity_kind)
-            });
-        }
-        return None;
-    }
-    if mode != "error" || findings.is_empty() {
-        return None;
-    }
-    let mut error = envelope();
-    error.insert("result".to_owned(), json!("error"));
-    if let Some(spec) = output.get("spec") {
-        error.insert("spec".to_owned(), spec.clone());
-    }
-    error.insert(
-        "kind".to_owned(),
-        findings[0]
-            .get("kind")
-            .cloned()
-            .unwrap_or_else(|| json!("vacuous")),
-    );
-    error.insert("findings".to_owned(), Value::Array(findings));
-    if let Some(checked) = output.get("checked_to_depth") {
-        error.insert("checked_to_depth".to_owned(), checked.clone());
-    }
-    if let Some(cost) = output.get("cost") {
-        error.insert("cost".to_owned(), cost.clone());
-    }
-    error.insert("trace_type".to_owned(), json!("vacuity"));
-    *output = Value::Object(error);
-    Some(2)
-}
-
-fn invariant_names(model: &KernelModel) -> Vec<String> {
-    invariant_names_selected(model, None)
-}
-
-fn invariant_names_selected(
-    model: &KernelModel,
-    checked_bounds: Option<&std::collections::BTreeSet<String>>,
-) -> Vec<String> {
-    let mut names = model
-        .state
-        .iter()
-        .filter(|(_, ty)| has_bounds(model, ty))
-        .map(|(name, _)| format!("_bounds_{name}"))
-        .filter(|name| checked_bounds.is_none_or(|selected| selected.contains(name)))
-        .map(|name| display(&name))
-        .collect::<Vec<_>>();
-    names.extend(
-        model
-            .invariants
-            .iter()
-            .map(|property| display(&property.name)),
-    );
-    names
+#[allow(clippy::too_many_arguments)]
+fn run_verify_admitted_from_source(
+    path: &Path,
+    source: &str,
+    depth: usize,
+    deadlock_mode: &str,
+    engine: &str,
+    explicit_budget: usize,
+    k_ind: usize,
+    finish: Option<&SourceEdition>,
+) -> (Value, i32) {
+    let options = CliVerifyOptions {
+        depth,
+        deadlock: deadlock_mode.to_owned(),
+        engine: engine.to_owned(),
+        explicit_budget,
+        k_ind,
+        use_cache: false,
+        ..CliVerifyOptions::default()
+    };
+    run_verify_cli_admitted(path, path, source, &options, finish)
 }
 
 fn bindings_json(bindings: &[std::collections::BTreeMap<String, FslValue>]) -> Value {
@@ -18489,7 +18575,9 @@ fn violation_bindings_json(
         return Value::Null;
     };
     if kind == "type_bound" {
-        let state_name = name.strip_prefix("_bounds_").unwrap_or(name);
+        let state_name = fsl_core::SyntheticName::parse_internal(name)
+            .and_then(|synthetic| synthetic.bounds_state())
+            .unwrap_or(name);
         let Some((_, TypeRef::Map(_, value_ty))) = model
             .state
             .iter()
@@ -18534,11 +18622,13 @@ fn violation_blame_json(
     violating_bindings: Value,
 ) -> Value {
     if kind == "type_bound" {
-        let state_name = name.strip_prefix("_bounds_").unwrap_or(name);
+        let state_name = fsl_core::SyntheticName::parse_internal(name)
+            .and_then(|synthetic| synthetic.bounds_state())
+            .unwrap_or(name);
         return json!({
             "conjuncts": [{
                 "index": 0,
-                "text": format!("{} stays within its declared type bounds", display(state_name)),
+                "text": format!("{} stays within its declared type bounds", model.names().public_state(state_name).into_string()),
                 "holds": false,
             }]
         });
@@ -18559,20 +18649,6 @@ fn violation_blame_json(
     json!({"conjuncts": [conjunct]})
 }
 
-fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
-    match ty {
-        TypeRef::Int | TypeRef::Bool | TypeRef::Relation(_, _) => false,
-        TypeRef::Range(_, _) | TypeRef::Set(_) | TypeRef::Seq(_, _) => true,
-        TypeRef::Option(inner) => has_bounds(model, inner),
-        TypeRef::Map(_, value) => has_bounds(model, value),
-        TypeRef::Named(name) => match model.types.get(name) {
-            Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
-            Some(TypeDef::Struct { fields }) => fields.iter().any(|(_, ty)| has_bounds(model, ty)),
-            None => false,
-        },
-    }
-}
-
 enum ValidatedReplayStep {
     Action(Option<std::collections::BTreeMap<String, FslValue>>),
     Stutter,
@@ -18581,12 +18657,6 @@ enum ValidatedReplayStep {
 struct ValidatedReplayEvent {
     step: ValidatedReplayStep,
     state: Value,
-}
-
-/// Whether a JSONL log action selects `action` under `maps auto`: its public
-/// name, or the [`display`] spelling `maps auto` matched before #1234.
-fn log_action_matches(model: &KernelModel, action: &fsl_core::ActionDef, source: &str) -> bool {
-    model.action_display_name(&action.name) == source || display(&action.name) == source
 }
 
 fn validate_versioned_replay_events(
@@ -18629,7 +18699,7 @@ fn parse_versioned_params(
     if values.len() != action.params.len() {
         return Err(format!(
             "event {event_index} parameter mismatch for action '{}'",
-            model.action_key(&action.name)
+            model.action_display_name(&action.name)
         ));
     }
     action
@@ -18656,404 +18726,6 @@ fn parse_versioned_params(
         .collect()
 }
 
-fn parse_params(
-    model: &KernelModel,
-    action: &fsl_core::ActionDef,
-    values: &Map<String, Value>,
-) -> Result<std::collections::BTreeMap<String, FslValue>, String> {
-    if values.len() != action.params.len() {
-        return Err(format!(
-            "parameter mismatch for action '{}'",
-            model.action_display_name(&action.name)
-        ));
-    }
-    action
-        .params
-        .iter()
-        .map(|param| {
-            let value = values
-                .get(param.name())
-                .ok_or_else(|| format!("missing parameter '{}'", param.name()))?;
-            Ok((
-                param.name().to_owned(),
-                parse_param_value(model, param, value)?,
-            ))
-        })
-        .collect()
-}
-
-fn parse_param_value(
-    model: &KernelModel,
-    param: &ParamDef,
-    value: &Value,
-) -> Result<FslValue, String> {
-    match param {
-        ParamDef::Range { .. } => value
-            .as_i64()
-            .map(FslValue::Int)
-            .ok_or_else(|| format!("parameter '{}' must be an integer", param.name())),
-        ParamDef::Typed { ty, .. } => match ty {
-            TypeRef::Bool => value
-                .as_bool()
-                .map(FslValue::Bool)
-                .or_else(|| value.as_i64().map(|value| FslValue::Bool(value != 0)))
-                .ok_or_else(|| format!("parameter '{}' must be Boolean", param.name())),
-            TypeRef::Int | TypeRef::Range(_, _) => value
-                .as_i64()
-                .map(FslValue::Int)
-                .ok_or_else(|| format!("parameter '{}' must be an integer", param.name())),
-            TypeRef::Named(type_name) => match model.types.get(type_name) {
-                Some(TypeDef::Domain { .. }) => value
-                    .as_i64()
-                    .map(FslValue::Int)
-                    .ok_or_else(|| format!("parameter '{}' must be an integer", param.name())),
-                Some(TypeDef::Enum { members, .. }) => {
-                    let member = value.as_str().ok_or_else(|| {
-                        format!("parameter '{}' must be an enum member", param.name())
-                    })?;
-                    if !members.iter().any(|candidate| candidate == member) {
-                        return Err(format!("unknown enum member '{member}'"));
-                    }
-                    Ok(FslValue::Enum {
-                        type_name: type_name.clone(),
-                        member: member.to_owned(),
-                    })
-                }
-                Some(TypeDef::Struct { .. }) | None => {
-                    Err(format!("parameter '{}' has unsupported type", param.name()))
-                }
-            },
-            _ => Err(format!("parameter '{}' has non-scalar type", param.name())),
-        },
-    }
-}
-
-fn load_model(path: &Path) -> Result<KernelModel, SpecLoadError> {
-    load_kernel_model(path).map(|(_, _, model)| model)
-}
-
-fn load_model_from_source(path: &Path, source: &str) -> Result<KernelModel, SpecLoadError> {
-    load_kernel_model_from_source(path, source).map(|(_, model)| model)
-}
-
-fn load_kernel_model(path: &Path) -> Result<(String, KernelSpec, KernelModel), SpecLoadError> {
-    let source = read_spec_source(path)?;
-    let (kernel, model) = load_kernel_model_from_source(path, &source)?;
-    Ok((source, kernel, model))
-}
-
-/// Build a checked Kernel/model from a caller-owned root-source snapshot.
-///
-/// `load_kernel_model` remains the path-reading compatibility entry point;
-/// callers that already captured their source — whether to avoid a second
-/// root-path read or because they also need a specialized surface projection
-/// — use this variant. The resolver can still read imported dependencies.
-fn load_kernel_model_from_source(
-    path: &Path,
-    source: &str,
-) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
-    let base = path.parent().unwrap_or_else(|| Path::new("."));
-    let resolver = fsl_core::FsResolver::new(base);
-    load_kernel_model_from_source_with_resolver(path, source, &resolver)
-}
-
-/// `load_kernel_model_from_source` with a caller-owned resolver, so a
-/// cache-key computation can observe the dependency reads (issue #1023) by
-/// passing a recording resolver instead of a plain `FsResolver`.
-fn load_kernel_model_from_source_with_resolver(
-    path: &Path,
-    source: &str,
-    resolver: &dyn fsl_core::FileResolver,
-) -> Result<(KernelSpec, KernelModel), SpecLoadError> {
-    fslc_rust::check_stages::load_kernel_model(source, &path.to_string_lossy(), resolver)
-}
-
-/// Read a spec file, classifying a read failure as `io` rather than letting the
-/// message-string classifier fall through to `semantics` (issue 497: a missing
-/// single analyze input reported `semantics` while the same missing file in a
-/// batch reported `io`).
-fn read_spec_source(path: &Path) -> Result<String, SpecLoadError> {
-    std::fs::read_to_string(path)
-        .map_err(|error| SpecLoadError::Io(format!("{}: {error}", path.display())))
-}
-
-#[allow(clippy::too_many_lines)]
-fn snapshot_value(
-    model: &KernelModel,
-    ty: &TypeRef,
-    value: &Value,
-    path: &str,
-) -> Result<FslValue, String> {
-    let type_error = || format!("{path} has a value incompatible with {ty:?}");
-    match ty {
-        TypeRef::Bool => value.as_bool().map(FslValue::Bool).ok_or_else(type_error),
-        TypeRef::Int => value.as_i64().map(FslValue::Int).ok_or_else(type_error),
-        TypeRef::Range(lo, hi) => {
-            let number = value.as_i64().ok_or_else(type_error)?;
-            if number < *lo || number > *hi {
-                return Err(format!(
-                    "{path} value {number} is out of range [{lo}..{hi}]"
-                ));
-            }
-            Ok(FslValue::Int(number))
-        }
-        TypeRef::Named(name) => match model.types.get(name) {
-            Some(TypeDef::Domain { lo, hi, .. }) => {
-                snapshot_value(model, &TypeRef::Range(*lo, *hi), value, path)
-            }
-            Some(TypeDef::Enum { members, .. }) => {
-                let member = value.as_str().ok_or_else(type_error)?;
-                if !members.iter().any(|candidate| candidate == member) {
-                    return Err(format!(
-                        "{path} enum member '{member}' is not one of {}",
-                        members.join(", ")
-                    ));
-                }
-                Ok(FslValue::Enum {
-                    type_name: name.clone(),
-                    member: member.to_owned(),
-                })
-            }
-            Some(TypeDef::Struct { fields }) => {
-                let object = value.as_object().ok_or_else(type_error)?;
-                for key in object.keys() {
-                    if !fields.iter().any(|(field, _)| field == key) {
-                        return Err(format!("unknown struct field '{path}.{key}'"));
-                    }
-                }
-                let parsed = fields
-                    .iter()
-                    .map(|(field, field_ty)| {
-                        let field_value = object
-                            .get(field)
-                            .ok_or_else(|| format!("missing struct field '{path}.{field}'"))?;
-                        Ok((
-                            field.clone(),
-                            snapshot_value(
-                                model,
-                                field_ty,
-                                field_value,
-                                &format!("{path}.{field}"),
-                            )?,
-                        ))
-                    })
-                    .collect::<Result<_, String>>()?;
-                Ok(FslValue::Struct {
-                    type_name: name.clone(),
-                    fields: parsed,
-                })
-            }
-            None => Err(format!("unknown type '{name}'")),
-        },
-        TypeRef::Option(inner) => {
-            if value.is_null() {
-                Ok(FslValue::None)
-            } else if matches!(inner.as_ref(), TypeRef::Option(_)) {
-                let object = value.as_object().ok_or_else(|| {
-                    format!(
-                        "{path} nested Option must be null or {{\"kind\":\"some\",\"value\":...}}"
-                    )
-                })?;
-                if object.len() != 2
-                    || object.get("kind") != Some(&Value::String("some".to_owned()))
-                    || !object.contains_key("value")
-                {
-                    return Err(format!(
-                        "{path} nested Option must be null or {{\"kind\":\"some\",\"value\":...}}"
-                    ));
-                }
-                Ok(FslValue::Some(Box::new(snapshot_value(
-                    model,
-                    inner,
-                    object.get("value").expect("checked value key"),
-                    path,
-                )?)))
-            } else {
-                Ok(FslValue::Some(Box::new(snapshot_value(
-                    model, inner, value, path,
-                )?)))
-            }
-        }
-        TypeRef::Map(key_ty, value_ty) => {
-            let object = value.as_object().ok_or_else(type_error)?;
-            let keys = model
-                .map_key_values(key_ty)
-                .map_err(|error| error.to_string())?;
-            let mut entries = std::collections::BTreeMap::new();
-            for key in keys {
-                let rendered = match &key {
-                    FslValue::Int(value) => value.to_string(),
-                    FslValue::Bool(value) => value.to_string(),
-                    FslValue::Enum { member, .. } => member.clone(),
-                    _ => return Err(format!("{path} has a non-scalar map key")),
-                };
-                let entry = object
-                    .get(&rendered)
-                    .ok_or_else(|| format!("missing map key '{path}[{rendered}]'"))?;
-                entries.insert(
-                    key,
-                    snapshot_value(model, value_ty, entry, &format!("{path}[{rendered}]"))?,
-                );
-            }
-            if object.len() != entries.len() {
-                return Err(format!("{path} contains an unknown map key"));
-            }
-            Ok(FslValue::Map(entries))
-        }
-        TypeRef::Set(element_ty) => {
-            let items = value.as_array().ok_or_else(type_error)?;
-            Ok(FslValue::Set(
-                items
-                    .iter()
-                    .enumerate()
-                    .map(|(index, item)| {
-                        snapshot_value(model, element_ty, item, &format!("{path}[{index}]"))
-                    })
-                    .collect::<Result<_, _>>()?,
-            ))
-        }
-        TypeRef::Seq(element_ty, capacity) => {
-            let items = value.as_array().ok_or_else(type_error)?;
-            if items.len() > *capacity {
-                return Err(format!(
-                    "{path} sequence length {} exceeds capacity {capacity}",
-                    items.len()
-                ));
-            }
-            Ok(FslValue::Seq(
-                items
-                    .iter()
-                    .enumerate()
-                    .map(|(index, item)| {
-                        snapshot_value(model, element_ty, item, &format!("{path}[{index}]"))
-                    })
-                    .collect::<Result<_, _>>()?,
-            ))
-        }
-        TypeRef::Relation(source_ty, target_ty) => {
-            let items = value.as_array().ok_or_else(type_error)?;
-            Ok(FslValue::Relation(
-                items
-                    .iter()
-                    .enumerate()
-                    .map(|(index, item)| {
-                        let pair = item
-                            .as_array()
-                            .filter(|pair| pair.len() == 2)
-                            .ok_or_else(|| format!("{path}[{index}] must be a pair"))?;
-                        Ok((
-                            snapshot_value(
-                                model,
-                                source_ty,
-                                &pair[0],
-                                &format!("{path}[{index}][0]"),
-                            )?,
-                            snapshot_value(
-                                model,
-                                target_ty,
-                                &pair[1],
-                                &format!("{path}[{index}][1]"),
-                            )?,
-                        ))
-                    })
-                    .collect::<Result<_, String>>()?,
-            ))
-        }
-    }
-}
-
-fn load_state_snapshot(
-    path: &Path,
-    model: &KernelModel,
-) -> Result<std::collections::BTreeMap<String, FslValue>, (String, String)> {
-    let source = std::fs::read_to_string(path).map_err(|error| {
-        (
-            "io".to_owned(),
-            if error.kind() == std::io::ErrorKind::NotFound {
-                format!("file not found: {}", path.display())
-            } else {
-                error.to_string()
-            },
-        )
-    })?;
-    let value: Value = serde_json::from_str(&source).map_err(|error| {
-        (
-            "io".to_owned(),
-            format!(
-                "invalid state JSON at line {}, column {}: {}",
-                error.line(),
-                error.column(),
-                error
-            ),
-        )
-    })?;
-    let object = value.as_object().ok_or_else(|| {
-        (
-            "type".to_owned(),
-            "state snapshot must be a JSON object".to_owned(),
-        )
-    })?;
-    load_snapshot_value_object(object, model).map_err(|error| ("type".to_owned(), error))
-}
-
-fn load_snapshot_value_object(
-    object: &Map<String, Value>,
-    model: &KernelModel,
-) -> Result<std::collections::BTreeMap<String, FslValue>, String> {
-    for key in object.keys() {
-        if !model.state.iter().any(|(name, _)| display(name) == *key) {
-            return Err(format!("unknown state variable '{key}'"));
-        }
-    }
-    model
-        .state
-        .iter()
-        .map(|(name, ty)| {
-            let display_name = display(name);
-            let value = object
-                .get(&display_name)
-                .ok_or_else(|| format!("missing state variable '{display_name}'"))?;
-            Ok((
-                name.clone(),
-                snapshot_value(model, ty, value, &format!("state.{display_name}"))?,
-            ))
-        })
-        .collect()
-}
-
-fn load_model_scoped(path: &Path, scope: &ScopeBounds) -> Result<KernelModel, SpecLoadError> {
-    let source = read_spec_source(path)?;
-    load_model_scoped_from_source(path, &source, scope)
-}
-
-fn load_model_scoped_from_source(
-    _path: &Path,
-    source: &str,
-    scope: &ScopeBounds,
-) -> Result<KernelModel, SpecLoadError> {
-    let kernel =
-        match fsl_core::parse_kernel_source_with_bounds(source, &scope.instances, &scope.values) {
-            Ok(kernel) => kernel,
-            // A rejected `--instances`/`--values` bound is a CLI argument
-            // defect, not a construct in the spec, so it owns no location.
-            Err(error) if error.message.starts_with("--instances/--values") => {
-                return Err(SpecLoadError::Semantic(Box::new(
-                    SemanticDiagnostic::unlocated(error.message),
-                )));
-            }
-            Err(error) => return Err(kernel_load_error(source, &error)),
-        };
-    fsl_core::build_model(kernel).map_err(|error| {
-        SpecLoadError::Semantic(Box::new(SemanticDiagnostic::from_model_error(&error)))
-    })
-}
-
-fn envelope() -> Map<String, Value> {
-    let mut output = Map::new();
-    output.insert("fsl".to_owned(), json!("1.0"));
-    output
-}
-
 fn with_version_metadata((mut output, status): (Value, i32)) -> (Value, i32) {
     output
         .as_object_mut()
@@ -19070,18 +18742,6 @@ fn with_version_metadata((mut output, status): (Value, i32)) -> (Value, i32) {
     (output, status)
 }
 
-fn error_output(kind: &str, message: &str) -> Value {
-    let mut output = envelope();
-    output.insert("result".to_owned(), json!("error"));
-    output.insert("kind".to_owned(), json!(kind));
-    output.insert("message".to_owned(), json!(message));
-    Value::Object(output)
-}
-
-fn surface_parse_error_output(error: &fsl_syntax::ParseError) -> Value {
-    fslc_rust::frontend_output::render_surface_parse_error(envelope(), error)
-}
-
 fn format_error_output(error: &fsl_syntax::FormatError) -> Value {
     let span = error.span();
     let mut output = error_output("format", &error.to_string());
@@ -19096,39 +18756,10 @@ fn format_error_output(error: &fsl_syntax::FormatError) -> Value {
     output
 }
 
-fn normalized_exit_status(output: &Value, reported_status: i32) -> i32 {
-    if output.get("result").and_then(Value::as_str) == Some("error")
-        && output.get("kind").and_then(Value::as_str) == Some("internal")
-    {
-        3
-    } else {
-        reported_status
-    }
-}
-
-fn semantic_error_output(message: &str) -> Value {
-    fslc_rust::verification_output::render_semantic_error(
-        envelope(),
-        message,
-        None,
-        false,
-        None,
-        None,
-    )
-}
-
 /// Render a core frontend/lowering diagnostic without discarding its typed
-/// location or name-resolution classification at a command boundary.
+/// location or classification at a command boundary.
 fn core_error_output(error: &fsl_core::CoreError) -> Value {
-    let diagnostic = SemanticDiagnostic::from_core_error(error);
-    fslc_rust::verification_output::render_semantic_error(
-        envelope(),
-        &diagnostic.message,
-        diagnostic.loc,
-        diagnostic.name_resolution,
-        diagnostic.diagnostic_code,
-        diagnostic.hint.as_deref(),
-    )
+    fslc_rust::spec_load::render_core_error(envelope(), error)
 }
 
 /// Render a domain projection failure from the renderer path.
@@ -19138,7 +18769,7 @@ fn core_error_output(error: &fsl_core::CoreError) -> Value {
 /// historical `at line:column` message shape established by
 /// `domain_origin_diagnostics`.
 fn domain_projection_error_output(path: &Path, error: &fsl_core::CoreError) -> Value {
-    if error.message.starts_with("unknown domain symbol") {
+    if error.kind == fsl_core::CoreErrorKind::UnknownDomainSymbol {
         core_error_output(&error.clone().with_source_file(path.display().to_string()))
     } else {
         core_error_output(error)
@@ -19157,7 +18788,7 @@ fn model_error_output(error: &fsl_core::ModelError) -> Value {
         envelope(),
         &error.to_string(),
         fslc_rust::verification_output::model_error_loc(error),
-        error.name_resolution,
+        &DiagnosticClass::model(error.name_resolution),
         error.diagnostic_code,
         error.hint.as_deref().map(String::as_str),
     )
@@ -19181,13 +18812,6 @@ fn mutate_error(output: Value) -> (Value, i32) {
     (output, status)
 }
 
-/// Render a spec-loading failure through the class the loader preserved, so
-/// every spec-reading command emits the envelope `check` emits for the same
-/// file (`kind:"parse"` + `diagnostic_code` + `loc` for a syntax error).
-fn spec_load_error_output(error: &SpecLoadError) -> Value {
-    fslc_rust::spec_load::render_spec_load_error(envelope(), error)
-}
-
 fn finish(output: &mut Map<String, Value>, checked: usize, started: Instant) {
     output.insert("checked_to_depth".to_owned(), json!(checked));
     output.insert("completeness".to_owned(), json!("bounded"));
@@ -19197,31 +18821,11 @@ fn finish(output: &mut Map<String, Value>, checked: usize, started: Instant) {
     );
 }
 
-fn display(name: &str) -> String {
-    fslc_rust::display_name(name)
-}
-
-/// Internal name of the action that took the last step of `trace`: the action
-/// a violation, CTI, or kill found at that step was produced by.
-fn trace_last_action(trace: &[TraceStep]) -> Option<&str> {
-    trace
-        .last()
-        .and_then(|step| step.action.as_ref())
-        .map(|action| action.name.as_str())
-}
-
-fn block_on_native<F: Future>(future: F) -> F::Output {
-    let mut future = pin!(future);
-    let waker = Waker::noop();
-    let mut context = Context::from_waker(waker);
-    match future.as_mut().poll(&mut context) {
-        Poll::Ready(result) => result,
-        Poll::Pending => panic!("native Z3 backend unexpectedly yielded Pending"),
-    }
-}
-
 #[cfg(test)]
 mod chain_jobs_tests {
+    mod dependency_edition {
+        include!("../tests/support/edition_dependency_native.rs");
+    }
     use super::*;
 
     #[test]
@@ -19242,7 +18846,8 @@ mod chain_jobs_tests {
         }
         sections.insert("impl".to_owned(), ManifestSection::default());
         steps.push(("impl".to_owned(), "impl".to_owned()));
-        let groups = chain_step_groups(&steps, &sections, &base);
+        let roots = prepare_project_roots(&sections, &base, read_spec_source).unwrap();
+        let groups = chain_step_groups(&steps, &roots);
         std::fs::remove_dir_all(&base).expect("remove scratch dir");
         assert_eq!(groups, vec![vec![0], vec![1], vec![2]]);
         assert_eq!(chain_worker_count(64, groups.len()), 3);
@@ -19317,6 +18922,117 @@ mod chain_jobs_tests {
 #[cfg(test)]
 mod exit_status_tests {
     use super::*;
+    use crate::property_selection::apply_vacuity_mode;
+    use crate::refinement::preservation_refine_result;
+    use crate::spec_loading::validate_specialized_document_from_source;
+    include!("issue_1422_sweep_budget_tests.rs");
+
+    #[test]
+    fn approval_ledger_rerender_returns_the_direct_verification_error() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let path = root.join("tests/fixtures/governance_missing_dependency.fsl");
+        let source = std::fs::read_to_string(&path).unwrap();
+        let request = LedgerReportRequest {
+            path: &path,
+            depth: 3,
+            deadlock_mode: "ignore",
+            engine: "bmc",
+            impl_log: None,
+            evidence_paths: &[],
+            output_path: None,
+        };
+        let expected = run_verify_from_source(
+            &path,
+            &source,
+            3,
+            "ignore",
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
+        assert_eq!(expected.1, 2);
+        assert_eq!(expected.0["result"], "error");
+        assert_eq!(expected.0["kind"], "type");
+        assert_eq!(expected.0["loc"], json!({"line":6,"column":5}));
+        assert_eq!(
+            run_ledger_report_from_source(&request, &source, &[], &[]),
+            expected
+        );
+
+        // Rendering this would report the failure as digest drift at exit 0.
+        assert_eq!(
+            generate_unapproved_ledger_report_from_source(&request, &source, None),
+            expected
+        );
+    }
+
+    #[test]
+    fn both_ledger_entry_points_preserve_non_error_ancillary_failures() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples/gallery/valid/tiny_bounded_counter.fsl");
+        let source = std::fs::read_to_string(&path).unwrap();
+        let verified = run_verify_from_source(
+            &path,
+            &source,
+            3,
+            "ignore",
+            "bmc",
+            DEFAULT_EXPLICIT_BUDGET,
+            1,
+        );
+        assert_eq!(verified.1, 0, "{verified:?}");
+        assert_eq!(verified.0["result"], "verified");
+        let absent = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+            "../target/ledger-tests/absent-ancillary-{}.json",
+            std::process::id()
+        ));
+        assert!(!absent.exists());
+        // An unreadable `--impl-log` or `--evidence` names its path (#1170
+        // phase 2).
+        let expected_message = format!(
+            "{}: {}",
+            absent.display(),
+            std::fs::read(&absent).unwrap_err()
+        );
+        for replay in [false, true] {
+            let evidence = if replay { vec![] } else { vec![absent.clone()] };
+            let request = LedgerReportRequest {
+                path: &path,
+                depth: 3,
+                deadlock_mode: "ignore",
+                engine: "bmc",
+                impl_log: replay.then_some(absent.as_path()),
+                evidence_paths: &evidence,
+                output_path: None,
+            };
+            let expected = (error_output("io", &expected_message), 2);
+            assert_eq!(
+                run_ledger_report_from_source(&request, &source, &[], &[]),
+                expected
+            );
+            assert_eq!(
+                generate_unapproved_ledger_report_from_source(&request, &source, None),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn direct_report_gate_preserves_complete_errors_and_both_exit_classes() {
+        for (status, kind) in [(2, "type"), (3, "internal")] {
+            let error = json!({"result":"error", "kind":kind, "message":"boom", "loc":{"line":4,"column":3}});
+            assert_eq!(
+                report_verification_error(&error, status),
+                Some((error, status))
+            );
+        }
+        for verdict in ["verified", "violated", "unknown_cti", "refinement_failed"] {
+            assert_eq!(
+                report_verification_error(&json!({"result":verdict}), 1),
+                None
+            );
+        }
+    }
 
     /// Issue #1303: a preservation refinement that exits 3 is an internal
     /// failure of the run (`kind:"internal"`, exit 3), never re-labelled a
@@ -19561,7 +19277,8 @@ spec InitTraceability {
         )
         .expect("write valid replacement");
 
-        let (source, domain) = read_domain_command_input(&path).expect("capture invalid snapshot");
+        let source = read_domain_command_source(&path).expect("capture invalid snapshot");
+        let domain = parse_domain_document_from_source(&path, &source).expect("parse snapshot");
         std::fs::rename(&replacement, &path).expect("atomically replace input after first read");
 
         assert!(
@@ -19605,6 +19322,40 @@ spec InitTraceability {
         }
     }
 
+    fn expected_snapshot_findings(
+        source: &str,
+        path: &Path,
+        edition: fsl_syntax::Edition,
+    ) -> Vec<Value> {
+        fslc_rust::migration::plan_migration(
+            source,
+            &path.to_string_lossy(),
+            edition,
+            parse_options(),
+        )
+        .expect("migration control")
+        .diagnostics
+        .into_iter()
+        .map(|finding| finding.json(&path.to_string_lossy(), edition))
+        .collect()
+    }
+
+    fn verify_snapshot(
+        path: &Path,
+        source: &str,
+        engine: &str,
+        edition: Option<fsl_syntax::EditionRequest>,
+    ) -> (Value, i32) {
+        let options = CliVerifyOptions {
+            depth: 4,
+            engine: engine.to_owned(),
+            use_cache: false,
+            shared: SharedOptions { edition },
+            ..CliVerifyOptions::default()
+        };
+        run_verify_cli_from_source(path, path, source, &options)
+    }
+
     /// Platform-neutral #808 control. Capturing source A from a regular file
     /// before replacing it with malformed source B must leave every
     /// `*_from_source` helper bound to A. No scheduling, thread, rename, or
@@ -19627,9 +19378,9 @@ spec InitTraceability {
             "kernel model must retain source A's state"
         );
         assert_eq!(
-            validate_requirement_traces_from_source(&fixture.path, &captured, &model)
+            validate_requirement_trace_source(&captured, &model)
                 .expect("validate source A requirement traces"),
-            (None, false)
+            TraceGate::NotRequirements
         );
         assert_eq!(
             implements_result_from_source(&fixture.path, &captured, &model, 4)
@@ -19637,10 +19388,11 @@ spec InitTraceability {
             None
         );
         assert!(
-            model
-                .leadstos
-                .iter()
-                .any(|property| display(&property.name) == "Served"),
+            model.leadstos.iter().any(|property| model
+                .names()
+                .public_property(&property.name)
+                .into_string()
+                == "Served"),
             "source A must retain its liveness property"
         );
 
@@ -19653,17 +19405,32 @@ spec InitTraceability {
             ("induction", "current", "proved"),
             ("induction", "next", "proved"),
         ] {
-            let result = run_verify_from_source(
-                &fixture.path,
-                &captured,
-                4,
-                "warn",
-                engine,
-                DEFAULT_EXPLICIT_BUDGET,
-                1,
-            );
-            let (output, status) =
-                apply_domain_edition_from_source(result, &captured, &fixture.path, edition);
+            let requested =
+                fsl_syntax::EditionRequest::parse(edition, &fsl_syntax::ParseOptions::stable())
+                    .expect("a published --edition value");
+            let source = if edition == "current" {
+                captured.replace(
+                    "action finish()",
+                    "action finish() \"REQ-PROBE-001: finish\"",
+                )
+            } else {
+                captured.clone()
+            };
+            let fixture = SnapshotFixture::new("finished-helpers", &source);
+            let source = read_spec_source(&fixture.path).expect("capture warning control");
+            std::fs::write(&fixture.path, "not valid FSL source").expect("replace root");
+            let (output, status) = verify_snapshot(&fixture.path, &source, engine, requested);
+            let expected =
+                expected_snapshot_findings(&source, &fixture.path, fsl_syntax::Edition::Fsl4);
+            assert_eq!(expected.len(), usize::from(edition == "current"));
+            let actual = output["warnings"]
+                .as_array()
+                .expect("warnings")
+                .iter()
+                .filter(|warning| warning["code"] == "legacy_string_metadata")
+                .cloned()
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected, "one finish for {engine}/{edition}");
             assert_eq!(
                 status, 0,
                 "{engine}/{edition} must verify source A: {output:#}"
@@ -19710,7 +19477,14 @@ spec InitTraceability {
         let captured = read_spec_source(&fixture.path).expect("capture source A");
         std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
 
-        let (output, status) = run_check_from_source(&fixture.path, &fixture.path, &captured);
+        let (output, status) = run_check_with_tags_from_source(
+            &fixture.path,
+            &fixture.path,
+            &captured,
+            false,
+            None,
+            None,
+        );
         assert_eq!(status, 0, "{output:#}");
         assert_eq!(output["result"], "ok", "{output:#}");
         assert_eq!(output["spec"], "VacuousLeadstoFixture", "{output:#}");
@@ -19827,6 +19601,7 @@ spec InitTraceability {
             None,
             None,
             None,
+            None,
         );
         assert_eq!(status, 0, "{output:#}");
         assert_eq!(output["result"], "analyzed", "{output:#}");
@@ -19855,6 +19630,66 @@ spec InitTraceability {
                 "missing solver.check_elapsed_s: {html}"
             );
         }
+    }
+
+    #[test]
+    fn html_timing_projection_omits_ambient_statistics_and_preserves_every_other_value() {
+        let explained = json!({
+            "spec": "Synthetic", "source": "elapsed_s check_elapsed_s memory_mb conflicts decisions propagations",
+            "counterfactuals": [{"property": "Safe", "violation": {
+                "result": "violated", "loc": {"line": 7, "column": 3},
+                "assurance": "bounded", "cost": {"elapsed_s": 0.5, "checks": 17},
+                "trace": [{"state": {"elapsed_s": 31, "check_elapsed_s": 32,
+                    "cost": {"elapsed_s": 33}, "memory_mb": 1.25,
+                    "conflicts": 3, "decisions": 5, "propagations": 7}}]
+            }}, {"property": "Other", "result": "unreachable"}],
+            "state": {"elapsed_s": 34}, "elapsed_s": 35
+        });
+        let verification = json!({
+            "result": "violated", "spec": "Synthetic", "depth": 4,
+            "loc": {"line": 9, "column": 5}, "assurance": "bounded",
+            "trace": [{"action": "Tick", "state": {"elapsed_s": 41,
+                "check_elapsed_s": 42, "cost": {"elapsed_s": 43}, "memory_mb": 2.5,
+                "conflicts": 11, "decisions": 13, "propagations": 17}}],
+            "cost": {"elapsed_s": 0.25, "checks": 19,
+                "solver": {"check_elapsed_s": 0.125, "checks": 23,
+                    "conflicts": 29, "decisions": 31, "propagations": 37, "memory_mb": 1.5},
+                "properties": [
+                    {"kind": "invariant", "name": "Safe", "checks": 7, "elapsed_s": 0.0625},
+                    {"kind": "reachable", "name": "Goal", "checks": 11, "elapsed_s": 0.03125}]},
+            "cache": {"hit": true, "source": "exact"}, "elapsed_s": 44
+        });
+        // Independent full expected payloads: do not derive them with the projection.
+        let expected_explained = json!({
+            "spec": "Synthetic", "source": "elapsed_s check_elapsed_s memory_mb conflicts decisions propagations",
+            "counterfactuals": [{"property": "Safe", "violation": {
+                "result": "violated", "loc": {"line": 7, "column": 3},
+                "assurance": "bounded", "cost": {"checks": 17},
+                "trace": [{"state": {"elapsed_s": 31, "check_elapsed_s": 32,
+                    "cost": {"elapsed_s": 33}, "memory_mb": 1.25,
+                    "conflicts": 3, "decisions": 5, "propagations": 7}}]
+            }}, {"property": "Other", "result": "unreachable"}],
+            "state": {"elapsed_s": 34}, "elapsed_s": 35
+        });
+        let expected_verification = json!({
+            "result": "violated", "spec": "Synthetic", "depth": 4,
+            "loc": {"line": 9, "column": 5}, "assurance": "bounded",
+            "trace": [{"action": "Tick", "state": {"elapsed_s": 41,
+                "check_elapsed_s": 42, "cost": {"elapsed_s": 43}, "memory_mb": 2.5,
+                "conflicts": 11, "decisions": 13, "propagations": 17}}],
+            "cost": {"checks": 19,
+                "solver": {"checks": 23},
+                "properties": [
+                    {"kind": "invariant", "name": "Safe", "checks": 7},
+                    {"kind": "reachable", "name": "Goal", "checks": 11}]},
+            "cache": {"hit": true, "source": "exact"}, "elapsed_s": 44
+        });
+        let originals = (explained.clone(), verification.clone());
+        assert_eq!(
+            html_report_without_timing(&explained, &verification),
+            (expected_explained, expected_verification)
+        );
+        assert_eq!((explained, verification), originals, "originals unchanged");
     }
 
     /// Platform-neutral #808 control for `domain generate`. The scaffold's
@@ -19898,12 +19733,16 @@ spec InitTraceability {
         std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
 
         let model = load_model_from_source(&fixture.path, &captured).expect("lower source A");
-        assert_eq!(display(&model.name), "CleanDiagnosticDomain");
+        assert_eq!(
+            model.names().public_identifier(&model.name).into_string(),
+            "CleanDiagnosticDomain"
+        );
         assert!(
-            model
-                .actions
-                .iter()
-                .any(|action| display(&action.name) == "doc_close_doc"),
+            model.actions.iter().any(|action| model
+                .names()
+                .public_action(&action.name)
+                .into_string()
+                == "doc_close_doc"),
             "replay model must retain source A's lowered CloseDoc action"
         );
     }
@@ -19970,20 +19809,32 @@ spec InitTraceability {
         let captured = read_domain_command_source(&fixture.path).expect("capture source A");
         std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
 
-        let verified = run_verify_from_source(
-            &fixture.path,
-            &captured,
-            4,
-            "warn",
-            "bmc",
-            DEFAULT_EXPLICIT_BUDGET,
-            1,
-        );
-        let (output, status) =
-            apply_domain_edition_from_source(verified, &captured, &fixture.path, "next");
-        assert_eq!(status, 0, "{output:#}");
-        assert_eq!(output["spec"], "CleanDiagnosticDomain", "{output:#}");
-        assert_eq!(output["edition"], "next", "{output:#}");
+        for (edition, source, count) in [
+            (fsl_syntax::Edition::Fsl5, captured.clone(), 0),
+            (
+                fsl_syntax::Edition::Fsl4,
+                captured.replace(
+                    "enum Status { Open, Closed }",
+                    "type Status = Open | Closed",
+                ),
+                1,
+            ),
+        ] {
+            let (output, status) = verify_snapshot(
+                &fixture.path,
+                &source,
+                "bmc",
+                Some(fsl_syntax::EditionRequest::numbered(edition)),
+            );
+            assert_eq!(status, 0, "{output:#}");
+            assert_eq!(output["spec"], "CleanDiagnosticDomain", "{output:#}");
+            if edition == fsl_syntax::Edition::Fsl5 {
+                assert_eq!(output["edition"], "next", "{output:#}");
+            }
+            let expected = expected_snapshot_findings(&source, &fixture.path, edition);
+            assert_eq!(expected.len(), count);
+            assert_eq!(output["warnings"], json!(expected));
+        }
     }
 
     /// The requirements `implements` path invokes the native refinement
@@ -20123,7 +19974,7 @@ spec AltFixture {
     /// `run_verify_from_source`'s result derived from source A, not a fresh
     /// read of whatever replaced the path. Source A and B declare distinct
     /// action/spec names so the fallback's `spec`/`invariant`/trace content
-    /// pins to A; reverting the fallback to `run_verify(path, ...)` makes the
+    /// pins to A; reverting to path-based verification makes the
     /// `spec`/`invariant` assertions below observe B instead.
     #[test]
     fn scenarios_violation_fallback_uses_the_captured_root_snapshot() {
@@ -20199,7 +20050,7 @@ spec GrowFixture {
             &captured,
             4,
             "warn",
-            "bmc",
+            "auto",
             DEFAULT_EXPLICIT_BUDGET,
             1,
         );
@@ -20214,10 +20065,11 @@ spec GrowFixture {
         // The exact model load `run_mutate` makes.
         let model = load_model_from_source(&fixture.path, &captured).expect("lower source A");
         assert!(
-            model
-                .invariants
-                .iter()
-                .any(|invariant| display(&invariant.name) == "NonNegative"),
+            model.invariants.iter().any(|invariant| model
+                .names()
+                .public_property(&invariant.name)
+                .into_string()
+                == "NonNegative"),
             "model must retain source A's invariant"
         );
 
@@ -20235,7 +20087,14 @@ spec GrowFixture {
                 mutant.op == "requires_remove" && mutant.action.as_deref() == Some("dec")
             })
             .expect("dec requires_remove mutant present in source A");
-        let outcome = mutation_oracle(mutant.spec, 4, &model, &mut native_mutation_bmc).outcome;
+        let outcome = mutation_oracle(
+            mutant.materialize(&spec),
+            4,
+            &model,
+            None,
+            &mut native_mutation_bmc,
+        )
+        .outcome;
         assert!(
             !outcome.is_clean(),
             "removing dec's requires guard must be killed by source A's NonNegative invariant, \
@@ -20331,6 +20190,15 @@ mod mutate_oracle_error_tests {
         );
     }
 
+    pub(super) fn failed_implements(
+        _: &mut MutationOracle,
+    ) -> Result<ImplementsOracle, MutationOracle> {
+        Err(MutationOracle::Error(OracleFailure::new(
+            "implements",
+            "refinement check failed",
+        )))
+    }
+
     /// The requirement oracle's error string used to become `killed_by`, and
     /// an implements oracle `Err` used to be a `refinement` kill.
     #[test]
@@ -20350,11 +20218,8 @@ mod mutate_oracle_error_tests {
                 None
             )
         );
-        let implements_error = apply_secondary_mutation_oracles(
-            MutationOracle::Clean,
-            |_| Ok(()),
-            |_| Err("refinement check failed".to_owned()),
-        );
+        let implements_error =
+            apply_secondary_mutation_oracles(MutationOracle::Clean, |_| Ok(()), failed_implements);
         assert_eq!(
             implements_error,
             (
@@ -20383,7 +20248,7 @@ mod mutate_oracle_error_tests {
         else {
             panic!("fixture must parse as a spec");
         };
-        let outcome = mutation_oracle(spec, 1, &small_model(), &mut |_, _| {
+        let outcome = mutation_oracle(spec, 1, &small_model(), None, &mut |_, _| {
             panic!("an unbuildable mutant must not reach the BMC oracle")
         })
         .outcome;
@@ -20417,6 +20282,7 @@ mod mutate_oracle_error_tests {
     ) -> MutateOptions<'_> {
         MutateOptions {
             depth: 4,
+            explicit_budget: None,
             max_mutants,
             by_requirement: false,
             oracle_attribution: false,
@@ -20633,7 +20499,7 @@ mod mutant_status_tests {
         assert_eq!(mutant_status(&MutationOracle::Clean, None).0, "survived");
     }
 
-    /// The implements oracle's `Err` is `error` (stage `implements`); its
+    /// An implements evaluation failure is `error` (stage `implements`); its
     /// budget cutoff is not an error and stays a clean outcome with the
     /// `inconclusive` detail, which `mutant_status` publishes as
     /// `inconclusive`. This is the path both the built-in and the external
@@ -20643,7 +20509,7 @@ mod mutant_status_tests {
         let (outcome, inconclusive) = apply_secondary_mutation_oracles(
             MutationOracle::Clean,
             |_| Ok(()),
-            |_| Err("refinement check failed".to_owned()),
+            super::mutate_oracle_error_tests::failed_implements,
         );
         assert_eq!(mutant_status(&outcome, inconclusive).0, "error");
         let (outcome, inconclusive) = apply_secondary_mutation_oracles(
@@ -20666,6 +20532,177 @@ mod mutant_status_tests {
 }
 
 #[cfg(test)]
+mod mutate_explicit_first_tests {
+    use super::*;
+
+    const TOGGLE: &str = "spec Toggle { type Small = 0..1 state { x: Small } init { x = 0 } action flip() { x = 1 - x } invariant Safe { x <= 1 } }";
+    const REACH: &str = "spec Reach { type Small = 0..2 state { x: Small } init { x = 1 } action step() { requires x < 2 x = x + 1 } reachable End { x == 2 } }";
+
+    fn compare(relative: &str, source: &str, depth: usize, cap: usize, budget: usize) -> Value {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .join(relative);
+        let run = |explicit_budget| {
+            std::thread::scope(|scope| {
+                std::thread::Builder::new()
+                    .stack_size(STACK_SIZE)
+                    .spawn_scoped(scope, || {
+                        run_mutate_from_source(
+                            &path,
+                            source,
+                            MutateOptions {
+                                depth,
+                                max_mutants: cap,
+                                explicit_budget,
+                                by_requirement: false,
+                                oracle_attribution: true,
+                                external_mutants: None,
+                                gate: MutationGate::default(),
+                            },
+                            &mut native_mutation_bmc,
+                        )
+                    })
+                    .expect("spawn subset")
+                    .join()
+                    .expect("subset panicked")
+            })
+        };
+        let (explicit, explicit_status) = run(Some(budget));
+        let (bmc, bmc_status) = run(None);
+        assert_eq!(explicit_status, 0, "{explicit:#}");
+        assert_eq!(bmc_status, 0, "{bmc:#}");
+        assert_eq!(explicit["result"], "mutated", "{explicit:#}");
+        assert_eq!(bmc["result"], "mutated", "{bmc:#}");
+        assert!(!explicit["mutants"].as_array().expect("records").is_empty());
+        assert_eq!(
+            explicit["mutants"], bmc["mutants"],
+            "full records: {relative}"
+        );
+        explicit
+    }
+
+    #[test]
+    fn pointer_registry() {
+        compare(
+            "rust/fslc/tests/fixtures/issue_1283_pointer_registry.fsl",
+            include_str!("../tests/fixtures/issue_1283_pointer_registry.fsl"),
+            3,
+            6,
+            MUTATION_EXPLICIT_BUDGET,
+        );
+    }
+
+    #[test]
+    fn fold_legacy_killer() {
+        let report = compare(
+            "examples/self/fslc_fold.fsl",
+            include_str!("../../../examples/self/fslc_fold.fsl"),
+            8,
+            72,
+            MUTATION_EXPLICIT_BUDGET,
+        );
+        let record = &report["mutants"][71];
+        assert_eq!(record["op"], "enum_constant_swap", "{record:#}");
+        assert_eq!(
+            record["target"], "finalize_fail assignment FinalizedFail->FinalizedPass",
+            "{record:#}"
+        );
+        assert_eq!(record["loc"], json!({"line":116,"column":5}), "{record:#}");
+        assert_eq!(record["killed_by"], "FailureIsSticky", "{record:#}");
+    }
+
+    #[test]
+    fn rbac() {
+        compare(
+            "examples/structural/rbac.fsl",
+            include_str!("../../../examples/structural/rbac.fsl"),
+            8,
+            6,
+            MUTATION_EXPLICIT_BUDGET,
+        );
+    }
+
+    #[test]
+    fn retry_liveness_slice() {
+        compare(
+            "examples/agentic_rag/mutation_slices/retry_liveness_slice.fsl",
+            include_str!("../../../examples/agentic_rag/mutation_slices/retry_liveness_slice.fsl"),
+            6,
+            3,
+            MUTATION_EXPLICIT_BUDGET,
+        );
+    }
+
+    fn main_route(source: &str, depth: usize, budget: usize) -> (MainOracle, usize) {
+        let kernel =
+            fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new(".")).expect("parse");
+        let model = fsl_core::build_model(kernel).expect("build");
+        let mut calls = 0;
+        let main = mutation_oracle_for_model(model, depth, Some(budget), &mut |model, depth| {
+            calls += 1;
+            native_mutation_bmc(model, depth)
+        });
+        (main, calls)
+    }
+
+    #[test]
+    fn progress_engine_keeps_the_route_beside_a_later_decision() {
+        let main = |outcome, engine| MainOracle {
+            outcome,
+            boundary_killer: None,
+            engine,
+        };
+        for route in ["explicit", "bmc"] {
+            let clean = main(MutationOracle::Clean, route);
+            assert_eq!(mutation_progress_engine(&clean, "survived"), route);
+            for later in ["killed", "inconclusive", "error"] {
+                assert_eq!(
+                    mutation_progress_engine(&clean, later),
+                    format!("secondary, oracle={route}")
+                );
+            }
+        }
+        let killed = || MutationOracle::killed("Safe", Vec::new());
+        for route in ["bmc", "probe"] {
+            assert_eq!(
+                mutation_progress_engine(&main(killed(), route), "killed"),
+                route
+            );
+        }
+        let failed = MutationOracle::Error(OracleFailure::new("bmc", "unknown"));
+        assert_eq!(
+            mutation_progress_engine(&main(failed, "bmc"), "error"),
+            "bmc"
+        );
+    }
+
+    #[test]
+    fn budget_one() {
+        compare("subset.fsl", TOGGLE, 2, 6, 1);
+        let (main, calls) = main_route(TOGGLE, 2, 1);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(calls, 2);
+        let (main, calls) = main_route(TOGGLE, 2, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "explicit");
+        assert_eq!(calls, 0);
+    }
+
+    #[test]
+    fn reachable_at_k_plus_one() {
+        compare("subset.fsl", REACH, 1, 12, MUTATION_EXPLICIT_BUDGET);
+        let delayed = REACH.replace("init { x = 1 }", "init { x = 0 }");
+        let (main, calls) = main_route(&delayed, 1, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "bmc");
+        assert_eq!(main.outcome.killed_by(), Some("End"));
+        assert_eq!(calls, 2);
+        let (main, calls) = main_route(&delayed, 2, MUTATION_EXPLICIT_BUDGET);
+        assert_eq!(main.engine, "explicit");
+        assert!(main.outcome.is_clean());
+        assert_eq!(calls, 0);
+    }
+}
+
+#[cfg(test)]
 mod mutate_init_bounds_override_tests {
     //! #1283 / #1251: the unit behavior of `apply_init_bounds_override` is
     //! pinned in `mutate_oracle_error_tests`; this pins its wiring in
@@ -20683,6 +20720,7 @@ mod mutate_init_bounds_override_tests {
             .join("tests/fixtures/issue_1283_pointer_registry.fsl");
         let options = MutateOptions {
             depth: 2,
+            explicit_budget: None,
             max_mutants: 5,
             by_requirement: false,
             oracle_attribution: false,
@@ -20735,7 +20773,7 @@ mod mutate_attribution_reuse_tests {
             calls.set(calls.get() + 1);
             native_mutation_bmc(model, depth)
         };
-        let main = mutation_oracle_for_model(model.clone(), 2, &mut bmc);
+        let main = mutation_oracle_for_model(model.clone(), 2, None, &mut bmc);
         assert!(main.outcome.killed_by().is_some(), "{main:?}");
         let main_calls = calls.replace(0);
         let killers =
@@ -20763,4 +20801,20 @@ mod mutate_attribution_reuse_tests {
         assert_eq!(attribution_calls, 1, "one isolated invariant model");
         assert!(killers.contains(&"_bounds_x".to_owned()), "{killers:?}");
     }
+}
+
+#[test]
+fn internal_input_two_normalizes_to_three_before_exit_contract_check() {
+    let output = error_output("internal", "fixture fault");
+    assert!(!fslc_rust::outcome::exit_status_matches(
+        "check", None, &output, 2
+    ));
+    let final_status = normalized_exit_status(&output, 2);
+    assert_eq!(final_status, 3);
+    assert!(fslc_rust::outcome::exit_status_matches(
+        "check",
+        None,
+        &output,
+        final_status
+    ));
 }

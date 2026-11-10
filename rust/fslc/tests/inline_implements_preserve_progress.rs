@@ -116,6 +116,7 @@ fn source_diagnostics_reject_inline_preserve_progress() {
         &source,
         path.to_str().expect("UTF-8 fixture path"),
         &fsl_core::FsResolver::new(&directory),
+        &fsl_syntax::ParseOptions::stable(),
     );
     let diagnostic = diagnostics
         .iter()

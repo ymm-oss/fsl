@@ -27,6 +27,10 @@
 //! None of those are reserved: reserving a word that works today breaks valid
 //! specifications, and for an author whose spec legitimately uses one that is
 //! worse than the bug.
+//!
+//! `Bool` is reserved as a type name only (issue #1480): a typed binder reads the name
+//! as the builtin, while an expression over a declared `Bool` read the declaration, and
+//! the engines disagreed on the same source. Any other use of the word stays a name.
 
 use fsl_syntax::{Binder, Expr, Param, Span, SpecItem, SurfaceSpec};
 
@@ -215,6 +219,7 @@ fn check_param(param: &Param, span: Option<Span>) -> Result<(), ModelError> {
 ///
 /// Returns [`ModelError`] naming the reserved word and the position that used
 /// it.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn check_reserved_names(spec: &SurfaceSpec) -> Result<(), ModelError> {
     check(&spec.name, "specification", None)?;
     for item in &spec.items {
@@ -242,7 +247,9 @@ pub(crate) fn check_reserved_names(spec: &SurfaceSpec) -> Result<(), ModelError>
                     check(member, "enum member", None)?;
                 }
             }
-            SpecItem::Struct { name, fields, span } => {
+            SpecItem::Struct {
+                name, fields, span, ..
+            } => {
                 check(name, "struct", Some(*span))?;
                 for (field, _) in fields {
                     check(field, "struct field", Some(*span))?;
@@ -313,6 +320,29 @@ pub(crate) fn check_reserved_names(spec: &SurfaceSpec) -> Result<(), ModelError>
             }
             SpecItem::Terminal { expr, span } => check_expr(expr, Some(*span))?,
             SpecItem::Init { .. } | SpecItem::VerifyBounds { .. } => {}
+        }
+    }
+    Ok(())
+}
+
+/// `Bool` names the builtin type wherever a type is written, so a declaration of it
+/// would give a typed binder a domain the expression typing does not agree with.
+///
+/// # Errors
+///
+/// Returns [`ModelError`] for a type, enum or struct declared with that name.
+pub(crate) fn check_type_names(spec: &SurfaceSpec) -> Result<(), ModelError> {
+    for item in &spec.items {
+        let (name, span) = match item {
+            SpecItem::Type { name, span, .. } | SpecItem::Enum { name, span, .. } => (name, *span),
+            SpecItem::Struct { name, span, .. } => (name, Some(*span)),
+            _ => continue,
+        };
+        if name == "Bool" {
+            return Err(ModelError {
+                message: "'Bool' is a reserved FSL type name and cannot be declared".to_owned(),
+                ..reject(name, "type", span)
+            });
         }
     }
     Ok(())

@@ -1,0 +1,74 @@
+// ════════════════════════════════════════════════════════════════
+// Expense reimbursement system requirements [PM deliverable] — fsl-req dialect
+//
+// Who writes it:
+//   The PM/PdM writes the product-facing requirements in the readable
+//   process+data profile: Claim is the lifecycle entity, amount is the
+//   carried input data, and AUTO_LIMIT makes the approval boundary exact.
+//
+// Why it is written:
+//   It turns the consultant's To-Be flow into concrete system behavior while
+//   `implements` checks that the requirements still refine the business
+//   process ExpenseToBe.
+//
+// How to read it:
+//   The process block is the lifecycle. Each transition names its source and
+//   target stage, actor, optional input, guard, data update, and `covers`
+//   traceability to REQ text. acceptance blocks are executable examples, and
+//   `expect Claim <id> in <Stage>` checks the generated process stage map.
+// ════════════════════════════════════════════════════════════════
+requirements ExpenseRequirements {
+  // submit's business-layer arity (case only) differs from its
+  // requirements-layer arity (case + the amount input this layer
+  // introduces), so `maps auto` cannot infer the correspondence — it can
+  // only bind same-arity, same-named parameters (issue #494). The other
+  // transitions keep the same case-only arity on both layers and still
+  // auto-map.
+  implements ExpenseToBe from "1_business.fsl" {
+    action submit(c, a) -> submit(c)
+  }
+
+  number Amount
+  const AUTO_LIMIT = 1
+
+  process Claim with amount: Amount {
+    stages Draft, Submitted, Approved, Rejected, Paid
+    initial Draft
+
+    transition submit       Draft     -> Submitted by Employee
+      with a: Amount
+      when a > 0
+      set amount = a
+      covers REQ-1 "The applicant submits an expense claim by entering an amount"
+
+    transition auto_approve Submitted -> Approved  by System
+      when amount <= AUTO_LIMIT
+      covers REQ-2 "Claims at or below AUTO_LIMIT are auto-approved by the system"
+
+    transition mgr_approve  Submitted -> Approved  by Manager
+      when amount >  AUTO_LIMIT
+      covers REQ-3 "Claims above AUTO_LIMIT are approved by a manager"
+
+    transition reject       Submitted -> Rejected  by Manager
+      when amount >  AUTO_LIMIT
+      covers REQ-3 "Claims above AUTO_LIMIT may be rejected by a manager"
+
+    transition pay          Approved  -> Paid      by Finance
+      covers REQ-4 "Only approved claims are paid"
+  }
+
+  kpi paid_claims = count Claim in Paid
+
+  acceptance AC-1 "Approval flow: a low-amount claim is auto-approved and paid" {
+    submit(0, 1) auto_approve(0) pay(0)
+    expect Claim 0 in Paid
+  }
+  acceptance AC-2 "Rejection flow: a high-amount claim ends in manager rejection" {
+    submit(1, 2) reject(1)
+    expect Claim 1 in Rejected
+  }
+}
+verify {
+  instances Claim = 3
+  values Amount = 0..3
+}

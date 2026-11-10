@@ -1,0 +1,3 @@
+compose UsesNextDep {
+  use ClaimEligibility as claims from "dep_next_colon.fsl"
+}

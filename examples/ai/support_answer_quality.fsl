@@ -71,7 +71,7 @@ ai_contract SupportAnswerContract {
 }
 
 dataset SupportEvalV3 {
-  source "examples/ai/support_eval_v3.jsonl"
+  source "support_eval_v3.jsonl"
 
   population {
     language in ["ja", "en"]

@@ -75,15 +75,6 @@ fn blind_detector(inject: &str) -> &'static str {
     }
 }
 
-fn baseline_for(base: &str) -> PathBuf {
-    match base {
-        "specs/bank.fsl" => root().join("specs/bank.fsl"),
-        "specs/order_workflow.fsl" => root().join("specs/order_workflow.fsl"),
-        "examples/layers/return_system.fsl" => root().join("examples/layers/return_system.fsl"),
-        other => panic!("unknown base spec: {other}"),
-    }
-}
-
 /// Parse the `// key: value` header comments in the first 8 lines, the same
 /// convention `tests/test_injection_bench.py::_headers` reads.
 fn headers(path: &Path) -> BTreeMap<String, String> {
@@ -250,7 +241,7 @@ fn strict_tags_requirements_cell(path_str: &str, expect_signal: &str, scratch: &
 fn mutate_differential_cell(path_str: &str, base: &str) -> Cell {
     let baseline = run_cli(&[
         "mutate",
-        baseline_for(base).to_str().expect("utf8"),
+        root().join(base).to_str().expect("utf8"),
         "--depth",
         DIFF_MUTATE_DEPTH,
         "--max-mutants",
@@ -264,7 +255,9 @@ fn mutate_differential_cell(path_str: &str, base: &str) -> Cell {
         "--max-mutants",
         DIFF_MUTATE_MAX,
     ]);
-    let base_survived = baseline["summary"]["survived"].as_i64().unwrap_or(0);
+    let base_survived = baseline["summary"]["survived"]
+        .as_i64()
+        .expect("baseline mutate must report its survivor count");
     let injected_survived = injected["summary"]["survived"].as_i64().unwrap_or(0);
     cell(
         injected_survived > base_survived,

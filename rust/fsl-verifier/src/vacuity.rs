@@ -7,13 +7,12 @@
 //! so they must stay on this side of the `fsl-runtime`/`fsl-solver` boundary
 //! (`AGENTS.md`: `fsl-runtime` must remain independent of `fsl-solver`).
 //!
-//! Every lane is a **bounded number of one-shot queries over freshly named
-//! states**, decided before the bounded-model-checking unrolling accumulates
-//! path constraints. That placement is what makes them depth-independent:
-//! each judgment quantifies over the declared type space, which is a superset
-//! of the reachable states, so "unsat" here means "unsat in every reachable
-//! state at every depth". A judgment that would disappear at a larger `--depth`
-//! is never produced (issue #465, accepted resolution (b)).
+//! Every lane uses a **bounded number of queries over freshly named states**.
+//! BMC runs these lanes late, after witness/reachable/deadlock projection, so
+//! diagnostic queries cannot perturb those witnesses. Fresh-state diagnostic
+//! premises, not the unrolled execution state's eligibility, define each query.
+//! The declared type space contains the reachable states; a judgment that would
+//! disappear at a larger `--depth` is never produced (issue #465).
 //!
 //! Inconclusive backends never produce a finding: `SatResult::Unknown` is
 //! treated as "not proven", the same fail-quiet direction the lanes take for
@@ -22,16 +21,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use fsl_core::{
-    ActionDef, KernelBinder as Binder, KernelExpr as Expr, KernelLValue as LValue, KernelModel,
-    KernelStatement as Statement, PropertyDef, Span,
+    ActionDef, KernelExpr as Expr, KernelLValue as LValue, KernelModel,
+    KernelStatement as Statement, PropertyDef, Span, integer_range_state_references,
 };
 use fsl_solver::{SatResult, SmtSolver};
 
 use crate::VerifyError;
-use crate::eval::eval;
-use crate::transition::{ActionInstance, action_guards, init_constraints, transition_constraint};
+use crate::eval::{FailureClass, eval, property_evaluation_status};
+use crate::transition::{
+    ActionInstance, action_guards, action_guards_in, classified_action_guard_definedness_in,
+    init_constraints, initial_state, transition_constraint,
+};
 use crate::value::{
-    Bindings, SymbolicState, bool_term, bounds, i64_index, logical_equal,
+    SymbolicState, TypedBindings as Bindings, bool_term, bounds, i64_index, logical_equal,
     symbolic_state_with_suffix,
 };
 
@@ -177,7 +179,7 @@ fn frozen_state_vars(model: &KernelModel) -> BTreeSet<String> {
         .collect()
 }
 
-fn collect_assigned_roots(statements: &[Statement], out: &mut BTreeSet<String>) {
+pub(crate) fn collect_assigned_roots(statements: &[Statement], out: &mut BTreeSet<String>) {
     for statement in statements {
         match statement {
             Statement::Assign { target, .. } => {
@@ -203,120 +205,10 @@ fn lvalue_root(target: &LValue) -> &str {
     }
 }
 
-/// State variables an expression may read.
-///
-/// Only used to decide whether a lane is worth a query; both an over- and an
-/// under-approximation stay sound, because the query itself quantifies over
-/// the whole type space either way.
+/// Free state reads, excluding lexical binders so they cannot trigger a frozen
+/// query or be reported as frozen state variables.
 fn referenced_state_vars(model: &KernelModel, expr: &Expr) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    collect_vars(expr, &mut names);
-    names
-        .into_iter()
-        .filter(|name| model.state.iter().any(|(state, _)| state == name))
-        .collect()
-}
-
-fn collect_vars(expr: &Expr, out: &mut BTreeSet<String>) {
-    match expr {
-        Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::EnumMember { .. } => {}
-        Expr::Var(name) => {
-            out.insert(name.clone());
-        }
-        Expr::Some(inner)
-        | Expr::Neg(inner)
-        | Expr::Not(inner)
-        | Expr::Field(inner, _)
-        | Expr::UnaryNamed { expr: inner, .. }
-        | Expr::Stage { entity: inner, .. } => collect_vars(inner, out),
-        Expr::Set(items) | Expr::Seq(items) => {
-            for item in items {
-                collect_vars(item, out);
-            }
-        }
-        Expr::Struct { fields, .. } => {
-            for (_, value) in fields {
-                collect_vars(value, out);
-            }
-        }
-        Expr::Call { args, .. } => {
-            for arg in args {
-                collect_vars(arg, out);
-            }
-        }
-        Expr::Method { receiver, args, .. } => {
-            collect_vars(receiver, out);
-            for arg in args {
-                collect_vars(arg, out);
-            }
-        }
-        Expr::Index(left, right)
-        | Expr::Binary { left, right, .. }
-        | Expr::BinaryNamed { left, right, .. } => {
-            collect_vars(left, out);
-            collect_vars(right, out);
-        }
-        Expr::Conditional {
-            condition,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            collect_vars(condition, out);
-            collect_vars(then_expr, out);
-            collect_vars(else_expr, out);
-        }
-        Expr::TernaryNamed {
-            first,
-            second,
-            third,
-            ..
-        } => {
-            collect_vars(first, out);
-            collect_vars(second, out);
-            collect_vars(third, out);
-        }
-        Expr::Is { expr, .. } => collect_vars(expr, out),
-        Expr::Quantified { binder, body, .. } => {
-            collect_binder_vars(binder, out);
-            collect_vars(body, out);
-        }
-        Expr::Aggregate { binder, value, .. } => {
-            collect_binder_vars(binder, out);
-            if let Some(value) = value {
-                collect_vars(value, out);
-            }
-        }
-    }
-}
-
-fn collect_binder_vars(binder: &Binder, out: &mut BTreeSet<String>) {
-    match binder {
-        Binder::Typed { where_expr, .. } => {
-            if let Some(where_expr) = where_expr {
-                collect_vars(where_expr, out);
-            }
-        }
-        Binder::Range {
-            lo, hi, where_expr, ..
-        } => {
-            collect_vars(lo, out);
-            collect_vars(hi, out);
-            if let Some(where_expr) = where_expr {
-                collect_vars(where_expr, out);
-            }
-        }
-        Binder::Collection {
-            collection,
-            where_expr,
-            ..
-        } => {
-            collect_vars(collection, out);
-            if let Some(where_expr) = where_expr {
-                collect_vars(where_expr, out);
-            }
-        }
-    }
+    fsl_core::state_references(expr, model, [])
 }
 
 fn is_generated_invariant(model: &KernelModel, name: &str) -> bool {
@@ -384,11 +276,11 @@ async fn frozen_tautologies<S: SmtSolver>(
         return Ok(Vec::new());
     }
     // One pair of probe states for the whole lane: every constraint below is
-    // asserted inside `proven_unsat`'s push/pop, so nothing carries between
+    // asserted inside a balanced diagnostic query, so nothing carries between
     // invariants. Allocating per invariant instead would multiply the Z3 term
     // count by the invariant count for no gain, which matters most in the
     // browser backend's bounded heap.
-    let init = symbolic_state_with_suffix(solver, model, "vac_frozen_init")?;
+    let init = initial_state(solver, model, "vac_frozen_init")?;
     let state = symbolic_state_with_suffix(solver, model, "vac_frozen")?;
     let bound_terms = all_bounds(solver, model, &state)?;
     let init_terms = init_constraints(solver, model, &init)?;
@@ -415,11 +307,49 @@ async fn frozen_tautologies<S: SmtSolver>(
             )?);
         }
         terms.extend(bound_terms.iter().cloned());
-        let mut bindings = Bindings::new();
-        let value = eval(solver, model, &property.expr, &state, &mut bindings, None)?;
-        terms.push(solver.not(bool_term(&value)?)?);
-        solver.set_query_context("vacuity", &property.name);
-        if proven_unsat(solver, &terms).await? {
+        let root_range = matches!(
+            &property.expr,
+            Expr::Quantified {
+                binder: fsl_core::KernelBinder::Range { .. },
+                ..
+            }
+        );
+        let proven = if root_range
+            || !integer_range_state_references(&property.expr, model, []).is_empty()
+        {
+            solver.push();
+            let analyzed: Result<bool, VerifyError> = async {
+                for term in &terms {
+                    solver.assert(term)?;
+                }
+                solver.set_query_context("vacuity", &property.name);
+                let condition = if root_range {
+                    crate::bmc::frozen_range_condition(solver, model, property, &state).await?
+                } else {
+                    crate::bmc::frozen_composite_condition(solver, model, property, &state).await?
+                };
+                let Some(condition) = condition else {
+                    return Ok(false);
+                };
+                let counterexample = solver.not(&condition)?;
+                proven_unsat(solver, &[counterexample]).await
+            }
+            .await;
+            let popped = solver.pop(1).map_err(VerifyError::from);
+            let proven = analyzed?;
+            popped?;
+            proven
+        } else {
+            let mut bindings = Bindings::new();
+            let status =
+                property_evaluation_status(solver, model, &property.expr, &state, &bindings, None)?;
+            let value = eval(solver, model, &property.expr, &state, &mut bindings, None)?;
+            let condition = solver.and(&[status.fully_defined, bool_term(&value)?.clone()])?;
+            terms.push(solver.not(&condition)?);
+            solver.set_query_context("vacuity", &property.name);
+            proven_unsat(solver, &terms).await?
+        };
+        if proven {
             findings.push(VacuityFinding::TautologyOverFrozen {
                 invariant: property.name.clone(),
                 span: property.span,
@@ -567,8 +497,7 @@ async fn deadlines_never_advance<S: SmtSolver>(
         }
 
         solver.set_query_context("vacuity", &property.name);
-        let init =
-            symbolic_state_with_suffix(solver, model, &format!("vac_deadline_init_{index}"))?;
+        let init = initial_state(solver, model, &format!("vac_deadline_init_{index}"))?;
         let mut base = init_constraints(solver, model, &init)?;
         base.push(solver.not(&strengthened_deadline_zero(solver, model, property, &init)?)?);
         if !proven_unsat(solver, &base).await? {
@@ -577,7 +506,7 @@ async fn deadlines_never_advance<S: SmtSolver>(
 
         let current =
             symbolic_state_with_suffix(solver, model, &format!("vac_deadline_cur_{index}"))?;
-        let next =
+        let mut next =
             symbolic_state_with_suffix(solver, model, &format!("vac_deadline_next_{index}"))?;
         let choice = solver.constant(
             &format!("__vac_deadline_choice_{index}"),
@@ -587,7 +516,7 @@ async fn deadlines_never_advance<S: SmtSolver>(
             solver.ge(&choice, &solver.int_value(0))?,
             solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?,
             strengthened_deadline_zero(solver, model, property, &current)?,
-            transition_constraint(solver, model, instances, &current, &next, &choice)?,
+            transition_constraint(solver, model, instances, &current, &mut next, &choice)?,
         ];
         step.push(solver.not(&strengthened_deadline_zero(solver, model, property, &next)?)?);
         if proven_unsat(solver, &step).await? {
@@ -633,7 +562,7 @@ async fn urgency_freeze<S: SmtSolver>(
     }
 
     solver.set_query_context("vacuity", "tick");
-    let init = symbolic_state_with_suffix(solver, model, "vac_urgency_init")?;
+    let init = initial_state(solver, model, "vac_urgency_init")?;
     let mut base = init_constraints(solver, model, &init)?;
     base.push(solver.not(&strengthened_urgent(solver, model, urgent, &init)?)?);
     if !proven_unsat(solver, &base).await? {
@@ -641,13 +570,13 @@ async fn urgency_freeze<S: SmtSolver>(
     }
 
     let current = symbolic_state_with_suffix(solver, model, "vac_urgency_cur")?;
-    let next = symbolic_state_with_suffix(solver, model, "vac_urgency_next")?;
+    let mut next = symbolic_state_with_suffix(solver, model, "vac_urgency_next")?;
     let choice = solver.constant("__vac_urgency_choice", &fsl_solver::Sort::Int)?;
     let mut step = vec![
         solver.ge(&choice, &solver.int_value(0))?,
         solver.lt(&choice, &solver.int_value(i64_index(instances.len())?))?,
         strengthened_urgent(solver, model, urgent, &current)?,
-        transition_constraint(solver, model, instances, &current, &next, &choice)?,
+        transition_constraint(solver, model, instances, &current, &mut next, &choice)?,
     ];
     step.push(solver.not(&strengthened_urgent(solver, model, urgent, &next)?)?);
     if !proven_unsat(solver, &step).await? {
@@ -726,26 +655,15 @@ async fn always_true_requires<S: SmtSolver>(
             if instance.action_index != action_index {
                 continue;
             }
-            let (guards, _) = action_guards(solver, model, action, &state, &instance.params)?;
-            if guards.len() != action.requires.len() {
-                // A `let` between clauses cannot change the count, but never
-                // index a mismatched pair: skip the whole action instead.
-                implied.fill(false);
-                break;
-            }
-            checked = true;
-            for (clause_index, guard) in guards.iter().enumerate() {
-                if !implied[clause_index] {
-                    continue;
-                }
-                let mut terms = bound_terms.clone();
-                terms.extend(guards[..clause_index].iter().cloned());
-                terms.push(solver.not(guard)?);
-                solver.set_query_context("vacuity", &action.name);
-                if !proven_unsat(solver, &terms).await? {
-                    implied[clause_index] = false;
-                }
-            }
+            checked |= requires_instance_implied(
+                model,
+                solver,
+                instance,
+                &state,
+                &bound_terms,
+                &mut implied,
+            )
+            .await?;
             if implied.iter().all(|entry| !entry) {
                 break;
             }
@@ -770,11 +688,91 @@ async fn always_true_requires<S: SmtSolver>(
     Ok(findings)
 }
 
+/// Run one instance's existing clause probes within its own range-bound scope.
+async fn requires_instance_implied<S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    instance: &ActionInstance<S::Term>,
+    state: &SymbolicState<S::Term>,
+    bound_terms: &[S::Term],
+    implied: &mut [bool],
+) -> Result<bool, VerifyError> {
+    let action = &model.actions[instance.action_index];
+    let range_action = fsl_core::action_has_integer_range_binder(model, action);
+    if range_action {
+        solver.push();
+    }
+    let analyzed: Result<bool, VerifyError> = async {
+        let ledger = if range_action {
+            solver.set_query_context("vacuity", &action.name);
+            for term in bound_terms {
+                solver.assert(term)?;
+            }
+            let Some(ledger) = crate::bmc::diagnostic_state_carriers(solver, model, state).await?
+            else {
+                implied.fill(false);
+                return Ok(false);
+            };
+            Some(ledger)
+        } else {
+            None
+        };
+        let (guards, _) = if let Some(ledger) = &ledger {
+            let ctx = Some(ledger);
+            let status = classified_action_guard_definedness_in(
+                solver,
+                model,
+                action,
+                state,
+                &instance.params,
+                FailureClass::PartialOperation,
+                ctx,
+            )?;
+            let undefined = solver.not(&status.defined)?;
+            if !proven_unsat(solver, &[undefined]).await? {
+                implied.fill(false);
+                return Ok(false);
+            }
+            solver.assert(&status.defined)?;
+            action_guards_in(solver, model, action, state, &instance.params, ctx)?
+        } else {
+            action_guards(solver, model, action, state, &instance.params)?
+        };
+        if guards.len() != action.requires.len() {
+            // Preserve whole-action suppression for a mismatched guard roster.
+            implied.fill(false);
+            return Ok(false);
+        }
+        for (clause_index, guard) in guards.iter().enumerate() {
+            if !implied[clause_index] {
+                continue;
+            }
+            let mut terms = bound_terms.to_vec();
+            terms.extend(guards[..clause_index].iter().cloned());
+            terms.push(solver.not(guard)?);
+            solver.set_query_context("vacuity", &action.name);
+            if !proven_unsat(solver, &terms).await? {
+                implied[clause_index] = false;
+            }
+        }
+        Ok(true)
+    }
+    .await;
+    let popped = if range_action {
+        solver.pop(1).map_err(VerifyError::from)
+    } else {
+        Ok(())
+    };
+    let checked = analyzed?;
+    popped?;
+    Ok(checked)
+}
+
 /// Whether the conjunction of `terms` is *proven* unsatisfiable.
 ///
 /// An `unknown` backend verdict answers `false`: a vacuity lane may only fire
 /// on a discharged proof obligation, never on the absence of a countermodel.
-async fn proven_unsat<S: SmtSolver>(
+pub(crate) async fn proven_unsat<S: SmtSolver>(
     solver: &mut S,
     terms: &[S::Term],
 ) -> Result<bool, VerifyError> {

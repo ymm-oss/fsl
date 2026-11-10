@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+// Approval-record regression fixture for issue #190.
+
+spec ApprovalReview {
+  state { approved: Bool, ever_approved: Bool }
+
+  init {
+    approved = false
+    ever_approved = false
+  }
+
+  action approve() "REQ-190: a pending review can be approved" {
+    requires not approved
+    approved = true
+    ever_approved = true
+  }
+
+  invariant ApprovalPersists "REQ-190: an approved review remains approved" {
+    ever_approved => approved
+  }
+}

@@ -460,7 +460,7 @@ fn a_tampered_signature_with_a_matching_trust_key_is_rejected() {
             .expect("parse record");
     // Flip exactly one *interior* character (never the last): see the
     // matching comment in issue_333_approval_requirements_document.rs's
-    // `tampered_v4_signature_is_rejected`.
+    // `tampered_v6_signature_is_rejected`.
     let original = record["signature"]["value"]
         .as_str()
         .expect("signature value")

@@ -121,6 +121,8 @@ fslc scenarios <file.fsl> [--depth K]
   returned as warnings such as
   `reachable SoldOut not witnessed at depth 3; try --depth >= 4`. `testgen
   --strict` disables partial mode and preserves the `reachable_failed` abort.
+  Before generation, `testgen` also gates inline seams and preservations through
+  the shared fold; failure returns the verify envelope/exit and writes no harness (#1337).
 
 ### 2.3 Output JSON
 

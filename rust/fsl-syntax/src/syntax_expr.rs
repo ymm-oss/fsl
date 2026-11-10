@@ -18,6 +18,9 @@ use crate::{
     TokenKind,
 };
 
+/// A struct literal that names a field an earlier field of the literal took.
+pub const DUPLICATE_STRUCT_FIELD: &str = "duplicate_struct_field";
+
 /// An unresolved source identifier with its exact token span.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SyntaxIdent {
@@ -197,6 +200,9 @@ pub enum SyntaxLValue {
 pub(crate) enum ExpressionMode {
     Kernel,
     Domain,
+    /// A kernel expression in a next-edition requirements body: `and` and
+    /// `or` may also be spelled as the keyword table's Japanese.
+    NextRequirements,
 }
 
 impl SyntaxExpr {
@@ -343,13 +349,24 @@ impl SyntaxExpr {
             SyntaxExprKind::Some(value) => Expr::Some(Box::new(value.into_kernel()?)),
             SyntaxExprKind::Set(values) => Expr::Set(convert_list(values)?),
             SyntaxExprKind::Seq(values) => Expr::Seq(convert_list(values)?),
-            SyntaxExprKind::Struct { name, fields } => Expr::Struct {
-                name: name.text,
-                fields: fields
-                    .into_iter()
-                    .map(|(field, value)| Ok((field.text, value.into_kernel()?)))
-                    .collect::<Result<Vec<_>, ParseError>>()?,
-            },
+            SyntaxExprKind::Struct { name, fields } => {
+                let mut seen = std::collections::BTreeSet::new();
+                if let Some((field, _)) = fields.iter().find(|(field, _)| !seen.insert(&field.text))
+                {
+                    return Err(ParseError::coded(
+                        DUPLICATE_STRUCT_FIELD,
+                        format!("duplicate field '{}.{}'", name.text, field.text),
+                        field.span,
+                    ));
+                }
+                Expr::Struct {
+                    name: name.text,
+                    fields: fields
+                        .into_iter()
+                        .map(|(field, value)| Ok((field.text, value.into_kernel()?)))
+                        .collect::<Result<Vec<_>, ParseError>>()?,
+                }
+            }
             SyntaxExprKind::Name(name) => Expr::Var(name.text),
             SyntaxExprKind::Call { callee, args } => {
                 let name = callee.text;
@@ -713,6 +730,7 @@ pub(crate) fn parse_tokens_expression(
     cursor: &mut usize,
     mode: ExpressionMode,
     line_terminated: bool,
+    diagnose_legacy_operators: bool,
 ) -> Result<SyntaxExpr, ParseError> {
     let line = line_terminated.then(|| tokens[*cursor].span.start.line);
     let mut parser = SyntaxParser {
@@ -720,6 +738,7 @@ pub(crate) fn parse_tokens_expression(
         cursor: *cursor,
         mode,
         line,
+        diagnose_legacy_operators,
     };
     let expression = parser.expression(0)?;
     *cursor = parser.cursor;
@@ -736,6 +755,7 @@ pub(crate) fn parse_tokens_lvalue(
         cursor: *cursor,
         mode,
         line: None,
+        diagnose_legacy_operators: false,
     };
     let target = parser.lvalue()?;
     *cursor = parser.cursor;
@@ -747,6 +767,7 @@ struct SyntaxParser<'a> {
     cursor: usize,
     mode: ExpressionMode,
     line: Option<u32>,
+    diagnose_legacy_operators: bool,
 }
 
 impl SyntaxParser<'_> {
@@ -819,6 +840,23 @@ impl SyntaxParser<'_> {
                 continue;
             }
 
+            if self.diagnose_legacy_operators
+                && !self.at_boundary()
+                && let TokenKind::Symbol(operator) = &self.peek().kind
+                && let Some(replacement) = match operator.as_str() {
+                    "||" => Some("or"),
+                    "->" => Some("=>"),
+                    _ => None,
+                }
+            {
+                return Err(ParseError::coded(
+                    "unsupported_in_edition",
+                    format!(
+                        "expression operator '{operator}' is unsupported in this edition; use '{replacement}' manually, then review fslc migrate <file> --edition next for remaining edits"
+                    ),
+                    self.peek().span,
+                ));
+            }
             let Some((canonical, spelling, left_power, right_power)) = self.infix() else {
                 break;
             };
@@ -1262,7 +1300,14 @@ impl SyntaxParser<'_> {
             TokenKind::Ident(value) | TokenKind::Symbol(value) => value.as_str(),
             _ => return None,
         };
-        match spelling {
+        let operator = match (self.mode, &self.peek().kind) {
+            (ExpressionMode::NextRequirements, TokenKind::Ident(_)) => {
+                crate::keywords::english_of(crate::keywords::KeywordContext::Expression, spelling)
+                    .unwrap_or(spelling)
+            }
+            _ => spelling,
+        };
+        match operator {
             "=>" => Some(("=>".to_owned(), spelling.to_owned(), 1, 1)),
             "->" if self.mode == ExpressionMode::Domain => {
                 Some(("=>".to_owned(), spelling.to_owned(), 1, 1))
@@ -1422,5 +1467,21 @@ fn join(first: Span, last: Span) -> Span {
     Span {
         start: first.start,
         end: last.end,
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    #[test]
+    fn a_line_terminated_expression_does_not_classify_the_next_line_operator() {
+        for operator in ["->", "||"] {
+            let tokens = crate::lex(&format!("true\n{operator} false")).expect("tokens");
+            let mut cursor = 0;
+            parse_tokens_expression(&tokens, &mut cursor, ExpressionMode::Kernel, true, true)
+                .expect("line boundary belongs to the caller");
+            assert_eq!(cursor, 1);
+        }
     }
 }

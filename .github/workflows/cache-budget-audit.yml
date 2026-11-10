@@ -30,6 +30,7 @@ on:
     paths:
       - .github/scripts/audit-cache-budget.mjs
       - .github/scripts/audit-cache-budget.test.mjs
+      - .github/scripts/cargo-profile-hash.mjs
       - .github/scripts/run-cache-budget-audit.mjs
       - .github/scripts/report-cache-budget-audit.mjs
       - .github/scripts/report-cache-budget-audit.test.mjs

@@ -20,6 +20,74 @@ introduced.
 - Whole-struct `==` / `!=`: Option fields use **logical equivalence**
   (both present and equal ∧ present ⇒ values equal). Same convention as `_logical_eq`.
 
+### Repeated fields in a declaration (#1692)
+
+**Breaking removal (#1692).** `SpecItem::Struct` and the kernel kept both copies of a repeated field.
+`check` admitted a value by the first type and the bounds refused the same value, so
+`struct P { x: K, x: Bool }` passed `check` and `verify` reported `p = {"x": 1}` out of `_bounds_p`,
+which `x: K` alone accepts. Which copy the bound reads was inferred from that and not traced in the code.
+`build_model` now refuses the first
+repeated field before it reads the field types, with `kind: "name"` and `loc` at the repeated name, as
+`duplicate enum member` and `duplicate state variable` do. `SpecItem::Struct` gains `field_spans`,
+parallel to `fields`, for that location. Two copies of one type are refused too: they lose nothing, and
+that matches the other repeated declarations (#1686). A struct nothing reads is refused as well.
+
+Routes on one document, `FSLC_CACHE=off`, base `b2cdb394fedcba015261df05587c4721583329e3`, head `66ca55474a05a8aefc9d92b29095505f1f1742af`. The literal is `P { x: 1 }`
+and the invariant `p.x == 1`.
+
+| Route | Base, `x: K, x: Bool` | Base, `x: Bool, x: K` | Base, `x: K, x: K` | Head, any |
+|---|---|---|---|---|
+| `check` | exit 0, `ok` | exit 2, `Int` not assignable to `Bool` at 5:10 | exit 0, `ok` | exit 2, `kind: "name"`, at 3:20, or 3:23 for `x: Bool` first |
+| `verify` on bmc | exit 1, `violated` | exit 2 | exit 0, `verified` | exit 2 |
+| `verify` on explicit, induction | exit 1, `violated` | exit 2 | exit 0, `proved` | exit 2 |
+| `fsl-bfs` | exit 0, a `type_bound` violation of `_bounds_p` | exit 2 | not run | exit 2, the message on stderr with no position |
+| `sweep --depth 0..1` | exit 1, `sweep_failed` | exit 2 | exit 0, `sweep_passed` | exit 2 |
+| `mutate`, `html`, `ledger` | exit 1 | exit 2 | exit 0 | exit 2 |
+| `scenarios`, `testgen` | exit 2, `SMT term sort mismatch` | exit 2 | exit 0 | exit 2 |
+| `replay --from-log`, a log with `x` 1 | exit 1, `nonconformant` | exit 2 | exit 0, `conformant` | exit 2 |
+| `refine`, either side, against the one-field spec | exit 2, `type 'P' is declared differently` | exit 2 | exit 2, the same | exit 2 |
+| `document generate` | exit 2, `no requirement IDs` | exit 2 | exit 2, the same | exit 2 |
+| `fmt --check` | exit 1, `format_check` | exit 2 | exit 1, `format_check` | exit 2, `kind: "semantics"`, no `loc` |
+| `fmt` | exit 0 | exit 2 | exit 0 | exit 2, `kind: "semantics"`, no `loc` |
+| `kernel` 1 and 2, `typestate`, `lint`, `migrate`, `explain`, `analyze`, `conformance`, `document claims`, `diff`, `replay --trace` | exit 0 | exit 2 | exit 0 | exit 2 |
+
+`fmt` and `fsl-bfs` give a repeated `enum` member the same way, so that is how those two report a model
+failure, not something this refusal adds.
+
+| Other file or dialect | Base | Head |
+|---|---|---|
+| Component, action lifted, synchronized or internal, or struct unreferenced | exit 0, `ok` | `component "piece.fsl" failed to check (duplicate struct field 'P.x' at piece.fsl:3:20) at root.fsl:2:3`, `kind: "semantics"`, `loc` at the `use` |
+| Inline `implements`, the other file a `spec` or `domain` | the next error of that root | `implements "abs.fsl" failed to check (duplicate struct field 'P.x' at abs.fsl:3:20)`, or `(duplicate struct field 'C.value' at absdom.fsl:3:34)` for a `domain`, `kind: "type"`, `loc` on the `implements` |
+| `value_object`, `check`, `domain check`, `testgen`, `generate` | exit 2 at the `init` for a different type, exit 0 for the same type | `duplicate struct field 'C.value' at doc.fsl:3:34`, `kind: "name"`, `loc` there |
+| `value_object`, `domain expand`, `domain analyze` | exit 0 | the same message without the file, and `expand` writes nothing |
+| `requirements` with a struct, `fsl 5` `spec`, literate document | exit 0, `ok` | as a `spec`, at the repeated field |
+
+The component's check runs before names are prefixed, so the report names `P` and not `part__P`. A
+`value_object` is refused where `domain_kernel_source` and lowering both start, because `domain expand`
+and `domain analyze` build no model.
+
+An input that already failed keeps exit 2 and now reports the repeat, so its kind changes:
+`x: Set<K>, x: K` from `kind: "type"`, `struct field 'P.x' has non-scalar type`, to `kind: "name"` at
+3:25, and `x: Nope, x: K` from `kind: "type"`, `unknown type 'Nope'`, to `kind: "name"` at 3:23. A
+reserved field name (`__x`) keeps its own refusal, which runs first.
+
+In `fslc-lsp` the refusal is a diagnostic at the repeated field, `kind` `name`, `code` `FSL-NAME`
+(`rust/fsl-lsp/tests/issue_1692_struct_field_declared_twice.rs`). The Worker was not run. Rust API:
+`SpecItem::Struct` gains `field_spans`.
+
+Migration: keep the one field you mean. There is no automatic migration.
+
+On-disk transition set (empty). Base `b2cdb394fedcba015261df05587c4721583329e3`, head `66ca55474a05a8aefc9d92b29095505f1f1742af`, each binary built from its own tree in
+its own target directory with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and
+`rust/fslc/tests/fixtures/` (650 forms: 23/195/432) ran with `FSLC_CACHE=off` and its own tree as cwd,
+as `fslc check <path>` stable and with the next edition enabled, and as `fslc kernel <path>
+--kernel-version 1|2`, twice per side. All 2600 pairs had equal complete stdout, stderr and exit with
+no field excluded, and no run differed from its repeat: 0 ok-to-error and 0 error-to-ok transitions.
+That includes `specs/order_system.fsl`, whose component `specs/payment.fsl` declares a struct. A pattern
+scan, on the earlier base `1559e8eba`, of the repository's `.fsl`, `.rs`, `.md`, `.py`, `.ts`, `.js`, `.json` and `.html` files found 930
+`struct` bodies and no FSL declaration repeating a field; the only hits were Rust structs. No required
+test's inline fixtures were rewritten.
+
 ## 2. Lowering (composition of physical splits)
 
 | Logical | Physical |
@@ -97,3 +165,80 @@ It also automatically enters the induction step premise (via invariants).
   in the §9 idiom collection, to "writable directly from v2.1".
 - Add a note on lifting the Option-field restriction in the "no struct nesting"
   paragraph of DESIGN-v1.md §3.4.
+
+## 8. Repeated fields in a literal (#1685)
+
+**Breaking removal (#1685).** A literal is a list of named values and `Expr::Struct` keeps that
+list, but every evaluator reads a field by name and the last occurrence decides. A repeated field
+was therefore accepted, its earlier values were dropped, and swapping them reversed the verdict.
+The first repeated field is now refused at its name where the literal becomes a kernel expression
+(`SyntaxExpr::into_kernel`), so no position and no edition needs its own check.
+
+The kind is `parse`, with `diagnostic_code: "duplicate_struct_field"`. `Expr::Struct` has no field
+spans, so a check in the model could only name the enclosing statement, and the requirement is the
+repeated name. A `domain` value object lowers its `SyntaxExpr` without that conversion and keeps
+its own `duplicate field` refusal, `kind: "semantics"`, at `check`, `domain check`, `domain generate`,
+`domain testgen` and `domain replay`. `domain expand` and `domain analyze` build no model, so they exited 0 on base,
+and `expand` wrote both copies to a file `check` then refused. They now refuse where they read the
+literal (`normalize_expr`), and `expand` writes nothing. The message is the same except for the file:
+`check` prints `at doc.fsl:10:31` and they print `at 10:31`. That was measured with the
+literal in `evolve`, a state default, `requires` and an invariant. Reading a marked step's input is
+speculative and discards parse errors, so this code alone is passed on: otherwise the refusal
+became `expected identifier` elsewhere on the line.
+
+Verdicts the removal takes, on one document whose `init` holds the literal and whose invariant is `p.x == 1`, with `FSLC_CACHE=off`, base
+`56354e477544f9be1f4477ddf036e5855d514bb5`, head `0d869b09886c1f627bf21bcc61394477dcceb4e7`:
+
+| Route | Base, `x: 1, x: 2` | Base, `x: 2, x: 1` | Head, either |
+|---|---|---|---|
+| `check` | exit 0, `ok` | exit 0, `ok` | exit 2 at 5:24 |
+| `verify` on bmc | exit 1, `violated` | exit 0, `verified` | exit 2 |
+| `verify` on explicit, induction | exit 1, `violated` | exit 0, `proved` | exit 2 |
+| `fsl-bfs` | invariant violation at step 0 | no violation | exit 2, the message on stderr |
+| `refine`, the literal in the implementation | exit 1, `impl_violated` | exit 0, `refines` | exit 2 |
+| `refine`, the literal in the abstraction | exit 1, `refinement_failed` | exit 0, `refines` | exit 2 |
+| `replay --from-log`, a log with `x` 1 | exit 1, `nonconformant` | exit 0, `conformant` | exit 2 |
+| `replay --trace`, an empty trace | exit 0, `conformant` | exit 0, `conformant` | exit 2 |
+| `scenarios`, `mutate`, `testgen`, `html`, `ledger` | exit 1 | exit 0 | exit 2 |
+| `diff` against the one-value spec, either side | exit 1, `semantic_diff` | exit 0, `semantic_diff` | exit 2 |
+| `sweep --depth 0..1` | exit 1, `sweep_failed` | exit 0, `sweep_passed` | exit 2 |
+| `lint`, `explain`, `analyze`, `conformance`, `kernel` 1 and 2, `typestate`, `fmt`, `migrate`, `document claims` | exit 0 | exit 0 | exit 2 |
+| `fmt --check` | exit 1, `format_check` | exit 1, `format_check` | exit 2 |
+
+`lint` and `migrate` add `file` to `loc`. Each form was also refused at the repeated field, and accepted with one
+value per field, in these positions: `init`, an assignment, `let`, an `if` statement, a conditional,
+`requires`, `ensures`, `invariant`, a quantifier body, `reachable`, `leadsTo`, a `def` body, a `def`
+argument, a map value, a field read, a scenario's `then`, a rule guard, a step's input with and without
+particles, a legacy `expect`, `spec` under `fsl 5` and a literate document. A struct field cannot
+hold a struct and `Option<P>` state is refused, so a literal does not nest. A `business` document
+and a `compose` root declare no struct, and one `part.P { ... }` written in a root was already a
+parse error.
+
+| Other file | Head |
+|---|---|
+| Component, action lifted, synchronized, or internal and unreferenced | `component "piece.fsl" failed to parse (duplicate field 'P.x' at piece.fsl:6:32) at root.fsl:2:3`, `kind: "semantics"`, `loc` at the `use`; base accepted them |
+| Inline `implements` | `implements "abs.fsl" failed to parse (duplicate field 'P.x' at abs.fsl:6:33)`, `kind: "type"`, `loc` on the `implements` |
+| Refinement mapping | `duplicate field 'P.x'`, `kind: "type"`, `loc` at the field; base accepted it, exit 0, `refines` |
+
+An input that already failed keeps exit 2 and now reports the repeat, so its kind changes. With
+`struct P { x: Q, y: K }`, `P { x: Q { a: 1, a: 2 }, y: 0 }` goes from `kind: "type"`, `struct field
+'P.x' has non-scalar type`, to `kind: "parse"`, `duplicate field 'Q.a' at 6:31`. An undefined
+`Q { a: 1, a: 2 }` goes from `kind: "semantics"`, `public Kernel cannot resolve type 'Q'`, to
+`kind: "parse"`, `duplicate field 'Q.a' at 5:24`. With one value per field each keeps its failure.
+
+In `fslc-lsp` the refusal is a diagnostic at the repeated field, `kind` `parse`, `code`
+`duplicate_struct_field` (`rust/fsl-lsp/tests/issue_1685_struct_field_repeat.rs`), and like any parse
+error it leaves `documentSymbol` returning null until the literal is fixed. The Worker was not run.
+Rust API: `fsl_syntax::DUPLICATE_STRUCT_FIELD`.
+
+Migration: keep the one value you mean. There is no automatic migration.
+
+On-disk transition set (empty). Base `56354e477544f9be1f4477ddf036e5855d514bb5`, head
+`0d869b09886c1f627bf21bcc61394477dcceb4e7`, each binary built from its own tree in its own target directory with
+Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (651 forms:
+23/195/433) ran with `FSLC_CACHE=off` and its own tree as cwd, as `fslc check <path>` stable and with
+`FSLC_UNSTABLE=fsl5`, and as `fslc kernel <path> --kernel-version 1|2`, twice per side. All 2604 pairs
+had equal complete stdout, stderr and exit with no field excluded, and no run differed from its repeat:
+0 ok-to-error and 0 error-to-ok transitions. No required test's inline fixtures were rewritten. That
+sweep runs no `domain` command, so `domain expand` and `domain analyze` also ran on the 37 forms in that
+corpus that declare a `domain`: 74 runs, each with equal complete stdout, stderr and exit, once per side.

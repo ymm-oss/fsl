@@ -79,9 +79,13 @@ fn render(fixture: &Fixture, locale: Locale) -> (RequirementClaimSet, RenderedDo
 }
 
 fn req2_block(markdown: &str) -> &str {
-    let start = markdown.find("### REQ-2").expect("REQ-2 section exists");
+    let start = markdown
+        .find("### REQ-CANCEL-002")
+        .expect("REQ-CANCEL-002 section exists");
     let rest = &markdown[start..];
-    let end = rest.find("### REQ-3").expect("REQ-3 section exists");
+    let end = rest
+        .find("### REQ-CANCEL-003")
+        .expect("REQ-CANCEL-003 section exists");
     rest[..end].trim_end()
 }
 
@@ -287,19 +291,19 @@ fn renderer_rejects_a_claim_moved_to_another_requirement() {
         .iter_mut()
         .find(|claim| claim.id == claim_id)
         .expect("tap_cancel claim")
-        .requirements = vec!["REQ-2".to_owned()];
+        .requirements = vec!["REQ-CANCEL-002".to_owned()];
     claims
         .requirements
         .iter_mut()
-        .find(|requirement| requirement.id == "REQ-1")
-        .expect("REQ-1")
+        .find(|requirement| requirement.id == "REQ-CANCEL-001")
+        .expect("REQ-CANCEL-001")
         .claim_ids
         .retain(|id| id != claim_id);
     let req2 = claims
         .requirements
         .iter_mut()
-        .find(|requirement| requirement.id == "REQ-2")
-        .expect("REQ-2");
+        .find(|requirement| requirement.id == "REQ-CANCEL-002")
+        .expect("REQ-CANCEL-002");
     req2.claim_ids.push(claim_id.to_owned());
     req2.claim_ids.sort();
     let kernel =
@@ -370,28 +374,28 @@ fn renderer_rejects_changes_to_every_source_derived_rcir_section() {
     }
 }
 
-// --- Acceptance criterion 1: cancel_system.fsl REQ-2 renders both guards, ---
+// --- Acceptance criterion 1: cancel_system.fsl REQ-CANCEL-002 renders both guards, ---
 // --- the struct update, and fairness without loss (ja + en golden).       ---
 
 #[test]
 fn req2_ja_golden_matches_exactly() {
     let fixture = cancel_system();
     let (_, doc) = render(&fixture, Locale::Ja);
-    let expected = "### REQ-2\n\
+    let expected = "### REQ-CANCEL-002\n\
 \n\
 **要件原文（意図。形式意味との一致は人間が確認する）**\n\
 \n\
 > On cancellation-form submission, show the retention offer exactly once per subscription\n\
 \n\
-（出典: `examples/pm/cancel_system.fsl:64`）\n\
+（出典: `examples/pm/cancel_system.fsl:68`）\n\
 \n\
 **形式化された意味（FSLから決定論的に生成）**\n\
 \n\
-<!-- fsl:claim begin id=\"action:submit_cancel#operation\" digest=\"sha256:62bfddb43c581089b0c8c3a3516c58d576708efaeda042793c0cd180c0b7b547\" -->\n\
+<!-- fsl:claim begin id=\"action:submit_cancel#operation\" digest=\"sha256:23ae9e27d9e1f549776e540284bd97c0bc5471cf3c1c8db9652c42b3c76bbece\" -->\n\
 #### 操作: `submit_cancel`\n\
 \n\
 - 識別子: `action:submit_cancel#operation`\n\
-- 出典: `examples/pm/cancel_system.fsl:65`\n\
+- 出典: `examples/pm/cancel_system.fsl:69`\n\
 - パラメータ: `c: Sub`\n\
 \n\
 操作 `submit_cancel` を実行できるのは、次の条件をすべて満たす場合に限る。\n\
@@ -418,21 +422,21 @@ fn req2_ja_golden_matches_exactly() {
 fn req2_en_golden_matches_exactly() {
     let fixture = cancel_system();
     let (_, doc) = render(&fixture, Locale::En);
-    let expected = "### REQ-2\n\
+    let expected = "### REQ-CANCEL-002\n\
 \n\
 **Original requirement text (intent; a human confirms that it matches the formalized meaning)**\n\
 \n\
 > On cancellation-form submission, show the retention offer exactly once per subscription\n\
 \n\
-(Source: `examples/pm/cancel_system.fsl:64`)\n\
+(Source: `examples/pm/cancel_system.fsl:68`)\n\
 \n\
 **Formalized meaning (generated deterministically from the FSL)**\n\
 \n\
-<!-- fsl:claim begin id=\"action:submit_cancel#operation\" digest=\"sha256:8ad70c92eda277d36efca15a5d82569add1d1d8392d9f6e07fae4134d003059f\" -->\n\
+<!-- fsl:claim begin id=\"action:submit_cancel#operation\" digest=\"sha256:2b57a37ba3fc25603f2cbdd9b715080bdb6c53a761c4241cb943f58100b7ddcb\" -->\n\
 #### Operation: `submit_cancel`\n\
 \n\
 - Identifier: `action:submit_cancel#operation`\n\
-- Source: `examples/pm/cancel_system.fsl:65`\n\
+- Source: `examples/pm/cancel_system.fsl:69`\n\
 - Parameters: `c: Sub`\n\
 \n\
 Action `submit_cancel` can be executed only when all of the following conditions hold.\n\
@@ -636,7 +640,7 @@ fn requires_renders_as_enablement_not_desirability() {
 fn not_is_preserved_as_negation_not_dropped() {
     let fixture = cancel_system();
     let (_, ja) = render(&fixture, Locale::Ja);
-    // REQ-2's second guard is `requires not scr[c].offered`.
+    // REQ-CANCEL-002's second guard is `requires not scr[c].offered`.
     assert!(ja.markdown.contains("`scr[c].offered` が `false` である"));
 }
 

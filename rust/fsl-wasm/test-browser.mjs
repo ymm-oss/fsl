@@ -14,6 +14,11 @@ import { assertNormalizerContract, differences, normalizeEnvelope } from "./pari
 import { workerMessageError } from "./web/worker-protocol.mjs";
 import { classifyOutcome, ParityViolationError, ProbeTimeoutError } from "./browser-outcome.mjs";
 import { specImports } from "./spec-imports.mjs";
+import { waitForCompletion } from "./completion-wait.mjs";
+
+function logPhase(phase, detail = "") {
+  console.error(`[${new Date().toISOString()}] fsl-wasm browser phase=${phase}${detail ? ` ${detail}` : ""}`);
+}
 
 async function main() {
   assertNormalizerContract();
@@ -30,10 +35,32 @@ if (protocolError?.message !== "initialization: probe" || workerMessageError({ e
 const dist = fileURLToPath(new URL("./dist/", import.meta.url));
 const repository = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const nativeCommandTimeoutMs = 60_000;
+// Live envelopes carry the workspace release; read it from the package
+// metadata the producers were built from instead of pinning a literal.
+const workspaceManifest = await readFile(join(repository, "rust/Cargo.toml"), "utf8");
+// Scan line by line: a `[` inside a value (an array, an inline table) must not
+// end the section; only a new `[table]` header does.
+let workspaceVersion;
+{
+  let section = "";
+  for (const line of workspaceManifest.split(/\r?\n/)) {
+    const header = /^\s*\[([^\]]+)\]\s*(?:#.*)?$/.exec(line);
+    if (header) {
+      section = header[1].trim();
+      continue;
+    }
+    const entry = /^\s*version\s*=\s*"([^"]+)"/.exec(line);
+    if (section === "workspace.package" && entry) {
+      workspaceVersion = entry[1];
+      break;
+    }
+  }
+}
+if (!workspaceVersion) throw new Error("rust/Cargo.toml [workspace.package].version not found");
 
-async function command(executable, args, timeoutMs = 300_000) {
+async function command(executable, args, timeoutMs = 300_000, environment = process.env) {
   return new Promise((resolveCommand, reject) => {
-    const process = spawn(executable, args, { cwd: repository, stdio: ["ignore", "pipe", "pipe"] });
+    const process = spawn(executable, args, { cwd: repository, env: environment, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -68,7 +95,12 @@ async function nativeEnvelope(testCase) {
       "--deadlock", testCase.options.deadlock,
       "--no-cache",
     ];
-  const result = await command(nativeBinary, args, nativeCommandTimeoutMs);
+  const result = await command(nativeBinary, args, nativeCommandTimeoutMs,
+    testCase.dependency_edition ? { ...process.env, FSLC_CACHE: "off" } : process.env);
+  if (testCase.id?.startsWith("1467/")) {
+    await writeFile(join(dist, `issue-${testCase.id.replaceAll("/", "-")}-native-command.json`),
+      JSON.stringify({ binary: nativeBinary, args, cwd: repository, ...result }, null, 2));
+  }
   if (testCase.expected_status !== undefined && result.status !== testCase.expected_status) {
     throw new Error(
       `native CLI exit mismatch for ${testCase.path}: expected ${testCase.expected_status}, got ${result.status}`,
@@ -229,6 +261,13 @@ for (const cmd of ["check", "verify"]) {
     throw new Error(`${failedPreservationCase} (${cmd}) must remain in the parity corpus`);
   }
 }
+// #1599: progress-bearing preservation must stay in full native/Worker parity.
+const progressMergeCase = "examples/refinement_liveness/governance_detects_progress_merge_collision.fsl";
+for (const cmd of ["check", "verify"]) {
+  if (!parityCases.some((testCase) => testCase.path === progressMergeCase && testCase.cmd === cmd)) {
+    throw new Error(`${progressMergeCase} (${cmd}) must remain in the parity corpus`);
+  }
+}
 // #577: anchors the retirement of the 28 stale refinement exclusions. Native
 // and Worker check/verify envelopes now agree for every refinement document
 // in the corpus (the exclusion premise measured in #568 no longer holds), so
@@ -238,6 +277,23 @@ for (const cmd of ["check", "verify"]) {
 const retiredRefinementCase = "specs/cart_refines.fsl";
 if (!parityCases.some((testCase) => testCase.path === retiredRefinementCase)) {
   throw new Error(`${retiredRefinementCase} must remain in the parity corpus`);
+}
+// #1449: accepted current-edition warning finalization runs after the main
+// browser BMC. Keep this verify case in full-envelope parity with depth 3 / warn
+// and reject a vacuous agreement where both surfaces silently drop warnings.
+const editionWarningCase = "examples/named_predicate.fsl";
+const editionWarningParity = parityCases.find(
+  (testCase) => testCase.path === editionWarningCase && testCase.cmd === "verify",
+);
+if (!editionWarningParity) {
+  throw new Error(`${editionWarningCase} (verify) must remain in the parity corpus`);
+}
+const editionWarningNative = await nativeEnvelope(editionWarningParity);
+if (editionWarningNative.result !== "verified"
+    || !Array.isArray(editionWarningNative.warnings) || editionWarningNative.warnings.length === 0
+    || editionWarningNative.warnings.filter((warning) => warning.code === "legacy_string_metadata"
+      && warning.edition === "current" && warning.severity === "warning").length !== 1) {
+  throw new Error(`${editionWarningCase} must verify with one current-edition metadata warning`);
 }
 // #1163: the Worker's `check` now runs the shared `check_stages`, including
 // the lenient Agent analysis native `check` runs, and its `verify` rejects an
@@ -274,6 +330,74 @@ parityCases.push({
   options: {},
   expected_status: 2,
 });
+// #1457: require real verdicts, not parity between two unsupported errors.
+// Positive cases force the symbolic route; negative controls also preserve
+// the exact deterministic witness instead of only the normalizer's trace shape.
+for (const binder of ["seq_literal", "set_statement"]) {
+  const fixture = `rust/fslc/tests/fixtures/issue_1457_worker_${binder}.fsl`;
+  const positive = await readFile(join(repository, fixture), "utf8");
+  for (const violated of [false, true]) {
+    const source = violated ? positive.replace("not done or flag", "not done or not flag") : positive;
+    const path = relative(repository, join(dist, `issue-1457-${binder}-${violated}.fsl`)).split("\\").join("/");
+    await writeFile(join(repository, path), source, "utf8");
+    parityCases.push({
+      id: `parity-${parityCases.length}`,
+      cmd: "verify",
+      path,
+      source,
+      source_file: path,
+      files: {},
+      options: { depth: 4, deadlock: "warn" },
+      expected_status: violated ? 1 : 0,
+      expected_result: violated ? "violated" : "verified",
+      exact_collection_witness: true,
+    });
+  }
+}
+// Exact issue-pair rejection and one-time warning, Linux WASM integration only.
+// The native test seam cannot run the pre-fix main browser BMC. Read the same
+// fixture files as the shared Rust table, rather than maintaining byte copies.
+// No product transport or solver-injection surface is changed here.
+const dependencyRoot = await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_root.txt"), "utf8");
+const dependencyVerify = JSON.parse(await readFile(join(repository, "rust/fsl-wasm/tests/support/dependency_verify.json"), "utf8"));
+delete dependencyVerify._license;
+const dependencyLegacy = await readFile(join(repository, editionWarningCase), "utf8");
+const dependencyCases = [];
+// #1467: real JS Worker batch, independent literal recursive value witnesses.
+const recursiveCases = [];
+const recursiveSource = `spec RecursivePacket {
+  type K = 0..1
+  struct P { a: K, o: Option<Option<K>> }
+  state { c: Bool, p: P, absent: Option<Option<K>>, m: Map<K,P> }
+  init { c = true p = P {a:0,o:some(some(0))} absent = none forall k: K { m[k] = P {a:k,o:some(none)} } }
+  action go() { c = false p = P {a:1,o:some(none)} }
+  invariant Capture { $P }
+}
+`;
+for (const [variant, predicate] of [
+  ["pass", "c or p.o == some(none)"],
+  ["reject", "c or p.a == 0"],
+  ["materialize", "c or Seq {m}.head()[0].o == some(none)"],
+]) {
+  const source = recursiveSource.replace("$P", predicate);
+  const path = relative(repository, join(dist, `issue-1467-${variant}.fsl`)).split("\\").join("/");
+  await writeFile(join(repository, path), source, "utf8");
+  for (let repeat = 0; repeat < 2; repeat += 1) recursiveCases.push({
+    id: `1467/${variant}/${repeat}`, variant, repeat, cmd: "verify", path, source,
+    source_file: path, files: {}, options: { depth: 2, deadlock: "warn" },
+  });
+}
+for (const [variant, header, expected_status] of [["N", 5, 2], ["W", 4, 0]]) {
+  const dependencyChild = `fsl ${header}\n${dependencyLegacy}`;
+  const directory = await mkdtemp(join(dist, "dependency-edition-"));
+  const path = relative(repository, join(directory, "root_compose.fsl")).split("\\").join("/");
+  await writeFile(join(repository, path), dependencyRoot, "utf8");
+  await writeFile(join(directory, "dep_next_colon.fsl"), dependencyChild, "utf8");
+  dependencyCases.push({
+    id: `E01/${variant}/worker-verify`, variant, dependency_edition: true, cmd: "verify", path, source: dependencyRoot, source_file: path,
+    files: { "dep_next_colon.fsl": dependencyChild }, options: { depth: 2, deadlock: "warn" }, expected_status,
+  });
+}
 await writeFile(
   join(dist, "parity-cases.json"),
   `${JSON.stringify([...parityCases, ...exclusionProbes])}\n`,
@@ -350,6 +474,13 @@ const chrome = [
   "/usr/bin/chromium",
 ].filter(Boolean).find(existsSync);
 if (!chrome) throw new Error("Chrome not found; set CHROME_BIN");
+logPhase("chrome", `executable=${chrome}`);
+try {
+  const version = await command(chrome, ["--version"], 2_000);
+  logPhase("chrome-version", version.status === 0 ? version.stdout.trim() : "unavailable");
+} catch {
+  logPhase("chrome-version", "unavailable");
+}
 
 profile = await mkdtemp(join(tmpdir(), "fsl-wasm-chrome-"));
 child = spawn(chrome, [
@@ -358,6 +489,7 @@ child = spawn(chrome, [
   "--remote-debugging-port=0", `--user-data-dir=${profile}`,
   `http://127.0.0.1:${port}/`,
 ], { stdio: ["ignore", "pipe", "pipe"] });
+child.once("spawn", () => logPhase("spawn", `pid=${child.pid}`));
 childClosed = new Promise((resolve) => child.once("close", resolve));
 let stderr = "";
 child.stderr.setEncoding("utf8");
@@ -381,7 +513,7 @@ const cdpTimeoutMs = 30_000;
 // CDP connection used to leave the returned promise unsettled forever: the
 // message listener is the only thing that ever resolved or rejected a
 // pending entry, so a response that never arrives hung node indefinitely,
-// and the `for (attempt < 360)` probe loop below is not actually a bound
+// and even the completion deadline below is not actually a bound
 // once a single `await cdp(...)` inside it never returns (#584). Both the
 // per-call timeout here and rejectPending's socket close/error handlers
 // below turn that hang into a loud, named failure, which lets the
@@ -401,9 +533,9 @@ const cdpTimeoutMs = 30_000;
 //   - Chrome's stderr is already accumulated but is otherwise printed only on
 //     a startup failure. A crash or renderer message in it names the cause.
 //
-// Deliberately no retry: retrying an unexplained stall would hide the event
-// this diagnostic exists to capture, and a real hang would return as a slow
-// pass instead of a failure.
+// Deliberately no individual CDP-call retry: retain the diagnostic for the
+// failed invocation. check-native-integration.sh may retry the whole browser
+// command once on status 124, recording both attempts in the step summary.
 const READY_STATE = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"];
 function cdp(socket, method, params = {}) {
   const id = nextId;
@@ -434,6 +566,133 @@ function rejectPending(error) {
   }
 }
 let details;
+let dependencyEnvelopes;
+const recursiveEnvelopes = [];
+// #1434: send whole request objects through the actual batch -> run boundary.
+// The single-request JS adapter destructures keys and cannot detect a typed
+// legacy Rust field. Never use normalizeEnvelope for these comparisons.
+async function publicationBoundary(socket) {
+  const body = "spec S { state { flag: Bool = false } action stay() { flag = false } invariant Safe { not flag } }\n";
+  const variants = [{}, { unstable: ["fsl5"] }, { unstable: ["later"] },
+    { unstable: 42 }, { unstable: { fsl5: true } }, { unrelated_unknown: { arbitrary: [42] } }];
+  const requests = [];
+  for (const header of ["", "fsl 4\n", "fsl 5\n"]) {
+    for (const extra of variants) {
+      requests.push({ cmd: "check", source: header + body, source_file: "model.fsl", ...extra });
+    }
+  }
+  const malformed = [
+    { cmd: 42 }, { source: {} }, { source_file: 42 }, { files: [] }, { options: 42 },
+    { options: { depth: "2" } }, { options: { deadlock: 42 } },
+  ];
+  for (const extra of malformed) {
+    requests.push({ cmd: "check", source: body, source_file: "model.fsl", ...extra });
+  }
+  // Real verify, not a host serde/check substitute. Preserve every raw value.
+  for (const extra of variants) {
+    requests.push({ cmd: "verify", source: "fsl 5\n" + body, source_file: "model.fsl",
+      options: { depth: 2, deadlock: "warn" }, ...extra });
+  }
+  const evaluated = await cdp(socket, "Runtime.evaluate", {
+    expression: `new Promise((resolve, reject) => {
+      const worker = new Worker('./worker.js');
+      const timer = setTimeout(() => { worker.terminate(); reject(new Error('publication boundary timeout')); }, 120000);
+      worker.onmessage = ({data}) => {
+        if (data.envelopes || data.envelope || data.transportError) {
+          clearTimeout(timer); worker.terminate();
+          if (data.envelopes) resolve(data.envelopes); else reject(new Error(JSON.stringify(data)));
+        }
+      };
+      worker.onerror = (event) => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message)); };
+      worker.postMessage({id:'publication-1434',batch:${JSON.stringify(requests)}});
+    })`, awaitPromise: true, returnByValue: true,
+  });
+  if (evaluated.exceptionDetails) throw new Error(JSON.stringify(evaluated.exceptionDetails));
+  const outputs = evaluated.result.value;
+  console.log(JSON.stringify({ publication1434: { requests, outputs } }));
+  if (!Array.isArray(outputs) || outputs.length !== requests.length) {
+    throw new Error("publication request population did not execute");
+  }
+  const versions = { verifier: { name: "fsl-wasm", version: workspaceVersion },
+    core: { name: "fsl-core", version: workspaceVersion },
+    solver: { name: "z3", backend: "z3-solver-wasm", version: "Z3 4.16.0.0" } };
+  const failures = [];
+  for (let header = 0; header < 3; header += 1) {
+    const reference = outputs[header * variants.length + 1];
+    const expected = { fsl: "1.0", result: "ok", spec: "S", warnings: [], versions };
+    if (header > 0) expected.fsl_edition = header === 1 ? 4 : 5;
+    if (header === 2) expected.edition = "next";
+    const oracleDrift = differences(reference, expected);
+    if (oracleDrift.length) failures.push({ header, oracleDrift });
+    for (let variant = 0; variant < variants.length; variant += 1) {
+      const actual = outputs[header * variants.length + variant];
+      const drift = differences(actual, reference);
+      if (drift.length) failures.push({ header, variant, drift });
+    }
+  }
+  const knownStart = 3 * variants.length;
+  // Literal messages/JSON offsets observed at the real run boundary on d83.
+  const knownMessages = [
+    "invalid type: integer `42`, expected a string at line 1 column 9",
+    "invalid type: map, expected a string at line 1 column 24",
+    "invalid type: integer `42`, expected a string at line 1 column 143",
+    "invalid type: sequence, expected a map at line 1 column 161",
+    "invalid type: integer `42`, expected struct Options at line 1 column 165",
+    "invalid type: string \"2\", expected usize at line 1 column 175",
+    "invalid type: integer `42`, expected a string at line 1 column 177",
+  ];
+  for (let index = 0; index < malformed.length; index += 1) {
+    const actual = outputs[knownStart + index];
+    const expected = { fsl: "1.0", versions, result: "error", kind: "io",
+      message: `invalid request JSON: ${knownMessages[index]}` };
+    const drift = differences(actual, expected);
+    if (drift.length) failures.push({ knownField: index, drift });
+  }
+  const verifies = outputs.slice(knownStart + malformed.length);
+  const stableVerify = (packet) => {
+    const stable = structuredClone(packet);
+    // These exact ten elapsed slots were observed on native and the actual
+    // d83 browser packet for this model/depth. Missing/extra/other changing
+    // cost slots FAIL closed; no new numeric paths are admitted here.
+    // Time spent executing/checking a property is ambient, never its verdict.
+    const slots = [[stable.cost, "elapsed_s"], [stable.cost?.solver, "check_elapsed_s"],
+      ...Array.from({ length: 8 }, (_, index) => [stable.cost?.properties?.[index], "elapsed_s"])];
+    for (const [object, key] of slots) {
+      if (!object || !Number.isFinite(object[key]) || object[key] < 0) {
+        throw new Error(`missing/non-numeric live publication timing ${JSON.stringify(packet)}`);
+      }
+      object[key] = 0;
+    }
+    // The allocator footprint is ambient, as #1702 found for the #1467
+    // comparisons: native and the Worker reported 8.85 and 8.84 MB for the
+    // same packet on #1711's CI. It must be present, finite and positive,
+    // then is zeroed; every other field, including the solver counts, stays
+    // exact.
+    const solver = stable.cost?.solver;
+    if (!solver || !Number.isFinite(solver.memory_mb) || solver.memory_mb <= 0) {
+      throw new Error(`missing positive publication allocator metric ${JSON.stringify(packet)}`);
+    }
+    solver.memory_mb = 0;
+    return stable;
+  };
+  const properties = [["action_coverage", "stay", 1], ["deadlock", "deadlock", 3],
+    ["init", "initial_state", 1], ["invariant", "Safe", 3], ["partial_op", "Safe", 3],
+    ["partial_op", "actions", 2], ["type_bound", "_bounds_flag", 3], ["vacuity", "session", 1]]
+    .map(([kind, name, checks]) => ({ kind, name, checks, elapsed_s: 0 }));
+  const verified = { fsl: "1.0", versions, spec: "S", result: "verified", depth: 2,
+    checked_to_depth: 2, completeness: "bounded", invariants_checked: ["Safe"], transitions_checked: [],
+    reachables: {}, action_coverage: { stay: true }, deadlock: { found: false }, warnings: [],
+    note: "bounded verification: no violation within depth 2", edition: "next", fsl_edition: 5,
+    cost: { elapsed_s: 0, solver: { checks: 17, check_elapsed_s: 0, conflicts: 2,
+      decisions: 1, propagations: 4, memory_mb: 0 }, properties } };
+  for (const [variant, actual] of verifies.entries()) {
+    // A baseline admission refusal stays semantic RED, not a missing-cost
+    // setup failure. Every key still participates in the literal comparison.
+    const drift = differences(actual.result === "verified" ? stableVerify(actual) : actual, verified);
+    if (drift.length) failures.push({ verifyVariant: variant, drift });
+  }
+  if (failures.length) throw new ParityViolationError(`publication packet drift ${JSON.stringify(failures)}`);
+}
 {
   const debugPort = await devtoolsPort();
   const targets = await fetch(`http://127.0.0.1:${debugPort}/json/list`).then((response) => response.json());
@@ -455,21 +714,45 @@ let details;
     socket.addEventListener("error", reject, { once: true });
   });
   await cdp(socket, "Runtime.enable");
-  for (let attempt = 0; attempt < 360; attempt += 1) {
-    const evaluated = await cdp(socket, "Runtime.evaluate", {
-      expression: `(() => { const node = document.querySelector('#result'); return node ? { done: node.dataset.done, ok: node.dataset.ok, text: node.textContent } : null; })()`,
-      returnByValue: true,
+  logPhase("devtools-ready", `port=${debugPort}`);
+  try {
+    details = await waitForCompletion({
+      evaluate: async () => {
+        const evaluated = await cdp(socket, "Runtime.evaluate", {
+          expression: `(() => { const node = document.querySelector('#result'); return node ? { done: node.dataset.done, ok: node.dataset.ok, text: node.textContent, phase: node.dataset.phase } : null; })()`,
+          returnByValue: true,
+        });
+        return evaluated.result.value;
+      },
     });
-    details = evaluated.result.value;
-    if (details?.done === "true") break;
-    await delay(250);
-  }
-  socket.close();
-  if (details?.done !== "true") {
-    throw new ProbeTimeoutError(
-      "poll",
-      `browser probe timed out after 360 attempts; last observation: ${JSON.stringify(details)}`,
-    );
+    logPhase("client-completion", `client=${details.phase ?? "unknown"}`);
+    // A fresh Worker for each new repeat avoids shared-runtime solver history.
+    for (const [batchIndex, batch] of [dependencyCases, ...recursiveCases.map((testCase) => [testCase])].entries()) {
+    const requests = batch.map(({ cmd, source, source_file, files, options }) => (
+      { cmd, source, source_file, files, options }
+    ));
+    const evaluated = await cdp(socket, "Runtime.evaluate", {
+      expression: `new Promise((resolve, reject) => {
+        const worker = new Worker('./worker.js');
+        const timer = setTimeout(() => { worker.terminate(); reject(new Error('dependency edition timeout')); }, 120000);
+        worker.onmessage = ({data}) => {
+          if (data.envelopes || data.envelope || data.transportError) {
+            clearTimeout(timer); worker.terminate();
+            if (data.envelopes) resolve(data.envelopes); else reject(new Error(JSON.stringify(data)));
+          }
+        };
+        worker.onerror = (event) => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message)); };
+        worker.postMessage({id:'dependency-edition',batch:${JSON.stringify(requests)}});
+      })`, awaitPromise: true, returnByValue: true,
+    });
+    if (evaluated.exceptionDetails) throw new Error(JSON.stringify(evaluated.exceptionDetails));
+    if (batchIndex === 0) dependencyEnvelopes = evaluated.result.value;
+    else recursiveEnvelopes.push(...evaluated.result.value);
+    }
+    await writeFile(join(dist, "issue-1467-worker-raw.json"), JSON.stringify({ cases: recursiveCases, envelopes: recursiveEnvelopes }, null, 2));
+    await publicationBoundary(socket);
+  } finally {
+    socket.close();
   }
 }
 if (details.ok !== "true") {
@@ -482,9 +765,153 @@ for (const testCase of parityCases) {
   native.push(await nativeEnvelope(testCase));
 }
 const mismatches = [];
+const recursiveNative = [];
+for (const testCase of recursiveCases) recursiveNative.push(await nativeEnvelope(testCase));
+await writeFile(join(dist, "issue-1467-native-raw.json"), JSON.stringify({ cases: recursiveCases, envelopes: recursiveNative }, null, 2));
+// Observed in the first raw capture: wall clocks vary; all exclusions are live.
+function recursiveStable(packet) {
+  const value = structuredClone(packet);
+  const clock = (object, key) => {
+    if (!Object.hasOwn(object, key) || !Number.isFinite(object[key])) throw new Error(`missing clock ${key}`);
+    delete object[key];
+  };
+  if (value.cost) {
+    clock(value.cost, "elapsed_s"); clock(value.cost.solver, "check_elapsed_s");
+    for (const property of value.cost.properties) clock(property, "elapsed_s");
+  } else if (value.result !== "error") throw new Error("missing successful cost packet");
+  return value;
+}
+// Repeat comparisons only: Z3's allocator footprint is ambient (observed
+// 18.01 vs 18.02 MB between identical native runs) and not part of the
+// verdict. It must be present, finite and positive in both packets, then is
+// dropped; every other field, including conflicts/decisions/propagations,
+// stays exact.
+function recursiveRepeatStable(packet) {
+  const value = recursiveStable(packet);
+  if (value.cost) {
+    const solver = value.cost.solver;
+    if (!Object.hasOwn(solver, "memory_mb") || !Number.isFinite(solver.memory_mb)
+      || solver.memory_mb <= 0) throw new Error("1467 missing positive allocator metric");
+    delete solver.memory_mb;
+  }
+  return value;
+}
+const recursiveComparisons = [];
+for (let index = 0; index < recursiveCases.length; index += 2) {
+  const nativeDrift = differences(recursiveRepeatStable(recursiveNative[index]), recursiveRepeatStable(recursiveNative[index + 1]));
+  const workerDrift = differences(recursiveRepeatStable(recursiveEnvelopes[index]), recursiveRepeatStable(recursiveEnvelopes[index + 1]));
+  const left = recursiveStable(recursiveNative[index]);
+  const right = recursiveStable(recursiveEnvelopes[index]);
+  if (recursiveCases[index].variant === "materialize") {
+    // #1467: matching serialized queries/results and correct raw-to-max mapping
+    // yielded decisions 103/100 and propagations 106/109, stable in both repeats.
+    // Effective defaults/term history are not proven identical; no sole cause
+    // is established. Only these materialize cross-runtime maxima may differ.
+    const counters = ["decisions", "propagations"];
+    for (const packet of [recursiveNative[index], recursiveNative[index + 1],
+      recursiveEnvelopes[index], recursiveEnvelopes[index + 1]]) {
+      for (const key of counters) {
+        const solver = packet.cost.solver;
+        const value = solver[key];
+        if (!Object.hasOwn(solver, key) || !Number.isFinite(value)
+          || !Number.isInteger(value) || value < 0) {
+          throw new Error(`1467 invalid materialize solver ${key}`);
+        }
+      }
+    }
+    for (const packet of [left, right]) {
+      for (const key of counters) packet.cost.solver[key] = 0;
+    }
+  }
+  // Observed runtime identity and allocator footprint differ, never semantic fields.
+  for (const [packet, name, backend] of [[left, "fslc-rust", "native-z3"], [right, "fsl-wasm", "z3-solver-wasm"]]) {
+    const metadata = { verifier: { name, version: workspaceVersion }, core: { name: "fsl-core", version: workspaceVersion },
+      solver: { name: "z3", backend, version: "Z3 4.16.0.0" } };
+    if (differences(packet.versions, metadata).length) throw new Error(`1467 runtime identity: ${name}`);
+    if (packet.cost) {
+      if (!Object.hasOwn(packet.cost.solver, "memory_mb") || !Number.isFinite(packet.cost.solver.memory_mb)
+        || packet.cost.solver.memory_mb <= 0) throw new Error("1467 missing positive allocator metric");
+      packet.cost.solver.memory_mb = 0; // Ambient allocator footprint, not part of the verdict.
+    }
+    packet.versions.verifier.name = "runtime"; packet.versions.solver.backend = "runtime";
+  }
+  recursiveComparisons.push({ id: recursiveCases[index].id, nativeDrift, workerDrift,
+    cross: differences(left, right) });
+}
+await writeFile(join(dist, "issue-1467-comparisons.json"), JSON.stringify(recursiveComparisons, null, 2));
+if (recursiveComparisons.some(({ nativeDrift, workerDrift, cross }) => nativeDrift.length || workerDrift.length || cross.length)) {
+  throw new ParityViolationError(`1467 full same-route drift: ${JSON.stringify(recursiveComparisons)}`);
+}
+const literalFinal = { c: false, p: { a: 1, o: { kind: "some", value: null } }, absent: null,
+  m: { "0": { a: 0, o: { kind: "some", value: null } }, "1": { a: 1, o: { kind: "some", value: null } } } };
+for (const [index, testCase] of recursiveCases.entries()) {
+  const nativeStatus = JSON.parse(await readFile(join(dist, `issue-${testCase.id.replaceAll("/", "-")}-native-command.json`), "utf8")).status;
+  if (nativeStatus !== (testCase.variant === "reject" ? 1 : 0)) throw new ParityViolationError(`${testCase.id}: native exit ${nativeStatus}`);
+  for (const envelope of [recursiveNative[index], recursiveEnvelopes[index]]) {
+    const expected = testCase.variant === "reject" ? "violated" : "verified";
+    if (envelope.result !== expected || envelope.completeness !== "bounded") {
+      throw new ParityViolationError(`${testCase.id}: expected ${expected}/bounded: ${JSON.stringify(envelope)}`);
+    }
+    if (testCase.variant === "reject" && (envelope.invariant !== "Capture" || envelope.violation_kind !== "invariant"
+      || envelope.violated_at_step !== 1 || envelope.loc.line !== 7 || envelope.loc.column !== 3
+      || differences(envelope.trace[1].state, literalFinal).length)) {
+      throw new ParityViolationError(`${testCase.id}: literal recursive witness drift`);
+    }
+  }
+}
+if (!Array.isArray(dependencyEnvelopes) || dependencyEnvelopes.length !== dependencyCases.length) {
+  throw new ParityViolationError("dependency edition cases did not execute");
+}
+for (const [index, testCase] of dependencyCases.entries()) {
+  const native = await nativeEnvelope(testCase);
+  const worker = dependencyEnvelopes[index];
+    // Exact independent finding, including every edit.
+    // Display the reference spelling on both surfaces; do not exclude locations.
+    for (const actual of [native, worker]) {
+      const file = "dep_next_colon.fsl";
+      const frontend = actual === native ? "fslc-rust" : "fsl-wasm";
+      const backend = actual === native ? "native-z3" : "z3-solver-wasm";
+      if (actual.versions?.verifier?.name !== frontend || actual.versions?.solver?.backend !== backend) {
+        throw new ParityViolationError(`dependency runtime identity drift for ${frontend}`);
+      }
+       const finding = { code: "legacy_string_metadata", kind: "legacy_string_metadata", taxonomy: "deprecated",
+           severity: testCase.variant === "N" ? "error" : "warning", edition: testCase.variant === "N" ? "next" : "current",
+          message: "legacy string metadata is deprecated; use a typed annotation",
+          loc: { file, line: 38, column: 38, end_line: 38, end_column: 85 },
+          canonical_replacement: '@requirement("REQ-2", "only eligible claims are auto-approved")', machine_applicable: true,
+          edits: [{ start: 770, end: 770, replacement: '@requirement("REQ-2", "only eligible claims are auto-approved")\n  ' },
+             { start: 805, end: 852, replacement: "" }] };
+       let expected = { fsl: "1.0", result: "error", kind: "unsupported_in_edition", edition: "next", fsl_edition: 5,
+         findings: [finding], versions: actual.versions };
+       if (testCase.variant === "W") {
+          expected = structuredClone(dependencyVerify);
+          expected.versions = actual.versions;
+          expected.warnings.push(finding);
+       }
+       // Normalization validates runtime identity/cost and shapes non-unique
+       // witnesses/state text; loc, verdict, assurance and extra keys stay exact.
+      const drift = differences(normalizeEnvelope(actual), normalizeEnvelope(expected));
+      if (drift.length) throw new ParityViolationError(JSON.stringify({ case: testCase.id, drift }));
+    }
+}
 for (let index = 0; index < parityCases.length; index += 1) {
   const nativeEnvelope = native[index];
   const wasmEnvelope = browser.parityEnvelopes[index];
+  const testCase = parityCases[index];
+  if (testCase.exact_collection_witness) {
+    for (const envelope of [nativeEnvelope, wasmEnvelope]) {
+      if (envelope.result !== testCase.expected_result) {
+        throw new ParityViolationError(`${testCase.path}: expected ${testCase.expected_result}, got ${envelope.result}`);
+      }
+    }
+    if (testCase.expected_result === "violated") {
+      const exact = differences(nativeEnvelope.trace, wasmEnvelope.trace);
+      exact.push(...differences(nativeEnvelope.loc, wasmEnvelope.loc));
+      if (exact.length > 0 || nativeEnvelope.invariant !== "Capture" || wasmEnvelope.invariant !== "Capture") {
+        throw new ParityViolationError(`${testCase.path}: collection witness drift: ${JSON.stringify(exact)}`);
+      }
+    }
+  }
   const normalizedNative = normalizeEnvelope(nativeEnvelope);
   let normalizedWasm;
   try {
@@ -583,7 +1010,9 @@ console.log(JSON.stringify({
 
 try {
   await main();
+  logPhase("completion");
 } catch (error) {
+  if (error instanceof ProbeTimeoutError) logPhase("timeout", `mode=${error.mode}`);
   const classified = classifyOutcome(error);
   const status = classified.status;
   const diagnostic = { schema: "fsl-wasm-browser-outcome.v1", ...classified };

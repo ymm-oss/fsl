@@ -99,8 +99,8 @@ fn classifies_every_authored_target_in_cancel_system() {
         "action:decline",
         "property:invariant:CountsMatchScreens",
         "property:invariant:OfferedFlagConsistent",
-        "acceptance:AC-1",
-        "acceptance:AC-2",
+        "acceptance:AC-CANCEL-001",
+        "acceptance:AC-CANCEL-002",
         "refinement:CancelFlow",
     ]
     .into_iter()
@@ -410,24 +410,24 @@ fn acceptance_case_own_id_is_a_requirement_relation() {
     let ac1 = claims
         .claims
         .iter()
-        .find(|claim| claim.id == "acceptance:AC-1#acceptance_trace")
-        .expect("AC-1 claim exists");
-    assert_eq!(ac1.requirements, vec!["AC-1".to_owned()]);
+        .find(|claim| claim.id == "acceptance:AC-CANCEL-001#acceptance_trace")
+        .expect("AC-CANCEL-001 claim exists");
+    assert_eq!(ac1.requirements, vec!["AC-CANCEL-001".to_owned()]);
     assert!(
         claims
             .coverage
             .rendered
-            .contains(&"acceptance:AC-1".to_owned())
+            .contains(&"acceptance:AC-CANCEL-001".to_owned())
     );
     let requirement = claims
         .requirements
         .iter()
-        .find(|requirement| requirement.id == "AC-1")
-        .expect("AC-1 has its own requirement record");
+        .find(|requirement| requirement.id == "AC-CANCEL-001")
+        .expect("AC-CANCEL-001 has its own requirement record");
     assert!(
         requirement
             .claim_ids
-            .contains(&"acceptance:AC-1#acceptance_trace".to_owned())
+            .contains(&"acceptance:AC-CANCEL-001#acceptance_trace".to_owned())
     );
 }
 
@@ -538,10 +538,7 @@ fn claim_digest_changes_when_a_referenced_enum_member_changes() {
 fn claim_digest_changes_when_fairness_is_removed() {
     let (source, root) = cancel_system();
     let before = project(&source, "cancel_system.fsl", &root);
-    let after = mutated_cancel_system(
-        "fair action accept(c: Sub) maps accept_offer(c)",
-        "action accept(c: Sub) maps accept_offer(c)",
-    );
+    let after = mutated_cancel_system("fair action accept(c: Sub) {", "action accept(c: Sub) {");
     assert_only_target_changed(
         &before,
         &after,
@@ -577,8 +574,8 @@ fn claim_digest_changes_when_an_acceptance_step_changes() {
     assert_only_target_changed(
         &before,
         &after,
-        "acceptance:AC-1#acceptance_trace",
-        "acceptance:AC-2#acceptance_trace",
+        "acceptance:AC-CANCEL-001#acceptance_trace",
+        "acceptance:AC-CANCEL-002#acceptance_trace",
     );
 }
 
@@ -666,17 +663,17 @@ fn requirements_dialect_claims_are_source_backed() {
 #[test]
 fn unknown_provenance_is_reported_not_guessed() {
     // The internal origin registry is currently sparse outside the domain
-    // dialect (docs/design/DESIGN-kernel-origin-v2.md), so most claims fall back to
+    // dialect (docs/design/DESIGN-kernel-origin-v2.md), so claims fall back to
     // their checked declaration's own span (a real, non-guessed signal — see
-    // `provenance_for`). `terminal` is the one claim kind with no span of its
-    // own (`KernelModel::terminal` is a bare `Expr`), so stripping the origin
-    // registry is the only way to observe genuinely unknown provenance
-    // without fabricating a location for it.
+    // `provenance_for`). Every claim kind has such a span, so genuinely
+    // unknown provenance is observable only on a model that has neither:
+    // the origin registry stripped and the terminal's span cleared.
     let (source, root) = claims_fixture();
     let resolver = fsl_core::FsResolver::new(&root);
     let kernel = fsl_core::parse_kernel_source(&source, &resolver).expect("parse");
-    let stripped_model =
+    let mut stripped_model =
         fsl_core::build_surface_model(kernel.syntax().clone()).expect("build surface model");
+    stripped_model.terminal_span = None;
 
     let input = fsl_tools::DocumentInput {
         kernel: &kernel,
@@ -708,6 +705,42 @@ fn unknown_provenance_is_reported_not_guessed() {
             .all(|claim| claim.provenance.assurance == ProvenanceAssurance::SourceBacked)
     );
     assert_eq!(claims.provenance.completeness, Completeness::Partial);
+}
+
+/// #1091: a terminal claim is attributed to its `terminal` block, so a
+/// requirements document that declares one keeps complete provenance.
+#[test]
+fn terminal_claim_is_source_backed_at_its_declaration() {
+    let (source, root) = claims_fixture();
+    let (line, column) = source
+        .lines()
+        .zip(1u32..)
+        .find_map(|(text, line)| {
+            let trimmed = text.trim_start();
+            let indent = u32::try_from(text.len() - trimmed.len()).expect("indent fits u32");
+            trimmed
+                .starts_with("terminal {")
+                .then_some((line, indent + 1))
+        })
+        .expect("the fixture declares terminal");
+    let expected = fsl_tools::SourceRef {
+        path: Some("document_claims_fixture.fsl".to_owned()),
+        line,
+        column,
+    };
+    let claims = project(&source, "document_claims_fixture.fsl", &root);
+    let terminal = claims
+        .claims
+        .iter()
+        .find(|claim| claim.kind.as_str() == "terminal_rule")
+        .expect("a terminal claim exists");
+    assert_eq!(
+        terminal.provenance.assurance,
+        ProvenanceAssurance::SourceBacked
+    );
+    assert_eq!(terminal.provenance.sources, vec![expected.clone()]);
+    assert_eq!(terminal.source, Some(expected));
+    assert_eq!(claims.provenance.completeness, Completeness::Complete);
 }
 
 // --- Undecided / analysis scope separation -------------------------------------

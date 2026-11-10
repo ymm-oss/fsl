@@ -1,0 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// expected-command: refine design_merge_collision.fsl policy_merge_collision.fsl design_merge_collision_refines.fsl --depth 4
+// expected-result: error
+// expected-kind: type
+
+   refinement Merge1599 { impl Impl1599Spec abs Abs1599Spec map y = x action go() -> step() preserve progress { respond Progress1599 by go } }

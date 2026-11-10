@@ -239,6 +239,10 @@ pub trait SmtSolver {
     fn statistics(&self) -> VerificationStatistics;
     fn sort(&self, term: &Self::Term) -> Sort;
 
+    /// An actual scalar literal, without consulting assertions or a model.
+    /// Opaque terms carry no such proof and retain the general representation.
+    fn literal_value(&self, term: &Self::Term) -> Option<ModelValue>;
+
     fn bool_value(&self, value: bool) -> Self::Term;
     fn int_value(&self, value: i64) -> Self::Term;
     fn constant(&self, name: &str, sort: &Sort) -> SolverResult<Self::Term>;

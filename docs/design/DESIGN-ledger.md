@@ -17,13 +17,20 @@ reads as "guarantees nothing".
 ## Inputs
 
 - `run_verify(file, depth, deadlock)` — violations (with `requirement` +
-  `trace_type` from #23), dead `reachable`s (`unreached[]`), uncovered actions,
+  `trace_type` from #23), dead `reachable`s (`unreached[]`), uncovered source-backed actions,
   vacuity warnings, failed acceptance/forbidden (as errors), and the guarantee
   bound (`checked_to_depth` + `completeness`).
+- Edition-migration findings render as `trace_type: migration` with a 移行候補 summary containing the code and message, without mutate advice (#1449).
+- Rows containing only migration findings use status 🟡 移行候補 and risk —; rows with any non-migration finding retain 🔴 要確認 and risk 要確認, including specification-wide and approval views.
+- Baseline migration findings and their evidence are retained. Successful raw ledger output already delivers migration warnings on stderr through captured-root admission; file-output envelopes and distinct approval baselines retain their existing delivery rules (#1449).
+- Warning kinds select their trace type, summary, business translation and default advice from one private presentation table (#1497). Six vacuity kinds and five migration kinds retain their complete rendered rows. `deadlock` is a deadlock finding; `never_enabled_action` adds a coverage warning beside the existing coverage projection; `vacuity_probe_truncated` is `verification_incomplete` without mutate advice. Other named kinds have warning-specific wording; unknown, missing and non-string kinds remain visible generic warnings, never implicit vacuity findings.
+- `no_user_invariants` describes absent user invariants and transition constraints; it does not imply that reachable or progress properties were not checked. The raw verifier warning is unchanged (#1004).
+- These presentation changes preserve raw evidence, assurance, command exits and generated-artifact envelopes. An affected existing approval becomes `drifted` for `rendering_changed`, still exit 0; review the new ledger and regenerate the approval. A newly approved ledger remains `approved`.
 - `run_scenarios(file, depth, deadlock)` — passing acceptance / forbidden /
   reachable confirmations per requirement.
 - `--impl-log <trace.json>` (optional) → `run_replay` — implementation-log
-  conformance (`conformant` / `nonconformant`). A replay **error** (missing
+  conformance (`conformant` / `nonconformant`). Nonconformance adds a spec-level
+  🔴 `conformance` finding; conformance adds none. Exit stays tied to verify. A replay **error** (missing
   file, malformed JSON, wrong-spec trace, schema-invalid trace) is not
   evidence and must not be rendered as an empty/missing implementation-log
   row: it fails the whole `ledger` command through the same standard error
@@ -56,12 +63,30 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
   standard CLI error envelope and exit codes. Defaults to `--deadlock ignore`
   (an audit focuses on intent drift, not terminal-state deadlock; run
   `verify --deadlock warn` separately for that).
+- A verification `result:"error"` returns its full JSON envelope and exit 2/3
+  before ancillary inputs, rendering, or output-file creation; see the
+  [verdict-findings amendment](#amendment-to-1316-verdict-findings-1338-decision-2026-10-26)
+  for the direct-report gate, and the
+  [#1418 amendment](#amendment-approval-rerendering-returns-verification-errors-1418)
+  for approval-only rerendering.
 
 ## Structure
 
 1. **Header** — the guarantee limit in positive form ("BMC: depth N までの全実行を
    網羅" / "k帰納法で全実行を証明") + the honesty line ("保証するのは内部整合;
    intent fidelity is borne by the per-row 判断").
+   Any `leads_to` entry without `unbounded` completeness makes aggregate assurance
+   plain `bounded`, even under induction, across Markdown, HTML and document evidence.
+   - **inline implements** (issue #1336) — after the header and any approval
+     comparison, before governance and the undecided list, an `implements`
+     envelope adds the folded top-level verdict (`検証判定`) and a table of
+     `abs` and `result`: 🟢 only for `refines`, 🔴 otherwise. Passing seams
+     are shown too. Adding this section alone does not change ledgers without
+     `implements`; sentinel coverage removal and the verdict findings below
+     independently change affected ledgers, even without `implements`.
+     Migration: an already-approved inline-implements ledger has a changed
+     rendering digest; `approval check` reports `drifted` (exit 0). Review
+     the new section and re-approve it; the approval schema is unchanged.
    - **governance preservation** (governance documents only, issue #1316) —
      when the verification envelope carries a `governance` section, the
      top-level verdict (`検証判定`, the verify `result` after the #1303 fold)
@@ -69,17 +94,152 @@ fslc ledger spec.fsl --depth 8 --impl-log run.json -o ledger.md
      `after`, preserved controls, and its own `result`, 🟢 for `refines` and
      🔴 for anything else (the fold's own predicate). Every preservation is
      listed, passing ones included, so the body agrees with the exit code. A
-     ledger without a `governance` section is unchanged.
+     ledger without a `governance` section gains no such section. This does not
+     promise byte stability against other finding/rendering changes.
 2. **未決定一覧** — when `undecided:` metadata exists, declaration / reason /
    state-dependency-derived affected requirement IDs. The marker is explicitly
    identified as metadata, not a verification condition.
 3. **リスク一覧** — one row per requirement id: 業務目的 / 状態 (🔴 要確認 / 🟢
    確認済) / 検出種別 (`trace_type`) / リスク (`control.severity`) / 判断者
-   (`control.owner`) / 次アクション.
+   (`control.owner`) / 次アクション. Coverage findings require an authored
+   primary-origin span, or otherwise a kernel action span, with positive line
+   and column. The shared `KernelModel::action_source_span` owner also governs
+   runtime warnings, mutate dead-action notes, and HTML coverage badges/denominators.
+   The current CLI mutant-enumeration path cannot encounter generated-only dead
+   actions; the shared view keeps its note eligibility aligned with reports.
+   Generated-only sentinels have no such finding; their raw `action_coverage` evidence remains
+   unchanged in verify/induction/Worker JSON and HTML Raw Data. Names and
+   prefixes are not the classification rule. An empty eligible HTML coverage
+   map renders `0/0`. Migration (#1338): removing false sentinel findings changes
+   affected ledger/HTML rendering digests; existing approvals report `drifted`
+   (exit 0), so review and re-approve them. Approval schemas are unchanged.
+   Reachables show ⚪ 未評価 / `not_run` for `violated` + `invariant`/`trans`/`ensures`/
+   `partial_op`/`type_bound`, or `explicit` deadlock; other results count as evaluated.
+   Scenario confirmation wins (確認済 / `bounded`) for supplied library inputs.
+   The report CLIs accept only `bmc`/`induction`; explicit verify envelopes may be supplied
+   to library renderers or as document evidence, whose class uses the aggregate token.
+   The per-property explicit-deadlock rule is library-only. After an early violation the CLI's
+   scenario run fails on the same violation, so it cannot supply that confirmation override.
+   "Not evaluated" includes earlier witnesses omitted from the producer's result; precise status is #1565.
+   Under `refinement_failed` over induction, unranked leadsTo
+   and reachable ledger/HTML rows stay `bounded`.
 4. **要件ID別詳細** — per requirement: the raw counterexample **translated into a
    business sentence** (dispatched on `trace_type`), the next action, and a
    decision line (☐承認 ☐差戻し ☐リスク受容 / 判断者 / 期限).
 5. **付録** — the raw JSON findings, collapsed (`<details>`), demoted off page 1.
+   Each finding omits only its raw top-level `cost` and `cache` execution metadata,
+   the same set as the scenarios digest. The projection is not recursive: full
+   CTI, hint, rank-failure and other proof evidence, and same-named fields inside
+   domain state, remain bound. Ledger Markdown is hashed as rendered, without
+   additional approval normalization; the appendix itself excludes execution
+   metadata so failed-report bytes and approval rerendering are reproducible.
+
+### Amendment to #1316: verdict findings (#1338, decision 2026-10-26)
+
+The dedicated governance/implements sections alone are not sufficient for
+requirement-level review. Every non-`refines` preservation now adds a finding
+attributed to the governance catalog's `GOV` requirement, with declaration name,
+result, `before` → `after`, controls, and its raw evidence subject only to the
+appendix's top-level execution-metadata omission. Passing
+preservations (including an empty list) add no findings. A non-`refines` inline
+`implements` adds a spec-level finding, not a fabricated requirement link; an
+otherwise confirmed requirement row can remain green. Both rules include
+`impl_violated` and `unknown_budget`, independently of the primary verdict.
+Budget exhaustion is unfinished search, not an established counterexample.
+The requirement ID and text come from the model metadata attached by governance
+lowering to its catalog invariant, not a copied ID or synthesized catalog text.
+
+`unknown_cti` adds an **unestablished** induction finding, attributed by the
+same declaration-owner rule as `violated`, or to the spec as a whole. Its
+summary and translation do not claim a reachable counterexample or violation;
+the appendix preserves the full `cti`, `hint`, and `rank_failure` evidence.
+
+Declaration ownership follows the envelope's obligation, not the historical
+`invariant` field alone: `trans` selects transitions; `leadsTo` / `leadsTo_rank`
+select leadsTo declarations; synthetic partial-operation / key-domain property
+checks select the property declaration; synthetic action checks, `ensures`, and
+`type_bound` select `last_action`; deadlock has no declaration owner. An explicit
+envelope requirement takes precedence. Otherwise the ledger uses `NameMap`'s
+`resolve_action`, `resolve_property`, and `resolve_synthetic` against the selected
+declarations, preferring `generated_name` to an authored display label (including
+on `last_action`). Public compose and branch spellings are resolved by that name
+owner, not by ledger string replacement or copied prefix rules. Only a unique
+resolved declaration supplies requirement metadata; missing or ambiguous owners
+remain spec-level findings.
+Reachable-failure and dead-action coverage findings likewise use `generated_name`
+when present to resolve their property or action declaration through `NameMap`.
+
+Ordinary violations, requirement confirmations, assurance classes, and human
+approval status remain separate axes. Added findings, corrected coverage, and
+corrected declaration attribution change affected ledger rendering digests:
+existing approvals become `drifted` and require
+review and re-approval.
+
+Direct `ledger` additionally returns a verification `result:"error"` envelope
+and its exit (2 for document errors, 3 for internal errors) before replay,
+evidence loading, witness preparation, rendering, approval overlays, or output-file
+creation. This shares its gate with direct
+HTML reporting, which checks before explain/render/write. Stdout is error JSON,
+not Markdown/HTML or a generated-artifact envelope. Non-error failed or
+unestablished verdicts still produce reports with their existing nonzero exit.
+Approval-only `generate_unapproved_ledger_report_from_source` rerendering kept
+its digest-comparison behavior and did not use this direct-report gate until the
+[#1418 amendment](#amendment-approval-rerendering-returns-verification-errors-1418).
+Its ancillary-input errors retain their existing handling. For non-error
+verification results, direct ledger also retains those ancillary-input errors.
+
+### Amendment: approval rerendering returns verification errors (#1418)
+
+This reverses the approval-only exception recorded above for verification
+`result:"error"`. Rendering such a result as a digest input hid the error: on a spec
+that fails `check`, `approval check` on a ledger record reported `drifted` at exit 0,
+and `approval create --kind ledger` reported an artifact mismatch. Approval-only
+rerendering now returns the same error envelope and exit (2, or 3 for internal) as
+direct `ledger`, which already happened for the trace gate (#1243).
+
+Only `result:"error"` stops rerendering. A failed or unestablished verdict still
+renders, and approving such a ledger stays allowed: `approved` confirms digest
+binding, not a verification pass (`docs/design/DESIGN-approval.md`). A record whose
+current spec produces a verification error now has no approval status, where it
+previously reported `approved` or `drifted`. Non-error digests are unchanged.
+
+### Amendment: one native verification pipeline (#1417)
+
+`run_verify_from_source` is a no-cache/default-policy adapter to
+`verification.rs::run_verify_cli_from_source`, not a second enumeration of
+verification stages. The caller supplies the captured source and depth, deadlock,
+engine, explicit budget and induction k; the default vacuity probe remains enabled.
+The shared owner retains governance folding outside the verification cache.
+Verify dispatch metadata and edition handling remain caller-owned.
+
+Both direct ledger and HTML run verification and the existing error gate **before**
+presentation-model loading; ledger extracts its checked trace contract afterwards.
+No error conversion, panic catch, duplicate fold or second verification is added.
+Approval-only ledger rerendering bypassed the direct-report gate until the
+[#1418 amendment](#amendment-approval-rerendering-returns-verification-errors-1418).
+Non-error verdicts retain their existing reports/exits.
+
+The only public error corrections are in direct ledger/HTML reports on invalid inputs:
+
+| Input | Previous report output | Shared verification output |
+|---|---|---|
+| Broken causal syntax | `FSL-DIALECT-UNKNOWN`, generic message, location 3:1 and `supported_dialects` | `FSL-PARSE`, causal parser message, location 4:3, no `supported_dialects` (regression fixture) |
+| Agent document | semantics error, missing state | parse error, Agent verification refusal; no location |
+| Unknown DB column | generated-name Kernel type message and location 12:5 | specialized unknown-column message, no location (regression fixture) |
+| Unknown AI authority tool | panic, empty stdout, exit 101 | JSON semantics error naming the unknown tool, exit 2 |
+
+The first three retain exit 2. Passing artifacts, warning lists, metadata,
+projection shapes and approval target digests do not change. The regression
+`rust/fslc/tests/issue_1417_verify_pipeline_routes.rs` enumerates all eight native
+routes with applicable dialects, rejecting report controls and passing/failing
+seam, governance, trace, vacuity and specialized-projection preservation controls.
+Lower-only scenarios/explain/testgen preflight and the async Worker pipeline are
+outside this consolidation; it does not claim those paths share native stages.
+`approval create --kind ledger|html`, `approval check`, `approval diff`, and
+`counterexample export` still lower the spec before verification or rerendering,
+retaining their existing invalid-input precedence. After #1464, unknown AI authority
+tools return a semantics error with exit 2 rather than panicking. Approval create's
+diagnostic precedence remains a separate issue.
 
 ## Column → source map
 

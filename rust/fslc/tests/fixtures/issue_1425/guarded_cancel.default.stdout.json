@@ -1,0 +1,750 @@
+{
+  "fsl": "1.0",
+  "result": "mutated",
+  "spec": "ForbiddenGuardedCancel",
+  "depth": 4,
+  "baseline": "verified",
+  "mutants": [
+    {
+      "op": "type_bound_lo_minus1",
+      "loc": null,
+      "target": "type OrderId lo",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "type_bound_lo_plus1",
+      "loc": null,
+      "target": "type OrderId lo",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "type_bound_hi_minus1",
+      "loc": null,
+      "target": "type OrderId hi",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "type_bound_hi_plus1",
+      "loc": null,
+      "target": "type OrderId hi",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 11,
+        "column": 30
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_order",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 11,
+        "column": 30
+      },
+      "target": "init assignment Cart->Paid",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 11,
+        "column": 30
+      },
+      "target": "init assignment Cart->Shipped",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 11,
+        "column": 30
+      },
+      "target": "init assignment Cart->Cancelled",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "requires_remove",
+      "loc": {
+        "line": 14,
+        "column": 33
+      },
+      "target": "pay requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "requires_negate",
+      "loc": {
+        "line": 14,
+        "column": 33
+      },
+      "target": "pay requires #1",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "equality_operator_flip",
+      "loc": {
+        "line": 14,
+        "column": 33
+      },
+      "target": "pay requires #1",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 33
+      },
+      "target": "pay requires #1 Cart->Paid",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 33
+      },
+      "target": "pay requires #1 Cart->Shipped",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 33
+      },
+      "target": "pay requires #1 Cart->Cancelled",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 14,
+        "column": 60
+      },
+      "target": "pay assignment",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 60
+      },
+      "target": "pay assignment Paid->Cart",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 60
+      },
+      "target": "pay assignment Paid->Shipped",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 14,
+        "column": 60
+      },
+      "target": "pay assignment Paid->Cancelled",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "requires_remove",
+      "loc": {
+        "line": 15,
+        "column": 33
+      },
+      "target": "ship requires #1",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "requires_negate",
+      "loc": {
+        "line": 15,
+        "column": 33
+      },
+      "target": "ship requires #1",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "equality_operator_flip",
+      "loc": {
+        "line": 15,
+        "column": 33
+      },
+      "target": "ship requires #1",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 15,
+        "column": 33
+      },
+      "target": "ship requires #1 Paid->Cart",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 15,
+        "column": 33
+      },
+      "target": "ship requires #1 Paid->Shipped",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 15,
+        "column": 33
+      },
+      "target": "ship requires #1 Paid->Cancelled",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 15,
+        "column": 60
+      },
+      "target": "ship assignment",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 15,
+        "column": 60
+      },
+      "target": "ship assignment Shipped->Cart",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 15,
+        "column": 60
+      },
+      "target": "ship assignment Shipped->Paid",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 15,
+        "column": 60
+      },
+      "target": "ship assignment Shipped->Cancelled",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "requires_remove",
+      "loc": {
+        "line": 16,
+        "column": 33
+      },
+      "target": "cancel requires #1",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "requires_negate",
+      "loc": {
+        "line": 16,
+        "column": 33
+      },
+      "target": "cancel requires #1",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "equality_operator_flip",
+      "loc": {
+        "line": 16,
+        "column": 33
+      },
+      "target": "cancel requires #1",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 16,
+        "column": 33
+      },
+      "target": "cancel requires #1 Paid->Cart",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 16,
+        "column": 33
+      },
+      "target": "cancel requires #1 Paid->Shipped",
+      "status": "killed",
+      "killed_by": "forbidden",
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 16,
+        "column": 33
+      },
+      "target": "cancel requires #1 Paid->Cancelled",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 16,
+        "column": 60
+      },
+      "target": "cancel assignment",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 16,
+        "column": 60
+      },
+      "target": "cancel assignment Cancelled->Cart",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 16,
+        "column": 60
+      },
+      "target": "cancel assignment Cancelled->Paid",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    },
+    {
+      "op": "enum_constant_swap",
+      "loc": {
+        "line": 16,
+        "column": 60
+      },
+      "target": "cancel assignment Cancelled->Shipped",
+      "status": "survived",
+      "killed_by": null,
+      "requirement": {
+        "id": "REQ-1",
+        "text": "Order lifecycle"
+      },
+      "source": "builtin",
+      "requirements": [
+        {
+          "id": "REQ-1",
+          "text": "Order lifecycle"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total": 38,
+    "killed": 25,
+    "survived": 13,
+    "invalid": 0,
+    "kill_rate": 0.6579,
+    "by_source": {
+      "builtin": {
+        "total": 38,
+        "killed": 25,
+        "survived": 13,
+        "invalid": 0,
+        "kill_rate": 0.6579
+      },
+      "external": {
+        "total": 0,
+        "killed": 0,
+        "survived": 0,
+        "invalid": 0,
+        "kill_rate": null
+      }
+    }
+  },
+  "by_requirement": {},
+  "notes": [
+    "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure"
+  ]
+}

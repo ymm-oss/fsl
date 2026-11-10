@@ -231,6 +231,72 @@ existing behavior migratable without treating an arbitrary default as newly
 inferred intent; the edition migrator consumes the edit contract described in
 [`DESIGN-initialization.md`](DESIGN-initialization.md).
 
+## Repeated declarations (#1700)
+
+A repeated declaration that loses a copy is refused at the repeat on `check`, `verify` and every
+`fslc domain` route, with exit 2 and a location, and `domain expand` writes nothing. `kind` is `name`
+for the three the lowering validates (`reject_repeated_declarations`, the first line of
+`validate_lowerable_constructs`, which `domain expand` and `domain analyze` also run although they
+build no model), and `parse` for the clauses the parser holds one value of
+(`reject_repeated_clause`). Through an inline `implements` the message names the other file and
+`kind` is `type`.
+
+Each kind below was measured on base `b2cdb394fedcba015261df05587c4721583329e3`, `FSLC_CACHE=off`, by comparing `check`, `domain expand`,
+`domain analyze` and `domain generate` on the document with copy A, copy B, A then B, and B then A,
+complete stdout with positions normalized. A kind whose repeat equals one single copy on all four
+loses the other.
+
+| Refused kind | Copy the base kept | Evidence |
+|---|---|---|
+| `evolve` for one event | first | A then B equals A, B then A equals B. `n = 1` then `n = 2` with `n <= 1`: `verified` on `verify`, `verified_under_assumptions` on `domain check`, reversed `violated` on both |
+| `command` of one name | first, in the lowering | `domain expand` equals A; `analyze` and `generate` list both. Inputs `a: Q` then `a: Bool` with `n = a` was `violated`, reversed exit 2 |
+| `event` field | last for an `evolve`, first for `correlation_id` | The four rows of #1700. `a: Bool` first, `correlation_id` on it: exit 2 |
+| aggregate `id` | last | A then B equals B, reversed equals A |
+| `implementation_profile` | last | same, seen on `analyze` |
+| effect `correlation_id`, `idempotency_key`, `handles`, `irreversible`, `reliable`, `retry`, `outbox`, `inbox`, `success_event`, `failure_event`, `timeout_event`, and `max_attempts` in `retry` | last | B then A equals A on all four; A then B equals B where B checks alone |
+| saga `starts_on`, step `awaits`, step `timeout` | last | A then B equals B, reversed equals A |
+| effect `timeout`, `request_event`, `backoff` in `retry`, projection `from` | last for the value; `timeout` keeps the first event | The parser overwrites the field. No measured route showed which copy it kept |
+| effect field | none | The parser discards every field, so one copy equals none and the repeat equals one copy. Refused because it reads no copy, not because order matters |
+
+| Kind that stays accepted | Why |
+|---|---|
+| `error` of one name | It has no content. `analyze` and `generate` list both; `domain expand` equals one copy |
+| second `state` block | Fields merge. A repeated field is refused as a duplicate state variable |
+| aggregate of one name | Both lower: `domain expand` holds the state, actions and invariants of each, and `verify` was `violated` by the second copy's invariant. One run |
+| saga of one name, a second saga `compensation` block | Both lower; the repeat differs from each single copy on `domain expand` |
+| saga `outbox`, `inbox` | Collected; `analyze` lists both |
+| `requires` in a `decide` or a step | All guard; the repeat differs from each single copy on `domain expand` |
+| effect `compensation` | The parser collects every copy. No measured route shows it |
+| projection of one name, projection `fields` | The parser keeps every copy. No measured route reads any projection: A and B alone gave equal output |
+| `async` on an effect or a step | It carries no value |
+
+| Kind already refused | Where |
+|---|---|
+| `event` of one name, `decide` for one command, `type` of one name, effect of one name, invariant of one name, step of one name, state field, command input, an assignment repeated in an `evolve`, one event in two `emits` | `check` and every route that builds a model. `domain expand` and `domain analyze` still exit 0, and the expansion holds both copies, so `check` refuses what it prints. No copy is lost, so this change leaves them |
+| enum member | every route, at the member |
+| `on_stale`, top-level `await` | every route, with one copy: neither has a lowering |
+
+No refused kind was found as a documented form: a pattern search of both language references, the FSL
+skill references and this note for several or multiple `decide`s or `evolve`s found none, and the sweep below shows none in the corpus.
+
+On-disk transition set (empty). Base `b2cdb394fedcba015261df05587c4721583329e3`, head `7f0b8e43af11f96786e2a72238c70a4a521b4cae`, each
+binary built from its own tree with Rust 1.98.0. Every `.fsl` under `specs/`, `examples/` and
+`rust/fslc/tests/fixtures/` (650 forms: 23/195/432) ran with `FSLC_CACHE=off` and its own tree as cwd, as
+`fslc check <path>` stable and with the next edition enabled, and as `fslc kernel <path>
+--kernel-version 1|2`, twice per side. All 2600 pairs had equal complete stdout, stderr and exit with no
+field excluded, and no run differed from its repeat: 0 ok-to-error and 0 error-to-ok. `domain expand` and
+`domain analyze` on the 37 domain forms of that corpus, 74 runs, also matched in full.
+
+Inline fixtures of the rewritten `issue_1680_duplicate_formals`, `check`, base then head. The first is the
+one ok-to-error transition, recorded as a breaking removal; the others stay refused at the same place:
+
+| Form | Base | Head |
+|---|---|---|
+| `domain_event_field_no_action_takes`: `amount: Bool` twice | exit 0, `ok` | exit 2, `name`, 17:7 |
+| saga observe event, `note: Bool` twice | exit 2, `semantics`, `duplicate action parameter 'note'`, 10:34 | exit 2, `name`, `duplicate event field 'Finished.note'`, 10:34 |
+| effect completion event, `note: Bool` twice | exit 2, `semantics`, `duplicate action parameter 'note'`, 18:79 | exit 2, `name`, `duplicate event field 'PaymentCaptured.note'`, 18:79 |
+| effect completion event, `payment_request_id` twice | exit 2, `semantics`, `duplicate action parameter`, 18:67 | exit 2, `name`, `duplicate event field`, 18:67 |
+
 ## Effects
 
 An async `effect` declares the request event, completion events, correlation id,

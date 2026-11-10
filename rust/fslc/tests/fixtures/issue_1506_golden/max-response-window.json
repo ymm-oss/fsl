@@ -1,0 +1,348 @@
+{
+  "base": "5738cc2c711b691a9d453b0190ead1a2ff77fc50",
+  "observed": {
+    "check": {
+      "fsl": "1.0",
+      "result": "causal_model_checked",
+      "schema_version": "causal-check.v0",
+      "formal_result": "not_run",
+      "model": "MaxResponseWindow",
+      "variables_checked": 2,
+      "claims_checked": 1,
+      "feedbacks_checked": 0,
+      "evidence_refs_checked": 0,
+      "retired_claims": 0,
+      "warnings": [],
+      "do_not_assume": [
+        "The causal claims are true",
+        "The graph is causally complete",
+        "Structural or temporal consistency establishes real-world causality"
+      ]
+    },
+    "consumers": {
+      "causal_graph": {
+        "fsl": "1.0",
+        "result": "causal_analyzed",
+        "schema_version": "causal-graph.v0",
+        "formal_result": "not_run",
+        "model": "MaxResponseWindow",
+        "projection": "causal_graph",
+        "timebase": "day",
+        "horizon": 9223372036854775807,
+        "do_not_assume": [
+          "The causal claims are true",
+          "Path existence establishes real-world causality",
+          "Timeline bounds are guarantees about the real world"
+        ],
+        "nodes": [
+          {
+            "id": "variable:a",
+            "kind": "variable",
+            "role": "intervention"
+          },
+          {
+            "id": "variable:d",
+            "kind": "variable",
+            "role": "outcome",
+            "indicator_class": "lagging"
+          }
+        ],
+        "edges": [
+          {
+            "id": "claim:AD",
+            "kind": "claim",
+            "source": "variable:a",
+            "target": "variable:d",
+            "polarity": "positive",
+            "lag": {
+              "min": 9223372036854775807,
+              "max": 9223372036854775807
+            },
+            "persists": {
+              "min": 0,
+              "max": 9223372036854775807
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          }
+        ],
+        "paths": [
+          {
+            "source": "variable:a",
+            "target": "variable:d",
+            "claims": [
+              "claim:AD"
+            ],
+            "polarity": "positive",
+            "first_response": {
+              "min": 9223372036854775807,
+              "max": 9223372036854775807
+            }
+          }
+        ],
+        "feedbacks": [],
+        "truncation": {
+          "paths_cap": 16,
+          "paths_truncated": 0
+        }
+      },
+      "causal_timeline": {
+        "fsl": "1.0",
+        "result": "causal_analyzed",
+        "schema_version": "causal-graph.v0",
+        "formal_result": "not_run",
+        "model": "MaxResponseWindow",
+        "projection": "causal_timeline",
+        "timebase": "day",
+        "horizon": 9223372036854775807,
+        "do_not_assume": [
+          "The causal claims are true",
+          "Path existence establishes real-world causality",
+          "Timeline bounds are guarantees about the real world"
+        ],
+        "nodes": [
+          {
+            "id": "variable:a",
+            "kind": "variable",
+            "role": "intervention"
+          },
+          {
+            "id": "variable:d",
+            "kind": "variable",
+            "role": "outcome",
+            "indicator_class": "lagging"
+          }
+        ],
+        "edges": [
+          {
+            "id": "claim:AD",
+            "kind": "claim",
+            "source": "variable:a",
+            "target": "variable:d",
+            "polarity": "positive",
+            "lag": {
+              "min": 9223372036854775807,
+              "max": 9223372036854775807
+            },
+            "persists": {
+              "min": 0,
+              "max": 9223372036854775807
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          }
+        ],
+        "timelines": [
+          {
+            "intervention": "variable:a",
+            "outcome": "variable:d",
+            "first_pass": {
+              "min": 9223372036854775807,
+              "max": 9223372036854775807
+            },
+            "via_feedback": false
+          }
+        ]
+      },
+      "causal_traceability_graph": {
+        "fsl": "1.0",
+        "result": "causal_analyzed",
+        "schema_version": "causal-graph.v0",
+        "formal_result": "not_run",
+        "model": "MaxResponseWindow",
+        "projection": "causal_traceability_graph",
+        "timebase": "day",
+        "horizon": 9223372036854775807,
+        "do_not_assume": [
+          "The causal claims are true",
+          "Path existence establishes real-world causality",
+          "Timeline bounds are guarantees about the real world"
+        ],
+        "nodes": [
+          {
+            "id": "variable:a",
+            "kind": "variable",
+            "role": "intervention"
+          },
+          {
+            "id": "variable:d",
+            "kind": "variable",
+            "role": "outcome",
+            "indicator_class": "lagging"
+          },
+          {
+            "id": "action:biz.enable",
+            "kind": "action"
+          },
+          {
+            "id": "state:biz.x",
+            "kind": "state"
+          }
+        ],
+        "edges": [
+          {
+            "id": "claim:AD",
+            "kind": "claim",
+            "source": "variable:a",
+            "target": "variable:d",
+            "polarity": "positive",
+            "lag": {
+              "min": 9223372036854775807,
+              "max": 9223372036854775807
+            },
+            "persists": {
+              "min": 0,
+              "max": 9223372036854775807
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          },
+          {
+            "id": "edge:variable:a:binds:action:biz.enable",
+            "kind": "binds",
+            "source": "variable:a",
+            "target": "action:biz.enable"
+          },
+          {
+            "id": "edge:variable:d:observes:state:biz.x",
+            "kind": "observes",
+            "source": "variable:d",
+            "target": "state:biz.x"
+          }
+        ]
+      },
+      "causal-review": {
+        "fsl": "1.0",
+        "result": "causal_analyzed",
+        "schema_version": "causal-findings.v0",
+        "formal_result": "not_run",
+        "model": "MaxResponseWindow",
+        "profile": "causal-review",
+        "findings": [
+          {
+            "finding_id": "causal-finding:single_hypothesis_bottleneck:claim-AD",
+            "analysis": "causal_structure",
+            "finding_type": "single_hypothesis_bottleneck",
+            "severity": "review_required",
+            "confidence": 0.9,
+            "formal_status": "not_a_violation",
+            "involved_nodes": [
+              "claim:AD",
+              "variable:a"
+            ],
+            "witness": {
+              "intervention": "a",
+              "outcomes": [
+                "d"
+              ],
+              "shared_cut_claims": [
+                "AD"
+              ],
+              "shared_cut_variables": []
+            },
+            "why_it_matters": "every outcome path from 'a' depends on one shared claim or mediator",
+            "candidate_repairs": [
+              {
+                "kind": "add_alternative_path"
+              },
+              {
+                "kind": "add_evidence_plan"
+              }
+            ],
+            "do_not_assume": [
+              "The claim is false",
+              "The finding is a formal violation",
+              "Absence of this finding proves the model is sound"
+            ]
+          },
+          {
+            "finding_id": "causal-finding:observation_window_misses_effect:variable-d",
+            "analysis": "causal_time",
+            "finding_type": "observation_window_misses_effect",
+            "severity": "review_required",
+            "confidence": 0.85,
+            "formal_status": "not_a_violation",
+            "involved_nodes": [
+              "variable:d",
+              "claim:AD"
+            ],
+            "witness": {
+              "window": {
+                "min": 0,
+                "max": 1
+              },
+              "response_window": {
+                "min": 9223372036854775807,
+                "max": 18446744073709551614
+              }
+            },
+            "why_it_matters": "the observation window for 'd' cannot overlap the response of claim 'AD'",
+            "candidate_repairs": [
+              {
+                "kind": "shift_window"
+              },
+              {
+                "kind": "ask_spec_question"
+              }
+            ],
+            "do_not_assume": [
+              "The claim is false",
+              "The finding is a formal violation",
+              "Absence of this finding proves the model is sound"
+            ]
+          },
+          {
+            "finding_id": "causal-finding:long_horizon_without_leading_indicator:variable-a",
+            "analysis": "causal_time",
+            "finding_type": "long_horizon_without_leading_indicator",
+            "severity": "review_required",
+            "confidence": 0.7,
+            "formal_status": "not_a_violation",
+            "involved_nodes": [
+              "variable:a",
+              "variable:d"
+            ],
+            "witness": {
+              "earliest_effect": 9223372036854775807,
+              "horizon": 9223372036854775807,
+              "rule": "earliest*2 >= horizon and no observable path variable with earliest*4 <= horizon"
+            },
+            "why_it_matters": "the path from 'a' to 'd' has no short-term observable node to steer by",
+            "candidate_repairs": [
+              {
+                "kind": "add_measurement"
+              },
+              {
+                "kind": "add_claim_path"
+              }
+            ],
+            "do_not_assume": [
+              "The claim is false",
+              "The finding is a formal violation",
+              "Absence of this finding proves the model is sound"
+            ]
+          }
+        ],
+        "not_evaluable": [
+          {
+            "finding_type": "measurement_cadence_too_coarse",
+            "reason": "variable declares no cadence",
+            "involved_nodes": [
+              "variable:d",
+              "claim:AD"
+            ]
+          }
+        ],
+        "do_not_assume": [
+          "The causal claims are true",
+          "Findings are formal violations",
+          "Absence of findings proves the model is causally sound",
+          "High confidence means high causal validity"
+        ]
+      }
+    }
+  }
+}

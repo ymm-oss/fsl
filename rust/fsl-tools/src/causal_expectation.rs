@@ -59,6 +59,7 @@ pub fn compile_expectations(
     causal_source: &fsl_syntax::CausalSource,
     model: &CausalModel,
     resolver: &dyn FileResolver,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<Vec<CompiledExpectation>, CausalError> {
     let mut compiled = Vec::new();
     for declaration in &causal_source.expectations {
@@ -135,7 +136,7 @@ pub fn compile_expectations(
                 format!("cannot read '{}': {}", import.path, error.message),
             )
         })?;
-        let parsed = fsl_syntax::parse_document(fsl_syntax::SourceFile::new(&source))
+        let parsed = fsl_syntax::parse_document_with(fsl_syntax::SourceFile::new(&source), options)
             .map_err(|error| fail(declaration, format!("target spec parse: {error}")))?;
         let SurfaceDocument::Spec(mut spec) = parsed.surface else {
             return Err(fail(

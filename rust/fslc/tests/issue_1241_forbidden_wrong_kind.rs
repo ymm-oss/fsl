@@ -242,13 +242,16 @@ fn a_wrong_kind_final_step_exits_2_on_every_gate_command() {
     }
     assert!(!directory.join("t.py").exists());
     assert!(!directory.join("cx.json").exists());
+    // The reports print the same error and write nothing (#1242, #1243).
     for args in [
         &["html", "spec.fsl", "--depth", "2", "-o", "report.html"][..],
         &["ledger", "spec.fsl", "--depth", "2", "-o", "ledger.md"],
     ] {
         let (output, status) = run(&directory, args);
-        assert_eq!(status, 2, "{args:?}: {output:#}");
+        assert_wrong_kind(&output, status, "c", &wrong, "Case");
     }
+    assert!(!directory.join("report.html").exists());
+    assert!(!directory.join("ledger.md").exists());
     std::fs::write(
         directory.join("fsl-project.toml"),
         "[requirements]\nfile = \"spec.fsl\"\ndepth = 2\n",
@@ -258,17 +261,7 @@ fn a_wrong_kind_final_step_exits_2_on_every_gate_command() {
     assert_eq!(status, 2, "{output:#}");
     assert_eq!(output["failed"], json!(["requirements"]), "{output:#}");
     assert_wrong_kind(&output["layers"][0]["detail"], status, "c", &wrong, "Case");
-    let ledger = std::fs::read_to_string(directory.join("ledger.md")).expect("read ledger");
     let _ = std::fs::remove_dir_all(&directory);
-    let entry = ledger
-        .split("### FB-1")
-        .nth(1)
-        .and_then(|rest| rest.split("```").next())
-        .unwrap_or_else(|| panic!("no FB-1 finding in ledger:\n{ledger}"));
-    // `fslc ledger` names the malformed argument, not an unresolved action
-    // (mutation: let the error fall to the generic `message` arm).
-    assert!(entry.contains("宣言した型の値ではなく"), "{entry}");
-    assert!(!entry.contains("action を指していない"), "{entry}");
 }
 
 /// Preservation controls: an in-kind integer below a declared range stays

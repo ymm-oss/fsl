@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement R {
+  impl Impl
+  abs Abs
+  maps auto
+  map case_stage[c: Case] = if done then Done else Open
+}

@@ -188,6 +188,13 @@ check_automation() {
   # the live parser-backed audit.
   step --needs-module pytest python3 -m pytest tests/test_toolchain_pin.py -v
   step --needs-module yaml python3 .github/scripts/validate_toolchain_pin.py
+  # Audit rust-cache key/hash inputs, save-if and the exact restore-only set;
+  # pytest and --selftest calibrate guard/role rejections. See
+  # docs/design/DESIGN-ci.md, "Cache key generation".
+  step --needs-module pytest python3 -m pytest tests/test_rust_cache_key.py -v
+  step --needs-module yaml python3 .github/scripts/validate_rust_cache_key.py --selftest
+  # Pin Windows shard wiring, live skip names and fail-closed aggregation.
+  step --needs-module pytest python3 -m pytest tests/test_windows_native_shards.py -v
   # Keep both VS Code install instructions tied to the release packaging name.
   step --needs-module pytest python3 -m pytest tests/test_vscode_vsix_name.py -v
   step python3 .github/scripts/validate_vscode_vsix_name.py
@@ -240,6 +247,16 @@ check_automation() {
   # split check-product-gate-scope.sh's own `selftest` versus its real
   # `diff_scope` invocation uses.
   step ./tools/aggregate_changelog.sh selftest
+  # The fragment rules applied to the released CHANGELOG.md sections from
+  # 5.0.0 on (issue #1763): declared category leads in declared order, one
+  # (id, category) each, and breaking labels only under `Changed`. Pure, so it
+  # runs here rather than beside `check-pr` in merge-readiness.yml.
+  step ./tools/aggregate_changelog.sh check-section
+  # Accepting/rejecting controls for the GitHub Release body that
+  # release.yml's `assemble` and `publish` jobs build: summary versus
+  # CHANGELOG section, emptiness, and both sides of the size limit
+  # (docs/design/RELEASE.md, step 8).
+  step ./tools/release-notes.sh selftest
   step python3 tools/check-design-citation-headings.py selftest
   step python3 tools/check-design-citation-headings.py check
   # Markdown link targets and heading anchors, repository-wide
@@ -258,8 +275,21 @@ check_automation() {
   step --needs-module pytest python3 -m pytest tests/test_ci_validator_inventory.py -v
 }
 
+check_native_python() {
+  # These Python drivers measure the already-built native CLI, not the frozen
+  # Python product. Keep them outside the bounded compile/core/automation lanes.
+  step --needs cargo --needs-module pytest --needs-module fslc \
+    env FSLC_BENCH_CLI=native python3 -m pytest \
+    tests/test_injection_bench.py \
+    tests/test_bounded_liveness_oracle.py \
+    tests/test_rust_cli_semantics.py -v
+  # The benchmark regenerates this artifact even on failure. Compare it whole:
+  # a stale committed matrix must not be silently refreshed by a green test.
+  step git diff --exit-code -- examples/gallery/injected/MATRIX.json
+}
+
 usage() {
-  echo "usage: $0 [--fail-fast] [all|compile|core|automation]" >&2
+  echo "usage: $0 [--fail-fast] [all|compile|core|automation|native-python]" >&2
   exit 2
 }
 
@@ -269,7 +299,7 @@ for argument in "$@"; do
     --fail-fast)
       fail_fast=1
       ;;
-    compile | core | automation | all)
+    compile | core | automation | native-python | all)
       if [ -n "$lane" ]; then
         usage
       fi
@@ -291,6 +321,9 @@ case "$lane" in
     ;;
   automation)
     check_automation
+    ;;
+  native-python)
+    check_native_python
     ;;
   all)
     check_core_contracts

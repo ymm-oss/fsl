@@ -1,0 +1,31 @@
+// original.fsl（impl） ⊑ lowered.fsl（abs）
+// 原文の struct の Map を、field ごとの Map へ分ける。
+refinement OriginalRefinesLowered {
+  impl AgenticRagToolApprovalSlice
+  abs  AgenticRagToolApprovalSlice
+
+  enum conversion stage Stage -> RequestStage {
+    New            -> New
+    EvidenceReady  -> EvidenceReady
+    ToolApproval   -> ToolApproval
+    ToolApproved   -> ToolApproved
+    ActionExecuted -> ActionExecuted
+    Refused        -> Refused
+  }
+
+  map request_stage[r: Request] = convert(stage, req[r].st)
+  map request_evidence[r: Request] = req[r].evidence
+  map request_approval[r: Request] = req[r].approval
+  map request_role[r: Request] = req[r].role
+  map request_needs_tool[r: Request] = req[r].needs_tool
+
+  action grant_operator(r)            -> grant_operator(r)
+  action prepare_tool_ready(r)        -> prepare_tool_ready(r)
+  action request_tool_approval(r)     -> request_tool_approval(r)
+  action approve_tool(r)              -> approve_tool(r)
+  action deny_tool(r)                 -> deny_tool(r)
+  action downgrade_approval(r)        -> downgrade_approval(r)
+  action revoke_operator(r)           -> revoke_operator(r)
+  action make_waiting_but_approved(r) -> make_waiting_but_approved(r)
+  action execute_tool(r)              -> execute_tool(r)
+}

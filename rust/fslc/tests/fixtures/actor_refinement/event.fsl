@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: Apache-2.0
+fsl 5
+requirements Impl {
+  actor System, Manager
+  entity Case { lifecycle Open -> Done }
+  event approve = Manager approves Case Open -> Done
+}
+verify { instances Case = 1 }

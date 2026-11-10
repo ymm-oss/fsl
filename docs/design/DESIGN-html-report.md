@@ -32,15 +32,69 @@ evaluator, or verifier.
 ## CLI contract
 
 ```
-fslc html spec.fsl --depth 8 -o report.html
+fslc html spec.fsl --depth 8 [-o report.html] [--no-timing]
 ```
 
 - With `-o`, writes the HTML file and prints the standard JSON envelope with
   `result:"generated"` and `kind:"html_report"`.
 - Without `-o`, writes the HTML directly to stdout, mirroring `testgen`'s
   "artifact to stdout" behavior.
+- `--no-timing` is HTML-only, defaults to false, and has no alias. It omits
+  only `verification.cost.elapsed_s`,
+  `verification.cost.solver.check_elapsed_s`,
+  `verification.cost.properties[].elapsed_s`,
+  `explained.counterfactuals[].violation.cost.elapsed_s`,
+  `verification.cost.solver.memory_mb`, `verification.cost.solver.conflicts`,
+  `verification.cost.solver.decisions`, and
+  `verification.cost.solver.propagations` from presentation
+  copies before rendering, for both stdout and `-o`/`--output` files. Source,
+  domain-state fields, `solver.checks`, and property `kind`/`name`/`checks` remain
+  intact. Wall-clock timings and environment-dependent Z3 internal statistics
+  are omitted for byte-stable comparison. The default report retains all timings
+  and solver statistics, as specified in
+  [`DESIGN-verification-cost.md`](DESIGN-verification-cost.md); ordinary verify
+  JSON, verification outcomes, and approval normalization are unchanged.
+  Timing-free reports support byte-stable comparison for the same input path,
+  source, options, and toolchain; they do not normalize different paths,
+  backends, or environments.
+  `approval create --kind html` regenerates the default timing-bearing report and normalizes timing and ambient solver-statistic values without removing their keys, so it rejects a `--no-timing` artifact as not matching a fresh rendering.
+  For #1469, 396 local macOS runs showed no variation in these solver statistics,
+  including `memory_mb`; one CI failure did show `memory_mb` differing between
+  reports (17.91 versus 17.92). The classification of `conflicts`, `decisions`,
+  and `propagations` as ambient rests on their Z3-internal source and the existing
+  approval normalization of the same four solver statistics, not observed drift
+  in that local sample.
 - Parse/type/semantic/io errors use the existing CLI error envelope and exit-code
   convention.
+- A verification `result:"error"` returns that full error envelope and exit
+  (2 for document errors, 3 for internal errors) before explain, rendering, or
+  output-file creation. Stdout is JSON rather than HTML, and `-o` creates no
+  artifact. The gate is shared with direct ledger reporting. Non-error failure
+  verdicts still render a report and retain their nonzero verification exit.
+- Before HTML approval rerendering, `approval create` loads its model and
+  `approval check` / `approval diff` lower the spec for its digest. Those preloads
+  process invalid input before `run_html_report`'s error gate, so approvals do not
+  receive the direct-report error-precedence correction. Ledger approval-only rerendering calls
+  `generate_unapproved_ledger_report_from_source`, which returns the same verification
+  error (`docs/design/DESIGN-ledger.md`, amendment #1418) and otherwise keeps its
+  digest-comparison behavior.
+
+### Shared verification and error precedence (#1417)
+
+Direct HTML runs the shared native source verification pipeline and its error gate before
+loading the presentation model or running explain. The baseline adapter disables
+caching and uses the default vacuity policy; it no longer owns a second stage list.
+Invalid causal, Agent, DB-column and AI-tool inputs therefore retain verification's
+classified error rather than an earlier presentation-lowering diagnostic or panic.
+The complete field/exit correction inventory and ledger approval-only distinction
+are recorded in `docs/design/DESIGN-ledger.md`, amendment #1417. Passing HTML,
+warnings, metadata and timing-normalized approval target digests are unchanged.
+The invalid-input corrections apply only to direct ledger/HTML reports.
+`approval create --kind ledger|html`, `approval check`, `approval diff`, and
+`counterexample export` still lower the spec before verification or rerendering,
+retaining their existing invalid-input precedence. After #1464, unknown AI authority
+tools return a semantics error with exit 2 rather than panicking. Approval create's
+diagnostic precedence remains a separate issue.
 
 ## Report structure
 
@@ -74,6 +128,14 @@ the verifier's verdict on it:
 - escaped source with line numbers
 - collapsed raw `explain` and `verify` JSON
 
+Coverage badges and the coverage denominator include only source-backed
+actions: a positive authored primary-origin position, then a positive kernel
+declaration position, through `KernelModel::action_source_span`. Generated-only
+sentinels are excluded regardless of name; zero eligible entries render `0/0`.
+The model tables/diagrams and original Raw Data are not filtered by this rule.
+Correcting these findings changes affected HTML rendering digests; review and
+re-approve existing artifacts whose approvals become `drifted` (exit 0).
+
 `ID: sentence` requirement/policy meta renders as a caption under the
 declaration's own name (not a trailing "Requirement" column), and is omitted
 entirely for a row that has none — no `none` filler cells. The same principle
@@ -90,7 +152,10 @@ JSON, and requirement text are HTML-escaped before rendering.
 
 Relation and refinement evidence are display-only views over existing verifier
 JSON. `fslc html` does not invent graph semantics: relation graphs render the
-pair lists already emitted in traces, and refinement panels render
+pair lists already emitted in traces only for state variables whose declared
+explain-skeleton type tag is `relation` (#1433). A pair-shaped Seq or Set is not
+a relation. Empty relations continue to produce no graph panel, and nonempty
+relation panels retain their existing rendering. Refinement panels render
 `implements.violation` / `refinement_failed` payloads side by side.
 
 ## Non-goals

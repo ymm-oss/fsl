@@ -12,13 +12,16 @@ use fsl_core::{
     KernelAggregateKind as AggregateKind, KernelBinder as Binder, KernelExpr as Expr,
     KernelLValue as LValue, KernelModel, KernelStatement as Statement, ModelError, ParamDef,
     PartialOperation, Refinement, Span, TraceAction, TraceChange, TraceStep, TypeDef, TypeRef,
-    display_name, insert_requirement_metadata, internal_origin_json, model_warnings,
-    origin_display_name, state_summary, static_leadsto_bindings,
+    insert_requirement_metadata, internal_origin_json, model_warnings, origin_display_name,
+    state_summary, static_leadsto_bindings,
 };
 use serde_json::{Value as JsonValue, json};
 
 mod explicit;
 mod trace;
+
+#[cfg(test)]
+mod scope_tests;
 
 pub use explicit::{
     ActionStats, ExplicitReachableWitness, ExplicitResult, ExplicitViolation,
@@ -84,8 +87,8 @@ impl fmt::Display for RuntimeError {
 impl std::error::Error for RuntimeError {}
 
 /// A `ModelError` is never a partial-operation failure. Its "division by
-/// zero"/"remainder by zero" come from constant folding while the model is built
-/// (`check` rejects them), not from evaluating an action, so the conversion
+/// zero"/"remainder by zero" come from constant folding during model construction
+/// or domain planning, not from evaluating an action, so the conversion
 /// deliberately sets `partial_operation: None` even though the messages match.
 impl From<ModelError> for RuntimeError {
     fn from(error: ModelError) -> Self {
@@ -100,9 +103,8 @@ impl From<ModelError> for RuntimeError {
 
 /// Evaluate one expression in a concrete logical state.
 ///
-/// Pattern matches intentionally mutate `bindings`, matching FSL's
-/// `value is some(name)` binding semantics for the remainder of a
-/// short-circuited Boolean expression.
+/// Pattern payloads are local to their true continuation. The caller's
+/// bindings are unchanged, including when evaluation returns an error.
 ///
 /// # Errors
 ///
@@ -124,7 +126,53 @@ pub fn eval(
     model: &KernelModel,
     old_state: Option<&State>,
 ) -> Result<Value, RuntimeError> {
-    recursion::guard(|| eval_inner(expr, state, bindings, model, old_state))
+    eval_observing(expr, state, bindings, model, old_state, None)
+}
+
+fn eval_observing(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<Value, RuntimeError> {
+    if matches!(expr, Expr::Is { .. })
+        || matches!(expr, Expr::Binary { op, .. } if fsl_core::pattern_binding_flows(op, false))
+    {
+        eval_with_bindings_observing(
+            expr,
+            state,
+            &mut bindings.clone(),
+            model,
+            old_state,
+            observed,
+        )
+    } else {
+        eval_with_bindings_observing(expr, state, bindings, model, old_state, observed)
+    }
+}
+
+/// Evaluate an explicit true continuation, such as a conjunctive requires.
+fn eval_with_bindings(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+) -> Result<Value, RuntimeError> {
+    eval_with_bindings_observing(expr, state, bindings, model, old_state, None)
+}
+
+fn eval_with_bindings_observing(
+    expr: &Expr,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<Value, RuntimeError> {
+    recursion::guard(|| eval_inner(expr, state, bindings, model, old_state, observed))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -134,24 +182,43 @@ fn eval_inner(
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
     match expr {
         Expr::Num(value) => Ok(Value::Int(*value)),
         Expr::Bool(value) => Ok(Value::Bool(*value)),
         Expr::None => Ok(Value::None),
-        Expr::Some(expr) => Ok(Value::Some(Box::new(eval(
-            expr, state, bindings, model, old_state,
+        Expr::Some(expr) => Ok(Value::Some(Box::new(eval_observing(
+            expr, state, bindings, model, old_state, observed,
         )?))),
         Expr::Set(items) => Ok(Value::Set(
             items
                 .iter()
-                .map(|item| eval(item, state, bindings, model, old_state))
+                .map(|item| {
+                    eval_observing(
+                        item,
+                        state,
+                        bindings,
+                        model,
+                        old_state,
+                        observed.as_deref_mut(),
+                    )
+                })
                 .collect::<Result<_, _>>()?,
         )),
         Expr::Seq(items) => Ok(Value::Seq(
             items
                 .iter()
-                .map(|item| eval(item, state, bindings, model, old_state))
+                .map(|item| {
+                    eval_observing(
+                        item,
+                        state,
+                        bindings,
+                        model,
+                        old_state,
+                        observed.as_deref_mut(),
+                    )
+                })
                 .collect::<Result<_, _>>()?,
         )),
         Expr::Struct { name, fields } => Ok(Value::Struct {
@@ -161,7 +228,14 @@ fn eval_inner(
                 .map(|(field, expr)| {
                     Ok((
                         field.clone(),
-                        eval(expr, state, bindings, model, old_state)?,
+                        eval_observing(
+                            expr,
+                            state,
+                            bindings,
+                            model,
+                            old_state,
+                            observed.as_deref_mut(),
+                        )?,
                     ))
                 })
                 .collect::<Result<_, RuntimeError>>()?,
@@ -173,7 +247,9 @@ fn eval_inner(
             .or_else(|| model.enum_members.get(name))
             .cloned()
             .ok_or_else(|| runtime_error(format!("unknown identifier '{name}'"))),
-        Expr::EnumMember { type_name, member } => {
+        Expr::EnumMember {
+            type_name, member, ..
+        } => {
             let Some(TypeDef::Enum { members, .. }) = model.types.get(type_name) else {
                 return Err(runtime_error(format!("unknown enum type '{type_name}'")));
             };
@@ -192,18 +268,39 @@ fn eval_inner(
         }
         Expr::Stage { .. } => Err(runtime_error("unlowered stage access")),
         Expr::Index(base, index) => {
-            if let Some(value) = eval_place(expr, state, bindings, model, old_state)? {
+            if let Some(value) = eval_place(
+                expr,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )? {
                 return Ok(value);
             }
-            let base = eval(base, state, bindings, model, old_state)?;
-            let index = eval(index, state, bindings, model, old_state)?;
+            let base = eval_observing(
+                base,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?;
+            let index = eval_observing(index, state, bindings, model, old_state, observed)?;
             index_place(&base, index).cloned()
         }
         Expr::Field(base, field) => {
-            if let Some(value) = eval_place(expr, state, bindings, model, old_state)? {
+            if let Some(value) = eval_place(
+                expr,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )? {
                 return Ok(value);
             }
-            let base = eval(base, state, bindings, model, old_state)?;
+            let base = eval_observing(base, state, bindings, model, old_state, observed)?;
             field_place(&base, field).cloned()
         }
         Expr::Method {
@@ -211,20 +308,31 @@ fn eval_inner(
             name,
             args,
         } => {
-            let receiver = eval(receiver, state, bindings, model, old_state)?;
-            eval_method(receiver, name, args, state, bindings, model, old_state)
+            let receiver = eval_observing(
+                receiver,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?;
+            eval_method(
+                receiver, name, args, state, bindings, model, old_state, observed,
+            )
         }
         Expr::Binary { op, left, right } => {
-            eval_binary(op, left, right, state, bindings, model, old_state)
+            eval_binary(op, left, right, state, bindings, model, old_state, observed)
         }
         Expr::Neg(expr) => {
-            let value = as_int(eval(expr, state, bindings, model, old_state)?)?;
+            let value = as_int(eval_observing(
+                expr, state, bindings, model, old_state, observed,
+            )?)?;
             Ok(Value::Int(value.checked_neg().ok_or_else(|| {
                 runtime_error("integer overflow in negation")
             })?))
         }
-        Expr::Not(expr) => Ok(Value::Bool(!as_bool(eval(
-            expr, state, bindings, model, old_state,
+        Expr::Not(expr) => Ok(Value::Bool(!as_bool(eval_observing(
+            expr, state, bindings, model, old_state, observed,
         )?)?)),
         Expr::Conditional {
             condition,
@@ -232,24 +340,42 @@ fn eval_inner(
             else_expr,
             ..
         } => {
-            if as_bool(eval(condition, state, bindings, model, old_state)?)? {
-                eval(then_expr, state, bindings, model, old_state)
+            if as_bool(eval_observing(
+                condition,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?)? {
+                eval_observing(then_expr, state, bindings, model, old_state, observed)
             } else {
-                eval(else_expr, state, bindings, model, old_state)
+                eval_observing(else_expr, state, bindings, model, old_state, observed)
             }
         }
         Expr::Is { expr, pattern } => {
-            let value = eval(expr, state, bindings, model, old_state)?;
+            let value = eval_observing(
+                expr,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?;
             match (value, pattern) {
                 (Value::None, fsl_core::Pattern::None) => Ok(Value::Bool(true)),
                 (Value::Some(_), fsl_core::Pattern::None)
                 | (Value::None, fsl_core::Pattern::Some(_)) => Ok(Value::Bool(false)),
                 (Value::Some(value), fsl_core::Pattern::Some(name)) => {
-                    // A pattern binding never overwrites a name already in scope
-                    // (action parameter, binder, let): the frozen reference guards
-                    // this in `_eval_requires` (`if k not in param_binds`), and #1153
-                    // is the port dropping it. A new name still reaches the body.
-                    bindings.entry(name.clone()).or_insert(*value);
+                    // Evidence survives lexical closure but is never lookup authority.
+                    if let Some(observed) = observed {
+                        observed
+                            .entry(name.clone())
+                            .or_insert_with(|| (*value).clone());
+                    }
+                    // Rewritten matches may shadow only in this continuation;
+                    // closed evaluation retains the caller's outer binding.
+                    bindings.insert(name.clone(), *value);
                     Ok(Value::Bool(true))
                 }
                 _ => Err(runtime_error("is pattern requires an Option value")),
@@ -260,6 +386,7 @@ fn eval_inner(
             binder,
             body,
         } => {
+            // Nested binder-local evaluation is outside the enclosing evidence frame.
             let candidates = binder_values(binder, state, bindings, model, old_state)?;
             if quantifier == "forall" {
                 for (value, mut local) in candidates {
@@ -302,6 +429,7 @@ fn eval_inner(
             binder,
             value,
         } => {
+            // Aggregate sources, filters and values likewise keep their own scope.
             let mut matches = 0_i64;
             let mut sum = 0_i64;
             for (candidate, mut local) in binder_values(binder, state, bindings, model, old_state)?
@@ -325,15 +453,18 @@ fn eval_inner(
             })
         }
         Expr::UnaryNamed { name, expr, .. } => match name.as_str() {
-            "old" => eval(
+            "old" => eval_observing(
                 expr,
                 old_state.ok_or_else(|| runtime_error("old() used without old state"))?,
                 bindings,
                 model,
                 None,
+                observed,
             ),
             "abs" => {
-                let value = as_int(eval(expr, state, bindings, model, old_state)?)?;
+                let value = as_int(eval_observing(
+                    expr, state, bindings, model, old_state, observed,
+                )?)?;
                 Ok(Value::Int(
                     value
                         .checked_abs()
@@ -341,15 +472,28 @@ fn eval_inner(
                 ))
             }
             "rel_acyclic" | "rel_functional" | "rel_injective" | "rel_domain" | "rel_range" => {
-                eval_relation_unary(name, eval(expr, state, bindings, model, old_state)?, model)
+                eval_relation_unary(
+                    name,
+                    eval_observing(expr, state, bindings, model, old_state, observed)?,
+                    model,
+                )
             }
             _ => Err(runtime_error(format!(
                 "unsupported unary expression '{name}'"
             ))),
         },
         Expr::BinaryNamed { name, left, right } => {
-            let left = as_int(eval(left, state, bindings, model, old_state)?)?;
-            let right = as_int(eval(right, state, bindings, model, old_state)?)?;
+            let left = as_int(eval_observing(
+                left,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?)?;
+            let right = as_int(eval_observing(
+                right, state, bindings, model, old_state, observed,
+            )?)?;
             Ok(Value::Int(if name == "min" {
                 left.min(right)
             } else if name == "max" {
@@ -366,9 +510,23 @@ fn eval_inner(
             second,
             third,
         } if name == "rel_reachable" => relation_reachable(
-            eval(first, state, bindings, model, old_state)?,
-            &eval(second, state, bindings, model, old_state)?,
-            &eval(third, state, bindings, model, old_state)?,
+            eval_observing(
+                first,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?,
+            &eval_observing(
+                second,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )?,
+            &eval_observing(third, state, bindings, model, old_state, observed)?,
         ),
         Expr::TernaryNamed { name, .. } => Err(runtime_error(format!(
             "unsupported ternary function '{name}'"
@@ -392,6 +550,7 @@ fn eval_place(
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
 ) -> Result<Option<Value>, RuntimeError> {
     enum PlaceStep<'expr> {
         Index(&'expr Expr),
@@ -431,7 +590,14 @@ fn eval_place(
     for step in steps.into_iter().rev() {
         current = match step {
             PlaceStep::Index(index) => {
-                let index = eval(index, state, bindings, model, old_state)?;
+                let index = eval_observing(
+                    index,
+                    state,
+                    bindings,
+                    model,
+                    old_state,
+                    observed.as_deref_mut(),
+                )?;
                 index_place(current, index)?
             }
             PlaceStep::Field(field) => field_place(current, field)?,
@@ -488,11 +654,27 @@ pub fn violating_bindings(
             let mut bad = Vec::new();
             for (value, mut local) in binder_values(binder, state, bindings, model, None)? {
                 local.insert(binder_name(binder).to_owned(), value);
-                if !binder_where_holds(binder, state, &mut local, model, None)? {
+                let mut observed = local.clone();
+                if !binder_where_holds_observing(
+                    binder,
+                    state,
+                    &mut local,
+                    model,
+                    None,
+                    Some(&mut observed),
+                )? {
                     continue;
                 }
-                if !as_bool(eval(body, state, &mut local, model, None)?)? {
-                    bad.push(local);
+                // Filter and body share evidence, never their closed lexical exports.
+                if !as_bool(eval_observing(
+                    body,
+                    state,
+                    &mut local,
+                    model,
+                    None,
+                    Some(&mut observed),
+                )?)? {
+                    bad.push(observed);
                 }
             }
             return Ok((!bad.is_empty()).then_some(bad));
@@ -506,10 +688,18 @@ pub fn violating_bindings(
             return search(right, state, bindings, model);
         }
         let mut local = bindings.clone();
-        if as_bool(eval(expr, state, &mut local, model, None)?)? {
+        let mut observed = local.clone();
+        if as_bool(eval_observing(
+            expr,
+            state,
+            &mut local,
+            model,
+            None,
+            Some(&mut observed),
+        )?)? {
             Ok(None)
         } else {
-            Ok(Some(vec![local]))
+            Ok(Some(vec![observed]))
         }
     }
 
@@ -525,10 +715,20 @@ fn eval_method(
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
     let values = args
         .iter()
-        .map(|arg| eval(arg, state, bindings, model, old_state))
+        .map(|arg| {
+            eval_observing(
+                arg,
+                state,
+                bindings,
+                model,
+                old_state,
+                observed.as_deref_mut(),
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     match receiver {
         Value::Set(mut set) => match (name, values.as_slice()) {
@@ -596,33 +796,47 @@ fn eval_binary(
     bindings: &mut Bindings,
     model: &KernelModel,
     old_state: Option<&State>,
+    mut observed: Option<&mut Bindings>,
 ) -> Result<Value, RuntimeError> {
-    if op == "and" {
-        if !as_bool(eval(left, state, bindings, model, old_state)?)? {
-            return Ok(Value::Bool(false));
+    if matches!(op, "and" | "or" | "=>") {
+        let mut local = bindings.clone();
+        let left = as_bool(eval_with_bindings_observing(
+            left,
+            state,
+            &mut local,
+            model,
+            old_state,
+            observed.as_deref_mut(),
+        )?)?;
+        match (op, left) {
+            ("and", false) => {
+                // Retain reached conjunct evidence even when its RHS is skipped.
+                *bindings = local;
+                return Ok(Value::Bool(false));
+            }
+            ("or", true) | ("=>", false) => return Ok(Value::Bool(true)),
+            _ => {}
         }
-        return Ok(Value::Bool(as_bool(eval(
-            right, state, bindings, model, old_state,
-        )?)?));
-    }
-    if op == "or" {
-        if as_bool(eval(left, state, bindings, model, old_state)?)? {
-            return Ok(Value::Bool(true));
+        if !fsl_core::pattern_binding_flows(op, true) {
+            local.clone_from(bindings);
         }
-        return Ok(Value::Bool(as_bool(eval(
-            right, state, bindings, model, old_state,
-        )?)?));
-    }
-    if op == "=>" {
-        if !as_bool(eval(left, state, bindings, model, old_state)?)? {
-            return Ok(Value::Bool(true));
+        let right = as_bool(eval_with_bindings_observing(
+            right, state, &mut local, model, old_state, observed,
+        )?)?;
+        if fsl_core::pattern_binding_flows(op, false) {
+            *bindings = local;
         }
-        return Ok(Value::Bool(as_bool(eval(
-            right, state, bindings, model, old_state,
-        )?)?));
+        return Ok(Value::Bool(right));
     }
-    let left = eval(left, state, bindings, model, old_state)?;
-    let right = eval(right, state, bindings, model, old_state)?;
+    let left = eval_observing(
+        left,
+        state,
+        bindings,
+        model,
+        old_state,
+        observed.as_deref_mut(),
+    )?;
+    let right = eval_observing(right, state, bindings, model, old_state, observed)?;
     match op {
         "+" => checked_binary(left, right, i64::checked_add, "addition"),
         "-" => checked_binary(left, right, i64::checked_sub, "subtraction"),
@@ -637,7 +851,9 @@ fn eval_binary(
                     Err(partial_operation_error(PartialOperation::Divide))
                 }
             } else {
-                Ok(Value::Int(left.div_euclid(right)))
+                left.checked_div_euclid(right)
+                    .map(Value::Int)
+                    .ok_or_else(|| runtime_error("integer overflow in division"))
             }
         }
         "%" => {
@@ -650,11 +866,15 @@ fn eval_binary(
                     Err(partial_operation_error(PartialOperation::Remainder))
                 }
             } else {
-                Ok(Value::Int(left.rem_euclid(right)))
+                left.checked_rem_euclid(right)
+                    .map(Value::Int)
+                    .ok_or_else(|| runtime_error("integer overflow in remainder"))
             }
         }
-        "==" => Ok(Value::Bool(left == right)),
-        "!=" => Ok(Value::Bool(left != right)),
+        "==" | "!=" => {
+            let equal = normalize_relation_comparison(left) == normalize_relation_comparison(right);
+            Ok(Value::Bool(if op == "==" { equal } else { !equal }))
+        }
         "<" | "<=" | ">" | ">=" => {
             let ordering = left.cmp(&right);
             Ok(Value::Bool(match op {
@@ -678,7 +898,9 @@ fn binder_values(
 ) -> Result<Vec<(Value, Bindings)>, RuntimeError> {
     let values = match binder {
         Binder::Typed { type_name, .. } => {
-            model.domain_values(&TypeRef::Named(qualified_type(type_name)?))?
+            let type_name = qualified_type(type_name)?;
+            let ty = model.typed_binder_type(&type_name);
+            model.domain_values(&ty)?
         }
         Binder::Range { lo, hi, .. } => {
             let mut local = bindings.clone();
@@ -708,13 +930,26 @@ fn binder_where_holds(
     model: &KernelModel,
     old_state: Option<&State>,
 ) -> Result<bool, RuntimeError> {
+    binder_where_holds_observing(binder, state, bindings, model, old_state, None)
+}
+
+fn binder_where_holds_observing(
+    binder: &Binder,
+    state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    old_state: Option<&State>,
+    observed: Option<&mut Bindings>,
+) -> Result<bool, RuntimeError> {
     let condition = match binder {
         Binder::Typed { where_expr, .. }
         | Binder::Range { where_expr, .. }
         | Binder::Collection { where_expr, .. } => where_expr.as_deref(),
     };
     condition.map_or(Ok(true), |condition| {
-        as_bool(eval(condition, state, bindings, model, old_state)?)
+        as_bool(eval_observing(
+            condition, state, bindings, model, old_state, observed,
+        )?)
     })
 }
 
@@ -1093,11 +1328,35 @@ impl Monitor {
     /// Returns [`RuntimeError`] when parameter domains or guards cannot be
     /// evaluated concretely.
     pub fn enabled(&self) -> Result<Vec<EnabledAction>, RuntimeError> {
+        self.enabled_where(|_, _| true)
+    }
+
+    /// The [`Monitor::enabled`] instances that `keep` accepts, in the same
+    /// order, with the same errors.
+    ///
+    /// Every instance's guards are still evaluated, so a guard that cannot
+    /// be evaluated fails here exactly as it fails [`Monitor::enabled`];
+    /// only the instances `keep` rejects (by action name and parameters) are
+    /// not collected. A caller that looks for one call (a requirements trace
+    /// step) therefore holds that call alone, not every instance of a large
+    /// parameter domain.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] when parameter domains or guards cannot be
+    /// evaluated concretely.
+    pub fn enabled_where(
+        &self,
+        mut keep: impl FnMut(&str, &Bindings) -> bool,
+    ) -> Result<Vec<EnabledAction>, RuntimeError> {
         let mut enabled = Vec::new();
         for action in &self.model.actions {
             for params in action_parameter_bindings(action, &self.model)? {
+                // The guards first: an instance `keep` rejects still fails
+                // here when its guard cannot be evaluated.
                 if let Some(bindings) =
                     evaluate_action_guards(action, &params, &self.state, &self.model)?
+                    && keep(&action.name, &params)
                 {
                     enabled.push(EnabledAction {
                         action: action.name.clone(),
@@ -1226,7 +1485,10 @@ impl Monitor {
                     action_name,
                     params,
                     "requires_failed",
-                    format!("_requires_failed_{action_name}"),
+                    fsl_core::SyntheticName::RequiresFailed {
+                        action: action_name,
+                    }
+                    .internal(),
                     None,
                 ));
             }
@@ -1237,7 +1499,10 @@ impl Monitor {
                     action_name,
                     params,
                     "partial_op",
-                    format!("_partial_{action_name}"),
+                    fsl_core::SyntheticName::PartialAction {
+                        action: action_name,
+                    }
+                    .internal(),
                     None,
                 ));
             }
@@ -1356,7 +1621,10 @@ impl Monitor {
                         attempted_state: None,
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
-                            name: format!("_partial_{}", action.name),
+                            name: fsl_core::SyntheticName::PartialAction {
+                                action: &action.name,
+                            }
+                            .internal(),
                             step: *step,
                         }),
                     });
@@ -1378,7 +1646,10 @@ impl Monitor {
                         attempted_state: Some(next),
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
-                            name: format!("_partial_{}", action.name),
+                            name: fsl_core::SyntheticName::PartialAction {
+                                action: &action.name,
+                            }
+                            .internal(),
                             step: *step,
                         }),
                     });
@@ -1406,7 +1677,10 @@ impl Monitor {
                         attempted_state: Some(next),
                         violation: Some(Violation {
                             kind: "partial_op".to_owned(),
-                            name: format!("_partial_{}", action.name),
+                            name: fsl_core::SyntheticName::PartialAction {
+                                action: &action.name,
+                            }
+                            .internal(),
                             step: *step,
                         }),
                     });
@@ -1469,7 +1743,10 @@ fn guard_partial_result(instance: &EnabledAction, state: State, step: usize) -> 
         attempted_state: None,
         violation: Some(Violation {
             kind: "partial_op".to_owned(),
-            name: format!("_partial_{}", instance.action),
+            name: fsl_core::SyntheticName::PartialAction {
+                action: &instance.action,
+            }
+            .internal(),
             step,
         }),
     }
@@ -1834,27 +2111,10 @@ pub const IMPLEMENTS_SEARCH_BUDGET: usize = 50_000;
 fn merged_refinement_model(
     implementation: &KernelModel,
     abstraction: &KernelModel,
+    preserve_progress: bool,
 ) -> Result<KernelModel, RuntimeError> {
-    let mut merged = implementation.clone();
-    for (name, definition) in &abstraction.types {
-        if let Some(existing) = implementation.types.get(name) {
-            let conflicts = matches!(
-                (existing, definition),
-                (TypeDef::Enum { .. }, TypeDef::Enum { .. })
-                    | (TypeDef::Struct { .. }, TypeDef::Struct { .. })
-            ) && existing != definition;
-            if conflicts {
-                return Err(runtime_error(format!(
-                    "type '{name}' is declared differently in the impl and abs specs"
-                )));
-            }
-        }
-        merged.types.insert(name.clone(), definition.clone());
-    }
-    for (name, value) in &abstraction.enum_members {
-        merged.enum_members.insert(name.clone(), value.clone());
-    }
-    Ok(merged)
+    fsl_core::merge_refinement_model(implementation, abstraction, preserve_progress)
+        .map_err(|error| runtime_error(error.message))
 }
 
 fn alpha_state(
@@ -1920,7 +2180,7 @@ fn alpha_state_inner(
                 None,
             )?
         };
-        alpha.insert(name.clone(), value);
+        alpha.insert(name.clone(), coerce_relation_literal(value, Some(abs_ty)));
     }
     let _ = implementation;
     Ok(alpha)
@@ -1962,7 +2222,7 @@ fn refinement_action_instance(
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expr) => {
-                if !as_bool(eval(
+                if !as_bool(eval_with_bindings(
                     expr,
                     &monitor.state,
                     &mut bindings,
@@ -2029,7 +2289,7 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
     Ok(projected)
 }
 
-/// Every concrete initial state consistent with `model`'s init.
+/// Enumerate initial states for refinement, subject to the legacy limits below.
 ///
 /// A model whose init assigns every state variable on every path returns
 /// exactly the single state [`Monitor::new`] would build — no behavior
@@ -2041,12 +2301,16 @@ fn project_abstract_state(state: &State, abstraction: &KernelModel) -> Result<St
 /// #493). This does not touch [`Monitor::new`] itself or any other caller —
 /// the general Monitor-construction gate for partial/nondeterministic init
 /// is a different surface (issue #519).
+/// Init ownership and forall read-order checks also apply to free-root enumeration.
+/// Assigned-root read order and completeness are checked before enumeration (#1521).
 ///
 /// # Errors
 ///
 /// Returns [`RuntimeError`] when a free variable's type is not a finite
 /// scalar domain, or a combination cannot be evaluated concretely.
 fn concrete_initial_states(model: &KernelModel) -> Result<Vec<State>, RuntimeError> {
+    check_init_write_ownership(model)?;
+    explicit::check_refinement_init(model)?;
     let free = explicit::unassigned_init_state_vars(model);
     if free.is_empty() {
         return Ok(vec![Monitor::new(model.clone())?.state]);
@@ -2132,11 +2396,9 @@ pub fn check_refinement_with_budget(
     // bounds or invariants. Checking this first — and returning immediately
     // — means the correspondence walk below never needs to decide what a
     // mid-walk self-violation means; by construction it cannot encounter
-    // one within the same `depth`. `impl_initial_states` covers every
-    // concrete initial valuation a nondeterministic impl `init` permits
-    // (issue #493), not one arbitrarily materialized default, so this
-    // precondition cannot miss a self-violation reachable only from a
-    // non-default initial branch either.
+    // one within the same `depth`. `impl_initial_states` enumerates never-assigned
+    // roots (#493), rather than selecting one default for them. This covers the
+    // supported branches; incomplete written roots are refused (future enumeration: #1579).
     //
     // The pre-pass walks the same reachable set the correspondence walk
     // does, so it takes the same `budget` (issue #1246): unbudgeted, it held
@@ -2163,11 +2425,12 @@ pub fn check_refinement_with_budget(
             budget_exhausted,
         });
     }
-    let eval_model = merged_refinement_model(implementation, abstraction)?;
-    // The set of every concrete state abs's own (possibly nondeterministic)
-    // init permits — init correspondence below asks whether α(s₀) is a
-    // *member* of this set, not whether it equals one materialized default
-    // abs initial state.
+    let eval_model =
+        merged_refinement_model(implementation, abstraction, !mapping.progress.is_empty())?;
+    // States produced by abs's own (possibly nondeterministic) init constructor,
+    // rejecting incomplete written roots. Init correspondence below asks whether
+    // α(s₀) is a member of this set, not whether it equals one chosen default for
+    // never-assigned abstract roots.
     let abs_initial_states: BTreeSet<State> =
         concrete_initial_states(abstraction)?.into_iter().collect();
     let action_map = mapping
@@ -2766,7 +3029,7 @@ pub fn bfs(model: KernelModel, depth: usize) -> Result<BfsResult, RuntimeError> 
                 Err(error) if is_partial_operation_error(&error) => {
                     let violation = Violation {
                         kind: "partial_op".to_owned(),
-                        name: "_partial_property_terminal".to_owned(),
+                        name: fsl_core::SyntheticName::PartialTerminal.internal(),
                         step,
                     };
                     if result
@@ -2867,11 +3130,8 @@ pub struct BoundaryProbe {
     pub finding: Option<(Violation, Vec<TraceStep>)>,
     /// Whether the search stopped because it reached `budget` distinct
     /// states rather than because it exhausted every state reachable within
-    /// `depth`. A caller must treat `exhausted && finding.is_none()`
-    /// identically to a normal empty result: this probe is an evidence
-    /// detour, not a verdict authority, so an inconclusive budgeted search
-    /// falls through to the symbolic engine exactly as a completed empty
-    /// search does.
+    /// `depth`. An exhausted empty probe cannot certify clean; mutate falls
+    /// back to BMC, while a completed empty probe may permit explicit checking.
     pub exhausted: bool,
     /// The number of distinct states visited, for diagnostics and for the
     /// corpus-conservation check that calibrates `CONCRETE_PROBE_BUDGET`.
@@ -2880,6 +3140,8 @@ pub struct BoundaryProbe {
 
 /// Find the first concrete partial-operation or type-bound violation and its
 /// trace, visiting at most `budget` distinct states.
+/// For models with actions, initial type bounds are checked first at step 0,
+/// with a root-only trace even at depth 0.
 ///
 /// This search is an evidence detour, not a verdict authority: it only ever
 /// returns `partial_op`/`type_bound` findings, and a caller that gets
@@ -2905,6 +3167,19 @@ pub fn find_boundary_violation(
     let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
     let mut visited = BTreeSet::from([initial_state.clone()]);
     let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+
+    if !model.actions.is_empty()
+        && let Some(violation) = check_state_bounds(&initial_state, model, 0, None)?
+    {
+        return Ok(BoundaryProbe {
+            finding: Some((
+                violation,
+                trace::reconstruct_trace(&initial_state, &parents),
+            )),
+            exhausted: false,
+            states_explored: visited.len(),
+        });
+    }
 
     while let Some((state, step)) = queue.pop_front() {
         if step >= depth {
@@ -2987,8 +3262,8 @@ enum SelfConsistency {
 /// Unlike [`find_boundary_violation`], which is scoped to
 /// `partial_op`/`type_bound` for its own narrower callers, this checks every
 /// violation kind `Monitor::current_violation`/`Monitor::step` can report,
-/// including a violation already present in the initial state (init can
-/// itself violate an invariant or type bound before any action runs).
+/// including initial invariant/partial-operation violations rather than only
+/// initial type bounds. Init can violate these before any action runs.
 ///
 /// `budget` bounds `visited.len()` exactly as the correspondence walk's
 /// budget does (issue #1246): checked right after a new insert, so the
@@ -3337,9 +3612,9 @@ fn vacuity_reachability_warning(
 /// `vacuous_implication`/`vacuous_leadsto` nor `vacuity_probe_truncated` is
 /// computed or emitted) rather than computing it and filtering the result.
 /// INVARIANT (issue #729): only the `verify`/`sweep` CLI option parsing for
-/// `--vacuity ignore` may pass `true` here. Every other caller -- the
-/// `ledger`/`html`/`mutate` baseline, the wasm Worker surface (which has no
-/// `--vacuity` option at all), induction's internal BMC base pass, and
+/// `--vacuity ignore` may pass `true` here. No-cache baseline adapters reach
+/// that owner with the default `warn` policy. Other callers -- the wasm
+/// Worker (which has no `--vacuity` option), induction's internal BMC base pass, and
 /// tests -- must pass `false` so the probe always runs and `--vacuity
 /// error` never silently loses evidence it would otherwise catch.
 #[must_use]
@@ -3389,7 +3664,7 @@ pub fn verification_warnings(
                 .unwrap_or_default();
         for (candidate_index, (property_index, _)) in implication_candidates.iter().enumerate() {
             let property = &model.invariants[*property_index];
-            let name = display_name(&property.name);
+            let name = model.names().public_property(&property.name).into_string();
             let mut warning = match probe_results.get(candidate_index) {
                 Some(Reachability::Unreachable) => vacuity_reachability_warning(
                     "vacuous_implication",
@@ -3420,7 +3695,7 @@ pub fn verification_warnings(
         }
         let leadsto_offset = implication_candidates.len();
         for (offset, property) in model.leadstos.iter().enumerate() {
-            let name = display_name(&property.name);
+            let name = model.names().public_property(&property.name).into_string();
             let mut warning = match probe_results.get(leadsto_offset + offset) {
                 Some(Reachability::Unreachable) => vacuity_reachability_warning(
                     "vacuous_leadsto",
@@ -3486,12 +3761,7 @@ pub fn never_enabled_action_warning(
     // source-backed lowered action reports the authored primary location,
     // while a kernel action retains its own declaration span. Zero spans are
     // reserved for generated-only sentinels and are not public findings.
-    let source_span = origin
-        .and_then(|origin| origin.primary.as_ref().and_then(|site| site.span))
-        .filter(|span| span.start.line > 0 && span.start.column > 0)
-        .or_else(|| {
-            (action.span.start.line > 0 && action.span.start.column > 0).then_some(action.span)
-        })?;
+    let source_span = model.action_source_span(action)?;
     let loc = source_span.python_loc();
     let mut warning = json!({
         "kind": "never_enabled_action",
@@ -3535,7 +3805,20 @@ pub fn induction_warnings(warnings: &[JsonValue]) -> Vec<JsonValue> {
 /// Returns [`RuntimeError`] for an empty/malformed trace, a disabled action, or
 /// any state/change mismatch.
 pub fn replay_trace(model: KernelModel, trace: &[TraceStep]) -> Result<(), RuntimeError> {
-    replay_trace_with_initial(model, trace, None)
+    replay_trace_with_bounds(model, trace, None)
+}
+
+/// Replay with the verification run's implicit-bound selection (`None`: all bounds).
+///
+/// # Errors
+///
+/// Returns the same errors as [`replay_trace`].
+pub fn replay_trace_with_bounds(
+    model: KernelModel,
+    trace: &[TraceStep],
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<(), RuntimeError> {
+    replay_trace_with_initial(model, trace, None, checked_bounds)
 }
 
 /// Replay a trace whose step zero is a caller-provided complete logical state.
@@ -3549,13 +3832,28 @@ pub fn replay_trace_from_state(
     trace: &[TraceStep],
     initial_state: &State,
 ) -> Result<(), RuntimeError> {
-    replay_trace_with_initial(model, trace, Some(initial_state))
+    replay_trace_from_state_with_bounds(model, trace, initial_state, None)
+}
+
+/// Replay from a complete state with the run's implicit-bound selection.
+///
+/// # Errors
+///
+/// Returns the same errors as [`replay_trace_from_state`].
+pub fn replay_trace_from_state_with_bounds(
+    model: KernelModel,
+    trace: &[TraceStep],
+    initial_state: &State,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<(), RuntimeError> {
+    replay_trace_with_initial(model, trace, Some(initial_state), checked_bounds)
 }
 
 fn replay_trace_with_initial(
     model: KernelModel,
     trace: &[TraceStep],
     initial_state: Option<&State>,
+    checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<(), RuntimeError> {
     let first = trace
         .first()
@@ -3605,7 +3903,7 @@ fn replay_trace_with_initial(
                     action.name
                 ))
             })?;
-        let stepped = monitor.step_candidate(candidate, None)?;
+        let stepped = monitor.step_candidate(candidate, checked_bounds)?;
         let observed_state = stepped.attempted_state.as_ref().unwrap_or(&stepped.state);
         if observed_state != &entry.state {
             return Err(runtime_error(format!(
@@ -3979,7 +4277,10 @@ fn record_reachables(
                 Err(error) if is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
                         kind: "partial_op".to_owned(),
-                        name: format!("_partial_property_{}", property.name),
+                        name: fsl_core::SyntheticName::PartialProperty {
+                            property: &property.name,
+                        }
+                        .internal(),
                         step,
                     }));
                 }
@@ -4016,15 +4317,14 @@ fn check_state_selected(
     })
 }
 
-fn check_state_selected_inner(
+fn check_state_bounds(
     state: &State,
-    old_state: Option<&State>,
     model: &KernelModel,
     step: usize,
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> Result<Option<Violation>, RuntimeError> {
     for (name, ty) in &model.state {
-        let property_name = format!("_bounds_{name}");
+        let property_name = fsl_core::SyntheticName::Bounds { state: name }.internal();
         if checked_bounds.is_some_and(|selected| !selected.contains(&property_name)) {
             continue;
         }
@@ -4042,6 +4342,19 @@ fn check_state_selected_inner(
             }));
         }
     }
+    Ok(None)
+}
+
+fn check_state_selected_inner(
+    state: &State,
+    old_state: Option<&State>,
+    model: &KernelModel,
+    step: usize,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<Option<Violation>, RuntimeError> {
+    if let Some(violation) = check_state_bounds(state, model, step, checked_bounds)? {
+        return Ok(Some(violation));
+    }
     for property in &model.invariants {
         let mut bindings = Bindings::new();
         let value = match eval(&property.expr, state, &mut bindings, model, old_state) {
@@ -4049,7 +4362,10 @@ fn check_state_selected_inner(
             Err(error) if is_partial_operation_error(&error) => {
                 return Ok(Some(Violation {
                     kind: "partial_op".to_owned(),
-                    name: format!("_partial_property_{}", property.name),
+                    name: fsl_core::SyntheticName::PartialProperty {
+                        property: &property.name,
+                    }
+                    .internal(),
                     step,
                 }));
             }
@@ -4071,7 +4387,10 @@ fn check_state_selected_inner(
                 Err(error) if is_partial_operation_error(&error) => {
                     return Ok(Some(Violation {
                         kind: "partial_op".to_owned(),
-                        name: format!("_partial_property_{}", property.name),
+                        name: fsl_core::SyntheticName::PartialProperty {
+                            property: &property.name,
+                        }
+                        .internal(),
                         step,
                     }));
                 }
@@ -4089,27 +4408,114 @@ fn check_state_selected_inner(
     Ok(None)
 }
 
+/// One parameter's finite domain, in [`KernelModel::domain_values`] order,
+/// without listing an integer range.
+enum ParameterDomain {
+    /// `lo..=hi`; empty when `lo > hi`.
+    Ints(i64, i64),
+    Values(Vec<Value>),
+}
+
+impl ParameterDomain {
+    fn of(param: &ParamDef, model: &KernelModel) -> Result<Self, RuntimeError> {
+        Ok(match param {
+            ParamDef::Typed { ty, .. } => match ty {
+                TypeRef::Range(lo, hi) => Self::Ints(*lo, *hi),
+                TypeRef::Named(name) => match model.types.get(name) {
+                    Some(TypeDef::Domain { lo, hi, .. }) => Self::Ints(*lo, *hi),
+                    _ => Self::Values(model.domain_values(ty)?),
+                },
+                _ => Self::Values(model.domain_values(ty)?),
+            },
+            ParamDef::Range { lo, hi, .. } => Self::Ints(*lo, *hi),
+        })
+    }
+
+    /// The number of values; an `i128` holds every `lo..=hi` count.
+    fn len(&self) -> i128 {
+        match self {
+            Self::Ints(lo, hi) => (i128::from(*hi) - i128::from(*lo) + 1).max(0),
+            Self::Values(values) => i128::try_from(values.len()).unwrap_or(i128::MAX),
+        }
+    }
+
+    /// The value at `index`, which is below [`ParameterDomain::len`].
+    fn value(&self, index: i128) -> Value {
+        match self {
+            Self::Ints(lo, _) => Value::Int(
+                i64::try_from(i128::from(*lo) + index).expect("an index below len() is in lo..=hi"),
+            ),
+            Self::Values(values) => {
+                values[usize::try_from(index).expect("an index below len()")].clone()
+            }
+        }
+    }
+}
+
+/// Every parameter binding of one action, generated one at a time: the first
+/// parameter varies slowest, the last fastest. Each parameter's domain is
+/// resolved before the first binding, so a domain that cannot be enumerated
+/// fails as it did when the whole product was listed up front, and an
+/// integer range is never listed (a forbidden or acceptance step over a
+/// large `values` scope stays in constant memory).
+struct ParameterBindings {
+    names: Vec<String>,
+    domains: Vec<ParameterDomain>,
+    /// The next binding's index per parameter; `None` once exhausted.
+    next: Option<Vec<i128>>,
+}
+
+impl Iterator for ParameterBindings {
+    type Item = Bindings;
+
+    fn next(&mut self) -> Option<Bindings> {
+        let indices = self.next.as_mut()?;
+        let binding = self
+            .names
+            .iter()
+            .zip(&self.domains)
+            .zip(indices.iter())
+            .map(|((name, domain), index)| (name.clone(), domain.value(*index)))
+            .collect();
+        let mut position = indices.len();
+        loop {
+            if position == 0 {
+                self.next = None;
+                break;
+            }
+            position -= 1;
+            indices[position] += 1;
+            if indices[position] < self.domains[position].len() {
+                break;
+            }
+            indices[position] = 0;
+        }
+        Some(binding)
+    }
+}
+
 fn action_parameter_bindings(
     action: &ActionDef,
     model: &KernelModel,
-) -> Result<Vec<Bindings>, RuntimeError> {
-    let mut bindings = vec![Bindings::new()];
-    for param in &action.params {
-        let values = match param {
-            ParamDef::Typed { ty, .. } => model.domain_values(ty)?,
-            ParamDef::Range { lo, hi, .. } => (*lo..=*hi).map(Value::Int).collect(),
-        };
-        let mut next = Vec::new();
-        for existing in bindings {
-            for value in &values {
-                let mut candidate = existing.clone();
-                candidate.insert(param.name().to_owned(), value.clone());
-                next.push(candidate);
-            }
-        }
-        bindings = next;
-    }
-    Ok(bindings)
+) -> Result<ParameterBindings, RuntimeError> {
+    let domains = action
+        .params
+        .iter()
+        .map(|param| ParameterDomain::of(param, model))
+        .collect::<Result<Vec<_>, _>>()?;
+    let next = domains
+        .iter()
+        .all(|domain| domain.len() > 0)
+        .then(|| vec![0; domains.len()]);
+    Ok(ParameterBindings {
+        names: action
+            .params
+            .iter()
+            .map(|param| param.name().to_owned())
+            .collect(),
+        domains,
+        next,
+    })
 }
 
 /// Whether `value` belongs to `parameter`'s declared domain (its type, or its
@@ -4181,7 +4587,7 @@ fn evaluate_action_guards_at(
                 bindings.insert(name.clone(), value);
             }
             ActionGuard::Requires(expression) => {
-                let value = eval(expression, state, &mut bindings, model, None)
+                let value = eval_with_bindings(expression, state, &mut bindings, model, None)
                     .and_then(as_bool)
                     .map_err(failed)?;
                 if !value {
@@ -4230,6 +4636,49 @@ pub fn guard_partial_operation(
 /// requiring a solver: unsatisfiability is witnessed directly by the
 /// conflicting concrete values, no search needed.
 fn execute_init_statement(
+    statement: &Statement,
+    state: &mut State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+    written: &mut BTreeMap<String, Value>,
+) -> Result<(), RuntimeError> {
+    execute_init_statement_inner(statement, state, bindings, model, written).map_err(|mut error| {
+        // Exact stems keep other init errors and already-located inner errors unchanged.
+        if matches!(
+            error.message.as_str(),
+            "map index outside finite key domain"
+                | "sequence index out of range"
+                | "map assignment index outside key domain"
+                | "sequence assignment index out of range"
+                | "integer overflow in negation"
+                | "integer overflow in abs"
+                | "integer overflow in addition"
+                | "integer overflow in subtraction"
+                | "integer overflow in multiplication"
+                | "integer overflow in division"
+                | "integer overflow in remainder"
+                | "integer overflow in sum"
+                | "head() on empty sequence"
+                | "pop() on empty sequence"
+                | "at() index out of range"
+                | "division by zero"
+                | "remainder by zero"
+        ) {
+            let span = match statement {
+                Statement::Assign { span, .. }
+                | Statement::If { span, .. }
+                | Statement::ForAll { span, .. } => span,
+            };
+            error.message = format!(
+                "{} in init at {}:{}",
+                error.message, span.start.line, span.start.column
+            );
+        }
+        error
+    })
+}
+
+fn execute_init_statement_inner(
     statement: &Statement,
     state: &mut State,
     bindings: &mut Bindings,
@@ -4347,7 +4796,10 @@ fn assign(
 ) -> Result<(), RuntimeError> {
     match target {
         LValue::Var(name) => {
-            target_state.insert(name.clone(), coerce_relation_literal(name, value, model));
+            target_state.insert(
+                name.clone(),
+                coerce_relation_literal(value, model.state_type(name)),
+            );
         }
         LValue::Index(name, index_expr) => {
             let index = eval(index_expr, read_state, bindings, model, None)?;
@@ -4428,18 +4880,27 @@ fn assign(
 
 /// `Set {}` is the only relation literal surface syntax accepts (public
 /// Kernel typing rejects a non-empty one), but `eval`'s `Expr::Set` arm has
-/// no assignment-target type context and always produces `Value::Set`.
-/// Coerce it here, where the target variable's declared type is known --
-/// mirrors the symbolic evaluator's `SymbolicValue::SetLiteral` ->
+/// no expected type context and always produces `Value::Set`.
+/// State writes supply the target type. This mirrors the symbolic
+/// evaluator's `SymbolicValue::SetLiteral` ->
 /// `SymbolicValue::Relation` coercion (`fsl-verifier/src/value.rs::coerce`).
-fn coerce_relation_literal(name: &str, value: Value, model: &KernelModel) -> Value {
+fn coerce_relation_literal(value: Value, expected: Option<&TypeRef>) -> Value {
     if let Value::Set(items) = &value
         && items.is_empty()
-        && matches!(model.state_type(name), Some(TypeRef::Relation(_, _)))
+        && matches!(expected, Some(TypeRef::Relation(_, _)))
     {
         return Value::Relation(BTreeSet::new());
     }
     value
+}
+
+/// Normalize empty relations only at the comparison root or inside `Some`.
+fn normalize_relation_comparison(value: Value) -> Value {
+    match value {
+        Value::Relation(items) if items.is_empty() => Value::Set(BTreeSet::new()),
+        Value::Some(inner) => Value::Some(Box::new(normalize_relation_comparison(*inner))),
+        value => value,
+    }
 }
 
 fn lvalue_key(

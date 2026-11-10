@@ -122,6 +122,7 @@ const VALID_DOMAIN_FIXTURES: &[&str] = &[
     "examples/domain/order_functional_ddd.fsl",
     "examples/domain/unsafe_irreversible_effect_without_idempotency.fsl",
     "rust/fslc/tests/fixtures/domain_canonical_enum.fsl",
+    "rust/fslc/tests/fixtures/domain_empty_membership.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/can_expansion_precedence.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/container_defaults_surface.fsl",
     "rust/fslc/tests/fixtures/domain_characterization/effect_saga_valid.fsl",

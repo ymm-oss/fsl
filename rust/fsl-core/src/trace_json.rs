@@ -4,12 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value, json};
 
-use crate::{FslValue, KernelModel, OriginChain, OriginSite, TraceStep, TypeRef};
-
-#[must_use]
-pub fn display_name(name: &str) -> String {
-    name.replacen("__", ".", 1).replace("QqDbSepqQ", "__")
-}
+use crate::{
+    FslValue, KernelModel, NameMap, OriginChain, OriginSite, TraceStep, TypeRef,
+    unmapped_public_spelling,
+};
 
 fn origin_site_json(site: &OriginSite) -> Value {
     let span = site.span.map(|span| {
@@ -117,7 +115,7 @@ pub fn state_json(state: &BTreeMap<String, FslValue>) -> Value {
     Value::Object(
         state
             .iter()
-            .map(|(name, value)| (display_name(name), fsl_value_json(value)))
+            .map(|(name, value)| (unmapped_public_spelling(name), fsl_value_json(value)))
             .collect(),
     )
 }
@@ -128,9 +126,13 @@ pub fn state_summary(model: &KernelModel, state: &BTreeMap<String, FslValue>) ->
         .state
         .iter()
         .filter_map(|(name, ty)| {
-            state
-                .get(name)
-                .map(|value| format!("{}={}", display_name(name), format_value(model, value, ty)))
+            state.get(name).map(|value| {
+                format!(
+                    "{}={}",
+                    model.names().public_state(name),
+                    format_value(model, value, ty)
+                )
+            })
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -276,7 +278,11 @@ pub fn trace_json(model: &KernelModel, trace: &[TraceStep]) -> Value {
                         trace.get(entry.step.saturating_sub(1)).map_or_else(
                             || Value::Object(Map::new()),
                             |previous| {
-                                Value::Object(compute_changes(&previous.state, &entry.state))
+                                Value::Object(compute_changes(
+                                    model.names(),
+                                    &previous.state,
+                                    &entry.state,
+                                ))
                             },
                         ),
                     );
@@ -288,6 +294,7 @@ pub fn trace_json(model: &KernelModel, trace: &[TraceStep]) -> Value {
 }
 
 fn compute_changes(
+    names: &NameMap,
     previous: &BTreeMap<String, FslValue>,
     current: &BTreeMap<String, FslValue>,
 ) -> Map<String, Value> {
@@ -376,7 +383,7 @@ fn compute_changes(
         .collect::<BTreeSet<_>>();
     for key in keys {
         walk(
-            &display_name(key),
+            names.public_state(key).as_str(),
             previous.get(key),
             current.get(key),
             &mut changes,

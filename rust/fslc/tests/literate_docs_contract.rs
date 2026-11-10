@@ -20,6 +20,12 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fslc_rust::literate_access::{LITERATE_REGISTRY, LITERATE_SUPPORTED_COMMANDS, LiterateSupport};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -287,8 +293,9 @@ impl Fixture {
             .duration_since(UNIX_EPOCH)
             .expect("clock after epoch")
             .as_nanos();
+        let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "fsl-literate-docs-contract-{name}-{}-{nonce}.md",
+            "fsl-literate-docs-contract-{name}-{}-{nonce}-{sequence}.md",
             std::process::id()
         ));
         std::fs::write(&path, source).expect("write CRLF fixture");
@@ -376,4 +383,137 @@ fn marked_doc_fences_check_and_the_unmarked_surface_is_reported() {
             );
         }
     }
+}
+
+/// Every `.md` under `dir`, recursively, in path order.
+fn markdown_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let mut entries = std::fs::read_dir(dir)
+        .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+        .map(|entry| entry.expect("directory entry").path())
+        .collect::<Vec<_>>();
+    entries.sort();
+    for path in entries {
+        if path.is_dir() {
+            markdown_files(&path, out);
+        } else if path.extension().is_some_and(|extension| extension == "md") {
+            out.push(path);
+        }
+    }
+}
+
+/// The first line inside the first fence whose info string starts with the
+/// token `fsl`, as `fslc`'s literate extractor finds it.
+fn first_fsl_line(markdown: &str) -> Option<&str> {
+    let mut lines = markdown.lines();
+    while let Some(line) = lines.next() {
+        let info = line.trim_start().trim_start_matches(['`', '~']);
+        if info.len() + 3 <= line.trim_start().len()
+            && info.split_whitespace().next() == Some("fsl")
+        {
+            return lines.next();
+        }
+    }
+    None
+}
+
+/// The FSL 5 layer skills that #1437 moved from `skills-next/` into `skills/`
+/// (fsl 5 plan §3 S13, decisions/043 stage 1 gate over decisions/048 J4).
+/// The shared `skills/fsl/` reference keeps the FSL 4 guidance, so its
+/// unmarked fences stay skipped fragments and it is not listed here.
+const FSL5_SKILL_DIRECTORIES: [&str; 7] = [
+    "skills/fsl-business",
+    "skills/fsl-delivery",
+    "skills/fsl-design",
+    "skills/fsl-design-review",
+    "skills/fsl-from-code",
+    "skills/fsl-requirements",
+    "skills/fsl-verify",
+];
+
+/// The opt-in variable #1434 removed; naming it in a skill would be a stale
+/// instruction (the half of the former `skills_next_unpackaged.rs` that
+/// still applies after the move).
+const REMOVED_GATE_VARIABLE: &str = "FSLC_UNSTABLE";
+
+fn every_file(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in
+        std::fs::read_dir(dir).unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
+    {
+        let path = entry.expect("directory entry").path();
+        if path.is_dir() {
+            every_file(&path, out);
+        } else {
+            out.push(path);
+        }
+    }
+}
+
+/// The FSL 5 layer skills are held to a stricter fence rule than the rest
+/// of `docs/` and `skills/`. Every `fsl` fence there must be marked and must
+/// check (`--every-fence`: an unmarked one fails instead of being skipped),
+/// each document's first `fsl` fence opens with the `fsl 5` header, so no
+/// example there is read as FSL 4, and no file names the removed gate
+/// variable.
+#[test]
+fn fsl5_skill_fences_all_check_under_the_fsl5_header() {
+    let root = workspace_root();
+    let mut documents = Vec::new();
+    for directory in FSL5_SKILL_DIRECTORIES {
+        let directory = root.join(directory);
+        assert!(directory.is_dir(), "{} is missing", directory.display());
+        markdown_files(&directory, &mut documents);
+    }
+    let mut files = Vec::new();
+    for directory in FSL5_SKILL_DIRECTORIES {
+        every_file(&root.join(directory), &mut files);
+    }
+    assert!(
+        files.len() > documents.len(),
+        "the agent manifests are scanned too"
+    );
+    for file in &files {
+        let text = std::fs::read_to_string(file).expect("read skill file");
+        for (index, line) in text.lines().enumerate() {
+            assert!(
+                !line.contains(REMOVED_GATE_VARIABLE),
+                "{}:{}: names the removed {REMOVED_GATE_VARIABLE} variable",
+                file.display(),
+                index + 1
+            );
+        }
+    }
+    let mut headed = 0;
+    for document in &documents {
+        let text = std::fs::read_to_string(document).expect("read skill document");
+        if let Some(first) = first_fsl_line(&text) {
+            assert_eq!(
+                first.trim(),
+                "fsl 5",
+                "{}: the first fsl fence must open with the `fsl 5` header",
+                document.display()
+            );
+            headed += 1;
+        }
+    }
+    assert!(headed >= 5, "only {headed} skill documents hold fsl fences");
+
+    let script = root.join("tools/check-doc-fences.py");
+    let output = std::process::Command::new("python3")
+        .arg(&script)
+        .args(["check", "--every-fence"])
+        .args(FSL5_SKILL_DIRECTORIES)
+        .args(["--fslc", env!("CARGO_BIN_EXE_fslc")])
+        .current_dir(&root)
+        .output()
+        .unwrap_or_else(|error| panic!("run {}: {error}", script.display()));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "check-doc-fences.py --every-fence over the FSL 5 skills failed\n{stdout}{stderr}"
+    );
+    assert!(
+        stdout.contains(" 0 fsl fences unmarked") && stdout.contains(" 0 failures"),
+        "the report must state no unmarked fence and no failure: {stdout}"
+    );
 }

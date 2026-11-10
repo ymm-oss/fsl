@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+refinement BranchRefines {
+  impl MapFieldInit
+  abs ReviewPartialAbs
+  map c = m[0].flag
+  action idle() -> idle()
+}

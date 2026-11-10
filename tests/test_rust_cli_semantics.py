@@ -372,7 +372,8 @@ def test_rust_ledger_uses_implementation_log(tmp_path):
         str(log),
     )
 
-    assert status == 0, error
+    # Reports preserve the nonzero verification verdict, even while rendering.
+    assert status == 1, error
     assert "実装ログ適合" in output
     assert "非適合" in output
 
@@ -386,8 +387,9 @@ def test_rust_ledger_groups_native_nfr_evidence_by_requirement(tmp_path):
 
     status, output, error = _run_rust_raw("ledger", str(spec), "--depth", "10")
 
-    assert status == 0, error
-    assert "NFR-1" in output
+    # The SLA violation remains a failing verdict in the rendered ledger.
+    assert status == 1, error
+    assert "NFR-SLA-001" in output
     assert "🔴 要確認" in output
     assert "`sla`" in output or "| sla |" in output
     assert "スケジューリング前提" in output
@@ -400,7 +402,7 @@ def test_rust_ledger_lists_all_verified_requirement_ids():
 
     assert status == 0, error
     assert "🔴 要確認" not in output
-    for requirement_id in ("REQ-1", "REQ-3", "REQ-5"):
+    for requirement_id in ("REQ-SUPPORT-001", "REQ-SUPPORT-003", "REQ-SUPPORT-005"):
         assert requirement_id in output
 
 

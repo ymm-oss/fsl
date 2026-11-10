@@ -4,13 +4,20 @@ trace.
 
 --- a/rust/fsl-verifier/src/trace.rs
 +++ b/rust/fsl-verifier/src/trace.rs
-@@ -21,7 +21,8 @@ pub(crate) fn project_trace<S: SmtSolver>(
- ) -> Result<Vec<TraceStep>, VerifyError> {
-     let mut trace = Vec::new();
-     for step in 0..=upto {
--        let state = project_state(solver, model, &states[step])?;
-+        let mut state = project_state(solver, model, &states[step])?;
-+        let _ = state.pop_first();
-         let action = if step == 0 {
-             None
+@@ -26,7 +26,7 @@ pub(crate) fn project_trace<S: SmtSolver>(
          } else {
+             Some(chosen_instance(solver, &choices[step - 1], instances)?)
+         };
+-        let state = if let Some(instance) = instance
++        let mut state = if let Some(instance) = instance
+             && has_missing_sequence_slots(solver, &states[step])?
+         {
+             // Frames have the declared capacity, while a failed assignment can
+@@ -48,6 +48,7 @@ pub(crate) fn project_trace<S: SmtSolver>(
+         } else {
+             project_state(solver, model, &states[step])?
+         };
++        let _ = state.pop_first();
+         let action = instance
+             .map(|instance| project_action(solver, model, instance))
+             .transpose()?;

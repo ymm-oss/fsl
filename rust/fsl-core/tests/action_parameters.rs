@@ -65,3 +65,37 @@ fn actions_reject_duplicate_names_before_runtime_dispatch() {
         "unexpected error: {error:?}"
     );
 }
+
+/// Hand-built or generated actions carry no formal spans; the refusal then falls
+/// back to the action instead of losing its location (#1680).
+#[test]
+fn duplicate_formal_without_authored_spans_points_at_the_action() {
+    let source = "spec Duplicate { type Small = 0..1 state { done: Bool } init { done = false }\n  action apply(a: Small, v: Small, v: Small) { } }";
+    let parse = || {
+        let fsl_syntax::SurfaceDocument::Spec(spec) =
+            fsl_syntax::parse_document(fsl_syntax::SourceFile::new(source))
+                .expect("parse")
+                .surface
+        else {
+            panic!("expected spec")
+        };
+        spec
+    };
+    let located = |spec| {
+        let error = fsl_core::build_surface_model(spec).expect_err("repeated formal");
+        assert!(
+            error.message.contains("duplicate action parameter 'v'"),
+            "{error:?}"
+        );
+        let span = error.span.expect("located");
+        (span.start.line, span.start.column)
+    };
+    assert_eq!(located(parse()), (2, 36), "the repeated name");
+    let mut spec = parse();
+    for item in &mut spec.items {
+        if let fsl_syntax::SpecItem::Action { param_spans, .. } = item {
+            param_spans.clear();
+        }
+    }
+    assert_eq!(located(spec), (2, 3), "the action");
+}

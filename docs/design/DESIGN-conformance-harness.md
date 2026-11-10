@@ -131,10 +131,12 @@ of the Rust CI-equivalent gate (`tools/check-native-integration.sh`, which does
 not execute Python — AGENTS.md). `tests/test_injection_bench.py` measures the
 same native binary by default too (`FSLC_BENCH_CLI=python` switches back to the
 frozen reference); it regenerates the committed `examples/gallery/injected/MATRIX.json`
-evidence artifact. A detector gap that is native-only and already filed (the
-`unreachable-antecedent` lane's `vacuity` primary detector against a
-`forall`-quantified implication, issue #486) is an explicit, documented
-exclusion in both — never a silent pass.
+evidence artifact. Issue #486 fixed vacuity detection through a `forall` binder;
+both matrices now require those primary detectors to catch, with no known-gap
+exclusion. The Python benchmark also runs in the required `rust-checks` job via
+`tools/check-merge-readiness.sh native-python` (issue #1466). That lane compares
+the regenerated MATRIX in full against the committed artifact, so stale
+expectations and stale generated evidence both fail CI.
 
 ## Pipeline stages and failure semantics — `tests/test_dialect_conformance.py`
 
@@ -573,7 +575,7 @@ outside {0,1,2}, and inside `run_db_check` no `.fsl` input can produce one.
 `check_db` calls `validate_db` first, so every input `run_verify` would reject
 with status 2 is already rejected before the kernel runs; `run_verify`'s
 remaining non-{0,1} exits are status 3 from `Z3Solver::new`, from
-`replay_bmc_witnesses`, and from `render_explicit_output` — internal
+`replay_bmc_witnesses_with_bounds`, and from `render_explicit_output` — internal
 inconsistencies, not spec properties. The guard is defensive depth against a
 verifier fault, not a reachable behavior, so no fixture can calibrate it and an
 operator for it would only ever report "primary did not fail". An operator whose

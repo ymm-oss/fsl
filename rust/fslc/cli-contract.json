@@ -3,7 +3,7 @@
   "root": {
     "path": [],
     "prog": "fslc",
-    "help": "usage: fslc [-h] [-V] {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,document,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain,causal}\n\npositional arguments:\n  {version,check,lint,migrate,fmt,kernel,conformance,verify,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,document,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain,causal}\n    version             show the version\n    check               check an FSL specification\n    lint                report edition migration diagnostics\n    migrate             plan or atomically apply edition migrations\n    fmt                 format one FSL source or check multiple paths\n    kernel              emit the normalized public Kernel JSON contract\n    conformance         emit language-neutral concrete conformance vectors\n    verify              verify specification properties with bounded or proving\n                        engines\n    sweep               run bounded verification across a scope grid\n    scenarios           generate integration-test scaffolds from a\n                        specification\n    replay              replay a concrete trace against a specification\n    testgen             generate tests from a specification\n    mutate              run mutation analysis on a specification\n    explain             explain verification outcomes for a specification\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    document            generate a requirements document (ja/en) or emit its\n                        RCIR claim set as JSON\n    approval            create and check digest-bound approval records\n    refine              check refinement between implementation and abstraction\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n    causal              causal review, expectation, observation, and ledger commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n",
+    "help": "usage: fslc [-h] [-V] {version,check,lint,migrate,fmt,kernel,conformance,testplan,verify,counterexample,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,document,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain,causal}\n\npositional arguments:\n  {version,check,lint,migrate,fmt,kernel,conformance,testplan,verify,counterexample,sweep,scenarios,replay,testgen,mutate,explain,html,ledger,document,approval,refine,diff,chain,typestate,analyze,db,compat,ai,domain,causal}\n    version             show the version\n    check               check an FSL specification\n    lint                report edition migration diagnostics\n    migrate             plan or atomically apply edition migrations\n    fmt                 format one FSL source or check multiple paths\n    kernel              emit the normalized public Kernel JSON contract\n    conformance         emit language-neutral concrete conformance vectors\n    testplan            select bounded conformance vectors into a closed\n                        test-plan.v1 JSON plan\n    verify              verify specification properties with bounded or proving\n                        engines\n    counterexample      export a bounded safety-invariant counterexample to\n                        reproducer.v1\n    sweep               run bounded verification across a scope grid\n    scenarios           generate integration-test scaffolds from a\n                        specification\n    replay              replay a concrete trace against a specification\n    testgen             generate tests from a specification\n    mutate              run mutation analysis on a specification\n    explain             explain verification outcomes for a specification\n    html                generate a self-contained HTML review report\n    ledger              generate a business audit ledger (markdown) by\n                        requirement id\n    document            generate a requirements document (ja/en) or emit its\n                        RCIR claim set as JSON\n    approval            create and check digest-bound approval records\n    refine              check refinement between implementation and abstraction\n    diff                compare OLD and NEW specification semantics\n    chain               run a project manifest across business, requirements,\n                        design, and impl\n    typestate           decide whether typestate (ghost types) applies to a\n                        design spec and emit a TS template\n    analyze             emit structural analysis JSON for a spec\n    db                  database compatibility dialect commands\n    compat              shared compatibility commands\n    ai                  AI dialect commands\n    domain              Functional DDD / async effect dialect commands\n    causal              causal review, expectation, observation, and ledger commands\n\noptions:\n  -h, --help            show this help message and exit\n  -V, --version         show program's version number and exit\n\n'fslc help [COMMAND ...]' prints the same help as 'fslc [COMMAND ...] --help'.\n",
     "actions": [
       {
         "dest": "help",
@@ -683,7 +683,7 @@
           "check"
         ],
         "prog": "fslc check",
-        "help": "usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] [--edition {current,next}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --strict-tags\n  --requirements REQUIREMENTS\n  --edition {current,next}\n",
+        "help": "usage: fslc check [-h] [--strict-tags] [--requirements REQUIREMENTS] [--edition {current,next,4,5}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --strict-tags\n  --requirements REQUIREMENTS\n  --edition {current,next,4,5}\n",
         "actions": [
           {
             "dest": "help",
@@ -727,7 +727,9 @@
             ],
             "choices": [
               "current",
-              "next"
+              "next",
+              "4",
+              "5"
             ],
             "default": "current",
             "action": "store"
@@ -1091,7 +1093,7 @@
               "check"
             ],
             "prog": "fslc domain check",
-            "help": "usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] [--edition {current,next}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n  --edition {current,next}\n",
+            "help": "usage: fslc domain check [-h] [--depth DEPTH] [--engine {bmc,induction}] [--deadlock {warn,error,ignore}] [--edition {current,next,4,5}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction}\n  --deadlock {warn,error,ignore}\n  --edition {current,next,4,5}\n",
             "actions": [
               {
                 "dest": "help",
@@ -1153,7 +1155,9 @@
                 ],
                 "choices": [
                   "current",
-                  "next"
+                  "next",
+                  "4",
+                  "5"
                 ],
                 "default": "current",
                 "action": "store"
@@ -1302,7 +1306,7 @@
               "testgen"
             ],
             "prog": "fslc domain testgen",
-            "help": "usage: fslc domain testgen [-h] [--depth DEPTH] [--target {vitest,pytest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --target {vitest,pytest,swift,kotlin,dart,phpunit}\n  --deadlock {warn,error,ignore}\n  --strict\n  -o, --output OUTPUT\n",
+            "help": "usage: fslc domain testgen [-h] [--depth DEPTH] [--target {vitest,pytest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [--allow-unwired] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --target {vitest,pytest,swift,kotlin,dart,phpunit}\n  --deadlock {warn,error,ignore}\n  --strict\n  --allow-unwired       emit runtime skips instead of failures for unwired adapters\n  -o, --output OUTPUT\n",
             "actions": [
               {
                 "dest": "help",
@@ -1371,6 +1375,16 @@
                 "action": "store_true"
               },
               {
+                "dest": "allow_unwired",
+                "required": false,
+                "flags": [
+                  "--allow-unwired"
+                ],
+                "nargs": 0,
+                "default": false,
+                "action": "store_true"
+              },
+              {
                 "dest": "output",
                 "required": false,
                 "flags": [
@@ -1389,7 +1403,7 @@
           "explain"
         ],
         "prog": "fslc explain",
-        "help": "usage: fslc explain [-h] [--depth DEPTH] [--readable] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help     show this help message and exit\n  --depth DEPTH\n  --readable\n",
+        "help": "usage: fslc explain [-h] [--depth DEPTH] [--readable] [--lowering]\n                    [--names {canonical,alias}]\n                    file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --readable\n  --lowering            add a 'lowering' object: each action's and property's\n                        origins\n  --names {canonical,alias}\n                        spell glossary names as their alias (default) or\n                        canonical name\n",
         "actions": [
           {
             "dest": "help",
@@ -1425,6 +1439,28 @@
             "nargs": 0,
             "default": false,
             "action": "store_true"
+          },
+          {
+            "dest": "lowering",
+            "required": false,
+            "flags": [
+              "--lowering"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
+          },
+          {
+            "dest": "names",
+            "required": false,
+            "flags": [
+              "--names"
+            ],
+            "choices": [
+              "canonical",
+              "alias"
+            ],
+            "action": "store"
           }
         ],
         "commands": []
@@ -1434,7 +1470,7 @@
           "html"
         ],
         "prog": "fslc html",
-        "help": "usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --engine {bmc,induction}\n                        use k-induction so a proved report can show assurance\n                        class 'proved'\n",
+        "help": "usage: fslc html [-h] [--depth DEPTH] [-o OUTPUT] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] [--no-timing] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --deadlock {warn,error,ignore}\n  --engine {bmc,induction}\n                        use k-induction so a proved report can show assurance\n                        class 'proved'\n  --no-timing           omit execution timing and ambient solver statistics\n                        from HTML (stdout or file); keep them by default\n",
         "actions": [
           {
             "dest": "help",
@@ -1496,6 +1532,16 @@
             ],
             "default": "bmc",
             "action": "store"
+          },
+          {
+            "dest": "no_timing",
+            "required": false,
+            "flags": [
+              "--no-timing"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
           }
         ],
         "commands": []
@@ -1519,7 +1565,7 @@
           {
             "path": ["approval", "create"],
             "prog": "fslc approval create",
-            "help": "usage: fslc approval create [-h] --kind {ledger,html,scenarios,requirements_document} --artifact ARTIFACT --approver APPROVER [--requirement ID] [--signing-key PRIVATE_KEY] [--depth DEPTH] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] [--glossary GLOSSARY] [--evidence EVIDENCE] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --kind {ledger,html,scenarios,requirements_document}\n  --artifact ARTIFACT   reviewed artifact generated with the recorded inputs\n  --approver APPROVER\n  --requirement ID      requirement ID to approve; repeatable, defaults to all\n  --signing-key PRIVATE_KEY\n                        create a signed record (v2 for ledger/html/scenarios,\n                        v4 for requirements_document) with a PKCS#8 Ed25519 key\n  --depth DEPTH         ledger/html/scenarios only\n  --deadlock {warn,error,ignore}\n                        ledger/html/scenarios only\n  --engine {bmc,induction}\n                        ledger/html/scenarios only\n  --glossary GLOSSARY   requirements_document only; the same glossary sidecar\n                        the reviewed document was generated with\n  --evidence EVIDENCE   requirements_document only; the same evidence file(s)\n                        the reviewed document was generated with; repeatable\n  -o, --output OUTPUT\n",
+            "help": "usage: fslc approval create [-h] --kind {ledger,html,scenarios,requirements_document} --artifact ARTIFACT --approver APPROVER [--requirement ID] [--signing-key PRIVATE_KEY] [--depth DEPTH] [--deadlock {warn,error,ignore}] [--engine {bmc,induction}] [--glossary GLOSSARY] [--evidence EVIDENCE] [-o OUTPUT] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --kind {ledger,html,scenarios,requirements_document}\n  --artifact ARTIFACT   reviewed artifact generated with the recorded inputs\n  --approver APPROVER\n  --requirement ID      requirement ID to approve; repeatable, defaults to all\n  --signing-key PRIVATE_KEY\n                        create a signed v6 record with a PKCS#8 Ed25519 key\n  --depth DEPTH         ledger/html/scenarios only\n  --deadlock {warn,error,ignore}\n                        ledger/html/scenarios only\n  --engine {bmc,induction}\n                        ledger/html/scenarios only\n  --glossary GLOSSARY   requirements_document only; the same glossary sidecar\n                        the reviewed document was generated with\n  --evidence EVIDENCE   requirements_document only; the same evidence file(s)\n                        the reviewed document was generated with; repeatable\n  -o, --output OUTPUT\n",
             "actions": [
               {"dest":"help","required":false,"flags":["-h","--help"],"nargs":0,"action":"store"},
               {"dest":"file","required":true,"positional":true,"action":"store"},
@@ -1981,7 +2027,7 @@
           "sweep"
         ],
         "prog": "fslc sweep",
-        "help": "usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH         depth range LO..HI to sweep (default: 0..8)\n  --engine {bmc,induction}\n  --k K_IND             max induction depth (induction engine only)\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        check a single named property in isolation\n  --instances INSTANCES\n                        sweep an entity bound (NAME=LO..HI; repeatable)\n  --values VALUES       sweep a number upper bound as LO..LO through LO..HI\n  --strict-tags\n  --requirements REQUIREMENTS\n",
+        "help": "usage: fslc sweep [-h] [--depth DEPTH] [--engine {bmc,induction}] [--k K_IND] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH         depth range LO..HI to sweep (default: 0..8)\n  --engine {bmc,induction}\n  --k K_IND             max induction depth (induction engine only)\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        check a single named property in isolation; under\n                        induction, every implicit type bound is still checked\n                        in the base case\n  --instances INSTANCES\n                        sweep an entity bound (NAME=LO..HI; repeatable)\n  --values VALUES       sweep a number upper bound as LO..LO through LO..HI\n  --strict-tags\n  --requirements REQUIREMENTS\n",
         "actions": [
           {
             "dest": "help",
@@ -2110,7 +2156,7 @@
           "testgen"
         ],
         "prog": "fslc testgen",
-        "help": "usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT] [--target {pytest,vitest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --target {pytest,vitest,swift,kotlin,dart,phpunit}\n                        test harness to emit (default: pytest)\n  --deadlock {warn,error,ignore}\n  --strict\n",
+        "help": "usage: fslc testgen [-h] [--depth DEPTH] [-o OUTPUT] [--target {pytest,vitest,swift,kotlin,dart,phpunit}] [--deadlock {warn,error,ignore}] [--strict] [--allow-unwired] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  -o, --output OUTPUT\n  --target {pytest,vitest,swift,kotlin,dart,phpunit}\n                        test harness to emit (default: pytest)\n  --deadlock {warn,error,ignore}\n  --strict\n  --allow-unwired       emit runtime skips instead of failures for unwired adapters\n",
         "actions": [
           {
             "dest": "help",
@@ -2186,6 +2232,16 @@
             "nargs": 0,
             "default": false,
             "action": "store_true"
+          },
+          {
+            "dest": "allow_unwired",
+            "required": false,
+            "flags": [
+              "--allow-unwired"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
           }
         ],
         "commands": []
@@ -2231,7 +2287,7 @@
           "verify"
         ],
         "prog": "fslc verify",
-        "help": "usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction,explicit,auto}] [--k K_IND] [--explicit-budget EXPLICIT_BUDGET] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] [--edition {current,next}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction,explicit,auto}\n  --k K_IND             max induction depth (induction engine only)\n  --explicit-budget EXPLICIT_BUDGET\n                        max visited states for the explicit engine (default\n                        1000000); exceeding returns unknown_budget\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        select one named property obligation; resolves across\n                        invariant/trans/leadsTo/reachable declarations; under\n                        induction, a selected trans keeps all invariant\n                        hypotheses\n  --exclude-property EXCLUDE_PROPERTY_NAMES\n                        skip a named property; repeat to omit\n                        invariants/trans/leadsTo/reachable declarations\n  --instances INSTANCES\n                        override a verify-block 'instances NAME = N' bound\n                        (NAME=N; repeatable) — e.g. shrink to 1 entity for\n                        liveness\n  --values VALUES       override a verify-block 'values NAME = LO..HI' bound\n                        (NAME=LO..HI; repeatable)\n  --strict-tags\n  --requirements REQUIREMENTS\n  --no-cache            skip the persistent verdict cache for this run (neither\n                        reads nor writes it)\n  --lemma LEMMAS        candidate auxiliary invariant expression (induction\n                        only; repeatable)\n  --from-state FROM_STATE\n                        replace spec init with a complete Monitor/replay\n                        logical-state JSON snapshot (BMC only)\n  --edition {current,next}\n",
+        "help": "usage: fslc verify [-h] [--depth DEPTH] [--engine {bmc,induction,explicit,auto}] [--k K_IND] [--explicit-budget EXPLICIT_BUDGET] [--deadlock {warn,error,ignore}] [--vacuity {warn,error,ignore}] [--property PROPERTY_NAME] [--exclude-property EXCLUDE_PROPERTY_NAMES] [--instances INSTANCES] [--values VALUES] [--strict-tags] [--requirements REQUIREMENTS] [--no-cache] [--lemma LEMMAS] [--from-state FROM_STATE] [--edition {current,next,4,5}] file\n\npositional arguments:\n  file\n\noptions:\n  -h, --help            show this help message and exit\n  --depth DEPTH\n  --engine {bmc,induction,explicit,auto}\n  --k K_IND             max induction depth (induction engine only)\n  --explicit-budget EXPLICIT_BUDGET\n                        max visited states for the explicit engine (default\n                        1000000); exceeding returns unknown_budget\n  --deadlock {warn,error,ignore}\n  --vacuity {warn,error,ignore}\n  --property PROPERTY_NAME\n                        select one named property obligation; resolves across\n                        invariant/trans/leadsTo/reachable declarations; under\n                        induction, a selected trans keeps all invariant\n                        hypotheses, and every implicit type bound is still\n                        checked in the base case\n  --exclude-property EXCLUDE_PROPERTY_NAMES\n                        skip a named property; repeat to omit\n                        invariants/trans/leadsTo/reachable declarations\n  --instances INSTANCES\n                        override a verify-block 'instances NAME = N' bound\n                        (NAME=N; repeatable) — e.g. shrink to 1 entity for\n                        liveness\n  --values VALUES       override a verify-block 'values NAME = LO..HI' bound\n                        (NAME=LO..HI; repeatable)\n  --strict-tags\n  --requirements REQUIREMENTS\n  --no-cache            skip the persistent verdict cache for this run (neither\n                        reads nor writes it)\n  --lemma LEMMAS        candidate auxiliary invariant expression (induction\n                        only; repeatable)\n  --from-state FROM_STATE\n                        replace spec init with a complete Monitor/replay\n                        logical-state JSON snapshot (BMC only)\n  --edition {current,next,4,5}\n",
         "actions": [
           {
             "dest": "help",
@@ -2407,7 +2463,9 @@
             ],
             "choices": [
               "current",
-              "next"
+              "next",
+              "4",
+              "5"
             ],
             "default": "current",
             "action": "store"
@@ -2577,7 +2635,7 @@
       {
         "path": ["fmt"],
         "prog": "fslc fmt",
-        "help": "usage: fslc fmt [-h] [--check] [--edition {current,next}] path [path ...]\n\nFormat one registered FSL document to stdout without mutating it. Multiple paths are accepted only with --check. Use '-' for stdin.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --check               report whether formatting is required (exit 0 clean, 1 changed)\n  --edition {current,next}\n                        formatting policy (default: current)\n",
+        "help": "usage: fslc fmt [-h] [--check] [--edition {current,next,4,5}] [--lang {ja,en}] [--names {alias,canonical}] path [path ...]\n\nFormat one registered FSL document to stdout without mutating it. Multiple paths are accepted only with --check. Use '-' for stdin.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --check               report whether formatting is required (exit 0 clean, 1 changed)\n  --edition {current,next,4,5}\n                        formatting policy (default: current)\n  --lang {ja,en}        respell every keyword in one language (fsl 5 requirements)\n  --names {alias,canonical}\n                        respell glossary names as their alias or canonical name (fsl 5 requirements)\n",
         "actions": [
           {
             "dest": "help",
@@ -2604,8 +2662,32 @@
             "dest": "edition",
             "required": false,
             "flags": ["--edition"],
-            "choices": ["current", "next"],
+            "choices": ["current", "next", "4", "5"],
             "default": "current",
+            "action": "store"
+          },
+          {
+            "dest": "lang",
+            "required": false,
+            "flags": [
+              "--lang"
+            ],
+            "choices": [
+              "ja",
+              "en"
+            ],
+            "action": "store"
+          },
+          {
+            "dest": "names",
+            "required": false,
+            "flags": [
+              "--names"
+            ],
+            "choices": [
+              "alias",
+              "canonical"
+            ],
             "action": "store"
           }
         ],
@@ -2614,7 +2696,7 @@
       {
         "path": ["lint"],
         "prog": "fslc lint",
-        "help": "usage: fslc lint [-h] [--edition {current,next}] [--project PROJECT] path [path ...]\n\nReport stable edition and ID-policy diagnostics without mutating source files.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next}\n                        lint policy (default: current)\n  --project PROJECT     explicit fsl-project.toml ID-policy manifest\n",
+        "help": "usage: fslc lint [-h] [--edition {current,next,4,5}] [--project PROJECT] [--strict-names] path [path ...]\n\nReport stable edition and ID-policy diagnostics without mutating source files.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next,4,5}\n                        lint policy (default: current)\n  --project PROJECT     explicit fsl-project.toml ID-policy manifest\n  --strict-names        warn 'mixed_names' where a glossary name is also written as its canonical name\n",
         "actions": [
           {
             "dest": "help",
@@ -2634,7 +2716,7 @@
             "dest": "edition",
             "required": false,
             "flags": ["--edition"],
-            "choices": ["current", "next"],
+            "choices": ["current", "next", "4", "5"],
             "default": "current",
             "action": "store"
           },
@@ -2643,6 +2725,16 @@
             "required": false,
             "flags": ["--project"],
             "action": "store"
+          },
+          {
+            "dest": "strict_names",
+            "required": false,
+            "flags": [
+              "--strict-names"
+            ],
+            "nargs": 0,
+            "default": false,
+            "action": "store_true"
           }
         ],
         "commands": []
@@ -2650,7 +2742,7 @@
       {
         "path": ["migrate"],
         "prog": "fslc migrate",
-        "help": "usage: fslc migrate [-h] [--edition {current,next}] [--write] path [path ...]\n\nPlan machine-applicable edition edits without mutation. --write applies the validated file set atomically.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next}\n                        target edition (default: next)\n  --write               atomically replace every validated input file\n",
+        "help": "usage: fslc migrate [-h] [--edition {current,next,4,5}] [--write] path [path ...]\n\nPlan machine-applicable edition edits without mutation. --write applies the validated file set atomically.\n\npositional arguments:\n  path\n\noptions:\n  -h, --help            show this help message and exit\n  --edition {current,next,4,5}\n                        target edition (default: next)\n  --write               atomically replace every validated input file\n",
         "actions": [
           {
             "dest": "help",
@@ -2670,7 +2762,7 @@
             "dest": "edition",
             "required": false,
             "flags": ["--edition"],
-            "choices": ["current", "next"],
+            "choices": ["current", "next", "4", "5"],
             "default": "next",
             "action": "store"
           },

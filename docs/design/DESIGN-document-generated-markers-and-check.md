@@ -168,9 +168,9 @@ label string `fslc document generate` was invoked with — `SpecInfo.source` and
 own command-line spelling of the spec path, a cosmetic difference (a relative path
 from a different working directory, for instance) would shift every source-ref line
 and manufacture false whole-document drift. `check` therefore re-projects under the
-label the artifact's frontmatter recorded (`load_document_claims_with_label`), not
-under its own argv spelling; the spec *content* still comes from the path check's
-own caller passed in.
+label the artifact's frontmatter recorded (`load_document_claims_from_source`), not
+under its own argv spelling. The spec content is the caller's captured, admitted
+source string; neither the label nor the original path is reread for projection.
 
 **Comparison algorithm.** After the frontmatter's `fsl_document_schema`/`view`/`lang`
 are confirmed supported (any of the three failing is a hard error, exit 2 — the
@@ -228,7 +228,7 @@ the artifact path, matching the issue's own JSON shapes with `fsl: "1.0"` added
 `document_conformant` -> 0; `document_drifted` -> 1 (a `reasons`-bearing result,
 *not* routed through `normalized_exit_status`'s `kind == "internal"` -> 3 special
 case, since its `result` is neither `"error"` nor internal); a frontmatter/schema
-failure, an I/O error, or a spec parse/type/semantics error -> 2, using the same
+failure, a usage (invalid argv) error, an I/O error, or a spec parse/type/semantics error -> 2, using the same
 `error_output`/`semantic_error_output` helpers `generate`/`claims` already call; an
 unexpected internal failure -> 3 via the existing `normalized_exit_status` path. No
 new exit-code plumbing was needed.
@@ -257,6 +257,103 @@ new exit-code plumbing was needed.
   in v1, per the issue.
 
 ## Verification evidence
+
+### External display data (#1428)
+
+The document and ledger renderers escape external data at its interpolation
+boundary, not the generated artifact. Requirement intent is quoted on every
+line (including blank lines); HTML comment delimiters and inline Markdown
+delimiters are literal data. Undecided reasons and approvers are single-line
+prose: CR/LF are represented as `&#13;`/`&#10;`, not new generated list items.
+Japanese and emoji remain readable. Ordinary arrows and canonical identifier
+underscores keep their existing bytes. Existing glossary-label formatting is
+unchanged; it is not reused for code spans or tables.
+
+Source/record/evidence paths and external result displays use inline code.
+Ordinary values keep their original backtick spelling; values containing
+backticks, pipes, HTML delimiters or CR/LF use an escaped HTML `code` element
+instead, with numeric references for backticks/pipes/control characters and
+Markdown emphasis, bracket and backslash punctuation. Image-opening `![` is
+encoded too; an inert `!` keeps its existing spelling. An HTML `code` element
+alone does not suppress Markdown parsing of its contents. GFM strikethrough
+tildes are numeric references in HTML code and backslash-escaped in prose.
+HTTP/HTTPS/FTP scheme colons and the first `www.` dot (case-insensitive) use
+numeric references; email addresses use the constant trusted `<span>@</span>`
+boundary, since an entity or backslash before `@` still permits GFM autolinking.
+This includes underscore-containing first domain labels (also leading/trailing
+underscores); a no-dot underscored tail remains ordinary non-email text.
+Input-supplied HTML remains escaped data; ordinary backtick code stays unchanged.
+Quoted ordered-list prefixes of one to nine digits plus `.` or `)` and list
+whitespace have their delimiter escaped, preserving indentation; non-list
+prefixes keep their existing bytes. If quote indentation reaches an indented
+code context, the entire **raw** line instead uses the existing literal code
+formatter, with its prefix whitespace inside the code. This avoids displaying
+prose escape characters as data for ordered prefixes, tilde, HTML, or other
+punctuation. Indentation uses physical tab stops after the emitted `> `: four
+spaces, two tabs, and deep mixed indentation select code; up to three spaces,
+a single tab and shallow mixed indentation retain their existing spelling.
+For a deep line using backtick code, add exactly one guard ASCII space at each
+edge only when the raw line starts and ends with ASCII space and contains a
+non-ASCII-space character. GFM strips those two guards, preserving all original
+spaces. All-ASCII-space lines are exempt and stay bare; TAB is not ASCII space.
+No input is trimmed, and HTML-code fallback and ordinary code slots are unchanged.
+Ledger
+free-text table cells escape Markdown as data as well as HTML/row boundaries;
+fixed generated inline-code syntax is not passed through the prose formatter.
+In particular, arbitrary producer-result cells and the external source/result
+inputs to an evidence-failure summary use prose escaping before interpolation;
+the surrounding generated summary and canonical result identifiers keep their
+existing spelling. Finding classification and the original evidence objects
+are not rewritten for display.
+The raw JSON evidence appendix stays fenced JSON, not escaped prose. The
+requirements overview repeats rule intent through the same blockquote helper
+as the requirement section. Authored line comments retained in rule statements
+and decision-row conditions are literal code/prose, not active Markdown;
+their parser-collapsed whitespace is not reconstructed. Lone CR in accepted
+decision/goal/policy descriptions is represented as `&#13;`. Literal LF inside
+source strings is rejected by the source parser, not claimed as renderer coverage.
+Reconstructed lowering/assuming/resource expressions retain their existing bytes.
+Lifecycle IDs and Mermaid bytes are unchanged: source glossary aliases are
+validated identifiers, not arbitrary sidecar labels; quoted/newline aliases
+are rejected at the actual source boundary. These controls do not establish
+real Mermaid rendering or a general Mermaid encoding policy.
+
+Machine frontmatter and generated claim/slot marker grammar are not Markdown
+display slots. Their existing rejection rules remain authoritative, including
+malformed source frontmatter and malformed marker lines in evidence result
+tokens (#1475). For results this is the former evidence-source list-row context,
+not the bare result string: a marker-like first inline fragment remains accepted,
+while a subsequent standalone malformed marker line retains its exact refusal.
+Validation includes the generated final-fragment suffix and rows ordered by
+their original raw path/result row bytes. The displayed escaped rows retain
+that same order and multiplicity, including identical rows and distinct results
+at one path; neither escaped-path sorting nor row deduplication is permitted.
+This does not allowlist marker strings or
+change the marker parser. Free-text intent/reasons/approvers cannot become claim authority.
+
+This interpolation-only correction retains renderer version 1.3.0 and the
+existing skeleton so benign artifacts stay byte-identical (an exception to the
+template-version rule above, not a general permission to change templates).
+An older structurally aligned artifact whose only difference is newly escaped
+residue is `document_drifted` / `edit_outside_slot`, exit 1. If a source citation
+or trace title inside an actual claim body changes display bytes, its block
+digest is recomputed from those exact bytes; an old valid block reports
+`claim_changed` / `render_diverged`. Malformed old markers retain
+`marker_malformed`. Residue-only changes preserve complete claim IDs, bodies
+and block digests. RCIR digests and claim semantics are not sanitized: changing
+requirement text still affects `claim_set_digest`, not unrelated `claim_digest`.
+
+Approvals bind the newly escaped canonical bytes and the exact reviewed file
+bytes, including any editable-slot content; never an old digest over new text.
+Existing affected approvals report `rendering_changed` / `drifted` (approval
+check remains exit 0); document generation with a stale approval still refuses
+with `FSL-DOC-APPROVAL-DRIFTED`, exit 2. Review, regenerate and re-approve affected
+artifacts. Public JSON schemas, assurance, replay and verdict meanings do not
+change. Literal renderer regressions and complete benign-artifact fingerprints
+live in `issue_1428_document_markdown.rs`, `issue_1428_ledger_markdown.rs` and
+`issue_1428_overview_markdown.rs`. Affected raw-overview approvals likewise bind
+the old artifact bytes and must be reviewed/regenerated/re-approved, not reused
+for the corrected rendering even when all claim blocks are byte-identical.
 
 `rust/fsl-tools/tests/document_markers.rs`: the frontmatter block's key set/values;
 every claim renders inside exactly one marker pair with a unique id matching RCIR's

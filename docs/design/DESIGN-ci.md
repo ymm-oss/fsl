@@ -39,6 +39,50 @@ replacement edge identified yet, so retiring it needs a separate compatibility d
 the BFS/BMC/scenarios trio remains pending native semantic
 migration.
 
+### WASM browser outcomes and timeout retries
+
+The FSL browser harness preserves `fsl-wasm-browser-outcome.v1`: a typed probe
+timeout exits **124** (`probe_timeout`, with `poll` or `cdp` mode), a native/Worker
+parity violation exits **65** (`parity_violation`), and other harness failures exit
+**1** (`harness_failure`). The earlier z3js spike has no such outcome JSON: only
+expiry of its 75-second result timer exits **124**; early browser exit, Worker
+failure, build failure and every other error still exit **1**. The spike lifecycle
+clears its result timer, stops any live Chrome, closes the server and removes the
+profile on success or failure, including profile-creation and launch failures;
+cleanup releases only acquired resources in that order.
+
+`tools/check-native-integration.sh` retries each of the spike `probe:browser` and
+FSL `test:browser` commands **once, only on exact status 124**. A second timeout
+fails, and status 65 or any other nonzero status is never retried or replaced by
+success. The phases have independent retry budgets. Setup commands run once with
+`set -euo pipefail`; a terminal spike failure stops the lane before native/FSL
+setup. Every browser attempt records its outcome and status, including an explicit
+first-timeout retry announcement, appending to `GITHUB_STEP_SUMMARY` when set.
+Local runs without that variable preserve the same exit behavior. Individual CDP
+calls are not retried; their original diagnostics remain in the log.
+
+FSL client completion has a **360-second elapsed-time deadline**, not a fixed poll
+count. In-flight CDP evaluations retain their own 30-second timeout and consume
+the completion budget. Chrome executable/version (best effort), spawn, DevTools
+readiness and completion/timeout timestamps, plus the last observed client phase,
+distinguish progress from an unexplained pending page. These diagnostics do not
+change outcome JSON, parity envelopes, normalization, exclusions or corpus scope.
+Package-free FSL/spike outcome, completion and retry controls run through the
+FSL package's `test:outcome` entry point in the WASM lane before the FSL browser.
+A retry is a bounded mitigation, not evidence that the underlying latency cause
+is resolved or that parity has passed.
+
+### Instrumented Rust builds and address-space ceilings
+
+Any sanitizer/instrumented CI job must exclude
+`requirement_trace_large_domain::a_trace_over_a_large_values_scope_checks_under_an_address_space_ceiling`
+(the `fslc-rust` integration test `requirement_trace_large_domain`). On Linux
+this test runs the CLI under a 1 GiB `ulimit -v`; ASan reserves a much larger
+virtual address space and fails under that limit regardless of the replay
+memory property. Keep the test enabled in ordinary, non-instrumented Linux
+builds. There is no instrumented job today; its exclusion mechanism must be
+chosen when such a job is added, not by weakening this test's ceiling.
+
 ### Why the split falls here
 
 Measured on the batch that motivated this revision:
@@ -57,22 +101,20 @@ Measured on the batch that motivated this revision:
   warm cache and ≈18 min cold), so deferring the matrix is what buys the merge throughput this
   design is for.
 
-The cost is stated plainly: a pull request into `main` now waits for `rust workspace`, measured at
-18m17s on a cold cache and around twelve minutes warm, rather than forty seconds. Because a branch
-that falls behind `main` must re-run its checks, a serial chain of rebases pays that repeatedly. One
-mitigation exists and is worth using before the cost is treated as inherent: independent changes can
-share one pull request with one commit per topic.
+The cost is stated plainly: a pull request into `main` waits for `rust workspace`, measured at
+18m17s on a cold cache and around twelve minutes warm, rather than forty seconds. Before the strict
+policy was relaxed, a branch falling behind `main` had to re-run its checks, so a serial chain of
+rebases paid that repeatedly. Independent changes can still share one pull request with one commit
+per topic.
 
-A merge queue would be the other, batching several candidates into one validation, and both
-`merge-readiness.yml` and `ci.yml` carry a `merge_group` trigger for exactly that. **It is not an
-available mitigation.** The queue itself was configured on the `main` ruleset on 2026-08-05 and
-removed the same day; both triggers are inert and enabling one changes nothing, because no
-`merge_group` event fires without a queue. Reviving it is a human-review-policy decision, not a CI
-one — see "Required pre-merge contexts, and why the merge queue was rejected" below, and the
-"Non-goals" entry that follows from it. This paragraph previously recommended the queue as a
-mitigation "once `ci.yml` gains the same trigger"; `ci.yml` gained it, the queue was then measured
-and rejected, and the recommendation was left behind. It is corrected here rather than deleted so the
-sequence stays legible.
+A merge queue is now the other mitigation: it validates queued candidates against current `main`
+without requiring a chain of branch updates. Adopted on 2026-10-29 after an explicit review-policy
+change, it uses the existing `merge_group` triggers in four workflows: `merge-readiness.yml`,
+`ci.yml`, `site-reference-freshness.yml`, and `cache-budget-audit-wiring.yml`.
+Pull requests still retain their full pre-merge evidence; this is not a reduction in per-push checks.
+See "Merge queue adoption (2026-10-29)" below. The unsuccessful 2026-08-05 experiment is retained
+there as dated history, not the current policy: this paragraph is corrected rather than deleted,
+with the history kept in the dedicated subsection.
 
 ## Merge readiness contract
 
@@ -220,14 +262,20 @@ parallel:
   workspace's non-doctest tests three ways with `cargo-nextest` via
   `tools/check-native-integration.sh rust-tests K/3`; the `rust-workspace` aggregator requires both
   and enforces shard-union completeness (`rust workspace`; see "Sharded pre-merge Linux evidence"
-  below);
+  below). After that workspace build, `rust-checks` also runs the native CLI's
+  Python-driven expectation checks described below;
 - the production WASM/browser phase from `tools/check-native-integration.sh wasm` (`WASM`);
-- focused native-Z3 tests on macOS and Windows (`native Z3 4.16`);
+- focused native-Z3 tests on macOS and Windows (`native Z3 4.16`); Windows uses
+  `rust-native-z3-windows-shards` (`long-poles`, `rest`) and retains `rust-native-z3-windows`
+  as the `always() && <condition>` aggregator (original event condition). When that condition holds,
+  any shard failure, cancellation or skip fails it; only `success` passes, preserving the product-gate dependency.
+  The long-poles shard checks its live test names against the rest shard's skip manifest;
+  measured shard timings and the rebalance they prompted are recorded below (#1532);
 - the M13 semantic mutation gate, sharded across three jobs: `semantic-mutation-operators` runs the
   curated fault-operator controls three ways via `tools/run-semantic-mutation-gate.sh <mode> --lane
-  operators --shard K/3`; `semantic-mutation-mutants` runs the generic cargo-mutants half, complete
-  and unsharded, via `tools/run-semantic-mutation-gate.sh <mode> --lane mutants`; the
-  `semantic-mutation` aggregator requires both and enforces operator-union completeness (`semantic
+  operators --shard K/3`; `semantic-mutation-mutants` runs the generic cargo-mutants half in the
+  selected changed/complete tier via `tools/run-semantic-mutation-gate.sh <mode> --lane mutants --shard K/3`; the
+  `semantic-mutation` aggregator requires both and enforces both exact executed unions (`semantic
   mutation`; see "Sharded pre-merge Linux evidence" below);
 - the deterministic finite-model agreement gate from `tools/check-native-integration.sh fsl-logic`
   (`FSL Logic Test`).
@@ -235,16 +283,67 @@ parallel:
 **The first two carry no event condition beyond scope evidence and therefore also run on every
 pull request today**, which is what makes the Linux evidence pre-merge. Only `native Z3 4.16` and
 the aggregate `product gate` context honour `FSL_OPTIMISTIC_CI` and skip on pull requests into
-`main`.
+`main` and on `merge_group` events.
 
 All four heavy jobs (`rust workspace`, `WASM`, `semantic mutation`, `FSL Logic Test`) are required
-contexts on the `main` ruleset, and all four also carry a `merge_group` trigger that is **inert**:
-no merge queue is configured on `main`, and the accepted decision below records that one was tried
-and rejected, so `merge_group` never fires. The same is true of
-`tools/check-product-gate-scope.sh`'s `queue-entry-stub` branch, which is gated on a
-`FSL_MERGE_QUEUE_CI` variable that does not exist. Every pull request therefore runs the complete
-Linux evidence in full, and that is the live contract — see "Required pre-merge contexts, and why
-the merge queue was rejected" below before assuming otherwise.
+contexts on the `main` ruleset, and all four also carry an active `merge_group` trigger.
+The queue was adopted on 2026-10-29. `FSL_MERGE_QUEUE_CI` stays unset, so
+`tools/check-product-gate-scope.sh`'s `queue-entry-stub` branch stays disabled: pull requests retain
+their full Linux evidence, subject to the existing in-job scope exemption, and each merge group
+computes its own scope with `diff_scope`. See "Merge queue adoption (2026-10-29)" below for the
+false-green risk that keeps the stub path off even with a queue.
+
+### Native CLI Python expectation checks
+
+Issue #1466 found native expectations silently aging outside CI: #486 fixed
+quantified vacuity detection, but the Python injection benchmark still expected
+the old gap. These are native-binary tests, not changes to frozen Python product
+behavior. The required `rust workspace` context now owns them through its
+`rust-checks` constituent job, after the existing workspace build:
+
+```bash
+./tools/check-merge-readiness.sh native-python
+```
+
+This explicit lane is separate from `compile`, `core`, `automation`, and their
+bounded `all` shorthand. It does not add a native build to merge readiness.
+`ci.yml` uses `actions/setup-python@v5`, Python 3.12, and the existing `.[dev]`
+dependency contract, matching `merge-readiness.yml`. Setup, dependency preparation,
+and execution share the existing evidence-scope guard; the job's 30-minute timeout,
+required-context names, and aggregator dependencies are unchanged.
+
+| Native-driving module | Required evidence | Prerequisites beyond pytest |
+|---|---|---|
+| `tests/test_injection_bench.py` | All 21 injected cases' primary/blind detectors; regenerated `MATRIX.json` | Built debug CLI and injected corpus |
+| `tests/test_bounded_liveness_oracle.py` | Native replay agrees with both bounded-response oracle fixtures | Cargo, debug CLI, frozen oracle imports |
+| `tests/test_rust_cli_semantics.py` | All 20 native CLI behavior/parity tests, including nonzero ledger verdicts | Debug CLI, Git, frozen dialect/codegen reference |
+
+No native-driving `tests/*.py` module in this inventory is excluded. The frozen
+imports require the already-declared Lark/Z3 dependencies; they do not make the
+rest of the frozen-Python suite required. `FSLC_BENCH_CLI=native` is explicit in
+the lane. After pytest, a full `git diff --exit-code` of the regenerated
+`examples/gallery/injected/MATRIX.json` rejects a stale committed artifact;
+there is no field exclusion. Generated evidence is never hand-edited.
+
+Enumeration is reproducible: search `tests/*.py` for
+`FSLC_BENCH_CLI|rust.*target|target.*debug|native_cli|native_binary|native_fslc|cargo|shutil.which|FSLC_`,
+then independently audit subprocess argv and reverse-import their helpers. The
+native calls resolve to the three modules above (23 collected pytest cases).
+`tests/oracle.py` invokes `sys.executable -m fslc`, not native; its importers,
+the gallery/self/e2e subprocess drivers, and in-process reference tests remain
+frozen-Python checks. `test_rust_port_ast.py` passes a Python fake parser to its
+parity helper, and hook/toolchain/cache-key tests inspect synthetic processes or
+configuration rather than running native `fslc`.
+
+Measured on macOS with the native binary built from `13859b41`, two complete
+runs passed all 23 cases in 30.89s and 29.34s, including the warm build
+fixture. Allowing a 2–4× hosted-Linux slowdown gives 60–120s of tests, plus an
+estimated 15–60s of Python setup/dependency preparation: approximately 1.25–3
+minutes added to `rust-checks`, not a measured CI duration or guaranteed critical
+path increase. Existing Z3 compilation is reused. Linux CI timing must be reported
+separately once available. Calibration changes each newly required case's stable
+expectation independently, and also runs the whole lane with one stale expectation
+per module: assertion failures must propagate through the lane's nonzero exit.
 
 ### Agent-configuration exemption
 
@@ -268,14 +367,15 @@ time this mechanism moved* — `merge readiness` was the only one — so this wa
 not a response to an already-broken required check. The requirement change landed 2026-08-05,
 making `rust workspace`, `WASM`, `semantic mutation (changed)`, and `FSL Logic Test (pr)` required
 alongside `merge readiness`; `site reference freshness` joined the required set afterward, closing
-issue #707's drift-detection half (see "Required pre-merge contexts, and why the merge queue was
-rejected" below for the live set, and "Ruleset drift audit" for why a required context can no
+issue #707's drift-detection half (see "Required pre-merge contexts and merge queue adoption"
+below for the live set, and "Ruleset drift audit" for why a required context can no
 longer drift silently).
 
 No **product-gate lane** reads those files. The paths that do read them keep their own
 unfiltered pre-merge coverage: `merge readiness / automation contracts` executes the `.claude/`
-environment contract test from `tests/test_claude_environment.py`, and `release.yml` extracts
-release notes from `CHANGELOG.md` at tag time and fails loudly (`test -s`) on a malformed file.
+environment contract test from `tests/test_claude_environment.py`, and `release.yml` builds
+release notes from `CHANGELOG.md` with `tools/release-notes.sh` in `assemble` (dispatch and tag)
+and `publish` (tag), and fails loudly on a missing section or an empty or oversized body.
 A pull request whose every changed file matches the list therefore still gets `run=false` from the
 scope script, each heavy job exits its remaining steps fast, and the pull request merges once all
 six required contexts report: real evidence from `merge readiness` and `site reference freshness`
@@ -315,7 +415,7 @@ doc-contract tests read documentation files directly.
 still classifying as `product` (the same shape as the existing `CLAUDE.md.d/x` case). Its two
 readers keep the coverage this decision requires of every exempt path:
 
-- `.github/workflows/release.yml` reads it fail-loud, at tag time, before "Extract release
+- `.github/workflows/release.yml` reads it fail-loud, at tag time, before "Build the release
   notes": a fragment still present under `changelog.d/` fails the guard
   (`stale-fragments-present`) rather than silently shipping notes with a missing entry.
 - `.github/workflows/merge-readiness.yml`'s `automation contracts` job reads it unfiltered, on
@@ -348,8 +448,8 @@ split into a sharded lane plus an aggregator that keeps the exact required-conte
 - `rust workspace` = `rust-checks` (once) + `rust-tests` (`cargo-nextest`, 3-way, duration-aware —
   see "Duration-aware `rust-tests` shard pinning" below) + the `rust-workspace` aggregator.
 - `semantic mutation (…)` = `semantic-mutation-operators` (3-way round-robin shard of
-  `operators.txt`) + `semantic-mutation-mutants` (generic cargo-mutants, complete and **deliberately
-  unsharded** — see below) + the `semantic-mutation` aggregator.
+  `operators.txt`) + `semantic-mutation-mutants` (3-way generic cargo-mutants in the selected
+  changed/complete tier — see below) + the `semantic-mutation` aggregator.
 
 Measured wall clock after sharding is **20.7 min**, down from 38m15s — 1.85x, saving ~17.5 min per
 pull request. Recorded from the first sharded run (30989320577, PR #719), all lanes green:
@@ -392,13 +492,35 @@ speed" move this repository's invariants forbid, so
 `rust-checks`, alongside formatting, Clippy, the full workspace build, and the boundary/stack-parity
 controls. `rust-tests` then shards only what `cargo-nextest` can run: everything else.
 
-**The generic mutants lane is deliberately unsharded.** At ~14.3 min it is already close to the
-curated operator lane's floor once that lane is split three ways (see below), and cargo-mutants
-sharding would add real risk — mutant-inventory slicing, uncertain `--shard`/partition index-base
-semantics in the pinned runner, and migrating the stale-reviewed-equivalents check to a sharded
-world — for no measurable wall-clock gain. `semantic-mutation-mutants` therefore runs
-`tools/run-semantic-mutation-gate.sh <mode> --lane mutants`, complete, on one runner, with the same
-fresh-`CARGO_TARGET_DIR` anti-contamination behavior it has always had.
+**The generic mutants lane now has three coverage-preserving shards.** The ~14.3-minute
+unsharded rationale above describes the historical run, not the current critical path. Later
+observations include the 72-minute run recorded below and run `41026377668`, job `123965359863`
+at `07e089ed`: approximately 78 minutes, 68 mutants (52 caught/16 unviable), 940s baseline build,
+4511s total build versus 37.8s test time. Cold vendored Z3 and fingerprint-driven CLI compilation
+dominate; this is not a reason to freeze fingerprints or reuse the baseline CLI across mutants.
+The pinned 27.1.0 actual-list pilot established zero-based native round-robin slices 23/23/22
+and a changed one-mutant 1/0/0 case. Public `--shard K/3` remains one-based. The GLOBAL selected
+inventory is captured before slicing and drives complete-tier stale-equivalent checks.
+Every shard retains a full scratch checkout, a fresh first-party target, and the same 35 detectors,
+including a real baseline for empty slices; a shard with zero selected mutants seeds third-party
+units only (#1412, DESIGN-semantic-mutation-gate, "Zero-mutant detector target"). The required aggregate validates stable logical artifacts and
+exact raw/reported executed-ID union, including empty shards, through
+`check-shard-artifact-cohort.sh mutants` (see DESIGN-semantic-mutation-gate).
+Each nonempty shard pays a cold baseline. A historical per-ID projection of roughly 36–40 minutes
+is only an estimate, not observed parallel CI wall time; serialized local sums are not speedup
+evidence. No cache-save policy, first-party reuse, paid resources, or other gate is changed.
+
+Observed CI comparison (different runners, same `07e089ed` Rust tree): the unsharded mutation job
+in [main07 run `41026377668`](https://github.com/ymm-oss/fsl/actions/runs/41026377668/job/123965359863)
+took **77m45s**; [complete run `41057387167`, attempt 1](https://github.com/ymm-oss/fsl/actions/runs/41057387167/attempts/1)
+at `7ea395aa` recorded shards **40m38s / 50m04s / 38m35s**. The maximum was **50m04s (−35.6%)**,
+while summed job time rose to **129m17s versus 77m45s (+66.3% job-minutes)**. All 68 classifications
+agreed (52 caught, 16 unviable, zero survivors/timeouts), as did every full `FAILED` test set.
+Four first `primary_failing_test` names differed only with concurrent `FAILED`-line ordering;
+the actual recorded values were retained, so this is **not whole-report equality**. This is an
+observational result, not a causal speedup attribution or performance promise. The later
+`56f67445` producer integration has a different Rust tree and requires its own checks;
+the `7ea395aa` complete/partial-rerun evidence does not transfer to it.
 
 **Why `if: always()` is load-bearing on both aggregators.** GitHub treats a *skipped* required
 status check as satisfied — it is not "pending" or "failing," it reads as passed. If `rust-workspace`
@@ -472,7 +594,9 @@ rejection asserts the produced value beside the expected diagnostic. The parser-
 `.github/scripts/validate-shard-artifact-workflow.py` and
 `tests/test_shard_artifact_workflow.py` additionally reject one-sided name/pattern drift, lost
 overwrite/provenance/helper wiring, lost aggregator/dependency guards, and accidental changes to
-both unsharded attempt-scoped artifacts (`semantic-mutation-mutants` and `fsl-logic`). All are
+the remaining unsharded attempt-scoped artifact (`fsl-logic`). Generic mutation controls additionally
+reject missing/duplicate IDs or shards, foreign metadata, stale GLOBAL equivalents,
+zero-slice selection drift, baseline omission, union bypass, and skip-green guards. All are
 required by `check-merge-readiness.sh automation`.
 
 This local evidence does not establish GitHub's cross-attempt `upload-artifact@v4` overwrite scope,
@@ -703,9 +827,14 @@ checks. The `build` job installs the MSRV toolchain (`1.88.0`, commit-pinned per
 that toolchain before assembling release binaries; only the shipped-unit crates are exercised at
 MSRV, while library-crate semantics remain the responsibility of PR/main CI at `1.98.0`.
 Development workflows (`ci.yml`, `merge-readiness.yml`, `pages.yml`) continue to pin
-`dtolnay/rust-toolchain@1.98.0`. The job sets `timeout-minutes: 90` to make the four-way matrix
-budget visible — measured from issue #1025 (`windows-latest` hit 61 minutes on a debug three-crate
-subset) plus `fslc-rust` test volume, not to add slack. An always-running `product gate` aggregator fails unless every required lane emitted
+`dtolnay/rust-toolchain@1.98.0`. The job sets `timeout-minutes: 150` to make the four-way matrix
+budget visible, not to add slack. The first budget, 90 minutes, came from issue #1025
+(`windows-latest` hit 61 minutes on a debug three-crate subset) plus `fslc-rust` test volume. The
+v5.0.0 candidate outgrew it on `windows-x64` (dispatch run 42591087279): the MSRV test build took
+30 minutes, the tests 57 minutes (433 test binaries, 0 failed), and the job was cancelled at 90
+minutes two minutes into the release build. The v4.12.0 Windows job, which includes that release
+build, took 32 minutes in all, so 150 minutes covers the measured 88 minutes plus one more
+release build and smoke, with headroom for runner variance. An always-running `product gate` aggregator fails unless every required lane emitted
 successful evidence; an accidentally skipped lane cannot make the workflow confidently green.
 
 Product-gate runs for merged commits are not cancelled. Each merged state therefore retains its own
@@ -746,10 +875,18 @@ in `ci.yml` carried `save-if: ${{ github.event_name != 'pull_request' }}`. Pull 
 request gives up is a warm second run of itself; what it gains is that `main`'s caches stay resident,
 which is the only cache any pull request could ever share.
 
+**Queue adoption qualification (2026-10-29).** The decision's premise that only `main` saves
+initially stopped holding: the original event guard permitted `merge_group` saves on queue refs.
+**Resolution (#1615):** all seven save-enabled Rust cache steps now exclude both `pull_request`
+and `merge_group`; push, schedule and manual saves remain enabled. Audit rules 3 and 4 now
+attribute both `refs/pull/` and `refs/heads/gh-readonly-queue/`, without duplicate findings.
+The original #747 incident and decision above remain history; see
+"Merge queue adoption (2026-10-29)" below for the observed risk and resolution, not a measured eviction claim.
+
 **That is no longer a description of every step -- the current contract has two shapes, not one, and
 which key a restore-only step reads is not the same for all of them.** A step that saves its own
-declared key still carries the event guard above (`save-if: ${{ github.event_name != 'pull_request'
-}}`); a step below carries `save-if: false` unconditionally and saves nothing, ever, instead. Naming
+declared key carries `save-if: ${{ github.event_name != 'pull_request' && github.event_name !=
+'merge_group' }}`; a step below carries `save-if: false` unconditionally and saves nothing, ever, instead. Naming
 each: `merge-readiness.yml`'s `rust-compile` job reads `rust-workspace` (`shared-key: rust-workspace`,
 `save-if: false`). `merge-readiness.yml`'s `core-contracts` job reads `rust-workspace` the same way.
 `ci.yml`'s `fsl-logic` job reads `rust-workspace` the same way again. `ci.yml`'s
@@ -759,10 +896,10 @@ saves (below), not `rust-workspace`. `CI_SHARED_KEYS` in `audit-cache-budget.mjs
 identities rule 3 attributes by name today: `rust-workspace`, `wasm`, `semantic-mutation` -- three,
 not the four this section originally measured, since `fsl-logic`'s dedicated key was retired when
 that job went restore-only. That is not the complete list of keys any workflow actually saves:
-`ci.yml`'s own `rust-native-z3` job also saves, on non-pull-request events, one key per platform
+`ci.yml`'s own `rust-native-z3` job also saves, excluding PR and merge-group events, one key per platform
 (`Windows_NT` and `Darwin`) -- it just is not one of `CI_SHARED_KEYS`' three named identities. Its
 presence on `main` is required separately, by `REQUIRED_MAIN_ENTRIES`'s per-`{key, platform}` check;
-a leak of it onto a pull-request ref is caught separately too, by rule 4's generic `/^v\d+-rust-/`
+a leak of it onto a PR or queue ref is caught separately too, by rule 4's generic `/^v\d+-rust-/`
 detection rather than rule 3's name-based one.
 
 `merge-readiness.yml` was deliberately left unchanged at that point: its two keys total about
@@ -779,7 +916,7 @@ because GitHub only evicts a cache for staleness after **7 days without a read**
 landed inside that window for refs that closed more recently than that. The LRU evictor does not
 distinguish "small but many" from "few but large": it evicted `refs/heads/main`'s
 `native Z3 4.16 (windows-latest)` cache down to **zero entries**, observed via
-`gh api actions/caches`. **The `save-if` guard `ci.yml` uses is the wrong fix here and was
+`gh api actions/caches`. **The original `save-if` guard `ci.yml` used was the wrong fix here and was
 reverted before merging**: that guard only stops saving on `pull_request` events, and it relies on
 some other event on the same workflow saving a `main`-branch copy to restore from. `ci.yml` has a
 `push: branches: [main]` trigger to do that; `merge-readiness.yml` has none (`on:` above lists only
@@ -799,8 +936,11 @@ the same two jobs logged it at 09:33:03.06Z and 09:33:05.55Z, respectively. Thes
 rather than the derivation mechanism, establish the observed full-key match. A future lockfile change
 could still produce `Swatinem/rust-cache`'s ordinary prefix-restore fallback rather than a cold build,
 but that is not what these runs observed. Neither job ever writes to this key: save-enabled `ci.yml`
-steps write on non-`pull_request` events, so no `pull_request` event can grow it, and
-merge-readiness gains no eviction pressure of its own to reintroduce.
+steps write only outside `pull_request` and `merge_group`, so neither event can grow it, and
+merge-readiness gains no eviction pressure of its own to reintroduce. Since the key was given an
+explicit generation and a Cargo profile hash, matching also requires each restore-only step to pass
+the same `prefix-key` and `env-vars` as its saver and to run the same hash step first; see "Cache key
+generation" below, which also explains why the logged keys above now read `v1-rust-...`.
 
 This also qualifies a claim made elsewhere in this document. Cache hit rates were measured to have
 no headroom for `rust workspace` — compile is only ~3.5 min of ~33 min **on a warm cache**. That
@@ -827,7 +967,8 @@ not touched by this fix and is not a lever in the budget arithmetic below.
 **The scratch-build-tree and evidence-path changes in this branch are a closed-ingress-path fix, not
 a size fix, and are kept for that reason alone.** `tools/run-semantic-mutation-gate.sh`'s mutants
 lane's scratch `CARGO_TARGET_DIR` (isolated per run so a stale mutant artifact's timestamp can never
-look newer than a freshly copied baseline checkout) used to be created under
+look newer than a freshly copied baseline checkout; a zero-mutant run seeds it with third-party units
+only) used to be created under
 `rust/target/semantic-mutation-build/run.XXXXXX`, inside the tree `Swatinem/rust-cache` saves
 wholesale, and now lives under `${RUNNER_TEMP:-${TMPDIR:-/tmp}}` instead. The script also clears any
 `rust/target/semantic-mutation.*`/`semantic-mutation-build` a restored cache may carry forward,
@@ -847,7 +988,7 @@ save occurred before the current `save-if: false` guard, so it disproves a claim
 shard always won the historical race. The guard instead closes the mutants save path now, ensuring
 that future timing cannot make its `rust/target`-scoped evidence directory (kept under `rust/target`
 solely because the artifact-upload glob requires it) enter this shared cache.
-`semantic-mutation-operators` remains save-enabled on non-pull-request events with
+`semantic-mutation-operators` remains save-enabled outside PR and merge-group events with
 `cache-on-failure: true`, and is therefore the sole configured owner and recovery path.
 
 **Budget lever: `fsl-logic` goes restore-only against `rust-workspace`, taking its dedicated key out
@@ -962,7 +1103,7 @@ observed semantic-mutation timeout-cancelled save. Since #752 paired the flag wi
 increases, subsequent outcomes cannot isolate either change's contribution.
 
 With the current configuration, the `semantic-mutation` key has exactly one class of savers: the
-three `semantic-mutation-operators` shards (`save-if` on non-pull-request events,
+three `semantic-mutation-operators` shards (`save-if` outside PR and merge-group events,
 `cache-on-failure: true` -- the owner keeps the recovery path for a cold start that fails or times
 out). `semantic-mutation-mutants` is restore-only (`save-if: false`); it carries no
 `cache-on-failure`, which would be meaningless there, since `Swatinem/rust-cache`'s save step exits
@@ -1039,14 +1180,39 @@ and the subsequent warm run completed. They do not attribute that save to `cache
 or make a 60-minute cold build pass. The 60-minute budget remains a resource bound, while the saved
 cache provides the recovery path.
 
-Both native Z3 jobs (`rust-native-z3-windows`, `rust-native-z3-macos`) were raised from 60 to 90
+Both native Z3 jobs (now `rust-native-z3-windows-shards`, `rust-native-z3-macos`) were raised from 60 to 90
 minutes (#1322). By 4.11.0 the warm Windows job spent about 4–5 minutes on setup and 45–57 minutes in
 `cargo test` (sum of per-binary `finished in`: 2693 s on a 4.10.0-candidate success, 2885 s on a
 4.11.0-candidate success, 3250–3370 s on runs cancelled at 60 minutes), against 34m39s for the
 whole warm job in August. On the 4.11.0 candidate `a9f49e7a`, four of five Windows attempts were
 cancelled with every finished binary passing (runs `38710766880` attempts 1–3 and `38720126150`
 attempts 1 and 3; attempt 2 succeeded in 54 minutes); macOS ran 37–57 minutes. The raise restores
-headroom only; bringing the test volume back below the budget is tracked in #1322.
+headroom only. By #1532, Windows jobs measured 54–79 minutes, then hit 90 minutes twice at
+`11f01225`. Windows now splits into `long-poles` (complete test binaries, listed in `ci.yml`)
+and `rest` (the same three packages, with exact skips read from
+`tools/windows-native-long-poles.txt`). Before running its binaries, the long-poles shard checks
+their live libtest `--list` output against that manifest; missing, extra or duplicate manifest
+names fail the job. No test is removed or narrowed. Both shards retain 90 minutes and the
+existing cache settings. The #1532 split started with `fsl5_glossary` and
+`issue_1442_compose_binding_capture_matrix` and projected long-poles about 35–60 minutes and
+rest about 28–50 minutes.
+
+Measured on 2026-11-05 main push and dispatch runs (`cf63f1769`..`b2337fdc6`), that projection
+did not hold for `rest`: it succeeded in 49–89 minutes (10 runs) and was cancelled at 90 minutes
+once (run `42028861481`), while long-poles took 15–31 minutes. The spread tracks runner speed,
+not cache or build: all 11 shard logs read (8 runs) restored the same `rust-native-z3` key with a
+full match, the rest shard's build took 4–7 minutes in all six rest logs read, and its
+per-binary `finished in` times differed by a median 1.64× between the 49-minute (`70a54bfeb`)
+and 85-minute (`ecf5d0ba6`) runs over nearly the same binaries (sums 2426 s and 4242 s). The
+long-poles binaries varied the same way (896 s to 1693 s). A further 400–450 s of the rest shard
+falls between its ~430 test binaries. The long-poles shard therefore also runs the five slowest
+rest binaries, `issue_1480_check_engine_agreement`, `issue_697_all_properties_memory`,
+`issue_1467_composite_values`, `issue_1467_frozen_lexical` and `refine_corpus_parity`
+(1698 s of the 89-minute run's 4485 s), and the manifest grows from 12 to 40 Windows test names.
+Projection on the slowest observed runners, not a measurement: long-poles about 60 minutes,
+rest about 61 minutes. PR checks do not run Windows; only a `workflow_dispatch` or a post-merge
+`main` run can establish the shard durations.
+The `rust-native-z3-windows` aggregator runs on Ubuntu with a 10-minute limit.
 
 **The control.** `.github/scripts/audit-cache-budget.mjs` is a pure function over a fetched cache
 listing; `.github/workflows/cache-budget-audit.yml` fetches and runs it on a schedule, on dispatch,
@@ -1100,12 +1266,19 @@ rather than approaching the repository quota.
 
 Given a usable observation, the pure audit fails closed on four states: usage at or above 85% of
 the limit, a missing `refs/heads/main` cache for any critical-path `{key, platform}` pair, — the
-rejecting control for the `save-if` guard itself — any pull-request-scoped cache for one of
-`ci.yml`'s shared keys, and — the general form of that same control — any `v0-rust-*`-prefixed
-cache on a pull-request ref at all, whether or not its shared key is one `ci.yml` declares.
+rejecting control for the `save-if` guard itself — any PR- or queue-scoped cache for one of
+`ci.yml`'s shared keys, and — the general form of that same control — any `v<N>-rust-*`-prefixed
+cache on a PR or queue ref at all, whether or not its shared key is one `ci.yml` declares, and
+under any key generation. The critical-path check counts only entries under the current key
+generation (`CURRENT_KEY_PREFIX`); see "Cache key generation". Rules 3 and 4 both match
+`refs/pull/` and `refs/heads/gh-readonly-queue/` under every key generation, including superseded
+prefixes. Rule 3 attributes named shared keys first; rule 4 skips those same entries, producing
+one finding per entry. The existing finding codes `pull-request-cache-present` and
+`pull-request-rust-cache-present` now cover queue refs too. Queue bytes remain in rule 1's raw
+physical budget; thresholds and cache visibility are unchanged.
 
 The critical-path check is per-`{key, platform}` pair, not per-key, because `rust-native-z3` is one
-shared key backed by a `[macos-15, windows-latest]` matrix in `ci.yml`: a key-only set lets either
+shared key on `rust-native-z3-macos` and `rust-native-z3-windows-shards` in `ci.yml`: a key-only set lets either
 platform's presence on `main` hide the other's absence. That was a live blind spot, not a
 hypothetical one -- the predecessor `sharedKeyOf`'s regex matched `Linux`/`macOS`/`Windows` (the GitHub Actions
 `runner.os` spellings), but `Swatinem/rust-cache` composes its key from `os.type()`, which reports
@@ -1118,7 +1291,7 @@ and the independently saved `semantic-mutation` key on `Linux`; the latter is th
 restore source for every PR's restore-only mutants lane.
 
 The general pull-request-rust-cache rule exists because `merge-readiness.yml`'s restore-only fix
-(above) makes "no workflow saves a rust cache on a pull-request event" a repository-wide invariant,
+(above), extended by #1615, makes "no workflow saves a rust cache on a PR or merge-group event" a repository-wide invariant,
 not something scoped to `CI_SHARED_KEYS`' three declared keys (`rust-workspace`, `wasm`,
 `semantic-mutation`). Before this rule, `merge-readiness.yml`'s own
 now-removed per-job keys (`rust-compile`, `core-contracts`) were invisible to this audit for the same
@@ -1134,7 +1307,9 @@ mixed pairs that remain failing; tied-`created_at` boundary reordering; per-fiel
 every `CI_SHARED_KEYS` key missing from `main`; and direct live-wrapper controls for 22,300/22,301,
 HTTP failure, malformed ordinary pages, the 900-request cap, and rate-limit headers/headroom.
 There are also rejecting fixtures for a non-`ci.yml` rust cache on a pull-request ref and for each
-half of `rust-native-z3` missing from `main`.
+half of `rust-native-z3` missing from `main`. Small, below-threshold PR/queue injections cover
+known shared keys, generic `v<N>-rust-*` keys (including current `v1`) and superseded prefixes
+independently of budget pressure.
 `tools/check-merge-readiness.sh`'s `check_automation` lane runs that suite on every pull request, so
 a change to the checker is covered pre-merge even though the live audit deliberately is not a
 required context: the shared cache state can change after a pull request's own checks pass, so
@@ -1264,14 +1439,15 @@ failure mode for a worse one. A check whose easiest passing implementation is th
 to prevent is not added.
 
 **Not fixed by `shared-key`.** A `shared-key` on the `rust-native-z3` job would let two *different*
-jobs share one cache; no other job builds this cache (confirmed: grepped every workflow for
-`Swatinem/rust-cache` steps naming a `rust-native-z3`-shaped key), so there is nothing for it to
+jobs share one cache; at the time, no other job built this cache (confirmed: grepped workflows for
+`Swatinem/rust-cache` steps naming a `rust-native-z3`-shaped key), so there was nothing for it to
 consolidate. This was this session's first hypothesis and it was wrong; recorded here so it is not
 re-proposed without this evidence.
 
-Setting `shared-key: rust-native-z3` on the split `rust-native-z3-macos` / `rust-native-z3-windows`
+Setting `shared-key: rust-native-z3` on `rust-native-z3-macos` / `rust-native-z3-windows-shards`
 jobs preserves the existing cache key identity after the matrix was split into two job ids; that is a
 different purpose from consolidating cache between unrelated jobs, which this paragraph rejects.
+Both Windows shards share this cache key; on a miss, the first saver wins.
 
 **An initial fix subtracting de-duplicated bytes from judgment was reviewed and reverted.** The
 first version of `auditCacheBudget()`'s response to this issue computed a "controllable footprint" --
@@ -1318,7 +1494,154 @@ the same transient two-generation overlap again, on whichever `{key, platform}` 
 built next after the change. The issue's title calls the budget overrun constant; the recurring
 mechanism, not any one incident, is why.
 
-## Required pre-merge contexts, and why the merge queue was rejected
+### Cache key generation
+
+**Problem (measured 2026-10-20).** `Swatinem/rust-cache@v2` (`src/config.ts` at the `v2` tag,
+`e9d7b9f1`) composes its key as
+`<prefix-key>-<shared-key>-<os.type()>-<arch>-<env hash>-<lock hash>`. `prefix-key` defaults to
+`v0-rust`; with `shared-key` set, the `key` input and the job id are ignored. The env hash covers the
+installed rustc versions and every `CARGO`/`CC`/`CFLAGS`/`CXX`/`CMAKE`/`RUST`-prefixed variable plus
+any `env-vars` prefixes; the lock hash covers `.cargo/config.toml`, `rust-toolchain*`, each workspace
+*member's* `Cargo.toml` and `Cargo.lock`. `rust/Cargo.toml` is a virtual manifest, not a member, so
+its `[profile.*]` sections — the only profiles cargo applies — are in neither hash. #1379
+(`debug = "line-tables-only"`) and #1380 (`[profile.dev.package.z3-sys] opt-level = 2`) therefore
+left every key unchanged: each later run restored the pre-change entry with `full match: true`,
+rebuilt what the profile change invalidated (all of vendored Z3 on the native lanes), and — because
+rust-cache skips saving on an exact hit — never replaced the entry, so the cache could not heal.
+Step timings from the run metadata: before (push run `39345907365`, `006e21b9`), `rust checks` took
+2m59s and `native Z3 4.16 (windows-latest)`'s test step 35m39s, and each `Post Run
+Swatinem/rust-cache@v2` step ran 24 s / 44 s (saving); after (push run `39387374602` and scheduled
+run `39501648132`, both `5009886f`), `rust checks` took 13m23s / 19m49s, the Windows test step
+53m08s / 48m41s, and each post step ran 0–1 s (no save). The live listing at that point is the
+`liveV0Listing()` fixture in `audit-cache-budget.test.mjs`: the Windows job kept restoring
+`v0-rust-rust-native-z3-Windows_NT-x64-70fc7789-b374b7ca`.
+
+**Decision: an explicit generation, plus a profile hash in the env hash.** Every
+`Swatinem/rust-cache` step in `ci.yml` and `merge-readiness.yml` passes
+
+- `prefix-key: v1-rust` — the manual generation. Bumping it re-keys every entry at once; that is the
+  lever for a build-affecting change no hash sees. The bump from rust-cache's default `v0-rust` is
+  what discards the entries that exact-hit the pre-#1379/#1380 build.
+- `env-vars: FSL_CARGO_PROFILE_HASH`, exported by the step immediately before it,
+  `node .github/scripts/cargo-profile-hash.mjs rust/Cargo.toml`: a hash of `rust/Cargo.toml`'s
+  `[profile.*]` sections only (line endings normalised, blank and full-line comment lines dropped),
+  appended to `$GITHUB_ENV`. Any later profile edit changes the env hash and therefore the key, so
+  the next run misses, builds, and saves a fresh entry. Not `key:` (ignored once `shared-key` is set)
+  and not `hashFiles('rust/Cargo.toml')`: the whole file also carries `[workspace.package] version`,
+  which every release bumps and which rust-cache itself normalises away for members, so a whole-file
+  hash would add one cold build per key per release. The env hash, not the lock hash, also changes
+  rust-cache's restore prefix, so a profile edit is a clean miss rather than a prefix restore of
+  artifacts built under the old profile; the price is one cold build per key per profile edit.
+
+The hash step carries the cache step's `if:`, and the hash script is shell-independent, so the same
+step runs under the Windows runner's default PowerShell. Restore-only steps (`merge-readiness.yml`'s
+two jobs, `fsl-logic`, `semantic-mutation-mutants`) still match their saver because they pass the same
+two inputs and compute the same hash from the same checkout; a pull request that edits the profiles
+misses on purpose, since `main`'s entry was built under the old ones.
+`.github/scripts/validate_rust_cache_key.py` (parser-backed, calibrated by
+`tests/test_rust_cache_key.py` and `--selftest`, run by the automation lane) fails closed when
+any rust-cache step lacks either input, when the step before it is not the hash step or has a
+different `if:`, or when the workflows' `prefix-key` and the audit's `CURRENT_KEY_PREFIX` differ.
+The plain check also enforces the save-if rule and exact four-job restore-only set; `--selftest`
+calibrates guard and role mutations. `rust/Cargo.toml` itself carries no note: a profile edit needs
+no manual step, and a comment there would make this CI-only change a product-surface diff.
+
+**Audit consequence.** `audit-cache-budget.mjs` exports `CURRENT_KEY_PREFIX`. The default-branch
+presence rule counts only current-generation entries: a leftover `v0-rust` entry is unreachable by
+every current step's key and restore prefix, so letting it satisfy the rule would report a warm `main`
+while every pull request builds cold; such a finding names the superseded generation that is present.
+A superseded-generation entry is stale whatever its `created_at`, counted in the generation-coexistence
+split, and listed by key in a non-gating `superseded-key-prefix` informational line as reclaimable.
+Its bytes stay in the raw budget judgment, which is unchanged from "Generation coexistence (issue
+#926, measured 2026-09-04)": they physically occupy the budget until deleted or evicted after 7 days
+without access. Unlike the #926 case, deleting a superseded-generation entry cannot make anything
+colder — no current step can restore it — so it is safe to delete once the change is on `main`.
+PR/queue attribution rules 3 and 4 stay generation-independent.
+
+**Cost.** The first `main` run after a bump or a profile edit is cold on every key (the native lanes
+rebuild vendored Z3 from source) and saves the new generation; `merge-readiness.yml` and other pull
+requests are cold until that save lands. While both generations exist the listing temporarily holds
+up to twice the Rust bytes, so the audit can report `budget-exhausted` until the superseded entries
+are deleted or LRU-evicted, and `main-cache-absent` for any pair whose new entry is not saved yet.
+
+### Runner disk budget
+
+`rust-tests` is the one job measured running out of disk, and it removes unused preinstalled
+toolchains before it builds. Every shard links every test binary, because
+`tools/check-native-integration.sh rust-tests K/3` lists the whole workspace to write `full.txt`
+before it selects its slice.
+
+**What the job writes.** No job printed free space before this change, so the budget below is
+inferred from a local build and from the runner's own warnings; it has not been measured on a
+runner. `cargo test --workspace --locked --no-run` at commit `156d9c8ee`, from an empty target
+directory with `CARGO_INCREMENTAL=0` and Rust 1.98.0, wrote 18.06 GiB, of which 16.43 GiB is 547
+executables (median 25 MiB). The toolchain (about 0.7 GiB), registry (at most about 1 GiB) and
+checkout (about 0.3 GiB) come on top, for about 20 GiB before any test runs.
+
+**Where it fails.** This table covers the 459 logged `rust tests`, `rust checks`, `WASM`,
+`FSL Logic Test` and `mutation` jobs from the 40 `ci.yml` runs created between 2026-11-04T23:17Z and
+2026-11-05T11:23Z. Jobs are grouped by the `Region:` line in each job log. The three logs where the
+`Cloud:` line was read say `AWS` for `us-west-2` (twice) and `Azure` for `centralus`; the other
+groupings follow from the region's name.
+
+| Regions | Images | Heavy jobs | `rust tests` jobs | Jobs with a disk signal |
+|---|---|---:|---:|---:|
+| Azure-named | `20261025.179.1`, `20261101.186.1` | 442 | 108 | 0 |
+| AWS-named (`us-west-2`, `us-east-1`) | `20261101.64.1`, `20261018.50.1` | 17 | 3 | 2 |
+
+The two signals are job `127186090349` (shard 1), where `rustc` hit `No space left on device` and the
+runner reported 67 MB free, and job `126970733676` (shard 3), where the build finished with 97 MB free
+and the job later failed on an unrelated test. A complete build leaving 97 MB free suggests that those
+runners start with about 20 GiB free. The Azure-named ones finish the same build with no warning, so
+they have more, by an unmeasured margin. Two more
+`rust tests (1/3)` jobs, `127061402906` and `127075424043`, died on the same error with no log
+retained, so their region is unknown. All four signals are in `rust-tests`.
+
+The absence of a signal is weak evidence. The runner warns only when a periodic check sees less than
+100 MB free, so it says nothing about how close a job came above that line.
+
+**What is removed.** The step sits after the scope decision and before the toolchain install, so a
+run the scope check skips pays nothing, and it cannot separate the hash step from `rust-cache`, which
+`.github/scripts/validate_rust_cache_key.py` requires to be adjacent.
+
+| Path | Why this job does not need it |
+|---|---|
+| `/usr/local/lib/android` | No step or test reads `ANDROID_*`. A cold vendored-Z3 build finds CMake in `/usr/local/bin`, where the image's `install-cmake.sh` puts it, not in the SDK. |
+| `/usr/share/dotnet` | The runner does not use it: `Runner.Listener.csproj` at `v2.338.2` sets `SelfContained`, and the runner runs from its own directory. No step or test calls `dotnet`. |
+| `/usr/local/.ghcup` | No step or test calls GHC or Cabal. This is where the image's `install-haskell.sh` installs them; `/opt/ghc`, which older cleanup recipes name, is not in that script. |
+
+`/opt/hostedtoolcache` stays, along with everything else on the image. On Linux the tests spawn only
+`git`, `sh`, `bash`, `python3`, `tar`, `mkfifo`, `cargo` and binaries the workspace built. The cache
+key does not change:
+the step sets no environment variable and touches no file that "Cache key generation" lists as a key
+input, and the job's Cargo profiles are untouched.
+
+The removal is unconditional. A threshold on free space would save time on the larger runners, but
+its value would depend on the same unmeasured budget.
+
+**What is unproven until the job runs.** The Android, .NET and GHCup paths were read from the
+`ubuntu26/20261101.186` image sources. The repository `actions/runner-images` has no tag for
+`20261101.64`, the image on the failing runners, so its contents are unknown; `rm -rf` does nothing
+for a path it lacks. The only size figures found are from a third party on an older image, about
+14 GiB for Android and 2.7 GiB for .NET. The time the removal takes is also unknown. `df -h /` before
+and after the removal, and the `Report runner disk use` step, record all of this on the next run. That
+last step cannot report when the runner itself dies of a full disk, as it did in the two jobs with no
+log.
+
+**Other jobs.** None of the other jobs gets the step, because none shows a signal. That includes the
+14 such jobs on AWS-named regions, among them `mutation mutants` in the `complete` tier and one
+`rust checks`. `rust-workspace` and `semantic-mutation` are aggregators that build nothing.
+`production-native-z3-linux` is the closest match: `cargo test -p fsl-solver-z3 -p fsl-verifier
+-p fslc-rust` builds most of the same binaries, but it runs only on pull requests into `production`
+and did not run in this window. If it reports a full disk, give it the same step.
+
+**This is headroom, not a limit.** Tracked integration-test files under `rust/*/tests/` went from 232
+on 2026-10-01 to 465 on 2026-11-01, and at the median each new one adds about 25 MiB to all three
+shards. Growth at that rate would use 14 GiB in under three months and would reach the Azure-named
+runners too. The lasting fix would be to stop linking every binary in every shard, which changes how
+`full.txt` is produced and is a separate decision.
+
+## Required pre-merge contexts and merge queue adoption
 
 ### Automation contracts use parser-backed workflow inspection
 
@@ -1377,8 +1700,9 @@ on every pull request with no path filter — `.github/workflows/site-reference-
 `pull_request`/`merge_group` triggers carry no `paths:` restriction — so requiring it cannot
 deadlock a pull request the way requiring `native Z3 4.16` or `product gate` would; those stay
 deferred precisely because they never report on an ordinary pull request.
-`bypass_actors` is empty, so `current_user_can_bypass` is `"never"` for every account — an
-administrator cannot merge past a failing or missing required context.
+The live capture has `bypass_actors: []` and `current_user_can_bypass: "never"` for its caller;
+no required-check bypass is configured. This is not a contemporary observation of an
+administrator's queue-specific merge behavior; see "Merge queue adoption (2026-10-29)" below.
 `strict_required_status_checks_policy` is `false`; see "Required contexts no longer have to run
 against current `main`" below.
 
@@ -1401,9 +1725,11 @@ branch added to one of its `audit_*` functions extends what a required context
 enforces, so an unlisted branch makes this paragraph under-describe the gate.
 
 The workflow invokes `tests/test_site_reference_snapshot.py`,
-`tests/test_site_manual_integrity.py`, and
+`tests/test_site_heading_hash.py`, `tests/test_site_manual_integrity.py`, and
 `tests/test_site_refresh_contract.py` explicitly. The snapshot module remains
-generated-reference-only; the manual test checks ordered static routes, unique labels,
+generated-reference-only; the heading module checks wrapped issue references and
+preserves ordinary headings, escaped hashes, and fenced code; the manual test
+checks ordered static routes, unique labels,
 local fragments, and pinned blob objects in checked-out Git history without fetching URLs;
 the refresh-contract test reads checked-out static files only, with no live server, no URL
 fetching, and no browser-automation or subprocess dependency, and carries rejecting mutant
@@ -1435,7 +1761,98 @@ permanently `Expected`. The in-job scope check that replaced `paths-ignore` (see
 "Agent-configuration exemption" above) is what makes them safe to require: every gated job now
 always reports, either from real evidence or from a fast early exit.
 
+### Merge queue adoption (2026-10-29)
+
+**Accepted decision.** The merge queue is now configured on `main`. Ruleset `19090821`
+(`main review for non-admins`) changed `required_approving_review_count` from `1` to `0` and
+`require_last_push_approval` from `true` to `false`. This deliberately removes enforced approval
+for non-admin contributors too: a single maintainer can now enqueue without GitHub demanding an
+approval from someone other than the last pusher. It answers the human-review-policy question
+that blocked the earlier experiment, rather than changing CI logic to evade that policy.
+
+Ruleset `19090811` (`main safety and CI`) now includes a `merge_queue` rule with these seven
+accepted parameters, captured in `.github/scripts/fixtures/ruleset-19090811.json`:
+
+| Parameter | Accepted value |
+|---|---|
+| `merge_method` | `SQUASH` |
+| `grouping_strategy` | `ALLGREEN` |
+| `max_entries_to_build` | `4` |
+| `min_entries_to_merge` | `1` |
+| `max_entries_to_merge` | `4` |
+| `min_entries_to_merge_wait_minutes` | `0` |
+| `check_response_timeout_minutes` | `240` |
+
+The six required contexts and `strict_required_status_checks_policy: false` are unchanged.
+Queued merges validate the candidate with current `main` and preceding queue entries through
+`merge_group`; ordinary branch updates are not needed merely because another queued change lands.
+The drift audit compares the queue's **presence as a rule type only**, not any of these seven
+parameters. They remain the same unaudited parameter blind spot as the `pull_request` rule's
+parameters; a clean audit is not evidence that their values match this table.
+
+**Full evidence stays on both paths.** `FSL_MERGE_QUEUE_CI` remains unset. Pull requests keep
+their full pre-merge evidence under the existing scope policy, and every `merge_group` run computes
+its own scope with `diff_scope`. A queued product change is checked in the pull-request run and
+again on the queue's combined revision with current `main`. The `queue-entry-stub` path must stay
+off whether or not administrator queue bypass remains possible: queue validation supplements,
+rather than replaces, pull-request evidence. Stubs without a replacing queue run would leave no
+pre-merge Linux evidence; queue adoption does not make that confidently-green false negative acceptable.
+
+**Administrator bypass evidence.** The bypass premise is carried forward from the 2026-08-05
+observation on #717: `gh pr merge --admin` merged `7b140af` without a `merge_group` run. It has
+not been verified against the current ruleset `19090811`, whose live capture shows
+`bypass_actors: []` and `current_user_can_bypass: "never"`. Those fields do not establish a current
+queue-specific bypass capability. If such a path remains available, it is reserved for emergencies
+only; no bypass actor is added and no required check is weakened. The stub-off policy holds
+regardless of the outcome of a contemporary bypass check.
+
+**Cache risk resolved (#1615).** Decision #747 relied on only `main` saving shared caches.
+Queue adoption exposed the original guard's permission for executing `merge_group` jobs to save
+under `refs/heads/gh-readonly-queue/...`. Other refs cannot restore those entries, but their
+bytes count toward the repository's 10 GiB budget. The save path was reachable on a changed
+key or cache miss; an exact cache hit does not save again.
+On the first product-gate `merge_group` run (`40840541665`), `save-if` evaluated true for
+`rust checks`, all three `rust tests` and all three `mutation operators`; the `rust tests` jobs
+did not save because their primary keys hit. At 18:05 on 2026-10-29, none of the repository's
+30 caches were on a `gh-readonly-queue` ref; that observation alone did not eliminate the risk,
+because under the old guard a key change or eviction could allow a save.
+All seven save-enabled `Swatinem/rust-cache` steps now exclude both `pull_request` and
+`merge_group`; push, schedule and `workflow_dispatch` retain saving. The two `ci.yml` and two
+`merge-readiness.yml` restore-only steps stay `save-if: false`. Native-Z3 job conditions are
+unchanged. The plain parser-backed Rust-cache validator owns the save-guard and restore-only
+role contract. Its automation-lane selftest reports the five-event tables and rejects PR-only
+and saver-to-false mutations for every saver, plus restore-only-to-saver mutations for consumers.
+Audit rules 3 and 4 now attribute both ref families, deduplicating entries that match both;
+queue bytes still count toward the unchanged physical budget. This closes the configuration
+risk; it is not evidence of a measured queue-cache eviction or of current live cache usage.
+
+The separate `actions/cache` steps for cargo-nextest and wasm-bindgen remain out of scope:
+their tool keys do not match the Rust-key rules 3 and 4 and are not protected by the rust-cache
+save guard. They can still save on PR and queue refs; their bytes count toward rule 1.
+
+**First queued merge evidence.** #1608 was merged by the queue to `main` commit
+`625698621cadfd842a90b6b921e51eb8a9591b79`. The queue branch was
+`gh-readonly-queue/main/pr-1608-f5f3f1942220ad6c1e1802fe9bc523fabe2155ae`.
+All four workflow runs below had event `merge_group`, head SHA
+`625698621cadfd842a90b6b921e51eb8a9591b79`, and completed with `success`.
+Evidence source: the workflow runs and check runs, read from the GitHub API.
+
+| Workflow | Run ID | Required contexts reported with `success` |
+|---|---|---|
+| `product gate` | `40840541665` | `rust workspace`, `WASM`, `semantic mutation (changed)`, `FSL Logic Test (pr)` |
+| `merge readiness` | `40840541655` | `merge readiness` |
+| `site reference freshness` | `40840541582` | `site reference freshness` |
+| `cache budget audit wiring` | `40840541689` | None; this workflow is not a required context. |
+
+The `product gate` job itself and all four `native Z3 4.16` jobs were skipped, as designed for
+these deferred contexts. The check runs for `625698621cadfd842a90b6b921e51eb8a9591b79`
+from app ID `15368` also reported `success` for all six required context names listed above.
+
 ### The merge queue was tried, measured against this repository's workflow, and rejected
+
+**Historical decision, 2026-08-05.** The account below records the original rejection and its
+false-green reasoning. It is superseded by "Merge queue adoption (2026-10-29)" above; its statements
+about the queue being unavailable and review policy being unchanged describe that earlier state.
 
 A GitHub merge queue was configured on this ruleset on 2026-08-05 and removed the same day. The
 intent was to move the heavy Linux evidence from once per pull-request push to once per landed
@@ -1485,18 +1902,20 @@ The cost was measured on this repository, not reasoned about. Merging #1073 move
 #1075 and #1076 into `BEHIND` and invalidated eighteen already-succeeded checks on each. Both had to
 be updated and re-run before either could land. With N pull requests open, every merge costs N
 re-runs of the heavy Linux evidence — and `rust workspace` is ~33 min on a warm cache, measured
-above. The queue that normally absorbs this cost is unavailable here for reasons that are about
-human review policy rather than CI, recorded in "The merge queue was tried, measured against this
-repository's workflow, and rejected" above. That left the strict flag paying its full price with no
-way to batch it.
+above. At the time of this decision, the queue that normally absorbs this cost was unavailable
+for the review-policy reasons recorded in the 2026-08-05 history above. That left the strict flag
+paying its full price with no way to batch it. The queue has since been adopted as recorded in
+"Merge queue adoption (2026-10-29)"; the flag remains `false`.
 
-**What is given up.** Two pull requests can each be green against an older `main` and break when
-combined — one renames a surface, the other adds a caller. That class now lands on `main` and is
-caught by the post-merge push run and its failure reporter, not before merge.
+**What was given up without a queue.** Two pull requests can each be green against an older `main`
+and break when combined — one renames a surface, the other adds a caller. With the strict flag off
+and no queue, that class landed on `main` and was caught by the post-merge push run and its failure
+reporter, not before merge. The adopted queue now validates the combined state before a queued
+merge; any path without queue validation would still carry the original stale-base risk.
 
-That is a real loss, and it is narrower than it sounds. It is not the *confidently-green false
+That was a real loss, and it is narrower than it sounds. It is not the *confidently-green false
 negative* the queue experiment above was rejected for: the six contexts still run, still block, and
-still report against the pull request's own head. What is lost is the guarantee that the head
+still report against the pull request's own head. Without queue validation, what is lost is the guarantee that the head
 included whatever landed in the meantime. This repository also already accepts post-merge detection
 for a comparable class — issue #806 records platform-specific defects reaching `main` because the
 native-Z3 matrix is promotion-only — so the shape is not new here.
@@ -1506,11 +1925,13 @@ maintainer, so the interleaving that makes stale bases dangerous is rare: the se
 usually rebased by the same person who just merged the first. Against that, the strict flag charged
 for the possibility on every merge regardless.
 
-**Reversal.** Set the flag back if any of these becomes true: a second maintainer starts landing
-changes concurrently, the post-merge reporter stops catching integration breaks that the strict flag
+**Original reversal conditions.** Set the flag back if any of these becomes true: a second maintainer
+starts landing changes concurrently, the post-merge reporter stops catching integration breaks that the strict flag
 would have caught pre-merge, or the review policy changes such that the merge queue becomes
 enqueueable. The first two are observable from the failure-issue history; the third is the condition
-the section above already names.
+the history above already names. Queue adoption supersedes the third condition: queued merges
+now validate against current `main` without restoring strict checks on each pull-request head.
+The first two remain reasons to reassess any merge path that bypasses the queue.
 
 The ruleset was changed first and this section recorded it (#1079), but `.github/ruleset-contract.json`
 and the checker still expected `true`, so the daily drift audit reported the intended change as
@@ -1541,6 +1962,8 @@ records which:
   above): these never report on an ordinary pull request, so requiring them would deadlock every
   one; an audit finding that one of them is present in the live required set gets a sharper message
   saying exactly that, rather than being reported as an ordinary unexpected context.
+  The Windows aggregator is deferred here; `product-gate` enforces it through `needs`.
+  Its two shard contexts are deliberately not recorded in `ruleset-contract.json`.
 - **constituent** — the sharded lane names (`rust checks`, `rust tests (K/3)`, `mutation operators
   (K/3)`, `mutation mutants`, "Sharded pre-merge Linux evidence" above): only their `if: always()`
   aggregator carries the required-context name, so the contract records these explicitly to stop a
@@ -1548,9 +1971,10 @@ records which:
   skipped shard silently satisfy the ruleset, the exact false-negative shape that section's
   `if: always()` discussion warns about.
 - **unaudited** — the `pull_request` rule's own parameters (`required_approving_review_count`,
-  `allowed_merge_methods`, review dismissal, …). These are **deliberately never read**. Human
-  review policy is a separate accepted process decision (ruleset `19090821`, "The merge queue was
-  tried…" above); this audit's job is CI-evidence configuration, not review policy. An editable
+  `allowed_merge_methods`, review dismissal, …) and all seven `merge_queue` parameters. These are
+  **never read** by the audit; it compares the queue's presence in `rule_types` only. Human
+  review policy and queue parameter values are separate accepted process decisions (see
+  "Merge queue adoption (2026-10-29)" above); a clean audit does not validate them. An editable
   `allowed_merge_methods` change is the audit's blind control — its calibration suite proves the
   audit stays clean when that field changes, so a green audit is never accidentally load-bearing
   evidence for review-policy drift it was never designed to catch.
@@ -1566,9 +1990,11 @@ unset or revoked `RULESET_AUDIT_TOKEN` makes the audit fail closed with `bypass-
 rather than silently skip the check it exists for.
 
 **The seam.** `compareRuleset(contractEntry, observationJson)` and `validateContract(contract)` are
-pure — no network, no filesystem, no process access — so every case in the calibration suite is
-built by `structuredClone`-ing the checked-in fixture (`.github/scripts/fixtures/ruleset-19090811.json`,
-a verbatim capture) and mutating exactly one field, with no live ruleset ever touched by a test.
+pure — no network, no filesystem, no process access — so calibration cases clone the checked-in
+fixture (`.github/scripts/fixtures/ruleset-19090811.json`, a verbatim capture) or contract and mutate
+local data, with no live ruleset ever touched by a test. The queue-presence calibration removes
+`merge_queue` from a cloned contract and requires exactly one `rule-type-unexpected` finding
+against the captured fixture.
 The suite covers the accepting case (the fixture is clean against the contract, which also freezes
 contract/fixture agreement — editing one without the other fails pre-merge), two rejecting cases
 (a dropped context; a renamed context, which must surface as one `missing` plus one `unexpected`
@@ -1657,8 +2083,8 @@ produce the new required context. Roll out in this order:
 2. In the `main` repository ruleset, add `rust workspace` and `WASM` alongside `merge readiness`.
    `native Z3 4.16 (macos-15)` and `native Z3 4.16 (windows-latest)` stay out of the required set —
    they are the deferred cross-platform matrix. **Completed 2026-08-05**, together with
-   `semantic mutation (changed)` and `FSL Logic Test (pr)`; see "Required pre-merge contexts, and
-   why the merge queue was rejected" for the live set and for why requiring them was blocked until
+   `semantic mutation (changed)` and `FSL Logic Test (pr)`; see "Required pre-merge contexts and
+   merge queue adoption" for the live set and for why requiring them was blocked until
    the `paths-ignore` exemption moved in-job.
 3. Leave `FSL_OPTIMISTIC_CI=enabled`. It now governs only the cross-platform matrix and the
    aggregate `product gate` context; main pushes, schedules, manual runs, and production promotions
@@ -1683,9 +2109,5 @@ discipline, which step 1 alone does not achieve.
 - Hiding platform failures with `continue-on-error`.
 - Trusting agent-authored verification claims in place of independent GitHub-hosted execution.
 - Changing FSL language, Kernel, CLI/JSON, LSP, Worker, or frozen Python compatibility behavior.
-- Running a GitHub merge queue. One was configured and removed on 2026-08-05 after direct
-  measurement; reviving it is a human-review-policy decision, not a CI one. See "Required
-  pre-merge contexts, and why the merge queue was rejected".
-- Relaxing the review requirement in ruleset `main review for non-admins` (id `19090821`) to make
-  a merge queue enqueueable. That trades review enforcement for non-admin contributors against CI
-  latency and needs its own accepted decision.
+- Replacing pull-request evidence with queue-entry stubs. Queue adoption and the review-policy
+  change are accepted in "Merge queue adoption (2026-10-29)"; `FSL_MERGE_QUEUE_CI` stays unset.

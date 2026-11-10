@@ -1,0 +1,61 @@
+{
+  "fsl": "1.0",
+  "result": "mutated",
+  "spec": "InterleavedMutationPasses",
+  "depth": 2,
+  "baseline": "verified",
+  "mutants": [
+    {
+      "op": "assignment_remove",
+      "loc": {
+        "line": 6,
+        "column": 5
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_n",
+      "requirement": null,
+      "source": "builtin"
+    },
+    {
+      "op": "integer_literal_minus1",
+      "loc": {
+        "line": 6,
+        "column": 5
+      },
+      "target": "init assignment",
+      "status": "killed",
+      "killed_by": "_bounds_n",
+      "requirement": null,
+      "source": "builtin"
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "killed": 2,
+    "survived": 0,
+    "invalid": 0,
+    "kill_rate": 1.0,
+    "by_source": {
+      "builtin": {
+        "total": 2,
+        "killed": 2,
+        "survived": 0,
+        "invalid": 0,
+        "kill_rate": 1.0
+      },
+      "external": {
+        "total": 0,
+        "killed": 0,
+        "survived": 0,
+        "invalid": 0,
+        "kill_rate": null
+      }
+    }
+  },
+  "by_requirement": {},
+  "notes": [
+    "possible equivalent mutants should be reviewed manually; survivors are a review queue, not a hard failure",
+    "mutant cap 2 reached: 16 dropped"
+  ]
+}

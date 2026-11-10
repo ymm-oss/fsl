@@ -7,9 +7,9 @@ use std::fmt;
 use std::future::Future;
 
 use fsl_core::{
-    ActionDef, FslValue, KernelExpr, KernelModel, ParamDef, TypeDef, TypeRef, display_name,
-    fsl_value_json, insert_requirement_metadata, internal_origin_json, origin_display_name,
-    state_json, trace_json,
+    ActionDef, FslValue, KernelExpr, KernelModel, ParamDef, PublicName, SyntheticName, TypeDef,
+    TypeRef, fsl_value_json, insert_requirement_metadata, internal_origin_json,
+    origin_display_name, state_json, trace_json,
 };
 use fsl_solver::VerificationStatistics;
 use fsl_verifier::{BmcResult, BmcViolation, VacuityFinding, violation_kind};
@@ -107,9 +107,9 @@ pub struct BmcOutputOptions<'a> {
     ///
     /// INVARIANT: only the `verify`/`sweep` CLI option parsing for
     /// `--vacuity ignore` (`rust/fslc/src/verification.rs`'s
-    /// `execute_cli_verification`) may set this `true`. Every other
-    /// caller -- the `ledger`/`html`/`mutate` baseline (`run_verify`), the
-    /// wasm Worker surface (which has no `--vacuity` option at all),
+    /// `execute_cli_verification`) may set this `true`. No-cache baseline
+    /// adapters reach that owner with the default `warn` policy. Other
+    /// callers -- the wasm Worker (which has no `--vacuity` option),
     /// induction's internal BMC base pass, and tests -- must pass `false`
     /// so the probe always runs and `--vacuity error` never silently loses
     /// evidence it would otherwise catch.
@@ -145,23 +145,97 @@ pub fn model_error_loc(error: &fsl_core::ModelError) -> Option<Value> {
     )
 }
 
+/// How a delivery surface knows a diagnostic's public classification.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DiagnosticClass {
+    /// A core frontend or lowering failure, classified by its type through
+    /// [`core_error_class`]. The message is never consulted (issue 1167).
+    Core(fsl_core::CoreErrorKind),
+    /// A typed-model diagnostic the frontend marked as name resolution
+    /// (issue 565).
+    Name,
+    /// A diagnostic that reaches the renderer without a typed classification
+    /// (a typed-model error other than name resolution, a runtime or verifier
+    /// error, or a message already flattened to a `String`). Classified by
+    /// [`semantic_error_kind`] and the message hint rules below until those
+    /// sources carry a kind of their own.
+    Message,
+}
+
+impl DiagnosticClass {
+    /// The class of a typed-model diagnostic.
+    #[must_use]
+    pub const fn model(name_resolution: bool) -> Self {
+        if name_resolution {
+            Self::Name
+        } else {
+            Self::Message
+        }
+    }
+}
+
+/// The public envelope fields a core diagnostic kind determines.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CoreErrorClass {
+    /// The `kind` member of `docs/design/DESIGN-v1.md` §7.2's closed set.
+    pub kind: &'static str,
+    /// The repair hint reported when the diagnostic supplies none of its own.
+    pub hint: Option<&'static str>,
+}
+
+const AI_HARD_CONTRACT_RULE_HINT: &str = "supported rules: forbidden_tool_blocked, human_approval_required, tool_authority, tool_precondition_declared, tool_schema_declared";
+
+/// The public classification of a core diagnostic kind.
+///
+/// Deliberately an exhaustive `match` with no wildcard arm: a new
+/// [`fsl_core::CoreErrorKind`] does not compile until it states here how the
+/// CLI reports it (issue 1167). Every kind maps onto the closed `kind` set of
+/// `docs/design/DESIGN-v1.md` §7.2; none extends it.
+#[must_use]
+pub fn core_error_class(kind: &fsl_core::CoreErrorKind) -> CoreErrorClass {
+    use fsl_core::CoreErrorKind;
+    let (kind, hint) = match kind {
+        CoreErrorKind::NameResolution => ("name", None),
+        CoreErrorKind::UnknownType => ("type", None),
+        CoreErrorKind::UnknownAiHardContractRule => ("semantics", Some(AI_HARD_CONTRACT_RULE_HINT)),
+        // A component failure is reported against the parent's `use`
+        // declaration, where the component's own class would be wrong advice
+        // (see `component_error` in `fsl-core/src/compose.rs`).
+        CoreErrorKind::ComponentLoad(_)
+        | CoreErrorKind::Semantics
+        | CoreErrorKind::UnresolvedTypeDefault
+        | CoreErrorKind::UnknownDomainSymbol
+        | CoreErrorKind::ScopeOverrideWithoutBounds
+        | CoreErrorKind::NotKernelLowerable => ("semantics", None),
+    };
+    CoreErrorClass { kind, hint }
+}
+
 /// Render a model-construction error using the public semantic classification.
 ///
 /// `docs/design/DESIGN-v1.md` §7.2 guarantees `loc` for `parse`/`name`/`type`/
 /// `semantics` and fixes `kind` as a closed set including `name`. This is the
 /// single dispatch point for that whole half of the set, so both the location
-/// (issue 555) and the classification (issue 565) travel with the diagnostic
-/// instead of being reconstructed per command.
+/// (issue 555) and the classification (issues 565, 1167) travel with the
+/// diagnostic instead of being reconstructed per command.
 #[must_use]
 pub fn render_semantic_error(
     mut output: Map<String, Value>,
     message: &str,
     loc: Option<Value>,
-    name_resolution: bool,
+    class: &DiagnosticClass,
     diagnostic_code: Option<&str>,
     hint: Option<&str>,
 ) -> Value {
-    let kind = diagnostic_kind(message, name_resolution);
+    let core = match class {
+        DiagnosticClass::Core(kind) => Some(core_error_class(kind)),
+        DiagnosticClass::Name | DiagnosticClass::Message => None,
+    };
+    let kind = match (class, core) {
+        (_, Some(core)) => core.kind,
+        (DiagnosticClass::Name, None) => "name",
+        (_, None) => semantic_error_kind(message),
+    };
     output.insert("result".to_owned(), json!("error"));
     output.insert("kind".to_owned(), json!(kind));
     output.insert("message".to_owned(), json!(message));
@@ -171,6 +245,19 @@ pub fn render_semantic_error(
     if let Some(code) = diagnostic_code {
         output.insert("diagnostic_code".to_owned(), json!(code));
     }
+    if let Some(core) = core {
+        if let Some(hint) = hint.or(core.hint) {
+            output.insert("hint".to_owned(), json!(hint));
+        }
+    } else {
+        insert_message_hint(&mut output, message, hint);
+    }
+    Value::Object(output)
+}
+
+/// The hint rules for a diagnostic without a typed classification
+/// ([`DiagnosticClass::Name`] and [`DiagnosticClass::Message`]).
+fn insert_message_hint(output: &mut Map<String, Value>, message: &str, hint: Option<&str>) {
     if let Some(hint) = hint {
         output.insert("hint".to_owned(), json!(hint));
     } else if message.starts_with("struct field '") && message.ends_with(" has non-scalar type") {
@@ -185,15 +272,12 @@ pub fn render_semantic_error(
             json!("state types allow scalars, nested Option around a scalar, structs with those fields, Map<bounded scalar, scalar-or-nested-Option-or-struct>, Set<bounded scalar>, Seq<scalar,N>, and bounded-scalar relations; Option cannot wrap a collection or struct"),
         );
     }
+    // A core error flattened to a `String` before it reaches a renderer (for
+    // legacy string-only callers) has lost its
+    // `CoreErrorKind`, so this rule still covers that path.
     if message.starts_with("unknown ai hard-contract rule '") {
-        output.insert(
-            "hint".to_owned(),
-            json!(
-                "supported rules: forbidden_tool_blocked, human_approval_required, tool_authority, tool_precondition_declared, tool_schema_declared"
-            ),
-        );
+        output.insert("hint".to_owned(), json!(AI_HARD_CONTRACT_RULE_HINT));
     }
-    Value::Object(output)
 }
 
 /// Render a runtime diagnostic without discarding an authored statement span.
@@ -206,7 +290,7 @@ pub fn render_runtime_error(
         output,
         &error.message,
         error.span.map(fsl_syntax::Span::python_loc),
-        false,
+        &DiagnosticClass::Message,
         None,
         None,
     )
@@ -277,7 +361,7 @@ pub fn render_governance_error(
     Value::Object(output)
 }
 
-/// The classification for a typed diagnostic, preferring the class the frontend
+/// The public `kind` for a diagnostic, preferring the class the frontend
 /// determined over matching on the message text.
 ///
 /// `docs/design/DESIGN-v1.md` §7.2's closed set includes `name`, which no message
@@ -285,13 +369,13 @@ pub fn render_governance_error(
 /// `duplicate enum member 'B'` and `undefined predicate 'p'` share no prefix or
 /// suffix, and a classifier keyed on message text silently reclassifies a
 /// diagnostic whenever its wording changes. The frontend already knows, so it
-/// says so (issue 565).
+/// says so (issues 565, 1167).
 #[must_use]
-pub fn diagnostic_kind(message: &str, name_resolution: bool) -> &'static str {
-    if name_resolution {
-        "name"
-    } else {
-        semantic_error_kind(message)
+pub fn diagnostic_kind(message: &str, class: &DiagnosticClass) -> &'static str {
+    match class {
+        DiagnosticClass::Core(kind) => core_error_class(kind).kind,
+        DiagnosticClass::Name => "name",
+        DiagnosticClass::Message => semantic_error_kind(message),
     }
 }
 
@@ -306,6 +390,12 @@ pub fn semantic_error_kind(message: &str) -> &'static str {
         || message.starts_with("struct field '") && message.ends_with(" has non-scalar type")
         || message.starts_with("state variable '")
             && message.ends_with(" has unsupported state type")
+        || message.starts_with("enum '") && message.ends_with(" has no members")
+        || message.starts_with("ai_component '") && message.ends_with(" declares no tools")
+        || message.starts_with("database '") && message.ends_with(" declares no columns")
+        || message.starts_with("component \"")
+            && message.contains("\" failed to check (enum '")
+            && message.contains("' has no members at ")
     {
         "type"
     } else {
@@ -324,6 +414,7 @@ pub fn requirements_implements_output(
     resolver: &dyn fsl_core::FileResolver,
     model: &KernelModel,
     depth: usize,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<Option<Value>, RequirementsImplementsError> {
     requirements_implements_output_with_bounds(
         source,
@@ -332,6 +423,7 @@ pub fn requirements_implements_output(
         depth,
         &std::collections::BTreeMap::new(),
         &std::collections::BTreeMap::new(),
+        options,
     )
 }
 
@@ -349,8 +441,10 @@ pub fn requirements_implements_output_with_bounds(
     depth: usize,
     instances: &std::collections::BTreeMap<String, i64>,
     values: &std::collections::BTreeMap<String, (i64, i64)>,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<Option<Value>, RequirementsImplementsError> {
-    let contract = resolve_requirements_implements(source, resolver, model, instances, values)?;
+    let contract =
+        resolve_requirements_implements(source, resolver, model, instances, values, options)?;
     check_requirements_implements(contract, model, depth)
 }
 
@@ -369,12 +463,15 @@ pub fn resolve_requirements_implements(
     model: &KernelModel,
     instances: &std::collections::BTreeMap<String, i64>,
     values: &std::collections::BTreeMap<String, (i64, i64)>,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<Option<fsl_core::ImplementsContract>, RequirementsImplementsError> {
-    fsl_core::requirements_implements_with_bounds(source, resolver, model, instances, values)
-        .map_err(|error| RequirementsImplementsError {
-            message: error.message,
-            span: error.span,
-        })
+    fsl_core::requirements_implements_with_bounds_with_options(
+        source, resolver, model, instances, values, options,
+    )
+    .map_err(|error| RequirementsImplementsError {
+        message: error.message,
+        span: error.span,
+    })
 }
 
 /// Check an already-resolved inline `implements` contract and render its
@@ -452,7 +549,7 @@ pub fn check_requirements_implements(
 pub fn attach_requirements_implements(envelope: &mut Value, implements: Value) -> Option<i32> {
     let already_failing = !crate::outcome::outcome_class(envelope).is_success();
     let Value::Object(map) = envelope else {
-        return Some(3);
+        return Some(crate::outcome::Verdict::InternalError.exit_code());
     };
     if map.get("result").and_then(Value::as_str) == Some("error") {
         return None;
@@ -487,39 +584,30 @@ fn fold_refinement_verdict(
     nested_result: Option<&str>,
     malformed_message: &str,
 ) -> Option<i32> {
-    match nested_result {
-        Some("refines") => None,
-        // Keep this `1` in step with the row-1 arm of `outcome::exit_status`:
-        // both encode the exit class of an inline `implements` failure, and
-        // changing that class means changing both. They are reached by
-        // independent paths -- `check`/`verify` fold here, while `mutate` and
-        // `ledger` re-emit a baseline envelope through `exit_status` -- so a
-        // mutation that breaks one does not make the other's tests fail
-        // (measured 2026-09-08: sending `exit_status`'s row 1 to 0 kills
-        // `issue_554_mutate_exit_status::a_violated_baseline_exits_one` and
-        // leaves `check_folds_failed_inline_refinement_into_command_failure`
-        // green). Nothing here detects the two drifting apart.
-        Some(verdict @ ("refinement_failed" | "impl_violated")) => {
-            map.insert("result".to_owned(), json!(verdict));
-            Some(1)
-        }
+    use crate::outcome::Verdict;
+
+    // The exit code of each fold comes from the `outcome::Verdict` table, the
+    // same entry `outcome::exit_status` reads when `mutate` and `ledger`
+    // re-emit a baseline envelope (#901). Before the table this arm carried
+    // its own `1` that had to be kept in step with `exit_status` by hand.
+    let folded = match nested_result {
+        Some("refines") => return None,
+        Some("refinement_failed") => Verdict::RefinementFailed,
+        Some("impl_violated") => Verdict::ImplViolated,
         // The correspondence walk hit its state budget (issue #1041)
         // instead of deciding a verdict. `unknown_budget` is already a
-        // non-success, cacheable failure class (`outcome.rs`'s
-        // `exit_status` row 1 and `outcome_class`), so folding it here
-        // reuses that existing exit-1 vocabulary rather than adding a new
-        // verdict string.
-        Some("unknown_budget") => {
-            map.insert("result".to_owned(), json!("unknown_budget"));
-            Some(1)
-        }
+        // non-success, cacheable failure class, so folding it here reuses
+        // that existing vocabulary rather than adding a new verdict string.
+        Some("unknown_budget") => Verdict::UnknownBudget,
         _ => {
             map.insert("result".to_owned(), json!("error"));
             map.insert("kind".to_owned(), json!("internal"));
             map.insert("message".to_owned(), json!(malformed_message));
-            Some(3)
+            return Some(Verdict::InternalError.exit_code());
         }
-    }
+    };
+    map.insert("result".to_owned(), json!(folded.result()));
+    Some(folded.exit_code())
 }
 
 /// Attach a rendered `governance` section and, when the command envelope is
@@ -530,18 +618,18 @@ fn fold_refinement_verdict(
 /// nothing; a failure-class envelope gains the section as evidence and keeps
 /// its own verdict; a success-class envelope (`ok`, `verified`, ...) takes the
 /// first failing preservation in declaration order through
-/// [`fold_refinement_verdict`]. A preservation's `result` keeps its own
-/// published vocabulary (`refines` / `refinement_failed` / `violated` /
-/// `unknown_budget`); its `violated` is the `after` spec breaking its own
-/// semantics, which the top level spells `impl_violated` exactly as an inline
-/// `implements` seam reports the same condition -- a top-level `violated`
-/// would claim a counterexample (`trace`, `violated_at_step`) of the checked
-/// document itself. Any other value fails closed (`error` / `internal`,
+/// [`fold_refinement_verdict`]. A preservation's `result` is `fslc refine`'s
+/// (`refines` / `refinement_failed` / `impl_violated` / `unknown_budget`);
+/// `impl_violated` is the `after` spec breaking its own semantics, the same
+/// word an inline `implements` seam and the top level use for that condition
+/// (#1315) -- a top-level `violated` would claim a counterexample (`trace`,
+/// `violated_at_step`) of the checked document itself. Any other value,
+/// including the pre-#1315 `violated`, fails closed (`error` / `internal`,
 /// exit 3).
 pub fn attach_governance(envelope: &mut Value, governance: Value) -> Option<i32> {
     let already_failing = !crate::outcome::outcome_class(envelope).is_success();
     let Value::Object(map) = envelope else {
-        return Some(3);
+        return Some(crate::outcome::Verdict::InternalError.exit_code());
     };
     if map.get("result").and_then(Value::as_str) == Some("error") {
         return None;
@@ -564,13 +652,9 @@ pub fn attach_governance(envelope: &mut Value, governance: Value) -> Option<i32>
     }
     // Every preservation `refines` (or there is none): the verdict stands.
     let failing = failing?;
-    let nested_result = match failing.as_deref() {
-        Some("violated") => Some("impl_violated".to_owned()),
-        other => other.map(str::to_owned),
-    };
     fold_refinement_verdict(
         map,
-        nested_result.as_deref(),
+        failing.as_deref(),
         "malformed governance preservation verdict",
     )
 }
@@ -601,9 +685,12 @@ pub const NOT_EVALUATED_BOUNDS_OVERRIDE: &str = "bounds_override";
 /// never reads the abstraction's file, so a run that does not evaluate the
 /// seam does not add that file to its cache-key dependency domain (#1023).
 #[must_use]
-pub fn requirements_implements_name(source: &str) -> Option<String> {
+pub fn requirements_implements_name(
+    source: &str,
+    options: &fsl_syntax::ParseOptions,
+) -> Option<String> {
     let Ok(fsl_syntax::SurfaceDocument::Requirements(requirements)) =
-        fsl_syntax::parse_surface_document(source)
+        fsl_syntax::parse_surface_document_with(source, options)
     else {
         return None;
     };
@@ -665,12 +752,13 @@ pub fn attach_not_evaluated(envelope: &mut Value, key: &str, section: Value) {
 pub fn governance_output(
     source: &str,
     resolver: &dyn fsl_core::FileResolver,
+    options: &fsl_syntax::ParseOptions,
     mut preservation_result: impl FnMut(
         &fsl_core::GovernancePreservation,
     ) -> Result<Value, GovernanceOutputError>,
 ) -> Result<Option<Value>, GovernanceOutputError> {
-    let Some(contract) =
-        fsl_core::governance_contract(source, resolver).map_err(GovernanceOutputError::from)?
+    let Some(contract) = fsl_core::governance_contract_with_options(source, resolver, options)
+        .map_err(GovernanceOutputError::from)?
     else {
         return Ok(None);
     };
@@ -693,14 +781,15 @@ pub fn governance_output(
 pub async fn governance_output_async<F, Fut>(
     source: &str,
     resolver: &dyn fsl_core::FileResolver,
+    options: &fsl_syntax::ParseOptions,
     mut preservation_result: F,
 ) -> Result<Option<Value>, GovernanceOutputError>
 where
     F: FnMut(&fsl_core::GovernancePreservation) -> Fut,
     Fut: Future<Output = Result<Value, GovernanceOutputError>>,
 {
-    let Some(contract) =
-        fsl_core::governance_contract(source, resolver).map_err(GovernanceOutputError::from)?
+    let Some(contract) = fsl_core::governance_contract_with_options(source, resolver, options)
+        .map_err(GovernanceOutputError::from)?
     else {
         return Ok(None);
     };
@@ -788,25 +877,50 @@ pub fn requirement_step_match(
             .map_err(|error| error.to_string())?,
         );
     }
-    let enabled = monitor.enabled().map_err(|error| error.to_string())?;
-    for action in requirement_actions_by_name(monitor, step)
+    let actions = requirement_actions_by_name(monitor, step)
         .into_iter()
-        .filter(|action| action.params.len() == arguments.len())
-    {
-        let params = action
-            .params
+        .filter(|action| action.params.len() == arguments.len());
+    let instance =
+        enabled_step_instance(monitor, actions, &arguments).map_err(|error| error.to_string())?;
+    Ok((arguments, instance))
+}
+
+/// The enabled instance of the first of `actions` (in order) called with
+/// `arguments`, as a search of [`fsl_runtime::Monitor::enabled`] finds it.
+///
+/// Only the instances the step names are collected: listing every enabled
+/// instance held one entry per value of a parameter domain, so a step over
+/// a large `values` scope exhausted memory. Every guard is still evaluated
+/// ([`fsl_runtime::Monitor::enabled_where`]), so a guard that cannot be
+/// evaluated fails as before.
+fn enabled_step_instance<'a>(
+    monitor: &fsl_runtime::Monitor,
+    actions: impl IntoIterator<Item = &'a ActionDef>,
+    arguments: &[FslValue],
+) -> Result<Option<fsl_runtime::EnabledAction>, fsl_runtime::RuntimeError> {
+    let calls = actions
+        .into_iter()
+        .map(|action| {
+            let params = action
+                .params
+                .iter()
+                .zip(arguments)
+                .map(|(param, value)| (param.name().to_owned(), value.clone()))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            (action.name.as_str(), params)
+        })
+        .collect::<Vec<_>>();
+    let enabled = monitor.enabled_where(|action, params| {
+        calls
             .iter()
-            .zip(&arguments)
-            .map(|(param, value)| (param.name().to_owned(), value.clone()))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        if let Some(instance) = enabled
+            .any(|(name, call)| *name == action && call == params)
+    })?;
+    Ok(calls.iter().find_map(|(name, params)| {
+        enabled
             .iter()
-            .find(|instance| instance.action == action.name && instance.params == params)
-        {
-            return Ok((arguments, Some(instance.clone())));
-        }
-    }
-    Ok((arguments, None))
+            .find(|instance| instance.action == *name && instance.params == *params)
+            .cloned()
+    }))
 }
 
 fn requirement_actions_by_name<'a>(
@@ -836,9 +950,8 @@ fn argument_in_checked_domain(
     Ok(match parameter {
         ParamDef::Typed { ty, .. } => monitor
             .model
-            .domain_values(ty)
-            .map_err(|error| error.to_string())?
-            .contains(value),
+            .domain_contains(ty, value)
+            .map_err(|error| error.to_string())?,
         ParamDef::Range { lo, hi, .. } => matches!(
             value,
             FslValue::Int(value) if lo <= value && value <= hi
@@ -1159,24 +1272,8 @@ pub fn requirement_step_match_values(
             step.name
         )));
     }
-    let enabled = monitor
-        .enabled()
-        .map_err(|error| RequirementStepRelationError::Replay(error.to_string()))?;
-    for action in matching_actions {
-        let params = action
-            .params
-            .iter()
-            .zip(arguments.iter())
-            .map(|(param, value)| (param.name().to_owned(), value.clone()))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        if let Some(instance) = enabled
-            .iter()
-            .find(|instance| instance.action == action.name && instance.params == params)
-        {
-            return Ok(Some(instance.clone()));
-        }
-    }
-    Ok(None)
+    enabled_step_instance(monitor, matching_actions, arguments)
+        .map_err(|error| RequirementStepRelationError::Replay(error.to_string()))
 }
 
 fn requirement_step_json(step: &fsl_core::RequirementsTraceStep, arguments: &[FslValue]) -> Value {
@@ -1199,6 +1296,62 @@ fn requirement_failure_base(
     output
 }
 
+/// Acceptance and forbidden traces that [`validate_requirement_trace_source`]
+/// replayed against a model without a failure.
+///
+/// The gate is the only constructor, so a consumer that takes this type can
+/// only be reached through it (#1285).
+///
+/// ```compile_fail,E0451
+/// fn forge(
+///     contract: fsl_core::RequirementsTraceContract,
+/// ) -> fslc_rust::verification_output::CheckedTraceContract {
+///     fslc_rust::verification_output::CheckedTraceContract { contract }
+/// }
+/// ```
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CheckedTraceContract {
+    contract: fsl_core::RequirementsTraceContract,
+}
+
+impl CheckedTraceContract {
+    /// The acceptance cases, in declaration order.
+    #[must_use]
+    pub fn acceptance(&self) -> &[fsl_core::RequirementsTraceCase] {
+        self.contract.unchecked_acceptance()
+    }
+
+    /// The forbidden cases, in declaration order.
+    #[must_use]
+    pub fn forbidden(&self) -> &[fsl_core::RequirementsTraceCase] {
+        self.contract.unchecked_forbidden()
+    }
+
+    /// The source's `verify` scope type names
+    /// ([`fsl_core::verify_scope_type_names`]).
+    #[must_use]
+    pub fn scope_types(&self) -> &std::collections::BTreeSet<String> {
+        self.contract.scope_types()
+    }
+}
+
+/// The verdict of [`validate_requirement_trace_source`].
+#[derive(Clone, Debug, PartialEq)]
+#[must_use = "a TraceGate may carry a rejected requirement trace"]
+pub enum TraceGate {
+    /// The source is not a requirements document, so it declares no traces.
+    NotRequirements,
+    /// Every acceptance and forbidden trace replayed as declared.
+    Passed(CheckedTraceContract),
+    /// The first trace that did not replay as declared.
+    Rejected {
+        /// The error envelope reporting the failing trace.
+        failure: Value,
+        /// The rejected contract, for attributing `failure` to its case.
+        contract: fsl_core::RequirementsTraceContract,
+    },
+}
+
 /// Validate requirements-layer acceptance and forbidden traces before proof.
 ///
 /// # Errors
@@ -1213,13 +1366,52 @@ pub fn validate_requirement_trace_source(
     envelope: &Map<String, Value>,
     source: &str,
     model: &KernelModel,
-) -> Result<(Option<Value>, bool), String> {
-    let Some(contract) =
-        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
+    options: &fsl_syntax::ParseOptions,
+) -> Result<TraceGate, String> {
+    let Some(contract) = fsl_core::requirements_trace_contract_with_options(source, options)
+        .map_err(|error| error.to_string())?
     else {
-        return Ok((None, false));
+        return Ok(TraceGate::NotRequirements);
     };
-    validate_requirement_trace_contract(envelope, &contract, model)
+    Ok(
+        match validate_requirement_trace_contract(envelope, &contract, model)? {
+            Some(failure) => TraceGate::Rejected { failure, contract },
+            None => TraceGate::Passed(CheckedTraceContract { contract }),
+        },
+    )
+}
+
+/// The requirement-trace gate for a consumer that reads acceptance /
+/// forbidden cases and must not report a result for a spec whose traces the
+/// gate refuses (#1285 stage 2, #1242, #1243).
+///
+/// Returns the checked contract (`None` when `source` is not a requirements
+/// document), or the envelope the consumer reports instead of its own output,
+/// with exit status 2: the gate's failure for a rejected trace, or a
+/// semantics error for a trace that cannot be parsed or replayed.
+///
+/// # Errors
+///
+/// Returns that envelope whenever the gate does not pass.
+pub fn require_trace_gate(
+    envelope: &Map<String, Value>,
+    source: &str,
+    model: &KernelModel,
+    options: &fsl_syntax::ParseOptions,
+) -> Result<Option<CheckedTraceContract>, Value> {
+    match validate_requirement_trace_source(envelope, source, model, options) {
+        Ok(TraceGate::Passed(contract)) => Ok(Some(contract)),
+        Ok(TraceGate::NotRequirements) => Ok(None),
+        Ok(TraceGate::Rejected { failure, .. }) => Err(failure),
+        Err(message) => Err(render_semantic_error(
+            envelope.clone(),
+            &message,
+            None,
+            &DiagnosticClass::Message,
+            None,
+            None,
+        )),
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -1227,14 +1419,44 @@ fn validate_requirement_trace_contract(
     envelope: &Map<String, Value>,
     contract: &fsl_core::RequirementsTraceContract,
     model: &KernelModel,
-) -> Result<(Option<Value>, bool), String> {
-    let has_contract = !contract.acceptance.is_empty() || !contract.forbidden.is_empty();
-    for case in &contract.acceptance {
+) -> Result<Option<Value>, String> {
+    for case in contract.unchecked_acceptance() {
         let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
         for (index, step) in case.steps.iter().enumerate() {
             let (arguments, instance) = requirement_step_match(&monitor, step)?;
             let Some(instance) = instance else {
                 let mut output = requirement_failure_base(envelope, "acceptance", case);
+                if let UnenabledStep::WrongKind {
+                    parameter,
+                    value,
+                    expected,
+                } =
+                    requirement_unenabled_step(&monitor, step, &arguments, contract.scope_types())?
+                {
+                    output.insert(
+                        "wrong_kind_argument".to_owned(),
+                        json!({
+                            "parameter": parameter,
+                            "value": fsl_value_json(&value),
+                            "type": expected,
+                        }),
+                    );
+                    output.insert(
+                        "message".to_owned(),
+                        json!(format!(
+                            "argument {} for '{parameter}' of '{}' is not a value of type '{expected}' in acceptance, so no guard was evaluated",
+                            fsl_value_json(&value),
+                            step.name,
+                        )),
+                    );
+                    output.insert(
+                        "hint".to_owned(),
+                        json!(format!(
+                            "an acceptance case requires every step to be enabled and ok. {} is not a value of '{expected}' at all, so the step is malformed rather than rejected and no guard was tested. Change the step to a value of '{expected}'.",
+                            fsl_value_json(&value),
+                        )),
+                    );
+                }
                 output.insert("failed_step".to_owned(), json!(index));
                 output.insert("step".to_owned(), requirement_step_json(step, &arguments));
                 output.insert("step_results".to_owned(), json!([]));
@@ -1243,7 +1465,7 @@ fn validate_requirement_trace_contract(
                     json!({"line": step.line, "column": step.column}),
                 );
                 output.insert("trace_type".to_owned(), json!("acceptance"));
-                return Ok((Some(Value::Object(output)), has_contract));
+                return Ok(Some(Value::Object(output)));
             };
             let result = monitor.step(&instance).map_err(|error| error.to_string())?;
             if result.violation.is_some() {
@@ -1256,7 +1478,7 @@ fn validate_requirement_trace_contract(
                     json!({"line": step.line, "column": step.column}),
                 );
                 output.insert("trace_type".to_owned(), json!("acceptance"));
-                return Ok((Some(Value::Object(output)), has_contract));
+                return Ok(Some(Value::Object(output)));
             }
         }
         let expectation = case
@@ -1282,10 +1504,10 @@ fn validate_requirement_trace_contract(
                 json!({"line": case.line, "column": case.column}),
             );
             output.insert("trace_type".to_owned(), json!("acceptance"));
-            return Ok((Some(Value::Object(output)), has_contract));
+            return Ok(Some(Value::Object(output)));
         }
     }
-    for case in &contract.forbidden {
+    for case in contract.unchecked_forbidden() {
         if case.steps.is_empty() {
             return Err(format!(
                 "forbidden '{}' must have at least one step",
@@ -1305,7 +1527,7 @@ fn validate_requirement_trace_contract(
                         &monitor,
                         step,
                         &arguments,
-                        &contract.scope_types,
+                        contract.scope_types(),
                     )?;
                     let Some(message) = unenabled.non_rejection_message(step) else {
                         break;
@@ -1371,7 +1593,7 @@ fn validate_requirement_trace_contract(
                     );
                     output.insert("message".to_owned(), json!(message));
                     output.insert("trace_type".to_owned(), json!("forbidden"));
-                    return Ok((Some(Value::Object(output)), has_contract));
+                    return Ok(Some(Value::Object(output)));
                 }
                 let mut output = requirement_failure_base(envelope, "forbidden_setup", case);
                 output.insert("failed_step".to_owned(), json!(index));
@@ -1386,7 +1608,7 @@ fn validate_requirement_trace_contract(
                     json!("the setup steps of a forbidden case must be enabled and ok (the trace is broken)."),
                 );
                 output.insert("trace_type".to_owned(), json!("forbidden"));
-                return Ok((Some(Value::Object(output)), has_contract));
+                return Ok(Some(Value::Object(output)));
             };
             let params = Value::Object(
                 instance
@@ -1411,8 +1633,8 @@ fn validate_requirement_trace_contract(
                         "violation".to_owned(),
                         json!({
                             "kind": violation.kind,
-                            "name": display_name(&violation.name),
-                            "action": display_name(&instance.action),
+                            "name": model.names().public_violation(&violation.name, None).into_string(),
+                            "action": model.names().public_action(&instance.action).into_string(),
                             "params": params,
                         }),
                     );
@@ -1427,11 +1649,11 @@ fn validate_requirement_trace_contract(
                         json!(format!(
                             "the last step was enabled and stopped with a runtime violation ({} '{}'), which is not a rejection: a forbidden case is satisfied only when the last step is not enabled (requires_failed / bad_call). If this call must be rejected, add a requires that rejects it. If the call should be allowed, the forbidden is wrong: fix the violation the step reaches and revise or remove the forbidden.",
                             violation.kind,
-                            display_name(&violation.name),
+                            model.names().public_violation(&violation.name, None).into_string(),
                         )),
                     );
                     output.insert("trace_type".to_owned(), json!("forbidden"));
-                    return Ok((Some(Value::Object(output)), has_contract));
+                    return Ok(Some(Value::Object(output)));
                 }
                 let mut output = requirement_failure_base(envelope, "forbidden_setup", case);
                 output.insert("failed_step".to_owned(), json!(index));
@@ -1442,7 +1664,7 @@ fn validate_requirement_trace_contract(
                     json!({"line": step.line, "column": step.column}),
                 );
                 output.insert("trace_type".to_owned(), json!("forbidden"));
-                return Ok((Some(Value::Object(output)), has_contract));
+                return Ok(Some(Value::Object(output)));
             }
             accepted_trace.push(json!({
                 "action": model.action_display_name(&instance.action),
@@ -1463,11 +1685,11 @@ fn validate_requirement_trace_contract(
                     json!("this operation should have been rejected but was accepted. A guard or invariant may be missing."),
                 );
                 output.insert("trace_type".to_owned(), json!("forbidden"));
-                return Ok((Some(Value::Object(output)), has_contract));
+                return Ok(Some(Value::Object(output)));
             }
         }
     }
-    Ok((None, has_contract))
+    Ok(None)
 }
 
 fn requirement_expectation_expr(
@@ -1564,51 +1786,32 @@ pub fn validate_requirement_trace_source_scoped(
     source: &str,
     model: &KernelModel,
     declared: Option<&KernelModel>,
+    options: &fsl_syntax::ParseOptions,
 ) -> Result<(Option<Value>, Vec<SkippedRequirementTrace>), String> {
-    let Some(contract) =
-        fsl_core::requirements_trace_contract(source).map_err(|error| error.to_string())?
+    let Some(contract) = fsl_core::requirements_trace_contract_with_options(source, options)
+        .map_err(|error| error.to_string())?
     else {
         return Ok((None, Vec::new()));
     };
     let mut skipped = Vec::new();
-    let cases = contract
-        .acceptance
-        .iter()
-        .map(|case| ("acceptance", case))
-        .chain(contract.forbidden.iter().map(|case| ("forbidden", case)));
-    for (kind, case) in cases {
-        let single = fsl_core::RequirementsTraceContract {
-            acceptance: if kind == "acceptance" {
-                vec![case.clone()]
-            } else {
-                Vec::new()
-            },
-            forbidden: if kind == "forbidden" {
-                vec![case.clone()]
-            } else {
-                Vec::new()
-            },
-            scope_types: contract.scope_types.clone(),
-        };
+    for (kind, case, single) in contract.split_cases() {
         let outcome = validate_requirement_trace_contract(envelope, &single, model);
         // Without the declared model nothing can be attributed to the
         // override, so every failure stays hard (fail closed).
         let Some(declared) = declared else {
-            if matches!(outcome, Ok((None, _))) {
+            if matches!(outcome, Ok(None)) {
                 continue;
             }
-            let (failure, _) = outcome?;
-            return Ok((failure, skipped));
+            return Ok((outcome?, skipped));
         };
-        let reference = if matches!(outcome, Ok((None, _))) {
+        let reference = if matches!(outcome, Ok(None)) {
             continue;
         } else if let Some(reference) =
             out_of_scope_reference(envelope, &single, model, declared, kind, case)
         {
             reference
         } else {
-            let (failure, _) = outcome?;
-            return Ok((failure, skipped));
+            return Ok((outcome?, skipped));
         };
         skipped.push(SkippedRequirementTrace {
             kind,
@@ -1686,12 +1889,12 @@ fn expectation_evaluates(
     single: &fsl_core::RequirementsTraceContract,
     model: &KernelModel,
 ) -> bool {
-    let Some(case) = single.acceptance.first() else {
+    let Some(case) = single.unchecked_acceptance().first() else {
         return false;
     };
     match validate_requirement_trace_contract(envelope, single, model) {
-        Ok((None, _)) => true,
-        Ok((Some(failure), _)) => {
+        Ok(None) => true,
+        Ok(Some(failure)) => {
             failure.get("expect").is_some()
                 && failure.get("failed_step") == Some(&json!(case.steps.len()))
         }
@@ -1761,9 +1964,7 @@ fn parameter_admits(model: &KernelModel, parameter: &ParamDef, value: &FslValue)
         // A domain that cannot be enumerated is not evidence of an
         // out-of-scope reference; treat it as admitting the value so the
         // failure stays a hard one.
-        ParamDef::Typed { ty, .. } => model
-            .domain_values(ty)
-            .map_or(true, |values| values.contains(value)),
+        ParamDef::Typed { ty, .. } => model.domain_contains(ty, value).unwrap_or(true),
         ParamDef::Range { lo, hi, .. } => {
             matches!(value, FslValue::Int(value) if lo <= value && value <= hi)
         }
@@ -1856,12 +2057,33 @@ pub fn replay_bmc_witnesses(
     result: &BmcResult,
     initial_state: Option<&fsl_runtime::State>,
 ) -> Result<(), String> {
+    replay_bmc_witnesses_with_bounds(model, result, initial_state, None)
+}
+
+/// Replay witnesses with the run's implicit-bound selection (`None`: all bounds).
+///
+/// # Errors
+///
+/// Returns the same errors as [`replay_bmc_witnesses`].
+pub fn replay_bmc_witnesses_with_bounds(
+    model: &KernelModel,
+    result: &BmcResult,
+    initial_state: Option<&fsl_runtime::State>,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<(), String> {
     let replay = |trace: &[fsl_core::TraceStep]| {
         initial_state
             .or_else(|| trace.first().map(|entry| &entry.state))
             .map_or_else(
-                || fsl_runtime::replay_trace(model.clone(), trace),
-                |state| fsl_runtime::replay_trace_from_state(model.clone(), trace, state),
+                || fsl_runtime::replay_trace_with_bounds(model.clone(), trace, checked_bounds),
+                |state| {
+                    fsl_runtime::replay_trace_from_state_with_bounds(
+                        model.clone(),
+                        trace,
+                        state,
+                        checked_bounds,
+                    )
+                },
             )
     };
     if let Some(violation) = &result.violation {
@@ -1948,7 +2170,7 @@ pub fn render_boundary_output(
             .find(|definition| definition.name == action.name)
     });
     let partial_property_name = (violation.kind == "partial_op")
-        .then(|| violation.name.strip_prefix("_partial_property_"))
+        .then(|| SyntheticName::parse_internal(&violation.name)?.partial_property())
         .flatten();
     let partial_property = partial_property_name.and_then(|name| {
         model
@@ -1970,9 +2192,8 @@ pub fn render_boundary_output(
     let origin = match violation.kind.as_str() {
         "invariant" => model.property_origin("invariant", &violation.name),
         "trans" => model.property_origin("trans", &violation.name),
-        "type_bound" => violation
-            .name
-            .strip_prefix("_bounds_")
+        "type_bound" => SyntheticName::parse_internal(&violation.name)
+            .and_then(|synthetic| synthetic.bounds_state())
             .and_then(|name| model.state_origin(name)),
         "partial_op" => partial_property
             .and_then(|(kind, property)| model.property_origin(kind, &property.name))
@@ -2198,7 +2419,7 @@ pub fn render_explicit_output(
     skip_vacuity_probe: bool,
 ) -> Result<(Value, i32), String> {
     let compatible = explicit_as_bmc(result, vacuity, reachable_diagnostics);
-    replay_bmc_witnesses(model, &compatible, None)?;
+    replay_bmc_witnesses_with_bounds(model, &compatible, None, checked_bounds)?;
     let statistics = VerificationStatistics::default();
 
     if let Some(violation) = &compatible.violation {
@@ -2472,12 +2693,12 @@ fn add_explicit_metadata(
         "action_profile".to_owned(),
         Value::Object(
             sorted_by_published(&result.action_profile, |name| {
-                model.action_display_name(name)
+                model.names().public_action(name)
             })
             .into_iter()
             .map(|(name, _, stats)| {
                 (
-                    name,
+                    name.into_string(),
                     json!({
                         "enabled": stats.enabled,
                         "fired": stats.fired,
@@ -2654,15 +2875,15 @@ fn render_reachable_failure(
                     let mut item = json!({
                         "name": origin
                             .and_then(origin_display_name)
-                            .map_or_else(|| display_name(&property.name), str::to_owned),
+                            .map_or_else(|| model.names().public_property(&property.name).into_string(), str::to_owned),
                         "loc": property.span.python_loc(),
                         "classification": if diagnosis.is_some() { "over_constrained" } else { "insufficient_depth" },
                         "hint": if let Some(diagnosis) = diagnosis {
                             let names = diagnosis.blocking.iter()
-                                .map(|blocker| display_name(&blocker.name))
+                                .map(|blocker| model.names().public_property(&blocker.name).into_string())
                                 .collect::<Vec<_>>();
                             let names = if names.is_empty() {
-                                display_name(&property.name)
+                                model.names().public_property(&property.name).into_string()
                             } else {
                                 names.join(", ")
                             };
@@ -2687,7 +2908,7 @@ fn render_reachable_failure(
                             if blocking.is_empty() {
                                 blocking.push(json!({
                                     "kind": "reachable",
-                                    "name": display_name(&property.name),
+                                    "name": model.names().public_property(&property.name).into_string(),
                                     "loc": property.span.python_loc(),
                                 }));
                             }
@@ -2701,7 +2922,7 @@ fn render_reachable_failure(
                         if let Some(origin) = origin {
                             item.insert(
                                 "generated_name".to_owned(),
-                                json!(display_name(&property.name)),
+                                json!(model.names().public_property(&property.name).into_string()),
                             );
                             item.insert("origin".to_owned(), internal_origin_json(origin));
                         }
@@ -2745,7 +2966,7 @@ fn render_reachable_failure(
 fn reachable_blocker_json(model: &KernelModel, blocker: &fsl_verifier::ReachableBlocker) -> Value {
     let mut rendered = json!({
         "kind": blocker.kind,
-        "name": display_name(&blocker.name),
+        "name": model.names().public_property(&blocker.name).into_string(),
     });
     if blocker.kind == "invariant"
         && let Some(property) = model
@@ -2865,7 +3086,10 @@ fn render_success(
                         {
                             entry.insert("within".to_owned(), json!(within));
                         }
-                        (display_name(&property.name), checked)
+                        (
+                            model.names().public_property(&property.name).into_string(),
+                            checked,
+                        )
                     })
                     .collect(),
             ),
@@ -2933,37 +3157,41 @@ fn add_common(
             model
                 .transitions
                 .iter()
-                .map(|property| Value::String(display_name(&property.name)))
+                .map(|property| {
+                    Value::String(model.names().public_property(&property.name).into_string())
+                })
                 .collect(),
         ),
     );
     output.insert(
         "reachables".to_owned(),
         Value::Object(
-            sorted_by_published(&result.reachables, display_name)
-                .into_iter()
-                .filter_map(|(name, _, witness)| {
-                    witness.as_ref().map(|witness| {
-                        (
-                            name,
-                            json!({
-                                "witnessed_at_step": witness.step,
-                                "witness": trace_json(model, &witness.trace),
-                            }),
-                        )
-                    })
+            sorted_by_published(&result.reachables, |name| {
+                model.names().public_property(name)
+            })
+            .into_iter()
+            .filter_map(|(name, _, witness)| {
+                witness.as_ref().map(|witness| {
+                    (
+                        name.into_string(),
+                        json!({
+                            "witnessed_at_step": witness.step,
+                            "witness": trace_json(model, &witness.trace),
+                        }),
+                    )
                 })
-                .collect(),
+            })
+            .collect(),
         ),
     );
     output.insert(
         "action_coverage".to_owned(),
         Value::Object(
-            sorted_by_published(&result.action_coverage, |name| model.action_display_name(name))
+            sorted_by_published(&result.action_coverage, |name| model.names().public_action(name))
                 .into_iter()
                 .map(|(published, name, covered)| {
                     (
-                        published,
+                        published.into_string(),
                         if *covered {
                             json!(true)
                         } else {
@@ -3045,12 +3273,12 @@ fn solver_vacuity_warnings(model: &KernelModel, result: &BmcResult) -> Vec<Value
 }
 
 fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
-    let label = model.action_display_name(finding.name());
+    let label = model.names().public_name(finding.name()).into_string();
     let (message, hint) = match finding {
         VacuityFinding::TautologyOverFrozen { frozen_vars, .. } => {
             let names = frozen_vars
                 .iter()
-                .map(|name| display_name(name))
+                .map(|name| model.names().public_state(name).into_string())
                 .collect::<Vec<_>>()
                 .join(", ");
             (
@@ -3073,7 +3301,7 @@ fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
             };
             let deadline_text = deadlines
                 .iter()
-                .map(|name| format!("'{}'", display_name(name)))
+                .map(|name| format!("'{}'", model.names().public_property(name).into_string()))
                 .collect::<Vec<_>>()
                 .join(", ");
             (
@@ -3086,7 +3314,7 @@ fn vacuity_warning(model: &KernelModel, finding: &VacuityFinding) -> Value {
         VacuityFinding::DeadlineNeverAdvances { age_vars, .. } => {
             let names = age_vars
                 .iter()
-                .map(|name| display_name(name))
+                .map(|name| model.names().public_state(name).into_string())
                 .collect::<Vec<_>>()
                 .join(", ");
             (
@@ -3191,8 +3419,8 @@ fn urgent_action_labels(model: &KernelModel) -> Vec<String> {
 #[must_use]
 pub fn sorted_by_published<V>(
     entries: &BTreeMap<String, V>,
-    publish: impl Fn(&str) -> String,
-) -> Vec<(String, &String, &V)> {
+    publish: impl Fn(&str) -> PublicName,
+) -> Vec<(PublicName, &String, &V)> {
     let mut entries = entries
         .iter()
         .map(|(name, value)| (publish(name), name, value))
@@ -3201,39 +3429,27 @@ pub fn sorted_by_published<V>(
     entries
 }
 
-fn invariant_names_selected(
+/// Published invariant inventory, with only this run's selected implicit bounds.
+#[must_use]
+pub fn invariant_names_selected(
     model: &KernelModel,
     checked_bounds: Option<&BTreeSet<String>>,
 ) -> Vec<String> {
     let mut names = model
         .state
         .iter()
-        .filter(|(_, ty)| has_bounds(model, ty))
-        .map(|(name, _)| format!("_bounds_{name}"))
+        .filter(|(_, ty)| model.type_has_bounds(ty))
+        .map(|(name, _)| fsl_core::SyntheticName::Bounds { state: name }.internal())
         .filter(|name| checked_bounds.is_none_or(|selected| selected.contains(name)))
-        .map(|name| display_name(&name))
+        .map(|name| model.names().public_violation(&name, None).into_string())
         .collect::<Vec<_>>();
     names.extend(
         model
             .invariants
             .iter()
-            .map(|property| display_name(&property.name)),
+            .map(|property| model.names().public_property(&property.name).into_string()),
     );
     names
-}
-
-fn has_bounds(model: &KernelModel, ty: &TypeRef) -> bool {
-    match ty {
-        TypeRef::Int | TypeRef::Bool | TypeRef::Relation(_, _) => false,
-        TypeRef::Range(_, _) | TypeRef::Set(_) | TypeRef::Seq(_, _) => true,
-        TypeRef::Option(inner) => has_bounds(model, inner),
-        TypeRef::Map(_, value) => has_bounds(model, value),
-        TypeRef::Named(name) => match model.types.get(name) {
-            Some(TypeDef::Domain { .. } | TypeDef::Enum { .. }) => true,
-            Some(TypeDef::Struct { fields }) => fields.iter().any(|(_, ty)| has_bounds(model, ty)),
-            None => false,
-        },
-    }
 }
 
 /// Shared with `main.rs::run_scenarios_mode`, which faces the same
@@ -3272,7 +3488,9 @@ fn violation_bindings_json(
         return Value::Null;
     };
     if kind == "type_bound" {
-        let state_name = name.strip_prefix("_bounds_").unwrap_or(name);
+        let state_name = SyntheticName::parse_internal(name)
+            .and_then(|synthetic| synthetic.bounds_state())
+            .unwrap_or(name);
         let Some((_, TypeRef::Map(_, value_ty))) = model
             .state
             .iter()
@@ -3317,11 +3535,13 @@ fn violation_blame_json(
     violating_bindings: Value,
 ) -> Value {
     if kind == "type_bound" {
-        let state_name = name.strip_prefix("_bounds_").unwrap_or(name);
+        let state_name = SyntheticName::parse_internal(name)
+            .and_then(|synthetic| synthetic.bounds_state())
+            .unwrap_or(name);
         return json!({
             "conjuncts": [{
                 "index": 0,
-                "text": format!("{} stays within its declared type bounds", display_name(state_name)),
+                "text": format!("{} stays within its declared type bounds", model.names().public_state(state_name).into_string()),
                 "holds": false,
             }]
         });
@@ -3342,8 +3562,8 @@ fn violation_blame_json(
     json!({"conjuncts": [conjunct]})
 }
 
-/// Serialize solver cost, publishing compose component names the way every
-/// other field of the envelope does.
+/// Serialize solver cost, publishing every name the way every other field of
+/// the envelope does (a branch split `submit__b1` as `submit.b1`, #1256).
 ///
 /// # Panics
 ///
@@ -3359,9 +3579,9 @@ pub fn cost_json(model: &KernelModel, cost: fsl_solver::VerificationCost<'_>) ->
     {
         if let Some(public) = property["name"]
             .as_str()
-            .and_then(|name| model.compose_public_name(name))
+            .map(|name| model.names().public_name(name))
         {
-            property["name"] = json!(public);
+            property["name"] = json!(public.into_string());
         }
     }
     // The solver orders properties by internal `(kind, name)`; the published
@@ -3385,14 +3605,20 @@ fn origin_aware_property_name(
     name: &str,
 ) -> String {
     let Some(origin) = model.property_origin(kind, name) else {
-        return display_name(name);
+        return model.names().public_property(name).into_string();
     };
-    output.insert("generated_name".to_owned(), json!(display_name(name)));
+    output.insert(
+        "generated_name".to_owned(),
+        json!(model.names().public_property(name).into_string()),
+    );
     output.insert("origin".to_owned(), internal_origin_json(origin));
     if let Some(span) = origin.primary.as_ref().and_then(|site| site.span) {
         output.insert("loc".to_owned(), span.python_loc());
     }
-    origin_display_name(origin).map_or_else(|| display_name(name), str::to_owned)
+    origin_display_name(origin).map_or_else(
+        || model.names().public_property(name).into_string(),
+        str::to_owned,
+    )
 }
 
 #[cfg(test)]
@@ -3409,13 +3635,126 @@ mod tests {
         Map::from_iter([("fsl".to_owned(), json!("1.0"))])
     }
 
+    /// The public envelope for one core kind: `(kind, hint)`.
+    ///
+    /// An exhaustive `match` with no wildcard arm, like the production
+    /// mapping: a new `CoreErrorKind` fails to compile here until the test
+    /// states the envelope it must produce (issue 1167).
+    fn expected_core_envelope(
+        kind: &fsl_core::CoreErrorKind,
+    ) -> (&'static str, Option<&'static str>) {
+        use fsl_core::CoreErrorKind;
+        match kind {
+            CoreErrorKind::NameResolution => ("name", None),
+            CoreErrorKind::UnknownType => ("type", None),
+            CoreErrorKind::UnknownAiHardContractRule => {
+                ("semantics", Some(AI_HARD_CONTRACT_RULE_HINT))
+            }
+            CoreErrorKind::Semantics
+            | CoreErrorKind::UnresolvedTypeDefault
+            | CoreErrorKind::UnknownDomainSymbol
+            | CoreErrorKind::ScopeOverrideWithoutBounds
+            | CoreErrorKind::NotKernelLowerable
+            | CoreErrorKind::ComponentLoad(_) => ("semantics", None),
+        }
+    }
+
+    fn every_core_error_kind() -> Vec<fsl_core::CoreErrorKind> {
+        use fsl_core::CoreErrorKind;
+        let leaves = [
+            CoreErrorKind::Semantics,
+            CoreErrorKind::NameResolution,
+            CoreErrorKind::UnknownType,
+            CoreErrorKind::UnresolvedTypeDefault,
+            CoreErrorKind::UnknownAiHardContractRule,
+            CoreErrorKind::UnknownDomainSymbol,
+            CoreErrorKind::ScopeOverrideWithoutBounds,
+            CoreErrorKind::NotKernelLowerable,
+        ];
+        let components = leaves
+            .iter()
+            .map(|cause| CoreErrorKind::ComponentLoad(Box::new(cause.clone())));
+        leaves.iter().cloned().chain(components).collect()
+    }
+
+    /// Render a core error through the same path every spec-loading command
+    /// uses: `SemanticDiagnostic::from_core_error` into the envelope renderer.
+    fn render_core_error(error: &fsl_core::CoreError) -> Value {
+        crate::spec_load::render_spec_load_error(
+            Map::new(),
+            &crate::spec_load::SpecLoadError::Semantic(Box::new(
+                crate::spec_load::SemanticDiagnostic::from_core_error(error),
+            )),
+        )
+    }
+
+    #[test]
+    fn every_core_error_kind_maps_onto_the_closed_public_kind_set() {
+        // `docs/design/DESIGN-v1.md` §7.2's closed set; a core kind may refine
+        // it but never extend it.
+        const CLOSED_KINDS: &[&str] = &["parse", "name", "type", "semantics", "io", "internal"];
+        for kind in every_core_error_kind() {
+            let class = core_error_class(&kind);
+            let (expected_kind, expected_hint) = expected_core_envelope(&kind);
+            assert!(CLOSED_KINDS.contains(&class.kind), "{kind:?}: {class:?}");
+            assert_eq!(class.kind, expected_kind, "{kind:?}");
+            assert_eq!(class.hint, expected_hint, "{kind:?}");
+
+            let output = render_core_error(
+                &fsl_core::CoreError::unlocated("reworded diagnostic").with_kind(kind.clone()),
+            );
+            assert_eq!(output["kind"], expected_kind, "{kind:?}: {output}");
+            assert_eq!(
+                output.get("hint").and_then(Value::as_str),
+                expected_hint,
+                "{kind:?}: {output}"
+            );
+        }
+    }
+
+    /// The classification follows the type in both directions: rewording a
+    /// typed diagnostic keeps its class and hint, and wording that used to
+    /// trigger a class does not confer it on a diagnostic of another kind.
+    #[test]
+    fn a_core_diagnostic_is_classified_by_its_kind_not_its_message() {
+        use fsl_core::{CoreError, CoreErrorKind};
+
+        let reworded_type = render_core_error(
+            &CoreError::unlocated("type 'core.Missing' is not declared")
+                .with_kind(CoreErrorKind::UnknownType),
+        );
+        assert_eq!(reworded_type["kind"], "type", "{reworded_type}");
+
+        let untyped_wording = render_core_error(&CoreError::unlocated("unknown type 'Missing'"));
+        assert_eq!(untyped_wording["kind"], "semantics", "{untyped_wording}");
+
+        let reworded_rule = render_core_error(
+            &CoreError::unlocated("hard-contract rule 'bogus' is not registered")
+                .with_kind(CoreErrorKind::UnknownAiHardContractRule),
+        );
+        assert_eq!(
+            reworded_rule["hint"], AI_HARD_CONTRACT_RULE_HINT,
+            "{reworded_rule}"
+        );
+
+        let untyped_rule = render_core_error(&CoreError::unlocated(
+            "unknown ai hard-contract rule 'bogus'",
+        ));
+        assert!(untyped_rule.get("hint").is_none(), "{untyped_rule}");
+
+        let coded = render_core_error(
+            &CoreError::unlocated("reworded diagnostic").with_diagnostic_code("fsl5_example_code"),
+        );
+        assert_eq!(coded["diagnostic_code"], "fsl5_example_code", "{coded}");
+    }
+
     #[test]
     fn state_shape_errors_are_located_type_diagnostics() {
         let output = render_semantic_error(
             Map::new(),
             "state variable 'x' has unsupported state type",
             Some(json!({"line": 3, "column": 3})),
-            false,
+            &DiagnosticClass::Message,
             None,
             None,
         );
@@ -3434,7 +3773,7 @@ mod tests {
             Map::new(),
             "struct field 'Record.nested' has non-scalar type",
             Some(json!({"line": 3, "column": 3})),
-            false,
+            &DiagnosticClass::Message,
             None,
             None,
         );
@@ -3695,16 +4034,16 @@ mod tests {
     }
 
     /// Issue #1303: every published preservation value, and what it makes of
-    /// a success-class envelope. `violated` (the `after` spec breaks its own
-    /// semantics) is spelled `impl_violated` at the top level, as an inline
-    /// `implements` seam spells it; anything outside the vocabulary fails
-    /// closed.
+    /// a success-class envelope. `impl_violated` (the `after` spec breaks its
+    /// own semantics) is the same word at both levels (#1315); anything
+    /// outside the vocabulary, including the retired `violated`, fails closed.
     #[test]
     fn attach_governance_folds_each_preservation_value() {
         for (preservation, expected_result, expected_exit) in [
             (json!("refines"), "ok", None),
             (json!("refinement_failed"), "refinement_failed", Some(1)),
-            (json!("violated"), "impl_violated", Some(1)),
+            (json!("impl_violated"), "impl_violated", Some(1)),
+            (json!("violated"), "error", Some(3)),
             (json!("unknown_budget"), "unknown_budget", Some(1)),
             (json!("error"), "error", Some(3)),
             (json!("who_knows"), "error", Some(3)),

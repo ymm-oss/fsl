@@ -1,0 +1,14 @@
+// original.fsl（impl） ⊑ lowered.fsl（abs）。恒等の対応（submit の入力名だけ a -> amount）。
+refinement OriginalRefinesLowered {
+  impl ExpenseRequirements
+  abs  ExpenseRequirements
+
+  map claim_stage[c: Claim] = claim_stage[c]
+  map claim_amount[c: Claim] = claim_amount[c]
+
+  action submit(c, a)      -> submit(c, a)
+  action auto_approve(c)   -> auto_approve(c)
+  action mgr_approve(c)    -> mgr_approve(c)
+  action reject(c)         -> reject(c)
+  action pay(c)            -> pay(c)
+}

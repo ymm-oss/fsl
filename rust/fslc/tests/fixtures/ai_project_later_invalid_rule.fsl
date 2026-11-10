@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+
+ai_component First {
+  tool Search { schema SearchV1; }
+  authority { }
+}
+
+// A second component starts after the first component and this comment.
+    ai_component Later {
+      tool Search { schema SearchV1; }
+
+      check hard {
+        rule unregistered_later_rule;
+      }
+    }
+
+statistical_property Quality {
+  target Later
+  require min_samples >= 0
+}

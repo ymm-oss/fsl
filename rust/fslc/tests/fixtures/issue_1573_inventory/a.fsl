@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+spec A {
+  type K = 1..2
+  state { o: Option<K>, n: Int }
+  init { o = some(1) n = 0 }
+  action stay() {
+    requires if (o is some(v)) then true else true
+    n = 0
+  }
+  invariant P { n == 0 }
+}

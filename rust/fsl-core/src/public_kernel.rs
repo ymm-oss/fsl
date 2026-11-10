@@ -424,7 +424,9 @@ fn expr_json_inner(
             output.insert("operator".to_owned(), json!(op));
             let left_json = expr_json(left, env, model, path, span, Some(&left_ty))?;
             let mut right_env = env.clone();
-            extend_pattern_binding(left, &mut right_env, model)?;
+            if crate::pattern_binding_flows(op, true) {
+                extend_pattern_binding(left, &mut right_env, model)?;
+            }
             output.insert("left".to_owned(), left_json);
             output.insert(
                 "right".to_owned(),
@@ -629,13 +631,13 @@ fn lvalue_json(
             "kind":"var","type":type_json(&ty),"span":span_json(path,span),"name":name
         }),
         LValue::Index(name, index) => {
-            let (TypeRef::Map(key, _) | TypeRef::Relation(key, _)) = resolve(
+            let Some((key, _)) = resolve(
                 model,
                 env.get(name)
                     .ok_or_else(|| error(format!("unknown update target '{name}'")))?,
             )?
-            else {
-                return Err(error("indexed update target requires Map or Relation"));
+            .index_types(false) else {
+                return Err(error("indexed update target requires Map"));
             };
             json!({
                 "kind":"index","type":type_json(&ty),"span":span_json(path,span),
@@ -732,10 +734,13 @@ fn walk_partial(
             Some(operation @ (PartialOperation::Head | PartialOperation::Pop)),
             Expr::Method { receiver, .. },
         ) => Some((operation, empty_failure(receiver))),
-        (Some(PartialOperation::At), Expr::Method { receiver, args, .. }) => Some((
-            PartialOperation::At,
-            out_of_prefix_failure(receiver, &args[0]),
-        )),
+        (Some(PartialOperation::At), Expr::Method { receiver, args, .. }) => {
+            let index = args.first().ok_or_else(|| PublicKernelError {
+                message: "method 'at' requires an index argument".to_owned(),
+                span: Some(span),
+            })?;
+            Some((PartialOperation::At, out_of_prefix_failure(receiver, index)))
+        }
         (Some(PartialOperation::Index), Expr::Index(collection, index))
             if matches!(
                 resolve(model, &infer_type(collection, env, model, None)?)?,
@@ -1512,7 +1517,7 @@ pub fn public_kernel_contract(
             let mut guards = Vec::new();
             let mut partial = Vec::new();
             let mut require_spans = action.require_spans.iter();
-            for guard in &action.guards {
+            for (guard_index, guard) in action.guards.iter().enumerate() {
                 match guard {
                     ActionGuard::Requires(expression) => {
                         let span = *require_spans.next().ok_or_else(|| {
@@ -1558,9 +1563,46 @@ pub fn public_kernel_contract(
                             &mut partial,
                         )?;
                         let ty = infer_type(expression, &local, model, None)?;
+                        let candidates = local.collection_candidates(expression, &ty, model)?;
+                        // A source let may shadow a state/local name used by its
+                        // RHS. Preserve that prior binding for candidate reads.
+                        let mut previous = HashMap::new();
+                        if !candidates.is_empty() && let Some(prior_ty) = local.get(name).cloned() {
+                            let prior = format!("$collection:{guard_index}:previous");
+                            let value = expr_json(&Expr::Var(name.clone()), &local, model,
+                                source_path, action.span, None)?;
+                            local.insert(prior.clone(), prior_ty);
+                            if let Some(candidates) = local.collections.get(name).cloned() {
+                                local.collections.insert(prior.clone(), candidates);
+                            }
+                            lets.push(json!({"name":prior,"value":value}));
+                            guards.push(json!({"kind":"let","name":prior,"value":value}));
+                            previous.insert(name.clone(), Expr::Var(prior));
+                        }
                         local.insert(name.clone(), ty);
                         lets.push(json!({"name":name,"value":value}));
                         guards.push(json!({"kind":"let","name":name,"value":value}));
+                        let mut captured = Vec::new();
+                        for (endpoint, candidates) in candidates.into_iter().enumerate() {
+                            let mut values = Vec::new();
+                            for (index, candidate) in candidates.into_iter().enumerate() {
+                                let candidate = crate::substitute_expr(candidate, &previous);
+                                if crate::typecheck::literal_scalar(&candidate)
+                                    || matches!(&candidate, Expr::Var(name) if name.starts_with("$collection:")) {
+                                    values.push(candidate);
+                                    continue;
+                                }
+                                let name = format!("$collection:{guard_index}:{endpoint}:{index}");
+                                let value = expr_json(&candidate, &local, model, source_path, action.span, None)?;
+                                let ty = infer_type(&candidate, &local, model, None)?;
+                                local.insert(name.clone(), ty);
+                                lets.push(json!({"name":name,"value":value}));
+                                guards.push(json!({"kind":"let","name":name,"value":value}));
+                                values.push(Expr::Var(name));
+                            }
+                            captured.push(values);
+                        }
+                        if !captured.is_empty() { local.collections.insert(name.clone(), captured); }
                     }
                 }
             }
@@ -1742,6 +1784,130 @@ pub fn public_kernel_contract_for_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn at_method_model(index: &str) -> (KernelSpec, KernelModel) {
+        let source = format!(
+            "spec EmptyAt {{ state {{ q: Seq<Int, 2>, n: Int }} \
+             init {{ q = Seq {{}} n = 0 }} \
+             action Touch() {{ n = q.at({index}) }} invariant Safe {{ true }} }}"
+        );
+        let kernel = crate::parse_direct_kernel_spec(&source).expect("parse at method");
+        let model = crate::build_model(kernel.clone()).expect("check still accepts this model");
+        (kernel, model)
+    }
+
+    #[test]
+    fn check_rejects_at_without_an_index() {
+        let source = "spec EmptyAt { state { q: Seq<Int, 2>, n: Int } \
+                      init { q = Seq {} n = 0 } \
+                      action Touch() { n = q.at() } invariant Safe { true } }";
+        let kernel = crate::parse_direct_kernel_spec(source).expect("parse missing at index");
+        let error = crate::build_model(kernel).expect_err("check must reject a missing at index");
+        assert!(
+            error.message.contains("invalid Seq method")
+                && error.message.contains("at")
+                && error.message.contains("/0"),
+            "{error:?}"
+        );
+        let span = error
+            .origin
+            .expect("authored diagnostic origin")
+            .primary
+            .expect("primary authored origin")
+            .span
+            .expect("authored expression span");
+        assert_eq!((span.start.line, span.start.column), (1, 92));
+    }
+
+    fn remove_at_index(model: &mut KernelModel) -> (Expr, Span) {
+        let action = model
+            .actions
+            .iter_mut()
+            .find(|action| action.name == "Touch")
+            .expect("Touch action");
+        let [Statement::Assign { value, span, .. }] = action.statements.as_mut_slice() else {
+            panic!("Touch must assign the at call");
+        };
+        let Expr::Method {
+            receiver,
+            name,
+            args,
+        } = value
+        else {
+            panic!("Touch assignment must contain a method call");
+        };
+        assert!(matches!(receiver.as_ref(), Expr::Var(name) if name == "q"));
+        assert_eq!(name, "at");
+        assert_eq!(args.len(), 1);
+        args.clear();
+        (value.clone(), *span)
+    }
+
+    #[test]
+    fn walk_partial_rejects_an_at_call_without_an_index() {
+        let (_, model) = at_method_model("0");
+        let (expression, span) = remove_at_index(&mut model.clone());
+        // Touch has no parameters or local guards, so its projection env is base_env.
+        let error = walk_partial(
+            &expression,
+            &base_env(&model),
+            &model,
+            "empty-at.fsl",
+            span,
+            None,
+            &mut Vec::new(),
+        )
+        .expect_err("missing at index must return PublicKernelError, not panic");
+        assert!(
+            error.message.contains("at")
+                && (error.message.contains("index") || error.message.contains("argument")),
+            "{error}"
+        );
+        assert_eq!(error.span, Some(span));
+    }
+
+    #[test]
+    fn public_kernel_rejects_an_at_call_without_an_index_without_panicking() {
+        let (kernel, model) = at_method_model("0");
+        // Projection walks the checked model's expression AST, not kernel.items.
+        let mut edited_model = model.clone();
+        let _ = remove_at_index(&mut edited_model);
+        for version in [PublicKernelVersion::V1, PublicKernelVersion::V2] {
+            let error = public_kernel_contract_for_version(
+                &kernel,
+                &edited_model,
+                "empty-at.fsl",
+                "kernel",
+                version,
+            )
+            .expect_err("missing at index must return PublicKernelError, not panic");
+            assert!(
+                error.message.contains("invalid Seq method")
+                    && error.message.contains("at")
+                    && error.message.contains("/0"),
+                "{version:?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_present_at_index_keeps_its_partial_operation_projection() {
+        let (kernel, model) = at_method_model("0");
+        for version in [PublicKernelVersion::V1, PublicKernelVersion::V2] {
+            let contract = public_kernel_contract_for_version(
+                &kernel,
+                &model,
+                "empty-at.fsl",
+                "kernel",
+                version,
+            )
+            .expect("a valid at call still projects");
+            let operation = &contract["actions"][0]["partial_operations"][0];
+            assert_eq!(operation["operation"], "at");
+            assert!(operation["failure_condition"].is_object(), "{operation}");
+            assert_eq!(operation["state_effect_on_failure"], "rollback");
+        }
+    }
     use crate::{build_model, parse_direct_kernel_spec};
 
     #[test]

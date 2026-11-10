@@ -6,11 +6,23 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use fsl_core::KernelModel;
+use fsl_core::{KernelModel, SyntheticName};
 use fsl_syntax::{Annotations, RequirementLink};
 use serde_json::Value;
 
 use crate::undecided_declarations;
+
+/// Approval renderer identity for the Markdown ledger (`fslc approval`, recorded as
+/// `"<id>/<version>"` in `target.generator_version`). Bump the version by
+/// hand when a template string, section order, escaping or other
+/// presentation of the rendered bytes changes for the same verification
+/// result; do not bump it for a crate release or a changed verifier result.
+/// Deliberately independent of `CARGO_PKG_VERSION`, for the same reason as
+/// `DOCUMENT_RENDERER_VERSION`: tying it to the crate would mark every
+/// approval drifted on every unrelated `fslc` release.
+pub const LEDGER_RENDERER: &str = "fslc-ledger-renderer";
+/// See [`LEDGER_RENDERER`].
+pub const LEDGER_RENDERER_VERSION: &str = "1.0.0";
 
 #[derive(Clone, Default)]
 struct RequirementEntry {
@@ -27,7 +39,204 @@ struct Finding {
     summary: String,
     next_action: Option<String>,
     raw: Value,
+    warning_presentation: Option<&'static WarningPresentation>,
 }
+
+struct WarningPresentation {
+    kind: &'static str,
+    trace_type: &'static str,
+    prefix: &'static str,
+    translation: &'static str,
+    advice: &'static str,
+}
+
+const GENERIC_WARNING: WarningPresentation = WarningPresentation {
+    kind: "",
+    trace_type: "warning",
+    prefix: "未分類の警告",
+    translation: "警告の分類が未登録。付録の生 JSON と警告内容を確認し、責任者が対応方針を決定する。",
+    advice: "警告内容と分類を確認",
+};
+const VACUITY_WARNING: WarningPresentation = WarningPresentation {
+    trace_type: "vacuity",
+    prefix: "空虚性の疑い",
+    translation: "性質『{name}』が空虚に成立している疑い（中身がない可能性）。`fslc mutate` で実効性を確認する。",
+    advice: "fslc mutate で実効性を確認",
+    ..GENERIC_WARNING
+};
+const MIGRATION_WARNING: WarningPresentation = WarningPresentation {
+    trace_type: "migration",
+    prefix: "移行候補",
+    translation: "検出種別 migration（付録の生 JSON を参照）。",
+    advice: "責任者が対応方針を決定",
+    ..GENERIC_WARNING
+};
+
+const WARNING_PRESENTATIONS: &[WarningPresentation] = &[
+    WarningPresentation {
+        kind: "vacuous_implication",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "vacuous_leadsto",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "tautology_over_frozen",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "urgency_freeze",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "vacuous_deadline",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "always_true_requires",
+        ..VACUITY_WARNING
+    },
+    WarningPresentation {
+        kind: "deprecated_domain_enum_union",
+        ..MIGRATION_WARNING
+    },
+    WarningPresentation {
+        kind: "legacy_string_metadata",
+        ..MIGRATION_WARNING
+    },
+    WarningPresentation {
+        kind: "legacy_quantifier_colon",
+        ..MIGRATION_WARNING
+    },
+    WarningPresentation {
+        kind: "inline_action_maps",
+        ..MIGRATION_WARNING
+    },
+    WarningPresentation {
+        kind: "implicit_initial_value",
+        ..MIGRATION_WARNING
+    },
+    WarningPresentation {
+        kind: "deadlock",
+        trace_type: "deadlock",
+        prefix: "停止状態の到達",
+        translation: "実行可能なアクションがない状態に到達する。意図した停止かを確認し、必要なら操作を追加するか terminal を宣言する。",
+        advice: "停止の意図を確認 / アクション追加 / terminal 宣言",
+    },
+    WarningPresentation {
+        kind: "never_enabled_action",
+        trace_type: "coverage",
+        prefix: "深さ内で一度も実行可能にならない",
+        translation: "アクション『{name}』が検証した深さ内で一度も実行可能にならない。ガードと前提操作を確認し、必要なら検証の深さを見直す。",
+        advice: "ガード・前提アクションを確認 / 検証の深さを見直し",
+    },
+    WarningPresentation {
+        kind: "vacuity_probe_truncated",
+        trace_type: "verification_incomplete",
+        prefix: "空虚性未確立（到達性 probe が判定に至らず）",
+        translation: "性質『{name}』の空虚性は未確立。到達性 probe が判定に至っていないため、状態空間と式の評価可否を確認する。",
+        advice: "状態空間を簡素化 / 深さを下げる / 式の評価可否を確認",
+    },
+    WarningPresentation {
+        kind: "no_user_invariants",
+        prefix: "安全性の確認対象なし",
+        translation: "利用者が記述した不変条件や遷移制約がない。必要な安全性の確認対象を見直す。",
+        advice: "必要な不変条件を追加 / 検証対象を確認",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "fair_not_inherited",
+        prefix: "公平性の前提未継承",
+        translation: "合成元の fair 指定が合成後に引き継がれていない。進行に必要な公平性の前提を確認する。",
+        advice: "合成後の fair 指定を確認",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "unused_control",
+        prefix: "統制の参照なし",
+        translation: "宣言した統制が参照されていない。統制と業務操作の対応を確認する。",
+        advice: "統制の参照を追加 / 不要な統制を見直し",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "fullwidth_space",
+        prefix: "表記上の警告",
+        translation: "全角空白が通常の空白として解釈されている。原文の表記を確認する。",
+        advice: "全角空白を通常の空白に修正",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "non_nfc_identifier",
+        prefix: "識別子の正規化",
+        translation: "識別子が NFC 正規形に正規化されている。意図した名前かを確認する。",
+        advice: "識別子を NFC 正規形に修正",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "lifecycle_edge_without_event",
+        prefix: "イベントのない状態遷移",
+        translation: "ライフサイクルの遷移に対応するイベントがない。業務上の遷移操作を確認する。",
+        advice: "遷移に対応するイベントを確認",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "actor_shadows_member",
+        prefix: "名前の重なり",
+        translation: "actor 名がメンバー名と重なっている。参照先が意図どおりかを確認する。",
+        advice: "actor とメンバーの名前を見直し",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "implied_by_lifecycle",
+        prefix: "ライフサイクルによる含意",
+        translation: "記述したルールはライフサイクルから既に導かれる。重複した記述が意図したものかを確認する。",
+        advice: "ルールとライフサイクルの対応を確認",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "never_rule_without_forbidden",
+        prefix: "禁止フローの確認不足",
+        translation: "禁止ルールに対応する forbidden がない。拒否すべき業務経路を具体例で確認する。",
+        advice: "対応する forbidden を追加 / 禁止ルールを確認",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "decide_row_emptied",
+        prefix: "判断表の行が空",
+        translation: "判断表の行に該当する場合が残っていない。条件の優先順位と重なりを確認する。",
+        advice: "判断表の条件と優先順位を見直し",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "acceptance_skipped",
+        prefix: "受入シナリオ未評価",
+        translation: "検証範囲の上書きにより受入シナリオが評価されていない。対象の値を含む範囲で再検証する。",
+        advice: "instances / values の範囲を見直して再検証",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "forbidden_skipped",
+        prefix: "禁止フロー未評価",
+        translation: "検証範囲の上書きにより禁止フローが評価されていない。対象の値を含む範囲で再検証する。",
+        advice: "instances / values の範囲を見直して再検証",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "untagged",
+        prefix: "要件の紐付けなし",
+        translation: "宣言に要件の注釈がない。要求との対応を確認する。",
+        advice: "要件の注釈を追加 / モデル上の意図を記録",
+        ..GENERIC_WARNING
+    },
+    WarningPresentation {
+        kind: "unreferenced_requirement",
+        prefix: "要件の参照なし",
+        translation: "要件 ID を参照する宣言やシナリオがない。仕様への反映を確認する。",
+        advice: "要件 ID を宣言・受入条件・禁止フローに紐付け",
+        ..GENERIC_WARNING
+    },
+];
 
 fn add_requirement(
     order: &mut Vec<String>,
@@ -124,41 +333,71 @@ fn requirement(value: &Value) -> (Option<String>, Option<String>) {
 }
 
 fn metadata_for(model: &KernelModel, group: &str, name: &str) -> Option<RequirementLink> {
-    let annotations = match group {
-        "invariants" => model
-            .invariants
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "transitions" => model
-            .transitions
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "reachables" => model
-            .reachables
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "leadstos" => model
-            .leadstos
-            .iter()
-            .find(|property| property.name == name)
-            .map(|property| &property.annotations),
-        "actions" => model
-            .actions
-            .iter()
-            .find(|action| action.name == name)
-            .map(|action| &action.annotations),
-        _ => None,
+    let declarations: Vec<_> = model
+        .invariants
+        .iter()
+        .map(|item| ("invariants", &item.name, &item.annotations))
+        .chain(
+            model
+                .transitions
+                .iter()
+                .map(|item| ("transitions", &item.name, &item.annotations)),
+        )
+        .chain(
+            model
+                .reachables
+                .iter()
+                .map(|item| ("reachables", &item.name, &item.annotations)),
+        )
+        .chain(
+            model
+                .leadstos
+                .iter()
+                .map(|item| ("leadstos", &item.name, &item.annotations)),
+        )
+        .chain(
+            model
+                .actions
+                .iter()
+                .map(|item| ("actions", &item.name, &item.annotations)),
+        )
+        .filter(|(kind, _, _)| *kind == group || group == "properties" && *kind != "actions")
+        .collect();
+    let synthetic = (group == "properties")
+        .then(|| SyntheticName::parse_internal(name))
+        .flatten();
+    let candidates: Vec<_> = declarations
+        .iter()
+        .map(|(_, name, _)| match synthetic {
+            Some(SyntheticName::PartialProperty { .. }) => {
+                SyntheticName::PartialProperty { property: name }.internal()
+            }
+            Some(SyntheticName::KeyDomainProperty { .. }) => {
+                SyntheticName::KeyDomainProperty { property: name }.internal()
+            }
+            _ => (*name).clone(),
+        })
+        .collect();
+    let names = candidates.iter().map(String::as_str);
+    let resolved = if group == "actions" {
+        model.names().resolve_action(name, names)
+    } else if matches!(
+        synthetic,
+        Some(SyntheticName::PartialProperty { .. } | SyntheticName::KeyDomainProperty { .. })
+    ) {
+        model.names().resolve_synthetic(name, names)
+    } else {
+        model.names().resolve_property(name, names)
     };
-    annotations.and_then(|annotations| {
-        annotations
-            .requirements()
-            .expect("checked model annotations are valid")
-            .into_iter()
-            .next()
-    })
+    // Missing and ambiguous identities stay spec-level; never choose a candidate.
+    let owner = resolved.ok()??;
+    let index = candidates.iter().position(|candidate| candidate == owner)?;
+    declarations[index]
+        .2
+        .requirements()
+        .expect("checked model annotations are valid")
+        .into_iter()
+        .next()
 }
 
 fn finding_requirement(
@@ -173,6 +412,55 @@ fn finding_requirement(
     }
     metadata_for(model, group, name)
         .map_or((None, None), |metadata| (Some(metadata.id), metadata.text))
+}
+
+fn generated_identity<'a>(value: &'a Value, name: &'a str) -> &'a str {
+    value
+        .get("generated_name")
+        .and_then(Value::as_str)
+        .unwrap_or(name)
+}
+
+fn verdict_requirement(
+    model: &KernelModel,
+    value: &Value,
+    name: &str,
+) -> (Option<String>, Option<String>) {
+    // Historical `invariant` fields also carry transition, liveness and action
+    // obligations. Classify the producer's obligation before resolving identity.
+    let (group, owner) = match value.get("violation_kind").and_then(Value::as_str) {
+        Some("deadlock") => ("", value),
+        Some("leadsTo" | "leadsTo_rank") => ("leadstos", value),
+        Some("trans") => ("transitions", value),
+        _ if value.get("trans").is_some() => ("transitions", value),
+        _ if value.get("leadsTo").is_some() => ("leadstos", value),
+        Some("partial_op" | "key_domain") => {
+            match SyntheticName::parse_internal(generated_identity(value, name)) {
+                Some(
+                    SyntheticName::PartialProperty { .. } | SyntheticName::KeyDomainProperty { .. },
+                ) => ("properties", value),
+                Some(
+                    SyntheticName::PartialAction { .. } | SyntheticName::KeyDomainAction { .. },
+                ) => ("actions", &value["last_action"]),
+                _ => ("", value),
+            }
+        }
+        Some("ensures" | "type_bound") => ("actions", &value["last_action"]),
+        _ => ("invariants", value),
+    };
+    finding_requirement(
+        model,
+        value,
+        group,
+        generated_identity(
+            owner,
+            if group == "actions" {
+                owner["name"].as_str().unwrap_or("")
+            } else {
+                name
+            },
+        ),
+    )
 }
 
 fn summarize_violation(value: &Value) -> String {
@@ -214,24 +502,15 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
         .get("trace_type")
         .and_then(Value::as_str)
         .unwrap_or("");
-    if result == "violated" {
-        let (group, name) =
-            if let Some(name) = verification.get("invariant").and_then(Value::as_str) {
-                ("invariants", name)
-            } else if let Some(name) = verification.get("leadsTo").and_then(Value::as_str) {
-                ("leadstos", name)
-            } else if let Some(name) = verification.get("trans").and_then(Value::as_str) {
-                ("transitions", name)
-            } else {
-                (
-                    "",
-                    verification
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                )
-            };
-        let metadata = finding_requirement(model, verification, group, name);
+    if matches!(result, "violated" | "unknown_cti") {
+        let name = verification
+            .get("trans")
+            .or_else(|| verification.get("leadsTo"))
+            .or_else(|| verification.get("invariant"))
+            .or_else(|| verification.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let metadata = verdict_requirement(model, verification, name);
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
@@ -242,12 +521,21 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             }
             .to_owned(),
             name: name.to_owned(),
-            summary: summarize_violation(verification),
+            summary: if result == "unknown_cti" {
+                format!("帰納証明は未確立（{result}）")
+            } else {
+                summarize_violation(verification)
+            },
             next_action: verification
-                .get("recommended_action")
+                .get(if result == "unknown_cti" {
+                    "hint"
+                } else {
+                    "recommended_action"
+                })
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             raw: verification.clone(),
+            warning_presentation: None,
         });
     } else if result == "reachable_failed" {
         for item in verification
@@ -257,7 +545,8 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             .flatten()
         {
             let name = item.get("name").and_then(Value::as_str).unwrap_or("");
-            let metadata = finding_requirement(model, item, "reachables", name);
+            let metadata =
+                finding_requirement(model, item, "reachables", generated_identity(item, name));
             let mut summary = match item.get("classification").and_then(Value::as_str) {
                 Some("insufficient_depth") => format!(
                     "深さ {} までに到達 trace なし（より深い探索が必要かもしれない）",
@@ -284,6 +573,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                 summary,
                 next_action: item.get("hint").and_then(Value::as_str).map(str::to_owned),
                 raw: item.clone(),
+                warning_presentation: None,
             });
         }
     } else if result == "error" && matches!(trace_type, "acceptance" | "forbidden") {
@@ -340,18 +630,58 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
                 .and_then(Value::as_str)
                 .map(str::to_owned),
             raw: verification.clone(),
+            warning_presentation: None,
         });
     }
-    for (name, item) in verification
-        .get("action_coverage")
-        .and_then(Value::as_object)
+    if let Some(implements) = verification.get("implements") {
+        findings.extend(refinement_finding(
+            implements,
+            "implements",
+            implements.get("abs").and_then(Value::as_str).unwrap_or("—"),
+            None,
+            "",
+        ));
+    }
+    // Governance lowering creates only the catalog invariant, the sole invariant
+    // with requirement metadata. Thus the first metadata-bearing invariant owns
+    // preservations; read it rather than copying its ID or catalog text.
+    let governance_requirement = model.invariants.iter().find_map(|property| {
+        metadata_for(
+            model,
+            "invariants",
+            model.names().public_property(&property.name).as_str(),
+        )
+    });
+    for preservation in verification["governance"]["preservations"]
+        .as_array()
         .into_iter()
         .flatten()
+    {
+        findings.extend(refinement_finding(
+            preservation,
+            "preservation",
+            preservation
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("—"),
+            governance_requirement.clone(),
+            &format!(
+                "{} → {} / control: {}",
+                preservation["before"].as_str().unwrap_or("—"),
+                preservation["after"].as_str().unwrap_or("—"),
+                preservation["preserve"],
+            ),
+        ));
+    }
+    for (name, item) in
+        crate::coverage::source_action_coverage(model, &verification["action_coverage"])
+            .into_iter()
+            .flatten()
     {
         if item.get("covered").and_then(Value::as_bool) != Some(false) {
             continue;
         }
-        let metadata = finding_requirement(model, item, "actions", name);
+        let metadata = finding_requirement(model, item, "actions", generated_identity(item, &name));
         let mut summary = "深さ内で一度も実行可能にならない（死アクション）".to_owned();
         if let Some(blocking) = item
             .get("blocking_requires")
@@ -367,6 +697,7 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             summary,
             next_action: item.get("hint").and_then(Value::as_str).map(str::to_owned),
             raw: item.clone(),
+            warning_presentation: None,
         });
     }
     for warning in verification
@@ -381,34 +712,62 @@ fn collect_findings(model: &KernelModel, verification: &Value) -> Vec<Finding> {
             .and_then(Value::as_str)
             .unwrap_or("");
         let metadata = requirement(warning);
-        let kind = warning.get("kind").and_then(Value::as_str).unwrap_or("");
+        let kind = warning
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or("不明");
         let message = warning.get("message").and_then(Value::as_str).unwrap_or("");
+        let presentation = WARNING_PRESENTATIONS
+            .iter()
+            .find(|entry| entry.kind == kind)
+            .unwrap_or(&GENERIC_WARNING);
+        let prefix = presentation.prefix;
         findings.push(Finding {
             requirement_id: metadata.0,
             requirement_text: metadata.1,
-            trace_type: "vacuity".to_owned(),
+            trace_type: presentation.trace_type.to_owned(),
             name: name.to_owned(),
-            // `vacuity_probe_truncated` (issue #729) is not itself a
-            // vacuity finding: it means the reachability probe (state
-            // budget exhaustion, or a per-candidate evaluation failure --
-            // `fsl_runtime::Reachability::Exhausted` does not distinguish
-            // the two) never reached a verdict either way. That is a
-            // distinct claim from "疑い" (suspected hollow), so it gets its
-            // own prefix -- "未確立" (not established), not "疑い"
-            // (suspected).
             summary: if kind == "vacuity_probe_truncated" {
-                format!("空虚性未確立（到達性 probe が判定に至らず）: {message}")
+                format!("{prefix}: {message}")
             } else {
-                format!("空虚性の疑い（{kind}）: {message}")
+                format!("{prefix}（{kind}）: {message}")
             },
-            next_action: warning
-                .get("hint")
-                .and_then(Value::as_str)
-                .map(str::to_owned),
+            next_action: if presentation.trace_type == "migration" {
+                None
+            } else {
+                warning
+                    .get("hint")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            },
             raw: warning.clone(),
+            warning_presentation: Some(presentation),
         });
     }
     findings
+}
+
+fn refinement_finding(
+    raw: &Value,
+    kind: &str,
+    name: &str,
+    requirement: Option<RequirementLink>,
+    context: &str,
+) -> Option<Finding> {
+    let result = raw.get("result").and_then(Value::as_str);
+    if refinement_passes(result) {
+        return None;
+    }
+    Some(Finding {
+        requirement_id: requirement.as_ref().map(|link| link.id.clone()),
+        requirement_text: requirement.and_then(|link| link.text),
+        trace_type: kind.to_owned(),
+        name: name.to_owned(),
+        summary: format!("{}: {} {context}", name, result.unwrap_or("—")),
+        next_action: None,
+        raw: raw.clone(),
+        warning_presentation: None,
+    })
 }
 
 /// What a `trace_type: "forbidden"` error reports. Only `Accepted` carries an
@@ -457,75 +816,80 @@ fn forbidden_failure(raw: &Value) -> ForbiddenFailure<'_> {
 }
 
 fn escape(value: &str) -> String {
-    value.replace('|', "\\|").replace('\n', " ")
+    // These cells can contain fixed generated inline-code syntax. Escape the
+    // table/HTML boundary here; free-text inputs use prose at their own slots.
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('|', "\\|")
+        .replace('\r', "&#13;")
+        .replace('\n', "&#10;")
 }
 
 fn translate(finding: &Finding) -> String {
+    let name = crate::document_markdown::prose(&finding.name);
+    if let Some(presentation) = finding.warning_presentation {
+        return presentation.translation.replace("{name}", &name);
+    }
     match finding.trace_type.as_str() {
         "reachable" => format!(
-            "業務経路『{}』が仕様上到達できない。受入条件に到達 trace を追加し、責任者が期待経路を承認する（死経路でないことの確認）。",
-            finding.name
+            "業務経路『{name}』が仕様上到達できない。受入条件に到達 trace を追加し、責任者が期待経路を承認する（死経路でないことの確認）。"
         ),
         "forbidden" => match forbidden_failure(&finding.raw) {
             ForbiddenFailure::Accepted => format!(
-                "禁止フロー『{}』が許容されている。ガードを追加するか、許容するなら責任者がリスク受容を判断する。",
-                finding.name
+                "禁止フロー『{name}』が許容されている。ガードを追加するか、許容するなら責任者がリスク受容を判断する。"
             ),
             ForbiddenFailure::Violation(..) => format!(
-                "禁止フロー『{}』の最後の操作をガードが拒否せず、実行すると実行時違反になる。拒否すべきならガードを追加し、許容すべきなら違反を直して禁止フローを見直す。",
-                finding.name
+                "禁止フロー『{name}』の最後の操作をガードが拒否せず、実行すると実行時違反になる。拒否すべきならガードを追加し、許容すべきなら違反を直して禁止フローを見直す。"
             ),
             ForbiddenFailure::Unresolved(_) => format!(
-                "禁止フロー『{}』の最後の手順が仕様の action を指しておらず、禁止を判定できない。action 名か引数の数を直す。",
-                finding.name
+                "禁止フロー『{name}』の最後の手順が仕様の action を指しておらず、禁止を判定できない。action 名か引数の数を直す。"
             ),
             ForbiddenFailure::OutsideScope(_) => format!(
-                "禁止フロー『{}』の最後の手順の引数が検証の範囲（instances / values）の外にあり、ガードを試していないので禁止の証拠にならない。範囲を広げるか、引数を範囲の内側に直す。",
-                finding.name
+                "禁止フロー『{name}』の最後の手順の引数が検証の範囲（instances / values）の外にあり、ガードを試していないので禁止の証拠にならない。範囲を広げるか、引数を範囲の内側に直す。"
             ),
             ForbiddenFailure::WrongKind(_) => format!(
-                "禁止フロー『{}』の最後の手順の引数が宣言した型の値ではなく（種類が違う）、ガードを試していないので禁止の証拠にならない。引数をその型の値に直す。",
-                finding.name
+                "禁止フロー『{name}』の最後の手順の引数が宣言した型の値ではなく（種類が違う）、ガードを試していないので禁止の証拠にならない。引数をその型の値に直す。"
             ),
             ForbiddenFailure::Setup(_) => format!(
-                "禁止フロー『{}』の前提手順が実行できず、禁止の判定に至っていない。前提手順を直す。",
-                finding.name
+                "禁止フロー『{name}』の前提手順が実行できず、禁止の判定に至っていない。前提手順を直す。"
             ),
             ForbiddenFailure::Other => format!(
-                "禁止フロー『{}』の検査がエラーで止まった。付録の生 JSON を確認する。",
-                finding.name
+                "禁止フロー『{name}』の検査がエラーで止まった。付録の生 JSON を確認する。"
             ),
         },
         "acceptance" => format!(
-            "受入シナリオ『{}』が成立しない。仕様か受入条件のどちらが正かを責任者が確定する。",
-            finding.name
+            "受入シナリオ『{name}』が成立しない。仕様か受入条件のどちらが正かを責任者が確定する。"
         ),
         "sla" => "SLA 期限を超過しうる。スケジューリング前提（urgent）か期限値を見直し、責任者が承認する。".to_owned(),
         "leadsTo" => format!(
-            "応答性『{}』が保証されない経路がある。fair 指定または進行ロジックを見直す。",
-            finding.name
+            "応答性『{name}』が保証されない経路がある。fair 指定または進行ロジックを見直す。"
         ),
         "leadsTo_rank" => format!(
-            "応答性『{}』の停止性（ランキング）が示せない。進行が単調に進むことを確認する。",
-            finding.name
+            "応答性『{name}』の停止性（ランキング）が示せない。進行が単調に進むことを確認する。"
         ),
+        "induction_cti" => format!(
+            "性質『{name}』の帰納証明は未確立。補助不変条件やランキングを確認する。"
+        ),
+        "implements" | "preservation" => if finding.raw["result"] == "unknown_budget" {
+            "対応関係の探索が未完了。範囲と対応付けを見直す。".to_owned()
+        } else {
+            "上位契約との対応関係が成立していない。対応付けと仕様を確認する。".to_owned()
+        },
         "refinement" => "詳細仕様が上位契約から逸脱している。対応付け（mapping）かガードを修正する。".to_owned(),
         "conformance" => "実装ログが仕様に非適合。実装か仕様のどちらが正かを確定する。".to_owned(),
         "external_evidence" => format!(
-            "外部証跡『{}』が非適合/失敗を報告している。証跡（実装ログ・統計評価等）と仕様のどちらが正かを責任者が確認する。",
-            finding.name
+            "外部証跡『{name}』が非適合/失敗を報告している。証跡（実装ログ・統計評価等）と仕様のどちらが正かを責任者が確認する。"
         ),
         "coverage" => format!(
-            "アクション『{}』が一度も実行可能にならない（死アクション）。ガードを緩めるか前提アクションを追加する。",
-            finding.name
+            "アクション『{name}』が一度も実行可能にならない（死アクション）。ガードを緩めるか前提アクションを追加する。"
         ),
         "vacuity" => format!(
-            "性質『{}』が空虚に成立している疑い（中身がない可能性）。`fslc mutate` で実効性を確認する。",
-            finding.name
+            "性質『{name}』が空虚に成立している疑い（中身がない可能性）。`fslc mutate` で実効性を確認する。"
         ),
         "invariant" | "type_bound" | "trans" | "ensures" | "partial_op" | "deadlock" => format!(
-            "不変条件『{}』が破れる経路がある。ガード修正かルール見直しを責任者が承認する。",
-            finding.name
+            "不変条件『{name}』が破れる経路がある。ガード修正かルール見直しを責任者が承認する。"
         ),
         other => format!("検出種別 {other}（付録の生 JSON を参照）。"),
     }
@@ -533,6 +897,9 @@ fn translate(finding: &Finding) -> String {
 
 fn next_action(finding: &Finding) -> String {
     finding.next_action.clone().unwrap_or_else(|| {
+        if let Some(presentation) = finding.warning_presentation {
+            return presentation.advice.to_owned();
+        }
         match finding.trace_type.as_str() {
             "reachable" => "受入条件に到達 trace を追加 / ガードを緩める",
             "forbidden" => match forbidden_failure(&finding.raw) {
@@ -645,6 +1012,23 @@ fn evidence_verdict(value: &Value) -> Option<bool> {
     }
 }
 
+fn replay_finding(replay: &Value) -> Option<Finding> {
+    (evidence_verdict(replay) == Some(false)).then(|| Finding {
+        requirement_id: None,
+        requirement_text: None,
+        trace_type: "conformance".to_owned(),
+        name: "実装ログ適合".to_owned(),
+        summary: "実装ログが仕様に非適合".to_owned(),
+        next_action: None,
+        raw: replay.clone(),
+        warning_presentation: None,
+    })
+}
+
+fn external_evidence_summary(source: &str, result: &str) -> String {
+    format!("外部証跡『{source}』が非適合/失敗を報告(result: {result})")
+}
+
 /// Turn every failing `--evidence` envelope into ledger [`Finding`]s (issue
 /// #508): a failing source must surface as a 🔴 要確認 row for every
 /// requirement it attaches to (root `requirements`/`requirement.id`, or
@@ -662,7 +1046,7 @@ fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
             .get("result")
             .and_then(Value::as_str)
             .unwrap_or("unknown");
-        let summary = format!("外部証跡『{source}』が非適合/失敗を報告(result: {result})");
+        let summary = external_evidence_summary(source, result);
         let ids = evidence_attached_requirement_ids(item);
         if ids.is_empty() {
             findings.push(Finding {
@@ -673,6 +1057,7 @@ fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
                 summary,
                 next_action: None,
                 raw: item.clone(),
+                warning_presentation: None,
             });
             continue;
         }
@@ -685,10 +1070,29 @@ fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
                 summary: summary.clone(),
                 next_action: None,
                 raw: item.clone(),
+                warning_presentation: None,
             });
         }
     }
     findings
+}
+
+/// The completeness a verification envelope reports (#1429 S1): its top-level
+/// `completeness` string, else the nested `kernel` projection's, which
+/// `fslc domain check` and `fslc ai check` emit without a top-level copy. The
+/// aggregate token, the ledger guarantee line and every per-element class read
+/// completeness only through this, so the header never claims more than a row.
+fn reported_completeness(value: &Value) -> Option<&str> {
+    value
+        .get("completeness")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            value
+                .get("kernel")
+                .and_then(Value::as_object)
+                .and_then(|kernel| kernel.get("completeness"))
+                .and_then(Value::as_str)
+        })
 }
 
 /// Classify one JSON envelope (an evidence file's parsed contents, or a
@@ -699,17 +1103,19 @@ fn collect_evidence_findings(evidence: &[(String, Value)]) -> Vec<Finding> {
 /// rather than re-deriving it — acceptance criterion 3 ("`bounded` never
 /// displays as `proved`") reduces to this already-tested function.
 pub(crate) fn assurance_token(value: &Value) -> &'static str {
-    let completeness = value
-        .get("completeness")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            value
-                .get("kernel")
-                .and_then(Value::as_object)
-                .and_then(|kernel| kernel.get("completeness"))
-                .and_then(Value::as_str)
-        });
+    let completeness = reported_completeness(value);
     if completeness == Some("unbounded") {
+        if value
+            .get("leads_to")
+            .and_then(Value::as_object)
+            .is_some_and(|entries| {
+                entries.values().any(|entry| {
+                    entry.get("completeness").and_then(Value::as_str) != Some("unbounded")
+                })
+            })
+        {
+            return "bounded";
+        }
         return "proved";
     }
     if completeness == Some("bounded") {
@@ -774,7 +1180,12 @@ pub(crate) fn assurance_label(token: &str, depth: Option<u64>) -> String {
 /// stamp one report-wide class on every row and call a bounded reachability
 /// witness `proved(induction)`.
 pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) -> &'static str {
-    if verification.get("result").and_then(Value::as_str) == Some("proved") {
+    let result = verification.get("result").and_then(Value::as_str);
+    if result == Some("error") || (group == "reachables" && !reachables_evaluated(verification)) {
+        return "not_run";
+    }
+    let completeness = reported_completeness(verification);
+    if completeness == Some("unbounded") {
         if matches!(group, "invariants" | "transitions") {
             return "proved";
         }
@@ -795,12 +1206,22 @@ pub(crate) fn formal_assurance(group: &str, name: &str, verification: &Value) ->
         }
         return "bounded";
     }
-    if verification.get("result").and_then(Value::as_str) == Some("error") {
-        "not_run"
-    } else if verification.get("completeness").and_then(Value::as_str) == Some("unbounded") {
-        "proved"
-    } else {
+    if completeness == Some("bounded") {
         "bounded"
+    } else {
+        "not_run"
+    }
+}
+
+fn reachables_evaluated(verification: &Value) -> bool {
+    if verification.get("result").and_then(Value::as_str) != Some("violated") {
+        return true;
+    }
+    // Infer from producer projection order; per-reachable status is #1565.
+    match verification.get("violation_kind").and_then(Value::as_str) {
+        Some("invariant" | "trans" | "ensures" | "partial_op" | "type_bound") => false,
+        Some("deadlock") => verification.get("engine").and_then(Value::as_str) != Some("explicit"),
+        _ => true,
     }
 }
 
@@ -809,13 +1230,20 @@ fn assurance_cell(
     registry: &BTreeMap<String, RequirementEntry>,
     verification: &Value,
     evidence: &[(String, Value)],
+    confirmed: bool,
 ) -> String {
     let mut sources = Vec::new();
     if let Some(entry) = registry.get(requirement_id) {
         let formal = entry
             .elements
             .iter()
-            .map(|(group, name)| formal_assurance(group, name, verification))
+            .map(|(group, name)| {
+                if group == "reachables" && confirmed {
+                    "bounded"
+                } else {
+                    formal_assurance(group, name, verification)
+                }
+            })
             .max_by_key(|token| match *token {
                 "proved" => 0,
                 "bounded" => 1,
@@ -860,16 +1288,61 @@ fn assurance_cell(
 }
 
 fn guarantee_line(verification: &Value) -> String {
-    if verification.get("completeness").and_then(Value::as_str) == Some("unbounded") {
-        return "k帰納法で **全実行を証明済み**（深さ無制限）".to_owned();
+    if verification.get("result").and_then(Value::as_str) == Some("error") {
+        return "形式的根拠なし（not_run）。検証はエラーで終了した".to_owned();
     }
-    let depth = verification
-        .get("checked_to_depth")
-        .or_else(|| verification.get("depth"))
-        .map_or_else(|| "null".to_owned(), Value::to_string);
-    format!(
-        "BMC（有界モデル検査）: **深さ {depth} までの全実行を網羅**。それ以遠の反例は本台帳の対象外"
-    )
+    match assurance_token(verification) {
+        "proved" => "k帰納法で **全実行を証明済み**（深さ無制限）".to_owned(),
+        "bounded" => verification
+            .get("checked_to_depth")
+            .or_else(|| verification.get("depth"))
+            .and_then(Value::as_u64)
+            .map_or_else(
+                || "有界検査の報告（bounded）。検査深さは報告されていない".to_owned(),
+                |depth| {
+                    format!(
+                        "BMC（有界モデル検査）: **深さ {depth} までの全実行を網羅**。それ以遠の反例は本台帳の対象外"
+                    )
+                },
+            ),
+        "replay-observed" => {
+            "観測済みログの照合のみ（replay-observed）。未観測の実行は保証しない".to_owned()
+        }
+        "statistical" => {
+            "固定データセットに対する統計的裏付け（statistical）。全実行は保証しない".to_owned()
+        }
+        _ => "形式的根拠なし（not_run）。検査完了の根拠は報告されていない".to_owned(),
+    }
+}
+
+fn refinement_text(value: Option<&Value>) -> String {
+    value
+        .and_then(Value::as_str)
+        .map_or_else(|| "—".to_owned(), escape)
+}
+
+fn refinement_passes(result: Option<&str>) -> bool {
+    result == Some("refines")
+}
+
+fn refinement_mark(result: Option<&str>) -> &'static str {
+    if refinement_passes(result) {
+        "🟢"
+    } else {
+        "🔴"
+    }
+}
+
+/// State the folded verdict and seam result, including a passing seam (#1336).
+fn render_implements_section(output: &mut String, verification: &Value, implements: &Value) {
+    let _ = writeln!(
+        output,
+        "\n## inline implements\n\n- 検証判定: `{}`\n\n| abs | result |\n|---|---|\n| `{}` | {} `{}` |",
+        refinement_text(verification.get("result")),
+        refinement_text(implements.get("abs")),
+        refinement_mark(implements.get("result").and_then(Value::as_str)),
+        refinement_text(implements.get("result")),
+    );
 }
 
 /// The verdict and preservation results of a governance document (#1316).
@@ -881,15 +1354,10 @@ fn guarantee_line(verification: &Value) -> String {
 /// marked failing. Rendered only when the verification envelope carries a
 /// `governance` section, so no other ledger changes.
 fn render_governance_section(output: &mut String, verification: &Value, governance: &Value) {
-    let text = |value: Option<&Value>| {
-        value
-            .and_then(Value::as_str)
-            .map_or_else(|| "—".to_owned(), escape)
-    };
     let _ = write!(
         output,
-        "\n## governance preservation\n\n- 検証判定: `{}`\n- preservation が 1 つでも `refines` でなければ、宣言順で最初のものが検証判定になり（`violated` は `impl_violated`）、`fslc ledger` は非 0 で終了する。\n\n| preservation | before → after | 保全する control | 結果 |\n|---|---|---|---|\n",
-        text(verification.get("result"))
+        "\n## governance preservation\n\n- 検証判定: `{}`\n- preservation が 1 つでも `refines` でなければ、宣言順で最初のものが検証判定になり、`fslc ledger` は非 0 で終了する。\n\n| preservation | before → after | 保全する control | 結果 |\n|---|---|---|---|\n",
+        refinement_text(verification.get("result"))
     );
     for preservation in governance
         .get("preservations")
@@ -906,23 +1374,19 @@ fn render_governance_section(output: &mut String, verification: &Value, governan
             .map(|control| format!("`{}`", escape(control)))
             .collect::<Vec<_>>();
         let result = preservation.get("result").and_then(Value::as_str);
-        let mark = if result == Some("refines") {
-            "🟢"
-        } else {
-            "🔴"
-        };
+        let mark = refinement_mark(result);
         let _ = writeln!(
             output,
             "| `{}` | `{}` → `{}` | {} | {mark} `{}` |",
-            text(preservation.get("name")),
-            text(preservation.get("before")),
-            text(preservation.get("after")),
+            refinement_text(preservation.get("name")),
+            refinement_text(preservation.get("before")),
+            refinement_text(preservation.get("after")),
             if preserve.is_empty() {
                 "—".to_owned()
             } else {
                 preserve.join(", ")
             },
-            text(preservation.get("result")),
+            refinement_text(preservation.get("result")),
         );
     }
 }
@@ -971,7 +1435,6 @@ pub fn render_ledger(
 
 /// Render the audit ledger with optional digest-bound approval decisions.
 #[must_use]
-#[allow(clippy::too_many_lines)]
 pub fn render_ledger_with_approvals(
     file: &str,
     model: &KernelModel,
@@ -981,10 +1444,43 @@ pub fn render_ledger_with_approvals(
     evidence: &[(String, Value)],
     approvals: Option<&Value>,
 ) -> String {
-    let (mut requirement_order, registry) = requirement_registry(model);
+    render_ledger_with_owners(
+        file,
+        model,
+        verification,
+        scenarios,
+        replay,
+        evidence,
+        approvals,
+        &BTreeMap::new(),
+    )
+}
+
+/// [`render_ledger_with_approvals`], titling each ID a declaration owns with the owner's
+/// title rather than the first linked text ([`crate::requirement_owners`], #1705).
+#[must_use]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+pub fn render_ledger_with_owners(
+    file: &str,
+    model: &KernelModel,
+    verification: &Value,
+    scenarios: &Value,
+    replay: Option<&Value>,
+    evidence: &[(String, Value)],
+    approvals: Option<&Value>,
+    owners: &BTreeMap<String, fsl_syntax::RequirementOwner>,
+) -> String {
+    let (mut requirement_order, mut registry) = requirement_registry(model);
+    for (id, entry) in &mut registry {
+        if let Some(owner) = owners.get(id) {
+            entry.text = Some(owner.title.clone());
+        }
+    }
+    let file = crate::document_markdown::code(file);
     let undecided = undecided_declarations(model);
     let findings = collect_findings(model, verification);
-    let evidence_findings = collect_evidence_findings(evidence);
+    let mut evidence_findings = collect_evidence_findings(evidence);
+    evidence_findings.extend(replay.and_then(replay_finding));
     let mut by_requirement: BTreeMap<String, Vec<&Finding>> = BTreeMap::new();
     let mut spec_level = Vec::new();
     for finding in findings.iter().chain(evidence_findings.iter()) {
@@ -1047,7 +1543,7 @@ pub fn render_ledger_with_approvals(
     }
 
     let mut output = format!(
-        "# 意図ずれ監査台帳: {}\n\n- 対象: `{file}`\n- 保証限界: {}\n- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / `bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / `statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。詳細は `docs/design/DESIGN-assurance-classes.md`。\n- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。\n",
+        "# 意図ずれ監査台帳: {}\n\n- 対象: {file}\n- 保証限界: {}\n- 保証クラス（要件ID別）: `proved(induction)` 全深さで証明 / `bounded(BMC depth k)` 深さkまで網羅 / `replay-observed` ログ照合のみ / `statistical` Wilson区間による統計的裏付け / `not_run` 形式的根拠なし。詳細は `docs/design/DESIGN-assurance-classes.md`。\n- この台帳が保証するのは **書かれた仕様の内部整合**。仕様が現実の意図に忠実かは各行の **判断** 欄で人間が担保する。\n",
         model.name,
         guarantee_line(verification)
     );
@@ -1079,6 +1575,9 @@ pub fn render_ledger_with_approvals(
             "- 承認照合: versioned approval record の spec/rendering digest を照合済み。\n",
         );
     }
+    if let Some(implements) = verification.get("implements") {
+        render_implements_section(&mut output, verification, implements);
+    }
     if let Some(governance) = verification.get("governance") {
         render_governance_section(&mut output, verification, governance);
     }
@@ -1098,7 +1597,7 @@ pub fn render_ledger_with_approvals(
                 output,
                 "| `{}` | {} | {} |",
                 escape(item["declaration"].as_str().unwrap_or_default()),
-                escape(item["reason"].as_str().unwrap_or_default()),
+                crate::document_markdown::prose(item["reason"].as_str().unwrap_or_default()),
                 if ids.is_empty() {
                     "—".to_owned()
                 } else {
@@ -1116,6 +1615,16 @@ pub fn render_ledger_with_approvals(
             "\n## リスク一覧（要件ID別）\n\n| 要件ID | 業務目的 | 状態 | 保証クラス | 検出種別 | リスク | 判断者 | 次アクション |\n|---|---|---|---|---|---|---|---|\n",
         );
     }
+    let finding_state = |findings: &[&Finding]| {
+        if findings
+            .iter()
+            .all(|finding| finding.trace_type == "migration")
+        {
+            ("🟡 移行候補", "—")
+        } else {
+            ("🔴 要確認", "要確認")
+        }
+    };
     for requirement_id in &requirement_order {
         let entry = registry.get(requirement_id);
         let requirement_findings = by_requirement
@@ -1143,6 +1652,13 @@ pub fn render_ledger_with_approvals(
             (
                 if confirmed.contains(requirement_id) {
                     "🟢 確認済（承認可）"
+                } else if entry.is_some_and(|entry| {
+                    entry.elements.iter().any(|(group, name)| {
+                        group == "reachables"
+                            && formal_assurance(group, name, verification) == "not_run"
+                    })
+                }) {
+                    "⚪ 未評価"
                 } else {
                     "🟢 反例なし"
                 },
@@ -1166,20 +1682,22 @@ pub fn render_ledger_with_approvals(
                 .into_iter()
                 .collect::<Vec<_>>()
                 .join(" / ");
-            ("🔴 要確認", types, "要確認", "____", action)
+            let (status, risk) = finding_state(requirement_findings);
+            (status, types, risk, "____", action)
         };
         if approvals.is_some() {
             let _ = writeln!(
                 output,
                 "| {} | {} | {status} | {} | {} | {} | {risk} | {owner} | {} |",
                 escape(requirement_id),
-                escape(purpose),
+                crate::document_markdown::prose(purpose),
                 escape(&approval_cell(approvals, requirement_id)),
                 escape(&assurance_cell(
                     requirement_id,
                     &registry,
                     verification,
-                    evidence
+                    evidence,
+                    confirmed.contains(requirement_id)
                 )),
                 escape(&types),
                 escape(&action),
@@ -1189,12 +1707,13 @@ pub fn render_ledger_with_approvals(
                 output,
                 "| {} | {} | {status} | {} | {} | {risk} | {owner} | {} |",
                 escape(requirement_id),
-                escape(purpose),
+                crate::document_markdown::prose(purpose),
                 escape(&assurance_cell(
                     requirement_id,
                     &registry,
                     verification,
-                    evidence
+                    evidence,
+                    confirmed.contains(requirement_id)
                 )),
                 escape(&types),
                 escape(&action),
@@ -1202,6 +1721,7 @@ pub fn render_ledger_with_approvals(
         }
     }
     if !spec_level.is_empty() {
+        let (status, risk) = finding_state(&spec_level);
         let types = spec_level
             .iter()
             .map(|finding| finding.trace_type.as_str())
@@ -1213,14 +1733,14 @@ pub fn render_ledger_with_approvals(
         if approvals.is_some() {
             let _ = writeln!(
                 output,
-                "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | — unapproved | {} | {} | 要確認 | ____ | 下記詳細 |",
+                "| （仕様全体） | 要件ID未付与の検出 | {status} | — unapproved | {} | {} | {risk} | ____ | 下記詳細 |",
                 escape(&assurance_label(assurance_token(verification), depth)),
                 escape(&types)
             );
         } else {
             let _ = writeln!(
                 output,
-                "| （仕様全体） | 要件ID未付与の検出 | 🔴 要確認 | {} | {} | 要確認 | ____ | 下記詳細 |",
+                "| （仕様全体） | 要件ID未付与の検出 | {status} | {} | {} | {risk} | ____ | 下記詳細 |",
                 escape(&assurance_label(assurance_token(verification), depth)),
                 escape(&types)
             );
@@ -1259,24 +1779,51 @@ pub fn render_ledger_with_approvals(
         let _ = writeln!(
             output,
             "### {requirement_id}{}",
-            text.map_or_else(String::new, |text| format!(" — {text}"))
+            text.map_or_else(String::new, |text| format!(
+                " — {}",
+                crate::document_markdown::prose(text)
+            ))
         );
         if requirement_id != "（仕様全体）" {
             let _ = writeln!(
                 output,
                 "- 保証クラス: {}",
-                assurance_cell(&requirement_id, &registry, verification, evidence)
+                assurance_cell(
+                    &requirement_id,
+                    &registry,
+                    verification,
+                    evidence,
+                    confirmed.contains(&requirement_id)
+                )
             );
         }
         for finding in requirement_findings {
+            let summary_label = match finding.trace_type.as_str() {
+                "induction_cti" => "未確立の要約",
+                "implements" | "preservation" => "判定要約",
+                _ => "反例要約",
+            };
             let _ = writeln!(
                 output,
-                "- **検出**: `{}` — {}\n  - 反例要約: {}\n  - 業務翻訳: {}\n  - 次アクション: {}",
+                "- **検出**: `{}` — {}\n  - {summary_label}: {}\n  - 業務翻訳: {}\n  - 次アクション: {}",
                 finding.trace_type,
-                escape(&finding.name),
-                escape(&finding.summary),
+                crate::document_markdown::prose(&finding.name),
+                if finding.trace_type == "external_evidence" {
+                    external_evidence_summary(
+                        &crate::document_markdown::prose(&finding.name),
+                        &crate::document_markdown::prose(
+                            finding
+                                .raw
+                                .get("result")
+                                .and_then(Value::as_str)
+                                .unwrap_or("unknown"),
+                        ),
+                    )
+                } else {
+                    escape(&finding.summary)
+                },
                 translate(finding),
-                escape(&next_action(finding)),
+                crate::document_markdown::prose(&next_action(finding)),
             );
         }
         output.push_str("- 判断: ☐ 承認　☐ 差戻し　☐ リスク受容　／　判断者: ____　期限: ____\n\n");
@@ -1310,13 +1857,13 @@ pub fn render_ledger_with_approvals(
                 .unwrap_or("—");
             let _ = writeln!(
                 output,
-                "| {} | {} | `{}` | {} | {} | `{}` |",
+                "| {} | {} | {} | {} | {} | {} |",
                 escape(requirement_id),
                 escape(&approval_cell(Some(approvals), requirement_id)),
-                escape(baseline),
+                crate::document_markdown::code(baseline),
                 escape(target),
                 escape(if reasons.is_empty() { "—" } else { &reasons }),
-                escape(command),
+                crate::document_markdown::code(command),
             );
         }
         output.push('\n');
@@ -1334,9 +1881,11 @@ pub fn render_ledger_with_approvals(
             };
             let _ = writeln!(
                 output,
-                "| `{}` | {} | {} | {} |",
-                escape(source),
-                escape(item.get("result").and_then(Value::as_str).unwrap_or("")),
+                "| {} | {} | {} | {} |",
+                crate::document_markdown::code(source),
+                crate::document_markdown::prose(
+                    item.get("result").and_then(Value::as_str).unwrap_or("")
+                ),
                 assurance_label(assurance_token(item), None),
                 escape(&ids),
             );
@@ -1350,10 +1899,104 @@ pub fn render_ledger_with_approvals(
         findings
             .into_iter()
             .chain(evidence_findings)
-            .map(|finding| finding.raw)
+            .map(|finding| {
+                let mut raw = finding.raw;
+                if let Some(fields) = raw.as_object_mut() {
+                    // Same top-level-only set as approval's scenarios digest.
+                    // Proof evidence and same-named domain fields stay bound.
+                    for key in ["cost", "cache"] {
+                        fields.remove(key);
+                    }
+                }
+                raw
+            })
             .collect(),
     );
     output.push_str(&serde_json::to_string_pretty(&raw).unwrap_or_else(|_| "[]".to_owned()));
     output.push_str("\n```\n\n</details>\n");
     output
+}
+
+#[cfg(test)]
+mod requirement_owner_tests {
+    use super::*;
+    use fsl_core::{FsResolver, build_model, parse_kernel_source};
+    use serde_json::json;
+
+    #[test]
+    fn ambiguous_declaration_names_do_not_guess_requirement_metadata() {
+        let mut model = build_model(
+            parse_kernel_source(
+                r#"spec Ambiguity { state { x: Int } init { x = 0 }
+                @requirement("OWNER") action left() { x = x + 1 }
+                @requirement("OTHER") action right() { x = x - 1 }
+                @requirement("OWNER") invariant Left { x >= 0 }
+                @requirement("OTHER") invariant Right { x <= 10 } }"#,
+                &FsResolver::new("."),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        // Deliberately artificial collisions, not a claim about accepted syntax.
+        // Exercise the resolver's all-candidates error for each lookup family.
+        for (index, spelling) in ["step__b1", "step.b1"].into_iter().enumerate() {
+            model.actions[index].name = spelling.to_owned();
+            model.invariants[index].name = spelling.to_owned();
+        }
+        assert!(metadata_for(&model, "actions", "step.b1").is_none());
+        assert!(metadata_for(&model, "invariants", "step.b1").is_none());
+        for synthetic in [
+            SyntheticName::PartialProperty {
+                property: "step__b1",
+            },
+            SyntheticName::KeyDomainProperty {
+                property: "step__b1",
+            },
+        ] {
+            let name = model.names().public_synthetic(&synthetic);
+            assert!(metadata_for(&model, "properties", name.as_str()).is_none());
+        }
+        let value = json!({"result":"unknown_cti", "violation_kind":"ensures",
+            "last_action":{"name":"step.b1"}});
+        assert_eq!(verdict_requirement(&model, &value, "step.b1"), (None, None));
+        let mut explicit = value;
+        explicit["requirement"] = json!({"id":"EXPLICIT", "text":"producer-owned"});
+        assert_eq!(
+            verdict_requirement(&model, &explicit, "step.b1"),
+            (
+                Some("EXPLICIT".to_owned()),
+                Some("producer-owned".to_owned())
+            )
+        );
+    }
+
+    #[test]
+    fn preservation_finding_reads_both_catalog_requirement_fields_from_model() {
+        let model = build_model(
+            parse_kernel_source(
+                r#"spec Catalog { state { ok: Bool } init { ok = true }
+                @requirement("CATALOG-ALT", "catalog intent from metadata")
+                invariant CatalogValid { ok } }"#,
+                &FsResolver::new("."),
+            )
+            .expect("parse catalog model"),
+        )
+        .expect("build model");
+        let findings = collect_findings(
+            &model,
+            &json!({
+                "result":"refinement_failed",
+                "governance":{"preservations":[{
+                    "name":"P", "before":"A", "after":"I", "preserve":["CTRL"],
+                    "result":"refinement_failed"
+                }]}
+            }),
+        );
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].requirement_id.as_deref(), Some("CATALOG-ALT"));
+        assert_eq!(
+            findings[0].requirement_text.as_deref(),
+            Some("catalog intent from metadata")
+        );
+    }
 }

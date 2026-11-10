@@ -1,0 +1,46 @@
+{
+  "schema": "fslc.approval.v3",
+  "spec": {
+    "path": "spec.fsl",
+    "digest_algorithm": "fsl-kernel-ast-v1+sha256",
+    "digest": "sha256:1d8ad00cf360d39990a8cba12ef5bd10961524e774054fa6dbe3f548a2e44aca",
+    "git_commit": "6ede052e67d0d736184eb8f37ade497d645dd2ad"
+  },
+  "target": {
+    "kind": "requirements_document",
+    "path": "./requirements.md",
+    "digest_algorithm": "fsl-rendered-requirements-document-v1+sha256",
+    "digest": "sha256:e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+    "reviewed_digest_algorithm": "fsl-reviewed-requirements-document-v1+sha256",
+    "reviewed_digest": "sha256:e80cdf780b7f6ef9c12661074ae59d4d0de756f8cd9f8bedaaae1f92d5743755",
+    "claim_set_digest_algorithm": "fsl-rcir-claim-set-v1+sha256",
+    "claim_set_digest": "sha256:6b11a312eb01a7a8f2c5ac3bdd6c9f4f7d0a116441e963f709c6b90d10dd7afe",
+    "generator": "fslc",
+    "generator_version": "4.12.0",
+    "inputs": {
+      "view": "requirements",
+      "lang": "ja",
+      "glossary": {
+        "path": "glossary.json",
+        "digest": "sha256:97f7cdedbd9d145f246108a434919e64981400ae243ae1a8d84a93400a289330"
+      },
+      "evidence": [
+        {
+          "path": "./evidence-b.json",
+          "digest": "sha256:585eb7f5092b7d2c4c3d6511d7e3a66ff941b9d20474c277625ac9932a47cc67"
+        },
+        {
+          "path": "nested/../evidence-a.json",
+          "digest": "sha256:cda8c7ae509a88c8bfef28f6af1c7f9c2b2948b973810e2114ce0fe79e515203"
+        }
+      ]
+    }
+  },
+  "approval": {
+    "approver": "alice",
+    "approved_at": "2026-11-03T06:08:02Z",
+    "requirements": [
+      "REQ-190"
+    ]
+  }
+}

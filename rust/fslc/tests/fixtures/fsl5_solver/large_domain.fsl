@@ -1,0 +1,36 @@
+fsl 5
+// decisions/048 J3: the table reads two fields whose domains multiply to
+// 1101 * 1101 = 1212201 values, past the enumeration bound, so the solver
+// decides it. No row holds at amount = 10 (Small stops below 10, Large starts
+// above it): every command that needs a valid spec rejects the document with
+// `decide_not_exhaustive`.
+requirements LargeDomain {
+  number Amount
+  number Days
+  actor Employee, System, Manager
+
+  entity Claim {
+    amount: Amount = 0
+    days: Days = 0
+    lifecycle Draft -> Submitted -> Approved
+    lifecycle Submitted -> Rejected
+  }
+
+  concept Small = Claim where amount < 10 and days <= 1100
+  concept Large = Claim where amount > 10
+
+  event submit       = Employee submits Claim with amount  Draft -> Submitted
+  event auto_approve = System approves Claim               Submitted -> Approved
+  event mgr_approve  = Manager approves Claim              Submitted -> Approved
+  event reject       = Manager rejects Claim               Submitted -> Rejected
+
+  decide T "Who handles a submitted claim" for Submitted Claim {
+    Small => System approves
+    Large => Manager approves or rejects
+  }
+}
+verify {
+  instances Claim = 1
+  values Amount = 0..1100
+  values Days = 0..1100
+}

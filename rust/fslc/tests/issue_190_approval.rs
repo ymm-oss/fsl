@@ -212,10 +212,9 @@ fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
         json!(["REQ-190"])
     );
     // Issue #333 added `claim_set_digest`/`claim_set_digest_algorithm` to
-    // `TargetBinding`, but only for a `requirements_document` target; a
-    // `ledger` record's shape (and schema `fslc.approval.v1`) must stay
-    // byte-identical to before that issue.
-    assert_eq!(created["record"]["schema"], "fslc.approval.v1");
+    // `TargetBinding`, but only for a `requirements_document` target;
+    // a `ledger` target retains its existing fields in new v5 records.
+    assert_eq!(created["record"]["schema"], "fslc.approval.v5");
     assert_eq!(
         created["record"]["target"]
             .as_object()
@@ -264,7 +263,7 @@ fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
     );
     assert_eq!(unsupported["kind"], "io");
 
-    invalid_record["schema"] = json!("fslc.approval.v1");
+    invalid_record["schema"] = created["record"]["schema"].clone();
     invalid_record["spec"]["digest"] = json!("sha256:not-a-digest");
     std::fs::write(
         root.join("malformed.json"),
@@ -350,10 +349,11 @@ fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
         .expect("approval section end")
         .0;
     let snapshot = format!("## リスク一覧（要件ID別）{risk}## 承認照合{approval}");
-    assert_eq!(
-        normalize_digests(&snapshot).trim(),
-        include_str!("../../../tests/snapshots/approval_ledger.md").trim()
+    let expected = include_str!("../../../tests/snapshots/approval_ledger.md").replace(
+        "\n\n## 承認照合",
+        "\n| （仕様全体） | 要件ID未付与の検出 | 🟡 移行候補 | — unapproved | bounded(BMC depth 2) | migration | — | ____ | 下記詳細 |\n\n## 承認照合",
     );
+    assert_eq!(normalize_digests(&snapshot).trim(), expected.trim());
 
     let original = std::fs::read_to_string(root.join("spec.fsl")).expect("read fixture");
     std::fs::write(
@@ -482,7 +482,7 @@ fn approval_record_reports_approved_then_drifted_and_drives_semantic_diff() {
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn signed_v2_records_require_a_matching_trust_anchor_and_fail_closed() {
+fn signed_v6_records_require_a_matching_trust_anchor_and_fail_closed() {
     let root = approval_repo();
     let (private, public) = write_signing_keys(&root, 7, "approval");
     let (_, wrong_public) = write_signing_keys(&root, 9, "wrong");
@@ -510,7 +510,7 @@ fn signed_v2_records_require_a_matching_trust_anchor_and_fail_closed() {
             "signed.json",
         ],
     ));
-    assert_eq!(created["record"]["schema"], "fslc.approval.v2");
+    assert_eq!(created["record"]["schema"], "fslc.approval.v6");
     assert_eq!(created["record"]["signature"]["algorithm"], "ed25519");
 
     let missing_trust = failed(
@@ -550,9 +550,18 @@ fn signed_v2_records_require_a_matching_trust_anchor_and_fail_closed() {
 
     let record = created["record"].clone();
     let mut reordered = serde_json::Map::new();
-    for key in ["signature", "approval", "target", "spec", "schema"] {
+    for key in [
+        "signature",
+        "approval",
+        "target",
+        "spec",
+        "render_source",
+        "path_base",
+        "schema",
+    ] {
         reordered.insert(key.to_owned(), record[key].clone());
     }
+    assert_eq!(Value::Object(reordered.clone()), record);
     std::fs::write(
         root.join("reordered.json"),
         serde_json::to_vec_pretty(&Value::Object(reordered)).expect("serialize reordered record"),

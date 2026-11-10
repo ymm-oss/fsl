@@ -245,7 +245,7 @@ verify { instances Claim = 1 }
     .expect("requirements traces");
 
     let Some(RequirementsTraceExpectation::Expr(KernelExpr::Quantified { body, .. })) =
-        &contract.acceptance[0].expectation
+        &contract.unchecked_acceptance()[0].expectation
     else {
         panic!("expected quantified acceptance expression")
     };
@@ -444,8 +444,8 @@ verify { instances Case = 2  instances Claim = 2  values Qty = 0..3 }
         requirements_trace_contract(requirements)
             .expect("trace contract")
             .expect("requirements contract")
-            .scope_types,
-        names(&["Case", "Claim", "Qty"]).expect("names")
+            .scope_types(),
+        &names(&["Case", "Claim", "Qty"]).expect("names")
     );
     let spec = "spec S {\n  entity Case\n  number Qty\n  type Amount = 0..3\n  state { n: Amount }\n  init { n = 0 }\n}\n";
     assert_eq!(

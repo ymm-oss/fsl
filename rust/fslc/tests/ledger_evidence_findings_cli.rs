@@ -91,6 +91,94 @@ fn requirement_row(markdown: &str) -> &str {
 }
 
 #[test]
+fn ledger_evidence_loader_errors_preserve_full_errors_and_destinations() {
+    type EvidenceCase = (&'static str, Option<&'static [u8]>, Option<&'static str>);
+    let cases: [EvidenceCase; 4] = [
+        ("missing", None, None),
+        (
+            "malformed",
+            Some(b"{not json"),
+            Some("invalid JSON: key must be a string at line 1 column 2"),
+        ),
+        (
+            "nonobject",
+            Some(b"[]"),
+            Some("evidence JSON must contain an object envelope"),
+        ),
+        (
+            "invalid-utf8",
+            Some(&[0xff]),
+            Some("evidence.json: stream did not contain valid UTF-8"),
+        ),
+    ];
+    for (name, input, message) in cases {
+        let dir = scratch_dir(name);
+        fs::write(dir.join("ledger_probe.fsl"), SPEC).expect("write valid probe spec");
+        let evidence = dir.join("evidence.json");
+        fs::write(&evidence, b"{}").expect("write valid evidence control");
+        let args = [
+            "ledger",
+            "ledger_probe.fsl",
+            "--evidence",
+            "evidence.json",
+            "-o",
+            "ledger.md",
+        ];
+        let control = run(&dir, &args);
+        assert_eq!(control.status.code(), Some(0), "valid ledger control");
+        let destination = dir.join("ledger.md");
+        assert!(!fs::read(&destination).unwrap().is_empty());
+        fs::remove_file(&destination).expect("remove positive-control output");
+        if let Some(bytes) = input {
+            fs::write(&evidence, bytes).expect("write invalid evidence bytes");
+        } else {
+            fs::remove_file(&evidence).expect("remove evidence for missing-file case");
+        }
+        let message = message.map_or_else(
+            || {
+                // The OS error string is platform-specific; preserve it in full
+                // behind the argument path the IO owner prefixes (#1170).
+                let error = fs::read_to_string(&evidence).expect_err("evidence must be absent");
+                format!("evidence.json: {error}")
+            },
+            str::to_owned,
+        );
+        let expected = serde_json::json!({
+            "fsl": "1.0",
+            "result": "error",
+            "kind": "io",
+            "message": message,
+        });
+        let preserved = b"existing ledger output\0\xff\n";
+        for exists in [false, true] {
+            if exists {
+                fs::write(&destination, preserved).expect("write existing output");
+            }
+            let output = run(&dir, &args);
+            assert_eq!(output.status.code(), Some(2));
+            let value: serde_json::Value =
+                serde_json::from_slice(&output.stdout).expect("complete JSON error stdout");
+            assert_eq!(value, expected, "complete ledger error for {name}");
+            assert!(output.stderr.is_empty(), "{:?}", output.stderr);
+            if exists {
+                assert_eq!(fs::read(&destination).unwrap(), preserved);
+            } else {
+                assert!(!destination.exists(), "refusal must not create an output");
+            }
+        }
+        if let Some(bytes) = input {
+            assert_eq!(fs::read(&evidence).unwrap(), bytes);
+        } else {
+            assert!(
+                !evidence.exists(),
+                "loader must not create missing evidence"
+            );
+        }
+        fs::remove_dir_all(dir).expect("remove loader failure fixture");
+    }
+}
+
+#[test]
 fn ledger_evidence_root_attached_failure_is_a_red_finding() {
     let markdown = render(
         "root-attached",

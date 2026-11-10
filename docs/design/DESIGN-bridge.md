@@ -95,11 +95,14 @@ Concrete execution requires a deterministic initial state. Static check at
   duplicate (this is exactly how a dialect like fsl-db populates a map one
   column at a time), but the same key assigned twice — whether by two flat
   statements, by a `forall` and a later flat write to one of its covered
-  keys, or by a bound loop variable whose two iterations could alias each
-  other — still is.
+  keys — still is. A finite binder-keyed `forall k: K { m[k] = ... }` is
+  allowed. Ownership summarizes each statement once, not once per iteration:
+  a single forall statement may write the same location repeatedly with agreeing
+  values, while conflicting values make init unsatisfiable.
 - The RHS of init may reference only const and **already-assigned** state
-  variables (evaluated top to bottom). A violation is `FslError(kind="semantics")`
-  + hint "runtime monitor requires a deterministic init".
+  variables (evaluated top to bottom). Native errors use `kind: "semantics"`
+  and the before-assigned message (exit 2); the historical Python deterministic-init
+  hint is not part of the native output contract.
 - All existing specs satisfy this (a spec that does not satisfy it passes verify
   but errors in Monitor — prompting a fix on the spec side).
 - This gate lives in `Monitor::new` itself (#519), not only in the explicit
@@ -116,6 +119,341 @@ Concrete execution requires a deterministic initial state. Static check at
   instead and is unaffected by this gate: `init` may leave a component free
   (BMC explores every admissible value there), and a concrete run pinned to
   one already-admissible value has nothing left for the gate to check.
+
+#### Init forall read order and coverage (#1518)
+
+The native runtime shares a read-order check between init ownership validation
+(`check` and symbolic verification) and deterministic-init validation
+(`Monitor::new` and explicit verification). In a statement `forall`'s filter
+or body, a read of a state root written by that same `forall` is rejected,
+including reads in assignment keys, right-hand sides, and `if` conditions.
+Only a location at the current binder key that has already been written in
+the current iteration is allowed. Writing `m[k]` permits later reads of
+`m[k]` and `m[k].flag`; writing `m[k].flag` permits a later read of that field,
+not the entire entry or another field. A write on only one `if` branch is not
+a definite preceding write after the `if`. This does not introduce new
+assignment shapes or relax existing ownership checks.
+
+For example, `forall k: K { m[k] = true seen[k] = m[k] }` remains valid;
+replacing the read with `m[1]`, or moving the read before the write, is now
+rejected. A read of a different root initialized before the `forall` remains
+valid. This is a **breaking removal of check acceptance**, including scalar-map
+and whole-struct-entry forms; rejection is root-based, not restricted to
+symbolic/concrete iteration-order disagreement. The semantics message identifies
+the root, not the individual read expression.
+Check and verification retain the enclosing statement's location (assignment,
+`if`, or `forall` for a filter); legacy replay retains its existing error
+envelope without a required location.
+
+The removal is intentionally conservative, not a per-key dependency proof.
+For example, `forall k in 0..0 { m[k] = true }` followed by
+`forall k in 1..1 { m[k] = m[0] }` is rejected: the second forall reads a
+different key of the same root it writes, even though the preceding forall
+initialized that key. Likewise,
+`forall outer in 0..0 { forall k: K { m[k] = true seen[k] = m[k] } }`
+is rejected even immediately after the inner write: the outer forall also
+writes `m`, and the read is not at its binder key. Both forms were already
+refused by explicit and Monitor on the base, with `before it is assigned`
+and `nested forall in init is not supported`, respectively; #1518 also
+rejects them at check. The rule is not refined to admit these cases.
+
+It also removes correct forms whose base-engine results agreed: with `m`
+indexed by `0..1`, `m[0] = true forall k in 1..1 { m[k] = true x = m[0] }`
+reads an already-initialized other key, but is rejected because the loop
+writes the same root.
+
+Definite coverage and write ownership are distinct. A forall whose domain is
+empty, or not statically provable nonempty, contributes no definite coverage
+for its fixed targets. Static filters may establish nonemptiness using only
+the binder and constants (for example `where k == 0` over `0..1`). A
+state-dependent filter is not such a proof, even when its state was initialized
+earlier. Ownership validation still inspects the body, and the existing
+check-time conservative binder-key coverage classification is unchanged. Thus an
+unexecuted write cannot initialize state computed by `Monitor::new` or explicit
+through an arbitrary default. Refinement's free-root `concrete_initial_states`
+path does not use `Monitor::new`: it checks ownership and read order, then
+refuses incomplete assigned roots on either side (#1521), including forall domains
+not proven nonempty. Partial-component enumeration is future work (#1579).
+Explicit and Monitor reject missing deterministic assignments with exit 2;
+symbolic init retains its free-value semantics, so it may violate a type bound
+or invariant with exit 1, or verify when all admissible values satisfy the
+property. Auto falls back from unsupported explicit init to BMC as before.
+This is also a conservative concrete-support breaking removal: after
+`flag = true`, a fixed-target write under `where flag and k == 0` is refused
+by explicit and Monitor with `init does not assign` even when its runtime
+domain is nonempty, rather than producing an incorrect verdict.
+
+Static filtered type/range and collection domains now supply exact binder-key
+coverage to explicit, Monitor and refinement (#1520), without changing check.
+Current-key reads after writes are accepted when selected keys cover the root;
+auto then uses explicit without fallback. Empty domains add no coverage, partial
+domains cover only selected keys, and state-dependent filters remain unresolved.
+
+Breaking-removal sweep (#1518): base
+`28c4eab710f8d83e766bb0e7c7e006d09d7777d8` versus head
+`9d94c5cb5447834f329002200afa0f3404d9a9a0` plus the production runtime change
+(`explicit.rs` SHA-256
+`b20b92e9945fd7a05eb8462c4a7ad3816fcd06cd2c34a871910b7b652090c17b`).
+The coordinator built each native binary in its own git-archive materialized
+tree and ran `fslc check <form>` over every `.fsl` under `specs/`, `examples/`,
+and `rust/fslc/tests/fixtures/`: 597 forms, 397 `ok` in each tree,
+**0 `ok`→`error`, 0 `error`→`ok`, and 0 other changes**. The corpus removal set
+is empty; A1–A5 pin five regression forms within this removal, which also
+includes the conservative examples above. No corpus spec was rewritten.
+
+#### Per-field init ownership and coverage (#1481)
+
+Native init ownership tracks `(root, concrete key, field)` (#1481): disjoint
+fields of a struct root or a `Map<K, Struct>` entry can be assigned separately,
+including by a finite `forall`; fields retain their scalar or nested
+`Option<scalar>` types. Overlapping writes by different statements on a path
+still collide, including whole-root/entry writes overlapping a field. Repeats
+across iterations of one statement retain the relational-init rule above, not a
+second ownership identity. Unresolved dynamic keys and binder keys under a
+`where` filter, collection binders and non-constant range binders retain
+whole-root ownership and conflict with other writes to that root. Definite
+assignment keeps recursive coverage per map key and per struct field, joins successive writes and intersects
+`if` branches component-wise. Only complete coverage of every field of every
+entry permits a root read or concrete Monitor construction; these deterministic
+paths reject partial initialization rather than filling it from defaults.
+Refinement also refuses incomplete assigned roots on either side (#1521),
+including a single-field partial init, rather than defaulting missing components.
+bmc and induction retain their free-value verdicts; partial-component enumeration
+is future work (#1579).
+The existing concrete field updater and symbolic init constraints consume these same checked lvalues;
+no solver dependency is added to the runtime.
+These component identities remain subject to the forall read-order and
+nonempty-domain coverage rules above; they do not bypass either gate.
+
+Admission of a shape requiring the new per-field ownership first requires full
+definite coverage of every root init may assign on every path, including roots
+written only as whole values. This is the same may-assigned set refinement
+excludes from free-root enumeration; never-assigned roots remain free.
+The final coverage
+uses the recursive key/field joins, branch meets and nonempty-domain rollback,
+not a union of field names written somewhere. Missing keys or fields retain the
+legacy probe's original ownership error and location, preventing new partial
+initialization from entering refinement's free-root path. The legacy probe still
+exempts all previously accepted partial forms (including branch-split fields,
+whole-entry key subsets and one-path whole-root writes) from this ownership rule.
+Refinement separately refuses incomplete assigned roots (#1521), while bmc and
+induction retain free-value verdicts. Partial-component enumeration is future
+work (#1579).
+
+Only the new admission/read analysis uses scope-aware static proofs. A forall
+source, filter or range bound that freely depends on an enclosing binder cannot
+prove nonemptiness or binder-key values using a same-named global const. Its
+coverage is unproved and rolled back, or its keys remain unresolved, yielding
+the saved legacy refusal. Sources use the enclosing scope; a binder's own filter
+and nested quantified/aggregate bodies use their local scope. No enclosing
+valuation combinations are enumerated. The ownership and engine bound resolvers
+are unchanged; independently, #1515 rejects executable local bindings that share
+a const's name before those paths can interpret the name differently. This is
+a source-acceptance restriction, not general dependent-range support.
+For outer-dependent ranges, nonempty rollback is the decisive coverage refusal;
+the bound resolver also leaves their keys unresolved, but that guard alone does
+not change admission while the rollback remains in place.
+
+For admitted new shapes, check also requires a complete may-assigned root before
+reading it, including roots written only as whole values. Early reads of
+non-field-written roots return the saved legacy ownership error and location
+unless the higher-priority field-read gate refuses first, even at a later
+statement. This is pass priority, not a globally earliest-read diagnostic.
+A Map needs every key and every field, not merely the selected entry.
+Whole-entry or whole-root reads of a field-written
+root follow the same rule, with `<whole entry>` / `<whole root>` diagnostic markers.
+This rejects `s.a = 1; s.b = (s.a == 1)` and
+reads of an already-written `m[k].f` before its siblings in the forall body;
+reading an already-written field at the current binder key after all binder-keyed
+fields are written remains valid. Whole-entry copies inside the body still fail
+#1518's field-path rule, which does not promote separate field writes to a
+whole-entry write; whole-entry copies outside the loop after full-root init are
+allowed. The same recursive coverage joins, branch meets and nonempty-domain
+rule feed this gate. A keyed write credits all statically known binder keys at
+once; this relies on #1518's separate forall read-order walk running first and
+limiting in-body reads to the current already-written key/path. These walks must
+not be reordered.
+Errors name the root and field and use the containing assignment, if or forall
+span, as the #1518 read-order gate does. The implementation first validates
+per-field ownership, then probes the previous root-granularity ownership rule;
+only a form that needs the new ownership granularity runs the full-coverage
+admission and extra all-assigned-root read checks. Previously accepted shapes
+retain their ownership-check admission. Refinement checks ownership and read order,
+then refuses incomplete assigned roots before replaying init in program order
+(#1521), on both implementation and abstraction sides. Never-assigned roots remain
+free and are enumerated; bmc and induction retain free-value verdicts for partial
+init. Partial-component enumeration is future work (#1579). This admission-only
+rule does not itself reject legacy-accepted whole-value reads before assignment;
+the separate #1451 gate below addresses those reads.
+
+Concrete coverage now counts resolved map-entry-field writes even when the legacy
+ownership probe succeeds. A complete map of single-field entries can therefore
+be constructed by explicit/Monitor where main reported missing assignment or an
+early root read. Retained but incomplete entry-field coverage adds the existing
+partial-component suffix to the missing-assignment error; complete coverage can
+also remove the map from the missing-root list. Branch coverage still intersects
+keys and fields, missing arms drop the root, and unproved nonempty loops roll
+back their contribution. Unresolved entry keys, root-field coverage, nested-forall
+restrictions and root-wide concrete reads are unchanged. These are intentional
+concrete changes, not a promise to preserve every legacy concrete error/result.
+Complete coverage need only contain every declared key: a superset such as
+`forall k in 0..2 { m[k].v = true }` for keys `0..1` now reaches the existing
+out-of-domain execution refusal instead of missing assignment. Repeating a
+fixed singleton-map entry's field write in one forall statement can likewise
+reach the existing unsatisfiable-init/vacuity refusal when iteration values
+conflict. A one-iteration fixed-key write becomes constructible. Relational
+repeated-write constraints are unchanged; their concrete refusal stage/kind is
+not. Mixed whole-entry/field branches meet `Full` with field coverage: singleton
+maps can become full, while larger maps retain partial coverage and its suffix.
+
+The consumer boundary includes every use of this concrete initialization, not
+only explicit verification and empty Monitor replay:
+
+- Refinement with no free roots uses `Monitor::new` on both the implementation
+  and abstraction sides. An old constructor error can become `refines` or a
+  genuine mapped-init `refinement_failed`, according to the mapping.
+- `verify --engine auto` can replace unsupported-init fallback to bounded BMC
+  with explicit unbounded closure. On the superset-key example it instead
+  reports the explicit out-of-domain error. Since #1543, explicit includes the
+  same location as BMC (`in init at 5:29`), so auto no longer loses that location.
+- `conformance` can now emit initialized vectors; `testgen` can emit a test
+  module instead of its existing constructor error (exit 3/internal). Their
+  prechecks differ: symbolic init errors can still preempt test generation.
+- Requirement acceptance/forbidden validation constructs a Monitor per case.
+  Newly constructible init can change `check`, proof and testgen outcomes: a
+  valid trace passes, while an incorrect expected value now reaches a located
+  acceptance rejection instead of an init-construction error. Kernel empty
+  replay and conformance vectors do not themselves validate the document's
+  declared acceptance cases.
+
+Thus kernel ownership admission and relational constraints can be preserved
+while consumer verdict, engine/completeness/fallback, diagnostic stage/kind/
+location and generated artifacts change. Four-engine agreement alone is not a
+complete compatibility statement for these consumers. The runtime remains
+independent of solvers.
+
+Diagnostic priority distinguishes the two root sets. If a field-written root is
+itself incomplete, return the saved legacy ownership error first. If all
+field-written roots are complete, run gate(a) before the final completeness
+refusal for other may-assigned roots, so a field read retains its named
+message and statement location. Successful admission still requires every
+may-assigned root to be complete. After gate(a), early reads of other may-assigned
+roots retain the saved ownership refusal, as do incomplete assigned roots. A
+later field read therefore outranks an earlier nonfield read; the concrete
+legacy preflight does not replace that field diagnostic.
+
+On a shared ownership refusal, concrete construction preserves main's earlier
+program-order read or domain failure, if one precedes the legacy collision.
+A private legacy-concrete preflight reproduces that ordering, including the
+existing nested-forall refusal; it only chooses an error and never constructs a
+state. New gate(a) and #1518 read-order diagnostics retain priority when they
+are the shared failure; gate(a) intentionally changes concrete messages on those
+main-rejected shapes. Check/refine report the saved ownership error for other
+admission refusals, including early reads of non-field-written roots.
+
+#### Assigned-root read order (#1451)
+
+After the existing ownership/field/forall gates accept an init, the shared
+runtime admission gate also checks ordered reads of every root init assigns
+anywhere, in assignment values/keys, if conditions and forall filters/bodies.
+Forall sources retain their separate existing validation. It reuses
+`walk_init` and the concrete root-coverage predicate and
+message: `init references state variable '<name>' before it is assigned`.
+Native check and ordinary verification return semantics/exit 2 with the
+containing statement's location. Compose, Worker check/verify and refinement's
+free-root constructor reach the same gate; runtime remains solver-independent.
+Existing shared ownership/field/forall refusals keep priority. This is a
+source-acceptance breaking removal, not a totality check.
+
+Coverage is whole-root, even for an already-written key/field, a syntactically
+present but short-circuited read, or a value left free on another branch or
+component. Thus `struct-other-partial`, `if-one-branch-read` and #1481 N2 now
+reject reads of #493-style free values because their root is may-assigned.
+A root never assigned anywhere remains free, including the issue's `on` and
+the `choose` condition of nondeterministic refinement init (#493). Check and
+symbolic verification retain those forms, while explicit still refuses them.
+Only unresolved binder values retain #1520's same-forall current-key exemption,
+subject to #1518's already-written-key rule, including filtered/collection
+X1/X2. Resolved binders use actual whole-root coverage: a full-domain typed
+loop is accepted, but a loop over only `0..0` cannot read its current `m[k]`
+when `m` has keys `0..1`, even if the remaining keys are written later.
+This does not promote the unresolved forms' explicit support.
+Binder-keyed filtered/collection writes do not establish the complete key set
+for a following read. Nesting an unresolved inner binder does not restore that
+coverage. This does not remove static nonempty proofs for fixed targets.
+Unread omitted roots and legacy-accepted partial init remain
+accepted. The expression-only read exemption never credits real assignment
+coverage or changes the initialized state.
+
+Sweep command: run `fslc check <form>` with the base/head binaries in each
+revision's own git-archive materialized tree. Measured base
+`c79016efeb630c717292e9392901cfe65ab40915`, head
+`2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4`; binary SHA-256 respectively
+`e42827307a61957e16d6a53e12bf84216506fc7eaa2a25ccc3a0084874b748f2` and
+`15ae6af290ba67b7fa8801494ee62fe54b8def11dc1393ba9067553a78953a8b`.
+All **597** `.fsl` files under `specs/`, `examples/`, and
+`rust/fslc/tests/fixtures/` have identical full stdout/stderr/exits (400 exit 0,
+191 exit 2, 6 exit 1): corpus `ok`→`error` set **empty**. The separate inline
+sweep covers the 36 author sources, N2 and five implementer fixtures, each
+direct and composed: 42 sources / 84 forms, base 80 exit 0 + 4 exit 2, head
+42 exit 0 + 42 exit 2. Exactly **38** forms become errors: the original 13 cases
+× 2, N2 × 2, the two static-subset cases × 2 and the three post-loop coverage
+cases × 2. Those are also the only full-output changes; no fields were
+excluded. N2 is not counted among the 597 corpus files.
+
+The table lists the targeted inline removal fixtures and a migration example
+for each; it is not an exhaustive list of all removed programs. It includes
+the original cases and the resolved-subset / post-loop coverage families.
+Bodies use `K = 0..1`, `R { on: Bool, other: Bool }`,
+and the corresponding regression's state declarations. Move reads after all
+required assignments or replace partial writes with a whole-value assignment;
+do not add a second overlapping write. Choosing a formerly free value, or
+filling a missing branch, intentionally restricts the model and is not an
+equivalence-preserving automatic repair.
+
+| Rejected source | Replacement init body |
+|---|---|
+| `root-value-before` | `on = false g = on` |
+| `root-unary-before` | `on = false g = not on` |
+| `if-condition-before` | `on = false if on { g = true } else { g = false }` |
+| `forall-body-before` | `on = false forall k in 0..1 { m[k] = on }` |
+| `map-index-read-before` | `m[0] = false m[1] = true k = 0 g = m[k]` |
+| `struct-root-before` | `r = R { on: false, other: true } g = r.on` |
+| `conditional-value-before` | `flag = true on = false g = if flag then on else false` |
+| `dead-rhs-before` | `on = false g = false and on` |
+| `map-key0-partial` | `m[0] = false m[1] = true g = m[0]` |
+| `map-key1-partial` | `m[0] = false m[1] = true g = m[1]` |
+| `struct-on-partial` | `r = R { on: false, other: true } g = r.on` |
+| `struct-other-partial` | `r = R { on: false, other: true } g = r.other` |
+| `if-one-branch-read` | `flag = false if flag { on = true } else { on = false } g = on` |
+| `1481-N2` (additional inline fixture) | `forall k: K { m[k] = Cell { flag: false, n: 0 } } done = m[0].n == 0` |
+| `static-subset-then-fill` | `m[0] = true m[1] = false forall k in 0..0 { seen[k] = m[k] } seen[1] = false` |
+| `static-subset-only` | `m[0] = true m[1] = false forall k in 0..0 { seen[k] = m[k] } seen[1] = false` — assigning formerly free `m[1]` and `seen[1]` narrows the model. |
+| `filtered-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
+| `collection-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
+| `nested-filter-followed-read` | `forall k: K { m[k] = true } g = m[0]` |
+
+For N2, `m[0].n` has no init assignment although root `m` is written. Its old
+check success and symbolic bounds violation are replaced by the root-read
+error; explicit/Monitor already refused with the same message. Native
+check/verify now locate the read at 5:44; legacy Monitor replay renders the
+same existing message without a location. The fixture is unchanged, only its
+test expectations change. Likewise, `issue-exact` is reclassified as a
+free-root preservation control rather than a refusal detector: `on` is never
+assigned anywhere. This is Part of #1451, not completion of that issue.
+
+Behavior notes: already-refused explicit inputs can gain a statement location
+(for example an unlocated early read becomes 3:10), while a never-assigned
+root's explicit refusal stays unlocated. With both a free and a later-assigned
+root, the named root can change (`choose` to `on`); a permitted unresolved
+current-key read beside a later-assigned root can similarly change `m` to `on`.
+Nested inputs can change from `nested forall in init is not supported` to the
+root-read error. Source admission can also preempt symbolic/auto diagnostics
+for outer-dependent nested ranges without changing their error exit.
+Compose runtime errors use physical names such as `part__x` and the component
+statement's line/column without a filename, like existing ownership errors.
+The remaining free/choose engine disagreement is tracked on #1451: check and
+symbolic verification retain these free-value forms, while explicit refuses them.
 
 ### 1.4 Expression evaluation
 
@@ -210,6 +548,18 @@ checked spec/state/action/parameter names and declaration order. It converges on
 the same normalized input and never exposes expressions or AST nodes to emitters.
 This bridge is retired when Public Kernel supports truthful compose provenance;
 it is not a catch-on-export-error fallback.
+
+**Native source-header contract (#1424).** Source basenames in every target's
+headers share one visible spelling: backslash, both quotes, `*`, `/`, `?`, `>`,
+and ASCII controls become lowercase `\xNN`. Other characters, including
+non-ASCII, remain unchanged. Trusted template slots are filled first; the escaped
+source name is inserted last and is never expanded again, even if it contains a
+slot name. This prevents a basename from closing a docstring/comment or switching
+PHP context. Ordinary output outside the Kotlin helper and its comment is
+unchanged.
+
+Native pytest strings escape controls (#1424): `\n`, `\r`, `\t`, otherwise
+lowercase `\xNN`; quotes/backslashes remain escaped.
 
 The output is a **self-contained pytest file** (the primary dependencies are
 `fslc.runtime` and `pytest`. In addition, only the standard library needed for
@@ -311,6 +661,12 @@ the unwired behaviour of §3.6 (by default a `scenario()` wrapper throws
 `adapter not wired` from every test; with `--allow-unwired` a top-level guard
 flips `test` to `test.skip`).
 
+**Native integer precision (#1424).** Generation rejects integers outside
+±(2^53−1) before emitting an artifact, rather than writing a lossy JavaScript
+number. The existing semantic-error envelope (exit 2) names the value and its
+input-vector path, including forbidden-step params and rejection data. This
+applies with or without `--allow-unwired`.
+
 Part 3 — the random walk — is the one real design point, because TypeScript has no
 `Monitor`. The chosen approach **bakes the trace at generation time**: the Python
 Monitor runs the fixed-seed (`Random(0)`) walk and the resulting
@@ -366,20 +722,25 @@ again reusing the baked walk. The choices:
   JVM delegates to JUnit, so the generated file carries the lightest dependency. The
   imports are fixed to `kotlin.test.{Test, assertEquals, assertFalse, assertNotNull,
   assertTrue}`.
-- **Dynamic dict is the easy case.** `params`/`observe()` are `Map<String, Any?>`,
-  and Kotlin's structural `==` is already deep on `List`/`Map` and discriminates a
-  boxed `Int` from a `Double`, so `assertPartial` is a plain recursion that asserts
-  only the expected keys and leans on `assertEquals` for leaves.
+- **Dynamic dict + integral equality (#1424).** `params`/`observe()` are
+  `Map<String, Any?>`. `assertPartial` recurses by expected map keys, asserting
+  only the fields the spec mentions. Before leaf `assertEquals`, both sides are
+  normalized recursively through List/Map values: Byte/Short/Int/Long become Long.
+  List order/length and exact map keys/size inside lists remain significant;
+  Float/Double and other non-integral leaves are unchanged and remain distinct.
+  Adapters should read numeric params through `Number`, not cast them to `Int`:
+  generated params can contain Int or Long depending on magnitude.
 - **Fail-when-unwired (§3.6).** `makeAdapter(): Adapter?` returns `null` until
   wired and each `@Test` starts `val a = makeAdapter() ?: fail(ADAPTER_NOT_WIRED)`.
   kotlin.test has no portable runtime skip (no `assumeTrue`), so the only way to
   "skip" would be the early `?: return` the target used before #1200, under which
   an unwired suite passed. `--allow-unwired` is therefore rejected for Kotlin
   (exit 2) instead of generating that silent green.
-- **Literals.** `_kotlin_literal` renders int as `Int`, float as `Double`, `null`,
-  `listOf`/`mapOf` (empty ones carry explicit type args), and strings with Kotlin
-  escapes — notably `$` must be escaped (string templates). The baked walk is a
-  `List<Triple<String, Map<String, Any?>, Map<String, Any?>>>`. Output defaults to
+- **Native literals (#1424).** Int-range integers remain unsuffixed; wider i64
+  values use `L`, and i64 minimum uses `Long.MIN_VALUE`. Floats render as `Double`,
+  and other literals use `null`, `listOf`/`mapOf` (empty ones carry explicit type
+  args), and Kotlin string escapes — notably `$` must be escaped (string templates).
+  The baked walk is a `List<Triple<String, Map<String, Any?>, Map<String, Any?>>>`. Output defaults to
   `<SpecName>ConformanceTest.kt`.
 
 (No `swiftc -parse`-style syntax gate in tests: kotlinc has no dependency-free
@@ -434,7 +795,9 @@ reusing the baked walk. The choices:
   every test fails. With `--allow-unwired` it calls `markTestSkipped` instead.
 - **Literals.** Strings are single-quoted (PHP single-quotes interpolate nothing;
   only `\\`/`\'` are escaped); JSON arrays render to PHP lists, JSON objects to
-  associative arrays; the baked walk is a `private const WALK`. Output defaults to
+  associative arrays. Native i64 minimum uses `PHP_INT_MIN` (#1424), avoiding a
+  decimal magnitude that PHP lexes as a float. The baked walk is a
+  `private const WALK`. Output defaults to
   `<SpecName>ConformanceTest.php` (PSR-4: class name = file name), test methods are
   `testScenario_<name>` / `testRandomWalkConformance`.
 

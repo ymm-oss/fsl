@@ -20,14 +20,17 @@ use std::fmt::Write as _;
 
 use fsl_core::{
     ActionGuard, KernelModel, KernelSpec, LeadsToDef, ParamDef, PropertyDef, RequirementsTraceCase,
-    RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, action_target, display_name,
-    requirements_trace_contract,
+    RequirementsTraceContract, RequirementsTraceExpectation, TypeRef, action_target,
+    requirements_trace_contract_with_options,
 };
+use fsl_syntax::ParseOptions;
 use serde_json::Value;
 
 use crate::document::{Claim, ClaimKind, RequirementClaimSet};
 use crate::document_evidence::{AppliedEvidence, requirement_assurance};
 use crate::document_glossary::AppliedGlossary;
+use crate::document_markdown::{blockquote, code, prose};
+use crate::document_markers::{parse_body, parse_frontmatter};
 use crate::document_presentation::Locale;
 use crate::document_project::project_renderer_contract;
 use crate::document_render_expr;
@@ -96,6 +99,7 @@ struct Ctx<'a> {
 ///
 /// Returns an error before rendering when the embedded Public Kernel differs
 /// from the supplied checked model or a semantic target does not resolve once.
+/// Also rejects generated frontmatter or body that violates the marker grammar.
 #[allow(clippy::too_many_arguments)]
 pub fn render_requirements_document(
     claims: &RequirementClaimSet,
@@ -107,15 +111,66 @@ pub fn render_requirements_document(
     evidence: Option<&AppliedEvidence<'_>>,
     approvals: Option<&AppliedApprovals<'_>>,
 ) -> Result<RenderedDocument, String> {
-    let trace = requirements_trace_contract(source).map_err(|error| error.to_string())?;
-    validate_render_inputs(claims, kernel, model, source, trace.as_ref())?;
+    render_requirements_document_with_options(
+        claims,
+        kernel,
+        model,
+        source,
+        locale,
+        glossary,
+        evidence,
+        approvals,
+        &ParseOptions::stable(),
+    )
+}
+
+/// [`render_requirements_document`] with `source` read under explicit
+/// [`ParseOptions`], the options it was lowered and projected under.
+///
+/// A requirements document declared with entities and events also gets the
+/// overview section (`document_views`): lifecycle diagrams, the event
+/// table, the decision tables with their results, the rules and the
+/// glossary; its events' phrases label their actions' claim headings unless
+/// a `--glossary` sidecar labels them.
+///
+/// # Errors
+///
+/// As [`render_requirements_document`].
+#[allow(clippy::too_many_arguments)]
+pub fn render_requirements_document_with_options(
+    claims: &RequirementClaimSet,
+    kernel: &KernelSpec,
+    model: &KernelModel,
+    source: &str,
+    locale: Locale,
+    glossary: Option<&AppliedGlossary<'_>>,
+    evidence: Option<&AppliedEvidence<'_>>,
+    approvals: Option<&AppliedApprovals<'_>>,
+    options: &ParseOptions,
+) -> Result<RenderedDocument, String> {
+    // Ungated here: the requirement-trace gate replays traces on
+    // `fsl-runtime`, which this crate does not depend on. `fslc` runs the gate
+    // before every document command and fails closed on its refusal.
+    let trace = requirements_trace_contract_with_options(source, options)
+        .map_err(|error| error.to_string())?;
+    validate_render_inputs(claims, kernel, model, source, trace.as_ref(), *options)?;
+    let views = crate::document_views::RequirementsViews::of(source, model, *options, locale);
+    let labelled = views.as_ref().map(|views| {
+        crate::document_glossary::with_source_labels(
+            glossary.map(|applied| applied.glossary),
+            locale,
+            views.action_labels(),
+        )
+    });
     let mut ctx = Ctx {
         model,
         trace: trace.as_ref(),
         locale,
         fallback_count: 0,
         rendered_claims: BTreeSet::new(),
-        glossary: glossary.map(|applied| applied.glossary),
+        glossary: labelled
+            .as_ref()
+            .or_else(|| glossary.map(|applied| applied.glossary)),
         evidence: evidence.map_or(&[], |applied| applied.files),
     };
 
@@ -137,15 +192,21 @@ pub fn render_requirements_document(
     push_section(&mut out, &position_section(locale));
     push_section(&mut out, &semantics_section(locale));
     push_section(&mut out, &verification_status_section(locale));
+    if let Some(views) = &views {
+        push_section(&mut out, &views.overview_section(claims));
+    }
     push_section(&mut out, &requirements_section(claims, &mut ctx));
     push_section(&mut out, &unattributed_section(claims, &mut ctx));
     push_section(&mut out, &undecided_section(claims, locale));
     push_section(&mut out, &analysis_scope_section(claims, locale));
-    if let Some(section) = glossary_section(ctx.glossary, locale) {
+    if let Some(section) = glossary_section(glossary.map(|applied| applied.glossary), locale) {
         push_section(&mut out, &section);
     }
-    if let Some(section) = evidence_sources_section(claims, ctx.evidence, locale) {
-        push_section(&mut out, &section);
+    if !ctx.evidence.is_empty() {
+        push_section(
+            &mut out,
+            &evidence_sources_section(claims, ctx.evidence, locale)?,
+        );
     }
     if let Some(section) =
         approvals_section(approvals.map_or(&[], |applied| applied.records), locale)
@@ -160,6 +221,9 @@ pub fn render_requirements_document(
         out.push('\n');
     }
 
+    let (_, consumed) = parse_frontmatter(&out).map_err(|issue| issue.to_string())?;
+    parse_body(out.get(consumed..).unwrap_or("")).map_err(|issue| issue.to_string())?;
+
     Ok(RenderedDocument {
         markdown: out,
         formula_fallback_count: ctx.fallback_count,
@@ -172,9 +236,16 @@ fn validate_render_inputs(
     model: &KernelModel,
     source: &str,
     trace: Option<&RequirementsTraceContract>,
+    options: ParseOptions,
 ) -> Result<(), String> {
-    let projected =
-        project_renderer_contract(kernel, model, source, claims.spec.source.as_deref(), trace)?;
+    let projected = project_renderer_contract(
+        kernel,
+        model,
+        source,
+        claims.spec.source.as_deref(),
+        trace,
+        options,
+    )?;
     if projected != *claims {
         return Err("RCIR does not match the paired checked source and model".to_owned());
     }
@@ -373,7 +444,7 @@ fn requirement_block(
         .map(|statement| {
             let text = statement.text.as_deref().unwrap_or("");
             let quote = if statement.text.is_some() {
-                format!("> {text}")
+                blockquote(text)
             } else {
                 match ctx.locale {
                     Locale::Ja => "> （原文は記載されていない）".to_owned(),
@@ -383,14 +454,20 @@ fn requirement_block(
             match &statement.source {
                 Some(source) => match ctx.locale {
                     Locale::Ja => format!(
-                        "{quote}\n\n（出典: `{}:{}`）",
-                        source.path.as_deref().unwrap_or(""),
-                        source.line
+                        "{quote}\n\n（出典: {}）",
+                        code(&format!(
+                            "{}:{}",
+                            source.path.as_deref().unwrap_or(""),
+                            source.line
+                        ))
                     ),
                     Locale::En => format!(
-                        "{quote}\n\n(Source: `{}:{}`)",
-                        source.path.as_deref().unwrap_or(""),
-                        source.line
+                        "{quote}\n\n(Source: {})",
+                        code(&format!(
+                            "{}:{}",
+                            source.path.as_deref().unwrap_or(""),
+                            source.line
+                        ))
                     ),
                 },
                 None => quote,
@@ -501,18 +578,17 @@ fn assurance_dimension_line(
     let joined = entries
         .iter()
         .map(|entry| {
-            let result = entry.result.as_deref().unwrap_or("");
+            let result = code(entry.result.as_deref().unwrap_or(""));
+            let source = code(&entry.source);
             match locale {
-                Locale::Ja if entry.result.is_some() => format!(
-                    "`{}`（結果: `{result}`、出典: `{}`）",
-                    entry.label, entry.source
-                ),
-                Locale::Ja => format!("`{}`（出典: `{}`）", entry.label, entry.source),
-                Locale::En if entry.result.is_some() => format!(
-                    "`{}` (result: `{result}`, source: `{}`)",
-                    entry.label, entry.source
-                ),
-                Locale::En => format!("`{}` (source: `{}`)", entry.label, entry.source),
+                Locale::Ja if entry.result.is_some() => {
+                    format!("`{}`（結果: {result}、出典: {source}）", entry.label)
+                }
+                Locale::Ja => format!("`{}`（出典: {source}）", entry.label),
+                Locale::En if entry.result.is_some() => {
+                    format!("`{}` (result: {result}, source: {source})", entry.label)
+                }
+                Locale::En => format!("`{}` (source: {source})", entry.label),
             }
         })
         .collect::<Vec<_>>()
@@ -593,7 +669,7 @@ fn undecided_section(claims: &RequirementClaimSet, locale: Locale) -> String {
                     Locale::En => "(No reason is recorded.)".to_owned(),
                 }
             } else {
-                item.reason.clone()
+                prose(&item.reason)
             };
             let requirement_ids = if item.requirement_ids.is_empty() {
                 match locale {
@@ -609,9 +685,8 @@ fn undecided_section(claims: &RequirementClaimSet, locale: Locale) -> String {
             };
             let source_line = item.source.as_ref().map(|source| {
                 format!(
-                    "\n- {source_label}: `{}:{}`",
-                    source.path.as_deref().unwrap_or(""),
-                    source.line
+                    "\n- {source_label}: {}",
+                    code(&format!("{}:{}", source.path.as_deref().unwrap_or(""), source.line))
                 )
             });
             format!(
@@ -718,16 +793,13 @@ fn glossary_section(
 
 /// A reference section listing every `--evidence` file the assurance-class
 /// fields (issue #332) drew on, sorted by path so the same file set in a
-/// different CLI order still renders byte-identically. `None` (section
-/// omitted) when no evidence was supplied at all.
+/// different CLI order still renders byte-identically. The caller omits this
+/// section when no evidence was supplied at all.
 fn evidence_sources_section(
     claims: &RequirementClaimSet,
     evidence: &[(String, Value)],
     locale: Locale,
-) -> Option<String> {
-    if evidence.is_empty() {
-        return None;
-    }
+) -> Result<String, String> {
     let head = heading(
         locale,
         "##",
@@ -747,7 +819,7 @@ fn evidence_sources_section(
         .iter()
         .map(|requirement| requirement.id.as_str())
         .collect();
-    let mut rows: Vec<String> = evidence
+    let mut rows: Vec<(String, String)> = evidence
         .iter()
         .map(|(path, item)| {
             let result = item.get("result").and_then(Value::as_str).unwrap_or("");
@@ -778,16 +850,35 @@ fn evidence_sources_section(
             } else {
                 ids.join(", ")
             };
-            match locale {
-                Locale::Ja => format!("- `{path}`（結果: `{result}`、対象要件 ID: {matched}）"),
+            let row = |path: &str, result: &str| match locale {
+                Locale::Ja => format!("- {path}（結果: {result}、対象要件 ID: {matched}）"),
                 Locale::En => {
-                    format!("- `{path}` (result: `{result}`, matched requirement IDs: {matched})")
+                    format!("- {path} (result: {result}, matched requirement IDs: {matched})")
                 }
-            }
+            };
+            (
+                row(&format!("`{path}`"), &format!("`{result}`")),
+                row(&code(path), &code(result)),
+            )
         })
         .collect();
-    rows.sort();
-    Some(format!("{head}\n\n{intro}\n\n{}", rows.join("\n")))
+    // #1475 checked results inside these list rows, not as bare bodies:
+    // the first fragment is inline; later lines retain the old marker grammar,
+    // including the generated suffix on the last fragment. Validate together
+    // so marker blocks spanning evidence rows keep their former context.
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    let legacy = rows
+        .iter()
+        .map(|row| row.0.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    parse_body(&legacy).map_err(|issue| issue.to_string())?;
+    let display = rows
+        .iter()
+        .map(|row| row.1.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(format!("{head}\n\n{intro}\n\n{display}"))
 }
 
 /// The fixed intent-fidelity disclaimer (issue #333, acceptance criterion
@@ -832,15 +923,17 @@ fn approvals_section(records: &[AppliedApproval], locale: Locale) -> Option<Stri
                     Locale::En => "Signature: none".to_owned(),
                 },
             };
-            let requirements = record.requirements.join(", ");
+            let requirements = prose(&record.requirements.join(", "));
+            let approver = prose(&record.approver);
+            let approved_at = code(&record.approved_at);
+            let record_path = code(&record.record_path);
+            let artifact_digest = code(&record.artifact_digest);
             match locale {
                 Locale::Ja => format!(
-                    "- 承認者: {}\n  - 承認日時: `{}`\n  - 対象要件 ID: {}\n  - 記録: `{}`\n  - レビュー済み成果物ダイジェスト: `{}`\n  - {signature}",
-                    record.approver, record.approved_at, requirements, record.record_path, record.artifact_digest
+                    "- 承認者: {approver}\n  - 承認日時: {approved_at}\n  - 対象要件 ID: {requirements}\n  - 記録: {record_path}\n  - レビュー済み成果物ダイジェスト: {artifact_digest}\n  - {signature}"
                 ),
                 Locale::En => format!(
-                    "- Approver: {}\n  - Approved at: `{}`\n  - Requirement IDs: {}\n  - Record: `{}`\n  - Reviewed artifact digest: `{}`\n  - {signature}",
-                    record.approver, record.approved_at, requirements, record.record_path, record.artifact_digest
+                    "- Approver: {approver}\n  - Approved at: {approved_at}\n  - Requirement IDs: {requirements}\n  - Record: {record_path}\n  - Reviewed artifact digest: {artifact_digest}\n  - {signature}"
                 ),
             }
         })
@@ -852,7 +945,7 @@ fn approvals_section(records: &[AppliedApproval], locale: Locale) -> Option<Stri
 fn generation_section(claims: &RequirementClaimSet, fallback_count: u64, locale: Locale) -> String {
     let head = heading(locale, "##", "生成情報", "Generation info");
     let source_line = match &claims.spec.source {
-        Some(source) => format!("`{source}`"),
+        Some(source) => code(source),
         None => match locale {
             Locale::Ja => "（ソースパスなし）".to_owned(),
             Locale::En => "(no source path)".to_owned(),
@@ -1041,9 +1134,12 @@ fn metadata_header(
     lines.push(format!("- {id_label}: `{}`", claim.id));
     if let Some(source) = &claim.source {
         lines.push(format!(
-            "- {source_label}: `{}:{}`",
-            source.path.as_deref().unwrap_or(""),
-            source.line
+            "- {source_label}: {}",
+            code(&format!(
+                "{}:{}",
+                source.path.as_deref().unwrap_or(""),
+                source.line
+            ))
         ));
     }
     if !matches!(
@@ -1096,7 +1192,7 @@ fn type_ref_text(ty: &TypeRef) -> String {
     match ty {
         TypeRef::Int => "Int".to_owned(),
         TypeRef::Bool => "Bool".to_owned(),
-        TypeRef::Named(name) => display_name(name),
+        TypeRef::Named(name) => fsl_core::unmapped_public_spelling(name),
         TypeRef::Range(lo, hi) => format!("{lo}..{hi}"),
         TypeRef::Map(key, value) => {
             format!("Map<{}, {}>", type_ref_text(key), type_ref_text(value))
@@ -1121,9 +1217,9 @@ fn render_operation(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .model
         .actions
         .iter()
-        .find(|action| ctx.model.action_key(&action.name) == key);
+        .find(|action| ctx.model.action_display_name(&action.name) == key);
     let name = action.map_or_else(
-        || display_name(key),
+        || ctx.model.names().public_action(key).into_string(),
         |action| ctx.model.action_display_name(&action.name),
     );
     let label = ctx
@@ -1423,9 +1519,19 @@ fn render_state_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.invariants, &name) else {
-        return metadata_header(claim, &display_name(&name), None, ctx.locale);
+        return metadata_header(
+            claim,
+            ctx.model.names().public_property(&name).as_str(),
+            None,
+            ctx.locale,
+        );
     };
-    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
+    let head = metadata_header(
+        claim,
+        ctx.model.names().public_property(&name).as_str(),
+        None,
+        ctx.locale,
+    );
     let lead = match ctx.locale {
         Locale::Ja => {
             "初期化後、および成功した各操作のコミット後に、次の条件が成立しなければならない。"
@@ -1452,9 +1558,19 @@ fn render_transition_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.transitions, &name) else {
-        return metadata_header(claim, &display_name(&name), None, ctx.locale);
+        return metadata_header(
+            claim,
+            ctx.model.names().public_property(&name).as_str(),
+            None,
+            ctx.locale,
+        );
     };
-    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
+    let head = metadata_header(
+        claim,
+        ctx.model.names().public_property(&name).as_str(),
+        None,
+        ctx.locale,
+    );
     let lead = match ctx.locale {
         Locale::Ja => {
             "成功する各遷移について、遷移前の状態と遷移後の状態は次の関係を満たさなければならない。以下で「遷移前の `x`」は遷移前の値を指し、それ以外の読み取りは遷移後の値を指す。"
@@ -1479,9 +1595,19 @@ fn render_reachability_goal(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.reachables, &name) else {
-        return metadata_header(claim, &display_name(&name), None, ctx.locale);
+        return metadata_header(
+            claim,
+            ctx.model.names().public_property(&name).as_str(),
+            None,
+            ctx.locale,
+        );
     };
-    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
+    let head = metadata_header(
+        claim,
+        ctx.model.names().public_property(&name).as_str(),
+        None,
+        ctx.locale,
+    );
     let lead = match ctx.locale {
         Locale::Ja => "次の状態に到達する実行例が存在しなければならない（到達目標）。",
         Locale::En => {
@@ -1506,9 +1632,19 @@ fn render_deadline_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = find_property(&ctx.model.invariants, &name) else {
-        return metadata_header(claim, &display_name(&name), None, ctx.locale);
+        return metadata_header(
+            claim,
+            ctx.model.names().public_property(&name).as_str(),
+            None,
+            ctx.locale,
+        );
     };
-    let head = metadata_header(claim, &display_name(&name), None, ctx.locale);
+    let head = metadata_header(
+        claim,
+        ctx.model.names().public_property(&name).as_str(),
+        None,
+        ctx.locale,
+    );
     let lead = match ctx.locale {
         Locale::Ja => {
             "次の条件は期限条件（deadline）である。初期化後、および成功した各操作のコミット後に成立しなければならない。"
@@ -1569,14 +1705,24 @@ fn render_progress_rule(claim: &Claim, ctx: &mut Ctx<'_>) -> String {
         .unwrap_or_default()
         .to_owned();
     let Some(property) = ctx.model.leadstos.iter().find(|p| p.name == name).cloned() else {
-        return metadata_header(claim, &display_name(&name), None, ctx.locale);
+        return metadata_header(
+            claim,
+            ctx.model.names().public_property(&name).as_str(),
+            None,
+            ctx.locale,
+        );
     };
     render_leadsto(claim, &property, ctx)
 }
 
 #[allow(clippy::too_many_lines)]
 fn render_leadsto(claim: &Claim, property: &LeadsToDef, ctx: &mut Ctx<'_>) -> String {
-    let head = metadata_header(claim, &display_name(&property.name), None, ctx.locale);
+    let head = metadata_header(
+        claim,
+        ctx.model.names().public_property(&property.name).as_str(),
+        None,
+        ctx.locale,
+    );
     let lead = match ctx.locale {
         Locale::Ja => "次の進行条件（liveness）が、FSL 上の要求として宣言されている。",
         Locale::En => "The following progress rule (liveness) is declared as a demand in the FSL.",
@@ -1707,9 +1853,9 @@ fn find_case<'a>(
 ) -> Option<&'a RequirementsTraceCase> {
     let trace = trace?;
     let cases = if is_acceptance {
-        &trace.acceptance
+        trace.unchecked_acceptance()
     } else {
-        &trace.forbidden
+        trace.unchecked_forbidden()
     };
     cases.iter().find(|case| case.id == id)
 }
@@ -1720,7 +1866,7 @@ fn step_text(model: &KernelModel, name: &str, args: &[fsl_core::KernelExpr]) -> 
         .map(|arg| fsl_core::source_expr_text(model, arg))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("`{}({args_text})`", display_name(name))
+    format!("`{}({args_text})`", model.names().public_identifier(name))
 }
 
 fn render_acceptance(claim: &Claim, case: &RequirementsTraceCase, ctx: &mut Ctx<'_>) -> String {
@@ -1769,7 +1915,7 @@ fn render_acceptance(claim: &Claim, case: &RequirementsTraceCase, ctx: &mut Ctx<
     };
     format!(
         "{head}\n- {title_label}: {}\n\n{intro}\n\n{given}\n{when_label}\n{steps}\n{then_line}\n\n{tail}",
-        case.text
+        prose(&case.text)
     )
 }
 
@@ -1837,7 +1983,7 @@ fn render_forbidden(claim: &Claim, case: &RequirementsTraceCase, ctx: &mut Ctx<'
     };
     format!(
         "{head}\n- {title_label}: {}\n\n{intro}\n\n{given}\n{when_line}\n{then_line}\n\n{tail}",
-        case.text
+        prose(&case.text)
     )
 }
 

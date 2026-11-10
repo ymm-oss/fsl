@@ -1,0 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+business Abs {
+  actor System, Manager
+  entity Case
+  process Case {
+    stages Open, Done
+    initial Open
+    transition approve Open -> Done by System
+  }
+}
+verify { instances Case = 1 }

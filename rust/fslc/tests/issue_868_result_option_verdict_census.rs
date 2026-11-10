@@ -181,6 +181,13 @@ const CLASSIFICATIONS: &[Classification] = &[
         ResultOption
     ),
     entry!(
+        Verdict,
+        "rust/fsl-runtime/src/lib.rs",
+        4106,
+        "check_state_bounds",
+        ResultOption
+    ),
+    entry!(
         Ordinary,
         "rust/fsl-runtime/src/lib.rs",
         348,
@@ -238,6 +245,13 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Verdict,
+        "rust/fsl-verifier/src/agreement.rs",
+        549,
+        "validated_post_read_context",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
         "rust/fsl-verifier/src/bmc.rs",
         421,
         "check_definedness",
@@ -260,8 +274,50 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Verdict,
         "rust/fsl-verifier/src/bmc.rs",
+        633,
+        "checked_action_carriers",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        1399,
+        "check_state_properties_in",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
         498,
         "check_state_properties",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        1102,
+        "diagnostic_state_carriers",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        966,
+        "frozen_composite_condition",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        958,
+        "frozen_range_condition",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fsl-verifier/src/bmc.rs",
+        1026,
+        "check_range_invariant",
         ResultOption
     ),
     entry!(
@@ -336,6 +392,20 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fsl-verifier/src/eval.rs",
+        2668,
+        "binder_where_in",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-verifier/tests/issue_1480_temporal_outer_bindings.rs",
+        551,
+        "named_outer_identity",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fsl-core/src/domain_lowering.rs",
         553,
         "enum_value",
@@ -351,8 +421,22 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Ordinary,
         "rust/fsl-core/src/dialect.rs",
+        3279,
+        "requirements_trace_contract_with_options",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/dialect.rs",
         3165,
         "governance_contract",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/dialect.rs",
+        3551,
+        "governance_contract_with_options",
         ResultOption
     ),
     entry!(
@@ -364,9 +448,88 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fsl-core/src/dialect.rs",
+        3401,
+        "verify_scope_type_names_with_options",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-syntax/src/edition.rs",
+        93,
+        "parse_option",
+        ResultOption
+    ),
+    // #1757: `EditionRequest::parse` is `parse_option` keeping the spelling;
+    // `None` is `--edition current` (no request), not a verdict.
+    entry!(
+        Ordinary,
+        "rust/fsl-syntax/src/edition.rs",
+        134,
+        "parse",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-syntax/src/edition.rs",
+        123,
+        "edition_header",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fslc/src/cli_options.rs",
+        184,
+        "parse_edition",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fsl-core/src/model.rs",
-        419,
+        214,
+        "expression_type",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/model.rs",
+        387,
         "resolve_replay_action",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/naming.rs",
+        461,
+        "resolve_action",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/naming.rs",
+        483,
+        "resolve_state",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/naming.rs",
+        501,
+        "resolve_property",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/naming.rs",
+        519,
+        "resolve_synthetic",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/naming.rs",
+        531,
+        "unique",
         ResultOption
     ),
     entry!(
@@ -379,8 +542,29 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Ordinary,
         "rust/fsl-core/src/refinement.rs",
+        1285,
+        "requirements_implements_with_options",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fslc/src/main.rs",
+        11262,
+        "mutation_implements_contract",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/refinement.rs",
         1268,
         "requirements_implements_with_bounds",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-core/src/refinement.rs",
+        1333,
+        "requirements_implements_with_bounds_with_options",
         ResultOption
     ),
     entry!(
@@ -433,18 +617,18 @@ const CLASSIFICATIONS: &[Classification] = &[
         ResultOption
     ),
     entry!(
-        Verdict,
+        Ordinary,
         "rust/fslc/src/verification_output.rs",
-        579,
-        "validate_requirement_trace_source",
-        ResultTupleOption
+        890,
+        "enabled_step_instance",
+        ResultOption
     ),
     entry!(
         Verdict,
         "rust/fslc/src/verification_output.rs",
         781,
         "validate_requirement_trace_contract",
-        ResultTupleOption
+        ResultOption
     ),
     entry!(
         Verdict,
@@ -455,17 +639,17 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Verdict,
-        "rust/fslc/src/main.rs",
-        14872,
-        "validate_requirement_traces_from_source",
-        ResultTupleOption
+        "rust/fslc/src/verification_output.rs",
+        1382,
+        "require_trace_gate",
+        ResultOption
     ),
     entry!(
         Verdict,
-        "rust/fslc/src/main.rs",
-        14783,
-        "validate_requirement_trace_source",
-        ResultTupleOption
+        "rust/fslc/src/spec_loading.rs",
+        41,
+        "require_trace_gate",
+        ResultOption
     ),
     entry!(
         Ordinary,
@@ -492,7 +676,7 @@ const CLASSIFICATIONS: &[Classification] = &[
         Ordinary,
         "rust/fslc/src/literate_access.rs",
         111,
-        "materialize_literate",
+        "capture_literate",
         ResultOption
     ),
     entry!(
@@ -500,6 +684,15 @@ const CLASSIFICATIONS: &[Classification] = &[
         "rust/fslc/src/literate_access.rs",
         409,
         "literate_access",
+        ResultOption
+    ),
+    // `None` is a document with no process form to rewrite; the reasons a
+    // process cannot be rewritten are the error, not a verdict.
+    entry!(
+        Ordinary,
+        "rust/fslc/src/migration/process_form.rs",
+        274,
+        "plan_process_conversion",
         ResultOption
     ),
     entry!(
@@ -523,6 +716,28 @@ const CLASSIFICATIONS: &[Classification] = &[
         "load_evidence",
         ResultOption
     ),
+    // Optional sidecar data: None means no input, never a verdict.
+    entry!(
+        Ordinary,
+        "rust/fslc/src/main.rs",
+        2104,
+        "load_glossary_with_base",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fslc/src/main.rs",
+        2159,
+        "load_evidence_with_base",
+        ResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fslc/src/main.rs",
+        2166,
+        "load_document_evidence",
+        ResultOption
+    ),
     entry!(
         Ordinary,
         "rust/fslc/src/main.rs",
@@ -537,10 +752,18 @@ const CLASSIFICATIONS: &[Classification] = &[
         "load_approvals_for_check",
         ResultOption
     ),
+    // `Some` carries an explain entry's trace evidence; discarding it reports a false preemption.
     entry!(
         Verdict,
         "rust/fslc/src/main.rs",
-        14937,
+        9487,
+        "canonical_concrete_violation_trace",
+        ResultOption
+    ),
+    entry!(
+        Verdict,
+        "rust/fslc/src/refinement.rs",
+        21,
         "governance_result_from_source",
         ResultOption
     ),
@@ -548,8 +771,8 @@ const CLASSIFICATIONS: &[Classification] = &[
     // into the envelope (#1303); discarding it reports the old exit.
     entry!(
         Verdict,
-        "rust/fslc/src/main.rs",
-        17136,
+        "rust/fslc/src/refinement.rs",
+        78,
         "fold_governance_from_source",
         ResultOption
     ),
@@ -562,8 +785,8 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Verdict,
-        "rust/fslc/src/main.rs",
-        15592,
+        "rust/fslc/src/refinement.rs",
+        98,
         "implements_result_from_source_with_bounds",
         ResultOption
     ),
@@ -621,8 +844,29 @@ const CLASSIFICATIONS: &[Classification] = &[
     ),
     entry!(
         Ordinary,
+        "rust/fsl-verifier/tests/support/composite_vacuity_fault.rs",
+        92,
+        "model_eval",
+        SolverResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fsl-verifier/tests/support/induction_target_fault.rs",
+        92,
+        "model_eval",
+        SolverResultOption
+    ),
+    entry!(
+        Ordinary,
         "rust/fslc/tests/solver_fail_closed.rs",
         193,
+        "model_eval",
+        SolverResultOption
+    ),
+    entry!(
+        Ordinary,
+        "rust/fslc/tests/issue_1415_requirements_solver.rs",
+        116,
         "model_eval",
         SolverResultOption
     ),
@@ -666,6 +910,48 @@ macro_rules! unresolved_ordinary {
 // shape. They are explicitly ordinary rather than silently omitted: a return
 // whose alias becomes relevant to optional verdicts must be reconsidered here.
 const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1480_temporal_outer_bindings.rs",
+        433,
+        "ints"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1480_temporal_outer_bindings.rs",
+        437,
+        "bool_int"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1480_temporal_outer_bindings.rs",
+        441,
+        "tag_bool"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/issue_1480_temporal_outer_bindings.rs",
+        649,
+        "literal_state"
+    ),
+    // U3 helpers return binding records/scopes, not fallible optional verdicts.
+    unresolved_ordinary!(
+        "rust/fsl-verifier/src/eval/range_metadata_tests.rs",
+        96,
+        "parameter"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/src/eval/range_metadata_tests.rs",
+        102,
+        "params"
+    ),
+    // ProgressResult is Result<ProgressCheck, VerifyError>, not an optional carrier.
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/refinement_progress.rs",
+        34,
+        "progress"
+    ),
+    unresolved_ordinary!(
+        "rust/fsl-verifier/tests/refinement_progress.rs",
+        39,
+        "pulled_safety"
+    ),
     unresolved_ordinary!("rust/fsl-core/src/domain.rs", 417, "build_normalize_scope"),
     unresolved_ordinary!("rust/fsl-core/src/domain_lowering.rs", 2712, "saga_scope"),
     unresolved_ordinary!(
@@ -674,6 +960,7 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
         "without_indexed_replacement"
     ),
     unresolved_ordinary!("rust/fsl-core/src/typecheck.rs", 58, "base_env"),
+    unresolved_ordinary!("rust/fsl-core/src/typecheck.rs", 222, "expression_env"),
     unresolved_ordinary!("rust/fsl-solver-z3/src/lib.rs", 235, "bool_value"),
     unresolved_ordinary!("rust/fsl-solver-z3/src/lib.rs", 239, "int_value"),
     unresolved_ordinary!("rust/fsl-solver-z3js/src/lib.rs", 186, "bool_value"),
@@ -716,6 +1003,10 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
     // `ChainStepResults` is `Vec<Option<(Value, bool)>>`: one report slot per
     // planned chain step (`None` = never ran), not a fallible optional verdict.
     unresolved_ordinary!("rust/fslc/src/main.rs", 4207, "run_chain_steps"),
+    // #1757: `ReadEdition` is `(Edition, Option<Edition>)`, the edition one
+    // document was read in and its header's (`None` = headerless); no Result
+    // and no verdict.
+    unresolved_ordinary!("rust/fslc/src/main.rs", 396, "read_edition"),
     unresolved_ordinary!(
         "rust/fslc/src/verification.rs",
         2192,
@@ -726,7 +1017,6 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
         2323,
         "finalize_cli_verification"
     ),
-    unresolved_ordinary!("rust/fslc/src/verification.rs", 1809, "run_verify_cli"),
     unresolved_ordinary!(
         "rust/fslc/src/verification.rs",
         1821,
@@ -734,8 +1024,21 @@ const UNRESOLVED_ORDINARY_CLASSIFICATIONS: &[Classification] = &[
     ),
     unresolved_ordinary!(
         "rust/fslc/src/verification.rs",
+        2210,
+        "run_verify_cli_admitted"
+    ),
+    unresolved_ordinary!(
+        "rust/fslc/src/verification.rs",
         2114,
         "run_verify_cli_kernel_from_source"
+    ),
+    // Files contains raw file bytes; Raw carries bytes and a process exit code,
+    // not an optional verification verdict.
+    unresolved_ordinary!("rust/fslc/tests/issue_1422_producer_period.rs", 42, "files"),
+    unresolved_ordinary!(
+        "rust/fslc/tests/issue_1422_producer_period.rs",
+        53,
+        "observe"
     ),
     unresolved_ordinary!(
         "rust/fslc/tests/issue_868_result_option_verdict_census.rs",
@@ -1351,17 +1654,64 @@ fn qualified_verification_output_call(tokens: &[Token], function: usize) -> bool
         .any(|token| token.text == "verification_output")
 }
 
+/// Every `use` item in `tokens`, as the token range from `use` to its `;`.
+fn use_items(tokens: &[Token]) -> Vec<(usize, usize)> {
+    let mut items = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        if tokens[index].text == "use"
+            && let Some(end) = (index..tokens.len()).find(|&end| tokens[end].text == ";")
+        {
+            items.push((index, end));
+            index = end + 1;
+        } else {
+            index += 1;
+        }
+    }
+    items
+}
+
+/// Whether `path` imports `name` from a module that defines it: a `use` item
+/// naming both the defining file's module and `name`, in a file of the same
+/// source directory (a sibling module of the same crate).
+fn imports_definition(
+    path: &str,
+    tokens: &[Token],
+    uses: &[(usize, usize)],
+    name: &str,
+    definitions: &BTreeSet<String>,
+) -> bool {
+    let directory = |file: &str| {
+        file.rsplit_once('/')
+            .map(|(directory, _)| directory.to_owned())
+    };
+    definitions.iter().any(|definition| {
+        let module = definition
+            .rsplit('/')
+            .next()
+            .and_then(|file| file.strip_suffix(".rs"));
+        directory(definition) == directory(path)
+            && module.is_some_and(|module| {
+                uses.iter().any(|&(start, end)| {
+                    let item = &tokens[start..=end];
+                    item.iter().any(|token| token.text == module)
+                        && item.iter().any(|token| token.text == name)
+                })
+            })
+    })
+}
+
 fn can_resolve_verdict_call(
     path: &str,
     tokens: &[Token],
+    uses: &[(usize, usize)],
     function: usize,
     verdict_definitions: &BTreeMap<String, BTreeSet<String>>,
 ) -> bool {
     let name = &tokens[function].text;
-    if verdict_definitions
-        .get(name)
-        .is_some_and(|paths| paths.contains(path))
-    {
+    if verdict_definitions.get(name).is_some_and(|paths| {
+        paths.contains(path) || imports_definition(path, tokens, uses, name, paths)
+    }) {
         return true;
     }
     match name.as_str() {
@@ -1370,7 +1720,6 @@ fn can_resolve_verdict_call(
         "requirements_implements_output"
         | "governance_output"
         | "governance_output_async"
-        | "validate_requirement_trace_source"
         | "validate_requirement_trace_source_scoped" => {
             qualified_verification_output_call(tokens, function)
         }
@@ -1384,16 +1733,20 @@ fn consumer_findings(
     verdict_definitions: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<ConsumerFinding> {
     let tokens = tokenize(source);
+    let uses = use_items(&tokens);
     let mut findings = Vec::new();
     for (index, token) in tokens.iter().enumerate() {
         if !verdict_definitions.contains_key(&token.text)
             || tokens
                 .get(index.wrapping_sub(1))
                 .is_some_and(|previous| previous.text == "fn")
+            || uses
+                .iter()
+                .any(|&(start, end)| (start..=end).contains(&index))
         {
             continue;
         }
-        if !can_resolve_verdict_call(path, &tokens, index, verdict_definitions) {
+        if !can_resolve_verdict_call(path, &tokens, &uses, index, verdict_definitions) {
             continue;
         }
         if generic_call_open(&tokens, index).is_none() {
@@ -1791,6 +2144,48 @@ fn normalized_windows_consumer_path_detects_a_discarded_verdict() {
             function: "synthetic_probe".to_owned(),
             kind: ConsumerFindingKind::DiscardedStatement,
         }]
+    );
+}
+
+/// A verdict function a sibling module defines is checked at every call site
+/// of a file that imports it (#1171 moved such helpers out of `main.rs`); the
+/// import itself is not a reference, and a file that does not import it, or
+/// imports a same-named module of another crate, is not resolved.
+#[test]
+fn imported_verdict_call_sites_are_checked() {
+    let verdict_definitions = BTreeMap::from([(
+        "synthetic_probe".to_owned(),
+        BTreeSet::from(["rust/fslc/src/refinement.rs".to_owned()]),
+    )]);
+    let source = "use refinement::{other, synthetic_probe};\n\
+                  fn consumer() -> Result<(), Error> { synthetic_probe()?; Ok(()) }\n\
+                  fn pointer() { let probe = synthetic_probe; }\n\
+                  fn checked() { match synthetic_probe() { _ => {} } }\n";
+    assert_eq!(
+        consumer_findings("rust/fslc/src/main.rs", source, &verdict_definitions),
+        vec![
+            ConsumerFinding {
+                path: "rust/fslc/src/main.rs".to_owned(),
+                line: 2,
+                function: "synthetic_probe".to_owned(),
+                kind: ConsumerFindingKind::DiscardedStatement,
+            },
+            ConsumerFinding {
+                path: "rust/fslc/src/main.rs".to_owned(),
+                line: 3,
+                function: "synthetic_probe".to_owned(),
+                kind: ConsumerFindingKind::IndirectReference,
+            },
+        ]
+    );
+    let unimported = "fn consumer() -> Result<(), Error> { synthetic_probe()?; Ok(()) }\n";
+    assert_eq!(
+        consumer_findings("rust/fslc/src/main.rs", unimported, &verdict_definitions),
+        Vec::new()
+    );
+    assert_eq!(
+        consumer_findings("rust/fsl-wasm/src/lib.rs", source, &verdict_definitions),
+        Vec::new()
     );
 }
 

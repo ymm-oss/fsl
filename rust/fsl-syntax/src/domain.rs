@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 use serde_json::{Value, json};
 
@@ -10,6 +12,10 @@ use crate::syntax_expr::{
     parse_tokens_expression, parse_tokens_lvalue,
 };
 use crate::{Annotations, ParseError, Span, Token, TokenKind, lex};
+
+/// What the message of a refused repeated clause starts with. Each of these clauses
+/// holds one value, so a second copy would overwrite the first (#1700).
+pub const REPEATED_DOMAIN_CLAUSE: &str = "duplicate domain clause ";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct DomainLoc {
@@ -35,6 +41,24 @@ impl DomainLoc {
         self.span
     }
 }
+
+/// The effect clauses that hold one value. `async` carries none, and `emits` and
+/// `compensation` collect every copy.
+const EFFECT_SINGLE_CLAUSES: &[&str] = &[
+    "reliable",
+    "irreversible",
+    "idempotency_key",
+    "correlation_id",
+    "handles",
+    "request_event",
+    "success_event",
+    "failure_event",
+    "timeout_event",
+    "retry",
+    "timeout",
+    "outbox",
+    "inbox",
+];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DomainField {
@@ -603,6 +627,29 @@ impl DomainParser {
         Ok(())
     }
 
+    /// Refuse the clause ahead when `seen` already holds it, at the repeated keyword.
+    fn reject_repeated_clause(
+        &self,
+        clauses: &[&'static str],
+        seen: &mut BTreeSet<&'static str>,
+        owner: &str,
+    ) -> Result<(), ParseError> {
+        let Some(clause) = clauses
+            .iter()
+            .copied()
+            .find(|clause| self.peek_ident(clause))
+        else {
+            return Ok(());
+        };
+        if seen.insert(clause) {
+            return Ok(());
+        }
+        Err(ParseError::new(
+            format!("{REPEATED_DOMAIN_CLAUSE}'{clause}' in {owner}"),
+            self.peek().span,
+        ))
+    }
+
     fn domain(&mut self) -> Result<DomainSpec, ParseError> {
         let loc = self.loc();
         self.expect_ident_value("domain")?;
@@ -615,8 +662,11 @@ impl DomainParser {
         let mut awaits = Vec::new();
         let mut sagas = Vec::new();
         let mut projections = Vec::new();
+        let mut seen = BTreeSet::new();
+        let owner = format!("domain '{name}'");
         while !self.eat_symbol("}") {
             self.take_leading_annotations()?;
+            self.reject_repeated_clause(&["implementation_profile"], &mut seen, &owner)?;
             if self.eat_ident("implementation_profile") {
                 self.expect_no_pending_annotations()?;
                 implementation_profile = Some(self.expect_ident()?);
@@ -802,8 +852,11 @@ impl DomainParser {
         let mut invariants = Vec::new();
         let mut projections = Vec::new();
         let mut stale_policies = Vec::new();
+        let mut seen = BTreeSet::new();
+        let owner = format!("aggregate '{name}'");
         while !self.eat_symbol("}") {
             self.take_leading_annotations()?;
+            self.reject_repeated_clause(&["id"], &mut seen, &owner)?;
             if self.eat_ident("id") {
                 self.expect_no_pending_annotations()?;
                 id_type = Some(self.expect_ident()?);
@@ -1038,7 +1091,10 @@ impl DomainParser {
         self.expect_symbol("{")?;
         let mut source = String::new();
         let mut fields = Vec::new();
+        let mut seen = BTreeSet::new();
+        let owner = format!("projection '{name}'");
         while !self.eat_symbol("}") {
+            self.reject_repeated_clause(&["from"], &mut seen, &owner)?;
             if self.eat_ident("from") {
                 source = self.expect_ident()?;
                 self.eat_symbol(";");
@@ -1085,7 +1141,11 @@ impl DomainParser {
         self.expect_symbol("{")?;
         let mut effect = DomainEffect::new(name, loc);
         effect.annotations = annotations;
+        let mut seen = BTreeSet::new();
+        let mut fields = BTreeSet::new();
+        let owner = format!("effect '{}'", effect.name);
         while !self.eat_symbol("}") {
+            self.reject_repeated_clause(EFFECT_SINGLE_CLAUSES, &mut seen, &owner)?;
             if self.eat_ident("async") {
                 effect.async_effect = true;
                 self.eat_symbol(";");
@@ -1148,7 +1208,13 @@ impl DomainParser {
                 effect.inbox = Some(self.expect_ident()?);
                 self.eat_symbol(";");
             } else if self.peek_ident("input") || self.field_ahead() {
-                self.field(true, false)?;
+                let field = self.field(true, false)?;
+                if !fields.insert(field.name.text.clone()) {
+                    return Err(ParseError::new(
+                        format!("{REPEATED_DOMAIN_CLAUSE}'{}' in {owner}", field.name.text),
+                        field.name.span,
+                    ));
+                }
             } else {
                 return Err(self.error("expected effect declaration"));
             }
@@ -1178,7 +1244,9 @@ impl DomainParser {
             backoff: None,
             loc: Some(loc),
         };
+        let mut seen = BTreeSet::new();
         while !self.eat_symbol("}") {
+            self.reject_repeated_clause(&["max_attempts", "backoff"], &mut seen, "retry")?;
             if self.eat_ident("max_attempts") {
                 retry.max_attempts = Some(self.expect_int()?);
             } else if self.eat_ident("backoff") {
@@ -1233,8 +1301,11 @@ impl DomainParser {
         let mut invariants = Vec::new();
         let mut outboxes = Vec::new();
         let mut inboxes = Vec::new();
+        let mut seen = BTreeSet::new();
+        let owner = format!("saga '{name}'");
         while !self.eat_symbol("}") {
             self.take_leading_annotations()?;
+            self.reject_repeated_clause(&["starts_on"], &mut seen, &owner)?;
             if self.eat_ident("starts_on") {
                 self.expect_no_pending_annotations()?;
                 starts_on = Some(self.expect_ident()?);
@@ -1293,7 +1364,10 @@ impl DomainParser {
             annotations,
             loc,
         };
+        let mut seen = BTreeSet::new();
+        let owner = format!("saga step '{}'", step.name);
         while !self.eat_symbol("}") {
+            self.reject_repeated_clause(&["awaits", "timeout"], &mut seen, &owner)?;
             if self.eat_ident("async") {
                 step.async_step = true;
                 self.eat_symbol(";");
@@ -1417,6 +1491,7 @@ impl DomainParser {
             &mut self.cursor,
             ExpressionMode::Domain,
             line_terminated,
+            false,
         )
     }
 

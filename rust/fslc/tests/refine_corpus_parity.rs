@@ -49,9 +49,12 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Map, Value};
+
+#[path = "support/parallel.rs"]
+mod parallel;
+use parallel::failures as for_each_parallel;
 
 #[path = "support/mod.rs"]
 mod support;
@@ -176,6 +179,19 @@ fn assert_projection_exclusions_are_live(actual: &[Value], expected: &Map<String
 
 const CASES: &[Case] = &[
     Case {
+        implementation: "examples/refinement_liveness/design_merge_collision.fsl",
+        abstraction: "examples/refinement_liveness/policy_merge_collision.fsl",
+        mapping: "examples/refinement_liveness/design_merge_collision_refines.fsl",
+        depth: 4,
+        expected_result: "error",
+        expected_kind: Some("type"),
+        declared_by: "examples/refinement_liveness/design_merge_collision_refines.fsl:2-4",
+        declaration: Some(Declaration {
+            path: "examples/refinement_liveness/design_merge_collision_refines.fsl",
+            anchor: "expected-result",
+        }),
+    },
+    Case {
         implementation: "specs/cart_impl.fsl",
         abstraction: "specs/cart_v1.fsl",
         mapping: "specs/cart_refines.fsl",
@@ -250,8 +266,8 @@ const CASES: &[Case] = &[
             anchor: "expected-result",
         }),
         depth: 2,
-        expected_result: "refinement_failed",
-        expected_kind: Some("abs_state_mismatch"),
+        expected_result: "error",
+        expected_kind: Some("type"),
         declared_by: "examples/gallery/adversarial/refine_mapping_boundary_map.fsl:1-3 \
                       (`expected-command`/`expected-result`/`expected-kind`, including \
                       `--depth 2`), corroborated by examples/gallery/README.md:56-60 \
@@ -782,7 +798,7 @@ fn run_refine(implementation: &str, abstraction: &str, mapping: &str, depth: u32
 
 /// The exit code the CLI contract binds to a `refine` result
 /// (`docs/manual/LANGUAGE.md:1549` and `:1562`): `refines` exits 0, `refinement_failed`
-/// exits 1, a static `error` exits 2, and `violated` — the impl-self-
+/// exits 1, a static `error` exits 2, and `impl_violated` — the impl-self-
 /// violation verdict `refine` reaches before it consults the abstraction
 /// (#466) — is failure-class, so it exits 1.
 ///
@@ -795,43 +811,13 @@ fn run_refine(implementation: &str, abstraction: &str, mapping: &str, depth: u32
 fn expected_status(result: &str) -> i32 {
     match result {
         "refines" => 0,
-        "refinement_failed" | "violated" => 1,
+        "refinement_failed" | "impl_violated" => 1,
         "error" => 2,
         other => panic!(
             "unregistered `fslc refine` result {other:?}: add its exit code to \
              expected_status. Do not let a new verdict default to 0."
         ),
     }
-}
-
-/// Runs `job` over `0..count` on a small worker pool and collects the
-/// failure strings. Two `agentic_rag` rows take ~100s and ~126s each in a
-/// debug build and dominate the sweep; running the rows concurrently keeps
-/// the manifest's CI cost near the single slowest row rather than the sum.
-fn for_each_parallel(count: usize, job: impl Fn(usize) -> Option<String> + Sync) -> Vec<String> {
-    let next = AtomicUsize::new(0);
-    let failures = Mutex::new(Vec::new());
-    let workers = std::thread::available_parallelism()
-        .map_or(4, std::num::NonZero::get)
-        .min(count.max(1));
-    std::thread::scope(|scope| {
-        for _ in 0..workers {
-            scope.spawn(|| {
-                loop {
-                    let index = next.fetch_add(1, Ordering::Relaxed);
-                    if index >= count {
-                        break;
-                    }
-                    if let Some(failure) = job(index) {
-                        failures.lock().expect("failure list").push(failure);
-                    }
-                }
-            });
-        }
-    });
-    let mut failures = failures.into_inner().expect("failure list");
-    failures.sort();
-    failures
 }
 
 /// Every `refinement`-dialect file in the corpus must carry a live manifest

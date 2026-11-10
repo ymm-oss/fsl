@@ -161,7 +161,10 @@ fn generate_unknown_label_fails_under_strict_on_a_fixture_with_no_other_coverage
     // unrelated to the glossary (issue #327), which would otherwise mask
     // FSL-DOC-LABEL-UNKNOWN under --strict; use a minimal fixture with an
     // empty init block (so `init` is not itself an unsupported target) to
-    // observe the label diagnostic in isolation.
+    // observe the label diagnostic in isolation. It declares no acceptance
+    // case: the requirement-trace gate could not replay one from the
+    // incomplete initial state, and the document commands refuse a spec whose
+    // traces it cannot replay (#1243).
     let spec = temp_path(".fsl");
     std::fs::write(
         &spec,
@@ -170,7 +173,6 @@ fn generate_unknown_label_fails_under_strict_on_a_fixture_with_no_other_coverage
   init { }
   @requirement("REQ-1", "Bump can happen")
   fair action bump() { counter = counter + 1 }
-  acceptance AC-1 "bump happens" { bump() expect true }
 }
 "#,
     )

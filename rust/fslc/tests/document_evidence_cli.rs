@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 static NEXT_OUTPUT: AtomicU64 = AtomicU64::new(0);
 
@@ -65,6 +66,143 @@ fn write_evidence(json: &str) -> PathBuf {
 
 const CANCEL_SYSTEM: &str = "examples/pm/cancel_system.fsl";
 
+fn assert_base_golden(actual: &Value) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/issue_1475_golden/document-ja-evidence.json");
+    let expected: Value = serde_json::from_slice(&std::fs::read(path).expect("read base golden"))
+        .expect("base golden JSON");
+    assert_eq!(expected["base"], "c25f8653b9c83a247321f375f98cd59f430b6326");
+    assert_eq!(actual, &expected["observed"], "full base document output");
+}
+
+struct NormalEvidenceFixture(PathBuf);
+
+impl Drop for NormalEvidenceFixture {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).expect("remove normal evidence fixture");
+    }
+}
+
+impl NormalEvidenceFixture {
+    fn new() -> Self {
+        let directory = temp_path(".normal-evidence");
+        std::fs::create_dir_all(directory.join("examples/pm")).expect("create fixture directory");
+        // The golden is frozen output from its base commit, so the inputs are
+        // the base commit's `examples/pm` bytes, pinned here: the public
+        // example may evolve independently (#608 renamed its IDs).
+        let pinned =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/issue_1475_golden/source");
+        for name in ["cancel_system.fsl", "cancel_flow.fsl"] {
+            let relative = Path::new("examples/pm").join(name);
+            let source =
+                std::fs::read_to_string(pinned.join(&relative)).expect("read pinned base source");
+            std::fs::write(directory.join(relative), source.replace("\r\n", "\n"))
+                .expect("copy source bytes");
+        }
+        std::fs::write(
+            directory.join("evidence.json"),
+            r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded","result":"verified"}"#,
+        )
+        .expect("write fixed evidence bytes");
+        Self(directory)
+    }
+
+    fn run(&self, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_fslc"))
+            .args(args)
+            .current_dir(&self.0)
+            .output()
+            .expect("run native fslc")
+    }
+}
+
+// #1475: valid artifact, hostile *fresh-side* evidence. An artifact-only
+// malformed marker exercises drift/1, not this renderer/checker panic.
+#[test]
+fn issue_1475_marker_in_fresh_evidence_is_a_document_refusal() {
+    let evidence = write_evidence(
+        r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded","result":"verified"}"#,
+    );
+    let (artifact, _) = generate_to_file(&[&evidence]);
+    let before = std::fs::read(&artifact).expect("normal artifact bytes");
+    std::fs::write(&evidence, r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded","result":"verified\n<!-- fsl:bogus -->\n"}"#).expect("write hostile evidence");
+    let output = check(CANCEL_SYSTEM, &artifact, &[&evidence]);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        json_stdout(&output),
+        serde_json::json!({
+            "fsl": "1.0", "result": "error", "kind": "document",
+            "message": "malformed generated-block marker: \"<!-- fsl:bogus -->\""
+        })
+    );
+    assert_eq!(
+        std::fs::read(&artifact).expect("artifact not overwritten"),
+        before
+    );
+}
+
+#[test]
+fn issue_1475_normal_evidence_bytes_and_full_check_envelope_are_stable() {
+    // Stable relative labels prevent ambient scratch paths entering Markdown,
+    // evidence digests or JSON. No output field/digest is excluded.
+    let fixture = NormalEvidenceFixture::new();
+    let generate_args = [
+        "document",
+        "generate",
+        CANCEL_SYSTEM,
+        "--lang",
+        "ja",
+        "--evidence",
+        "evidence.json",
+        "-o",
+        "document.md",
+    ];
+    let generation = fixture.run(&generate_args);
+    assert_eq!(generation.status.code(), Some(0));
+    assert!(generation.stderr.is_empty());
+    let generated = json_stdout(&generation);
+    let artifact = fixture.0.join("document.md");
+    let before = std::fs::read(&artifact).expect("normal artifact bytes");
+    let check_args = [
+        "document",
+        "check",
+        CANCEL_SYSTEM,
+        "document.md",
+        "--evidence",
+        "evidence.json",
+    ];
+    let output = fixture.run(&check_args);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let value = json_stdout(&output);
+    assert_eq!(value["result"], "document_conformant");
+    println!(
+        "DOCUMENT NORMAL GENERATE {generated}\nDOCUMENT NORMAL CHECK {value}\n{}",
+        String::from_utf8_lossy(&before)
+    );
+    assert_eq!(value["spec_digest"], generated["spec_digest"]);
+    assert_eq!(value["claim_set_digest"], generated["claim_set_digest"]);
+    assert_base_golden(&serde_json::json!({
+        "generate": generated, "check": value,
+        "markdown_sha256": format!("{:x}", Sha256::digest(&before)),
+    }));
+    assert_eq!(
+        value,
+        json_stdout(&fixture.run(&check_args)),
+        "same-binary repeat determinism"
+    );
+    let regenerated = fixture.run(&generate_args);
+    assert_eq!(regenerated.status.code(), Some(0));
+    assert_eq!(generated, json_stdout(&regenerated));
+    assert_eq!(std::fs::read(&artifact).expect("regenerated bytes"), before);
+}
+
 fn generate(extra_args: &[&str]) -> Output {
     let mut args = vec!["document", "generate", CANCEL_SYSTEM, "--lang", "ja"];
     args.extend_from_slice(extra_args);
@@ -112,7 +250,8 @@ fn check(spec: &str, artifact: &Path, evidence: &[&Path]) -> Output {
 
 #[test]
 fn generate_with_evidence_overlays_assurance_and_records_digest() {
-    let evidence = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (out, envelope) = generate_to_file(&[&evidence]);
     assert_eq!(envelope["result"], "generated");
     assert!(
@@ -126,9 +265,13 @@ fn generate_with_evidence_overlays_assurance_and_records_digest() {
 
     let markdown = std::fs::read_to_string(&out).expect("read generated markdown");
     assert!(markdown.contains("evidence_digest: sha256:"));
-    let start = markdown.find("### REQ-1").expect("REQ-1 section exists");
+    let start = markdown
+        .find("### REQ-CANCEL-001")
+        .expect("REQ-CANCEL-001 section exists");
     let rest = &markdown[start..];
-    let end = rest.find("### REQ-2").expect("REQ-2 section exists");
+    let end = rest
+        .find("### REQ-CANCEL-002")
+        .expect("REQ-CANCEL-002 section exists");
     assert!(rest[..end].contains("proved(induction)"));
     let _ = std::fs::remove_file(&out);
     let _ = std::fs::remove_file(&evidence);
@@ -168,7 +311,11 @@ fn generate_evidence_unmatched_file_fails_under_strict_on_a_fixture_with_no_othe
 {
     // Mirrors issue #330's own equivalent test: cancel_system.fsl has
     // pre-existing unsupported targets unrelated to evidence, which would
-    // otherwise mask FSL-DOC-EVIDENCE-UNMATCHED under --strict.
+    // otherwise mask FSL-DOC-EVIDENCE-UNMATCHED under --strict. The empty
+    // `init` keeps `init` out of the unsupported targets, so the fixture
+    // declares no acceptance case: the requirement-trace gate could not
+    // replay one from an incomplete initial state, and the document commands
+    // refuse a spec whose traces it cannot replay (#1243).
     let spec = temp_path(".fsl");
     std::fs::write(
         &spec,
@@ -177,7 +324,6 @@ fn generate_evidence_unmatched_file_fails_under_strict_on_a_fixture_with_no_othe
   init { }
   @requirement("REQ-1", "Bump can happen")
   fair action bump() { counter = counter + 1 }
-  acceptance AC-1 "bump happens" { bump() expect true }
 }
 "#,
     )
@@ -216,32 +362,128 @@ fn generate_evidence_unmatched_file_fails_under_strict_on_a_fixture_with_no_othe
 
 #[test]
 fn generate_evidence_malformed_json_exits_two() {
-    let evidence = write_evidence("{not json");
-    let evidence_str = evidence.to_str().expect("utf8 path");
-    let output = generate(&["--evidence", evidence_str]);
-    assert_eq!(output.status.code(), Some(2));
-    let envelope = json_stdout(&output);
-    assert_eq!(envelope["code"], "FSL-DOC-EVIDENCE-INVALID");
-    let _ = std::fs::remove_file(&evidence);
+    assert_evidence_load_refusal(Some(b"{not json"), |path| {
+        serde_json::json!({
+            "fsl": "1.0",
+            "result": "error",
+            "kind": "document",
+            "code": "FSL-DOC-EVIDENCE-INVALID",
+            "message": format!(
+                "{}: invalid JSON: key must be a string at line 1 column 2",
+                path.display()
+            ),
+        })
+    });
 }
 
 #[test]
 fn generate_evidence_non_object_json_exits_two() {
-    let evidence = write_evidence("[1, 2, 3]");
-    let evidence_str = evidence.to_str().expect("utf8 path");
-    let output = generate(&["--evidence", evidence_str]);
-    assert_eq!(output.status.code(), Some(2));
-    let envelope = json_stdout(&output);
-    assert_eq!(envelope["code"], "FSL-DOC-EVIDENCE-INVALID");
-    let _ = std::fs::remove_file(&evidence);
+    for input in [b"[1, 2, 3]".as_slice(), b"[]".as_slice()] {
+        assert_evidence_load_refusal(Some(input), |path| {
+            serde_json::json!({
+                "fsl": "1.0",
+                "result": "error",
+                "kind": "document",
+                "code": "FSL-DOC-EVIDENCE-INVALID",
+                "message": format!(
+                    "{}: evidence JSON must contain an object envelope",
+                    path.display()
+                ),
+            })
+        });
+    }
 }
 
 #[test]
 fn generate_missing_evidence_file_exits_two_as_io_error() {
-    let output = generate(&["--evidence", "/nonexistent/evidence.json"]);
+    assert_evidence_load_refusal(None, |path| {
+        // Preserve the complete OS diagnostic without hard-coding a platform's
+        // wording, behind the path the IO owner prefixes (#1170).
+        let error = std::fs::read(path).expect_err("evidence must be absent");
+        serde_json::json!({
+            "fsl": "1.0",
+            "result": "error",
+            "kind": "io",
+            "message": format!("{}: {error}", path.display()),
+        })
+    });
+}
+
+#[test]
+fn generate_invalid_utf8_evidence_exits_two_as_io_error() {
+    assert_evidence_load_refusal(Some(&[0xff]), |path| {
+        serde_json::json!({
+            "fsl": "1.0",
+            "result": "error",
+            "kind": "io",
+            "message": format!(
+                "{}: invalid utf-8 sequence of 1 bytes from index 0",
+                path.display()
+            ),
+        })
+    });
+}
+
+/// #1429: loader failures preserve their full envelope and both kinds of output.
+fn assert_evidence_load_refusal(input: Option<&[u8]>, expected: impl FnOnce(&Path) -> Value) {
+    let evidence = temp_path(".invalid-evidence.json");
+    assert!(!evidence.exists(), "fresh evidence path");
+    if let Some(bytes) = input {
+        std::fs::write(&evidence, bytes).expect("write invalid evidence bytes");
+    }
+    let expected = expected(&evidence);
+    let evidence_str = evidence.to_str().expect("utf8 path");
+    let stdout_only = generate(&["--evidence", evidence_str]);
+    assert_eq!(stdout_only.status.code(), Some(2));
+    assert_eq!(
+        json_stdout(&stdout_only),
+        expected,
+        "complete generate error without an output path"
+    );
+    assert!(stdout_only.stderr.is_empty(), "{:?}", stdout_only.stderr);
+    let destination = temp_path(".refused.md");
+    assert!(!destination.exists(), "fresh output path");
+    let preserved = b"existing document output\0\xff\n";
+    for exists in [false, true] {
+        if exists {
+            std::fs::write(&destination, preserved).expect("write existing output");
+        }
+        let output = generate(&[
+            "--evidence",
+            evidence_str,
+            "-o",
+            destination.to_str().expect("utf8 path"),
+        ]);
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(json_stdout(&output), expected, "complete generate error");
+        assert!(output.stderr.is_empty(), "{:?}", output.stderr);
+        if exists {
+            assert_eq!(std::fs::read(&destination).unwrap(), preserved);
+        } else {
+            assert!(!destination.exists(), "refusal must not create an output");
+        }
+    }
+
+    let (artifact, _) = generate_to_file(&[]);
+    let before = std::fs::read(&artifact).expect("read valid generated document");
+    let control = check(CANCEL_SYSTEM, &artifact, &[]);
+    assert_eq!(control.status.code(), Some(0), "valid document control");
+    let output = check(CANCEL_SYSTEM, &artifact, &[&evidence]);
     assert_eq!(output.status.code(), Some(2));
-    let envelope = json_stdout(&output);
-    assert_eq!(envelope["kind"], "io");
+    assert_eq!(json_stdout(&output), expected, "complete check error");
+    assert!(output.stderr.is_empty(), "{:?}", output.stderr);
+    assert_eq!(std::fs::read(&artifact).unwrap(), before);
+    if let Some(bytes) = input {
+        assert_eq!(std::fs::read(&evidence).unwrap(), bytes);
+        std::fs::remove_file(&evidence).expect("remove invalid evidence");
+    } else {
+        assert!(
+            !evidence.exists(),
+            "loader must not create missing evidence"
+        );
+    }
+    std::fs::remove_file(destination).expect("remove preserved output");
+    std::fs::remove_file(artifact).expect("remove valid document");
 }
 
 // --- Digest separation --------------------------------------------------------
@@ -249,10 +491,11 @@ fn generate_missing_evidence_file_exits_two_as_io_error() {
 #[test]
 fn changing_the_evidence_changes_artifact_digest_but_not_claim_set_digest() {
     let (out_none, envelope_none) = generate_to_file(&[]);
-    let evidence_a = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence_a =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (out_a, envelope_a) = generate_to_file(&[&evidence_a]);
     let evidence_b = write_evidence(
-        r#"{"requirement":{"id":"REQ-1"},"completeness":"bounded","checked_to_depth":8}"#,
+        r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"bounded","checked_to_depth":8}"#,
     );
     let (out_b, envelope_b) = generate_to_file(&[&evidence_b]);
 
@@ -282,10 +525,10 @@ fn changing_the_evidence_changes_artifact_digest_but_not_claim_set_digest() {
 #[test]
 fn evidence_file_order_does_not_change_the_recorded_digest() {
     let evidence_a = write_evidence(
-        r#"{"requirement":{"id":"REQ-1"},"completeness":"bounded","checked_to_depth":8,"result":"verified"}"#,
+        r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"bounded","checked_to_depth":8,"result":"verified"}"#,
     );
     let evidence_b = write_evidence(
-        r#"{"requirement":{"id":"REQ-1"},"completeness":"bounded","checked_to_depth":8,"result":"violated"}"#,
+        r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"bounded","checked_to_depth":8,"result":"violated"}"#,
     );
     let (out_forward, forward) = generate_to_file(&[&evidence_a, &evidence_b]);
     let (out_reversed, reversed) = generate_to_file(&[&evidence_b, &evidence_a]);
@@ -308,7 +551,8 @@ fn evidence_file_order_does_not_change_the_recorded_digest() {
 
 #[test]
 fn check_is_conformant_when_the_same_evidence_is_supplied() {
-    let evidence = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (artifact, _) = generate_to_file(&[&evidence]);
     let output = check(CANCEL_SYSTEM, &artifact, &[&evidence]);
     assert_eq!(output.status.code(), Some(0));
@@ -319,7 +563,8 @@ fn check_is_conformant_when_the_same_evidence_is_supplied() {
 
 #[test]
 fn check_reports_evidence_changed_when_the_flag_is_omitted() {
-    let evidence = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (artifact, _) = generate_to_file(&[&evidence]);
     let output = check(CANCEL_SYSTEM, &artifact, &[]);
     assert_eq!(output.status.code(), Some(1));
@@ -346,7 +591,8 @@ fn check_reports_evidence_changed_when_the_flag_is_omitted() {
 #[test]
 fn check_reports_evidence_changed_when_spurious_evidence_is_supplied() {
     let (artifact, _) = generate_to_file(&[]);
-    let evidence = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let output = check(CANCEL_SYSTEM, &artifact, &[&evidence]);
     assert_eq!(output.status.code(), Some(1));
     let envelope = json_stdout(&output);
@@ -363,10 +609,11 @@ fn check_reports_evidence_changed_when_spurious_evidence_is_supplied() {
 
 #[test]
 fn check_reports_evidence_changed_when_the_evidence_content_differs() {
-    let evidence_a = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence_a =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (artifact, _) = generate_to_file(&[&evidence_a]);
     let evidence_b = write_evidence(
-        r#"{"requirement":{"id":"REQ-1"},"completeness":"bounded","checked_to_depth":8}"#,
+        r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"bounded","checked_to_depth":8}"#,
     );
     let output = check(CANCEL_SYSTEM, &artifact, &[&evidence_b]);
     assert_eq!(output.status.code(), Some(1));
@@ -400,7 +647,8 @@ fn a_hand_edit_inside_a_claim_block_is_still_caught_even_when_evidence_also_chan
     // skip_residue_text split (fsl_tools::document_check): unlike a
     // renderer or glossary change, an evidence-only change must not mask a
     // genuine hand-edit inside a claim block.
-    let evidence = write_evidence(r#"{"requirement":{"id":"REQ-1"},"completeness":"unbounded"}"#);
+    let evidence =
+        write_evidence(r#"{"requirement":{"id":"REQ-CANCEL-001"},"completeness":"unbounded"}"#);
     let (artifact, _) = generate_to_file(&[&evidence]);
     let text = std::fs::read_to_string(&artifact).expect("read artifact");
     assert!(text.contains("CancelForm"), "fixture text not found");

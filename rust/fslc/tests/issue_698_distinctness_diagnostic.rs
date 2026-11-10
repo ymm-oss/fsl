@@ -27,10 +27,15 @@ fn run_cli(args: &[&str]) -> (Value, i32) {
 
 fn shared_diagnostic(source: &str, path: &str) -> fslc_rust::source_diagnostic::SourceDiagnostic {
     let resolver = fsl_core::FsResolver::new(Path::new("."));
-    fslc_rust::source_diagnostic::diagnostics(source, path, &resolver)
-        .into_iter()
-        .find(|diagnostic| diagnostic.kind != "migration")
-        .expect("expected a semantic diagnostic")
+    fslc_rust::source_diagnostic::diagnostics(
+        source,
+        path,
+        &resolver,
+        &fsl_syntax::ParseOptions::stable(),
+    )
+    .into_iter()
+    .find(|diagnostic| diagnostic.kind != "migration")
+    .expect("expected a semantic diagnostic")
 }
 
 #[test]

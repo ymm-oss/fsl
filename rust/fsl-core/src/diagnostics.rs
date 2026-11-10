@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
 
-use fsl_syntax::{Annotations, MetaTag};
+use fsl_syntax::{Annotations, MetaTag, ParseOptions};
 use serde_json::{Map, Value, json};
 
-use crate::dialect::{requirements_has_implements, requirements_trace_contract};
-use crate::{CoreError, KernelModel, TypeRef, display_name};
+use crate::dialect::{
+    requirements_has_implements_with_options, requirements_trace_contract_with_options,
+};
+use crate::{CoreError, KernelModel, TypeRef};
 
 /// Typed `kind` for the model-level "no user invariants" warning.
 pub const NO_USER_INVARIANTS_KIND: &str = "no_user_invariants";
@@ -27,10 +29,16 @@ impl<'a> ModelWarningContext<'a> {
     /// # Errors
     ///
     /// Returns [`CoreError`] when the source cannot be parsed as requirements metadata.
-    pub fn from_source(model: &'a KernelModel, source: &str) -> Result<Self, CoreError> {
-        let has_forbidden = requirements_trace_contract(source)?
-            .is_some_and(|contract| !contract.forbidden.is_empty());
-        let has_implements = requirements_has_implements(source)?;
+    pub fn from_source(
+        model: &'a KernelModel,
+        source: &str,
+        options: &ParseOptions,
+    ) -> Result<Self, CoreError> {
+        // Ungated: a forbidden the gate would reject still suppresses the
+        // warning; `check` reports that rejection separately.
+        let has_forbidden = requirements_trace_contract_with_options(source, options)?
+            .is_some_and(|contract| !contract.unchecked_forbidden().is_empty());
+        let has_implements = requirements_has_implements_with_options(source, options)?;
         Ok(Self {
             model,
             has_forbidden,
@@ -111,7 +119,7 @@ pub fn model_warnings(model: &KernelModel) -> Vec<Value> {
         })
         .map(|(name, _)| {
             json!({
-                "message": format!("Map<Int, ...> on '{}' is deprecated; use a bounded domain type as key", display_name(name)),
+                "message": format!("Map<Int, ...> on '{}' is deprecated; use a bounded domain type as key", model.names().public_state(name)),
                 "hint": "declare `type K = 0..<max>` and use `Map<K, ...>`",
             })
         })

@@ -8,15 +8,47 @@ use fsl_syntax::{
     ActionItem, Binder, Expr, LValue, MetaTag, Span, SpecItem, Statement, SurfaceSpec,
 };
 
-/// One fully materialized built-in mutant.
+/// One built-in mutation, retained as an edit rather than a full spec.
 #[derive(Clone, Debug)]
 pub struct BuiltinMutant {
     pub op: String,
-    pub spec: SurfaceSpec,
+    item_index: usize,
+    edit: Edit,
     pub span: Option<Span>,
     pub target: String,
     pub requirement: Option<MetaTag>,
     pub action: Option<String>,
+    /// The 0-based index, among the action's `requires`, of the guard this
+    /// mutant changes; `None` for a mutant of anything else.
+    pub guard: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+enum Edit {
+    Item(SpecItem),
+    Part(usize, ActionItem),
+    RemovePart(usize),
+}
+
+impl BuiltinMutant {
+    /// Clone `base` once and apply this mutant's edit.
+    /// `base` must be the same spec passed to `enumerate_builtin_mutants`.
+    #[must_use]
+    pub fn materialize(&self, base: &SurfaceSpec) -> SurfaceSpec {
+        debug_assert!(self.item_index < base.items.len());
+        let mut mutated = base.clone();
+        match (&self.edit, &mut mutated.items[self.item_index]) {
+            (Edit::Item(item), slot) => *slot = item.clone(),
+            (Edit::Part(index, part), SpecItem::Action { items, .. }) => {
+                items[*index] = part.clone();
+            }
+            (Edit::RemovePart(index), SpecItem::Action { items, .. }) => {
+                items.remove(*index);
+            }
+            _ => unreachable!("mutant base must be the enumerated spec"),
+        }
+        mutated
+    }
 }
 
 #[derive(Clone)]
@@ -192,12 +224,17 @@ fn expr_mutations(expr: &Expr, enums: &BTreeMap<String, Vec<String>>) -> Vec<Exp
                 });
             }
         }
-        Expr::EnumMember { type_name, member } if enums.contains_key(member) => {
+        Expr::EnumMember {
+            type_name,
+            member,
+            source_bare,
+        } if enums.contains_key(member) => {
             for sibling in &enums[member] {
                 output.push(ExprMutation {
                     expr: Expr::EnumMember {
                         type_name: type_name.clone(),
                         member: sibling.clone(),
+                        source_bare: *source_bare,
                     },
                     op: "enum_constant_swap",
                     enum_swap: None,
@@ -756,19 +793,20 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                 lo,
                 hi,
                 symmetric,
+                span,
             } => {
                 for (bound, value) in [("lo", lo.as_ref()), ("hi", hi.as_ref())] {
                     let Expr::Num(value) = value else {
                         continue;
                     };
                     for (candidate, suffix, _) in adjacent_integers(*value) {
-                        let mut mutated = spec.clone();
-                        mutated.items[item_index] = if bound == "lo" {
+                        let replacement = if bound == "lo" {
                             SpecItem::Type {
                                 name: name.clone(),
                                 lo: Box::new(Expr::Num(candidate)),
                                 hi: hi.clone(),
                                 symmetric: *symmetric,
+                                span: *span,
                             }
                         } else {
                             SpecItem::Type {
@@ -776,33 +814,37 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                                 lo: lo.clone(),
                                 hi: Box::new(Expr::Num(candidate)),
                                 symmetric: *symmetric,
+                                span: *span,
                             }
                         };
                         output.push(BuiltinMutant {
                             op: format!("type_bound_{bound}_{suffix}"),
-                            spec: mutated,
+                            item_index,
+                            edit: Edit::Item(replacement),
                             span: None,
                             target: format!("type {name} {bound}"),
                             requirement: None,
                             action: None,
+                            guard: None,
                         });
                     }
                 }
             }
             SpecItem::Const { name, value } => {
                 for mutation in expr_mutations(value, &enums) {
-                    let mut mutated = spec.clone();
-                    mutated.items[item_index] = SpecItem::Const {
+                    let replacement = SpecItem::Const {
                         name: name.clone(),
                         value: Box::new(mutation.expr.clone()),
                     };
                     output.push(BuiltinMutant {
                         op: mutation.op.to_owned(),
-                        spec: mutated,
+                        item_index,
+                        edit: Edit::Item(replacement),
                         span: None,
                         target: mutation_target(&format!("const {name}"), &mutation),
                         requirement: None,
                         action: None,
+                        guard: None,
                     });
                 }
             }
@@ -812,25 +854,27 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                 annotations,
             } => {
                 for mutation in statement_mutations(statements, &enums, "init") {
-                    let mut mutated = spec.clone();
-                    mutated.items[item_index] = SpecItem::Init {
+                    let replacement = SpecItem::Init {
                         statements: mutation.statements,
                         meta: meta.clone(),
                         annotations: annotations.clone(),
                     };
                     output.push(BuiltinMutant {
                         op: mutation.op.to_owned(),
-                        spec: mutated,
+                        item_index,
+                        edit: Edit::Item(replacement),
                         span: Some(mutation.span),
                         target: mutation.target,
                         requirement: None,
                         action: Some("init".to_owned()),
+                        guard: None,
                     });
                 }
             }
             SpecItem::Action {
                 name,
                 params,
+                param_spans,
                 items,
                 span,
                 fair,
@@ -845,66 +889,61 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                         ActionItem::Requires(expr, item_span) => {
                             require_number += 1;
                             let target = format!("{label} requires #{require_number}");
-                            let mut removed = spec.clone();
-                            if let SpecItem::Action { items, .. } = &mut removed.items[item_index] {
-                                items.remove(part_index);
-                            }
                             output.push(BuiltinMutant {
                                 op: "requires_remove".to_owned(),
-                                spec: removed,
+                                item_index,
+                                edit: Edit::RemovePart(part_index),
                                 span: Some(*item_span),
                                 target: target.clone(),
                                 requirement: meta.clone(),
                                 action: Some(label.clone()),
+                                guard: Some(require_number - 1),
                             });
-                            let mut negated = spec.clone();
-                            if let SpecItem::Action { items, .. } = &mut negated.items[item_index] {
-                                items[part_index] = ActionItem::Requires(
-                                    Expr::Not(Box::new(expr.clone())),
-                                    *item_span,
-                                );
-                            }
                             output.push(BuiltinMutant {
                                 op: "requires_negate".to_owned(),
-                                spec: negated,
+                                item_index,
+                                edit: Edit::Part(
+                                    part_index,
+                                    ActionItem::Requires(
+                                        Expr::Not(Box::new(expr.clone())),
+                                        *item_span,
+                                    ),
+                                ),
                                 span: Some(*item_span),
                                 target: target.clone(),
                                 requirement: meta.clone(),
                                 action: Some(label.clone()),
+                                guard: Some(require_number - 1),
                             });
                             for mutation in expr_mutations(expr, &enums) {
-                                let mut mutated = spec.clone();
-                                if let SpecItem::Action { items, .. } =
-                                    &mut mutated.items[item_index]
-                                {
-                                    items[part_index] =
-                                        ActionItem::Requires(mutation.expr.clone(), *item_span);
-                                }
                                 output.push(BuiltinMutant {
                                     op: mutation.op.to_owned(),
-                                    spec: mutated,
+                                    item_index,
+                                    edit: Edit::Part(
+                                        part_index,
+                                        ActionItem::Requires(mutation.expr.clone(), *item_span),
+                                    ),
                                     span: Some(*item_span),
                                     target: mutation_target(&target, &mutation),
                                     requirement: meta.clone(),
                                     action: Some(label.clone()),
+                                    guard: Some(require_number - 1),
                                 });
                             }
                         }
                         ActionItem::Let(let_name, expr, item_span) => {
                             for mutation in expr_mutations(expr, &enums) {
-                                let mut mutated = spec.clone();
-                                if let SpecItem::Action { items, .. } =
-                                    &mut mutated.items[item_index]
-                                {
-                                    items[part_index] = ActionItem::Let(
-                                        let_name.clone(),
-                                        mutation.expr.clone(),
-                                        *item_span,
-                                    );
-                                }
                                 output.push(BuiltinMutant {
                                     op: mutation.op.to_owned(),
-                                    spec: mutated,
+                                    item_index,
+                                    edit: Edit::Part(
+                                        part_index,
+                                        ActionItem::Let(
+                                            let_name.clone(),
+                                            mutation.expr.clone(),
+                                            *item_span,
+                                        ),
+                                    ),
                                     span: Some(*item_span),
                                     target: mutation_target(
                                         &format!("{label} let {let_name}"),
@@ -912,6 +951,7 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                                     ),
                                     requirement: meta.clone(),
                                     action: Some(label.clone()),
+                                    guard: None,
                                 });
                             }
                         }
@@ -925,30 +965,31 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                     for mutation in
                         statement_mutations(std::slice::from_ref(statement), &enums, &label)
                     {
-                        let mut mutated = spec.clone();
-                        if let SpecItem::Action { items, .. } = &mut mutated.items[item_index] {
-                            if mutation.statements.is_empty() {
-                                items.remove(part_index);
-                            } else {
-                                items[part_index] =
-                                    ActionItem::Statement(mutation.statements[0].clone());
-                            }
-                        }
+                        let edit = if mutation.statements.is_empty() {
+                            Edit::RemovePart(part_index)
+                        } else {
+                            Edit::Part(
+                                part_index,
+                                ActionItem::Statement(mutation.statements[0].clone()),
+                            )
+                        };
                         output.push(BuiltinMutant {
                             op: mutation.op.to_owned(),
-                            spec: mutated,
+                            item_index,
+                            edit,
                             span: Some(mutation.span),
                             target: mutation.target,
                             requirement: meta.clone(),
                             action: Some(label.clone()),
+                            guard: None,
                         });
                     }
                 }
                 if *fair {
-                    let mut mutated = spec.clone();
-                    mutated.items[item_index] = SpecItem::Action {
+                    let replacement = SpecItem::Action {
                         name: name.clone(),
                         params: params.clone(),
+                        param_spans: param_spans.clone(),
                         items: items.clone(),
                         span: *span,
                         fair: false,
@@ -958,11 +999,13 @@ pub fn enumerate_builtin_mutants(spec: &SurfaceSpec) -> Vec<BuiltinMutant> {
                     };
                     output.push(BuiltinMutant {
                         op: "fair_remove".to_owned(),
-                        spec: mutated,
+                        item_index,
+                        edit: Edit::Item(replacement),
                         span: Some(*span),
                         target: format!("{label} fair"),
                         requirement: meta.clone(),
                         action: Some(label),
+                        guard: None,
                     });
                 }
             }

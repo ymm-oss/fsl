@@ -354,6 +354,29 @@ finding. Retirement itself is not a formal proof of falsity.
   its claims' lag intervals (e.g. `0..7` + `14..90` + `60..180` = `74..277`).
 - A path containing `lag unknown` has time reach `unknown`. No convenient
   default is substituted.
+- **Analysis numeric range (#1475):** accumulated minimum path, earliest-response,
+  and feedback-cycle times use checked `u64` addition. If any candidate time sum
+  evaluated during exploration cannot be represented as `u64`, analysis immediately
+  returns a causal semantics error at the contributing claim's source position
+  (exit 2), even if the true minimum fits in `u64` or a later `lag unknown` would
+  make the answer `unknown`. `check` acceptance is unchanged. Overflow is
+  not replaced with saturation or `unknown`. Constant-factor threshold
+  comparisons are evaluated exactly by widening operands before multiplication,
+  without exposing a wider integer in output. Maximum path, SCC-internal,
+  condensation-path, and feedback-cycle sums follow the same rule (#1506):
+  any explored candidate sum that overflows returns the located
+  `causal_invalid_model`, not saturation or `unknown`. Timeline internal sums
+  are evaluated only for components reachable over known-lag condensation edges
+  from the intervention currently being evaluated; SCCs unreachable from that
+  intervention do not enter those sums. Any evaluated overflow rejects the entire
+  `causal_timeline` projection, including pairs for other interventions. This
+  reachability restriction does not apply to declared feedback cycle sums in
+  `causal_graph` or `causal-review`, which reject an overflowing `cycle_lag` even
+  in a feedback component unreachable from interventions. Reachable SCC internal
+  sums are evaluated before the DP edge additions, and overflow when adding a
+  target SCC's internal bound names the entering edge's claim.
+  `response_end = lag.max + persists.max` cannot overflow: both values are at
+  most the horizon (at most `i64::MAX`), so their sum is at most `2^64 - 2`.
 - Clock mappings connecting to the kernel's generated `tick` are fixed as
   named `clock` declarations directly under the `causal` block. A declaration
   binds an imported kernel spec, a positive-integer number of kernel ticks,
@@ -554,6 +577,18 @@ Never changed by this profile: `rust/fsl-runtime`, `rust/fsl-solver*`,
 - Representative path output has an explicit cap and truncation metadata;
   reachability, earliest time, and dominators come from graph algorithms, not
   enumeration, so the cap can never change a judgment.
+  The native `representative_paths` walk uses
+  `REPRESENTATIVE_PATH_EXPANSION_BUDGET = 100_000`: each DFS stack pop counts
+  once, across all intervention starts in one projection. Reverse reachability
+  from all outcomes is computed once to prune successors that cannot reach an
+  outcome. The budget leaves the committed examples and exact-count goldens
+  unchanged while bounding the exponential simple-path enumeration on dense
+  graphs. `truncation.paths_cap` remains 16. If the walk finishes within the
+  budget, `paths_truncated` is the exact number of omitted paths and
+  `paths_truncated_exact` is absent, preserving the existing output. If work
+  remains after the budget, the walk stops, keeps the paths already found, and
+  adds `paths_truncated_exact: false`; `paths_truncated` then counts only omitted
+  paths already encountered and is a lower bound (possibly zero), not a total.
 
 ## 10. Resolved open decisions
 
@@ -620,7 +655,9 @@ never contradict, the sections above.
   (missing/duplicate timebase, horizon, or required claim field; invalid
   enum values; clock unit ≠ timebase) and `causal_scope_invalid` (undeclared
   dimension/token, contradictory or cyclic relations, duplicate dimension in a
-  selection). Both are errors; analysis never starts on them.
+  selection). These well-formedness failures prevent analysis from starting.
+  `causal_invalid_model` also reports minimum- or maximum-time sum overflow during
+  analysis, without changing `check` acceptance (see §5, **Analysis numeric range**).
 - **Unacknowledged-cycle rule** (warning `causal_unacknowledged_feedback` and
   finding `unacknowledged_feedback_loop`): computed at edge granularity on the
   SCC condensation — any active claim inside a nontrivial SCC that is not part
@@ -659,13 +696,26 @@ never contradict, the sections above.
 
 ## 13. Phase 2 implementation notes (fixed by #322)
 
-- **Digest conventions.** `artifact_digest` = `sha256:` over the canonical
-  JSON (recursively sorted keys, compact separators) of the artifact with the
+- **Digest conventions.** `artifact_digest` = `sha256:` over the canonical JSON
+  of the artifact with the
   `artifact_digest` field removed. A lifecycle `record_digest` = the same
   canonicalization of the record with `record_digest` removed plus the
   chain's `evidence_id` and `artifact_digest` injected. Tampering with either
   is a fatal `causal_evidence_digest_mismatch` /
   `causal_evidence_lifecycle_mismatch`.
+- **Canonical JSON rules (#1432).** The native `canonical_json` digest format
+  recursively sorts object keys by Rust `str` order (UTF-8 byte order) and uses
+  compact separators. Integers remain exact within the i64 and u64 ranges,
+  including values above 2^53. Float spelling is `serde_json`'s shortest
+  round-trip form (version 1.0.150 pinned in `rust/Cargo.lock`): integral floats
+  in plain notation retain `.0` (for example `1.0`), and `-0.0` is kept;
+  exponent notation such as `1e+30` and `1e-7` has no `.0`.
+  Non-ASCII text remains raw UTF-8. Double quote (`"`), backslash
+  (`\`), and U+0000..U+001F are escaped: `\n`, `\r`, `\t`, `\b`, `\f`, otherwise
+  lowercase `\u00xx`; `/` is not escaped. These pin the existing bytes, not a new
+  serialization or digest version. This is not a claim of RFC 8785/JCS
+  conformance; #1526 tracks that separate question. Existing artifact and
+  lifecycle record digests remain unchanged.
 - **Fail-closed boundary.** Artifact schema violations (unknown design/
   support/observation fields, non-`not_run` `formal_result`), digest
   mismatches, and lifecycle-chain violations (sequence gaps/forks, broken
@@ -674,9 +724,26 @@ never contradict, the sections above.
   (version pin, scope, freshness, lifecycle status, window-vs-lag, lineage)
   are warnings: the artifact stays in history and in the graph but is
   excluded from current support.
+- **Declared freshness is validated.** After the artifact's declared digest
+  matches its canonical payload, a present `period.valid_until` must be a
+  string of exactly ten ASCII characters in `YYYY-MM-DD` form and a valid
+  Gregorian date, including year `0000` and Gregorian leap-year rules.
+  Null and other non-string values, malformed strings, and impossible dates
+  fail closed with `causal_evidence_schema_mismatch` and exit 2, with or
+  without `--as-of`. A digest mismatch retains precedence over this check.
+  Missing `valid_until` remains accepted with `unknown_freshness` and no
+  current support. This check does not tighten `period.start` or `period.end`.
 - **Staleness needs `--as-of`.** `stale_evidence` compares `valid_until`
-  against an explicit `--as-of YYYY-MM-DD` only; without `--as-of`, a
-  declared `valid_until` is accepted as-declared (never the wall clock, so
+  against an explicit `--as-of YYYY-MM-DD` only. `causal analyze` and
+  `causal ledger` check the `--as-of` value while reading options, before
+  the model or any evidence is read, by the same rule as `valid_until`:
+  exactly ten ASCII characters, digits in every field, no sign, and a valid
+  Gregorian date. Any other value, including an empty one, is refused with
+  `kind:"usage"`, exit 2, and the message `--as-of requires a valid Gregorian
+  date in YYYY-MM-DD format, got '<value>'` (#1422). This is a new refusal:
+  such a value used to exit 0 and silently count nothing as stale. Without
+  `--as-of`, a
+  valid declared `valid_until` is used as-declared (never the wall clock, so
   identical inputs always produce identical output). Missing `valid_until`
   is `unknown_freshness` and excludes the artifact regardless.
 - **Window conversion.** `period.end - period.start` converts to timebase
@@ -696,11 +763,14 @@ never contradict, the sections above.
   `period_start_missing`, `period_end_missing`, `period_date_unparsable`,
   `period_end_before_start`, `timebase_not_convertible`,
   `week_window_not_whole_weeks`; the lag side reports `claim_lag_unknown`.
-  A date is parsed as `YYYY-MM-DD` with a month in 1..12 and a day in 1..31 —
-  day-of-month validity against the month is **not** checked, so an impossible
-  date such as `2026-02-31` converts as its normalized value rather than
-  reporting `period_date_unparsable`. That is pre-existing `civil_days`
-  behaviour and also governs `valid_until` staleness.
+  The existing `civil_days` conversion checks Gregorian month lengths and
+  leap years: an impossible date such as `2026-02-31` reports
+  `period_date_unparsable` rather than being normalized. Every field must be
+  fixed-width ASCII digits, so a signed field such as `+026-01-01` or
+  `2026-+1-01` is also `period_date_unparsable` rather than being read as a
+  number (#1422). The same calendar conversion also governs `valid_until`
+  validation, `--as-of` validation and staleness. Unconvertible start/end
+  dates remain soft timing exclusions rather than artifact parse errors.
 - **Lineage.** The lineage root is the transitive `derived_from` root when
   present, else `source_study_id`, else the artifact itself. Roots sharing
   members emit `duplicate_evidence_source`; one root is one vote; support
@@ -787,7 +857,16 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
   A nonconformant log record (action not enabled, state mismatch) aborts
   with `observation_replay_nonconformant`. A mapping failure (unknown
   action, parameter mismatch, missing state variable) aborts with
-  `observation_replay_failed`. All failure outputs carry `do_not_assume`.
+  `observation_replay_failed`. These record-mapping and conformance failures
+  carry `do_not_assume`. Non-record argument, schema, and I/O errors retain
+  their ordinary CLI error envelopes.
+- **Shared mapping arithmetic (#1422).** Negating a dynamic JSON-log integer
+  at `i64::MIN` refuses with the existing `invalid mapping arithmetic` error
+  instead of overflowing. `fslc replay --from-log --mapping` reports
+  `nonconformant` with violation kind `log_mapping` and exit 1;
+  `causal observe-expectations` reports `observation_replay_failed` and exit 2.
+  Representable integer negation, non-integer type errors, and the other
+  arithmetic operators retain their existing behavior.
 - **Evidence artifacts.** Per-expectation `fsl-causal-evidence.v0` artifacts
   with the `observation` object filled in: `design: "observational"`,
   `support: "inconclusive"`, `observation.kind: "expectation_replay"`,
@@ -796,6 +875,30 @@ integer-conversion fail-closed conditions (§5) are shared verbatim with #323.
   than `"inconclusive"` or `design` other than `"observational"` (AC 3/4).
   `observation.digests` carries sha256 digests of the causal source, JSONL
   log, and mapping file. Lifecycle records are sequence-1 active chains.
+- **Generated artifact validation (#1422).** Observation checks each generated
+  evidence artifact with the ingestion parser after stamping its digest and
+  before writing any evidence or lifecycle file. Since the declared period end
+  is emitted as `valid_until`, an invalid generated freshness date returns a
+  `semantics` error with diagnostic `causal_evidence_schema_mismatch` and exit 2.
+  This refusal leaves existing output files unchanged. `--period-start` and
+  `--period-end` are checked while options are read, by the same rule as
+  `--as-of`: a value that is not a real Gregorian date in ASCII `YYYY-MM-DD`
+  is refused with `kind:"usage"`, exit 2, and the message `<option> requires
+  a valid Gregorian date in YYYY-MM-DD format, got '<value>'`, before any
+  input is read or output written. This is a new refusal: an invalid
+  `--period-start` such as `2026-02-30` used to exit 0 and write an artifact
+  whose start was a soft timing exclusion. A stored artifact's invalid
+  `period.start`/`period.end` stays a soft timing exclusion on ingestion.
+  Observation adds no date-order policy and takes no `--as-of`.
+- **Captured inputs (#1423).** Observation parses JSONL records and hashes the
+  same single UTF-8 capture, including original whitespace and line endings;
+  log read/parse failures still precede scope parsing. Replacing or removing
+  the log after capture cannot change evaluation or provenance. The replay
+  path reader retains the shared parser's line numbers and errors. Observe
+  and verify already load the causal model from the supplied source (the
+  historical issue's spec-reread premise no longer applies). Source/mapping
+  hashing and §13 artifact/lifecycle canonicalization are unchanged, as are
+  ordinary outputs, failure classifications, exit codes and assurance.
 - **File output.** `--out` and `--lifecycle-out` write one file per artifact
   (individually consumable by `fslc causal analyze --evidence`). Multiple
   expectations produce files with the evidence ID embedded in the filename.

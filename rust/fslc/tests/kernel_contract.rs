@@ -52,6 +52,69 @@ fn run_cli(args: &[&str]) -> (Value, i32) {
     (value, output.status.code().expect("exit status"))
 }
 
+fn at_method_output(command: &str, index: &str) -> std::process::Output {
+    let source = format!(
+        "spec EmptyAt {{ state {{ q: Seq<Int, 2>, n: Int }} init {{ q = Seq {{}} n = 0 }} \
+         action Touch() {{ n = q.at({index}) }} invariant Safe {{ true }} }}"
+    );
+    let path = scratch_dir("at-method").join("spec.fsl");
+    fs::write(&path, source).expect("write source");
+    Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .arg(command)
+        .arg(&path)
+        .current_dir(repo_root())
+        .output()
+        .expect("run at-method CLI")
+}
+
+#[test]
+fn empty_at_index_is_rejected_by_check_and_kernel() {
+    let checked = at_method_output("check", "");
+    assert_eq!(checked.status.code(), Some(2), "{checked:?}");
+    assert!(checked.stderr.is_empty(), "{checked:?}");
+    let checked: Value = serde_json::from_slice(&checked.stdout).expect("check JSON");
+    let diagnostic = json!({
+        "fsl": "1.0",
+        "result": "error",
+        "kind": "semantics",
+        "message": "invalid model expression: invalid Seq method 'at'/0 at 1:92",
+        "loc": {"line": 1, "column": 92}
+    });
+    let mut checked_diagnostic = diagnostic.clone();
+    checked_diagnostic["versions"] = fsl_core::version_metadata(
+        "fslc-rust",
+        env!("CARGO_PKG_VERSION"),
+        "native-z3",
+        fsl_solver_z3::version(),
+    );
+    assert_eq!(checked, checked_diagnostic, "check-time semantics envelope");
+
+    let output = at_method_output("kernel", "");
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let output: Value = serde_json::from_slice(&output.stdout).expect("kernel error JSON");
+    assert_eq!(
+        output, diagnostic,
+        "kernel runs the checker first and returns its diagnostic without check version metadata"
+    );
+}
+
+#[test]
+fn at_with_an_index_still_exports_a_partial_operation() {
+    let output = at_method_output("kernel", "0");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stderr.is_empty(), "{output:?}");
+    let output: Value = serde_json::from_slice(&output.stdout).expect("kernel JSON");
+    assert_eq!(output["result"], "kernel");
+    assert_eq!(
+        output["actions"][0]["partial_operations"][0]["operation"],
+        "at"
+    );
+    compiled_kernel_v1_schema()
+        .validate(&output)
+        .expect("valid Kernel schema");
+}
+
 fn compiled_kernel_v1_schema() -> jsonschema::Validator {
     let schema: Value = serde_json::from_str(
         &fs::read_to_string(repo_root().join("schemas/fslc/kernel/kernel.v1.schema.json"))
@@ -600,7 +663,7 @@ fn native_cli_negotiates_kernel_and_conformance_majors_fail_closed() {
     assert_eq!(unsupported.status.code(), Some(2));
     let unsupported: Value = serde_json::from_slice(&unsupported.stdout).expect("error envelope");
     assert_eq!(unsupported["result"], "error");
-    assert_eq!(unsupported["kind"], "semantics");
+    assert_eq!(unsupported["kind"], "usage");
     assert!(
         unsupported["message"]
             .as_str()

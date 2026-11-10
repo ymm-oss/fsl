@@ -3,20 +3,31 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use fsl_core::{FslValue, KernelExpr, KernelModel};
+use fsl_core::{FslValue, KernelExpr, KernelModel, TypeDef, TypeRef};
+use fslc_rust::outcome::error_exit;
+use fslc_rust::spec_load::SpecLoadError;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
-use super::{
-    CliVerifyOptions, ScopeBounds, SpecLoadError, add_strict_tag_warnings, apply_vacuity_mode,
-    block_on_native, display, envelope, error_output, implements_error_output,
-    implements_result_from_source_with_bounds, invariant_names,
-    load_kernel_model_from_source_with_resolver, load_model, load_model_from_source,
-    load_model_scoped, load_model_scoped_from_source, load_snapshot_value_object,
-    load_state_snapshot, read_spec_source, select_properties, selected_implicit_bounds,
-    semantic_error_output, spec_load_error_output, surface_parse_error_output, trace_last_action,
-    validate_requirement_traces_from_source, validate_specialized_document_from_source,
+use crate::cli_options::{CliVerifyOptions, ScopeBounds};
+use crate::cli_output::{
+    envelope, error_output, semantic_error_output, spec_load_error_output,
+    surface_parse_error_output, trace_last_action,
 };
+use crate::process::{STACK_SIZE, block_on_native, parse_options};
+use crate::property_selection::{
+    apply_vacuity_mode, invariant_names, select_properties, selected_implicit_bounds,
+};
+use crate::refinement::{
+    fold_governance_from_source, implements_error_output, implements_result_from_source_with_bounds,
+};
+use crate::spec_loading::{
+    io_error_output, load_kernel_model_from_source_with_resolver, load_model,
+    load_model_from_source, load_model_scoped, load_model_scoped_from_source,
+    load_snapshot_value_object, load_state_snapshot, require_trace_gate,
+    validate_specialized_document_from_source,
+};
+use crate::strict_tags::add_strict_tag_warnings_from_source;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum VerificationEngine {
@@ -91,9 +102,12 @@ fn origin_aware_property_name(
     name: &str,
 ) -> String {
     let Some(origin) = model.property_origin(kind, name) else {
-        return display(name);
+        return model.names().public_property(name).into_string();
     };
-    output.insert("generated_name".to_owned(), json!(display(name)));
+    output.insert(
+        "generated_name".to_owned(),
+        json!(model.names().public_property(name).into_string()),
+    );
     output.insert(
         "origin".to_owned(),
         ::fslc_rust::internal_origin_json(origin),
@@ -101,7 +115,10 @@ fn origin_aware_property_name(
     if let Some(span) = origin.primary.as_ref().and_then(|site| site.span) {
         output.insert("loc".to_owned(), span.python_loc());
     }
-    ::fslc_rust::origin_display_name(origin).map_or_else(|| display(name), str::to_owned)
+    ::fslc_rust::origin_display_name(origin).map_or_else(
+        || model.names().public_property(name).into_string(),
+        str::to_owned,
+    )
 }
 
 fn origin_aware_action_json(
@@ -183,7 +200,7 @@ fn selected_transition_induction_model(
     if !model
         .transitions
         .iter()
-        .any(|property| display(&property.name) == selected)
+        .any(|property| model.names().public_property(&property.name).into_string() == selected)
     {
         return Ok(None);
     }
@@ -208,19 +225,19 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         auxiliary,
         skip_vacuity_probe,
     } = request;
-    let selected_transition_model = match selected_transition_induction_model(selection) {
+    let selected_model = match selected_transition_induction_model(selection)
+        .and_then(|model| model.map_or_else(|| load_selected_model(selection), Ok))
+    {
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let selection = selected_transition_model
-        .as_ref()
-        .map_or(selection, |model| ModelSelection {
-            path: selection.path,
-            model: Some(model),
-            scope: None,
-            property: None,
-            excluded: &[],
-        });
+    let selection = ModelSelection {
+        path: selection.path,
+        model: Some(&selected_model),
+        scope: None,
+        property: None,
+        excluded: &[],
+    };
     let started = Instant::now();
     let base_request = BmcRequest {
         selection,
@@ -229,28 +246,15 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         initial_state: None,
         skip_vacuity_probe,
     };
-    let (base_prepared, base_solved) = match execute_bmc(&base_request, started) {
+    let (base_solved, (base_value, base_status)) = match execute_bmc(&base_request, started, true) {
         Ok(execution) => execution,
         Err(output) => return output,
     };
-    let (base_value, base_status) = fslc_rust::verification_output::render_bmc_output(
-        envelope(),
-        &base_prepared.model,
-        &base_solved.result,
-        fslc_rust::verification_output::BmcOutputOptions {
-            depth: base_request.depth,
-            deadlock: base_request.deadlock,
-            checked_bounds: base_prepared.checked_bounds.as_ref(),
-            elapsed_s: started.elapsed().as_secs_f64(),
-            statistics: &base_solved.statistics,
-            skip_vacuity_probe: base_request.skip_vacuity_probe,
-        },
-    );
     let Value::Object(base) = &base_value else {
-        return (
-            error_output("internal", "BMC returned a non-object envelope"),
-            3,
-        );
+        return error_exit(error_output(
+            "internal",
+            "BMC returned a non-object envelope",
+        ));
     };
     if base.get("result").and_then(Value::as_str) != Some("verified") {
         // A base-case `leadsTo` violation may be a raw BMC stall/lasso trace
@@ -281,11 +285,11 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
     };
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return (error_output("internal", &error.to_string()), 3),
+        Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
     let induction = match block_on_native(fsl_verifier::prove_induction(&model, &mut solver, k)) {
         Ok(result) => result,
-        Err(error) => return (error_output("semantics", &error.to_string()), 2),
+        Err(error) => return error_exit(error_output("semantics", &error.to_string())),
     };
 
     if let Some(cti) = &induction.cti {
@@ -296,7 +300,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
 
     let ranked = match block_on_native(fsl_verifier::prove_ranked_leadstos(&model, &mut solver)) {
         Ok(result) => result,
-        Err(error) => return (error_output("semantics", &error.to_string()), 2),
+        Err(error) => return error_exit(error_output("semantics", &error.to_string())),
     };
     let mut statistics = base_solved.statistics.clone();
     statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
@@ -387,6 +391,7 @@ fn monotone_suggestion(
 }
 
 fn scalar_suggestion(
+    model: &KernelModel,
     initial_state: &std::collections::BTreeMap<String, FslValue>,
     trace: &[fsl_core::TraceStep],
     name: &str,
@@ -402,7 +407,7 @@ fn scalar_suggestion(
         })
         .collect::<Option<Vec<_>>>()?;
     let direction = monotone_direction(&values).ok()??;
-    let public_name = display(name);
+    let public_name = model.names().public_state(name).into_string();
     let operator = if direction == std::cmp::Ordering::Greater {
         ">="
     } else {
@@ -479,11 +484,11 @@ fn map_suggestion(
     } else {
         "<="
     };
-    let public_name = display(name);
+    let public_name = model.names().public_state(name).into_string();
     let binder = if public_name == "k" { "key" } else { "k" };
     let expression = format!(
         "forall {binder}: {} {{ {public_name}[{binder}] {operator} {initial} }}",
-        display(key_name)
+        model.names().public_state(key_name).into_string()
     );
     monotone_suggestion(&public_name, direction, start, *initial, &expression)
 }
@@ -503,7 +508,7 @@ fn suggested_invariants(
         .iter()
         .filter_map(|(name, ty)| {
             if integer_state_type(model, ty) {
-                scalar_suggestion(&initial_state, trace, name)
+                scalar_suggestion(model, &initial_state, trace, name)
             } else {
                 map_suggestion(model, &initial_state, trace, name, ty)
             }
@@ -520,10 +525,12 @@ fn insert_action_cti_last_action(
     cti: &fsl_verifier::InductionCti,
 ) {
     let action_context = cti.kind == fsl_verifier::violation_kind::ENSURES
-        || ["_partial_", "_key_domain_"].into_iter().any(|prefix| {
-            cti.name
-                .strip_prefix(prefix)
-                .is_some_and(|rest| !rest.starts_with("property_"))
+        || fsl_core::SyntheticName::parse_internal(&cti.name).is_some_and(|synthetic| {
+            matches!(
+                synthetic,
+                fsl_core::SyntheticName::PartialAction { .. }
+                    | fsl_core::SyntheticName::KeyDomainAction { .. }
+            )
         });
     let Some(action) = action_context
         .then(|| cti.trace.last())
@@ -643,7 +650,9 @@ fn render_induction_cti(
                 model
                     .transitions
                     .iter()
-                    .map(|property| Value::String(display(&property.name)))
+                    .map(|property| {
+                        Value::String(model.names().public_property(&property.name).into_string())
+                    })
                     .collect(),
             ),
         );
@@ -769,10 +778,12 @@ fn render_induction_success(
     output.insert(
         "k_used".to_owned(),
         Value::Object(
-            ::fslc_rust::verification_output::sorted_by_published(&induction.k_used, display)
-                .into_iter()
-                .map(|(name, _, k)| (name, json!(k)))
-                .collect(),
+            ::fslc_rust::verification_output::sorted_by_published(&induction.k_used, |name| {
+                model.names().public_property(name)
+            })
+            .into_iter()
+            .map(|(name, _, k)| (name.into_string(), json!(k)))
+            .collect(),
         ),
     );
     output.insert("base_depth".to_owned(), json!(depth));
@@ -791,7 +802,9 @@ fn render_induction_success(
             model
                 .transitions
                 .iter()
-                .map(|property| Value::String(display(&property.name)))
+                .map(|property| {
+                    Value::String(model.names().public_property(&property.name).into_string())
+                })
                 .collect(),
         ),
     );
@@ -811,7 +824,7 @@ fn render_induction_success(
         let mut leads_to = leads_to.as_object().cloned().unwrap_or_default();
         for proof in &ranked.proofs {
             let entry = leads_to
-                .entry(display(&proof.name))
+                .entry(model.names().public_property(&proof.name).into_string())
                 .or_insert_with(|| json!({"checked_to_depth": depth}));
             if let Value::Object(entry) = entry {
                 entry.insert("proved".to_owned(), json!(true));
@@ -929,14 +942,16 @@ fn explicit_solver_findings(
     action_coverage: &std::collections::BTreeMap<String, bool>,
 ) -> Result<ExplicitSolverFindings, (Value, i32)> {
     let mut solver = fsl_solver_z3::Z3Solver::new()
-        .map_err(|error| (error_output("internal", &error.to_string()), 3))?;
+        .map_err(|error| error_exit(error_output("internal", &error.to_string())))?;
     block_on_native(async {
         let diagnostics = fsl_verifier::diagnose_reachables(model, &mut solver).await?;
         let vacuity =
             fsl_verifier::model_vacuity_findings(model, &mut solver, action_coverage).await?;
         Ok((vacuity, diagnostics))
     })
-    .map_err(|error: fsl_verifier::VerifyError| (error_output("semantics", &error.to_string()), 2))
+    .map_err(|error: fsl_verifier::VerifyError| {
+        error_exit(error_output("semantics", &error.to_string()))
+    })
 }
 
 pub(super) fn run_explicit_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
@@ -1009,22 +1024,22 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
     if model.actions.is_empty() {
         return (semantic_error_output("spec has no actions"), 2);
     }
-    if let Some(reason) = fsl_runtime::explicit_unsupported_reason(&model) {
-        return auto_fallback_to_bmc(request, &reason, "unsupported");
-    }
     let checked_bounds = selected_implicit_bounds(
         &model,
         request.selection.property,
         request.selection.excluded,
     );
-    let result = match fsl_runtime::verify_explicit_selected(
-        model.clone(),
+    let result = match explicit_first(
+        &model,
         request.depth,
         request.budget,
         checked_bounds.as_ref(),
     ) {
-        Ok(result) => result,
-        Err(error) => {
+        ExplicitFirst::Unsupported(reason) => {
+            return auto_fallback_to_bmc(request, &reason, "unsupported");
+        }
+        ExplicitFirst::Ran(Ok(result)) => result,
+        ExplicitFirst::Ran(Err(error)) => {
             return (
                 fslc_rust::verification_output::render_runtime_error(envelope(), &error),
                 2,
@@ -1052,6 +1067,31 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
         return auto_fallback_to_bmc(request, &budget_fallback_reason(&output), "budget");
     }
     (output, status)
+}
+
+// A short-lived return value, not a stored collection; keep the raw runtime result.
+#[allow(clippy::large_enum_variant)]
+pub(super) enum ExplicitFirst {
+    Unsupported(String),
+    Ran(Result<fsl_runtime::ExplicitResult, fsl_runtime::RuntimeError>),
+}
+
+/// Shared raw decision; callers retain their own verdict/fallback policy.
+pub(super) fn explicit_first(
+    model: &KernelModel,
+    depth: usize,
+    budget: usize,
+    checked_bounds: Option<&std::collections::BTreeSet<String>>,
+) -> ExplicitFirst {
+    if let Some(reason) = fsl_runtime::explicit_unsupported_reason(model) {
+        return ExplicitFirst::Unsupported(reason);
+    }
+    ExplicitFirst::Ran(fsl_runtime::verify_explicit_selected(
+        model.clone(),
+        depth,
+        budget,
+        checked_bounds,
+    ))
 }
 
 fn auto_fallback_to_bmc(request: ExplicitRequest<'_>, reason: &str, kind: &str) -> (Value, i32) {
@@ -1101,16 +1141,23 @@ fn budget_fallback_reason(explicit_output: &Value) -> String {
 fn finish_explicit_output(rendered: Result<(Value, i32), String>) -> (Value, i32) {
     match rendered {
         Ok(output) => output,
-        Err(error) => (error_output("internal", &error), 3),
+        Err(error) => error_exit(error_output("internal", &error)),
     }
 }
 
 pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
     let started = Instant::now();
-    let (prepared, solved) = match execute_bmc(&request, started) {
-        Ok(execution) => execution,
-        Err(output) => return output,
-    };
+    match execute_bmc(&request, started, false) {
+        Ok((_, output)) | Err(output) => output,
+    }
+}
+
+fn render_bmc(
+    request: &BmcRequest<'_>,
+    prepared: &PreparedBmc,
+    solved: &SolvedBmc,
+    started: Instant,
+) -> (Value, i32) {
     fslc_rust::verification_output::render_bmc_output(
         envelope(),
         &prepared.model,
@@ -1126,16 +1173,48 @@ pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
     )
 }
 
+fn contains_sequence(model: &KernelModel, ty: &TypeRef) -> bool {
+    match ty {
+        TypeRef::Seq(_, _) => true,
+        TypeRef::Map(key, value) | TypeRef::Relation(key, value) => {
+            contains_sequence(model, key) || contains_sequence(model, value)
+        }
+        TypeRef::Set(inner) | TypeRef::Option(inner) => contains_sequence(model, inner),
+        TypeRef::Named(name) => matches!(model.types.get(name), Some(TypeDef::Struct { fields })
+            if fields.iter().any(|(_, ty)| contains_sequence(model, ty))),
+        TypeRef::Int | TypeRef::Bool | TypeRef::Range(_, _) => false,
+    }
+}
+
 fn execute_bmc(
     request: &BmcRequest<'_>,
     started: Instant,
-) -> Result<(PreparedBmc, SolvedBmc), CommandResult> {
-    let prepared = prepare_bmc(request, started)?;
-    let solved = solve_bmc(request, &prepared)?;
-    Ok((prepared, solved))
+    symbolic_first: bool,
+) -> Result<(SolvedBmc, CommandResult), CommandResult> {
+    let prepared = prepare_bmc(request)?;
+    let deferred = symbolic_first
+        && !prepared
+            .model
+            .state
+            .iter()
+            .any(|(_, ty)| contains_sequence(&prepared.model, ty));
+    if !deferred {
+        probe_bmc_boundary(request, &prepared, started)?;
+    }
+    let solved = solve_bmc(request, &prepared);
+    let output = match &solved {
+        Ok(solved) => render_bmc(request, &prepared, solved, started),
+        Err(output) => output.clone(),
+    };
+    // Only a successful all-bounds base makes the concrete search redundant.
+    // Every non-success retains the existing boundary evidence and priority.
+    if deferred && output.0.get("result").and_then(Value::as_str) != Some("verified") {
+        probe_bmc_boundary(request, &prepared, started)?;
+    }
+    Ok((solved?, output))
 }
 
-fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc, CommandResult> {
+fn prepare_bmc(request: &BmcRequest<'_>) -> Result<PreparedBmc, CommandResult> {
     let model = load_selected_model(request.selection)
         .map_err(|error| (spec_load_error_output(&error), 2))?;
     if request.initial_state.is_none() {
@@ -1151,16 +1230,29 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
         request.selection.property,
         request.selection.excluded,
     );
+    Ok(PreparedBmc {
+        model,
+        checked_bounds,
+    })
+}
+
+fn probe_bmc_boundary(
+    request: &BmcRequest<'_>,
+    prepared: &PreparedBmc,
+    started: Instant,
+) -> Result<(), CommandResult> {
+    let model = &prepared.model;
+    let checked_bounds = &prepared.checked_bounds;
     // Some concrete boundary outcomes (notably an over-capacity Seq successor)
     // cannot be represented by the bounded symbolic value and must retain the
     // exact Monitor evidence. Action-context `partial_op` is deliberately not
     // consumed here: it belongs to `verify_bounded*` itself (#651).
     if checked_bounds.is_none()
         && request.initial_state.is_none()
-        && fsl_runtime::deterministic_initial_state(&model).is_ok()
+        && fsl_runtime::deterministic_initial_state(model).is_ok()
     {
         match fsl_runtime::find_boundary_violation(
-            &model,
+            model,
             request.depth,
             fsl_runtime::CONCRETE_PROBE_BUDGET,
         ) {
@@ -1171,7 +1263,7 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
                     let statistics = fsl_solver::VerificationStatistics::default();
                     return Err(fslc_rust::verification_output::render_boundary_output(
                         envelope(),
-                        &model,
+                        model,
                         &violation,
                         &trace,
                         &fslc_rust::verification_output::BmcOutputOptions {
@@ -1194,10 +1286,7 @@ fn prepare_bmc(request: &BmcRequest<'_>, started: Instant) -> Result<PreparedBmc
             Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
         }
     }
-    Ok(PreparedBmc {
-        model,
-        checked_bounds,
-    })
+    Ok(())
 }
 
 /// Per-check wall-clock limit for the #1149 ranking pre-pass. A check that
@@ -1229,7 +1318,7 @@ fn ranked_lasso_discharges(
 ) {
     std::thread::scope(|scope| {
         let worker = std::thread::Builder::new()
-            .stack_size(super::STACK_SIZE)
+            .stack_size(STACK_SIZE)
             .name("fslc-ranking".to_owned())
             .spawn_scoped(scope, || {
                 let Ok(mut solver) =
@@ -1246,7 +1335,13 @@ fn ranked_lasso_discharges(
             });
         worker
             .ok()
-            .and_then(|worker| worker.join().ok())
+            .and_then(|worker| {
+                let joined = worker.join();
+                if joined.is_err() {
+                    crate::z3_panic::forget();
+                }
+                joined.ok()
+            })
             .unwrap_or_else(|| (std::collections::BTreeSet::new(), None))
     })
 }
@@ -1254,7 +1349,7 @@ fn ranked_lasso_discharges(
 fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedBmc, CommandResult> {
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return Err((error_output("internal", &error.to_string()), 3)),
+        Err(error) => return Err(error_exit(error_output("internal", &error.to_string()))),
     };
     // A ranked `leadsTo` whose ranking obligations hold needs no bounded
     // fair-lasso search: the ranking already shows that search is `unsat`
@@ -1274,12 +1369,13 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
         Ok(result) => result,
         Err(error) => return Err((semantic_error_output(&error.to_string()), 2)),
     };
-    if let Err(error) = ::fslc_rust::verification_output::replay_bmc_witnesses(
+    if let Err(error) = ::fslc_rust::verification_output::replay_bmc_witnesses_with_bounds(
         &prepared.model,
         &result,
         request.initial_state,
+        prepared.checked_bounds.as_ref(),
     ) {
-        return Err((error_output("internal", &error), 3));
+        return Err(error_exit(error_output("internal", &error)));
     }
     // Static reachable diagnosis deliberately uses a separate solver session.
     // Even stack-isolated queries perturb backend query history and can change
@@ -1298,7 +1394,7 @@ fn solve_bmc(request: &BmcRequest<'_>, prepared: &PreparedBmc) -> Result<SolvedB
     if needs_reachable_diagnosis {
         let mut diagnosis_solver = match fsl_solver_z3::Z3Solver::new() {
             Ok(solver) => solver,
-            Err(error) => return Err((error_output("internal", &error.to_string()), 3)),
+            Err(error) => return Err(error_exit(error_output("internal", &error.to_string()))),
         };
         result.reachable_diagnostics = match block_on_native(fsl_verifier::diagnose_reachables(
             &prepared.model,
@@ -1492,6 +1588,37 @@ fn prepare_lemma_induction<'a>(
     Ok((selection, selected, occupied_names))
 }
 
+fn prepare_lemma_candidates<'a>(
+    sources: &'a [String],
+    model: &KernelModel,
+    mut occupied_names: std::collections::BTreeSet<String>,
+) -> Vec<Result<(String, KernelExpr, &'a str), Value>> {
+    let mut candidates = Vec::new();
+    for (index, source) in sources.iter().enumerate() {
+        let name = collision_free_lemma_name(index, &mut occupied_names);
+        let expression = match fsl_syntax::parse_expr(source) {
+            Ok(expression) => expression,
+            Err(error) => {
+                candidates.push(Err(json!({
+                    "expression":source,"name":name,"status":"rejected","used":false,
+                    "proof":{"result":"error","kind":"parse","message":error.message,
+                        "loc":error.span.python_loc()},
+                })));
+                continue;
+            }
+        };
+        if let Err(message) = fsl_core::validate_boolean_expression(&expression, model) {
+            candidates.push(Err(json!({
+                "expression":source,"name":name,"status":"rejected","used":false,
+                "proof":{"result":"error","kind":"semantics","message":message},
+            })));
+            continue;
+        }
+        candidates.push(Ok((name, expression, source.as_str())));
+    }
+    candidates
+}
+
 fn run_induction_with_lemmas(
     path: &Path,
     options: &CliVerifyOptions,
@@ -1499,27 +1626,26 @@ fn run_induction_with_lemmas(
 ) -> (Value, i32) {
     let deadlock = match DeadlockMode::parse(&options.deadlock) {
         Ok(mode) => mode,
-        Err(error) => return (error_output("usage", &error), 2),
+        Err(error) => return error_exit(error_output("usage", &error)),
     };
-    let (selection, model, mut occupied_names) =
-        match prepare_lemma_induction(path, options, prepared) {
-            Ok(prepared) => prepared,
-            Err(output) => return output,
-        };
+    let (selection, model, occupied_names) = match prepare_lemma_induction(path, options, prepared)
+    {
+        Ok(prepared) => prepared,
+        Err(output) => return output,
+    };
     let mut entries = Vec::new();
     let mut proved_candidates = Vec::new();
     let (mut auxiliary, mut auxiliary_sources) = (Vec::new(), Vec::new());
     let mut exclusions = Vec::new();
-    for (index, source) in options.lemmas.iter().enumerate() {
-        let name = collision_free_lemma_name(index, &mut occupied_names);
-        let expression = match fsl_syntax::parse_expr(source) {
-            Ok(expression) => expression,
-            Err(error) => {
-                entries.push(json!({
-                    "expression":source,"name":name,"status":"rejected","used":false,
-                    "proof":{"result":"error","kind":"parse","message":error.message,
-                        "loc":error.span.python_loc()},
-                }));
+    // Finish parsing and type validation for every candidate before any candidate
+    // proof or concrete CTI evaluation. This is an invariant's expected type without
+    // its #1679 carrier rule; see `validate_boolean_expression`.
+    let candidates = prepare_lemma_candidates(&options.lemmas, &model, occupied_names);
+    for candidate in candidates {
+        let (name, expression, source) = match candidate {
+            Ok(candidate) => candidate,
+            Err(entry) => {
+                entries.push(entry);
                 continue;
             }
         };
@@ -1532,14 +1658,14 @@ fn run_induction_with_lemmas(
             options.k_ind,
         );
         if entry.get("status").and_then(Value::as_str) == Some("proved") {
-            proved_candidates.push((entries.len(), name.clone(), expression, source.clone()));
+            proved_candidates.push((entries.len(), name.clone(), expression, source.to_owned()));
         }
         entries.push(entry);
     }
     // See `execute_cli_verification`'s matching comment: this is the
     // `--lemma` path's own derivation of the same CLI `--vacuity` option,
     // since `run_induction_with_lemmas` is called directly from
-    // `run_verify_cli` rather than through `execute_cli_verification`.
+    // `run_verify_cli_from_source` rather than through `execute_cli_verification`.
     let skip_vacuity_probe = options.vacuity == "ignore";
     let (mut result, status) = loop {
         let (current, status) = run_induction_filtered(InductionRequest {
@@ -1723,8 +1849,15 @@ fn verify_cache_keys_with_solver_version(
 /// this one is a fixed constant with no CLI flag, added to the options
 /// blob instead. Both are inputs to the same single key derivation -- they
 /// do not compete for one slot.
+///
+/// An explicit `--edition` request is also carried as its number
+/// (`edition_request`): `--edition 4` and an omitted or `current` request
+/// share the `edition` spelling `current` but differ on a `fsl 5` document
+/// (an edition conflict), so their results are never shared. The document's
+/// edition header is part of the source text the key already hashes. Without
+/// an explicit request the blob has no `edition_request` (#1434).
 fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value {
-    json!({
+    let mut blob = json!({
         "deadlock": options.deadlock,
         "engine": engine,
         "explicit_budget": options.explicit_budget,
@@ -1737,8 +1870,17 @@ fn verify_cache_base_options(engine: &str, options: &CliVerifyOptions) -> Value 
         "values": options.scope.values,
         "strict_tags": options.strict_tags,
         "lemmas": options.lemmas,
-        "edition": options.edition,
-    })
+        "edition": options.shared.edition.map_or("current", |request| request.edition.as_str()),
+    });
+    // The request's edition, not its spelling: `next` and `5` read a document
+    // alike and share a result.
+    if let (Some(request), Value::Object(fields)) = (options.shared.edition, &mut blob) {
+        fields.insert(
+            "edition_request".to_owned(),
+            json!(request.edition.number()),
+        );
+    }
+    blob
 }
 
 /// `sources` is the resolved-absolute-path/content set actually read while
@@ -1991,18 +2133,6 @@ struct PreparedCliVerification {
     requirement_traces_not_evaluated: Option<Value>,
 }
 
-pub(super) fn run_verify_cli(
-    path: &Path,
-    cache_identity_path: &Path,
-    options: &CliVerifyOptions,
-) -> CommandResult {
-    let source = match read_spec_source(path) {
-        Ok(source) => source,
-        Err(error) => return (spec_load_error_output(&error), 2),
-    };
-    run_verify_cli_from_source(path, cache_identity_path, &source, options)
-}
-
 /// Why this run does not evaluate the inline `implements` seam, in a fixed
 /// order; empty when it does.
 ///
@@ -2041,7 +2171,10 @@ fn suppressed_implements_section(source: &str, reasons: &[&'static str]) -> Opti
     if reasons.is_empty() {
         return None;
     }
-    let abs = fslc_rust::verification_output::requirements_implements_name(source)?;
+    let abs = fslc_rust::verification_output::requirements_implements_name(
+        source,
+        crate::process::parse_options(),
+    )?;
     let mut fields = Map::new();
     fields.insert("abs".to_owned(), json!(abs));
     Some(fslc_rust::verification_output::not_evaluated_section(
@@ -2064,16 +2197,12 @@ fn suppressed_implements_section(source: &str, reasons: &[&'static str]) -> Opti
 /// (nested `from`/`use` reuses the same resolver instance all the way
 /// down), so the relative path is already unambiguous, and it matches what
 /// the pre-#1023 directory walk hashed for an in-parent dependency
-/// (`source.strip_prefix(base)`). A checked literate `.md` document is
-/// verified through a per-process `.{stem}.literate-{pid}.fsl`
-/// materialization (`literate_access.rs`) sitting beside it; that sibling
-/// was excluded from the old walk for exactly this reason
-/// (`is_literate_materialization`) and never reaches this resolver at all
-/// (its own root source is read directly, by content, never through a
-/// `from`/`use` clause) — but recording relative-to-base keeps that
-/// property true by construction rather than by a second exclusion list,
-/// instead of an absolute path that would embed a directory a symlinked
-/// alias resolves through.
+/// (`source.strip_prefix(base)`). A checked literate `.md` document uses a
+/// captured root source and a compatibility-only logical `.fsl` path beside
+/// it (`literate_access.rs`). That path never reaches this resolver as the
+/// root; recording relative to its lexical parent preserves symlink-alias
+/// dependency identity without a second exclusion list or an absolute path
+/// embedding the directory the alias resolves through.
 struct RecordingResolver {
     base: PathBuf,
     reads: std::cell::RefCell<Vec<(PathBuf, String)>>,
@@ -2096,6 +2225,7 @@ impl fsl_core::FileResolver for RecordingResolver {
     fn read(&self, path: &str) -> Result<String, fsl_core::CoreError> {
         let content = std::fs::read_to_string(self.base.join(path))
             .map_err(|error| fsl_core::CoreError::unlocated(error.to_string()))?;
+        crate::output_publication::note_input(&self.base.join(path));
         self.reads
             .borrow_mut()
             .push((PathBuf::from(path), content.clone()));
@@ -2109,17 +2239,49 @@ pub(super) fn run_verify_cli_from_source(
     source: &str,
     options: &CliVerifyOptions,
 ) -> CommandResult {
+    let dependencies = fslc_rust::migration::DependencyScope::enter();
+    let edition = match fslc_rust::migration::admit_source(
+        source,
+        &cache_identity_path.to_string_lossy(),
+        options.shared.edition,
+        parse_options(),
+        &envelope,
+        true,
+    ) {
+        Ok(edition) => edition,
+        Err(refusal) => return refusal,
+    };
+    dependencies.finish(
+        run_verify_cli_admitted(path, cache_identity_path, source, options, Some(&edition)),
+        false,
+    )
+}
+
+/// Consume a captured, admitted root. Specialized outer owners pass `None`;
+/// nested verification owners finish each distinct result here with its token.
+pub(super) fn run_verify_cli_admitted(
+    path: &Path,
+    cache_identity_path: &Path,
+    source: &str,
+    options: &CliVerifyOptions,
+    finish: Option<&fslc_rust::migration::SourceEdition>,
+) -> CommandResult {
     let (mut output, status) =
         run_verify_cli_kernel_from_source(path, cache_identity_path, source, options);
     // A governance document's preservations fold into the verdict here,
     // outside the verify cache (issue #1303): the cache key covers only the
     // document's own kernel, so a cached `verified` must still be re-gated by
     // the preservations' current files. Every `verify`-shaped caller --
-    // `verify` (including `--lemma`), `sweep` cells, and a `chain` spec layer
-    // with a `depth` -- goes through this one point.
-    match super::fold_governance_from_source(path, source, &mut output) {
+    // `verify` (including `--lemma`), `sweep` cells, a `chain` spec layer
+    // with a `depth`, and the no-cache report/tool baseline adapter -- goes
+    // through this one point.
+    let result = match fold_governance_from_source(path, source, &mut output) {
         Ok(folded) => (output, folded.unwrap_or(status)),
         Err(error) => error,
+    };
+    match finish {
+        Some(edition) => edition.finish(result),
+        None => result,
     }
 }
 
@@ -2131,19 +2293,13 @@ fn run_verify_cli_kernel_from_source(
     options: &CliVerifyOptions,
 ) -> CommandResult {
     if !options.lemmas.is_empty() && options.engine != "induction" {
-        return (
-            error_output("usage", "--lemma requires --engine induction"),
-            2,
-        );
+        return error_exit(error_output("usage", "--lemma requires --engine induction"));
     }
     if options.from_state.is_some() && options.engine != "bmc" {
-        return (
-            error_output(
-                "semantics",
-                "--from-state is available only with the BMC engine; induction and explicit verification start from the spec init contract",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "semantics",
+            "--from-state is available only with the BMC engine; induction and explicit verification start from the spec init contract",
+        ));
     }
     // Causal models are intentionally outside the kernel dialect dispatcher.
     // Check their syntax first so a malformed causal input retains its parser
@@ -2154,13 +2310,22 @@ fn run_verify_cli_kernel_from_source(
     if fsl_syntax::is_causal_source(source)
         && let Err(error) = fsl_syntax::parse_causal(source)
     {
-        return super::causal::causal_parse_error_output(&error, false);
+        return crate::causal::causal_parse_error_output(&error, false);
     }
-    let recorder = RecordingResolver::new(path.parent().unwrap_or_else(|| Path::new(".")));
+    let base = path.parent().unwrap_or_else(|| Path::new("."));
+    let recorder = fslc_rust::migration::DependencyResolver::native(
+        RecordingResolver::new(base),
+        base,
+        *parse_options(),
+        &envelope,
+    );
     let prepared = match prepare_cli_verification_from_source(path, source, options, &recorder) {
         Ok(prepared) => prepared,
         Err(output) => return output,
     };
+    if let Some(refusal) = recorder.refusal() {
+        return refusal;
+    }
     if !options.lemmas.is_empty() {
         let (mut output, mut status) = run_induction_with_lemmas(path, options, &prepared);
         // The `--lemma` path returns before `execute_cli_verification`, so the
@@ -2199,7 +2364,7 @@ fn run_verify_cli_kernel_from_source(
                 Err(error) => return (implements_error_output(&error), 2),
             }
         }
-        return finalize_cli_verification(path, options, &prepared, None, output, status);
+        return finalize_cli_verification(source, options, &prepared, None, output, status);
     }
     // The inline `implements` seam's dependency is read here, before the
     // cache key below, rather than inside `execute_cli_verification`
@@ -2221,6 +2386,7 @@ fn run_verify_cli_kernel_from_source(
                 model,
                 &options.scope.instances,
                 &options.scope.values,
+                crate::process::parse_options(),
             ) {
                 Ok(contract) => contract,
                 Err(error) => return (implements_error_output(&error), 2),
@@ -2230,7 +2396,7 @@ fn run_verify_cli_kernel_from_source(
             Err(_) => None,
         }
     };
-    let sources = recorder.take_sources();
+    let sources = recorder.inner().take_sources();
     // `auto` never keys a cache entry under the literal string "auto": a
     // lookup consults the explicit/bmc keys directly
     // (`cached_auto_verification`) and a store writes under whichever engine
@@ -2260,7 +2426,7 @@ fn run_verify_cli_kernel_from_source(
         suppressed_implements_section(source, &suppression),
     );
     let (output, status) = finalize_cli_verification(
-        path,
+        source,
         options,
         &prepared,
         cache_keys.as_ref(),
@@ -2277,16 +2443,16 @@ fn prepare_cli_verification_from_source(
     path: &Path,
     source: &str,
     options: &CliVerifyOptions,
-    recorder: &RecordingResolver,
+    recorder: &dyn fsl_core::FileResolver,
 ) -> Result<PreparedCliVerification, CommandResult> {
-    let is_agent_document = match fsl_syntax::parse_surface_document(source) {
+    let is_agent_document = match fsl_syntax::parse_surface_document_with(source, parse_options()) {
         Ok(fsl_syntax::SurfaceDocument::Agent(_)) => true,
         Ok(_) => false,
         Err(error) => return Err((surface_parse_error_output(&error), 2)),
     };
     let has_scope = !options.scope.instances.is_empty() || !options.scope.values.is_empty();
     if let Err(error) = validate_specialized_document_from_source(path, source) {
-        return Err((semantic_error_output(&error), 2));
+        return Err((spec_load_error_output(&error), 2));
     }
     // `--instances`/`--values` scope overrides go through
     // `parse_kernel_source_with_bounds` (`load_model_scoped_from_source`),
@@ -2319,12 +2485,13 @@ fn prepare_cli_verification_from_source(
             // is what put a reference out of scope. Loaded without the
             // recorder: the scoped path never resolves through it either, so
             // the cache key's dependency domain is unchanged.
-            let declared = load_model_from_source(path, source).ok();
+            let declared = crate::spec_loading::load_declared_model_beside_scope(path, source).ok();
             match fslc_rust::verification_output::validate_requirement_trace_source_scoped(
                 &envelope(),
                 source,
                 model,
                 declared.as_ref(),
+                crate::process::parse_options(),
             ) {
                 Ok((Some(failure), _)) => return Err((failure, 2)),
                 Ok((None, skipped)) => skipped,
@@ -2333,12 +2500,11 @@ fn prepare_cli_verification_from_source(
         }
         _ => Vec::new(),
     };
-    if !has_scope && let Ok(model) = &snapshot_model {
-        match validate_requirement_traces_from_source(path, source, model) {
-            Ok((Some(failure), _)) => return Err((failure, 2)),
-            Ok((None, _)) => {}
-            Err(error) => return Err((semantic_error_output(&error), 2)),
-        }
+    if !has_scope
+        && let Ok(model) = &snapshot_model
+        && let Err(refusal) = require_trace_gate(source, model)
+    {
+        return Err((refusal, 2));
     }
     // A scenario skipped as out of the overridden scope was not evaluated,
     // and the envelope says so instead of reading as if it had passed
@@ -2395,32 +2561,29 @@ fn validate_cli_property_selection(
         && let Some(kind) = model
             .leadstos
             .iter()
-            .any(|item| display(&item.name) == name)
+            .any(|item| model.names().public_property(&item.name).into_string() == name)
             .then_some("leadsTo")
             .or_else(|| {
                 model
                     .reachables
                     .iter()
-                    .any(|item| display(&item.name) == name)
+                    .any(|item| model.names().public_property(&item.name).into_string() == name)
                     .then_some("reachable")
             })
     {
-        return Err((
-            error_output(
-                "usage",
-                &format!(
-                    "--property {name} is a {kind}, which the induction engine cannot prove; check it with the default bmc engine"
-                ),
+        return Err(error_exit(error_output(
+            "usage",
+            &format!(
+                "--property {name} is a {kind}, which the induction engine cannot prove; check it with the default bmc engine"
             ),
-            2,
-        ));
+        )));
     }
     select_properties(
         &mut model,
         options.property.as_deref(),
         &options.exclude_properties,
     )
-    .map_err(|error| (error_output("usage", &error), 2))
+    .map_err(|error| error_exit(error_output("usage", &error)))
 }
 
 fn cached_verification(
@@ -2437,6 +2600,8 @@ fn cached_verification(
 }
 
 fn cached_output_status(output: &Value) -> Option<i32> {
+    use fslc_rust::outcome::Verdict;
+
     let output = output.as_object()?;
     if output.get("fsl").and_then(Value::as_str) != Some("1.0")
         || output.get("spec").and_then(Value::as_str)?.is_empty()
@@ -2444,33 +2609,37 @@ fn cached_output_status(output: &Value) -> Option<i32> {
         return None;
     }
     let completeness = output.get("completeness").and_then(Value::as_str);
-    match output.get("result").and_then(Value::as_str) {
-        Some("verified") if completeness == Some("bounded") => Some(0),
-        Some("proved") if completeness == Some("unbounded") => Some(0),
-        Some("violated") if valid_cached_violation(output, completeness) => Some(1),
-        Some("reachable_failed")
-            if matches!(completeness, Some("bounded" | "unbounded"))
-                && output.get("unreached").and_then(Value::as_array).is_some() =>
-        {
-            Some(1)
+    // The shape each replayable verdict must carry is this function's own
+    // question; the exit code it then implies is the `Verdict` table's (#901).
+    let verdict = Verdict::from_result(output.get("result").and_then(Value::as_str)?)?;
+    let replayable = match verdict {
+        Verdict::Verified => completeness == Some("bounded"),
+        Verdict::Proved => completeness == Some("unbounded"),
+        Verdict::Violated => valid_cached_violation(output, completeness),
+        Verdict::ReachableFailed => {
+            matches!(completeness, Some("bounded" | "unbounded"))
+                && output.get("unreached").and_then(Value::as_array).is_some()
         }
-        Some("unknown_cti")
-            if completeness == Some("bounded")
-                && output.get("cti").and_then(Value::as_object).is_some() =>
-        {
-            Some(1)
+        Verdict::UnknownCti => {
+            completeness == Some("bounded")
+                && output.get("cti").and_then(Value::as_object).is_some()
         }
-        Some("unknown_budget")
-            if completeness == Some("unknown")
+        Verdict::UnknownBudget => {
+            completeness == Some("unknown")
                 && output
                     .get("states_explored")
                     .and_then(Value::as_u64)
-                    .is_some() =>
-        {
-            Some(1)
+                    .is_some()
         }
-        _ => None,
-    }
+        // Not admitted to the cache (`outcome::verify_cache_admits`, #1022),
+        // or not a `verify` verdict at all.
+        Verdict::RefinementFailed
+        | Verdict::ImplViolated
+        | Verdict::Indeterminate
+        | Verdict::SpecError
+        | Verdict::InternalError => false,
+    };
+    replayable.then(|| verdict.exit_code())
 }
 
 fn valid_cached_violation(output: &Map<String, Value>, completeness: Option<&str>) -> bool {
@@ -2621,17 +2790,14 @@ fn execute_cli_verification(
     suppressed_implements: Option<Value>,
 ) -> CommandResult {
     if !(selection_filtered || prepared.has_scope) && prepared.is_agent_document {
-        return (
-            error_output(
-                "parse",
-                "agent documents cannot be verified as Kernel specs",
-            ),
-            2,
-        );
+        return error_exit(error_output(
+            "parse",
+            "agent documents cannot be verified as Kernel specs",
+        ));
     }
     let deadlock = match DeadlockMode::parse(&options.deadlock) {
         Ok(mode) => mode,
-        Err(error) => return (error_output("usage", &error), 2),
+        Err(error) => return error_exit(error_output("usage", &error)),
     };
     let model = match &prepared.model {
         Ok(model) => model,
@@ -2660,12 +2826,11 @@ fn execute_cli_verification(
     // is the *only* place in the product that may set `skip_vacuity_probe`
     // to `true`. It is derived directly from the CLI's own `--vacuity`
     // option parsing, which both `verify` and `sweep` funnel through
-    // `run_verify_cli` -- `sweep` builds its own `CliVerifyOptions` per
-    // grid cell and calls `run_verify_cli` exactly like `verify` does.
-    // Every other constructor of `BmcRequest`/`InductionRequest`/
-    // `ExplicitRequest` in this codebase (the `ledger`/`html`/`mutate`
-    // baseline in `rust/fslc/src/main.rs`'s `run_verify`, and tests) must
-    // pass `false`.
+    // `run_verify_cli_from_source` -- `sweep` builds its own `CliVerifyOptions` per
+    // grid cell and calls `run_verify_cli_from_source` exactly like `verify` does.
+    // No-cache baseline adapters also reach this derivation, with the
+    // default `warn` policy, so they keep the probe. Other request
+    // constructors (including tests) must pass `false`.
     let skip_vacuity_probe = options.vacuity == "ignore";
     let (mut output, status) = match VerificationEngine::parse(&options.engine) {
         Ok(VerificationEngine::Bmc) => run_bmc_filtered(BmcRequest {
@@ -2697,7 +2862,7 @@ fn execute_cli_verification(
             budget: options.explicit_budget,
             skip_vacuity_probe,
         }),
-        Err(error) => return (error_output("usage", &error), 2),
+        Err(error) => return error_exit(error_output("usage", &error)),
     };
     // A selected run (#1008) keeps the `implements` key with the reason it
     // was not evaluated instead of dropping it, and still gets the same
@@ -2729,7 +2894,9 @@ fn decorate_default_cli_verification(
     let implements_exit = implements.and_then(|implements| {
         fslc_rust::verification_output::attach_requirements_implements(output, implements)
     });
-    if let Ok(ctx) = fsl_core::ModelWarningContext::from_source(model, source) {
+    if let Ok(ctx) =
+        fsl_core::ModelWarningContext::from_source(model, source, crate::process::parse_options())
+    {
         fsl_core::finalize_envelope_model_warnings(output, &ctx);
     }
     let Value::Object(envelope) = output else {
@@ -2765,7 +2932,7 @@ fn describe_scope_overrides(scope: &ScopeBounds) -> String {
 }
 
 fn finalize_cli_verification(
-    path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
     prepared: &PreparedCliVerification,
     cache_keys: Option<&(String, String)>,
@@ -2817,7 +2984,7 @@ fn finalize_cli_verification(
     if status == 0
         && options.strict_tags
         && let Err(output) = add_cli_strict_tag_warnings(
-            path,
+            source,
             options,
             prepared
                 .model
@@ -2833,17 +3000,14 @@ fn finalize_cli_verification(
             && let Some(cached) = verify_cache_lookup(key, xdepth, options.depth)
             && cached.get("result") != output.get("result")
         {
-            return (
-                error_output(
-                    "internal",
-                    &format!(
-                        "verify cache divergence: cached result={:?} fresh result={:?} for key={key}",
-                        cached.get("result"),
-                        output.get("result")
-                    ),
+            return error_exit(error_output(
+                "internal",
+                &format!(
+                    "verify cache divergence: cached result={:?} fresh result={:?} for key={key}",
+                    cached.get("result"),
+                    output.get("result")
                 ),
-                3,
-            );
+            ));
         }
         verify_cache_store(key, xdepth, &output);
     }
@@ -2910,17 +3074,54 @@ fn add_snapshot_metadata(output: &mut Value, options: &CliVerifyOptions) {
 }
 
 fn add_cli_strict_tag_warnings(
-    path: &Path,
+    source: &str,
     options: &CliVerifyOptions,
     model: &KernelModel,
     output: &mut Value,
 ) -> Result<(), CommandResult> {
-    add_strict_tag_warnings(output, model, path, true, options.requirements.as_deref())
-        .map_err(|error| (error_output("io", &error), 2))
+    add_strict_tag_warnings_from_source(
+        output,
+        model,
+        source,
+        true,
+        options.requirements.as_deref(),
+    )
+    .map_err(|error| error_exit(io_error_output(&error)))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[allow(dead_code)]
+    mod init_collection_fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/issue_1463_aggregate_and_component_locations.rs"
+        ));
+    }
+
+    #[test]
+    fn issue_1463_induction_entry_rejects_unchecked_init_via_bounded_base() {
+        let (model, expected) = init_collection_fixture::unchecked_init_collection_model();
+        let path = Path::new("unchecked-init.fsl");
+        let (output, status) = run_induction_filtered(InductionRequest {
+            selection: ModelSelection {
+                path,
+                model: Some(&model),
+                scope: None,
+                property: None,
+                excluded: &[],
+            },
+            depth: 2,
+            deadlock: DeadlockMode::Ignore,
+            k: 1,
+            auxiliary: &[],
+            skip_vacuity_probe: true,
+        });
+        assert_eq!(status, 2, "{output}");
+        assert_eq!(output["result"], "error");
+        assert_eq!(output["message"], expected);
+    }
 
     fn repository_path(relative: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -3079,6 +3280,33 @@ mod tests {
             json!(fsl_runtime::IMPLEMENTS_SEARCH_BUDGET),
             "{base_options:#}"
         );
+    }
+
+    /// #1434: `--edition 4` and an omitted request share the `edition`
+    /// spelling `current` but not a result, so the key tells them apart; the
+    /// blob of a run without `--edition` carries no gate or request field.
+    #[test]
+    fn verify_cache_base_options_separate_explicit_edition_requests() {
+        let blob = |edition| {
+            let mut options = CliVerifyOptions::default();
+            options.shared.edition = edition;
+            verify_cache_base_options("bmc", &options)
+        };
+        let omitted = blob(None);
+        assert_eq!(omitted["edition"], json!("current"), "{omitted:#}");
+        assert!(omitted.get("edition_request").is_none(), "{omitted:#}");
+        assert!(omitted.get("unstable").is_none(), "{omitted:#}");
+        let four = blob(Some(fsl_syntax::EditionRequest::numbered(
+            fsl_syntax::Edition::Fsl4,
+        )));
+        assert_eq!(four["edition"], json!("current"), "{four:#}");
+        assert_eq!(four["edition_request"], json!(4), "{four:#}");
+        assert_ne!(four, omitted);
+        let five = blob(Some(fsl_syntax::EditionRequest::numbered(
+            fsl_syntax::Edition::Fsl5,
+        )));
+        assert_eq!(five["edition"], json!("next"), "{five:#}");
+        assert_eq!(five["edition_request"], json!(5), "{five:#}");
     }
 
     #[test]
@@ -3449,19 +3677,15 @@ mod tests {
         assert_ne!(current, updated);
     }
 
-    /// Preservation control (issue #1023, not a detector): the per-process
-    /// literate materialization (`literate_access.rs`, `.{stem}.literate-
-    /// {pid}.fsl`) sitting beside the checked `.md` document is never read
-    /// through `RecordingResolver` (it is the checked document's own root
-    /// source, read directly by content, never a `from`/`use` target), so
-    /// its run-local PID-bearing name cannot enter the key's dependency set
-    /// by construction. This already passes before #1023 (the pre-existing
-    /// `is_literate_materialization` exclusion, now removed as dead code,
-    /// covered the same case for the directory walk), and must keep passing
-    /// after: a literate document verified twice must hit the cache the
-    /// second time.
+    /// Preservation control (issue #1023, not a detector): the logical
+    /// `.{stem}.literate-{pid}.fsl` path (`literate_access.rs`) beside the
+    /// checked `.md` document is never read through `RecordingResolver`,
+    /// because the root source is captured by content and is never a
+    /// `from`/`use` target. Its run-local PID-bearing name cannot enter the
+    /// key's dependency set: a literate document verified twice must reach the
+    /// same key. A file left at that path by an older version changes nothing.
     #[test]
-    fn literate_materialization_never_enters_the_cache_key_dependency_set() {
+    fn literate_logical_path_never_enters_the_cache_key_dependency_set() {
         const SOURCE: &str = "spec Example { state { x: Int } init { x = 0 } }\n";
         let root = std::env::temp_dir().join(format!(
             "fslc-literate-materialization-cache-{}",
@@ -3487,7 +3711,7 @@ mod tests {
         assert_eq!(
             first, second,
             "re-verifying the same literate document must reach the same key \
-             (a run-local PID in the materialization's name must not leak in): {first:?} vs {second:?}"
+             (a run-local PID in the logical path must not leak in): {first:?} vs {second:?}"
         );
 
         let _ = std::fs::remove_dir_all(root);

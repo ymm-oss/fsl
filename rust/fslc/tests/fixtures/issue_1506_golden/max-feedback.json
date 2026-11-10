@@ -1,0 +1,362 @@
+{
+  "base": "5738cc2c711b691a9d453b0190ead1a2ff77fc50",
+  "observed": {
+    "check": {
+      "fsl": "1.0",
+      "result": "causal_model_checked",
+      "schema_version": "causal-check.v0",
+      "formal_result": "not_run",
+      "model": "MaxFeedback",
+      "variables_checked": 3,
+      "claims_checked": 3,
+      "feedbacks_checked": 1,
+      "evidence_refs_checked": 0,
+      "retired_claims": 0,
+      "warnings": [],
+      "do_not_assume": [
+        "The causal claims are true",
+        "The graph is causally complete",
+        "Structural or temporal consistency establishes real-world causality"
+      ]
+    },
+    "consumers": {
+      "causal_graph": {
+        "fsl": "1.0",
+        "result": "causal_analyzed",
+        "schema_version": "causal-graph.v0",
+        "formal_result": "not_run",
+        "model": "MaxFeedback",
+        "projection": "causal_graph",
+        "timebase": "day",
+        "horizon": 9223372036854775807,
+        "do_not_assume": [
+          "The causal claims are true",
+          "Path existence establishes real-world causality",
+          "Timeline bounds are guarantees about the real world"
+        ],
+        "nodes": [
+          {
+            "id": "variable:a",
+            "kind": "variable",
+            "role": "mediator"
+          },
+          {
+            "id": "variable:b",
+            "kind": "variable",
+            "role": "mediator"
+          },
+          {
+            "id": "variable:c",
+            "kind": "variable",
+            "role": "mediator"
+          }
+        ],
+        "edges": [
+          {
+            "id": "claim:AB",
+            "kind": "claim",
+            "source": "variable:a",
+            "target": "variable:b",
+            "polarity": "positive",
+            "lag": {
+              "min": 0,
+              "max": 6148914691236517205
+            },
+            "persists": {
+              "min": 0,
+              "max": 0
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          },
+          {
+            "id": "claim:BC",
+            "kind": "claim",
+            "source": "variable:b",
+            "target": "variable:c",
+            "polarity": "positive",
+            "lag": {
+              "min": 0,
+              "max": 6148914691236517205
+            },
+            "persists": {
+              "min": 0,
+              "max": 0
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          },
+          {
+            "id": "claim:CA",
+            "kind": "claim",
+            "source": "variable:c",
+            "target": "variable:a",
+            "polarity": "positive",
+            "lag": {
+              "min": 1,
+              "max": 6148914691236517205
+            },
+            "persists": {
+              "min": 0,
+              "max": 0
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          }
+        ],
+        "paths": [],
+        "feedbacks": [
+          {
+            "id": "feedback:F",
+            "loop_class": "reinforcing",
+            "claims": [
+              "claim:CA",
+              "claim:AB",
+              "claim:BC"
+            ],
+            "cycle_lag": {
+              "min": 1,
+              "max": 18446744073709551615
+            },
+            "max_repetitions_within_horizon": 9223372036854775807,
+            "recurrent": true
+          }
+        ],
+        "truncation": {
+          "paths_cap": 16,
+          "paths_truncated": 0
+        }
+      },
+      "causal_timeline": {
+        "fsl": "1.0",
+        "result": "causal_analyzed",
+        "schema_version": "causal-graph.v0",
+        "formal_result": "not_run",
+        "model": "MaxFeedback",
+        "projection": "causal_timeline",
+        "timebase": "day",
+        "horizon": 9223372036854775807,
+        "do_not_assume": [
+          "The causal claims are true",
+          "Path existence establishes real-world causality",
+          "Timeline bounds are guarantees about the real world"
+        ],
+        "nodes": [
+          {
+            "id": "variable:a",
+            "kind": "variable",
+            "role": "mediator"
+          },
+          {
+            "id": "variable:b",
+            "kind": "variable",
+            "role": "mediator"
+          },
+          {
+            "id": "variable:c",
+            "kind": "variable",
+            "role": "mediator"
+          }
+        ],
+        "edges": [
+          {
+            "id": "claim:AB",
+            "kind": "claim",
+            "source": "variable:a",
+            "target": "variable:b",
+            "polarity": "positive",
+            "lag": {
+              "min": 0,
+              "max": 6148914691236517205
+            },
+            "persists": {
+              "min": 0,
+              "max": 0
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          },
+          {
+            "id": "claim:BC",
+            "kind": "claim",
+            "source": "variable:b",
+            "target": "variable:c",
+            "polarity": "positive",
+            "lag": {
+              "min": 0,
+              "max": 6148914691236517205
+            },
+            "persists": {
+              "min": 0,
+              "max": 0
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          },
+          {
+            "id": "claim:CA",
+            "kind": "claim",
+            "source": "variable:c",
+            "target": "variable:a",
+            "polarity": "positive",
+            "lag": {
+              "min": 1,
+              "max": 6148914691236517205
+            },
+            "persists": {
+              "min": 0,
+              "max": 0
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          }
+        ],
+        "timelines": []
+      },
+      "causal_traceability_graph": {
+        "fsl": "1.0",
+        "result": "causal_analyzed",
+        "schema_version": "causal-graph.v0",
+        "formal_result": "not_run",
+        "model": "MaxFeedback",
+        "projection": "causal_traceability_graph",
+        "timebase": "day",
+        "horizon": 9223372036854775807,
+        "do_not_assume": [
+          "The causal claims are true",
+          "Path existence establishes real-world causality",
+          "Timeline bounds are guarantees about the real world"
+        ],
+        "nodes": [
+          {
+            "id": "variable:a",
+            "kind": "variable",
+            "role": "mediator"
+          },
+          {
+            "id": "variable:b",
+            "kind": "variable",
+            "role": "mediator"
+          },
+          {
+            "id": "variable:c",
+            "kind": "variable",
+            "role": "mediator"
+          }
+        ],
+        "edges": [
+          {
+            "id": "claim:AB",
+            "kind": "claim",
+            "source": "variable:a",
+            "target": "variable:b",
+            "polarity": "positive",
+            "lag": {
+              "min": 0,
+              "max": 6148914691236517205
+            },
+            "persists": {
+              "min": 0,
+              "max": 0
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          },
+          {
+            "id": "claim:BC",
+            "kind": "claim",
+            "source": "variable:b",
+            "target": "variable:c",
+            "polarity": "positive",
+            "lag": {
+              "min": 0,
+              "max": 6148914691236517205
+            },
+            "persists": {
+              "min": 0,
+              "max": 0
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          },
+          {
+            "id": "claim:CA",
+            "kind": "claim",
+            "source": "variable:c",
+            "target": "variable:a",
+            "polarity": "positive",
+            "lag": {
+              "min": 1,
+              "max": 6148914691236517205
+            },
+            "persists": {
+              "min": 0,
+              "max": 0
+            },
+            "version": 1,
+            "status": "active",
+            "basis": "hypothesis"
+          }
+        ]
+      },
+      "causal-review": {
+        "fsl": "1.0",
+        "result": "causal_analyzed",
+        "schema_version": "causal-findings.v0",
+        "formal_result": "not_run",
+        "model": "MaxFeedback",
+        "profile": "causal-review",
+        "findings": [
+          {
+            "finding_id": "causal-finding:feedback_without_damping_story:feedback-F",
+            "analysis": "causal_structure",
+            "finding_type": "feedback_without_damping_story",
+            "severity": "review_required",
+            "confidence": 0.6,
+            "formal_status": "not_a_violation",
+            "involved_nodes": [
+              "feedback:F"
+            ],
+            "witness": {
+              "loop_class": "reinforcing",
+              "claims": [
+                "CA",
+                "AB",
+                "BC"
+              ]
+            },
+            "why_it_matters": "reinforcing feedback 'F' shares no variable with any declared balancing loop",
+            "candidate_repairs": [
+              {
+                "kind": "ask_spec_question"
+              },
+              {
+                "kind": "add_claim_path"
+              }
+            ],
+            "do_not_assume": [
+              "The claim is false",
+              "The finding is a formal violation",
+              "Absence of this finding proves the model is sound"
+            ]
+          }
+        ],
+        "not_evaluable": [],
+        "do_not_assume": [
+          "The causal claims are true",
+          "Findings are formal violations",
+          "Absence of findings proves the model is causally sound",
+          "High confidence means high causal validity"
+        ]
+      }
+    }
+  }
+}

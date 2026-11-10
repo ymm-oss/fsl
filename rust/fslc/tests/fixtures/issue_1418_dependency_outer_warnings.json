@@ -1,0 +1,118 @@
+[
+  {
+    "code": "legacy_string_metadata",
+    "kind": "legacy_string_metadata",
+    "taxonomy": "deprecated",
+    "severity": "warning",
+    "edition": "current",
+    "message": "legacy string metadata is deprecated; use a typed annotation",
+    "loc": {
+      "file": "root.fsl",
+      "line": 5,
+      "column": 21,
+      "end_line": 5,
+      "end_column": 48
+    },
+    "canonical_replacement": "@requirement(\"REQ-ROOT-001\", \"root review\")",
+    "machine_applicable": true,
+    "edits": [
+      {
+        "start": 110,
+        "end": 110,
+        "replacement": "@requirement(\"REQ-ROOT-001\", \"root review\")\n "
+      },
+      {
+        "start": 129,
+        "end": 156,
+        "replacement": ""
+      }
+    ]
+  },
+  {
+    "code": "legacy_string_metadata",
+    "kind": "legacy_string_metadata",
+    "taxonomy": "deprecated",
+    "severity": "warning",
+    "edition": "current",
+    "message": "legacy string metadata is deprecated; use a typed annotation",
+    "loc": {
+      "file": "root.fsl",
+      "line": 6,
+      "column": 25,
+      "end_line": 6,
+      "end_column": 57
+    },
+    "canonical_replacement": "@requirement(\"REQ-ROOT-002\", \"also root review\")",
+    "machine_applicable": true,
+    "edits": [
+      {
+        "start": 167,
+        "end": 167,
+        "replacement": "@requirement(\"REQ-ROOT-002\", \"also root review\")\n "
+      },
+      {
+        "start": 190,
+        "end": 222,
+        "replacement": ""
+      }
+    ]
+  },
+  {
+    "code": "legacy_string_metadata",
+    "kind": "legacy_string_metadata",
+    "taxonomy": "deprecated",
+    "severity": "warning",
+    "edition": "current",
+    "message": "legacy string metadata is deprecated; use a typed annotation",
+    "loc": {
+      "file": "dep.fsl",
+      "line": 2,
+      "column": 87,
+      "end_line": 2,
+      "end_column": 106
+    },
+    "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+    "machine_applicable": true,
+    "edits": [
+      {
+        "start": 109,
+        "end": 109,
+        "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+      },
+      {
+        "start": 125,
+        "end": 153,
+        "replacement": ""
+      }
+    ]
+  },
+  {
+    "code": "legacy_string_metadata",
+    "kind": "legacy_string_metadata",
+    "taxonomy": "deprecated",
+    "severity": "warning",
+    "edition": "current",
+    "message": "legacy string metadata is deprecated; use a typed annotation",
+    "loc": {
+      "file": "dir/dep.fsl",
+      "line": 2,
+      "column": 87,
+      "end_line": 2,
+      "end_column": 106
+    },
+    "canonical_replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")",
+    "machine_applicable": true,
+    "edits": [
+      {
+        "start": 109,
+        "end": 109,
+        "replacement": "@requirement(\"REQ-DEP-001\", \"日本語😀\")\n                                                                      "
+      },
+      {
+        "start": 125,
+        "end": 153,
+        "replacement": ""
+      }
+    ]
+  }
+]

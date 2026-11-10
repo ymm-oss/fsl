@@ -79,8 +79,8 @@ the relevant role skill directs it.
   `policy/goal ... satisfies ControlID` for the actual checkable rule; violations
   then carry both the broken policy/goal and satisfied controls. A standalone
   `governance Name { ... }` catalog can require controls across business specs
-  and run preservation refinements during `fslc check`, `fslc verify`, and
-  `fslc scenarios`; a
+  and run preservation refinements during `fslc check`, `fslc verify`,
+  `fslc scenarios`, and `fslc testgen`; a
   preservation that does not `refines` fails the command (exit 1).
 - `requirements Name { process E with f: T {...} / kpi / acceptance /
   forbidden / implements Abs from "file" { } }` — the requirements layer. Use
@@ -88,26 +88,51 @@ the relevant role skill directs it.
   clauses carry inputs (`with`), guards (`when`), field updates (`set`), and
   traceability (`covers`). Put verifier bounds in `verify { instances E = N
   values T = lo..hi }`. With `implements`, verify simultaneously runs the refine
-  to the upper layer (the `implements` field in the result JSON); CLI
+  to the upper layer (the `implements` field in the result JSON). The ledger
+  body shows its folded verdict and `abs` / `result` in `## inline implements`,
+  even when the seam passes (only `refines` is green); old approvals of such
+  ledgers become `drifted` and need review and re-approval. CLI
   `--instances` / `--values` overrides propagate into the abstract spec for that
   refinement, restricted to entity/number names the abstraction declares (impl-only
   names stay on the implementation side). An empty body
   auto-generates identity refinement when names match, `maps auto` is allowed for
-  same-name kernel-wrapper state/actions, and auto-mapped process transitions are
-  actor-checked; the inline block also takes action-correspondence items
+  same-name kernel-wrapper state/actions, and a process transition auto-mapped
+  to a same-named business action is actor-checked even with covers (its text
+  is not an actor declaration; #1441). Auto-mapping is the only place a process-form
+  requirements `by X` meets the business actors: this form (edition 4) has no
+  `actor` declaration, so `by X` is a free label `check` never looks up. The
+  comparison happens when a refinement auto-maps the transition to the
+  same-named business action — via `maps auto`, or via the inline seam's
+  implicit auto-mapping of every transition no explicit inline `action` item
+  names — and that refinement is evaluated. Examples: the inline seam runs in
+  an unscoped `check`/`verify` and in `scenarios`, not in a `verify` scoped
+  with `--property` and the like; a refinement file's `maps auto` runs in
+  `fslc refine` or a `fslc chain` refine layer; `fslc diff` without a mapping
+  builds its own `maps auto` refinement between the two versions, so a changed
+  `by` label shows up there as an automatic-mapping failure. Not actor-checked:
+  a transition mapped by an explicit `action` item, one the inline seam maps to
+  `stutter` (no same-named business action), a requirement action without its own
+  `by X` actor (#1456), and any run that evaluates no
+  such refinement. The inline block also takes action-correspondence items
   (`action impl(..) -> abs(..) | stutter`), including an arity change, the same
   syntax a separate refinement file uses. `acceptance` is replay-checked at
   check time and supports `expect E id in Stage` as well as `expect <expr>`,
-  then flows scenarios → testgen; action arguments in `acceptance`/`forbidden`
-  accept enum member names as well as numeric ordinals. `forbidden` (must-forbid)
+  whose operands are recursively type-checked with expected `Bool` before replay
+  (also FSL 5 scenario `then <expr>`). The predicate is not an invariant.
+  Acceptance flows scenarios → testgen; action arguments in `acceptance`/`forbidden`
+  must match the parameter's kind. Enum parameters take member names, not numeric
+  ordinals (`paint(1)` is not `paint(Blue)`); const names work where their values
+  match the parameter's kind. `forbidden` (must-forbid)
   conversely writes an "operation sequence that should be rejected" and
   verifies at check time that the last step is rejected (not enabled; neither a
   runtime violation nor an argument outside the `entity` / `number` verify scope
   counts) — otherwise `kind: "forbidden"`.
   Carried fields (`f: T`) accept `number` (optional initializer, default `lo`), or `Bool`/enum (initializer
-  required). Use kernel-wrapper `struct` / `state` / `init`, `fair action`,
-  `branches`, and explicit `maps` only for hard cases such as multi-entity
+  required). Use kernel-wrapper `struct` / `state` / `init` and explicit fair
+  actions only for hard cases such as multi-entity
   behavior, conservation rules, SLA/time, or history that needs kernel state.
+  Legacy branch-local `maps` are current-edition only; for next, split fair actions
+  by condition and put their correspondences in `implements`.
   An independent channel for catching under-constraint (missing guards) that a
   safety invariant stays silent about (a receptacle for cross-validation where a
   separate agent writes positive/negative traces from NL)
@@ -154,6 +179,8 @@ Multiple-relation JSON outputs use `requirements` and preserve singular fields
 as lexical compatibility projections. This syntax and its
 report surfaces are native Rust CLI features; the frozen Python reference is
 not extended.
+
+<a id="authoring-specs-as-readable-documentation"></a>
 
 ### Authoring specs as readable documentation (requirements + design)
 
@@ -262,10 +289,13 @@ catalog. `fslc check governance.fsl` verifies that each delegated business spec
 exists, each `require CTRL` is satisfied by business-side `satisfies` metadata or
 an explicit `CTRL is satisfied_by policy|goal ID` mapping, and each
 `preservation` block runs its declared refinement at depth 8 (`fslc verify`
-and `fslc scenarios` run it too, at depth 8 whatever their `--depth`). Each result stays under
+and `fslc scenarios` / `fslc testgen` run it too, at depth 8 whatever their `--depth`).
+On a failed seam or preservation, `testgen` returns the verify owner's failure
+envelope and exit (1 for failed verification, 2 for a contract error, 3 for an
+internal error), and writes no harness. Each result stays under
 `governance.preservations[].result`; the first non-`refines` one in
 declaration order is also the command's verdict, fail-closed:
-`refinement_failed` -> `refinement_failed`, `violated` (the `after` spec
+`refinement_failed` -> `refinement_failed`, `impl_violated` (the `after` spec
 breaks its own semantics) -> `impl_violated`, `unknown_budget` ->
 `unknown_budget`, all exit 1; any other value is `error`/`internal` (exit 3).
 
@@ -280,6 +310,15 @@ the whole spec and deadlock checking is unchanged (a cyclic process always has
 an enabled transition, so it can never deadlock anyway).
 
 ### requirements (the requirements layer)
+
+The examples in this section use the FSL 4 forms (headerless documents). For a document
+headed `fsl 5`, use only the
+[requirements syntax owner](../../fsl-requirements/references/syntax.md),
+[English/Japanese keywords](../../fsl-requirements/references/keywords.md) and
+[glossary](../../fsl-requirements/references/glossary.md): entity/lifecycle/event,
+concept/relation/resource, rule/decide, measures, scenario/forbidden,
+time/deadline, goal/policy and optional implements. Do not put
+process/transition requirements forms under `fsl 5`.
 
 ```fsl
 requirements ExpenseRequirements {
@@ -341,13 +380,19 @@ verify {
   refinement file and run `fslc refine`. Action↔action
   correspondence can also still be written as the `maps <abs_act>(...)` clause
   **on the requirement-level action** (auto-synthesized for matching names;
-  `maps auto` covers same-name kernel-wrapper actions). Writing both a `maps`
+  `maps auto` covers same-name kernel-wrapper actions). This legacy clause emits
+  `inline_action_maps` through the shared current-edition check, verify,
+  and Worker JSON warning policy; prefer the explicit
+  correspondence inside `implements`. Branch-specific mappings require manual
+  conversion rather than one unconditional correspondence. Writing both a `maps`
   clause on an action and a matching inline `action ...` item for the same impl
   action name is a duplicate-correspondence error (`kind: "type"`,
   with both origin kinds and locations). An inline `action` item cannot target
   a `branches`-split action by its pre-split name — reference the generated
-  `name__b<N>` alias. Auto-mapped process transitions are statically
-  actor-checked; an actor mismatch is a check-time type error. The seam's
+  `name__b<N>` alias. Whenever the seam is evaluated, a process transition
+  auto-mapped to a same-named business action is statically actor-checked even
+  with covers (its text is not an actor declaration; #1441);
+  an actor mismatch is a check-time type error. The seam's
   verdict is reported as `implements: {abs, result}` with `result` one of
   `refines` / `refinement_failed` / `impl_violated` (the last one meaning the
   requirements spec breaks its own bounds/invariants, so no refinement verdict
@@ -370,9 +415,35 @@ verify {
 - `acceptance` is replay-checked at check time with the concrete Monitor (failure is
   `kind: "acceptance"`). It supports the readable stage form
   `expect <Entity> <id> in <Stage>` alongside `expect <expr>`, is output to
-  scenarios as `acceptance_<ID>`, and flows to testgen. Step action arguments accept
-  enum member names and const names, not just numeric literals (`answer(0, Triggered)`
-  == `answer(0, 1)`); an undefined name is a check-time error.
+  scenarios as `acceptance_<ID>`, and flows to testgen. Step action arguments must
+  match the parameter's kind: enum parameters take member names, not numeric
+  ordinals (`paint(1)` is not `paint(Blue)`). Const names work where their values
+  match the parameter's kind; an undefined name is a check-time error. A wrong-kind
+  acceptance argument produces `kind: "acceptance"` with `wrong_kind_argument`
+  (`parameter`, `value`, `type`), a top-level `message` naming the argument and
+  expected type and explaining that no guard was evaluated, a hint, and a `loc`
+  at that step.
+  Expression expectations
+  (also FSL 5 scenario `then`) use the invariant's recursive checker with expected
+  `Bool` before replay. Enum-vs-integer comparisons (`c != 1` or `c == 1` for
+  `c: Color`) fail with `kind: "semantics"`, exit 2, the assignability message,
+  and the authored `expect`/`then` keyword location. A well-typed false predicate
+  still reports `kind: "acceptance"`. It is tested only in the post-state, not
+  promoted to an invariant.
+- All acceptance/forbidden step arguments, including setup/final calls and FSL 5
+  scenario/forbidden `with`, particle, hybrid and relation-role inputs, use the
+  same lowered-model recursive checker before replay. No parameter type is
+  imposed at the outer boundary: internal mismatches, including in unselected
+  branches, are `kind: "semantics"`, exit 2, with the assignability message at
+  the first authored token of the step: action name for calls, actor for
+  actor-first phrases, or the first token (for example the instance) of a
+  reordered particle phrase. `paint(if c != 1 then Red else Blue)`
+  is malformed even if a guard would reject its value. Internally well-typed
+  `paint(1)` and `paint(if true then 1 else 2)` keep the forbidden
+  `wrong_kind_argument` diagnostic below, and well-typed values-scope-only
+  exclusions retain replay skips. For measured breaking removals and repair
+  guidance, see [syntax.md](syntax.md#5-semantic-rules) and
+  [the design note](../../../docs/design/DESIGN-requirements-stage.md#extension-compatibility-measurement-and-breaking-removals).
 - `forbidden FB-EXPENSE-001 "source" { <steps> expect rejected }` is must-forbid (the dual of
   acceptance). The premise steps (all but the last) are all ok, and it succeeds if
   **the last step is rejected**, i.e. not enabled. If accepted,
@@ -396,11 +467,13 @@ verify {
   error with `out_of_scope_argument` — widen the scope or move the argument
   inside it. A last step naming no action or no variant of that arity is a
   `kind: "forbidden"` error with a `message`, not a rejection. On any of these
-  errors every command that runs this check exits 2 with no verdict, scenario,
-  or test, except `explain`, which exits 0 with no witnesses (known gap #1242),
-  `approval create --kind ledger`, which exits 0 and records a ledger that
-  lists the error, and `approval check` of a ledger record, which reports
-  `drifted` (exit 0). `fslc diff` replays the forbidden too but reports a
+  errors every command that reports a result about the acceptance / forbidden
+  cases exits 2 with this error and no verdict, scenario, test, explanation,
+  report, ledger, document, or approval record (`explain`, `html`, `ledger`,
+  the `document` commands, and `approval create` / `check` included), and the
+  language server shows it as an `FSL-REQUIREMENT-TRACE` error. `fslc analyze`
+  still graphs the cases, marked `"trace_gate": "unchecked"`. `fslc diff`
+  replays the forbidden too but reports a
   finding whose exit status follows `--forbid`. Under a `--instances` /
   `--values` override that alone removed the argument, the forbidden is
   `forbidden_skipped`, with the exit status of the rest of the spec (0 when it
@@ -408,8 +481,11 @@ verify {
 - The kernel-wrapper form remains for hard cases: multi-entity requirements,
   conservation rules, SLA/time, history that is not expressible as a carried
   field, or any behavior that needs explicit kernel state. In that form, use
-  kernel `struct` / `state` / `init`, `fair action`, `branches`, and explicit
-  `maps` where needed. The display of a branches split action is
+  kernel `struct` / `state` / `init` and explicit `fair action`. Legacy `branches`
+  with inline `maps` remain accepted in current, not next. For next, split the
+  conditions into fair actions and map each inside `implements`, preserving guards,
+  effects and fairness; see `submit_small` / `submit_large` in
+  `examples/layers/return_system.fsl`. The display of a branches split action is
   `submit[a <= AUTO_LIMIT]`; diagnostics keep the internal name (`submit__b1`)
   and add `display_name`.
 - Elements inside a requirement automatically get {id, text} metadata.

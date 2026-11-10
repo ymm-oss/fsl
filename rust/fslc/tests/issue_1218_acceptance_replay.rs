@@ -21,6 +21,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Separates scratch names built in one test binary (#1712): the process id is
+/// shared, and the clock can read the same value on two threads (macOS reports
+/// microseconds), so two tests with the same label could build the same path.
+static FIXTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 const FIXTURE_DIR: &str = "rust/fslc/tests/fixtures/issue_1218_acceptance_replay";
 /// Shared with #1008: a sound seam and a false, in-range acceptance.
@@ -155,12 +161,13 @@ fn sweep(arguments: &[&str]) -> (Value, i32) {
     let mut full = vec!["sweep"];
     full.extend_from_slice(arguments);
     let cache = std::env::temp_dir().join(format!(
-        "fsl-issue-1218-sweep-{}-{}",
+        "fsl-issue-1218-sweep-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
-            .as_nanos()
+            .as_nanos(),
+        FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed),
     ));
     std::fs::create_dir(&cache).expect("sweep cache dir must not already exist");
     let result = run_with_env(&full, &[("FSLC_CACHE_DIR", cache.as_path())]);
@@ -304,8 +311,9 @@ fn a_cached_scoped_run_replays_the_skip_warning_once() {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock after epoch")
         .as_nanos();
+    let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let cache = std::env::temp_dir().join(format!(
-        "fsl-issue-1218-cache-{}-{nonce}",
+        "fsl-issue-1218-cache-{}-{nonce}-{sequence}",
         std::process::id()
     ));
     std::fs::create_dir(&cache).expect("cache dir must not already exist");

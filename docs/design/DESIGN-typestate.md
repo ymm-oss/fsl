@@ -29,7 +29,8 @@ TypeScript for derivable entities. The output uses the same JSON envelope as the
   state-preserving self-loop. For one allowed state it reports `B → B`; for
   multiple allowed states it reports one self-loop per state. The TypeScript
   skeleton preserves the caller's exact phantom state with `S extends A | B`
-  and returns `S`, rather than widening `A` to `A | B`. Actions that neither
+  and returns `S` (freshening that generic name as described in §5), rather than
+  widening `A` to `A | B`. Actions that neither
   guard nor assign the entity are not operations of that entity's state machine.
 - **`branching`** — the to-state is assigned only inside an `if` (data-dependent). It is exposed
   in the type, but the implementation bears a proof obligation of exhaustiveness (flagged).
@@ -69,10 +70,46 @@ that happens to preserve state** (it errs on the sound side). If only some,
   retired from the CLI path. Rust callers should export public Kernel JSON and
   call the JSON adapter; private AST/model shapes are not a generator contract.
 - Public Kernel actions are normalized by name. Typestate restores declaration
-  order from public source spans so the report and `--ts` output remain byte
-  compatible with the established CLI contract.
-- The verification engine and solver are unmodified. Reserved-word collisions
-  for TypeScript identifiers remain escaped by the existing emitter.
+  order from public source spans. Relative to the frozen reference, native
+  judgment already scopes enum fields by owning struct and drops a disjunctive
+  guard when any disjunct does not constrain the entity. Since #680, locally
+  guarded state-preserving actions appear as self-loop report entries with
+  `state_preserving: true` and generic
+  TypeScript signatures preserving the exact input state; #1431 adds identifier
+  escaping/collision avoidance and model-derived parameter types. The JSON
+  `typescript` fields carry all these TypeScript differences. The command
+  envelope and existing report field shapes remain compatible (including
+  source-name `params`); report values, entity inclusion, applicability and
+  summary counts can differ under the earlier judgment rules. Native entity
+  order is alphabetical (the frozen reference uses declaration order). Neither
+  JSON nor TypeScript is claimed byte-identical to the frozen reference.
+- TypeScript action and parameter bindings append `_` for ECMAScript reserved
+  words (including literals), strict-mode reserved words, `await`, the existing
+  `type` entry, and strict-mode binding restrictions `eval` and `arguments`.
+  In each emitted signature, `self` is fixed first and the phantom generic (if
+  present) is reserved before parameters. Parameters are allocated in declaration
+  order, appending further `_` until distinct. Function names are allocated once
+  per spec over **all actions in declaration order**, using the same escaping/
+  suffix rule. Every entity declaration reuses that mapping: one FSL action has
+  the same TypeScript name everywhere, and distinct actions never share a name.
+  Each entity's action list contains at most one entry per model action.
+- The phantom generic starts at `S`, adding `_` until it differs from every
+  public model type name and every type declared anywhere in the TypeScript
+  output: all entity interfaces, their `<Name>State` aliases, and any other
+  generated types. The selected name is used in every interface binder, brand
+  field, function binder, `self` type and return type of state-preserving
+  signatures. Collision-free output keeps its existing spelling and bytes.
+- Parameter types use the same model-derived mapping as state data fields:
+  integers, ranges and domains become `number`, booleans become `boolean`, enums
+  and structs retain their public names, except that an enum whose public name
+  equals any emitted entity interface or `<Name>State` alias is written as an
+  inline union of its member string literals in declaration order. This exception
+  also applies inside options and sets, in both parameters and data fields.
+  Options add `| null`, sets use `Set<T>`, and unsupported types become `unknown`.
+  The host supplies the remaining named model types these declarations reference
+  and any required collection library types. This is an ambient declaration
+  skeleton, not a standalone implementation module.
+- The verification engine and solver are unmodified.
 
 ## 6. Tests / related
 

@@ -263,6 +263,743 @@ claims triangulation, it must separately preserve a raw observation, declare
 two independent decision lineages, execute model-world/oracle-world/model-oracle
 edges, and calibrate them as required by that accepted design.
 
+### Relation endpoint expression boundary (#1458)
+
+The bounded-scalar relation declaration gate also requires typed uses of its
+endpoints. For `r: relation A -> B`, `r.contains(a,b)`, `r.add(a,b)`,
+`r.remove(a,b)` and `reachable(r,a,b)` validate `a` against `A` and `b` against
+`B` independently through the shared recursive expression checker. Enum types
+remain nominal and existing integer/range assignability is unchanged.
+
+This is a breaking removal of previously accepted ill-typed expressions, not
+a runtime coercion or new relation operation. A mismatch retains the existing
+assignability diagnostic and authored expression origin, appending
+`hint: use endpoints matching the relation's declared source and target types`.
+Native check and verify reject it with `kind: "semantics"`, exit 2, before
+evaluation. LSP retains `FSL-SEMANTIC`; Worker preserves the native semantic
+error envelope with Worker-owned delivery metadata. Public Kernel expression
+validation uses the same gate without changing the schema. Native/Worker parity
+is shared-checker evidence, not independent semantic triangulation.
+
+The 15 endpoint detectors and 14 preservation/rejecting controls in
+`issue_1458_relation_endpoint_types.rs` cover each method's two positions,
+both reachable positions, heterogeneous source/target order, nested expressions,
+and valid relation operations. A well-typed negated membership control must
+still produce a real invariant violation, not a check error or false green.
+Receiver/arity validation, relation functions on non-relations and the
+self-relation requirement are separate #1459 signature work. No runtime or
+verifier endpoint checks are introduced here.
+
+For `r: relation A -> B`, `domain(r)` infers `Set<A>` and `range(r)` infers
+`Set<B>`, not a universal `Set<Int>`. Binders over these projections inherit the
+endpoint type, as do their public Kernel projection and binder annotations (the
+schema is unchanged). Enum-typed projection uses are accepted, including
+`not (exists x in domain(r): reachable(r, x, x))`, while closing the numeric
+endpoint bypass through enum projection binders. Symbolic and concrete
+projection semantics are unchanged; enum/Int confusion is rejected before
+evaluation rather than interpreted through ordinals. Named numeric endpoints
+remain integer-compatible. The fixed domain/range target has nine detectors
+(three enum uses preserved relative to released main and six newly rejected
+forms) and seven numeric preservation/rejecting controls. Existing non-relation
+signature handling is outside this change (#1459).
+
+The additional breaking removals for `s: relation Color -> Color` and
+`r: relation N -> N` are:
+
+| Inline fixture | Removed invariant expression |
+|---|---|
+| enum-domain-bypass | `forall x in domain(s): not r.contains(x, x)` |
+| enum-range-bypass | `forall x in range(s): not r.contains(x, x)` |
+| enum-domain-integer-member | `not domain(s).contains(0)` |
+| enum-range-integer-member | `not range(s).contains(0)` |
+| enum-domain-integer-comparison | `forall x in domain(s): x != 0` |
+| enum-range-integer-comparison | `forall x in range(s): x != 0` |
+
+#### Removed endpoint forms
+
+These 17 inline occurrences (15 distinct sources) change from `ok` / 0 to
+`error` / `semantics` / 2 in both modes in the final measurement below.
+Here `N = 0..2` and `Color = {Red, Blue}`; endpoint errors retain invariant
+origin 7:3 and the endpoint repair hint. Projection removals are listed above.
+
+| Inline fixture label | Relation | Removed invariant expression |
+|---|---|---|
+| fixed-reachable-evaluated-enums | N -> N | `not reachable(r, Red, Blue)` |
+| fixed-contains-evaluated-enums | N -> N | `not r.contains(Red, Blue)` |
+| fixed-add-contains-evaluated-enums | N -> N | `r.add(Red, Blue).contains(Red, Blue)` |
+| fixed-remove-evaluated-enums | N -> N | `r.remove(Red, Blue) == r` |
+| fixed-reachable-source | N -> N | `not reachable(r, Red, 1)` |
+| fixed-reachable-target | N -> N | `not reachable(r, 1, Blue)` |
+| fixed-contains-source | N -> N | `not r.contains(Red, 1)` |
+| fixed-contains-target | N -> N | `not r.contains(1, Blue)` |
+| fixed-add-source | N -> N | `r.add(Red, 1) != r` |
+| fixed-add-target | N -> N | `r.add(1, Blue) != r` |
+| fixed-remove-source | N -> N | `r.remove(Red, 1) == r` |
+| fixed-remove-target | N -> N | `r.remove(1, Blue) == r` |
+| fixed-heterogeneous-contains-target | N -> Color | `not r.contains(1, 2)` |
+| fixed-heterogeneous-add-target | N -> Color | `r.add(1, 2) != r` |
+| fixed-heterogeneous-remove-target | N -> Color | `r.remove(1, 2) == r` |
+| lsp-08 | N -> N | `not r.contains(1, Blue)` (duplicate occurrence) |
+| worker-07 | N -> N | `not reachable(r, 1, Blue)` (duplicate occurrence) |
+
+#### Restacked endpoint and projection boundary measurement
+
+This is the historical #1458 measurement on the frozen `8e54e862` integration base:
+
+- BASE: `8e54e862cb809121bcd33de53645795bf94a1df5`, materialized by
+  `git archive` and built in that archive's own fresh, unpopulated target.
+- Measured HEAD: `870d03e7aa0be837a43c4c5c15f10d32853941bb`; production
+  commit `dba6456882a75ab34695767383ed86fccbc5ea38`. Subsequent commits
+  change no `rust/*/src` files. The three fixed test files are byte-identical
+  to `764a00c37750ef271a8407ca9785a5d27251406e`.
+- All five original #1458 patches remain identical under `git range-diff`;
+  the rebases had no conflicts. This records-only follow-up changes no source,
+  test, corpus or CLI contract JSON.
+
+On BASE `8e54e862`, both the workspace HEAD build
+(`cargo build --manifest-path rust/Cargo.toml --workspace --locked --offline`)
+and the fresh archived BASE build
+(`cargo build -v --manifest-path rust/Cargo.toml --locked --offline -p fslc-rust --bin fslc`)
+exit 0. Verbose compilation witnesses identify `fsl-syntax`, `fsl-core` and
+`fslc-rust` under the base paths. Toolchain is 1.98.0, with four build jobs/test
+threads and worktree-local TMPDIR. Each binary executes `fslc check FORM` in
+its own tree. One lane-D-then-heavy lock acquisition encloses the **whole
+sweep**, with no per-invocation locks. Each invocation waits for one-minute
+load below 9. Stable mode removes `FSLC_UNSTABLE`; the other mode sets it to
+`fsl5`; cache is disabled.
+
+Binary-identity controls within the sweep on BASE `8e54e862` run the #1439 S1
+`paint(if c != 1 then Red else Blue)` forbidden final-step form and the #1458
+`not reachable(r, Red, Blue)` numeric-relation form, twice in both modes:
+S1 is `error` / `semantics` / 2 on **both** binaries; the endpoint detector is
+`ok` / 0 on BASE and `error` / `semantics` / 2 on HEAD (16 calibration checks).
+Because #1439 is already in BASE, its removals and expectation-envelope
+reclassifications are not inherited #1458 transitions in this measurement.
+
+| Forms per tree | Count |
+|---|---:|
+| Every `.fsl` under `specs/`, `examples/`, `rust/fslc/tests/fixtures/` | 597 |
+| All five `issue_1439_*.rs` files: expect/nested/scope/step/unary | 6 + 8 + 2 + 21 + 10 = 47 |
+| Fixed #1458 endpoint and domain/range files | 35 + 16 = 51 |
+| Fixed #1458 projection-acceptance file: four models, two refinement-input triples, two Kernel forms | 12 |
+| Native/shared diagnostic step and parity fixtures | 2 + 8 = 10 |
+| Worker parity, step and scenario-then fixtures | 7 + 2 + 1 = 10 |
+| LSP stdio expectation and step fixtures | 2 + 2 = 4 |
+| Total | **731 (597 corpus + 134 inline)** |
+
+Written #1458 inline expansions are byte-checked against the actual fixtures
+from the immutable tests; the two in-memory Kernel sources are mechanically
+expanded from their test template. Each mode/tree runs twice: **5,848 checks**. Complete
+stdout bytes, parsed JSON, stderr and exits repeat exactly; **no fields or forms
+are excluded**. The **597-form corpus `ok` → `error` transition set is empty**,
+with no other corpus output drift.
+
+Within the original inline subset retained in this measurement, the observed
+#1458 breaking removals are exactly the 15 endpoint source expressions in
+the table above, the duplicate native target-only contains / Worker target-only
+reachable occurrences, and all six enum projection expressions in the earlier
+projection table: **23 occurrences, 21 distinct sources, 46 mode-form transitions**,
+with exactly the same membership as the earlier inventory. The expanded third
+fixed file additionally counts `xs = domain(s)` with `s: relation Color -> Color`
+and `xs: Set<N>`: `ok` / 0 → `error` / `semantics` / 2 at assignment origin
+8:19 in both modes. This is the already documented q01 family below, not a new
+removal caused by the rebase. Totals are **24 occurrences, 22 distinct sources,
+48 mode-form removals**.
+All are `ok` / 0 → `error` / `semantics` / 2 in both modes. Endpoint and bypass
+errors retain their repair hint; projection membership/comparison errors retain
+the existing assignability message and authored origin without inventing a new
+hint. The three legitimate enum projection idioms check on both BASE and final
+HEAD; only the intermediate endpoint-only patch regressed them.
+
+The third file also adds three counted accepting forms: `COUNT`, `SET_EQUALITY`
+and `COLOR_ASSIGNMENT`, each `error` / `semantics` / 2 → `ok` / 0 in both modes
+(six mode-form additions, not error-envelope reclassifications). Of **1,462
+mode-form pairs**, **1,408 are entirely unchanged**. No further output changes
+were observed. Standalone checks of refinement input components do not replace
+the fixed tests' multi-file `refine` assertions.
+
+The two new corpus fixtures are included without exclusions:
+`rust/fslc/tests/fixtures/legacy_return_branches.fsl` is `ok` / 0 with
+`implements.result: "refines"`; `legacy_return_impl_refines.fsl`, a standalone
+refinement fragment, is `error` / `semantics` / 2, `spec has no state block`.
+Both retain identical complete outputs on BASE and HEAD in both modes and
+repetitions. All **5,832 shared observations** also match the earlier
+`6e99702c05c92be39791ab1b0effe78f8ab0e60d` measurement in full; the 16
+observations of the two added corpus forms are retained separately because
+those paths did not exist in that base.
+
+On BASE `8e54e862`, `cargo test --manifest-path rust/Cargo.toml --workspace --locked --offline`
+exits 0: **3,063 passed, zero failed or ignored**. CLI conformance, the three
+fixed targets (52 tests) and formatting also pass on that base. Public Kernel
+controls require `rel_domain`/`rel_range` item and binder annotations for both
+`N -> Color` and `Color -> N`; these are shared-checker controls, not independent
+semantic triangulation or unbounded verification.
+
+The production-src-only revert calibration was **measured on BASE
+`6e99702c05c92be39791ab1b0effe78f8ab0e60d`**, producing **28 intended failures
+and 24 preservation passes** (endpoint 15/14, domain/range 6/10, acceptance 7/0).
+The three legitimate enum-binder/cycle idioms are preserved under this full
+revert, while detecting a projection-only revert. Exact source/diff/status
+restore was proved clean. Clippy was also **measured on 6e99702c**, exit 101
+only for authorized #1444 (`claims_next_edition`, requirement_trace_large_domain:65).
+Neither is relabeled or rerun on `8e54e862`: COMMON rev 4/4.1 carries them
+across 26 changed main files, with zero production/golden/CLI-contract/lock
+overlap and only the two corpus additions, both `A` in `git diff --name-status`.
+
+#### Remeasurement after main's typecheck changes (`9af1fa5f`)
+
+The current measurement uses BASE `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db`
+and measured HEAD `3a8a6019a5bed3ae62f960afedf2bdcf6d129341`. The six prior
+commits were rebased from `8e54e862cb809121bcd33de53645795bf94a1df5`:
+production is now `66727f6ead1da285f7c026de2dc20605cb2c2ae2`, with the five
+later patches unchanged. Two conflicts in `typecheck.rs` retain main's
+phase-aware recursive validation and the relation endpoint expectations; the
+endpoint helper passes the current validation phase through rather than
+resetting aggregate normalization or substituted pattern scopes. Main's #1442,
+#1463 and #1448 checks remain intact. The only subsequent source change is the
+whitespace-only `rel_domain`/`rel_range` arm formatting in the measured HEAD.
+The complete file before and after that commit is equal after removing all
+whitespace; the exact diff changes only that arm. No test was adapted. The
+three fixed files remain byte-identical to `764a00c37750ef271a8407ca9785a5d27251406e`.
+
+BASE was materialized with `git archive` into its own tree and compiled into a
+fresh target with `cargo build -v --manifest-path rust/Cargo.toml --locked --offline -p fslc-rust --bin fslc`
+(exit 0). Verbose output witnesses `fsl-syntax`, `fsl-core` and `fslc-rust`
+compiling from that base tree. Each binary runs `fslc check FORM` in its own
+materialized tree, enumerating every `.fsl` under `specs/`, `examples/` and
+`rust/fslc/tests/fixtures/`, plus the inline inventory above. The corpus remains
+**597 forms**, with ten modified sources since `8e54e862`: the seven injected
+`return_system__*` fixtures, `examples/layers/return_impl_refines.fsl`,
+`examples/layers/return_system.fsl`, and `examples/pm/cancel_system.fsl` (main's
+canonical action-correspondence updates). BASE and HEAD corpus bytes match.
+The same **134 inline forms** yield **731 forms per tree / 5,848 checks**, both
+modes twice, with **no excluded fields or forms** and exact repeat agreement.
+Binary-identity controls again pass all 16 expected accepting/rejecting checks.
+
+The measured **597-form corpus `ok` → `error` transition set is empty** between
+these named BASE and HEAD binaries, with no other corpus output drift. The
+inline result remains **48 removals** (24 occurrences / 22 distinct sources)
+and **six additions** (the three counted accepting forms, in both modes), with
+**1,408 unchanged mode-form pairs** out of 1,462. Every removal/addition has
+the same membership as the `8e54e862` measurement above, including the original
+46-transition subset. No new #1458 breaking family is introduced by the rebase.
+
+Full comparison with the old measurement observes exactly two changed forms
+(12 observations, both modes and repetitions), all attributable to main's
+#1463 in `28c4eab710f8d83e766bb0e7c7e006d09d7777d8`, not #1458:
+
+| Form / file | Old to current observation | Scope / attribution |
+|---|---|---|
+| `forall i in s { m[i] = true }`, `rust/fslc/tests/fixtures/explicit_init_state_collection.fsl` | `ok` / 0 → `error` / `semantics` / 2, location 12:5, `init forall over a state collection is not supported; state variable 's' is not allowed` | Both BASE and HEAD; main moves the existing init collection restriction to model construction (8 observations). |
+| `count(x in domain(s)) <= 1`, the `COUNT` model in `rust/fslc/tests/issue_1458_projection_acceptance.rs` | BASE remains `error` / `semantics` / 2; `invalid model expression: type is not a finite scalar` gains ` at 8:3` and `loc: {line: 8, column: 3}` | BASE only; main preserves the authored aggregate location (4 observations). HEAD remains accepted. |
+
+No other complete stdout, parsed JSON, stderr or exit changes were observed
+across the old and new measurements. In particular, the ten changed corpus
+sources do not create output differences. The shared main rejection is not
+counted as a #1458 corpus removal, and the located BASE count diagnostic does
+not change its error-to-ok addition classification.
+
+On BASE `9af1fa5f`, the production-source-only reverse calibration was freshly
+measured at `3a8a6019`: the nonempty reverse patch names exactly
+`rust/fsl-core/src/typecheck.rs` and `rust/fsl-wasm/src/lib.rs`, and **both files
+equal their BASE blobs** before testing. The three fixed targets with
+`--no-fail-fast` produce **28 intended failures / 24 preservation passes**:
+endpoint 15/14, domain/range 6/10, acceptance 7/0, identical failing test
+membership to the old `6e99702c` calibration. Exact file bytes, full diff and
+clean status prove restoration; all 52 tests pass afterward. These are fresh
+`9af1fa5f` measurements, unlike the explicitly carried historical calibration.
+
+`cargo test --manifest-path rust/Cargo.toml --locked --offline --workspace --no-fail-fast`
+passes **3,468 tests, zero failed or ignored**, measured on
+`fc77124b31744f1c1728295db6f09508265b8285`. This result is carried across only
+the proved whitespace-only commit to `3a8a6019`; it is not claimed as a rerun
+there. On the latter HEAD, workspace build, CLI conformance (11), the three
+fixed targets twice (52 each), formatting and
+`cargo clippy --manifest-path rust/Cargo.toml --locked --offline --workspace --all-targets -- -D warnings`
+all exit 0. Clippy is **warning-free on BASE `9af1fa5f`**: no #1444 exception
+is carried forward. Main's changed #1448 tests (10), core tests (55), and
+compose/quantifier parent targets (230, including support modules) also pass
+on `fc77124b`. All checks use toolchain 1.98.0, four jobs/threads, offline
+locked dependencies and worktree-local TMPDIR. Heavy jobs release their locks
+between commands; after the scheduling amendment, subsequent heavy jobs yield
+to other waiting lanes before reacquisition. One
+whole-script acquisition encloses the sweep. These are bounded check/test
+observations, not independent triangulation or unbounded verification.
+
+#### Projection categories and final-review regression controls
+
+The measured fixture lists above are **not an exhaustive description of the
+language boundary**. Both each element and the whole set produced by `domain`
+or `range` take the declared endpoint type. Consequently an enum or Bool
+projection element is rejected anywhere `Int` is expected; its whole set is rejected
+wherever a numeric Set is expected. The breaking removal includes
+comparison, ordering, arithmetic, `min`/`max`, membership, set-literal equality,
+Option comparisons and pattern payloads, numeric Set state assignment, and
+refinement maps. This is shared type inference, not an allowlist of the six
+projection examples or a new runtime conversion.
+
+Newly accepted families, relative to released BASE `e8cf78f0`, include `count`
+over finite endpoint-typed domain/range projections; numeric `sum`; enum
+set-literal equality, enum-typed `where` filters and conditional projection
+membership; `let`-bound projections consumed as matching typed sets; matching
+enum Set state assignment; and refinement maps into matching enum Sets. These
+forms still evaluate their authored properties: acceptance is not an invariant
+truth claim. `unique` over enum domain/range is **preserved accepted behavior**,
+not a new addition. Direct measurements override the review brief's initial
+classification: its p28 is a `count` probe, and both `unique` supplements check
+on BASE and HEAD and produce real step-2 violations on both engines. The three
+enum-binder/cycle idioms a02/a03/a05 also check on released BASE and final HEAD;
+only the unreleased intermediate endpoint-only patch rejected them.
+
+The broader final-review probes below are **historical measurements on BASE
+`e8cf78f0162530e264128f588981d49790f2767f` and production HEAD
+`c11d5ed399807979c3bf89b07e06e4d2cbde9adc`**, not measurements on the final
+integration base. They were independently run twice: 228 main observations and
+76 supplements, both runs exiting 0. The supplement adds test sources but no
+production change. Each direct call removes `FSLC_UNSTABLE`, disables cache,
+and retains complete source, stdout, JSON, stderr and exit. An accepted check
+is followed by
+`verify FORM --engine bmc --depth 3 --no-cache` and the analogous explicit call;
+maps use `refine IMPL ABS MAP --depth 3`. No field is excluded, and no
+cross-engine envelope equality is claimed. The tables report both repetitions'
+matching semantic outcomes.
+
+Here E is check `error/semantics/2`, O is check `ok/0`, and Xn is a real
+invariant violation at step n, exit 1, on **both** BMC and explicit. All ordinary
+HEAD rejection origins below are invariant 8:3 unless stated otherwise.
+
+| Newly rejected probe | Authored form / context | BASE check | HEAD check / origin |
+|---|---|---|---|
+| q01 | `xs = domain(s)`, `s: relation Color -> Color`, `xs: Set<N>` | O | E, assignment 8:19 |
+| p14 | `forall x in domain(s) { x + 1 != 0 }` | O | E |
+| p16 | `forall x in domain(s) { min(x, 1) != 0 }` | O | E |
+| max supplement | same form with `max(x, 1)` | O | E, origin 8:3 |
+| q14 | `not domain(b).contains(1)`, `b: relation Bool -> Color` | O | E, 6:3 |
+| p06 | `domain(s) != Set { 0 }` | O | E |
+| p07 | `Set { 0 } != domain(s)` | O | E |
+| p18 | `forall x in domain(s) { some(0) != some(x) }` | O | E |
+| u04 | `forall x in domain(s) { o != some(x) }`, `o: Option<N>` | O | E |
+| p17 | `forall x in domain(s) { (some(x) is some(y)) => y != 0 }` | O | E |
+| p11 | `forall y in range(h) { y < 1 }`, `h: relation N -> Color` | O | E |
+| numeric refinement map | abstract `xs: Set<N>`, `map xs = domain(s)` | type validation accepts; simulation returns `refinement_failed/abs_state_mismatch/1` | `error/type/2` before simulation, existing unknown-span origin 1:1 |
+
+| Newly accepted probe | Authored form / context | BASE | HEAD check / BMC / explicit |
+|---|---|---|---|
+| p01 | `count(x in domain(s)) <= 1` | E | O / X2 / X2 |
+| p02 | `sum(x in domain(r) of x) <= 1`, numeric r | E | O / X1 / X1 |
+| range-sum supplement | same sum over `range(r)` | E | O / X1 / X1 |
+| p28 | `count(x in range(r) where x > 0) <= 1`, numeric r | E | O / X2 / X2 |
+| p05 | `domain(s) == Set {} or domain(s) == Set { Red }` | E | O / X1 / X1 |
+| p21 | `not (exists x in domain(s) where x != Red { s.contains(x, Red) })` | E | O / X1 / X1 |
+| p23 | `not (if s.contains(Red, Red) then domain(s) else range(s)).contains(Blue)` | E | O / X1 / X1 |
+| q07 | `let d = domain(s)`, `requires d.contains(Red)`, then n becomes 1 | E | O / X2 / X2, invariant 12:3 |
+| q02 | `xs = domain(s)`, `xs: Set<Color>` | E | O / X2 / X2 |
+| enum refinement map | abstract `xs: Set<Color>`, `map xs = domain(s)`, `links(a,b) -> mark(a)` | `error/type/2` | `refines/0`, checked to depth 3, action map links to mark |
+
+All newly accepted ordinary probes above retain invariant origin 8:3 except
+q07. Successful refinement has no diagnostic origin; type errors for map
+expressions currently use 1:1 rather than the authored map keyword. Neither
+origin limitation is changed or disguised as an authored-span improvement.
+
+Public Kernel precision here is limited to the **projection nodes and binders
+over those projections**. Numeric endpoint literals in relation `contains`,
+`add`, `remove`, and `reachable` arguments still export as `int`, rather than
+the named numeric endpoint type: this is a pre-existing annotation limitation
+(`public_kernel.rs` method argument projection and ternary argument projection).
+Probe k01 remains accepted on BASE and HEAD, with numeric relation arguments
+exported as `int`; no `public_kernel.rs` change is part of this fix.
+
+`issue_1458_projection_acceptance.rs` commits seven controls: three require real
+violations on both engines with authored invariant origins; one requires
+refinement into `Set<Color>`; two reject numeric Set assignment/refinement
+before evaluation/simulation; and one asserts exact public Kernel projection
+item **and binder** types for both `N -> Color` and `Color -> N`. The Kernel
+fixture uses binder self-comparison so its revert failure is an `int` annotation,
+not an incidental model-loader rejection. Reversing only the domain/range hunk
+of `c11d5ed3`, measured on historical BASE `e8cf78f0`, produces **seven intended
+failures / zero passes**; exact checker bytes and diff are restored, then all
+three #1458 targets pass twice (52 tests per run). The two fixed files remain
+unchanged. In that historical round on BASE `e8cf78f0`, formatting passes and
+CLI all-target Clippy retains only authorized #1444.
+
+These historical probes are not retroactively added to the final sweep. The
+final measurement above explicitly includes all forms of the third fixed file;
+the broader probe tables retain their original base and head identities.
+
+Out-of-scope leftovers are explicitly retained: cross-range numeric Set coercion
+(u01/u02/q03) checks on both binaries but BMC reports a type/coercion error while
+explicit returns a violation; relation indexing `h[x]` (q17) checks on both but
+both engines report errors. Both are routed to the representative as new issue
+candidates, not fixed or covered by an unchanged-runtime agreement claim here.
+At that checkpoint `abs` on an enum projection element (p15) checked but both
+engines errored on both binaries; it and the non-relation `domain` fallback to
+`Set<Int>` were deferred to #1459, resolved by the amendment below.
+
+### Static operand and signature boundary (#1459)
+
+This amendment closes six remaining shared-checker gaps. It changes neither
+grammar/lowering nor runtime/verifier semantics. Invalid authored expressions
+now fail during model loading, with `kind: semantics`, exit 2, and the existing
+authored expression origin; generated aggregate terms must not replace that
+origin with 1:1. These checks cover expression trees visited by the shared
+validator: unselected conditional branches, initializers, action assignments,
+guard/let values and ensures, properties, leadsTo predicates/ranking, terminal
+predicates, and trace expression internals. Parameter-type checking of helpful
+action arguments was outside the historical baseline; main's #1527 now provides
+it and is preserved. Outer trace argument kinds retain their existing replay contract.
+
+| Breaking removal category | Previously accepted examples now rejected |
+|---|---|
+| Non-Option patterns | `n is none`, `n is some(x)` for numeric `n` |
+| Non-integer abs operands | `abs(Red)`, `abs(true)`, `abs(x)` for an enum domain/range binder |
+| Non-relation functions/projections | `acyclic(n)`, `functional(n)`, `injective(n)`, `domain(n)`, `range(n)`, `reachable(n,0,1)`; no invented `Set<Int>` fallback |
+| Invalid path/cycle relation shape | `acyclic(h)` and `reachable(h,a,b)` on mixed enum/numeric endpoints or `N -> M`, even with identical numeric bounds |
+| Invalid collection receiver/name/arity | numeric receivers; Set.push, Seq.add, relation.size; missing/extra Set/Seq arguments; relation endpoint methods without exactly two arguments; action assignment `n = q.at()` |
+| Erased empty-aggregate operands | `count(i in 1..0 where 1)` / `where not 1`, `sum(i in 1..0 of true)` / `of -Red`, and corresponding zero-capacity Seq forms |
+
+The method gate matches existing runtime dispatch: Set contains/add/remove take
+one item, size takes none; Seq contains/push take one item, at takes one integer
+index, pop/head/size take none; relation contains/add/remove take exactly two
+typed endpoints. Map has no methods. No new runtime operation is introduced.
+Original count/sum binders, Bool filters and integer sum values are validated
+before normalization; well-typed empty domains keep their zero identities.
+
+Diagnostics reuse domain-lowering Option and method wording, ordinary Int/Bool
+assignability, public relation-function names and repair hints. Existing #1458
+endpoint mismatches/hints remain unchanged. Heterogeneous non-path relation
+functions, valid methods, Option continuation bindings and non-reflexive
+reachability retain their meaning. Additive native/shared-LSP and Worker rows
+assert located Option errors rather than merely a runtime exit code.
+
+The existing verifier test `acyclic_on_a_non_self_relation_is_rejected` keeps
+its name and intent. It now asserts the earlier model-build rejection of its
+unchanged `relation User -> Role` source. It also retains the verifier-level
+`verify_bounded` rejection by mutating a public checked-model expression from
+functional to acyclic, following the existing #1259 unchecked-input test pattern.
+No unchecked builder API, product bypass or accepted-source exception is added.
+
+Self-relation means exact declared endpoint `TypeRef` identity for both
+`reachable` and `acyclic`, matching symbolic evaluation: `T -> T`, not merely
+numeric assignability. Thus `type N = 0..2` and `type M = 0..2` still make
+`relation N -> M` invalid for these two functions. Heterogeneous non-path
+functions and endpoint methods remain valid. This is an explicit breaking
+removal, not a new enum/numeric encoding or runtime conversion.
+
+#### Three-tree boundary audit (#1459)
+
+The released BASE is `e8cf78f0162530e264128f588981d49790f2767f`, the immediate
+parent is `764a00c37750ef271a8407ca9785a5d27251406e`, and the implementation
+HEAD is `33d7faa7dc034a7c8b484d59c40c0e78a45607ca`. Both baselines were freshly
+materialized with `git archive` inside the task worktree, each starting without
+a target directory. Each tree built its own CLI with
+`cargo build --manifest-path rust/Cargo.toml -p fslc-rust --bin fslc --locked --offline -v`.
+Verbose logs show `fsl-syntax`, `fsl-core` and `fslc-rust` compiling from that
+tree's own paths, not a cloned target or another worktree's binary.
+
+| State | CLI binary SHA-256 | Checker source SHA-256 |
+|---|---|---|
+| BASE `e8cf78f0` | `218301707985a399d4cdfa722b5033950298ce5cb8565f12c01ad541e022c89c` | `a7d9fa098655a325fe184cc6d849fb37d6dbfc32288dc66e9436c026447ebe9b` |
+| Parent `764a00c3` | `086b0db01caaee83a0bd102b2519dc9fbda88dd874a7f75f86d8110101b5c098` | `61dcd7feb19f120b53f3df6fc3cde8240a9a86f345462075f0a7c32b8e6888b8` |
+| HEAD `33d7faa7` | `649ee0617acebb01716cfc9f940289f3643e07b73d16e6c9942d907553956661` | `08ac6ec27e100b7b6832aabac302137be071b88ca847a523bcbc4e984c66078e` |
+
+Recount command:
+`rg --files -0 specs examples rust/fslc/tests/fixtures -g '*.fsl'`.
+An independent recursive inventory agrees, and all corpus paths and source
+bytes agree across the three trees. The **591 corpus files** and **384 inline
+occurrences** give **975 forms per tree**. Inline coverage includes the original
+122 occurrences, 12 forms from the seven final #1458 tests, two new consumer
+rows, two forms for the adapted verifier test, all 228 current operand fixtures,
+17 statement fixtures, and the original combined numeric-policy fixture from
+the formerly ignored test. The historical 122 source hashes are unchanged.
+
+Each binary ran `check FORM` in its own tree, serially, in both modes twice:
+
+```text
+env -u FSLC_UNSTABLE FSLC_CACHE=off BINARY check FORM
+env FSLC_UNSTABLE=fsl5 FSLC_CACHE=off BINARY check FORM
+```
+
+One outer lane-D-then-heavy advisory lock covered calibration, all checks,
+comparison and audit; per-binary locks were removed before measurement. Uptime
+was checked **inside** those locks before every binary, pausing at one-minute
+load ≥9. Observed sweep loads were 1.63–2.43. Whole-wrapper exit was **0**,
+wall time **754.44 s including lock wait / 272.20 s inside the locks**.
+There are **11,700 sweep checks**, plus 12 calibration calls: the Option detector
+checks on both bases and rejects on HEAD, while the #1458 endpoint detector
+checks on BASE but rejects on parent and HEAD, each twice.
+
+All **5,850 repeat pairs** agree in full stdout, JSON, stderr and exit. There
+are no excluded fields or omitted forms. The **corpus ok→error set is empty**
+for BASE→HEAD and parent→HEAD; there is also **no other corpus output drift**.
+These are measured results for the named commits and commands, not an
+assumption from the narrower native corpus gate.
+
+| New #1459 category | Removed source occurrences | Removed mode-forms | Diagnostic reclassifications (mode-forms) |
+|---|---:|---:|---:|
+| Option operand shape | 9 | 18 | 8 |
+| Integer abs operands | 12 | 24 | 16 |
+| Relation operands/projections | 15 | 30 | 24 |
+| Exact self-relation identity | 20 | 40 | 0 |
+| Method receiver/name/arity | 44 | 88 | 12 |
+| Original empty count/sum operands | 24 | 48 | 0 |
+| **Total** | **124** | **248** | **60** |
+
+The removals comprise **123 distinct source texts** (the new native/Worker
+Option rows duplicate one text). Numeric `N -> M` accounts for **nine source
+occurrences / 18 mode-form removals**: eight final reachable/acyclic position
+fixtures plus the original combined fixture. The adapted verifier's unchanged
+`User -> Role` acyclic source contributes two mode-form removals. All 60 new
+diagnostic reclassifications remain `error/semantics/2`: formerly unlocated
+runtime errors now have the authored static origin and approved class text.
+
+Attribution uses BASE→parent for inherited work and parent→HEAD for #1459:
+
+| Issue in the expanded inventory | Removals | Diagnostic reclassifications | Additions |
+|---|---:|---:|---:|
+| Inherited #1439 | 86 | 11 | 0 |
+| Inherited #1458 | 56 | 0 | 6 |
+| New #1459 | 248 | 60 | 0 |
+
+All entries count mode-forms. The original 122 occurrences reproduce exactly
+the prior 70 #1439 removals, three #1439 reclassifications and 46 #1458 removals.
+The expanded controls add 16 inherited unary-filter removals and eight
+head/at trace-location reclassifications; eight endpoint-calibration removals
+and two numeric-Set assignment removals remain #1458, not new #1459 behavior.
+The six additions are the two-mode count, enum set-literal equality and enum
+Set assignment forms added by #1458. Direct BASE→HEAD comparison
+has **390 removals, 71 diagnostic reclassifications, six additions and 1,483
+fully unchanged pairs**, out of 1,950 mode-form pairs.
+
+Final regression calibration: the fixed operand target passes **28 tests twice**,
+with no ignore. Reversing only the production checker change produces the
+expected **18 original-reason detector failures and ten control passes**
+(14 false-green check tuples, four missing-static-diagnostic failures); exact
+checker/diff and fixed-test hashes are restored. The statement target passes
+**17 tests twice**; its production-only revert produces exactly **16 intended
+check false-green failures and one valid-body control pass**. All six scoped
+package suites pass, native LSP/Worker rows run twice, formatting passes, and
+final scoped Clippy has only the separately authorized #1444 dead-code warning.
+This is source-boundary and routing evidence, not independent semantic
+triangulation or an unbounded-verification claim.
+
+#### Final review round 1 (#1459)
+
+Review of `33d7faa7` found that exact endpoint identity was still checked only
+on an operand's inferred type. Conditional inference uses the then branch,
+and ordinary numeric compatibility permitted a non-self else branch to pass.
+The self-relation check now visits both branches, including nesting and
+unselected branches, through `old` and relation add/remove receivers. Action
+lets retain a separate private identity guarantee computed before each binding,
+so two-step aliases cannot discard a non-self selection. This does not alter
+ordinary numeric or Set compatibility, public type environments or model IR.
+
+All errors leaving recursive expression validation acquire the current authored
+span through the existing insert-if-absent rule; precise inner spans are kept.
+Equality inference distinguishes context-needed literal failures structurally,
+so an empty literal cannot mask a substantive domain/range operand error.
+Range-bound assignability does not manufacture a 1:1 span: the enclosing binder
+supplies the authored origin. Terminal validation uses its stored declaration
+span. Synthetic aggregate/partial-path spans and legacy APIs without a supplied
+source span are not reclassified as authored positions.
+
+The inference call-site audit covers the original 20 typecheck calls, three
+post-validation Public Kernel projection calls and two partial-operation calls
+that consume inference errors. Recursive type inference, index/method helpers,
+binary operand inference, pattern extension and aggregate normalization now
+leave validation through the common authored boundary. `expression_type` and
+assignability already attach caller spans. The former repeated raw let inference
+is span-bound; the three new branch/receiver inferences are covered by the same
+boundary or the action-span mapping during let capture. Public projection runs
+only after full expression/model validation; its raw calls cannot be the first
+diagnostic for invalid authored input. Partial-operation classification consumes
+its two errors rather than returning them as diagnostics.
+
+The `unknown_span` inventory identifies one authored-model use in the model
+expression validator: terminal, now replaced by `terminal_span`. The two range
+bound calls are also fixed. Remaining uses are generated aggregate conditionals,
+generated quantified partial paths, source-span-less legacy expression APIs,
+and declaration-annotation fallbacks (the no-target case is unused). KPI loading
+explicitly restores the projection declaration origin. A source-less programmatic
+model without a terminal span retains the legacy fallback; an authored terminal
+does not use it.
+
+Two scope clarifications remain explicit. At the historical round-1 baseline,
+`helpful` actions checked existence/arity only; main's #1527 now checks parameter
+types and is preserved during integration. Relation-valued temporary collection
+literals are not generalized by the self-relation provenance fix: a mixed
+relation sequence can check while both engines reject it because such sequences
+are unsupported. That separate constructor-acceptance gap is likewise routed
+upstream. Neither is evidence for claiming all language expression positions
+or temporary constructors are supported.
+
+Round-1 implementation HEAD is `8caf5c2ed9e1aa15238dcde1b3a66bb4ccf9c857`.
+The primary BASE/parent/HEAD comparison remains `e8cf78f0` / `764a00c3` / this
+HEAD. A **fourth own-tree baseline** was freshly materialized with
+`git archive 33d7faa7` and built from its own source paths, starting without a
+target directory. It was not a copy of the old working-tree executable.
+
+| R1 state | CLI binary SHA-256 | Checker source SHA-256 |
+|---|---|---|
+| R0 `33d7faa7` own-tree baseline | `365a2474809cbf2bb773ace0c2fb23b25e5b301d08f977feec8d86dbb0ed1cd7` | `08ac6ec27e100b7b6832aabac302137be071b88ca847a523bcbc4e984c66078e` |
+| R1 HEAD `8caf5c2e` | `d04df10f36e1140ba18e22d8d7e6b32a5b33987ddb97daf0c2d01456d9533b38` | `5f80538cfaac2b261068ca8cb22037a0d3278ad9fd4c27bae83d7a6c140c4411` |
+
+The earlier two own-tree baselines retain their recorded binary/source hashes.
+The census command and cache/feature-mode `check FORM` commands are the same as
+above. All **591 corpus files** and the original **384 inline occurrences**
+retain their source hashes; 46 review fixtures and 17 supplementary path/origin
+fixtures add **63 forms**, yielding **447 inline / 1,038 total forms per tree**.
+The primary three-tree measurement has **12,456 checks**, with **4,152 additional
+33d checks** for attribution: **16,608 total**, stable/fsl5 twice in all four
+trees. Twenty-four calibration calls prove the original Option/endpoint gates
+and, separately, the conditional-self detector (accepted by `33d7faa7`, rejected
+by R1), each twice per state.
+
+Fresh-baseline/head builds, calibration, all four measurement passes, comparison
+and audit ran under **one lane-D-then-heavy acquisition**. Before every Cargo
+start/binary, uptime was checked inside the locks and load ≥9 paused the run.
+Observed measurement load was 1.46–3.95. Wrapper exit is **0**; wall time is
+**613.81 s including lock wait / 613.71 s inside locks including the fresh build**.
+All **8,304 repeat pairs** agree in full stdout/JSON/stderr/exit. There are **no
+excluded forms or fields**, no corpus ok→error transitions, and no other corpus
+output drift in any comparison.
+
+| R1-only change, `33d7faa7` → `8caf5c2e` | Source occurrences | Mode-forms |
+|---|---:|---:|
+| Non-self conditional selections through supported wrappers/aliases, now rejected | 21 | 42 removals |
+| Projection inference origin/primary-diagnostic correction | 8 | 16 reclassifications |
+| Range-bound generated 1:1 → authored origin | 3 | 6 reclassifications |
+| Terminal generated 1:1 → authored origin | 1 | 2 reclassifications |
+
+Thus R1 adds **42 removals and 24 diagnostic reclassifications**, no additions,
+with **2,010 unchanged pairs** out of 2,076. Every reclassification remains
+`error/semantics/2`: eight source forms formerly had no location and four had
+generated 1:1; all now have the expected authored location. Two of the eight
+also replace a context-needed empty-literal error with the substantive
+domain/range error. The precise-inner-origin control remains unchanged.
+
+| Full expanded comparison | Removed mode-forms | Diagnostic reclassifications | Additions | Unchanged |
+|---|---:|---:|---:|---:|
+| BASE → parent | 142 | 11 | 8 | 1,915 |
+| Parent → R0 `33d7faa7` | 274 | 64 | 0 | 1,738 |
+| R0 → R1 | 42 | 24 | 0 | 2,010 |
+| Parent → R1 | 316 | 66 | 0 | 1,694 |
+| BASE → R1 | 458 | 77 | 8 | 1,533 |
+
+The larger fixture set does not retroactively change the earlier 975-form audit.
+Inherited #1439 still contributes 86 removals/11 reclassifications; inherited
+#1458 contributes 56 removals and now eight additions (including the additional
+enum-projection equality control). The parent→R0 edge adds 26 removals and four
+diagnostic changes on new fixtures to the earlier 248/60 counts. The latter are
+the two-mode Boolean/projection aggregate-range-bound forms: the parent's static
+range-bound error becomes the R0 specific operand error at 1:1, then R1 attaches
+the authored origin. Do not add edge reclassification counts blindly: a form
+already removed by R0 can have a further diagnostic correction in R1.
+
+Final-code V1 runs all four immutable targets twice: **28 + 17 + 30 + 13 = 88
+tests**, none ignored. Reverting only R1 production to exact `33d7faa7` behavior
+produces **33 intended detector failures and 55 passes**, including all 45 earlier
+tests and ten new controls. Produced reasons are 21 false-green check tuples,
+six missing locations, four generated-1:1 locations and two masked substantive
+errors; exact checker/diff and all four hashes are restored. Requested R1 scoped
+packages pass **2,414 tests**, formatting passes, and scoped Clippy retains only
+the separately authorized #1444. No new allowance or existing-test rewrite is
+used. These are bounded source/type and routing checks, not an assurance upgrade.
+
+#### Integration audit carried to main `11f01225` (#1459)
+
+Final base is **`11f01225e244dabde0f8dfd9aaa665bc47dccfd4`**. Implementation
+was measured at **`2b7d2e98349505af7dccb7843e41ab659066f021`**, on
+`b1557a31b77f549d2c48823c3435217f9df4fc53`, and carried to `11f01225`, whose
+tree differs only by `docs/intro/language.en.html` and `language.ja.html`.
+#1458 is already on main, not a separate integration parent. Its historical
+attribution is still measured by the `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db`
+→`b1557a31` split; the latter's code was built at
+`3a8a6019a5bed3ae62f960afedf2bdcf6d129341` and is identical to the final base.
+
+Every `.fsl` under `specs/`, `examples/`, and `rust/fslc/tests/fixtures/` is
+included: **597 corpus inputs**, plus **601 inline inputs**. The inline inventory
+retains the five #1459 fixed files, three #1458 fixed files and rewritten Kernel
+fixtures, and adds every source from the **137 shared #1463 rows**, including
+their one resolver dependency. Each invocation is `fslc check FORM`, cache off,
+with `FSLC_UNSTABLE` unset and set to `fsl5`, each repeated twice in independently
+materialized states. **1,198 inputs/state**, **14,376 primary checks**, **24
+identity calibrations**, and **7,188 full-output repeat pairs**. All repeat pairs
+agree literally. No corpus output changes and no form or output-field exclusions.
+
+| Full expanded comparison | Removals | Diagnostic reclassifications | Additions | Unchanged mode-forms |
+|---|---:|---:|---:|---:|
+| Historical pre-#1458 `9af1fa5f` → measured baseline carried to `11f01225` | 56 | 0 | 8 | 2,332 |
+| Final base `11f01225` → measured #1459 implementation | 294 | 62 | 0 | 2,040 |
+| Historical `9af1fa5f` → measured #1459 implementation | 350 | 62 | 8 | 1,976 |
+
+The #1459 removals are **147 source occurrences / 142 distinct source texts**;
+the 62 reclassifications are 31 occurrences. The historical #1458 134-entry
+subset remains **48 removals / six additions**. Expanded fixtures contribute
+eight additional inherited endpoint removals and two inherited projection-equality
+additions; do not attribute these to #1459.
+
+The historical 316/66 #1459 comparison above changes because main #1463
+(`28c4eab710f8d83e766bb0e7c7e006d09d7777d8`) already validates original
+aggregate operands and authored bounds. These 24 occurrences no longer contribute
+48 #1459 removals: `empty-count-{0,1}-{A,D,F,I}`,
+`empty-sum-{0,1}-{A,D,F,I}`, `empty-seq-count-{A,D,F,I}`, and
+`empty-seq-sum-{A,D,F,I}` in the operand fixture inventory. Here A/D/F/I denote
+acceptance/dead branch/forbidden/invariant positions. The two `range-bool` and
+`range-enum` path occurrences no longer contribute four reclassifications:
+base and head already agree on their located semantics errors. All other retained
+transition members are unchanged. Added occurrences contribute 16 let-shadowing,
+four public-Kernel, four CLI-Kernel, and two shared-row removal mode-forms:
+**316−48+26=294**, **66−4=62**. Historical measurements are not relabeled.
+
+The breaking shared-row removal is **`X1/operand-method-types`**:
+`invariant Capture { acyclic(done) }` with Bool `done`. Its recorded baseline
+stays `[Ok, Error, Error, Error]`; expected outcomes become
+`[Error, Error, Error, Error]` in check/BMC/induction/explicit order, with check
+semantics rejection at **8:3**. It is the only changed shared row. For the other
+136 primary sources and one resolver dependency (**137 inputs**), the same
+`fslc check FORM` command at the named base and implementation SHAs yields an
+empty transition set and no other output change, in both modes twice.
+
+The full inherited comparison preserves **5,848 raw observations**: **292**
+differences are solely the input path embedded in `message` (exit, location,
+other JSON fields and stderr unchanged). Another **16** observations concern
+two inherited entries, `1458-acceptance-kernel-N-Color` and
+`1458-acceptance-kernel-Color-N`. The previous extractor selected scratch labels
+`kernel-N-Color` / `kernel-Color-N`, not the spec template at
+`issue_1458_projection_acceptance.rs:270`; both sides therefore returned parse
+errors. This sweep uses the actual `spec ProjectionKernel` test sources, which
+check on both baseline binaries. There is no transition or attribution change.
+Raw differences remain recorded; no field is normalized/excluded in the sweep.
+The optional canonical-path replay was explicitly **not run**. The #1458-side
+extraction defect is reported upstream separately.
+
+Coverage adaptations preserve guards rather than bypass them. The existing
+relation_operations verifier test still reaches its low-level rejection through
+an edited checked model. The #1464 public-Kernel missing-at-index test is split
+into `check_rejects_at_without_an_index`,
+`walk_partial_rejects_an_at_call_without_an_index`, and
+`public_kernel_rejects_an_at_call_without_an_index_without_panicking`. The latter
+two start with accepted `at(0)`, remove the index in the model AST, and separately
+exercise the projection guard and public checked-model validation. The renamed
+CLI `empty_at_index_is_rejected_by_check_and_kernel` stops at check for both
+commands and pins their complete observed envelopes; it no longer claims to
+exercise the projection guard. Its unchanged valid-index control still exports
+the partial operation. The X1 expectation change follows upstream approval and
+the explicit #1459 ownership in DESIGN-check-executable-forms.
+
+All five immutable #1459 files pass 98 tests twice; #1458's three files pass 52;
+Kernel passes 24 twice and public Kernel 10 twice. Full workspace rerun passes
+**3,568 / 0 failed / 0 ignored**; workspace build, Clippy and fmt pass. Reverting
+only typecheck.rs and compose.rs to exact `b1557a31` gives **75 intended failures
+/ 60 preservation passes** across 135 tests, including X1 and renamed Kernel
+check-step detectors; three original aggregate tests now remain green because
+main already closes those holes, so they are preservation controls on this base.
+Direct `args[0]` calibration panics in the walk guard test; disabling public
+checked-model validation fails with the index-guard message instead of at/0.
+Each mutation is restored byte-for-byte with an empty full diff, then the head
+is rebuilt. These checks establish bounded typing/routing evidence, not an
+assurance upgrade or independent triangulation.
+
 ## 5. Lossless public observation and replay
 
 Full language support is incomplete if engines distinguish `none` from

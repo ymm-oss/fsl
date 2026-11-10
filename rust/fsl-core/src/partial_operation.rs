@@ -480,8 +480,11 @@ fn walk_expr_inner<S: Scope>(expr: &Expr, scope: &mut S, visit: &mut impl FnMut(
             walk_expr(left, scope, visit);
             walk_expr(right, scope, visit);
         }
-        Expr::Binary { left, right, .. } => {
+        Expr::Binary { op, left, right } => {
             walk_expr(left, scope, visit);
+            if !crate::pattern_binding_flows(op, true) {
+                return walk_expr(right, scope, visit);
+            }
             let mut right_scope = scope.pattern_scope(left);
             walk_expr(right, &mut right_scope, visit);
         }

@@ -14,12 +14,15 @@ examine_globs = [
 
 examine_re = [
   "(replace verify_bounded_config( ->| with)| in verify_bounded_config$)",
-  "(replace check_state_properties( ->| with)| in check_state_properties$)",
+  "(replace reject_unchecked_sequence_overflow( ->| with)| in reject_unchecked_sequence_overflow$)",
+  "(replace check_state_properties_in( ->| with)| in check_state_properties_in$)",
   "(replace make_violation( ->| with)| in make_violation$)",
   "(replace probe( ->| with)| in probe$)",
   "(replace project_trace( ->| with)| in project_trace$)",
+  "(replace has_missing_sequence_slots( ->| with)| in has_missing_sequence_slots$)",
+  "(replace chosen_instance( ->| with)| in chosen_instance$)",
   "(replace project_action( ->| with)| in project_action$)",
-  "(replace replay_bmc_witnesses( ->| with)| in replay_bmc_witnesses$)",
+  "(replace replay_bmc_witnesses_with_bounds( ->| with)| in replay_bmc_witnesses_with_bounds$)",
   "(replace render_violation( ->| with)| in render_violation$)",
 ]
 
@@ -30,9 +33,9 @@ examine_re = [
 # and `delete ! in verify_bounded_config` at each of the first two anchors, so
 # line-free exclude_re patterns cannot preserve this exact three-exclusion scope.
 exclude_re = [
-  "^fsl-verifier/src/bmc\\.rs:760:.* in verify_bounded_config$",
-  "^fsl-verifier/src/bmc\\.rs:767:.* in verify_bounded_config$",
-  "^fsl-verifier/src/bmc\\.rs:781:.* in verify_bounded_config$",
+  "^fsl-verifier/src/bmc\\.rs:940:.* in verify_bounded_config$",
+  "^fsl-verifier/src/bmc\\.rs:947:.* in verify_bounded_config$",
+  "^fsl-verifier/src/bmc\\.rs:971:.* in verify_bounded_config$",
 ]
 
 # Changed-mode diff filtering may select only fsl-verifier as the mutated

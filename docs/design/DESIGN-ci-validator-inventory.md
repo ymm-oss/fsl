@@ -40,6 +40,33 @@ Non-required workflows (for example
 `.github/workflows/cache-budget-audit-wiring.yml`) are intentionally excluded
 from required-gate resolution.
 
+### Site heading regression coverage (#1501)
+
+`tests/test_site_heading_hash.py` is classified as `required` through
+`.github/workflows/site-reference-freshness.yml`, alongside
+`tests/test_site_reference_snapshot.py`. It detects wrapped line-start issue
+references being rendered as headings in either language and the two real
+Japanese-manual occurrences, with preservation controls for ordinary headings,
+fenced code, and escaped hashes. Like the snapshot module, it needs the workflow's
+`markdown` dependency. Its placement follows site-reference ownership: this
+standalone workflow owns generated-reference freshness and its required
+`site reference freshness` context. The automation lane now installs `.[dev]`
+and runs pytest; dependency restrictions are not the placement rationale (see
+`DESIGN-docs-site.md:229-236`).
+Regenerate the inventory after wiring the module with
+`python3 tools/check_ci_validator_inventory.py generate`, then audit it with
+`python3 tools/check_ci_validator_inventory.py check`.
+
+### Windows native-Z3 shard controls (#1532)
+
+`tests/test_windows_native_shards.py` is `required` through the automation lane in
+`tools/check-merge-readiness.sh`. It covers live-name comparison, rejecting name
+drift/duplicates, shard-result rejection, workflow wiring and the 40 source names
+(12 at #1532; the rebalance after measured shard times added 28).
+After `generate` and `check`: 131 validator modules, 19 required and 112 exempt.
+The generator scans the two entrypoints above, not `ci.yml`; the new test wiring,
+not the workflow edit alone, adds this inventory row.
+
 ## Tiers
 
 | Tier | Meaning | Required-gate wiring |
@@ -82,6 +109,21 @@ Unwired validators are not defects by default. Only `required` rows must be
 reachable from the scanned entrypoints.
 
 ## Controls
+
+### Native-driving Python tests
+
+Issue #1466 corrects the blanket `frozen-python-compatibility` classification of
+`tests/test_injection_bench.py`, `tests/test_bounded_liveness_oracle.py`, and
+`tests/test_rust_cli_semantics.py`: these three modules exercise the native CLI
+and are required, not excluded. Their actual pytest invocation lives in
+`tools/check-merge-readiness.sh`'s explicit `native-python` lane, called by
+`ci.yml`'s `rust-checks` job after the native workspace build. The existing
+entrypoint scanner therefore sees the invocation without adding another scan
+root. Regenerate the inventory with `generate`; do not hand-edit its tiers.
+The complete enumeration method, prerequisites, timing estimate, and calibration
+boundary are recorded in `DESIGN-ci.md` under Native CLI Python expectation checks.
+
+### Inventory controls
 
 1. **Inventory completeness** — every tracked `tests/test_*.py` and
    `tools/check_rust_*.py` module must appear in the committed inventory;

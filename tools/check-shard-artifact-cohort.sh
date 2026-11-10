@@ -493,6 +493,12 @@ selftest() {
 }
 
 case "${1:-}" in
+  mutants)
+    [ "$#" -eq 6 ] || fail "usage: $0 mutants <cohort-dir> <run-id> <current-attempt> <head-revision> <shard-total>"
+    shift
+    exec python3 "$root/tools/check-mutant-shard-cohort.py" cohort "$@" \
+      "$root/rust/fslc/tests/implementation_mutation/equivalents.v1.json"
+    ;;
   rust|semantic)
     [ "$#" -eq 6 ] || fail "usage: $0 {rust|semantic} <cohort-dir> <run-id> <current-attempt> <head-revision> <shard-total>"
     check_cohort "$@"
@@ -502,6 +508,6 @@ case "${1:-}" in
     selftest
     ;;
   *)
-    fail "usage: $0 {rust|semantic} <cohort-dir> <run-id> <current-attempt> <head-revision> <shard-total> | selftest"
+    fail "usage: $0 {rust|semantic|mutants} <cohort-dir> <run-id> <current-attempt> <head-revision> <shard-total> | selftest"
     ;;
 esac

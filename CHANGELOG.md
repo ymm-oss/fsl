@@ -5,6 +5,2834 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-11-07
+
+- Added (#1344): HTML-only `--no-timing` omits execution timing fields from
+  stdout and `-o`/`--output` reports for byte-stable comparison of the same
+  input path, source, options, and toolchain. Default reports retain timings;
+  source, domain state, counts, verification JSON, and exit codes are unchanged.
+- Added (#1449): captured-root admission and current-edition migration-warning
+  delivery for 21 single-root consumer modes. Each explicit root is captured and
+  admitted once before consumption or side effects, and consumers reuse those
+  bytes. Open results deliver each complete finding once per slot; successful raw reports,
+  documents and domain output deliver findings on stderr without changing stdout.
+  HTML/ledger file-output envelopes and approval-only rendering keep their existing
+  delivery contracts. Eight explicitly tracked modes remain outside this delivery.
+- Added (#1641): independent native regression controls for report child findings,
+  first approval overlays, captured prepared-source execution, actual worker and
+  fresh-step admission-token transport, and positional manifest/root carriers.
+  Observation is binary-private and test-only; public behavior is unchanged.
+- Added (#1705): `fslc lint` now warns with `shared_requirement_id` where a current-edition `requirements` document gives one requirement ID two owners: a second `requirement` with the ID of an earlier one, or an `acceptance` and a `requirement` sharing an ID. `check` still accepts these documents, and the ledger keeps one row for the ID. The warning is located at the second owner's ID, names the earlier owner, has taxonomy `ambiguous_intent` and is not machine-applicable.
+- Changed (#251): current-edition check, verify, and Worker JSON now
+  warn on legacy declaration string metadata, colon quantifiers, and inline action
+  mappings, using the existing lint codes and migration-safety data. Verdicts and
+  exit codes are unchanged; applicable Worker error envelopes also carry the native
+  implicit-initial-value warnings.
+  Testgen's verifier-failure envelopes use the same source-edition finalization
+  as CLI verify, preserving its warnings without changing failure verdicts or exits.
+- Changed (#552): the language server's document index is now checked against
+  the parsed declarations (name, role, and owning scope) over the corpus, so an
+  index heuristic that gives a name the wrong role or owner fails the tests. The
+  index and the server's responses are unchanged.
+- Changed (#984): the Rust workspace's `dev` profile (and `test`, which
+  inherits it) now emits only line tables for workspace crates and no debug
+  info for dependencies, cutting test-executable size and link time. Panic
+  messages and backtraces still show `file:line` for workspace code; a debugger
+  no longer sees local variables. The `release` profile, command output, and
+  exit codes are unchanged.
+- Changed (#1167): core diagnostics are classified by a typed error kind instead
+  of their message text, so a new kind cannot reach the CLI, the language server,
+  or the browser Worker without stating its public `kind` and hint. Diagnostic
+  output and exit codes are unchanged.
+- Changed (#1170, #1709, breaking): an input file that `fslc` cannot read (missing, a
+  directory, no permission, not UTF-8) is now reported the same way on the
+  routes below: `kind:"io"`, exit 2, and the message `<path>: <error>`. Routes that
+  change: `approval create --kind requirements_document` with an unreadable
+  `--artifact`, `--glossary` or `--evidence` (was `kind:"usage"`); the spec of
+  `domain analyze`/`check`/`expand`/`generate`/`replay`/`testgen` and
+  `db observe` (was `kind:"semantics"`, retiring the #780-era exception); the
+  bare OS error without the path from the spec of `ai check`/`compat`/`drift`/
+  `eval`/`regress`/`replay`, `db import`, `diff` (both specs and `--mapping`),
+  `refine` (the mapping), `fmt`, `replay --trace` and
+  `--from-log --mapping`, `approval check`/`diff --record` and `--trust-key`,
+  `approval create --artifact` and `--signing-key`, `ledger --impl-log`/
+  `--evidence`/`--approval`, `document check` (the document), `mutate --from`,
+  `verify --from-state` and `--requirements`, and `causal observe-expectations
+  --from-log`/`--mapping`/`--scope` and `causal ledger --plans`; and the causal
+  family's `cannot read <path>: <error>` spelling (the spec of every `causal`
+  subcommand and `causal analyze`/`ledger --evidence`). A file read from
+  a `diff --git` or `approval diff` checkout is named by the caller's path or
+  `<commit>:<path>`, not the temporary tree. A missing file that already
+  reported `file not found: <path>` keeps that message, and only a missing one:
+  any other `chain` manifest read failure is `<path>: <error>`. An unreadable
+  import or `compose` component stays `kind:"semantics"` with its `loc`, and `ai` log
+  and record inputs, `ai compare --from` and `db observe --trace` still report
+  an unreadable file as `kind:"parse"`. A new test pins one case per changed
+  route.
+
+  `fslc`'s file-IO error classification has one owner,
+  `spec_loading.rs`, and every command arm that reported an `io` error now
+  builds it there. A new test counts the hand-written IO, error-envelope,
+  and error-exit sites left outside their owners and fails if one is added.
+  That ownership change by itself left command output, error `kind`s, messages,
+  and exit codes unchanged.
+- Changed (#1171): `fslc`'s shared envelope, error, spec-loading, and display
+  helpers moved out of `main.rs` into their own modules, so the verification,
+  causal, and code-audit modules no longer reach back into `main.rs`; each
+  command's option parsing is now a typed option struct with one parser per
+  command. Command output, exit codes, usage messages, and help text are
+  unchanged.
+- Changed (#1255, breaking): `fslc conformance` names a compose component invariant broken
+  while another action stepped by its public name, `acct.Inv` (was `acct__Inv`),
+  the name `verify` and `replay` give it. `fslc mutate` compares the dead
+  actions of the baseline (`action_coverage` keys, `acct.thaw`) with the mutant's
+  action in the same spelling, so a never-enabled component action's surviving
+  mutants carry `note: "action dead at baseline — survival expected"` in a
+  compose as they do in a single spec. Migration: a consumer that matched
+  `alias__Name` in a conformance `outcome.name` must match `alias.Name`.
+- Changed (#1256, breaking removal): a name declared in a `spec`, `requirements`,
+  `business`, or `compose` document may no longer contain `__`. `fslc check`
+  (and every command that loads the document) rejects one with `kind: "name"`,
+  exit 2, located at the declaration; a compose component's own declaration is
+  reported at the parent's `use`. This covers specs, actions, parameters, `let`
+  bindings, state variables, properties, types, consts, enum members, struct
+  fields, processes, stages, actors, and `use` aliases. `__` is reserved for the
+  names lowering generates (a compose component's physical `alias__name`, a
+  `branches` split `submit__b1`), so each has one public spelling, `alias.name`
+  and `submit.b1`. Before, `action foo__bar` passed check and was published as
+  `foo__bar` by the Public Kernel and `foo.bar` by conformance, and
+  `use X as a__b` published its state `n` as `a.b__n`. Referencing a generated
+  name, as a refinement mapping onto `submit__b1` does, is still accepted. No
+  spec or example in the repository declares such a name. Migration: rename a
+  declaration that contains `__` (for example `foo__bar` to `foo_bar`) and the
+  references to it, including replay traces and stored outputs that name it.
+
+  Also breaking: an action generated by `branches` has one public name,
+  `submit.b1`, in every output. `fslc verify` printed it `submit__b1` in
+  `cost.properties[].name` while `action_coverage` printed `submit.b1`;
+  `fslc conformance` outcome names (`_requires_failed_submit__b1` is now
+  `_requires_failed_submit.b1`), `fslc analyze` node and edge IDs
+  (`action:submit__b1`, `guard:submit__b1:0`, `effect:submit__b1:0` are now
+  `action:submit.b1`, …, and lists keyed by them follow the new order), the
+  definedness error of `verify --engine bmc|induction`, the `undecided:` and
+  `fslc document` claim keys, and `fslc refine`'s `progress.*.actions` now agree.
+  A v1 `fslc replay` trace accepts `submit.b1`, the name conformance prints,
+  which was rejected as an unknown action; `submit__b1` is still accepted, and
+  `state_mismatch.action` echoes `submit.b1`. `fslc testplan` matches the
+  Public Kernel's `submit__b1` to the conformance vectors' `submit.b1`, so a
+  branch action's `boundary_accept_*` / `boundary_reject_*` cases are selected
+  (none were), and it fails with an error instead of silently dropping the
+  cases when no vector names an action that has a boundary guard. The same
+  owner now spells every `cost.properties[].name` and conformance outcome name,
+  so a database-dialect name no longer leaks the internal separator sentinel
+  (`db_not_null_after_backfillQqDbSepqQusersQqDbSepqQid` is now
+  `db_not_null_after_backfill__users__id`, as `invariant` already printed it) and
+  an ai-dialect invariant matches `invariants_checked`
+  (`ai_approval_before_execute.RefundPayment`). The Public Kernel keeps the
+  internal name. Migration: a consumer that matched
+  `submit__b1` in these fields, or stored analyze IDs or `--focus` arguments
+  such as `action:submit__b1`, must use `submit.b1`.
+- Changed (#1281): explicit decides clean mutant survivors first, the baseline uses auto, and progress lines go to stderr. The BMC fallback retains its kill labels; stdout is unchanged except for the encoding-only residual in DESIGN-mutate §3, where explicit-clean can survive a BMC-only `build_spec` rejection.
+- Changed (#1284, breaking): diagnostics and `fslc explain` spell a compose component
+  declaration by its public name. A type-check or model-build error names
+  `acct.MAXX` (was `acct__MAXX`) and prints a component type as
+  `Named("t.Amount")` (was `Named("t__Amount")`); readable `explain` prints
+  parameter and state types as `bank.Amount` (was `bank__Amount`), and the blame
+  effect text, `explain`'s JSON and `html`'s embedded copy of it, and the
+  `--export tag-review` effect targets print the assignment root as
+  `audit.log = audit.log.push(a)` (was `audit__log = …`). A component state or
+  property is published from the compose structure rather than by rewriting the
+  physical name. Synthetic names such as `_bounds_<state>` are published from
+  their parts, so a state that starts with `_` no longer moves the `.`. Single
+  specs are unaffected. Migration: a consumer that matched an internal
+  `alias__name` in these messages or texts must match `alias.name`.
+
+  The conversion between internal names (compose
+  `alias__name`, engine-made violation names such as `_partial_<action>` and
+  `_bounds_<state>`) and the names written to public output now has one owner,
+  and a test rejects new spellings outside it. That ownership change by itself
+  left command output unchanged.
+- Changed (#1285): acceptance and forbidden traces reach their consumers only
+  through the requirement-trace gate, as a type the gate alone can construct; a
+  consumer that reads them ungated names that at the call site. Command output
+  and exit codes are unchanged.
+- Changed (#1315, breaking): the implementation side violating its own
+  contract has one public word, `impl_violated`, wherever it is reported.
+  `fslc refine` on an impl spec that breaks its own type bound, invariant,
+  `trans`, or `ensures` within `--depth` now reports top-level
+  `result: "impl_violated"` (was `"violated"`), and a governance
+  `preservation` whose `after` spec does the same reports
+  `governance.preservations[].result: "impl_violated"` (was `"violated"`) from
+  `check`, `verify`, `scenarios`, `ledger`, and the browser Worker alike. The
+  inline `implements` seam and the folded top-level verdict already used
+  `impl_violated`, so the nested and top-level values now agree. The evidence
+  fields (`violation_kind`, `invariant`, `violated_at_step`, `impl_trace`,
+  `note`) and every exit code are unchanged, and `fslc chain`'s own run verdict
+  for a failing layer stays `violated`. Migration: a consumer that matches
+  `"violated"` on `fslc refine`'s `result`, on a `chain` refine layer's
+  `result`/`detail.result`, or on `governance.preservations[].result` must match
+  `"impl_violated"` instead; `"violated"` from `fslc verify` keeps its meaning
+  (a counterexample of the verified spec itself).
+- Changed (#1322): development and test builds now compile the vendored Z3 with
+  optimisation (`[profile.dev.package.z3-sys] opt-level = 2`), so cmake builds it
+  as `Release` (`-O3 -DNDEBUG`) — the same Z3 configuration release builds ship —
+  instead of `Debug` (`-O0 -g`, Z3 internal assertions). Solver-heavy test suites
+  run about 4.5× faster and the build directory shrinks from about 26 GB to 11 GB;
+  verdicts are unchanged (specs and examples swept with check / verify /
+  induction). Release builds are unaffected. No migration is needed.
+- Changed (#1334, breaking removal): sync additional statements assigning component
+  state through physical names such as `alias__x` now produce an explicit located
+  error. Those spellings previously passed `check`; alias-qualified writes were
+  already rejected. This removal affects only physical-name component-state
+  assignments in sync additions. Binaries built from base
+  `9ad07c7ad8327b637d8d419eee7a313dc726e9e5` and implementation head
+  `24a807883786e3ad3477c6ecbbdace2d5378441c`, each in its own materialized
+  tree, checked all 597 `.fsl` files under `specs/`,
+  `examples/`, and `rust/fslc/tests/fixtures/`: recorded exit codes, results, and
+  the first 160 characters of each message agree, with zero ok-to-error transitions
+  (this write form is absent from that corpus). No pre-existing required tests were
+  rewritten, renamed, deleted, or stopped; only new regression tests were added.
+- Changed (#1335, breaking removal): compose-level `def` calls now expand with the same source-local
+  predicate expander as ordinary specs, before alias resolution and
+  sync argument substitution. Definitions are removed before Kernel lowering;
+  duplicate, unknown, recursive, wrong-arity, and capturing calls use the
+  ordinary spec diagnostics. Unused duplicate or recursive compose definitions
+  that previously passed `check` now reject, just as in an ordinary spec.
+  Previously valid compose predicates could stop at
+  an unlowered predicate call (exit 2) instead of receiving a verdict.
+- Changed (#1338, representative decision 2026-10-26): ledger risk rows now include
+  every non-`refines` governance preservation, attributed using the model's catalog
+  requirement metadata, and every failed inline `implements` as a spec-level
+  finding. `unknown_cti` is an unestablished induction finding, with its full
+  CTI/hint/rank-failure evidence retained, not a reachable counterexample.
+  Direct `ledger` and `html` now return verification `error` as JSON and exit 2/3
+  instead of Markdown/HTML or a generated-artifact envelope, and create no `-o`
+  artifact; HTML stops before explain. Non-error failure reports still render.
+  Approval-only ledger digest rerendering returns the same verification `error`; see #1418.
+  Added findings and corrected coverage rendering change affected approved ledger
+  and HTML digests (`drifted`, exit 0); corrected declaration attribution also changes
+  affected ledger digests. Review and re-approve those artifacts.
+  Documents whose verification errors now prevent report generation must be fixed
+  before a new artifact can be reviewed. The inline section's noninterference
+  claim applies only to that section, not to these separate rendering changes.
+  Verdict findings now follow their actual declaration owner, including ranked
+  and bounded leadsTo, transitions, action obligations, and synthetic property checks.
+  Public compose names, generated identities behind authored labels, and branch
+  names resolve through the core name map before metadata lookup; ambiguous names
+  remain spec-level rather than guessing a requirement.
+  Direct ledger verification errors also precede ancillary replay/evidence errors.
+  Each ledger appendix finding omits only raw top-level `cost` and `cache` execution
+  metadata, preserving proof evidence and same-named domain fields. Failed-ledger
+  approval was already non-reproducible for `violated` reports on main; CTI findings
+  exposed the same issue. Their rendered bytes and unchanged approval round trips
+  are now reproducible, while genuine reviewed-content changes still cause drift.
+- Changed (#1368): the parser's entry points take explicit parse options, and a
+  test inventories every parse entry in the workspace so a new one cannot bypass
+  them. Parsing, diagnostics, and command output are unchanged.
+- Changed (#1371): the language-server index tests build the index with the
+  server's parse options. The index and the server's responses are unchanged.
+- Changed (#1377): the lexer reads identifiers through one selectable rule whose
+  diagnostics carry their own codes, and the language server's rename check and
+  the browser harness's import scan use the same rule. The VS Code grammar now
+  also highlights a declaration name written with non-ASCII letters. Parsing,
+  diagnostics, and command output are unchanged.
+- Changed (#1378): the formatter, migration, lint, and language server share one
+  edition type, and the core library and the shared command modules take
+  explicit parse options. Parsing, diagnostics, and command output are
+  unchanged.
+- Changed (#1382): the requirements parser can desugar further declaration
+  forms into the existing process, acceptance and forbidden items, and the
+  names a requirements process generates now come from the core naming module.
+  Parsing, diagnostics, and command output of published documents are
+  unchanged.
+- Changed (#1383): requirements lowering runs a name-resolution step first, and
+  the name owner keeps a per-document table of display spellings beside the
+  canonical names. Parsing, diagnostics, and command output are unchanged.
+- Changed (#1384): the requirements parser can fold a further declaration form
+  (decision tables) into the guards of existing process transitions, and the
+  core checks that such a table's rows cover and partition the values of the
+  fields they read, enumerating finite domains and handing larger ones to the
+  solver in `check`. Parsing, diagnostics, and command output of published
+  documents are unchanged.
+- Changed (#1387): the requirements parser can desugar rule declarations into
+  guards and properties of the existing process items, the core can decide
+  over finite type domains whether such guards can hold together, and the
+  names those properties generate come from the core naming module. Parsing,
+  diagnostics, and command output of published documents are unchanged.
+- Changed (#1389): the requirements parser reads its keywords through one
+  internal keyword table, which pairs each keyword with a second spelling, and
+  can read phrases whose words are marked by role, in any order. The checks of
+  glossary aliases against keyword spellings read the same table. Parsing,
+  diagnostics, and command output of published documents are unchanged.
+- Changed (#1390): the migrator can rewrite a requirements `process` block into
+  the declarations the requirements desugaring reads back into the same
+  process, check that the rewrite keeps the location-free checked kernel, and
+  refuse a block it cannot rewrite with a stated reason, writing no file. The
+  migration's kernel comparison moved from the command into the migration
+  module. Parsing, diagnostics, and command output of published documents are
+  unchanged.
+- Changed (#1393): the requirements parser can desugar declarations that relate
+  one entity to another, state that belongs to no entity, counts over a
+  concept, and goals and policies into the existing process items, properties
+  and projections; the business dialect's goal and policy lowering is shared
+  with it. Parsing, diagnostics, and command output of published documents are
+  unchanged.
+- Changed (#1394): the formatter can respell a requirements document through
+  the parser's record of where each keyword and phrase was written: keywords
+  through the internal keyword table, names through the glossary, and the word
+  order of phrases whose role markers it adds or removes; a respelled document
+  must lower to the same checked kernel. It also indents the continuation lines
+  of single-line requirement statements and separates a role marker written
+  onto its word. Formatting, diagnostics, and command output of published
+  documents are unchanged.
+- Changed (#1395): the origins the requirements lowering records for rule
+  guards, rule properties and decision-table rows spell the statement in
+  canonical names and English keywords, a stage guard records the move it
+  came from, and `explain` can show those origins next to each guard and
+  property. Parsing, diagnostics, and command output of published documents
+  are unchanged.
+- Changed (#1396): the language server can read a requirements document
+  through the internal keyword table and glossary: aliases resolve to their
+  canonical names for navigation, references, hover and rename, keywords and
+  role-marking words of either spelling are not indexed as names, and
+  completion and hover show each keyword's other spelling. The editor
+  behaviour and the command output for published documents are unchanged.
+- Changed (#1397): the requirements document renderer reads its source under
+  the same parse options as the rest of the command, through new option-taking
+  entries beside the projection and rendering entries, and can add reference
+  views (a lifecycle diagram per entity, event and decision tables, rule
+  statements, relations, resources, measures, goals, policies and the
+  glossary) for a further declaration form. Parsing, diagnostics, and command
+  output of published documents are unchanged.
+- Changed (#1398): the repository holds a draft set of layer skills outside the
+  installable skill bundle, and its tests keep that draft checked: every example
+  in it must check, its keyword table must match the parser's, and the release
+  must not package it. `tools/check-doc-fences.py` gains `--every-fence`, which
+  fails an unmarked fence instead of skipping it. The installed skills, parsing,
+  diagnostics, and command output are unchanged.
+- Changed (#1399): the requirements groundwork derives the terminal states of
+  an entity-based requirements document from its lifecycles, as a business
+  document does from its process stages (a document that declares its own
+  terminal states keeps them); the identifier groundwork's lexer warnings (a
+  full-width space, an identifier not in Unicode normalization form C) are
+  reported by `check`, the browser Worker and `lint`, as the language server
+  already showed them; a name that is not ASCII in a document without a
+  glossary is rejected as `canonical_name_not_ascii` in every dialect; and an
+  inline `implements` whose layers declare the same enum with other members or
+  in another order is reported with both member lists and how to reorder the
+  lifecycle lines. Parsing, diagnostics, and command output of published
+  documents are unchanged.
+- Changed (#1400): for a further requirements form, `fslc mutate
+  --by-requirement` credits a killed mutant of a guard to the requirement that
+  guard formalizes; `fslc lint` applies the ID policy to the IDs its
+  declarations start with, in either keyword spelling; and `fslc explain`
+  respells the expression text of blamed guards, effects and conjuncts like the
+  other names it shows. Parsing, diagnostics, and command output of published
+  documents are unchanged.
+- Changed (#1403): the requirements groundwork's process-block rewrite reports,
+  as an `info` finding `derived_terminal_added`, when the rewritten document
+  gets terminal states derived from its lifecycles' final stages that the
+  process block did not declare. The finding names each entity and its final
+  stages, says that the deadlock verdict may change, and gives the equivalent
+  `terminal { … }`; the exit status is unchanged. Parsing, diagnostics, and
+  command output of published documents are unchanged.
+- Changed (#1410): Remove the test wording and helper names left from the `fsl5` gate after #1434: the `fsl5_*` runners no longer say they set the gate, `edition_migrator.rs` calls `ParseOptions::stable()` directly instead of `gated_options()`, and the LSP stdio test names its legacy `FSLC_UNSTABLE` values as such. No test assertion and no product behavior changes.
+- Changed (#1411): Share one item-level scanner across source censuses that skips only test-only items, so product code after an inline `#[cfg(test)]` item is counted; assertions are unchanged.
+- Changed (#1412): a `mutation mutants` CI shard with zero selected mutants now
+  seeds its fresh Cargo target with third-party build output, including vendored
+  Z3, instead of compiling it again. Every first-party crate still compiles in the
+  shard: Cargo's per-artifact verdict is retained and any reused first-party
+  artifact fails the shard and the aggregate. Shards that test a mutant, the same
+  35 detectors, and the local unsharded gate keep their full build. A failing seed
+  command falls back to a full fresh build, a seed Cargo refuses or cannot use
+  fails the shard, and the log names the path taken.
+- Changed (#1413): `edition_header.rs` refuses `FSLC_UPDATE_EDITION_GOLDEN` under `CI` instead of rewriting the edition golden and passing, through the same guard as the keyword table (only the value `1` updates locally), and the `issue_1351_init_requirement_diagnostics` LSP test reads through the deadline-bound receiver, so a silent server fails the test instead of hanging it. No product behavior changes.
+- Changed (#1415): Add unit tests for rule-guard field spelling and requirements-solver refutation.
+- Changed (#1417): native verification baselines now delegate to the same ordered
+  pipeline as verify, sweep and depth-bearing chain spec layers, with caching disabled
+  and the default vacuity probe preserved. Direct ledger and HTML reports check verification errors
+  before presentation-model loading: malformed causal, Agent and DB-column inputs
+  retain the shared diagnostic envelope; an unknown AI authority tool returns a JSON
+  semantics error with exit 2 instead of panicking with exit 101. Passing reports,
+  warnings, metadata, public Kernel projections and approval artifact digests are
+  unchanged. The error-precedence inventory is in docs/design/DESIGN-ledger.md and
+  docs/design/DESIGN-html-report.md; both language references and the command skill
+  reference describe the shared boundary.
+  Approval create for ledger/HTML, approval check, approval diff and counterexample
+  export still lower the spec before verification or rerendering, retaining their
+  invalid-input precedence. Unknown AI tools return JSON `semantics` errors (exit 2);
+  approval create's diagnostic precedence remains a separate issue.
+- Changed (#1418, breaking): Approval artifact failures preserve their complete downstream
+  JSON envelopes and exit codes through create and check.
+  Their exit moves from 2 to the downstream exit: 1 for scenarios or HTML verification
+  failures and 3 for internal failures. `ledger --approval` keeps exit 2 when an `html` or
+  `scenarios` record's rerender stops on a failed baseline, now with `result:"error"` naming
+  the record instead of that record's envelope, and leaves the `-o` file untouched. Approval status applies to completed evaluations.
+  `approved` confirms digest binding, not a verification pass, so `verify` must be gated
+  separately; an approval gate requires exit 0, `approval_check` and `approved`. Debug builds check final normal-JSON envelope/exit
+  pairs after internal normalization, with finite HTML/ledger report exceptions;
+  release and dedicated raw/metadata/fmt delivery retain their existing behavior.
+  Aborted scenarios approval results attach each root migration finding and each
+  finding from a distinct dependency resource once; successful artifact bytes,
+  digests and approval signatures retain their existing form.
+  The debug exit check recognizes the existing `migrate_manual_required` result
+  at exactly exit 1, preserving its JSON envelope and no-write behavior.
+  Batch diff's debug exit check preserves its existing maximum child exit (0/1/2),
+  separately from the semantic gate, including operational errors at exit 2.
+  The design-citation CI scanner honors Git's declared binary/nontext attributes
+  without ignoring malformed UTF-8 text or relaxing heading and tracked-target checks.
+  `approval create --kind ledger` and `approval check` on a ledger record now return a
+  verification `result:"error"` with its envelope and exit (2, or 3 for internal). On a spec
+  that fails `check`, they previously reported an artifact mismatch and `drifted` at exit 0.
+  Approving a ledger with a failed or unestablished verdict stays allowed.
+- Changed (#1419, breaking): native artifact file output now requires a writable parent
+  directory, including to replace a writable existing file, and refuses final
+  symlinks and every non-regular destination with exit 2. This is breaking for
+  `-o /dev/null`, `-o /dev/stdout` and process substitution such as `/dev/fd/63`.
+  Replacement changes the inode and does not guarantee ownership/ACL/xattr
+  preservation.
+- Changed (#1421, breaking): New approval records use unsigned v5 or signed v6
+  with a `path_base` relative to the Git root and the original source label. Checks
+  resolve stored inputs and reviewed document targets from the Git root of the spec
+  being checked, so a clone, worktree or relocated checkout reads its own files,
+  while preserving literal paths, rendering labels and bytes. A document record's
+  creation directory, target and inputs must stay inside that root: paths that are
+  absolute or lead outside are refused at creation and at check. The root comes from
+  the directory the spec's path names, ignoring `GIT_DIR` and similar variables, so
+  `document generate --approval` on these records needs Git, and a spec resolving outside
+  the root is refused. For solver records `approved` covers the spec and a fresh
+  rendering, not the reviewed file on disk; a v5 record is unsigned, so a `path_base`
+  edited to reach a same-content copy still reports `approved`, while v6 catches it. Legacy v1–v4
+  records retain their closed formats, signatures and invocation-relative paths;
+  older binaries reject new records as unsupported schemas. Document source-label
+  admission remains unchanged.
+  Authoritative document approval checks and ledger evaluations reject a raw
+  input-digest mismatch as an I/O error only when the complete existing evaluation
+  would approve. Earlier errors and full ordered drift results keep precedence;
+  the first mismatch follows glossary then recorded evidence order, using the
+  same loaded bytes and literal paths.
+  Relative declared AI `dataset.source` paths now resolve from the declaring FSL
+  file's directory. Absolute declarations and caller-relative `--records` overrides
+  retain their behavior, with no fallback search. The base is the file's lexical
+  parent, so a declaring file reached through a symlink resolves beside the link. The documented support-quality
+  example uses `support_eval_v3.jsonl`; existing repository-prefixed declarations
+  need explicit migration or a records override.
+  After replay and artifact construction, causal observation rejects repeated
+  actual output destinations before serialization or writes. A key is the canonicalized
+  parent plus the file name, or the collapsed spelling when the parent does not exist;
+  names differing only by case do not collide. The usage error names the first repeated
+  paths. A later write failure now lists the earlier files in `written`. Distinct
+  output names, bytes, interleaving and inconclusive assurance remain unchanged.
+- Changed (#1434, breaking): the `fsl 5` syntax edition is published. A document headed `fsl 5` (or `fsl 4`) is read in that edition by `check`, `verify`, `migrate`, `lint`, `fmt`, every other command, the language server and the browser Worker without any opt-in. A document without an edition header is still read as `fsl 4`, and this change leaves its `check` verdict unchanged; other 5.0.0 changes refuse some forms in every edition, headerless documents included (see "Upgrading fslc from 4.12 to 5.0" in `docs/manual/LANGUAGE.md`). The unstable gate is removed: `FSLC_UNSTABLE` is no longer read, and the Worker request has no `unstable` field (an old client's `"unstable"` value of any type is ignored as an unknown field). `--edition 4` and `--edition 5` are accepted beside `current` and `next` (`5` is `next`; outputs still spell the edition `current` / `next`), and the five options `fmt --lang` / `--names`, `explain --names` / `--lowering` and `lint --strict-names` are accepted without the gate and are listed in `cli-contract.json`, the help text and the CLI reference page. #1715 (#1437) lists `--edition 4` / `5` there too, so all four spellings are public. The internal `fsl-bfs` comparison tool also reads `fsl 4` / `fsl 5` headers now. Before, even with the gate, all 20 headed corpus forms exited 2: 14 refused as the declaration `fsl`, and 6 Japanese ones at their first Japanese character.
+
+  Behavior that changes for a document without a header: `lint --edition next` (or `5`) reports `missing_edition_header` (severity `info`) and exits 1 where it exited 0, and `migrate`, whose default edition is `next`, plans inserting `fsl 5` before the first significant line and inserts it with `--write`. A document that takes no edition header, such as `agent`, a `refinement` document, which is not a standalone check target, and a `compose` document, whose migration contract cannot keep its components' source files, are not offered one: `lint` and `migrate` give them what they gave before. Default `migrate` also runs the next edition's process-form conversion on a headerless `requirements` document, so one that needs a manual step (`migrate_manual_required`) exits 1 where it exited 0: 11 of the 651 corpus forms, such as `examples/annotations/annotated_claims.fsl`. Use `--edition current` to keep the former result. A document headed `fsl 5` or `fsl 4` that was refused as the unknown declaration `fsl` without the gate is now read in its edition.
+
+  The verify cache key changes: it no longer has an `unstable` field, and it gains an `edition_request` field (the edition number) only when `--edition` is given explicitly. A `verify` result cached before this change under the gate, or with an explicit `--edition`, therefore misses the cache once and is recomputed; a result cached without either is unaffected.
+
+  Type-boundary sweep (`fslc check` over every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/`, 651 forms, plus 488 inline fixtures of the rewritten or removed tests), base `63dd3e02c` with and without `FSLC_UNSTABLE=fsl5` against this change: the `ok`-to-`error` set is empty. The `error`-to-`ok` set against the base without the gate is the 17 corpus forms and 16 inline fixtures headed `fsl 4`/`fsl 5`; against the base with the gate, every output is identical.
+- Changed (#1437, breaking): the installed Agent Skills now describe FSL 5. The layer
+  skills `fsl-business`, `fsl-requirements`, `fsl-design`, `fsl-design-review`,
+  `fsl-from-code`, `fsl-delivery` and `fsl-verify` are replaced by their FSL 5
+  versions, which write files headed `fsl 5`. Each one also notes that a headerless
+  document is FSL 4 and points to the migration guide in `docs/manual/LANGUAGE.md`.
+  `fsl-requirements/references/` adds the FSL 5 requirements syntax, the English /
+  Japanese keyword table and the glossary guide.
+
+  The shared `fsl` skill keeps its FSL 4 and kernel guidance. It adds the FSL 5
+  route, the header placement, and compact sections on annotations and reusable
+  predicates, Option payload scope, the ranked-response recipe, and compose and
+  refinement. It also adds the per-file edition rule and the scoped-liveness
+  procedure to `commands.md`. The unpackaged `skills-next/` directory is removed;
+  `fsl-requirements-document` is unchanged.
+
+  `--edition 4` and `--edition 5` are now advertised beside
+  `current` and `next` on every command that takes `--edition` (`check`,
+  `verify`, `domain check`, `fmt`, `lint` and `migrate`): in
+  `cli-contract.json`'s choices, in each command's `--help` text, in the
+  `fmt`, `lint` and `migrate` usage lines, and on the CLI reference page. A
+  value outside the four now reports `--edition must be current, next, 4, or 5`
+  (it said `--edition must be current or next`), still `kind:"usage"`, exit 2.
+  What `--edition` accepts is unchanged, and outputs still spell the edition
+  `"current"` / `"next"`.
+- Changed (#1439, breaking removal): requirements acceptance `expect <expr>` and FSL 5 scenario
+  `then <expr>` now use the invariant's recursive Bool expression checker before
+  replay. Enum-vs-integer comparisons such as `c != 1` and `c == 1` fail with the
+  existing assignability message, `kind: "semantics"`, exit 2, and the authored
+  expect/then keyword location. Valid comparisons remain post-state predicates,
+  not invariants; well-typed false expectations retain `kind: "acceptance"`.
+  Trace-step arguments now use the same checker for internal well-typedness,
+  including unselected branches, without forcing the outer parameter type.
+  Errors point to the first authored step token: the action for calls, actor for
+  actor-first phrases, or first token (for example the instance) for reordered
+  particle phrases. Literal and internally
+  consistent conditional wrong-kind values retain `wrong_kind_argument`.
+  This fixes false-green traces, including an enum/integer condition selecting a
+  guard-rejected value. Breaking removal: these previously accepted, internally
+  ill-typed inline forms now fail with `kind: "semantics"`, exit 2 (IDs identify
+  the exact tests in `docs/design/DESIGN-requirements-stage.md`):
+
+  | Removal | Ill-typed trace form now rejected |
+  |---|---|
+  | T01 | acceptance Color argument with condition `c != 1` |
+  | T02 | forbidden setup Color argument with condition `c != 1` |
+  | T03 | forbidden final: `paint(if c != 1 then Red else Blue)` |
+  | T04 | FSL 5 scenario call with condition `claim_stage[0] != 1` |
+  | T05 | FSL 5 scenario with input, same malformed stage condition |
+  | T06 | FSL 5 scenario particle input, same condition |
+  | T07 | FSL 5 forbidden call setup, same condition |
+  | T08 | FSL 5 forbidden call final, same condition |
+  | T09 | FSL 5 forbidden with setup input, same condition |
+  | T10 | FSL 5 forbidden with final input, same condition |
+  | T11 | FSL 5 forbidden particle setup input, same condition |
+  | T12 | FSL 5 forbidden particle final input, same condition |
+  | T13 | acceptance numeric argument: `setn(if c != 1 then 2 else 0)` |
+  | T14 | FSL 5 marked/with hybrid input, malformed ClaimStage comparison |
+  | T15 | FSL 5 relation-role value with condition `ticket_stage[0] != 1` |
+  | T16 | acceptance unselected branch: `paint(if true then Blue else (if c != 1 then Red else Blue))` |
+  | T17 | native/shared diagnostic test's `expect c != 1` row |
+  | T18 | rewritten Worker diagnostic test's identical `expect c != 1` row |
+  | T19 | step: `paint(if o is some(z) then z else Red)` with `o = none` |
+  | T20 | expectation: `expect (if o is some(z) then z else Red) == Red` with `o = none` |
+  | T21 | reordered particle input: `claim1 を Employee が amount (if claim_stage[0] != 1 then 1 else 2) で submits` |
+
+  Historically, against base `5a539bbe`, all 579 forms per tree under `specs/`,
+  `examples/` and `rust/fslc/tests/fixtures/` in both modes still have a measured empty
+  ok-to-error transition set. Including the lint-rewritten test's 21 inline
+  fixtures, both modes twice give 4,800 checks: the original T01–T16 removals produce
+  21 mode/form transitions (T01–T03, T13, T16 in both modes; others only in
+  FSL 5), no other full-output/exit differences, no repeat differences or
+  excluded fields. Repair comparisons using members of the same enum, including
+  in unselected branches. See the design note for commands and measured identity.
+  The round 1 supplement checks all sources of the rewritten diagnostic tests and
+  changed-oracle consumers plus scope/reordered-particle controls: 20 forms per
+  tree, both modes twice, 160 checks against the same base and unchanged
+  production code. T17–T20 are additional breaking removals in both modes; T21
+  only in FSL 5 (five fixture occurrences / nine mode-form transitions; no other
+  differences or exclusions). T17/T18 are identical FSL in two tests. T19/T20
+  report `public Kernel cannot type identifier 'z'`: `is some(z)` binds only in
+  its true logical continuation (`=>` / `and`), not a conditional's `then` arm,
+  even if unselected. Invariants already reject that scope escape; use a supported
+  continuation or avoid the escaped name. T21's location is the first token
+  `claim1` (8:5), not the actor later in the phrase.
+
+  The shared checker now requires a Bool operand for `not` and an Int-compatible
+  operand (including named numeric ranges) for unary minus in every model
+  expression and trace. Unselected branches and short-circuited `and` / `or` do
+  not bypass typing. `not (c == Red)`, `-(-1)` and numeric `- n` remain valid.
+  The fresh sweep against base `5a539bbe` checks 579 corpus forms plus 51 inline
+  fixture occurrences per tree, both modes twice (5,040 checks), with an empty
+  corpus ok-to-error set. These seven additional inline **breaking removals**
+  all change from `ok` / 0 to `error` / `semantics` / 2 in both modes:
+
+  | Removal | Ill-typed unary form now rejected |
+  |---|---|
+  | U01 | forbidden step `paint(if true then Red else (if not 1 then Red else Blue))` |
+  | U02 | forbidden step `paint(if true then Red else (if -Red > 0 then Red else Blue))` |
+  | U03 | forbidden step `paint(if c == Red or not 1 then Red else Blue)` |
+  | U04 | acceptance `expect c == Blue or not 1` after `paint(Blue)` |
+  | U05 | invariant `c == Red or c == Blue or not 1` |
+  | U06 | invariant `c == Red or c == Blue or -Red > 0` |
+  | U07 | acceptance `expect not (false and not 1)` after `paint(Blue)` |
+
+  These add 14 mode/form transitions to T01–T21 (44 total); there are no other
+  full-output/exit differences, repeat differences or excluded fields. Use Bool
+  for `not` and numeric operands for unary minus, even in skipped expressions.
+  See `DESIGN-requirements-stage.md`, Unary operand typing, for commands and
+  the exact measured base/head identities.
+
+  Current rebase sweep: BASE `23eb5e41326ef4cf81a100ad0e011e81ed9fd507`,
+  HEAD `1e27d896b69b395ad8e48c570b4ddbca50e442a0`, built in their own trees.
+  `BINARY check FORM` covers 594 corpus forms and 65 inline occurrences per tree
+  in both modes twice (5,272 checks). The corpus ok-to-error set remains empty;
+  the historical 51-inline subset retains all 44 recorded mode/form removals.
+  Including every inline form from all five fixed test files additionally records
+  acceptance `expect` / FSL 5 `then` predicates `c != 1`, `true and c != 1`,
+  `not (c == 1)`, `if c != 1 then true else false` and
+  `forall color: Color { color != 1 }` as **breaking removals** for enum `c: Color`:
+  acceptance in both modes, scenario only in FSL 5 (15 additional mode/form
+  transitions, 59 total). Repair comparisons with same-enum members. The two
+  corresponding `c == 1` fixtures remain errors but change their diagnostic from
+  `acceptance` to `semantics` at the expectation keyword, with exit 2 unchanged (three mode/form
+  changes). These account for all 62 full-output differences, with no others,
+  repeat differences or exclusions. S1 calibration passed BASE and rejected HEAD
+  twice. See the design note for inventory commands and full measurement scope.
+- Changed (#1440): the `issue_1573_pattern_reuse` and `issue_1480` envelope
+  tests take the expected `fslc-rust` and `fsl-core` versions from the build's
+  package version, and the WASM browser parity test reads `fsl-wasm` and
+  `fsl-core` from the `[workspace.package]` version in `rust/Cargo.toml`, instead
+  of a literal `4.12.0`, so a release bump no longer fails them. Product output
+  is unchanged.
+- Changed (#1441, breaking removal): v5.0.0 auto mappings compare source actors on both
+  sides (the `by X` label for an edition 4 process transition) independently of
+  `covers`, including fsl 4 process/business transitions,
+  cross-edition 4/5 pairs and typed/legacy compose pairs. Previously hidden
+  mismatches now return the existing located `maps auto actor mismatch` type
+  error (exit 2) in check/unscoped verify/refine and Worker; mapping-free diff
+  instead reports unknown/automatic_mapping_failed within semantic_diff/exit 0.
+  Explicit action correspondences, metadata rules for unregistered actions
+  (raw spec/compose actions), and public
+  Kernel/JSON schemas are unchanged. The complete four-cell `fslc check` sweep at
+  base `5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` and head
+  `9ca8630c7f45f1def54c056bf53a852853c7a60c` (579 base / 591 head forms in their
+  own trees) measured no corpus ok→error or error→ok transitions. Separately,
+  the expansion class is registered transition metadata whose requirement text
+  begins with `by ` (covers text and next-edition rule/decide text). Matching actors with
+  impl/business covers text `by Manager` (B3/B4) or abstract event rule text
+  `by Manager only` without covers (F1/p5) now check ok/0 rather than error/type/2;
+  bounded verify returns verified/0 with implements refines and F1 standalone
+  refine returns refines/0 instead of error/type/2. There is no general automatic
+  semantics-preserving migration; see the measured removals, expansions and migration contract in `docs/design/DESIGN-refinement.md`, section "#1441: source-actor auto mapping and breaking-source migration".
+- Changed (#1442, breaking removal): synchronized reference arguments read only
+  header parameters, consts, and state, not `let` bindings in the additional items.
+  The previously accepted `action s() = b.go(t) { let t = true }`, where that let
+  is the only declaration of `t`, now fails `check` with exit 2 and
+  `kind: "semantics"`; its cause is
+  `public Kernel cannot type identifier 't'`, retaining the original component
+  position. As with other component-owned model errors, the diagnostic is wrapped
+  at the component's `use` declaration with that inner cause and component
+  file, line and column preserved.
+  Declare a header parameter and supply its value at the call site, or read
+  composition-side state instead; review the changed interface or state semantics.
+  There is no automatic migration, compatibility bypass, or grace period.
+  The checked repository corpus has zero ok-to-error transitions; this removal
+  is demonstrated separately by an inline regression with accepting parameter
+  and state controls.
+  Composition also no longer rescues originally undeclared component value reads
+  or update targets through header parameters, composition state, foreign enum
+  members, or generated state/const names. Such inputs now retain the standalone
+  component's semantic cause and original component location; late model errors
+  retain them inside the existing component-use wrapper. Declare or
+  correct the name in its owning component, or pass a value through an explicit
+  component parameter; there is no automatic migration or grace period. The
+  check sweep comparing base `9ad07c7ad8327b637d8d419eee7a313dc726e9e5`
+  and implementation head `24a807883786e3ad3477c6ecbbdace2d5378441c`
+  covers all 597 repository forms with zero ok-to-error
+  transitions; inline standalone-refusal controls demonstrate this removal even
+  though those invalid source forms do not occur in the checked corpus.
+
+  Changed (#1442): `check` now validates each `leadsTo` helpful-action argument
+  with the ordinary expression typechecker against the corresponding action
+  parameter type, in the property's binder scope. Previously unchecked argument
+  expressions with wrong types, unknown names, or forbidden pattern shadowing
+  now reject before verification. Name and arity checks remain unchanged.
+  Diagnostics identify the helpful clause; individual argument spans require a
+  separate follow-up issue. State independence remains induction-only.
+  Composition also preserves original-source pattern refusals after aggregate
+  normalization: prefixing cannot rescue a nonempty `count` or `sum` whose
+  pattern shadows an original global. Empty aggregates remain accepted when
+  their standalone source accepts them. No engine semantics or bypass is added.
+- Changed (#1446, #1341, #1342, #1343, #1447, breaking): Native
+  argv acceptance is validated centrally against the embedded CLI contract.
+  Non-owned shared options on `explain`, `typestate`, `mutate`, `testgen`,
+  `html`, and `ledger`, non-owned `scenarios` options even at default values,
+  and unknown options or excess operands on `version` are usage errors
+  (exit 2), rather than silently accepted or interpreted by another command's
+  parser. Both `testgen` and `domain testgen` now publish the existing
+  `--allow-unwired` flag in their contract actions and help.
+  All choices are checked before source I/O, including previously deferred
+  checks on `analyze`, `causal analyze`, `db import`, `db check`, `ai check`,
+  `domain check`, `domain generate`, `domain testgen`, and `testgen`: invalid
+  values now use `kind: "usage"` instead of downstream `io` or `semantics`,
+  with the existing messages preserved. Unsupported `--kernel-version`
+  values on `kernel` and `conformance` likewise change from `semantics` to
+  `usage`, retaining the unsupported-public-Kernel-major message and exit 2.
+  Odd `refine` chain operands and malformed `diff --git` ranges already caught
+  by shape validation change from `io` to `usage`, preserving their messages
+  and exit 2. Three-dot ranges are now rejected before Git ref resolution
+  with `--git range must be BASE..HEAD`. The checks retain their branch
+  order, and the handling of nonexistent Git refs is unchanged.
+  Unknown-option diagnostics now name
+  the real command and option on `scenarios`, `ai check`, `domain check`,
+  `domain expand`, and `db observe`, and identify dash-prefixed unknown
+  options on the `compat` group. Existing root/other-group wording,
+  `compat` no-argument/bare-unknown usage and `--include-ai` wording, and
+  terminal `ai compare` missing-value wording are preserved.
+  `ai compare` no longer accepts literal `--` as an option value, including labels
+  and dataset: it reports a missing-value usage error (exit 2) instead.
+  An option-position bare `--` now terminates `ai compare`, like other commands;
+  following operands remain usage errors.
+
+  Per issue:
+  - `explain` and `typestate` reject shared options that do not
+    apply to them, and `testgen` rejects its unused `--engine` option. These
+    options now report an unknown-option usage error (exit 2), before reading
+    any option value (#1341).
+  - `db check` validates each `--deadlock` value as `warn`,
+    `error`, or `ignore` before loading the source. Invalid values report a
+    usage error (exit 2), even when followed by a valid repeated value (#1342).
+  - `refine` reports an unpaired additional chain operand as a
+    usage error instead of an I/O error, preserving the message, exit 2, and
+    literate-input diagnostic precedence (#1343).
+- Changed (#1449, breaking removal): Native checking and verification classify the root source's
+  edition before consumption. Verify-shaped results share migration-warning
+  finalization after governance, including nested verification and report baselines,
+  instead of repeating it in the CLI verify and test-generation failure paths.
+  Edition-migration ledger rows now say 移行候補 with their code and message instead of vacuity or mutate advice.
+  Migration-only rows use status 🟡 移行候補 and risk —; non-migration or mixed rows retain 🔴 要確認 and risk 要確認.
+  Kernel, conformance, testplan and typestate consumers also admit their captured
+  source before analysis; closed contracts and raw TypeScript deliver migration
+  warnings on stderr without changing their output schemas.
+  Worker check and verify reject unsupported source editions before model or solver
+  consumption, retain verification-option error priority, and deliver admitted
+  warnings once after governance.
+  Editor diagnostics reject unsupported editions before model or analysis work and
+  retain migration finding ranges for UTF-16 publication.
+  Replay, explain and single-source analysis also apply admission before consuming
+  the captured source, with readable and graph output warnings kept on stderr.
+  Domain check now finalizes each result once instead of duplicating migration
+  warnings across its specialized result and nested verification result, including
+  non-definitive verification errors; requested editions and read-error kinds are retained.
+  Causal consumers admit captured roots and explicit observation mappings before
+  analysis or output, preserve specialized warnings, and reuse the same source for
+  expectation parsing and model construction instead of rereading the root.
+  Causal root preparation intentionally reports a later operand/mapping read error
+  before an earlier root's parse/model error. Envelope edition metadata now comes
+  only from the primary root; every slot's warnings are retained once. Native and
+  Worker check reuse the admitted token for their inner diagnostic preflight.
+  The single-root extension completes 21 further modes: six AI readers, the five
+  non-check domain commands, the three document commands, database observation,
+  log replay, counterexample export ordering, mutate success warnings, sweep capture
+  and direct HTML/ledger raw-warning delivery. Root and mapping preparation makes
+  mapping IO precede an ordinary root parse/model error in log replay. Document
+  check admits before artifact IO/frontmatter and projects captured bytes under
+  the recorded label without rereading its path. Direct raw reports warn on stderr;
+  HTML/ledger file-output envelopes and approval-only stderr remain unchanged.
+  The multi-root completion covers analyze batch/project, approval check/create/diff
+  and the captured-source ledger --approval overlay, chain, live diff and refine.
+  Later direct-input IO now precedes earlier parse/model errors outside chain.
+  Newly owned dependency failures use the complete child refusal/exit 2 rather than
+  flattened loader errors; successful results receive child warnings once. Approval
+  diff keeps approval metadata on success, but a child refusal replaces it. Batch
+  diagnostics stay file-local, and chain finishes each detail before its wrapper.
+  Git-revision roots (#1513), public-example warning cleanup (#608), lint dialect
+  support (#609) and other ledger warning classifications (#1497) are separate.
+  Breaking consumer removals: four next-edition migration forms (enum union,
+  metadata, colon quantifier, inline maps) now refuse in analyze/conformance/explain/
+  html/kernel/ledger/mutate/scenarios/sweep/testgen/typestate, and enum union in
+  testplan (45 command/form observations already rejected by check). A named
+  BASE/implementation `check` audit covers 597 corpus files plus 309 inline
+  occurrences in both materialized trees with an empty ok-to-error set; see the
+  migration design amendment for SHAs, command and attribution.
+  The latest audit uses BASE 1844fa74a717ba9229e0b292d9421c0939016e5e and Rust
+  revision e04df80f35cf3a7a3b8119dc7b6513ac7272ce76, built in separate clean archives.
+  Cache-disabled `fslc check FORM`, 597 corpus files +29 required input occurrences
+  per tree, both binaries in both trees: 2,504 checks, empty ok-to-error and full
+  stdout/stderr/exit difference sets, no excluded fields. The 29 comprise the original
+  eight (two domain snapshot includes, two scenario literals, two empty-membership
+  inputs, fixed approval source and command-matrix approval baseline), twenty actual
+  success-table sources and one replay-order root; repeated/included files remain
+  occurrences. Historical BASE a42d4cede3d8d688daff3173de7bd839a6992172 /HEAD
+  e2669212315f4db9bec2c0c525ba8d44f77bacfd measured 597+29 per tree /2,504 checks.
+  Initial BASE c79016efeb630c717292e9392901cfe65ab40915 /implementation
+  ceb03268e567487f6ec080afcf3ab034d4a5ea0c measured 597+8 per tree /2,420 checks.
+  Both historical ok-to-error sets were empty; neither substitutes for the latest.
+  The latest repeated 21-mode consumer comparison executes 772 observations and records
+  17 distinct breaking command/source removals (19 control occurrences per repeat,
+  including repeated requirements metadata): domain analyze/expand/generate/replay/
+  testgen refuse enum union (5); document claims refuses metadata in spec and
+  requirements, colon quantifier and inline mapping (4); document generate refuses
+  metadata in spec and requirements (2); document check refuses requirements
+  metadata (1); replay --from-log refuses enum union, metadata in spec and
+  requirements, colon quantifier and inline mapping (5). These previously non-error
+  consumer inputs are not grammar removals or proof claims; the mapping-only control
+  was already an error at BASE and is not counted as a removal.
+  The sweep grid now uses the same admission owner as the other single-root modes,
+  retaining per-cell warning ownership without finishing the aggregate. Success
+  controls compare one complete finding where the dialect has migration forms and
+  require warning absence for AI/DB dialects without those forms. No planner or
+  language behavior is added by those controls.
+
+  The multi-root audit compares main base 796876558b83f2dedd7dafdf04ef77fced3de033
+  and Rust/source-test revision 8796f19d9646a4edffbac0719c3693a8f88c1405, each in
+  its own materialized tree: 606 corpus files, 35,611 inline occurrences, both
+  parser modes and observed edition requests, 72,859 pairs. Additional base
+  e16f65bfeae773218d23f425376ea7c23b895bff covers its 603 files and the same inline
+  inputs, yielding 218,571 commands overall. Both ok-to-error sets and complete
+  base/head JSON/stderr/exit difference sets are empty; no fields are excluded.
+
+  The active-target/single-mapping repair repeats the boundary comparison against
+  the same main base with independently materialized head
+  e47dce898889e891e9fa82a5fdd8698749e4db80: all 606 corpus files and 35,663 inline
+  occurrences including new inputs, 72,963 pairs / 145,926 commands. Fixture hashes
+  verified and CLI checks rerun; no ok-to-error or full JSON/stderr/exit differences,
+  and no excluded fields.
+- Changed (#1450, breaking removal): `check` rejects calls whose caller action
+  parameters, lets, expression quantifier/aggregate binders or statement `forall`
+  would capture free names in the expanded def body, excluding the def's own
+  parameters. The error is exit 2, `kind: "semantics"`, and `would capture variable`
+  at the call. Rename the caller binding; no automatic rename or bypass is added.
+  Non-global `is some(v)` bindings exported by `requires` and by a binary left
+  operand also count as caller bindings and reject these previously accepted calls.
+  Direct specs and source-local compose/component defs share the check. Pattern
+  collision rules remain in force, including imported enum members; the explicit
+  diagnostic-order exceptions below still reject with the same exit and kind.
+  Compose-source expansion now receives Common declarations for its
+  global-name inventory and runs after component loading, still before rewriting.
+
+  The declaration-level `leadsTo` path is also rejected by #1528: before/after,
+  `helpful` arguments, `decreases`, and `within` cannot capture a def-body free
+  name through a declaration binder. These calls use the same exit 2 / semantics
+  capture diagnostic; rename the declaration binder.
+  The declaration binder's own `where` expression is checked for capture; this can
+  precede the existing rejection of unsupported wrapper `where` filters. First
+  error ordering can also change when both a component load and a compose def are
+  invalid, or when both an action body and its parameter range contain invalid calls.
+  In particular, **v01** (invalid parameter range and action body) remains
+  exit 2/kind `name`, but can report the body error before the parameter error.
+  **a01** (a pattern-bound argument colliding with a def-body binder) remains
+  exit 2/kind `semantics`, but can report pattern shadowing instead of the earlier
+  `would capture` message at a different first location. Restoring those two
+  legacy diagnostics is deferred; neither change introduces a successful verdict.
+
+  The final `check` sweep of all 597 repository forms, in the respective
+  materialized trees for base `11f01225e244dabde0f8dfd9aaa665bc47dccfd4` and built
+  implementation `dd7b47885680076412ab2f0b46ebe8854ff6758b`, has zero ok-to-error
+  transitions. Check/analyze outputs agree for all 20 compose corpus files and two
+  refactor controls; BMC at depth 4 agrees outside observed elapsed-duration values,
+  calibrated with two same-base repeats. No semantic field is excluded. Inline
+  capture controls separately demonstrate the breaking removal.
+- Changed (Part of #1451, breaking removal): check and ordinary verify reject reads of an init
+  may-assigned root before full-root definite assignment with explicit's
+  `init references state variable '<name>' before it is assigned`, semantics/exit 2
+  and a statement location. This conservatively rejects dead RHS reads,
+  already-written components, and free component/path reads in
+  `struct-other-partial`, `if-one-branch-read`, and #1481 N2. Never-assigned roots
+  (issue-exact/free and choose, #493), permitted same-forall current-key reads
+  (#1520 X1/X2, only for unresolved binder values), and unread omitted/legacy
+  partial init remain accepted. Resolved partial-domain loops still require
+  whole-root coverage. Binder-keyed filtered/collection writes, including nested
+  ones, do not establish full coverage for a following read; rewrite with a
+  resolved full-domain binder before reading. Explicit's
+  free-value support gap remains in #1451. Rewrite by reading after complete
+  assignment or explicitly initializing the whole root; the 19 measured-inline
+  migration examples (original 13, N2, two subsets and three post-loop cases) are in
+  [DESIGN-bridge](docs/design/DESIGN-bridge.md#assigned-root-read-order-1451).
+  Breaking-removal evidence: `fslc check <form>` in each own materialized tree,
+  base `c79016efeb630c717292e9392901cfe65ab40915` versus head
+  `2d05dd63f05ca68c4bd7d06c3b24ba147ce6eda4`, all 597 `.fsl` files under `specs/`,
+  `examples/`, `rust/fslc/tests/fixtures/` unchanged in full output/exit (400 exit 0,
+  191 exit 2, 6 exit 1); corpus removal set empty. Separately, 42 inline sources
+  direct/composed (84 forms) have 38 `ok`→`error` transitions: original 13 cases
+  × 2, N2 × 2, two static-subset cases × 2 and three post-loop coverage cases × 2,
+  with no other output changes.
+- Changed (#1452, breaking removal): compose no longer accepts a child whose own edition rejects a
+  legacy colon quantifier. The former `ok`/exit 0 becomes the complete child
+  `unsupported_in_edition` refusal/exit 2 with finding message
+  `legacy colon quantifier syntax is deprecated`. Its child `loc.file` keeps the
+  reference spelling, so the migration refusal matches standalone checking with
+  that spelling; canonical filesystem identity is only the deduplication key. The braced canonical twin remains
+  accepted. This breaking consumer removal is recorded in the migration design and
+  both language references, not a grammar removal or stronger verification claim.
+  The materialized-tree check comparison (`bc14d885` → corrected Rust source/test tree `a65eddd5`)
+  covered 603 corpus forms in two parser configurations and 368 required-test
+  inline/included occurrences per tree (3148 checks). Its 6 `ok`→`error` occurrences
+  are only this compose-child form: the
+  `edition_dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice`
+  context and `edition_dispatch_inventory` contexts
+  `dialect_controls::actual_dialects_and_valid_sidecars_are_preserved_twice` and
+  `deferred_modes_have_live_disagreements_across_the_complete_native_adapters`, each
+  twice. Other transitions: 0; corpus transitions: 0. Canonical twins stay accepted.
+- Changed (#1456, breaking removal): v5.0.0 automatic mappings use requirement actions'
+  own actors, including standalone actions and generated branches on either side,
+  not enclosing requirement prose. Hidden own-actor mismatches now fail check,
+  unscoped verify, refine and Worker with the existing located type error (exit 2);
+  mapping-free diff keeps its semantic_diff/exit-0 envelope and reports affected
+  directions as unknown/automatic_mapping_failed. Matching or absent own actors
+  previously rejected by prose are intentionally accepted. Typed requirement text
+  does not declare an actor. Explicit action entries, inline branch maps and stutter
+  stay exempt; public metadata priority, Kernel v1/v2, RCIR, digests and report
+  attribution are unchanged. The repeated four-cell corpus check at base
+  `e8cf78f0162530e264128f588981d49790f2767f` / head
+  `b8daaa8245f374f74448fd983755689f832484cc` (591 base / 592 head forms per binary,
+  each own tree) found no corpus ok→error or error→ok transitions. Acceptance
+  removals/expansions are separate controls. Confirm policy before correcting an
+  action's actor; there is no general automatic migration, compatibility bypass or
+  grace period. If problems occur, return to a 4.x binary. See
+  `docs/design/DESIGN-refinement.md`, section
+  `#1456: requirement-action own actors and breaking-source migration`.
+- Changed (#1458, breaking removal): relation `contains`, `add`, `remove`, and `reachable` now
+  check source and target arguments against their independently declared endpoint
+  types. This breaking removal rejects previously accepted mismatched endpoints
+  before evaluation with `kind: "semantics"`, exit 2, the existing assignability
+  message and `hint: use endpoints matching the relation's declared source and
+  target types`. `domain(r)` is now `Set<A>` and `range(r)` is `Set<B>` for
+  `r: relation A -> B`, including binders over those projections and their public
+  Kernel projection/binder annotations. Enum-typed projection uses are accepted;
+  the enum-binder/cycle idioms `not (exists x in domain(r): reachable(r, x, x))`,
+  `forall x in domain(r): not r.contains(x, Blue)`, and
+  `forall y in range(r): not r.contains(1, y)` remain compatible with released main.
+  The change rejects enum/Int confusion. Enum nominality, numeric/range
+  compatibility, public Kernel schemas
+  and runtime semantics are unchanged; LSP/Worker inherit the shared checker.
+  The restacked boundary sweep used BASE
+  `9af1fa5f36f91e415b7ba249888f4ada4cf7a0db` and HEAD
+  `3a8a6019a5bed3ae62f960afedf2bdcf6d129341`: zero `ok` to `error` transitions
+  among all 597 corpus forms. All 134 inline fixture occurrences were checked;
+  #1458 removes 24 occurrences (22 distinct sources) in both modes, 48 mode-form
+  transitions. The former 46-transition subset is unchanged; the expanded
+  inventory additionally counts numeric Set assignment below. Three counted forms
+  (count, enum set-literal equality and matching enum Set assignment) add six
+  error-to-ok pairs. Each mode/tree ran twice: 5,848 checks, full outputs without
+  exclusions. On this base, source-only revert calibration produces 28 intended
+  failures and 24 preservation passes, with exact restoration and 52 fixed tests
+  passing afterward; workspace Clippy is warning-free. The workspace suite passed
+  3,468 tests on `fc77124b31744f1c1728295db6f09508265b8285`; only a proved
+  whitespace-only commit follows it to the measured HEAD (whole-file equality after
+  removing whitespace). Builds, CLI conformance, fixed tests twice and fmt pass on
+  that HEAD. Since the earlier `8e54e862` measurement, main's #1463 rejects
+  `explicit_init_state_collection.fsl` on both BASE and HEAD and adds the authored
+  location to the BASE count diagnostic; #1458 removal/addition sets are unchanged.
+  See
+  `docs/design/DESIGN-nested-option-support.md`, section #1458, for commands,
+  identities and measurements. Removed numeric `N -> N` invariants are
+  `not reachable(r, Red, Blue)`, `not reachable(r, Red, 1)`,
+  `not reachable(r, 1, Blue)`, `not r.contains(Red, Blue)`,
+  `not r.contains(Red, 1)`, `not r.contains(1, Blue)`,
+  `r.add(Red, Blue).contains(Red, Blue)`, `r.add(Red, 1) != r`,
+  `r.add(1, Blue) != r`, `r.remove(Red, Blue) == r`,
+  `r.remove(Red, 1) == r`, `r.remove(1, Blue) == r`;
+  for `N -> Color`: `not r.contains(1, 2)`, `r.add(1, 2) != r`,
+  `r.remove(1, 2) == r`. `Red` and `Blue` belong to enum `Color`.
+  LSP and Worker add duplicate target-only contains/reachable occurrences.
+  Projection typing additionally removes, for `s: relation Color -> Color` and
+  `r: relation N -> N`, `forall x in domain(s): not r.contains(x, x)`,
+  `forall x in range(s): not r.contains(x, x)`, `not domain(s).contains(0)`,
+  `not range(s).contains(0)`, `forall x in domain(s): x != 0`, and
+  `forall x in range(s): x != 0`.
+  The expanded inventory also rejects `xs = domain(s)` for
+  `s: relation Color -> Color`, `xs: Set<N>` (assignment origin 8:19).
+  General breaking rule: projection elements and sets take the endpoint type.
+  Enum or Bool elements are rejected anywhere Int is expected; their sets are rejected
+  where numeric Sets are expected: comparison, ordering, arithmetic, min/max,
+  membership, set-literal equality, Option and pattern payloads, numeric Set state
+  assignment and refinement maps. The measured fixture list is not exhaustive.
+  Newly accepted families include count over finite endpoint-typed domain and
+  range, sum over numeric projections, enum set-literal equality, enum-typed where
+  filters and conditional projection membership, let-bound projections consumed
+  as matching typed sets, matching enum Set assignments and refinement maps into
+  matching enum Sets. Unique over enum domain/range was already accepted on released
+  main and remains accepted. These additions do not guarantee invariant truth.
+- Changed (#1459, breaking removal): shared static checking now rejects non-Option
+  `is none`/`is some` operands; non-integer `abs` arguments, including enum
+  domain/range elements; non-relation operands of acyclic, functional, injective,
+  domain, range and reachable; and non-self path/cycle relations. Reachable and
+  acyclic require exactly the same declared endpoint type, T -> T: mixed
+  enum/numeric relations and N -> M are rejected even if numeric N and M have
+  identical bounds. Numeric compatibility does not establish self-relation identity.
+  Non-relations no longer infer a fallback Set<Int> projection.
+
+  Collection method receivers, names and arities must match the runtime:
+  Set contains/add/remove take one item and size takes none; Seq contains/push/at
+  take one argument and pop/head/size take none; relation contains/add/remove
+  take exactly two endpoints. Map has no methods. Invalid examples now rejected
+  include n.contains(0), Set.push, Seq.add, relation.size, s.contains(), q.pop(1)
+  and action assignment n = q.at().
+
+  Count/sum check original binders, Bool filters and integer values before
+  expansion, even over empty ranges or zero-capacity sequences: count with
+  `where 1`/`where not 1` and sum with `of true`/`of -Red` no longer disappear
+  into a zero result. Well-typed empty aggregates still return zero.
+
+  These checks cover dead branches, action assignments/requires/ensures and
+  trace expressions, reporting authored locations as semantics errors, exit 2,
+  before execution or replay. Valid Option bindings, integer abs, supported
+  methods, heterogeneous non-path relation operations, endpoint hints and
+  non-reflexive reachability remain unchanged. The former abs exception in the
+  #1458 projection records is removed. Native LSP and Worker parity tests cover
+  the new Option operand error.
+
+  Boundary audit: BASE e8cf78f0, HEAD 33d7faa7; 591 corpus files plus 384 inline
+  occurrences (975 forms), stable/fsl5 twice in three independently built trees
+  (baseline, immediate parent, head), 11,700 checks. The corpus ok-to-error set is
+  empty, with no other corpus output drift and no excluded forms or fields.
+  New #1459 removals total 248 mode-forms (124 occurrences/123 distinct sources)
+  across all six categories above, including numeric N -> M. Another 60 mode-forms
+  remain error/semantics/2 but change from unlocated runtime failures to authored
+  static diagnostics. Inherited #1439 (86 removals/11 reclassifications) and #1458
+  (56 removals/6 additions) are accounted separately in the expanded inventory,
+  not counted as new #1459 behavior. The design amendment records full evidence.
+
+  Review round 1 also rejects non-self selections hidden behind conditional
+  then-branch inference, through nesting, old, relation add/remove receivers and
+  action let aliases. Projection equality preserves substantive relation errors
+  over context-needed empty literals and retains authored locations; range bounds
+  and terminal no longer report generated 1:1 origins for authored input. Existing
+  numeric/Set compatibility and valid dynamic verdicts are unchanged. At that
+  historical baseline, checked positions did not include helpful parameter types;
+  this does not add relation-valued temporary collection support. Helpful argument
+  typing was separate upstream work at that historical baseline; main's #1527 now
+  checks parameter types and is preserved.
+
+  Round-1 delta BASE 33d7faa7 to HEAD 8caf5c2e: 42 additional mode-form removals
+  (21 source occurrences) and 24 diagnostic reclassifications (12 occurrences:
+  projection inference 16, range-bound origins six, terminal origins two). The
+  diagnostic changes retain error/semantics/2. The expanded 591-corpus/447-inline
+  inventory (1,038 forms) runs both modes twice in four own-built trees, 16,608
+  checks including the separate previous-fix baseline. All 8,304 repeat pairs
+  agree in full, with no exclusions or corpus output drift. Inherited/R0 changes
+  are accounted separately, not attributed to round 1.
+
+  Current integration: final base `11f01225e244dabde0f8dfd9aaa665bc47dccfd4`,
+  implementation measured at `2b7d2e98349505af7dccb7843e41ab659066f021` on
+  `b1557a31b77f549d2c48823c3435217f9df4fc53`, carried to `11f01225` across only two
+  generated language pages. All 597 corpus + 601 inline inputs (1,198 total), both
+  modes twice in three states: 14,376 checks + 24 identity controls, no corpus output
+  drift or exclusions. #1459 accounts for 294 mode-form removals (147 occurrences,
+  142 distinct sources) and 62 diagnostic reclassifications. Main #1463 already
+  owns 48 former removals/four reclassifications; added let/Kernel/CLI/shared-row
+  occurrences contribute 26 removals. Historical #1458 attribution from `9af1fa5f`
+  remains 48/six on its 134-entry subset, 56/eight on the expanded inventory.
+
+  The shared #1463 row X1/operand-method-types is a breaking removal:
+  `invariant Capture { acyclic(done) }` for Bool `done` now fails check at 8:3;
+  outcomes become [Error, Error, Error, Error] rather than [Ok, Error, Error, Error].
+  For the other 136 row sources plus one resolver dependency (137 inputs),
+  `fslc check FORM` at the named base/head, stable/fsl5 twice, shows no further
+  transition or output change. The inherited comparison retains 292 embedded-path
+  differences and 16 observations from two prior scratch-label extraction errors;
+  the real test sources now check on both baseline binaries, with no attribution
+  change. Optional replay not run; no sweep output normalized. Full evidence and
+  the retained Public Kernel projection-guard controls are in the design amendment.
+- Changed (#1463, breaking removal): check now rejects leadsTo collection/where wrapper
+  binders, init statement forall collection sources with free state references,
+  and relation index reads/writes, with shared core diagnostics and authored
+  locations across native CLI, LSP and Worker. These forms previously checked
+  without executable semantics. Written aggregate binders, filters and values
+  are checked before Count/Sum normalization, so empty expansion cannot hide
+  relation indexing or existing type errors. This intentionally also removes
+  Bool indexing inside empty literal-range/zero-capacity Seq aggregates
+  (the #1463 decision to check aggregate source types regardless of candidate count;
+  a #1459-class closure; no new type rules are added).
+  Empty Count/Sum now reports every existing type error in the written expressions,
+  such as the non-Bool filter in `count(x in 1..0 where x + 1)`; the 6 Bool-index
+  removals are examples in the measured corpus/inline inputs, not an exhaustive
+  list of type-error kinds.
+  Raw validation does not expand dependent inner Count/Sum before outer
+  substitution or prematurely reject a pattern name awaiting substitution;
+  existing nested and pattern positive/negative controls retain acceptance.
+  Map indexing, relation methods, state-independent
+  init literals and ordinary assigned-state reads remain supported. Nested init
+  forall remains an explicit limitation routed by auto to symbolic BMC.
+
+  Separately fixed the false symbolic/explicit rejection of local binder names
+  that shadow state, without narrowing check acceptance. Remaining range/domain
+  forms are #1480, init/zero-capacity issues are #1481, typing gaps are #1459,
+  and collection-literal shape issues remain #1467.
+
+  Public output changes are intentional: the newly forbidden forms return a
+  located semantics error (exit 2) before engine routing; aggregate errors retain
+  their authored property location instead of synthetic 1:1. Imported failures
+  anchor at the owning root use, retain the component filename/cause location,
+  and show public names such as part.xs/part.Capture, not lowered part__ names.
+  Wrapper messages say leadsTo wrapper rather than misleadingly bounded leadsTo.
+  Model-expression type errors now point to their owning declaration, including
+  errors whose base check envelope already had a loc; component type errors,
+  including pre-existing ones, anchor at the owning root use and retain their
+  component cause.
+
+  The base 5738cc2c711b691a9d453b0190ead1a2ff77fc50 versus the #1463 change
+  (exact measured head recorded in the PR) sweep ran twice in their own trees
+  using `FSLC_CACHE=off fslc check <form>`. Both runs exited 0: 597 corpus forms +
+  1016 inline IDs = 1613, with 110 accepted-to-error removals (1 corpus, 109 inline),
+  identical complete reports and no excluded fields. These are 22 wrapper,
+  31 init-source, 51 relation-index (18 aggregate), and 6 empty-aggregate Bool-index
+  forms. The complete fresh-base sweep includes both added legacy-return fixtures
+  without a difference. All 66 nested-aggregate/pattern check controls preserve
+  identical accepted outputs; its 15 removals are four quantifier relation-index
+  bounds and eleven sync-expanded/root relation-index forms. Complete removal IDs:
+
+  | Removed form ID set | Count |
+  |---|---:|
+  | `corpus/rust/fslc/tests/fixtures/explicit_init_state_collection.fsl` | 1 |
+  | `inline/1457/init-stmt/{empty-body,empty-domain}/{Set,Seq}/state/{positive,negative}` | 8 |
+  | `inline/L1/{Set,Seq}/{state,literal}/{false,true}` | 8 |
+  | `inline/L1/{utf16-prefix,resolved-component}` | 2 |
+  | `inline/L2/{z: K,z in 0..1}/{z == 1,not done,true,false}` | 8 |
+  | `inline/L3/z in Set { 1 }` | 1 |
+  | `inline/L3/z: K where z == 1` | 1 |
+  | `inline/I1/{Set,Seq}/{false,true}/{plain,conditional,unreachable,nested}` | 16 |
+  | `inline/S4/{own-source,sibling-restored,aggregate-source}` | 3 |
+  | `inline/R1/read/{init,action,invariant,trans,leadsTo,reachable}/{false,true}` | 12 |
+  | `inline/R1/write/{init,action}` | 2 |
+  | `inline/R1/receiver/{old,conditional,domain-binder}` | 3 |
+  | `inline/guard/{StateCollection,ranked-where}` | 2 |
+  | `inline/aggregate-and-component-locations/case-{00,04,08,12,16,20,24,28,32,36,40,44,48,52,56,60,64,68}` | 18 |
+  | `inline/aggregate-and-component-locations/case-{01,05,09,25,29,33}` | 6 |
+  | `inline/aggregate-and-component-locations/case-{72,73,74}` | 3 |
+  | `inline/aggregate-and-component-locations/unchecked-init/state-source` | 1 |
+  | `inline/nested-aggregates-and-sync-ownership/case-{68,69,70,71}` | 4 |
+  | `inline/nested-aggregates-and-sync-ownership/case-{76,77,78,79,80,81,82,83,84,85,86}` | 11 |
+
+  Of 128 full-output differences, the remaining 18 stay error/semantics, exit 2:
+  `inline/1457/boundary/nonfinite` gains authored message/loc 1:161;
+  `inline/R2/seq-write-remains-rejected` keeps loc 7:17 but requires Map, not Map
+  or Relation; `inline/aggregate-and-component-locations/case-{13,17,37,41,49,53,61,65}` moves 1:1 to 6:3
+  and changes Map/Relation/Seq repair text to Map/Seq;
+  `inline/aggregate-and-component-locations/case-{21,45,57,69}` changes only that text, retaining 6:3.
+  `inline/nested-aggregates-and-sync-ownership/case-{72,74}` already failed static aggregate bounds; the relation
+  index now reports property 6:3 instead of no location;
+  `inline/nested-aggregates-and-sync-ownership/case-{73,75}` anchors the same existing failure at use 2:3
+  and retains the part.Capture cause at piece.fsl:6:3.
+  Other envelope fields remain unchanged; no output drift is excluded.
+  Exit-1 refinement/trace verdicts are not input errors.
+- Changed (#1464): the unknown authority tool regression walk also runs
+  `approval create --kind html`, which panicked at the AI lowering lookup
+  before the #1464 fix. Command behavior is unchanged.
+- Changed (#1467, breaking): already-admitted recursive Set/Seq expressions share checked
+  expected-type construction, equality, conditional joins, methods and binders,
+  including Struct, Option/nested absence, nested collections, relation and existing
+  Map values. Sets use logical deduplication; Seq keeps order, duplicates and live
+  length. Carrier/capacity, presence, partial-operation and storage-bound rules stay
+  unchanged; temporaries are not clipped. No grammar, admission or Map syntax is added.
+  **Breaking public Rust library API:** `SymbolicValue::Collection.entries` changes
+  from `Vec<(Vec<T>, T)>` to `Vec<(Vec<SymbolicValue<T>>, T)>`; Rust constructor and
+  field consumers must adapt to typed recursive keys. The private CollectionEntries
+  alias does not hide this public break. The exact `Bindings<T>` BTreeMap alias,
+  root export and SymbolicValue variant census remain unchanged, not every Rust API.
+  This is not a CLI/Kernel JSON schema or assurance change; existing errors,
+  locations, invalid-enum projection and solver-free engine boundaries remain.
+- Changed (#1472, breaking removal): whole Set, Seq, Map and relation values
+  require matching carriers, including Seq capacity and both Map keys and values.
+  This resolves #1627: narrow-to-wide as well as wide-to-narrow whole Set copies
+  now fail check with the existing located assignability error (exit 2), rather
+  than disagreeing across engines. Equal-range aliases remain compatible through
+  symbolic retagging; scalar/Option numeric compatibility and scalar arguments
+  are unchanged. Refinement resolves each model's numeric types independently and
+  retains its existing type error. Upstream #1642 recovers authored map spans, with
+  unknown 1:1 retained only without an authored span. Migrated unchanged-source
+  anchors are runtime1:40/1:45 map tokens, standalone4:3 map and inline2:3 implements,
+  formerly1:1. Same-name struct-field and enum/range collisions remain open pending
+  #1599's shared merge rule and Type-kind handoff. Int is outside the finite-carrier gate;
+  existing literal compatibility and inferred Seq capacity are preserved. Static
+  implements-map type failures in mutate now use the shared check-invalid path:
+  whole-container range mutants move from errored to invalid, outside kill_rate
+  and without oracle_errors in the gate. Solver/evaluation errors and budget
+  cutoffs retain their existing classifications. Independent archive builds of
+  79687655 and 3c99c93b twice checked 606 corpus and 16 original inline
+  forms: zero corpus removals, zero error-to-error diagnostic changes; three inline
+  ok-to-error removals are FALSE_VACUITY/CondMap (Map keys 0..0 vs 0..2, 20:41),
+  the #1522 MAP conditional (keys 0..2 vs 0..1, 7:35), and SET_WIDENING
+  (Set 0..2 to 0..4, 6:48). Also removed are admitted whole Seq maps in runtime
+  SeqWide to SeqAbs, SeqWider to SeqGuarded, CLI SEQ_WIDE_IMPL to SEQ_ABS and
+  inline seq_req(-1): capacity 2, model-local elements -1..2 or 0..3 vs 0..2;
+  former refinement failures now reject statically. Another 18 literal-boundary
+  forms retain identical check outputs. Set/Seq conditional inference keeps an
+  already known finite carrier/capacity across let, without literal materialization.
+  Six additional breaking removals, measured with 18 bridge forms, are both arm
+  orders of Set0..2→0..4, Seq0..2→0..4 at capacity2 and Seq capacity2→3 with equal
+  elements (all8:3). Their standalone/same-carrier controls still check; nine
+  total ok-to-error forms were measured. Literal materialization remains #1467.
+- Changed (#1473, breaking removal): DB lowering rejects unknown compatibility-rule names with an
+  authored semantics error before emitting a model or artifact. Kernel export no
+  longer accepts these malformed documents; file-based fmt, lint, and migrate now
+  return exit 2 instead of exit 0. Commands retain their established lowering-error
+  locations, including positions in the message rather than a loc field for
+  fmt/lint/migrate. Check and Worker specialized-validator envelopes, all twelve
+  valid rule names, default selection, repair-tool carve-outs, and DB-only findings
+  remain unchanged. The rule vocabulary is shared by fsl-core and fsl-tools. Repair: spell each
+  `check compatibility` rule as one of the twelve valid names.
+  The base/head check sweep covered 595 file-backed forms with no ok-to-error
+  transitions or output/exit drift; exact commits, binary hashes, and commands are
+  recorded in docs/design/DESIGN-db.md.
+- Changed (#1480, breaking removal): `check`, every `verify` engine, LSP and Worker now
+  refuse every integer range bound the symbolic engines cannot execute, with a located
+  `semantics` error, exit 2. Refused: unplanned dependent bounds (index, field, `size()`,
+  `if`, `min`, `/`, `%`, `old`, aggregates); state-dependent bounds in `ensures`,
+  `reachable`, `terminal`, `until`, leadsTo P/Q, `decreases` and `helpful` arguments;
+  bounds reading a `let` (even literal), pattern binding, Int state, non-literal Seq
+  element or non-literal Set literal item; in a scope with no certified read frame,
+  bounds reading an element of a state Set that some write can give a key read from
+  state; a dependent range under an `old(...)` with no frame left, which includes an `old`
+  inside `P` of `P unless Q`; and intervals that do not fit `i64`. Forms that reported a verdict before
+  reaching the bound lose it: an earlier violated property, `--property` or
+  `--exclude-property`, `--depth 0`, and explicit-engine verdicts on these forms.
+  No size cap is added. `conformance`, `analyze`, `explain`, `diff`, `refine`, `testgen`,
+  `mutate`, `sweep`, `scenarios`, `html` and `ledger` refuse these forms too. `kernel`, `typestate`,
+  `lint`, `migrate`, `fmt` and `document claims` do not, and `replay` keeps loading them
+  by design, including a dynamic aggregate form it used to refuse. See
+  `DESIGN-check-executable-forms.md`.
+  Breaking-removal sweep: `fslc check <form>` with binaries built by Rust 1.98.0, each in its
+  own `git archive` tree, base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`, head
+  `f101e7a93cbb50ad85e3531a1d27314559735311`, over 20,179 forms: 646 `.fsl` files (`specs/` 23,
+  `examples/` 195, `rust/fslc/tests/fixtures/` 428) and 19,533 models captured while running
+  the workspace tests on both sides. `ok`→`error`: 649, none under `specs/` or `examples/`:
+  495 `'x' is not an integer const`, 85 `binder bound is not a static integer`, 20 bounds that
+  overflow or do not fold, 16 init statement `forall` bounds reading state, 11 declared `Bool`,
+  10 typed binders over the builtin `Int`, 8 over a Struct, 4 negative `within`. Corpus files:
+  `explicit_init_range_assigned.fsl`, `explicit_init_range_unassigned.fsl`, and seven head-only
+  files under `issue_1480_temporal_outer/`. Four of the 85 are a `leadsTo` wrapper bound reading
+  a name that is both a state and a const, where the base read the const and returned `violated`
+  on bmc and induction.
+
+  Forms the engines used to refuse now run where the rule says they can: a dependent
+  bound in a fair guard, in a sticky helpful guard, in a `trans` body with a partial
+  operation, under a static outer binder, and in an invariant beside a failing
+  `reachable`; binders over several-item Set literals and over state Sets with non-empty
+  or written values; and a run with `--property` whose read frame proves the unselected
+  bound. A frame that cannot prove it still refuses.
+
+  `Bool` is now a reserved type name. Breaking removal: `enum Bool`, `type Bool` and
+  `struct Bool` are refused at the declaration, standalone or in a composed component,
+  where a typed binder and an expression used to read the name differently. Breaking
+  removal: a typed binder over the builtin `Int`, including a `leadsTo` wrapper, is refused
+  at `check` with `type 'Int' is not a finite scalar`, where every engine already refused
+  it. A spec that declares `type Int` or `enum Int` keeps its binder in every scope.
+
+  With `--property` on state that really escapes, bmc refuses a read that needs the bound
+  with `[eligibility]`, and a binder over a state Set whose frame could not be rebuilt with
+  `[planner]: missing-finite-fact`; induction reports the escape, and explicit reports the
+  selected property.
+
+  A form that runs out of memory enumerating a range now refuses with a `[resource]` error,
+  exit 2, instead of a panic with empty stdout. A panic in the Z3 bindings, which is what
+  running out while building solver terms produces, refuses with a `[solver-panic]` error
+  carrying the panic text, exit 2; it says no verdict was reached and does not claim a
+  cause. No size limit is added.
+
+  Reject two previously check-admitted forms before engine dispatch: init statement
+  `forall` integer-range bounds with free state reads, and typed binders over a named
+  Struct in an expression, action or `leadsTo` wrapper, which engines already refuse as
+  non-scalar. Diagnostics retain owning source locations. Supported init RHS reads,
+  Bool, Enum and Range binders and ordinary and collection Struct values are unchanged.
+  Range admission runs after existing init ownership and read checks, preserving their
+  earlier diagnostics and component provenance. Already-refused init-statement typed
+  Struct domains retain their complete unlocated finite-scalar error.
+
+  Static binder ranges share successful checked constant folding across aggregate
+  normalization, symbolic verification and static leadsTo and Monitor bindings, including
+  Euclidean division and remainder, `min`, `max`, `abs` and typed conditionals with
+  selected-arm arithmetic. `KernelModel::constant_integer` is a new Rust API that reads
+  the current constant map without caching. A plain `0..n` over a state that shares its
+  name with a const now reads the state: it used to prove what the explicit engine
+  violated, and now every engine reports `violated`.
+
+  Builtin `Bool` binders keep their `false`, `true` identity in quantifiers, statement
+  `forall` coverage and static `leadsTo` wrappers. Breaking admission removal: negative
+  constant `within` deadlines fail at the owning property before engine dispatch; zero
+  and positive deadlines are unchanged. Property-keyed JSON and bounded unranked liveness
+  assurance are unchanged.
+
+  Add the Rust-only integer range planning API under `fsl_core::binder_range` and
+  `KernelModel::plan_integer_range`. Plans keep name provenance and prerequisite ownership,
+  and full `i64` cardinality uses `u128` without enumerating candidates.
+
+  Unfiltered outer `leadsTo` range binders can use already bound wrapper locals with
+  checked integer arithmetic and typed Boolean conditions, keeping declared binding types,
+  expansion order and diagnostics. Free state bounds are refused even when a const shares
+  the name. `within` remains a nonnegative declaration constant; collection and filtered
+  wrappers and explicit liveness remain unsupported.
+- Changed (#1481): Init ownership distinguishes disjoint fields of struct roots and map entries, including finite forall and existing scalar or nested Option fields. Shapes requiring the new granularity need full definite coverage of every may-assigned root. In those newly admitted shapes, reads before full coverage are rejected. When field-written roots are complete at the end, the named field-read gate runs before nonfield-read checks, even if the field read appears later. Nonfield refusals retain the legacy ownership error and location unless the field gate refuses first; incomplete field-written roots also retain the saved ownership refusal. Never-assigned roots remain free. Legacy-probe-accepted forms keep their ownership admission and symbolic free components. Before #1521, refinement could default missing components; it now refuses incomplete assigned roots, while bmc and induction retain free-value verdicts. Partial-component enumeration is future work (#1579). Symbolic shadow resolution in #1515 is unchanged. New proofs conservatively leave outer-binder-dependent domains/key bounds unresolved.
+
+  Concrete legacy behavior is not uniformly preserved. Resolved entry-field coverage can make complete single-field-entry maps constructible, add a partial-component suffix, or remove a complete map from missing-root names. This includes constant/enum keys and mixed whole-entry/field branch meets. A complete-by-superset key range now reaches the existing out-of-domain refusal; repeated fixed-entry field writes with conflicting iteration values now reach the existing vacuity refusal instead of missing assignment. Relational repeated-write constraints themselves are unchanged, but concrete refusal stages, kinds and messages can change.
+
+  The effects extend beyond explicit verification and Monitor: deterministic refinement constructors on both sides, `verify --engine auto`, conformance vectors, test generation and requirement-trace validation share concrete initialization. Constructor errors can become correct refinement verdicts, vectors or generated tests. Auto can change from bounded BMC fallback to unbounded explicit closure, and its out-of-domain error can lose BMC's location text. Requirement traces can become executable, changing check/proof/testgen outcomes or exposing a genuine acceptance failure. Kernel replay/conformance output alone does not validate declared acceptance cases.
+
+  Overlapping-write refusals are preserved. On shared ownership refusals, the legacy-concrete preflight preserves earlier read/domain failures; named field-read and #1518 diagnostics retain priority, so not every concrete message is preserved. The runtime remains solver-independent.
+- Changed (#1492): ledger ancillary I/O failure tests derive expected messages
+  from the platform's `std::io::Error` for the same missing path, so the tests
+  also pass on Windows. Command behavior is unchanged.
+- Changed (#1498): isolate error-envelope approval fixtures from runner Git
+  line-ending defaults, preserving strict stderr assertions on Windows. Run all
+  Windows native solver, verifier, and CLI test binaries with `--no-fail-fast` so
+  the next main-push product gate reports every remaining failing binary.
+- Changed (#1515, breaking removal): executable local bindings with the same
+  name as any `const`, including non-integer constants. `check` now rejects
+  quantifier and aggregate binders, statement `forall`, `leadsTo` binders, action
+  parameters and `let` bindings, and `def` parameters, including their requirements
+  and compose-component forms. Rename the local name and its uses, for example
+  `forall N in 0..1 { N <= 1 }` to `forall k in 0..1 { k <= 1 }` when `const N`
+  exists. Diagnostics name the binding and locate its existing AST owner, not
+  the binding-name token; qualified component constants and legal state-name
+  shadowing remain available. General dependent range bounds are not added.
+  The original pre-migration regression inventory includes 152 removed inline
+  forms: 126 compose-capture
+  forms (#1442; e.g. `const x = false` with `action go(x: Bool) { requires x }`),
+  24 nested-aggregate forms (#1463; e.g. `const x = false` with
+  `sum(x in 0..1 of count(y in 0..x)) == 3`), and 2 direct/composed helpful-argument
+  forms (#1333; `const c = 0` with local `c` and `helpful step(c)`). Rename the
+  local name and its uses; 126 fresh compose controls remain accepted. Five
+  partial-init forms (#1481) remain error→error but now report const-shadowing
+  before ownership, changing diagnostic priority and owner locations. The
+  same rule also rejects documented implicit process c, next-edition entity
+  instance first-letter names and relation actor-instance params, at the source
+  process/entity/event declaration even when no local declaration was written.
+  Rename a conflicting const in those implicit-name cases. Hidden KPI projection
+  binders instead freshen only on collision: only then does the projection's
+  Kernel AST JSON name change; the public Kernel export is unchanged.
+  Nested init with const i=1 and
+  `forall i in 0..0 { forall j in 0..i { m[j] = true } }` is an additional removal:
+  it checked on base 46031415 and now refuses the outer forall at 5:10. Rename the
+  local and its bound uses. Def-call argument binders are checked before expansion
+  even if an unused formal erases them, with the same owner/message as retained
+  arguments. Fresh native check at base 46031415 versus measured ancestor 65bf2876
+  finds zero removals/other output differences across 603 corpus forms, with the
+  original 152 inline removals, 126 fresh accepted and five diagnostic changes.
+  Another 70 removal witnesses and 70 renamed controls cover the additional
+  boundaries; both hidden-KPI cases remain accepted. The measured ancestor has
+  identical Rust implementation/corpus sources to the documentation update.
+  The design note records this bounded evidence, not every removed program.
+
+  This prevents symbolic and explicit engines from producing opposite
+  verdicts when a range bound reads a name shared by a local binding and a global
+  constant. The frontend rejects the collision before verification, preserving
+  identical complete error envelopes across `check`, BMC, induction and explicit,
+  and checking component names before prefixing and `def` parameters before
+  inlining. Engine range-bound evaluators are unchanged.
+- Changed (#1517, breaking removal): root synchronized arguments are typed against their formals before substitution, including arguments for formals the component action never reads, in root header parameter, state, constant and enum context. Numeric carriers stay compatible, and a range mismatch stays a verification result only when the component action reads the argument. Root errors point at the argument with a bare message; action and Kernel metadata do not change.
+
+  These forms passed `check` before and are now semantic errors (exit 2):
+
+  - Unused formal, bad argument: `true` or `part.h[0]` for `a: K`; an unresolved name (`nosuch`), including one bound only by an additional-item `let`; `part.Red` or `Color.Red` (write `Red`); another component's enum value (`other.tone`) for a `part.Color` formal; a non-Bool condition (`if 1 then 0 else 0`); a root `def` with a badly typed argument (`rp(true)` for `def rp(v: Int)`).
+  - Used formal whose substituted body happened to type: `put(a in 0..1) { flag = a }` or `put(a: K) { flag = a }` with `flag: Bool` and `true`; `put(a: K) { m[a] = true }` with `m: Map<C, Bool>` and enum `R`.
+  - Duplicate formals `(a: K, a: K)` with `true, 0`.
+  - `internal part.put` with `part.put(0)` where the component declares `a: Int`, `a in 1..0`, `a: Nope` or a struct-typed `a: T`.
+
+  Migration: pass a value of the formal's type, using a header parameter when it comes from outside the root, or correct the component. There is no automatic migration.
+
+  The 610-form on-disk corpus has an empty transition set: base `5564b25ccb37e3477311fde1dae5eb6298eb6b2d`, head `d19e9939d8079042ddc768afe8550c4f402743dc`, `fslc check` stable and FSL5 opt-in, and `fslc kernel --kernel-version 1|2`, twice per side. DESIGN-sync-argument-root-validation.md has the command and the exact forms.
+
+  A conditional with a Bool, ranged or named expected type now checks its arms against that type, so `m[if c then 0 else true]` with `m: Map<A, Bool>` names `Named("A")` instead of `Range(0, 1)`. Other conditionals, including an `Int` expectation, still check arms against the first arm's type. This changed no admission result on the measured forms.
+
+  Rust API: public `SyncRef` requires `arg_spans`, and fallible `into_validated_syntax` validates before raw conversion. The three migrated CLI callers each add one full core validation.
+- Changed (#1518, breaking removal): check now rejects reads in init forall bodies
+  or filters of roots written by the same forall, except locations already written
+  at the current binder key in the current iteration. This root-based removal
+  includes correct forms with agreeing base-engine results, as well as
+  prior-forall other-key and nested-forall reads already refused by explicit and
+  Monitor with `before it is assigned` and
+  `nested forall in init is not supported`, respectively.
+  Fixed targets in empty or not statically provable nonempty domains no longer
+  count as assigned, preventing explicit and Monitor from accepting defaults.
+  Even after `flag = true`, a fixed-target write under `where flag and k == 0`
+  is conservatively refused with `init does not assign` despite a nonempty runtime
+  domain, not given an incorrect verdict. The 597-form corpus sweep found 0
+  ok-to-error transitions.
+- Changed (#1521, breaking removal): `refine` refuses incomplete assigned init roots on both its
+  implementation and abstraction free-root paths instead of silently using defaults
+  for unwritten fields, map keys, branches, or unproved forall coverage.
+  The error explains that bmc and induction still return verdicts using free values.
+  Never-assigned scalar roots remain enumerated. Singleton fixed-target assignments
+  with a static, state-independent filter proven nonempty remain accepted;
+  state-reading filters do not prove nonemptiness and cannot establish full coverage.
+  Check, verification engines, and Monitor behavior are unchanged.
+- Changed (#1522, breaking removal): Different-bound relation values in conditionals, Set/Seq items,
+  action/init/let assignments now fail check/verify/replay (located semantics, exit 2),
+  even narrow→wide, due to engine disagreement. At the #1522 measurement,
+  equal-bound aliases, scalar/Map compatibility, nominal enums and self-relation
+  identity were preserved, and numeric `Set<A>` → `Set<B>` widening still checked
+  with symbolic disagreement tracked as #1627. Subsequently #1472 requires equal
+  whole-container carriers for Set/Seq/Map (including Map keys and values), rejects
+  that Set widening statically, and resolves #1627. Scalar compatibility remains.
+  Equal-bound relation literal engine support (#1524) stays with #1467. Corpus
+  removals: 0; inline acceptance removals: 10; one #1459 error changes message/location.
+  Repair: declare the relations that meet in one conditional, collection or
+  assignment with endpoint types of the same bounds.
+  See `docs/design/DESIGN-relation-endpoint-compatibility.md`.
+- Changed (#1528, breaking removal): `leadsTo` declaration binders now participate
+  in def free-name capture checks for before/after expressions, `helpful`
+  arguments, `decreases`, and `within`, in direct specs, compose components and root
+  properties, and dialect properties lowered to `leadsTo` (such as requirements).
+  Previously accepted capturing calls reject with exit 2, `kind: "semantics"`,
+  and `would capture variable` at the call. Rename the declaration binder; no
+  automatic rename or bypass is added. Binder ranges and binder-where expansion
+  are unchanged, as are constant/enum `helpful` arguments from #1580.
+
+  The state-reading `within` control already failed closed: exit 2 / semantics
+  is unchanged, but for the acceptance source `unknown constant 'c'` becomes
+  `predicate 'Bound' call would capture variable 'c'; rename the binder at the call site at 9:41`.
+  The old check loc 4:23 is replaced by the call position embedded in the message;
+  the fixed check/BMC/induction error envelopes omit structured loc and agree in full.
+  This is an error-to-error diagnostic change, not a false-green baseline.
+  When a `leadsTo` also contains an already-invalid pattern-scope escape (#1547),
+  `would capture` can likewise precede that rejection; exit 2 / semantics is unchanged.
+
+  Separately built `git archive` trees for base
+  `08d9656c5548a7ae5cbd2156880fdf52f9d0b8fc` and implementation
+  `c1a7d126071d8ac0600ffcd13d3ea9b3f0b7f286` checked all 601 `.fsl` corpus files
+  under specs, examples, and CLI fixtures, plus the one migrated inline source
+  (602 forms). All corpus stdout/stderr bytes and exits agree: zero ok-to-error
+  transitions and zero error-to-error diagnostic changes. The inline source is
+  the only ok-to-error transition, a declaration binder capturing a def-body free
+  state name in a decreases call. No unrelated acceptance is removed.
+- Changed (#1545, breaking removal): native `check` and the shared Worker check stages validate every
+  AI-project component before reporting success. Undeclared authority tools and
+  unknown hard-contract rules now produce the same error diagnostic and status 2
+  as project `ai check`, rather than an analyzed-project success.
+
+  Shared component validation rejects tool-less
+  components, including empty authority blocks, in `ai compat`, `ai replay`,
+  project `ai check` and native/Worker project checking. Standalone no-tools
+  envelopes from #1546 are preserved on check and specialized-preflight paths;
+  the lowering-only duplicate-fallback priority exception is measured below.
+  Generic project checking no longer accepts
+  the fixtures `error_envelope_ai_project_unknown_tool.fsl`,
+  `error_envelope_ai_project_invalid_rule.fsl` and the tool-less Markdown project
+  `error_envelope_literate_ai_project.md`. The first two report their existing
+  unknown tool/rule semantics errors; the Markdown project reported type,
+  `ai_component 'EnvelopeParityLiterateProject' declares no tools`, block loc1:1,
+  exit2 (historical #1545 frame; #1574 now reports document loc5:1).
+  #1574 corrects project semantic coordinates to document positions;
+  LSP project-component diagnostics remain separate (#1575).
+  Measured using independently built B
+  `d37a215e8df6c00222e6aafd94bc9b556c445521` and H
+  `99810256faca086360c6ca4233f935b9b56b1ec8` in their own git-archive trees:
+  `<B-binary> check <relative-path>` in B and `<H-binary> check <relative-path>`
+  in H, all 597 FSL and 30 Markdown corpus files plus twelve new inline occurrences
+  per tree, 1,278 checks, cache/unstable overrides unset and no excluded output
+  fields. Four Markdown files have FSL fences; bash-only examples/ai/README.md is
+  also covered as a negative control. Corpus ok/exit0 to error/exit2 removals are
+  the three named fixtures. Four new test-inline
+  occurrences are also breaking removals: tool-less-component projects in CLI and
+  Worker-shaped tests (two), an empty-authority-only component in a project (one),
+  and an invalid later component after a valid first one (one). The three tool-less
+  occurrences reported type at block loc 1:1 (historical frame; #1574 now reports
+  document loc2:3 for the indented CLI project forms, while the first-character
+  Worker case stays 1:1); the later unknown tool reports
+  unlocated semantics. No existing inline FSL was rewritten; other check-only
+  output/status observations are unchanged. Lowering-only analyze on 18 AI corpus
+  inputs plus four explicit shapes, followed by scenarios (depth2/deadlock ignore)
+  and explain on changed shapes and a compose control, produced
+  30 command-form pairs × 2 binaries = 60 observations.
+  Analyze22/scenarios4/explain4 each have one ok-to-error, zero error-to-ok and two
+  changed error envelopes. An undeclared forbidden X hidden by selecting only
+  `tool_authority` now reports semantics/`unknown tool 'X' in authority block`/no loc/exit2 instead of
+  success. Duplicate fallback x without tools changes
+  type/`ai_component 'DupNoTools' declares no tools`/loc1:1 to
+  semantics/`duplicate fallback reason 'x'`/no loc; with a tool, unlocated
+  semantics/`duplicate action 'fallback_x'` becomes
+  semantics/`duplicate fallback reason 'x'`/no loc (both exit2).
+  AI-component compose use stays rejected with
+  `compose use must reference a spec at 2:3`, loc2:3, exit2.
+  These are explicit lowering diagnostic/priority changes, not broad
+  envelope preservation. Declare a tool or remove an unneeded component and
+  correct unknown authority/rule references.
+- Changed (#1546, breaking removal): `check` and every model-loading command,
+  including fmt, lint, kernel, diff, all verification engines, scenarios and
+  testgen, reject empty spec/Kernel enums even when unused, with kind type,
+  `enum '<Name>' has no members` and CLI exit 2. Where the command publishes loc,
+  it is the declaration start (symmetric when present); a compose child uses the
+  #567 parent-use loc wrapper
+  with child path/position in its message. Domain keeps its earlier semantics
+  error. Tool-less standalone `ai_component` inputs, including empty authority,
+  are rejected at the kernel boundary by check, ai check, BMC, induction,
+  scenarios, testgen and Worker checking with exact
+  `ai_component '<Name>' declares no tools` and component loc; one tool with empty
+  authority remains valid. Existing bad-rule/unknown-authority errors keep their
+  priority. This does not change ai compat, ai replay or ai_project paths; their
+  tool-less validation gap remains #1545. Column-less dbsystem databases (schema0,
+  no tables or only an empty table) are also breaking removals: check, BMC,
+  induction, explicit, scenarios, testgen and kernel report exact
+  `database '<Name>' declares no columns`, type/exit2 and database loc. db check
+  reports that error only when it reaches lowering; static compatibility findings
+  still come first (an artifact reading an absent column can yield violated/exit1,
+  as on base). DB fmt/lint keep their existing semantics/exit2 rendering with a
+  location suffix in the message and no loc field. Empty `EmptyImpl` / `EmptyAbs`
+  refinement inputs now
+  fail before mapping elaboration: kind/exit are unchanged, message changes from
+  `enum conversion endpoint 'X' has no members` or
+  `enum abstraction endpoint 'X' has no members` to `enum 'X' has no members`, loc
+  moves from the mapping file to the impl/abs declaration, and the later mapping
+  span object is absent. See the
+  [boundary decision](docs/design/DESIGN-enum-member-identity.md#nonempty-enum-declarations-1546).
+- Changed (#1547, breaking removal): native `check` rejects pattern variables
+  outside their true continuation, including disjunctive/comparison/implication
+  escapes and non-conjunctive `requires` exports. Ten logical scope consumers and
+  the DDD frontend share one operator policy. Collision reservations remain
+  separate and base-equivalent, including compose guard-name inventories so
+  accepted output retains authored names; #1573 remains separate work. Legal
+  `and`/`=>` RHS bindings and conjunctive guard exports remain supported. Earlier newly invalid
+  references can precede legacy collision diagnostics, still exit 2/semantics.
+  Expression-if arm inference can report unbound then/else/nested references at
+  `6:32`/`6:39`/`6:48` before the former condition collision `6:12`; renaming only
+  the arm reference restores the complete base packet `6:12`. When only an
+  out-of-continuation pattern would capture a free name in a def body, the
+  predicate-capture error becomes a located unbound-reference diagnostic. This
+  class preserves exit 2/kind semantics while changing message/possibly location;
+  it is not limited to the three examples measured below. Outer
+  not/quantifier/aggregate escapes were already refused, not new removals. For a policy
+  allowing `none` but requiring payload 1 when present, use
+  `(o is some(v)) => v == 1`, equivalently
+  `o == none or (o is some(v) and v == 1)`; `and` alone instead rejects `none`.
+  The own-tree `<binary> check <path>` sweep from
+  `e0b4cbae39569de8008a8eb049588aa84d8c1a42` to measured
+  `3ae20a93296d36089f7860957a0a0b601f96932a`, repeated twice with complete
+  stdout/stderr/exit comparison and no excluded fields, found zero removals/output
+  changes in 601 corpus inputs (598 baseline plus three new fixtures supplied to
+  both trees) and 1,777 existing complete static Rust-test literal occurrences.
+  Authored 147 routes have 57 removals; reviewed 110 inputs have 24, totaling 81, enumerated in
+  [the scope design](docs/design/DESIGN-pattern-binding-scope.md#3-true-continuation-enforcement-1547).
+  The historical 18 message-change packets are unchanged: 15 collision-priority
+  cases with mechanical collision-return controls (seven tested location changes),
+  plus three def-call capture examples. A nineteenth occurrence is the authored
+  copy of the already-reviewed d06 source, with identical before/after packets,
+  not another diagnostic class. No acceptance expansions or repeat differences
+  were observed in this bounded sweep. Another 1,783 interpolated/incomplete
+  document candidates were inventoried, not executed; runtime-generated fixture
+  graphs are not covered.
+- Changed (#1552, breaking removal): `check` now rejects previously accepted unsatisfiable
+  requirements `rule` guards that reuse an entity field's name as an `is` pattern
+  inside a quantifier body or aggregate value. The conflict check reads that name
+  as the field, not the payload, matching the event's lowering (#1561 tracks the
+  pattern-name rule itself). For example,
+  `amount == 0 and (exists x: Amount where x == 1 { some(x) is some(amount) and amount == 1 })`
+  now fails with exit 2, `kind: "semantics"`, and
+  `rule_conflict_unsatisfiable_guard`: the event requires the field to be both 0
+  and 1. No spec or example in the repository has this removed shape; the
+  597-form corpus sweep showed no acceptance transitions. Migration: to test the
+  payload rather than the field, replace `some(x) is some(amount) and amount == 1`
+  with `some(x) is some(v) and v == 1`, using a pattern name that is not a field;
+  with the outer condition unchanged, this means the field is 0 and the matched
+  payload is 1, and the rewritten example passes `check`.
+- Changed (#1561, breaking removal): requirements now reject `is some(name)` declarations that collide with an entity
+  field or relation role before field substitution and rule-conflict analysis.
+  Rename both the pattern and its continuation to a fresh name: replace
+  `some(1) is some(amount) and amount == 1` with `some(1) is some(v) and v == 1`.
+  This formerly accepted input is a breaking removal; three already-refused #1552
+  variants now receive a located pattern-shadowing diagnostic instead of a rule
+  conflict. Legacy guards, assignment RHS, rule properties, measures, decision
+  assumptions/rows and concepts (even unused) share the
+  gate. Event-input and quantifier/aggregate shadowing rules remain unchanged.
+  The own-tree `FSLC_CACHE=off <binary> check <form>` comparison
+  ran twice on base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d` and measured head
+  `13676f0bca83b2433cc974468bbb00c59aef25a9` (binary SHA256
+  `0cab1c914a05344d8958a6f9bd5ce5a17618f87f9f7e74e279b449fbca47f314`):
+  610 corpus forms unchanged, all 121 supplemental forms included (original63,
+  prior49, added fresh1, decision/concept6, exact review2). The 27 case-addressed
+  inline removals, not necessarily byte-unique programs, are:
+
+  - `control_is_pattern_field_name_satisfiable_matches_base` (1).
+  - `expression-0`, `expression-1`, `expression-2`, `expression-3`, `expression-4`,
+    `expression-5`, `expression-6`, `expression-7`, `expression-8`, `expression-9`,
+    `expression-10`, `expression-11`, `expression-12` (13).
+  - `argument-1`, `argument-4`, `argument-9` (3).
+  - `event-set`, `when`, `set`, `never`, `property`, `measure`, `role` (7).
+  - `decision-assuming`, `unused-concept`, `review-original-collision` (3).
+
+  The original and/implication/quantifier contradictions plus `argument-7` and
+  `decision-row` are five error→error diagnostic changes, not extra removals.
+  All 2,924 executions have no repeat differences or excluded fields; no other
+  required-test inputs were rewritten or omitted. Later integration commits are
+  not this measurement. (Refs #1561)
+- Changed (#1569, breaking removal): legacy requirements transition guards such as
+  `exists c: Amount { stage(c) == Approved and amount == c }`, with a process field
+  `amount`, now fail `check`, `kernel`, and `verify` with exit 2, `kind: "semantics"`,
+  and `stage(c) refers to type 'Amount', which has no process`. A field named `c`
+  is not required. Previously, `check` accepted the guard and `verify` reported
+  `verified`: capture-avoiding substitution renamed the non-entity binder without
+  renaming the stage operand, so `stage(c)` silently read the transition's own
+  instance. The same invalid guard consistently using binder `d` already failed.
+  No checked-in spec or example has this removed shape; the 597-form base
+  `1844fa74` / head `7b9b34b3` sweep showed no corpus acceptance transitions.
+  Migration: `stage(...)` takes an entity parameter or binder. To read the
+  transition's own stage, use
+  `exists n: Amount { stage(c) == Approved and amount == n }`, keeping `c` for the
+  entity and a different name for the non-entity binder; the rewritten guard passes
+  `check`.
+- Changed (#1573, breaking removal): pattern-name reuse after matches inside
+  `not`, expression-if conditions/arms, where-to-body/of, and statement-if
+  conditions or arms flowing into later statements. Rename the later binding
+  and its reads; the four standalone/compose #1442 nested-if reuse routes are
+  included, with original refusal inputs retained and only the inner `u` renamed
+  to `w` for accepted preservation controls. Visibility is not broadened, opposite
+  statement arms remain independent, and candidate-local names do not escape.
+  Direct-spec init checking applies these rules across all init blocks and inline
+  initializers, preserving initializer/const/map-key diagnostics. Composed init
+  still has a same-source fragment/inline→init reservation gap; common init can
+  inherit unrelated Fresh decisions. Rebinding remains illegal. False verified
+  results belong to #1622; compose init-fragment reservations will be tracked in
+  a separate issue filed after merge. Expression then-to-else
+  reuse is also rejected while the symbolic expression evaluator shares bindings
+  (#1577). For sync actions and non-init paths, compose gives independent sources
+  distinct hygienic pattern names:
+  the guard-output examples change `v` to `__v_substitution_0/1`, preserving their
+  explain result and verification verdicts. Two-source statement payloads no
+  longer produce the false violated verdict caused by one source's value being
+  used by another; check stays accepted and the correct verdict is holds, while
+  a genuinely false control remains violated. Evaluator lifetime work remains
+  tracked in #1622, including the still-unrepaired separation of component init
+  patterns; the general init-source separation guarantee is not made here.
+  Refinement map-expression collisions can precede preserved-progress capture
+  errors; a later-name-only repair restores the base capture packet. Unknown
+  zero-width map-expression error spans now use the available map declaration span,
+  without replacing meaningful expression spans.
+- Changed (#1595, breaking removal): `fslc refine` preserved progress refuses property pattern names matching free impl names from lexically
+  used maps, even outside readable continuations; prior `or` exit 0 `refines` becomes exit 2/type.
+  Used-map RHS patterns may not reuse any property binder or sibling used-map pattern name.
+  Rename the abstract or mapping pattern binder to repair these located errors at `respond`.
+  Ordinary source binding scope is unchanged. Refs #1595.
+- Changed (#1599, breaking removal): refinement rejects conflicting same-named type definitions, including unequal
+  resolved domain bounds, at the refinement/implements declaration (type, exit 2).
+  Symmetry annotations do not participate; equal definitions retain the impl entry.
+  With preserved progress, different enums may not share member spellings, even at
+  equal ordinals; without progress, typed conversions/abstractions remain accepted.
+  Breaking removal: refine_mapping_boundary changes from refinement_failed /
+  abs_state_mismatch (exit 1) to error / type (exit 2). Use distinct type names.
+  Mutants changing the bounds of a type named identically in the abstraction are
+  invalid under #1472's static-type classification, not oracle errors or kills.
+  The rule includes entity instances: impl_spec_extra's default check/verify now
+  rejects Item=1 versus Item=3 with type/exit2 instead of refinement_failed/exit1.
+  Audit a52bef4931adc67ea2b1fdca827e2318b4ae25ab→9eaaea7d1c526ede6a13408ea414616ddadccf69:
+  check610 corpus/39 next controls,60 mappings,20 inline/2 expression triples/39 cells,
+  full JSON/stderr/exit twice. Existing corpus check ok→error is empty. Inline
+  removals: original D-bound issue1296/1302, inline collision and governance collision;
+  verify follows. Refine removals: cases1/2a/3a/3b, domain_bounds/domain_lower,
+  kind_change/struct_named_type, matching-ordinal/chain and shared-member expression
+  progress. Renamed controls pass. Original2 runtime/2 CLI/3 mutation diagnostics
+  now prefer declaration rejection; invalid/gates stay unchanged. Authored1:1 is
+  the full refinement keyword token, not fallback; map companions retain map spans.
+  Existing type errors gain loaded operand identities; boundary/entity change class.
+- Changed (#1600, breaking removal): in next-edition requirements, a relation role, a
+  resource name, and a measure name may no longer contain `__`, extending
+  #1256's `__` reservation to these three kinds of next-edition declaration. `fslc check` rejects
+  `Claim belongs to User as __owner via approve`, `resource __r: Amount = 0`,
+  and `measure __m = count Claim in Approved` with `kind: "name"`, exit 2,
+  located at the declaration, and the message
+  `relation role name '__owner' contains '__', which is reserved for the names FSL generates ...`
+  (or `resource name`, `measure name`). Before, the declared-name walk missed
+  these three, so they passed check. No spec or example in the repository
+  declares such a name. Migration: rename the role, resource, or measure so that
+  it does not contain `__` (for example `__owner` to `owner`), and update the
+  references to it.
+- Changed (#1602, #1603, breaking removal): `check` now rejects `__` in goal and policy IDs,
+  requirement IDs (`rule` in the next edition), scenario IDs (`acceptance` in
+  legacy), forbidden IDs, decision-table IDs (`decide`), and glossary aliases,
+  in both editions wherever the construct exists. These previously accepted names
+  now produce exit 2, `kind: "name"`, and structured `loc`, using the existing
+  reserved-separator message. Next-edition rule IDs use only their exact header
+  token spans, even with deadlines or preceding comments. Explicit `requirement`
+  blocks are supported and their IDs checked in both editions,
+  with or without deadlines; only rule-generated copies lose the duplicate ID check.
+  Known legacy-syntax limitation (also for explicit blocks):
+  split-spelled requirement, acceptance and forbidden IDs such as `REQ - __1` may
+  be located at the declaration keyword or a later repeated normalized spelling
+  rather than the ID tokens; rejection is unchanged and that limitation is not
+  fixed here. Rename IDs and aliases without `__` and update their references;
+  references to generated names remain allowed.
+- Changed (#1613, breaking removal): `refine` progress pulls now instantiate indexed mappings
+  simultaneously in implementation scope, avoiding identity/swap stack overflow
+  and an indexed chain's false `refines`. **Breaking removal:** with per-element
+  maps, free abstract whole-map reads in pulled progress properties are now
+  `error/type` (exit 2) at `respond`, even when an unrelated implementation state
+  shares the name. The `whole-same` witness changes `refines`/0 to type/2;
+  already-rejected renamed forms gain location/classification, not new rejection.
+  Legal source binders, inserted implementation whole-map expressions, scalar
+  maps and no-progress simulation stay supported. Migration must preserve P/Q's
+  quantifiers and temporal meaning; moving `forall` across `~>` is not generally
+  equivalent. The named f8→2aab own-tree audit has an empty check-removal set over
+  610 corpus + 54 inline forms, separately one admitted→error refinement case;
+  all 710 check/refine routes ran twice per SHA. Full SHAs, commands, counts and
+  the separate crash/verdict corrections are recorded in DESIGN-refinement §4.
+- Changed (#1640, breaking): reserved-name diagnostics for legacy requirement, acceptance,
+  and forbidden IDs point to the first written ID token, including IDs with
+  spaces around hyphens, rather than matching description text or the declaration
+  keyword. ID normalization, accepted spellings, zero padding, declaration spans,
+  and the public Kernel/JSON projection are unchanged. The public Rust
+  `RequirementsItem::{Requirement, Acceptance, Forbidden}` variants gain an
+  `id_span: Span` field; downstream constructors and exhaustive field patterns
+  must account for this source-compatibility change.
+- Changed (#1656): schedule the generic implementation-mutation gate across three round-robin shards while retaining
+  the exact GLOBAL mutant roster, all 35 detectors, fresh per-shard builds and real empty-shard
+  baselines. Require revision-bound raw outcome inventories and compatible stable-slot artifact
+  cohorts before the existing required semantic-mutation aggregate can pass. The default local and
+  curated-operator paths remain unsharded/unchanged; an observational same-Rust-tree CI comparison
+  recorded a 35.6% lower maximum shard duration with 66.3% more job-minutes, not a causal speedup
+  promise (see `docs/design/DESIGN-ci.md` for run identities and evidence limits).
+- Changed (#1422, breaking removal): Causal evidence ingestion now rejects present
+  `period.valid_until` values unless they are strings with the exact ASCII
+  `YYYY-MM-DD` shape and a valid Gregorian date, after checking the artifact
+  digest. Missing freshness remains accepted but excluded from current support;
+  start/end timing exclusions and review-only assurance are unchanged.
+
+  `causal analyze` and `causal ledger` now refuse an `--as-of` value that is not
+  a real Gregorian date written as ASCII `YYYY-MM-DD` with `kind:"usage"` and
+  exit 2, before reading the model or evidence. This is a new refusal: values
+  such as `2099-02-30`, `2099-13-01`, `garbage`, an empty string, or
+  `2099-+4-01` used to exit 0 and count no evidence as stale. Date fields are now
+  read as fixed-width ASCII digits everywhere, so a signed `period.start` or
+  `period.end` such as `+026-01-01` reports `period_date_unparsable` instead of
+  being read as year 26.
+
+  Sweep now checks the normalized inclusive instances/value/depth grid before
+  allocating combinations or running cells, with a fixed limit of 10,000 cells.
+  Overflow or an oversized grid returns an exit-2 semantics error; admitted grids
+  retain their existing verification behavior.
+
+  Dynamic JSON-log negation of `i64::MIN` now returns the existing arithmetic
+  refusal instead of panicking. Replay reports `nonconformant` / `log_mapping`
+  with exit 1; causal observation reports `observation_replay_failed` with exit 2.
+  Representable negation, non-integer type errors, and other arithmetic are unchanged.
+
+  Observation producers now validate generated evidence before writing evidence or
+  lifecycle files. Invalid declared freshness returns the existing exit-2 schema
+  diagnostic, preserving existing output files.
+
+  `causal observe-expectations` now refuses a `--period-start` or `--period-end`
+  that is not a real Gregorian date in ASCII `YYYY-MM-DD` with `kind:"usage"` and
+  exit 2 while reading options, writing nothing. This is a new refusal: an invalid
+  `--period-start` such as `2026-02-30` used to exit 0 and write an artifact.
+- Changed (#1679, breaking removal): the model expressions listed here, whose container carriers symbolic evaluation cannot coerce, now fail `check` with the existing located assignability error (`semantics`, exit 2) instead of `cannot coerce symbolic value` on bmc and induction, evaluated or not. Three routes still pass `check` and report it; they are listed below.
+
+  These forms passed `check` before and are now semantic errors:
+
+  - A Map whose value is `Int` or `Option<Int>` against one with a range, for `m0: Map<K, Int>`, `m1: Map<K, A>`: `m0 == m1`, `m0 != m1`, `m0 = m1`, `m0 == (if c then m1 else m0)`, `m0 == old(m1)`, `(if c then m0 else m1)[0]`; inside a literal (`some(m0) == some(m1)`, `Seq { m0 } == Seq { m1 }`, `Set { m0 } == Set { m1 }`) and between sibling elements (`Seq { m0, m1 }`, `Set { m0, m1 }`); as a method argument (`Seq { m0 }.contains(m1)`, `Set { m0 }.add(m1)`, `Set { m0 }.remove(m1)`, `Seq { m0 }.push(m1)`); and read back out of one (`Seq { m0 }.head() == m1`).
+  - A conditional arm that only an `Int` sibling related to the expectation: `a == (if c then t else b)` with `let t = Set { 0 }`, `a: Set<A>`, `b: Set<B>`; the same with a `Seq` literal, a declared `q: Seq<Int, 2>` or a differing capacity; `sa == old(if c then q else sb)`; and such an arm inside `some(...)`, `Seq { ... }`, `Set { ... }` or a method argument.
+
+  Verdicts taken away:
+
+  - A mismatch in a position that is never evaluated returned a verdict on bmc, explicit, induction and `fsl-bfs`, and is refused: `forall i: E { m0 == m1 }` and `exists` over `type E = 1..0`, an arm under such a binder, an action with a parameter over an empty range, and a property left out by `--exclude-property` or `--property`. There are 11 such forms in the audit grids.
+  - A mismatch in a `decreases` measure is the same kind of position: bmc does not read a measure, and induction reads one only once it ranks. `leadsTo L { n < 3 ~> n == 3 decreases (if m0 == m1 then 1 else 0) }` returned `violated` on both where `n` never moves, and `verified` on bmc and `cannot coerce` on induction where an action reaches `n == 3`.
+  - In the audit grids, other removed forms returned no verdict on bmc or induction. Explicit answered 82 of them, such as an unused `let u = m0 == m1`, and `fsl-bfs` answered 234.
+
+  Migration: declare the two values with one carrier, or compare the entries (`m0[k] == m1[k]`). There is no automatic migration.
+
+  Other forms keep their verdicts, including `a == t`, `q == a` with a differing range or capacity, `some(t) == some(a)`, `Option<Int>` against `Option<A>`, and Maps of equal carriers or equal-range aliases. A collection holding `Int` below an element that no literal expectation types used to check and then report `cannot coerce` on bmc and induction, and on explicit except in a `trans` or a read into state; it now returns a result. That is a `let` or `is` binding (`let t = Set { some(0) }` against `Set { p }`, `some(Set { some(1) }) is some(x) and Set { p } == x`), a method's result or argument (`Set { p, none } == Set { o }.add(none)`, `Set { Set { p } }.contains(t)`, `.add(t)`, `.remove(t)`, `Seq { Seq { p } }.push(t)`) and a read into state (`p = (if c then Seq { p } else t).head()`), in a guard and in an `invariant`, `reachable`, `trans` or `leadsTo`, and it decides inside a `--lemma` candidate and a map under `preserve progress` too.
+
+  A refinement map and a scenario `expect` keep the prior rule. An `expect` is evaluated concretely, and so is a map on the refinement step, but `preserve progress` evaluates a map symbolically: `map same = m == y` for those Maps gives `cannot coerce`, exit 2, under `preserve progress`, and refines without it. A `--lemma` candidate with such a mismatch stays `rejected` with `cannot coerce`, `used` false and the main result unchanged, and one whose mismatch is never evaluated stays usable. The third route predates this change: a range-typed literal under `old(...)` keeps its own range and capacity, so `a == old(Set { vb })`, `sa == old(Seq { vb })` and `sa == old(Seq { va })` for `vb: 0..2`, `a: Set<A>`, `sa: Seq<A, 2>` pass `check`, exit 2 on bmc and induction, and explicit answers.
+
+  The 646-form on-disk corpus has an empty transition set: base `268fdf62e6449c28c7048d04ca0030bd3f23c3b8`, head `d7d35d672e61d5cce8ee3dfea0428f892240b347`, `fslc check` stable and FSL5 opt-in, and `fslc kernel` versions 1 and 2, complete output compared. The one inline change in a rewritten test is `f1` in `issue_1517_conditional_arm_admission`, ok to error.
+
+  Rust API: `fsl_core::CarrierCoercion` and `KernelModel::carrier_coercion` are new; `check` and `coerce` answer from them.
+- Changed (#1680, breaking removal): `check` refuses a formal or input name an earlier formal of the same action took, on every route that loads the document: action, requirements action, process transition, event, domain command input, event field an effect or saga action takes as a formal, synchronized root action, inline `implements` abstraction action, and every compose component action whether lifted, synchronized or internal and unreferenced. A component reports `component "piece.fsl" failed to check (part.put: duplicate action parameter 'a' at piece.fsl:1:81) at root.fsl:2:3`, and an inline `implements` reports `implements "abs.fsl" failed to check (step: duplicate action parameter 'x' at abs.fsl:1:77)` with `kind: "type"` and `loc` on the `implements`.
+
+  These forms passed `check` before and are now semantic errors (exit 2):
+
+  - `internal part.put` with `part.put(0, 1)`, in either order, for `put(a: K, a: K)`, `put(a in 0..1, a in 0..1)` or `put(a: K, b: K, a: K)`. The body read the last actual and dropped the first, so swapping the arguments flipped the verdict.
+  - `internal part.put` with no reference to it.
+
+  On those component forms the other routes change too: `verify` no longer returns a verdict, `refine` no longer returns `refines`, `replay` no longer returns `conformant` or `nonconformant`, and `lint`, `fmt`, `conformance`, `explain` and `analyze` exit 2 instead of their own results. `domain analyze` and `domain expand` build no model and still exit 0 on a repeated command input.
+
+  Migration: give each formal its own name and pass each actual to the formal it belongs to. There is no automatic migration.
+
+  Elsewhere the message is `duplicate action parameter 'a'` and `loc` is the repeated name, not the first token spelled like it; a domain command or an event no longer adds its declaration's position to the message. A log mapping's `action ev(a, a) -> put(a)` and a domain event field no action takes stay accepted, because no actual is lost. A lifted component action, which reported no location, now uses the component wrapper. `part.put(true, 0)` for such formals now reports the repeated formal instead of the `Bool` actual; `part.put(0)` keeps its arity error. `def` parameters were already refused on every route and are unchanged.
+
+  The 617-form on-disk corpus has an empty transition set: base `e3c19a39c9c3bf5c315c6002fd18114aa22cd654`, head `a7e54a21b390dec8df9cfbfdf6a5f113186b454f`, `fslc check` stable and FSL5 opt-in, and `fslc kernel` versions 1 and 2, complete output compared. The one inline change is the `duplicate_formal_with_erased_bool` row of `issue_1517_breaking_removals`, error to error. The new inputs of `issue_1680_duplicate_formals` change only where they repeat a formal.
+
+  Rust API: `SpecItem::Action`, `SyncAction` and `RequirementAction` require `param_spans`, and `ProcessTransition` requires `input_spans`.
+- Changed (#1682, breaking removal): in next-edition requirements, `check` refuses a `scenario` or `forbidden` step that names an input twice, on every route that loads the document, with exit 2, `kind: "semantics"`, `duplicate step input 'amount' at doc.fsl:43:44` and `loc` at the repeated name. Through an inline `implements` the report is `implements "rep.fsl" failed to check (duplicate step input 'v' at rep.fsl:15:30)` with `kind: "type"` and `loc` on the `implements`; `lint` and `fmt` omit `loc`.
+
+  These forms passed `check` before and kept only the last value, so swapping the values changed the result:
+
+  - `Employee submits claim1 with amount 2, amount 1`, in either order, with equal values, or written `Employee claim1 submits with ...`.
+  - `従業員 が 申請1 を 申請金額 2, 申請金額 1 で 提出する`, the same input in two `で` groups, or an alias with its canonical name.
+  - `Agent takes t1 with assignee 0, assignee 1`, the role of a relation event.
+
+  On those forms `verify`, `sweep`, `refine`, `kernel`, `migrate`, `document claims`, `document generate`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`, `explain`, `analyze`, `conformance`, `typestate`, `lint` and `fmt` exit 2 instead of their own results. A step with a parse error keeps that error, different inputs may come in any order, and a later step may name the same input again.
+
+  Migration: keep the one value you mean. There is no automatic migration.
+
+  The 646-form on-disk corpus has an empty transition set: base `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `596881fc5e944a2548eedfe1b55d52fbea8ee344`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
+
+  Rust API: `NextEditionRequirements` gains `repeated_step_inputs`.
+
+  The design note `docs/design/DESIGN-dialects.md` holds the measured forms and routes. The language references take this text when the next edition's reference is written (#1437).
+- Changed (#1683, breaking removal): `check` and the symbolic engines now answer from one carrier rule, `fsl_core::CarrierCoercion`, whose answers are `Retag`, `RebuildInt`, `MapMismatch` and `NotAssignable`, and a literal under `old(...)` that can type itself is also typed against what surrounds it, in `check` and in evaluation.
+
+  Removed: a Map at any depth below `some`, Set and Seq literals and conditional arms under `old(...)`, for `m0: Map<K, Int>`, `m1: Map<K, A>`: `some(m0) == old(some(m1))`, `some(m0) != old(some(m1))`, `Set { m0 } == old(Set { m1 })`, `Seq { m0 } == old(Seq { m1 })`, `Set { m0 } == old(Set { if c then m1 else m1 })`, now fail `check` with the located assignability error (`semantics`, exit 2).
+
+  What goes with it: where such a form is evaluated, bmc and induction reported `cannot coerce`, but explicit and `fsl-bfs` returned a verdict, `violated` included, and that verdict is lost. Under a position that is never evaluated, such as `forall i: E { ... }` over `type E = 1..0`, bmc and induction lose theirs too, as for the forms #1679 refused. The refusal comes before property selection, so `--exclude-property` does not avoid it, and such a form hides another property's counterexample behind exit 2 until it is rewritten.
+
+  Unchanged: `a == old(Set {})`, `sa == old(Seq {})` and `oa == old(none)` are refused, though they pass outside `old(...)`.
+
+  Now returns a result: a range-typed literal under `old(...)`, the third route #1679 recorded. `a == old(Set { vb })`, `sa == old(Seq { vb })` and `sa == old(Seq { va })` for `vb: 0..2`, `a: Set<A>`, `sa: Seq<A, 2>` reported `cannot coerce` on bmc and induction and now agree with explicit. One past capacity, `sb != old(Seq { va, va, va })` for `sb: Seq<B, 2>`, can end in `model sequence length exceeds capacity` on induction instead, as the same form outside `old(...)` does. Two routes still report it: a Map comparison in a refinement map under `preserve progress`, and a rejected `--lemma` candidate.
+
+  Migration: declare the two values with one carrier, or compare the entries (`m0[k] == m1[k]`).
+
+  The 650-form on-disk corpus has an empty transition set, base `b2cdb394fedcba015261df05587c4721583329e3`, head `683d12d99f5b3510101d4571b5e7e2db8fd1a444`, and bmc and induction return the same result on all 428 forms it accepts. The matrix and the positions it does not cover are in `docs/design/DESIGN-finite-container-carriers.md`.
+
+  Rust API: `CarrierCoercion` gains `Retag` and `NotAssignable`, and loses `Other`.
+- Changed (#1685, breaking removal): a struct literal that names a field twice is refused at the repeated field, in every position and edition, with exit 2, `kind: "parse"`, `diagnostic_code: "duplicate_struct_field"` and `duplicate field 'P.x' at 5:24`. A component reports `component "piece.fsl" failed to parse (duplicate field 'P.x' at piece.fsl:6:32) at root.fsl:2:3` with `kind: "semantics"`, an inline `implements` reports `implements "abs.fsl" failed to parse (duplicate field 'P.x' at abs.fsl:6:33)` with `kind: "type"` and `loc` on the `implements`, and a refinement mapping reports `duplicate field 'P.x'` with `kind: "type"` and `loc` at the field.
+
+  These forms passed `check` before and kept only the last value, so swapping the values reversed the verdict:
+
+  - `P { x: 1, x: 2, y: 0 }`, in either order or with equal values, in `init`, an action, a guard, a property, a `def`, a map value or a scenario, in any edition.
+  - The same literal in a compose component, whether its action is lifted, synchronized, or internal and unreferenced.
+  - The same literal in a refinement mapping or an inline `implements` abstraction.
+
+  An input that already failed now reports the repeat, so its kind can change: `P { x: Q { a: 1, a: 2 }, y: 0 }` from `type` to `parse`, and an undefined `Q { a: 1, a: 2 }` from `semantics` to `parse`. In `fslc-lsp` the refusal is a parse diagnostic at the repeated field, and like any parse error it leaves `documentSymbol` returning null until the literal is fixed.
+
+  `verify` no longer returns `violated`, `verified` or `proved` on those forms, `refine` no longer returns `refines`, `impl_violated` or `refinement_failed`, `replay` no longer returns `conformant` or `nonconformant`, `sweep --depth 0..1` no longer returns `sweep_failed` or `sweep_passed`, and `migrate`, `document claims`, `scenarios`, `mutate`, `testgen`, `html`, `ledger`, `diff`, `lint`, `fmt`, `explain`, `analyze`, `conformance`, `kernel` and `typestate` exit 2 instead of their own results. A `domain` value object is refused in `check` and every `domain` command, with `kind: "semantics"`: `domain expand` and `domain analyze` exited 0 before, and `expand` wrote both copies to a file `check` refused. `domain expand` now writes nothing.
+
+  Migration: keep the one value you mean. There is no automatic migration.
+
+  The 651-form on-disk corpus has an empty transition set: base `56354e477544f9be1f4477ddf036e5855d514bb5`, head `0d869b09886c1f627bf21bcc61394477dcceb4e7`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
+
+  Rust API: `fsl_syntax::DUPLICATE_STRUCT_FIELD`.
+- Changed (#1686, breaking removal): in a business or requirements document, an `instances` or `values` bound or a `kpi` written twice under one name is refused at the repeated declaration, whether or not the copies are equal, with exit 2, `kind: "semantics"`, `loc` at the second copy and `duplicate values bound for 'V' at doc.fsl:14:3`, `duplicate instances bound for 'E' at doc.fsl:13:3` or `duplicate kpi 'done' at doc.fsl:9:3`. In next-edition requirements a `concept` written twice is refused the same way, `duplicate concept 'SmallClaim' at doc.fsl:24:3`. An inline `implements` reports `implements "1_business.fsl" failed to check (duplicate kpi 'paid_claims' at 1_business.fsl:55:3)` with `kind: "type"` and `loc` on the `implements`.
+
+  These forms passed `check` before and kept one copy, so swapping the copies changed the result:
+
+  - Two `values` bounds of one number: in requirements the last was kept, and `verify` moved between `verified` and `violated`. Lowering a business document does not read `values`, and `check` went from exit 0 to exit 2 there too.
+  - Two `instances` bounds of one entity: the last was kept, and `check` moved between `ok` and an error.
+  - Two `concept` declarations of one name: the first was kept, and `check` moved between `ok` and a decision-table error.
+  - Two `kpi` declarations of one name: `analyze` reported only the last, and no verdict changed.
+
+  `verify` no longer returns `verified`, `proved` or `violated` on those forms, `refine` no longer returns `impl_violated`, `replay` no longer returns `conformant`, and `sweep`, `migrate`, `scenarios`, `testgen`, `mutate`, `html`, `ledger`, `diff`, `document`, `kernel`, `typestate`, `lint`, `fmt`, `explain`, `analyze` and `conformance` exit 2 instead of their own results. A `spec` with an `entity` or a `number` already refused a repeated bound and is unchanged. A `spec` with neither does not read its bounds, and repeating one there stays accepted.
+
+  Migration: keep the one declaration you mean. There is no automatic migration.
+
+  The 651-form on-disk corpus has an empty transition set: base `9c31458678cf6c70e77987c85c95f4bc0d8df503`, head `b2367d61fd8a410f9e1364301f1fab0d6b7c4cb7`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
+- Changed (#1692, breaking removal): a `struct` or `value_object` that declares a field twice is refused at the repeated field, whether or not the two types agree and whether or not anything reads it, with exit 2, `kind: "name"`, `duplicate struct field 'P.x'` and `loc` at the second `x`. A component reports `component "piece.fsl" failed to check (duplicate struct field 'P.x' at piece.fsl:3:20) at root.fsl:2:3` with `kind: "semantics"`, and an inline `implements` reports `implements "abs.fsl" failed to check (duplicate struct field 'P.x' at abs.fsl:3:20)` with `kind: "type"` and `loc` on the `implements`.
+
+  These forms passed `check` before. With different types, `check` admitted a value by the first type and the bounds refused it:
+
+  - `struct P { x: K, x: Bool }` or `struct P { x: K, x: K }`, in a `spec`, in a `requirements` document, or in a composed component, read or not.
+  - `value_object C { value: Q = 0; value: Q = 0; }`. `domain expand` and `domain analyze` also exited 0 on a `value_object` whose copies differ, and `expand` wrote it out.
+
+  `verify` no longer returns `violated`, `verified` or `proved` on those forms, `sweep` no longer returns `sweep_failed` or `sweep_passed`, `replay` no longer returns `conformant` or `nonconformant`, and `mutate`, `html`, `ledger`, `diff`, `migrate`, `document claims`, `kernel`, `typestate`, `lint`, `fmt`, `explain`, `analyze`, `conformance`, `domain expand` and `domain analyze` exit 2 instead of their own results. `fmt` reports it as `kind: "semantics"` with no `loc`.
+
+  An input that already failed now reports the repeat, so its kind can change: `struct P { x: Set<K>, x: K }` and `struct P { x: Nope, x: K }` from `type` to `name`.
+
+  Migration: keep the one field you mean. There is no automatic migration.
+
+  The 650-form on-disk corpus has an empty transition set: base `b2cdb394fedcba015261df05587c4721583329e3`, head `66ca55474a05a8aefc9d92b29095505f1f1742af`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
+
+  Rust API: `SpecItem::Struct` gains `field_spans`.
+- Changed (#1694, breaking removal): a requirements document declares at most one `implements`. A second clause, naming another contract or the same one, is refused at that clause with exit 2, `kind: "parse"` and `duplicate implements 'Broken' (a requirements document declares one, and 'Held' came first) at 3:3`. The seam took the first clause and dropped the rest without a message, so a later contract was never checked: a broken contract written second passed `check` and written first failed it, in the stable edition and the next one.
+
+  On those documents `check`, `verify` on every engine, `verify --property` and `--exclude-property`, `refine`, `chain`, `mutate`, `ledger`, `lint`, `fmt`, `migrate`, `kernel`, `typestate`, `analyze`, `explain`, `document`, `scenarios`, `testgen`, `html`, `conformance` and `diff` no longer return their own results, and the Worker and the editor report the same refusal. An abstraction file that repeats the clause is reported through the clause that named it, with `kind: "type"` and `loc` on that clause. A document with one clause is unchanged.
+
+  Migration: keep the contract this document refines, and check any other from its own document or with `fslc refine`. There is no automatic migration.
+
+  The 646-form on-disk corpus has an empty transition set: base `1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `805751922a4b93c225beeeb7484b1e80581de809`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared. The 58 Rust string literals that hold a clause did not change either.
+- Changed (#1700, breaking removal): a repeated `domain` declaration that loses a copy is refused at the repeat on `check`, `verify` and every `fslc domain` route (exit 2, located), and `domain expand` writes nothing.
+
+  These forms passed `check` before and kept one copy:
+
+  - `kind: "name"`: a second `evolve` for one event, which flipped `verify` from `violated` to `verified` by the order of two copies; a second `command` of one name; an `event` that declares a field twice, which let the order of the copies decide `check`.
+  - `kind: "parse"`, a second copy of a clause that holds one value: `implementation_profile`; aggregate `id`; projection `from`; effect `reliable`, `irreversible`, `idempotency_key`, `correlation_id`, `handles`, `request_event`, `success_event`, `failure_event`, `timeout_event`, `retry`, `timeout`, `outbox`, `inbox` or a field of an effect; `max_attempts` or `backoff` in a `retry`; saga `starts_on`; step `awaits` or `timeout`.
+
+  An event field an effect or saga action takes as a formal was already refused; it stays refused at the same place, with the message `duplicate event field 'E.a'` and `kind: "name"` instead of `duplicate action parameter 'a'` and `kind: "semantics"`. An event field no action takes was accepted by #1680 and is now refused. Through an inline `implements` the message names the other file, with `kind: "type"`.
+
+  Kinds that read every copy stay accepted, such as two `requires` or two sagas of one name.
+
+  Migration: delete the copy that was lost, or merge the two. There is no automatic migration.
+
+  The 650-form on-disk corpus has an empty transition set: base `b2cdb394fedcba015261df05587c4721583329e3`, head `7f0b8e43af11f96786e2a72238c70a4a521b4cae`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared. See `docs/design/DESIGN-domain.md`.
+- Changed (#1705, breaking removal): in next-edition requirements, `check` and every route that loads the document refuse three repeats, with exit 2 and `kind: "parse"`. For an ID, the ledger used to keep one row, with one title and one status, for the two declarations, or one text for two `covers`.
+
+  These forms passed `check` before:
+
+  - A second `actor` of one name, on its own line or in a list (`duplicate actor 'Agent'`), located at the repeated name. Its output equalled one copy's.
+  - A second declaration owning a requirement ID that a `rule`, `decide`, `scenario`, `forbidden`, `goal` or `policy`, or a current-edition `requirement` or `acceptance` block, already owns, located at its ID and naming both kinds (`duplicate requirement id 'REQ-DESK-001': this rule reuses the ID of the rule at 19:8`). That includes two `rule`s of one ID, which lost a title from the ledger, a `rule` reusing a `decide` ID, whose title reached neither the ledger nor the documents, and two `requirement` blocks of one ID. A second `scenario`, `forbidden`, `goal`, `policy` or `acceptance` of its own kind keeps the refusal it had; an `acceptance` reusing a `scenario` ID, refused before as `duplicate acceptance id` with `kind: "semantics"`, now gets this message.
+  - Two `covers` of an ID that no declaration owns, with different texts, anywhere in the document: two events, two rows of one `decide`, rows of two tables, or an event and a row. The refusal is located at the `covers` keyword of the later one and names the earlier one (`requirement ID 'REQ-EV-1' is covered as "withdrawing" here and as "closing" at 15:5`). One ID with one text stays accepted, and the ledger shows it once. An event and a row covering one ID with different texts on one event were refused before as a conflicting annotation with `kind: "semantics"`; they now get this message with `kind: "parse"`, at the same location.
+
+  The current edition shares IDs the same way and `check` is unchanged for it. `fslc migrate --edition next` on a current-edition document with two `requirement`s of one ID, or an `acceptance` and a `requirement` sharing one, used to add the header and write a document the next edition refuses; it now stops before rewriting with exit 1 and a `migrate_manual_required` finding, `reason: "shared_requirement_id"`, at the second owner's ID in the source.
+
+  Migration: rename one of the two IDs, merge the two declarations, or give every `covers` of an ID one text; delete the repeated actor. There is no automatic migration.
+
+  The 651-form on-disk corpus has an empty transition set: base `56354e477544f9be1f4477ddf036e5855d514bb5`, head `2286fc51feaf3b49dac235c15e3367eb8346b919`, `fslc check` stable and with the next edition enabled, and `fslc kernel` versions 1 and 2, complete output compared.
+
+  Changed ledger and document output (#1705): in next-edition requirements, a decide row's or an event's `covers` of an ID that a declaration owns stays accepted and linked, whatever its text, and keeps that text in the kernel. The ledger row for the ID now takes the owner's title; it used to take the first `covers` text and drop the owner's. `document claims` now lists the owner's title first among the ID's statements, cited at the owner, so the document's rule section quotes it; the `covers` texts follow as linked statements. With an event's `covers` of a rule's ID, the rule's title used to reach neither `document claims` nor `document generate`. One case stays refused, as before: a row covering its own table's ID with another text (`requirement annotation 'REQ-2-3' has conflicting text`, `kind: "semantics"`). Migrating a current-edition document can therefore retitle a ledger row: a process `covers` naming a `requirement` block's ID with another text migrates with exit 0, and the row that showed the `covers` text now shows the block's title. A ledger approval of the current-edition document reports `drifted` after any migration, retitled or not. Current-edition `ledger`, `document generate` and `document claims` output is unchanged.
+
+  The design note `docs/design/DESIGN-dialects.md` holds the measured forms. The language references take this text when the next edition's reference is written (#1437).
+- Changed (#1723): the GitHub Release body is now built by
+  `tools/release-notes.sh`. When `docs/release-notes/vX.Y.Z.md` exists, the body
+  is that hand-written summary followed by an absolute link to the `## [X.Y.Z]`
+  section of the tagged `CHANGELOG.md`. Otherwise the body is that section, as
+  before. The `assemble` job builds and checks the body, so a `workflow_dispatch`
+  dry run fails on a missing section, an empty body, or a body over GitHub's
+  125,000-character limit (checked as 125,000 bytes) before any tag exists. The
+  aggregated 5.0.0 section is 225,360 bytes, so 5.0.0 needs a summary.
+- Changed (#1727): the WASM browser parity test reads the `[workspace.package]`
+  version from `rust/Cargo.toml` table by table, so an array value in that table
+  no longer hides it. Product output is unchanged.
+- Changed (#1728, breaking): approval records name the target kind's renderer instead of
+  the `fslc` release. A new record stores `"<renderer-id>/<semver>"` in
+  `target.generator_version`: `fslc-ledger-renderer/1.0.0`,
+  `fslc-html-renderer/1.0.0`, `fslc-scenarios-renderer/1.0.0`, or
+  `fslc-document-renderer/1.3.0`. `approval check` and `ledger --approval`
+  report `renderer_changed` only when that renderer version changes, so
+  upgrading `fslc` alone no longer drifts an approval. A 4.x record keeps its
+  bare crate version (exactly `X.Y.Z`). For it only the renderer comparison is
+  skipped, so it stays `approved` while every specification, rendering,
+  claim-set and reviewed-artifact digest matches. Before, it reported
+  `renderer_changed` on any other `fslc` version. Other values, such as `4.12`
+  or `v4.12.0`, are still compared. Migration: a consumer that read
+  `generator_version` as the `fslc` version must read `fslc --version` instead.
+- Changed (#1754, breaking): `fslc migrate --write` no longer reports `"written": true` when
+  it wrote nothing. The top-level `written` echoed the `--write` flag, so a run
+  whose inputs needed no rewrite reported `"written": true` with `"changed": 0`.
+  `written` now means a file was replaced: the top level is `true` only when at
+  least one input was replaced, and each `files[]` entry carries its own
+  `written`, `true` only for a replaced input. Unchanged inputs were already left
+  untouched (same inode and mtime); dry runs, refusals and
+  `migrate_manual_required` report `written: false` at both levels. A consumer
+  that read `written` as "`--write` was given" now sees `false` for a no-op
+  write.
+- Changed (#1798, breaking removal): in an FSL 5 event's `only when` condition
+  or `set` expression, a bare name that is both the event's input and a field of
+  its entity is `ambiguous_input_field` (exit 2) inside every expression form,
+  as LANGUAGE.md already states; inside `abs(...)`, `min`/`max`, a method call,
+  an `is` test, a quantifier or `count`/`sum` it used to read the input silently.
+  Write `input amount` or `Claim.amount`. Nested in those forms, both used to fail
+  with a `semantics` error and now work: `Claim.amount` reads the stored field
+  and `input amount` reads the input, except inside a quantifier or aggregate
+  binder named `amount`, where it is refused with the new code
+  `captured_by_binder` because the binder would capture it. A concept condition
+  whose quantifier range bound is a field (`exists x in amount..amount { ... }`)
+  is now refused with `binder bound is not a static integer`: it used to pass
+  only by reading a same-named input. A decision table's `assuming` now expands
+  a concept named inside a quantifier or aggregate, which used to fail with a
+  `semantics` error; a binder named like something that concept reads (a
+  resource, say) is `captured_by_binder`. Inside a binder named like a concept,
+  the name is the binder: base left every name inside a quantifier unresolved,
+  so such a name was the binder there too, and `assuming exists Small in 0..0
+  { Small == 0 }` checks `ok` on both. Checking all 655 `.fsl` files under
+  `specs/`, `examples/` and `rust/fslc/tests/fixtures/` (22 of them `fsl 5`),
+  each SHA in its own materialized tree with a binary built from it, gives the
+  same result, kind, diagnostic code and exit code on `995146f45` and on this
+  change.
+- Fixed (#251): next-edition diagnostics for already-invalid expression `||` and
+  `->` keep the parse envelope and exit code while reporting
+  `unsupported_in_edition`, the operator location, canonical replacement, and
+  migration guidance. Structural operators and domain acceptance are unchanged.
+  Worker check/verify now finalize successful and error envelopes with native
+  edition policy, including declared-edition fields and current enum-union warnings,
+  while check preserves early project-gate results instead of folding model-only
+  governance over them.
+  Type-range endpoints, including parenthesized parts, retain generic parse diagnostics.
+- Fixed (#608): 25 more shipped examples now pass `fslc lint`, including the
+  teaching examples `examples/pm/cancel_system.fsl`, `examples/pm/cancel_flow.fsl`,
+  `examples/layers/return_policy.fsl` and `examples/layers/return_system.fsl`.
+  Their requirement, acceptance, forbidden, policy, goal, control and assumption
+  IDs use the canonical `PREFIX-SCOPE-NNN` form: `REQ-1` becomes
+  `REQ-CANCEL-001`, `goal CanRetain` becomes `goal GOAL-CANCEL-001`, and
+  `FB-EARLY-REFUSE` becomes `FB-EARLY-REFUSE-001`. Legacy `"ID: text"` tags
+  become `@requirement(...)`, and domain invariants use `=>` instead of `->`.
+  Each changed file keeps its `check` result, its `verify --depth 8` verdict and
+  property results, and its `mutate` kill rate. A new corpus test,
+  `every_corpus_spec_lints_clean_or_is_allowlisted`, fails when a `specs/` or
+  `examples/` file adds a lint finding. Each file it still allows names its
+  reason, for example a file the frozen Python reference loads, or business
+  policy IDs that `preserve progress` must reference as identifiers.
+- Fixed (#1091): a requirements document's `terminal_rule` claim is now
+  attributed to its `terminal` block. `fslc document claims` reports it
+  `source_backed` with the block's `source` location instead of `unknown` with
+  no location, so a spec that declares `terminal` keeps
+  `provenance.completeness: complete`, and `fslc document generate` no longer
+  adds the "provenance information is incomplete" note for it. Claim and claim
+  set digests do not change. Migration: a requirements document generated before
+  this fix for a spec that declares `terminal` carries that note, so
+  `fslc document check` (and `fslc approval` over a `requirements_document`)
+  now reports it as drifted (`edit_outside_slot`); regenerate it with
+  `fslc document generate`.
+- Fixed (#1242): `fslc explain` (and `--readable`) no longer reports
+  `result: "explained"` with exit 0 and no witnesses for a spec whose
+  acceptance / forbidden traces the requirement-trace gate refuses. It reports
+  the gate's own error (`kind: "acceptance"`, `"forbidden"`, or
+  `"forbidden_setup"`, the envelope `check` and `scenarios` report) with exit 2.
+  `fslc html` stops at the same error: its exit status stays 2, but it now
+  prints the gate's error and writes no report instead of a report with an
+  empty witness section. Migration: a pipeline that read `explain`'s witnesses
+  or `html`'s report for such a spec gets the gate's error instead; fix the
+  acceptance / forbidden case it names (the same error `fslc check` reports).
+- Fixed (#1243): the commands that report a result about a spec's acceptance /
+  forbidden cases run the requirement-trace gate and fail closed on its
+  refusal, reporting the gate's error (the envelope `check` reports; a
+  `semantics` error when a trace cannot be replayed, e.g. under an `init` that
+  leaves a state variable unassigned) with exit 2: `fslc document generate` / `document claims` / `document check`
+  (which rendered, projected, or conformance-checked the refused cases as
+  claims, exit 0), `fslc ledger` (which rendered a ledger listing the error,
+  exit 2), `fslc approval create --kind requirements_document` and
+  `--kind ledger` (which recorded an approval, exit 0), and `fslc approval
+  check` of either kind (a `ledger` record reported `drifted`, exit 0). The
+  language server now publishes the refusal as an error diagnostic with code
+  `FSL-REQUIREMENT-TRACE` at the location `check` reports, where it published
+  nothing. A spec whose traces pass the gate, or that declares none, is
+  unaffected. Migration: fix the acceptance / forbidden case the error names
+  (the same error `fslc check` reports) before generating or approving a
+  document or ledger; an approval recorded for such a spec can no longer be
+  checked until the spec passes `check`.
+- Fixed (#1281): `fslc mutate` now checks each mutant on a fresh solver context, so
+  a mutant's result no longer depends on the solver queries made for earlier
+  mutants in the same run. This can change which property a mutant is reported as
+  killed by (and with it the per-obligation and per-requirement tallies), and,
+  where an `ensures` counterexample is replayed, whether the mutant is killed;
+  each mutant now gets the result it gets when checked alone. Each mutation
+  solver call takes about 0.7 ms longer. The faster mutate work tracked in #1281
+  is still open.
+- Fixed (#1285): `fslc analyze` graphs no longer present the acceptance /
+  forbidden cases of a spec whose traces the requirement-trace gate refuses
+  as if they had passed it. The graph still projects them (analyze reports
+  structure, so it does not fail), and each such `acceptance:<id>` /
+  `forbidden:<id>` node now carries `"trace_gate": "unchecked"`. Nodes of a
+  spec whose traces pass the gate are unchanged. Migration: a consumer of the
+  graph that treats acceptance / forbidden nodes as checked claims skips nodes
+  with `trace_gate: "unchecked"`.
+- Fixed (#1333): a component's `leadsTo` helpful action now references that
+  component's prefixed action, and its arguments are rewritten in the same
+  binder scope as the temporal property. Composed ranking proofs can now run
+  instead of failing with an undeclared helpful action (exit 2). Internal or
+  unknown helpful actions remain errors rather than binding to glue actions.
+- Fixed (#1334): ordinary compose glue actions now resolve component aliases in
+  parameters, guards, postconditions, lets, statements, and assignment targets,
+  allowing direct component-state reads and writes through `alias.var` as designed.
+  Assignment indices are resolved in glue actions, sync additions, and compose
+  init alike. Sync additions that write component state through `alias.var`
+  now report an explicit restriction at the assignment rather than an unknown
+  update target. Compose init can initialize component state through `alias.var`;
+  overlap with the component's own init is rejected by the existing duplicate
+  initialization check, never resolved by picking one assignment. Component
+  invariants continue to check glue writes. Alias resolution
+  respects parameters, model-normalized guard bindings, quantifiers, aggregates,
+  logical/guard pattern continuations, and temporal binders. A pattern payload is
+  visible on the right of `and` or `=>`, and a `requires` also exposes it to later
+  guards and the normalized body/ensures; neither statement nor expression `if`
+  introduces it into a branch. Guards see preceding bindings; body statements
+  and ensures see the final guard scope regardless of their source position, so a
+  local binding named like an alias keeps its referent.
+- Fixed (#1336): `fslc ledger` now shows its folded verification verdict and
+  inline `implements` seam (`abs`, `result`) in a new `## inline implements`
+  section after the header and approval comparison, before governance and the
+  risk lists. Passing seams are listed too; only `refines` is green. Previously
+  a failed seam exited 1 without its verdict or seam appearing in the body.
+  This section addition alone does not change ledgers without `implements`;
+  the separate sentinel-coverage correction and verdict findings (#1338) can
+  change them, including governance ledgers. Migration: an approved
+  inline-implements ledger's rendering digest changes, so `fslc approval check`
+  reports `drifted` (exit 0); review the section and re-approve the ledger.
+- Fixed (#1337): `fslc testgen` now refuses failed inline `implements` seams
+  and governance preservations on its kernel path as well as its verify fallback
+  path. Both return the verify owner's failure envelope and exit 1, or the same
+  located contract error and exit 2, or internal error and exit 3, and write no
+  harness. The gate shares the scenarios fold and runs before the walk, path
+  handling, and generation.
+  Migration: these documents previously generated a harness with exit 0 on the
+  kernel path; automation must now handle verify exits 1/2/3 and no output artifact. Fix
+  the seam or preservation before generating tests. Passing documents and
+  non-strict partially reachable scenarios keep their existing generation behavior.
+- Fixed (#1338): generated-only sentinel actions no longer appear as dead-action
+  coverage findings in `fslc ledger`, or as uncovered badges and coverage
+  denominator entries in `fslc html`. Runtime warnings, ledger, HTML, and mutate
+  dead-action notes share the existing source-location rule through
+  `KernelModel::action_source_span`:
+  positive authored primary-origin position, then positive kernel declaration
+  position, never a name/prefix test. Authored blocked actions retain their findings.
+  The current CLI mutant-enumeration path cannot encounter generated-only dead actions.
+  This coverage presentation correction preserves raw coverage,
+  verify/induction/Worker JSON, and HTML Raw Data;
+  HTML with no eligible coverage entries shows `0/0`. Migration: corrected ledger
+  and HTML artifacts have changed rendering digests, so existing approvals report
+  `drifted` (exit 0); review and re-approve the artifacts.
+- Fixed (#1345): Cache replay preserves stored f64 values and JSON tokens via
+  serde_json `float_roundtrip`, without changing cache shape, schema, or keys.
+  Document sweep cache provenance as execution metadata: stable comparisons
+  exclude root `cost`/`cache` per verification envelope, preserving domain state;
+  use `FSLC_CACHE=off` to disable caching rather than a sweep `--no-cache` flag.
+  Accurate JSON f64 reading applies workspace-wide, including Worker requests,
+  scenario approval normalization, AI eval/JSONL, causal evidence/plan/lifecycle,
+  and log replay/implementation-log/event inputs; older scenario approval or causal
+  digests containing boundary decimal values can change. The fslc/fsl-tools test
+  graphs already enabled this feature via the `jsonschema` dev-dependency, so tests
+  and distributed builds previously parsed such values differently.
+- Fixed (#1346): requirements acceptance steps now report `wrong_kind_argument`,
+  a top-level `message` identifying the argument and expected type and explaining
+  that no guard was evaluated, a hint, and the step location for arguments of the
+  wrong parameter kind, matching forbidden's diagnostic style without changing
+  acceptance's error kind or exit status.
+  Correct the language and skill references: enum step arguments take member names,
+  not numeric ordinals (`paint(1)` is not `paint(Blue)`).
+- Fixed (#1350): `fslc explain` now produces invariant and reachable
+  counterfactual candidates for kernel specs using `entity` / `number` domains
+  bounded by a sibling `verify` block, just as for directly bounded `type`
+  declarations. Invariants without a candidate within the requested depth retain
+  their depth-limit note instead of silently disappearing. Kernel specs using
+  `def` (named predicates) also regain counterfactual candidates, with authored
+  source locations and text preserved. `fslc html` shows the
+  same restored candidates without changing the explanation JSON format. A
+  weakening that violates several invariants or prevents several reachable goals
+  now contributes a candidate to each affected property, retaining the existing
+  per-invariant ranking. Counterfactual traces record the actual violating
+  successor and its state changes rather than the Monitor rollback state.
+  Each invariant is searched in isolation, so its counterfactual trace may pass
+  through states that violate another invariant. Normal `verify` and `replay`
+  retain all invariants and stop at the first violation instead.
+  When a non-user check preempts a target's invariant search, explain now tries
+  bounded solver-independent concrete search for a valid target witness. If none
+  is found, the existing note identifies the preempting kind, name and step rather
+  than claiming absence within depth. Bounded init-assignment removals remain
+  skipped; no-candidate depth/preemption notes now append the named state root
+  and the reason that nondeterministic initialization was not analyzed. This is
+  an intentional note-wording change, with no new JSON field.
+  Concrete search also continues past partial guards and erroring children,
+  and refuses witnesses starting from an already-violated initial state.
+  Preempted no-candidate notes also explain when concrete search could not start,
+  naming reported free state roots publicly or preserving another startup error's
+  cause. This is diagnostic only; nondeterministic initialization is not searched.
+- Fixed (#1351): `fslc analyze` and enabled LSP structural diagnostics no longer
+  report an init-only requirement as disconnected, matching `check --strict-tags`
+  and lint. Init carrying requirement relations now has an `init` graph node with
+  requirement metadata and `declares`/`covers` edges, retained in requirement and
+  impact projections, manifest traceability graphs, and DOT/Mermaid exports.
+  Init without requirement relations leaves graph output unchanged. Genuine
+  orphan requirements remain review findings, not verifier violations.
+- Fixed (#1362, #552): in the language server, a name spelled like a word the
+  index used to treat as a keyword (`status`, `count`, `age`, `evidence`,
+  `owner`, `rejected`, `severity`, `respond`, ...) is now a name like any other
+  in `spec`, `requirements` and `compose` documents: a state variable, struct
+  field, enum member, parameter or `let` binding so named is declared, and
+  go-to-definition, references, rename, hover, document symbols and completion
+  reach it and its uses (for example `respond(0)` in an acceptance). The
+  document index now takes those dialects' declarations from the parsed AST.
+  As a result, the `until` operator inside an `until NAME { P until Q }`
+  property no longer declares the first name of `Q` as a property, so uses of
+  that state variable resolve to its declaration again. Other dialects and the
+  server's other responses are unchanged.
+- Fixed (#1391): replaying a requirements document's `acceptance` and
+  `forbidden` traces no longer holds memory in proportion to the
+  `verify { values }` scope of an action parameter. Each trace step used to list
+  every enabled instance of every action, so a published requirements spec with,
+  for example, `values Amount = 0..2000000` and a single `forbidden` made
+  `fslc check` use several GB until it was killed. Each step now keeps only the
+  call it names, and `check` on that spec stays at about 20 MB. Every instance's
+  guards are still evaluated, so trace verdicts and errors are unchanged, and
+  the replay time still grows with the scope.
+- Fixed (#1392): `fslc fmt` and `fslc migrate` print requirement-style IDs
+  the way they are written. They used to put spaces around each `-` of an ID
+  outside `business` documents, so `requirement REQ-1`, `acceptance AC-1`,
+  `forbidden FB-1`, `covers REQ-1` and governance references such as
+  `owns CTRL-1` or `require CTRL-1` came out as `REQ - 1`, `AC - 1`, `CTRL - 1`.
+  The ID values and the checked model did not change, but the written file no
+  longer read as its author wrote it. Subtraction is still printed with spaces
+  (`balance - 1`). An ID written with spaces (`REQ - 1`) is now printed as its
+  value (`REQ-1`). If the formatter would ever print an ID differently from its
+  value, `fmt` and `migrate` now stop with an error instead of writing the file.
+  Migration: a file already written by `fmt` or `migrate --write` with spaced
+  IDs is reported as changed by `fslc fmt --check`; run `fslc fmt` on it (or
+  restore the IDs by hand) to get `REQ-1` back.
+- Fixed (#1401): in the requirements groundwork, an event that names no
+  requirement with `covers` no longer gets a requirement made from its own name
+  and actor (`submit: by Employee`). Its action carries the requirement IDs the
+  document attaches to it: the rules that guard it, and the decision table and
+  the `covers` of the rows that name it. The kernel's `requirement` of the
+  action is the most specific of them (a row's `covers` before its table's ID),
+  or none when nothing names the event. `ledger`, `document generate`,
+  `explain` and `mutate --by-requirement` no longer show such a note as a
+  requirement, and the requirement a rule formalizes gets the same ledger status
+  as the same requirement written as a requirement block. Parsing, diagnostics,
+  and command output of published documents are unchanged.
+- Fixed (#1402): a requirements decision table or rule guard whose check the
+  solver decides (because its fields take more than 1000000 values together,
+  or because its condition reads a resource or a relation role) was checked
+  only by `fslc check`. `verify`, `kernel`, `testgen`, `document`,
+  `scenarios`, `ledger`, `explain`, `mutate`, `typestate` and the other
+  commands that load the spec accepted it and exited 0. They now reject it
+  with exit 2 and the diagnostic `check` reports (`decide_not_exhaustive`,
+  `decide_overlap` or `rule_conflict_unsatisfiable_guard`). The language
+  server now shows that error, and the browser Worker's `check` and `verify`
+  report it too.
+- Fixed (#1413): Make LSP stdio tests fail at a deadline instead of hanging, drive a solver test to completion, refuse the `fsl5_keywords` golden-update variable under `CI`, and document the sanitizer exclusion of `requirement_trace_large_domain`.
+- Fixed (#1414): `fsl5_lowering_contract.rs` and `fsl5_decide.rs` copy fixtures into scratch directories unique to the process and call, emptied first and removed afterwards, and `issue_1171_command_argv.rs` gives each run its own `FSLC_CACHE_DIR` and removes it. Before, the lowering-contract copies persisted, so a deleted fixture was still read from an earlier run; two concurrent `fsl5_decide` processes on one target deleted each other's inputs; and every argv run left a cache directory in the temporary directory. No product behavior changes.
+- Fixed (#1416): preserve lossless token/trivia text and Unicode source positions while computing
+  trivia positions incrementally instead of rescanning source prefixes. Make the
+  AI project block scanner ignore `//` comment contents during header and brace
+  matching, preventing ghost declarations, truncated fields, missing siblings and
+  false unterminated-block diagnostics, without repeated prefix-depth scans.
+- Fixed (#1417): the HTML and ledger unknown authority tool regression expectations
+  now follow the verification-first pipeline's unlocated validator error. Report
+  DESIGN notes also reflect #1464's semantics errors instead of the former panics
+  on approval and counterexample export paths. Command behavior is unchanged.
+- Fixed (#1419): native generated artifacts and approval/causal records are
+  written completely to a same-directory temporary file before replacement,
+  preserving existing output bytes on publication failure. Existing regular-file
+  permission bits and new-file umask are retained; setuid and setgid are not. Partial
+  bytes stay owner-only, though abrupt termination can leave that temporary file.
+  Multi-file output keeps its existing order without rollback or added power-loss
+  durability. Temporary names include a clock component and exclude the destination
+  basename, and an entry already at that name fails with an error naming its path.
+- Fixed (#1420): native `check`, `verify`, and `scenarios` consume extracted
+  literate Markdown source in memory instead of creating an adjacent
+  `.literate-<pid>.fsl` file. Extraction no longer requires a writable source
+  directory or leaves a new sibling after abrupt termination. Existing
+  diagnostic labels, lexical dependency resolution, edition admission and
+  Markdown-byte cache identity are retained; verify's `--strict-tags` uses
+  the captured extracted source. Existing abandoned siblings are left untouched.
+- Fixed (#1423): causal observation log provenance now hashes the same captured UTF-8 input
+  used for replay evaluation, rather than rereading its path. Preserve ordinary
+  JSON outputs, errors, assurance, replay parsing, and artifact/lifecycle digest
+  canonicalization. Observe/verify already use the supplied causal source; this
+  fix addresses the remaining log reread in #1423.
+- Fixed (#1424): testgen preserves wide Kotlin integer literals and compares integral
+  values recursively through lists and maps, emits `PHP_INT_MIN` for i64 minimum,
+  rejects lossy Vitest integers with a located error, escapes Python string controls,
+  and inserts escaped source basenames only after trusted template slots are filled
+  in every target. Ordinary output outside the Kotlin helper and its comment is
+  unchanged.
+- Fixed (#1425): Built-in mutation candidates are retained as edits and materialized
+  one at a time, avoiding a full spec clone per candidate. Residual: each init
+  mutant retains a rewritten copy of its entire init block, and whole top-level
+  `if` statement mutants retain a rewritten copy of that entire statement;
+  their retained memory still scales with that block or statement's size times
+  its mutant count. Mutate stdout, catalog order, cap accounting, and verdicts
+  are unchanged. No migration is required.
+- Fixed (#1426): Causal representative-path projection now prunes dead ends and stops
+  after 100,000 DFS expansions. Budget-limited output marks `paths_truncated_exact` as
+  `false` and reports the omitted paths counted so far as a lower bound; completed
+  walks retain the existing exact counts and output shape. The schema constrains
+  the optional exactness marker to `false`; absence remains the exact-count signal.
+- Fixed (#1427): Testplan boundary cases now reserve plain names before qualifying
+  duplicates across actions and guards, then sort cases by their final unique names.
+  They omit unrepresentable integer boundaries without overflow and index conformance
+  state values once when constructing shortest setup paths.
+- Fixed (#1429): `fslc ledger` and `fslc html` property assurance, and the
+  ledger's `保証限界` line, no longer over-claim for a verification envelope that
+  does not report a completed check. The header and every property row now read
+  completeness the same way (the top-level `completeness`, else the nested
+  `kernel.completeness` that `fslc domain check` and `fslc ai check` report). A
+  row is `bounded` only under reported `completeness: "bounded"` and `proved`
+  only under reported `completeness: "unbounded"`; a missing, unknown or
+  method/depth-only envelope, or `result: "proved"` without completeness, now
+  shows `not_run`. The guarantee line no longer states BMC coverage of every
+  execution for `not_run`, error, replay or statistical input, and a bounded
+  report without a valid depth says the depth is unreported instead of printing
+  `深さ null`. This includes a native explicit-engine `unknown_budget` result
+  (`completeness: "unknown"`) passed to the library renderers, which showed
+  `bounded(BMC depth N)` and BMC coverage before and now shows `not_run`;
+  `fslc ledger` and `fslc html` accept only `bmc` and `induction`. A rendering of
+  a non-error result with top-level bounded or unbounded completeness and its
+  depth is unchanged; verdicts, raw findings, locations, exit codes and the
+  aggregate/external-evidence token (#994/#995) are unchanged. Migration: an
+  approval bound to a ledger or HTML rendering of an affected envelope fails its
+  existing drift check; regenerate and re-approve it.
+- Fixed (#1430): Graph exports now re-check suffixed Mermaid identifiers to keep
+  nodes and edges distinct after sanitization. Analysis and causal exporters share
+  one escaping rule per format, including DOT quotes, backslashes and newlines,
+  and Mermaid label delimiters.
+- Fixed (#1431): TypeScript typestate skeletons now escape ECMAScript and strict-mode
+  reserved action and parameter names (including `eval` and `arguments`), keep
+  function/signature identifiers distinct, allocate action names once per spec in
+  declaration order for reuse across entities, and keep the phantom generic clear
+  of every model and generated type name. Parameter types now come from the model
+  instead of blanket `number`. Enum types whose public names collide with emitted
+  entity interfaces or state aliases use inline member string-literal unions,
+  including inside options and sets in parameters and data fields.
+  These are native/frozen-reference differences in
+  addition to the earlier #680 guarded state-preserving self-loop report entries
+  (`state_preserving: true`) and generic signatures preserving the exact input
+  state. Native judgment also already scopes enum fields by owning struct and
+  drops disjunctive guards when any disjunct does not constrain the entity. JSON
+  `typescript` fields carry the TS differences; the command envelope and existing
+  report field shapes (including source-name `params`) stay compatible, but report
+  values, entity inclusion, applicability and summary counts can differ under the
+  earlier judgment rules. Native entity order is alphabetical (the frozen reference
+  uses declaration order). Neither JSON nor TS is claimed byte-identical to the
+  frozen reference.
+- Fixed (#1433): HTML Relation Graphs use declared relation state types rather than
+  inferring relations from pair-shaped values. Seq/Set values no longer produce
+  spurious graphs; real relation reports, including empty relations, are unchanged.
+- Fixed (#1438): in the requirements groundwork, auto-mapped events reject actor
+  mismatches against business transitions at check time, using typed actor
+  provenance independent of requirement annotations. Parsing, diagnostics, and
+  command output of published documents are unchanged.
+- Fixed (#1442): component rewriting now preserves model-normalized `let` bindings
+  and pattern scope in logical and guard continuations instead of replacing local
+  reads with prefixed component-state reads. The tested use-only compositions
+  preserve standalone local-binding behavior across BMC, induction, explicit
+  exploration, and Monitor replay. Guards see preceding guard bindings; body
+  statements and ensures see all guard bindings even when written before a `let`
+  or `requires`. A pattern
+  payload is visible on the right of `and` or `=>`, and a `requires` also exposes
+  it to later guards and the normalized body/ensures; neither statement nor
+  expression `if` introduces it into a branch. A pattern
+  binding follows the same phase-aware collision rule as the standalone spec.
+  Patterns sharing a normalized non-typed `count` or `sum` binder are accepted
+  in compose just as they are alone; non-expanding `forall` and `unique` forms
+  retain their collision refusal. Other original-source collisions remain
+  rejected instead of being hidden by prefixing. The ordinary type checker owns
+  this decision for both source rewriting and checked expressions. Component-owned
+  late diagnostics retain the original cause and component position inside the
+  existing use-site diagnostic wrapper.
+  Private lets, patterns, quantifiers, aggregates, and statement-forall binders
+  share one hygienic rewrite across synchronized sources. It inventories both
+  reads and declarations, including non-exported pattern labels, and preserves
+  each source's original collision refusals. Header arguments are inserted in
+  their header-parameter scope, not under another source's guards. Ambient state
+  or enum names cannot falsely reject private component patterns; an unread
+  ambient state alone does not force an ordinary let to be renamed.
+  The same hygiene now covers component property, temporal, initialization, and
+  inline-state-initializer roots. Bare component enum reads retain their owning
+  enum when an unrenamed public value would capture them, while uncontested
+  reads retain their existing representation. Reified bare enum reads print their
+  source member spelling; conversion, abstraction, and explicitly qualified enum
+  literals retain owner qualification through node-local spelling provenance.
+  A single inserted argument pattern without foreign interference
+  is no longer renamed merely because its name is reserved for freshness.
+  When sync composition must rename colliding private bindings, synthesized names
+  such as `__u_substitution_0` may intentionally appear in later error messages,
+  `explain`, `analyze`, and approval HTML output. Inputs needing no such renaming
+  keep their existing output spelling.
+- Fixed (#1443): compose state declarations now resolve component aliases in inline
+  initializers and type-range expressions. Component constants can initialize a
+  compose state field or define its bounds. Inline initializers still cannot read
+  any state root: `seen: Bool = a.on` now reports the existing state-read prohibition
+  with the resolved public name instead of failing to type the alias identifier.
+  Qualified type syntax is unchanged.
+- Fixed (#1444): Gate the large-domain trace test's next-edition helper with the same Linux-only condition as its caller, keeping macOS Clippy warning-free without suppressing dead-code diagnostics. Linux test behavior is unchanged.
+- Fixed (#1448): induction `--lemma` candidates now receive the same recursive
+  Boolean type check as invariants, for all candidates before any candidate proof
+  or evaluation. Ill-typed expressions are rejected and unused with a nested
+  semantics error and checker message, never proved or recommended. Later valid
+  candidates still run, and the target result owns the exit code. Lemma runs
+  continue to bypass the persistent verification cache.
+- Fixed (#1449): Complete live multi-root and manifest admission for analyze
+  batch/project, approval check/create/diff and ledger approval overlays, chain,
+  diff and direct/multi-link refinement. Consumers use the same captured bytes and
+  positional edition tokens, with once-only diagnostics for each distinct result,
+  artifact and baseline. Batch dependency scopes remain file-local; actual chain
+  step threads own their detail delivery. Live Git mappings are admitted without
+  changing historical mapping selection or admitting historical roots (#1513).
+  The deferred-mode set is empty and strict inventory controls remain executable.
+  Live Git mapping capture is shared across every selected comparison, including
+  existing stream-backed paths, without changing IO precedence or historical selection.
+  Project analysis does not prepare mappings for noncanonical, unused target sections.
+  Independent HTML/ledger baseline pinning and internal seam controls remain
+  tracked in #1641; neither renderer's independent pin is included in this change.
+- Fixed (#1451): explicit and Monitor now diagnose init reads of never-assigned
+  state roots as unsupported free initial values (nondeterministic init), with
+  guidance to use `--engine bmc`, instead of claiming the root is read before
+  assignment. Reported names retain compose prefixes. This intentionally changes
+  the public message only: semantics/exit 2, assigned-root early-read rejection,
+  check acceptance of free roots, BMC/induction symbolic values, and refinement's
+  free-root enumeration remain unchanged. Auto still falls back to BMC; for
+  non-error BMC results, `engine_fallback.reason` carries the new diagnostic.
+  BMC error results still omit fallback metadata; explicit gains no free-root
+  enumeration.
+- Fixed (#1452): consumed compose, implements, causal and governance dependencies
+  are admitted by their own syntax edition before their bytes enter model/solver or output work.
+  Canonical mixed editions remain valid, repeated child findings are delivered once
+  per outer native owner or explicit local log, and repair tools report child findings without editing children.
+  Editor aliases deduplicate each complete child finding at the first parent
+  reference, preserving file-backed open-document precedence and child UTF-16 ranges.
+  Untitled buffers publish absolute child links without a path-conversion panic.
+- Fixed (#1457): symbolic verification now evaluates scalar Set and Seq collection binders in
+  expressions and statements using shared membership-aware expansion. Seq binders
+  preserve their live prefix, position order and duplicates; Set binders preserve
+  distinct members in concrete value order, including dynamically valued literals.
+  Symbolic and explicit verification share the existing rejection of state-dependent
+  collection domains in init statement forall; check acceptance is unchanged.
+- Fixed (#1464): Lowering now returns an authored error instead of panicking
+  when the generated kernel needs an undeclared AI authority tool reference,
+  including in document-taking CLI commands and the language server. Editor
+  diagnostics point at the authority clause that names the tool; existing check
+  and Worker error envelopes are unchanged.
+  Empty domain membership now renders as false without panicking in domain
+  analyze, check, expand, or mutation after a verified baseline; domain check
+  still reports a violation. Kernel projection of `at()` without an index now
+  returns the existing semantics error instead of panicking, while check
+  acceptance and valid `at(0)` projections are unchanged.
+- Fixed (#1467): symbolic scalar/enum Set/Seq expressions use shared checked
+  inferred/expected types, including empty equality operands and conditional arms.
+  Private lexical type metadata preserves raw `none`/composite values and the public
+  Rust `Bindings<T>` alias. Carrier, capacity and storage-bound rules are unchanged;
+  remaining composite/relation gaps stay tracked by #1467. State/storage restrictions
+  do not imply rejection of every composite expression literal. This does not claim
+  whole-corpus engine agreement or validation of a later integrated source state.
+- Fixed (#1469): `html --no-timing` omits environment-dependent solver statistics
+  from the presentation copy on stdout and in `-o`/`--output` files, preventing
+  ambient Z3 memory differences from breaking byte-stable report comparisons.
+  The exact omitted fields are `verification.cost.elapsed_s`,
+  `verification.cost.solver.check_elapsed_s`,
+  `verification.cost.properties[].elapsed_s`,
+  `explained.counterfactuals[].violation.cost.elapsed_s`,
+  `verification.cost.solver.memory_mb`, `verification.cost.solver.conflicts`,
+  `verification.cost.solver.decisions`, and `verification.cost.solver.propagations`.
+  Solver check counts and property identities/counts remain; default HTML,
+  ordinary verify JSON, exit codes, and approval normalization are unchanged.
+  One CI failure showed `memory_mb` differing (17.91 versus 17.92); 396 local
+  macOS runs showed no solver-statistic variation, including memory. The three
+  search counters are classified as ambient based on their Z3-internal source
+  and the existing approval normalization of the same four solver statistics,
+  not on measured local drift.
+- Fixed (#1475): Reject overflowing causal analysis minimum-time sums with the
+  contributing claim's location, and evaluate causal time thresholds exactly.
+  Malformed generated document frontmatter/markers, missing chain step files,
+  and malformed approval timestamps now use their existing error envelopes instead
+  of panicking. Normal document and approval bytes/digests and source-check
+  acceptance are unchanged.
+- Fixed (#1480): avoid reporting a frozen-state tautology when the invariant can be undefined for a typed mutable state. Preserve genuine defined tautologies and partial operations that remain unreachable under the frozen values.
+- Fixed (#1481): In ordinary action/property contexts, BMC, induction, and explicit verification now agree with the Monitor's existing `partial_op` for reached `head()`, `at(i)`, and index reads of an empty zero-capacity Seq, instead of symbolic term-construction errors. Unreached reads that previously failed symbolic term construction now pass under short-circuit guards and disabled actions. Ordinary symbolic evaluation constructs a fresh, unconstrained read term outside the declared capacity for each otherwise unrepresentable read, without exposing its value in properties, witnesses, or traces or reusing agreement-only fallback values; temporaries with live elements retain their normal read semantics. Ranked `leadsTo` decreases measures are a narrow exception: a path-sensitive preflight refuses only reached zero-slot reads whose fresh value would otherwise enter rank evaluation, retaining the base semantics error (`head() on zero-capacity sequence` or `cannot select from an empty finite domain`). Unreached conditional and short-circuited measure reads can now prove by ranking where the base reported a semantics error. The following general partial-operation measure probe (#1542, in the same release) also covers physical-slot measures, including capacity-zero push/pop and conditional-merge temporaries, so undefined reads are not used as rank values. BMC's rank fast path discharges nothing on either refusal.
+- Fixed (#1496): WASM CI retries each browser probe once only on timeout status
+  124, retaining attempt history in the step summary and never retrying parity
+  violations or other failures. Only the z3js spike's result-timer expiry now exits
+  124; FSL browser completion uses a 360-second wall-clock deadline with timestamped
+  phase diagnostics instead of a fixed poll count. Parity comparison and outcome
+  JSON contracts are unchanged.
+- Fixed (#1497): ledger warnings now use kind-specific summaries, translations and advice instead of treating every non-migration warning as vacuity. Deadlock, coverage and incomplete probes retain their distinct meanings; unknown kinds remain visible generic warnings. Existing vacuity and migration rows, raw evidence, assurance and exit behavior are preserved. Affected approvals report `drifted` for `rendering_changed` (exit 0) and require review and re-approval.
+- Fixed (#1501): the generated language reference keeps wrapped line-start issue
+  references such as `#1448` and `#1200` as paragraph text instead of turning them
+  into headings and dropping the hash. Only the heading separator rule changes:
+  one to six hashes require a space, tab, or end of line. The installed
+  Python-Markdown version's heading-body and closing-hash behavior, including
+  escaped hashes, is preserved; fenced code and already escaped paragraph hashes
+  are unchanged. Lines beginning with seven or more hashes now remain prose rather
+  than becoming h6 headings, matching CommonMark and GitHub.
+- Fixed (#1506): Reject overflowing causal analysis maximum-time sums with the
+  contributing claim's location instead of silently saturating. Timeline SCC-internal
+  sums only include components reachable from the intervention being evaluated.
+  This restriction does not apply to declared feedback cycle sums in graph or review analyses.
+  Representable results, output schemas, and source-check acceptance are unchanged.
+- Fixed (#1511): Make the #1475 chain regression expect native path separators while retaining full JSON equality, and gate the newline-filename approval regression to Unix because Windows rejects its fixture filename. Product output and Unix refusal coverage are unchanged.
+- Fixed (#1513): admit both selected Git diff spec roots and approval baselines,
+  with revision:path diagnostics and one complete legacy warning per selected slot,
+  including duplicates. Preserve pair-local refusal, old/live primary metadata,
+  approval signature/path/digest precedence and historical dependency/mapping scope.
+- Fixed (#1519): Symbolic verification retains every live element of full-push and literal sequence temporaries through supported conditional expressions and comparisons, while state assignments remain capacity bounded. Unchecked oversized frames and incomplete non-bound or ranked induction evidence are rejected; checked action-bound diagnostics keep actual attempted values, and genuine bounded leadsTo counterexamples are preserved. Initial values are not reconstructed from actions: symbolic projection fails closed when their elements are unrepresentable, whereas the default concrete pre-pass can report type_bound.
+- Fixed (#1520): explicit, Monitor and refinement now resolve static filtered and collection init forall domains for binder-key coverage. Current-key reads after writes are supported when selected keys cover the root; empty and state-dependent domains still cannot fabricate coverage. Check-time read-order rules are unchanged. Refinement now refuses nested fixed-target initialization that depends on an outer binder shadowing a same-named constant, previously incorrectly accepted as refines.
+- Fixed (#1531): Verification witness replay honors the run's implicit-bound selection, so selected range-property violations no longer become internal trace mismatches. Explicit verification fails closed with `model sequence length exceeds capacity` (exit 2, `semantics`) when a successor exceeds an unchecked Seq capacity, using BMC's error contract instead of returning `verified`, `proved`, `reachable_failed`, or a replay error. This includes successors that preserve an initial overflow; the initial frame itself is not screened by explicit at any depth, so without an over-capacity successor explicit can still return `proved` where BMC errors. A genuine violating successor may be reported first depending on exploration order: frontier state-value order, then action declaration order within one state. Existing replay APIs and scenarios, mutation, refinement, `fsl-bmc`, and Worker retain all-bounds behavior.
+- Fixed (#1541): Retain computed out-of-domain members added to bounded Sets and
+  relations through symbolic consumers, state transitions and counterexample
+  projection, exposing bound violations when storing the add result back instead
+  of false unbounded proofs.
+  Relation bounds now appear consistently in selection and proof/report inventories;
+  Public Kernel v1/v2 aggregate export retains candidates through collection let
+  aliases and shadowed bindings without changing JSON shapes. The existing
+  `--exclude-property` limitation for implicit bounds is unchanged.
+  Whole-collection assignment from a wider carrier remains unsupported by symbolic
+  BMC/induction (exit 2), as on base.
+  Relational init copies share complete introduced support, including copy chains,
+  conditions and relation pairs. Unchecked Set/relation roots compact only after
+  proving finite key support; optional closed-grid ranking preserves lasso search
+  when a Set/relation root bound is omitted. Other unselected scalar bounds are not
+  assumed by ranking. Static check and concrete init read-order policy are unchanged.
+- Fixed (#1542): native induction checks reached partial operations in `leadsTo`
+  `decreases` measures before using initial, successor or deadlock-side rank values.
+  A possibly undefined measure now produces an exit-2 semantics error naming the
+  operation instead of a fabricated rank value or proof. Short-circuit guards,
+  zero-slot Seq preflight errors and total-measure solver counts are preserved;
+  BMC falls back to its lasso search when ranking refuses the measure. The exit-2
+  refusal applies to the rank-proof phase; a real base-BMC counterexample remains
+  `violated` (exit 1) if its optional rank diagnosis is refused.
+- Fixed (#1543): concrete init evaluation failures now name the same containing
+  statement location as BMC, including assignment targets, if conditions, forall
+  sources and filters, and inner forall assignments. Explicit and auto no longer
+  lose the location of an out-of-domain init Map write.
+  CLI and Worker JSON messages for concrete init evaluation
+  failures append ` in init at L:C`, including shared Monitor/replay, scenarios,
+  and testgen init execution. Existing runtime message stems, error kinds, exit
+  codes, and JSON fields are preserved; no structured location is added and
+  unsatisfiable-init messages remain unchanged.
+- Fixed (#1548): nonconformant ledger implementation logs now add red conformance
+  findings. Aggregate assurance stays bounded when induction leaves a bounded leadsTo.
+  BMC early safety violations mark tagged reachables `not_run`.
+  Unranked leadsTo/reachable rows stay bounded under refinement failure over induction.
+  Migration: ledger/HTML rendering digests change for induction with an unranked leadsTo,
+  BMC early violations with tagged reachables, a nonconformant `--impl-log`, and
+  refinement failure (or an undecided implements seam) over induction. Existing approvals
+  report `drifted` (exit 0); review and re-approve affected artifacts.
+- Fixed (#1552): Requirements `rule` conditions now accept entity fields inside
+  `abs`, `min`, `max`, relation builtins such as `reachable`, indexes, field
+  accesses, method calls, `some(...)`, `Set`, `Seq` or struct literals, the operand
+  of `is`, quantifier filters or bodies, and aggregate filters or values. Names
+  bound by a quantifier or aggregate shadow entity fields within their scope.
+  Dynamic range bounds such as `exists x in 0..amount` remain rejected because
+  the bounds must be static.
+
+  The rule check now reads these conditions the way the event is lowered. A rule
+  previously accepted although its event could never occur, for example one that
+  reuses a field name as an `is` pattern inside a quantifier (#1561), is now
+  rejected with `rule_conflict_unsatisfiable_guard`.
+- Fixed (#1553): Make the #1475 chain regression expect layer-detail warning locations to carry the native path chain passes to check (`.\spec.fsl` on Windows), while the standalone check still expects its argument. Product output and Unix expectations are unchanged.
+- Fixed (#1556): A requirements `rule` condition that calls a `def` predicate or uses `stage(...)` of a typed entity parameter or binder, including `<process>.stage(x)`, is now checked as its expanded and lowered form instead of being rejected with `rule_conflict_unsatisfiable_guard`.
+- Fixed (#1558): the test-only #1417 preservation control no longer compares the
+  process-wide solver memory statistic; stable fields remain compared in full.
+- Fixed (#1563): compose regression scratch directories and matching test helpers
+  now include a random identity, avoiding collisions when process IDs are reused.
+- Fixed (#1568): Concrete explicit verification and replay now treat an empty relation as equal to `Set {}` in either operand order for direct comparisons, and in the direction `some(r) == some(Set {})` for Option-wrapped comparisons, including after removing its last pair. Negated equality and inequality no longer falsely accept an empty relation. Refinement maps using `Set {}` now produce canonical relation-typed abstract state instead of reporting `map_out_of_bounds`.
+- Fixed (#1569): A `stage(x)` inside a quantifier or aggregate whose binder is named
+  like the implicit entity parameter of a legacy transition, a next-edition event, or a
+  property now reads the binder rather than the outer instance. Legacy transitions
+  always use `c`; next-edition events and properties use, for example, `c` for `Claim`.
+  Previously this could hide violations in transition guards and `set` values, or
+  report spurious violations in `always ... has` properties. A process field named
+  `c` still leaves `stage(c)` referring to the transition's own entity instance.
+- Fixed (#1574): embedded AI component diagnostics now use original-document
+  coordinates across AI check, compatibility, replay, native check and shared
+  Worker checking. Nested locations and annotation byte spans are translated once;
+  standalone locations, parse errors, validity, error kinds and exits are preserved.
+- Fixed (#1575): the native language server publishes AI-project component errors
+  for undeclared authority tools, unknown hard rules and missing tools at their
+  whole-document UTF-16 positions, and clears them after valid edits. Validation
+  is shared with CLI/Worker checking without changing their error envelopes.
+- Fixed (#1580): induction resolves constants and bare enum members in `helpful`
+  arguments, including integer arithmetic, instead of refusing them as unknown names.
+  State-dependent arguments remain refused; `check` and BMC verdicts are unchanged; BMC may now skip lasso checks that the ranking discharges.
+- Fixed (#1584): the rule-conflict check's copy of a rule guard now renames binders named like generated entity field, relation-role or stage state maps before expanding predicates. The event's own guard already renamed these binders; matching that behavior avoids false rule-conflict rejections.
+- Fixed (#1586): the semantic mutation gate's final report schema check reuses
+  the initial manifest build instead of rebuilding cargo-mutants' differently
+  flagged dependencies. Report validation, the zero-mutant path, and fresh
+  per-run mutation build directories are preserved.
+- Fixed (#1587): Local expression binders that shadow state names no longer count as state reads
+  in frozen-state vacuity warnings, explain trace blame, or document undecided
+  requirement associations. This also prevents a spurious symbolic range-bound
+  error after explicit verification of nested aggregates with shadowed binders.
+- Fixed (#1591): The concrete boundary pre-pass checks only initial type bounds before exploring actions, without evaluating user invariants, so BMC and induction runs entering the pre-pass report an already out-of-bound initial state at step 0 with a one-state trace and no last action, matching explicit even at depth 0. The WASM Worker's verify shares this correction. An over-capacity Seq initial value at depth 0, or an invalid initial value whose first action overflows (including depths 1–2), now returns exit 1 / `violated` / `type_bound` instead of exit 2 / `semantics`. Every `--property` selection bypasses the pre-pass except selected-trans induction; `--exclude-property <user property>` alone keeps it and receives the step-0 correction. Dispatch conditions, supplied-initial-state and nondeterministic-init routes, and the no-actions semantics error are preserved; overflow after a valid initial state still reports the action step. Legacy empty-action-trace replay does not check initial bounds and is unchanged.
+- Fixed (#1595): `fslc refine` preserved progress resolves abstract Int/Bool constants in P/Q, binder domains,
+  supported nested filters and decreases, retaining local scope. Impl-constant binder
+  collisions and read abstract constant/state ambiguities are located type errors;
+  unused maps/otherwise legal locals stay admissible. Violations with an abstract constant bound
+  and renamed impl constant, or a body constant without an impl namesake, now give
+  exit 1 `progress_lost` instead of exit 2 errors. Refs #1595.
+- Fixed (#1596): dividing the minimum i64 value by `-1` or taking its remainder
+  now reports integer overflow instead of panicking in runtime evaluation and
+  constant folding; finite-domain evaluation defers the overflow like other
+  checked arithmetic. Init errors retain the containing statement location, and
+  zero-division behavior is unchanged, including totalized property contexts.
+- Fixed (#1597): BMC and induction report undefined init operations before bounds on init-assigned roots can hide them. An empty-sequence `pop()` flowing into a bounded scalar or sequence now reports `pop() on empty sequence` at its init statement instead of a type-bound violation or a negative model sequence length. Selected bounds on roots init never assigns remain assumptions of the init-definedness query, preventing out-of-type free inputs from inventing init errors. Assigned sequence roots are first queried within their represented capacity; failures found only without that capacity assumption return the unlocated refusal `model sequence length exceeds capacity`, rather than naming a potentially invented failing operation. This includes init that stores an over-capacity sequence and reads beyond its represented slots: it retains the base refusal for many such forms and changes the base step-0 `type_bound` verdict to that refusal for others. Ordinary representable init bound violations and action-definedness checks are unchanged.
+
+  The BMC/induction exception that prioritized a step-0 type-bound violation when init both assigned an out-of-type value and evaluated an undefined operation is removed. For example, `n: 0..1` with `init { n = 5 t = 1 / 0 }` now returns exit 2 / `error` / `semantics` with the located init division-by-zero message, rather than exit 1 / `violated` / `type_bound` for `_bounds_n`. A defined out-of-type assignment alone still returns the step-0 type-bound violation.
+- Fixed (#1598): selected induction now establishes every implicit bound assumed by its step in
+  the base case, even with `--property P`. This intentionally changes these verdicts:
+
+  - Exit 0 false `proved` / `unbounded` → exit 1 `violated` / `type_bound`, naming
+    the failing `_bounds_*`.
+  - Exit 2 `error` / `kind: "semantics"` for an overflowing Seq frame → exit 1
+    `violated` / `type_bound` (step 0 for deterministic initial overflow).
+  - The shared base also changes `sweep --engine induction --property P` from
+    exit 0 `sweep_passed` to exit 1 `sweep_failed` (with `v: 0..3` initialized to
+    5 and `--depth 2..3`, it reports `_bounds_v`@0), and `verify --lemma` targets from exit 0 `proved` to exit 1
+    `violated` / `type_bound`.
+  - `unknown_cti` or `violated P` at the same or a later step → `violated _bounds_*`
+    at the first failing base step. Same-step examples: `n: 0..1`, init 0,
+    increment, `P { n <= 1 }` at depth 2 changes `P`@2 to `_bounds_n`@2; a Set
+    initial copy with `K = 0..1`, `init { x = 2 t = Set { x } s = t }`,
+    `P { not s.contains(2) }` changes `P`@0 to `_bounds_s`@0 (both remain exit 1
+    `violated`, now `type_bound`).
+
+  Sibling user invariants stay unselected; standalone BMC/explicit selection is
+  unchanged.
+- Fixed (#1599): use one core declaration merge for refinement typechecking, concrete evaluation
+  and preserved-progress verification. Pulled-model safety violations now fail
+  closed with a non-solver semantics error (exit 2), naming the property and pulled
+  model without a trace, instead of being discarded as successful refinement.
+- Fixed (#1603): invalid written next-edition rule-property names, including `__`
+  and literal names such as `none:`, now report `kind: "name"` instead of
+  `kind: "semantics"` and include structured `loc` at the statement's start, not
+  the label. Exit 2, `diagnostic_code: "invalid_rule_property_name"`, and the
+  diagnostic wording are unchanged. When checking a file, the message suffix
+  changes from `at L:C` to `at <source-file>:L:C`, like other located name errors.
+- Fixed (#1607): BMC and induction name the first reached concrete failure inside
+  quantified and aggregate init expressions, matching explicit and auto. Diagnostics
+  respect candidate membership, filters, quantifier short-circuiting, and each
+  running sum's overflow while preserving the containing init statement's location.
+  Symbolic CLI and Worker JSON messages for binder init failures
+  replace `undefined evaluation` and `integer overflow in sum or undefined summand`
+  with the concrete source, filter, body, or summand failure, or `integer overflow
+  in sum` for accumulation overflow. Runtime messages, the ` in init at L:C` suffix,
+  error kinds, exit codes, and JSON fields are unchanged.
+- Fixed (#1615): Keep merge-group Rust caches restore-only alongside pull requests,
+  while retaining push, scheduled and manual cache saves. Attribute known and generic
+  Rust caches on merge-queue refs in the cache-budget audit without duplicate findings
+  or changing the physical-budget threshold.
+- Fixed (#1622, #1577): pattern payloads now stay within their true continuation
+  in symbolic verification and concrete Monitor/solver-free BFS evaluation,
+  including raw/expected-type conditionals, guards and composed initializers.
+  Closed expressions restore outer values and declared binding types; legal
+  conjunctive requires flow and all existing source collision refusals remain.
+  Diagnostic evidence retains successful payload matches actually reached in selected
+  candidate filters and closed bodies, including non-exporting children, eager
+  arguments, optimized indices and nonquantified fallback, in both top-level and
+  blame witnesses. Evidence never supplies identifier lookup; skipped children,
+  other candidates and nested binder-local captures remain excluded. Original
+  binder values and first-observed keys retain their diagnostic identity.
+- Fixed (#1628): Non-Seq induction bases skip the redundant concrete boundary
+  search only after symbolic BMC verifies every assumed bound. Seq evidence and
+  non-success priority are preserved; the depth-20 collection deadline is unchanged.
+- Fixed (#1644): the explicit-first unreadable-catalog mutate test now expects the platform's own I/O error text so it also passes on Windows; product output and Unix expectations are unchanged.
+- Fixed (#1649): cross-platform chain acceptance evidence: expected manifest-relative
+  paths now use the platform path join, including dependency warnings and missing
+  input diagnostics. Complete output and topology comparisons remain exact;
+  native command behavior is unchanged.
+- Fixed (#1652): native error-envelope parity tests now require complete check/verify version metadata independently of cache settings, while preserving its absence on specialized commands. Missing, corrupted and unexpected metadata remain rejecting controls; CLI output is unchanged.
+- Fixed (#1654): specialized preflight tests now validate complete native version metadata consistently with cache enabled or disabled.
+- Fixed (#1657): removed a Clippy warning in name display without changing prose or alias output.
+- Fixed (#1670): keep bool-closure repeat comparisons exact except for validated native-Z3 memory
+  allocation telemetry on the observed queried BMC bounded proof route. Add
+  test-only accepting and rejecting comparator controls; product semantics are
+  unchanged.
+- Fixed (#1674): make Windows test fixtures portable by preserving LF bytes in the edition test's
+  scratch Git repository and using numeric case labels instead of FSL types and
+  expressions in recursive-context fixture paths. FSL inputs and expected results
+  are unchanged.
+- Fixed (#1675): escape external requirement intent, undecided reasons, approval display fields
+  and paths at their Markdown context boundaries; contain quoted lines and ledger
+  CR/LF/HTML data without rewriting generated markers or semantic claims. Benign
+  Unicode output and glossary formatting are preserved. Affected old documents
+  and approvals require regeneration/review; digests always bind actual new bytes.
+  The requirements overview now also contains repeated rule intent, authored
+  rule/decision comments and accepted CR description data; validated source
+  glossary aliases and Mermaid diagram bytes are unchanged.
+  Mixed HTML-code fallback values now preserve literal Markdown punctuation, and
+  ledger producer results and external finding summaries escape their free inputs
+  without rewriting generated syntax or raw evidence. Marker-like first inline
+  evidence results remain accepted; subsequent malformed marker lines retain the
+  legacy refusal in their actual generated list-row context.
+  Literal display also contains GFM strikethrough/autolinks and quoted ordered
+  list prefixes. Evidence-source rows retain their original raw-row ordering and
+  multiplicity for both marker validation and escaped display.
+  Email display also contains underscored domain labels; deeply indented quoted
+  intent uses the whole raw line's literal code context, while shallow whitespace
+  and the benign single-tab form retain their existing display bytes.
+  Deep quoted backtick code preserves raw boundary ASCII spaces with one guard at
+  each edge when needed, without padding all-space lines or changing other code slots.
+- Fixed (#1678, refs #1281): a `fslc mutate` progress line now reads `engine=secondary, oracle=<route>` when the main oracle was clean and a later check (requirements, implements, or the init-bounds override) decided the mutant's `killed`, `inconclusive`, or `error` status. It used to show only the route, for example `killed acceptance (engine=explicit)`, which read as if explicit had produced that status. Main-oracle lines are unchanged. Stderr only; stdout is unchanged.
+- Fixed (#1693, refs #1480): a range admission test no longer pins Linux's wording of a missing-file error, which failed the Windows native Z3 job on `main`. No product behavior changes.
+- Fixed (#1698): `rust tests` shards ran out of disk while linking test binaries on some
+  hosted runners, which failed the merge queue. Each shard now removes the
+  preinstalled Android, .NET and GHCup toolchains before it builds, and prints free
+  space before and after the removal and at the end of the job. Tests, Cargo profiles
+  and cache keys are unchanged.
+- Fixed (#1699): a `sweep` test no longer names its cache directory from the process id and the clock alone, which collided on Windows, where tests run in parallel and the clock is coarse. No product behavior changes.
+- Fixed (#1702): the WASM browser test's #1467 recursive repeat comparisons no longer
+  compare Z3's ambient allocator footprint (`cost.solver.memory_mb`), which
+  differed by 0.01 MB between identical native runs and failed the merge queue
+  with `parity_violation`. Each repeat packet must still report a present, finite,
+  positive value; every other field, including conflicts, decisions and
+  propagations, stays exact, and the cross-runtime comparison is unchanged. No
+  product behavior changes.
+- Fixed (#1712): tests that named temporary specs and directories from a label, the process id and the clock now also add a per-binary counter. Two tests with the same label, such as the bmc and induction tests of one #1481 cell, could build the same path when the clock read the same value, which happens on macOS, where the clock has microsecond resolution; one test's cleanup then deleted the other's file. No product behavior changes.
+- Fixed (#1730): the VS Code extension highlights FSL 5. Its TextMate grammar had not changed since #1377 and knew none of the FSL 5 requirements keywords. It now highlights the `fsl 4` / `fsl 5` header line, and after an `fsl 5` header every active keyword of `rust/fsl-syntax/src/keywords.rs` in English (a multi-word keyword such as `only when` or `belongs to` as one phrase) and in Japanese, the particles が・を・に・で・は, and the FSL 5 declaration heads with their names (`event`, `rule`, `decide`, `scenario`, `出来事`, `規則`, `決定表`, ...). A Japanese keyword or particle is highlighted only as a whole word, never inside a name such as `支払件数`. Headerless and `fsl 4` documents are tokenized exactly as before. A new test, `rust/fsl-syntax/tests/vscode_grammar_keywords.rs`, fails when the grammar misses an active keyword or particle of the table or keeps one the table no longer has.
+- Fixed (#1731): `install.sh` no longer keeps the copy of a skill it replaces
+  inside `~/.claude/skills/`. Claude Code loads every directory there as a
+  skill, so a backup named `<name>.pre-native-v3` was offered next to the live
+  skill as a second, stale copy. A replaced copy now goes to
+  `<data>/skill-backups/claude/<name>-<UTC time>` under the FSL data directory,
+  and the installer prints the path. On its next run with skills enabled, the
+  installer moves each `fsl*.pre-native-v3` that an earlier version left in
+  `~/.claude/skills/` into the same backup directory, unchanged and under the
+  same name, and prints each move. It removes nothing, and it stops before
+  linking anything when a backup path already exists. The README describes the
+  backup location. Its uninstall command now honours `FSL_DATA_DIR`,
+  `FSL_INSTALL_DIR`, `XDG_DATA_HOME` and `FSL_BIN_DIR`. It does nothing unless
+  the data directory holds a `current` link and a `releases` directory. It removes
+  a command or skill link only when the link points into that directory, then
+  removes `current` and `releases`, and keeps `skill-backups/`. It used to delete
+  a skill link another tool placed, and a real directory under a skill name, both
+  of which the installer itself leaves alone. The README's macOS
+  `xattr -d com.apple.quarantine` step no longer fails when the file has no such
+  attribute.
+- Fixed (#1734): `fslc lint --edition current` and `fslc migrate --edition current` follow the document's edition header, as `check`, `verify`, `domain check` and `fmt` already did. They read `current` as an explicit `4`, so an `fsl 5` document was refused with `edition_conflict` and the message "the document declares 'fsl 5' but --edition 4 was requested", although the user had typed `current` and the upgrade guide recommends it. `current` on a headerless document still reads it as FSL 4 (for `migrate`, instead of its next-edition default), and the explicit conflicts are unchanged: `--edition 4` on an `fsl 5` document, and `--edition 5` or `next` on an `fsl 4` document, remain `edition_conflict`.
+- Fixed (#1735): `fslc migrate --write` no longer rewrites a read-only input.
+  Since `migrate` was added (3.0.0; observed on 4.12.0), it replaced a changed
+  mode-0444 file through a sibling temporary file and a rename, reported
+  `"written": true` and exited 0, leaving the new bytes read-only. It now refuses
+  such an input with the same `io` error as a read-only `-o` target (#1419):
+  `output target is read-only`, exit 2. The check runs over the whole write set
+  before any temporary file is prepared, so one read-only input leaves every input
+  unchanged; a temporary file prepared for an earlier input is also removed when a
+  later input's temporary file cannot be created. Writable inputs are rewritten
+  as before, keeping their permission bits.
+- Fixed (#1736): `fslc refine` with `preserve progress` is fast again. Since #1467 the symbolic evaluator types every equality, conditional, `let` and collection binder against the model, and each of those calls rebuilt the model's whole type environment (every state root, constant and enum member). The environment is now built once and reused while the model's state, constants and types are unchanged, so every inferred type is the one the rebuilt environment gave. On one machine `refine` of `examples/multi_agent_system` design → requirements at `--depth 8` went from 6.60 s back to 5.02 s (4.58 s in v4.12.0).
+- Fixed (#1737): native artifact output refuses a destination that is the same file as an input
+  the command reads, before anything is written: `fslc html s.fsl -o s.fsl` no
+  longer replaces the spec with the report. The spec, imported files and file
+  options such as `--evidence`, `--glossary`, `--approval` and `--artifact`
+  count, compared by file identity, so `./s.fsl`, a symlink and a hard link to
+  the input are refused too. The refusal is a `kind: "io"` error with exit 2, in
+  the envelope of the existing non-regular-target refusals; it covers `html`,
+  `ledger`, `testgen`, `counterexample export`, `document generate`/`claims`,
+  `db import`, `domain expand`/`generate`/`testgen`, `approval create` and
+  `causal observe-expectations`.
+- Fixed (#1739): the VS Code extension `.vsix` no longer ships a vulnerable
+  `brace-expansion`. The `editors/vscode` lockfile is refreshed with
+  `npm audit fix` (no `--force`, no direct-dependency or `package.json`
+  change): the runtime `vscode-languageclient` -> `minimatch@5.1.9` ->
+  `brace-expansion` moves from 2.1.1 to 2.1.7, clearing its six high
+  denial-of-service advisories, and the build-only toolchain under
+  `@vscode/vsce` and `@azure/identity` takes in-range updates of `undici`,
+  `fast-uri`, `js-yaml`, `markdown-it`, `@azure/msal-node` and `qs`.
+  `npm audit --omit=dev` now reports no advisory; the full audit drops from
+  11 (7 high, 4 moderate) to 3 moderate, all in `glob`/`minimatch` under the
+  build-only `@vscode/vsce@3.9.2`, whose fixed versions lie outside that
+  release's dependency ranges. The packaged `.vsix` keeps the same 210 files;
+  only the three `brace-expansion` files change.
+- Fixed (#1753): `fslc document generate`, `document claims` and
+  `approval create --kind requirements_document` refuse an `-o` destination that
+  is the abstraction a requirements document names in `implements ... from`, also
+  through `./`, a symlink or a hard link, although they never read that file:
+  `document claims req.fsl -o abs.fsl` no longer replaces the abstract spec with
+  the claims JSON. The refusal is the #1737 `kind: "io"` error with exit 2,
+  before anything is written.
+- Fixed (#1755): `fslc migrate --write` keeps a document's line endings and byte
+  order mark. On a CRLF document, the lines it inserted or rewrote ended in LF
+  while the other lines kept CRLF, and a document the formatter rewrote (string
+  metadata, inline maps, domain enums, colon quantifiers) came back LF-only
+  without its UTF-8 byte order mark. Every line of the written document now ends
+  as the input's first line does (CRLF or LF), the mark is kept exactly when the
+  input has one, and the dry run's replacement holds the same bytes. LF inputs
+  are written as before. `fslc fmt` is unchanged: it still prints LF without the
+  mark.
+- Fixed (#1756): `fslc --help` and the `root.help` string of `cli-contract.json` list `testplan` and `counterexample`, which already worked and were in `root.commands`. A bare `fslc` reports the root usage line, which names every top-level command, instead of `usage: fslc <check|verify> SPEC [options]`; it stays a `kind: "usage"` envelope on stdout with exit 2. `fslc help [COMMAND [SUBCOMMAND]]` prints the same help as `fslc [COMMAND ...] --help` with exit 0, where 4.12 reported `unknown command 'help'`; a word after `help` that names no command is the usual unknown-command usage error. A bare `fslc document` names `check`, and a bare `fslc domain` names `replay` and `testgen`. A conformance test now derives every root and family command list, and each bare usage line, from `cli-contract.json`, so a command missing from one fails it.
+- Fixed (#1757): `fslc lint`, `fslc migrate` and `fslc fmt --check` publish the edition a document was read in, as `check`, `verify` and `domain check` already did, instead of the requested `--edition`. An `fsl 5` document linted without `--edition` reported `"edition": "current"`, `migrate --edition current` on it said `current`, and `migrate` on an `fsl 4` document said `next`; they now report `next`, `next` and `current`, and add `"fsl_edition": 4` or `5` when the document has a header. Over several documents `edition` is `next` only when every one was read in the next edition, and `fsl_edition` appears only when every one declares the same header. These reports still always carry `edition`, so a headerless document reports what 4.12 did. An `edition_conflict` message quotes `--edition` as typed: `--edition next was requested`, where it said `--edition 5`. Exit codes and verdicts are unchanged.
+- Fixed (#1764): the `migrate` multi-file refusal test now reaches the refusal.
+  Its "safe" input failed `check`, so `migrate` exited 2 before planning the
+  refused input and the test passed for the wrong reason. The safe input now
+  checks and is rewritten when migrated alone; the test asserts the
+  `migration_refused` result, the refused file's `unsupported_double_ampersand`
+  finding and `written: false`, and fails when the all-or-nothing guard is
+  removed. Test-only; `migrate` behavior is unchanged.
+- Fixed (#1792): the workspace's own tests compile again on Rust 1.88, the
+  declared minimum `rust-version`. A test helper used an `if let` match guard,
+  which 1.88 rejects, so the release workflow's MSRV test step failed before it
+  built any native binary. Test-only; the shipped binaries are unchanged.
+- Fixed (#1794): the `fsl-lsp` stdio tests pass on Windows. Two tests built or
+  expected Unix-only file URIs: `file://C:\...` is normalized by the server, so
+  nine `issue_1517` cases waited out their 120 s deadline, and a drive-less
+  `file:///tmp/...` has no Windows path. The release workflow's Windows MSRV test
+  step failed on them. Test-only; the server is unchanged.
+- Fixed (#1798): in an FSL 5 `requirements` document, a field name in a
+  `concept` condition is the stored entity field in every expression form. Inside
+  `abs(...)`, `min`/`max`, a method call such as `.contains(...)`, an `is`
+  pattern test, a quantifier, or `count`/`sum`, the name used to read the event
+  input of the same name, so an `only for <Concept>` guard, and a decision-table
+  row naming the concept, admitted an event the concept excludes. `check`, BMC
+  and induction then accepted such a spec wrongly; they now refuse it (for
+  example a scenario that relies on the excluded event fails with
+  `kind: "acceptance"`, exit 2). A quantifier or aggregate binder named like a
+  field still shadows the field inside its scope. One shared resolver with no
+  catch-all now spells fields for concepts, decision tables and event
+  expressions, so a new expression form cannot skip resolution.
+- Fixed (#1799): in an FSL 5 `requirements` document, two `only after` rules
+  whose prerequisite events joined to one history field name (the events
+  `{a, b}` and a single event named `a_or_b` both gave `did_a_or_b`) shared
+  that field, so one rule's prerequisite satisfied the other: a scenario that
+  skipped the required event was `ok`, `verified` and `proved`, and a valid
+  order could be refused. Each prerequisite event set now has its own field;
+  sets whose names collide get numbered fields (`did_a_or_b_1`,
+  `did_a_or_b_2`) independent of rule order. Field names of documents without
+  such a collision are unchanged.
+- Replaced (#251): Inline branch maps in the public return example with explicit
+  fair actions and local `implements` correspondences. The public refinement
+  correspondences intentionally change from `submit.b1` / `submit.b2` to
+  `submit_small` / `submit_large` as a result of canonicalizing the example,
+  without changing its guards, effects, fairness or typed requirement metadata.
+- Required (#251): Preserve legacy return-branch and generated-name regression
+  evidence in dedicated fixtures so those controls keep running when the public
+  return example is canonicalized.
+- Required (#1466): run all three native-CLI Python test modules in the required
+  Rust workspace CI job, and reject stale generated injection matrices. Remove
+  the repaired quantified-vacuity gap expectations and preserve failing ledger
+  exit codes in the native behavior tests.
+- Required (#1542): Pin undefined successor decreases measures when both the
+  leadsTo trigger and goal become false, and when a non-helpful action leaves a
+  helpful obligation pending. Native CLI regression cells require induction to
+  refuse undefined rank evidence and preserve BMC and explicit-engine verdicts.
+- Unified (#1170): in `fslc`'s `main.rs`, `causal.rs`, `refinement.rs`, and
+  `verification.rs`, a pair of `error_output(..)` or `io_error_output(..)`
+  with a hand-written `2` or `3` that equals the `Verdict` table's code now
+  takes its exit from `fslc_rust::outcome::error_exit` (266 sites). Other
+  shapes keep their literal: a bare `(output, 2)`, pairs built from
+  `surface_parse_error_output` or `semantic_error_output`, `process::exit`,
+  `"exit_code"` fields, and `run_document_claims`' `internal` error with 2.
+  The #1170 ratchet counts what is left (`main.rs` 170, `verification.rs` 29,
+  `causal.rs` 14, `refinement.rs` 3, and the other files' literals). `chain`
+  builds its nested error details through the `cli_output.rs` envelope owner
+  and its layer input-error records through `chain_step_input_error`; its
+  failed refine-run and `[impl]` command records are unchanged. Command
+  output, error `kind`s, messages, and exit codes are unchanged.
+- Sharded (#1532): Split Windows native-Z3 tests into long-poles and rest shards without narrowing tests,
+  check the skip names against the live test list, and preserve the existing check name
+  with an aggregator that requires shard success.
+- Sharded (#1562): the test-only compose binding matrix and glossary output checks
+  now run independent CLI observations concurrently while preserving coverage and report order.
+- Sharded (#1582): the collection binder matrix now runs independent cells
+  concurrently while preserving all 349 cells, per-cell checks, and report order.
+  Elapsed time remains diagnostic rather than a runner-dependent pass/fail budget.
+- Documented (#251): Move the cancellation example's four action correspondences
+  into its local `implements` block while preserving its checked Kernel and typed
+  requirement metadata. `docs/design/DESIGN-migration.md` records the manually
+  applied edits and that whole-file `fmt --check --edition next` still exits 1,
+  as it does for the original example.
+- Documented (#1335): `LANGUAGE.md`, `LANGUAGE.ja.md`, the `fsl` skill's
+  `syntax.md` and `DESIGN-def.md` now record the 5.0.0 compose `def` change as
+  a breaking removal. `fslc` 4.12.0 `check` accepted, with exit 0, an unused
+  compose-level `def` with a repeated definition or parameter name, direct or
+  mutual recursion, or a call in its body to an undefined predicate or with the
+  wrong arity; 5.0.0 rejects each with exit 2 and the direct-spec error. The
+  4.12 to 5.0 table of refused forms gains a row, and `DESIGN-def.md` records the
+  measured transitions. A new regression test in
+  `issue_1335_compose_predicate_expansion.rs` covers the forms that existing
+  tests did not.
+- Documented (#1347): a requirements transition's `by X` is a free label.
+  The requirements layer has no `actor` declaration and `check` does not look
+  the name up, unlike `business`, which rejects a transition whose actor is not
+  declared. The label is compared with the business actor only when a
+  refinement auto-maps the transition to the same-named business action (via
+  `maps auto`, or via the inline `implements` seam's implicit auto-mapping of a
+  transition no explicit inline `action` item names) and that refinement is
+  evaluated; a `verify` scoped with `--property` does not evaluate the inline
+  seam, and `fslc diff` without a mapping builds its own `maps auto`
+  refinement. A transition mapped by an explicit `action` item, or one the
+  inline seam maps to `stutter` (no same-named business action), is not
+  compared. `docs/manual/LANGUAGE.md` and `docs/manual/LANGUAGE.ja.md` §13.2,
+  `skills/fsl/references/layers.md`, and `skills/fsl-requirements/SKILL.md` say
+  so; behavior is unchanged.
+- Documented (#1432): documented and pinned the existing canonical JSON rules for
+  causal evidence digests, including UTF-8 key order, exact integers, serde_json
+  float formatting, and string escapes. Serialization and stored digests are
+  unchanged; RFC 8785/JCS conformance remains a separate follow-up (#1526).
+- Documented (#1437): the published `fsl 5` edition. `docs/manual/LANGUAGE.md` and `LANGUAGE.ja.md` now describe a document headed `fsl 5`, paired English/Japanese. They cover the requirements forms with their English and Japanese keywords: entities, lifecycles, events, all rule forms, decision tables, glossaries and contextual Japanese keywords, relations, resources, projections, goals, policies and scenarios.
+
+  The edition guide states that only the header selects the syntax, while `--edition` (`current` / `next`, or `4` / `5`) selects the edition policy. On a headerless document, `--edition 5` still parses FSL 4 and only applies the next edition's findings. The guide also records how JSON reports the edition (`"edition": "next"`, `"fsl_edition"`).
+
+  The FSL 4 to FSL 5 migration guide covers `fslc migrate --edition 5`, its findings including `derived_terminal_added`, and `migrate_manual_required`. It also states that `causal`, `agent` and other AI-dialect declarations, `refinement` and `compose` documents are not offered a header.
+
+  New sections record the FSL 5 refusals of repeated step inputs (#1682), actors and requirement-ID owners (#1705), and `concept` (#1686). The `verify` blame note now states that `violating_bindings` names the outermost quantifier only. The FSL 4 reference is retained, and the README routes to the new sections. The site renderer keeps checked FSL examples in code blocks and the prose that follows outside them.
+- Documented (#1440): `docs/manual/LANGUAGE.md` and `LANGUAGE.ja.md` gain
+  "Upgrading fslc from 4.12 to 5.0", for anyone moving the binary from 4.12
+  whether or not they adopt FSL 5. It lists the forms 5.0.0 refuses that 4.12
+  accepted, headerless documents included, with what `check` or `refine` reports
+  and the repair, and the CLI, JSON and exit-code changes with what to search for
+  and change. The edition guide no longer implies that a headerless document
+  keeps every 4.12 result. The breaking removals #1256, #1452 and #1595 are now
+  recorded with their issue numbers in both language references,
+  `skills/fsl/references/syntax.md` and their design notes; #1452 is measured
+  against pre-release builds, since 4.12 refused every `fsl 5` child. Breaking
+  fragments in `changelog.d/` use one of two labels:
+  `<Category> (#N, breaking removal):` for a form that was accepted and is now refused, and
+  `<Category> (#N, breaking):` for other breaking changes such as CLI, JSON,
+  exit-code, record-format or Rust API changes; and
+  `docs/release-notes/v5.0.0.md` summarizes the release for a 4.12 user.
+
+  The guide also corrects its 4.12 column:
+  plain `fslc migrate` already targeted `next` in 4.12 but planned nothing for a
+  headerless document, and 4.12 already refused some foreign options, such as
+  `explain --engine`, while it ignored others, such as `version --depth`. The
+  guide now says that a 4.12 ledger, HTML or scenarios approval whose artifact
+  5.0 renders differently reports `drifted` with `rendering_changed` and needs
+  re-approval, with counts over the repository's `examples/` and `specs/`, and
+  that `renderer_changed` is not reported for a 4.x record. The FSL 4 to FSL 5
+  migration guidance says how to answer the `never_rule_without_forbidden`
+  warning a converted process form can add: add a `forbidden … then rejected`
+  trace for each guarded rule.
+- Documented (#1483): helpful arguments are type-checked against action parameters
+  by #1527; state independence remains an induction-only restriction, not a check
+  or BMC restriction. Both language references and the induction design record agree.
+- Documented (#1624): native `verify --property` and `sweep --property` help
+  now state that induction still checks every implicit type bound in its base
+  case. The English, Japanese, and skill verify synopses match; verdicts,
+  exit codes, and assurance are unchanged.
+- Documented (#1630): distinguish user-property selection from induction's
+  implicit type-bound base checks in the FSL command reference, and mark the v1
+  property-selector description as historical with a link to the current contract.
+- Documented (#1766): `examples/fsl5/` ships the first `fsl 5`-headed examples: one
+  leave-request requirements model written with the English spellings
+  (`leave_request.en.fsl`) and with the Japanese keywords, particles and glossary
+  aliases (`leave_request.ja.fsl`). Both check, lint with no finding, verify to
+  depth 8 and prove their invariants by induction; their Kernel JSON is identical
+  apart from source locations and the quoted requirement texts. LANGUAGE.md,
+  LANGUAGE.ja.md, the README tree and the site's examples pages link them.
+  The corpus tests that assumed every corpus document is headerless now read a
+  headed document in its own edition: `edition_header.rs` copies it unchanged
+  instead of adding a second header, and the LSP corpus test expects the next
+  lexicon for an `fsl 5` document. `formatter_cli.rs` formats each corpus document
+  only under the edition policies `fslc fmt` accepts for it, so an `fsl 5`
+  document is no longer formatted under the `fsl 4` policy its header refuses.
+- Decided (#1612): Adopt the main merge queue with squash merging and zero required
+  approvals so a single maintainer can enqueue. Record the live queue rule in the
+  CI contract and fixture, retain full pull-request evidence with
+  `FSL_MERGE_QUEUE_CI` unset, reserve any remaining administrator queue bypass for
+  emergencies, and record merge-group cache saves as a known open risk (#1615).
+
 ## [4.12.0] - 2026-10-17
 
 - Changed (#1263): a `proved` result from `fslc verify --engine induction` now
@@ -7548,7 +10376,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v4.12.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v5.0.0...HEAD
+[5.0.0]: https://github.com/ymm-oss/fsl/compare/v4.12.0...v5.0.0
 [4.12.0]: https://github.com/ymm-oss/fsl/compare/v4.11.0...v4.12.0
 [4.11.0]: https://github.com/ymm-oss/fsl/compare/v4.10.0...v4.11.0
 [4.10.0]: https://github.com/ymm-oss/fsl/compare/v4.9.0...v4.10.0

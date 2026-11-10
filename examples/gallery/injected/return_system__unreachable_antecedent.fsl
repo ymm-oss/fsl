@@ -1,4 +1,4 @@
-// base: examples/layers/return_system.fsl
+// base: rust/fslc/tests/fixtures/legacy_return_branches.fsl
 // inject: unreachable-antecedent
 // expect-detector: vacuity
 // expect-signal: vacuous_implication:ImpossibleNewPaid

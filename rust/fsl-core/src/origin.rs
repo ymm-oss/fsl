@@ -67,9 +67,23 @@ impl OriginChain {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct OriginRegistry {
     bindings: BTreeMap<String, Vec<OriginChain>>,
+    // Source actors are independent of requirement annotations and dialect.
+    action_actors: BTreeMap<String, Option<String>>,
 }
 
 impl OriginRegistry {
+    pub(crate) fn discard_component_check_targets(&mut self) {
+        self.bindings
+            .retain(|target, _| !is_component_check_target(target));
+    }
+    pub(crate) fn bind_action_actor(&mut self, name: &str, actor: Option<String>) {
+        self.action_actors.insert(action_target(name), actor);
+    }
+
+    pub(crate) fn action_actor(&self, name: &str) -> Option<&Option<String>> {
+        self.action_actors.get(&action_target(name))
+    }
+
     pub fn bind(&mut self, target: impl Into<String>, origin: OriginChain) {
         let origins = self.bindings.entry(target.into()).or_default();
         if !origins.contains(&origin) {
@@ -112,6 +126,13 @@ impl OriginRegistry {
             .iter()
             .map(|(target, origins)| (target.as_str(), origins.as_slice()))
     }
+}
+
+pub(crate) fn actor_from_metadata(meta: Option<&MetaTag>) -> Option<&str> {
+    meta.and_then(|tag| tag.text.as_deref())
+        .and_then(|text| text.strip_prefix("by "))
+        .map(str::trim)
+        .filter(|actor| !actor.is_empty())
 }
 
 /// Requirement relations are intentionally separate from declaration/source
@@ -163,6 +184,14 @@ pub fn init_statement_target(index: usize) -> String {
     format!("init:{index}")
 }
 
+pub(crate) fn component_check_target(target: &str) -> String {
+    format!("component-check:{target}")
+}
+
+pub(crate) fn is_component_check_target(target: &str) -> bool {
+    target.starts_with("component-check:")
+}
+
 #[must_use]
 pub fn action_target(name: &str) -> String {
     format!("action:{name}")
@@ -176,6 +205,10 @@ pub fn action_guard_target(name: &str, index: usize) -> String {
 #[must_use]
 pub fn action_statement_target(name: &str, index: usize) -> String {
     format!("action:{name}:statement:{index}")
+}
+
+pub(crate) fn action_ensure_target(name: &str, index: usize) -> String {
+    format!("action:{name}:ensure:{index}")
 }
 
 #[must_use]

@@ -53,9 +53,9 @@ impl DocumentCheckReport {
     }
 }
 
-/// A failure the artifact's own frontmatter caused, severe enough that no
-/// structural comparison is meaningful — the equivalent of a parse/schema
-/// error, not a drift finding (`fslc document check` exits 2, not 1).
+/// A failure in the artifact's frontmatter or the fresh rendering, severe
+/// enough that no structural comparison is meaningful — the equivalent of a
+/// parse/schema error, not a drift finding (`fslc document check` exits 2, not 1).
 pub enum CheckError {
     Marker(MarkerIssue),
     UnsupportedSchema(String),
@@ -92,13 +92,8 @@ impl std::fmt::Display for CheckError {
 /// line, a marker-like line inside a slot) is not an error here — it comes
 /// back as a `marker_malformed` [`DriftReason`], since the artifact is still
 /// a recognizable generated document, just internally inconsistent.
-///
-/// # Panics
-///
-/// Panics if `fresh_markdown` (the caller's own fresh
-/// `render_requirements_document` output for the same locale) does not
-/// parse as a well-formed generated document — that would be this crate's
-/// own renderer producing an artifact its own parser rejects.
+/// Malformed fresh frontmatter or body also returns [`CheckError::Marker`];
+/// fresh rendering failures are not artifact drift.
 #[allow(clippy::too_many_lines)]
 pub fn check_requirements_document(
     artifact_text: &str,
@@ -120,8 +115,10 @@ pub fn check_requirements_document(
     let mut reasons = Vec::new();
 
     let (fresh_frontmatter, fresh_consumed) =
-        parse_frontmatter(fresh_markdown).expect("this build's own render always has frontmatter");
-    debug_assert_eq!(fresh_frontmatter.schema, DOCUMENT_SCHEMA);
+        parse_frontmatter(fresh_markdown).map_err(CheckError::Marker)?;
+    if fresh_frontmatter.schema != DOCUMENT_SCHEMA {
+        return Err(CheckError::UnsupportedSchema(fresh_frontmatter.schema));
+    }
 
     let renderer_changed = frontmatter.renderer != DOCUMENT_RENDERER
         || frontmatter.renderer_version != DOCUMENT_RENDERER_VERSION;
@@ -215,7 +212,7 @@ pub fn check_requirements_document(
         }
     };
     let fresh_segments = parse_body(fresh_markdown.get(fresh_consumed..).unwrap_or(""))
-        .expect("this build's own render always has well-formed markers");
+        .map_err(CheckError::Marker)?;
 
     check_claims(
         &artifact_segments,

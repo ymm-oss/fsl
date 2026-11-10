@@ -9,12 +9,20 @@ use serde_json::json;
 use fsl_syntax::{
     ActionItem, ActionTarget, AggregateKind, Annotation, Annotations, Binder, BusinessGoalBody,
     BusinessItem, BusinessPolicyBody, Expr, GovernanceArtifactRef, GovernanceDelegateItem,
-    GovernanceItem, LValue, MapsClause, MetaTag, Param, PreservationItem, ProcessField,
-    ProcessItem, ProcessTransition, QualifiedName, RequirementAction, RequirementActionItem,
-    RequirementBlockItem, RequirementsItem, SpecItem, StateField, Statement, SurfaceBusiness,
-    SurfaceDocument, SurfaceGovernance, SurfaceRequirements, SurfaceSpec, TimeItem, TypeExpr,
-    VerifyItem,
+    GovernanceItem, LValue, MapsClause, MetaTag, Param, ParseOptions, PreservationItem,
+    ProcessField, ProcessItem, ProcessTransition, QualifiedName, RequirementAction,
+    RequirementActionItem, RequirementBlockItem, RequirementsItem, SpecItem, StateField, Statement,
+    SurfaceBusiness, SurfaceDocument, SurfaceGovernance, SurfaceRequirements, SurfaceSpec,
+    TimeItem, TypeExpr, VerifyItem, parse_surface_document_with,
 };
+
+mod next_rules;
+mod repeated_declarations;
+pub(crate) use repeated_declarations::{
+    is_repeated_declaration, reject_repeated_requirements_declarations,
+};
+
+pub use next_rules::rule_property_names;
 
 use crate::{
     CoreError, FileResolver, KernelSpec, LoweringStep, OriginChain, OriginId, OriginRegistry,
@@ -50,7 +58,108 @@ struct PrecedenceLowering {
     histories_by_destination: BTreeMap<(String, String), Vec<String>>,
 }
 
-fn kpi_projection(item: &BusinessItem, processes: &[Process]) -> Result<ProjectionDef, CoreError> {
+/// A `goal` as the `reachable` property it states, over each entity's
+/// process and the name its instance is bound to (`process_of`). The
+/// business dialect binds `c`; next-edition requirements bind the entity's
+/// binder.
+fn lower_goal<'p>(
+    goal: &BusinessItem,
+    process_of: &dyn Fn(&str) -> Option<(&'p Process, String)>,
+) -> Result<SpecItem, CoreError> {
+    let BusinessItem::Goal {
+        id,
+        text,
+        body,
+        span,
+        annotations: goal_annotations,
+        ..
+    } = goal
+    else {
+        unreachable!("a goal");
+    };
+    let process = |case_name: &str| {
+        process_of(case_name)
+            .ok_or_else(|| core_error(format!("entity '{case_name}' has no process"), *span))
+    };
+    let expr = match body {
+        BusinessGoalBody::Expr(expr) => expr.clone(),
+        BusinessGoalBody::SomeStage { case_name, stage } => {
+            let (process, binder) = process(case_name)?;
+            Expr::Quantified {
+                quantifier: "exists".to_owned(),
+                binder: typed_binder(&binder, case_name),
+                body: Box::new(stage_is(process, &binder, stage)),
+            }
+        }
+        BusinessGoalBody::AllStage { case_name, stages } => {
+            let (process, binder) = process(case_name)?;
+            Expr::Quantified {
+                quantifier: "forall".to_owned(),
+                binder: typed_binder(&binder, case_name),
+                body: Box::new(or_all(
+                    stages
+                        .iter()
+                        .map(|stage| stage_is(process, &binder, stage))
+                        .collect(),
+                )),
+            }
+        }
+    };
+    Ok(SpecItem::Reachable {
+        name: id.clone(),
+        expr: Box::new(expr),
+        span: *span,
+        meta: meta(id, text),
+        annotations: goal_annotations.clone(),
+    })
+}
+
+/// A `policy … every E in S must eventually be T {or T}` as the `leadsTo` it
+/// states over instance `binder` of `process`.
+fn eventually_policy(policy: &BusinessItem, process: &Process, binder: &str) -> SpecItem {
+    let BusinessItem::Policy {
+        id,
+        text,
+        body,
+        span,
+        annotations,
+        ..
+    } = policy
+    else {
+        unreachable!("a policy");
+    };
+    let BusinessPolicyBody::Eventually {
+        case_name,
+        source_stage,
+        target_stages,
+    } = body.as_ref()
+    else {
+        unreachable!("an eventually policy");
+    };
+    SpecItem::LeadsTo {
+        name: id.clone(),
+        binders: vec![typed_binder(binder, case_name)],
+        before: Box::new(stage_is(process, binder, source_stage)),
+        after: Box::new(or_all(
+            target_stages
+                .iter()
+                .map(|stage| stage_is(process, binder, stage))
+                .collect(),
+        )),
+        span: *span,
+        meta: meta(id, text),
+        decreases: None,
+        within: None,
+        helpful: Vec::new(),
+        annotations: annotations.clone(),
+    }
+}
+
+fn kpi_projection(
+    item: &BusinessItem,
+    processes: &[Process],
+    binder: &str,
+) -> Result<ProjectionDef, CoreError> {
     let BusinessItem::Kpi {
         name,
         case_name,
@@ -87,9 +196,9 @@ fn kpi_projection(item: &BusinessItem, processes: &[Process]) -> Result<Projecti
         expr: Expr::Aggregate {
             kind: AggregateKind::Count,
             binder: Binder::Typed {
-                name: "c".to_owned(),
+                name: binder.to_owned(),
                 type_name: qualified(case_name),
-                where_expr: Some(Box::new(stage_is(process, "c", stage))),
+                where_expr: Some(Box::new(stage_is(process, binder, stage))),
             },
             value: None,
         },
@@ -153,12 +262,79 @@ pub struct RequirementsTraceCase {
     pub annotations: Annotations,
 }
 
+/// The acceptance and forbidden traces of a requirements document, as parsed.
+///
+/// Parsing does not replay a trace against the model, so these cases are not
+/// yet evidence: the requirement-trace gate (`fslc_rust::verification_output::
+/// validate_requirement_trace_source`) replays them and hands out a checked
+/// contract. Only [`requirements_trace_contract`] builds this value, and its
+/// cases are readable only through the `unchecked_` accessors, so a consumer
+/// that reads them without the gate says so at the call site (#1285).
+///
+/// ```compile_fail,E0451
+/// let contract = fsl_core::RequirementsTraceContract {
+///     acceptance: Vec::new(),
+///     forbidden: Vec::new(),
+///     scope_types: Default::default(),
+/// };
+/// ```
+///
+/// ```compile_fail,E0616
+/// fn read(contract: &fsl_core::RequirementsTraceContract) -> usize {
+///     contract.forbidden.len()
+/// }
+/// ```
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RequirementsTraceContract {
-    pub acceptance: Vec<RequirementsTraceCase>,
-    pub forbidden: Vec<RequirementsTraceCase>,
+    acceptance: Vec<RequirementsTraceCase>,
+    forbidden: Vec<RequirementsTraceCase>,
+    scope_types: BTreeSet<String>,
+}
+
+impl RequirementsTraceContract {
+    /// The acceptance cases, in declaration order, not replayed by any gate.
+    #[must_use]
+    pub fn unchecked_acceptance(&self) -> &[RequirementsTraceCase] {
+        &self.acceptance
+    }
+
+    /// The forbidden cases, in declaration order, not replayed by any gate.
+    #[must_use]
+    pub fn unchecked_forbidden(&self) -> &[RequirementsTraceCase] {
+        &self.forbidden
+    }
+
     /// The source's [`verify_scope_type_names`].
-    pub scope_types: BTreeSet<String>,
+    #[must_use]
+    pub fn scope_types(&self) -> &BTreeSet<String> {
+        &self.scope_types
+    }
+
+    /// Every case as `(kind, case, one-case contract)`, acceptance first and
+    /// then forbidden, each in declaration order. `kind` is `"acceptance"` or
+    /// `"forbidden"`; the one-case contract keeps this contract's scope types.
+    #[must_use]
+    pub fn split_cases(&self) -> Vec<(&'static str, &RequirementsTraceCase, Self)> {
+        let single = |kind: &'static str, case: &RequirementsTraceCase| Self {
+            acceptance: if kind == "acceptance" {
+                vec![case.clone()]
+            } else {
+                Vec::new()
+            },
+            forbidden: if kind == "forbidden" {
+                vec![case.clone()]
+            } else {
+                Vec::new()
+            },
+            scope_types: self.scope_types.clone(),
+        };
+        self.acceptance
+            .iter()
+            .map(|case| ("acceptance", case))
+            .chain(self.forbidden.iter().map(|case| ("forbidden", case)))
+            .map(|(kind, case)| (kind, case, single(kind, case)))
+            .collect()
+    }
 }
 
 fn qualified(name: &str) -> QualifiedName {
@@ -177,7 +353,7 @@ fn typed_binder(name: &str, type_name: &str) -> Binder {
 }
 
 fn process_state(name: &str) -> String {
-    format!("{}_stage", name.to_lowercase())
+    crate::naming::process_stage_state(name)
 }
 
 fn process_symbol(path: &fsl_syntax::SymbolPath) -> String {
@@ -201,7 +377,7 @@ fn process_path(document: &str, path: &fsl_syntax::SymbolPath) -> Vec<String> {
 }
 
 fn process_enum(name: &str) -> String {
-    format!("{name}Stage")
+    crate::naming::process_stage_enum(name)
 }
 
 fn stage_access(process: &Process, entity: Expr) -> Expr {
@@ -304,9 +480,17 @@ impl StageResolver<'_> {
                 };
                 let [resolved] = candidates.as_slice() else {
                     if candidates.is_empty() {
+                        // Matching authored binders decode too; quantifier binders bypass the '__' declaration check.
+                        let display_name = name
+                            .strip_prefix("__")
+                            .and_then(|name| name.rsplit_once("_substitution_"))
+                            .filter(|(original, index)| {
+                                !original.is_empty() && index.parse::<u64>().is_ok()
+                            })
+                            .map_or(name.as_str(), |(original, _)| original);
                         return Err(core_error(
                             format!(
-                                "stage({name}) refers to type '{entity_type}', which has no process"
+                                "stage({display_name}) refers to type '{entity_type}', which has no process"
                             ),
                             span,
                         ));
@@ -993,6 +1177,7 @@ fn meta(id: &str, text: impl Into<String>) -> Option<MetaTag> {
 /// process/stage references.
 #[allow(clippy::too_many_lines)]
 pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError> {
+    repeated_declarations::reject_repeated_business_declarations(&business)?;
     let mut actors = BTreeSet::new();
     let mut entities = Vec::new();
     let mut bounds = BTreeMap::new();
@@ -1115,6 +1300,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             lo: Box::new(Expr::Num(0)),
             hi: Box::new(Expr::Num(*count - 1)),
             symmetric: false,
+            span: None,
         });
     }
     for process in &processes {
@@ -1122,6 +1308,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             name: process_enum(&process.name),
             members: process.stages.clone(),
             member_spans: Vec::new(),
+            span: Some(process.span),
             symmetric: false,
         });
     }
@@ -1226,6 +1413,7 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
             items.push(SpecItem::Action {
                 name: transition.name.clone(),
                 params: vec![Param::Typed("c".to_owned(), qualified(&process.entity))],
+                param_spans: Vec::new(),
                 items: action_items,
                 span: transition.span,
                 fair: true,
@@ -1306,31 +1494,11 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
                 helpful: Vec::new(),
                 annotations: policy_annotations.clone(),
             },
-            BusinessPolicyBody::Eventually {
-                case_name,
-                source_stage,
-                target_stages,
-            } => {
+            BusinessPolicyBody::Eventually { case_name, .. } => {
                 let process = by_name.get(case_name.as_str()).ok_or_else(|| {
                     core_error(format!("entity '{case_name}' has no process"), *span)
                 })?;
-                SpecItem::LeadsTo {
-                    name: id.clone(),
-                    binders: vec![typed_binder("c", case_name)],
-                    before: Box::new(stage_is(process, "c", source_stage)),
-                    after: Box::new(or_all(
-                        target_stages
-                            .iter()
-                            .map(|stage| stage_is(process, "c", stage))
-                            .collect(),
-                    )),
-                    span: *span,
-                    meta: meta(id, text),
-                    decreases: None,
-                    within: None,
-                    helpful: Vec::new(),
-                    annotations: policy_annotations.clone(),
-                }
+                eventually_policy(policy, process, "c")
             }
             BusinessPolicyBody::Precedence {
                 case_name,
@@ -1409,60 +1577,22 @@ pub fn lower_business(business: SurfaceBusiness) -> Result<KernelSpec, CoreError
         });
     }
     for goal in goals {
-        let BusinessItem::Goal {
-            id,
-            text,
-            body,
-            span,
-            annotations: goal_annotations,
-            ..
-        } = goal
-        else {
-            unreachable!();
-        };
-        let expr = match body {
-            BusinessGoalBody::Expr(expr) => expr.clone(),
-            BusinessGoalBody::SomeStage { case_name, stage } => {
-                let process = by_name.get(case_name.as_str()).ok_or_else(|| {
-                    core_error(format!("entity '{case_name}' has no process"), *span)
-                })?;
-                Expr::Quantified {
-                    quantifier: "exists".to_owned(),
-                    binder: typed_binder("c", case_name),
-                    body: Box::new(stage_is(process, "c", stage)),
-                }
-            }
-            BusinessGoalBody::AllStage { case_name, stages } => {
-                let process = by_name.get(case_name.as_str()).ok_or_else(|| {
-                    core_error(format!("entity '{case_name}' has no process"), *span)
-                })?;
-                Expr::Quantified {
-                    quantifier: "forall".to_owned(),
-                    binder: typed_binder("c", case_name),
-                    body: Box::new(or_all(
-                        stages
-                            .iter()
-                            .map(|stage| stage_is(process, "c", stage))
-                            .collect(),
-                    )),
-                }
-            }
-        };
-        items.push(SpecItem::Reachable {
-            name: id.clone(),
-            expr: Box::new(expr),
-            span: *span,
-            meta: meta(id, text),
-            annotations: goal_annotations.clone(),
-        });
+        items.push(lower_goal(goal, &|case_name| {
+            by_name
+                .get(case_name)
+                .map(|process| (*process, "c".to_owned()))
+        })?);
     }
     let projections = business
         .items
         .iter()
         .filter(|item| matches!(item, BusinessItem::Kpi { .. }))
-        .map(|item| kpi_projection(item, &processes))
+        .map(|item| kpi_projection(item, &processes, "c"))
         .collect::<Result<Vec<_>, _>>()?;
-    let origins = resolve_stage_items(&mut items, &processes, "business")?;
+    let mut origins = resolve_stage_items(&mut items, &processes, "business")?;
+    for transition in processes.iter().flat_map(|process| &process.transitions) {
+        origins.bind_action_actor(&transition.name, Some(transition.actor.clone()));
+    }
     let mut kernel = crate::lower_direct_spec_with_origins(
         SurfaceSpec {
             name: business.name,
@@ -1582,14 +1712,110 @@ fn core_error(message: String, span: fsl_syntax::Span) -> CoreError {
         line: span.start.line,
         column: span.start.column,
         origin: None,
-        name_resolution: false,
+        kind: crate::CoreErrorKind::Semantics,
+        diagnostic_code: None,
     }
 }
 
 #[derive(Clone)]
 struct RequirementsProcess {
     process: Process,
+    /// The declared fields, then the next edition's relation roles.
     fields: Vec<ProcessField>,
+    /// The fields of `fields` that are relation roles: their state holds an
+    /// `Option` of their type, initially `none`.
+    roles: BTreeSet<String>,
+}
+
+/// The main path's stage lowering and predicate expansion for rule guards.
+pub(crate) struct RuleGuardLowering {
+    processes: Vec<Process>,
+    fields: BTreeMap<String, Vec<ProcessField>>,
+    expander: crate::PredicateExpander,
+}
+
+impl RuleGuardLowering {
+    fn new(
+        requirements: &SurfaceRequirements,
+        processes: &[RequirementsProcess],
+    ) -> Result<Self, CoreError> {
+        let fields = processes
+            .iter()
+            .map(|p| (p.process.entity.clone(), p.fields.clone()))
+            .collect();
+        let processes = processes
+            .iter()
+            .map(|p| p.process.clone())
+            .collect::<Vec<_>>();
+        let resolver = StageResolver::new(&processes);
+        let mut definitions = SurfaceSpec {
+            name: requirements.name.clone(),
+            meta: None,
+            items: requirements
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    RequirementsItem::Common(item) => Some(item.clone()),
+                    _ => None,
+                })
+                .collect(),
+        };
+        for item in &mut definitions.items {
+            if let SpecItem::Def { params, value, .. } = item {
+                let environment = params
+                    .iter()
+                    .map(|(name, ty)| (name.clone(), qualified_type_name(ty)))
+                    .collect();
+                resolve_stage_expression(&resolver, value, &environment)?;
+            }
+        }
+        Ok(Self {
+            expander: crate::PredicateExpander::new(&definitions)?,
+            processes,
+            fields,
+        })
+    }
+
+    pub(crate) fn condition(
+        &self,
+        condition: Expr,
+        entity: &str,
+        inputs: &[(String, QualifiedName)],
+    ) -> Expr {
+        let mut environment = inputs
+            .iter()
+            .map(|(name, ty)| (name.clone(), qualified_type_name(ty)))
+            .collect::<BTreeMap<_, _>>();
+        let binder = crate::naming::entity_binder(entity);
+        environment.insert(binder.clone(), entity.to_owned());
+        // The unused set mentions all main-path capture names without replacing
+        // spelled fields: the empty key cannot match a source identifier.
+        let mut names = vec![Expr::Var(binder), Expr::Var(process_state(entity))];
+        names.extend(
+            self.fields
+                .get(entity)
+                .into_iter()
+                .flatten()
+                .map(|field| Expr::Var(process_field_state(entity, &field.name))),
+        );
+        let renaming = std::collections::HashMap::from([(String::new(), Expr::Set(names))]);
+        let renamed = substitute_expr(condition.clone(), &renaming);
+        // Preserve the surface condition on failure: the main path reports the
+        // real error, while an unlowered obligation continues to fail closed.
+        StageResolver::new(&self.processes)
+            .expression(renamed, &environment)
+            .and_then(|lowered| {
+                self.expander
+                    .scoped(environment.keys().cloned().collect(), || {
+                        self.expander.expand_expr(lowered, &mut Vec::new())
+                    })
+            })
+            .unwrap_or(condition)
+    }
+}
+
+pub(crate) fn rule_guard_lowering(requirements: &SurfaceRequirements) -> Option<RuleGuardLowering> {
+    RuleGuardLowering::new(requirements, &requirements_processes(requirements).ok()?).ok()
 }
 
 fn requirements_processes(
@@ -1627,6 +1853,25 @@ fn requirements_processes(
                     }
                 }
             }
+            let mut fields = fields
+                .as_ref()
+                .map_or_else(Vec::new, |fields| fields.fields.clone());
+            let mut roles = BTreeSet::new();
+            for relation in requirements
+                .next
+                .iter()
+                .flat_map(|next| &next.relations)
+                .filter(|relation| relation.entity == name.name())
+            {
+                fields.push(ProcessField {
+                    name: relation.role.clone(),
+                    type_name: qualified(&relation.target),
+                    initial: Some(Expr::None),
+                    span: relation.span,
+                    type_span: relation.span,
+                });
+                roles.insert(relation.role.clone());
+            }
             Ok(RequirementsProcess {
                 process: Process {
                     name: process_symbol(name),
@@ -1645,16 +1890,105 @@ fn requirements_processes(
                     transitions,
                     span: *span,
                 },
-                fields: fields
-                    .as_ref()
-                    .map_or_else(Vec::new, |fields| fields.fields.clone()),
+                fields,
+                roles,
             })
         })
         .collect()
 }
 
+/// Check source field spellings before substitution erases them (#1561).
+fn check_field_patterns(
+    expression: &Expr,
+    fields: &[ProcessField],
+    inputs: &BTreeSet<&str>,
+    span: fsl_syntax::Span,
+) -> Result<(), CoreError> {
+    let mut names = std::collections::HashSet::new();
+    crate::collect_pattern_names(expression, &mut names);
+    for name in names.into_iter().collect::<BTreeSet<_>>() {
+        crate::typecheck::reject_pattern_binding_name(
+            &crate::typecheck::ValidationPhase::normalized(),
+            None,
+            &name,
+            [],
+            [],
+            [],
+            [],
+            fields
+                .iter()
+                .map(|field| field.name.as_str())
+                .filter(|name| !inputs.contains(name)),
+        )
+        .map_err(|error| crate::type_error_at(error, span))?;
+    }
+    Ok(())
+}
+
+fn check_requirements_field_patterns(
+    requirements: &SurfaceRequirements,
+    processes: &[RequirementsProcess],
+) -> Result<(), CoreError> {
+    for process in processes {
+        for transition in &process.process.transitions {
+            let inputs = transition
+                .event
+                .iter()
+                .flat_map(|_| &transition.inputs)
+                .map(crate::rule_guards::input_name)
+                .collect();
+            let check = |expression: &Expr, span| {
+                check_field_patterns(expression, &process.fields, &inputs, span)
+            };
+            if let Some(guard) = &transition.guard {
+                check(guard, transition.span)?;
+            }
+            for guard in transition.event.iter().flat_map(|event| &event.rule_guards) {
+                check(&guard.condition, guard.span)?;
+            }
+            for (_, value) in &transition.assignments {
+                check(value, transition.span)?;
+            }
+        }
+    }
+    if let Some(next) = &requirements.next {
+        let expressions = next
+            .properties
+            .iter()
+            .map(|p| (&p.entity, &p.condition, p.span))
+            .chain(
+                next.measures
+                    .iter()
+                    .map(|m| (&m.entity, &m.condition, m.span)),
+            )
+            .chain(next.decisions.iter().flat_map(|table| {
+                table
+                    .assuming
+                    .iter()
+                    .map(|expression| (&table.entity, expression, table.span))
+                    .chain(
+                        table
+                            .rows
+                            .iter()
+                            .map(|row| (&table.entity, &row.condition, row.span)),
+                    )
+            }))
+            .chain(
+                next.concepts
+                    .iter()
+                    .filter_map(|c| c.condition.as_ref().map(|expr| (&c.entity, expr, c.span))),
+            );
+        for (entity, expression, span) in expressions {
+            if let Some(process) = processes.iter().find(|p| &p.process.entity == entity) {
+                check_field_patterns(expression, &process.fields, &BTreeSet::new(), span)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn process_field_state(process: &str, field: &str) -> String {
-    format!("{}_{}", process.to_lowercase(), field)
+    crate::naming::process_field_state(process, field)
 }
 
 fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
@@ -1662,6 +1996,7 @@ fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
         SpecItem::Action {
             name,
             params,
+            param_spans,
             items,
             span,
             fair,
@@ -1671,6 +2006,7 @@ fn with_meta(item: SpecItem, metadata: Option<MetaTag>) -> SpecItem {
         } => SpecItem::Action {
             name,
             params,
+            param_spans,
             items,
             span,
             fair,
@@ -1755,6 +2091,7 @@ fn maps_clause_text(maps: &MapsClause) -> String {
 fn lower_requirement_action(
     action: &RequirementAction,
     metadata: Option<MetaTag>,
+    action_actors: &mut BTreeMap<String, Option<String>>,
 ) -> Vec<(SpecItem, Option<OriginChain>)> {
     let ordinary = action
         .items
@@ -1768,11 +2105,12 @@ fn lower_requirement_action(
         RequirementActionItem::Branches { branches, .. } => Some(branches),
         RequirementActionItem::Action(_) => None,
     });
-    match branches {
+    let lowered = match branches {
         None => vec![(
             SpecItem::Action {
                 name: action.name.clone(),
                 params: action.params.clone(),
+                param_spans: action.param_spans.clone(),
                 items: ordinary,
                 span: action.span,
                 fair: action.fair,
@@ -1817,6 +2155,7 @@ fn lower_requirement_action(
                     SpecItem::Action {
                         name: branch_name,
                         params: action.params.clone(),
+                        param_spans: action.param_spans.clone(),
                         items,
                         span: action.span,
                         fair: action.fair,
@@ -1828,7 +2167,15 @@ fn lower_requirement_action(
                 )
             })
             .collect(),
+    };
+    let actor = crate::origin::actor_from_metadata(action.meta.as_ref());
+    for (item, _) in &lowered {
+        if let SpecItem::Action { name, .. } = item {
+            // Absence is registered too: requirement text is not an actor source.
+            action_actors.insert(name.clone(), actor.map(str::to_owned));
+        }
     }
+    lowered
 }
 
 fn static_int(expr: &Expr, constants: &BTreeMap<String, i64>) -> Option<i64> {
@@ -1917,14 +2264,225 @@ fn generated_age_type(name: &str, existing: &mut BTreeSet<String>) -> String {
     candidate
 }
 
-/// Lower the requirements dialect into the shared kernel.
+/// A requirements name generated for a next-edition entity collides with a
+/// declared or another generated name (decisions/050: the names come from
+/// [`crate::naming`]).
+pub const GENERATED_NAME_COLLISION: &str = "generated_name_collision";
+
+/// The binder each process's actions and initial values quantify over: the
+/// entity's [`crate::naming::entity_binder`] for a next-edition entity, `c`
+/// for a `process`.
+fn process_binders(
+    requirements: &SurfaceRequirements,
+    processes: &[RequirementsProcess],
+) -> Vec<String> {
+    processes
+        .iter()
+        .map(|process| {
+            let entity = &process.process.entity;
+            if requirements
+                .next
+                .as_ref()
+                .is_some_and(|next| next.entities.contains(entity))
+            {
+                crate::naming::entity_binder(entity)
+            } else {
+                "c".to_owned()
+            }
+        })
+        .collect()
+}
+
+/// Refuse a next-edition entity whose generated names
+/// ([`crate::naming::entity_generated_names`]) meet a name declared in
+/// `declared`, a resource, or a name generated for an earlier entity, or
+/// whose binder meets one of its fields or event inputs.
+fn check_generated_names(
+    next: &fsl_syntax::NextEditionRequirements,
+    declared: &[SpecItem],
+    processes: &[RequirementsProcess],
+    binders: &[String],
+) -> Result<(), CoreError> {
+    let mut taken = BTreeSet::new();
+    for item in declared {
+        match item {
+            SpecItem::Const { name, .. }
+            | SpecItem::Def { name, .. }
+            | SpecItem::Type { name, .. }
+            | SpecItem::Enum { name, .. }
+            | SpecItem::Struct { name, .. } => {
+                taken.insert(name.clone());
+            }
+            SpecItem::State(fields) => {
+                taken.extend(fields.iter().map(|field| field.name.clone()));
+            }
+            _ => {}
+        }
+    }
+    // A resource is declared state, like the document's own.
+    taken.extend(next.resources.iter().map(|resource| resource.name.clone()));
+    let collision = |name: &str, entity: &str, span, what: &str| CoreError {
+        diagnostic_code: Some(GENERATED_NAME_COLLISION),
+        ..core_error(
+            format!("entity '{entity}' generates '{name}', which {what}; rename one of them"),
+            span,
+        )
+    };
+    for (process, binder) in processes.iter().zip(binders) {
+        let entity = &process.process.entity;
+        if !next.entities.contains(entity) {
+            continue;
+        }
+        let fields = process.fields.iter().map(|field| field.name.as_str());
+        for name in crate::naming::entity_generated_names(entity, fields) {
+            if !taken.insert(name.clone()) {
+                return Err(collision(
+                    &name,
+                    entity,
+                    process.process.span,
+                    "is already declared",
+                ));
+            }
+        }
+        let locals = process
+            .fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .chain(process.process.transitions.iter().flat_map(|transition| {
+                transition.inputs.iter().map(crate::rule_guards::input_name)
+            }));
+        if let Some(local) = locals.into_iter().find(|local| local == binder) {
+            return Err(collision(
+                binder,
+                entity,
+                process.process.span,
+                &format!("as its binder, is also its field or input '{local}'"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The origin of an action lowered from a next-edition `event`: its phrase
+/// and move, as an `event` lowering step.
+fn event_origin(
+    transition: &ProcessTransition,
+    event: &fsl_syntax::EventForm,
+    process: &Process,
+) -> OriginChain {
+    let movement = if event.moves {
+        format!("{} -> {}", transition.source, transition.target)
+    } else {
+        format!("in {}", transition.source)
+    };
+    OriginChain {
+        id: OriginId(format!(
+            "requirements:event:{}:{}",
+            transition.name, transition.span.start.offset
+        )),
+        dialect: "requirements".to_owned(),
+        primary: Some(OriginSite {
+            source_file: None,
+            span: Some(transition.span),
+            dialect: "requirements".to_owned(),
+            declaration_path: vec![transition.name.clone()],
+        }),
+        secondary: Vec::new(),
+        lowering_steps: vec![LoweringStep {
+            kind: "event".to_owned(),
+            detail: Some(format!(
+                "{}{} {} {} {movement}",
+                if event.fair { "" } else { "fault " },
+                transition.actor,
+                event.verb,
+                process.entity
+            )),
+        }],
+        generated: true,
+    }
+}
+
+/// The requirement of the action of a next-edition event without `covers`:
+/// the first ID a decision table row's `covers`, a `rule` or a decision
+/// table attached to the event (its requirement annotations, in source
+/// order), a row's `covers` before its table's own ID. `None` when nothing
+/// names the event. Unlike a process-form transition, the event never gets
+/// the `by <actor>` note: the actor is not a requirement.
+fn event_requirement(
+    transition: &ProcessTransition,
+    decision_ids: &BTreeSet<String>,
+) -> Option<MetaTag> {
+    let requirements = transition
+        .annotations
+        .source_order()
+        .iter()
+        .filter_map(|annotation| match annotation {
+            Annotation::Requirement { id, text, span } => Some((id, text, *span)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    requirements
+        .iter()
+        .find(|(id, _, _)| !decision_ids.contains(*id))
+        .or_else(|| requirements.first())
+        .map(|(id, text, span)| MetaTag {
+            id: (*id).clone(),
+            text: (*text).clone(),
+            span: Some(*span),
+        })
+}
+
+/// The origin id prefix of a refusal of a repeated scenario step input.
+const REPEATED_STEP_INPUT: &str = "requirements:step-input:";
+
+/// Whether `error` refuses a repeated scenario step input.
+pub(crate) fn is_repeated_step_input(error: &CoreError) -> bool {
+    error
+        .origin
+        .as_ref()
+        .is_some_and(|origin| origin.id.0.starts_with(REPEATED_STEP_INPUT))
+}
+
+/// Refuse the first input a scenario or forbidden step names again.
+pub(crate) fn reject_repeated_step_input(
+    requirements: &SurfaceRequirements,
+) -> Result<(), CoreError> {
+    let first = requirements
+        .next
+        .iter()
+        .flat_map(|next| &next.repeated_step_inputs)
+        .next();
+    let Some((input, at)) = first else {
+        return Ok(());
+    };
+    let mut error = core_error(format!("duplicate step input '{input}'"), *at);
+    error.origin = Some(Box::new(OriginChain {
+        id: OriginId(format!("{REPEATED_STEP_INPUT}{}", at.start.offset)),
+        dialect: "requirements".to_owned(),
+        primary: Some(OriginSite {
+            source_file: None,
+            span: Some(*at),
+            dialect: "requirements".to_owned(),
+            declaration_path: Vec::new(),
+        }),
+        secondary: Vec::new(),
+        lowering_steps: Vec::new(),
+        generated: false,
+    }));
+    Err(error)
+}
+
+/// Lower the requirements dialect into the shared kernel, after name
+/// resolution ([`crate::lower_requirements`]) replaced every glossary alias.
 ///
 /// # Errors
 ///
 /// Returns [`CoreError`] for missing entity/number bounds or malformed process
 /// declarations.
 #[allow(clippy::too_many_lines)]
-pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpec, CoreError> {
+pub(crate) fn lower_resolved_requirements(
+    requirements: SurfaceRequirements,
+) -> Result<KernelSpec, CoreError> {
     let mut common = Vec::new();
     let mut entities = Vec::new();
     let mut numbers = Vec::new();
@@ -1997,6 +2555,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             lo: Box::new(Expr::Num(0)),
             hi: Box::new(Expr::Num(*count - 1)),
             symmetric: false,
+            span: None,
         });
     }
     for (name, span) in &numbers {
@@ -2011,22 +2570,38 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             lo: Box::new(lo.clone()),
             hi: Box::new(hi.clone()),
             symmetric: false,
+            span: None,
         });
     }
     items.extend(common);
 
     let processes = requirements_processes(&requirements)?;
+    let binders = process_binders(&requirements, &processes);
+    check_requirements_field_patterns(&requirements, &processes)?;
+    let decision_tables = crate::decision_table::Tables::of(&requirements);
+    let guard_lowering = RuleGuardLowering::new(&requirements, &processes).ok();
+    let rule_guards = crate::rule_guards::RuleGuards::of(&requirements, guard_lowering.as_ref());
+    if let Some(next) = &requirements.next {
+        check_generated_names(next, &items, &processes, &binders)?;
+    }
+    let decision_ids = requirements
+        .next
+        .iter()
+        .flat_map(|next| &next.decisions)
+        .map(|table| table.id.clone())
+        .collect::<BTreeSet<_>>();
     for process in &processes {
         items.push(SpecItem::Enum {
             name: process_enum(&process.process.name),
             members: process.process.stages.clone(),
             member_spans: Vec::new(),
+            span: Some(process.process.span),
             symmetric: false,
         });
     }
     let mut state = Vec::new();
     let mut init = Vec::new();
-    for process in &processes {
+    for (process, binder) in processes.iter().zip(&binders) {
         let process_name = &process.process.name;
         state.push(StateField::generated(
             process_state(process_name),
@@ -2037,7 +2612,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             process.process.span,
         ));
         let mut init_body = vec![Statement::Assign {
-            target: LValue::Index(process_state(process_name), Expr::Var("c".to_owned())),
+            target: LValue::Index(process_state(process_name), Expr::Var(binder.clone())),
             value: Expr::Var(process.process.initial.clone()),
             span: process.process.span,
         }];
@@ -2046,6 +2621,11 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                 TypeExpr::Bool
             } else {
                 TypeExpr::Name(field.type_name.name.clone())
+            };
+            let field_ty = if process.roles.contains(&field.name) {
+                TypeExpr::Option(Box::new(field_ty))
+            } else {
+                field_ty
             };
             state.push(StateField::generated(
                 process_field_state(process_name, &field.name),
@@ -2063,16 +2643,37 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             init_body.push(Statement::Assign {
                 target: LValue::Index(
                     process_field_state(process_name, &field.name),
-                    Expr::Var("c".to_owned()),
+                    Expr::Var(binder.clone()),
                 ),
                 value: initial,
                 span: process.process.span,
             });
         }
         init.push(Statement::ForAll {
-            binder: typed_binder("c", &process.process.entity),
+            binder: typed_binder(binder, &process.process.entity),
             statements: init_body,
             span: process.process.span,
+        });
+    }
+    let resources = requirements
+        .next
+        .iter()
+        .flat_map(|next| &next.resources)
+        .collect::<Vec<_>>();
+    for resource in &resources {
+        state.push(StateField::generated(
+            resource.name.clone(),
+            if resource.type_name.name == "Bool" {
+                TypeExpr::Bool
+            } else {
+                TypeExpr::Name(resource.type_name.name.clone())
+            },
+            resource.span,
+        ));
+        init.push(Statement::Assign {
+            target: LValue::Var(resource.name.clone()),
+            value: resource.initial.clone(),
+            span: resource.span,
         });
     }
     if !state.is_empty() {
@@ -2083,54 +2684,105 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             annotations: Annotations::default(),
         });
     }
-    for process in &processes {
-        let replacements = process
+    for (process, binder) in processes.iter().zip(&binders) {
+        let field_reads = process
             .fields
             .iter()
             .map(|field| {
-                (
-                    field.name.clone(),
-                    Expr::Index(
-                        Box::new(Expr::Var(process_field_state(
-                            &process.process.name,
-                            &field.name,
-                        ))),
-                        Box::new(Expr::Var("c".to_owned())),
-                    ),
+                Expr::Index(
+                    Box::new(Expr::Var(process_field_state(
+                        &process.process.name,
+                        &field.name,
+                    ))),
+                    Box::new(Expr::Var(binder.clone())),
                 )
             })
-            .collect::<std::collections::HashMap<_, _>>();
+            .collect::<Vec<_>>();
         for transition in &process.process.transitions {
+            // A next-edition event's input shadows the field it shares a
+            // name with; `Entity.field` names the field (decisions/046 Q6).
+            let event = transition.event.as_ref();
+            let inputs = transition
+                .inputs
+                .iter()
+                .map(crate::rule_guards::input_name)
+                .collect::<BTreeSet<_>>();
+            let replacements = process
+                .fields
+                .iter()
+                .zip(&field_reads)
+                .flat_map(|(field, read)| {
+                    let bare = (event.is_none() || !inputs.contains(field.name.as_str()))
+                        .then(|| (field.name.clone(), read.clone()));
+                    let dotted = event.map(|_| {
+                        (
+                            format!("{}.{}", process.process.entity, field.name),
+                            read.clone(),
+                        )
+                    });
+                    bare.into_iter().chain(dotted)
+                })
+                .chain(event.map(|_| next_rules::stage_replacement(&process.process, binder)))
+                .collect::<std::collections::HashMap<_, _>>();
             let mut body = vec![ActionItem::Requires(
-                stage_is(&process.process, "c", &transition.source),
+                stage_is(&process.process, binder, &transition.source),
                 transition.span,
             )];
+            if let Some(event) = event {
+                extra_origins.push((
+                    crate::action_guard_target(&transition.name, 0),
+                    next_rules::move_origin(transition, event),
+                ));
+            }
             if let Some(guard) = &transition.guard {
                 body.push(ActionItem::Requires(
                     substitute_expr(guard.clone(), &replacements),
                     transition.span,
                 ));
             }
-            body.push(ActionItem::Statement(Statement::Assign {
-                target: LValue::Index(
-                    process_state(&process.process.name),
-                    Expr::Var("c".to_owned()),
-                ),
-                value: Expr::Var(transition.target.clone()),
-                span: transition.span,
-            }));
-            for (field, expression) in &transition.assignments {
+            for guard in event.map_or(&[][..], |event| event.rule_guards.as_slice()) {
+                extra_origins.push((
+                    crate::action_guard_target(&transition.name, body.len()),
+                    next_rules::guard_origin(transition, guard),
+                ));
+                body.push(ActionItem::Requires(
+                    substitute_expr(guard.condition.clone(), &replacements),
+                    transition.span,
+                ));
+            }
+            if event.is_none_or(|event| event.moves) {
                 body.push(ActionItem::Statement(Statement::Assign {
                     target: LValue::Index(
-                        process_field_state(&process.process.name, field),
-                        Expr::Var("c".to_owned()),
+                        process_state(&process.process.name),
+                        Expr::Var(binder.clone()),
                     ),
+                    value: Expr::Var(transition.target.clone()),
+                    span: transition.span,
+                }));
+            }
+            for (field, expression) in &transition.assignments {
+                // An event's `set` of a resource writes the one variable.
+                let target = if event.is_some()
+                    && resources.iter().any(|resource| resource.name == *field)
+                {
+                    LValue::Var(field.clone())
+                } else {
+                    LValue::Index(
+                        process_field_state(&process.process.name, field),
+                        Expr::Var(binder.clone()),
+                    )
+                };
+                body.push(ActionItem::Statement(Statement::Assign {
+                    target,
                     value: substitute_expr(expression.clone(), &replacements),
                     span: transition.span,
                 }));
             }
             let metadata = transition.covers.as_ref().map_or_else(
-                || meta(&transition.name, format!("by {}", transition.actor)),
+                || match event {
+                    Some(_) => event_requirement(transition, &decision_ids),
+                    None => meta(&transition.name, format!("by {}", transition.actor)),
+                },
                 |cover| {
                     extra_annotations.push((
                         crate::action_target(&transition.name),
@@ -2147,24 +2799,72 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                     })
                 },
             );
+            if let Some(event) = event {
+                let mut origin = event_origin(transition, event, &process.process);
+                origin.lowering_steps.extend(
+                    decision_tables.lowering_steps(&process.process.entity, &transition.name),
+                );
+                extra_origins.push((crate::action_target(&transition.name), origin));
+            }
             let mut params = vec![Param::Typed(
-                "c".to_owned(),
+                binder.clone(),
                 qualified(&process.process.entity),
             )];
             params.extend(transition.inputs.clone());
+            let mut param_spans = vec![transition.span];
+            param_spans.extend(transition.input_spans.iter().copied());
             items.push(SpecItem::Action {
                 name: transition.name.clone(),
                 params,
+                param_spans,
                 items: body,
                 span: transition.span,
-                fair: true,
+                fair: event.is_none_or(|event| event.fair),
                 meta: metadata,
                 sync: false,
                 annotations: transition.annotations.clone(),
             });
         }
     }
+    if let Some(terminal) = derived_requirements_terminal(&requirements, &processes, &binders) {
+        items.push(terminal);
+    }
+    if let Some(next) = &requirements.next {
+        for property in next_rules::lower_rule_properties(
+            &next.properties,
+            &processes,
+            &binders,
+            &requirements.items,
+        )? {
+            extra_annotations.push((property.target.clone(), property.annotation));
+            extra_origins.push((property.target, property.origin));
+            items.push(property.item);
+        }
+        let process_of = |entity: &str| {
+            processes
+                .iter()
+                .zip(&binders)
+                .find(|(process, _)| process.process.entity == entity)
+        };
+        for goal in &next.goals {
+            items.push(match goal {
+                BusinessItem::Policy { span, body, .. } => {
+                    let BusinessPolicyBody::Eventually { case_name, .. } = body.as_ref() else {
+                        unreachable!("a next-edition policy is an eventually policy");
+                    };
+                    let (process, binder) = process_of(case_name).ok_or_else(|| {
+                        core_error(format!("entity '{case_name}' has no lifecycle"), *span)
+                    })?;
+                    eventually_policy(goal, &process.process, binder)
+                }
+                _ => lower_goal(goal, &|entity| {
+                    process_of(entity).map(|(process, binder)| (&process.process, binder.clone()))
+                })?,
+            });
+        }
+    }
     let mut deadlines = Vec::new();
+    let mut action_actors = BTreeMap::new();
     for requirement in requirement_items {
         let RequirementsItem::Requirement {
             id,
@@ -2172,6 +2872,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             items: declarations,
             span: requirement_span,
             annotations: block_annotations,
+            ..
         } = requirement
         else {
             unreachable!();
@@ -2180,7 +2881,8 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         for declaration in declarations {
             match declaration {
                 RequirementBlockItem::Action(action) => {
-                    let lowered = lower_requirement_action(action, metadata.clone());
+                    let lowered =
+                        lower_requirement_action(action, metadata.clone(), &mut action_actors);
                     for (item, origin) in &lowered {
                         if let SpecItem::Action { name, span, .. } = item {
                             extra_annotations.push((
@@ -2258,7 +2960,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         }
     }
     for action in standalone_actions {
-        for (item, origin) in lower_requirement_action(action, None) {
+        for (item, origin) in lower_requirement_action(action, None, &mut action_actors) {
             if let (SpecItem::Action { name, .. }, Some(origin)) = (&item, origin) {
                 extra_origins.push((crate::action_target(name), origin));
             }
@@ -2336,6 +3038,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
                 lo: Box::new(Expr::Num(0)),
                 hi: Box::new(Expr::Num(cap)),
                 symmetric: false,
+                span: None,
             });
             let (state_type, init_statement, reference, target) = match &binder {
                 Some(binder) => {
@@ -2457,6 +3160,7 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
         items.push(SpecItem::Action {
             name: "tick".to_owned(),
             params: Vec::new(),
+            param_spans: Vec::new(),
             items: tick_items,
             span: time_span,
             fair: false,
@@ -2537,23 +3241,98 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
             });
         }
     }
+    for (item, annotation, origin) in decision_tables.assumption_invariants() {
+        if let SpecItem::Invariant { name, .. } = &item {
+            let target = crate::property_target("invariant", name);
+            extra_annotations.push((target.clone(), annotation));
+            extra_origins.push((target, origin));
+        }
+        items.push(item);
+    }
     let stage_processes = processes
         .iter()
         .map(|process| process.process.clone())
         .collect::<Vec<_>>();
-    let projections = requirements
+    let constants = items.iter().filter_map(|item| match item {
+        SpecItem::Const { name, .. } => Some(name),
+        _ => None,
+    });
+    let kpi_binder = if constants.clone().any(|name| name == "c") {
+        crate::fresh_binding_name("c", &constants.cloned().collect())
+    } else {
+        "c".to_owned()
+    };
+    let mut projections = requirements
         .items
         .iter()
         .filter_map(|item| match item {
             RequirementsItem::Kpi(item) => Some(item),
             _ => None,
         })
-        .map(|item| kpi_projection(item, &stage_processes))
+        .map(|item| kpi_projection(item, &stage_processes, &kpi_binder))
         .collect::<Result<Vec<_>, _>>()?;
+    if let Some(next) = &requirements.next {
+        projections.extend(next_rules::measure_projections(
+            &next.measures,
+            &processes,
+            &binders,
+        )?);
+    }
     let mut origins = resolve_stage_items(&mut items, &stage_processes, "requirements")?;
+    for transition in processes
+        .iter()
+        .flat_map(|process| &process.process.transitions)
+    {
+        origins.bind_action_actor(&transition.name, Some(transition.actor.clone()));
+    }
+    for (name, actor) in action_actors {
+        origins.bind_action_actor(&name, actor);
+    }
+    let stage_resolver = StageResolver::new(&stage_processes);
+    let expectations = requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Acceptance {
+                expectation: fsl_syntax::AcceptanceExpectation::Expr(expr, span),
+                ..
+            } => Some((expr.clone(), *span)),
+            _ => None,
+        })
+        .map(|(mut expr, span)| {
+            resolve_stage_expression(&stage_resolver, &mut expr, &BTreeMap::new())?;
+            Ok((expr, span))
+        })
+        .collect::<Result<Vec<_>, CoreError>>()?;
+    let step_arguments = requirements
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            RequirementsItem::Acceptance { steps, .. }
+            | RequirementsItem::Forbidden { steps, .. } => Some(steps),
+            _ => None,
+        })
+        .flatten()
+        .flat_map(|step| step.args.iter().map(move |expr| (expr.clone(), step.span)))
+        .map(|(mut expr, span)| {
+            resolve_stage_expression(&stage_resolver, &mut expr, &BTreeMap::new())?;
+            Ok((expr, span))
+        })
+        .collect::<Result<Vec<_>, CoreError>>()?;
     for (target, origin) in extra_origins {
         origins.bind(target, origin);
     }
+    let next_warnings = requirements
+        .next
+        .as_ref()
+        .map(|next| {
+            next.warnings
+                .iter()
+                .map(|warning| (warning.clone(), "warning"))
+                .chain(next.notes.iter().map(|note| (note.clone(), "info")))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let mut kernel = crate::lower_direct_spec_with_origins(
         SurfaceSpec {
             name: requirements.name,
@@ -2566,7 +3345,110 @@ pub fn lower_requirements(requirements: SurfaceRequirements) -> Result<KernelSpe
     for (target, annotation) in extra_annotations {
         kernel.bind_annotation(target, annotation);
     }
+    kernel
+        .diagnostics
+        .extend(next_warnings.into_iter().map(|(warning, severity)| {
+            json!({
+                "kind": warning.code,
+                "code": warning.code,
+                "severity": severity,
+                "message": warning.message,
+                "loc": warning.span.python_loc(),
+            })
+        }));
+    let domain_warnings = crate::finite_domain::check(&decision_tables, &rule_guards, &kernel)?;
+    kernel.diagnostics.extend(domain_warnings);
+    // Trace expectations are post-state predicates, not invariants. Check
+    // their operands recursively against the same lowered types without
+    // adding a property to the Kernel. As with finite-domain checks above,
+    // leave an invalid model to the ordinary model-building diagnostic path.
+    // Step arguments need internal typing only: their final parameter kind
+    // and domain membership remain the replay checker's responsibility.
+    if (!expectations.is_empty() || !step_arguments.is_empty())
+        && let Ok(model) = crate::build_model(kernel.clone())
+    {
+        let expressions = expectations
+            .into_iter()
+            .map(|(expr, span)| (expr, span, Some(crate::TypeRef::Bool), "expect"))
+            .chain(
+                step_arguments
+                    .into_iter()
+                    .map(|(expr, span)| (expr, span, None, "step")),
+            );
+        for (expr, span, expected, position) in expressions {
+            crate::typecheck::validate_public_expression(&expr, &model, span, expected.as_ref())
+                .map_err(|error| {
+                    let mut diagnostic =
+                        core_error(format!("invalid model expression: {}", error.message), span);
+                    diagnostic.origin = Some(Box::new(OriginChain {
+                        id: OriginId(format!("requirements:{position}:{}", span.start.offset)),
+                        dialect: "requirements".to_owned(),
+                        primary: Some(OriginSite {
+                            source_file: None,
+                            span: Some(span),
+                            dialect: "requirements".to_owned(),
+                            declaration_path: Vec::new(),
+                        }),
+                        secondary: Vec::new(),
+                        lowering_steps: Vec::new(),
+                        generated: false,
+                    }));
+                    diagnostic
+                })?;
+        }
+    }
     Ok(kernel)
+}
+
+/// The `terminal { }` of a next-edition requirements document that writes
+/// none, derived as a business document derives its own from its sink
+/// stages: an instance has stopped as intended in a final stage of its
+/// entity's lifecycle (one no `lifecycle` edge leaves, whether or not an
+/// event moves along that edge), and the document has when every instance
+/// of every entity with a lifecycle has. An entity without a lifecycle is no
+/// process and adds nothing, nor does a relation's role (a field). An entity
+/// whose lifecycle has no final stage never stops as intended. `None` for the
+/// published edition, whose requirements derive no terminal.
+fn derived_requirements_terminal(
+    requirements: &SurfaceRequirements,
+    processes: &[RequirementsProcess],
+    binders: &[String],
+) -> Option<SpecItem> {
+    let next = requirements.next.as_ref()?;
+    if requirements
+        .items
+        .iter()
+        .any(|item| matches!(item, RequirementsItem::Common(SpecItem::Terminal { .. })))
+    {
+        return None;
+    }
+    let mut span = None;
+    let conditions = processes
+        .iter()
+        .zip(binders)
+        .filter_map(|(process, binder)| {
+            let process = &process.process;
+            let (_, finals) = next
+                .final_stages
+                .iter()
+                .find(|(entity, _)| *entity == process.entity)?;
+            span.get_or_insert(process.span);
+            Some(Expr::Quantified {
+                quantifier: "forall".to_owned(),
+                binder: typed_binder(binder, &process.entity),
+                body: Box::new(or_all(
+                    finals
+                        .iter()
+                        .map(|stage| stage_is(process, binder, stage))
+                        .collect(),
+                )),
+            })
+        })
+        .collect::<Vec<_>>();
+    Some(SpecItem::Terminal {
+        expr: Box::new(and_all(conditions)),
+        span: span?,
+    })
 }
 
 fn property_targets(item: &SpecItem) -> Vec<String> {
@@ -2599,14 +3481,16 @@ fn property_meta(item: &SpecItem) -> Option<&MetaTag> {
     }
 }
 
-fn property_span(item: &SpecItem) -> fsl_syntax::Span {
+pub(crate) fn property_span(item: &SpecItem) -> fsl_syntax::Span {
     match item {
         SpecItem::Invariant { span, .. }
         | SpecItem::Trans { span, .. }
         | SpecItem::Reachable { span, .. }
         | SpecItem::Until { span, .. }
         | SpecItem::Unless { span, .. }
-        | SpecItem::LeadsTo { span, .. } => *span,
+        | SpecItem::LeadsTo { span, .. }
+        | SpecItem::Action { span, .. }
+        | SpecItem::Terminal { span, .. } => *span,
         _ => zero_span(),
     }
 }
@@ -2628,6 +3512,7 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
                 lo: Box::new(Expr::Num(0)),
                 hi: Box::new(Expr::Num(0)),
                 symmetric: false,
+                span: None,
             },
             SpecItem::State(vec![StateField::generated(
                 "_governance_ok",
@@ -2646,6 +3531,7 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
             SpecItem::Action {
                 name: "_governance_noop".to_owned(),
                 params: Vec::new(),
+                param_spans: Vec::new(),
                 items: vec![ActionItem::Requires(Expr::Bool(false), span)],
                 span,
                 fair: false,
@@ -2676,9 +3562,10 @@ pub fn lower_governance(governance: SurfaceGovernance) -> Result<KernelSpec, Cor
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] if the lowered kernel catalog is invalid.
+/// Returns [`CoreError`] if a compatibility rule name is unknown or the lowered
+/// kernel catalog is invalid.
 pub fn lower_db(system: &fsl_syntax::DbSystem) -> Result<KernelSpec, CoreError> {
-    let (surface, origins) = crate::db::lower_db_surface(system);
+    let (surface, origins) = crate::db::lower_db_surface(system)?;
     crate::lower_direct_spec_with_origins(surface, origins)
 }
 
@@ -2753,23 +3640,32 @@ fn ai_span(loc: fsl_syntax::AiLoc) -> fsl_syntax::Span {
     }
 }
 
-/// Semantic validation shared by every `fslc ai` entry point that can emit a
-/// success verdict for an `ai_component` document, whether the component is
-/// supplied alone or as part of an fsl-ai project (issue #800).
+/// Semantic validation for AI check, compat, replay, and project checking.
+/// Standalone and embedded components share these rules; AI eval, drift and
+/// regress remain outside this validation contract (issue #800).
 ///
 /// # Errors
 ///
 /// Returns [`CoreError`] when authority references an undeclared tool, a
 /// `check hard { rule ... }` clause names an unknown rule, or a fallback
-/// reason is duplicated.
+/// reason is duplicated, or no tools are declared.
 pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), CoreError> {
+    validate_ai_component_with_location(component).map_err(|(error, _)| error)
+}
+
+/// Validate a component while retaining the authored failure position.
+///
+/// # Errors
+/// Returns the legacy validation error and its optional source location.
+pub fn validate_ai_component_with_location(
+    component: &fsl_syntax::AiComponent,
+) -> Result<(), (CoreError, Option<fsl_syntax::AiLoc>)> {
     let mut reasons = BTreeSet::new();
     for fallback in &component.fallback {
         if !reasons.insert(&fallback.reason) {
-            return Err(CoreError::unlocated(format!(
-                "duplicate fallback reason '{}'",
-                fallback.reason
-            )));
+            let error =
+                CoreError::unlocated(format!("duplicate fallback reason '{}'", fallback.reason));
+            return Err((error, Some(fallback.loc)));
         }
     }
     let tools = component
@@ -2786,13 +3682,42 @@ pub fn validate_ai_component(component: &fsl_syntax::AiComponent) -> Result<(), 
         .chain(&component.authority.forbidden)
     {
         if !tools.contains(rule.name.as_str()) {
-            return Err(CoreError::unlocated(format!(
-                "unknown tool '{}' in authority block",
-                rule.name
-            )));
+            let error =
+                CoreError::unlocated(format!("unknown tool '{}' in authority block", rule.name));
+            return Err((error, rule.loc));
         }
     }
-    ai_rule_set(component)?;
+    ai_rule_set(component).map_err(|error| {
+        let loc = fsl_syntax::AiLoc {
+            line: error.line,
+            column: error.column,
+        };
+        (error, Some(loc))
+    })?;
+    if component.tools.is_empty() {
+        let span = ai_span(component.loc);
+        let mut error = core_error(
+            format!("ai_component '{}' declares no tools", component.name),
+            span,
+        );
+        error.origin = Some(Box::new(OriginChain {
+            id: OriginId(format!(
+                "ai-component:{}:{}",
+                component.loc.line, component.loc.column
+            )),
+            dialect: "ai_component".to_owned(),
+            primary: Some(OriginSite {
+                source_file: None,
+                span: Some(span),
+                dialect: "ai_component".to_owned(),
+                declaration_path: vec![component.name.clone()],
+            }),
+            secondary: Vec::new(),
+            lowering_steps: Vec::new(),
+            generated: false,
+        }));
+        return Err((error, Some(component.loc)));
+    }
     Ok(())
 }
 
@@ -2822,7 +3747,8 @@ fn ai_rule_set(component: &fsl_syntax::AiComponent) -> Result<BTreeSet<String>, 
             return Err(core_error(
                 format!("unknown ai hard-contract rule '{name}'"),
                 ai_span(loc),
-            ));
+            )
+            .with_kind(crate::CoreErrorKind::UnknownAiHardContractRule));
         }
     }
     Ok(names.into_iter().collect())
@@ -2888,6 +3814,7 @@ fn ai_action(
     SpecItem::Action {
         name,
         params: Vec::new(),
+        param_spans: Vec::new(),
         items: vec![ActionItem::Statement(statement)],
         span,
         fair: false,
@@ -2920,7 +3847,8 @@ fn ai_index_assign(map_name: &str, index: Expr, value: Expr, span: fsl_syntax::S
 ///
 /// # Errors
 ///
-/// Returns [`CoreError`] when `check hard { rule ... }` names an unknown rule
+/// Returns [`CoreError`] when the generated kernel needs a reference to an
+/// undeclared authority tool, `check hard { rule ... }` names an unknown rule,
 /// or the generated kernel catalog is invalid.
 #[allow(clippy::too_many_lines)]
 pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSpec, CoreError> {
@@ -2937,7 +3865,55 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
         .iter()
         .map(|tool| (tool.name.as_str(), tool))
         .collect::<BTreeMap<_, _>>();
-    let member_expr = |tool_name: &str| Expr::Var(members[tool_name].clone());
+    let member_expr = |tool_name: &str| {
+        members
+            .get(tool_name)
+            .cloned()
+            .map(Expr::Var)
+            .ok_or_else(|| {
+                let loc = component
+                    .authority
+                    .may_suggest
+                    .iter()
+                    .chain(&component.authority.may_execute)
+                    .chain(&component.authority.requires_human_approval)
+                    .chain(&component.authority.forbidden)
+                    .find(|rule| rule.name == tool_name)
+                    .and_then(|rule| rule.loc)
+                    .unwrap_or(component.loc);
+                let span = ai_span(loc);
+                let mut error = core_error(
+                    format!("unknown tool '{tool_name}' in authority block"),
+                    span,
+                );
+                error.origin = Some(Box::new(OriginChain {
+                    id: OriginId(format!("ai-authority:{}:{}", loc.line, loc.column)),
+                    dialect: "ai_component".to_owned(),
+                    primary: Some(OriginSite {
+                        source_file: None,
+                        span: Some(span),
+                        dialect: "ai_component".to_owned(),
+                        declaration_path: vec![component.name.clone(), "authority".to_owned()],
+                    }),
+                    secondary: Vec::new(),
+                    lowering_steps: Vec::new(),
+                    generated: false,
+                }));
+                error
+            })
+    };
+    if component.tools.is_empty() {
+        for rule in component
+            .authority
+            .may_suggest
+            .iter()
+            .chain(&component.authority.may_execute)
+            .chain(&component.authority.requires_human_approval)
+            .chain(&component.authority.forbidden)
+        {
+            member_expr(&rule.name)?;
+        }
+    }
     let tool_span = |tool_name: &str| {
         tool_by_name
             .get(tool_name)
@@ -2954,6 +3930,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
                 .map(|tool| members[tool.name.as_str()].clone())
                 .collect(),
             member_spans: Vec::new(),
+            span: Some(ai_span(component.loc)),
             symmetric: false,
         },
         SpecItem::State(vec![
@@ -3035,7 +4012,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
             name,
             ai_index_assign(
                 "tool_suggested",
-                member_expr(tool_name),
+                member_expr(tool_name)?,
                 Expr::Bool(true),
                 tool_span(tool_name),
             ),
@@ -3051,7 +4028,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
             name,
             ai_index_assign(
                 "human_approved",
-                member_expr(tool_name),
+                member_expr(tool_name)?,
                 Expr::Bool(true),
                 tool_span(tool_name),
             ),
@@ -3068,14 +4045,14 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
             action_items.push(ActionItem::Requires(
                 Expr::Index(
                     Box::new(Expr::Var("human_approved".to_owned())),
-                    Box::new(member_expr(tool_name)),
+                    Box::new(member_expr(tool_name)?),
                 ),
                 tool_span(tool_name),
             ));
         }
         action_items.push(ActionItem::Statement(ai_index_assign(
             "tool_executed",
-            member_expr(tool_name),
+            member_expr(tool_name)?,
             Expr::Bool(true),
             tool_span(tool_name),
         )));
@@ -3090,6 +4067,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
         items.push(SpecItem::Action {
             name,
             params: Vec::new(),
+            param_spans: Vec::new(),
             items: action_items,
             span: tool_span(tool_name),
             fair: false,
@@ -3124,7 +4102,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
                 name,
                 expr: Box::new(Expr::Not(Box::new(Expr::Index(
                     Box::new(Expr::Var("tool_executed".to_owned())),
-                    Box::new(member_expr(tool_name)),
+                    Box::new(member_expr(tool_name)?),
                 )))),
                 span: tool_span(tool_name),
                 meta: meta(
@@ -3145,11 +4123,11 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
                     op: "=>".to_owned(),
                     left: Box::new(Expr::Index(
                         Box::new(Expr::Var("tool_executed".to_owned())),
-                        Box::new(member_expr(tool_name)),
+                        Box::new(member_expr(tool_name)?),
                     )),
                     right: Box::new(Expr::Index(
                         Box::new(Expr::Var("human_approved".to_owned())),
-                        Box::new(member_expr(tool_name)),
+                        Box::new(member_expr(tool_name)?),
                     )),
                 }),
                 span: tool_span(tool_name),
@@ -3184,6 +4162,7 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
         span,
     });
 
+    validate_ai_component(&component)?;
     lower_direct_spec(SurfaceSpec {
         name: component.name,
         meta: None,
@@ -3199,7 +4178,19 @@ pub fn lower_ai_component(component: fsl_syntax::AiComponent) -> Result<KernelSp
 pub fn requirements_trace_contract(
     source: &str,
 ) -> Result<Option<RequirementsTraceContract>, CoreError> {
-    let document = fsl_syntax::parse_surface_document(source)?;
+    requirements_trace_contract_with_options(source, &ParseOptions::stable())
+}
+
+/// [`requirements_trace_contract`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`requirements_trace_contract`].
+pub fn requirements_trace_contract_with_options(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<Option<RequirementsTraceContract>, CoreError> {
+    let document = parse_surface_document_with(source, options)?;
     let SurfaceDocument::Requirements(requirements) = document else {
         return Ok(None);
     };
@@ -3233,6 +4224,7 @@ pub fn requirements_trace_contract(
                 expectation,
                 span,
                 annotations: surface_annotations,
+                ..
             } => {
                 if !acceptance_ids.insert(id.clone()) {
                     return Err(core_error(format!("duplicate acceptance id '{id}'"), span));
@@ -3270,6 +4262,7 @@ pub fn requirements_trace_contract(
                 steps,
                 span,
                 annotations: surface_annotations,
+                ..
             } => {
                 if !forbidden_ids.insert(id.clone()) {
                     return Err(core_error(format!("duplicate forbidden id '{id}'"), span));
@@ -3309,7 +4302,19 @@ pub fn requirements_trace_contract(
 ///
 /// Returns [`CoreError`] when the source cannot be parsed.
 pub fn verify_scope_type_names(source: &str) -> Result<Option<BTreeSet<String>>, CoreError> {
-    Ok(match fsl_syntax::parse_surface_document(source)? {
+    verify_scope_type_names_with_options(source, &ParseOptions::stable())
+}
+
+/// [`verify_scope_type_names`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`verify_scope_type_names`].
+pub fn verify_scope_type_names_with_options(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<Option<BTreeSet<String>>, CoreError> {
+    Ok(match parse_surface_document_with(source, options)? {
         SurfaceDocument::Spec(spec) => Some(
             spec.items
                 .iter()
@@ -3364,7 +4369,19 @@ fn requirements_scope_type_names(requirements: &SurfaceRequirements) -> BTreeSet
 ///
 /// Returns [`CoreError`] when the source cannot be parsed.
 pub fn requirements_declared_ids(source: &str) -> Result<BTreeSet<String>, CoreError> {
-    let document = fsl_syntax::parse_surface_document(source)?;
+    requirements_declared_ids_with_options(source, &ParseOptions::stable())
+}
+
+/// [`requirements_declared_ids`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`requirements_declared_ids`].
+pub fn requirements_declared_ids_with_options(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<BTreeSet<String>, CoreError> {
+    let document = parse_surface_document_with(source, options)?;
     let SurfaceDocument::Requirements(requirements) = document else {
         return Ok(BTreeSet::new());
     };
@@ -3384,7 +4401,19 @@ pub fn requirements_declared_ids(source: &str) -> Result<BTreeSet<String>, CoreE
 ///
 /// Returns [`CoreError`] when the source cannot be parsed.
 pub fn requirements_has_implements(source: &str) -> Result<bool, CoreError> {
-    let document = fsl_syntax::parse_surface_document(source)?;
+    requirements_has_implements_with_options(source, &ParseOptions::stable())
+}
+
+/// [`requirements_has_implements`] under explicit [`ParseOptions`].
+///
+/// # Errors
+///
+/// As [`requirements_has_implements`].
+pub fn requirements_has_implements_with_options(
+    source: &str,
+    options: &ParseOptions,
+) -> Result<bool, CoreError> {
+    let document = parse_surface_document_with(source, options)?;
     let SurfaceDocument::Requirements(requirements) = document else {
         return Ok(false);
     };
@@ -3422,7 +4451,21 @@ pub fn governance_contract(
     source: &str,
     resolver: &dyn FileResolver,
 ) -> Result<Option<GovernanceContract>, CoreError> {
-    let document = fsl_syntax::parse_surface_document(source)?;
+    governance_contract_with_options(source, resolver, &ParseOptions::stable())
+}
+
+/// [`governance_contract`] under explicit [`ParseOptions`], which also read
+/// the governance dependencies.
+///
+/// # Errors
+///
+/// As [`governance_contract`].
+pub fn governance_contract_with_options(
+    source: &str,
+    resolver: &dyn FileResolver,
+    options: &ParseOptions,
+) -> Result<Option<GovernanceContract>, CoreError> {
+    let document = parse_surface_document_with(source, options)?;
     let SurfaceDocument::Governance(governance) = document else {
         return Ok(None);
     };
@@ -3467,6 +4510,7 @@ pub fn governance_contract(
                     span,
                     &control_ids,
                     resolver,
+                    *options,
                 )?);
             }
             GovernanceItem::Preservation { name, items, span } => {
@@ -3482,6 +4526,7 @@ pub fn governance_contract(
                     span,
                     &control_ids,
                     resolver,
+                    *options,
                 )?);
             }
         }
@@ -3501,11 +4546,12 @@ fn governance_business_catalog(
     path: &str,
     span: fsl_syntax::Span,
     resolver: &dyn FileResolver,
+    options: ParseOptions,
 ) -> Result<(BTreeSet<String>, BTreeSet<String>, GovernanceSatisfaction), CoreError> {
     let dependency = resolver
         .read(path)
         .map_err(|_| core_error(format!("governance dependency not found: '{path}'"), span))?;
-    let parsed = fsl_syntax::parse_surface_document(&dependency).map_err(|error| {
+    let parsed = parse_surface_document_with(&dependency, &options).map_err(|error| {
         core_error(
             format!("invalid governance dependency '{path}': {error}"),
             span,
@@ -3557,9 +4603,10 @@ fn validate_governance_delegate(
     span: fsl_syntax::Span,
     controls: &BTreeSet<String>,
     resolver: &dyn FileResolver,
+    options: ParseOptions,
 ) -> Result<GovernanceDelegate, CoreError> {
     let (policies, goals, implicit_satisfaction) =
-        governance_business_catalog(&business_name, path, span, resolver)?;
+        governance_business_catalog(&business_name, path, span, resolver, options)?;
     let mut required = Vec::new();
     let mut required_ids = BTreeSet::new();
     let mut explicit = GovernanceSatisfaction::new();
@@ -3634,6 +4681,7 @@ fn validate_governance_preservation(
     span: fsl_syntax::Span,
     controls: &BTreeSet<String>,
     resolver: &dyn FileResolver,
+    options: ParseOptions,
 ) -> Result<GovernancePreservation, CoreError> {
     let mut before = None;
     let mut after = None;
@@ -3698,8 +4746,8 @@ fn validate_governance_preservation(
             span,
         ));
     }
-    validate_governance_document(resolver, &before_path, &before_name, before_span)?;
-    validate_governance_document(resolver, &after_path, &after_name, after_span)?;
+    validate_governance_document(resolver, &before_path, &before_name, before_span, options)?;
+    validate_governance_document(resolver, &after_path, &after_name, after_span, options)?;
     resolver.read(&refinement_path).map_err(|_| {
         core_error(
             format!("governance dependency not found: '{refinement_path}'"),
@@ -3738,11 +4786,12 @@ fn validate_governance_document(
     path: &str,
     expected_name: &str,
     span: fsl_syntax::Span,
+    options: ParseOptions,
 ) -> Result<(), CoreError> {
     let source = resolver
         .read(path)
         .map_err(|_| core_error(format!("governance dependency not found: '{path}'"), span))?;
-    let document = fsl_syntax::parse_surface_document(&source).map_err(|error| {
+    let document = parse_surface_document_with(&source, &options).map_err(|error| {
         core_error(
             format!("invalid governance dependency '{path}': {error}"),
             span,

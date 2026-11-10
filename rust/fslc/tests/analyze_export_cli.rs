@@ -79,7 +79,16 @@ fn dot_export_escapes_a_backslash_from_a_valid_fsl_requirement_id() {
     ]);
 
     assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.is_empty());
+    let checked = run(&["check", fixture.to_str().expect("UTF-8 fixture path")]);
+    assert_eq!(checked.status.code(), Some(0));
+    let checked: Value = serde_json::from_slice(&checked.stdout).expect("check JSON");
+    let warnings = checked["warnings"].as_array().expect("source warnings");
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0]["code"], "legacy_string_metadata");
+    assert_eq!(
+        String::from_utf8(output.stderr).expect("UTF-8 warnings"),
+        format!("warning: {}\n", warnings[0])
+    );
     let dot = String::from_utf8(output.stdout).expect("UTF-8 DOT output");
     assert!(dot.starts_with("digraph fsl_analysis {\n"));
     let requirement = dot

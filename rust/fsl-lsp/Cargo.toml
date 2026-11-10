@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 fsl-core = { path = "../fsl-core" }
+fsl-solver-z3 = { path = "../fsl-solver-z3" }
 fsl-syntax = { path = "../fsl-syntax" }
 fsl-tools = { path = "../fsl-tools" }
 fslc-rust = { path = "../fslc", default-features = false }

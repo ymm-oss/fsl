@@ -2,8 +2,10 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "FSL",
   "scopeName": "source.fsl",
-  "comment": "Regex-based highlighting is approximate because FSL keywords are contextual.",
+  "comment": "Regex-based highlighting is approximate because FSL keywords are contextual. The FSL 5 keywords (fsl5-declarations, fsl5-keywords) are derived from rust/fsl-syntax/src/keywords.rs and apply only after an `fsl 5` header line; rust/fsl-syntax/tests/vscode_grammar_keywords.rs keeps them in step.",
   "patterns": [
+    { "include": "#fsl5-document" },
+    { "include": "#edition-header" },
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#declarations" },
@@ -15,6 +17,95 @@
     { "include": "#methods" }
   ],
   "repository": {
+    "edition-header": {
+      "patterns": [
+        {
+          "name": "meta.edition-header.fsl",
+          "match": "^\\x{FEFF}?[ \\t]*(fsl)[ \\t]+([45])[ \\t]*$",
+          "captures": {
+            "1": { "name": "keyword.other.edition.fsl" },
+            "2": { "name": "constant.numeric.edition.fsl" }
+          }
+        }
+      ]
+    },
+    "fsl5-document": {
+      "comment": "An `fsl 5` header opens the rest of the document: the FSL 4 rules plus the FSL 5 keywords. A headerless or `fsl 4` document never enters it. The end never matches.",
+      "begin": "^\\x{FEFF}?[ \\t]*(fsl)[ \\t]+(5)[ \\t]*$",
+      "beginCaptures": {
+        "0": { "name": "meta.edition-header.fsl" },
+        "1": { "name": "keyword.other.edition.fsl" },
+        "2": { "name": "constant.numeric.edition.fsl" }
+      },
+      "end": "(?!)",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#declarations" },
+        { "include": "#fsl5-declarations" },
+        { "include": "#builtins" },
+        { "include": "#keywords" },
+        { "include": "#fsl5-keywords" },
+        { "include": "#constants" },
+        { "include": "#numbers" },
+        { "include": "#operators" },
+        { "include": "#methods" }
+      ]
+    },
+    "fsl5-declarations": {
+      "comment": "FSL 5 declaration heads followed by the declared name: keywords.rs rows of context Declaration (and Requirements). A Japanese head is a whole identifier: no identifier character may stand directly before it.",
+      "patterns": [
+        {
+          "name": "meta.definition.block.fsl",
+          "match": "(?<![\\p{XID_Continue}])(要件)\\s+([\\p{XID_Continue}&&[^\\x{30FB}\\x{FF65}]][[\\p{XID_Continue}-]&&[^\\x{30FB}\\x{FF65}]]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.fsl" },
+            "2": { "name": "entity.name.type.fsl" }
+          }
+        },
+        {
+          "name": "meta.definition.named.fsl",
+          "match": "\\b(forbidden|resource|scenario|concept|measure|decide|entity|number|policy|actor|const|event|enum|goal|rule|type|kpi)\\s+([\\p{XID_Continue}&&[^\\x{30FB}\\x{FF65}]][[\\p{XID_Continue}-]&&[^\\x{30FB}\\x{FF65}]]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.fsl" },
+            "2": { "name": "entity.name.function.fsl" }
+          }
+        },
+        {
+          "name": "meta.definition.named.fsl",
+          "match": "(?<![\\p{XID_Continue}])(エンティティ|拒否シナリオ|アクター|シナリオ|重要指標|出来事|決定表|列挙|区分|定数|指標|数値|方針|目標|規則|資源|型)\\s+([\\p{XID_Continue}&&[^\\x{30FB}\\x{FF65}]][[\\p{XID_Continue}-]&&[^\\x{30FB}\\x{FF65}]]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.fsl" },
+            "2": { "name": "entity.name.function.fsl" }
+          }
+        }
+      ]
+    },
+    "fsl5-keywords": {
+      "comment": "Every active keywords.rs row in English and Japanese, and the particles. Declaration-head rows (contexts Document and Declaration) are keyword.declaration; the rest are keyword.control. A multi-word English keyword matches as one phrase. A Japanese keyword or particle matches only as a whole identifier (no identifier character on either side), so the particles never match inside a name.",
+      "patterns": [
+        {
+          "name": "keyword.declaration.fsl",
+          "match": "\\b(requirements|forbidden|glossary|resource|scenario|concept|measure|decide|entity|number|policy|verify|actor|const|event|enum|goal|rule|type|kpi)\\b"
+        },
+        {
+          "name": "keyword.control.fsl",
+          "match": "\\b(must\\s+eventually\\s+be|belongs\\s+to|only\\s+after|can\\s+reach|instances|lifecycle|only\\s+from|only\\s+when|otherwise|assuming|deadline|only\\s+for|rejected|always|covers|enters|not\\s+in|values|allow|count|every|fault|input|never|where|some|then|when|with|and|for|has|set|via|as|in|is|or)\\b"
+        },
+        {
+          "name": "keyword.declaration.fsl",
+          "match": "(?<![\\p{XID_Continue}])(エンティティ|拒否シナリオ|アクター|シナリオ|重要指標|出来事|決定表|用語集|列挙|区分|定数|指標|数値|方針|検証|目標|要件|規則|資源|型)(?![\\p{XID_Continue}])"
+        },
+        {
+          "name": "keyword.control.fsl",
+          "match": "(?<![\\p{XID_Continue}])(ライフサイクル|いずれかの|いずれ必ず|すべての|それ以外|先行条件|到達可能|対応要件|段階以外|のうち|または|所属先|遷移元|遷移先|かつ|仮定|件数|個数|値域|入力|契機|対象|常に|役名|必須|拒否|更新|期限|条件|段階|異常|禁止|結果|許可)(?![\\p{XID_Continue}])"
+        },
+        {
+          "name": "keyword.other.particle.fsl",
+          "match": "(?<![\\p{XID_Continue}])(が|で|に|は|を)(?![\\p{XID_Continue}])"
+        }
+      ]
+    },
     "comments": {
       "patterns": [
         {
@@ -35,7 +126,7 @@
       "patterns": [
         {
           "name": "meta.definition.block.fsl",
-          "match": "\\b(spec|compose|requirements|business|governance|refinement)\\s+([A-Za-z_][A-Za-z_0-9]*)",
+          "match": "\\b(spec|compose|requirements|business|governance|refinement)\\s+([_\\p{XID_Start}][\\p{XID_Continue}&&[^\\x{30FB}\\x{FF65}]]*)",
           "captures": {
             "1": { "name": "keyword.declaration.fsl" },
             "2": { "name": "entity.name.type.fsl" }
@@ -43,7 +134,7 @@
         },
         {
           "name": "meta.definition.named.fsl",
-          "match": "\\b(const|type|enum|struct|entity|number|action|invariant|trans|reachable|leadsTo|until|unless|requirement|acceptance|forbidden|kpi|process|control|policy|goal|authority|preservation)\\s+([A-Za-z0-9_][A-Za-z0-9_-]*)",
+          "match": "\\b(const|type|enum|struct|entity|number|action|invariant|trans|reachable|leadsTo|until|unless|requirement|acceptance|forbidden|kpi|process|control|policy|goal|authority|preservation)\\s+([\\p{XID_Continue}&&[^\\x{30FB}\\x{FF65}]][[\\p{XID_Continue}-]&&[^\\x{30FB}\\x{FF65}]]*)",
           "captures": {
             "1": { "name": "keyword.declaration.fsl" },
             "2": { "name": "entity.name.function.fsl" }

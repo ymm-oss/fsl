@@ -2,13 +2,14 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use fsl_core::{FslValue, KernelModel, ParamDef};
+use fsl_core::{FslValue, KernelModel, ParamDef, PublicName};
 use serde_json::{Value, json};
 
 // The one ordered list of `check`'s validity stages (issue #1163). The Worker
 // calls it too, so it is not behind `native-cli`; its specialized-document and
 // Agent stages are why `fsl-tools` is an unconditional dependency.
 pub mod check_stages;
+pub mod checked_build;
 pub mod coverage;
 pub mod frontend_output;
 pub mod junit_report;
@@ -16,7 +17,7 @@ pub mod junit_report;
 // (issue #665). Declared on the library side for the same reason `outcome`
 // is: integration tests under `tests/` link the library, not the binary, and
 // need to gate the registry against `cli-contract.json` directly. Native-CLI
-// filesystem materialization is not meaningful to `fsl-lsp`/`fsl-wasm`, which
+// filesystem access is not meaningful to `fsl-lsp`/`fsl-wasm`, which
 // depend on this crate with `default-features = false`.
 #[cfg(feature = "native-cli")]
 pub mod literate_access;
@@ -41,13 +42,14 @@ pub mod origin_coverage;
 pub mod outcome;
 pub mod replay_trace;
 pub mod reproducer;
+pub mod requirements_solver;
 pub mod source_diagnostic;
 pub mod spec_load;
 pub mod verification_output;
 
 pub use fsl_core::{
-    display_name, expr_text, fsl_value_json, internal_origin_json, origin_display_name,
-    source_expr_text, state_json, trace_json,
+    expr_text, fsl_value_json, internal_origin_json, origin_display_name, source_expr_text,
+    state_json, trace_json,
 };
 
 /// Diff two already-JSON-rendered values into a native `trace_json`-style
@@ -141,10 +143,7 @@ pub fn conformance_vectors_for_version(
     while let Some((state_id, state_depth, monitor)) = queue.pop_front() {
         let before = conformance_state_json(model, &monitor.state)?;
         for (action, params) in &all_calls {
-            let action_json = json!({
-                "name":model.action_display_name(action),
-                "params":params.iter().map(|(name,value)|(name.clone(),fsl_value_json(value))).collect::<serde_json::Map<_,_>>()
-            });
+            let action_json = conformance_action_json(&model.names().public_action(action), params);
             let mut successor = monitor.clone();
             let result = successor
                 .attempt(action, params)
@@ -161,8 +160,9 @@ pub fn conformance_vectors_for_version(
                     "outcome":{
                         "kind":violation.kind,
                         "name":model
-                            .component_public_name(&violation.name, action)
-                            .unwrap_or(violation.name),
+                            .names()
+                            .public_violation(&violation.name, Some(action))
+                            .as_str(),
                         "state_changed":after != before,"state":after,
                         "attempted_state":attempted
                     }
@@ -423,6 +423,16 @@ pub fn testgen_trace_vectors(model: &KernelModel) -> Result<TestgenWalk, String>
     })))
 }
 
+fn conformance_action_json(name: &PublicName, params: &BTreeMap<String, FslValue>) -> Value {
+    json!({
+        "name": name.as_str(),
+        "params": params
+            .iter()
+            .map(|(name, value)| (name.clone(), fsl_value_json(value)))
+            .collect::<serde_json::Map<_, _>>(),
+    })
+}
+
 fn conformance_state_json(
     model: &KernelModel,
     state: &BTreeMap<String, FslValue>,
@@ -436,7 +446,7 @@ fn conformance_state_json(
                     .get(name)
                     .ok_or_else(|| format!("missing state variable '{name}'"))?;
                 Ok((
-                    display_name(name),
+                    model.names().public_state(name).into_string(),
                     conformance_value_json(model, ty, value)?,
                 ))
             })

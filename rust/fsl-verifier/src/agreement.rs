@@ -6,14 +6,19 @@ use fsl_core::{FslValue, KernelExpr, KernelModel, ParamDef, TypeDef, TypeRef};
 use fsl_solver::{SatResult, SmtSolver, Sort};
 
 use crate::VerifyError;
-use crate::eval::{definedness, eval};
+use crate::bmc::{CheckedStateCarriers, checked_action_carriers, checked_read_carriers};
+use crate::eval::{
+    FailureClass, classified_evaluation_status_in, definedness, enumerated_binder_binding, eval,
+    eval_in,
+};
 use crate::transition::{
-    action_guard_definedness, action_guards, action_instances, action_statements_definedness,
-    transition_constraint,
+    action_guard_definedness, action_guards_in, action_instances, action_statements_definedness,
+    classified_action_guard_definedness_in, classified_action_statements_evaluation_status_in,
+    transition_constraint_in,
 };
 use crate::value::{
-    Bindings, SymbolicState, SymbolicValue, bool_term, bounds, concrete_value, logical_equal,
-    project_state, symbolic_state_with_suffix,
+    SymbolicState, SymbolicValue, TypedBinding, TypedBindings as Bindings, bool_term, bounds,
+    concrete_value, logical_equal, project_state, symbolic_state_with_suffix,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -79,6 +84,23 @@ async fn transition_matches_step_with_bounds<S: SmtSolver>(
     let mut symbolic_current = symbolic_state_with_suffix(solver, model, "agreement_current")?;
     let mut symbolic_next = symbolic_state_with_suffix(solver, model, "agreement_next")?;
     pin_state(solver, model, &symbolic_current, current, "current", false)?;
+    if totalize_partial_values {
+        totalize_agreement_state(solver, model, &mut symbolic_current)?;
+        totalize_agreement_state(solver, model, &mut symbolic_next)?;
+    }
+    let instances = action_instances(solver, model)?;
+    let choice = solver.constant("agreement_action_choice", &Sort::Int)?;
+    let current_context = checked_action_carriers(solver, model, &symbolic_current, None).await?;
+    let transition = transition_constraint_in(
+        solver,
+        model,
+        &instances,
+        &symbolic_current,
+        &mut symbolic_next,
+        &choice,
+        current_context.as_ref(),
+    )?;
+    solver.assert(&transition)?;
     pin_state(
         solver,
         model,
@@ -87,21 +109,6 @@ async fn transition_matches_step_with_bounds<S: SmtSolver>(
         "next",
         allow_next_bound_violation,
     )?;
-    if totalize_partial_values {
-        totalize_agreement_state(solver, model, &mut symbolic_current)?;
-        totalize_agreement_state(solver, model, &mut symbolic_next)?;
-    }
-    let instances = action_instances(solver, model)?;
-    let choice = solver.constant("agreement_action_choice", &Sort::Int)?;
-    let transition = transition_constraint(
-        solver,
-        model,
-        &instances,
-        &symbolic_current,
-        &symbolic_next,
-        &choice,
-    )?;
-    solver.assert(&transition)?;
 
     for (index, instance) in instances.iter().enumerate() {
         if instance.action != action {
@@ -360,29 +367,56 @@ async fn action_condition_is_implied<S: SmtSolver>(
     expected: ActionCondition,
 ) -> Result<bool, VerifyError> {
     solver.push();
-    let assertions = (|| -> Result<S::Term, VerifyError> {
+    let assertions: Result<S::Term, VerifyError> = async {
         let definition = validate_action_parameters(model, action, params)?;
         let mut symbolic_current =
             symbolic_state_with_suffix(solver, model, "agreement_action_current")?;
         pin_state(solver, model, &symbolic_current, current, "current", false)?;
         totalize_agreement_state(solver, model, &mut symbolic_current)?;
         let symbolic_params = symbolic_action_parameters(solver, model, definition, params)?;
-        let status = action_guard_definedness(
-            solver,
-            model,
-            definition,
-            &symbolic_current,
-            &symbolic_params,
-        )?;
+        let current_context =
+            checked_action_carriers(solver, model, &symbolic_current, None).await?;
+        let status = if let Some(ctx) = current_context.as_ref() {
+            classified_action_guard_definedness_in(
+                solver,
+                model,
+                definition,
+                &symbolic_current,
+                &symbolic_params,
+                FailureClass::PartialOperation,
+                Some(ctx),
+            )?
+        } else {
+            action_guard_definedness(
+                solver,
+                model,
+                definition,
+                &symbolic_current,
+                &symbolic_params,
+            )?
+        };
         let condition = match expected {
             ActionCondition::EnabledAndDefined => {
-                let statements_defined = action_statements_definedness(
-                    solver,
-                    model,
-                    definition,
-                    &symbolic_current,
-                    &status.bindings,
-                )?;
+                let statements_defined = if let Some(ctx) = current_context.as_ref() {
+                    classified_action_statements_evaluation_status_in(
+                        solver,
+                        model,
+                        definition,
+                        &symbolic_current,
+                        &status.bindings,
+                        FailureClass::PartialOperation,
+                        Some(ctx),
+                    )?
+                    .fully_defined
+                } else {
+                    action_statements_definedness(
+                        solver,
+                        model,
+                        definition,
+                        &symbolic_current,
+                        &status.bindings,
+                    )?
+                };
                 solver.and(&[status.defined, status.enabled, statements_defined])?
             }
             ActionCondition::DisabledAndDefined => {
@@ -391,7 +425,8 @@ async fn action_condition_is_implied<S: SmtSolver>(
         };
         solver.assert(&solver.not(&condition)?)?;
         Ok(condition)
-    })();
+    }
+    .await;
     if let Err(error) = assertions {
         solver.pop(1)?;
         return Err(error);
@@ -446,6 +481,15 @@ async fn post_outcome_matches<S: SmtSolver>(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let bounds_hold = solver.and(&bound_terms)?;
+    let post_context = validated_post_read_context(
+        model,
+        solver,
+        definition,
+        &symbolic_current,
+        &symbolic_next,
+        outcome_kind,
+    )
+    .await?;
 
     let (invariants_hold, invariant_fails) = ordered_property_phase(
         solver,
@@ -453,6 +497,7 @@ async fn post_outcome_matches<S: SmtSolver>(
         &model.invariants,
         &symbolic_next,
         &symbolic_current,
+        post_context.as_ref(),
     )?;
     let (transitions_hold, transition_fails) = ordered_property_phase(
         solver,
@@ -460,15 +505,17 @@ async fn post_outcome_matches<S: SmtSolver>(
         &model.transitions,
         &symbolic_next,
         &symbolic_current,
+        post_context.as_ref(),
     )?;
 
     let symbolic_params = symbolic_action_parameters(solver, model, definition, params)?;
-    let (_, mut bindings) = action_guards(
+    let (_, mut bindings) = action_guards_in(
         solver,
         model,
         definition,
         &symbolic_current,
         &symbolic_params,
+        post_context.as_ref(),
     )?;
     let (ensures_hold, ensure_fails) = ordered_expression_phase(
         solver,
@@ -477,6 +524,7 @@ async fn post_outcome_matches<S: SmtSolver>(
         &symbolic_next,
         &mut bindings,
         Some(&symbolic_current),
+        post_context.as_ref(),
     )?;
 
     let condition = match outcome_kind {
@@ -497,33 +545,102 @@ async fn post_outcome_matches<S: SmtSolver>(
     }
 }
 
+/// These objects have already passed `pin_state`; allowed-invalid next is never certified.
+async fn validated_post_read_context<'f, S: SmtSolver>(
+    model: &KernelModel,
+    solver: &mut S,
+    definition: &fsl_core::ActionDef,
+    current: &'f SymbolicState<S::Term>,
+    next: &'f SymbolicState<S::Term>,
+    outcome_kind: &str,
+) -> Result<Option<CheckedStateCarriers<'f, S::Term>>, VerifyError> {
+    let local_names = definition
+        .params
+        .iter()
+        .map(ParamDef::name)
+        .chain(definition.lets.iter().map(|(name, _)| name.as_str()))
+        .collect::<Vec<_>>();
+    let needs_post_context = model
+        .invariants
+        .iter()
+        .chain(&model.transitions)
+        .any(|property| {
+            !fsl_core::integer_range_state_references(&property.expr, model, []).is_empty()
+        })
+        || definition.ensures.iter().any(|expr| {
+            !fsl_core::integer_range_state_references(expr, model, local_names.iter().copied())
+                .is_empty()
+        });
+    let needs_action_context = model
+        .actions
+        .iter()
+        .any(|action| fsl_core::action_has_integer_range_binder(model, action));
+    if !needs_post_context && !needs_action_context {
+        return Ok(None);
+    }
+    let current = checked_read_carriers(solver, model, current, None).await?;
+    if needs_post_context && outcome_kind != "type_bound" {
+        let next = checked_read_carriers(solver, model, next, None).await?;
+        Ok(Some(next.with_old(current)))
+    } else {
+        Ok(Some(current))
+    }
+}
+
 fn ordered_property_phase<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
     properties: &[fsl_core::PropertyDef],
     next: &SymbolicState<S::Term>,
     current: &SymbolicState<S::Term>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<(S::Term, S::Term), VerifyError> {
     let mut prefix = solver.bool_value(true);
     let mut failures = Vec::new();
     for property in properties {
         let mut bindings = Bindings::new();
-        let expression_defined = definedness(
-            solver,
-            model,
-            &property.expr,
-            next,
-            &bindings,
-            Some(current),
-        )?;
-        let value = eval(
-            solver,
-            model,
-            &property.expr,
-            next,
-            &mut bindings,
-            Some(current),
-        )?;
+        let expression_defined = if let Some(ctx) = ctx {
+            classified_evaluation_status_in(
+                solver,
+                model,
+                &property.expr,
+                next,
+                &bindings,
+                Some(current),
+                FailureClass::PartialOperation,
+                Some(ctx),
+            )?
+            .fully_defined
+        } else {
+            definedness(
+                solver,
+                model,
+                &property.expr,
+                next,
+                &bindings,
+                Some(current),
+            )?
+        };
+        let value = if let Some(ctx) = ctx {
+            eval_in(
+                solver,
+                model,
+                &property.expr,
+                next,
+                &mut bindings,
+                Some(current),
+                Some(ctx),
+            )?
+        } else {
+            eval(
+                solver,
+                model,
+                &property.expr,
+                next,
+                &mut bindings,
+                Some(current),
+            )?
+        };
         let value = bool_term(&value)?.clone();
         failures.push(solver.and(&[
             prefix.clone(),
@@ -542,13 +659,39 @@ fn ordered_expression_phase<S: SmtSolver>(
     state: &SymbolicState<S::Term>,
     bindings: &mut Bindings<S::Term>,
     old_state: Option<&SymbolicState<S::Term>>,
+    ctx: Option<&CheckedStateCarriers<'_, S::Term>>,
 ) -> Result<(S::Term, S::Term), VerifyError> {
     let mut prefix = solver.bool_value(true);
     let mut failures = Vec::new();
     for expression in expressions {
-        let expression_defined =
-            definedness(solver, model, expression, state, bindings, old_state)?;
-        let value = eval(solver, model, expression, state, bindings, old_state)?;
+        let expression_defined = if let Some(ctx) = ctx {
+            classified_evaluation_status_in(
+                solver,
+                model,
+                expression,
+                state,
+                bindings,
+                old_state,
+                FailureClass::PartialOperation,
+                Some(ctx),
+            )?
+            .fully_defined
+        } else {
+            definedness(solver, model, expression, state, bindings, old_state)?
+        };
+        let value = if let Some(ctx) = ctx {
+            eval_in(
+                solver,
+                model,
+                expression,
+                state,
+                bindings,
+                old_state,
+                Some(ctx),
+            )?
+        } else {
+            eval(solver, model, expression, state, bindings, old_state)?
+        };
         let value = bool_term(&value)?.clone();
         failures.push(solver.and(&[
             prefix.clone(),
@@ -566,21 +709,23 @@ fn symbolic_action_parameters<S: SmtSolver>(
     definition: &fsl_core::ActionDef,
     params: &BTreeMap<String, FslValue>,
 ) -> Result<Bindings<S::Term>, VerifyError> {
-    definition
-        .params
-        .iter()
-        .map(|parameter| {
-            let name = parameter.name();
-            let value = params.get(name).ok_or_else(|| {
-                VerifyError::new(format!("agreement parameter '{name}' is missing"))
-            })?;
-            let ty = match parameter {
-                ParamDef::Typed { ty, .. } => ty.clone(),
-                ParamDef::Range { lo, hi, .. } => TypeRef::Range(*lo, *hi),
-            };
-            Ok((name.to_owned(), concrete_value(solver, model, &ty, value)?))
-        })
-        .collect()
+    let mut bindings = Bindings::new();
+    for parameter in &definition.params {
+        let name = parameter.name();
+        let value = params
+            .get(name)
+            .ok_or_else(|| VerifyError::new(format!("agreement parameter '{name}' is missing")))?;
+        let ty = match parameter {
+            ParamDef::Typed { ty, .. } => ty.clone(),
+            ParamDef::Range { lo, hi, .. } => TypeRef::Range(*lo, *hi),
+        };
+        let value = concrete_value(solver, model, &ty, value)?;
+        bindings.insert(
+            name.to_owned(),
+            enumerated_binder_binding(solver, model, TypedBinding(value, Some(ty))),
+        );
+    }
+    Ok(bindings)
 }
 
 fn validate_action_parameters<'a>(
@@ -792,6 +937,10 @@ fn totalize_agreement_value<S: SmtSolver>(
         SymbolicValue::SetLiteral(values) | SymbolicValue::SeqLiteral(values) => values
             .iter_mut()
             .try_for_each(|value| totalize_agreement_value(solver, model, value)),
+        SymbolicValue::Collection { entries, .. } => entries
+            .iter_mut()
+            .flat_map(|(key, _)| key.iter_mut())
+            .try_for_each(|value| totalize_agreement_value(solver, model, value)),
         SymbolicValue::Scalar { .. }
         | SymbolicValue::None
         | SymbolicValue::Set { .. }
@@ -855,13 +1004,24 @@ pub async fn expression_matches_value<S: SmtSolver>(
             "agreement state contains an unknown state variable",
         ));
     }
-    let actual = eval(
+    let referenced = fsl_core::integer_range_state_references(expression, model, []);
+    let context = if referenced.is_empty() {
+        None
+    } else {
+        let selected = referenced
+            .iter()
+            .map(|name| fsl_core::SyntheticName::Bounds { state: name }.internal())
+            .collect();
+        Some(checked_read_carriers(solver, model, &symbolic, Some(&selected)).await?)
+    };
+    let actual = eval_in(
         solver,
         model,
         expression,
         &symbolic,
         &mut Bindings::new(),
         None,
+        context.as_ref(),
     )?;
     let ty = actual
         .ty()
@@ -905,25 +1065,41 @@ pub async fn invariant_implication<S: SmtSolver>(
         )?)?;
     }
     for property in &antecedent.invariants {
-        let value = eval(
+        let context = if fsl_core::integer_range_state_references(&property.expr, antecedent, [])
+            .is_empty()
+        {
+            None
+        } else {
+            Some(checked_read_carriers(solver, antecedent, &state, None).await?)
+        };
+        let value = eval_in(
             solver,
             antecedent,
             &property.expr,
             &state,
             &mut Bindings::new(),
             None,
+            context.as_ref(),
         )?;
         solver.assert(bool_term(&value)?)?;
     }
     let mut consequents = Vec::new();
     for property in &consequent.invariants {
-        let value = eval(
+        let context = if fsl_core::integer_range_state_references(&property.expr, consequent, [])
+            .is_empty()
+        {
+            None
+        } else {
+            Some(checked_read_carriers(solver, consequent, &state, None).await?)
+        };
+        let value = eval_in(
             solver,
             consequent,
             &property.expr,
             &state,
             &mut Bindings::new(),
             None,
+            context.as_ref(),
         )?;
         consequents.push(bool_term(&value)?.clone());
     }

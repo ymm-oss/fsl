@@ -1,0 +1,1026 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Ryoichi Izumita
+
+//! The one owner of internal Kernel names and their public spellings.
+//!
+//! Three kinds of name meet at the output boundary:
+//!
+//! - declarations a compose document builds from two parts, internally
+//!   `alias__name` ([`ComposeName`]);
+//! - names an engine synthesises for a violation or an implicit property
+//!   ([`SyntheticName`]);
+//! - every other Kernel identifier. A name a user declares never contains the
+//!   separator `__` (check rejects one, [`crate::reject_declared_separator`]), so a
+//!   `__` inside a Kernel name is always one a lowering generated (a branch
+//!   split `submit__b1`, a dialect's derived name), and the string rule (the
+//!   first `__` reads as `.`, and the database dialect's separator sentinel
+//!   reads as `__`) publishes it as `submit.b1`.
+//!
+//! Every output publishes a name in this one spelling, in a human-facing field
+//! and in an identifier field alike; the Public Kernel is the exception that
+//! keeps the internal name, since it is the Kernel itself.
+//!
+//! [`NameMap`], owned by each [`crate::KernelModel`], is the only producer of
+//! a [`PublicName`] and the only reader that maps a public spelling back to an
+//! internal name. Model-free contexts (a Public Kernel or projection JSON
+//! document, a bare state map, expression text) use
+//! [`unmapped_public_spelling`], whose callers are enumerated by the
+//! repository's naming drift test.
+
+use std::collections::BTreeMap;
+use std::fmt;
+
+/// The database dialect's stand-in for a public `__` inside a generated
+/// name, restored when the name is published.
+pub(crate) const DB_SEPARATOR: &str = "QqDbSepqQ";
+
+/// The separator a lowering puts between the parts of a generated name.
+const SEPARATOR: &str = "__";
+
+/// Whether a declared name contains the separator, which only generated
+/// names may (decisions 051, #1256).
+#[must_use]
+pub fn contains_separator(name: &str) -> bool {
+    name.contains(SEPARATOR)
+}
+
+/// The internal-to-public string rule.
+fn display_name(name: &str) -> String {
+    name.replacen("__", ".", 1).replace(DB_SEPARATOR, "__")
+}
+
+/// Public spelling of a Kernel identifier read where no [`NameMap`] is in
+/// reach.
+///
+/// This is the string rule, which agrees with [`NameMap`] for every name a
+/// checked document can produce, because no declared name contains `__`. A
+/// caller that has a model publishes through [`NameMap`] instead.
+#[must_use]
+pub fn unmapped_public_spelling(name: &str) -> String {
+    display_name(name)
+}
+
+/// Structural identity of one compose component declaration: the `use` alias
+/// and the name declared by the component spec.
+///
+/// Public spellings are built from these two parts rather than parsed back
+/// out of the internal name `alias__name`. Neither part may contain `__`
+/// ([`crate::reject_declared_separator`]), so the two agree.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComposeName {
+    pub alias: String,
+    pub name: String,
+}
+
+impl ComposeName {
+    pub(crate) fn new(alias: &str, name: &str) -> Self {
+        Self {
+            alias: alias.to_owned(),
+            name: name.to_owned(),
+        }
+    }
+
+    /// The canonical public spelling, `alias.name`.
+    #[must_use]
+    pub fn display(&self) -> String {
+        format!("{}.{}", self.alias, self.name)
+    }
+}
+
+/// The internal Kernel name of a compose component declaration.
+pub(crate) fn compose_internal(alias: &str, name: &str) -> String {
+    format!("{alias}__{name}")
+}
+
+/// The stage state of a requirements `process`: `claim_stage` for `Claim`.
+pub(crate) fn process_stage_state(process: &str) -> String {
+    format!("{}_stage", process.to_lowercase())
+}
+
+/// The stage enum of a requirements `process`: `ClaimStage` for `Claim`.
+pub(crate) fn process_stage_enum(process: &str) -> String {
+    format!("{process}Stage")
+}
+
+/// The state of one data field of a requirements `process`: `claim_amount`.
+pub(crate) fn process_field_state(process: &str, field: &str) -> String {
+    format!("{}_{}", process.to_lowercase(), field)
+}
+
+/// The binder a next-edition entity's events and initial values quantify
+/// over: the entity's first letter in lower case (`c` for `Claim`, `r` for
+/// `Request`). A `process` quantifies over `c`.
+pub(crate) fn entity_binder(entity: &str) -> String {
+    // One rule with the parser, which names a relation event's input by it.
+    fsl_syntax::entity_binder(entity)
+}
+
+/// The invariant a next-edition decision table's `assuming Q` adds:
+/// `_decide_REQ_2_3_assuming` for table `REQ-2-3`.
+pub(crate) fn decide_assumption_invariant(table: &str) -> String {
+    let safe = table
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    format!("_decide_{safe}_assuming")
+}
+
+/// Every declaration name a next-edition entity lowers to: its stage enum,
+/// its stage state, and one state per field.
+pub(crate) fn entity_generated_names<'a>(
+    entity: &str,
+    fields: impl IntoIterator<Item = &'a str>,
+) -> Vec<String> {
+    let mut names = vec![process_stage_enum(entity), process_stage_state(entity)];
+    names.extend(
+        fields
+            .into_iter()
+            .map(|field| process_field_state(entity, field)),
+    );
+    names
+}
+
+/// The property an unnamed next-edition rule statement lowers to: the
+/// requirement id with every character that cannot appear in a name spelled
+/// `_`, then the statement kind, then the statement's ordinal among the
+/// requirement's unnamed statements of that kind when it is not the first. `REQ_5_always` is the
+/// first `always` of rule `REQ-5`, `REQ_5_always_2` its second.
+pub(crate) fn rule_property_name(requirement: &str, kind: &str, ordinal: usize) -> String {
+    let mut name = requirement
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if name.starts_with(|first: char| first.is_ascii_digit()) {
+        name.insert_str(0, "REQ_");
+    }
+    if ordinal > 1 {
+        format!("{name}_{kind}_{ordinal}")
+    } else {
+        format!("{name}_{kind}")
+    }
+}
+
+/// Why a name written for a rule property (`Name: always …`) cannot be a
+/// Kernel property name, or `None` when it can: a literal reads as itself in
+/// every expression, and `__` is the compose separator a public spelling
+/// reads back as `.`.
+pub(crate) fn invalid_rule_property_name(name: &str) -> Option<&'static str> {
+    if crate::reserved::is_reserved(name) {
+        Some("is a literal")
+    } else if name.contains("__") {
+        Some("contains `__`, which a published name reads as a separator")
+    } else {
+        None
+    }
+}
+
+/// A name an engine builds for a violation or an implicit property.
+///
+/// [`Self::internal`] is the only spelling and [`Self::parse_internal`] the
+/// only reader. The prefixes overlap (`_partial_property_x` is both the
+/// partial-operation name of property `x` and of an action named
+/// `property_x`); the reader resolves an overlap toward the property kind.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SyntheticName<'a> {
+    /// A conformance step whose `requires` does not hold.
+    RequiresFailed { action: &'a str },
+    /// A partial operation while an action's guard or body evaluates.
+    PartialAction { action: &'a str },
+    /// A partial operation while a property evaluates.
+    PartialProperty { property: &'a str },
+    /// A partial operation while the `terminal` condition evaluates.
+    PartialTerminal,
+    /// The implicit type-bound invariant of a state variable.
+    Bounds { state: &'a str },
+    /// A finite Map key outside its domain in an action step.
+    KeyDomainAction { action: &'a str },
+    /// A finite Map key outside its domain in a property.
+    KeyDomainProperty { property: &'a str },
+}
+
+const REQUIRES_FAILED: &str = "_requires_failed_";
+const PARTIAL: &str = "_partial_";
+const PARTIAL_PROPERTY: &str = "_partial_property_";
+const PARTIAL_TERMINAL: &str = "_partial_property_terminal";
+const BOUNDS: &str = "_bounds_";
+const KEY_DOMAIN: &str = "_key_domain_";
+const KEY_DOMAIN_PROPERTY: &str = "_key_domain_property_";
+
+impl<'a> SyntheticName<'a> {
+    /// The internal spelling every engine reports.
+    #[must_use]
+    pub fn internal(&self) -> String {
+        match self {
+            Self::RequiresFailed { action } => format!("{REQUIRES_FAILED}{action}"),
+            Self::PartialAction { action } => format!("{PARTIAL}{action}"),
+            Self::PartialProperty { property } => format!("{PARTIAL_PROPERTY}{property}"),
+            Self::PartialTerminal => PARTIAL_TERMINAL.to_owned(),
+            Self::Bounds { state } => format!("{BOUNDS}{state}"),
+            Self::KeyDomainAction { action } => format!("{KEY_DOMAIN}{action}"),
+            Self::KeyDomainProperty { property } => format!("{KEY_DOMAIN_PROPERTY}{property}"),
+        }
+    }
+
+    /// Classify `name` by its synthetic prefix; `None` for a declared name.
+    ///
+    /// The remainder is returned as written, so this reads either an internal
+    /// name or a public spelling of one.
+    #[must_use]
+    pub fn parse_internal(name: &'a str) -> Option<Self> {
+        if let Some(action) = name.strip_prefix(REQUIRES_FAILED) {
+            return Some(Self::RequiresFailed { action });
+        }
+        if let Some(state) = name.strip_prefix(BOUNDS) {
+            return Some(Self::Bounds { state });
+        }
+        if name == PARTIAL_TERMINAL {
+            return Some(Self::PartialTerminal);
+        }
+        if let Some(property) = name.strip_prefix(PARTIAL_PROPERTY) {
+            return Some(Self::PartialProperty { property });
+        }
+        if let Some(action) = name.strip_prefix(PARTIAL) {
+            return Some(Self::PartialAction { action });
+        }
+        if let Some(property) = name.strip_prefix(KEY_DOMAIN_PROPERTY) {
+            return Some(Self::KeyDomainProperty { property });
+        }
+        name.strip_prefix(KEY_DOMAIN)
+            .map(|action| Self::KeyDomainAction { action })
+    }
+
+    /// The action a name built in an action step names.
+    #[must_use]
+    pub fn action(&self) -> Option<&'a str> {
+        match self {
+            Self::RequiresFailed { action }
+            | Self::PartialAction { action }
+            | Self::KeyDomainAction { action } => Some(action),
+            _ => None,
+        }
+    }
+
+    /// The state variable of a type-bound name.
+    #[must_use]
+    pub fn bounds_state(&self) -> Option<&'a str> {
+        match self {
+            Self::Bounds { state } => Some(state),
+            _ => None,
+        }
+    }
+
+    /// The property a partial-operation name names, with the `terminal`
+    /// condition read as the property `terminal`.
+    #[must_use]
+    pub fn partial_property(&self) -> Option<&'a str> {
+        match self {
+            Self::PartialProperty { property } => Some(property),
+            Self::PartialTerminal => Some("terminal"),
+            _ => None,
+        }
+    }
+}
+
+/// A name as published in JSON, a replay echo, a mutation target, or a report.
+///
+/// Only [`NameMap`] produces one; a string cannot be promoted to a public name
+/// outside `naming`:
+///
+/// ```compile_fail
+/// let _ = fsl_core::PublicName(String::from("acct__go"));
+/// ```
+///
+/// ```
+/// fn publish(name: &fsl_core::PublicName) -> &str {
+///     name.as_str()
+/// }
+/// let names = fsl_core::NameMap::default();
+/// assert_eq!(publish(&names.public_action("submit__b1")), "submit.b1");
+/// ```
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PublicName(String);
+
+impl PublicName {
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl fmt::Display for PublicName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for PublicName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq<str> for PublicName {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for PublicName {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl From<PublicName> for String {
+    fn from(name: PublicName) -> Self {
+        name.0
+    }
+}
+
+impl From<PublicName> for serde_json::Value {
+    fn from(name: PublicName) -> Self {
+        Self::String(name.0)
+    }
+}
+
+/// A public spelling that matches more than one internal name.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AmbiguousName<'n> {
+    pub candidates: Vec<&'n str>,
+}
+
+/// The aliases a next-edition requirements glossary gives canonical names.
+///
+/// Aliases are display spellings only: name resolution replaced every alias
+/// by its canonical name before lowering, so no Kernel name, and no
+/// [`PublicName`], is ever an alias. This table is how a delivery surface
+/// that displays names for a reader (diagnostics, `explain`) finds the alias
+/// of a canonical name, and the one place the pair is kept.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Glossary {
+    /// `(canonical as written, alias)` in glossary order. A field's canonical
+    /// side is written `Entity.field`.
+    entries: Vec<(String, String)>,
+}
+
+impl Glossary {
+    pub(crate) fn insert(&mut self, written: String, alias: String) {
+        self.entries.push((written, alias));
+    }
+
+    /// Whether the document had no glossary.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// `(canonical, alias)` pairs in glossary order.
+    pub fn entries(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.entries
+            .iter()
+            .map(|(canonical, alias)| (canonical.as_str(), alias.as_str()))
+    }
+
+    /// The alias of `name`: an unqualified canonical name, `Entity.field`, or
+    /// the bare name of a field when exactly one entry gives that field name
+    /// an alias.
+    #[must_use]
+    pub fn alias(&self, name: &str) -> Option<&str> {
+        if let Some((_, alias)) = self.entries.iter().find(|(canonical, _)| canonical == name) {
+            return Some(alias);
+        }
+        let mut fields = self.entries.iter().filter(|(canonical, _)| {
+            canonical
+                .split_once('.')
+                .is_some_and(|(_, field)| field == name)
+        });
+        match (fields.next(), fields.next()) {
+            (Some((_, alias)), None) => Some(alias),
+            _ => None,
+        }
+    }
+
+    /// The canonical name (the field name for a qualified entry) `alias`
+    /// resolves to.
+    #[must_use]
+    pub fn canonical(&self, alias: &str) -> Option<&str> {
+        self.entries
+            .iter()
+            .find(|(_, candidate)| candidate == alias)
+            .map(|(canonical, _)| {
+                canonical
+                    .split_once('.')
+                    .map_or(canonical.as_str(), |(_, field)| field)
+            })
+    }
+
+    /// How a reader sees `name` in a message: `alias（name）` when it has an
+    /// alias, `name` otherwise.
+    #[must_use]
+    pub fn display(&self, name: &str) -> String {
+        self.alias(name)
+            .map_or_else(|| name.to_owned(), |alias| format!("{alias}（{name}）"))
+    }
+}
+
+/// Internal name to structural identity for one model's compose declarations.
+/// Empty for any document that is not a compose.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct NameMap {
+    pub(crate) pattern_scopes: crate::typecheck::PatternScopes,
+    actions: BTreeMap<String, ComposeName>,
+    states: BTreeMap<String, ComposeName>,
+    properties: BTreeMap<String, ComposeName>,
+    /// Empty unless the document is a next-edition requirements document
+    /// with a glossary.
+    glossary: Glossary,
+}
+
+impl NameMap {
+    /// The aliases of the document's glossary (empty without one).
+    #[must_use]
+    pub fn glossary(&self) -> &Glossary {
+        &self.glossary
+    }
+
+    pub(crate) fn set_glossary(&mut self, glossary: Glossary) {
+        self.glossary = glossary;
+    }
+
+    pub(crate) fn insert_action(&mut self, alias: &str, name: &str) {
+        self.actions
+            .insert(compose_internal(alias, name), ComposeName::new(alias, name));
+    }
+
+    pub(crate) fn insert_state(&mut self, alias: &str, name: &str) {
+        self.states
+            .insert(compose_internal(alias, name), ComposeName::new(alias, name));
+    }
+
+    pub(crate) fn insert_property(&mut self, alias: &str, name: &str) {
+        self.properties
+            .insert(compose_internal(alias, name), ComposeName::new(alias, name));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_action_identity(&mut self, internal: &str, identity: ComposeName) {
+        self.actions.insert(internal.to_owned(), identity);
+    }
+
+    /// Structural compose identity of an action, or `None` when the action is
+    /// not a compose component action (a direct spec action or a sync action).
+    #[must_use]
+    pub fn compose_action(&self, name: &str) -> Option<&ComposeName> {
+        self.actions.get(name)
+    }
+
+    /// Structural compose identity of a component state variable.
+    #[must_use]
+    pub fn compose_state(&self, name: &str) -> Option<&ComposeName> {
+        self.states.get(name)
+    }
+
+    /// Structural compose identity of a component property.
+    #[must_use]
+    pub fn compose_property(&self, name: &str) -> Option<&ComposeName> {
+        self.properties.get(name)
+    }
+
+    /// Public spelling of `name` when it is, or was built from, the compose
+    /// component action `action`; `None` for every other name.
+    ///
+    /// This is the only place a component action's public spelling is
+    /// produced; the other action renderings differ only in how they spell a
+    /// name no component owns.
+    ///
+    /// `name` is either the action itself or a name built while `action`
+    /// stepped: a kind prefix followed by the internal action name
+    /// (`_requires_failed_<action>`, `_partial_<action>`). The prefix is kept
+    /// and the action suffix is respelled from the structural table.
+    #[must_use]
+    pub fn component_public_name(&self, name: &str, action: &str) -> Option<PublicName> {
+        let component = self.compose_action(action)?;
+        let prefix = name.strip_suffix(action)?;
+        (prefix.is_empty() || prefix.starts_with('_') && prefix.ends_with('_'))
+            .then(|| PublicName(format!("{prefix}{}", component.display())))
+    }
+
+    /// An action: `alias.action` for a compose component action, the string
+    /// rule otherwise (a branch split `submit__b1` publishes as `submit.b1`).
+    ///
+    /// Human-facing fields and identifier fields (a replay echo, a graph node
+    /// ID, a claim key, a mutation target) use this one spelling.
+    #[must_use]
+    pub fn public_action(&self, name: &str) -> PublicName {
+        self.component_public_name(name, name)
+            .unwrap_or_else(|| PublicName(display_name(name)))
+    }
+
+    /// A violation, CTI, or mutation-kill name produced while `action`
+    /// stepped (see [`Self::component_public_name`]), or [`Self::public_name`]
+    /// (a component invariant publishes as `acct.Inv`, #1255).
+    #[must_use]
+    pub fn public_violation(&self, name: &str, action: Option<&str>) -> PublicName {
+        action
+            .and_then(|action| self.component_public_name(name, action))
+            .unwrap_or_else(|| self.public_name(name))
+    }
+
+    /// A mutation target path rooted at `action` (`<action>` followed by the
+    /// path inside it), with the action respelled by [`Self::public_action`];
+    /// the exact target otherwise.
+    #[must_use]
+    pub fn public_action_target(&self, target: &str, action: Option<&str>) -> PublicName {
+        action
+            .and_then(|action| {
+                let rest = target.strip_prefix(action)?;
+                Some(PublicName(format!("{}{rest}", self.public_action(action))))
+            })
+            .unwrap_or_else(|| PublicName(target.to_owned()))
+    }
+
+    /// A state variable: `alias.name` for a compose component state, the
+    /// string rule otherwise.
+    #[must_use]
+    pub fn public_state(&self, name: &str) -> PublicName {
+        PublicName(
+            self.compose_state(name)
+                .map_or_else(|| display_name(name), ComposeName::display),
+        )
+    }
+
+    /// A declared property (invariant, transition, reachable, leadsTo):
+    /// `alias.name` for a compose component property, the string rule
+    /// otherwise.
+    #[must_use]
+    pub fn public_property(&self, name: &str) -> PublicName {
+        PublicName(
+            self.compose_property(name)
+                .map_or_else(|| display_name(name), ComposeName::display),
+        )
+    }
+
+    /// A declared type (domain, enum, struct).
+    #[must_use]
+    pub fn public_type(&self, name: &str) -> PublicName {
+        PublicName(display_name(name))
+    }
+
+    /// Any other Kernel identifier: a spec name, a constant, an enum member,
+    /// a state root read from an update target.
+    #[must_use]
+    pub fn public_identifier(&self, name: &str) -> PublicName {
+        PublicName(display_name(name))
+    }
+
+    /// A synthetic name rendered from its parts: the kind prefix followed by
+    /// the public spelling of the action, property, or state it names.
+    #[must_use]
+    pub fn public_synthetic(&self, name: &SyntheticName<'_>) -> PublicName {
+        let (prefix, part) = match name {
+            SyntheticName::RequiresFailed { action } => {
+                (REQUIRES_FAILED, self.public_action(action))
+            }
+            SyntheticName::PartialAction { action } => (PARTIAL, self.public_action(action)),
+            SyntheticName::KeyDomainAction { action } => (KEY_DOMAIN, self.public_action(action)),
+            SyntheticName::PartialProperty { property } => {
+                (PARTIAL_PROPERTY, self.public_property(property))
+            }
+            SyntheticName::KeyDomainProperty { property } => {
+                (KEY_DOMAIN_PROPERTY, self.public_property(property))
+            }
+            SyntheticName::Bounds { state } => (BOUNDS, self.public_state(state)),
+            SyntheticName::PartialTerminal => return PublicName(PARTIAL_TERMINAL.to_owned()),
+        };
+        PublicName(format!("{prefix}{part}"))
+    }
+
+    /// Public spelling of a name derived from a compose component
+    /// declaration: an action, a state variable, a property, or the
+    /// `_bounds_<state>` name built from a state variable. `None` for every
+    /// other name.
+    ///
+    /// Each is spelled from its structural `alias.name`.
+    #[must_use]
+    pub fn compose_public_name(&self, name: &str) -> Option<PublicName> {
+        let declared =
+            |name: &str| self.states.contains_key(name) || self.properties.contains_key(name);
+        self.component_public_name(name, name)
+            .or_else(|| self.compose_state(name).map(|_| self.public_state(name)))
+            .or_else(|| {
+                self.compose_property(name)
+                    .map(|_| self.public_property(name))
+            })
+            .or_else(|| {
+                let state = SyntheticName::parse_internal(name)?.bounds_state()?;
+                declared(state).then(|| self.public_synthetic(&SyntheticName::Bounds { state }))
+            })
+    }
+
+    /// Any Kernel name whose kind the caller does not know (a solver cost
+    /// entry, a property list mixing kinds): a component action, state, or
+    /// property by its structural spelling, a synthetic name from its parts,
+    /// the string rule otherwise.
+    #[must_use]
+    pub fn public_name(&self, name: &str) -> PublicName {
+        self.compose_public_name(name).unwrap_or_else(|| {
+            SyntheticName::parse_internal(name).map_or_else(
+                || PublicName(display_name(name)),
+                |synthetic| self.public_synthetic(&synthetic),
+            )
+        })
+    }
+
+    /// Resolve an action spelling against `candidates` (internal names).
+    ///
+    /// An action matches its public spelling ([`Self::public_action`]) or its
+    /// internal Kernel name, which v1 replay traces written before the public
+    /// spelling was settled use (`alias__action` before #1234, a branch split
+    /// `submit__b1` before #1256).
+    ///
+    /// # Errors
+    ///
+    /// Returns every matching candidate when more than one matches, so the
+    /// caller fails closed instead of picking one.
+    pub fn resolve_action<'n>(
+        &self,
+        spelling: &str,
+        candidates: impl IntoIterator<Item = &'n str>,
+    ) -> Result<Option<&'n str>, AmbiguousName<'n>> {
+        unique(
+            candidates
+                .into_iter()
+                .filter(|name| *name == spelling || self.public_action(name) == spelling),
+        )
+    }
+
+    /// Resolve a state spelling against `candidates` by its public spelling.
+    ///
+    /// # Errors
+    ///
+    /// Returns every matching candidate when more than one matches.
+    pub fn resolve_state<'n>(
+        &self,
+        spelling: &str,
+        candidates: impl IntoIterator<Item = &'n str>,
+    ) -> Result<Option<&'n str>, AmbiguousName<'n>> {
+        unique(
+            candidates
+                .into_iter()
+                .filter(|name| self.public_state(name) == spelling),
+        )
+    }
+
+    /// Resolve a property spelling against `candidates` by its public
+    /// spelling.
+    ///
+    /// # Errors
+    ///
+    /// Returns every matching candidate when more than one matches.
+    pub fn resolve_property<'n>(
+        &self,
+        spelling: &str,
+        candidates: impl IntoIterator<Item = &'n str>,
+    ) -> Result<Option<&'n str>, AmbiguousName<'n>> {
+        unique(
+            candidates
+                .into_iter()
+                .filter(|name| self.public_property(name) == spelling),
+        )
+    }
+
+    /// Resolve a synthetic spelling against `candidates` (internal synthetic
+    /// names) by [`Self::public_synthetic`].
+    ///
+    /// # Errors
+    ///
+    /// Returns every matching candidate when more than one matches.
+    pub fn resolve_synthetic<'n>(
+        &self,
+        spelling: &str,
+        candidates: impl IntoIterator<Item = &'n str>,
+    ) -> Result<Option<&'n str>, AmbiguousName<'n>> {
+        unique(candidates.into_iter().filter(|name| {
+            SyntheticName::parse_internal(name)
+                .is_some_and(|synthetic| self.public_synthetic(&synthetic) == spelling)
+        }))
+    }
+}
+
+fn unique<'n>(
+    mut matches: impl Iterator<Item = &'n str>,
+) -> Result<Option<&'n str>, AmbiguousName<'n>> {
+    let Some(first) = matches.next() else {
+        return Ok(None);
+    };
+    let rest = matches.collect::<Vec<_>>();
+    if rest.is_empty() {
+        return Ok(Some(first));
+    }
+    let mut candidates = vec![first];
+    candidates.extend(rest);
+    Err(AmbiguousName { candidates })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AmbiguousName, ComposeName, NameMap, PublicName, SyntheticName};
+    use crate::{
+        CoreError, CoreErrorKind, FileResolver, KernelModel, build_model, parse_kernel_source,
+    };
+
+    struct Components;
+
+    impl FileResolver for Components {
+        fn read(&self, path: &str) -> Result<String, CoreError> {
+            let name = path.trim_end_matches(".fsl");
+            Ok(format!(
+                "spec {name} {{ state {{ bal: 0..1 }} init {{ bal = 0 }} \
+                 action go() {{ requires bal < 1  bal = 1 }} \
+                 invariant Inv {{ bal >= 0 }} }}"
+            ))
+        }
+    }
+
+    fn compose(aliases: &[&str]) -> KernelModel {
+        let uses = aliases
+            .iter()
+            .map(|alias| format!("use Acct as {alias} from \"Acct.fsl\""))
+            .collect::<Vec<_>>()
+            .join("  ");
+        build_model(
+            parse_kernel_source(&format!("compose Bank {{ {uses} }}"), &Components)
+                .expect("lower compose"),
+        )
+        .expect("build compose model")
+    }
+
+    fn actions(model: &KernelModel) -> Vec<&str> {
+        model
+            .actions
+            .iter()
+            .map(|action| action.name.as_str())
+            .collect()
+    }
+
+    fn states(model: &KernelModel) -> Vec<&str> {
+        model.state.iter().map(|(name, _)| name.as_str()).collect()
+    }
+
+    fn properties(model: &KernelModel) -> Vec<&str> {
+        model
+            .invariants
+            .iter()
+            .map(|property| property.name.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn compose_action_state_and_property_round_trip_through_the_structural_table() {
+        let model = compose(&["acct"]);
+        let names = model.names();
+        assert_eq!(
+            names
+                .compose_state("acct__bal")
+                .map(ComposeName::display)
+                .as_deref(),
+            Some("acct.bal")
+        );
+        assert_eq!(
+            names
+                .compose_property("acct__Inv")
+                .map(ComposeName::display)
+                .as_deref(),
+            Some("acct.Inv")
+        );
+
+        let action = names.public_action("acct__go");
+        assert_eq!(action, "acct.go");
+        assert_eq!(
+            names.resolve_action(action.as_str(), actions(&model)),
+            Ok(Some("acct__go"))
+        );
+        assert_eq!(
+            names.resolve_action("acct__go", actions(&model)),
+            Ok(Some("acct__go"))
+        );
+
+        let state = names.public_state("acct__bal");
+        assert_eq!(state, "acct.bal");
+        assert_eq!(
+            names.resolve_state(state.as_str(), states(&model)),
+            Ok(Some("acct__bal"))
+        );
+
+        let property = names.public_property("acct__Inv");
+        assert_eq!(property, "acct.Inv");
+        assert_eq!(
+            names.resolve_property(property.as_str(), properties(&model)),
+            Ok(Some("acct__Inv"))
+        );
+    }
+
+    #[test]
+    fn every_synthetic_kind_round_trips_through_its_internal_and_public_spelling() {
+        let model = compose(&["acct"]);
+        let names = model.names();
+        for (synthetic, public) in [
+            (
+                SyntheticName::RequiresFailed { action: "acct__go" },
+                "_requires_failed_acct.go",
+            ),
+            (
+                SyntheticName::PartialAction { action: "acct__go" },
+                "_partial_acct.go",
+            ),
+            (
+                SyntheticName::PartialProperty {
+                    property: "acct__Inv",
+                },
+                "_partial_property_acct.Inv",
+            ),
+            (SyntheticName::PartialTerminal, "_partial_property_terminal"),
+            (
+                SyntheticName::Bounds { state: "acct__bal" },
+                "_bounds_acct.bal",
+            ),
+            (
+                SyntheticName::KeyDomainAction { action: "acct__go" },
+                "_key_domain_acct.go",
+            ),
+            (
+                SyntheticName::KeyDomainProperty {
+                    property: "acct__Inv",
+                },
+                "_key_domain_property_acct.Inv",
+            ),
+        ] {
+            let internal = synthetic.internal();
+            assert_eq!(
+                SyntheticName::parse_internal(&internal),
+                Some(synthetic),
+                "{internal}"
+            );
+            assert_eq!(names.public_synthetic(&synthetic), public, "{internal}");
+            assert_eq!(
+                names.resolve_synthetic(public, [internal.as_str()]),
+                Ok(Some(internal.as_str())),
+                "{internal}"
+            );
+        }
+        assert_eq!(SyntheticName::parse_internal("acct__Inv"), None);
+    }
+
+    #[test]
+    fn a_generated_name_publishes_and_resolves_in_one_spelling() {
+        let names = NameMap::default();
+        // #1256: a branch split `submit__b1` is the only kind of non-compose
+        // name with `__`. Human-facing and identifier fields share its public
+        // spelling, which resolves back, as does the internal name an older
+        // replay trace wrote.
+        assert_eq!(names.public_action("submit__b1"), "submit.b1");
+        assert_eq!(
+            names.resolve_action("submit.b1", ["submit__b1", "submit__b2"]),
+            Ok(Some("submit__b1"))
+        );
+        assert_eq!(
+            names.resolve_action("submit__b1", ["submit__b1", "submit__b2"]),
+            Ok(Some("submit__b1"))
+        );
+        assert_eq!(
+            names.public_action_target("submit__b1 requires #1", Some("submit__b1")),
+            "submit.b1 requires #1"
+        );
+        assert_eq!(names.public_state("sys__st"), "sys.st");
+        assert_eq!(
+            names.resolve_state("sys.st", ["sys__st"]),
+            Ok(Some("sys__st"))
+        );
+    }
+
+    #[test]
+    fn a_declared_name_containing_the_separator_is_rejected_before_lowering() {
+        for (source, line, column) in [
+            ("compose Bank { use Acct as a__b from \"Acct.fsl\" }", 1, 28),
+            (
+                "spec S {\n  state { x: Int }\n  init { x = 0 }\n  action foo__bar() { x = 1 }\n}",
+                4,
+                10,
+            ),
+            (
+                "spec S {\n  const LIM__IT = 1\n  state { x: Int }\n  init { x = 0 }\n}",
+                2,
+                9,
+            ),
+        ] {
+            let error = parse_kernel_source(source, &Components).expect_err(source);
+            assert_eq!(error.kind, CoreErrorKind::NameResolution, "{source}");
+            assert!(error.message.contains("contains '__'"), "{}", error.message);
+            assert_eq!((error.line, error.column), (line, column), "{source}");
+        }
+    }
+
+    #[test]
+    fn compose_state_and_property_publish_from_the_structural_table() {
+        let model = compose(&["acct"]);
+        let names = model.names();
+        assert_eq!(names.public_state("acct__bal"), "acct.bal");
+        assert_eq!(names.public_property("acct__Inv"), "acct.Inv");
+        assert_eq!(
+            names
+                .compose_public_name("acct__Inv")
+                .as_ref()
+                .map(PublicName::as_str),
+            Some("acct.Inv")
+        );
+        assert_eq!(names.public_name("_bounds_acct__bal"), "_bounds_acct.bal");
+    }
+
+    #[test]
+    fn overlapping_synthetic_prefixes_resolve_toward_the_property_kind() {
+        let action = SyntheticName::PartialAction {
+            action: "property_x",
+        };
+        assert_eq!(
+            SyntheticName::parse_internal(&action.internal()),
+            Some(SyntheticName::PartialProperty { property: "x" })
+        );
+        let action = SyntheticName::KeyDomainAction {
+            action: "property_x",
+        };
+        assert_eq!(
+            SyntheticName::parse_internal(&action.internal()),
+            Some(SyntheticName::KeyDomainProperty { property: "x" })
+        );
+        let property = SyntheticName::PartialProperty {
+            property: "terminal",
+        };
+        assert_eq!(
+            SyntheticName::parse_internal(&property.internal()),
+            Some(SyntheticName::PartialTerminal)
+        );
+        assert_eq!(
+            SyntheticName::PartialTerminal.partial_property(),
+            Some("terminal")
+        );
+    }
+
+    #[test]
+    fn a_public_spelling_two_internal_names_share_fails_closed() {
+        let names = NameMap::default();
+        let candidates = ["x__y__z", "x__yQqDbSepqQz"];
+        assert_eq!(
+            names.public_state(candidates[0]),
+            names.public_state(candidates[1])
+        );
+        assert_eq!(
+            names.resolve_state("x.y__z", candidates),
+            Err(AmbiguousName {
+                candidates: candidates.to_vec()
+            })
+        );
+    }
+
+    #[test]
+    fn violation_names_publish_from_their_parts() {
+        let model = compose(&["acct"]);
+        let names = model.names();
+        // `_bounds_` followed by a state that starts with `_`: the whole-name
+        // string rule would read the prefix's `_` and the state's `_` as the
+        // separator.
+        let state = "_a";
+        let internal = SyntheticName::Bounds { state }.internal();
+        assert_eq!(
+            names.public_synthetic(&SyntheticName::Bounds { state }),
+            "_bounds__a"
+        );
+        assert_eq!(names.public_violation(&internal, None), "_bounds__a");
+        // #1255: a component invariant broken while another action stepped
+        // publishes as the component property, not as its internal name.
+        assert_eq!(
+            names.public_violation("acct__Inv", Some("acct__go")),
+            "acct.Inv"
+        );
+        assert_eq!(
+            names.public_violation("_requires_failed_acct__go", Some("acct__go")),
+            "_requires_failed_acct.go"
+        );
+    }
+}

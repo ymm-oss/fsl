@@ -20,6 +20,58 @@ remainder by zero remain totalized to zero in property context and remain
 
 The symbolic evaluator may retain bounded slots beyond a Seq's live prefix as
 an encoding detail, but no property value or witness may observe such a slot.
+Expression temporaries, including full-sequence `push` results and literals,
+retain every live element even beyond the declared state capacity; the declared
+N bounds state, not temporary storage. Checked state bounds enforce `len <= N`;
+when a sequence's bound is not checked, a possibly over-capacity frame instead
+fails closed before any property or action can read its missing suffix.
+For a checked overflow caused by an action assignment, trace projection
+reconstructs the actual attempted value from that action without displaying
+padding or truncating the sequence. This reconstruction does not cover init:
+symbolic projection of an initial frame with unrepresented elements fails closed
+rather than inventing a witness, while the default concrete pre-pass can instead
+report that overflow as `type_bound`. Non-bound invariant, `trans`, and ranked
+`leadsTo` induction CTIs with missing slots also fail closed; bound-property CTIs
+retain action-based reconstruction without changing the induction premises.
+
+Capacity-zero Seqs with no physical slots follow the same live-prefix
+definedness rule, with a fresh, unconstrained symbolic read slot outside the
+declared capacity, materialized for each read-term construction rather than
+stored as a state slot or a live temporary element. Empty live-prefix
+temporaries that retain physical slots use those existing slots instead.
+For a zero-slot frame whose bound is unchecked (`len > N`), the fail-closed
+guards above from #1519, not definedness, keep the slot unobservable.
+
+The `decreases` measure of a ranked `leadsTo` is a narrow exception to the
+`partial_op` classification: a possible reached partial measure is refused as
+a semantics error rather than a `partial_op` witness. Before evaluating its
+initial, successor, or deadlock measure,
+a rank-only, path-sensitive preflight refuses only reached reads with no
+physical slot whose fresh value would otherwise enter the rank evaluation.
+It retains the pre-#1481 error (`head() on zero-capacity sequence` for `head`,
+`cannot select from an empty finite domain` for `at`/index). Unreached reads in
+untaken conditional branches or short-circuited operands can now yield a ranking
+proof where the base reported a semantics error. This cell-2 preflight runs
+**before** the general measure partial-operation probe added in #1542, and
+keeps its messages unchanged. The general probe uses property-context
+`first_partial` under the inherited rank frame's invariant/transition assumptions
+and the initial pending condition, additionally assuming `¬Q(s')` for the
+successor probe; the independent deadlock frame uses its own pending condition,
+respecting `if`, `and`, `or`, and `=>` short-circuit evaluation. It also rejects
+undefined physical-slot measures, including capacity-zero
+`xs.push(0).pop().head()` and the head of
+`if n > 0 then xs else xs.push(1)`, with
+`leadsTo 'L' decreases measure may be undefined: OP` (exit 2, semantics).
+This refusal applies to the rank-proof phase: if base BMC has already found a
+real `leadsTo` counterexample, a refused optional rank diagnosis keeps that
+`violated` verdict (exit 1) instead.
+No hidden, stale or default slot value becomes rank evidence. Measures with no
+partial operations skip the additional solver probes. The BMC rank-discharge
+fast path uses both checks and discharges nothing on any ranking error; it
+does not report the ranking error itself and returns to its own lasso search.
+This is not a new overflow or Map key-domain obligation; see
+[the ranking contract](DESIGN-induction.md#23-ranked-leadsto-step-case).
+
 Before testing an invariant, transition, pending reachable predicate, or
 `leadsTo` side, BMC probes the path-sensitive definedness condition. Terminal
 definedness is probed under the deadlock condition, matching concrete

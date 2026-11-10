@@ -409,40 +409,24 @@ fn ordinary_identifiers_keep_precedence_over_ambiguous_enum_members() {
 }
 
 #[test]
-fn empty_enum_conversion_fails_closed_before_call_elaboration() {
-    let implementation = build(
-        "spec Impl { enum EmptyImpl {} state { ready: Bool } init { ready = false } action send(s: EmptyImpl) { requires false } }",
-    );
-    let abstraction = build(
-        "spec Abs { enum EmptyAbs {} state { ready: Bool } init { ready = false } action send(s: EmptyAbs) { requires false } }",
-    );
-    let error = parse_refinement(
-        "refinement R { impl Impl abs Abs enum conversion empty EmptyImpl -> EmptyAbs {} action send(s) -> send(convert(empty, s)) }",
-        &implementation,
-        &abstraction,
-    )
-    .expect_err("empty conversions must not reach an infallible elaboration branch");
-    assert!(error.message.contains("EmptyImpl' has no members"));
-    assert!(error.span.is_some());
-
-    let error = parse_refinement(
-        "refinement R { impl Impl abs Abs enum abstraction empty EmptyImpl -> EmptyAbs {} action send(s) -> send(abstract(empty, s)) }",
-        &implementation,
-        &abstraction,
-    )
-    .expect_err("empty abstractions must not reach fallback-based elaboration");
-    assert!(error.message.contains("EmptyImpl' has no members"));
-    assert!(error.span.is_some());
-
-    let non_empty_implementation = build(
-        "spec Impl { enum NonEmptyImpl { A } state { ready: Bool } init { ready = false } action send(s: NonEmptyImpl) { ready = true } }",
-    );
-    let error = parse_refinement(
-        "refinement R { impl Impl abs Abs enum abstraction empty NonEmptyImpl -> EmptyAbs {} map ready = ready action send(s) -> send(abstract(empty, s)) }",
-        &non_empty_implementation,
-        &abstraction,
-    )
-    .expect_err("an empty abstraction target has no representable result");
-    assert!(error.message.contains("EmptyAbs' has no members"));
-    assert!(error.span.is_some());
+fn empty_enum_inputs_fail_model_build_before_conversion_or_abstraction_elaboration() {
+    // Neither an empty implementation domain nor an empty abstraction target
+    // may reach conversion/abstraction call elaboration: reject at model build.
+    for (name, source) in [
+        (
+            "EmptyImpl",
+            "spec Impl { enum EmptyImpl {} state { ready: Bool } init { ready = false } action send(s: EmptyImpl) { requires false } }",
+        ),
+        (
+            "EmptyAbs",
+            "spec Abs { enum EmptyAbs {} state { ready: Bool } init { ready = false } action send(s: EmptyAbs) { requires false } }",
+        ),
+    ] {
+        let kernel = parse_kernel_source(source, &FsResolver::new(".")).expect("parse source");
+        let error = build_model(kernel)
+            .expect_err("empty enum inputs must be rejected before refinement elaboration");
+        assert_eq!(error.message, format!("enum '{name}' has no members"));
+        assert!(!error.name_resolution, "empty enum is a type error");
+        assert!(error.span.is_some(), "locate the rejected enum declaration");
+    }
 }

@@ -63,6 +63,16 @@ refinement CartImplRefinesCart {
   instead of guessing. A parameter *type* mismatch between two identically
   named parameters is caught by the same `validate_expression_type` check
   every other authoring route already goes through, not duplicated here.
+  Actor compatibility applies only to automatically synthesized action pairs:
+  each side uses its source actor from the registry (the `by X` label for an
+  edition 4 process transition), regardless of dialect, edition or requirement
+  text. Requirement actions, standalone or inside a block, register their own
+  metadata's `by ` actor, including absence; every generated branch keeps that
+  value. Block text and typed requirement text cannot supply an actor. Only
+  unregistered raw spec/compose actions use the existing metadata `by ` prefix
+  rule. Both actors must be available to compare them. Explicit action entries and `stutter` are
+  not actor-checked.
+  See the [#1441 amendment](#migration-1441) and [#1456 migration](#migration-1456).
 - `action <impl_action>(<formal parameter list>) -> <abs_action>(<expr list>) | stutter`
   The formal parameters are the parameter names of the impl action (matching
   order). They may be written bare (`u`) or with a type annotation matching the
@@ -87,6 +97,17 @@ refinement CartImplRefinesCart {
   `progress_failure:"lasso_blocks_progress"` or
   `"deadlock_or_stall_blocks_progress"`, pending bindings, `impl_trace`, and
   `progress:{leadsTo, actions}` so repair can target the lower-layer action.
+  Abstract Int/Bool constants become literals in P/Q, `decreases`, domains and nested filters.
+  Impl-constant/read const-state collisions are refused; `check` already rejects const-namesake locals.
+  Property patterns matching free impl names from lexically used maps are refused outside
+  readable continuations too; rename the abstract pattern binder. Used-map RHS patterns cannot
+  reuse property binder names or other used-map patterns; rename the mapping pattern binder.
+  Direct pull errors locate `respond` (type, exit 2); the const/state bound has abstract-only BMC exit 1.
+  Unused maps/legal locals stay admissible; outer capture is refused. Only nested diagnostics may rename.
+  State replacement is simultaneous: an indexed read `a[e]` instantiates its
+  implementation-scope template once, after pulling `e`. A free whole-map read
+  of an indexed abstract state is refused at `respond`, even if an implementation
+  state has the same spelling; see the #1613 audit in §4.
 - The grammar does not coexist with existing `.fsl` files (an **independent
   file** with `refinement` at the top level. Parsing adds `refinement_def` to
   the same Lark grammar).
@@ -171,6 +192,65 @@ Two consequences fall out of reusing the same merge, not from new logic:
   action '<pre_split_name>'"` — reference the generated alias instead, same as
   a separate-file mapping would need to.
 
+### 1.3 One `implements` in a requirements document (#1694)
+
+A requirements document names one contract. Before this decision the native parser kept every
+`implements` it read, and the two readers that take a contract took the first:
+`requirements_implements_with_bounds_with_options`, by a `find_map`, and
+`requirements_implements_name`, for a selected run. The rest were dropped without a message, so a
+later contract was never checked. Two other readers saw every clause and checked none:
+`document_project` lists each name as outside the claim universe, and the migrator declines to move
+an inline map. A broken contract written second passed, and written first failed,
+in the stable edition and the next one alike. Writing one contract twice also passed.
+
+**Decision: refuse the second clause, rather than check every clause.** Nothing relied on two:
+
+- Neither language reference, no skill and no intro page shows a document with two clauses or says
+  what two would mean. `DESIGN-migration.md` speaks of "the single local `implements` block".
+- No `.fsl` under `specs/`, `examples/` or `rust/fslc/tests/fixtures/` holds two, and no Rust string
+  literal holding a clause holds a second.
+- The frozen Python reference already refuses them: `requirements may declare implements only once`,
+  located at the second clause.
+
+Checking every clause would also have needed an answer no contract states: `implements` in the JSON
+envelope is one `{abs, result}`, and consumers gate on `implements.result`.
+
+**Where.** The parser, in `reject_second_implements`, because every reader parses first. That covers
+the commands that read the clause and those that only read the document around it, without a change
+at each. `preserve progress` inside `implements` is refused in the same place for the same reason
+(#1275). The refusal is `kind: "parse"`, exit 2, with `loc` at the second clause's `implements`:
+
+```text
+duplicate implements 'Broken' (a requirements document declares one, and 'Held' came first) at 3:3
+```
+
+The same contract written twice is refused the same way, `duplicate implements 'Held' (a requirements
+document declares one, and 'Held' came first) at 3:3`.
+
+A second clause is a parse error, so `documentSymbol` returns null until it is fixed, as for any parse error.
+
+What this leaves as it is:
+
+- An abstraction file that repeats the clause is reported through the clause that named it, as any
+  parse failure of an abstraction is: `kind: "type"`, `loc` on that clause, and a message without the
+  other file's name or the place in it.
+- The migrator's `inline maps require exactly one local implements block` now applies only to no
+  block. Its refusal of multiple blocks in the table in `DESIGN-migration.md` still holds, by this
+  parse error.
+- The frozen Python reference keeps its own message and `kind: "type"`, so the two implementations
+  agree on refusing and on `loc`, and differ on those two fields.
+
+**Breaking removal, with an empty transition set.** A document with two clauses passed before and is
+now an error. `sweep.py <base tree> <head tree> <out.json> <inline dir>` ran every `.fsl` under
+`specs/`, `examples/` and `rust/fslc/tests/fixtures/`, 646 forms, through `fslc check` stable and with
+the next edition enabled and `fslc kernel` versions 1 and 2, twice per side, each binary built in its
+own tree, comparing complete stdout, stderr and exit code. Base
+`1559e8eba90f73615d4efd00fcdccc30cf525b42`, head `805751922a4b93c225beeeb7484b1e80581de809`: 2584
+pairs, none changed, none unstable. The 58 Rust string literals in `rust/` that hold a clause, written
+out as documents and checked both ways, also did not change. A document added to that pass with two
+clauses did change, exit 0 to exit 2. A literal that is a template or a fragment can stop parsing
+before its clauses, so that pass is the weaker of the two.
+
 ## 2. Checking Semantics (Bounded Forward Simulation)
 
 α(s) := the mapping that defines the impl state → abs state mapping.
@@ -181,8 +261,9 @@ Two consequences fall out of reusing the same merge, not from new logic:
    invariant, `trans`, or `ensures` violation, independent of the mapping and
    the abstraction entirely. This is a property of the refinement *input*
    (the impl spec is broken on its own), not a refinement fidelity verdict:
-   `result:"violated"` with the impl's own `violation_kind`/trace and an
-   explanatory `note`, never `result:"refines"` and never folded into
+   `result:"impl_violated"` (issue #1315; formerly `violated`) with the
+   impl's own `violation_kind`/trace and an explanatory `note`, never
+   `result:"refines"` and never folded into
    `refinement_failed` (whose `kind`s below describe a mismatch *between*
    impl and abs, not a defect in the impl alone). If this precondition finds
    a violation, steps 1-4 do not run. It visits at most
@@ -479,12 +560,12 @@ both consume this set:
 
 **Scope**: only a state variable with *zero* assignment coverage — never an assignment
 target on any init path — is treated as free. A variable assigned on some but not all
-paths (e.g. only inside an `if` with no `else`) is left out of the enumeration and keeps
-the prior default-filled behavior for the branch that skips it; the static analysis cannot
-always prove such a remaining value is genuinely unconstrained rather than an approximation
-artifact (a `where`-filtered `forall`, for instance), so this checker does not guess there
-either. Fully characterizing that partial-coverage case is `Monitor` construction's own
-concern generally, not this refinement-local enumeration (issue #519, a different surface).
+paths (e.g. only inside an `if` with no `else`) is not enumerated: refinement now
+refuses incomplete assigned roots on either side instead of keeping unwritten
+components at defaults (#1521). This includes partial fields/keys and forall
+coverage not statically established as complete; bmc and induction retain their
+free-value verdicts. Enumerating these partial init components is future work
+(#1579); general Monitor admission remains a separate surface (issue #519).
 
 **Breaking change**: `fslc refine` verdicts change for a mapping between two specs where
 either side's `init` leaves a state variable fully unassigned on every path. A refinement
@@ -652,6 +733,92 @@ Static checks (`kind: "type"` error, exit 2):
 - The counterexample's `abs_before/after` display applies `logical_state_values`
   to the values obtained by evaluating α's expression dict in the model.
 
+### Indexed progress pull and breaking whole-map removal (#1613)
+
+The progress pull, unlike the simulation's bounded array construction above,
+substitutes abstract reads syntactically. For `map a[i: K] = expr`, a source
+read `a[e]` becomes `expr[i := pull(e)]`. The inserted `expr` is already in
+implementation scope: do not apply the abstract scalar or indexed mapping
+tables inside it again. Scalar replacement likewise remains single-pass.
+Identity and cyclic indexed maps are therefore legal; their names alone neither
+prove nor refute progress, and they must not recurse indefinitely.
+
+An element template cannot pull a free abstract whole-map occurrence such as
+`m == z`. Refuse that source form with `error/type`, exit 2, at the mapping's
+`respond`, without a proof or trace. Resolve scope **before** insertion: a
+same-named implementation state must not make the abstract occurrence legal,
+and a legitimate whole-map expression inside an implementation template must
+not be mistaken for an abstract read. Only a direct indexed base is consumed;
+its index expression is still inspected. Binder domains use the incoming
+scope; filters and bodies use the local binding. Existing pattern-continuation
+policy, unused mappings, legal source locals, scalar maps and no-progress
+simulation retain their semantics.
+
+**Breaking removal:** the `whole-same` witness in
+`rust/fslc/tests/issue_1613_whole_map_scope.rs` maps `m[i] = n[i]` while an
+unrelated implementation `m` changes and `n`/`z` stay zero. Its abstract
+`m == z ~> m != z` previously falsely returned `refines`/exit 0. It now returns
+the located type error at `respond` 8:23 (span offsets 166..173). Renaming only
+the unrelated implementation `m` is not a workaround: that source was already
+rejected, and now receives the same located error.
+
+Migration must re-express the intended Boolean P and Q with supported element
+reads while preserving their quantifiers and temporal structure. For a
+whole-map equality over the same finite key domain, keep the all-keys equality
+inside P or Q; its negation means **some** key differs. Do not mechanically
+replace a whole-map `P ~> Q` by `forall k { P[k] ~> Q[k] }`: that changes the
+response obligation in general. The singleton element-read witness loses
+progress at `k=0`; it does not establish this rewrite for larger domains.
+Do not remove `preserve progress` or weaken the property to avoid the error.
+
+**Named boundary audit:** base `f8e3726e2ead231c89cd4f52eef3dd5d652c774d`,
+normal production head `2aab19f2b2d286c01c1aa79497c131df334aaff1`, each binary
+built and executed in its own materialized tree. With `FSLC_UNSTABLE=fsl5` and
+`FSLC_CACHE=off`, run `fslc check <path>` on all **610** corpus forms
+(23 `specs/`, 195 `examples/`, 392 `rust/fslc/tests/fixtures/`) and **54**
+materialized inline forms. The `check` ok→error set is **empty**; all their
+stdout/stderr/exit/JSON observations are identical between base and head.
+The 595-source test inventory found no rewritten, renamed, removed or
+deselected required tests: mandatory rewritten-test inline forms **0**;
+only the two independently authored #1613 acceptance files were added.
+
+Separately run `fslc refine impl.fsl abs.fsl map.fsl --depth 4` on all **18**
+materialized acceptance cases, and all **28** live commands (operands and depths)
+in `rust/fslc/tests/refine_corpus_parity.rs`. That is **710 routes, twice per
+SHA** (1,420 observations per SHA), with complete CLI fields and no masks.
+All 28 corpus refinement routes are unchanged. Of 18 inline refinement cases,
+9 are unchanged and 9 change in both repetitions:
+
+- Five former stack aborts (identity, swap, singleton elements, implementation
+  template and its element control) become structured `progress_lost`/exit 1.
+- The indexed chain's false `refines` becomes `progress_lost`/exit 1.
+- Two already-rejected whole-map forms keep exit 2 but change unlocated
+  `semantics` into located `type`, retaining loaded impl/abs names.
+- **One admitted→error restriction:** `whole-same`, as described above.
+
+The empty check-removal set does not erase that separate refinement removal.
+All head repeat outputs are identical. The only five base repeat differences
+are the observed thread IDs in stack-abort stderr; raw stderr and empty/invalid
+JSON outputs are retained, not excluded or normalized. There were no timeouts
+and no invalid JSON outputs at head. This audit is bounded behavior evidence,
+not an unbounded proof or an assurance promotion.
+
+### Preserved-progress pattern names (breaking removal, #1595)
+
+A preserved-progress property pattern name that matches a free implementation
+name from a lexically used map is refused even outside a readable continuation,
+and a used-map RHS pattern may not reuse a property binder or a sibling used-map
+pattern name. `refine` reports `kind: "type"` with `loc` at `respond`, exit 2.
+Observed on 2026-11-07 with `FSLC_CACHE=off`, for the abstract property
+`y==0 ~> ((o is some(x)) or y==3)` under `map y=x map o=p` (the
+`r1_pattern_or` cell of `rust/fslc/tests/issue_1595_progress_pull_scope.rs`):
+`refine --depth 4` reports `refines`/0 on the v4.12.0 binary and
+`error`/`type`/2 with `rename the abstract pattern binder 'x' to avoid
+mapped-name capture` on a binary built from `c505d0a6c`; the abstract spec alone
+stays `verified`/0 on `verify --engine bmc --depth 4`. Renaming the pattern
+binder to `w` gives `refines`/0 on the same binary. Repair: rename the abstract
+or mapping pattern binder; ordinary source binding scope is unchanged.
+
 ## 5. Test Plan (tests/test_refine.py) + Sample
 
 Sample: `specs/cart_impl.fsl` (a refinement of ShoppingCart. Example: it has
@@ -699,21 +866,64 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
    out-of-domain key inside an action-correspondence argument expression, and
    an abstract guard whose evaluation fails at the mapped state for reasons
    other than an out-of-domain argument.
-8. **conflicting same-named type**: impl and abs both declare a type with the
-   same name but a different shape (an enum with different members, or a
-   struct with different fields) → kind: type, exit 2. Type metadata is
-   merged by name for refinement checking (`_merge_types_meta`); a same name
-   with a different member list would otherwise let an impl-only member get
-   silently reinterpreted as whichever abs member sits at the same ordinal
-   index, turning a real refinement violation into a false "refines". Domain
-   types with different bounds are still allowed to share a name — an
-   out-of-range impl value there is already caught downstream as
-   `abs_state_mismatch`, so merging is safe. The fix: give impl and abs
-   layers distinct type names.
+8. **conflicting same-named declarations (#1599)**: one core
+   `merge_refinement_model` owns the typecheck, runtime and progress inventories.
+   Same-named types must have the same kind, resolved domain bounds, ordered enum
+   members, or struct fields/types; `symmetric` is ignored and the impl entry stays.
+   Differences, including unused declarations, are type errors (exit 2) at the
+   `refinement`/inline `implements` declaration, naming both specs and the conflict.
+   Governance retains the outer preservation location. Use distinct type names
+   for different definitions. Previously permitted same-name unequal bounds are
+   a breaking removal: the boundary gallery changes from exit 1
+   `refinement_failed/abs_state_mismatch` to exit 2 `error/type`.
+   Different enums may share member spellings without progress; ambiguous bare
+   uses still fail, while typed conversions/abstractions remain supported. With
+   `preserve progress`, shared spellings with different nominal owners are rejected
+   even at equal ordinals, so impl bodies cannot be reinterpreted in the pulled model.
+   A pulled-model safety violation is a non-solver `VerifyError`, not progress
+   success or `progress_lost`: native refine returns exit 2 `error/semantics`, names
+   the property and pulled model, and emits no trace. Existing impl self-violation
+   and progress-loss reporting remain separate.
+   This includes entity domains lowered from `instances`: diagnostics name both
+   effective counts and their verify-block/CLI sources. Align verify blocks, or
+   use `--instances Item=N` for both direct specs with **verify/refine only**, not check.
+   Composed conflicts retain component file, instance count and verify-block source
+   under the public type name (for example `p.Item`). Align the component verify
+   blocks; compose does not support that instances override. Public diagnostic
+   spelling does not change internal type/member identities or add member syntax.
+   The default check/verify of `inline_implements_bounds/impl_spec_extra.fsl`
+   (Item=1 vs Item=3) changes from exit 1 `refinement_failed` to located type/exit2;
+   the existing equal-instances override control remains accepted.
+   Declaration validation precedes map-expression validation (#1599/#1472).
+   Authored standalone 1:1 is not an unknown-location fallback: its complete
+   span is the literal ten-byte `refinement` token, including end1:11. Inline
+   diagnostics retain the literal `implements` token; distinct-name carrier
+   mismatches still reach the map gate. Original and renamed companions are
+   calibrated separately by declaration-bypass and carrier-bypass controls.
+
+   Native boundary audit: base `a52bef4931adc67ea2b1fdca827e2318b4ae25ab`,
+   measured product/test head `9eaaea7d1c526ede6a13408ea414616ddadccf69`;
+   `check`610 corpus forms (606 existing,4 added),39 next-edition controls,
+   60 typed mappings,20 rewritten inline triples and2 expression triples,
+   plus39 acceptance cells; full JSON/stderr/exit measured twice per tree.
+   Existing corpus `check` ok→error set is **empty**, not inferred from parity.
+   Inline check removals: the original D=1..4 vs D=0..4 fixtures in
+   `issue_1296_abs_partial_op` and `issue_1302_abs_step_violation`, plus
+   `inline_collision_is_located_at_implements` and `governance_check_collision`.
+   Their corresponding verify routes also become type errors.
+   Refine removals: cases1/2a/3a/3b, domain_bounds/domain_lower/kind_change,
+   struct_named_type, matching-ordinal member collision and chain collision;
+   the original shared-member expression_agreement progress form also changes
+   refines→type error. Renamed companions preserve its successful agreement.
+   Boundary/entity refinement_failed→type error remains a verdict-class change.
+   Diagnostic-only changes: the two original runtime Seq controls, two CLI
+   controls and three mutation controls now name the declaration conflict;
+   mutation invalid counts/gates remain unchanged. Existing type errors also
+   gain loaded impl/abs identities (incomplete conversion and actor mappings).
 9. **impl self-violation (precondition, issue #466)**: an impl whose own
    guard/type-bound weakening lets it violate itself within depth K (e.g. a
    dropped `requires` that lets a state variable step outside its declared
-   type bound) → `result:"violated"` with the impl's own `violation_kind`,
+   type bound) → `result:"impl_violated"` with the impl's own `violation_kind`,
    never `refines`. `docs/design/DESIGN-refinement.md` §2 step 0. Rust coverage:
    `rust/fsl-runtime/tests/refinement.rs` (the `check_refinement` contract
    directly, plus a regression control distinguishing this from a pure
@@ -817,6 +1027,221 @@ change abs's stock) → `impl_checkout` consumes the reserved stock) +
      (stepping with the out-of-domain argument would be an abstract
      `type_bound` violation).
 
+<a id="migration-1441"></a>
+
+## #1441: source-actor auto mapping and breaking-source migration
+
+**v5.0.0 amendment (native Rust).** Requirement annotations and actor identity
+are distinct for registered transitions: metadata whose requirement text begins
+with `by ` (covers text and next-edition rule/decide text) cannot erase or replace a
+transition's source actor. The private origin
+registry records every requirements transition (process or event) and business
+transition. One per-action lookup serves both sides, including cross-edition
+4→5/5→4 and typed↔legacy compose pairs. This replaces #1438's private
+`ActionActor` enum with `BTreeMap<String, String>`; it adds no public Kernel,
+`ActionDef`, schema or JSON fields. The legacy metadata rule is retained for
+actions without a registry entry (raw spec/compose actions), not for the requirement
+text of registered transitions. The #1456 amendment below also registers
+requirements action items, standalone or inside a block, including actor absence.
+
+The invariant is that auto-mapped actions with two available source actors
+must compare those actors independently of provenance and traceability text.
+Same-name/parameter matching, explicit correspondence precedence and the
+Auto-only condition are unchanged. `check`, unscoped `verify`, standalone
+`refine` and Worker reject mismatches while constructing the correspondence:
+`result: "error"`, `kind: "type"`, exit 2, at the implicit inline `implements` or
+explicit `maps auto` span, using the existing message, for example:
+
+```text
+maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'
+```
+
+`diff` without a mapping still returns `semantic_diff`/exit 0; an affected
+direction reports `unknown` / `automatic_mapping_failed` with that message,
+not a top-level type-error envelope. Selected `verify` runs still do not
+evaluate the inline seam; explicit action correspondences remain outside the
+actor check. Matching actors do not establish refinement by themselves.
+
+**Measured type-boundary inventory.** Base
+`5a539bbe27dc933d7fe8df95e6189cb75cec6cc9` and implementation head
+`9ca8630c7f45f1def54c056bf53a852853c7a60c` were each fully materialized with
+`git archive <sha> | tar -x -C <tree>`. Both binaries were built from their own
+trees with `cargo build --manifest-path <tree>/rust/Cargo.toml -p fslc-rust
+--bin fslc --locked` (Rust 1.98.0, `88d9e12ae`, offline, debug). In each source
+tree, **both** binaries ran `fslc check <relative-path>` on every `.fsl` under
+`specs/`, `examples/` and `rust/fslc/tests/fixtures/`, without exclusions;
+only files with an `fsl 5` header received `FSLC_UNSTABLE=fsl5`.
+
+| Binary / source tree | Forms | `fsl 5` forms | `ok` / `error` | Other results |
+|---|---:|---:|---|---|
+| base / base | 579 | 19 | 406 / 164 | 3 causal_model_checked, 1 impl_violated, 5 refinement_failed |
+| head / base | 579 | 19 | 406 / 164 | same |
+| base / head | 591 | 20 | 411 / 171 | same |
+| head / head | 591 | 20 | 411 / 171 | same |
+
+The four cells were run twice with identical summaries. **Corpus breaking
+removals (`ok`→`error`): empty; corpus expansions (`error`→`ok`): empty.**
+The same-source comparisons and common-path own-SHA comparison had no other
+JSON/exit changes. Head adds the 12 `actor_refinement/` fixture files; no paths
+were removed or existing corpus sources repaired. Classification: true actor
+mixups 0, false rejections 0, unrelated transitions 0. Existing tests/helpers
+were preserved, not renamed, removed or stopped from running, so required old inline
+forms to materialize: 0. Binary SHA256: base
+`1b4c6d491cf35b007eb1734ba1a5f3c38ba6b5111d747ee72735ecb432501e24`, head
+`5d3be4babff513f5e87a59056a67cf47c9ceca6d0fa2088835401dc7e08acf89`.
+
+The source-compatibility break is nevertheless exercised by rejecting
+regression controls in `rust/fslc/tests/fsl5_actor_refinement.rs` (A/B covers,
+C cross-edition, D compose) and Worker A1/A3. The separate **acceptance
+expansions** below are not repository-corpus transitions. All three were measured
+twice with the same base/head binaries, `check requirements.fsl` and
+`verify requirements.fsl --depth 6 --no-cache`:
+
+| Control (both source actors `System`) | Old / new check | Old / new verify or refine |
+|---|---|---|
+| B3: impl `covers REQ-1 "by Manager"` | error/type/2 → ok/0 | verify: error/type/2 → verified/0, implements refines |
+| B4: business `covers BIZ-1 "by Manager"` | error/type/2 → ok/0 | verify: error/type/2 → verified/0, implements refines |
+| F1 (p5): abstract fsl 5 event, no covers, `rule REQ-9 "by Manager only"` | inline: error/type/2 → ok/0 | inline verify: error/type/2 → verified/0, implements refines; standalone refine: error/type/2 → refines/0 |
+
+The expansion class is registered transition metadata whose requirement text
+begins with `by ` (covers text and next-edition rule/decide text), not only covers.
+Here “next edition” is fsl 5.
+F1 was also measured twice with `refine requirements.fsl business.fsl mapping.fsl
+--depth 6`. These correct sources need no edit; their prose is no longer treated
+as an actor declaration. `verified` here is bounded, not `proved`. Requirements
+action items follow the own-actor rule in the #1456 amendment below.
+
+**Migration contract (#702, limited to this change):**
+
+1. **Versions/editions:** reproduced on native 4.12.0 at the base SHA above and
+   on the pre-fix #1438 parent `c00b58ce87798ded9322932abda5b1b75c7804f1`.
+   Fixed for v5.0.0: fsl 4 process/business `covers`, mixed fsl 4/5 automatic
+   mappings and typed/legacy compose pairs. The earliest affected release has
+   not been established. fsl 4→4 without `covers` keeps its existing results.
+2. **New rejection:** previously accepted mismatched source actors hidden by
+   `covers`, cross-edition or mixed-carrier lookup now receive the stable
+   diagnostic above. This removes accepted source patterns even though the
+   checked repository corpus has no removals.
+3. **Rewrite:** there is no general semantics-equivalent rewrite or automatic
+   migration. Removing/changing `covers` does not correct actor identity.
+   Confirm the intended business policy before correcting a mistaken `by
+   Manager` to `by System` (or an event subject). Changing the actor changes
+   business meaning. An intentional delegation needs a human-designed and
+   reviewed explicit correspondence, not an automatic bypass.
+4. **Commands:** run unscoped `fslc check req.fsl`, inspect both declarations
+   and the mapping, correct confirmed mistakes, then repeat `check` and run
+   `fslc verify req.fsl --depth 6 --no-cache`. For a standalone mapping run
+   `fslc refine impl.fsl abs.fsl map.fsl --depth 6` (an `fsl 5` input is read
+   from its header, #1434). There is no dedicated lint/migrate auto-fix for policy
+   actors; selected `verify` is not a migration detector.
+5. **Verdicts/evidence:** old `ok`/`verified`/`refines` can become type errors;
+   public Kernel/JSON schemas do not change. After a source correction,
+   reverify and regenerate proof/ledger evidence: an old source hash's result
+   is not evidence for the edited source.
+6. **Consumers/artifacts:** Worker uses the shared resolver; native-check
+   hooks/CI/downstream callers must handle the rejection. LSP actor-mismatch
+   delivery remains deferred (S1); use the CLI, not editor silence, to gate.
+   Regenerate affected scenario/testgen/replay/ledger/document artifacts and
+   recheck against the implementation. Worker cross-edition S2 is not covered
+   by these acceptance tests (its native comparison helper is stable-only);
+   CLI C1–C4 cover it.
+7. **Rollback:** v5.0.0 is fail-closed, with no compatibility bypass or grace
+   period. If problems occur, return to a 4.x binary. No support duration is
+   promised. This note does not implement #702's general release gate.
+
+<a id="migration-1456"></a>
+
+## #1456: requirement-action own actors and breaking-source migration
+
+**v5.0.0 amendment (native Rust).** A requirement action's actor comes only from
+its own legacy metadata: text starting with `by `, trimmed to a nonempty actor.
+This applies to actions inside a requirement block, standalone requirements
+actions, and every generated `name__bN` branch, on either side of an automatic
+mapping. The enclosing requirement's ID/text remains traceability, not an actor
+declaration. Typed `@requirement` text does not introduce an actor declaration.
+
+The existing private registry now stores `BTreeMap<String, Option<String>>`:
+a registered actor wins; registered absence ends lookup without consulting block
+text; only an unregistered raw spec/compose action uses the existing metadata
+rule. One shared prefix extractor serves both paths. The public metadata priority
+is unchanged, as are `ActionDef`, Kernel v1/v2, RCIR, spec digests, traceability
+and report attribution. Explicit action entries, inline branch maps and stutter
+are still not actor-checked; standalone `maps auto` does check generated branches.
+
+**Measured inventory.** Base `e8cf78f0162530e264128f588981d49790f2767f`
+and implementation `b8daaa8245f374f74448fd983755689f832484cc` were each
+materialized with `git archive <sha>` and `tar -xf <archive> -C <tree>`, then built
+in their own tree with `cargo build --manifest-path rust/Cargo.toml -p fslc-rust
+--bin fslc --locked` (Rust 1.98.0, `88d9e12ae`, offline, debug). Both binaries
+ran `fslc check <relative-path>` in each tree on every `.fsl` in `specs/`,
+`examples/`, `rust/fslc/tests/fixtures/`, with cache off and the edition opt-in
+only for a file with an `fsl 5` header. No negative fixtures were excluded.
+
+| Source tree | Base binary forms | Head binary forms |
+|---|---:|---:|
+| base | 591 | 591 |
+| head | 592 | 592 |
+
+Both full four-cell observations and summaries were identical on two runs.
+**Corpus `ok`→`error`: empty; `error`→`ok`: empty; other JSON/exit changes: empty**
+in same-source and common-path own-SHA comparisons. The only added path is the
+acceptance fixture `rust/fslc/tests/fixtures/actor_refinement/requirement-action.fsl`;
+no existing sources were repaired or removed. No pre-existing base inline forms
+were rewritten, renamed, removed or stopped from running (materialization count
+0). The new acceptance helper's explicit-auto location expectation was corrected
+to the existing `maps` token span; no production span rule changed.
+Binary SHA256: base `ec78a59a98f1732783ab41740367b261ae1d3b09e072886051afc69c878972e2`,
+head `0cdf4b1868d38a00a4db9283c3d1aaa399b0f73199e622948095609c2ccda804`.
+
+Separate from that corpus, CLI acceptance controls and Worker stable-only controls
+were calibrated on old production, then passed twice on the fix:
+
+| Acceptance class | Old → new result |
+|---|---|
+| Own `Manager` against abstract `System`, hidden by block `by System` or ordinary prose; either side; standalone branch auto | check/verify/refine success → error/type/2 |
+| Own actors both `System`, but block text invents another actor | error/type/2 → ok/0, bounded verified/0, implements refines |
+| Own actor absent (no annotation, non-`by` or empty actor; typed requirement text is not an actor) and block text invents a mismatch | error/type/2 → ok/0, bounded verified/0, implements refines |
+
+The latter two are **intentional acceptance expansions**: prose must neither
+invent nor replace an actor. Artifact probes ran each binary twice on the same
+seam-free input. Kernel v1/v2, analyze, document claims/generate (including RCIR
+and digest), ledger, explain, scenarios and testgen were byte-identical. Full HTML
+was identical after normalizing only ten observed elapsed-time values in embedded
+verify JSON (total, solver check and eight property timings); every excluded key
+was checked present, numeric and nonnegative. No verdict/location/assurance field
+was excluded. This shared-lowering agreement is not independent triangulation.
+
+**Migration contract (#702, limited to this change):**
+
+1. **Versions/editions:** reproduced on native 4.12.0 at the base above; fixed for
+   v5.0.0. The earliest affected release is unknown. Published requirement actions
+   keep the existing own-metadata prefix syntax; typed requirement text is not a
+   new actor syntax.
+2. **New rejection:** the first acceptance class above now reports
+   `maps auto actor mismatch for action 'approve': impl actor 'Manager' != abstract actor 'System'`,
+   `error`/`kind: "type"`/exit 2. The existing implicit `implements` or explicit
+   `maps auto` span is retained. Mapping-free diff keeps semantic_diff/exit 0 and
+   reports affected directions as unknown/automatic_mapping_failed.
+3. **Rewrite:** confirm policy and correct a mistaken actor on the action itself.
+   Do not rewrite the enclosing prose to hide a mismatch. There is no general
+   semantics-equivalent rewrite or automatic migration; an actor change changes
+   policy. Intentional delegation needs a reviewed explicit correspondence.
+4. **Commands:** run unscoped `fslc check req.fsl`, inspect both own actors and the
+   mapping, correct confirmed mistakes, repeat check, then run
+   `fslc verify req.fsl --depth 6 --no-cache`. For standalone mappings use
+   `fslc refine impl.fsl abs.fsl map.fsl --depth 6`. Selected verify skips the seam
+   and is not a migration detector.
+5. **Verdicts/evidence:** old false successes can become type errors, and old
+   prose-induced false rejections can become success. Public Kernel/JSON schemas
+   and metadata/digest projections are unchanged. Bounded verified is not proved.
+6. **Consumers/artifacts:** Worker check/verify use the shared resolver; hooks,
+   CI and downstream callers must handle the new rejection. LSP delivery is not
+   wired. After correcting source, reverify and regenerate affected proof,
+   scenario/testgen/replay/ledger/document evidence. Worker acceptance is stable-only;
+   the accepted typed-text cases are covered by native CLI tests.
+7. **Rollback:** v5.0.0 is fail-closed, without a compatibility bypass or grace
+   period. If problems occur, return to a 4.x binary. No support duration is promised.
+
 ## 6. Documentation Reflection
 
 - A "refinement" section in LANGUAGE.md (mapping syntax, check content,
@@ -882,6 +1307,7 @@ search on the implementation model (`check_refinement_progress` in
 `fsl-verifier`), surfacing `kind: "progress_lost"` directly in refine output
 (see §1 above). Without `preserve progress`, liveness failures still appear only
 as separate lower-layer `violated` / `leadsTo` verification results.
+The shared core pull enforces the abstract-scope and capture-refusal rules in §1.
 
 ## Frozen Python reference divergence
 
@@ -988,7 +1414,8 @@ those consumers match on it. `fslc refine` reports `unknown_budget` / exit 1
 with `states_explored`, the inline seam's vocabulary; a chain stops at that
 link; a governance preservation reports `unknown_budget`. The Worker
 governance path also stopped reporting a self-violating `after` spec as
-`refines` and now reports `violated`, as native does. `fslc diff`'s direction
+`refines` and now reports `violated`, as native does (both spell it
+`impl_violated` since #1315). `fslc diff`'s direction
 check and `fslc mutate`'s implements oracle still read the outcome fields
 themselves at first. #1262 made every `RefinementCheck` field private, so the
 outcome can only be read through `verdict()` (the bypass no longer compiles),

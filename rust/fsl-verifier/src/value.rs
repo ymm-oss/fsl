@@ -1,15 +1,150 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+#[cfg(test)]
+#[path = "issue_1467_relation_prefix_tests.rs"]
+mod issue_1467_relation_prefix_tests;
+
+use fsl_core::binder_range::{InclusiveI64, IntegerEnvelopeFact};
 use fsl_core::{FslValue, KernelModel, TypeDef, TypeRef};
-use fsl_solver::{ModelValue, SmtSolver, Sort};
+use fsl_solver::{ModelValue, SatResult, SmtSolver, Sort};
 
 use crate::VerifyError;
 
 pub type SymbolicState<T> = BTreeMap<String, SymbolicValue<T>>;
 pub type Bindings<T> = BTreeMap<String, SymbolicValue<T>>;
+
+#[derive(Clone, Debug)]
+pub(crate) struct TypedBinding<T>(pub(crate) SymbolicValue<T>, pub(crate) Option<TypeRef>);
+
+impl<T> From<SymbolicValue<T>> for TypedBinding<T> {
+    fn from(value: SymbolicValue<T>) -> Self {
+        let ty = value.ty().cloned();
+        Self(value, ty)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) enum RangeFact<T> {
+    ParameterValue(IntegerEnvelopeFact),
+    CapturedLet {
+        envelope: IntegerEnvelopeFact,
+        valid_when: T,
+    },
+}
+
+impl<T> RangeFact<T> {
+    pub(crate) fn parameter(value: i64) -> Self {
+        Self::ParameterValue(IntegerEnvelopeFact::new(
+            InclusiveI64::new(value, value).expect("singleton interval"),
+        ))
+    }
+
+    /// A candidate of a state Set whose carrier is certified on this read frame.
+    pub(crate) const fn certified(envelope: InclusiveI64) -> Self {
+        Self::ParameterValue(IntegerEnvelopeFact::new(envelope))
+    }
+
+    pub(crate) fn captured(envelope: InclusiveI64, valid_when: T) -> Self {
+        Self::CapturedLet {
+            envelope: IntegerEnvelopeFact::new(envelope),
+            valid_when,
+        }
+    }
+
+    pub(crate) fn envelope(&self) -> &IntegerEnvelopeFact {
+        match self {
+            Self::ParameterValue(envelope) | Self::CapturedLet { envelope, .. } => envelope,
+        }
+    }
+
+    pub(crate) fn valid_when(&self) -> Option<&T> {
+        match self {
+            Self::ParameterValue(_) => None,
+            Self::CapturedLet { valid_when, .. } => Some(valid_when),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BindingRecord<T> {
+    pub(crate) binding: TypedBinding<T>,
+    pub(crate) range_fact: Option<RangeFact<T>>,
+}
+
+impl<T> BindingRecord<T> {
+    pub(crate) fn with_range_fact(binding: TypedBinding<T>, fact: RangeFact<T>) -> Self {
+        Self {
+            binding,
+            range_fact: Some(fact),
+        }
+    }
+}
+
+impl<T> From<TypedBinding<T>> for BindingRecord<T> {
+    fn from(binding: TypedBinding<T>) -> Self {
+        Self {
+            binding,
+            range_fact: None,
+        }
+    }
+}
+
+impl<T> From<SymbolicValue<T>> for BindingRecord<T> {
+    fn from(value: SymbolicValue<T>) -> Self {
+        TypedBinding::from(value).into()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct TypedBindings<T>(BTreeMap<String, BindingRecord<T>>);
+
+impl<T> TypedBindings<T> {
+    pub(crate) fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    pub(crate) fn insert(&mut self, name: String, value: impl Into<BindingRecord<T>>) {
+        self.0.insert(name, value.into());
+    }
+
+    pub(crate) fn get(&self, name: &str) -> Option<&SymbolicValue<T>> {
+        self.0.get(name).map(|record| &record.binding.0)
+    }
+
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &String> {
+        self.0.keys()
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &SymbolicValue<T>)> {
+        self.0
+            .iter()
+            .map(|(name, record)| (name, &record.binding.0))
+    }
+
+    pub(crate) fn records(&self) -> impl Iterator<Item = (&String, &BindingRecord<T>)> {
+        self.0.iter()
+    }
+
+    pub(crate) fn types(&self) -> impl Iterator<Item = (&String, &TypeRef)> {
+        self.0
+            .iter()
+            .filter_map(|(name, record)| record.binding.1.as_ref().map(|ty| (name, ty)))
+    }
+}
+
+impl<T> FromIterator<(String, SymbolicValue<T>)> for TypedBindings<T> {
+    fn from_iter<I: IntoIterator<Item = (String, SymbolicValue<T>)>>(iter: I) -> Self {
+        Self(
+            iter.into_iter()
+                .map(|(name, value)| (name, value.into()))
+                .collect(),
+        )
+    }
+}
 type MapEntries<T> = Vec<(FslValue, SymbolicValue<T>)>;
+pub(crate) type CollectionEntries<T> = Vec<(Vec<SymbolicValue<T>>, T)>;
 
 #[derive(Clone, Debug)]
 pub enum SymbolicValue<T> {
@@ -44,6 +179,13 @@ pub enum SymbolicValue<T> {
         ty: TypeRef,
         entries: Vec<((FslValue, FslValue), T)>,
     },
+    /// Actual recursive members/pairs, including values outside a declared carrier.
+    /// Live entries are distinct; absent slots may contain arbitrary keys.
+    /// Relations retain their declared pair grid as the entry prefix.
+    Collection {
+        ty: TypeRef,
+        entries: CollectionEntries<T>,
+    },
     SetLiteral(Vec<Self>),
     SeqLiteral(Vec<Self>),
 }
@@ -57,6 +199,7 @@ impl<T> SymbolicValue<T> {
             | Self::Map { ty, .. }
             | Self::Set { ty, .. }
             | Self::Seq { ty, .. }
+            | Self::Collection { ty, .. }
             | Self::Relation { ty, .. } => Some(ty),
             Self::None | Self::SetLiteral(_) | Self::SeqLiteral(_) => None,
         }
@@ -299,10 +442,29 @@ pub(crate) fn concrete_value<S: SmtSolver>(
                 })
                 .collect::<Result<_, VerifyError>>()?,
         }),
+        (TypeRef::Set(element_ty), FslValue::Set(values))
+            if **element_ty == TypeRef::Int || solver_sort(model, element_ty).is_err() =>
+        {
+            Ok(SymbolicValue::Collection {
+                ty: ty.clone(),
+                entries: values
+                    .iter()
+                    .map(|value| {
+                        Ok((
+                            vec![concrete_value(solver, model, element_ty, value)?],
+                            solver.bool_value(true),
+                        ))
+                    })
+                    .collect::<Result<_, VerifyError>>()?,
+            })
+        }
         (TypeRef::Set(element_ty), FslValue::Set(values)) => Ok(SymbolicValue::Set {
             ty: ty.clone(),
             entries: model
                 .domain_values(element_ty)?
+                .into_iter()
+                .chain(values.iter().cloned())
+                .collect::<std::collections::BTreeSet<_>>()
                 .into_iter()
                 .map(|element| {
                     let present = values.contains(&element);
@@ -314,7 +476,7 @@ pub(crate) fn concrete_value<S: SmtSolver>(
             let default = model.default_value(element_ty)?;
             Ok(SymbolicValue::Seq {
                 ty: ty.clone(),
-                slots: (0..*capacity)
+                slots: (0..(*capacity).max(values.len()))
                     .map(|index| {
                         concrete_value(
                             solver,
@@ -331,18 +493,27 @@ pub(crate) fn concrete_value<S: SmtSolver>(
             })
         }
         (TypeRef::Relation(source_ty, target_ty), FslValue::Relation(values)) => {
+            let mut pairs: Vec<_> = model
+                .domain_values(source_ty)?
+                .into_iter()
+                .flat_map(|source| {
+                    model
+                        .domain_values(target_ty)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(move |target| (source.clone(), target))
+                })
+                .collect();
+            let extra: Vec<_> = values
+                .iter()
+                .filter(|pair| !pairs.contains(pair))
+                .cloned()
+                .collect();
+            pairs.extend(extra);
             Ok(SymbolicValue::Relation {
                 ty: ty.clone(),
-                entries: model
-                    .domain_values(source_ty)?
+                entries: pairs
                     .into_iter()
-                    .flat_map(|source| {
-                        model
-                            .domain_values(target_ty)
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(move |target| (source.clone(), target))
-                    })
                     .map(|pair| {
                         let present = values.contains(&pair);
                         Ok((pair, solver.bool_value(present)))
@@ -392,6 +563,23 @@ pub(crate) fn logical_equal<S: SmtSolver>(
     left: &SymbolicValue<S::Term>,
     right: &SymbolicValue<S::Term>,
 ) -> Result<S::Term, VerifyError> {
+    if is_collection(left)
+        && is_collection(right)
+        && (matches!(left, SymbolicValue::Collection { .. })
+            || matches!(right, SymbolicValue::Collection { .. }))
+    {
+        let (_, left) = collection_entries(solver, model, left)?;
+        let (_, right) = collection_entries(solver, model, right)?;
+        let mut parts = Vec::new();
+        for (source, target) in [(&left, &right), (&right, &left)] {
+            for (key, present) in source {
+                parts.push(
+                    solver.implies(present, &collection_contains(solver, model, target, key)?)?,
+                );
+            }
+        }
+        return Ok(solver.and(&parts)?);
+    }
     match (left, right) {
         (SymbolicValue::None, SymbolicValue::None) => Ok(solver.bool_value(true)),
         (SymbolicValue::Option { present, .. }, SymbolicValue::None)
@@ -497,9 +685,9 @@ pub(crate) fn logical_equal<S: SmtSolver>(
                 ..
             },
         ) => {
-            if left_slots.len() != right_slots.len() {
-                return Err(VerifyError::new("sequence capacity mismatch"));
-            }
+            // Equal lengths make the common prefix cover every live element of
+            // represented temporaries. State-frame equalities also retain an
+            // overflow length so the type-bound check can report the failure.
             let mut parts = vec![solver.equal(left_len, right_len)?];
             for (index, (left_value, right_value)) in left_slots.iter().zip(right_slots).enumerate()
             {
@@ -513,6 +701,238 @@ pub(crate) fn logical_equal<S: SmtSolver>(
     }
 }
 
+/// Strict order of projected values. Inactive payloads never participate.
+#[allow(clippy::too_many_lines)]
+pub(crate) fn value_less<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    left: &SymbolicValue<S::Term>,
+    right: &SymbolicValue<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    if is_collection(left) && is_collection(right) {
+        return collection_less(solver, model, left, right);
+    }
+    match (left, right) {
+        (SymbolicValue::Scalar { ty: lt, term: l }, SymbolicValue::Scalar { ty: rt, term: r }) => {
+            let (lv, lk, ln) = scalar_order(solver, model, lt, l)?;
+            let (rv, rk, rn) = scalar_order(solver, model, rt, r)?;
+            let payload = if ln == rn {
+                solver.lt(&lk, &rk)?
+            } else {
+                solver.ite(
+                    &solver.equal(&lv, &solver.int_value(2))?,
+                    &solver.bool_value(ln < rn),
+                    &solver.lt(&lk, &rk)?,
+                )?
+            };
+            Ok(solver.or(&[
+                solver.lt(&lv, &rv)?,
+                solver.and(&[solver.equal(&lv, &rv)?, payload])?,
+            ])?)
+        }
+        (SymbolicValue::None | SymbolicValue::Option { .. }, SymbolicValue::None) => {
+            Ok(solver.bool_value(false))
+        }
+        (SymbolicValue::None, SymbolicValue::Option { present, .. }) => Ok(present.clone()),
+        (
+            SymbolicValue::Option {
+                present: lp,
+                value: l,
+                ..
+            },
+            SymbolicValue::Option {
+                present: rp,
+                value: r,
+                ..
+            },
+        ) => Ok(solver.and(&[
+            rp.clone(),
+            solver.or(&[solver.not(lp)?, value_less(solver, model, l, r)?])?,
+        ])?),
+        (
+            SymbolicValue::Struct { ty: lt, fields: l },
+            SymbolicValue::Struct { ty: rt, fields: r },
+        ) => {
+            if lt != rt {
+                let (TypeRef::Named(ln), TypeRef::Named(rn)) = (lt, rt) else {
+                    return Err(VerifyError::new("struct has no nominal type"));
+                };
+                return Ok(solver.bool_value(ln < rn));
+            }
+            let mut less = solver.bool_value(false);
+            for ((ln, lv), (rn, rv)) in l.iter().zip(r).rev() {
+                less = if ln == rn {
+                    lex_step(solver, model, lv, rv, &less)?
+                } else {
+                    solver.bool_value(ln < rn)
+                };
+            }
+            Ok(less)
+        }
+        (SymbolicValue::Map { entries: l, .. }, SymbolicValue::Map { entries: r, .. }) => {
+            let mut l: Vec<_> = l.iter().collect();
+            let mut r: Vec<_> = r.iter().collect();
+            l.sort_by(|(a, _), (b, _)| a.cmp(b));
+            r.sort_by(|(a, _), (b, _)| a.cmp(b));
+            let mut less = solver.bool_value(l.len() < r.len());
+            for ((lk, lv), (rk, rv)) in l.iter().zip(&r).rev() {
+                less = if lk == rk {
+                    lex_step(solver, model, lv, rv, &less)?
+                } else {
+                    solver.bool_value(lk < rk)
+                };
+            }
+            Ok(less)
+        }
+        (
+            SymbolicValue::Seq {
+                slots: l, len: ll, ..
+            },
+            SymbolicValue::Seq {
+                slots: r, len: rl, ..
+            },
+        ) => {
+            let mut less = solver.lt(ll, rl)?;
+            for (index, (lv, rv)) in l.iter().zip(r).enumerate().rev() {
+                let position = solver.int_value(i64_index(index)?);
+                let lp = solver.lt(&position, ll)?;
+                let rp = solver.lt(&position, rl)?;
+                less = solver.ite(
+                    &lp,
+                    &solver.and(&[rp.clone(), lex_step(solver, model, lv, rv, &less)?])?,
+                    &rp,
+                )?;
+            }
+            Ok(less)
+        }
+        _ => Err(VerifyError::new("cannot order different symbolic shapes")),
+    }
+}
+
+/// A compact, ordered candidate VIEW. Relation storage is never reordered.
+pub(crate) fn ordered_collection_entries<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    entries: CollectionEntries<S::Term>,
+) -> Result<CollectionEntries<S::Term>, VerifyError> {
+    let mut ordered = distinct_entries(solver, model, entries)?;
+    for end in 1..ordered.len() {
+        for index in (1..=end).rev() {
+            let (left, lp) = &ordered[index - 1];
+            let (right, rp) = &ordered[index];
+            let swap = solver.and(&[
+                rp.clone(),
+                solver.or(&[solver.not(lp)?, key_less(solver, model, right, left)?])?,
+            ])?;
+            let choose = |a: &[SymbolicValue<S::Term>], b: &[SymbolicValue<S::Term>]| {
+                a.iter()
+                    .zip(b)
+                    .map(|(a, b)| ite_value(solver, model, &swap, a, b))
+                    .collect::<Result<Vec<_>, _>>()
+            };
+            let lower = (choose(right, left)?, solver.ite(&swap, rp, lp)?);
+            let upper = (choose(left, right)?, solver.ite(&swap, lp, rp)?);
+            ordered[index - 1] = lower;
+            ordered[index] = upper;
+        }
+    }
+    Ok(ordered)
+}
+
+fn collection_less<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    left: &SymbolicValue<S::Term>,
+    right: &SymbolicValue<S::Term>,
+) -> Result<S::Term, VerifyError> {
+    let (_, left) = collection_entries(solver, model, left)?;
+    let (_, right) = collection_entries(solver, model, right)?;
+    let left = ordered_collection_entries(solver, model, left)?;
+    let right = ordered_collection_entries(solver, model, right)?;
+    // At equal live prefixes, exhaustion wins. Presence, not padded payload or
+    // cardinality-first comparison, decides whether the next member exists.
+    let mut less = solver.or(&right
+        .iter()
+        .skip(left.len())
+        .map(|(_, present)| present.clone())
+        .collect::<Vec<_>>())?;
+    for ((lk, lp), (rk, rp)) in left.iter().zip(&right).rev() {
+        let next = solver.or(&[
+            key_less(solver, model, lk, rk)?,
+            solver.and(&[collection_key_equal(solver, model, lk, rk)?, less])?,
+        ])?;
+        less = solver.ite(lp, &solver.and(&[rp.clone(), next])?, rp)?;
+    }
+    Ok(less)
+}
+
+fn lex_step<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    left: &SymbolicValue<S::Term>,
+    right: &SymbolicValue<S::Term>,
+    tail: &S::Term,
+) -> Result<S::Term, VerifyError> {
+    Ok(solver.or(&[
+        value_less(solver, model, left, right)?,
+        solver.and(&[logical_equal(solver, model, left, right)?, tail.clone()])?,
+    ])?)
+}
+
+fn key_less<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    left: &[SymbolicValue<S::Term>],
+    right: &[SymbolicValue<S::Term>],
+) -> Result<S::Term, VerifyError> {
+    if left.len() != right.len() {
+        return Err(VerifyError::new("collection key arity mismatch"));
+    }
+    let mut less = solver.bool_value(false);
+    for (l, r) in left.iter().zip(right).rev() {
+        less = lex_step(solver, model, l, r, &less)?;
+    }
+    Ok(less)
+}
+
+/// Enum projection preserves invalid signed ordinals as Int (#1283).
+/// Valid enums follow nominal name/member spelling, not declaration ordinal.
+fn scalar_order<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    ty: &TypeRef,
+    term: &S::Term,
+) -> Result<(S::Term, S::Term, String), VerifyError> {
+    if *ty == TypeRef::Bool {
+        return Ok((
+            solver.int_value(1),
+            solver.ite(term, &solver.int_value(1), &solver.int_value(0))?,
+            String::new(),
+        ));
+    }
+    if let TypeRef::Named(name) = ty
+        && let Some(TypeDef::Enum { members, .. }) = model.types.get(name)
+    {
+        let mut sorted: Vec<_> = members.iter().enumerate().collect();
+        sorted.sort_by_key(|(_, a)| *a);
+        let mut key = term.clone();
+        for (rank, (ordinal, _)) in sorted.iter().enumerate() {
+            key = solver.ite(
+                &solver.equal(term, &solver.int_value(i64_index(*ordinal)?))?,
+                &solver.int_value(i64_index(rank)?),
+                &key,
+            )?;
+        }
+        let valid = scalar_bounds(solver, model, ty, term)?;
+        return Ok((
+            solver.ite(&valid, &solver.int_value(2), &solver.int_value(0))?,
+            key,
+            name.clone(),
+        ));
+    }
+    Ok((solver.int_value(0), term.clone(), String::new()))
+}
+
 #[allow(clippy::too_many_lines)]
 pub(crate) fn ite_value<S: SmtSolver>(
     solver: &S,
@@ -521,6 +941,63 @@ pub(crate) fn ite_value<S: SmtSolver>(
     then_value: &SymbolicValue<S::Term>,
     else_value: &SymbolicValue<S::Term>,
 ) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    if is_collection(then_value)
+        && is_collection(else_value)
+        && (matches!(then_value, SymbolicValue::Collection { .. })
+            || matches!(else_value, SymbolicValue::Collection { .. }))
+    {
+        let (ty, then_entries) = collection_entries(solver, model, then_value)?;
+        let (_, else_entries) = collection_entries(solver, model, else_value)?;
+        let mut entries = Vec::new();
+        let known: Option<Vec<_>> = then_entries
+            .iter()
+            .chain(&else_entries)
+            .map(|(key, _)| literal_key(solver, key))
+            .collect();
+        if let Some(keys) = known {
+            let mut seen = Vec::new();
+            for ((key, _), known) in then_entries.iter().chain(&else_entries).zip(keys) {
+                if seen.contains(&known) {
+                    continue;
+                }
+                seen.push(known);
+                entries.push((
+                    key.clone(),
+                    solver.ite(
+                        condition,
+                        &collection_contains(solver, model, &then_entries, key)?,
+                        &collection_contains(solver, model, &else_entries, key)?,
+                    )?,
+                ));
+            }
+            return Ok(SymbolicValue::Collection { ty, entries });
+        }
+        // Align slots, not copies of whole candidate lists. Each arm has distinct
+        // live members, so selection preserves distinctness and growth is linear.
+        for index in 0..then_entries.len().max(else_entries.len()) {
+            let then_entry = then_entries.get(index);
+            let else_entry = else_entries.get(index);
+            let key = match (then_entry, else_entry) {
+                (Some((left, _)), Some((right, _))) => left
+                    .iter()
+                    .zip(right)
+                    .map(|(left, right)| ite_value(solver, model, condition, left, right))
+                    .collect::<Result<_, _>>()?,
+                (Some((key, _)), None) | (None, Some((key, _))) => key.clone(),
+                (None, None) => unreachable!(),
+            };
+            let absent = solver.bool_value(false);
+            entries.push((
+                key,
+                solver.ite(
+                    condition,
+                    then_entry.map_or(&absent, |(_, present)| present),
+                    else_entry.map_or(&absent, |(_, present)| present),
+                )?,
+            ));
+        }
+        return Ok(SymbolicValue::Collection { ty, entries });
+    }
     if matches!(then_value, SymbolicValue::None) {
         let ty = else_value
             .ty()
@@ -654,17 +1131,28 @@ pub(crate) fn ite_value<S: SmtSolver>(
                 len: else_len,
                 ..
             },
-        ) => Ok(SymbolicValue::Seq {
-            ty: ty.clone(),
-            slots: then_slots
-                .iter()
-                .zip(else_slots)
-                .map(|(then_slot, else_slot)| {
+        ) => {
+            let slots = (0..then_slots.len().max(else_slots.len()))
+                .map(|index| {
+                    // Missing slots are inactive in that arm. Use the other
+                    // actual candidate, without enumerating a padding carrier.
+                    let then_slot = then_slots
+                        .get(index)
+                        .or_else(|| else_slots.get(index))
+                        .unwrap();
+                    let else_slot = else_slots
+                        .get(index)
+                        .or_else(|| then_slots.get(index))
+                        .unwrap();
                     ite_value(solver, model, condition, then_slot, else_slot)
                 })
-                .collect::<Result<_, VerifyError>>()?,
-            len: solver.ite(condition, then_len, else_len)?,
-        }),
+                .collect::<Result<_, VerifyError>>()?;
+            Ok(SymbolicValue::Seq {
+                ty: ty.clone(),
+                slots,
+                len: solver.ite(condition, then_len, else_len)?,
+            })
+        }
         _ => Err(VerifyError::new("if arms have different symbolic shapes")),
     }
 }
@@ -683,13 +1171,7 @@ where
     }
     let parts = left
         .iter()
-        .zip(right)
-        .map(|((left_key, left_term), (right_key, right_term))| {
-            if left_key != right_key {
-                return Err(VerifyError::new("finite collection domain mismatch"));
-            }
-            Ok(solver.equal(left_term, right_term)?)
-        })
+        .map(|(key, term)| Ok(solver.equal(term, term_for_key(right, key)?)?))
         .collect::<Result<Vec<_>, VerifyError>>()?;
     Ok(solver.and(&parts)?)
 }
@@ -704,18 +1186,29 @@ where
     S: SmtSolver,
     K: Clone + PartialEq,
 {
+    if then_entries.len() != else_entries.len() {
+        return Err(VerifyError::new("finite collection shape mismatch"));
+    }
     then_entries
         .iter()
-        .zip(else_entries)
-        .map(|((key, term), (else_key, else_term))| {
-            if key != else_key {
-                return Err(VerifyError::new("finite collection domain mismatch"));
-            }
-            Ok((key.clone(), solver.ite(condition, term, else_term)?))
+        .map(|(key, term)| {
+            Ok((
+                key.clone(),
+                solver.ite(condition, term, term_for_key(else_entries, key)?)?,
+            ))
         })
         .collect()
 }
 
+fn term_for_key<'a, K: PartialEq, T>(entries: &'a [(K, T)], key: &K) -> Result<&'a T, VerifyError> {
+    entries
+        .iter()
+        .find(|(candidate, _)| candidate == key)
+        .map(|(_, term)| term)
+        .ok_or_else(|| VerifyError::new("finite collection domain mismatch"))
+}
+
+#[allow(clippy::too_many_lines)]
 pub(crate) fn coerce<S: SmtSolver>(
     solver: &S,
     model: &KernelModel,
@@ -741,16 +1234,20 @@ pub(crate) fn coerce<S: SmtSolver>(
             })
         }
         (SymbolicValue::SetLiteral(items), TypeRef::Set(element_ty)) => {
-            let mut entries = Vec::new();
-            for element in model.domain_values(element_ty)? {
-                let symbolic_element = concrete_value(solver, model, element_ty, &element)?;
-                let mut alternatives = Vec::new();
-                for item in &items {
-                    alternatives.push(logical_equal(solver, model, &symbolic_element, item)?);
-                }
-                entries.push((element, solver.or(&alternatives)?));
+            if items.is_empty()
+                && **element_ty != TypeRef::Int
+                && solver_sort(model, element_ty).is_ok()
+            {
+                return concrete_value(solver, model, target_ty, &model.default_value(target_ty)?);
             }
-            Ok(SymbolicValue::Set {
+            let mut entries = Vec::new();
+            for item in items {
+                let item = coerce(solver, model, item, element_ty)?;
+                let key = vec![item];
+                let present = solver.not(&collection_contains(solver, model, &entries, &key)?)?;
+                entries.push((key, present));
+            }
+            Ok(SymbolicValue::Collection {
                 ty: target_ty.clone(),
                 entries,
             })
@@ -782,14 +1279,20 @@ pub(crate) fn coerce<S: SmtSolver>(
             })
         }
         (SymbolicValue::SeqLiteral(items), TypeRef::Seq(element_ty, capacity)) => {
-            if items.len() > *capacity {
-                return Err(VerifyError::new("sequence literal exceeds capacity"));
-            }
-            let default =
-                concrete_value(solver, model, element_ty, &model.default_value(element_ty)?)?;
-            let mut slots = Vec::with_capacity(*capacity);
-            for index in 0..*capacity {
-                let item = items.get(index).cloned().unwrap_or_else(|| default.clone());
+            let slot_count = (*capacity).max(items.len());
+            let default = if slot_count > items.len() {
+                Some(concrete_value(
+                    solver,
+                    model,
+                    element_ty,
+                    &model.default_value(element_ty)?,
+                )?)
+            } else {
+                None
+            };
+            let mut slots = Vec::with_capacity(slot_count);
+            for index in 0..slot_count {
+                let item = items.get(index).or(default.as_ref()).unwrap().clone();
                 slots.push(coerce(solver, model, item, element_ty)?);
             }
             Ok(SymbolicValue::Seq {
@@ -804,15 +1307,308 @@ pub(crate) fn coerce<S: SmtSolver>(
                 term,
             })
         }
-        (mut value, ty) if value.ty() == Some(ty) => {
-            set_value_type(&mut value, ty.clone());
-            Ok(value)
+        // A literal has no carrier of its own, so its arms above type each element, and
+        // a scalar is one term whatever it is labelled. The rest answer the carrier rule
+        // `check` asks (#1683). `RebuildInt` covers a collection holding `Int`, bound by
+        // `let` or `is`, a method's result or argument, or read back out of one.
+        (mut value, ty) => {
+            let answer = value
+                .ty()
+                .map(|actual| model.carrier_coercion(actual, ty))
+                .transpose()?;
+            match answer {
+                Some(fsl_core::CarrierCoercion::Retag) => {
+                    set_value_type(&mut value, ty.clone());
+                    Ok(value)
+                }
+                Some(fsl_core::CarrierCoercion::RebuildInt) => {
+                    coerce_inferred_collection(solver, model, value, ty)
+                }
+                _ => Err(VerifyError::new(format!(
+                    "cannot coerce symbolic value {:?} to {ty:?}",
+                    value.ty()
+                ))),
+            }
         }
-        (value, ty) => Err(VerifyError::new(format!(
-            "cannot coerce symbolic value {:?} to {ty:?}",
-            value.ty()
-        ))),
     }
+}
+
+fn coerce_inferred_collection<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    value: SymbolicValue<S::Term>,
+    target: &TypeRef,
+) -> Result<SymbolicValue<S::Term>, VerifyError> {
+    match value {
+        value @ (SymbolicValue::Collection { .. } | SymbolicValue::Set { .. }) => {
+            let (_, entries) = collection_entries(solver, model, &value)?;
+            let types = collection_types(target)?;
+            Ok(SymbolicValue::Collection {
+                ty: target.clone(),
+                entries: entries
+                    .into_iter()
+                    .map(|(key, present)| Ok((coerce_key(solver, model, &key, &types)?, present)))
+                    .collect::<Result<_, VerifyError>>()?,
+            })
+        }
+        SymbolicValue::Seq { slots, len, .. } => {
+            let TypeRef::Seq(element, _) = target else {
+                unreachable!()
+            };
+            Ok(SymbolicValue::Seq {
+                ty: target.clone(),
+                slots: slots
+                    .into_iter()
+                    .map(|slot| coerce(solver, model, slot, element))
+                    .collect::<Result<_, _>>()?,
+                len,
+            })
+        }
+        _ => unreachable!(),
+    }
+}
+
+pub(crate) fn is_collection<T>(value: &SymbolicValue<T>) -> bool {
+    matches!(
+        value,
+        SymbolicValue::Set { .. }
+            | SymbolicValue::Relation { .. }
+            | SymbolicValue::Collection { .. }
+    )
+}
+
+pub(crate) fn map_collections<T>(
+    target: &mut SymbolicValue<T>,
+    source: &SymbolicValue<T>,
+    map: &mut impl FnMut(&mut SymbolicValue<T>, &SymbolicValue<T>) -> Result<(), VerifyError>,
+) -> Result<(), VerifyError> {
+    if is_collection(target) && is_collection(source) {
+        return map(target, source);
+    }
+    Ok(())
+}
+
+pub(crate) fn snapshot_collections<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    target: &mut SymbolicValue<S::Term>,
+    source: &SymbolicValue<S::Term>,
+) -> Result<(), VerifyError> {
+    map_collections(target, source, &mut |target, source| {
+        let (ty, entries) = collection_entries(solver, model, source)?;
+        *target = SymbolicValue::Collection { ty, entries };
+        Ok(())
+    })
+}
+
+/// Canonicalize only after proving that no live key escapes the frame's support.
+/// Selected, already asserted bounds discharge this proof without a query.
+/// Only top-level Set/relation roots are reframed; other roots stay unchanged.
+pub(crate) async fn reframe_collections<S: SmtSolver>(
+    solver: &mut S,
+    model: &KernelModel,
+    state: &mut SymbolicState<S::Term>,
+    suffix: &str,
+    checked_bounds: Option<&BTreeSet<String>>,
+) -> Result<(), VerifyError> {
+    for (name, _) in &model.state {
+        let bounded = checked_bounds.is_none_or(|selected| {
+            selected.contains(&fsl_core::SyntheticName::Bounds { state: name }.internal())
+        });
+        let source = state[name].clone();
+        let mut carrier = source.clone();
+        let mut index = 0;
+        map_collections(&mut carrier, &source, &mut |target, value| {
+            if let SymbolicValue::Collection { ty, entries } = value {
+                *target = symbolic_value(
+                    solver,
+                    model,
+                    ty,
+                    &format!("{name}@carrier_{suffix}_{index}"),
+                )?;
+                if !bounded {
+                    let (_, mut support) = collection_entries(solver, model, target)?;
+                    for (key, _) in entries {
+                        if let Some(known) = literal_key(solver, key)
+                            && !support
+                                .iter()
+                                .any(|(key, _)| literal_key(solver, key).as_ref() == Some(&known))
+                        {
+                            let present = solver.constant(
+                                &format!("{name}@support_{suffix}_{index}_{}", support.len()),
+                                &Sort::Bool,
+                            )?;
+                            support.push((key.clone(), present));
+                            *target = SymbolicValue::Collection {
+                                ty: ty.clone(),
+                                entries: support.clone(),
+                            };
+                        }
+                    }
+                }
+                index += 1;
+            }
+            Ok(())
+        })?;
+        if index > 0 {
+            if !bounded {
+                let mut supported = source.clone();
+                map_collections(&mut supported, &carrier, &mut |value, frame| {
+                    let (ty, mut entries) = collection_entries(solver, model, value)?;
+                    let (_, mut support) = collection_entries(solver, model, frame)?;
+                    for (_, present) in &mut support {
+                        *present = solver.bool_value(true);
+                    }
+                    for (key, present) in &mut entries {
+                        *present = solver.and(&[
+                            present.clone(),
+                            collection_contains(solver, model, &support, key)?,
+                        ])?;
+                    }
+                    *value = SymbolicValue::Collection { ty, entries };
+                    Ok(())
+                })?;
+                let escapes = solver.not(&logical_equal(solver, model, &source, &supported)?)?;
+                solver.set_query_context("collection_support", name);
+                match solver.check_assuming(&[escapes]).await? {
+                    SatResult::Sat => continue,
+                    SatResult::Unsat => {}
+                    SatResult::Unknown => {
+                        return Err(VerifyError::solver(
+                            "solver returned unknown in collection support proof",
+                        ));
+                    }
+                }
+            }
+            solver.assert(&logical_equal(solver, model, &carrier, &source)?)?;
+            state.insert(name.clone(), carrier);
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn collection_types(ty: &TypeRef) -> Result<Vec<&TypeRef>, VerifyError> {
+    match ty {
+        TypeRef::Set(element) => Ok(vec![element]),
+        TypeRef::Relation(source, target) => Ok(vec![source, target]),
+        _ => Err(VerifyError::new("expected Set or relation")),
+    }
+}
+
+fn coerce_key<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    key: &[SymbolicValue<S::Term>],
+    types: &[&TypeRef],
+) -> Result<Vec<SymbolicValue<S::Term>>, VerifyError> {
+    if key.len() != types.len() {
+        return Err(VerifyError::new("collection key arity mismatch"));
+    }
+    key.iter()
+        .zip(types)
+        .map(|(value, ty)| coerce(solver, model, value.clone(), ty))
+        .collect()
+}
+
+pub(crate) fn collection_entries<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    value: &SymbolicValue<S::Term>,
+) -> Result<(TypeRef, CollectionEntries<S::Term>), VerifyError> {
+    let ty = value
+        .ty()
+        .ok_or_else(|| VerifyError::new("untyped collection"))?;
+    let types = collection_types(ty)?;
+    let entries = match value {
+        SymbolicValue::Collection { entries, .. } => entries
+            .iter()
+            .map(|(key, present)| Ok((coerce_key(solver, model, key, &types)?, present.clone())))
+            .collect::<Result<_, VerifyError>>()?,
+        SymbolicValue::Set { entries, .. } => entries
+            .iter()
+            .map(|(key, present)| {
+                Ok((
+                    vec![concrete_value(solver, model, types[0], key)?],
+                    present.clone(),
+                ))
+            })
+            .collect::<Result<_, VerifyError>>()?,
+        SymbolicValue::Relation { entries, .. } => entries
+            .iter()
+            .map(|((source, target), present)| {
+                Ok((
+                    vec![
+                        concrete_value(solver, model, types[0], source)?,
+                        concrete_value(solver, model, types[1], target)?,
+                    ],
+                    present.clone(),
+                ))
+            })
+            .collect::<Result<_, VerifyError>>()?,
+        _ => return Err(VerifyError::new("expected Set or relation")),
+    };
+    Ok((ty.clone(), entries))
+}
+
+pub(crate) fn collection_key_equal<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    left: &[SymbolicValue<S::Term>],
+    right: &[SymbolicValue<S::Term>],
+) -> Result<S::Term, VerifyError> {
+    if left.len() != right.len() {
+        return Err(VerifyError::new("collection key arity mismatch"));
+    }
+    Ok(solver.and(
+        &left
+            .iter()
+            .zip(right)
+            .map(|(left, right)| logical_equal(solver, model, left, right))
+            .collect::<Result<Vec<_>, _>>()?,
+    )?)
+}
+
+pub(crate) fn collection_contains<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    entries: &CollectionEntries<S::Term>,
+    key: &[SymbolicValue<S::Term>],
+) -> Result<S::Term, VerifyError> {
+    let terms = entries
+        .iter()
+        .map(|(candidate, present)| {
+            Ok(solver.and(&[
+                collection_key_equal(solver, model, candidate, key)?,
+                present.clone(),
+            ])?)
+        })
+        .collect::<Result<Vec<_>, VerifyError>>()?;
+    Ok(solver.or(&terms)?)
+}
+
+pub(crate) fn literal_key<S: SmtSolver>(
+    solver: &S,
+    key: &[SymbolicValue<S::Term>],
+) -> Option<Vec<ModelValue>> {
+    key.iter()
+        .map(|value| match value {
+            SymbolicValue::Scalar { term, .. } => solver.literal_value(term),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(crate) fn distinct_entries<S: SmtSolver>(
+    solver: &S,
+    model: &KernelModel,
+    entries: CollectionEntries<S::Term>,
+) -> Result<CollectionEntries<S::Term>, VerifyError> {
+    let mut distinct = Vec::new();
+    for (key, present) in entries {
+        let duplicate = collection_contains(solver, model, &distinct, &key)?;
+        distinct.push((key, solver.and(&[present, solver.not(&duplicate)?])?));
+    }
+    Ok(distinct)
 }
 
 fn set_value_type<T>(value: &mut SymbolicValue<T>, ty: TypeRef) {
@@ -822,6 +1618,7 @@ fn set_value_type<T>(value: &mut SymbolicValue<T>, ty: TypeRef) {
         | SymbolicValue::Struct { ty: current, .. }
         | SymbolicValue::Map { ty: current, .. }
         | SymbolicValue::Set { ty: current, .. }
+        | SymbolicValue::Collection { ty: current, .. }
         | SymbolicValue::Seq { ty: current, .. }
         | SymbolicValue::Relation { ty: current, .. } => *current = ty,
         SymbolicValue::None | SymbolicValue::SetLiteral(_) | SymbolicValue::SeqLiteral(_) => {}
@@ -891,10 +1688,28 @@ pub(crate) fn bounds<S: SmtSolver>(
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(solver.and(&parts)?)
         }
-        SymbolicValue::Set { .. } | SymbolicValue::Relation { .. } => Ok(solver.bool_value(true)),
-        SymbolicValue::Seq { slots, len, .. } => {
+        SymbolicValue::Set { .. } | SymbolicValue::Relation { .. } => {
+            let (ty, entries) = collection_entries(solver, model, value)?;
+            bounds(solver, model, &SymbolicValue::Collection { ty, entries })
+        }
+        SymbolicValue::Collection { .. } => {
+            let (_, entries) = collection_entries(solver, model, value)?;
+            let mut parts = Vec::new();
+            for (key, present) in &entries {
+                let valid = key
+                    .iter()
+                    .map(|value| bounds(solver, model, value))
+                    .collect::<Result<Vec<_>, _>>()?;
+                parts.push(solver.implies(present, &solver.and(&valid)?)?);
+            }
+            Ok(solver.and(&parts)?)
+        }
+        SymbolicValue::Seq { ty, slots, len } => {
+            let TypeRef::Seq(_, capacity) = ty else {
+                unreachable!();
+            };
             let zero = solver.int_value(0);
-            let capacity = solver.int_value(i64_index(slots.len())?);
+            let capacity = solver.int_value(i64_index(*capacity)?);
             let mut parts = vec![solver.ge(len, &zero)?, solver.le(len, &capacity)?];
             for (index, value) in slots.iter().enumerate() {
                 let active = solver.lt(&solver.int_value(i64_index(index)?), len)?;
@@ -1043,6 +1858,31 @@ pub(crate) fn project_value<S: SmtSolver>(
                 })
                 .collect::<Result<_, VerifyError>>()?,
         )),
+        SymbolicValue::Collection { ty, .. } => {
+            let (_, entries) = collection_entries(solver, model, value)?;
+            let mut values = Vec::new();
+            for (key, present) in &entries {
+                if project_bool(solver, present)? {
+                    values.push(
+                        key.iter()
+                            .map(|value| project_value(solver, model, value))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    );
+                }
+            }
+            Ok(match ty {
+                TypeRef::Set(_) => {
+                    FslValue::Set(values.into_iter().map(|key| key[0].clone()).collect())
+                }
+                TypeRef::Relation(_, _) => FslValue::Relation(
+                    values
+                        .into_iter()
+                        .map(|key| (key[0].clone(), key[1].clone()))
+                        .collect(),
+                ),
+                _ => unreachable!(),
+            })
+        }
         SymbolicValue::None | SymbolicValue::SetLiteral(_) | SymbolicValue::SeqLiteral(_) => Err(
             VerifyError::new("untyped literal cannot be projected from a solver model"),
         ),

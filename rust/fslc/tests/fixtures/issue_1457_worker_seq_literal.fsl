@@ -1,0 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+spec WorkerSeqBinder {
+  state { flag: Bool, done: Bool }
+  init { flag = false done = false }
+  action go() {
+    flag = exists z in Seq { 1 } { z == 1 }
+    done = true
+  }
+  invariant Capture { not done or flag }
+}

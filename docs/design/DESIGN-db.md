@@ -52,7 +52,35 @@ Public Kernel v1 and v2 schemas and versions are unchanged; v2 reports these
 lowered targets as `generated_from_source`. Source-backed DB origins do not
 replace the established generated action/property display names, which remain
 the executable and replay identities. DB-only compatibility validation continues
-to belong to `fsl-tools` and is not moved into the shared kernel.
+to belong to `fsl-tools` and is not moved into the shared kernel. Rule-vocabulary
+well-formedness is the narrow exception: the closed set of twelve rule names is
+owned by `fsl-core` and shared with `fsl-tools`. Lowering rejects an unknown name
+at its authored rule before constructing a catalog; it does not run the DB-only
+findings or reachable-schema-window validation. In particular, a DB-only schema
+window rejection does not newly prevent Kernel export.
+
+The #1473 check-boundary comparison covered all 595 `.fsl` files recursively
+under `specs/`, `examples/`, and `rust/fslc/tests/fixtures/`, without corpus
+exclusions. Base production was `2debc32a67d5e459110a4fd61fce9cbcf93c3fe7`;
+the head implementation commit was `63f98beb88be08f4455592436219bdd4a92bcf06`
+(tree `dcd6497eb7dc8b6049a734e1bf457bfb8894f72c`).
+The measured head binary was built from a tree whose production sources and
+Cargo.lock are identical to that implementation commit.
+For each relative path, the commands
+were `FSLC_CACHE=off .codex/tmp/sweep-1473/base3-fslc check <relative-path>` and
+`FSLC_CACHE=off .codex/tmp/sweep-1473/head3-fslc check <relative-path>` in this
+materialized tree, with the base binary built after restoring the five affected
+production files to base and the head binary built from the restored head.
+Their SHA256 values were respectively
+`7b431cb05464e3eef24f35a68edab9c716d44055ed4b281b088db3d91f7d7079` and
+`c7e659610dbd7efddf539f7d730d106344955e4fc1dec9cb3d09e260765eb0c3`.
+The path-set difference and `check` `ok`→`error` transition set were both empty;
+stdout, stderr, and exit statuses also matched in full (400 exit-0 forms on
+each side). This is a check-acceptance comparison, not preservation of the old
+malformed-document Kernel export. Existing rewritten error-walk expectations use
+file-backed fixtures in this collection; no inline fixture was removed or
+stopped running. Separate accepting controls cover all twelve rules, omitted and
+empty checks, and the intentionally accepted repair-tool inputs.
 
 The conformance anchors are `rust/fslc/tests/db_direct_lowering.rs`: a positive
 catalog-order/model control, a Public Kernel v2 source-origin control, and a
@@ -74,7 +102,11 @@ coexistence is explicit in the artifact windows. Validation rejects an
 environment schema version that the declared, strictly sequential migration
 plan never reaches, and rejects a `check compatibility` rule name outside the
 closed vocabulary below; both fail `fslc check` / `fslc db check` with exit 2
-instead of silently checking nothing.
+instead of silently checking nothing. Unknown rule names are also rejected by
+shared lowering before catalog construction for every lowering consumer,
+including `kernel`, `scenarios`, `explain`, and `testgen`; see
+[Direct lowering and provenance](#direct-lowering-and-provenance) above. This
+shared vocabulary gate does not move schema-window validation into the core.
 
 Rules checked in snapshot mode:
 

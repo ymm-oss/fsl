@@ -1,20 +1,26 @@
-Restores #1009: `fslc html` discards the verification status after rendering
-the report and always returns exit 0 from `generated_content_result`, so a gate
-reading only the process exit code sees a pass over a `violated` baseline.
+Restores #1009: `fslc html` discards the verification status, bypasses the
+report-verification-error gate, and returns `generated_content_result`'s exit 0
+after successful rendering. A process-exit-only gate sees a pass over a
+`violated` baseline. Remove the early error gate as well as the final status
+fold so the discarded status has no remaining use on the shared timing path.
 
 --- a/rust/fslc/src/main.rs
 +++ b/rust/fslc/src/main.rs
-@@ -11756,7 +11756,7 @@ fn run_html_report_from_source(
+@@ -13352,11 +13352,8 @@ fn run_html_report_from_source_with_label(
+     edition: Option<&SourceEdition>,
+     render_source: Option<&str>,
+ ) -> (Value, i32) {
+-    let (mut verification, verification_status) =
++    let (mut verification, _) =
+         report_verification_from_source(path, source, depth, deadlock_mode, engine, edition);
+-    if let Some(error) = report_verification_error(&verification, verification_status) {
+-        return error;
+-    }
+     let model = match load_model_from_source(path, source) {
          Ok(model) => model,
          Err(error) => return (spec_load_error_output(&error), 2),
-     };
--    let (verification, verification_status) = run_verify_from_source(
-+    let (verification, _) = run_verify_from_source(
-         path,
-         source,
-         depth,
-@@ -11787,7 +11787,7 @@ fn run_html_report_from_source(
-         &verification,
+@@ -13392,7 +13389,7 @@ fn run_html_report_from_source_with_label(
+         verification_view,
          &fsl_tools::undecided_declarations(&model),
      );
 -    let (result, status) = generated_content_result(
@@ -22,7 +28,7 @@ reading only the process exit code sees a pass over a `violated` baseline.
          "html_report",
          &model.name,
          format!(
-@@ -11798,13 +11798,6 @@ fn run_html_report_from_source(
+@@ -13403,13 +13400,6 @@ fn run_html_report_from_source_with_label(
          ),
          &html,
          output_path,

@@ -21,12 +21,17 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// The 28 public type names this change annotates: #858's enumeration minus
+#[path = "support/outcome_census_rule.rs"]
+mod outcome_census_rule;
+
+/// The 31 public type names this change annotates: #858's enumeration minus
 /// the exclusions below, plus `BoundedLivenessViolation` and
 /// `LeadsToViolation`, which the extended `*Violation` rule found and #858's
-/// curated table missed, and `RefinementVerdict` (#1245). Each must carry `#[must_use]` on the TYPE, because on
+/// curated table missed, `RefinementVerdict` (#1245), `Verdict` (#901),
+/// `TraceGate` (#1285), and `ProcessFormOutcome` (the migration's process-form
+/// rewrite or refusal). Each must carry `#[must_use]` on the TYPE, because on
 /// the function it is redundant against `Result` and closes nothing.
-const ANNOTATED: [&str; 28] = [
+const ANNOTATED: [&str; 31] = [
     // fsl-runtime
     "Violation",
     "StepResult",
@@ -60,12 +65,15 @@ const ANNOTATED: [&str; 28] = [
     "SupportOverlay",
     // fslc
     "OutcomeClass",
+    "Verdict",
+    "TraceGate",
+    "ProcessFormOutcome",
 ];
 
-/// `ANNOTATED` holds 28 distinct names but 29 declarations: `ReachableWitness`
+/// `ANNOTATED` holds 31 distinct names but 32 declarations: `ReachableWitness`
 /// is declared once in `fsl-runtime` and once in `fsl-verifier`, and both must
 /// carry the attribute.
-const ANNOTATED_DECLARATIONS: usize = 29;
+const ANNOTATED_DECLARATIONS: usize = 32;
 
 /// Types deliberately left un-annotated, each with the reason. A type moved
 /// off this list must gain the attribute; a type added to it must state why.
@@ -101,9 +109,9 @@ fn read_source(path: &Path) -> String {
 
 /// What the rule below actually matches today. #858 reports 33 types from a
 /// hand-curated table; this rule -- #858's, extended with the `*Violation`
-/// suffix -- selects 17, all of which are in `ANNOTATED`. Both numbers are pinned so
+/// suffix -- selects 19, all of which are in `ANNOTATED`. Both numbers are pinned so
 /// neither the curated decision nor the detector can drift unnoticed.
-const DISCOVERED: [&str; 17] = [
+const DISCOVERED: [&str; 19] = [
     "BfsResult",
     "BmcResult",
     "BmcViolation",
@@ -114,12 +122,14 @@ const DISCOVERED: [&str; 17] = [
     "ImplicationResult",
     "InductionResult",
     "LeadsToViolation",
+    "ProcessFormOutcome",
     "ProgressCheck",
     "RankedLeadstoResult",
     "RefinementVerdict",
     "SatResult",
     "StepResult",
     "VacuityFinding",
+    "Verdict",
     "Violation",
 ];
 
@@ -155,74 +165,15 @@ fn crate_sources() -> Vec<PathBuf> {
     files
 }
 
-/// Whether a declaration's body carries an outcome, or its name says it is
-/// one. This is the same rule #858 measured the codebase with.
-fn carries_an_outcome(name: &str, body: &str) -> bool {
-    name.ends_with("Result")
-        || name.ends_with("Outcome")
-        || name.ends_with("Report")
-        || name.ends_with("Verdict")
-        || name.ends_with("Finding")
-        // `Violation` is NOT in the rule #858 states, and that omission is a
-        // defect in the rule rather than in its curated table: no `*Violation`
-        // type matches any suffix above, and none carries a `violation:` field
-        // of its own. `Violation`, `ExplicitViolation`, and `BmcViolation` were
-        // annotated only because the hand-written table happened to list them.
-        // Adding the suffix surfaced two more the table also missed --
-        // `BoundedLivenessViolation` and `LeadsToViolation`.
-        || name.ends_with("Violation")
-        || body.contains("pub violation:")
-        || body.contains("pub outcome:")
-}
-
 /// `(type name, annotated)` for every public struct/enum in the product body
-/// of the audited crates. `#[cfg(test)]` modules are excluded: a test's own
-/// helper types are not a public outcome surface.
+/// of the audited crates. Direct test-only items are excluded: test helper
+/// types are not a public outcome surface. The shared rule handles blanked
+/// comments in the annotation look-back.
 fn census() -> BTreeMap<String, bool> {
     let mut found = BTreeMap::new();
     for file in crate_sources() {
         let text = read_source(&file);
-        let product = text.split("#[cfg(test)]").next().expect("product body");
-        let lines: Vec<&str> = product.lines().collect();
-        for (index, line) in lines.iter().enumerate() {
-            let Some(rest) = line
-                .strip_prefix("pub struct ")
-                .or_else(|| line.strip_prefix("pub enum "))
-            else {
-                continue;
-            };
-            let name = rest
-                .split(|character: char| !character.is_alphanumeric() && character != '_')
-                .next()
-                .unwrap_or_default();
-            if name.is_empty() {
-                continue;
-            }
-            // The declaration body, for the `violation`/`outcome` field rule.
-            let body = lines[index..]
-                .iter()
-                .take_while(|candidate| !candidate.starts_with('}'))
-                .fold(String::new(), |mut accumulated, candidate| {
-                    accumulated.push_str(candidate);
-                    accumulated.push('\n');
-                    accumulated
-                });
-            if !carries_an_outcome(name, &body) {
-                continue;
-            }
-            // Only the contiguous attribute/doc block directly above counts.
-            let annotated = lines[..index]
-                .iter()
-                .rev()
-                .take_while(|candidate| {
-                    let trimmed = candidate.trim_start();
-                    trimmed.starts_with("#[")
-                        || trimmed.starts_with("///")
-                        || trimmed.starts_with(']')
-                })
-                .any(|candidate| candidate.trim_start().starts_with("#[must_use"));
-            found.insert(name.to_owned(), annotated);
-        }
+        found.extend(outcome_census_rule::outcome_types(&text));
     }
     found
 }

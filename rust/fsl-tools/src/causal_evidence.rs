@@ -45,6 +45,12 @@ fn error(kind: &'static str, message: impl Into<String>) -> EvidenceError {
 
 /// Canonical JSON: recursively sorted object keys, compact separators.
 /// `preserve_order` is enabled workspace-wide, so sorting must be explicit.
+/// Keys use Rust `str`/UTF-8 byte order; integers are exact within i64/u64.
+/// Float spelling comes from `serde_json` (version pinned in Cargo.lock):
+/// shortest round-trip form, integral `.0` in plain notation, `-0.0` kept,
+/// but no `.0` in exponent forms such as `1e+30` and `1e-7`. Values retain
+/// raw UTF-8 and JSON control escaping. See DESIGN-causal.md's canonical JSON rules
+/// (#1432); RFC 8785/JCS conformance is a separate follow-up (#1526).
 #[must_use]
 pub fn canonical_json(value: &Value) -> String {
     fn sort(value: &Value) -> Value {
@@ -119,10 +125,24 @@ fn days_in_month(year: i64, month: i64) -> i64 {
     }
 }
 
-/// Days since the civil epoch for a `YYYY-MM-DD` date (Gregorian).
+/// Whether `date` is a real Gregorian date written as exactly ten ASCII
+/// characters `YYYY-MM-DD`: four, two and two ASCII digits, no sign (#1422).
+#[must_use]
+pub fn is_calendar_date(date: &str) -> bool {
+    civil_days(date).is_some()
+}
+
+/// Days since the civil epoch for a `YYYY-MM-DD` date (Gregorian). Every
+/// field is fixed-width ASCII digits; a sign or any other byte is refused
+/// (#1422).
 fn civil_days(date: &str) -> Option<i64> {
     let bytes = date.as_bytes();
-    if bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
+    if bytes.len() != 10
+        || !bytes.iter().enumerate().all(|(index, byte)| match index {
+            4 | 7 => *byte == b'-',
+            _ => byte.is_ascii_digit(),
+        })
+    {
         return None;
     }
     let year: i64 = date.get(0..4)?.parse().ok()?;
@@ -320,6 +340,22 @@ pub fn parse_artifact(artifact: &Value) -> Result<EvidenceArtifact, EvidenceErro
             "causal_evidence_digest_mismatch",
             format!("{context}: declared artifact_digest does not match the canonical payload"),
         ));
+    }
+    if let Some(valid_until) = period.and_then(|period| period.get("valid_until")) {
+        let valid_until = valid_until.as_str().ok_or_else(|| {
+            error(
+                "causal_evidence_schema_mismatch",
+                format!("{context}: period.valid_until must be a string"),
+            )
+        })?;
+        if civil_days(valid_until).is_none() {
+            return Err(error(
+                "causal_evidence_schema_mismatch",
+                format!(
+                    "{context}: period.valid_until must be a valid Gregorian date in YYYY-MM-DD format"
+                ),
+            ));
+        }
     }
     Ok(EvidenceArtifact {
         evidence_id,
@@ -704,8 +740,7 @@ impl WindowConversion {
             Self::PeriodStartMissing => "the observation period start date is missing".to_owned(),
             Self::PeriodEndMissing => "the observation period end date is missing".to_owned(),
             Self::PeriodDateUnparsable => {
-                "an observation period date does not parse as YYYY-MM-DD with a month in 1..12 \
-                 and a day in 1..31"
+                "an observation period date is not a valid Gregorian date in YYYY-MM-DD format"
                     .to_owned()
             }
             Self::PeriodEndBeforeStart => {
@@ -1313,6 +1348,10 @@ mod tests {
         assert_eq!(civil_days("2026-00-10"), None);
         assert_eq!(civil_days("2026-01-00"), None);
         assert_eq!(civil_days("garbage"), None);
+        assert_eq!(civil_days("+026-01-01"), None);
+        assert_eq!(civil_days("-026-01-01"), None);
+        assert_eq!(civil_days("2099-+4-01"), None);
+        assert_eq!(civil_days("2099-04-+1"), None);
     }
 }
 
@@ -1740,8 +1779,8 @@ mod aggregation_tests {
 
     /// Every conversion failure names *which* conversion refused, exactly.
     fn assert_each_conversion_cause_is_named() {
-        const UNPARSABLE: &str = "an observation period date does not parse as YYYY-MM-DD \
-                                  with a month in 1..12 and a day in 1..31";
+        const UNPARSABLE: &str =
+            "an observation period date is not a valid Gregorian date in YYYY-MM-DD format";
         for (label, period, expected_code, expected_reason) in [
             (
                 "period_start_missing",

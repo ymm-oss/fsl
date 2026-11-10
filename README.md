@@ -14,8 +14,13 @@ Specs can be written in **three layered dialects — consulting (business) / req
 chained via refinement so that requirement IDs propagate transparently across all diagnostics.
 Non-functional requirements are also supported, down to SLAs (discrete time).
 
-For the language specification, semantics, and output JSON see [`docs/manual/LANGUAGE.md`](docs/manual/LANGUAGE.md);
-for a map of all the documentation see [`docs/README.md`](docs/README.md).
+For new FSL 5 requirements, start with the [entity/event/rule and decision-table
+reference](docs/manual/LANGUAGE.md#fsl5-requirements)
+([日本語](docs/manual/LANGUAGE.ja.md#fsl5-requirements)).
+The [edition guide](docs/manual/LANGUAGE.md#fsl-editions) explains
+headers and retained FSL 4 input; the [migration guide](docs/manual/LANGUAGE.md#fsl4-to-fsl5-migration)
+explains conversion and refusals. The same manuals cover kernel/design semantics
+and output JSON. See [`docs/README.md`](docs/README.md) for the documentation map.
 
 > **A note on this repository's two implementations.** The native Rust workspace under
 > [`rust/`](rust/) is the authoritative implementation — it is what every command below
@@ -67,10 +72,52 @@ at the old `~/.fsl/.venv/bin` or `~/.fsl/.native/bin` installs (the pre-Rust, fs
 > writes the same directory, so the two would otherwise contend for it. Nothing else
 > writes there unless you ask for it: mise links into the project by default.
 
-Uninstall:
+When `~/.claude/skills/<name>` already holds something other than the current link or a
+link another tool placed, such as a hand-copied skill directory, the installer moves it to
+`<data>/skill-backups/claude/<name>-<UTC time>` and prints the new path. `<data>` is
+`FSL_DATA_DIR`, else the deprecated `FSL_INSTALL_DIR`, else `$XDG_DATA_HOME/fsl`, else
+`~/.local/share/fsl`. The backup stays out
+of the skills directory because Claude Code loads every directory there as a skill. The
+installer stops before linking anything if a backup path already exists, so a backup is
+never overwritten. Earlier installers kept backups beside the links as
+`~/.claude/skills/<name>.pre-native-v3`; when skills are linked, the next run moves each one,
+unchanged and under the same name, into `<data>/skill-backups/claude/` and prints it.
+
+Uninstall, using the same `FSL_DATA_DIR`, `FSL_INSTALL_DIR`, `XDG_DATA_HOME` and
+`FSL_BIN_DIR` values as the installation (the defaults apply when they are unset). The
+command first checks that `<data>` is an FSL data directory, holding a `current` link and a
+`releases` directory; otherwise it prints a message and removes nothing. It removes a
+command or skill link only when the link points into `<data>`, so a real directory and a
+skill link another tool placed stay where they are. It then removes `<data>/current` and
+`<data>/releases`, and removes `<data>` itself only if nothing else is left in it.
+
+Skill backups survive the uninstall in `<data>/skill-backups/claude/`. To restore one, move
+it back, for example
+`mv <data>/skill-backups/claude/fsl-verify-<UTC time> ~/.claude/skills/fsl-verify`. To
+discard them, delete `<data>/skill-backups` and then the empty `<data>`. The command also
+leaves the bin and skills directories in place, even when they end up empty. If you
+uninstall without re-running the installer, an earlier installer's
+`~/.claude/skills/fsl*.pre-native-v3` stays where it is; move or delete it yourself.
 
 ```bash
-rm -rf ~/.local/share/fsl ~/.local/bin/fslc ~/.local/bin/fslc-lsp ~/.claude/skills/fsl ~/.claude/skills/fsl-business ~/.claude/skills/fsl-requirements ~/.claude/skills/fsl-design ~/.claude/skills/fsl-design-review ~/.claude/skills/fsl-delivery ~/.claude/skills/fsl-from-code ~/.claude/skills/fsl-requirements-document
+data_dir="${FSL_DATA_DIR:-${FSL_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fsl}}"
+bin_dir="${FSL_BIN_DIR:-$HOME/.local/bin}"
+skills_dir="$HOME/.claude/skills"
+if [ -L "$data_dir/current" ] && [ -d "$data_dir/releases" ]; then
+  for link in "$bin_dir/fslc" "$bin_dir/fslc-lsp" \
+    "$skills_dir/fsl" "$skills_dir/fsl-business" "$skills_dir/fsl-requirements" \
+    "$skills_dir/fsl-design" "$skills_dir/fsl-design-review" "$skills_dir/fsl-delivery" \
+    "$skills_dir/fsl-from-code" "$skills_dir/fsl-requirements-document" "$skills_dir/fsl-verify"; do
+    if [ -L "$link" ]; then
+      case "$(readlink "$link")" in "$data_dir"/*) rm -f "$link" ;; esac
+    fi
+  done
+  rm -f "$data_dir/current"
+  rm -rf "$data_dir/releases"
+  rmdir "$data_dir" 2>/dev/null || echo "Kept $data_dir: it still holds skill-backups/ or other files."
+else
+  echo "Skipped: $data_dir is not an FSL data directory (no current link and releases directory)."
+fi
 ```
 
 A mise installation is removed with `mise uninstall` instead. Its skill links are removed
@@ -112,11 +159,12 @@ Put this in your `mise.toml`, then run `mise install`:
 > [!IMPORTANT]
 > Releases made before packslip support carry no packslip, so pin a version only once
 > the release you want carries one.
-> mise says so rather than guessing:
+> mise says so rather than guessing. Pinning such a release prints, with that release's
+> number in place of `<version>`:
 >
 > ```console
 > $ mise install
-> failed: github.com/ymm-oss/fsl has no release 4.6.0 carrying packslip.fslc.sigstore.json;
+> failed: github.com/ymm-oss/fsl has no release <version> carrying packslip.fslc.sigstore.json;
 > mise installs from a packslip and does not guess at release assets
 > ```
 
@@ -190,12 +238,26 @@ runs, with no skill integration and no PATH setup.
 ```bash
 # Example: macOS (Apple Silicon)
 chmod +x fslc-macos-arm64
-./fslc-macos-arm64 verify spec.fsl
+cat > spec.fsl <<'EOF'
+spec Counter {
+  state { n: 0..5 }
+  init { n = 0 }
+  action inc() { requires n < 3  n = n + 1 }
+  action reset() { requires n == 3  n = 0 }
+  invariant AtMostThree { n <= 3 }
+}
+EOF
+./fslc-macos-arm64 verify spec.fsl   # "result": "verified", exit 0
 ```
 
-> **macOS note**: a downloaded executable will be blocked by Gatekeeper. The first time
-> only, remove the quarantine attribute: `xattr -d com.apple.quarantine ./fslc-macos-arm64`
-> (or right-click in Finder → "Open" once).
+Delete `requires n < 3` and run it again: `verify` reports `"result": "violated"` for
+`AtMostThree` at step 4, where `n` reaches 4, and exits 1.
+
+> **macOS note**: Gatekeeper may block a downloaded executable the first time it runs. If
+> it does, remove the quarantine attribute once:
+> `xattr -d com.apple.quarantine ./fslc-macos-arm64 2>/dev/null || true`
+> (or right-click in Finder → "Open" once). Not every download carries that attribute; the
+> `|| true` keeps the command from failing when the file has none.
 
 Each file ships with a companion `*.sha256`. You can verify it with
 `shasum -a 256 -c fslc-macos-arm64.sha256`. The Linux binaries target the Ubuntu 24.04 ABI
@@ -234,8 +296,12 @@ test scaffolds from this spec" or "check whether this log conforms to the spec."
 ## Using the CLI directly
 
 Every command below was run against this repository's own `specs/` (the `document` and
-`ledger` examples below run against `examples/pm/` instead). Except where noted, output
-is JSON on stdout (`fslc chain` also writes a human status table to stderr).
+`ledger` examples below run against `examples/pm/` instead). Those paths are relative to a
+checkout of this repository (`git clone https://github.com/ymm-oss/fsl && cd fsl`): the
+install script, mise and the single executables install `fslc` without them. Without a
+checkout, run the same commands on your own `.fsl` file, such as the `spec.fsl` above.
+Except where noted, output is JSON on stdout (`fslc chain` also writes a human status
+table to stderr).
 
 ### Check and verify
 
@@ -254,7 +320,7 @@ engine's visited-state budget returns `unknown_budget` rather than a false `veri
 obligation runs, `--instances`/`--values` to override verify-block bounds, `--lemma` for
 induction candidate auxiliary invariants, `--from-state` to continue BMC from a captured
 Monitor/replay state snapshot, `--requirements` to scope by requirement id, `--deadlock
-{warn,error,ignore}`, and `--edition {current,next}`. See `fslc verify --help` for the
+{warn,error,ignore}`, and `--edition {current,next,4,5}`. See `fslc verify --help` for the
 full, current list.
 
 ### Scenarios, test generation, and log conformance
@@ -354,8 +420,8 @@ syntax highlighting, diagnostics, outline, and go-to-definition. See
 ### Everything else
 
 `fslc` has commands not covered above — `version`, `lint`, `migrate`, `fmt`, `sweep`,
-`conformance`, `approval`, and `diff` among them. Run `fslc --help` or `fslc <command>
---help` for their current arguments, or see [`docs/README.md`](docs/README.md) for the
+`conformance`, `approval`, and `diff` among them. Run `fslc --help` or `fslc help <command>`
+(the same as `fslc <command> --help`) for their current arguments, or see [`docs/README.md`](docs/README.md) for the
 design document covering most of them (`sweep` has no entry there yet).
 
 `fslc` also has dialect-specific command groups — `ai` (AI hard-contract/agent-structure
@@ -369,8 +435,15 @@ does not tutorialize them.
 
 0 = verified / proved / refines / conformant / generated / mutated / explained / analyzed
 / typestate; 1 = violated / refinement_failed / reachable_failed / unknown_cti /
-unknown_budget / nonconformant; 2 = spec error (`error`, including vacuity under
-`--vacuity error`); 3 = internal error.
+unknown_budget / nonconformant, and a `fslc diff` whose `gate.passed` is `false`; 2 = spec
+error (`error`, including vacuity under `--vacuity error`); 3 = internal error.
+
+`fslc diff` reports its findings as `result: "semantic_diff"` and exits 0 unless its gate
+fails. A kind named in `--forbid` fails the gate, and two kinds fail it without `--forbid`:
+`impl_violated` (one side violates its own invariants or type bounds, so the comparison
+is not trustworthy) and `unknown_budget` (the comparison stopped at its state budget). For
+example, `fslc diff specs/cart_v1.fsl specs/cart_v1_buggy.fsl` gives
+`gate.violations: ["impl_violated"]`, `gate.passed: false`, and exit 1.
 
 ## Skills for AI agents
 
@@ -388,6 +461,7 @@ discovery, the canonical copies live under [`skills/`](skills/) at the repositor
 - [`skills/fsl-delivery/SKILL.md`](skills/fsl-delivery/SKILL.md) — end-to-end workflow orchestration across planning, requirements, design, and implementation conformance
 - [`skills/fsl-from-code/SKILL.md`](skills/fsl-from-code/SKILL.md) — reverse-engineer a design-layer spec from existing source code
 - [`skills/fsl-requirements-document/SKILL.md`](skills/fsl-requirements-document/SKILL.md) — generate and re-verify a human-readable requirements document from a checked spec
+- [`skills/fsl-verify/SKILL.md`](skills/fsl-verify/SKILL.md) — choose the verification run per layer and change, read results that exit 0 without passing, and write the completion report
 
 Two routes place these skills for you.
 
@@ -424,7 +498,7 @@ fsl/
 ├── docs/                   # docs/README.md maps all of it; LANGUAGE.md is the language reference
 ├── specs/                  # sample specs (*.fsl); most carry a header comment naming the
 │                           #   language feature/idiom they exercise (not all do — browse the directory)
-├── examples/               # FSL corpus by audience and topic — pm/, consulting/, e2e/, gallery/, bank/,
+├── examples/               # FSL corpus by audience and topic — fsl5/, pm/, consulting/, e2e/, gallery/, bank/,
 │                           #   layers/, nfr/, domain/, db/, ai/, causal/, and more; see the directory itself
 ├── skills/                 # canonical Agent Skills; .claude/skills/fsl* and .agents/skills/fsl* symlink here
 └── tests/                  # Python-driven Rust contract, parity, and compatibility tests

@@ -158,8 +158,8 @@ fn mutate_kills_a_mutant_that_reaches_an_abstract_partial_op() {
     let dir = scratch("mutate");
     fs::write(
         dir.join("abs.fsl"),
-        "spec MA {\n  type D = 0..4\n  state { y: Bool }\n  init { y = true }\n  \
-         action go(d: D) { y = y and 4 / d > 0 }\n}\n",
+        "spec MA {\n  type AD = 0..4\n  state { y: Bool }\n  init { y = true }\n  \
+         action go(d: AD) { y = y and 4 / d > 0 }\n}\n",
     )
     .expect("write abs");
     fs::write(

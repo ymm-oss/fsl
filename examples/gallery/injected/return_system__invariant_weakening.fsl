@@ -1,4 +1,4 @@
-// base: examples/layers/return_system.fsl
+// base: rust/fslc/tests/fixtures/legacy_return_branches.fsl
 // inject: invariant-weakening
 // expect-detector: mutate-differential
 // expect-signal: survivors_increase

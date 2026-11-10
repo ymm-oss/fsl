@@ -1,0 +1,12 @@
+spec MapFieldInit { // SPDX-License-Identifier: Apache-2.0
+  type K = 0..1
+  struct Cell { flag: Bool, n: 0..2 }
+  state { c: Bool, m: Map<K, Cell> }
+  init {
+    c = true
+    if c { m[0].flag = true m[0].n = 2 } else { m[0].flag = false }
+    m[1] = Cell { flag: false, n: 1 }
+  }
+  action idle() { }
+  invariant Initialized { c and m[0].flag and m[0].n == 2 and not m[1].flag and m[1].n == 1 }
+}

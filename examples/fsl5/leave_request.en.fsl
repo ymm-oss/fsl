@@ -1,0 +1,127 @@
+fsl 5
+// Leave requests, written with the English spellings of FSL 5.
+// leave_request.ja.fsl is the same model with the Japanese spellings.
+requirements LeaveRequests {
+  number Days
+  const AUTO_LIMIT = 1
+  const MAX_DAYS = 3
+  actor Employee, Manager, System
+
+  entity Leave {
+    days: Days = 0
+    substitute: Bool = false
+    lifecycle Draft -> Submitted -> Approved -> Taken
+    lifecycle Submitted -> Rejected
+    lifecycle Approved -> Cancelled
+  }
+
+  concept ShortLeave = Leave where days <= AUTO_LIMIT
+  concept LongLeave = Leave where days > AUTO_LIMIT
+
+  event submit = Employee submits Leave with days Draft -> Submitted
+  event auto_approve = System approves Leave Submitted -> Approved
+  event approve = Manager approves Leave Submitted -> Approved
+  event reject = Manager rejects Leave Submitted -> Rejected
+  event arrange = Manager staffs Leave in Approved
+    set substitute = true
+  event take = Employee takes Leave Approved -> Taken
+  event cancel = Employee cancels Leave Approved -> Cancelled
+
+  rule REQ-LEAVE-001 "Leave is requested for 1 to MAX_DAYS days" {
+    allow Employee submits Leave only when input days > 0 and input days <= MAX_DAYS
+  }
+
+  decide REQ-LEAVE-002 "Who decides a submitted leave" for Submitted Leave {
+    ShortLeave => System approves
+      covers REQ-LEAVE-003 "Leave of up to AUTO_LIMIT days is approved by the system"
+    LongLeave => Manager approves or rejects
+      covers REQ-LEAVE-004 "Longer leave is approved or rejected by a manager"
+  }
+
+  rule REQ-LEAVE-005 "Leave is not taken before a substitute is arranged" {
+    never Employee takes Leave when not substitute
+    TakenHasSubstitute: always Leave in Taken has substitute
+  }
+
+  rule REQ-LEAVE-006 "A submitted leave keeps a valid length" {
+    DaysInRange: always Leave not in Draft has days > 0 and days <= MAX_DAYS
+  }
+
+  rule REQ-LEAVE-007 "A substitute is arranged only for an approved leave" {
+    NoEarlySubstitute: always Leave in Draft, Submitted, Rejected has not substitute
+  }
+
+  // The lifecycle already implies these (check reports implied_by_lifecycle,
+  // severity info); stating them makes each step a checked property.
+  rule REQ-LEAVE-008 "Leave is approved only when submitted and taken only when approved" {
+    ApprovedFromSubmitted: Leave enters Approved only from Submitted
+    TakenFromApproved: Leave enters Taken only from Approved
+  }
+
+  rule REQ-LEAVE-009 "Only leave longer than AUTO_LIMIT days is rejected" {
+    RejectedIsLong: always Leave in Rejected has days > AUTO_LIMIT
+  }
+
+  goal GOAL-LEAVE-001 "Leave can be taken" some Leave can reach Taken
+  policy POL-LEAVE-001 "Every submitted leave is eventually decided"
+    every Leave in Submitted must eventually be Approved or Rejected
+  policy POL-LEAVE-002 "Every approved leave is eventually taken or cancelled"
+    every Leave in Approved must eventually be Taken or Cancelled
+
+  scenario AC-LEAVE-001 "A one-day leave is approved by the system and taken" {
+    Employee submits l1 with days 1
+    System approves l1
+    Manager staffs l1
+    Employee takes l1
+    then l1 is Taken
+  }
+
+  scenario AC-LEAVE-002 "A three-day leave is rejected while a one-day leave is approved" {
+    Employee submits l1 with days 3
+    Employee submits l2 with days 1
+    System approves l2
+    Manager rejects l1
+    then l1 is Rejected
+  }
+
+  scenario AC-LEAVE-003 "Approved leave can be cancelled" {
+    Employee submits l1 with days 2
+    Manager approves l1
+    Employee cancels l1
+    then l1 is Cancelled
+  }
+
+  forbidden FB-LEAVE-001 "Leave of zero days is not requested" {
+    Employee submits l1 with days 0
+    then rejected
+  }
+
+  forbidden FB-LEAVE-002 "Leave longer than MAX_DAYS is not requested" {
+    Employee submits l1 with days 4
+    then rejected
+  }
+
+  forbidden FB-LEAVE-003 "A manager does not decide a one-day leave" {
+    Employee submits l1 with days 1
+    Manager approves l1
+    then rejected
+  }
+
+  forbidden FB-LEAVE-004 "Leave is not taken before a substitute is arranged" {
+    Employee submits l1 with days 1
+    System approves l1
+    Employee takes l1
+    then rejected
+  }
+
+  forbidden FB-LEAVE-005 "The system does not approve a three-day leave" {
+    Employee submits l1 with days 3
+    System approves l1
+    then rejected
+  }
+}
+
+verify {
+  instances Leave = 2
+  values Days = 0..4
+}
