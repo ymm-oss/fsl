@@ -260,10 +260,18 @@ witness is not replayed on the Worker. Native `fslc replay` replays both.
 `assertWitnessReplayContract` runs before the browser starts, on
 `rust/fslc/tests/fixtures/issue_1789_worker_twin_actions.fsl`. It requires that
 the structural diff alone reject a state-identical action swap and that
-replay accept it. It also requires rejection of a witness action that is not
-enabled at its step, of a witness that replays but reaches a different state,
-and of an action location that is not the action's native span. The fixture is
-also a live parity case.
+replay accept it. It also requires rejection of a witness action whose guard
+fails at its step (`requires_failed`), of a witness that replays but reaches a
+different state, of changes that differ while the states agree, of a differing
+action that carries `origin`, and of an action location that is not the
+action's native span. The fixture is also a live parity case.
+
+This acceptance is a witness-nondeterminism allowance in the sense of
+[`RUST-PORTING.md`](RUST-PORTING.md) §3. The JSON paths are the two witness sites
+above. The source of nondeterminism is a Z3 build target choosing between
+actions with the same effect. The semantic test is the replay check and
+`assertWitnessReplayContract`. It does not allowlist locations: a differing
+action's `loc` must equal that action's native source span on both sides.
 
 Failures use `fsl-native-wasm-parity-failure.v1`: each record contains the
 case path/command/options, machine-readable JSON paths with native and Worker

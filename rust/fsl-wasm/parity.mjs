@@ -370,9 +370,32 @@ export async function assertWitnessReplayContract({ verify, oracleFor }) {
   const disabled = rewrite((entry) => { entry.action = action("submit"); });
   const disabledResult = await reconcile(disabled);
   requireCondition(
-    disabledResult.replayed.length === 0 && rejectedAt(disabledResult, /does not replay/),
-    "a witness action that is not enabled at its step must fail parity",
+    disabledResult.replayed.length === 0
+      && rejectedAt(disabledResult, /does not replay.*"kind":"requires_failed"/),
+    "a witness action that is not enabled at its step must fail parity on its guard",
     disabledResult,
+  );
+
+  const generated = rewrite((entry) => {
+    entry.action = { ...action(twins[entry.action.name]), origin: { dialect: "spec" } };
+  });
+  const generatedResult = await reconcile(generated);
+  requireCondition(
+    generatedResult.replayed.length === 0
+      && rejectedAt(generatedResult, /carries fields replay cannot check/),
+    "a differing witness action with metadata replay cannot check must fail parity",
+    generatedResult,
+  );
+
+  const changed = rewrite((entry) => {
+    entry.action = action(twins[entry.action.name]);
+    entry.changes = { ...entry.changes, declined: { from: false, to: false } };
+  });
+  const changedResult = await reconcile(changed);
+  requireCondition(
+    changedResult.replayed.length === 0 && rejectedAt(changedResult, /differs outside its action/),
+    "a witness whose changes differ while its states agree must fail parity",
+    changedResult,
   );
 
   const declined = rewrite((entry, previous) => {

@@ -141,9 +141,11 @@ function witnessOracle(path) {
         if (result.status !== 0 || !Array.isArray(kernel.actions)) {
           throw new Error(kernel.message ?? `fslc kernel exited ${result.status}`);
         }
-        return new Map(kernel.actions.map((action) => [
+        const spans = new Map(kernel.actions.map((action) => [
           action.name, { line: action.span.line, column: action.span.column },
         ]));
+        if (spans.size !== kernel.actions.length) throw new Error("fslc kernel repeats an action name");
+        return spans;
       });
       return locations;
     },
