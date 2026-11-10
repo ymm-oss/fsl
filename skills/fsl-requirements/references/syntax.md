@@ -176,6 +176,14 @@ in any order:
 | `Name:` **always** `E` [**not**] **in** `S, …` **has** `x` | an invariant: in (or outside) those stages the field condition holds; `has role` means the relation is set |
 | **deadline** `age <= bound` | the requirement's deadline, over an `age` of the `time` block below |
 
+- The history field of `only after` is named after `Q`'s events, joined by
+  `_or_` (`order_did_pay`, `order_did_pay_or_ship`). When two prerequisite
+  sets of one entity would get the same name (the events `a` and `b`
+  together, and a single event named `a_or_b`, both give `did_a_or_b`), each
+  gets a numbered suffix: `order_did_a_or_b_1`, `order_did_a_or_b_2`.
+  The number depends on the entity's other history fields and declared
+  fields, not on rule order, so adding a rule or a field elsewhere can
+  renumber it, and the field names in counterexamples change with it.
 - An `allow` / `never` / `only after` statement rejects calls. Give it a
   `forbidden` trace that tries one (`never_rule_without_forbidden` warns when
   no forbidden trace ends in an event the rule guards).

@@ -4511,7 +4511,7 @@ separate rules guarding the same event also conjoin. The complete statement set 
 | `allow Actor verb Entity only when condition` | The event requires the condition. |
 | `allow Actor verb Entity only for Concept` | The event requires membership in the concept. |
 | `never Actor verb Entity when condition` / `for Concept` | The event requires the condition to be false / the entity to be outside the concept. |
-| `Actor verb Entity only after Actor other Entity` | Unless the lifecycle already guarantees the order, a hidden per-instance history field is set by the prerequisite event and required by the later event. |
+| `Actor verb Entity only after Actor other Entity` | Unless the lifecycle already guarantees the order, a hidden per-instance history field is set by the prerequisite event and required by the later event. The field is named after the prerequisite events (`order_did_pay`); when two prerequisite sets of one entity would get the same name, each gets a numbered suffix (`order_did_a_or_b_1`, `order_did_a_or_b_2`). The number depends on the entity's other history fields and declared fields, not on rule order, so an edit elsewhere can change the field names shown in counterexamples. |
 | `Name: Entity enters Target only from Source, Other` | A two-state transition property restricts entry. |
 | `Name: always Concept1 is Concept2` | A safety invariant implies the second predicate from the first; `Stage Entity` can also name a case. |
 | `Name: always Entity in S, T has condition` | A safety invariant enforces the field condition in those stages. `not in` selects their complement; a bare relation role means it is set. |

@@ -4194,7 +4194,7 @@ fair ではありません。辺に対応する event がなければ `lifecycle
 | `allow Actor verb Entity only when condition` | 条件を出来事のガードにします。 |
 | `allow Actor verb Entity only for Concept` | 区分に属することをガードにします。 |
 | `never Actor verb Entity when condition` / `for Concept` | 条件が偽であること／区分に属さないことをガードにします。 |
-| `Actor verb Entity only after Actor other Entity` | lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。 |
+| `Actor verb Entity only after Actor other Entity` | lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。フィールド名は前提の出来事から作ります（`order_did_pay`）。一つのエンティティで二つの前提の集合が同じ名前になる場合は、それぞれに番号が付きます（`order_did_a_or_b_1`、`order_did_a_or_b_2`）。番号は rule の順序ではなく、そのエンティティの他の履歴フィールドと宣言済みフィールドで決まるため、別の箇所の編集で反例に出るフィールド名が変わることがあります。 |
 | `Name: Entity enters Target only from Source, Other` | 遷移元を制限する二状態の性質です。 |
 | `Name: always Concept1 is Concept2` | 前者なら後者も成り立つという不変条件です。`Stage Entity` もケースとして使えます。 |
 | `Name: always Entity in S, T has condition` | 指定段階でフィールド条件を要求する不変条件です。`not in` は指定段階の外を選びます。relation の役名だけなら、関係が設定済みであることを表します。 |
