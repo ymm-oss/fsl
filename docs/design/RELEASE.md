@@ -37,9 +37,8 @@ checksummed Agent Skill bundle, VS Code extension, and Public Kernel contract
 bundles produced by `.github/workflows/release.yml`.
 `install.sh` resolves the latest published tag once and uses that same tag for
 the skill bundle and both native binaries. It installs only those payloads into
-the user's data directory; it does not clone the repository. The v3.0.0
-compatibility path extracts only the skills from that exact tag's source archive
-because the first native release predates the checksummed skill bundle.
+the user's data directory; it does not clone the repository. It stops when the
+tag has no checksummed skill bundle; v3.0.0, the first native release, has none.
 
 Linux artifacts target glibc 2.39 or newer. The release workflow pins both Linux
 runners to Ubuntu 24.04 and rejects binaries that require a newer GLIBC symbol.
