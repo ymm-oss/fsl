@@ -429,6 +429,89 @@ fn business_continuation_lines_are_indented_in_the_next_edition_only() {
     assert_eq!(twice, next, "fmt is not idempotent");
 }
 
+/// A `def` whose body closes a brace and then continues on `or` lines, every
+/// line at the declaration's own indentation.
+const BRACE_CONTINUATION_FLAT: &str = r"fsl 5
+spec Brace {
+  entity Item
+  def ok(a: Bool) = forall i: Item {
+  a
+  }
+  or a
+  or not a
+
+  state {
+    x: Bool
+  }
+
+  init {
+    x = false
+  }
+
+  action flip() {
+    x = not x
+  }
+
+  invariant Total {
+    ok(x)
+  }
+}
+
+verify {
+  instances Item = 2
+}
+";
+
+/// [`BRACE_CONTINUATION_FLAT`] formatted: the `}` is indented like the line
+/// that opened its brace, and the lines after it still continue the `def`.
+const BRACE_CONTINUATION_LAYOUT: &str = r"fsl 5
+spec Brace {
+  entity Item
+  def ok(a: Bool) = forall i: Item {
+    a
+  }
+
+    or a
+    or not a
+
+  state {
+    x: Bool
+  }
+
+  init {
+    x = false
+  }
+
+  action flip() {
+    x = not x
+  }
+
+  invariant Total {
+    ok(x)
+  }
+}
+
+verify {
+  instances Item = 2
+}
+";
+
+/// #1783: a line after a `}` that closes a brace inside a declaration is
+/// still a continuation line of that declaration.
+#[test]
+fn a_line_after_a_closing_brace_still_continues_its_declaration() {
+    let directory = empty_scratch("brace-continuation");
+    let (formatted, formatted_path) = fmt(&directory, "flat.fsl", BRACE_CONTINUATION_FLAT, &[]);
+    assert_eq!(formatted, BRACE_CONTINUATION_LAYOUT);
+    same_kernel(
+        &directory.join("flat.fsl"),
+        &formatted_path,
+        "fsl 5 brace continuation fmt",
+    );
+    let (twice, _) = fmt(&directory, "again.fsl", &formatted, &[]);
+    assert_eq!(twice, formatted, "fmt is not idempotent");
+}
+
 /// #1783: the business example of `skills/fsl-business/SKILL.md` is written
 /// in fmt's canonical form.
 #[test]
