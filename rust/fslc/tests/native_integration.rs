@@ -240,9 +240,8 @@ fn assert_installer_release_contract(root: &Path) {
     assert!(installer.contains("mv -fh \"$ACTIVATION_LINK\" \"$CURRENT_LINK\""));
     assert!(installer.contains("mv -fT \"$ACTIVATION_LINK\" \"$CURRENT_LINK\""));
     assert!(installer.contains("stage_release_asset \"fsl-skills.tar.gz\""));
-    assert!(installer.contains("[ \"$RELEASE_TAG\" != \"v3.0.0\" ]"));
-    assert!(installer.contains("archive/refs/tags/$RELEASE_TAG.tar.gz"));
-    assert!(installer.contains("d2d691a98af28f4aaa77ded08b35978539a0d1e3c65e8b7f29783f143a447598"));
+    // The skills come only from the checksummed bundle of the resolved tag.
+    assert!(!installer.contains("archive/refs/tags/"));
     assert!(installer.contains("EXPECTED_VERSION=\"fslc ${RELEASE_TAG#v}\""));
     assert!(installer.contains("RESOLVED_VERSION=$(fslc --version"));
     assert!(installer.contains("diff -qr \"$STAGING_DIR\" \"$RELEASE_DIR\""));
@@ -1073,6 +1072,85 @@ fn installer_warns_about_fsl_install_dir_on_stderr() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The PATH hint names the directory the command links went to, which
+/// `FSL_BIN_DIR` selects, and the line it suggests puts that directory's `fslc`
+/// on `PATH` when a shell runs it, even when the directory's name holds a
+/// space or a character special inside double quotes. A directory already on
+/// `PATH` gets no hint.
+#[cfg(unix)]
+#[test]
+fn installer_path_hint_names_the_command_link_directory() {
+    let dir = std::env::temp_dir().join(format!("fsl-installer-path-hint-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (release, fakebin) = stage_fake_installer_release(&dir);
+    let home = dir.join("home");
+    let install = |vars: &[(&str, &Path)]| -> String {
+        let installed = run_installer(&home, &fakebin, &release, vars);
+        assert!(installed.status.success(), "{installed:?}");
+        String::from_utf8_lossy(&installed.stdout).into_owned()
+    };
+    // The line the hint suggests for `bin`, under the shell `shell`.
+    let suggested = |shell: &str, rc: &str, bin: &Path, vars: &[(&str, &Path)]| -> String {
+        let mut vars = vars.to_vec();
+        vars.push(("SHELL", Path::new(shell)));
+        let stdout = install(&vars);
+        let hint = format!(
+            "{} is not on your PATH. Add this line to {rc}: ",
+            bin.display()
+        );
+        stdout
+            .lines()
+            .find_map(|line| line.strip_prefix(&hint))
+            .unwrap_or_else(|| panic!("no PATH hint for {}: {stdout}", bin.display()))
+            .to_owned()
+    };
+    // Where `fslc` resolves after a shell without the links on PATH runs `line`.
+    let follow = |line: &str| -> PathBuf {
+        let followed = Command::new("bash")
+            .arg("-c")
+            .arg(format!("{line}\ncommand -v fslc"))
+            .env_clear()
+            .env("HOME", &home)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert!(followed.status.success(), "{line}: {followed:?}");
+        PathBuf::from(String::from_utf8_lossy(&followed.stdout).trim_end())
+    };
+
+    let default_bin = home.join(".local/bin");
+    let line = suggested("/bin/bash", "~/.bashrc", &default_bin, &[]);
+    assert_eq!(line, "export PATH=\"$HOME/.local/bin:$PATH\"");
+    assert_eq!(follow(&line), default_bin.join("fslc"));
+
+    for (shell, rc, name) in [
+        ("/bin/zsh", "~/.zshrc", "opt-bin"),
+        ("/bin/bash", "~/.bashrc", "a b$c\"d`e\\f"),
+    ] {
+        let bin = home.join(name);
+        let line = suggested(shell, rc, &bin, &[("FSL_BIN_DIR", &bin)]);
+        assert_eq!(follow(&line), bin.join("fslc"), "{line}");
+    }
+
+    let bin = home.join("opt-bin");
+    let stdout = install(&[("FSL_BIN_DIR", &bin), ("SHELL", Path::new("/bin/sh"))]);
+    assert!(
+        stdout.contains(&format!(
+            "{} is not on your PATH. Add it in your shell configuration.",
+            bin.display()
+        )),
+        "{stdout}"
+    );
+    let on_path = format!("{}:{}:/usr/bin:/bin", fakebin.display(), bin.display());
+    let stdout = install(&[
+        ("FSL_BIN_DIR", &bin),
+        ("SHELL", Path::new("/bin/bash")),
+        ("PATH", Path::new(&on_path)),
+    ]);
+    assert!(!stdout.contains("is not on your PATH"), "{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The README's uninstall block, exactly as a reader copies it.
 #[cfg(unix)]
 fn readme_uninstall_block() -> String {
@@ -1093,7 +1171,7 @@ fn readme_uninstall_block() -> String {
         + 1;
     let block = &readme[open..close];
     assert!(
-        block.starts_with("data_dir=\"${FSL_DATA_DIR:-"),
+        block.starts_with("(\n  data_dir=\"${FSL_DATA_DIR:-"),
         "the block after the uninstall instructions is not the uninstall block:\n{block}"
     );
     block.to_owned()
@@ -1209,6 +1287,33 @@ fn readme_uninstall_block_removes_a_default_install() {
     );
     assert!(bin.is_dir() && skills.is_dir());
     assert_eq!(stdout, "");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The README's uninstall block, pasted into a shell, leaves none of its
+/// variables set in that shell.
+#[cfg(unix)]
+#[test]
+fn readme_uninstall_block_leaves_no_variables_in_the_shell() {
+    let fake = FakeRelease::new("variables");
+    let dir = &fake.dir;
+    let home = dir.join("home");
+    fake.install(&home, &[]);
+    let pasted = Command::new("bash")
+        .arg("-c")
+        .arg(format!(
+            "{}for name in data_dir bin_dir skills_dir link; do \
+             [ -z \"${{!name+set}}\" ] || echo \"$name is still set\"; done\n",
+            readme_uninstall_block()
+        ))
+        .env_clear()
+        .env("HOME", &home)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(pasted.status.success(), "{pasted:?}");
+    assert_eq!(String::from_utf8_lossy(&pasted.stdout), "");
+    assert!(!present(&home.join(".local/share/fsl")));
     let _ = std::fs::remove_dir_all(dir);
 }
 
