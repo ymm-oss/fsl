@@ -121,7 +121,8 @@ a separate activity (`fsl-requirements-document`).
    is missing). Name every `always` / `enters` statement (`AmountPositive:
    always …`): the name is the property's name in results and diagnostics.
 4. Where the source decides "who handles it / which way" by case, write a
-   `decide ID "text" for Stage Entity { Case => Actor verb … }` table. `check`
+   `decide ID "text" for Stage Entity { Case => Actor verb … }` table (or
+   `for Entity in Stage`, the same table). `check`
    proves over the field domains that the rows cover every case
    (`decide_not_exhaustive`, with the uncovered values) and never overlap
    (`decide_overlap`, with the shared values). Close a real gap with a row or

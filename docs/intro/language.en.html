@@ -4741,11 +4741,11 @@ separate rules guarding the same event also conjoin. The complete statement set 
 </tr>
 <tr>
 <td><code>allow Actor verb Entity only for Concept</code></td>
-<td>The event requires membership in the concept.</td>
+<td>The event requires membership in the concept. <code>and</code> joins terms, and a term may name one stage instead, in either order: <code>Placed Order</code> or <code>Order in Placed</code> is the same guard.</td>
 </tr>
 <tr>
 <td><code>never Actor verb Entity when condition</code> / <code>for Concept</code></td>
-<td>The event requires the condition to be false / the entity to be outside the concept.</td>
+<td>The event requires the condition to be false / the entity to be outside the concept (terms as after <code>only for</code>).</td>
 </tr>
 <tr>
 <td><code>Actor verb Entity only after Actor other Entity</code></td>
@@ -4785,6 +4785,16 @@ case of a submitted claim (the entities, events and concepts must be declared):<
     covers REQ-3 &quot;A large claim is approved or rejected by a manager&quot;
 } assuming amount &gt; 0
 </code></pre>
+<p>The header may name its stage either way: <code>for Claim in Submitted</code> (Japanese
+<code>対象 申請 段階 提出済み</code>) is the same table as <code>for Submitted Claim</code>, lowered
+identically, and <code>fmt</code> keeps the order written. After any <code>for</code> — the table's,
+<code>only for</code>'s and <code>never … for</code>'s — <code>Entity in Stage</code> names one stage, as
+<code>Stage Entity</code> does (<code>for Order in Placed, Packed</code> is refused at the comma); in a
+rule, its <code>in</code> stands on the entity's line, as the entity of <code>Stage Entity</code> stands
+on the stage's, because a statement starts on a new line (the stage that <code>in</code>
+requires may follow on the next line, as the term that <code>and</code> requires may).
+<code>always</code> keeps its two forms: <code>always Stage Entity is …</code> and
+<code>always Entity in S… has …</code>.</p>
 <p>A row condition is a concept, a conjunction of concepts (<code>and</code>), or <code>Stage Entity</code>.
 <code>otherwise =&gt; Actor verb</code> covers the complement of the other rows. Each event
 leaving the table's stage must be listed (<code>decide_event_not_listed</code>). The rows
@@ -4974,13 +4984,13 @@ keywords can mix; the header, <code>implements … from</code> and mappings, ker
 </tr>
 <tr>
 <td>Allow rule / 許可規則</td>
-<td><code>allow</code>; <code>only when</code>; <code>only for</code></td>
-<td><code>許可</code>; <code>条件</code>; <code>対象</code></td>
+<td><code>allow</code>; <code>only when</code>; <code>only for</code>; <code>in</code></td>
+<td><code>許可</code>; <code>条件</code>; <code>対象</code>; <code>段階</code></td>
 </tr>
 <tr>
 <td>Never rule / 禁止規則</td>
-<td><code>never</code>; <code>when</code>; <code>for</code></td>
-<td><code>禁止</code>; <code>条件</code>; <code>対象</code></td>
+<td><code>never</code>; <code>when</code>; <code>for</code>; <code>in</code></td>
+<td><code>禁止</code>; <code>条件</code>; <code>対象</code>; <code>段階</code></td>
 </tr>
 <tr>
 <td>Ordering / 順序</td>
@@ -5004,8 +5014,8 @@ keywords can mix; the header, <code>implements … from</code> and mappings, ker
 </tr>
 <tr>
 <td>Decision table / 決定表</td>
-<td><code>for</code>; <code>otherwise</code>; <code>assuming</code></td>
-<td><code>対象</code>; <code>それ以外</code>; <code>仮定</code></td>
+<td><code>for</code>; <code>in</code>; <code>otherwise</code>; <code>assuming</code></td>
+<td><code>対象</code>; <code>段階</code>; <code>それ以外</code>; <code>仮定</code></td>
 </tr>
 <tr>
 <td>Decision outcome / 決定表の結果</td>

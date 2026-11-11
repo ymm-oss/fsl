@@ -4192,8 +4192,8 @@ fair ではありません。辺に対応する event がなければ `lifecycle
 | 文の断片 | 検査する意味 |
 |---|---|
 | `allow Actor verb Entity only when condition` | 条件を出来事のガードにします。 |
-| `allow Actor verb Entity only for Concept` | 区分に属することをガードにします。 |
-| `never Actor verb Entity when condition` / `for Concept` | 条件が偽であること／区分に属さないことをガードにします。 |
+| `allow Actor verb Entity only for Concept` | 区分に属することをガードにします。項は `and` で結べます。区分の代わりに段階を一つ、どちらの順でも書けます。`Placed Order` と `Order in Placed` は同じガードです。 |
+| `never Actor verb Entity when condition` / `for Concept` | 条件が偽であること／区分に属さないことをガードにします（項は `only for` と同じ）。 |
 | `Actor verb Entity only after Actor other Entity` | lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。フィールド名は前提の出来事から作ります（`order_did_pay`）。一つのエンティティで二つの前提の集合が同じ名前になる場合は、それぞれに番号が付きます（`order_did_a_or_b_1`、`order_did_a_or_b_2`）。番号は rule の順序ではなく、そのエンティティの他の履歴フィールドと宣言済みフィールドで決まるため、別の箇所の編集で反例に出るフィールド名が変わることがあります。 |
 | `Name: Entity enters Target only from Source, Other` | 遷移元を制限する二状態の性質です。 |
 | `Name: always Concept1 is Concept2` | 前者なら後者も成り立つという不変条件です。`Stage Entity` もケースとして使えます。 |
@@ -4219,6 +4219,16 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
     covers REQ-3 "A large claim is approved or rejected by a manager"
 } assuming amount > 0
 ```
+
+見出しの段階はどちらの順でも書けます。`for Claim in Submitted`（日本語では
+`対象 申請 段階 提出済み`）は `for Submitted Claim` と同じ表で、同じように下ろされ、
+`fmt` は書かれた順を保ちます。どの `for` の後でも（表の `for`、`only for`、
+`never … for`）、`Entity in Stage` は `Stage Entity` と同じく段階を一つだけ指します
+（`for Order in Placed, Packed` はカンマの位置で拒否されます）。rule の中では、
+`Stage Entity` のエンティティが段階と同じ行に書かれるのと同じく、`in` はエンティティと
+同じ行に書きます。文は新しい行から始まるからです（`in` に続く段階は、`and` に続く
+項と同じく次の行に書けます）。`always` の形は変わりません。
+`always Stage Entity is …` と `always Entity in S… has …` です。
 
 行の条件には区分、`and` で結んだ区分、`Stage Entity` を使えます。
 `otherwise => Actor verb` は他の行が成り立たない場合を受け持ちます。
@@ -4365,13 +4375,13 @@ glossary の別の正規名か、変換後の仕様が宣言する名前と同�
 | Relation / 関係 | `belongs to`; `as`; `via` | `所属先`; `役名`; `契機` |
 | Event / 出来事 | `fault`; `in`; `set`; `covers` | `異常`; `段階`; `更新`; `対応要件` |
 | Event/rule expressions / 出来事・規則の式 | `input` | `入力` |
-| Allow rule / 許可規則 | `allow`; `only when`; `only for` | `許可`; `条件`; `対象` |
-| Never rule / 禁止規則 | `never`; `when`; `for` | `禁止`; `条件`; `対象` |
+| Allow rule / 許可規則 | `allow`; `only when`; `only for`; `in` | `許可`; `条件`; `対象`; `段階` |
+| Never rule / 禁止規則 | `never`; `when`; `for`; `in` | `禁止`; `条件`; `対象`; `段階` |
 | Ordering / 順序 | `only after` | `先行条件` |
 | Entry / 遷移元の制限 | `enters`; `only from` | `遷移先`; `遷移元` |
 | Safety rule / 不変条件 | `always`; `is`; `in`; `not in`; `has` | `常に`; `は`; `段階`; `段階以外`; `必須` |
 | Deadline / 期限 | `deadline` | `期限` |
-| Decision table / 決定表 | `for`; `otherwise`; `assuming` | `対象`; `それ以外`; `仮定` |
+| Decision table / 決定表 | `for`; `in`; `otherwise`; `assuming` | `対象`; `段階`; `それ以外`; `仮定` |
 | Decision outcome / 決定表の結果 | `or` | `または` |
 | Goal / 目標 | `some`; `can reach` | `いずれかの`; `到達可能` |
 | Policy / 方針 | `every`; `in`; `must eventually be`; `or` | `すべての`; `段階`; `いずれ必ず`; `または` |

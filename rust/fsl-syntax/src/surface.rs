@@ -844,7 +844,8 @@ pub fn entity_binder(entity: &str) -> String {
         .map_or_else(|| "c".to_owned(), |first| first.to_lowercase().collect())
 }
 
-/// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`.
+/// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`
+/// (or `for Entity in Stage`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecisionTable {
     pub id: String,
