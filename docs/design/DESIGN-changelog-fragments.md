@@ -813,6 +813,47 @@ sections predate these rules and fail them, so they are not checked. The check
 runs in the merge-readiness automation lane; `selftest` holds its accepting and
 rejecting fixtures.
 
+**Amendment (#1806, post-release-commit fold and release-notes cross-check).** The
+handover above assumes one aggregation per release. Fragments that merged after
+the 5.0.0 release commit and before the tag were folded into `## [5.0.0]` by hand
+five times (#1733, #1790, #1793, #1796, #1802), each re-deriving where a bullet
+goes and whether the date moves. `tools/aggregate_changelog.sh fold --version
+X.Y.Z` now does it, under the same rules those folds followed. Each bullet is
+`render_fragment`'s output. The sorted fragments are merged into the section's
+bullets: a fragment goes before the first bullet whose (declared category rank,
+first id) is greater than its own, so existing entries keep their order even
+where the section is out of id order. The heading, including its date, is
+unchanged; all five folds kept 2026-11-07. The folded fragments are deleted in
+the same step, so authority is still handed over, not duplicated. `verify_fold`
+plays control 5's part. Outside the section body the file must be byte-identical,
+and the blank lines around the bullets must stay as they were. The section must
+hold the old bullets byte for byte and in order, plus exactly one rendered bullet
+per fragment, in control 3's order and at the position the merge rule gives. The
+result must still pass `check-section`. `fold` refuses when the section is
+missing or is not the newest one, when `[Unreleased]` has content, when tag
+`vX.Y.Z` exists locally, when the section already fails `check-section`, or when
+a fragment's (id, category) is already an entry. With no fragments it is a
+no-op. Reconstructing each fold's parent tree in a scratch directory and running
+`fold` reproduces the committed `CHANGELOG.md` of #1790, #1793, #1796 and #1802
+byte for byte. It refuses #1733's parent: that section predates #1763's rules,
+and #1733 added a second `Documented (#1440)` entry, which #1778 later merged.
+A fold does not touch `[Unreleased]`, so control 4 classifies its diff as
+`unchanged`. `check-section` in the merge-readiness lane is what checks the
+folded section.
+
+The release summary `docs/release-notes/vX.Y.Z.md` replaces the section as the
+release body (the release-body amendment above), so a breaking entry it omits
+is invisible on the release page. The 5.0.0 review compared the breaking ids by
+hand. `check-section` now requires every id of every breaking entry (ids in
+`refs` lists excepted) to appear as `#N` under the summary's `## Breaking
+changes` heading, when the summary exists. A release without one publishes the
+section itself, so there is nothing to compare. The check lives in
+`check-section`, not `tools/release-notes.sh`. `check-section` already defines
+what a breaking label and an entry's ids are, and a second parser in another
+script could drift from it. It also already runs on every pull request, so a fold
+that adds a breaking entry fails before merge rather than in the release
+workflow. The 5.0.0 section has 61 breaking entries carrying 67 ids, all listed.
+
 ## Migration: six named sites
 
 1. New `tools/aggregate_changelog` (stdlib-only) plus executable tests for all six controls,
