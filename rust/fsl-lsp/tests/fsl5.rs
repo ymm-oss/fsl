@@ -158,6 +158,134 @@ fn every_next_edition_fixture_is_indexed_in_full() {
     }
 }
 
+/// #1815: a decision table `for Claim in Submitted` / `対象 申請 段階 提出済み`
+/// indexes like `for Submitted Claim`: the same declarations, its entity and
+/// stage are uses of theirs, the name has as many references, and `in` /
+/// `段階` is a keyword, not a name.
+#[test]
+fn for_entity_in_stage_uses_the_entity_and_the_stage() {
+    let declared = |index: &DocumentIndex| {
+        index
+            .symbols
+            .iter()
+            .map(|symbol| (symbol.name.clone(), symbol.role))
+            .collect::<BTreeSet<_>>()
+    };
+    for (file, stage_first, entity_first, words) in [
+        (
+            "fsl5_en.fsl",
+            "for Submitted Claim {",
+            "for Claim in Submitted {",
+            [("Claim", "Claim"), ("in", ""), ("Submitted", "Submitted")],
+        ),
+        (
+            "fsl5_ja_full.fsl",
+            "対象 提出済み 申請 {",
+            "対象 申請 段階 提出済み {",
+            [("申請", "Claim"), ("段階", ""), ("提出済み", "Submitted")],
+        ),
+    ] {
+        let (source, original) = index(file);
+        assert_eq!(source.matches(stage_first).count(), 1, "{file}");
+        let rewritten = source.replacen(stage_first, entity_first, 1);
+        let index = DocumentIndex::build(&rewritten, Some(file), &ParseOptions::stable())
+            .unwrap_or_else(|error| panic!("{file}: {error}"));
+        assert_eq!(
+            index.unindexed_identifiers(),
+            Vec::<String>::new(),
+            "{file}"
+        );
+        assert_eq!(declared(&index), declared(&original), "{file}");
+        let line = rewritten
+            .lines()
+            .position(|line| line.contains(entity_first))
+            .expect("the table's header");
+        let header = rewritten.lines().nth(line).expect("header line");
+        let from = header.find(entity_first).expect("on its line");
+        for (word, canonical) in words {
+            let byte = from + entity_first.find(word).expect("the word");
+            let position = Position::new(
+                u32::try_from(line).expect("fits"),
+                u32::try_from(header[..byte].encode_utf16().count()).expect("fits"),
+            );
+            let used = index
+                .references
+                .iter()
+                .find(|reference| reference.range.start == position);
+            if canonical.is_empty() {
+                assert!(used.is_none(), "{file}: `{word}` is indexed as {used:?}");
+                assert!(
+                    index.definition_at(position).is_none(),
+                    "{file}: `{word}` names something"
+                );
+                continue;
+            }
+            assert_eq!(
+                used.map(|reference| reference.name.as_str()),
+                Some(canonical),
+                "{file}: `{word}`"
+            );
+            let declaration = index
+                .definition_at(position)
+                .unwrap_or_else(|| panic!("{file}: `{word}` has a declaration"));
+            assert_eq!(declaration.name, canonical, "{file}");
+            let before = original
+                .symbols
+                .iter()
+                .find(|symbol| symbol.name == canonical)
+                .expect("declared before");
+            assert_eq!(
+                index
+                    .references_at(declaration.selection_range.start, true)
+                    .len(),
+                original
+                    .references_at(before.selection_range.start, true)
+                    .len(),
+                "{file}: references of {canonical}"
+            );
+        }
+    }
+}
+
+/// #1815: a rule's `never … for Claim in Approved` indexes as
+/// `for Approved Claim` does: the same declarations and the same uses, and
+/// `in` is not a name.
+#[test]
+fn a_rules_for_entity_in_stage_indexes_as_stage_entity() {
+    let (source, _) = index("fsl5_en.fsl");
+    let anchor = "    allow Employee submits Claim only when input amount > 0\n";
+    let build = |condition: &str| {
+        assert_eq!(source.matches(anchor).count(), 1);
+        let rewritten = source.replacen(
+            anchor,
+            &format!("{anchor}    never Finance pays Claim for {condition}\n"),
+            1,
+        );
+        let index = DocumentIndex::build(&rewritten, Some("fsl5_en.fsl"), &ParseOptions::stable())
+            .unwrap_or_else(|error| panic!("{condition}: {error}"));
+        assert_eq!(
+            index.unindexed_identifiers(),
+            Vec::<String>::new(),
+            "{condition}"
+        );
+        let symbols = index
+            .symbols
+            .iter()
+            .map(|symbol| (symbol.name.clone(), symbol.role))
+            .collect::<BTreeSet<_>>();
+        let mut uses = index
+            .references
+            .iter()
+            .map(|reference| reference.name.clone())
+            .collect::<Vec<_>>();
+        uses.sort();
+        (symbols, uses)
+    };
+    let (stage_first, entity_first) = (build("Approved Claim"), build("Claim in Approved"));
+    assert!(!entity_first.1.contains(&"in".to_owned()));
+    assert_eq!(entity_first, stage_first);
+}
+
 /// The relations stage's declarations: a relation's role is a property of
 /// the entity, `resource` and `measure` declare variables, `goal` and
 /// `policy` properties; and the English and all-Japanese spellings of the

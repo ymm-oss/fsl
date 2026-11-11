@@ -935,7 +935,8 @@ pub fn entity_field_state(entity: &str, field: &str) -> String {
     format!("{}_{}", entity.to_lowercase(), field)
 }
 
-/// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`.
+/// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`
+/// (or `for Entity in Stage`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecisionTable {
     pub id: String,

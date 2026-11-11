@@ -54,9 +54,9 @@ pub enum KeywordContext {
     Event,
     /// Inside a rule's or an event's expression: `input name`.
     RuleExpression,
-    /// `allow P only when X | only for C`.
+    /// `allow P only when X | only for C`; a `C` may be `S E` or `E in S`.
     Allow,
-    /// `never P when X | for C`.
+    /// `never P when X | for C`; a `C` may be `S E` or `E in S`.
     Never,
     /// `P only after Q`.
     After,
@@ -66,7 +66,8 @@ pub enum KeywordContext {
     Always,
     /// `deadline name <= bound` inside a rule.
     Deadline,
-    /// `decide ID "text" for S E { … [otherwise => …] } [assuming Q]`.
+    /// `decide ID "text" for S E | for E in S { … [otherwise => …] }
+    /// [assuming Q]`.
     Decide,
     /// A decision table row's outcome: `Actor verb {or verb}`.
     DecideRow,
@@ -136,10 +137,12 @@ pub enum Kw {
     Allow,
     AllowOnlyWhen,
     AllowOnlyFor,
+    AllowForIn,
     AllowOnlyAs,
     Never,
     NeverWhen,
     NeverFor,
+    NeverForIn,
     Because,
     OnlyAfter,
     Enters,
@@ -152,6 +155,7 @@ pub enum Kw {
     Deadline,
     Decide,
     DecideFor,
+    DecideForIn,
     Otherwise,
     Assuming,
     RowOr,
@@ -280,10 +284,12 @@ pub const KEYWORDS: &[Keyword] = &[
     row(Kw::Allow, C::Allow, "allow", "許可"),
     row(Kw::AllowOnlyWhen, C::Allow, "only when", "条件"),
     row(Kw::AllowOnlyFor, C::Allow, "only for", "対象"),
+    row(Kw::AllowForIn, C::Allow, "in", "段階"),
     reserved(Kw::AllowOnlyAs, C::Allow, "only as", "立場"),
     row(Kw::Never, C::Never, "never", "禁止"),
     row(Kw::NeverWhen, C::Never, "when", "条件"),
     row(Kw::NeverFor, C::Never, "for", "対象"),
+    row(Kw::NeverForIn, C::Never, "in", "段階"),
     reserved(Kw::Because, C::Never, "because", "理由"),
     row(Kw::OnlyAfter, C::After, "only after", "先行条件"),
     row(Kw::Enters, C::Enters, "enters", "遷移先"),
@@ -296,6 +302,7 @@ pub const KEYWORDS: &[Keyword] = &[
     row(Kw::Deadline, C::Deadline, "deadline", "期限"),
     row(Kw::Decide, C::Declaration, "decide", "決定表"),
     row(Kw::DecideFor, C::Decide, "for", "対象"),
+    row(Kw::DecideForIn, C::Decide, "in", "段階"),
     row(Kw::RowOr, C::DecideRow, "or", "または"),
     row(Kw::Otherwise, C::Decide, "otherwise", "それ以外"),
     row(Kw::Assuming, C::Decide, "assuming", "仮定"),
@@ -338,7 +345,7 @@ pub const SHARED_JAPANESE: &[(&str, &[&str])] = &[
     // "under this condition": allow's `only when`, never's `when`.
     ("条件", &["only when", "when"]),
     // "the instances it applies to": allow's `only for`, never's `for`, the
-    // decision table's `for S E`.
+    // decision table's `for S E` / `for E in S`.
     ("対象", &["only for", "for"]),
 ];
 

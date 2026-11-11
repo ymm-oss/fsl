@@ -188,8 +188,8 @@ in any order:
 | Statement | Lowers to |
 |---|---|
 | **allow** `Actor verb Entity` **only when** `cond` | a guard on the event: it may happen only when `cond` holds |
-| **allow** … **only for** `Concept` | a guard: only for instances of the concept |
-| **never** `Actor verb Entity` **when** `cond` / **for** `Concept` | a guard: not when `cond` holds / not for the concept |
+| **allow** … **only for** `Concept` | a guard: only for instances of the concept; terms join with **and**, and a term may name one stage, `Stage Entity` or `Entity` **in** `Stage` (the same guard) |
+| **never** `Actor verb Entity` **when** `cond` / **for** `Concept` | a guard: not when `cond` holds / not for the concept (terms as after **only for**) |
 | `P` **only after** `Q` | a hidden history field (`order_did_pay`) that `Q`'s events set and `P`'s require |
 | `Name:` `E` **enters** `T` **only from** `S, …` | a transition property `Name` |
 | `Name:` **always** `C1` **is** `C2` | an invariant: every instance of `C1` (a concept, or `Stage Entity`) is in `C2` |
@@ -214,6 +214,13 @@ in any order:
   when the source states it; it is then still checked.
 - Name every `always` / `enters` statement: the name is the property's name in
   results and diagnostics (otherwise a generated one).
+- After `for`, `Order in Placed` and `Placed Order` are one term (`対象 Order 段階
+  Placed` in Japanese keywords); `fmt` keeps the order written. Either names one
+  stage: for several, declare a concept (`concept Open = Order in Placed, Packed`).
+  The `in` stands on the entity's line, as the entity of `Placed Order` stands on
+  the stage's: a statement starts on a new line (the stage after `in` may
+  wrap, as a term after `and` may). `always` keeps its forms,
+  `always Placed Order is …` and `always Order in Placed has …`.
 
 ## Decision tables
 
@@ -227,7 +234,7 @@ in any order:
 
 | Form | Meaning |
 |---|---|
-| **decide** `ID "text"` **for** `Stage Entity` `{ rows }` | who may do what to an instance in that stage, case by case |
+| **decide** `ID "text"` **for** `Stage Entity` `{ rows }` | who may do what to an instance in that stage, case by case; **for** `Entity` **in** `Stage` is the same table |
 | `Concept {and Concept} => Actor verb {or verb}` | a row: in this case, this actor may take these events |
 | `Stage Entity => …` | a row by stage |
 | … **covers** `ID "text"` (on the next line) | the requirement this row carries |

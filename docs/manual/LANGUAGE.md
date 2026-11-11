@@ -4542,8 +4542,8 @@ separate rules guarding the same event also conjoin. The complete statement set 
 | Statement fragment | Checked meaning |
 |---|---|
 | `allow Actor verb Entity only when condition` | The event requires the condition. |
-| `allow Actor verb Entity only for Concept` | The event requires membership in the concept. |
-| `never Actor verb Entity when condition` / `for Concept` | The event requires the condition to be false / the entity to be outside the concept. |
+| `allow Actor verb Entity only for Concept` | The event requires membership in the concept. `and` joins terms, and a term may name one stage instead, in either order: `Placed Order` or `Order in Placed` is the same guard. |
+| `never Actor verb Entity when condition` / `for Concept` | The event requires the condition to be false / the entity to be outside the concept (terms as after `only for`). |
 | `Actor verb Entity only after Actor other Entity` | Unless the lifecycle already guarantees the order, a hidden per-instance history field is set by the prerequisite event and required by the later event. The field is named after the prerequisite events (`order_did_pay`); when two prerequisite sets of one entity would get the same name, each gets a numbered suffix (`order_did_a_or_b_1`, `order_did_a_or_b_2`). The number depends on the entity's other history fields and declared fields, not on rule order, so an edit elsewhere can change the field names shown in counterexamples. |
 | `Name: Entity enters Target only from Source, Other` | A two-state transition property restricts entry. |
 | `Name: always Concept1 is Concept2` | A safety invariant implies the second predicate from the first; `Stage Entity` can also name a case. |
@@ -4569,6 +4569,17 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
     covers REQ-3 "A large claim is approved or rejected by a manager"
 } assuming amount > 0
 ```
+
+The header may name its stage either way: `for Claim in Submitted` (Japanese
+`対象 申請 段階 提出済み`) is the same table as `for Submitted Claim`, lowered
+identically, and `fmt` keeps the order written. After any `for` — the table's,
+`only for`'s and `never … for`'s — `Entity in Stage` names one stage, as
+`Stage Entity` does (`for Order in Placed, Packed` is refused at the comma); in a
+rule, its `in` stands on the entity's line, as the entity of `Stage Entity` stands
+on the stage's, because a statement starts on a new line (the stage that `in`
+requires may follow on the next line, as the term that `and` requires may).
+`always` keeps its two forms: `always Stage Entity is …` and
+`always Entity in S… has …`.
 
 A row condition is a concept, a conjunction of concepts (`and`), or `Stage Entity`.
 `otherwise => Actor verb` covers the complement of the other rows. Each event
@@ -4740,13 +4751,13 @@ keywords can mix; the header, `implements … from` and mappings, kernel members
 | Relation / 関係 | `belongs to`; `as`; `via` | `所属先`; `役名`; `契機` |
 | Event / 出来事 | `fault`; `in`; `set`; `covers` | `異常`; `段階`; `更新`; `対応要件` |
 | Event/rule expressions / 出来事・規則の式 | `input` | `入力` |
-| Allow rule / 許可規則 | `allow`; `only when`; `only for` | `許可`; `条件`; `対象` |
-| Never rule / 禁止規則 | `never`; `when`; `for` | `禁止`; `条件`; `対象` |
+| Allow rule / 許可規則 | `allow`; `only when`; `only for`; `in` | `許可`; `条件`; `対象`; `段階` |
+| Never rule / 禁止規則 | `never`; `when`; `for`; `in` | `禁止`; `条件`; `対象`; `段階` |
 | Ordering / 順序 | `only after` | `先行条件` |
 | Entry / 遷移元の制限 | `enters`; `only from` | `遷移先`; `遷移元` |
 | Safety rule / 不変条件 | `always`; `is`; `in`; `not in`; `has` | `常に`; `は`; `段階`; `段階以外`; `必須` |
 | Deadline / 期限 | `deadline` | `期限` |
-| Decision table / 決定表 | `for`; `otherwise`; `assuming` | `対象`; `それ以外`; `仮定` |
+| Decision table / 決定表 | `for`; `in`; `otherwise`; `assuming` | `対象`; `段階`; `それ以外`; `仮定` |
 | Decision outcome / 決定表の結果 | `or` | `または` |
 | Goal / 目標 | `some`; `can reach` | `いずれかの`; `到達可能` |
 | Policy / 方針 | `every`; `in`; `must eventually be`; `or` | `すべての`; `段階`; `いずれ必ず`; `または` |
