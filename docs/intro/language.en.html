@@ -4668,7 +4668,7 @@ requirements Support {
   measure closed_tickets = count Ticket in Closed
 
   scenario AC-TICKET-001 &quot;An agent takes and closes a ticket&quot; {
-    Agent takes t1 with assignee 1
+    Agent takes t1 with assignee a1
     Agent closes t1
     then t1 is Closed
   }
@@ -4801,8 +4801,11 @@ via take</code> adds an initially unset optional role to each ticket. The relate
 must be declared with <code>entity</code>, and the <code>via</code> event's actor must be that entity,
 so <code>Agent</code> is declared as both <code>actor</code> and <code>entity</code>. The event records its
 counterpart as its first input, and every scenario step of that event must supply
-it: <code>with assignee 1</code> selects Agent instance 1. The value is an instance number;
-an instance label (<code>with assignee a1</code>) is refused. An event makes at most one
+it: <code>with assignee a1</code> names an Agent instance, numbered like the trace's other
+instance labels (see "Scenarios and stopping"), and <code>with assignee 1</code> still selects
+Agent instance 1 by number. A name the document declares as a constant, resource,
+enum member, or stage keeps that meaning there (<code>with assignee LEAD</code> is the constant
+<code>LEAD</code>); any other name is an instance label. An event makes at most one
 relation: a second relation to the same entity via the same event is refused at
 that relation (<code>event_already_makes_relation</code>), so give it its own event.
 <code>resource stock: Qty = 2</code> declares shared state outside any entity; events update it with <code>set</code>, and guards may read it.
@@ -4815,17 +4818,28 @@ Goals (<code>some E can reach S</code>) are reachability properties; policies
 (<code>every E in S must eventually be T or U</code>) are progress properties over fair events.
 Their IDs and quoted text remain part of traceability.</p>
 <p><strong>Scenarios and stopping.</strong> A step is <code>Actor verb instance [with input value, …]</code>
-(<code>Agent takes t1 with assignee 1</code>). <code>Actor instance verb …</code> is the same step
-(<code>Agent t1 takes with assignee 1</code>): of the two words, the verb is the first that is
+(<code>Agent takes t1 with assignee a1</code>). <code>Actor instance verb …</code> is the same step
+(<code>Agent t1 takes with assignee a1</code>): of the two words, the verb is the first that is
 some event's verb. An actor/verb phrase resolves to an event; unknown or
 ambiguous matches report <code>unknown_verb</code>, <code>unknown_event_phrase</code>, or
-<code>ambiguous_step</code>. Instance labels (<code>t1</code>, <code>t2</code>) are local to a trace and allocated
-in order of first use; exceeding <code>verify</code> counts is <code>scenario_instance_overflow</code>.
-<code>then t1 is Closed</code> checks one instance's final stage. To check more, write an
-expression over the lowered state, indexed by instance number (the first label used
-for an entity is 0): <code>then ticket_stage[0] == Closed and ticket_stage[1] == Open</code>.
-Labels cannot appear in that expression, and <code>then t1 is Closed and t2 is Open</code> is
-refused. A scenario must execute
+<code>ambiguous_step</code>. Instance labels (<code>t1</code>, <code>t2</code>, and <code>a1</code> as a relation role's
+value) are local to a trace and numbered from 0 per entity in order of first use,
+a step's instance before its role value; exceeding <code>verify</code> counts is
+<code>scenario_instance_overflow</code>. A label names an instance of one entity: a role value
+naming an instance of another entity is refused. Only labels are counted, so a number
+written as a role value is that instance whatever the labels: after <code>with assignee 0</code>,
+the first Agent label is instance 0 too.
+<code>then t1 is Closed</code> checks one instance's final stage. To check more, write one
+expression: in it, <code>t1.field</code> is the field of instance <code>t1</code> and <code>stage(t1)</code> (or
+<code>Ticket.stage(t1)</code>) its stage, read from the lowered state at the instance's number
+(<code>t1.assignee</code> is <code>ticket_assignee[0]</code>):
+<code>then stage(t1) == Closed and t1.assignee == some(0)</code>. The lowered spelling
+(<code>ticket_stage[0] == Closed</code>) is still accepted. A label is read only in those two
+positions, not as a bare value (compare a role with a number, as above); a quantifier
+or aggregate binder of the same name hides it in its scope, an <code>is some(t1)</code> pattern
+anywhere in the expression hides it in the whole expression, and a constant, resource,
+enum member, or stage of the same name keeps its meaning.
+<code>then t1 is Closed and t2 is Open</code> is refused. A scenario must execute
 every step and satisfy its final check (<code>kind: "acceptance"</code>, <code>failed_step</code> for a
 failed step). A forbidden trace must execute its prefix and reject its last
 step: an accepted last step is <code>kind: "forbidden"</code>; a rejected prefix is

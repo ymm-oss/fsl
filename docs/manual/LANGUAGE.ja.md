@@ -4128,7 +4128,7 @@ requirements Support {
   measure closed_tickets = count Ticket in Closed
 
   scenario AC-TICKET-001 "An agent takes and closes a ticket" {
-    Agent takes t1 with assignee 1
+    Agent takes t1 with assignee a1
     Agent closes t1
     then t1 is Closed
   }
@@ -4236,8 +4236,11 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
 最初は未設定の optional な役割を追加します。関係先は `entity` で宣言し、`via` の event の
 アクターはその関係先でなければなりません。そのため `Agent` は `actor` と `entity` の両方で
 宣言します。この event は最初の入力で相手を受け取って記録し、この event のシナリオの
-ステップでは必ず相手を指定します。`with assignee 1` は Agent のインスタンス 1 を選びます。
-値はインスタンス番号です。インスタンス名（`with assignee a1`）は拒否されます。
+ステップでは必ず相手を指定します。`with assignee a1` は Agent のインスタンスを名前で指し、
+trace の他のインスタンス名と同じ規則で番号を割り当てます（「シナリオと停止」を参照）。
+`with assignee 1` は従来どおり Agent のインスタンス 1 を番号で選びます。文書が定数、資源、
+列挙値、段階として宣言している名前はそこでもその意味のままです（`with assignee LEAD` は
+定数 `LEAD`）。それ以外の名前はインスタンス名です。
 一つの event が作る関係は一つまでです。同じ関係先への二つ目の関係に同じ event を `via` で
 書くと、その関係の位置で拒否します（`event_already_makes_relation`）。二つ目の関係には別の
 event を用意します。
@@ -4251,16 +4254,26 @@ event を用意します。
 どちらも ID と原文をトレーサビリティに残します。
 
 **シナリオと停止。** ステップは `Actor verb instance [with input value, …]` と書きます
-（`Agent takes t1 with assignee 1`）。`Actor instance verb …` も同じステップです
-（`Agent t1 takes with assignee 1`）。二語のうち、いずれかの event の動詞である最初の語が動詞です。
+（`Agent takes t1 with assignee a1`）。`Actor instance verb …` も同じステップです
+（`Agent t1 takes with assignee a1`）。二語のうち、いずれかの event の動詞である最初の語が動詞です。
 アクターと動詞の句は event に対応します。対応がない、または曖昧なら
 `unknown_verb`、`unknown_event_phrase`、`ambiguous_step` で知らせます。
-`t1`、`t2` などのインスタンス名は trace 内だけの名前で、初出順に割り当てます。
-`verify` の個数を超えると `scenario_instance_overflow` です。
-`then t1 is Closed` は一つのインスタンスの最終段階を検査します。複数を検査するには、
-変換後の状態をインスタンス番号で引く式を書きます（エンティティごとに最初の名前が 0 です）。
-例: `then ticket_stage[0] == Closed and ticket_stage[1] == Open`。この式ではインスタンス名を
-使えず、`then t1 is Closed and t2 is Open` は拒否されます。scenario は全ステップを実行し、
+`t1`、`t2` や関係の役割の値に書いた `a1` などのインスタンス名は trace 内だけの名前で、
+エンティティごとに初出順に 0 から番号を割り当てます。一つのステップではインスタンスが役割の値より
+先です。`verify` の個数を超えると `scenario_instance_overflow` です。インスタンス名は一つの
+エンティティのインスタンスを指し、別のエンティティのインスタンス名を役割の値に書くと拒否されます。
+数えるのはインスタンス名だけなので、役割の値に書いた番号は名前と関係なくその番号のインスタンスです。
+`with assignee 0` のあとでも、最初の Agent のインスタンス名は 0 番です。
+`then t1 is Closed` は一つのインスタンスの最終段階を検査します。複数を検査するには一つの式を
+書きます。式の中では `t1.field` がインスタンス `t1` のフィールド、`stage(t1)`（または
+`Ticket.stage(t1)`）がその段階で、変換後の状態をインスタンスの番号で引いたものです
+（`t1.assignee` は `ticket_assignee[0]`）。
+例: `then stage(t1) == Closed and t1.assignee == some(0)`。変換後の書き方
+（`ticket_stage[0] == Closed`）も引き続き使えます。インスタンス名を読むのはこの二つの位置だけで、
+単独の値としては読みません（役割は上の例のように番号と比べます）。同じ名前の量化子・集計の
+束縛変数はその範囲でインスタンス名を隠し、式のどこかにある `is some(t1)` のパターンは式全体で
+インスタンス名を隠します。同じ名前の定数、資源、列挙値、段階はその意味のままです。
+`then t1 is Closed and t2 is Open` は拒否されます。scenario は全ステップを実行し、
 最後の条件を満たす必要があります。失敗は `kind: "acceptance"`、ステップの失敗には
 `failed_step` が付きます。forbidden trace は途中まで実行でき、最後のステップだけを
 拒否する必要があります。最後が受理されると `kind: "forbidden"`、途中で拒否されると

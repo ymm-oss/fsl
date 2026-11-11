@@ -11,14 +11,15 @@ use crate::{Binder, Expr, ParseError};
 
 /// How a name-resolving rewrite treats one name reference, given the binder
 /// names in scope there: `Some` replaces it, `None` keeps a `Var` or
-/// `EnumMember` and looks inside a field read. A replacement must not name a
+/// `EnumMember` and looks inside a field read or a `stage(name)`. A replacement must not name a
 /// binder in scope, which would capture it (#1798): `resolve` refuses instead.
 pub(in crate::parser) type ResolveName<'a> =
     dyn Fn(&Expr, &BTreeSet<String>) -> Result<Option<Expr>, ParseError> + 'a;
 
 /// `expression` rebuilt through every [`Expr`] form, with `resolve` applied
-/// to each name reference -- a `Var`, an `EnumMember`, or a field read of a
-/// `Var` -- whose head name no quantifier or aggregate binder in scope binds.
+/// to each name reference -- a `Var`, an `EnumMember`, a field read of a
+/// `Var`, or `stage` of a `Var` -- whose head name no quantifier or aggregate
+/// binder in scope binds.
 /// `bound` holds the binders of the enclosing scope. A binder's domain (a
 /// range's bounds, a collection) lies outside its scope; its `where` filter
 /// and its body or value lie inside. An `is some(v)` pattern does not shadow
@@ -49,6 +50,7 @@ pub(in crate::parser) fn resolve_names(
                 type_name: name, ..
             } => free(name),
             Expr::Field(receiver, _) => matches!(receiver.as_ref(), Expr::Var(name) if free(name)),
+            Expr::Stage { entity, .. } => matches!(entity.as_ref(), Expr::Var(name) if free(name)),
             _ => false,
         };
         if reference && let Some(resolved) = resolve(&expression, bound)? {
@@ -181,6 +183,84 @@ pub(in crate::parser) fn free_names(expression: &Expr) -> BTreeSet<String> {
     })
     .expect("collecting names refuses none");
     names.into_inner()
+}
+
+/// The names an `is some(v)` pattern anywhere in `expression` binds.
+pub(in crate::parser) fn pattern_names(expression: &Expr) -> BTreeSet<String> {
+    fn collect(expression: &Expr, names: &mut BTreeSet<String>) {
+        let mut parts: Vec<&Expr> = Vec::new();
+        match expression {
+            Expr::Num(_) | Expr::Bool(_) | Expr::None | Expr::Var(_) | Expr::EnumMember { .. } => {}
+            Expr::Some(value) | Expr::Neg(value) | Expr::Not(value) | Expr::Field(value, _) => {
+                parts.push(value);
+            }
+            Expr::Set(values) | Expr::Seq(values) | Expr::Call { args: values, .. } => {
+                parts.extend(values);
+            }
+            Expr::Struct { fields, .. } => parts.extend(fields.iter().map(|(_, value)| value)),
+            Expr::Index(left, right)
+            | Expr::Binary { left, right, .. }
+            | Expr::BinaryNamed { left, right, .. } => parts.extend([&**left, &**right]),
+            Expr::Method { receiver, args, .. } => {
+                parts.push(receiver);
+                parts.extend(args);
+            }
+            Expr::Conditional {
+                condition,
+                then_expr,
+                else_expr,
+                ..
+            } => parts.extend([&**condition, &**then_expr, &**else_expr]),
+            Expr::Is { expr, pattern } => {
+                if let crate::Pattern::Some(name) = pattern {
+                    names.insert(name.clone());
+                }
+                parts.push(expr);
+            }
+            Expr::Quantified { binder, body, .. } => {
+                binder_expressions(binder, &mut parts);
+                parts.push(body);
+            }
+            Expr::Aggregate { binder, value, .. } => {
+                binder_expressions(binder, &mut parts);
+                parts.extend(value.as_deref());
+            }
+            Expr::Stage { entity, .. } | Expr::UnaryNamed { expr: entity, .. } => {
+                parts.push(entity);
+            }
+            Expr::TernaryNamed {
+                first,
+                second,
+                third,
+                ..
+            } => parts.extend([&**first, &**second, &**third]),
+        }
+        for part in parts {
+            collect(part, names);
+        }
+    }
+    fn binder_expressions<'a>(binder: &'a Binder, parts: &mut Vec<&'a Expr>) {
+        match binder {
+            Binder::Typed { where_expr, .. } => parts.extend(where_expr.as_deref()),
+            Binder::Range {
+                lo, hi, where_expr, ..
+            } => {
+                parts.extend([&**lo, &**hi]);
+                parts.extend(where_expr.as_deref());
+            }
+            Binder::Collection {
+                collection,
+                where_expr,
+                ..
+            } => {
+                parts.push(collection);
+                parts.extend(where_expr.as_deref());
+            }
+        }
+    }
+    let mut names = BTreeSet::new();
+    collect(expression, &mut names);
+    names
 }
 
 /// `binder` with its domain resolved in the enclosing scope `bound` and its
@@ -459,6 +539,65 @@ mod tests {
         .expect("infallible");
         assert_eq!(resolved, expression);
         assert!(seen.borrow().is_empty(), "{:?}", seen.borrow());
+    }
+
+    /// `stage(o)` of a free `o` is handed to `resolve` whole; under a binder
+    /// named `o` it is not (#1812).
+    #[test]
+    fn stage_of_a_free_name_is_handed_to_resolve_whole() {
+        let stage = Expr::Stage {
+            process: None,
+            entity: var("o"),
+            entity_span: span(),
+            span: span(),
+        };
+        let replace = |expression: Expr| {
+            resolve_names(expression, &BTreeSet::new(), &|reference, _| {
+                Ok(matches!(reference, Expr::Stage { .. }).then(|| Expr::Num(0)))
+            })
+            .expect("infallible")
+        };
+        assert_eq!(replace(stage.clone()), Expr::Num(0));
+        let bound = Expr::Quantified {
+            quantifier: "exists".into(),
+            binder: Binder::Typed {
+                name: "o".into(),
+                type_name: QualifiedName {
+                    namespace: None,
+                    name: "Order".into(),
+                },
+                where_expr: None,
+            },
+            body: Box::new(stage),
+        };
+        assert_eq!(replace(bound.clone()), bound);
+    }
+
+    /// `pattern_names` finds an `is some(p)` pattern in every position of
+    /// every form, as `resolve_names` reaches a name there (#1812).
+    #[test]
+    fn a_pattern_is_found_inside_every_form() {
+        for form in every_form(false) {
+            let expected: BTreeSet<String> = if matches!(form, Expr::Is { .. }) {
+                ["p".to_owned(), "v".to_owned()].into()
+            } else {
+                ["p".to_owned()].into()
+            };
+            let with_pattern = resolve_names(form.clone(), &BTreeSet::new(), &|reference, _| {
+                Ok(
+                    matches!(reference, Expr::Var(name) if name == "amount").then(|| Expr::Is {
+                        expr: var("amount"),
+                        pattern: Pattern::Some("p".into()),
+                    }),
+                )
+            })
+            .expect("infallible");
+            assert_eq!(super::pattern_names(&with_pattern), expected, "{form:?}");
+            assert!(
+                super::pattern_names(&form).len() <= 1,
+                "only the `is` form has a pattern: {form:?}"
+            );
+        }
     }
 
     /// `resolve` sees the binders around each reference: the filter and the

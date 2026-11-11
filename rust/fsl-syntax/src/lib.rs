@@ -119,7 +119,7 @@ pub use surface::{
     ResourceDeclaration, RuleGuard, RuleProperty, SpecItem, StateField, Statement, SurfaceAgent,
     SurfaceBusiness, SurfaceCompose, SurfaceDocument, SurfaceGovernance, SurfaceRefinement,
     SurfaceRequirements, SurfaceSpec, SyncAction, SyncRef, TimeItem, TypeExpr, VerifyItem,
-    entity_binder, stage_reference,
+    entity_binder, entity_field_state, entity_stage_state, stage_reference,
 };
 pub use syntax_expr::{
     DUPLICATE_STRUCT_FIELD, SyntaxBinder, SyntaxExpr, SyntaxExprKind, SyntaxIdent, SyntaxLValue,

@@ -225,7 +225,7 @@ fn a_scenario_step_names_the_instance_a_relation_records() {
     assert!(
         output["message"]
             .as_str()
-            .is_some_and(|message| message.contains("`with assignee <number>`")),
+            .is_some_and(|message| message.contains("`with assignee <instance>`")),
         "{output:#}"
     );
     let (output, exit) = fslc(
@@ -238,6 +238,342 @@ fn a_scenario_step_names_the_instance_a_relation_records() {
         (Some("error"), Some("forbidden"), 2),
         "{output:#}"
     );
+}
+
+/// The relations example with `body` as the steps and check of `AC-1`.
+fn with_ac1(body: &str) -> String {
+    edit(
+        &fixture("relations", "fsl5_en.fsl"),
+        "    Agent takes t1 with assignee 1\n    Agent closes t1\n    then t1 is Closed\n",
+        body,
+    )
+}
+
+/// `fslc <args>` with `source` as `doc.fsl`: the raw stdout and the exit code.
+fn fslc_text(args: &[&str], label: &str, source: &str) -> (String, i32) {
+    let scratch = Scratch::new(label);
+    scratch.write("doc.fsl", source);
+    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        .args(args)
+        .current_dir(&scratch.0)
+        .output()
+        .expect("run fslc");
+    (
+        String::from_utf8(output.stdout).expect("UTF-8 stdout"),
+        output.status.code().expect("exit code"),
+    )
+}
+
+/// `(result, kind, diagnostic_code, message, exit)` of `fslc check`.
+fn verdict(label: &str, source: &str) -> (String, String, String, String, i32) {
+    let (output, exit) = fslc("check", label, source);
+    let text = |key: &str| output[key].as_str().unwrap_or_default().to_owned();
+    (
+        text("result"),
+        text("kind"),
+        text("diagnostic_code"),
+        text("message"),
+        exit,
+    )
+}
+
+fn assert_ok(label: &str, source: &str) {
+    let (result, kind, _, message, exit) = verdict(label, source);
+    assert_eq!(
+        (result.as_str(), exit),
+        ("ok", 0),
+        "{label}: {kind} {message}"
+    );
+}
+
+fn assert_refused(label: &str, source: &str, kind: &str, message: &str) {
+    let (result, produced, _, text, exit) = verdict(label, source);
+    assert_eq!(
+        (result.as_str(), produced.as_str(), exit),
+        ("error", kind, 2),
+        "{label}: {text}"
+    );
+    assert!(
+        text.contains(message),
+        "{label}: {text:?} lacks {message:?}"
+    );
+}
+
+/// #1812: a relation role's value may be an instance name of the related
+/// entity. Names are numbered per entity in order of first use, as a step's
+/// instance is, so the name form is the number form: `scenarios` and the
+/// generated document are byte-equal, and differ from the swapped numbers.
+/// The verify bound and the related entity are enforced.
+#[test]
+fn a_role_value_is_an_instance_name_of_the_related_entity() {
+    let steps = |first: &str, second: &str| {
+        with_ac1(&format!(
+            "    Agent takes t1 with assignee {first}\n    Agent takes t2 with assignee \
+             {second}\n    Agent closes t2\n    then t2 is Closed\n"
+        ))
+    };
+    let named = steps("b", "a");
+    assert_ok("role-named", &named);
+    for (args, shows_values) in [
+        (&["scenarios", "doc.fsl"][..], true),
+        (
+            &["document", "generate", "doc.fsl", "--lang", "en"][..],
+            true,
+        ),
+        (&["testgen", "doc.fsl"][..], false),
+        (&["explain", "doc.fsl", "--readable"][..], false),
+        (&["kernel", "doc.fsl"][..], false),
+    ] {
+        let (by_name, exit) = fslc_text(args, "role-output", &named);
+        assert_eq!(exit, 0, "{args:?}: {by_name}");
+        let (by_number, _) = fslc_text(args, "role-output", &steps("0", "1"));
+        assert_eq!(by_name, by_number, "{args:?}: `b`, `a` are 0, 1");
+        if shows_values {
+            let (swapped, _) = fslc_text(args, "role-output", &steps("1", "0"));
+            assert_ne!(
+                by_name, swapped,
+                "{args:?}: the output shows the role value"
+            );
+        }
+    }
+
+    let reused = with_ac1(
+        "    Agent takes t1 with assignee a1\n    Agent takes t2 with assignee a1\n    \
+         then t1.assignee == some(0) and t2.assignee == some(0)\n",
+    );
+    assert_ok("role-reused", &reused);
+    assert_refused(
+        "role-reused-moved",
+        &edit(&reused, "t2.assignee == some(0)", "t2.assignee == some(1)"),
+        "acceptance",
+        "",
+    );
+
+    assert_refused(
+        "role-overflow",
+        &edit(
+            &steps("a1", "a2"),
+            "instances Agent = 2",
+            "instances Agent = 1",
+        ),
+        "parse",
+        "'AC-1' scenario names 'a2' is instance 2 of 'Agent', but verify bounds 'Agent' to 1",
+    );
+    assert_refused(
+        "role-other-entity",
+        &steps("a1", "t1"),
+        "parse",
+        "'t1' is an instance of 'Ticket', but the relation 'assignee' of event 'take' takes a \
+         'Agent'",
+    );
+
+    let forbidden = edit(
+        &edit(
+            &fixture("relations", "fsl5_en.fsl"),
+            "    Agent takes t1 with assignee 0\n",
+            "    Agent takes t1 with assignee a1\n",
+        ),
+        "    Agent takes t2 with assignee 0\n",
+        "    Agent takes t2 with assignee a1\n",
+    );
+    assert_ok("role-forbidden", &forbidden);
+    assert_refused(
+        "role-forbidden-desk-open",
+        &edit(&forbidden, "    Agent escalates t1\n", ""),
+        "forbidden",
+        "",
+    );
+}
+
+/// #1812: a role value the document declares as a constant, resource, stage
+/// or enum member keeps that meaning; any other name, even one spelled like a
+/// lowered state, is an instance name.
+#[test]
+fn a_declared_name_as_a_role_value_keeps_its_meaning() {
+    let constant = edit(
+        &with_ac1("    Agent takes t1 with assignee LEAD\n    then t1.assignee == some(1)\n"),
+        "  actor Agent\n",
+        "  actor Agent\n  const LEAD = 1\n",
+    );
+    assert_ok("role-constant", &constant);
+    assert_refused(
+        "role-constant-as-instance",
+        &edit(&constant, "some(1)", "some(0)"),
+        "acceptance",
+        "",
+    );
+    // A resource, a stage and an enum member keep their meaning too, which
+    // is no Agent.
+    let one = |value: &str| {
+        with_ac1(&format!(
+            "    Agent takes t1 with assignee {value}\n    then t1 is Assigned\n"
+        ))
+    };
+    for (label, source, value) in [
+        ("role-resource", one("desk_open"), "true"),
+        ("role-stage", one("Closed"), "\"Closed\""),
+        (
+            "role-enum-member",
+            edit(
+                &one("Front"),
+                "  actor Agent\n",
+                "  actor Agent\n  enum Desk { Front }\n",
+            ),
+            "\"Front\"",
+        ),
+    ] {
+        assert_refused(
+            label,
+            &source,
+            "acceptance",
+            &format!("argument {value} for 'a' of 'take' is not a value of type 'Agent'"),
+        );
+    }
+    // A lowered state is a map, never an Agent, so its spelling is a name.
+    let lowered = with_ac1(
+        "    Agent takes t1 with assignee a1\n    Agent takes t2 with assignee ticket_stage\n    \
+         then t2.assignee == some(1)\n",
+    );
+    assert_ok("role-lowered-spelling", &lowered);
+    assert_refused(
+        "role-lowered-spelling-moved",
+        &edit(&lowered, "some(1)", "some(0)"),
+        "acceptance",
+        "",
+    );
+}
+
+/// #1812: a scenario's `then` expression reads an instance by its name:
+/// `t1.field`, `stage(t1)` and `Ticket.stage(t1)` are the lowered state at
+/// the instance's number, so the generated document equals the one of the
+/// lowered spelling. A binder of the same name keeps it; a name that is no
+/// field, the wrong entity, or an entity with no lifecycle is refused.
+#[test]
+fn a_scenario_check_reads_an_instance_by_its_name() {
+    let check = |then: &str| {
+        with_ac1(&format!(
+            "    Agent takes t1 with assignee a1\n    Agent takes t2 with assignee a2\n    \
+             Agent closes t2\n    then {then}\n"
+        ))
+    };
+    let named = check(
+        "t2.assignee == some(1) and stage(t2) == Closed and Ticket.stage(t1) == Assigned and \
+         t1.assignee == some(0)",
+    );
+    assert_ok("then-named", &named);
+    let lowered = check(
+        "ticket_assignee[1] == some(1) and ticket_stage[1] == Closed and ticket_stage[0] == \
+         Assigned and ticket_assignee[0] == some(0)",
+    );
+    let args = ["document", "generate", "doc.fsl", "--lang", "en"];
+    let (by_name, exit) = fslc_text(&args, "then-named-document", &named);
+    assert_eq!(exit, 0, "{by_name}");
+    let (by_state, _) = fslc_text(&args, "then-lowered-document", &lowered);
+    assert_eq!(by_name, by_state);
+
+    for (label, then) in [
+        ("then-field-moved", "t2.assignee == some(0)"),
+        ("then-stage-moved", "stage(t2) == Assigned"),
+        ("then-qualified-moved", "Ticket.stage(t1) == Closed"),
+    ] {
+        assert_refused(label, &check(then), "acceptance", "");
+    }
+    // Read as the instance `t1` (Assigned), this check would fail.
+    assert_ok(
+        "then-binder",
+        &check("exists t1: Ticket { stage(t1) == Closed }"),
+    );
+    // An `is some(t1)` pattern keeps `t1` too, an Agent whose stage the
+    // lowering refuses, as without instance names; read as the instance `t1`
+    // the check would hold.
+    assert_refused(
+        "then-pattern",
+        &check("t2.assignee is some(t1) and stage(t1) == Assigned"),
+        "semantics",
+        "stage(t1) cannot be resolved; 't1' is not a typed parameter or binder",
+    );
+    assert_ok(
+        "then-pattern-other-name",
+        &check("t2.assignee is some(a) and a == 1 and stage(t1) == Assigned"),
+    );
+    for (label, then, message) in [
+        (
+            "then-no-field",
+            "t1.priority == 0",
+            "'priority' is not a field of 'Ticket', the entity of 't1'",
+        ),
+        (
+            "then-other-entity",
+            "Agent.stage(t1) == Assigned",
+            "'t1' is an instance of 'Ticket', not of 'Agent'",
+        ),
+        (
+            "then-stage-no-lifecycle",
+            "stage(a1) == Assigned",
+            "'a1' is an instance of 'Agent', which has no lifecycle",
+        ),
+        (
+            "then-is-no-lifecycle",
+            "a1 is Assigned",
+            "'a1' is an instance of 'Agent', which has no lifecycle",
+        ),
+    ] {
+        assert_refused(label, &check(then), "parse", message);
+    }
+}
+
+/// #1812 in Japanese: a role value (`購入者 利用者2 で`) and a check
+/// (`注文2.注文数`, `stage(注文2)`, `注文.stage(注文1)`) name instances
+/// through the glossary, and lower as the number and state spellings do.
+#[test]
+fn japanese_instance_names_in_role_values_and_checks() {
+    let document = |steps: &str, check: &str| {
+        format!(
+            "fsl 5\n要件 R {{\n  用語集 {{\n    Qty = 数量\n    User = 利用者\n    Order = 注文\n    \
+             Order.qty = 注文数\n    Order.buyer = 購入者\n    Empty = 空\n    Placed = 発注済み\n    \
+             places = 発注する\n  }}\n  数値 数量\n  アクター 利用者\n  エンティティ 利用者\n  \
+             エンティティ 注文 {{\n    注文数: 数量 = 0\n    ライフサイクル 空 -> 発注済み\n  }}\n  \
+             注文 所属先 利用者 役名 購入者 契機 place\n  出来事 place = 利用者 が 注文 を 注文数 で \
+             発注する 空 -> 発注済み\n  シナリオ AC-1 \"x\" {{\n{steps}    結果 {check}\n  }}\n}}\n\
+             検証 {{\n  個数 注文 = 2\n  個数 利用者 = 2\n  値域 数量 = 0..2\n}}\n"
+        )
+    };
+    let steps = |first: &str, second: &str| {
+        format!(
+            "    利用者 が 注文1 を 購入者 {first} で 注文数 1 で 発注する\n    利用者 が 注文2 を \
+             購入者 {second} で 注文数 2 で 発注する\n"
+        )
+    };
+    let named = document(
+        &steps("利用者1", "利用者2"),
+        "注文2.注文数 == 2 かつ stage(注文2) == 発注済み かつ 注文2.購入者 == some(1) かつ \
+         注文.stage(注文1) == 発注済み",
+    );
+    assert_ok("ja-named", &named);
+    let numbered = document(
+        &steps("0", "1"),
+        "order_qty[1] == 2 かつ order_stage[1] == 発注済み かつ order_buyer[1] == some(1) かつ \
+         order_stage[0] == 発注済み",
+    );
+    for args in [&["kernel", "doc.fsl"][..], &["scenarios", "doc.fsl"][..]] {
+        let (by_name, exit) = fslc_text(args, "ja-named-output", &named);
+        assert_eq!(exit, 0, "{args:?}: {by_name}");
+        let (by_number, _) = fslc_text(args, "ja-numbered-output", &numbered);
+        assert_eq!(by_name, by_number, "{args:?}");
+    }
+    for (label, check) in [
+        ("ja-role-moved", "注文2.購入者 == some(0)"),
+        ("ja-field-moved", "注文2.注文数 == 1"),
+        ("ja-stage-moved", "stage(注文2) == 空"),
+        ("ja-qualified-moved", "注文.stage(注文1) == 空"),
+    ] {
+        assert_refused(
+            label,
+            &document(&steps("利用者1", "利用者2"), check),
+            "acceptance",
+            "",
+        );
+    }
 }
 
 /// decisions/048 J3: a guard that reads a resource is enumerated over the
