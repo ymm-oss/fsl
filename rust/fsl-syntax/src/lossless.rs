@@ -928,19 +928,8 @@ impl Formatter {
 
     fn token(&mut self, kind: &TokenKind, original: &str, span: Span) {
         let offset = span.start.offset;
-        self.leave_statement(offset);
-        let opens_statement = if let Some(&end) = self.statement_ends.get(&offset) {
-            self.statement = Some(StatementLayout {
-                end,
-                line_continued: false,
-                braces: Vec::new(),
-            });
-            true
-        } else {
-            false
-        };
-        let closes = matches!(kind, TokenKind::Symbol(symbol) if symbol == "}");
-        if closes {
+        self.enter_statement(offset);
+        if matches!(kind, TokenKind::Symbol(symbol) if symbol == "}") {
             self.indent = self.indent.saturating_sub(1);
             if !self.line_start {
                 self.pending_lines = 1;
@@ -949,22 +938,8 @@ impl Formatter {
         self.flush_pending();
         let at_line_start = self.line_start;
         self.write_indent();
-        let closed_brace = if closes {
-            self.statement
-                .as_mut()
-                .and_then(|statement| statement.braces.pop())
-        } else {
-            None
-        };
         if at_line_start {
-            let continued = self.continuations.contains(&offset)
-                || (!opens_statement && closed_brace.unwrap_or_else(|| self.continues_statement()));
-            if continued {
-                self.output.push_str("  ");
-            }
-            if let Some(statement) = &mut self.statement {
-                statement.line_continued = continued;
-            }
+            self.start_line(offset);
         }
         let compact_hyphen = matches!(kind, TokenKind::Symbol(symbol) if symbol == "-")
             && self.compact_hyphens.contains(&span.start.offset);
@@ -990,11 +965,12 @@ impl Formatter {
             TokenKind::Symbol(symbol) if symbol == "{" => {
                 self.indent += 1;
                 self.pending_lines = 1;
-                if let Some(statement) = &mut self.statement {
-                    statement.braces.push(statement.line_continued);
-                }
+                self.open_brace();
             }
-            TokenKind::Symbol(symbol) if symbol == "}" => self.pending_lines = 2,
+            TokenKind::Symbol(symbol) if symbol == "}" => {
+                self.pending_lines = 2;
+                self.close_brace();
+            }
             TokenKind::Symbol(symbol) if symbol == ";" => self.pending_lines = 1,
             _ => {}
         }
@@ -1020,12 +996,52 @@ impl Formatter {
         }
     }
 
+    /// Leaves the declaration being written once `offset` reaches its end,
+    /// and enters the declaration whose first token is at `offset`.
+    fn enter_statement(&mut self, offset: usize) {
+        self.leave_statement(offset);
+        if let Some(&end) = self.statement_ends.get(&offset) {
+            self.statement = Some(StatementLayout {
+                end,
+                line_continued: false,
+                braces: Vec::new(),
+            });
+        }
+    }
+
+    /// Indents the line the token at `offset` starts one level more when it
+    /// is a continuation line, and records whether it is. A `}` is still
+    /// inside the brace it closes, so its line is indented like the line
+    /// that opened that brace.
+    fn start_line(&mut self, offset: usize) {
+        let continued = self.continuations.contains(&offset)
+            || (!self.statement_ends.contains_key(&offset) && self.continues_statement());
+        if continued {
+            self.output.push_str("  ");
+        }
+        if let Some(statement) = &mut self.statement {
+            statement.line_continued = continued;
+        }
+    }
+
     /// Whether a line starting here inside the declaration being written is
     /// a continuation line (not its first line, which a token decides).
     fn continues_statement(&self) -> bool {
         self.statement
             .as_ref()
             .is_some_and(|statement| statement.braces.last().copied().unwrap_or(true))
+    }
+
+    fn open_brace(&mut self) {
+        if let Some(statement) = &mut self.statement {
+            statement.braces.push(statement.line_continued);
+        }
+    }
+
+    fn close_brace(&mut self) {
+        if let Some(statement) = &mut self.statement {
+            statement.braces.pop();
+        }
     }
 
     fn flush_pending(&mut self) {
