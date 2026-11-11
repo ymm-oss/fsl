@@ -5780,7 +5780,8 @@ fn run_scenarios_mode_from_source(
 }
 
 /// One bounded verifier run of the witness or counterfactual phase of
-/// `explain` (shared with `scenarios`). Tests count these runs (#1838, #1839).
+/// `explain` (shared with `scenarios`). Tests count these runs and the
+/// concrete counterfactual searches (#1838, #1839).
 fn explain_bounded_run(
     model: &KernelModel,
     solver: &mut fsl_solver_z3::Z3Solver,
@@ -5795,15 +5796,39 @@ fn explain_bounded_run(
 mod explain_run_observer {
     use std::cell::Cell;
 
-    thread_local! { static RUNS: Cell<usize> = const { Cell::new(0) }; }
+    thread_local! {
+        static RUNS: Cell<usize> = const { Cell::new(0) };
+        static SEARCHES: Cell<usize> = const { Cell::new(0) };
+        static UNSHARED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Make every per-invariant counterfactual run, in order, on this
+    /// thread's context: no screening, sharing or replay.
+    pub(crate) fn set_unshared(unshared: bool) {
+        UNSHARED.with(|flag| flag.set(unshared));
+    }
+
+    pub(crate) fn unshared() -> bool {
+        UNSHARED.with(Cell::get)
+    }
 
     pub(crate) fn record_bounded_run() {
         RUNS.with(|runs| runs.set(runs.get() + 1));
     }
 
+    pub(crate) fn record_concrete_search() {
+        SEARCHES.with(|searches| searches.set(searches.get() + 1));
+    }
+
     /// The runs recorded on this thread since the last call.
     pub(crate) fn bounded_runs() -> usize {
         RUNS.with(|runs| runs.replace(0))
+    }
+
+    /// The concrete counterfactual searches recorded on this thread since
+    /// the last call.
+    pub(crate) fn concrete_searches() -> usize {
+        SEARCHES.with(|searches| searches.replace(0))
     }
 }
 
@@ -9731,11 +9756,32 @@ fn weakening_candidates(
     candidates
 }
 
+/// The reachables a bounded run of the weakened `model` leaves unreached, or
+/// `None` when the weakening breaks a safety check (concretely or in the run)
+/// or the run fails.
+fn unreached_reachables(
+    model: &KernelModel,
+    depth: usize,
+    runs: &WeakenedModelRuns,
+) -> Option<std::collections::BTreeSet<String>> {
+    if fsl_runtime::find_boundary_violation(model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
+        .is_ok_and(|probe| probe.finding.is_some())
+    {
+        return None;
+    }
+    if let Some(unreached) = runs.get(model) {
+        return unreached.clone();
+    }
+    let mut solver = fsl_solver_z3::Z3Solver::new().ok()?;
+    unreached_after(&explain_bounded_run(model, &mut solver, depth))
+}
+
 fn reachable_counterfactuals_from_source(
     names: &KernelModel,
     path: &Path,
     source: &str,
     depth: usize,
+    runs: &WeakenedModelRuns,
 ) -> Value {
     let Ok(parsed) = parse_surface_document_from_source(path, source) else {
         return json!([]);
@@ -9762,36 +9808,45 @@ fn reachable_counterfactuals_from_source(
     };
     let lines = source.lines().collect::<Vec<_>>();
     let mut output = Vec::new();
+    let mut fair_removal_unreached: Option<(
+        KernelModel,
+        Option<std::collections::BTreeSet<String>>,
+    )> = None;
     for candidate in weakening_candidates(&document, &|name| names.action_display_name(name)) {
         let Ok(mut model) = fsl_core::build_surface_model(candidate.spec) else {
             continue;
         };
         model.inherit_compose_names(names);
+        // Only this weakening's reachables are reported (#1838).
+        if model.reachables.is_empty() {
+            continue;
+        }
         // Counterfactuals below consume only invariant/reachable outcomes.
         // Re-running every leadsTo lasso for every weakening multiplies the
         // cost while discarding its result, especially for quantified
         // liveness with mixed fair/non-fair actions (issue #633).
         model.leadstos.clear();
-        if fsl_runtime::find_boundary_violation(&model, depth, fsl_runtime::CONCRETE_PROBE_BUDGET)
-            .is_ok_and(|probe| probe.finding.is_some())
+        let fairless = (candidate.op == "fair-removal").then(|| without_fairness(&model));
+        let unreached = if let Some((_, unreached)) = fair_removal_unreached
+            .as_ref()
+            .filter(|(cached, _)| fairless.as_ref() == Some(cached))
         {
-            continue;
-        }
-        let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+            unreached.clone()
+        } else {
+            let unreached = unreached_reachables(&model, depth, runs);
+            if let Some(fairless) = fairless {
+                fair_removal_unreached = Some((fairless, unreached.clone()));
+            }
+            unreached
+        };
+        let Some(unreached) = unreached else {
             continue;
         };
-        let Ok(result) = explain_bounded_run(&model, &mut solver, depth) else {
-            continue;
-        };
-        if result.violation.is_some() || result.leadsto_violation.is_some() {
-            continue;
-        }
-        for property in model.reachables.iter().filter(|property| {
-            result
-                .reachables
-                .get(&property.name)
-                .is_some_and(Option::is_none)
-        }) {
+        for property in model
+            .reachables
+            .iter()
+            .filter(|property| unreached.contains(&property.name))
+        {
             let line = usize::try_from(candidate.span.start.line).unwrap_or_default();
             let mut weakening = json!({
                 "op":candidate.op,
@@ -9956,11 +10011,19 @@ fn concrete_search_unavailable_note(
     format!("concrete search not run: initialization/initial-state checks failed: {message}")
 }
 
+/// The first concrete trace, in breadth-first order, whose last step violates
+/// `invariant`: at step `steps` exactly when `exact`, otherwise at the fewest
+/// steps up to `steps`. Every violation is reported at the step it occurs
+/// and every level is generated before the next, so a non-exact search
+/// returns what exact searches at `0..=steps`, in turn, return first.
 fn canonical_concrete_violation_trace(
     model: &KernelModel,
     invariant: &str,
     steps: usize,
+    exact: bool,
 ) -> Result<Option<Vec<fsl_core::TraceStep>>, fsl_runtime::RuntimeError> {
+    #[cfg(test)]
+    explain_run_observer::record_concrete_search();
     let initial = fsl_runtime::Monitor::new(model.clone())?;
     if initial.current_violation()?.is_some() {
         return Ok(None);
@@ -9996,7 +10059,7 @@ fn canonical_concrete_violation_trace(
                 &result,
             ));
             if let Some(violation) = result.violation {
-                if violation.name == invariant && violation.step == steps {
+                if violation.name == invariant && (!exact || violation.step == steps) {
                     // Concrete evidence must also satisfy terminal trans/ensures.
                     // If this rejects a solver-target canonicalization, its
                     // caller keeps the BMC trace and its first-violation order.
@@ -10161,12 +10224,351 @@ fn invariant_violation_explanation(
     (trace, Value::Object(explanation))
 }
 
+/// `model` with no action fair. The bounded verifier reads `fair` only in
+/// the `leadsTo` lasso search and the Monitor never reads it, so once
+/// `leadsTo` is cleared two models equal here answer every counterfactual run
+/// alike (#1838).
+fn without_fairness(model: &KernelModel) -> KernelModel {
+    let mut model = model.clone();
+    for action in &mut model.actions {
+        action.fair = false;
+    }
+    model
+}
+
+#[cfg(test)]
+fn unshared_counterfactual_runs() -> bool {
+    explain_run_observer::unshared()
+}
+
+#[cfg(not(test))]
+const fn unshared_counterfactual_runs() -> bool {
+    false
+}
+
+/// The verdicts of bounded runs of weakened models that retained all their
+/// invariants, so the reachable counterfactual phase does not repeat a run
+/// the invariant phase made of an equal model (#1838). Only verdicts are
+/// kept: whether the run ended without a violation and which reachables it
+/// left unreached, which no earlier solver session can change.
+#[derive(Default)]
+struct WeakenedModelRuns(Vec<(u64, KernelModel, Option<std::collections::BTreeSet<String>>)>);
+
+impl WeakenedModelRuns {
+    fn fingerprint(model: &KernelModel) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        format!("{model:?}").hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Keep the verdicts of `result`, a run of `model` as it is.
+    fn record(
+        &mut self,
+        model: &KernelModel,
+        result: &Result<fsl_verifier::BmcResult, fsl_verifier::VerifyError>,
+    ) {
+        let fingerprint = Self::fingerprint(model);
+        if self.find(fingerprint, model).is_none() {
+            self.0
+                .push((fingerprint, model.clone(), unreached_after(result)));
+        }
+    }
+
+    /// The kept [`unreached_after`] of a run of `model`, if one was kept.
+    fn get(&self, model: &KernelModel) -> Option<&Option<std::collections::BTreeSet<String>>> {
+        self.find(Self::fingerprint(model), model)
+    }
+
+    fn find(
+        &self,
+        fingerprint: u64,
+        model: &KernelModel,
+    ) -> Option<&Option<std::collections::BTreeSet<String>>> {
+        self.0
+            .iter()
+            .find(|(recorded, recorded_model, _)| {
+                *recorded == fingerprint && recorded_model == model
+            })
+            .map(|(_, _, unreached)| unreached)
+    }
+}
+
+/// The reachables a run left unreached, or `None` when it reported a
+/// violation or failed.
+fn unreached_after(
+    result: &Result<fsl_verifier::BmcResult, fsl_verifier::VerifyError>,
+) -> Option<std::collections::BTreeSet<String>> {
+    let result = result.as_ref().ok()?;
+    if result.violation.is_some() || result.leadsto_violation.is_some() {
+        return None;
+    }
+    Some(
+        result
+            .reachables
+            .iter()
+            .filter(|(_, witness)| witness.is_none())
+            .map(|(name, _)| name.clone())
+            .collect(),
+    )
+}
+
+/// What one weakened model contributes to one user invariant's
+/// counterfactual entry.
+#[derive(Clone, Default)]
+struct InvariantOutcome {
+    preemption: Option<String>,
+    unavailable: Option<String>,
+    violation: Option<fsl_verifier::BmcViolation>,
+    /// It carries a value the solver chose rather than a verdict: a trace
+    /// the concrete search did not replace, or a note naming the run's last
+    /// action. Such a value can depend on earlier runs on the same context.
+    solver_chosen: bool,
+}
+
+/// One [`InvariantOutcome`] per invariant of `original`, in order, for the
+/// weakened `model`.
+///
+/// The bounded verifier reports only its first violation, so each user
+/// invariant is analyzed on its own run, retaining that invariant alone:
+/// another invariant cannot hide its counterfactual, and the per-invariant
+/// ranking is preserved. A run is skipped only when
+/// [`invariants_without_bounded_violation`] proves it reports no violation.
+fn invariant_outcomes(
+    model: &KernelModel,
+    original: &KernelModel,
+    depth: usize,
+    removed_init_root: Option<&str>,
+    runs: &mut WeakenedModelRuns,
+) -> Vec<InvariantOutcome> {
+    let unbroken = if unshared_counterfactual_runs() {
+        std::collections::BTreeSet::new()
+    } else {
+        invariants_without_bounded_violation(model, depth, runs)
+    };
+    original
+        .invariants
+        .iter()
+        .map(|property| {
+            if unbroken.contains(&property.name) {
+                InvariantOutcome::default()
+            } else {
+                target_invariant_outcome(model, &property.name, depth, removed_init_root, runs)
+            }
+        })
+        .collect()
+}
+
+/// The invariants of `model` for which a bounded run retaining that
+/// invariant alone reports no violation within `depth` (#1838).
+///
+/// A run retaining a set `R` of them that ends without a violation proves
+/// this for every member of `R`. A run asserts the init and transition
+/// constraints, which do not depend on the invariants, and otherwise only
+/// checks it has already proved; so a run retaining one member of `R`
+/// asks only questions the `R` run answered `unsat`. A violation of a member
+/// removes it from `R` for the next run. Any other outcome proves nothing,
+/// and a single member's run is its own question, so it is not screened.
+fn invariants_without_bounded_violation(
+    model: &KernelModel,
+    depth: usize,
+    runs: &mut WeakenedModelRuns,
+) -> std::collections::BTreeSet<String> {
+    let mut remaining = model
+        .invariants
+        .iter()
+        .map(|property| property.name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    while remaining.len() > 1 {
+        let mut screened = model.clone();
+        screened
+            .invariants
+            .retain(|property| remaining.contains(&property.name));
+        let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+            break;
+        };
+        let result = explain_bounded_run(&screened, &mut solver, depth);
+        if screened.invariants.len() == model.invariants.len() {
+            runs.record(model, &result);
+        }
+        match result {
+            Ok(result) => match result.violation {
+                None => return remaining,
+                Some(violation)
+                    if violation.kind == "invariant" && remaining.remove(&violation.name) => {}
+                Some(_) => break,
+            },
+            Err(_) => break,
+        }
+    }
+    std::collections::BTreeSet::new()
+}
+
+/// Whether the public name of the check `name` depends on the action that
+/// broke it.
+fn violation_name_follows_action(model: &KernelModel, name: &str) -> bool {
+    let names = model.names();
+    let plain = names.public_violation(name, None);
+    model
+        .actions
+        .iter()
+        .any(|action| names.public_violation(name, Some(&action.name)).as_str() != plain.as_str())
+}
+
+/// The outcome for the invariant `target` of the weakened `model`, from a
+/// bounded run that retains `target` as its only invariant.
+fn target_invariant_outcome(
+    model: &KernelModel,
+    target: &str,
+    depth: usize,
+    removed_init_root: Option<&str>,
+    runs: &mut WeakenedModelRuns,
+) -> InvariantOutcome {
+    let all_invariants = model.invariants.len();
+    let mut outcome = InvariantOutcome::default();
+    let mut model = model.clone();
+    model
+        .invariants
+        .retain(|candidate| candidate.name == target);
+    let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
+        return outcome;
+    };
+    let result = explain_bounded_run(&model, &mut solver, depth);
+    if model.invariants.len() == all_invariants {
+        runs.record(&model, &result);
+    }
+    let Ok(result) = result else {
+        return outcome;
+    };
+    let Some(violation) = result.violation.as_ref() else {
+        return outcome;
+    };
+    if violation.kind == "invariant" && violation.name == target {
+        let mut canonical_violation = violation.clone();
+        if let Ok(Some(trace)) = canonical_concrete_violation_trace(
+            &model,
+            &violation.name,
+            violation.trace.len().saturating_sub(1),
+            true,
+        ) {
+            canonical_violation.trace = trace;
+        } else {
+            outcome.solver_chosen = true;
+            if let Some(root) = removed_init_root {
+                canonicalize_initial_int_violation(&model, &mut canonical_violation, root);
+            }
+        }
+        outcome.violation = Some(canonical_violation);
+    } else if matches!(
+        violation.kind.as_str(),
+        "type_bound" | "trans" | "partial_op" | "ensures"
+    ) {
+        outcome.preemption = Some(format!(
+            "preempted by {} {} at step {}",
+            violation.kind,
+            model
+                .names()
+                .public_violation(&violation.name, violation.last_action.as_deref())
+                .as_str(),
+            violation.step,
+        ));
+        outcome.solver_chosen =
+            violation.step > 0 && violation_name_follows_action(&model, &violation.name);
+        // The first failing non-user check need not be on the path
+        // that breaks this target. Concrete search discards unsafe
+        // children but keeps exploring the other enabled actions.
+        match canonical_concrete_violation_trace(&model, target, depth, false) {
+            Ok(Some(trace)) => {
+                outcome.violation = Some(fsl_verifier::BmcViolation {
+                    kind: "invariant".to_owned(),
+                    name: target.to_owned(),
+                    step: trace.len().saturating_sub(1),
+                    last_action: trace
+                        .last()
+                        .and_then(|entry| entry.action.as_ref())
+                        .map(|action| action.name.clone()),
+                    trace,
+                    leads_to: None,
+                });
+            }
+            Ok(None) => {}
+            Err(error) => {
+                outcome.unavailable = Some(concrete_search_unavailable_note(&model, &error));
+            }
+        }
+    }
+    outcome
+}
+
+/// The rank of a counterfactual for its invariant: shortest trace first,
+/// then the weakening operator, then the source line. Lower wins; on a tie
+/// the earlier weakening keeps its place.
+fn counterfactual_rank(
+    op: &str,
+    span: &fsl_syntax::Span,
+    violation: &fsl_verifier::BmcViolation,
+) -> (usize, usize, u32) {
+    let priority = match op {
+        "assignment_remove" => 0,
+        "requires_remove" => 1,
+        "fair_remove" => 2,
+        _ => 99,
+    };
+    (violation.trace.len(), priority, span.start.line)
+}
+
+/// The `(weakening, invariant)` outcomes whose violation or preemption note
+/// the counterfactual entries print. Trace lengths and notes' presence are
+/// verdicts, so this does not depend on which solver context chose a trace.
+fn printed_outcomes(
+    weakenings: &[(
+        fsl_tools::BuiltinMutant,
+        fsl_syntax::Span,
+        KernelModel,
+        Option<String>,
+    )],
+    analyzed: &[(Vec<InvariantOutcome>, std::time::Duration)],
+    original: &KernelModel,
+) -> Vec<(usize, usize)> {
+    let mut best = std::collections::BTreeMap::<&str, ((usize, usize, u32), (usize, usize))>::new();
+    let mut first_preemption = std::collections::BTreeMap::<&str, (usize, usize)>::new();
+    for (weakening, ((candidate, span, _, _), (outcomes, _))) in
+        weakenings.iter().zip(analyzed).enumerate()
+    {
+        for (invariant, (property, outcome)) in original.invariants.iter().zip(outcomes).enumerate()
+        {
+            let at = (weakening, invariant);
+            if outcome.preemption.is_some() {
+                first_preemption.entry(property.name.as_str()).or_insert(at);
+            }
+            if let Some(violation) = &outcome.violation {
+                let rank = counterfactual_rank(&candidate.op, span, violation);
+                if best
+                    .get(property.name.as_str())
+                    .is_none_or(|(current, _)| rank < *current)
+                {
+                    best.insert(property.name.as_str(), (rank, at));
+                }
+            }
+        }
+    }
+    let mut printed = best.values().map(|(_, at)| *at).collect::<Vec<_>>();
+    printed.extend(
+        first_preemption
+            .into_iter()
+            .filter(|(name, _)| !best.contains_key(name))
+            .map(|(_, at)| at),
+    );
+    printed
+}
+
 #[allow(clippy::too_many_lines)]
 fn invariant_counterfactuals_from_source(
     names: &KernelModel,
     path: &Path,
     source: &str,
     depth: usize,
+    runs: &mut WeakenedModelRuns,
 ) -> Value {
     let Ok(parsed) = parse_surface_document_from_source(path, source) else {
         return json!([]);
@@ -10200,6 +10602,7 @@ fn invariant_counterfactuals_from_source(
     let mut unavailable =
         std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
     let mut skipped_init_roots = std::collections::BTreeSet::new();
+    let mut weakenings = Vec::new();
     for candidate in fsl_tools::enumerate_builtin_mutants(&document)
         .into_iter()
         .filter(|candidate| {
@@ -10226,94 +10629,99 @@ fn invariant_counterfactuals_from_source(
             skipped_init_roots.insert(root.clone());
             continue;
         }
-        let started = Instant::now();
         let Ok(mut model) = fsl_core::build_surface_model(mutated_spec) else {
             continue;
         };
         model.inherit_compose_names(names);
         model.leadstos.clear();
-        // The bounded verifier reports only its first violation. Analyze each
-        // user invariant separately so another invariant cannot hide its
-        // counterfactual, while preserving the per-invariant ranking below.
-        for property in &original.invariants {
+        weakenings.push((candidate, span, model, removed_init_root));
+    }
+    // A fresh context keeps the screening and shared runs from changing the
+    // models the solver returns on this thread, where the replay below repeats
+    // every per-invariant run in order up to the last outcome that carries a
+    // solver-chosen value.
+    let unshared = unshared_counterfactual_runs();
+    let mut analyze = || {
+        let mut fair_removal_outcomes: Option<(KernelModel, Vec<InvariantOutcome>)> = None;
+        weakenings
+            .iter()
+            .map(|(candidate, _, model, removed_init_root)| {
+                let started = Instant::now();
+                let fairless =
+                    (candidate.op == "fair_remove" && !unshared).then(|| without_fairness(model));
+                let outcomes = if let Some((_, outcomes)) = fair_removal_outcomes
+                    .as_ref()
+                    .filter(|(cached, _)| fairless.as_ref() == Some(cached))
+                {
+                    outcomes.clone()
+                } else {
+                    let outcomes = invariant_outcomes(
+                        model,
+                        &original,
+                        depth,
+                        removed_init_root.as_deref(),
+                        runs,
+                    );
+                    if let Some(fairless) = fairless {
+                        fair_removal_outcomes = Some((fairless, outcomes.clone()));
+                    }
+                    outcomes
+                };
+                (outcomes, started.elapsed())
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut analyzed = if unshared {
+        analyze()
+    } else {
+        fsl_solver_z3::with_fresh_context(analyze)
+    };
+    let last_solver_chosen = printed_outcomes(&weakenings, &analyzed, &original)
+        .into_iter()
+        .filter(|&(weakening, invariant)| analyzed[weakening].0[invariant].solver_chosen)
+        .max()
+        .filter(|_| !unshared);
+    if let Some(last) = last_solver_chosen {
+        'replay: for (weakening, (_, _, model, removed_init_root)) in weakenings.iter().enumerate()
+        {
+            for (invariant, property) in original.invariants.iter().enumerate() {
+                let outcome = target_invariant_outcome(
+                    model,
+                    &property.name,
+                    depth,
+                    removed_init_root.as_deref(),
+                    runs,
+                );
+                if analyzed[weakening].0[invariant].solver_chosen {
+                    analyzed[weakening].0[invariant] = outcome;
+                }
+                if (weakening, invariant) == last {
+                    break 'replay;
+                }
+            }
+        }
+    }
+    for ((candidate, span, model, _), (outcomes, elapsed)) in weakenings.iter().zip(analyzed) {
+        let started = Instant::now()
+            .checked_sub(elapsed)
+            .unwrap_or_else(Instant::now);
+        for (property, outcome) in original.invariants.iter().zip(outcomes) {
+            if let Some(note) = outcome.preemption {
+                preemptions.entry(property.name.clone()).or_insert(note);
+            }
+            if let Some(note) = outcome.unavailable {
+                unavailable
+                    .entry(property.name.clone())
+                    .or_default()
+                    .insert(note);
+            }
+            let Some(canonical_violation) = outcome.violation else {
+                continue;
+            };
             let mut model = model.clone();
             model
                 .invariants
                 .retain(|candidate| candidate.name == property.name);
-            let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
-                continue;
-            };
-            let Ok(result) = explain_bounded_run(&model, &mut solver, depth) else {
-                continue;
-            };
-            let Some(violation) = result.violation.as_ref() else {
-                continue;
-            };
-            let canonical_violation =
-                if violation.kind == "invariant" && violation.name == property.name {
-                    let mut canonical_violation = violation.clone();
-                    if let Ok(Some(trace)) = canonical_concrete_violation_trace(
-                        &model,
-                        &violation.name,
-                        violation.trace.len().saturating_sub(1),
-                    ) {
-                        canonical_violation.trace = trace;
-                    } else if let Some(root) = removed_init_root.as_deref() {
-                        canonicalize_initial_int_violation(&model, &mut canonical_violation, root);
-                    }
-                    canonical_violation
-                } else if matches!(
-                    violation.kind.as_str(),
-                    "type_bound" | "trans" | "partial_op" | "ensures"
-                ) {
-                    preemptions.entry(property.name.clone()).or_insert_with(|| {
-                        format!(
-                            "preempted by {} {} at step {}",
-                            violation.kind,
-                            model
-                                .names()
-                                .public_violation(&violation.name, violation.last_action.as_deref())
-                                .as_str(),
-                            violation.step,
-                        )
-                    });
-                    // The first failing non-user check need not be on the path
-                    // that breaks this target. Concrete search discards unsafe
-                    // children but keeps exploring the other enabled actions.
-                    let mut concrete_trace = None;
-                    for steps in 0..=depth {
-                        match canonical_concrete_violation_trace(&model, &property.name, steps) {
-                            Ok(Some(trace)) => {
-                                concrete_trace = Some(trace);
-                                break;
-                            }
-                            Ok(None) => {}
-                            Err(error) => {
-                                unavailable
-                                    .entry(property.name.clone())
-                                    .or_default()
-                                    .insert(concrete_search_unavailable_note(&model, &error));
-                                break;
-                            }
-                        }
-                    }
-                    let Some(trace) = concrete_trace else {
-                        continue;
-                    };
-                    fsl_verifier::BmcViolation {
-                        kind: "invariant".to_owned(),
-                        name: property.name.clone(),
-                        step: trace.len().saturating_sub(1),
-                        last_action: trace
-                            .last()
-                            .and_then(|entry| entry.action.as_ref())
-                            .map(|action| action.name.clone()),
-                        trace,
-                        leads_to: None,
-                    }
-                } else {
-                    continue;
-                };
             let violation = &canonical_violation;
             let (trace, explanation) =
                 invariant_violation_explanation(&model, &canonical_violation, started);
@@ -10339,13 +10747,7 @@ fn invariant_counterfactuals_from_source(
                 value.insert("origin".to_owned(), json!("init"));
                 value.insert("label".to_owned(), json!("init weakening"));
             }
-            let priority = match op {
-                "assignment-removal" => 0,
-                "requires-removal" => 1,
-                "fair-removal" => 2,
-                _ => 99,
-            };
-            let key = (canonical_violation.trace.len(), priority, span.start.line);
+            let key = counterfactual_rank(&candidate.op, span, &canonical_violation);
             let property = original
                 .invariants
                 .iter()
@@ -10563,12 +10965,13 @@ fn run_explain_from_source(
             "witnesses".to_owned(),
             explain_witnesses(&model, &scenarios),
         );
+        let mut runs = WeakenedModelRuns::default();
         output.insert(
             "counterfactuals".to_owned(),
-            invariant_counterfactuals_from_source(&model, path, source, depth),
+            invariant_counterfactuals_from_source(&model, path, source, depth, &mut runs),
         );
         let mut reachable_counterfactuals =
-            reachable_counterfactuals_from_source(&model, path, source, depth);
+            reachable_counterfactuals_from_source(&model, path, source, depth, &runs);
         if let Value::Array(items) = &mut reachable_counterfactuals {
             for item in items {
                 if let Value::Object(item) = item {
@@ -19644,6 +20047,160 @@ spec InitTraceability {
         assert!(
             explain_run_observer::bounded_runs() > 0,
             "the JSON form must run the bounded verifier: {explained:#}"
+        );
+    }
+
+    /// Pins how many bounded runs and concrete searches `explain` makes on a
+    /// small spec, beside the counterfactuals they produce (#1838).
+    #[test]
+    fn explain_counterfactual_runs_are_pinned() {
+        let fixture = SnapshotFixture::new("explain-run-count", EXPLAIN_RUN_COUNT_SPEC);
+        explain_run_observer::bounded_runs();
+        explain_run_observer::concrete_searches();
+        let (explained, status) =
+            run_explain_from_source(&fixture.path, EXPLAIN_RUN_COUNT_SPEC, 4, false);
+        assert_eq!(status, 0, "{explained:#}");
+        let runs = (
+            explain_run_observer::bounded_runs(),
+            explain_run_observer::concrete_searches(),
+        );
+        let properties = |key: &str| {
+            explained[key]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|item| {
+                    format!(
+                        "{} {}",
+                        item.get("invariant")
+                            .or_else(|| item.get("property"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                        item["weakening"]["op"].as_str().unwrap_or_default()
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            (
+                properties("counterfactuals"),
+                properties("reachable_counterfactuals")
+            ),
+            (
+                vec![
+                    "XAtMostTwo requires-removal".to_owned(),
+                    "YAtMostX requires-removal".to_owned()
+                ],
+                vec![
+                    "BothTwo assignment-removal".to_owned(),
+                    "BothTwo assignment-removal".to_owned()
+                ]
+            ),
+            "{explained:#}"
+        );
+        assert_eq!(runs, (12, 4), "bounded runs and concrete searches");
+    }
+
+    /// Screening, sharing and replay print what making every per-invariant
+    /// run in order prints, from the same solver context. Each spec has a
+    /// counterfactual whose trace the solver chose (#1838).
+    #[test]
+    fn shared_counterfactual_runs_print_the_unshared_output() {
+        for (label, source) in [
+            (
+                "explain-support-sla",
+                include_str!("../../../examples/nfr/support_sla.fsl"),
+            ),
+            (
+                "explain-refinement-algebra",
+                include_str!("../../../examples/self/refinement_algebra.fsl"),
+            ),
+        ] {
+            let fixture = SnapshotFixture::new(label, source);
+            let explain = |unshared| {
+                explain_run_observer::set_unshared(unshared);
+                let (mut output, status) = fsl_solver_z3::with_fresh_context(|| {
+                    run_explain_from_source(&fixture.path, source, 4, false)
+                });
+                explain_run_observer::set_unshared(false);
+                assert_eq!(status, 0, "{output:#}");
+                for item in output["counterfactuals"]
+                    .as_array_mut()
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(cost) = item
+                        .pointer_mut("/violation/cost")
+                        .and_then(Value::as_object_mut)
+                    {
+                        assert!(cost.remove("elapsed_s").is_some(), "{label}");
+                    }
+                }
+                output
+            };
+            assert_eq!(explain(false), explain(true), "{label}");
+        }
+    }
+
+    /// Removing `fill`'s guard breaks the `y` bound at step 3 before
+    /// `NotBothTwo` fails at step 4, so a run retaining both invariants first
+    /// reports the bound. That run proves nothing about either invariant: the
+    /// counterfactual and the preemption note must survive (#1838).
+    #[test]
+    fn screening_keeps_counterfactuals_behind_a_preempting_bound() {
+        const SPEC: &str = r"spec ScreenPreempt {
+  type Y = 0..2
+  type X = 0..2
+  state {
+    x: X,
+    y: Y
+  }
+  init {
+    x = 0
+    y = 0
+  }
+  action fill() {
+    requires y < 1
+    y = y + 1
+  }
+  action incx() {
+    requires x < 2
+    x = x + 1
+  }
+  invariant XInRange { x <= 2 }
+  invariant NotBothTwo { not (x == 2 and y == 2) }
+}
+";
+        let fixture = SnapshotFixture::new("explain-screen-preempt", SPEC);
+        let (explained, status) = run_explain_from_source(&fixture.path, SPEC, 6, false);
+        assert_eq!(status, 0, "{explained:#}");
+        let entries = explained["counterfactuals"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|entry| {
+                (
+                    entry["invariant"].as_str().unwrap_or_default().to_owned(),
+                    entry["weakening"]["target"].as_str().map(str::to_owned),
+                    entry["trace"].as_array().map_or(0, Vec::len),
+                    entry["note"]
+                        .as_str()
+                        .is_some_and(|note| note.starts_with("preempted by type_bound")),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries,
+            vec![
+                ("XInRange".to_owned(), None, 0, true),
+                (
+                    "NotBothTwo".to_owned(),
+                    Some("fill requires #1".to_owned()),
+                    5,
+                    false
+                ),
+            ],
+            "{explained:#}"
         );
     }
 
