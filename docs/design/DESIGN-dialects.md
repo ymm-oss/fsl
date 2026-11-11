@@ -328,6 +328,58 @@ No form changes from `ok` to `error`: `fslc check` of the 655 `.fsl` files under
 edits no `.fsl` file), gives the same result, kind, diagnostic code and exit
 code for every file.
 
+#### A stage-qualified entity after `for`, in either order (#1815)
+
+A stage-qualified entity is written stage first after `for` (`decide … for Placed
+Order`, `allow … only for Placed Order`, `never … for Packed Order`) and entity
+first elsewhere (`always Order not in Empty has buyer`, `count Order in Refunded`,
+`concept C = Order in Placed`, `policy … every Order in Placed …`). Every `for`
+now also reads `Entity in Stage`, so an author who learned one order from
+`always` or `count` need not guess the other.
+
+- **Grammar.** `in` is a keyword row of each context that reads a `for`
+  (`Allow`, `Never`, `Decide`), spelled `in` / `段階` as in every other context
+  that has one, so `fmt --lang` translates it and `fmt` keeps the order written.
+  `for Entity in Stage` names one stage, as `for Stage Entity` does: a list is
+  refused at its comma with a message that names the other order. `for Order not
+  in Placed` is not a form.
+- **Lowering.** Both orders build the same `Stage Entity` conjunct (rules) or the
+  same table stage and entity (`decide`). The kernel, and the canonical text of
+  each lowering step (`for Placed Order …`), are the same for both orders.
+- **The newline boundary.** A rule's concept expression (`conjuncts` in
+  `rules.rs`) reads a second word on the first word's line as the entity of
+  `Stage Entity`, because a statement starts on a new line. Before this change
+  `only for Order in Placed` read `Order in` as `Stage Entity` with an entity
+  named `in`, and `Placed` began the next statement. `Entity in Stage` is now read
+  first, and its `in` must stand on the entity's line, the same rule: a
+  statement on the next line that starts with a word spelled `in` / `段階` (a
+  property named so) stays a statement of its own, and `only for Order` followed
+  by `in Placed` on the next line is refused as before. The stage that an `in`
+  requires may follow on the next line, as the term that an `and` requires may:
+  the boundary only decides whether a word belongs. The table header has no
+  such boundary: `{` ends it, as it did for `for Stage Entity`.
+- **Not changed.** `always C1 is C2` reads `Stage Entity` only, because `always E
+  in …` begins `always E in S… has X`. A decision table row reads `Stage Entity`
+  only. `count`, `concept`, `policy` and `always … has` read `Entity in S…` only.
+
+| Form | Base `0de2dfc8` | This change |
+|---|---|---|
+| `decide … for Order in Placed {` / `決定表 … 対象 Order 段階 Placed {` | exit 2, `parse`, "expected '{'" at the stage after `in` / `段階` (read as `Stage Entity` with an entity named `in`) | exit 0; the kernel of `for Placed Order` |
+| `allow … only for Order in Placed` / `never … for Order in Packed` (also `対象 Order 段階 Placed`, and in an `and` either side) | exit 2, `parse`, "expected identifier" at the next line, or "expected 'only after'" | exit 0; the kernel of `Placed Order` |
+| `for Order in Placed, Packed` (table or rule) | exit 2, `parse`, "expected '{'" / "expected identifier" | exit 2, `parse`, "`Order in Placed` after `for` names one stage, as `Placed Order` does", at the comma |
+| `only for Order` and `in Placed` on the next line | exit 2, `parse`, "expected identifier" | unchanged |
+| `always Order in Placed is C`, a row `Order in Placed =>`, `count Placed Order` | exit 2, `parse` | unchanged |
+
+No form changes from `ok` to `error`: `fslc check` of the 665 `.fsl` files under
+`specs/`, `examples/` and `rust/fslc/tests/fixtures/`, with a binary built from
+`0de2dfc8` and one built from this change in the same tree (the change edits no
+`.fsl` file), gives the same exit, result, kind, diagnostic code and message for
+every file. No entity can be named `in` or `段階` and be used by an event (the
+event line is a parse error), so no accepted document wrote `for Stage in`.
+`rust/fslc/tests/issue_1815_for_entity_in_stage.rs` and
+`rust/fsl-lsp/tests/fsl5.rs` (`for_entity_in_stage_uses_the_entity_and_the_stage`)
+hold the contract.
+
 #### Repeated scenario step inputs (#1682)
 
 **Breaking removal (#1682).** The desugaring of a `scenario` or `forbidden` step

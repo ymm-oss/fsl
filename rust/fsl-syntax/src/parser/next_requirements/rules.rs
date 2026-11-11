@@ -60,7 +60,8 @@ struct Phrase {
     span: Span,
 }
 
-/// One conjunct of a concept expression: a concept, or `Stage Entity`.
+/// One conjunct of a concept expression: a concept, or `Stage Entity` (after
+/// `for`, also written `Entity in Stage`).
 pub(super) enum Conjunct {
     Concept(Word),
     Stage { stage: Word, entity: Word },
@@ -193,12 +194,13 @@ impl Parser<'_> {
     fn rule_statement(&mut self) -> Result<RuleStatement, ParseError> {
         if self.eat_kw(Kw::Allow) {
             let phrase = self.phrase(&[Kw::AllowOnlyWhen, Kw::AllowOnlyFor])?;
-            let condition = self.rule_condition(Kw::AllowOnlyWhen, Kw::AllowOnlyFor)?;
+            let condition =
+                self.rule_condition(Kw::AllowOnlyWhen, Kw::AllowOnlyFor, Kw::AllowForIn)?;
             return Ok(RuleStatement::Allow(phrase, condition));
         }
         if self.eat_kw(Kw::Never) {
             let phrase = self.phrase(&[Kw::NeverWhen, Kw::NeverFor])?;
-            let condition = self.rule_condition(Kw::NeverWhen, Kw::NeverFor)?;
+            let condition = self.rule_condition(Kw::NeverWhen, Kw::NeverFor, Kw::NeverForIn)?;
             return Ok(RuleStatement::Never(phrase, condition));
         }
         if self.eat_kw(Kw::Always) {
@@ -224,13 +226,13 @@ impl Parser<'_> {
                 });
             }
             let left_start = self.peek().span;
-            let left = self.conjuncts()?;
+            let left = self.conjuncts(None)?;
             let is = self.peek().span;
             if !self.peek_kw(Kw::AlwaysIs) {
                 return Err(self.error(&format!("expected {}", self.kw_spelling(Kw::AlwaysIs))));
             }
             self.bump();
-            let right = self.conjuncts()?;
+            let right = self.conjuncts(None)?;
             self.spellings.checks.push(crate::CheckSpelling {
                 is,
                 span: join_span(left_start, self.last_span()),
@@ -341,14 +343,14 @@ impl Parser<'_> {
 
     /// `<when> <expression>` (inputs spelled `input name`) or
     /// `<for> <concept expression>`: allow's `only when` / `only for`, never's
-    /// `when` / `for`.
-    fn rule_condition(&mut self, when: Kw, r#for: Kw) -> Result<Condition, ParseError> {
+    /// `when` / `for`; `r#in` is the context's `in` of `Entity in Stage`.
+    fn rule_condition(&mut self, when: Kw, r#for: Kw, r#in: Kw) -> Result<Condition, ParseError> {
         if self.eat_kw(when) {
             let from = self.cursor;
             let expression = self.event_expression()?;
             Ok(Condition::When(expression, self.canonical_text(from)))
         } else if self.eat_kw(r#for) {
-            Ok(Condition::For(self.conjuncts()?))
+            Ok(Condition::For(self.conjuncts(Some(r#in))?))
         } else {
             Err(self.error(&format!(
                 "expected {} <condition> or {} <concept>",
@@ -358,16 +360,24 @@ impl Parser<'_> {
         }
     }
 
-    /// `C {and C}` where each `C` is a concept or `Stage Entity`. The entity
-    /// of `Stage Entity` is on the stage's line: a statement starts on a new
-    /// line, so a word on the next line is not part of the expression.
-    fn conjuncts(&mut self) -> Result<Vec<Conjunct>, ParseError> {
+    /// `C {and C}` where each `C` is a concept or `Stage Entity`, or, with
+    /// `r#in` (after `for`), also `Entity in Stage`. The entity of `Stage
+    /// Entity`, like the `in` of `Entity in Stage`, is on the first word's
+    /// line: a statement starts on a new line, so a word on the next line is
+    /// not part of the expression.
+    fn conjuncts(&mut self, r#in: Option<Kw>) -> Result<Vec<Conjunct>, ParseError> {
         let mut conjuncts = Vec::new();
         loop {
             let first = self.word()?;
-            let next = self.peek();
-            let same_line = next.span.start.line == first.span.start.line;
-            let conjunct = if matches!(next.kind, TokenKind::Ident(_))
+            let same_line = self.peek().span.start.line == first.span.start.line;
+            let conjunct = if let Some(r#in) = r#in.filter(|r#in| same_line && self.peek_kw(*r#in))
+            {
+                self.bump_kw(r#in);
+                Conjunct::Stage {
+                    stage: self.stage_after_in(&first)?,
+                    entity: first,
+                }
+            } else if matches!(self.peek().kind, TokenKind::Ident(_))
                 && same_line
                 && !self.peek_kw(Kw::And)
                 && !self.peek_kw(Kw::AlwaysIs)
@@ -385,6 +395,22 @@ impl Parser<'_> {
                 return Ok(conjuncts);
             }
         }
+    }
+
+    /// The one stage of `entity in Stage` after a `for`, its `in` read.
+    /// `for Stage Entity` names one stage, and so does this order.
+    pub(super) fn stage_after_in(&mut self, entity: &Word) -> Result<Word, ParseError> {
+        let stage = self.word()?;
+        if is_symbol(self.peek(), ",") {
+            return Err(ParseError::new(
+                format!(
+                    "`{} in {}` after `for` names one stage, as `{} {}` does",
+                    entity.text, stage.text, stage.text, entity.text
+                ),
+                self.peek().span,
+            ));
+        }
+        Ok(stage)
     }
 }
 

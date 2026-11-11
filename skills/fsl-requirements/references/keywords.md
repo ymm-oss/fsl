@@ -114,22 +114,24 @@ what the parser reads.
 |---|---|---|
 | `input` | `入力` |  |
 
-**`allow P only when X | only for C`**
+**`allow P only when X | only for C` (`C`: concepts, `S E`, `E in S`)**
 
 | English | Japanese | Note |
 |---|---|---|
 | `allow` | `許可` |  |
 | `only when` | `条件` |  |
 | `only for` | `対象` |  |
+| `in` | `段階` |  |
 | `only as` | `立場` | reserved: not read yet |
 
-**`never P when X | for C`**
+**`never P when X | for C` (`C`: concepts, `S E`, `E in S`)**
 
 | English | Japanese | Note |
 |---|---|---|
 | `never` | `禁止` |  |
 | `when` | `条件` |  |
 | `for` | `対象` |  |
+| `in` | `段階` |  |
 | `because` | `理由` | reserved: not read yet |
 
 **`P only after Q`**
@@ -161,11 +163,12 @@ what the parser reads.
 |---|---|---|
 | `deadline` | `期限` |  |
 
-**`decide ID "text" for S E { … [otherwise => …] } [assuming Q]`**
+**`decide ID "text" for S E | for E in S { … [otherwise => …] } [assuming Q]`**
 
 | English | Japanese | Note |
 |---|---|---|
 | `for` | `対象` |  |
+| `in` | `段階` |  |
 | `otherwise` | `それ以外` |  |
 | `assuming` | `仮定` |  |
 
