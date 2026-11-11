@@ -4749,7 +4749,7 @@ separate rules guarding the same event also conjoin. The complete statement set 
 </tr>
 <tr>
 <td><code>Actor verb Entity only after Actor other Entity</code></td>
-<td>Unless the lifecycle already guarantees the order, a hidden per-instance history field is set by the prerequisite event and required by the later event.</td>
+<td>Unless the lifecycle already guarantees the order, a hidden per-instance history field is set by the prerequisite event and required by the later event. The field is named after the prerequisite events (<code>order_did_pay</code>); when two prerequisite sets of one entity would get the same name, each gets a numbered suffix (<code>order_did_a_or_b_1</code>, <code>order_did_a_or_b_2</code>). The number depends on the entity's other history fields and declared fields, not on rule order, so an edit elsewhere can change the field names shown in counterexamples.</td>
 </tr>
 <tr>
 <td><code>Name: Entity enters Target only from Source, Other</code></td>

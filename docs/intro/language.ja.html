@@ -4432,7 +4432,7 @@ fair ではありません。辺に対応する event がなければ <code>life
 </tr>
 <tr>
 <td><code>Actor verb Entity only after Actor other Entity</code></td>
-<td>lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。</td>
+<td>lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。フィールド名は前提の出来事から作ります（<code>order_did_pay</code>）。一つのエンティティで二つの前提の集合が同じ名前になる場合は、それぞれに番号が付きます（<code>order_did_a_or_b_1</code>、<code>order_did_a_or_b_2</code>）。番号は rule の順序ではなく、そのエンティティの他の履歴フィールドと宣言済みフィールドで決まるため、別の箇所の編集で反例に出るフィールド名が変わることがあります。</td>
 </tr>
 <tr>
 <td><code>Name: Entity enters Target only from Source, Other</code></td>
