@@ -2195,8 +2195,16 @@ Edition lint findings use the stable taxonomies `deprecated`,
 `non_canonical`, `ambiguous_intent`, and `unsupported_in_edition`. Migration
 handles legacy domain enums/operators, declaration string metadata, colon
 quantifiers, unambiguous local inline action mappings, and implicit defaults.
-It refuses source/comment movement that cannot be proven safe. `&&` remains an
-invalid token and is therefore reported with an `and` suggestion but is never
+For the next edition (the `migrate` default) it also inserts the `fsl 5`
+edition header into a headerless document (`missing_edition_header`; not a
+causal or AI declaration, `refinement`, or `compose`, which get no header) and
+converts each `process` of a headerless `requirements` document into an entity
+with its lifecycle, one event per transition, and a rule per guarded
+requirement (`legacy_process_form`). When that document declares no
+`terminal`, the converted document has the terminal states derived from the
+final lifecycle stages (`derived_terminal_added`), which can change the
+deadlock verdict. It refuses source/comment movement that cannot be proven
+safe. `&&` remains an invalid token and is therefore reported with an `and` suggestion but is never
 machine-applied. See `docs/design/DESIGN-migration.md` for atomicity and bulk-update
 steps.
 

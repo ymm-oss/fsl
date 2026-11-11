@@ -1937,14 +1937,14 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 
 ```
 fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
-fslc check     <file.fsl>                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
+fslc check     <file.fsl|file.md>                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
 fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics, fsl 5 info notes (§13.2); never mutates
 fslc migrate   <path>... [--edition current|next|4|5] [--write] # dry-run edits (default edition next); --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
-fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
+fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -1966,7 +1966,7 @@ fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] -
                                                # slice 1: safety-invariant counterexample を reproducer.v1 へ export
 fslc sweep     <file.fsl> [--instances E=lo..hi]... [--depth lo..hi] [--property Name]
                                                  # opt-in scope sweep over bounded verification
-fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
+fslc scenarios <file.fsl|file.md> [--depth K]     # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance (§12)
 fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                  # production log mapping + conformance (§12)
@@ -2024,7 +2024,14 @@ fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime eve
 `non_canonical`、`ambiguous_intent`、`unsupported_in_edition` を使います。
 マイグレーションは、レガシーの domain enum/演算子、宣言の文字列メタデータ、コロン
 量化子、曖昧さのないローカルなインライン action マッピング、暗黙のデフォルトを
-扱います。安全と証明できないソース/コメントの移動は拒否します。`&&` は引き続き
+扱います。次のエディション(`migrate` の既定)では、ヘッダーのない文書に `fsl 5`
+エディションヘッダーを挿入し(`missing_edition_header`。causal と AI の宣言、
+`refinement`、`compose` には挿入しません)、ヘッダーのない `requirements` 文書の
+各 `process` を、ライフサイクルを持つ entity、transition ごとの event、ガード付きの
+要件ごとの rule に変換します(`legacy_process_form`)。その文書が `terminal` を宣言
+していない場合、変換後の文書は最終のライフサイクル段階から導出される終端状態を持ち
+(`derived_terminal_added`)、deadlock の判定が変わることがあります。安全と証明
+できないソース/コメントの移動は拒否します。`&&` は引き続き
 不正なトークンであり、そのため `and` の提案つきで報告されますが、機械適用される
 ことはありません。原子性と一括更新の手順は `docs/design/DESIGN-migration.md` を参照。
 

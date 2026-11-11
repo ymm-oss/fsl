@@ -134,7 +134,21 @@ a feature-flag system solely to accommodate this flow.
      `./tools/release-notes.sh build --version X.Y.Z --repository-url https://github.com/ymm-oss/fsl --out /tmp/release-notes-X.Y.Z.md`
      passes; add
      `docs/release-notes/vX.Y.Z.md` when the section is over the limit or has
-     no bullets.
+     no bullets;
+   - ran `tools/aggregate_changelog.sh check-section --version X.Y.Z` on the
+     reviewed section: declared category order, one (id, category) pair per
+     entry, and breaking labels only under `Changed`. When
+     `docs/release-notes/vX.Y.Z.md` exists, every id of every breaking entry
+     must appear as `#N` under its `## Breaking changes` heading;
+   - a `changelog.d/` fragment that merged after the release commit and is to
+     ship is folded into the existing section with
+     `tools/aggregate_changelog.sh fold --version X.Y.Z`, then `check-section`
+     again; never run `release` a second time, and the tag-time `check-stale`
+     guard refuses the tag while a fragment remains. `fold` does not edit the
+     summary: add a folded user-visible change and every folded breaking
+     entry to it yourself. The fold changes the tree, so freeze the new merged
+     `main` SHA as the candidate (step 2); evidence for the earlier candidate
+     does not transfer.
 4. Run `./tools/check-native-integration.sh` and dispatch the release workflow's
    manual artifact build. Verify the completed run's `head_sha` equals the
    recorded candidate SHA; discard and rerun evidence produced from a moving
