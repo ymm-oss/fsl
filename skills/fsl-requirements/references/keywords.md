@@ -20,7 +20,7 @@ How the table works:
   scenario checks one instance's stage. To check more, write one expression
   after `then`, where `and` / `かつ` is the Boolean operator ("Boolean
   operators of an expression"):
-  `結果 claim_stage[0] == 支払済み かつ claim_amount[0] == 1`.
+  `結果 stage(申請1) == 支払済み かつ 申請1.申請金額 == 1`.
 - **Only these words.** The header `fsl 5`, `implements … from` and its
   mapping, expression operators other than `and` / `or`, kernel members
   (`terminal`, `time`, `state`, …) and the `verify` world's `..` stay English.

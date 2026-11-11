@@ -921,6 +921,20 @@ pub fn entity_binder(entity: &str) -> String {
         .map_or_else(|| "c".to_owned(), |first| first.to_lowercase().collect())
 }
 
+/// The state holding the stage of each instance of a next-edition entity
+/// (or a requirements `process`): `claim_stage` for `Claim`.
+#[must_use]
+pub fn entity_stage_state(entity: &str) -> String {
+    format!("{}_stage", entity.to_lowercase())
+}
+
+/// The state holding one field of each instance of a next-edition entity
+/// (or a requirements `process`): `claim_amount` for `Claim.amount`.
+#[must_use]
+pub fn entity_field_state(entity: &str, field: &str) -> String {
+    format!("{}_{}", entity.to_lowercase(), field)
+}
+
 /// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`
 /// (or `for Entity in Stage`).
 #[derive(Clone, Debug, Eq, PartialEq)]

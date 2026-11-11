@@ -2354,6 +2354,11 @@ and `c == 1` are assignability errors (`kind: "semantics"`, exit 2), located at
 the authored `expect`/`then` keyword. This is a post-state predicate, not an
 invariant; a well-typed false expectation still reports `kind: "acceptance"`.
 The readable `expect E id in Stage` and forbidden's `expect rejected` are unchanged.
+In an FSL 5 scenario, an instance name in `then` (`o1.qty`, `stage(o1)`,
+`Order.stage(o1)`) and a relation-role value naming an instance (`with buyer u1`)
+become the lowered state read and the instance number before this check, so they
+are checked as `order_qty[0]` and `with buyer 0` are (#1812; the rules are in
+`skills/fsl-requirements/references/syntax.md`).
 
 Historical compatibility measurement (#1439): against base `5a539bbe`, all 579
 forms per tree under `specs/`, `examples/` and `rust/fslc/tests/fixtures/` were checked in
