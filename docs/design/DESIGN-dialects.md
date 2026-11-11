@@ -687,7 +687,8 @@ identifier with no space, as in a call, so the parser records the `(` of each pa
 (`SourceSpellings::parenthesized_moves`). The formatter writes one space before those, so
 `Claim(Submitted -> Rejected)` prints as `Claim (Submitted -> Rejected)`. Without that record,
 `fmt` printed `Claim(Submitted -> Rejected)`; it parses the same, but it is not the documented
-layout. `fmt --lang` rewrites only the phrase, which ends before `(`. `fslc migrate --edition 5`
+layout. `fmt --lang` and `fmt --names` respell words where they stand; the move keeps its
+parentheses. `fslc migrate --edition 5`
 still writes the bare form. The LSP index reads stages between the parentheses as uses of the
 lifecycle's stages, as it does for a bare move.
 
@@ -705,7 +706,9 @@ Corpus: base `9bcff3eb` and this change were each materialized in their own tree
 `git archive <sha> | tar -x`. `FSLC_CACHE=off <binary> check|kernel|fmt <form>` ran there with a
 debug `fslc` built from that SHA, over every `.fsl` under `specs/`, `examples/` and
 `rust/fslc/tests/fixtures/` (665 files, 31 of them `fsl 5`). Stdout and exit code are
-byte-identical for every file and command. The change edits no `.fsl` file and no existing test.
+byte-identical for every file and command. The change edits no `.fsl` file. Of the existing
+tests, it changes only the event heading that `rust/fslc/tests/fsl5_keywords.rs` renders into
+`skills/fsl-requirements/references/keywords.md`.
 Documented in `docs/manual/LANGUAGE.md` and `docs/manual/LANGUAGE.ja.md`, the regenerated
 `docs/intro/language.{en,ja}.html`, `skills/fsl-requirements/` (`SKILL.md`,
 `references/syntax.md`, `references/glossary.md`, `references/keywords.md`),
