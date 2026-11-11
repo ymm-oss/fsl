@@ -12,7 +12,9 @@ formulas" to "adjudicating concrete examples."
 `fslc explain <f> [--depth K] --readable` emits the deterministic text review
 view. **No LLM used** (deterministic formatting only; prose generation is left
 to the agent-side skill). The verification engine is unmodified; #6 mutate and
-verify are reused.
+verify are reused. The text prints no witness or counterfactual, so
+`--readable` does not compute them (#1839); only its `Implements:` section
+runs a refinement check.
 
 ```json
 {"result":"explained",

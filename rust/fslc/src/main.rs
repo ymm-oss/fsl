@@ -5779,6 +5779,34 @@ fn run_scenarios_mode_from_source(
     )
 }
 
+/// One bounded verifier run of the witness or counterfactual phase of
+/// `explain` (shared with `scenarios`). Tests count these runs (#1838, #1839).
+fn explain_bounded_run(
+    model: &KernelModel,
+    solver: &mut fsl_solver_z3::Z3Solver,
+    depth: usize,
+) -> Result<fsl_verifier::BmcResult, fsl_verifier::VerifyError> {
+    #[cfg(test)]
+    explain_run_observer::record_bounded_run();
+    block_on_native(fsl_verifier::verify_bounded(model, solver, depth))
+}
+
+#[cfg(test)]
+mod explain_run_observer {
+    use std::cell::Cell;
+
+    thread_local! { static RUNS: Cell<usize> = const { Cell::new(0) }; }
+
+    pub(crate) fn record_bounded_run() {
+        RUNS.with(|runs| runs.set(runs.get() + 1));
+    }
+
+    /// The runs recorded on this thread since the last call.
+    pub(crate) fn bounded_runs() -> usize {
+        RUNS.with(|runs| runs.replace(0))
+    }
+}
+
 /// The scenarios envelope of a model whose requirement traces already passed
 /// the gate: only the gate hands out `trace_contract`, which the acceptance /
 /// forbidden scenarios are built from.
@@ -5796,7 +5824,7 @@ fn scenarios_from_checked_traces(
         Ok(solver) => solver,
         Err(error) => return error_exit(error_output("internal", &error.to_string())),
     };
-    let result = match block_on_native(fsl_verifier::verify_bounded(model, &mut solver, depth)) {
+    let result = match explain_bounded_run(model, &mut solver, depth) {
         Ok(result) => result,
         Err(error) => return error_exit(error_output("semantics", &error.to_string())),
     };
@@ -9752,8 +9780,7 @@ fn reachable_counterfactuals_from_source(
         let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
             continue;
         };
-        let Ok(result) = block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
-        else {
+        let Ok(result) = explain_bounded_run(&model, &mut solver, depth) else {
             continue;
         };
         if result.violation.is_some() || result.leadsto_violation.is_some() {
@@ -10216,9 +10243,7 @@ fn invariant_counterfactuals_from_source(
             let Ok(mut solver) = fsl_solver_z3::Z3Solver::new() else {
                 continue;
             };
-            let Ok(result) =
-                block_on_native(fsl_verifier::verify_bounded(&model, &mut solver, depth))
-            else {
+            let Ok(result) = explain_bounded_run(&model, &mut solver, depth) else {
                 continue;
             };
             let Some(violation) = result.violation.as_ref() else {
@@ -10512,7 +10537,6 @@ fn run_explain_from_source(
     };
     let spec_kind = source_dialect(source);
     let skeleton = model_skeleton(&model, spec_kind);
-    let scenarios = witness_scenarios(path, source, &model, trace_contract.as_ref(), depth, "warn");
     let mut output = envelope();
     output.insert("result".to_owned(), json!("explained"));
     output.insert("spec".to_owned(), json!(model.name));
@@ -10530,35 +10554,41 @@ fn run_explain_from_source(
     if let Some(next) = &readings {
         output.insert("readings".to_owned(), explain_readings::json(&model, next));
     }
-    output.insert(
-        "witnesses".to_owned(),
-        explain_witnesses(&model, &scenarios),
-    );
-    output.insert(
-        "counterfactuals".to_owned(),
-        invariant_counterfactuals_from_source(&model, path, source, depth),
-    );
-    let mut reachable_counterfactuals =
-        reachable_counterfactuals_from_source(&model, path, source, depth);
-    if let Value::Array(items) = &mut reachable_counterfactuals {
-        for item in items {
-            if let Value::Object(item) = item {
-                item.insert("faithfulness_class".to_owned(), json!("intent_unexercised"));
-                item.insert(
-                    "recommended_action".to_owned(),
-                    json!("add a single-shot reachable for the action / raise --depth"),
-                );
+    // The readable text prints no witness or counterfactual, so it does not
+    // compute them (#1839).
+    if !readable {
+        let scenarios =
+            witness_scenarios(path, source, &model, trace_contract.as_ref(), depth, "warn");
+        output.insert(
+            "witnesses".to_owned(),
+            explain_witnesses(&model, &scenarios),
+        );
+        output.insert(
+            "counterfactuals".to_owned(),
+            invariant_counterfactuals_from_source(&model, path, source, depth),
+        );
+        let mut reachable_counterfactuals =
+            reachable_counterfactuals_from_source(&model, path, source, depth);
+        if let Value::Array(items) = &mut reachable_counterfactuals {
+            for item in items {
+                if let Value::Object(item) = item {
+                    item.insert("faithfulness_class".to_owned(), json!("intent_unexercised"));
+                    item.insert(
+                        "recommended_action".to_owned(),
+                        json!("add a single-shot reachable for the action / raise --depth"),
+                    );
+                }
             }
         }
-    }
-    if reachable_counterfactuals
-        .as_array()
-        .is_some_and(|items| !items.is_empty())
-    {
-        output.insert(
-            "reachable_counterfactuals".to_owned(),
-            reachable_counterfactuals,
-        );
+        if reachable_counterfactuals
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+        {
+            output.insert(
+                "reachable_counterfactuals".to_owned(),
+                reachable_counterfactuals,
+            );
+        }
     }
     if readable {
         let mut text = format!("Spec: {} (depth {depth})\n", model.name);
@@ -19557,6 +19587,63 @@ spec InitTraceability {
                 .as_str()
                 .is_some_and(|text| text.contains("VacuousLeadstoFixture")),
             "readable explain output must retain source A: {output:#}"
+        );
+    }
+
+    /// A small spec for the tests that count `explain`'s bounded runs: two
+    /// invariants, a reachable, and two fair actions whose `requires` and
+    /// assignments the counterfactual phases remove.
+    const EXPLAIN_RUN_COUNT_SPEC: &str = r"spec RunCount {
+  type N = 0..3
+  state {
+    x: N,
+    y: N
+  }
+  init {
+    x = 0
+    y = 0
+  }
+  fair action inc() {
+    requires x < 2
+    x = x + 1
+  }
+  fair action copy() {
+    requires y < x
+    y = y + 1
+  }
+  invariant XAtMostTwo { x <= 2 }
+  invariant YAtMostX { y <= x }
+  reachable BothTwo { x == 2 and y == 2 }
+}
+";
+
+    /// `explain --readable` prints no witness or counterfactual, so it does
+    /// not run the bounded verifier; the JSON form of the same spec does
+    /// (#1839).
+    #[test]
+    fn readable_explain_runs_no_bounded_verification() {
+        let fixture = SnapshotFixture::new("explain-readable-runs", EXPLAIN_RUN_COUNT_SPEC);
+        explain_run_observer::bounded_runs();
+        let (readable, status) =
+            run_explain_from_source(&fixture.path, EXPLAIN_RUN_COUNT_SPEC, 4, true);
+        assert_eq!(status, 0, "{readable:#}");
+        assert!(
+            readable["readable"]
+                .as_str()
+                .is_some_and(|text| text.starts_with("Spec: RunCount (depth 4)\n")),
+            "{readable:#}"
+        );
+        assert_eq!(
+            explain_run_observer::bounded_runs(),
+            0,
+            "explain --readable ran the bounded verifier"
+        );
+        let (explained, status) =
+            run_explain_from_source(&fixture.path, EXPLAIN_RUN_COUNT_SPEC, 4, false);
+        assert_eq!(status, 0, "{explained:#}");
+        assert!(
+            explain_run_observer::bounded_runs() > 0,
+            "the JSON form must run the bounded verifier: {explained:#}"
         );
     }
 
