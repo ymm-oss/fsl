@@ -4422,11 +4422,11 @@ requirements Support {
   Ticket belongs to Agent as assignee via take
   resource desk_open: Bool = true
 
-  event take = Agent takes Ticket Open -> Assigned
-  event close = Agent closes Ticket Assigned -> Closed
-  event escalate = Agent escalates Ticket Assigned -> Escalated
+  event take = Agent takes Ticket (Open -> Assigned)
+  event close = Agent closes Ticket (Assigned -> Closed)
+  event escalate = Agent escalates Ticket (Assigned -> Escalated)
     set desk_open = false
-  event withdraw = Agent withdraws Ticket Open -> Withdrawn
+  event withdraw = Agent withdraws Ticket (Open -> Withdrawn)
 
   rule REQ-DESK-001 "A ticket is taken only while the desk is open" {
     allow Agent takes Ticket only when desk_open
@@ -4487,10 +4487,15 @@ A field is state, so it cannot be a quantifier range bound
 canonical `entity_field` names (for example `order_qty` and `order_stage`);
 design and `implements` mappings refer to those names.
 
-**Events.** `event place = User places Order with qty Empty -> Placed` names the
+**Events.** `event place = User places Order with qty (Empty -> Placed)` names the
 canonical action `place` and its actor/verb/entity phrase. A move must be a
 lifecycle edge (`event_not_on_lifecycle`); `in Placed` instead describes a
-same-stage event. `with qty` stores an input in that field;
+same-stage event. The move follows the phrase and its inputs, in parentheses or
+bare: `event place = User places Order with qty Empty -> Placed` is equally
+accepted and lowers to the same model, and `fmt` keeps the form written. The
+parentheses hold one move: a stay takes none (`(in Placed)` and `(Placed)` are
+parse errors), and full-width `（ ）` is `fullwidth_symbol`.
+`with qty` stores an input in that field;
 `with n: Qty` declares an explicitly typed input. If `n` matches no entity
 field, it adds no automatic field assignment; if it matches a field, that field
 is assigned even when the input's type is explicit.
@@ -4720,6 +4725,8 @@ For example, `従業員 が 経費申請 を 申請金額 で 提出する` is a
 `従業員 が c1 を 申請金額 1 で 提出する` is a scenario step. With particles,
 every phrase word except the verb needs its role marker, and word order can vary:
 `従業員 が 経費申請 を 提出する 申請金額 で` is the same event phrase.
+The event's move follows its phrase, so the sentence still ends with its verb:
+`出来事 submit = 従業員 が 経費申請 を 申請金額 で 提出する (下書き -> 提出済み)`.
 Partial marking is `mixed_particles`, a wrong role is `particle_role_mismatch`,
 and an attached particle (`従業員が`) is `particle_needs_space`.
 `fmt --lang ja|en` selects keyword spellings; `--names alias|canonical` selects

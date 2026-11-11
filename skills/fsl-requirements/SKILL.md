@@ -169,11 +169,11 @@ requirements ReturnRequirements {
   concept SmallReturn = Return where amount <= AUTO_LIMIT
   concept LargeReturn = Return where amount > AUTO_LIMIT
 
-  event request      = Customer requests Return with amount   Draft -> Requested
-  event auto_approve = System approves Return                Requested -> Approved
-  event mgr_approve  = Manager approves Return               Requested -> Approved
-  event reject       = Manager rejects Return                Requested -> Rejected
-  event refund       = Finance refunds Return                Approved -> Refunded
+  event request      = Customer requests Return with amount (Draft -> Requested)
+  event auto_approve = System approves Return (Requested -> Approved)
+  event mgr_approve  = Manager approves Return (Requested -> Approved)
+  event reject       = Manager rejects Return (Requested -> Rejected)
+  event refund       = Finance refunds Return (Approved -> Refunded)
 
   rule REQ-RET-001 "A return is requested with a positive amount" {
     allow Customer requests Return only when input amount > 0

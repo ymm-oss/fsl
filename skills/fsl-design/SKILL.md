@@ -47,7 +47,7 @@ Run `fslc explain --readable requirements.fsl` (with a glossary, add
 |---|---|
 | `entity Return { amount: … }` | `return_amount: Map<Return, Amount>` |
 | its `lifecycle` lines | `return_stage: Map<Return, ReturnStage>`; the enum's members are the stages, in order of first appearance |
-| `event request = Customer requests Return with amount Draft -> Requested` | action `request(r: Return, amount: Amount)`: the instance first, then the inputs |
+| `event request = Customer requests Return with amount (Draft -> Requested)` | action `request(r: Return, amount: Amount)`: the instance first, then the inputs |
 | `Order belongs to User as buyer via place` | `order_buyer: Map<Order, Option<User>>`; `place` gets the `User` instance as its second parameter |
 | `P only after Q` | a history field `order_did_<events of Q>` |
 | `resource stock: Qty` | `stock` |
