@@ -1264,11 +1264,200 @@ struct EventSignature {
     roles: Vec<String>,
 }
 
-/// A scenario instance name: its entity, number and simulated stage.
+/// A scenario instance name: its entity, number and simulated stage (empty
+/// for an entity with no lifecycle).
 struct Instance {
     entity: String,
     number: i64,
     stage: String,
+}
+
+/// The instance names of one trace: each is numbered from 0 per entity in
+/// order of first use, as a step's instance or as a relation role's value.
+struct TraceNames<'a> {
+    id: String,
+    forbidden: bool,
+    entities: &'a BTreeMap<String, Entity>,
+    instance_bounds: &'a BTreeMap<String, i64>,
+    /// The names that are values of the document (constants, resources,
+    /// enum members and stages): a role value or a check keeps reading them
+    /// as those values, never as an instance name.
+    values: &'a BTreeSet<String>,
+    instances: BTreeMap<String, Instance>,
+    counts: BTreeMap<String, i64>,
+}
+
+impl TraceNames<'_> {
+    /// Name `name` the next instance of `entity`, in its initial stage.
+    fn introduce(&mut self, name: &str, span: Span, entity: &str) -> Result<(), ParseError> {
+        let count = self.counts.entry(entity.to_owned()).or_default();
+        if let Some(&limit) = self.instance_bounds.get(entity)
+            && *count >= limit
+        {
+            return Err(ParseError::coded(
+                SCENARIO_INSTANCE_OVERFLOW,
+                format!(
+                    "'{}' {} '{name}' is instance {} of '{entity}', but verify bounds \
+                     '{entity}' to {limit} instance(s)",
+                    self.id,
+                    if self.forbidden {
+                        "forbidden trace names"
+                    } else {
+                        "scenario names"
+                    },
+                    *count + 1
+                ),
+                span,
+            ));
+        }
+        let stage = self
+            .entities
+            .get(entity)
+            .map(|declared| declared.stages[0].clone())
+            .unwrap_or_default();
+        self.instances.insert(
+            name.to_owned(),
+            Instance {
+                entity: entity.to_owned(),
+                number: *count,
+                stage,
+            },
+        );
+        *count += 1;
+        Ok(())
+    }
+
+    /// The value a step gives the relation role `role` of `event`, which
+    /// relates a `related`: a name that is not a value of the document is
+    /// the instance of that name, named here if no earlier step did.
+    fn role_value(
+        &mut self,
+        value: Expr,
+        span: Span,
+        related: &str,
+        role: &str,
+        event: &str,
+    ) -> Result<Expr, ParseError> {
+        let Expr::Var(name) = &value else {
+            return Ok(value);
+        };
+        if self.values.contains(name) {
+            return Ok(value);
+        }
+        if !self.instances.contains_key(name) {
+            self.introduce(name, span, related)?;
+        }
+        let bound = &self.instances[name];
+        if bound.entity != related {
+            return Err(ParseError::new(
+                format!(
+                    "'{name}' is an instance of '{}', but the relation '{role}' of event \
+                     '{event}' takes a '{related}'",
+                    bound.entity
+                ),
+                span,
+            ));
+        }
+        Ok(Expr::Num(bound.number))
+    }
+
+    /// The instance a check names by `name`, unless `name` is a value of the
+    /// document.
+    fn instance(&self, name: &str) -> Option<&Instance> {
+        if self.values.contains(name) {
+            None
+        } else {
+            self.instances.get(name)
+        }
+    }
+
+    /// A scenario's `then` expression with `o1.field`, `stage(o1)` and
+    /// `Entity.stage(o1)` of each instance `o1` the trace names read from
+    /// the lowered state at the instance's number (`order_qty[0]`). A binder
+    /// of the same name around the read keeps it, and so does an `is some(o1)`
+    /// pattern anywhere in the check, whose scope only the lowering knows.
+    fn instance_reads(&self, expression: Expr, span: Span) -> Result<Expr, ParseError> {
+        let at = |state: String, bound: &Instance| {
+            Expr::Index(
+                Box::new(Expr::Var(state)),
+                Box::new(Expr::Num(bound.number)),
+            )
+        };
+        let patterns = names::pattern_names(&expression);
+        let instance = |name: &String| {
+            if patterns.contains(name) {
+                None
+            } else {
+                self.instance(name)
+            }
+        };
+        names::resolve_names(
+            expression,
+            &BTreeSet::new(),
+            &|reference, _| match reference {
+                Expr::Field(receiver, field) => {
+                    let Expr::Var(name) = receiver.as_ref() else {
+                        return Ok(None);
+                    };
+                    let Some(bound) = instance(name) else {
+                        return Ok(None);
+                    };
+                    if !self
+                        .entities
+                        .get(&bound.entity)
+                        .is_some_and(|entity| entity.fields.contains_key(field))
+                    {
+                        return Err(ParseError::new(
+                            format!(
+                                "'{field}' is not a field of '{}', the entity of '{name}'",
+                                bound.entity
+                            ),
+                            span,
+                        ));
+                    }
+                    Ok(Some(at(
+                        crate::entity_field_state(&bound.entity, field),
+                        bound,
+                    )))
+                }
+                Expr::Stage {
+                    process,
+                    entity,
+                    entity_span,
+                    ..
+                } => {
+                    let Expr::Var(name) = entity.as_ref() else {
+                        return Ok(None);
+                    };
+                    let Some(bound) = instance(name) else {
+                        return Ok(None);
+                    };
+                    if let Some(path) = process
+                        && path.segments() != [bound.entity.as_str()]
+                    {
+                        return Err(ParseError::new(
+                            format!(
+                                "'{name}' is an instance of '{}', not of '{path}'",
+                                bound.entity
+                            ),
+                            *entity_span,
+                        ));
+                    }
+                    if !self.entities.contains_key(&bound.entity) {
+                        return Err(ParseError::new(
+                            format!(
+                                "'{name}' is an instance of '{}', which has no lifecycle",
+                                bound.entity
+                            ),
+                            *entity_span,
+                        ));
+                    }
+                    Ok(Some(at(crate::entity_stage_state(&bound.entity), bound)))
+                }
+                _ => Ok(None),
+            },
+        )
+    }
 }
 
 fn levenshtein(left: &str, right: &str) -> usize {
@@ -1922,6 +2111,20 @@ impl Pending {
             ));
         }
 
+        let values = items
+            .iter()
+            .flat_map(|item| match item {
+                RequirementsItem::Common(SpecItem::Const { name, .. }) => vec![name.clone()],
+                RequirementsItem::Common(SpecItem::Enum { members, .. }) => members.clone(),
+                _ => Vec::new(),
+            })
+            .chain(resources.iter().cloned())
+            .chain(
+                entities
+                    .values()
+                    .flat_map(|entity| entity.stages.iter().cloned()),
+            )
+            .collect::<BTreeSet<_>>();
         for (position, trace) in self.traces {
             let item = desugar_trace(
                 trace,
@@ -1929,6 +2132,7 @@ impl Pending {
                 &signatures,
                 &entities,
                 &instance_bounds,
+                &values,
                 &mut next,
             )?;
             generated.push((position, item));
@@ -2066,14 +2270,22 @@ fn desugar_trace(
     events: &[EventSignature],
     entities: &BTreeMap<String, Entity>,
     instance_bounds: &BTreeMap<String, i64>,
+    values: &BTreeSet<String>,
     next: &mut NextEditionRequirements,
 ) -> Result<RequirementsItem, ParseError> {
     let verbs = events
         .iter()
         .map(|event| event.verb.as_str())
         .collect::<BTreeSet<_>>();
-    let mut instances = BTreeMap::<String, Instance>::new();
-    let mut counts = BTreeMap::<String, i64>::new();
+    let mut names = TraceNames {
+        id: trace.id.clone(),
+        forbidden: trace.forbidden,
+        entities,
+        instance_bounds,
+        values,
+        instances: BTreeMap::new(),
+        counts: BTreeMap::new(),
+    };
     let mut steps = Vec::new();
     for step in trace.steps {
         let (actor, words, inputs, particles, span, phrase_span) = match step {
@@ -2137,7 +2349,8 @@ fn desugar_trace(
             inputs: inputs.iter().map(|(_, _, span)| *span).collect(),
         });
         let phrase = format!("'{} {}'", actor.text, verb.text);
-        let bound = instances
+        let bound = names
+            .instances
             .get(&instance.text)
             .map(|bound| bound.entity.clone());
         let matching = events
@@ -2187,39 +2400,10 @@ fn desugar_trace(
                     span,
                 ));
             };
-            let count = counts.entry(entity.to_owned()).or_default();
-            if let Some(&limit) = instance_bounds.get(entity)
-                && *count >= limit
-            {
-                return Err(ParseError::coded(
-                    SCENARIO_INSTANCE_OVERFLOW,
-                    format!(
-                        "'{}' {} '{}' is instance {} of '{entity}', but verify bounds \
-                         '{entity}' to {limit} instance(s)",
-                        trace.id,
-                        if trace.forbidden {
-                            "forbidden trace names"
-                        } else {
-                            "scenario names"
-                        },
-                        instance.text,
-                        *count + 1
-                    ),
-                    instance.span,
-                ));
-            }
-            let stage = entities[entity].stages[0].clone();
-            instances.insert(
-                instance.text.clone(),
-                Instance {
-                    entity: entity.to_owned(),
-                    number: *count,
-                    stage,
-                },
-            );
-            *count += 1;
+            names.introduce(&instance.text, instance.span, entity)?;
         }
-        let state = instances
+        let state = names
+            .instances
             .get_mut(&instance.text)
             .expect("the step's instance is bound");
         let from_here = matching
@@ -2253,29 +2437,33 @@ fn desugar_trace(
         if chosen.from == state.stage {
             state.stage.clone_from(&chosen.to);
         }
+        let mut args = vec![Expr::Num(state.number)];
         let mut given = BTreeMap::new();
-        for (name, value, _) in inputs {
+        for (name, value, input_span) in inputs {
             let (text, at) = (name.text.clone(), name.span);
-            if given.insert(text.clone(), (name, value)).is_some() {
+            if given
+                .insert(text.clone(), (name, value, input_span))
+                .is_some()
+            {
                 next.repeated_step_inputs.push((text, at));
             }
         }
-        let mut args = vec![Expr::Num(state.number)];
         for role in &chosen.roles {
-            let Some((_, value)) = given.remove(role) else {
+            let Some((_, value, input_span)) = given.remove(role) else {
                 return Err(ParseError::new(
                     format!(
                         "step {phrase} {} makes the relation '{role}' of event '{}'; give the \
-                         related instance (`with {role} <number>`)",
+                         related instance (`with {role} <instance>`)",
                         instance.text, chosen.name
                     ),
                     span,
                 ));
             };
-            args.push(value);
+            let related = &entities[&chosen.entity].fields[role].name;
+            args.push(names.role_value(value, input_span, related, role, &chosen.name)?);
         }
         for input in &chosen.inputs {
-            let Some((_, value)) = given.remove(input) else {
+            let Some((_, value, _)) = given.remove(input) else {
                 return Err(ParseError::new(
                     format!(
                         "step {phrase} {} gives no value for input '{input}' of event '{}' \
@@ -2287,7 +2475,7 @@ fn desugar_trace(
             };
             args.push(value);
         }
-        if let Some((name, (word, _))) = given.into_iter().next() {
+        if let Some((name, (word, _, _))) = given.into_iter().next() {
             return Err(ParseError::new(
                 format!("event '{}' has no input '{name}'", chosen.name),
                 word.span,
@@ -2311,9 +2499,11 @@ fn desugar_trace(
     }
     let (check, check_span) = trace.check.expect("a scenario has a check");
     let expectation = match check {
-        Check::Expr(expression) => AcceptanceExpectation::Expr(expression, check_span),
+        Check::Expr(expression) => {
+            AcceptanceExpectation::Expr(names.instance_reads(expression, check_span)?, check_span)
+        }
         Check::Stage { instance, stage } => {
-            let Some(bound) = instances.get(&instance.text) else {
+            let Some(bound) = names.instances.get(&instance.text) else {
                 return Err(ParseError::new(
                     format!(
                         "'{}' is not an instance a step of scenario '{}' names",
@@ -2322,7 +2512,16 @@ fn desugar_trace(
                     instance.span,
                 ));
             };
-            if !entities[&bound.entity].has_stage(&stage.text) {
+            let Some(entity) = entities.get(&bound.entity) else {
+                return Err(ParseError::new(
+                    format!(
+                        "'{}' is an instance of '{}', which has no lifecycle",
+                        instance.text, bound.entity
+                    ),
+                    instance.span,
+                ));
+            };
+            if !entity.has_stage(&stage.text) {
                 return Err(ParseError::new(
                     format!("'{}' is not a stage of '{}'", stage.text, bound.entity),
                     stage.span,

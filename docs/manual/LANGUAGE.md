@@ -4451,7 +4451,7 @@ requirements Support {
   measure closed_tickets = count Ticket in Closed
 
   scenario AC-TICKET-001 "An agent takes and closes a ticket" {
-    Agent takes t1 with assignee 1
+    Agent takes t1 with assignee a1
     Agent closes t1
     then t1 is Closed
   }
@@ -4606,8 +4606,11 @@ via take` adds an initially unset optional role to each ticket. The related enti
 must be declared with `entity`, and the `via` event's actor must be that entity,
 so `Agent` is declared as both `actor` and `entity`. The event records its
 counterpart as its first input, and every scenario step of that event must supply
-it: `with assignee 1` selects Agent instance 1. The value is an instance number;
-an instance label (`with assignee a1`) is refused. An event makes at most one
+it: `with assignee a1` names an Agent instance, numbered like the trace's other
+instance labels (see "Scenarios and stopping"), and `with assignee 1` still selects
+Agent instance 1 by number. A name the document declares as a constant, resource,
+enum member, or stage keeps that meaning there (`with assignee LEAD` is the constant
+`LEAD`); any other name is an instance label. An event makes at most one
 relation: a second relation to the same entity via the same event is refused at
 that relation (`event_already_makes_relation`), so give it its own event.
 `resource stock: Qty = 2` declares shared state outside any entity; events update it with `set`, and guards may read it.
@@ -4621,17 +4624,28 @@ Goals (`some E can reach S`) are reachability properties; policies
 Their IDs and quoted text remain part of traceability.
 
 **Scenarios and stopping.** A step is `Actor verb instance [with input value, …]`
-(`Agent takes t1 with assignee 1`). `Actor instance verb …` is the same step
-(`Agent t1 takes with assignee 1`): of the two words, the verb is the first that is
+(`Agent takes t1 with assignee a1`). `Actor instance verb …` is the same step
+(`Agent t1 takes with assignee a1`): of the two words, the verb is the first that is
 some event's verb. An actor/verb phrase resolves to an event; unknown or
 ambiguous matches report `unknown_verb`, `unknown_event_phrase`, or
-`ambiguous_step`. Instance labels (`t1`, `t2`) are local to a trace and allocated
-in order of first use; exceeding `verify` counts is `scenario_instance_overflow`.
-`then t1 is Closed` checks one instance's final stage. To check more, write an
-expression over the lowered state, indexed by instance number (the first label used
-for an entity is 0): `then ticket_stage[0] == Closed and ticket_stage[1] == Open`.
-Labels cannot appear in that expression, and `then t1 is Closed and t2 is Open` is
-refused. A scenario must execute
+`ambiguous_step`. Instance labels (`t1`, `t2`, and `a1` as a relation role's
+value) are local to a trace and numbered from 0 per entity in order of first use,
+a step's instance before its role value; exceeding `verify` counts is
+`scenario_instance_overflow`. A label names an instance of one entity: a role value
+naming an instance of another entity is refused. Only labels are counted, so a number
+written as a role value is that instance whatever the labels: after `with assignee 0`,
+the first Agent label is instance 0 too.
+`then t1 is Closed` checks one instance's final stage. To check more, write one
+expression: in it, `t1.field` is the field of instance `t1` and `stage(t1)` (or
+`Ticket.stage(t1)`) its stage, read from the lowered state at the instance's number
+(`t1.assignee` is `ticket_assignee[0]`):
+`then stage(t1) == Closed and t1.assignee == some(0)`. The lowered spelling
+(`ticket_stage[0] == Closed`) is still accepted. A label is read only in those two
+positions, not as a bare value (compare a role with a number, as above); a quantifier
+or aggregate binder of the same name hides it in its scope, an `is some(t1)` pattern
+anywhere in the expression hides it in the whole expression, and a constant, resource,
+enum member, or stage of the same name keeps its meaning.
+`then t1 is Closed and t2 is Open` is refused. A scenario must execute
 every step and satisfy its final check (`kind: "acceptance"`, `failed_step` for a
 failed step). A forbidden trace must execute its prefix and reject its last
 step: an accepted last step is `kind: "forbidden"`; a rejected prefix is

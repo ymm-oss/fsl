@@ -704,6 +704,82 @@ Documented in `docs/manual/LANGUAGE.md` and `docs/manual/LANGUAGE.ja.md`, `skill
 `skills/fsl-requirements/references/syntax.md` (pointed to from `skills/fsl/references/syntax.md`),
 and `changelog.d/1798-*.md`.
 
+#### Instance names in role values and checks (#1812)
+
+A scenario names its instances (`o1`, `申請1`), but a relation role's value took the related
+entity's raw number (`with buyer 0`) and a `then` expression only the lowered state
+(`order_qty[0]`). Both now take the trace's names; the number forms keep working. The rewrite is
+part of the step desugaring (`TraceNames` in `rust/fsl-syntax/src/parser/next_requirements.rs`),
+so every later stage sees exactly the number form it saw before: the lowering, `check`'s replay,
+the Monitor, BMC and BFS are unchanged, and `scenarios`, `testgen`, `explain`, `kernel` and
+`document` print the same output for the name form and the number form.
+
+- **Numbering.** One counter per entity, per trace. A name is numbered on its first use, as a
+  step's instance or as a role value, from 0; within a step the instance comes before its role
+  value (an event makes one relation, #1808, so a step has at most one role value). A name used
+  again is the same instance; a name of another entity's instance as a role value is refused
+  (`'t1' is an instance of 'Ticket', but the relation 'assignee' of event 'take' takes a
+  'Agent'`). The `verify` bound applies to role-introduced names (`scenario_instance_overflow`).
+  A number written as a role value does not take a slot: after `with assignee 0`, the first
+  Agent name is Agent 0 too. Refusing that mix would need the values of constants as well; it
+  is documented instead.
+  An instance of an entity with no lifecycle (`entity User`) has no stage: `then u1 is S` and
+  `stage(u1)` are refused (`… which has no lifecycle`).
+- **Which bare name is an instance.** A role value is any expression; only a single bare name
+  is read as an instance name, and only when the document does not declare it as a `const`, a
+  `resource`, an `enum` member or a lifecycle stage. Measured on base `0de2dfc8`: a constant
+  (`with buyer ALICE`) and an Int resource (`with buyer stock`) are accepted today and keep
+  their value; an enum member or stage resolves but fails typing (`acceptance`, "is not a value
+  of type 'User'") and keeps doing so. Every other bare name is now an instance name. On base
+  it was `public Kernel cannot type identifier`, or, for a name spelled like a lowered
+  per-entity state (`with buyer order_qty`), the same `acceptance` error, since such a state is a
+  map from instance numbers (`argument {"0":0,"1":0} … is not a value of type 'User'`). The only
+  scalar states a requirements document lowers to are its resources (in the 19 corpus
+  documents that lower, `stock` and `desk_open`), so no form that checked changes its meaning.
+  Lowered names are not excluded: core adds some itself (`*_stage_via_*` history), and the
+  parser cannot list them.
+- **Checks.** In `then <expr>`, `o1.field` becomes `entity_field[n]` and `stage(o1)` /
+  `Order.stage(o1)` becomes `entity_stage[n]`, with `n` the instance's number, through the same
+  binder-aware resolver as #1798 (which now also hands `stage(name)` to its callback). A
+  quantifier or aggregate binder of the same name keeps the name, as do the declared names
+  above. So does an `is some(o1)` pattern anywhere in the check (`names::pattern_names`): the
+  resolver does not treat patterns as binders (#1552), and the pattern's scope (its logical
+  continuation, `DESIGN-pattern-binding-scope.md`) is the lowering's to decide, so the whole
+  check keeps the name. Inside the scope that is the pattern variable, as on base; outside it
+  base already failed (`cannot type identifier`, or `stage(o1) cannot be resolved`), and still
+  does. A bare name is not rewritten: the kernel's identifiers there include lowered states,
+  history fields and ages that the parser does not enumerate, so reading a bare instance name
+  could silently change the meaning of a check that reads one of them. The state names come
+  from `fsl_syntax::entity_stage_state` / `entity_field_state`, to which
+  `fsl_core::naming::process_stage_state` / `process_field_state` delegate.
+
+Measured with `check` on base `0de2dfc8` and this change, on a probe document (`entity User`,
+`Order belongs to User as buyer via place`, `instances User = 2`):
+
+| Form | Base | This change |
+|---|---|---|
+| `User places o1 with buyer u1, qty 1` | exit 2, `semantics`, `cannot type identifier 'u1'` | exit 0, as `with buyer 0` |
+| `then o1.qty == 1` / `== 2` | exit 2, `semantics`, `cannot type identifier 'o1'` | exit 0 / exit 2, `acceptance` |
+| `then stage(o1) == Placed`, `then Order.stage(o1) == Placed` | exit 2, `semantics`, `stage(o1) cannot be resolved` | exit 0 |
+| `with buyer ALICE` (`const ALICE = 1`), `with buyer stock` (`resource stock: Qty = 1`) | exit 0, the value 1 | unchanged |
+| `with buyer Web` (enum member), `with buyer Placed` (stage) | exit 2, `acceptance`, not a value of type 'User' | unchanged |
+| `then exists o1: Order { o1.qty == 1 }` | exit 2, `semantics`, field access requires struct | unchanged |
+| `then some(Note { qty: 1 }) is some(o1) and o1.qty == 1` / `== 2`, in a document without the relation and with `struct Note { qty: Qty }`, after `User places o1 with qty 2` | exit 0 / exit 2, `acceptance`: the pattern's `o1` | unchanged |
+| `then o1.buyer == some(u1)` (a bare name) | exit 2, `semantics`, `cannot type identifier 'u1'` | unchanged |
+| Japanese: `利用者 が 注文1 を 購入者 利用者1 で 注文数 1 で 発注する`, `結果 注文1.注文数 == 1 かつ stage(注文1) == 発注済み` | exit 2, `semantics` | exit 0; `fmt --lang en --names canonical` keeps the names and lowers to the same kernel |
+
+Corpus: `fslc check` of every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/`
+(665 forms) with a debug binary built from `0de2dfc8` and one built from this change, both run in
+this change's tree (it edits no `.fsl` file): complete stdout and exit code are byte-equal for
+all 665. The executable evidence is in `rust/fslc/tests/fsl5_relations.rs`
+(`a_role_value_is_an_instance_name_of_the_related_entity`,
+`a_declared_name_as_a_role_value_keeps_its_meaning`,
+`a_scenario_check_reads_an_instance_by_its_name`,
+`japanese_instance_names_in_role_values_and_checks`). Documented in `docs/manual/LANGUAGE.md` and
+`docs/manual/LANGUAGE.ja.md` ("Relations, resources, and projections", "Scenarios and
+stopping"), `skills/fsl-requirements/references/syntax.md` and `keywords.md`,
+`skills/fsl/references/syntax.md`, and `changelog.d/1812-*.md`.
+
 #### Parenthesized event move (#1803)
 
 An `fsl 5` event may write its move in parentheses after the phrase and its inputs:

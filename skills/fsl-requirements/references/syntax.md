@@ -290,7 +290,7 @@ nothing.
 ```fsl check
 
   scenario AC-ORD-001 "A paid single order is delivered" {
-    User places o1 with buyer 0, qty 1
+    User places o1 with buyer u1, qty 1
     User pays o1
     Shop packs o1
     Shop ships o1
@@ -298,22 +298,22 @@ nothing.
     then o1 is Delivered
   }
   scenario AC-ORD-002 "A cancelled order keeps its quantity" {
-    User places o1 with buyer 0, qty 1
+    User places o1 with buyer u1, qty 1
     Shop cancels o1
-    then order_stage[0] == Cancelled and order_qty[0] == 1
+    then stage(o1) == Cancelled and o1.qty == 1
   }
   forbidden FB-ORD-001 "An unpaid order is not packed" {
-    User places o1 with buyer 0, qty 1
+    User places o1 with buyer u1, qty 1
     Shop packs o1
     then rejected
   }
   forbidden FB-ORD-002 "A bulk order is not cancelled" {
-    User places o1 with buyer 0, qty 2
+    User places o1 with buyer u1, qty 2
     Shop cancels o1
     then rejected
   }
   forbidden FB-ORD-003 "A damaged order is not delivered" {
-    User places o1 with buyer 0, qty 1
+    User places o1 with buyer u1, qty 1
     User pays o1
     Shop packs o1
     Shop ships o1
@@ -322,8 +322,8 @@ nothing.
     then rejected
   }
   forbidden FB-ORD-004 "No order is placed beyond the stock" {
-    User places o1 with buyer 0, qty 2
-    User places o2 with buyer 1, qty 1
+    User places o1 with buyer u1, qty 2
+    User places o2 with buyer u2, qty 1
     then rejected
   }
 }
@@ -338,9 +338,9 @@ verify {
 |---|---|
 | **scenario** `ID "text"` `{ steps  then check }` | a positive trace: every step must be enabled and the check must hold |
 | **forbidden** `ID "text"` `{ steps  then rejected }` | a negative trace: the steps before the last are enabled, and the last is rejected |
-| `Actor verb instance` [**with** `input value, …`] | a step; `o1`, `o2` are instance names, numbered in order of first use (more than `verify` allows is `scenario_instance_overflow`); a relation's role is an input (`with buyer 0`). `Actor instance verb` is the same step (`User o1 places with buyer 0, qty 1`): of the two words, the verb is the first that is some event's verb |
+| `Actor verb instance` [**with** `input value, …`] | a step; `o1`, `o2` are instance names. A relation's role is an input whose value names an instance of the related entity (`with buyer u1`) or gives its number (`with buyer 0`). Names are numbered from 0 per entity in order of first use, a step's instance before its role value (more than `verify` allows is `scenario_instance_overflow`); a name the spec declares as a constant, resource, enum member or stage keeps that meaning, and a name of another entity's instance is refused. Only names are counted: after `with buyer 0`, the first User name is 0 too. `Actor instance verb` is the same step (`User o1 places with buyer u1, qty 1`): of the two words, the verb is the first that is some event's verb |
 | **then** `o1` **is** `Stage` | the check after the last step: the stage of one instance. Nothing may follow it: `then o1 is Delivered and …` is refused (`kind: "parse"`) |
-| **then** `expression` | any other check after the last step, as one expression over the lowered state, joined with `and` (`AC-ORD-002`); an instance is its number, from 0 per entity in order of first use (`order_qty[0]` is `o1`'s quantity), and its name cannot be written there |
+| **then** `expression` | any other check after the last step, as one expression joined with `and` (`AC-ORD-002`). `o1.qty` is a field of `o1` and `stage(o1)` (or `Order.stage(o1)`) its stage: the lowered state at `o1`'s number (`order_qty[0]`, which may also be written). A name is read only there, not as a bare value (`o1.buyer == some(0)`); a binder, an `is some(o1)` pattern anywhere in the check, or a declared constant, resource, enum member or stage of the same name keeps its meaning |
 | **verify** `{ instances E = N  values T = lo..hi }` | the finite world every command checks in; results hold for these sizes only |
 
 `check` runs every scenario and forbidden trace. Each failure is
