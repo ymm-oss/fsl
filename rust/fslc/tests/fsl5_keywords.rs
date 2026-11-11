@@ -286,7 +286,7 @@ const fn context_heading(context: KeywordContext) -> &'static str {
         KeywordContext::Concept => "`concept C = E in S, … | where cond`",
         KeywordContext::Relation => "`R belongs to E as role via event`",
         KeywordContext::Event => {
-            "`[fault] event name = phrase [with …] A -> B | in S [set …] [covers …]`"
+            "`[fault] event name = phrase [with …] (A -> B) | A -> B | in S [set …] [covers …]`"
         }
         KeywordContext::RuleExpression => "Inside a rule's or an event's expression",
         KeywordContext::Allow => "`allow P only when X | only for C`",

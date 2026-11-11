@@ -50,7 +50,7 @@ pub enum KeywordContext {
     Concept,
     /// `R belongs to E as r via n`.
     Relation,
-    /// `[fault] event name = phrase [with …] S -> T | in S [set …] [covers …]`.
+    /// `[fault] event name = phrase [with …] (S -> T) | S -> T | in S [set …] [covers …]`.
     Event,
     /// Inside a rule's or an event's expression: `input name`.
     RuleExpression,

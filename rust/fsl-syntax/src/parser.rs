@@ -649,6 +649,7 @@ impl<'a> Parser<'a> {
             spellings.phrases.extend(parsed.phrases);
             spellings.checks = parsed.checks;
             spellings.statements = parsed.statements;
+            spellings.parenthesized_moves = parsed.parenthesized_moves;
             spellings.expressions = parsed.expressions;
             spellings
                 .keywords

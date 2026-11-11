@@ -734,8 +734,8 @@ impl Parser<'_> {
         })
     }
 
-    /// `[fault] event name = Actor Verb Entity [with i …] S -> T | in S
-    /// [set f = e, …] {covers ID "text"}`, or with particles
+    /// `[fault] event name = Actor Verb Entity [with i …] S -> T | (S -> T) |
+    /// in S [set f = e, …] {covers ID "text"}`, or with particles
     /// `Actor が Entity を [Verb] [i で] S -> T …` in any order.
     fn event_declaration(&mut self) -> Result<EventDeclaration, ParseError> {
         let span = self.peek().span;
@@ -776,6 +776,22 @@ impl Parser<'_> {
         let phrase_span = join_span(phrase_start, self.last_span());
         let movement = if self.eat_kw(Kw::EventIn) {
             Move::Stay(self.word()?)
+        } else if is_symbol(self.peek(), "(") {
+            let open = self.peek().span;
+            self.bump();
+            if self.peek_kw(Kw::EventIn) || is_symbol(self.peek_n(1), ")") {
+                return Err(ParseError::new(
+                    "a parenthesized move is `(S -> T)`; a stay is written `in S` (`段階 S`) \
+                     without parentheses",
+                    open,
+                ));
+            }
+            let from = self.word()?;
+            self.expect_symbol("->")?;
+            let to = self.word()?;
+            self.expect_symbol(")")?;
+            self.spellings.parenthesized_moves.push(open);
+            Move::Between(from, to)
         } else {
             let from = self.word()?;
             self.expect_symbol("->")?;

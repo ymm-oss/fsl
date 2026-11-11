@@ -97,7 +97,7 @@ what the parser reads.
 | `as` | `役名` |  |
 | `via` | `契機` |  |
 
-**`[fault] event name = phrase [with …] A -> B | in S [set …] [covers …]`**
+**`[fault] event name = phrase [with …] (A -> B) | A -> B | in S [set …] [covers …]`**
 
 | English | Japanese | Note |
 |---|---|---|

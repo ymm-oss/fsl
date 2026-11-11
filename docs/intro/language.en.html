@@ -4647,11 +4647,11 @@ requirements Support {
   Ticket belongs to Agent as assignee via take
   resource desk_open: Bool = true
 
-  event take = Agent takes Ticket Open -&gt; Assigned
-  event close = Agent closes Ticket Assigned -&gt; Closed
-  event escalate = Agent escalates Ticket Assigned -&gt; Escalated
+  event take = Agent takes Ticket (Open -&gt; Assigned)
+  event close = Agent closes Ticket (Assigned -&gt; Closed)
+  event escalate = Agent escalates Ticket (Assigned -&gt; Escalated)
     set desk_open = false
-  event withdraw = Agent withdraws Ticket Open -&gt; Withdrawn
+  event withdraw = Agent withdraws Ticket (Open -&gt; Withdrawn)
 
   rule REQ-DESK-001 &quot;A ticket is taken only while the desk is open&quot; {
     allow Agent takes Ticket only when desk_open
@@ -4710,10 +4710,15 @@ A field is state, so it cannot be a quantifier range bound
 (<code>exists x in qty..qty { ... }</code> is <code>binder bound is not a static integer</code>). Lowered fields use
 canonical <code>entity_field</code> names (for example <code>order_qty</code> and <code>order_stage</code>);
 design and <code>implements</code> mappings refer to those names.</p>
-<p><strong>Events.</strong> <code>event place = User places Order with qty Empty -&gt; Placed</code> names the
+<p><strong>Events.</strong> <code>event place = User places Order with qty (Empty -&gt; Placed)</code> names the
 canonical action <code>place</code> and its actor/verb/entity phrase. A move must be a
 lifecycle edge (<code>event_not_on_lifecycle</code>); <code>in Placed</code> instead describes a
-same-stage event. <code>with qty</code> stores an input in that field;
+same-stage event. The move follows the phrase and its inputs, in parentheses or
+bare: <code>event place = User places Order with qty Empty -&gt; Placed</code> is equally
+accepted and lowers to the same model, and <code>fmt</code> keeps the form written. The
+parentheses hold one move: a stay takes none (<code>(in Placed)</code> and <code>(Placed)</code> are
+parse errors), and full-width <code>（ ）</code> is <code>fullwidth_symbol</code>.
+<code>with qty</code> stores an input in that field;
 <code>with n: Qty</code> declares an explicitly typed input. If <code>n</code> matches no entity
 field, it adds no automatic field assignment; if it matches a field, that field
 is assigned even when the input's type is explicit.
@@ -5069,6 +5074,8 @@ For example, <code>従業員 が 経費申請 を 申請金額 で 提出する<
 <code>従業員 が c1 を 申請金額 1 で 提出する</code> is a scenario step. With particles,
 every phrase word except the verb needs its role marker, and word order can vary:
 <code>従業員 が 経費申請 を 提出する 申請金額 で</code> is the same event phrase.
+The event's move follows its phrase, so the sentence still ends with its verb:
+<code>出来事 submit = 従業員 が 経費申請 を 申請金額 で 提出する (下書き -&gt; 提出済み)</code>.
 Partial marking is <code>mixed_particles</code>, a wrong role is <code>particle_role_mismatch</code>,
 and an attached particle (<code>従業員が</code>) is <code>particle_needs_space</code>.
 <code>fmt --lang ja|en</code> selects keyword spellings; <code>--names alias|canonical</code> selects

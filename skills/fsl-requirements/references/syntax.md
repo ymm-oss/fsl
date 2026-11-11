@@ -105,28 +105,37 @@ source's words.
 
 ```fsl check
 
-  event place   = User places Order with qty      Empty -> Placed
+  event place   = User places Order with qty (Empty -> Placed)
     set stock = stock - input qty
-  event pay     = User pays Order                 in Placed
-  event pack    = Shop packs Order                Placed -> Packed
-  event cancel  = Shop cancels Order              Placed -> Cancelled
-  event ship    = Shop ships Order                Packed -> Shipped
-  event deliver = Courier delivers Order          Shipped -> Delivered
+  event pay     = User pays Order in Placed
+  event pack    = Shop packs Order (Placed -> Packed)
+  event cancel  = Shop cancels Order (Placed -> Cancelled)
+  event ship    = Shop ships Order (Packed -> Shipped)
+  event deliver = Courier delivers Order (Shipped -> Delivered)
     covers REQ-ORD-007 "A shipped order is delivered by the courier"
-  fault event damage = Weather damages Order      in Shipped
+  fault event damage = Weather damages Order in Shipped
     set damaged = true
-  event replace = Shop replaces Order             in Shipped
+  event replace = Shop replaces Order in Shipped
     set damaged = false
 ```
 
 | Form | Meaning |
 |---|---|
-| **event** `name = Actor verb Entity A -> B` | one move along a lifecycle edge (`event_not_on_lifecycle` if it is not an edge); `name` is the canonical action name implementations see |
-| … **in** `S` | an event that stays in stage `S` |
+| **event** `name = Actor verb Entity (A -> B)` | one move along a lifecycle edge (`event_not_on_lifecycle` if it is not an edge); `name` is the canonical action name implementations see |
+| … `A -> B` | the same move without parentheses |
+| … **in** `S` | an event that stays in stage `S`; a stay takes no parentheses |
 | … **with** `field` | an input stored in the field of that name; `with i: Type` is an input that is not a field; several inputs are a comma list |
 | **set** `x = expr, y = expr` | other updates; `input qty` names the input where a field has the same name (a bare `qty` there is `ambiguous_input_field`; `input qty` inside a binder named `qty` is `captured_by_binder`) |
 | **covers** `ID "text"` | the requirement this event carries |
 | **fault event** | not fair: something that may happen, never something that must eventually happen. The keyword makes it so, not the actor's name (`Weather`) |
+
+The move comes after the phrase and its inputs. In parentheses it reads as a
+note on the sentence, which ends with its verb in Japanese:
+`出来事 pack = 店舗 が 注文 を 梱包する (受注 -> 梱包済み)`. The bare form
+is equally accepted: `event pack = Shop packs Order Placed -> Packed` is the
+same event, and both lower to the same model. `fmt` keeps the form you wrote.
+The parentheses hold one move only: `(in Placed)` and `(Placed)` are refused
+(`kind: "parse"`), and full-width `（ ）` is refused as `fullwidth_symbol`.
 
 The verb may be left out (`Shop Order`); it then is the event name. Every
 lifecycle edge should have an event (`lifecycle_edge_without_event` warns

@@ -279,6 +279,98 @@ fn an_alias_resolves_to_its_canonical_declaration() {
     assert_eq!(index.definition_at(qualified.range.start), Some(amount));
 }
 
+/// `source` with the move `S -> T` of every event line written `(S -> T)`.
+fn parenthesize_moves(source: &str) -> String {
+    let mut output = String::new();
+    for line in source.split_inclusive('\n') {
+        let event = matches!(
+            line.split_whitespace().next(),
+            Some("event" | "出来事" | "fault" | "異常")
+        );
+        let Some(arrow) = line.find(" -> ").filter(|_| event) else {
+            output.push_str(line);
+            continue;
+        };
+        let from = line[..arrow].rfind(' ').expect("a word before the move") + 1;
+        let rest = &line[arrow + 4..];
+        let to = arrow + 4 + rest.find([' ', '\n']).unwrap_or(rest.len());
+        for part in [&line[..from], "(", &line[from..to], ")", &line[to..]] {
+            output.push_str(part);
+        }
+    }
+    output
+}
+
+/// #1803: the stages of a parenthesized move are uses of the lifecycle's
+/// stages, as in the bare move, in every spelling: the document declares the
+/// same names, its uses are on the same lines, and each stage between the
+/// parentheses resolves to its lifecycle declaration.
+#[test]
+fn the_stages_of_a_parenthesized_move_are_uses_of_the_lifecycle_stages() {
+    let uses = |index: &DocumentIndex| {
+        let mut uses = index
+            .references
+            .iter()
+            .map(|reference| {
+                (
+                    reference.name.clone(),
+                    reference.range.start.line,
+                    reference.qualifier.clone(),
+                    reference.alias.clone(),
+                    reference.target_spec().map(str::to_owned),
+                )
+            })
+            .collect::<Vec<_>>();
+        uses.sort();
+        uses
+    };
+    for file in SPELLINGS {
+        let (bare_source, bare) = index(file);
+        let source = parenthesize_moves(&bare_source);
+        assert_ne!(source, bare_source, "{file}");
+        let index = DocumentIndex::build(&source, Some(file), &ParseOptions::stable())
+            .unwrap_or_else(|error| panic!("{file}: {error}"));
+        assert_eq!(
+            index.unindexed_identifiers(),
+            Vec::<String>::new(),
+            "{file}"
+        );
+        assert_eq!(index.symbols, bare.symbols, "{file}");
+        assert_eq!(uses(&index), uses(&bare), "{file}");
+        let mut stages = 0;
+        for (line_number, line) in source.lines().enumerate() {
+            let event = matches!(
+                line.split_whitespace().next(),
+                Some("event" | "出来事" | "fault" | "異常")
+            );
+            let Some(open) = line.find(" (").filter(|_| event) else {
+                continue;
+            };
+            let inside = &line[open + 2..line.rfind(')').expect("closed")];
+            for stage in inside.split(" -> ") {
+                let line_number = u32::try_from(line_number).expect("fits");
+                let start = open + 2 + inside.find(stage).expect("stage");
+                let column = line[..start].encode_utf16().count();
+                let position = Position::new(line_number, u32::try_from(column).expect("fits"));
+                let definition = index
+                    .definition_at(position)
+                    .unwrap_or_else(|| panic!("{file}:{line_number}: {stage} resolves"));
+                assert_eq!(definition.role, SymbolRole::Variable, "{file}: {stage}");
+                assert!(
+                    source
+                        .lines()
+                        .nth(definition.selection_range.start.line as usize)
+                        .is_some_and(|declaring| declaring.trim_start().starts_with("lifecycle")
+                            || declaring.trim_start().starts_with("ライフサイクル")),
+                    "{file}: {stage} resolves to {definition:?}"
+                );
+                stages += 1;
+            }
+        }
+        assert_eq!(stages, 10, "{file}: two stages of five events");
+    }
+}
+
 /// The left side of an `implements` mapping names this document's event and
 /// the right side the implemented layer's action, as in a refinement file:
 /// the mapping's parameters are its own, not the entity's field `amount`.

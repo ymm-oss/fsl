@@ -47,7 +47,7 @@ Run `fslc explain --readable requirements.fsl` (with a glossary, add
 |---|---|
 | `entity Return { amount: … }` | `return_amount: Map<Return, Amount>` |
 | its `lifecycle` lines | `return_stage: Map<Return, ReturnStage>`; the enum's members are the stages, in order of first appearance |
-| `event request = Customer requests Return with amount Draft -> Requested` | action `request(r: Return, amount: Amount)`: the instance first, then the inputs |
+| `event request = Customer requests Return with amount (Draft -> Requested)` | action `request(r: Return, amount: Amount)`: the instance first, then the inputs |
 | `Order belongs to User as buyer via place` | `order_buyer: Map<Order, Option<User>>`; `place` gets the `User` instance as its second parameter |
 | `P only after Q` | a history field `order_did_<events of Q>`, the events joined by `_or_`; when two prerequisite sets of the entity would get the same name, each gets a numbered suffix (`order_did_a_or_b_1`, `order_did_a_or_b_2`), and the number depends on the entity's other history fields and declared fields (not on rule order), so an edit elsewhere can renumber it: read the name from `explain --readable` |
 | `resource stock: Qty` | `stock` |

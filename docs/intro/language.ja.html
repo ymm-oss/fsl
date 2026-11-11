@@ -4332,11 +4332,11 @@ requirements Support {
   Ticket belongs to Agent as assignee via take
   resource desk_open: Bool = true
 
-  event take = Agent takes Ticket Open -&gt; Assigned
-  event close = Agent closes Ticket Assigned -&gt; Closed
-  event escalate = Agent escalates Ticket Assigned -&gt; Escalated
+  event take = Agent takes Ticket (Open -&gt; Assigned)
+  event close = Agent closes Ticket (Assigned -&gt; Closed)
+  event escalate = Agent escalates Ticket (Assigned -&gt; Escalated)
     set desk_open = false
-  event withdraw = Agent withdraws Ticket Open -&gt; Withdrawn
+  event withdraw = Agent withdraws Ticket (Open -&gt; Withdrawn)
 
   rule REQ-DESK-001 &quot;A ticket is taken only while the desk is open&quot; {
     allow Agent takes Ticket only when desk_open
@@ -4394,10 +4394,15 @@ lifecycle 行を追加すると別のパスを表せます。<code>number Qty</c
 （<code>exists x in qty..qty { ... }</code> は <code>binder bound is not a static integer</code>）。
 変換後のフィールド名は <code>order_qty</code>、<code>order_stage</code> など、正規名の <code>entity_field</code> です。
 設計と <code>implements</code> のマッピングでは、その名前を使います。</p>
-<p><strong>出来事。</strong> <code>event place = User places Order with qty Empty -&gt; Placed</code> は、
+<p><strong>出来事。</strong> <code>event place = User places Order with qty (Empty -&gt; Placed)</code> は、
 正規の action 名 <code>place</code> と、アクター・動詞・エンティティの句を定めます。
 遷移は lifecycle の辺でなければなりません（<code>event_not_on_lifecycle</code>）。
 代わりに <code>in Placed</code> と書くと、同じ段階にとどまる出来事です。
+遷移は句と入力の後に、括弧で囲んでも囲まずにも書けます。
+<code>event place = User places Order with qty Empty -&gt; Placed</code> も同じく受理され、同じモデルに
+変換されます。<code>fmt</code> は書かれた形を保ちます。括弧の中は遷移 1 つだけです。とどまる出来事には
+括弧を付けません（<code>(in Placed)</code> と <code>(Placed)</code> は構文エラー）。全角の <code>（ ）</code> は
+<code>fullwidth_symbol</code> です。
 <code>with qty</code> は入力を同名フィールドに格納します。<code>with n: Qty</code> は型を明記した入力です。
 <code>n</code> と同名のフィールドがなければ、自動のフィールド代入は行いません。同名のフィールドが
 あれば、入力の型を明記していても代入します。入力も <code>set x = expr, y = expr</code> の更新も、
@@ -4740,6 +4745,8 @@ allow の <code>only as</code> / <code>立場</code>、never の <code>because</
 <code>従業員 が c1 を 申請金額 1 で 提出する</code> はシナリオのステップです。
 助詞を使う句では、動詞以外の各語に役割の印を付けると、語順を変えられます。
 <code>従業員 が 経費申請 を 提出する 申請金額 で</code> も同じ event の句です。
+出来事の遷移は句の後に書くので、文は動詞で終わります。
+<code>出来事 submit = 従業員 が 経費申請 を 申請金額 で 提出する (下書き -&gt; 提出済み)</code>。
 一部だけに付けると <code>mixed_particles</code>、役割が違うと <code>particle_role_mismatch</code>、
 <code>従業員が</code> のように語につなげると <code>particle_needs_space</code> です。
 <code>fmt --lang ja|en</code> でキーワード、<code>--names alias|canonical</code> で用語の綴りを選びます。

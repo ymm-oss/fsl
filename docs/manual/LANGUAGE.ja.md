@@ -4107,11 +4107,11 @@ requirements Support {
   Ticket belongs to Agent as assignee via take
   resource desk_open: Bool = true
 
-  event take = Agent takes Ticket Open -> Assigned
-  event close = Agent closes Ticket Assigned -> Closed
-  event escalate = Agent escalates Ticket Assigned -> Escalated
+  event take = Agent takes Ticket (Open -> Assigned)
+  event close = Agent closes Ticket (Assigned -> Closed)
+  event escalate = Agent escalates Ticket (Assigned -> Escalated)
     set desk_open = false
-  event withdraw = Agent withdraws Ticket Open -> Withdrawn
+  event withdraw = Agent withdraws Ticket (Open -> Withdrawn)
 
   rule REQ-DESK-001 "A ticket is taken only while the desk is open" {
     allow Agent takes Ticket only when desk_open
@@ -4171,10 +4171,15 @@ lifecycle 行を追加すると別のパスを表せます。`number Qty` の有
 変換後のフィールド名は `order_qty`、`order_stage` など、正規名の `entity_field` です。
 設計と `implements` のマッピングでは、その名前を使います。
 
-**出来事。** `event place = User places Order with qty Empty -> Placed` は、
+**出来事。** `event place = User places Order with qty (Empty -> Placed)` は、
 正規の action 名 `place` と、アクター・動詞・エンティティの句を定めます。
 遷移は lifecycle の辺でなければなりません（`event_not_on_lifecycle`）。
 代わりに `in Placed` と書くと、同じ段階にとどまる出来事です。
+遷移は句と入力の後に、括弧で囲んでも囲まずにも書けます。
+`event place = User places Order with qty Empty -> Placed` も同じく受理され、同じモデルに
+変換されます。`fmt` は書かれた形を保ちます。括弧の中は遷移 1 つだけです。とどまる出来事には
+括弧を付けません（`(in Placed)` と `(Placed)` は構文エラー）。全角の `（ ）` は
+`fullwidth_symbol` です。
 `with qty` は入力を同名フィールドに格納します。`with n: Qty` は型を明記した入力です。
 `n` と同名のフィールドがなければ、自動のフィールド代入は行いません。同名のフィールドが
 あれば、入力の型を明記していても代入します。入力も `set x = expr, y = expr` の更新も、
@@ -4405,6 +4410,8 @@ allow の `only as` / `立場`、never の `because` / `理由` は予約済み�
 `従業員 が c1 を 申請金額 1 で 提出する` はシナリオのステップです。
 助詞を使う句では、動詞以外の各語に役割の印を付けると、語順を変えられます。
 `従業員 が 経費申請 を 提出する 申請金額 で` も同じ event の句です。
+出来事の遷移は句の後に書くので、文は動詞で終わります。
+`出来事 submit = 従業員 が 経費申請 を 申請金額 で 提出する (下書き -> 提出済み)`。
 一部だけに付けると `mixed_particles`、役割が違うと `particle_role_mismatch`、
 `従業員が` のように語につなげると `particle_needs_space` です。
 `fmt --lang ja|en` でキーワード、`--names alias|canonical` で用語の綴りを選びます。
