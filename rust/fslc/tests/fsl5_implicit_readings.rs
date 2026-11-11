@@ -18,6 +18,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
 
@@ -187,8 +188,18 @@ fn explicit_edits(index: usize, positions: &[usize]) -> Vec<(&'static str, &'sta
     edits
 }
 
+static SCRATCH_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+
+/// `text` written to `name` in a directory of its own: the tests run in
+/// parallel and reuse names, and `--readable` output shows the name.
 fn scratch(name: &str, text: &str) -> PathBuf {
-    let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("fsl5_implicit_readings");
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("fsl5_implicit_readings")
+        .join(format!(
+            "{}-{}",
+            std::process::id(),
+            SCRATCH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
     std::fs::create_dir_all(&directory).expect("scratch directory");
     let path = directory.join(name);
     std::fs::write(&path, text).expect("write scratch source");
