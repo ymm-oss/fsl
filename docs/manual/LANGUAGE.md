@@ -2109,7 +2109,7 @@ additional removals in #1463.
 ```
 fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check     <file.fsl|file.md>                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
-fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics, fsl 5 info notes (§13.2); never mutates
 fslc migrate   <path>... [--edition current|next|4|5] [--write] # dry-run edits (default edition next); --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
@@ -4503,6 +4503,34 @@ records traceability. Declare every actor, including those used in scenarios
 (`actor_not_declared`). Ordinary events are fair; `fault event` is not fair.
 A declared edge with no event warns `lifecycle_edge_without_event`.
 
+**Seeing the implicit readings (#1817).** Several of these forms take their
+meaning from a name match, word count or line order, so an edit can change
+the meaning without a message: renaming `with qty` or the field `qty` drops the
+store; reordering lifecycle lines changes the initial stage and the stage
+order; `Shop Order` makes the event name the verb. `fslc explain` shows each
+reading. Its JSON gains `readings` (only for a requirements document headed
+`fsl 5`): `entities[]` with `entity`, `initial`, `stages` (in enum order) and
+`lifecycle_lines`, and `events[]` with `event`, `entity`, `verb`,
+`verb_omitted`, `fair`, `inputs[]` (`name`, `written`, and `stored[]` of
+`{field, by}`, `by` one of `same_name`, `set` for `set f = input name`, and
+`relation` for the actor's instance a relation's event records, which the
+source does not write; an input used only inside a larger expression is
+stored nowhere, `stored: []`), and `guards[]` (each `requires` of the event's
+action: `index`, `expr`, `conjunctive: true`, and the `origins` that
+`explain --lowering` lists). Every guard of an event must hold: an
+`allow … only when` adds one; it never makes an event possible that another
+guard refuses. `--readable` shows the same as a `Lifecycles:` section and, under
+each event's action, `verb:` (when left out), `fair:`, `input …:` and a
+`guards:` line. Nothing else in `explain`'s output changes. `fslc lint` reports
+three info notes in `files[].notes[]` (counted in `note_count`), with the
+fields of a finding, taxonomy `ambiguous_intent` and `severity: "info"`:
+`input_stored_by_name` (at the input), `verb_from_event_name` (at the
+phrase) and `initial_stage_from_line_order` (at the initial stage, for an
+entity with more than one lifecycle line). Both keys appear only when there
+is a note, so `lint` of any other document prints what it printed before. A
+note is not a finding: it changes neither `findings`, `finding_count` nor the
+exit code.
+
 **Rules.** A `rule ID "source text" { statement+ }` conjoins all its statements;
 separate rules guarding the same event also conjoin. The complete statement set is:
 
@@ -6192,7 +6220,9 @@ DESIGN-*.md).
   branch lowering, synthesized refinement mappings, automatic checks, tags) +
   counterfactuals ("without this rule, this procedure could break it") + witness
   narration. Moves human review from reading logical formulas to adjudicating
-  concrete examples. JSON mode remains available without `--readable`. →
+  concrete examples. JSON mode remains available without `--readable`. For a
+  requirements document headed `fsl 5` it also shows the readings the source
+  leaves implicit (`readings`; §13.2 "Seeing the implicit readings"). →
   [`DESIGN-explain.md`](../design/DESIGN-explain.md)
 - **`fslc analyze`** — emits structural observation JSON. `--projection tsg`
   returns the Typed Semantic Graph of requirements, actions, state, properties,

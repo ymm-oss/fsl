@@ -28,6 +28,7 @@ mod cli_options;
 mod cli_output;
 mod code_audit;
 mod explain_lowering;
+mod explain_readings;
 mod log_replay;
 mod name_display;
 mod output_publication;
@@ -551,6 +552,7 @@ fn run_lint_inner(
     };
     let mut files = Vec::new();
     let mut finding_count = 0_usize;
+    let mut note_count = 0_usize;
     for path in &paths {
         let (source, mut plan, edition) = match load_migration_plan(path, options, log) {
             Ok(loaded) => loaded,
@@ -583,25 +585,35 @@ fn run_lint_inner(
         plan.diagnostics
             .sort_by_key(|diagnostic| diagnostic.span.start.offset);
         finding_count += plan.diagnostics.len();
-        files.push(json!({
+        let notes = fslc_rust::migration::implicit_reading_notes(&source, crate::parse_options());
+        note_count += notes.len();
+        let mut file = json!({
             "path": path,
             "findings": plan.diagnostics.iter().map(|finding| finding.json(&path.to_string_lossy(), edition)).collect::<Vec<_>>(),
-        }));
+        });
+        if !notes.is_empty() {
+            file["notes"] = notes
+                .iter()
+                .map(|note| note.json(&path.to_string_lossy(), edition))
+                .collect();
+        }
+        files.push(file);
     }
-    (
-        json!({
-            "fsl":"1.0",
-            "result":"lint",
-            "edition":options.requested_edition(),
-            "finding_count":finding_count,
-            "id_policy":{
-                "source":policy_source,
-                "patterns":id_policy.json(),
-            },
-            "files":files,
-        }),
-        i32::from(finding_count > 0),
-    )
+    let mut output = json!({
+        "fsl":"1.0",
+        "result":"lint",
+        "edition":options.requested_edition(),
+        "finding_count":finding_count,
+        "id_policy":{
+            "source":policy_source,
+            "patterns":id_policy.json(),
+        },
+        "files":files,
+    });
+    if note_count > 0 {
+        output["note_count"] = json!(note_count);
+    }
+    (output, i32::from(finding_count > 0))
 }
 
 fn expand_lint_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
@@ -10514,6 +10526,10 @@ fn run_explain_from_source(
         }),
     );
     output.insert("skeleton".to_owned(), skeleton);
+    let readings = explain_readings::of_source(source);
+    if let Some(next) = &readings {
+        output.insert("readings".to_owned(), explain_readings::json(&model, next));
+    }
     output.insert(
         "witnesses".to_owned(),
         explain_witnesses(&model, &scenarios),
@@ -10571,6 +10587,16 @@ fn run_explain_from_source(
                 type_ref_text(&model, ty)
             );
         }
+        let lifecycles = readings
+            .as_ref()
+            .map(explain_readings::lifecycle_lines)
+            .unwrap_or_default();
+        if !lifecycles.is_empty() {
+            text.push_str("\nLifecycles:\n");
+            for line in lifecycles {
+                let _ = writeln!(text, "  - {line}");
+            }
+        }
         if let Some(implements) = readable_implements_text_from_source(path, source, &model, depth)
         {
             text.push_str("\nImplements:\n");
@@ -10618,6 +10644,9 @@ fn run_explain_from_source(
             for line in explain_lowering::action_lines(&model, &action.name) {
                 let _ = writeln!(text, "    {line}");
             }
+            for line in explain_readings::action_lines(&model, readings.as_ref(), action) {
+                let _ = writeln!(text, "    {line}");
+            }
             for requirement in action
                 .annotations
                 .requirements()
@@ -10632,6 +10661,9 @@ fn run_explain_from_source(
                         .as_ref()
                         .map_or_else(String::new, |value| format!(": {value}"))
                 );
+            }
+            if let Some(line) = explain_readings::guards_line(&model, readings.as_ref(), action) {
+                let _ = writeln!(text, "    {line}");
             }
             if !action.requires.is_empty() {
                 text.push_str("    requires:\n");

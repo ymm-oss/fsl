@@ -109,7 +109,7 @@ what you must read.
 | `refines` | `checked_to_depth`, `action_map` | bounded by that depth |
 | `semantic_diff` | `summary`, findings, `gate` | gate with `--forbid` |
 | `mutated` | `summary.kill_rate`, `summary.survived`, `mutants[]` with `status: "survived"`, `by_requirement` | §6 |
-| `lint` | `finding_count`, `files[].findings[].code` | done at `finding_count: 0` |
+| `lint` | `finding_count`, `files[].findings[].code`; `files[].notes[]` (info, §8) | done at `finding_count: 0`; notes do not count |
 | `error` with `kind: "unsupported_in_edition"` (`fsl 5`) | `findings[].code`, `loc`, `canonical_replacement`, `machine_applicable` | apply the replacement, or `migrate --edition 5 --write` |
 | `error` with `kind: "acceptance"` / `"forbidden"` / `"forbidden_setup"` | `id`, `failed_step`, `step` | a scenario step was rejected; a forbidden trace's last step was accepted; a forbidden trace's setup step was already rejected (the trace never reached the call it tests) |
 
@@ -261,6 +261,9 @@ canonical name in parentheses (`'申請（Claim）'`).
 | `event_already_makes_relation` | a second relation names an event that already makes one (`… via place` twice); an event makes at most one relation | give the second relation its own event |
 | `actor_shadows_member` (warning) | an actor is spelled like an enum member | rename one |
 | `lifecycle_edge_without_event` (warning) | an edge no event takes | §2 |
+| `input_stored_by_name` (`lint` note, info) | an event input is stored in the field of the same name only because the names match; renaming either drops the store | keep it if the source means it; `fslc explain` lists each input's `stored` |
+| `verb_from_event_name` (`lint` note, info) | the event phrase leaves the verb out, so the event name is the verb scenario steps use | write the verb when the source has one |
+| `initial_stage_from_line_order` (`lint` note, info) | an entity with more than one `lifecycle` line: the first line's first stage is initial and the stages are ordered as they first appear | keep the line that starts at the initial stage first |
 
 **Rules**
 
