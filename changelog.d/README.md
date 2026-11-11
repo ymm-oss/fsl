@@ -154,8 +154,9 @@ accumulated in this directory by then. Only new entries route through
 
 ## Verification
 
-`tools/aggregate_changelog.sh selftest` exercises every control's accepting
-and rejecting fixtures. `tools/aggregate_changelog.sh check` validates the
+`tools/aggregate_changelog.sh selftest` exercises the accepting and rejecting
+fixtures of every control, of `check-section` and of `fold`.
+`tools/aggregate_changelog.sh check` validates the
 fragments currently in this directory (name shape and duplicate ids) without
 aggregating anything.
 
@@ -164,6 +165,15 @@ released `CHANGELOG.md` sections from 5.0.0 on, after aggregation and any hand
 edit to a version section (issue #1763): every top-level bullet has a declared
 category lead with an id, categories follow the declared order, an (id,
 category) pair appears once, and a `breaking` or `breaking removal` label
-appears only under `Changed`. `--version X.Y.Z` checks one section. Older
-sections predate these rules and are not checked. The merge-readiness
-automation lane (`tools/check-merge-readiness.sh automation`) runs it.
+appears only under `Changed`. When a release has the summary
+`docs/release-notes/vX.Y.Z.md`, every id of every breaking entry must also
+appear as `#N` under the summary's `## Breaking changes` heading (issue
+#1806). `--version X.Y.Z` checks one section. Older sections predate these
+rules and are not checked. The merge-readiness automation lane
+(`tools/check-merge-readiness.sh automation`) runs it.
+
+A fragment that merges after the release commit and before the tag is folded
+into the released section with `tools/aggregate_changelog.sh fold --version
+X.Y.Z` (`docs/design/RELEASE.md`, "Fragments that merge after the release
+commit"): the bullet `release` would have rendered, at the position its
+order gives, with the heading date unchanged and the fragment deleted.

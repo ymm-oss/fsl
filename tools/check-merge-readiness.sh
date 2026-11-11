@@ -242,15 +242,18 @@ check_automation() {
   # controls (docs/design/DESIGN-changelog-fragments.md): nonconforming fragment
   # name, duplicate (id, category), nondeterministic/nonconforming order,
   # unaggregated-at-release plus direct-edit-forbidden, and aggregation
-  # conservation. Pure, no BASE_SHA/HEAD_SHA needed here -- the real
+  # conservation; plus check-section's and fold's fixtures (issue #1806).
+  # Pure, no BASE_SHA/HEAD_SHA needed here -- the real
   # pull-request-diff checks run directly in merge-readiness.yml, the same
   # split check-product-gate-scope.sh's own `selftest` versus its real
   # `diff_scope` invocation uses.
   step ./tools/aggregate_changelog.sh selftest
   # The fragment rules applied to the released CHANGELOG.md sections from
   # 5.0.0 on (issue #1763): declared category leads in declared order, one
-  # (id, category) each, and breaking labels only under `Changed`. Pure, so it
-  # runs here rather than beside `check-pr` in merge-readiness.yml.
+  # (id, category) each, and breaking labels only under `Changed`; and, where
+  # docs/release-notes/vX.Y.Z.md exists, every breaking id listed under its
+  # `## Breaking changes` (issue #1806). Pure, so it runs here rather than
+  # beside `check-pr` in merge-readiness.yml.
   step ./tools/aggregate_changelog.sh check-section
   # Accepting/rejecting controls for the GitHub Release body that
   # release.yml's `assemble` and `publish` jobs build: summary versus
