@@ -1,0 +1,1 @@
+Fixed (#1817): `fsl5_implicit_readings.rs` writes each scratch document into a directory unique to the process and call. Before, tests running in parallel rewrote the same `readings_en.fsl`, `readings_ja.fsl`, `explicit_en.fsl`, `explicit_ja.fsl` and `cart_v1.fsl`, so one test could read another's half-written or differently edited document and fail. No product behavior changes.
