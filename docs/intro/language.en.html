@@ -2405,7 +2405,7 @@ additional removals in #1463.</p></div></details>
 </ul></div></details>
 <details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check     &lt;file.fsl|file.md&gt;                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
-fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics, fsl 5 info notes (§13.2); never mutates
 fslc migrate   &lt;path&gt;... [--edition current|next|4|5] [--write] # dry-run edits (default edition next); --write applies validated set
 fslc fmt       &lt;file.fsl|-&gt; [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
@@ -4730,6 +4730,33 @@ An omitted verb defaults to the event name. <code>covers REQ-ID "source text"</c
 records traceability. Declare every actor, including those used in scenarios
 (<code>actor_not_declared</code>). Ordinary events are fair; <code>fault event</code> is not fair.
 A declared edge with no event warns <code>lifecycle_edge_without_event</code>.</p>
+<p><strong>Seeing the implicit readings (#1817).</strong> Several of these forms take their
+meaning from a name match, word count or line order, so an edit can change
+the meaning without a message: renaming <code>with qty</code> or the field <code>qty</code> drops the
+store; reordering lifecycle lines changes the initial stage and the stage
+order; <code>Shop Order</code> makes the event name the verb. <code>fslc explain</code> shows each
+reading. Its JSON gains <code>readings</code> (only for a requirements document headed
+<code>fsl 5</code>): <code>entities[]</code> with <code>entity</code>, <code>initial</code>, <code>stages</code> (in enum order) and
+<code>lifecycle_lines</code>, and <code>events[]</code> with <code>event</code>, <code>entity</code>, <code>verb</code>,
+<code>verb_omitted</code>, <code>fair</code>, <code>inputs[]</code> (<code>name</code>, <code>written</code>, and <code>stored[]</code> of
+<code>{field, by}</code>, <code>by</code> one of <code>same_name</code>, <code>set</code> for <code>set f = input name</code>, and
+<code>relation</code> for the actor's instance a relation's event records, which the
+source does not write; an input used only inside a larger expression is
+stored nowhere, <code>stored: []</code>), and <code>guards[]</code> (each <code>requires</code> of the event's
+action: <code>index</code>, <code>expr</code>, <code>conjunctive: true</code>, and the <code>origins</code> that
+<code>explain --lowering</code> lists). Every guard of an event must hold: an
+<code>allow … only when</code> adds one; it never makes an event possible that another
+guard refuses. <code>--readable</code> shows the same as a <code>Lifecycles:</code> section and, under
+each event's action, <code>verb:</code> (when left out), <code>fair:</code>, <code>input …:</code> and a
+<code>guards:</code> line. Nothing else in <code>explain</code>'s output changes. <code>fslc lint</code> reports
+three info notes in <code>files[].notes[]</code> (counted in <code>note_count</code>), with the
+fields of a finding, taxonomy <code>ambiguous_intent</code> and <code>severity: "info"</code>:
+<code>input_stored_by_name</code> (at the input), <code>verb_from_event_name</code> (at the
+phrase) and <code>initial_stage_from_line_order</code> (at the initial stage, for an
+entity with more than one lifecycle line). Both keys appear only when there
+is a note, so <code>lint</code> of any other document prints what it printed before. A
+note is not a finding: it changes neither <code>findings</code>, <code>finding_count</code> nor the
+exit code.</p>
 <p><strong>Rules.</strong> A <code>rule ID "source text" { statement+ }</code> conjoins all its statements;
 separate rules guarding the same event also conjoin. The complete statement set is:</p>
 <table>
@@ -6643,7 +6670,9 @@ DESIGN-*.md).</p>
   branch lowering, synthesized refinement mappings, automatic checks, tags) +
   counterfactuals ("without this rule, this procedure could break it") + witness
   narration. Moves human review from reading logical formulas to adjudicating
-  concrete examples. JSON mode remains available without <code>--readable</code>. →
+  concrete examples. JSON mode remains available without <code>--readable</code>. For a
+  requirements document headed <code>fsl 5</code> it also shows the readings the source
+  leaves implicit (<code>readings</code>; §13.2 "Seeing the implicit readings"). →
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
 - <strong><code>fslc analyze</code></strong> — emits structural observation JSON. <code>--projection tsg</code>
   returns the Typed Semantic Graph of requirements, actions, state, properties,

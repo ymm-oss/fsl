@@ -48,10 +48,10 @@ use crate::keywords::{Kw, Particle};
 use crate::syntax_expr::parse_tokens_expression;
 use crate::{
     AcceptanceExpectation, AcceptanceStep, Annotation, Annotations, BusinessItem,
-    ConceptDeclaration, EditionWarning, EventForm, Expr, NextEditionRequirements, Param,
-    ParseError, ProcessCover, ProcessField, ProcessFields, ProcessItem, ProcessTransition,
-    QualifiedName, RequirementOwner, RequirementsItem, Span, SpecItem, SymbolPath, SyntaxIdent,
-    Token, TokenKind, VerifyItem,
+    ConceptDeclaration, EditionWarning, EventForm, EventReading, Expr, InputReading, InputStore,
+    LifecycleReading, NextEditionRequirements, Param, ParseError, ProcessCover, ProcessField,
+    ProcessFields, ProcessItem, ProcessTransition, QualifiedName, RequirementOwner,
+    RequirementsItem, Span, SpecItem, SymbolPath, SyntaxIdent, Token, TokenKind, VerifyItem,
 };
 use crate::{PhraseKind, PhraseSpelling};
 
@@ -1657,6 +1657,13 @@ impl Pending {
             }
             next.entities.push(declaration.name.text.clone());
             let entity = &entities[&declaration.name.text];
+            next.lifecycle_readings.push(LifecycleReading {
+                entity: declaration.name.text.clone(),
+                initial: declaration.lifecycles[0][0].text.clone(),
+                stages: entity.stages.clone(),
+                lines: declaration.lifecycles.len(),
+                initial_span: declaration.lifecycles[0][0].span,
+            });
             next.final_stages.push((
                 declaration.name.text.clone(),
                 entity
@@ -1759,15 +1766,15 @@ impl Pending {
             if !actors.contains(event.actor.text.as_str()) {
                 return Err(actor_not_declared(&event.actor, &actors));
             }
-            let (verb, entity_name) = match event.words.as_slice() {
+            let (verb, entity_name, verb_omitted) = match event.words.as_slice() {
                 [entity] if entities.contains_key(&entity.text) => {
-                    (event.name.text.clone(), entity.clone())
+                    (event.name.text.clone(), entity.clone(), true)
                 }
                 [verb, entity] if entities.contains_key(&entity.text) => {
-                    (verb.text.clone(), entity.clone())
+                    (verb.text.clone(), entity.clone(), false)
                 }
                 [entity, verb] if entities.contains_key(&entity.text) => {
-                    (verb.text.clone(), entity.clone())
+                    (verb.text.clone(), entity.clone(), false)
                 }
                 _ => {
                     return Err(ParseError::new(
@@ -1832,6 +1839,7 @@ impl Pending {
             let mut input_spans = Vec::new();
             let mut assignments = Vec::new();
             let mut input_names = Vec::new();
+            let mut input_readings = Vec::new();
             for (input, type_name, _) in &event.inputs {
                 if entity.roles.contains(&input.text) {
                     return Err(ParseError::new(
@@ -1857,6 +1865,15 @@ impl Pending {
                 if field.is_some() {
                     assignments.push((input.text.clone(), Expr::Var(input.text.clone())));
                 }
+                input_readings.push(InputReading {
+                    name: input.text.clone(),
+                    stored: field
+                        .map(|_| (input.text.clone(), InputStore::SameName))
+                        .into_iter()
+                        .collect(),
+                    written: true,
+                    span: input.span,
+                });
                 params.push(Param::Typed(input.text.clone(), type_name));
                 input_spans.push(input.span);
                 input_names.push(input.text.clone());
@@ -1912,6 +1929,15 @@ impl Pending {
                     ),
                 );
                 input_spans.insert(index, event.span);
+                input_readings.insert(
+                    index,
+                    InputReading {
+                        name: binder.clone(),
+                        stored: vec![(role.clone(), InputStore::Relation)],
+                        written: false,
+                        span: event.span,
+                    },
+                );
                 assignments.push((role.clone(), Expr::Some(Box::new(Expr::Var(binder)))));
                 roles.push(role.clone());
             }
@@ -1943,6 +1969,13 @@ impl Pending {
                     &event.name.text,
                     field.span,
                 )?;
+                if let Expr::Var(name) = &expression
+                    && let Some(reading) = input_readings
+                        .iter_mut()
+                        .find(|reading| reading.written && reading.name == *name)
+                {
+                    reading.stored.push((field.text.clone(), InputStore::Set));
+                }
                 assignments.push((field.text, expression));
             }
             let mut covers = event.covers.into_iter();
@@ -1955,6 +1988,15 @@ impl Pending {
                     span: extra.span,
                 });
             }
+            next.event_readings.push(EventReading {
+                event: event.name.text.clone(),
+                entity: entity_name.text.clone(),
+                verb: verb.clone(),
+                verb_omitted,
+                inputs: input_readings,
+                span: event.span,
+                phrase_span: event.phrase_span,
+            });
             signatures.push(EventSignature {
                 name: event.name.text.clone(),
                 actor: event.actor.text.clone(),

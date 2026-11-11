@@ -25,6 +25,16 @@ pub use process_form::{
 /// the ID.
 pub const SHARED_REQUIREMENT_ID: &str = "shared_requirement_id";
 
+/// Lint note (#1817): an event input stored in its entity's field of the
+/// same name only because the two are named alike.
+pub const INPUT_STORED_BY_NAME: &str = "input_stored_by_name";
+/// Lint note (#1817): an event phrase that leaves the verb out, so the event
+/// name is the verb.
+pub const VERB_FROM_EVENT_NAME: &str = "verb_from_event_name";
+/// Lint note (#1817): an entity with more than one lifecycle line, whose
+/// initial stage and stage order come from the order of the lines.
+pub const INITIAL_STAGE_FROM_LINE_ORDER: &str = "initial_stage_from_line_order";
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum IdKind {
     Requirement,
@@ -375,8 +385,14 @@ impl MigrationDiagnostic {
             "code": self.code,
             "kind": self.code,
             "taxonomy": self.taxonomy.as_str(),
-            "severity": if [fsl_syntax::MISSING_EDITION_HEADER, DERIVED_TERMINAL_ADDED]
-                .contains(&self.code)
+            "severity": if [
+                fsl_syntax::MISSING_EDITION_HEADER,
+                DERIVED_TERMINAL_ADDED,
+                INPUT_STORED_BY_NAME,
+                VERB_FROM_EVENT_NAME,
+                INITIAL_STAGE_FROM_LINE_ORDER,
+            ]
+            .contains(&self.code)
             {
                 "info"
             } else if [
@@ -1259,6 +1275,102 @@ pub fn shared_requirement_id_diagnostics(
         });
     }
     diagnostics
+}
+
+/// `lint`'s notes (#1817): each reading a next-edition requirements document
+/// leaves implicit and an edit can change without any message, as an info
+/// finding. An input stored in the field of the same name
+/// ([`INPUT_STORED_BY_NAME`], at the input), a phrase without a verb
+/// ([`VERB_FROM_EVENT_NAME`], at the phrase) and an initial stage taken from
+/// the first of several lifecycle lines ([`INITIAL_STAGE_FROM_LINE_ORDER`], at
+/// that stage). They are reported apart from the findings: none of them is
+/// a defect, so none changes `finding_count` or the exit code. Empty for a
+/// document of any other form. With a glossary, each quoted name that has an
+/// alias reads `'alias（name）'`, as in `check`'s messages.
+#[must_use]
+pub fn implicit_reading_notes(source: &str, options: &ParseOptions) -> Vec<MigrationDiagnostic> {
+    let Ok(SurfaceDocument::Requirements(requirements)) =
+        fsl_syntax::parse_surface_document_with(source, options)
+    else {
+        return Vec::new();
+    };
+    let Some(next) = requirements.next else {
+        return Vec::new();
+    };
+    let note = |code, message, span, canonical_replacement| MigrationDiagnostic {
+        code,
+        taxonomy: Taxonomy::AmbiguousIntent,
+        message,
+        span,
+        canonical_replacement,
+        machine_applicable: false,
+        reason: None,
+        edits: Vec::new(),
+    };
+    let mut notes = Vec::new();
+    for lifecycle in next.lifecycle_readings.iter().filter(|l| l.lines > 1) {
+        notes.push(note(
+            INITIAL_STAGE_FROM_LINE_ORDER,
+            format!(
+                "entity '{}' has {} lifecycle lines: the first stage of the first line, '{}', is \
+                 the initial one, and the stages are ordered as they first appear ({}); \
+                 reordering the lines changes both",
+                lifecycle.entity,
+                lifecycle.lines,
+                lifecycle.initial,
+                lifecycle.stages.join(", ")
+            ),
+            lifecycle.initial_span,
+            "keep the line that starts at the initial stage first".to_owned(),
+        ));
+    }
+    for event in &next.event_readings {
+        if event.verb_omitted {
+            notes.push(note(
+                VERB_FROM_EVENT_NAME,
+                format!(
+                    "event '{}' leaves the verb out of its phrase, so its name '{}' is the verb \
+                     its scenario steps use",
+                    event.event, event.verb
+                ),
+                event.phrase_span,
+                format!("write the verb: `<Actor> <verb> {}`", event.entity),
+            ));
+        }
+        for input in &event.inputs {
+            for (field, _) in input
+                .stored
+                .iter()
+                .filter(|(_, store)| *store == fsl_syntax::InputStore::SameName)
+            {
+                notes.push(note(
+                    INPUT_STORED_BY_NAME,
+                    format!(
+                        "input '{}' of event '{}' is stored in the field '{field}' of '{}' \
+                         because the two are named alike; renaming either one drops the store",
+                        input.name, event.event, event.entity
+                    ),
+                    input.span,
+                    format!(
+                        "keep the two names alike, or give the input its own name and type and \
+                         `set {field} = input <name>`"
+                    ),
+                ));
+            }
+        }
+    }
+    if let Some(glossary) = fsl_syntax::document_glossary(source, options) {
+        for note in &mut notes {
+            for entry in &glossary.entries {
+                note.message = note.message.replace(
+                    &format!("'{}'", entry.canonical.name),
+                    &format!("'{}（{}）'", entry.alias, entry.canonical.name),
+                );
+            }
+        }
+    }
+    notes.sort_by_key(|note| note.span.start.offset);
+    notes
 }
 
 /// The lexer's warnings (`fullwidth_space`, `non_nfc_identifier`) as lint

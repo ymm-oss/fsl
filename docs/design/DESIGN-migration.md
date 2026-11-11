@@ -13,6 +13,11 @@ taxonomies `deprecated`, `non_canonical`, `ambiguous_intent`, or
 `unsupported_in_edition`, severity, exact span, edition, canonical replacement,
 and whether its edits are machine-applicable.
 
+Info notes on the implicit readings of an FSL 5 requirements document
+(`files[].notes[]` with `note_count`, both only when there is a note) are not
+findings: they never count in `finding_count` or change the exit code
+(`DESIGN-explain.md` §7, #1817).
+
 The "check failure" half of exit 2 is unconditional per input, shared by
 `lint` and `migrate` (#517): every input is checked-model-validated
 regardless of whether it happens to contain any legacy syntax for

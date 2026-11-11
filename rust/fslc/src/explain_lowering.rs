@@ -120,6 +120,15 @@ pub(crate) fn guard_requirements(model: &KernelModel, action: &str, index: usize
         .collect()
 }
 
+/// The origins of the action's `index`-th `requires` from the next-edition
+/// forms, as `{kind, detail, line}`.
+pub(crate) fn guard_origins(model: &KernelModel, action: &str, index: usize) -> Vec<Value> {
+    steps(model, &action_guard_target(action, index), STEPS)
+        .iter()
+        .map(Step::json)
+        .collect()
+}
+
 /// The readable lines naming the event an action lowers from:
 /// `event: System approves Claim Submitted -> Approved (claims.fsl:27)`.
 pub(crate) fn action_lines(model: &KernelModel, action: &str) -> Vec<String> {
@@ -166,10 +175,7 @@ pub(crate) fn lowering(model: &KernelModel) -> Value {
                     json!({
                         "index": index,
                         "expr": fslc_rust::expr_text(requirement),
-                        "origins": steps(model, &action_guard_target(&action.name, index), STEPS)
-                            .iter()
-                            .map(Step::json)
-                            .collect::<Vec<_>>(),
+                        "origins": guard_origins(model, &action.name, index),
                     })
                 })
                 .collect::<Vec<_>>();
