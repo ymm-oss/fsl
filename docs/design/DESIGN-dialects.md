@@ -652,6 +652,68 @@ Documented in `docs/manual/LANGUAGE.md` and `docs/manual/LANGUAGE.ja.md`, `skill
 `skills/fsl-requirements/references/syntax.md` (pointed to from `skills/fsl/references/syntax.md`),
 and `changelog.d/1798-*.md`.
 
+#### Parenthesized event move (#1803)
+
+An `fsl 5` event may write its move in parentheses after the phrase and its inputs:
+`event reject = Manager rejects Claim (Submitted -> Rejected)`,
+`event submit = Employee submits Claim with amount (Draft -> Submitted)`,
+`出来事 reject = 上長 が 申請 を 却下する (提出済み -> 却下済み)`. Written bare, the phrase and the
+move run together (`rejects Claim Submitted`, `却下する 提出済み`); the parentheses end the
+sentence at its verb. The bare form stays accepted, and both lower to the same kernel. This is an
+additive change: no form that checked before changes meaning.
+
+The event parser (`event_declaration` in `rust/fsl-syntax/src/parser/next_requirements.rs`) reads
+`( S -> T )` where it read `S -> T`. Inside the parentheses it refuses `in S` / `段階 S` and a lone
+`S` with one message that names both forms, located at `(`. A missing `)` is `expected ')'`. A
+second `(` is `expected identifier`. The stay stays `in S` / `段階 S`; the issue's `(S)` for a stay
+is not adopted. Full-width `（ ）` was already refused when lexing (`fullwidth_symbol`, "write
+'('"), and that refusal stays.
+
+Why `(` there cannot mean anything else:
+
+- The lexer reads `(` as a one-character symbol, never as part of an identifier.
+- Both phrase loops, plain and with particles, take only identifiers, so they stop at `(`. The
+  particle detector `phrase_has_particles` scans the line up to `->`, so it decides the same way
+  for both forms.
+- Before this change, the token after the phrase and its inputs had to be `with`, `in` / `段階`,
+  or the first stage of `S -> T`. A `(` there was `expected identifier`, so no document that parsed
+  before has one there.
+- An input's type is `qualified_name`, `Ident [. Ident]`. It has no type arguments and no call, so
+  `with amount: Amount (Draft -> Submitted)` reads the type `Amount` and then the move.
+- `set` and `covers` come after the move and are unchanged.
+
+`fmt` keeps the form written and does not canonicalize. The formatter prints a `(` after an
+identifier with no space, as in a call, so the parser records the `(` of each parenthesized move
+(`SourceSpellings::parenthesized_moves`). The formatter writes one space before those, so
+`Claim(Submitted -> Rejected)` prints as `Claim (Submitted -> Rejected)`. Without that record,
+`fmt` printed `Claim(Submitted -> Rejected)`; it parses the same, but it is not the documented
+layout. `fmt --lang` and `fmt --names` respell words where they stand; the move keeps its
+parentheses. `fslc migrate --edition 5`
+still writes the bare form. The LSP index reads stages between the parentheses as uses of the
+lifecycle's stages, as it does for a bare move.
+
+Evidence: `rust/fslc/tests/issue_1803_parenthesized_move.rs` and
+`the_stages_of_a_parenthesized_move_are_uses_of_the_lifecycle_stages` in
+`rust/fsl-lsp/tests/fsl5.rs`. Seven `fsl 5` fixtures were tested, English, Japanese with
+particles, all-Japanese, relations, stays and multi-entity. With every move in parentheses, and
+with every other one, each gives the same `check` packet and the same `fslc kernel` JSON as the
+fixture as written, compared in full. `fmt` prints both forms, and a mix of them, unchanged.
+`--lang ja|en` commutes with adding the parentheses. Each refusal above is tested in English and in
+Japanese. All of these fail on base `9bcff3eb`, which refuses every parenthesized move with
+`expected identifier` at `(`.
+
+Corpus: base `9bcff3eb` and this change were each materialized in their own tree with
+`git archive <sha> | tar -x`. `FSLC_CACHE=off <binary> check|kernel|fmt <form>` ran there with a
+debug `fslc` built from that SHA, over every `.fsl` under `specs/`, `examples/` and
+`rust/fslc/tests/fixtures/` (665 files, 31 of them `fsl 5`). Stdout and exit code are
+byte-identical for every file and command. The change edits no `.fsl` file. Of the existing
+tests, it changes only the event heading that `rust/fslc/tests/fsl5_keywords.rs` renders into
+`skills/fsl-requirements/references/keywords.md`.
+Documented in `docs/manual/LANGUAGE.md` and `docs/manual/LANGUAGE.ja.md`, the regenerated
+`docs/intro/language.{en,ja}.html`, `skills/fsl-requirements/` (`SKILL.md`,
+`references/syntax.md`, `references/glossary.md`, `references/keywords.md`),
+`skills/fsl-design/SKILL.md`, and `changelog.d/1803-parenthesized-event-move.added.md`.
+
 ### 2.3 Tests (tests/test_req_dialect.py)
 
 Use the return requirements (almost the same as §2.1) as a fixture:

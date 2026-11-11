@@ -354,13 +354,17 @@ pub fn format_source_with(
         .collect();
     // The edition's layout applies to a document read in it.
     let next_edition = edition == Edition::Fsl5 && parsed.edition == Edition::Fsl5;
-    let continuations = if next_edition {
-        continuation_offsets(&tree, &parsed.surface)
+    let (continuations, spaced_opens) = if next_edition {
+        (
+            continuation_offsets(&tree, &parsed.surface),
+            parenthesized_move_offsets(&parsed.surface),
+        )
     } else {
-        BTreeSet::new()
+        (BTreeSet::new(), BTreeSet::new())
     };
     let mut formatter = Formatter::new(compact_hyphens);
     formatter.continuations = continuations;
+    formatter.spaced_opens = spaced_opens;
     formatter.write(tree.nodes());
     let mut output = formatter.finish();
     if matches!(crate::edition_header(&output, options), Ok(Some(_))) {
@@ -431,6 +435,25 @@ fn continuation_offsets(
         previous_line = node.span.end.line;
     }
     offsets
+}
+
+/// The start offsets of the `(` of each event move written in parentheses,
+/// `(S -> T)`: the formatter writes one space before them, where a `(` after
+/// a word would otherwise open a call.
+fn parenthesized_move_offsets(surface: &crate::SurfaceDocument) -> BTreeSet<usize> {
+    let crate::SurfaceDocument::Requirements(requirements) = surface else {
+        return BTreeSet::new();
+    };
+    requirements
+        .next
+        .as_ref()
+        .map_or_else(BTreeSet::new, |next| {
+            next.spellings
+                .parenthesized_moves
+                .iter()
+                .map(|span| span.start.offset)
+                .collect()
+        })
 }
 
 /// Refuse an output in which a requirement-style identifier is not printed
@@ -809,6 +832,9 @@ struct Formatter {
     /// Tokens that start a line a statement continues on: indented one level
     /// more ([`continuation_offsets`]).
     continuations: BTreeSet<usize>,
+    /// Tokens written after one space whatever comes before them
+    /// ([`parenthesized_move_offsets`]).
+    spaced_opens: BTreeSet<usize>,
 }
 
 impl Formatter {
@@ -825,6 +851,7 @@ impl Formatter {
             type_argument_depth: 0,
             source_line_break: false,
             continuations: BTreeSet::new(),
+            spaced_opens: BTreeSet::new(),
         }
     }
 
@@ -889,13 +916,14 @@ impl Formatter {
             .previous_offset
             .is_some_and(|offset| self.compact_hyphens.contains(&offset));
         if !at_line_start
-            && needs_space(
-                self.previous.as_ref(),
-                kind,
-                self.pending_space,
-                self.type_argument_depth,
-                previous_compact_hyphen || compact_hyphen,
-            )
+            && (self.spaced_opens.contains(&span.start.offset)
+                || needs_space(
+                    self.previous.as_ref(),
+                    kind,
+                    self.pending_space,
+                    self.type_argument_depth,
+                    previous_compact_hyphen || compact_hyphen,
+                ))
         {
             self.output.push(' ');
         }
