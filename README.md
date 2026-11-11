@@ -230,7 +230,7 @@ runs, with no skill integration and no PATH setup.
 
 | OS / arch | File to download |
 | --- | --- |
-| macOS (Apple Silicon, M1 and later) | `fslc-macos-arm64` |
+| macOS (Apple Silicon, M1 and later, macOS 14 or later) | `fslc-macos-arm64` |
 | Linux (x86_64, glibc 2.39+) | `fslc-linux-x64` |
 | Linux (ARM64, glibc 2.39+) | `fslc-linux-arm64` |
 | Windows (x64) | `fslc-windows-x64.exe` |

@@ -7,7 +7,7 @@ if [ -n "${FSL_DATA_DIR:-}" ]; then
   INSTALL_DIR="$FSL_DATA_DIR"
 elif [ -n "${FSL_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$FSL_INSTALL_DIR"
-  echo "Warning: FSL_INSTALL_DIR is deprecated; use FSL_DATA_DIR instead."
+  echo "Warning: FSL_INSTALL_DIR is deprecated; use FSL_DATA_DIR instead." >&2
 else
   INSTALL_DIR="$DATA_HOME/fsl"
 fi
