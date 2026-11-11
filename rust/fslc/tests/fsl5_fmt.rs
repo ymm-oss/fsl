@@ -62,11 +62,7 @@ fn read(path: &Path) -> String {
 /// A scratch directory holding the files of the example `from` (the
 /// fixtures' `implements` dependencies).
 fn scratch_of(label: &str, from: &Path) -> PathBuf {
-    let directory = Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join("fsl5_fmt")
-        .join(label);
-    let _ = std::fs::remove_dir_all(&directory);
-    std::fs::create_dir_all(&directory).expect("create scratch directory");
+    let directory = empty_scratch(label);
     for entry in std::fs::read_dir(from).expect("example directory") {
         let path = entry.expect("fixture").path();
         std::fs::copy(&path, directory.join(path.file_name().expect("name")))
@@ -77,6 +73,19 @@ fn scratch_of(label: &str, from: &Path) -> PathBuf {
 
 fn scratch(label: &str) -> PathBuf {
     scratch_of(label, &e2e())
+}
+
+fn empty_scratch(label: &str) -> PathBuf {
+    let directory = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("fsl5_fmt")
+        .join(label);
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).expect("create scratch directory");
+    directory
+}
+
+fn repository() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 /// `(stdout, exit)` of `fslc fmt <path> <args>`.
@@ -319,6 +328,139 @@ fn continuation_lines_are_indented_under_their_statement() {
         formatted.contains("System approves\n      covers REQ"),
         "{formatted}"
     );
+}
+
+/// A business declaration's FSL 4 layout: its attribute and continuation
+/// lines at the declaration's own indentation.
+const BUSINESS_FSL4_LAYOUT: &str = r#"business Returns {
+  actor Manager, Finance
+  entity Return
+  process Return {
+    stages Requested, Approved, Refunded
+    initial Requested
+    transition approve Requested -> Approved by Manager
+    transition refund Approved -> Refunded by Finance
+  }
+
+  control CTRL-RET-001 "Every refund is backed by an approval"
+  // Finance answers for it.
+  owner Finance
+  severity high
+  applies_to Return
+  policy POL-RET-001 "No return is refunded without approval"
+  satisfies CTRL-RET-001
+  every Return reaching Refunded must have passed through Approved
+  policy POL-RET-002 "A refunded return was approved"
+  satisfies CTRL-RET-001
+  invariant {
+    forall c: Return {
+      stage(c) == Refunded => return_stage_via_Approved[c]
+    }
+  }
+
+  goal GOAL-RET-001 "A return can be refunded"
+  satisfies CTRL-RET-001
+  some Return can reach Refunded
+}
+
+verify {
+  instances Return = 2
+}
+"#;
+
+/// [`BUSINESS_FSL4_LAYOUT`] in the next edition: every line a declaration
+/// continues on, and every line inside a brace opened on one, is indented
+/// one level deeper than the declaration's first line.
+const BUSINESS_FSL5_LAYOUT: &str = r#"fsl 5
+business Returns {
+  actor Manager, Finance
+  entity Return
+  process Return {
+    stages Requested, Approved, Refunded
+    initial Requested
+    transition approve Requested -> Approved by Manager
+    transition refund Approved -> Refunded by Finance
+  }
+
+  control CTRL-RET-001 "Every refund is backed by an approval"
+    // Finance answers for it.
+    owner Finance
+    severity high
+    applies_to Return
+  policy POL-RET-001 "No return is refunded without approval"
+    satisfies CTRL-RET-001
+    every Return reaching Refunded must have passed through Approved
+  policy POL-RET-002 "A refunded return was approved"
+    satisfies CTRL-RET-001
+    invariant {
+      forall c: Return {
+        stage(c) == Refunded => return_stage_via_Approved[c]
+      }
+    }
+
+  goal GOAL-RET-001 "A return can be refunded"
+    satisfies CTRL-RET-001
+    some Return can reach Refunded
+}
+
+verify {
+  instances Return = 2
+}
+"#;
+
+/// #1783: an `fsl 5` business declaration's attribute and continuation lines
+/// are indented under it, the layout keeps the kernel and is a fixed point,
+/// and a headerless document keeps the FSL 4 layout.
+#[test]
+fn business_continuation_lines_are_indented_in_the_next_edition_only() {
+    let directory = empty_scratch("business-continuation");
+    let (current, _) = fmt(&directory, "fsl4.fsl", BUSINESS_FSL4_LAYOUT, &[]);
+    assert_eq!(current, BUSINESS_FSL4_LAYOUT);
+
+    let flat = format!("fsl 5\n{BUSINESS_FSL4_LAYOUT}");
+    let (next, next_path) = fmt(&directory, "fsl5.fsl", &flat, &[]);
+    assert_eq!(next, BUSINESS_FSL5_LAYOUT);
+    same_kernel(
+        &directory.join("fsl5.fsl"),
+        &next_path,
+        "fsl 5 business fmt",
+    );
+    let (twice, _) = fmt(&directory, "again.fsl", &next, &[]);
+    assert_eq!(twice, next, "fmt is not idempotent");
+}
+
+/// #1783: the business example of `skills/fsl-business/SKILL.md` is written
+/// in fmt's canonical form.
+#[test]
+fn the_business_skill_example_is_canonical() {
+    let skill = read(&repository().join("skills/fsl-business/SKILL.md"));
+    let example = skill
+        .split("```fsl check\n")
+        .nth(1)
+        .and_then(|block| block.split("```\n").next())
+        .expect("the skill's checked example");
+    assert!(example.starts_with("fsl 5\nbusiness "), "{example}");
+    let (formatted, _) = fmt(&empty_scratch("business-skill"), "doc.fsl", example, &[]);
+    assert_eq!(formatted, example);
+}
+
+/// The `examples/fsl5/` documents (business flows, a design with a `def`
+/// body, refinements with `map … =` continuations) are fmt's canonical form.
+#[test]
+fn the_fsl5_examples_are_canonical() {
+    let directory = repository().join("examples/fsl5");
+    let mut examples = std::fs::read_dir(&directory)
+        .expect("examples/fsl5")
+        .map(|entry| entry.expect("example").path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "fsl"))
+        .collect::<Vec<_>>();
+    examples.sort();
+    assert!(examples.len() >= 11, "{examples:?}");
+    for path in examples {
+        let (formatted, status) = fmt_raw(&path, &[]);
+        assert_eq!(status, 0, "{}: {formatted}", path.display());
+        assert_eq!(formatted, read(&path), "{}", path.display());
+    }
 }
 
 /// `particle_needs_space`: `check` rejects a particle written onto its word;

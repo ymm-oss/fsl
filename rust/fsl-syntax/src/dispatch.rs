@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 
 use crate::annotation_parse::leading_annotations;
 use crate::lexer::lex_declaration_prefix;
-use crate::parser::IdSpelling;
+use crate::parser::FormatReading;
 use crate::{
     Annotations, Edition, ParseError, ParseOptions, SurfaceDocument, Token, TokenKind,
     edition_header, lex_with,
@@ -51,13 +51,13 @@ pub struct ParsedDocument {
     pub surface: SurfaceDocument,
 }
 
-/// A frontend returns the document and the requirement-style identifiers it
-/// read ([`IdSpelling`]); only the shared grammar has any.
+/// A frontend returns the document and what it read for the formatter
+/// ([`FormatReading`]); only the shared grammar reads any.
 type Frontend = for<'a> fn(
     SourceFile<'a>,
     Vec<Token>,
     usize,
-) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError>;
+) -> Result<(SurfaceDocument, FormatReading), ParseError>;
 
 #[derive(Clone, Copy)]
 struct FrontendRegistration {
@@ -209,12 +209,12 @@ pub fn parse_document_with(
     parse_document_with_ids(source, *options).map(|(parsed, _)| parsed)
 }
 
-/// [`parse_document_with`] plus every requirement-style identifier the
-/// frontend read, in source order (for the formatter).
+/// [`parse_document_with`] plus what the frontend read for the formatter
+/// ([`FormatReading`]).
 pub(crate) fn parse_document_with_ids(
     source: SourceFile<'_>,
     options: ParseOptions,
-) -> Result<(ParsedDocument, Vec<IdSpelling>), ParseError> {
+) -> Result<(ParsedDocument, FormatReading), ParseError> {
     LazyLock::force(&VALID_REGISTRY);
     let (tokens, edition) = document_tokens(source.source(), options)?;
     let mut cursor = 0;
@@ -306,7 +306,7 @@ fn parse_shared(
     source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
-) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
+) -> Result<(SurfaceDocument, FormatReading), ParseError> {
     crate::parser::parse_shared_tokens(
         source.source(),
         tokens,
@@ -340,36 +340,40 @@ fn parse_db(
     _source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
-) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
+) -> Result<(SurfaceDocument, FormatReading), ParseError> {
     crate::db::parse_db_system_tokens(tokens, cursor)
-        .map(|db| (SurfaceDocument::Db(db), Vec::new()))
+        .map(|db| (SurfaceDocument::Db(db), FormatReading::default()))
 }
 
 fn parse_domain(
     _source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
-) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
+) -> Result<(SurfaceDocument, FormatReading), ParseError> {
     crate::domain::parse_domain_tokens(tokens, cursor)
-        .map(|domain| (SurfaceDocument::Domain(domain), Vec::new()))
+        .map(|domain| (SurfaceDocument::Domain(domain), FormatReading::default()))
 }
 
 fn parse_ai(
     source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
-) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
-    crate::ai::parse_ai_component_tokens(source.source(), tokens, cursor)
-        .map(|component| (SurfaceDocument::AiComponent(component), Vec::new()))
+) -> Result<(SurfaceDocument, FormatReading), ParseError> {
+    crate::ai::parse_ai_component_tokens(source.source(), tokens, cursor).map(|component| {
+        (
+            SurfaceDocument::AiComponent(component),
+            FormatReading::default(),
+        )
+    })
 }
 
 fn parse_agent(
     source: SourceFile<'_>,
     tokens: Vec<Token>,
     cursor: usize,
-) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
+) -> Result<(SurfaceDocument, FormatReading), ParseError> {
     crate::ai::parse_agent_tokens(source.source(), tokens, cursor)
-        .map(|agent| (SurfaceDocument::Agent(agent), Vec::new()))
+        .map(|agent| (SurfaceDocument::Agent(agent), FormatReading::default()))
 }
 
 #[cfg(test)]
