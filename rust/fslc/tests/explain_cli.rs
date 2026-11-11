@@ -664,7 +664,8 @@ fn readable_action<'t>(readable: &'t str, action: &str) -> &'t str {
 /// fsl 5 plan §3 S10 explain, design draft B.8: in the e2e example each
 /// `requires` of `auto_approve` names where it came from: the stage guard the
 /// event's move, the amount guard row 1 of the decision table REQ-2-3. The
-/// golden was read and fixed by hand.
+/// golden was read and fixed by hand; the `fair:` and `guards:` lines are the
+/// event's implicit readings (#1817).
 #[test]
 fn explain_readable_names_the_origin_of_each_requires() {
     let (readable, exit) = run_fsl5_e2e(&["explain", "--readable", "fsl5_en.fsl"]);
@@ -673,8 +674,10 @@ fn explain_readable_names_the_origin_of_each_requires() {
         readable_action(&readable, "auto_approve"),
         "  - auto_approve(c: Claim) [fair]
     event: System approves Claim Submitted -> Approved (fsl5_en.fsl:27)
+    fair: yes (every event but a fault event)
     requirement: REQ-2: Claims at or below AUTO_LIMIT are auto-approved by the system
     requirement: REQ-2-3: Who handles a submitted claim
+    guards: all 2 requires below must hold (an allow … only when adds one; it allows nothing by itself)
     requires:
       - requires claim_stage[c] == Submitted  ← move Submitted -> Approved (fsl5_en.fsl:27)
       - requires claim_amount[c] <= AUTO_LIMIT  ← decide REQ-2-3 for Submitted Claim row 1: SmallClaim => System approves (fsl5_en.fsl:37)

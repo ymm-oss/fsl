@@ -1938,7 +1938,7 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 ```
 fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check     <file.fsl>                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
-fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
+fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics, fsl 5 info notes (§13.2); never mutates
 fslc migrate   <path>... [--edition current|next|4|5] [--write] # dry-run edits (default edition next); --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
@@ -4191,6 +4191,30 @@ lifecycle 行を追加すると別のパスを表せます。`number Qty` の有
 宣言してください（`actor_not_declared`）。通常の event は fair、`fault event` は
 fair ではありません。辺に対応する event がなければ `lifecycle_edge_without_event` の警告です。
 
+**暗黙の読み方を見る（#1817）。** これらの形のいくつかは、名前の一致・語の数・行の順で
+意味が決まるため、編集で意味が変わっても何のメッセージも出ません。`with qty` か
+フィールド `qty` の名前を変えると格納が消え、lifecycle の行を並べ替えると初期段階と
+段階の順が変わり、`Shop Order` では event 名が動詞になります。`fslc explain` はそれぞれの
+読み方を示します。JSON には `readings` が加わります（`fsl 5` ヘッダーの requirements
+文書のときだけ）。`entities[]` は `entity`、`initial`、`stages`（enum の順）、
+`lifecycle_lines` を持ち、`events[]` は `event`、`entity`、`verb`、`verb_omitted`、
+`fair`、`inputs[]`（`name`、`written`、`{field, by}` の `stored[]`。`by` は
+`same_name`、`set f = input name` の `set`、関係の event が記録するアクターの
+インスタンス（原文には書かない入力）の `relation` のいずれか。より大きな式の中でだけ
+使う入力はどこにも格納されず `stored: []`）、`guards[]`（event の action の
+`requires` ごとに `index`、`expr`、`conjunctive: true`、`explain --lowering` が示す
+`origins`）を持ちます。event のガードはすべて成り立たなければなりません。
+`allow … only when` はガードを一つ加えるだけで、別のガードが拒む event を可能にする
+ことはありません。`--readable` は同じ内容を `Lifecycles:` 節と、各 event の action の下の
+`verb:`（省いたとき）、`fair:`、`input …:`、`guards:` の行で示します。`explain` の
+出力のほかの部分は変わりません。`fslc lint` は三つの情報ノートを `files[].notes[]`
+（件数は `note_count`）に報告します。各ノートは finding と同じフィールドを持ち、
+分類は `ambiguous_intent`、`severity: "info"` です。`input_stored_by_name`（入力の
+位置）、`verb_from_event_name`（句の位置）、`initial_stage_from_line_order`
+（lifecycle の行が二つ以上あるエンティティの初期段階の位置）です。二つのキーはノートが
+あるときだけ現れるため、ほかの文書の `lint` の出力は以前と同じです。ノートは finding では
+ありません。`findings`、`finding_count`、exit code のいずれも変えません。
+
 **規則。** `rule ID "原文" { statement+ }` は内部の文をすべて論理積で組み合わせます。
 同じ出来事を制約する別の rule も論理積になります。使える文は次のとおりです。
 
@@ -5822,7 +5846,8 @@ DESIGN-*.md があります)。
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
   それを壊せる」)+ witness のナレーションの上のテキストビュー。人間のレビューを、
   論理式を読むことから、具体例を裁定することへ移します。`--readable` なしでは
-  JSON モードが引き続き利用できます。→
+  JSON モードが引き続き利用できます。`fsl 5` ヘッダーの requirements 文書では、原文が
+  暗黙にしている読み方も示します（`readings`。§13.2「暗黙の読み方を見る」）。→
   [`DESIGN-explain.md`](../design/DESIGN-explain.md)
 - **`fslc analyze`** — 構造的な観測 JSON を出力します。`--projection tsg` は、
   要件、action、状態、プロパティ、シナリオの Typed Semantic Graph を返します。

@@ -202,3 +202,54 @@ declaration with no registered `OriginChain`:
   in §2 — an `Implements:` section from the existing
   `requirements_implements_output` when the source declares
   `implements X from "Y"`.
+
+## 7. Implicit readings of FSL 5 requirements (#1817)
+
+Several FSL 5 requirements forms take their meaning from a name match, a word
+count or line order: `with qty` stores the input in the field `qty`; the first
+`lifecycle` line's first stage is initial and the stages are ordered as they
+first appear; `Shop Order` (two words) makes the event name the verb; every
+event but a `fault event` is fair; `allow … only when` adds a guard rather than
+granting permission. Each was documented, but no output said which reading was
+taken, so an edit could change meaning without a message. Decision (user,
+2026-11-11): output only, in `explain` and `lint`; no language change (an
+explicit `initial` declaration was suggested and is out of scope).
+
+- **Where the readings come from.** Only the desugaring knows why an input is
+  stored, whether a verb was written and how many lifecycle lines there were.
+  It records `EventReading` / `LifecycleReading` on
+  `NextEditionRequirements::event_readings` / `lifecycle_readings`, which the
+  lowering never reads. Kernel origins are not extended: they reach the Kernel
+  and the existing `skeleton.actions[].origin` of `explain`, so every
+  document's `check`, `kernel` and existing `explain` output stays as it was.
+  Fairness and the guards are the Kernel action's, found through the event's
+  origin (its `event` lowering step and declaration span), so `explain` shows
+  what `verify` checks.
+- **`explain`.** JSON gains one key, `readings`, only for a requirements
+  document headed `fsl 5` (LANGUAGE.md §13.2 lists its fields). Each guard is
+  marked `conjunctive: true` with the origins `explain --lowering` gives it.
+  `--readable` adds a `Lifecycles:` section and `verb:` / `fair:` / `input …:`
+  / `guards:` lines; no existing line changes. `explain --lowering` is
+  unchanged. `fslc html` embeds the `explain` JSON in its raw-data section, so
+  its report of such a document carries `readings` too and an `html` approval
+  record of it reports `rendering_changed`; the template is unchanged, so
+  `HTML_RENDERER_VERSION` stays (`DESIGN-approval.md`, "Renderer version"). The output is respelled like the rest of `explain`'s, so enum-like
+  values (`same_name`, `set`, `relation`) avoid words a glossary would name.
+- **`lint`.** The three readings an edit can silently change are info notes
+  (`input_stored_by_name`, `verb_from_event_name`,
+  `initial_stage_from_line_order`; the last only with more than one lifecycle
+  line), taxonomy `ambiguous_intent`, in `files[].notes[]` with a top-level
+  `note_count`, both present only when there is a note, so `lint` of every
+  other document prints the bytes it printed before (the full-stdout goldens
+  of `issue_1434_publication.rs` and `specialized_preflight_preservation.rs`
+  hold). They are kept out of `findings` because `finding_count` is the
+  lint outcome (`outcome.rs`, "done at `finding_count: 0`") and `lint` exits 1
+  whenever it reports a finding: as findings they would turn every such
+  document's `lint` from exit 0 to 1. Fairness and conjunctive guards are not
+  notes: they cannot change without an edit to the `fault` keyword or the
+  rules, which already says what it does.
+- **Evidence.** `rust/fslc/tests/fsl5_implicit_readings.rs` (English and
+  Japanese spellings, each reading made explicit as a negative control, notes
+  beside a finding). Base `9bcff3eb` and head `check`, `kernel` and `lint`
+  exit codes over `specs/`, `examples/` and `rust/fslc/tests/fixtures/` are
+  identical, and head `explain` JSON equals base apart from `readings`.

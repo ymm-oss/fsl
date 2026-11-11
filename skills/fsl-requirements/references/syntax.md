@@ -144,6 +144,17 @@ matched to events by actor and verb: `unknown_verb`, `unknown_event_phrase`
 (with the actor's verbs) and `ambiguous_step` say why a step matched none or
 several.
 
+Three of these readings come from a name match, a word count or line order,
+so an edit can change them silently: renaming `with qty` (or the field) drops
+the store, reordering `lifecycle` lines changes the initial stage and the stage
+order, and `Shop Order` makes the event name the verb. `fslc explain` shows
+how each was read (`readings` in JSON; `Lifecycles:`, `verb:`, `fair:`,
+`input …:` and `guards:` lines with `--readable`), and `fslc lint` notes each
+as info in `files[].notes[]`: `input_stored_by_name`, `verb_from_event_name`,
+`initial_stage_from_line_order` (only with more than one lifecycle line). A
+note is not a finding and never changes `lint`'s exit code; keep the form when
+it is what the source means.
+
 ## Rules
 
 ```fsl check
