@@ -5409,8 +5409,9 @@ verify {
 ```
 
 The explicit forms remain available when the rule is not just stage progression:
-`policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }` and
-`goal ... { exists c: Return { stage(c) == Refunded } }`.
+`policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }`,
+`goal ... { exists c: Return { stage(c) == Refunded } }`, and
+`policy ... invariant { … }` (below).
 
 For a **no-bypass** control — a target stage that must never be reached
 without first passing through a required waypoint — use the precedence form
@@ -5442,6 +5443,40 @@ needed — no ghost counterexample-to-induction from the history flag being
 ```json
 {"result": "proved", "k_used": {"CTRL-APPROVAL": 1, "CTRL-APPROVAL_stability": 1}}
 ```
+
+`policy ID "text" [satisfies CTRL, ...] invariant { expr }` states any other
+safety rule over the business state. It compiles to one kernel invariant named
+`ID`, carrying the policy's id and text as its `requirement`, and synthesizes
+nothing else. The expression reads the names the business lowering
+synthesizes:
+
+| Name | What it is |
+|---|---|
+| `stage(c)` | the stage of `c`, where `c` is bound to an entity type (`forall c: Return { … }`); it reads `return_stage[c]` |
+| `return_stage` | the stage map `Map<Return, ReturnStage>` of process `Return`: the entity name lowercased, then `_stage` |
+| `ReturnStage`, `Requested`, … | the stage enum, `<Entity>Stage`, and its members |
+| `return_stage_via_Approved` | the history flag `Map<Return, Bool>` of a no-bypass policy over the waypoint `Approved` (`return_stage_via_Approved_Rejected` for the waypoints `Approved or Rejected`, in the process's stage order). It exists only while such a policy is declared; otherwise `check` rejects the name |
+
+The no-bypass policy that synthesizes a flag also adds the invariant
+`<PolicyId>_stability`, named after the first policy over that waypoint set.
+Every stage of a pure stage graph is reachable, for each case independently,
+so a condition over `stage(c)` alone either always holds or is violated. The
+form says something when it reads a history flag:
+
+```fsl
+policy PAY-1 "refunds only for approved cases"
+  every Return reaching Refunded must have passed through Approved
+policy PAY-3 "an approval is final" invariant {
+  forall c: Return { stage(c) == Requested or stage(c) == Rejected => not return_stage_via_Approved[c] }
+}
+```
+
+Added to `ReturnHandling` above, `PAY-3` verifies and proves by induction (with
+`PAY-1` and `PAY-1_stability`). Adding `transition revoke Approved -> Rejected
+by Manager` makes it `violated`, with the `requirement`
+`{"id": "PAY-3", "text": "an approval is final"}`. The complete example is
+checked as written in `DESIGN-dialects.md` §3.1, and the fsl-business skill's
+example carries the same rule as `POL-RET-003`.
 
 Business has no `terminal` syntax of its own. Instead, each process's **sink
 stages** (stages with no outgoing `transition`) are collected automatically:

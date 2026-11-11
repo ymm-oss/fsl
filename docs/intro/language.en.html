@@ -5855,8 +5855,9 @@ verify {
 }
 </code></pre>
 <p>The explicit forms remain available when the rule is not just stage progression:
-<code>policy ... responds { forall c: Return { stage(c) == Requested ~&gt; ... } }</code> and
-<code>goal ... { exists c: Return { stage(c) == Refunded } }</code>.</p>
+<code>policy ... responds { forall c: Return { stage(c) == Requested ~&gt; ... } }</code>,
+<code>goal ... { exists c: Return { stage(c) == Refunded } }</code>, and
+<code>policy ... invariant { … }</code> (below).</p>
 <p>For a <strong>no-bypass</strong> control — a target stage that must never be reached
 without first passing through a required waypoint — use the precedence form
 (#75; design rationale in <code>DESIGN-precedence-policy.md</code>):</p>
@@ -5881,6 +5882,54 @@ needed — no ghost counterexample-to-induction from the history flag being
 "true but not yet provably so" at an arbitrary induction step.</p>
 <pre><code class="language-json">{&quot;result&quot;: &quot;proved&quot;, &quot;k_used&quot;: {&quot;CTRL-APPROVAL&quot;: 1, &quot;CTRL-APPROVAL_stability&quot;: 1}}
 </code></pre>
+<p><code>policy ID "text" [satisfies CTRL, ...] invariant { expr }</code> states any other
+safety rule over the business state. It compiles to one kernel invariant named
+<code>ID</code>, carrying the policy's id and text as its <code>requirement</code>, and synthesizes
+nothing else. The expression reads the names the business lowering
+synthesizes:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stage(c)</code></td>
+<td>the stage of <code>c</code>, where <code>c</code> is bound to an entity type (<code>forall c: Return { … }</code>); it reads <code>return_stage[c]</code></td>
+</tr>
+<tr>
+<td><code>return_stage</code></td>
+<td>the stage map <code>Map&lt;Return, ReturnStage&gt;</code> of process <code>Return</code>: the entity name lowercased, then <code>_stage</code></td>
+</tr>
+<tr>
+<td><code>ReturnStage</code>, <code>Requested</code>, …</td>
+<td>the stage enum, <code>&lt;Entity&gt;Stage</code>, and its members</td>
+</tr>
+<tr>
+<td><code>return_stage_via_Approved</code></td>
+<td>the history flag <code>Map&lt;Return, Bool&gt;</code> of a no-bypass policy over the waypoint <code>Approved</code> (<code>return_stage_via_Approved_Rejected</code> for the waypoints <code>Approved or Rejected</code>, in the process's stage order). It exists only while such a policy is declared; otherwise <code>check</code> rejects the name</td>
+</tr>
+</tbody>
+</table>
+<p>The no-bypass policy that synthesizes a flag also adds the invariant
+<code>&lt;PolicyId&gt;_stability</code>, named after the first policy over that waypoint set.
+Every stage of a pure stage graph is reachable, for each case independently,
+so a condition over <code>stage(c)</code> alone either always holds or is violated. The
+form says something when it reads a history flag:</p>
+<pre><code class="language-fsl">policy PAY-1 &quot;refunds only for approved cases&quot;
+  every Return reaching Refunded must have passed through Approved
+policy PAY-3 &quot;an approval is final&quot; invariant {
+  forall c: Return { stage(c) == Requested or stage(c) == Rejected =&gt; not return_stage_via_Approved[c] }
+}
+</code></pre>
+<p>Added to <code>ReturnHandling</code> above, <code>PAY-3</code> verifies and proves by induction (with
+<code>PAY-1</code> and <code>PAY-1_stability</code>). Adding <code>transition revoke Approved -&gt; Rejected
+by Manager</code> makes it <code>violated</code>, with the <code>requirement</code>
+<code>{"id": "PAY-3", "text": "an approval is final"}</code>. The complete example is
+checked as written in <code>DESIGN-dialects.md</code> §3.1, and the fsl-business skill's
+example carries the same rule as <code>POL-RET-003</code>.</p>
 <p>Business has no <code>terminal</code> syntax of its own. Instead, each process's <strong>sink
 stages</strong> (stages with no outgoing <code>transition</code>) are collected automatically:
 if every process has at least one sink, a kernel <code>terminal { }</code> is generated

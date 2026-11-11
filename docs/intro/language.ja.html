@@ -5488,8 +5488,9 @@ verify {
 }
 </code></pre>
 <p>規則が単なる stage の進行でないときは、明示の形式が引き続き使えます:
-<code>policy ... responds { forall c: Return { stage(c) == Requested ~&gt; ... } }</code> と
-<code>goal ... { exists c: Return { stage(c) == Refunded } }</code>。</p>
+<code>policy ... responds { forall c: Return { stage(c) == Requested ~&gt; ... } }</code>、
+<code>goal ... { exists c: Return { stage(c) == Refunded } }</code>、
+<code>policy ... invariant { … }</code>(後述)。</p>
 <p><strong>バイパス禁止(no-bypass)</strong>のコントロール — 必須の経由地点を先に通らずには決して
 到達してはならないターゲット stage — には、precedence 形式を使います
 (#75。設計の根拠は <code>DESIGN-precedence-policy.md</code>):</p>
@@ -5514,6 +5515,53 @@ or Rejected</code> — そして、同じ <code>(process, waypoint-set)</code> �
 よるゴーストの counterexample-to-induction は生じません。</p>
 <pre><code class="language-json">{&quot;result&quot;: &quot;proved&quot;, &quot;k_used&quot;: {&quot;CTRL-APPROVAL&quot;: 1, &quot;CTRL-APPROVAL_stability&quot;: 1}}
 </code></pre>
+<p><code>policy ID "text" [satisfies CTRL, ...] invariant { expr }</code> は、business の状態に
+ついてのそれ以外の安全性の規則を書きます。これは <code>ID</code> という名前の kernel
+invariant 1 つにコンパイルされ、policy の id と text を <code>requirement</code> として運び、
+それ以外には何も合成しません。式は、business の lowering が合成する名前を読みます:</p>
+<table>
+<thead>
+<tr>
+<th>名前</th>
+<th>何か</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stage(c)</code></td>
+<td>エンティティ型に束縛された <code>c</code>(<code>forall c: Return { … }</code>)の stage。<code>return_stage[c]</code> を読みます</td>
+</tr>
+<tr>
+<td><code>return_stage</code></td>
+<td>process <code>Return</code> の stage マップ <code>Map&lt;Return, ReturnStage&gt;</code>。エンティティ名を小文字にし、<code>_stage</code> を付けた名前です</td>
+</tr>
+<tr>
+<td><code>ReturnStage</code>、<code>Requested</code>、…</td>
+<td>stage の enum <code>&lt;Entity&gt;Stage</code> とそのメンバー</td>
+</tr>
+<tr>
+<td><code>return_stage_via_Approved</code></td>
+<td>経由地点 <code>Approved</code> の上の no-bypass policy の履歴フラグ <code>Map&lt;Return, Bool&gt;</code>(経由地点が <code>Approved or Rejected</code> なら、process の stage の順で <code>return_stage_via_Approved_Rejected</code>)。そのような policy が宣言されているときだけ存在し、そうでなければ <code>check</code> はこの名前を拒否します</td>
+</tr>
+</tbody>
+</table>
+<p>フラグを合成する no-bypass policy は、invariant <code>&lt;PolicyId&gt;_stability</code> も追加します。
+その名前は、その経由地点集合の上の最初の policy から付けられます。純粋な stage
+グラフでは、どのケースについても独立にすべての stage に到達できるので、
+<code>stage(c)</code> だけの条件は常に成り立つか、違反されるかのどちらかです。この形式が
+意味を持つのは、履歴フラグを読むときです:</p>
+<pre><code class="language-fsl">policy PAY-1 &quot;refunds only for approved cases&quot;
+  every Return reaching Refunded must have passed through Approved
+policy PAY-3 &quot;an approval is final&quot; invariant {
+  forall c: Return { stage(c) == Requested or stage(c) == Rejected =&gt; not return_stage_via_Approved[c] }
+}
+</code></pre>
+<p>上の <code>ReturnHandling</code> に加えると、<code>PAY-3</code> は verify され、induction で証明されます
+(<code>PAY-1</code> と <code>PAY-1_stability</code> とともに)。<code>transition revoke Approved -&gt; Rejected
+by Manager</code> を加えると <code>violated</code> になり、<code>requirement</code> は
+<code>{"id": "PAY-3", "text": "an approval is final"}</code> です。完全な例は
+<code>DESIGN-dialects.md</code> §3.1 に書かれたとおりに検査され、fsl-business スキルの例は
+同じ規則を <code>POL-RET-003</code> として持ちます。</p>
 <p>business には独自の <code>terminal</code> 構文はありません。代わりに、各 process の
 <strong>シンクステージ</strong>(出て行く <code>transition</code> のないステージ)が自動的に収集されます:
 すべての process が少なくとも 1 つのシンクを持つなら、process にわたる

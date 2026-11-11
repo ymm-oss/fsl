@@ -84,6 +84,14 @@ business ReturnToBe {
   policy POL-RET-002 "No return is refunded without approval"
     satisfies CTRL-RET-001
     every Return reaching Refunded must have passed through Approved
+  policy POL-RET-003 "An approval is final"
+    satisfies CTRL-RET-001
+    invariant {
+      forall c: Return {
+        stage(c) == Draft or stage(c) == Requested or stage(c) == Rejected => not return_stage_via_Approved[c]
+      }
+    }
+
   goal GOAL-RET-001 "A return can be refunded" some Return can reach Refunded
 }
 
@@ -106,8 +114,19 @@ it (that skill's "The seam to a business layer").
 | **kpi** `name = count E in S` | a count of cases, a projection that adds no state |
 | **control** `ID "text" owner A severity s applies_to E` | catalog metadata; it proves nothing by itself. A control nothing satisfies is an `unused_control` warning |
 | **policy** `ID "text" [satisfies CTRL] every E in S must eventually be T {or T}` | a progress rule over the fair transitions |
-| **policy** `ID "text" [satisfies CTRL] every E reaching T must have passed through W {or W}` | a no-bypass rule: a hidden history flag (`return_stage_via_Approved`) plus an invariant, and an auxiliary invariant that lets a compliant spec prove by induction |
+| **policy** `ID "text" [satisfies CTRL] every E reaching T must have passed through W {or W}` | a no-bypass rule: a hidden history flag (`return_stage_via_Approved`) plus an invariant, and an auxiliary invariant `<ID>_stability` that lets a compliant spec prove by induction |
+| **policy** `ID "text" [satisfies CTRL] invariant { expr }` | any other safety rule: one invariant named `ID`. `expr` reads the names below |
 | **goal** `ID "text" [satisfies CTRL] some E can reach S` / `all E can be S {or S}` | reachability |
+
+The names an `invariant { }` body reads are the ones the lowering synthesizes:
+`stage(c)` for `c` bound to an entity type (it reads `return_stage[c]`); the
+stage map `return_stage` (the entity name lowercased, then `_stage`); the enum
+`ReturnStage` and its stages; and the history flag of a no-bypass policy,
+`return_stage_via_Approved` (`…_via_Approved_Rejected` for two waypoints, in
+stage order), which exists only while that policy is declared. A condition
+over `stage(c)` alone either always holds or is violated, because every stage
+of a pure stage graph is reachable; `POL-RET-003` reads the flag
+`POL-RET-002` adds. A `revoke Approved -> Rejected` transition violates it.
 
 Intended stops need no flag: a business spec derives `terminal { }` from each
 process's sink stages (stages with no outgoing transition), so a run that ends
