@@ -2490,8 +2490,16 @@ fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runti
 <code>non_canonical</code>, <code>ambiguous_intent</code>, and <code>unsupported_in_edition</code>. Migration
 handles legacy domain enums/operators, declaration string metadata, colon
 quantifiers, unambiguous local inline action mappings, and implicit defaults.
-It refuses source/comment movement that cannot be proven safe. <code>&amp;&amp;</code> remains an
-invalid token and is therefore reported with an <code>and</code> suggestion but is never
+For the next edition (the <code>migrate</code> default) it also inserts the <code>fsl 5</code>
+edition header into a headerless document (<code>missing_edition_header</code>; not a
+causal or AI declaration, <code>refinement</code>, or <code>compose</code>, which get no header) and
+converts each <code>process</code> of a headerless <code>requirements</code> document into an entity
+with its lifecycle, one event per transition, and a rule per guarded
+requirement (<code>legacy_process_form</code>). When that document declares no
+<code>terminal</code>, the converted document has the terminal states derived from the
+final lifecycle stages (<code>derived_terminal_added</code>), which can change the
+deadlock verdict. It refuses source/comment movement that cannot be proven
+safe. <code>&amp;&amp;</code> remains an invalid token and is therefore reported with an <code>and</code> suggestion but is never
 machine-applied. See <code>docs/design/DESIGN-migration.md</code> for atomicity and bulk-update
 steps.</p>
 <p>For already-invalid expression <code>||</code> and <code>-&gt;</code> in spec, requirements, compose,

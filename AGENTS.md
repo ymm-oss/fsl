@@ -102,7 +102,9 @@ new hypothesis, code/config change, or narrower reproducer.
   from head, in each SHA's own materialized tree, plus the inline fixtures of
   every required test it rewrites, renames, removes, or stops running. Record
   each `ok`→`error` transition as a breaking removal in the design note, both
-  language references, `skills/fsl/references/syntax.md`, and a `changed`
+  language references, `skills/fsl/references/syntax.md` (and a layer skill's
+  `references/syntax.md` that documents the form, such as
+  `skills/fsl-requirements/references/syntax.md`), and a `changed`
   fragment; state an empty transition set with the command, both SHAs, and the
   form count rather than assuming it. `corpus_check_sweep.rs` reports only a
   `specs/`/`examples/` form that stops checking
