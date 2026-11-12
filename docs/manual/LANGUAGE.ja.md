@@ -5042,8 +5042,9 @@ verify {
 ```
 
 規則が単なる stage の進行でないときは、明示の形式が引き続き使えます:
-`policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }` と
-`goal ... { exists c: Return { stage(c) == Refunded } }`。
+`policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }`、
+`goal ... { exists c: Return { stage(c) == Refunded } }`、
+`policy ... invariant { … }`(後述)。
 
 **バイパス禁止(no-bypass)**のコントロール — 必須の経由地点を先に通らずには決して
 到達してはならないターゲット stage — には、precedence 形式を使います
@@ -5075,6 +5076,39 @@ or Rejected` — そして、同じ `(process, waypoint-set)` の上の 2 つの
 ```json
 {"result": "proved", "k_used": {"CTRL-APPROVAL": 1, "CTRL-APPROVAL_stability": 1}}
 ```
+
+`policy ID "text" [satisfies CTRL, ...] invariant { expr }` は、business の状態に
+ついてのそれ以外の安全性の規則を書きます。これは `ID` という名前の kernel
+invariant 1 つにコンパイルされ、policy の id と text を `requirement` として運び、
+それ以外には何も合成しません。式は、business の lowering が合成する名前を読みます:
+
+| 名前 | 何か |
+|---|---|
+| `stage(c)` | エンティティ型に束縛された `c`(`forall c: Return { … }`)の stage。`return_stage[c]` を読みます |
+| `return_stage` | process `Return` の stage マップ `Map<Return, ReturnStage>`。エンティティ名を小文字にし、`_stage` を付けた名前です |
+| `ReturnStage`、`Requested`、… | stage の enum `<Entity>Stage` とそのメンバー |
+| `return_stage_via_Approved` | 経由地点 `Approved` の上の no-bypass policy の履歴フラグ `Map<Return, Bool>`(経由地点が `Approved or Rejected` なら、process の stage の順で `return_stage_via_Approved_Rejected`)。そのような policy が宣言されているときだけ存在し、そうでなければ `check` はこの名前を拒否します |
+
+フラグを合成する no-bypass policy は、invariant `<PolicyId>_stability` も追加します。
+その名前は、その経由地点集合の上の最初の policy から付けられます。純粋な stage
+グラフでは、どのケースについても独立にすべての stage に到達できるので、
+`stage(c)` だけの条件は常に成り立つか、違反されるかのどちらかです。この形式が
+意味を持つのは、履歴フラグを読むときです:
+
+```fsl
+policy PAY-1 "refunds only for approved cases"
+  every Return reaching Refunded must have passed through Approved
+policy PAY-3 "an approval is final" invariant {
+  forall c: Return { stage(c) == Requested or stage(c) == Rejected => not return_stage_via_Approved[c] }
+}
+```
+
+上の `ReturnHandling` に加えると、`PAY-3` は verify され、induction で証明されます
+(`PAY-1` と `PAY-1_stability` とともに)。`transition revoke Approved -> Rejected
+by Manager` を加えると `violated` になり、`requirement` は
+`{"id": "PAY-3", "text": "an approval is final"}` です。完全な例は
+`DESIGN-dialects.md` §3.1 に書かれたとおりに検査され、fsl-business スキルの例は
+同じ規則を `POL-RET-003` として持ちます。
 
 business には独自の `terminal` 構文はありません。代わりに、各 process の
 **シンクステージ**(出て行く `transition` のないステージ)が自動的に収集されます:

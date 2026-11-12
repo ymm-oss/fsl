@@ -3,7 +3,7 @@
 
 //! Lossless source nodes and the shared, trivia-preserving formatter.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::dispatch::parse_document_with_ids;
@@ -349,22 +349,28 @@ pub fn format_source_with(
     let (parsed, read) = parse_document_with_ids(SourceFile::new(&rewritten), *options)
         .map_err(FormatError::Parse)?;
     let compact_hyphens = read
+        .ids
         .iter()
         .flat_map(|id| id.hyphens.iter().copied())
         .collect();
     // The edition's layout applies to a document read in it.
     let next_edition = edition == Edition::Fsl5 && parsed.edition == Edition::Fsl5;
-    let (continuations, spaced_opens) = if next_edition {
+    let (continuations, spaced_opens, statement_ends) = if next_edition {
         (
             continuation_offsets(&tree, &parsed.surface),
             parenthesized_move_offsets(&parsed.surface),
+            read.statements
+                .iter()
+                .map(|span| (span.start.offset, span.end.offset))
+                .collect(),
         )
     } else {
-        (BTreeSet::new(), BTreeSet::new())
+        (BTreeSet::new(), BTreeSet::new(), BTreeMap::new())
     };
     let mut formatter = Formatter::new(compact_hyphens);
     formatter.continuations = continuations;
     formatter.spaced_opens = spaced_opens;
+    formatter.statement_ends = statement_ends;
     formatter.write(tree.nodes());
     let mut output = formatter.finish();
     if matches!(crate::edition_header(&output, options), Ok(Some(_))) {
@@ -375,7 +381,7 @@ pub fn format_source_with(
     }
     let (_, printed) =
         parse_document_with_ids(SourceFile::new(&output), *options).map_err(FormatError::Parse)?;
-    check_identifier_spellings(&read, &rewritten, &printed, &output)?;
+    check_identifier_spellings(&read.ids, &rewritten, &printed.ids, &output)?;
     Ok(output)
 }
 
@@ -835,6 +841,23 @@ struct Formatter {
     /// Tokens written after one space whatever comes before them
     /// ([`parenthesized_move_offsets`]).
     spaced_opens: BTreeSet<usize>,
+    /// The end offset of each declaration a line may continue, by the offset
+    /// of its first token ([`crate::parser::FormatReading::statements`]).
+    statement_ends: BTreeMap<usize, usize>,
+    /// The declaration being written, until a token at or past its end.
+    statement: Option<StatementLayout>,
+}
+
+/// The layout of the declaration being written: every line after its first
+/// is indented one level deeper, and so is a line inside a brace opened on
+/// such a line.
+struct StatementLayout {
+    end: usize,
+    /// Whether the line being written is indented as a continuation line.
+    line_continued: bool,
+    /// For each brace the declaration has open, whether the line that
+    /// opened it is a continuation line.
+    braces: Vec<bool>,
 }
 
 impl Formatter {
@@ -852,6 +875,8 @@ impl Formatter {
             source_line_break: false,
             continuations: BTreeSet::new(),
             spaced_opens: BTreeSet::new(),
+            statement_ends: BTreeMap::new(),
+            statement: None,
         }
     }
 
@@ -859,7 +884,7 @@ impl Formatter {
         for node in nodes {
             match &node.kind {
                 LosslessKind::Whitespace => self.whitespace(&node.text),
-                LosslessKind::LineComment => self.comment(&node.text),
+                LosslessKind::LineComment => self.comment(&node.text, node.span.start.offset),
                 LosslessKind::Token(kind) => self.token(kind, &node.text, node.span),
                 LosslessKind::Error => unreachable!("lexical errors are refused"),
             }
@@ -877,7 +902,8 @@ impl Formatter {
         }
     }
 
-    fn comment(&mut self, value: &str) {
+    fn comment(&mut self, value: &str, offset: usize) {
+        self.leave_statement(offset);
         let inline = !self.source_line_break && !self.line_start;
         let lines_after_attachment = if inline { self.pending_lines } else { 0 };
         if inline {
@@ -889,6 +915,10 @@ impl Formatter {
         if !self.line_start && !self.output.ends_with(' ') {
             self.output.push(' ');
         }
+        if self.line_start && self.continues_statement() {
+            self.write_indent();
+            self.output.push_str("  ");
+        }
         self.write_indent();
         self.output.push_str(value.trim_end());
         self.newline();
@@ -897,8 +927,9 @@ impl Formatter {
     }
 
     fn token(&mut self, kind: &TokenKind, original: &str, span: Span) {
-        let closes = matches!(kind, TokenKind::Symbol(symbol) if symbol == "}");
-        if closes {
+        let offset = span.start.offset;
+        self.enter_statement(offset);
+        if matches!(kind, TokenKind::Symbol(symbol) if symbol == "}") {
             self.indent = self.indent.saturating_sub(1);
             if !self.line_start {
                 self.pending_lines = 1;
@@ -907,8 +938,8 @@ impl Formatter {
         self.flush_pending();
         let at_line_start = self.line_start;
         self.write_indent();
-        if at_line_start && self.continuations.contains(&span.start.offset) {
-            self.output.push_str("  ");
+        if at_line_start {
+            self.start_line(offset);
         }
         let compact_hyphen = matches!(kind, TokenKind::Symbol(symbol) if symbol == "-")
             && self.compact_hyphens.contains(&span.start.offset);
@@ -934,8 +965,12 @@ impl Formatter {
             TokenKind::Symbol(symbol) if symbol == "{" => {
                 self.indent += 1;
                 self.pending_lines = 1;
+                self.open_brace();
             }
-            TokenKind::Symbol(symbol) if symbol == "}" => self.pending_lines = 2,
+            TokenKind::Symbol(symbol) if symbol == "}" => {
+                self.pending_lines = 2;
+                self.close_brace();
+            }
             TokenKind::Symbol(symbol) if symbol == ";" => self.pending_lines = 1,
             _ => {}
         }
@@ -949,6 +984,64 @@ impl Formatter {
         self.previous = Some(kind.clone());
         self.previous_offset = Some(span.start.offset);
         self.source_line_break = false;
+    }
+
+    fn leave_statement(&mut self, offset: usize) {
+        if self
+            .statement
+            .as_ref()
+            .is_some_and(|statement| offset >= statement.end)
+        {
+            self.statement = None;
+        }
+    }
+
+    /// Leaves the declaration being written once `offset` reaches its end,
+    /// and enters the declaration whose first token is at `offset`.
+    fn enter_statement(&mut self, offset: usize) {
+        self.leave_statement(offset);
+        if let Some(&end) = self.statement_ends.get(&offset) {
+            self.statement = Some(StatementLayout {
+                end,
+                line_continued: false,
+                braces: Vec::new(),
+            });
+        }
+    }
+
+    /// Indents the line the token at `offset` starts one level more when it
+    /// is a continuation line, and records whether it is. A `}` is still
+    /// inside the brace it closes, so its line is indented like the line
+    /// that opened that brace.
+    fn start_line(&mut self, offset: usize) {
+        let continued = self.continuations.contains(&offset)
+            || (!self.statement_ends.contains_key(&offset) && self.continues_statement());
+        if continued {
+            self.output.push_str("  ");
+        }
+        if let Some(statement) = &mut self.statement {
+            statement.line_continued = continued;
+        }
+    }
+
+    /// Whether a line starting here inside the declaration being written is
+    /// a continuation line (not its first line, which a token decides).
+    fn continues_statement(&self) -> bool {
+        self.statement
+            .as_ref()
+            .is_some_and(|statement| statement.braces.last().copied().unwrap_or(true))
+    }
+
+    fn open_brace(&mut self) {
+        if let Some(statement) = &mut self.statement {
+            statement.braces.push(statement.line_continued);
+        }
+    }
+
+    fn close_brace(&mut self) {
+        if let Some(statement) = &mut self.statement {
+            statement.braces.pop();
+        }
     }
 
     fn flush_pending(&mut self) {
@@ -1130,7 +1223,10 @@ mod tests {
     fn an_output_that_respells_an_identifier_is_refused() {
         let options = ParseOptions::stable();
         let source = format_source(SPACED_IDS, Edition::Fsl4).expect("format");
-        let (_, read) = parse_document_with_ids(SourceFile::new(&source), options).expect("parse");
+        let read = parse_document_with_ids(SourceFile::new(&source), options)
+            .expect("parse")
+            .1
+            .ids;
         assert_eq!(
             read.iter().map(|id| id.value.as_str()).collect::<Vec<_>>(),
             ["BANK-WITHDRAW", "BANK-FB-1"]
@@ -1141,8 +1237,10 @@ mod tests {
         );
 
         let spaced = source.replace("BANK-FB-1", "BANK-FB - 1");
-        let (_, printed) =
-            parse_document_with_ids(SourceFile::new(&spaced), options).expect("parse");
+        let printed = parse_document_with_ids(SourceFile::new(&spaced), options)
+            .expect("parse")
+            .1
+            .ids;
         assert_eq!(
             check_identifier_spellings(&read, &source, &printed, &spaced),
             Err(FormatError::RespelledIdentifier {
@@ -1153,8 +1251,10 @@ mod tests {
         );
 
         let renamed = source.replace("BANK-FB-1", "BANK-FB-2");
-        let (_, printed) =
-            parse_document_with_ids(SourceFile::new(&renamed), options).expect("parse");
+        let printed = parse_document_with_ids(SourceFile::new(&renamed), options)
+            .expect("parse")
+            .1
+            .ids;
         assert!(matches!(
             check_identifier_spellings(&read, &source, &printed, &renamed),
             Err(FormatError::RespelledIdentifier { identifier, .. }) if identifier == "BANK-FB-1"

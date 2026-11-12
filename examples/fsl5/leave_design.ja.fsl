@@ -20,14 +20,14 @@ spec LeaveDesign {
 
   // 設計の矢印。チケットの段階はこの矢印に沿ってだけ変わる。
   def moves(a: Phase, b: Phase) =
-  a == b
-  or a == Drafting and b == AutoQueue
-  or a == Drafting and b == ManagerQueue
-  or a == AutoQueue and b == Granted
-  or a == ManagerQueue and b == Granted
-  or a == ManagerQueue and b == Refused
-  or a == Granted and b == OnLeave
-  or a == Granted and b == Withdrawn
+    a == b
+    or a == Drafting and b == AutoQueue
+    or a == Drafting and b == ManagerQueue
+    or a == AutoQueue and b == Granted
+    or a == ManagerQueue and b == Granted
+    or a == ManagerQueue and b == Refused
+    or a == Granted and b == OnLeave
+    or a == Granted and b == Withdrawn
 
   state {
     tickets: Map<Leave, Ticket>

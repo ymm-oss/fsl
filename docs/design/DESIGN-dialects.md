@@ -860,7 +860,7 @@ Add `business <Name> { ... }` at top level. The expander
 
 ### 3.1 Syntax
 
-```fsl
+```fsl check
 business ReturnHandling {
   actor Customer, Manager                  // → enum Actor { Customer, Manager } (an informational annotation, omittable if not referenced)
   entity Return                            // → entity sort; verification size lives in verify
@@ -882,9 +882,11 @@ business ReturnHandling {
     severity high
     applies_to Return
 
-  policy PAY-1 "refunds only for approved cases" invariant {
-    // stage(c) is available in expressions (c is an entity-typed bound variable)
-    forall c: Return { stage(c) == Refunded => true }   // example
+  policy PAY-1 "refunds only for approved cases"
+    every Return reaching Refunded must have passed through Approved
+  policy PAY-3 "an approval is final" invariant {
+    // stage(c) (c is an entity-typed bound variable) and the history flag PAY-1 synthesizes (rule 8)
+    forall c: Return { stage(c) == Requested or stage(c) == Rejected => not return_stage_via_Approved[c] }
   }
   policy PAY-2 "every request is eventually adjudicated"
     satisfies CTRL-REFUND-REVIEW
@@ -926,7 +928,16 @@ verify {
    or properties by itself. A control becomes checkable when a policy or goal
    declares `satisfies <ControlID>`.
 5. `policy <ID> "<text>" [satisfies <ControlID>, ...] invariant { expr }` →
-   invariant (with meta). The same optional `satisfies` clause is available on
+   one invariant named `<ID>` (with meta); nothing else is synthesized. `expr`
+   reads `stage(c)`, the stage map and enum of rule 2, and the history flags of
+   rule 8, which exist only while a precedence policy over that waypoint set is
+   declared (otherwise the name does not type). Every stage of a pure stage
+   graph is reachable, each case independently, so an invariant over `stage(c)`
+   alone is either a tautology or violated; `PAY-3` in §3.1 reads PAY-1's flag
+   (#1784, which replaced a `… => true` example). A transition
+   `Approved -> Rejected` violates it, and
+   `rust/fslc/tests/issue_1784_business_policy_invariant.rs` keeps that
+   negative control. The same optional `satisfies` clause is available on
    all policy forms and on goals. Unknown control references are type errors;
    declared but unused controls produce an `unused_control` warning. When a
    satisfied policy/goal fails, the JSON `requirement` object includes

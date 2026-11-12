@@ -15,12 +15,12 @@ refinement LeaveDesignRefinesRequests {
   abs LeaveRequests
 
   map leave_stage[l: Leave] =
-  if tickets[l].phase == Drafting then Draft
-  else if tickets[l].phase == AutoQueue or tickets[l].phase == ManagerQueue then Submitted
-  else if tickets[l].phase == Granted then Approved
-  else if tickets[l].phase == OnLeave then Taken
-  else if tickets[l].phase == Refused then Rejected
-  else Cancelled
+    if tickets[l].phase == Drafting then Draft
+    else if tickets[l].phase == AutoQueue or tickets[l].phase == ManagerQueue then Submitted
+    else if tickets[l].phase == Granted then Approved
+    else if tickets[l].phase == OnLeave then Taken
+    else if tickets[l].phase == Refused then Rejected
+    else Cancelled
   map leave_days[l: Leave] = tickets[l].days
   map leave_substitute[l: Leave] = tickets[l].cover
 

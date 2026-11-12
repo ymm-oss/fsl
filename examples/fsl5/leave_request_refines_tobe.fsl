@@ -18,7 +18,7 @@ refinement LeaveRequestsRefineToBe {
 
   map leave_stage[c: Leave] = leave_stage[c]
   map leave_stage_via_Approved[c: Leave] =
-  leave_stage[c] == Approved or leave_stage[c] == Taken or leave_stage[c] == Cancelled
+    leave_stage[c] == Approved or leave_stage[c] == Taken or leave_stage[c] == Cancelled
   map leave_stage_via_Submitted[c: Leave] = leave_stage[c] != Draft
 
   action submit(l, days) -> submit(l)

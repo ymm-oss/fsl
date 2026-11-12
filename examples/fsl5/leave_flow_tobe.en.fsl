@@ -27,24 +27,24 @@ business LeaveFlowToBe {
   kpi open_requests = count Leave in Submitted
 
   control CTRL-LEAVEFLOW-001 "Leave is taken or cancelled only after it was approved"
-  owner Manager
-  severity high
-  applies_to Leave
+    owner Manager
+    severity high
+    applies_to Leave
   control CTRL-LEAVEFLOW-002 "No request waits for a decision forever"
-  owner Manager
-  severity medium
-  applies_to Leave
+    owner Manager
+    severity medium
+    applies_to Leave
 
   policy POL-LEAVEFLOW-001 "No leave is taken or cancelled without an approval"
-  satisfies CTRL-LEAVEFLOW-001
-  every Leave reaching Taken or Cancelled must have passed through Approved
+    satisfies CTRL-LEAVEFLOW-001
+    every Leave reaching Taken or Cancelled must have passed through Approved
   policy POL-LEAVEFLOW-002 "Every submitted leave is eventually decided"
-  satisfies CTRL-LEAVEFLOW-002
-  every Leave in Submitted must eventually be Approved or Rejected
+    satisfies CTRL-LEAVEFLOW-002
+    every Leave in Submitted must eventually be Approved or Rejected
   policy POL-LEAVEFLOW-003 "Every approved leave is eventually taken or cancelled"
-  every Leave in Approved must eventually be Taken or Cancelled
+    every Leave in Approved must eventually be Taken or Cancelled
   policy POL-LEAVEFLOW-004 "A leave is decided only after it was submitted"
-  every Leave reaching Approved or Rejected must have passed through Submitted
+    every Leave reaching Approved or Rejected must have passed through Submitted
   goal GOAL-LEAVEFLOW-001 "A leave can be taken" some Leave can reach Taken
   goal GOAL-LEAVEFLOW-002 "A leave can be rejected" some Leave can reach Rejected
   goal GOAL-LEAVEFLOW-003 "A leave can be cancelled" some Leave can reach Cancelled

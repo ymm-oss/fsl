@@ -22,17 +22,17 @@ business LeaveFlowAsIs {
   kpi taken_leaves = count Leave in Taken
 
   control CTRL-LEAVEFLOW-001 "休暇は承認された後にだけ取得または取消する"
-  owner Manager
-  severity high
-  applies_to Leave
+    owner Manager
+    severity high
+    applies_to Leave
 
   policy POL-LEAVEFLOW-001 "承認を経ずに休暇を取得も取消もしない"
-  satisfies CTRL-LEAVEFLOW-001
-  every Leave reaching Taken or Cancelled must have passed through Approved
+    satisfies CTRL-LEAVEFLOW-001
+    every Leave reaching Taken or Cancelled must have passed through Approved
   policy POL-LEAVEFLOW-004 "休暇は申請された後にだけ決める"
-  every Leave reaching Approved or Rejected must have passed through Submitted
+    every Leave reaching Approved or Rejected must have passed through Submitted
   policy POL-LEAVEFLOW-003 "承認された休暇はいずれ取得か取消になる"
-  every Leave in Approved must eventually be Taken or Cancelled
+    every Leave in Approved must eventually be Taken or Cancelled
   goal GOAL-LEAVEFLOW-001 "休暇は取得まで進める" some Leave can reach Taken
   goal GOAL-LEAVEFLOW-002 "休暇は却下されうる" some Leave can reach Rejected
   goal GOAL-LEAVEFLOW-003 "休暇は取り消されうる" some Leave can reach Cancelled
