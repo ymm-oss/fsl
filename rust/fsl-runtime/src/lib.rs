@@ -23,6 +23,24 @@ mod trace;
 #[cfg(test)]
 mod scope_tests;
 
+#[cfg(test)]
+mod enabled_calls_tests;
+
+/// Work counters the structural tests of #1842 read, so a scaling
+/// regression fails without a wall-clock deadline.
+#[cfg(test)]
+mod evaluation_counts {
+    std::thread_local! {
+        /// Calls of `evaluate_action_guards_at`: one per action instance whose
+        /// guards are evaluated.
+        pub(crate) static GUARD_EVALUATIONS: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+        /// Calls of `explicit::init_write_keys_overlap`.
+        pub(crate) static INIT_WRITE_COMPARISONS: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+    }
+}
+
 pub use explicit::{
     ActionStats, ExplicitReachableWitness, ExplicitResult, ExplicitViolation,
     check_init_write_ownership, deterministic_initial_state, explicit_unsupported_reason,
@@ -1362,6 +1380,70 @@ impl Monitor {
                         action: action.name.clone(),
                         params,
                         bindings,
+                    });
+                }
+            }
+        }
+        Ok(enabled)
+    }
+
+    /// The [`Monitor::enabled_where`] instances whose action name and
+    /// parameters are one of `calls`, in the same order, with the same
+    /// errors.
+    ///
+    /// `enabled_where` evaluates the guards of every instance so that a guard
+    /// that cannot be evaluated for any of them fails it. Here an action whose
+    /// guards cannot fail for any of its instances in the current state
+    /// ([`guards_cannot_fail`]) has only the instances `calls` names
+    /// evaluated, and every other action has every instance evaluated, as
+    /// `enabled_where` does. A requirements trace step therefore costs its
+    /// own call, not the number of entity instances or the size of a
+    /// `values` scope (#1842).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuntimeError`] when parameter domains or guards cannot be
+    /// evaluated concretely: the error `enabled_where` returns.
+    pub fn enabled_calls(
+        &self,
+        calls: &[(&str, &Bindings)],
+    ) -> Result<Vec<EnabledAction>, RuntimeError> {
+        let mut enabled = Vec::new();
+        for action in &self.model.actions {
+            let bindings = action_parameter_bindings(action, &self.model)?;
+            let requested = calls
+                .iter()
+                .filter(|(name, _)| *name == action.name)
+                .map(|(_, params)| *params);
+            if !guards_cannot_fail(action, &bindings.domains, &self.state, &self.model) {
+                let requested = requested.collect::<Vec<_>>();
+                for params in bindings {
+                    if let Some(guard_bindings) =
+                        evaluate_action_guards(action, &params, &self.state, &self.model)?
+                        && requested.contains(&&params)
+                    {
+                        enabled.push(EnabledAction {
+                            action: action.name.clone(),
+                            params,
+                            bindings: guard_bindings,
+                        });
+                    }
+                }
+                continue;
+            }
+            let mut named = requested
+                .filter_map(|params| bindings.position(params).map(|position| (position, params)))
+                .collect::<Vec<_>>();
+            named.sort_by(|left, right| left.0.cmp(&right.0));
+            named.dedup_by(|left, right| left.0 == right.0);
+            for (_, params) in named {
+                if let Some(guard_bindings) =
+                    evaluate_action_guards(action, params, &self.state, &self.model)?
+                {
+                    enabled.push(EnabledAction {
+                        action: action.name.clone(),
+                        params: params.clone(),
+                        bindings: guard_bindings,
                     });
                 }
             }
@@ -4450,6 +4532,21 @@ impl ParameterDomain {
             }
         }
     }
+
+    /// The first index whose [`ParameterDomain::value`] is `value`, or `None`
+    /// when `value` is not in the domain.
+    fn index_of(&self, value: &Value) -> Option<i128> {
+        match (self, value) {
+            (Self::Ints(lo, hi), Value::Int(value)) => {
+                (lo <= value && value <= hi).then(|| i128::from(*value) - i128::from(*lo))
+            }
+            (Self::Ints(..), _) => None,
+            (Self::Values(values), value) => values
+                .iter()
+                .position(|candidate| candidate == value)
+                .and_then(|index| i128::try_from(index).ok()),
+        }
+    }
 }
 
 /// Every parameter binding of one action, generated one at a time: the first
@@ -4491,6 +4588,23 @@ impl Iterator for ParameterBindings {
             indices[position] = 0;
         }
         Some(binding)
+    }
+}
+
+impl ParameterBindings {
+    /// Where `params` comes in this iteration, as the per-parameter domain
+    /// indices (the iteration yields them in lexicographic order), or `None`
+    /// when `params` is not one of the bindings. Parameter names must be
+    /// distinct.
+    fn position(&self, params: &Bindings) -> Option<Vec<i128>> {
+        if params.len() != self.names.len() {
+            return None;
+        }
+        self.names
+            .iter()
+            .zip(&self.domains)
+            .map(|(name, domain)| domain.index_of(params.get(name)?))
+            .collect()
     }
 }
 
@@ -4577,6 +4691,8 @@ fn evaluate_action_guards_at(
     state: &State,
     model: &KernelModel,
 ) -> Result<Option<Bindings>, (Option<usize>, RuntimeError)> {
+    #[cfg(test)]
+    evaluation_counts::GUARD_EVALUATIONS.with(|count| count.set(count.get() + 1));
     validate_action_parameters(action, params, model).map_err(|error| (None, error))?;
     let mut bindings = params.clone();
     for (index, guard) in action.guards.iter().enumerate() {
@@ -4597,6 +4713,221 @@ fn evaluate_action_guards_at(
         }
     }
     Ok(Some(bindings))
+}
+
+/// Whether [`evaluate_action_guards`] cannot fail in `state` for any binding
+/// of `action`'s parameters over `domains`, decided without evaluating a
+/// single guard, so [`Monitor::enabled_calls`] evaluates only the bindings
+/// it is asked about.
+///
+/// `true` is exact only in that direction. It needs parameters with distinct
+/// names, each an integer range, a domain, an enum, or `Bool`, so every
+/// binding passes `validate_action_parameters`; and guards built only from
+/// literals, enum members, names that resolve, comparisons, `not`, `and` /
+/// `or` / `=>`, and reads `m[p]` of a state `Map` that holds every value of
+/// the domain of parameter `p`. A comparison never fails (`eval_binary`
+/// orders any two values), `not` and the Boolean connectives fail only on an
+/// operand that is not a Bool, and so does `requires`. Every such fact is
+/// read from `state`, not taken from the declared types.
+fn guards_cannot_fail(
+    action: &ActionDef,
+    domains: &[ParameterDomain],
+    state: &State,
+    model: &KernelModel,
+) -> bool {
+    let mut scope = BTreeMap::new();
+    for (position, (parameter, domain)) in action.params.iter().zip(domains).enumerate() {
+        if !binding_values_validate(parameter, domain, model)
+            || scope
+                .insert(parameter.name(), GuardName::Parameter(position))
+                .is_some()
+        {
+            return false;
+        }
+    }
+    let mut check = GuardCheck {
+        scope,
+        domains,
+        state,
+        model,
+    };
+    for guard in &action.guards {
+        match guard {
+            ActionGuard::Requires(expression) => {
+                if !check.cannot_fail(expression, true) {
+                    return false;
+                }
+            }
+            ActionGuard::Let(name, expression) => {
+                if !check.cannot_fail(expression, false) {
+                    return false;
+                }
+                let boolean = check.cannot_fail(expression, true);
+                check.scope.insert(name, GuardName::Let { boolean });
+            }
+        }
+    }
+    true
+}
+
+/// Whether every value of `domain`, the domain of `parameter`, passes
+/// `parameter_value_in_domain` once and only once.
+fn binding_values_validate(
+    parameter: &ParamDef,
+    domain: &ParameterDomain,
+    model: &KernelModel,
+) -> bool {
+    match (parameter, domain) {
+        (
+            ParamDef::Range { .. }
+            | ParamDef::Typed {
+                ty: TypeRef::Range(..),
+                ..
+            },
+            _,
+        ) => {
+            matches!(domain, ParameterDomain::Ints(..))
+        }
+        (
+            ParamDef::Typed {
+                ty: TypeRef::Named(name),
+                ..
+            },
+            ParameterDomain::Ints(..),
+        ) => {
+            matches!(model.types.get(name), Some(TypeDef::Domain { .. }))
+        }
+        (
+            ParamDef::Typed {
+                ty: TypeRef::Named(_) | TypeRef::Bool,
+                ..
+            },
+            ParameterDomain::Values(values),
+        ) => {
+            values.iter().collect::<BTreeSet<_>>().len() == values.len()
+                && values.iter().all(|value| {
+                    matches!(parameter_value_in_domain(parameter, value, model), Ok(true))
+                })
+        }
+        _ => false,
+    }
+}
+
+/// What a guard name is bound to while [`guards_cannot_fail`] reads the
+/// guards in order.
+enum GuardName {
+    /// The parameter at this position.
+    Parameter(usize),
+    /// A `let`, and whether its value is certainly a Bool.
+    Let { boolean: bool },
+}
+
+struct GuardCheck<'a> {
+    scope: BTreeMap<&'a str, GuardName>,
+    domains: &'a [ParameterDomain],
+    state: &'a State,
+    model: &'a KernelModel,
+}
+
+impl GuardCheck<'_> {
+    /// Whether evaluating `expr` cannot fail for any binding, and, when
+    /// `boolean`, also cannot give a value other than a Bool.
+    fn cannot_fail(&self, expr: &Expr, boolean: bool) -> bool {
+        recursion::guard(|| match expr {
+            Expr::Bool(_) => true,
+            Expr::Num(_) | Expr::None => !boolean,
+            Expr::EnumMember {
+                type_name, member, ..
+            } => {
+                !boolean
+                    && matches!(
+                        self.model.types.get(type_name),
+                        Some(TypeDef::Enum { members, .. }) if members.contains(member)
+                    )
+            }
+            Expr::Var(name) => self
+                .name_is_boolean(name)
+                .is_some_and(|is_boolean| is_boolean || !boolean),
+            Expr::Index(base, index) => self.index_cannot_fail(base, index, boolean),
+            Expr::Not(inner) => self.cannot_fail(inner, true),
+            Expr::Binary { op, left, right } => match op.as_str() {
+                "and" | "or" | "=>" => {
+                    self.cannot_fail(left, true) && self.cannot_fail(right, true)
+                }
+                "==" | "!=" | "<" | "<=" | ">" | ">=" => {
+                    self.cannot_fail(left, false) && self.cannot_fail(right, false)
+                }
+                _ => false,
+            },
+            _ => false,
+        })
+    }
+
+    /// Whether `name` resolves as `eval` resolves a `Var` (a parameter or a
+    /// `let`, then the state, a constant, an enum member) and, when it does,
+    /// whether its value is a Bool for every binding.
+    fn name_is_boolean(&self, name: &str) -> Option<bool> {
+        if let Some(bound) = self.scope.get(name) {
+            return Some(match bound {
+                GuardName::Parameter(position) => matches!(
+                    &self.domains[*position],
+                    ParameterDomain::Values(values)
+                        if values.iter().all(|value| matches!(value, Value::Bool(_)))
+                ),
+                GuardName::Let { boolean } => *boolean,
+            });
+        }
+        self.state
+            .get(name)
+            .or_else(|| self.model.consts.get(name))
+            .or_else(|| self.model.enum_members.get(name))
+            .map(|value| matches!(value, Value::Bool(_)))
+    }
+
+    /// `m[p]` with `m` a state `Map` (no guard name shadows it, so `eval`'s
+    /// place read finds it in the state) that holds every value of the
+    /// domain of parameter `p`, and, when `boolean`, only Bool values.
+    fn index_cannot_fail(&self, base: &Expr, index: &Expr, boolean: bool) -> bool {
+        let (Expr::Var(map), Expr::Var(key)) = (base, index) else {
+            return false;
+        };
+        if self.scope.contains_key(map.as_str()) {
+            return false;
+        }
+        let Some(GuardName::Parameter(position)) = self.scope.get(key.as_str()) else {
+            return false;
+        };
+        let Some(Value::Map(entries)) = self.state.get(map) else {
+            return false;
+        };
+        map_holds_domain(entries, &self.domains[*position])
+            && (!boolean
+                || entries
+                    .values()
+                    .all(|value| matches!(value, Value::Bool(_))))
+    }
+}
+
+/// Whether `entries` has a key for every value of `domain`. For an integer
+/// domain this reads only the first and last keys and the length: `Value`
+/// orders every `Int` before any other value, so keys from `Int(first)` to
+/// `Int(last)`, `last - first + 1` of them, are exactly that integer range.
+fn map_holds_domain(entries: &BTreeMap<Value, Value>, domain: &ParameterDomain) -> bool {
+    match domain {
+        ParameterDomain::Ints(lo, hi) if lo > hi => true,
+        ParameterDomain::Ints(lo, hi) => {
+            match (entries.first_key_value(), entries.last_key_value()) {
+                (Some((Value::Int(first), _)), Some((Value::Int(last), _))) => {
+                    first <= lo
+                        && hi <= last
+                        && i128::try_from(entries.len())
+                            .is_ok_and(|len| len == i128::from(*last) - i128::from(*first) + 1)
+                }
+                _ => false,
+            }
+        }
+        ParameterDomain::Values(values) => values.iter().all(|value| entries.contains_key(value)),
+    }
 }
 
 /// The guard (an index into `action.guards`, in source order) whose
@@ -4688,8 +5019,7 @@ fn execute_init_statement_inner(
     match statement {
         Statement::Assign { target, value, .. } => {
             let value = eval(value, state, bindings, model, None)?;
-            let read_state = state.clone();
-            let key = lvalue_key(target, &read_state, bindings, model)?;
+            let key = lvalue_key(target, state, bindings, model)?;
             match written.get(&key) {
                 Some(previous) if *previous != value => {
                     return Err(runtime_error("init constraints are unsatisfiable"));
@@ -4698,7 +5028,8 @@ fn execute_init_statement_inner(
                     written.insert(key, value.clone());
                 }
             }
-            assign(target, value, &read_state, state, bindings, model)?;
+            let place = assign_place(target, state, bindings, model)?;
+            write_place(place, value, state, None, model)?;
         }
         Statement::If {
             condition,
@@ -4794,86 +5125,131 @@ fn assign(
     bindings: &mut Bindings,
     model: &KernelModel,
 ) -> Result<(), RuntimeError> {
-    match target {
-        LValue::Var(name) => {
-            target_state.insert(
-                name.clone(),
-                coerce_relation_literal(value, model.state_type(name)),
-            );
-        }
-        LValue::Index(name, index_expr) => {
-            let index = eval(index_expr, read_state, bindings, model, None)?;
-            let mut root = target_state
-                .get(name)
-                .or_else(|| read_state.get(name))
-                .cloned()
-                .ok_or_else(|| runtime_error(format!("unknown assignment target '{name}'")))?;
-            match &mut root {
-                Value::Map(values) => {
-                    if !values.contains_key(&index) {
-                        return Err(runtime_error("map assignment index outside key domain"));
-                    }
-                    values.insert(index, value);
-                }
-                // Unreachable on a checked model: `check` rejects a `Seq`
-                // indexed target. Kept with its pre-#1166 classification (a
-                // negative index was `partial_op` by message, a too-large one
-                // was not) so this change does not alter it.
-                Value::Seq(values) => {
-                    let index = partial_index(index, PartialOperation::Index)?;
-                    let slot = values
-                        .get_mut(index)
-                        .ok_or_else(|| runtime_error("sequence assignment index out of range"))?;
-                    *slot = value;
-                }
-                _ => return Err(runtime_error("indexed assignment requires map or sequence")),
-            }
-            target_state.insert(name.clone(), root);
-        }
+    let place = assign_place(target, read_state, bindings, model)?;
+    write_place(place, value, target_state, Some(read_state), model)
+}
+
+/// An assignment target with its index expression evaluated.
+enum AssignPlace<'target> {
+    Var(&'target str),
+    /// A part of the state variable named first.
+    Part(&'target str, PartPlace<'target>),
+}
+
+enum PartPlace<'target> {
+    Index(Value),
+    Field(&'target str),
+    IndexField(Value, &'target str),
+}
+
+/// Resolve `target` against `read_state`: the first half of [`assign`],
+/// which evaluates the index expression before it looks up the root.
+fn assign_place<'target>(
+    target: &'target LValue,
+    read_state: &State,
+    bindings: &mut Bindings,
+    model: &KernelModel,
+) -> Result<AssignPlace<'target>, RuntimeError> {
+    Ok(match target {
+        LValue::Var(name) => AssignPlace::Var(name),
+        LValue::Index(name, index_expr) => AssignPlace::Part(
+            name,
+            PartPlace::Index(eval(index_expr, read_state, bindings, model, None)?),
+        ),
         LValue::Field(base, field) => match base.as_ref() {
-            LValue::Var(name) => {
-                let mut root = target_state
-                    .get(name)
-                    .or_else(|| read_state.get(name))
-                    .cloned()
-                    .ok_or_else(|| runtime_error(format!("unknown assignment target '{name}'")))?;
-                let Value::Struct { fields, .. } = &mut root else {
-                    return Err(runtime_error("field assignment requires struct state"));
-                };
-                let slot = fields
-                    .get_mut(field)
-                    .ok_or_else(|| runtime_error(format!("unknown struct field '{field}'")))?;
-                *slot = value;
-                target_state.insert(name.clone(), root);
-            }
-            LValue::Index(name, index_expr) => {
-                let index = eval(index_expr, read_state, bindings, model, None)?;
-                let mut root = target_state
-                    .get(name)
-                    .or_else(|| read_state.get(name))
-                    .cloned()
-                    .ok_or_else(|| runtime_error(format!("unknown assignment target '{name}'")))?;
-                let Value::Map(values) = &mut root else {
-                    return Err(runtime_error("map field assignment requires map state"));
-                };
-                let Value::Struct { fields, .. } = values
-                    .get_mut(&index)
-                    .ok_or_else(|| runtime_error("map assignment index outside key domain"))?
-                else {
-                    return Err(runtime_error("map field assignment requires struct values"));
-                };
-                let slot = fields
-                    .get_mut(field)
-                    .ok_or_else(|| runtime_error(format!("unknown struct field '{field}'")))?;
-                *slot = value;
-                target_state.insert(name.clone(), root);
-            }
+            LValue::Var(name) => AssignPlace::Part(name, PartPlace::Field(field)),
+            LValue::Index(name, index_expr) => AssignPlace::Part(
+                name,
+                PartPlace::IndexField(eval(index_expr, read_state, bindings, model, None)?, field),
+            ),
             LValue::Field(_, _) => {
                 return Err(runtime_error(
                     "nested field lvalue is not supported by grammar",
                 ));
             }
         },
+    })
+}
+
+/// Write `value` at `place` in `target_state`: the second half of
+/// [`assign`]. A root `target_state` does not hold yet is taken from
+/// `read_state`. Every check runs before the write, so a failed write leaves
+/// `target_state` unchanged.
+fn write_place(
+    place: AssignPlace<'_>,
+    value: Value,
+    target_state: &mut State,
+    read_state: Option<&State>,
+    model: &KernelModel,
+) -> Result<(), RuntimeError> {
+    let (name, part) = match place {
+        AssignPlace::Var(name) => {
+            target_state.insert(
+                name.to_owned(),
+                coerce_relation_literal(value, model.state_type(name)),
+            );
+            return Ok(());
+        }
+        AssignPlace::Part(name, part) => (name, part),
+    };
+    if let Some(root) = target_state.get_mut(name) {
+        return write_part(part, value, root);
+    }
+    let mut root = read_state
+        .and_then(|state| state.get(name))
+        .cloned()
+        .ok_or_else(|| runtime_error(format!("unknown assignment target '{name}'")))?;
+    write_part(part, value, &mut root)?;
+    target_state.insert(name.to_owned(), root);
+    Ok(())
+}
+
+fn write_part(part: PartPlace<'_>, value: Value, root: &mut Value) -> Result<(), RuntimeError> {
+    match part {
+        PartPlace::Index(index) => match root {
+            Value::Map(values) => {
+                let slot = values
+                    .get_mut(&index)
+                    .ok_or_else(|| runtime_error("map assignment index outside key domain"))?;
+                *slot = value;
+            }
+            // Unreachable on a checked model: `check` rejects a `Seq`
+            // indexed target. Kept with its pre-#1166 classification (a
+            // negative index was `partial_op` by message, a too-large one
+            // was not) so this change does not alter it.
+            Value::Seq(values) => {
+                let index = partial_index(index, PartialOperation::Index)?;
+                let slot = values
+                    .get_mut(index)
+                    .ok_or_else(|| runtime_error("sequence assignment index out of range"))?;
+                *slot = value;
+            }
+            _ => return Err(runtime_error("indexed assignment requires map or sequence")),
+        },
+        PartPlace::Field(field) => {
+            let Value::Struct { fields, .. } = root else {
+                return Err(runtime_error("field assignment requires struct state"));
+            };
+            let slot = fields
+                .get_mut(field)
+                .ok_or_else(|| runtime_error(format!("unknown struct field '{field}'")))?;
+            *slot = value;
+        }
+        PartPlace::IndexField(index, field) => {
+            let Value::Map(values) = root else {
+                return Err(runtime_error("map field assignment requires map state"));
+            };
+            let Value::Struct { fields, .. } = values
+                .get_mut(&index)
+                .ok_or_else(|| runtime_error("map assignment index outside key domain"))?
+            else {
+                return Err(runtime_error("map field assignment requires struct values"));
+            };
+            let slot = fields
+                .get_mut(field)
+                .ok_or_else(|| runtime_error(format!("unknown struct field '{field}'")))?;
+            *slot = value;
+        }
     }
     Ok(())
 }

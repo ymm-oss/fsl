@@ -890,9 +890,10 @@ pub fn requirement_step_match(
 ///
 /// Only the instances the step names are collected: listing every enabled
 /// instance held one entry per value of a parameter domain, so a step over
-/// a large `values` scope exhausted memory. Every guard is still evaluated
-/// ([`fsl_runtime::Monitor::enabled_where`]), so a guard that cannot be
-/// evaluated fails as before.
+/// a large `values` scope exhausted memory. A guard that cannot be evaluated
+/// for any instance still fails the step as it fails `enabled`
+/// ([`fsl_runtime::Monitor::enabled_calls`]); only an action whose guards
+/// cannot fail has the other instances skipped.
 fn enabled_step_instance<'a>(
     monitor: &fsl_runtime::Monitor,
     actions: impl IntoIterator<Item = &'a ActionDef>,
@@ -910,11 +911,11 @@ fn enabled_step_instance<'a>(
             (action.name.as_str(), params)
         })
         .collect::<Vec<_>>();
-    let enabled = monitor.enabled_where(|action, params| {
-        calls
-            .iter()
-            .any(|(name, call)| *name == action && call == params)
-    })?;
+    let requested = calls
+        .iter()
+        .map(|(name, params)| (*name, params))
+        .collect::<Vec<_>>();
+    let enabled = monitor.enabled_calls(&requested)?;
     Ok(calls.iter().find_map(|(name, params)| {
         enabled
             .iter()
@@ -1414,14 +1415,35 @@ pub fn require_trace_gate(
     }
 }
 
+/// The Monitor at `model`'s initial state, built when a case first needs it
+/// and copied for each later case: building it runs init, which every case
+/// used to repeat.
+struct InitialMonitor<'a> {
+    model: &'a KernelModel,
+    built: Option<fsl_runtime::Monitor>,
+}
+
+impl InitialMonitor<'_> {
+    fn get(&mut self) -> Result<fsl_runtime::Monitor, String> {
+        if let Some(monitor) = &self.built {
+            return Ok(monitor.clone());
+        }
+        let monitor =
+            fsl_runtime::Monitor::new(self.model.clone()).map_err(|error| error.to_string())?;
+        self.built = Some(monitor.clone());
+        Ok(monitor)
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn validate_requirement_trace_contract(
     envelope: &Map<String, Value>,
     contract: &fsl_core::RequirementsTraceContract,
     model: &KernelModel,
 ) -> Result<Option<Value>, String> {
+    let mut initial = InitialMonitor { model, built: None };
     for case in contract.unchecked_acceptance() {
-        let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
+        let mut monitor = initial.get()?;
         for (index, step) in case.steps.iter().enumerate() {
             let (arguments, instance) = requirement_step_match(&monitor, step)?;
             let Some(instance) = instance else {
@@ -1514,7 +1536,7 @@ fn validate_requirement_trace_contract(
                 case.id
             ));
         }
-        let mut monitor = fsl_runtime::Monitor::new(model.clone()).map_err(|e| e.to_string())?;
+        let mut monitor = initial.get()?;
         let mut accepted_trace = Vec::new();
         for (index, step) in case.steps.iter().enumerate() {
             // A guard that cannot be evaluated here must stay an error, never
