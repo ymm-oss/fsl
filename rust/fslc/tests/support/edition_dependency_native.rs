@@ -51,8 +51,20 @@ fn dependency_edition_o01_fresh_thread_has_no_owner_and_fails_closed() {
 
 fn lenient_helper(id: &str, model: &KernelModel, path: &Path, source: &str) -> Value {
     match id {
-        "P01" => reachable_counterfactuals_from_source(model, path, source, 2),
-        "P02" => invariant_counterfactuals_from_source(model, path, source, 2),
+        "P01" => reachable_counterfactuals_from_source(
+            model,
+            path,
+            source,
+            2,
+            &WeakenedModelRuns::default(),
+        ),
+        "P02" => invariant_counterfactuals_from_source(
+            model,
+            path,
+            source,
+            2,
+            &mut WeakenedModelRuns::default(),
+        ),
         "P03" => json!(document_model_failure(source, path.parent().unwrap()).is_some()),
         "P04" => json!(readable_implements_text_from_source(path, source, model, 2)),
         _ => unreachable!(),

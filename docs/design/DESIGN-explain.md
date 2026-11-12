@@ -12,7 +12,9 @@ formulas" to "adjudicating concrete examples."
 `fslc explain <f> [--depth K] --readable` emits the deterministic text review
 view. **No LLM used** (deterministic formatting only; prose generation is left
 to the agent-side skill). The verification engine is unmodified; #6 mutate and
-verify are reused.
+verify are reused. The text prints no witness or counterfactual, so
+`--readable` does not compute them (#1839); only its `Implements:` section
+runs a refinement check.
 
 ```json
 {"result":"explained",
@@ -85,8 +87,8 @@ verification logic is written. Key points:
   not just the bounded verifier's first reported failure for the mutant.
 - **Non-user-check preemption (#1350):** if the target-isolated verifier first
   reports `type_bound`, `trans`, `partial_op` or `ensures`, try the existing
-  solver-independent concrete search at each step count through the requested
-  depth. It skips guard-partial action instances and errored/violating children
+  solver-independent concrete search for the fewest steps through the
+  requested depth. It skips guard-partial action instances and errored/violating children
   while exploring other instances and queued paths; a failed initialization or
   an initially violated/unevaluable state cannot supply a concrete trace.
   A target witness competes under the same ranking tuple. If none is found,
@@ -101,8 +103,7 @@ verification logic is written. Key points:
   initialization/initial-state checks failed: REASON`, preserving the reported
   cause without inventing free roots. Distinct reasons are retained per target;
   they do not replace the existing preemption or bounded-init skip clauses.
-  Constructor failure stops retries at larger exact depths because no concrete
-  root exists. This does not enumerate nondeterministic initial states. Entries
+  Constructor failure ends the search because no concrete root exists. This does not enumerate nondeterministic initial states. Entries
   whose concrete search did run keep their existing note unchanged, and selected
   candidates still take precedence. A declined optional canonicalization of a
   solver-target witness keeps its BMC evidence as described above.
@@ -121,6 +122,47 @@ verification logic is written. Key points:
   `counterfactual_scope.liveness:"skipped"`, and `--readable` states the same
   scope. This prevents quantified liveness from multiplying every safety
   weakening without silently implying that liveness was analyzed (#633).
+
+**Amendment (#1838): cost.** The counterfactual phases dominated `explain` and
+`html`. They now skip work whose result is already known, and their output is
+unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
+
+- **Screening.** Before the per-invariant runs, one bounded run of the
+  weakened model retains all its invariants. A violated invariant is dropped
+  and the run repeated; a run that ends without a violation proves the same
+  for each remaining invariant's own run, which is then skipped. A run asserts
+  the init and transition constraints, which do not depend on the invariants,
+  and assumes a check only after proving it, so a run that retains one of the
+  invariants asks only questions the screening run answered `unsat`. Any other
+  outcome screens nothing.
+- **Fair removals.** The verifier reads `fair` only in the `leadsTo` lasso
+  search and the Monitor never reads it. Counterfactual models clear `leadsTo`,
+  so fair removals whose models are equal once `fair` is ignored share one
+  analysis.
+- **One concrete search.** A preempted target's concrete search runs once,
+  breadth-first, to the requested depth. The Monitor reports a violation at
+  the step it occurs and every level is generated before the next, so its
+  first match is the one the former exact search per step count found first.
+- **Reachable phase.** A weakening of a spec with no reachable is not run. A
+  weakened model that the invariant phase already ran with all its invariants
+  reuses that run's verdicts: whether it found a violation and which
+  reachables it left unreached.
+
+- **Solver-chosen values.** Verdicts do not depend on which runs came before,
+  but the model a run returns can: solvers on one thread share a Z3 context.
+  An outcome carries a solver-chosen value when concrete search does not
+  replace its trace (a removed init assignment, an edge the Monitor rejects)
+  or when its preemption note names a check whose public name depends on the
+  run's last action. The screening and shared analysis therefore run on a
+  fresh context (`fsl_solver_z3::with_fresh_context`). Which outcome an entry
+  prints is known from verdicts alone: the rank is trace length, operator and
+  source line, and a note is printed only when no weakening violates the
+  invariant. If a printed outcome carries a solver-chosen value, the
+  per-invariant runs are then made in order on the thread's own context, as
+  before #1838, up to the last such outcome, and the solver-chosen outcomes
+  are taken from them. The unit test
+  `shared_counterfactual_runs_print_the_unshared_output` compares this with
+  making every run in order from the same context.
 
 ## 5. Ripple / tests
 
