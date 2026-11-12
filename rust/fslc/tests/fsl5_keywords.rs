@@ -286,17 +286,19 @@ const fn context_heading(context: KeywordContext) -> &'static str {
         KeywordContext::Concept => "`concept C = E in S, … | where cond`",
         KeywordContext::Relation => "`R belongs to E as role via event`",
         KeywordContext::Event => {
-            "`[fault] event name = phrase [with …] A -> B | in S [set …] [covers …]`"
+            "`[fault] event name = phrase [with …] (A -> B) | A -> B | in S [set …] [covers …]`"
         }
         KeywordContext::RuleExpression => "Inside a rule's or an event's expression",
-        KeywordContext::Allow => "`allow P only when X | only for C`",
-        KeywordContext::Never => "`never P when X | for C`",
+        KeywordContext::Allow => {
+            "`allow P only when X | only for C` (`C`: concepts, `S E`, `E in S`)"
+        }
+        KeywordContext::Never => "`never P when X | for C` (`C`: concepts, `S E`, `E in S`)",
         KeywordContext::After => "`P only after Q`",
         KeywordContext::Enters => "`E enters T only from S, …`",
         KeywordContext::Always => "`always C1 is C2`, `always E [not] in S, … has X`",
         KeywordContext::Deadline => "`deadline age <= bound` in a rule",
         KeywordContext::Decide => {
-            "`decide ID \"text\" for S E { … [otherwise => …] } [assuming Q]`"
+            "`decide ID \"text\" for S E | for E in S { … [otherwise => …] } [assuming Q]`"
         }
         KeywordContext::DecideRow => "A decision row's outcome `Actor verb {or verb}`",
         KeywordContext::Goal => "`goal ID \"text\" some E can reach S`",

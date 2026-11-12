@@ -1,0 +1,173 @@
+fsl 5
+// 休暇申請の設計層。leave_design_refines_request.fsl を通して leave_request.ja.fsl
+// を詳細化する FSL 5 のカーネル仕様。申請は長さで二つの待ち行列のどちらかに入り、
+// 要件からはどちらも 申請済み(Submitted)に見える。leave_design.en.fsl と同じモデル。
+// 設計層には用語集も日本語のキーワードもないため、名前は英語の正規名のまま、
+// 引用文とコメントだけを日本語で書く。
+spec LeaveDesign {
+  entity Leave
+  number Days
+  const AUTO_LIMIT = 1
+  const MAX_DAYS = 3
+
+  enum Phase {
+    Drafting, AutoQueue, ManagerQueue, Granted, OnLeave, Refused, Withdrawn
+  }
+
+  struct Ticket {
+    phase: Phase, days: Days, cover: Bool
+  }
+
+  // 設計の矢印。チケットの段階はこの矢印に沿ってだけ変わる。
+  def moves(a: Phase, b: Phase) =
+    a == b
+    or a == Drafting and b == AutoQueue
+    or a == Drafting and b == ManagerQueue
+    or a == AutoQueue and b == Granted
+    or a == ManagerQueue and b == Granted
+    or a == ManagerQueue and b == Refused
+    or a == Granted and b == OnLeave
+    or a == Granted and b == Withdrawn
+
+  state {
+    tickets: Map<Leave, Ticket>
+  }
+
+  init {
+    forall l: Leave {
+      tickets[l] = Ticket {
+        phase: Drafting, days: 0, cover: false
+      }
+    }
+  }
+
+  @requirement("REQ-LEAVE-001", "1 日以上 MAX_DAYS 日以下の申請を長さで待ち行列に入れる")
+  fair action file(l: Leave, d: Days) {
+    requires tickets[l].phase == Drafting
+    requires d > 0 and d <= MAX_DAYS
+    tickets[l].phase = if d <= AUTO_LIMIT then AutoQueue else ManagerQueue
+    tickets[l].days = d
+  }
+
+  @requirement("REQ-LEAVE-003", "自動の待ち行列の申請はシステムが承認する")
+  fair action auto_grant(l: Leave) {
+    requires tickets[l].phase == AutoQueue
+    tickets[l].phase = Granted
+  }
+
+  @requirement("REQ-LEAVE-004", "上長の待ち行列の申請は上長が承認する")
+  fair action manager_grant(l: Leave) {
+    requires tickets[l].phase == ManagerQueue
+    tickets[l].phase = Granted
+  }
+
+  @requirement("REQ-LEAVE-004", "上長の待ち行列の申請は上長が却下する")
+  fair action manager_refuse(l: Leave) {
+    requires tickets[l].phase == ManagerQueue
+    tickets[l].phase = Refused
+  }
+
+  @requirement("REQ-LEAVE-007", "承認された休暇に代行を割り当てる")
+  fair action assign_cover(l: Leave) {
+    requires tickets[l].phase == Granted
+    tickets[l].cover = true
+  }
+
+  @requirement("REQ-LEAVE-005", "代行を割り当ててから休暇を始める")
+  fair action start_leave(l: Leave) {
+    requires tickets[l].phase == Granted
+    requires tickets[l].cover
+    tickets[l].phase = OnLeave
+  }
+
+  @requirement("MODEL-LEAVE-001", "承認された休暇を取り下げる(要件の cancel)")
+  fair action withdraw(l: Leave) {
+    requires tickets[l].phase == Granted
+    tickets[l].phase = Withdrawn
+  }
+
+  @requirement("REQ-LEAVE-006", "申請後の休暇は有効な日数を保つ")
+  invariant DaysInRange {
+    forall l: Leave {
+      tickets[l].phase != Drafting => tickets[l].days > 0 and tickets[l].days <= MAX_DAYS
+    }
+  }
+
+  @requirement("REQ-LEAVE-003", "自動の待ち行列には短い申請だけがある")
+  invariant AutoQueueIsShort {
+    forall l: Leave {
+      tickets[l].phase == AutoQueue => tickets[l].days <= AUTO_LIMIT
+    }
+  }
+
+  @requirement("REQ-LEAVE-009", "上長の待ち行列と却下には長い申請だけがある")
+  invariant ManagerSeesLongOnly {
+    forall l: Leave {
+      tickets[l].phase == ManagerQueue or tickets[l].phase == Refused => tickets[l].days > AUTO_LIMIT
+    }
+  }
+
+  @requirement("REQ-LEAVE-007", "代行は承認された休暇にだけ割り当てる")
+  invariant CoverOnlyWhenGranted {
+    forall l: Leave {
+      tickets[l].cover => tickets[l].phase == Granted or tickets[l].phase == OnLeave or tickets[l].phase == Withdrawn
+    }
+  }
+
+  @requirement("REQ-LEAVE-005", "取得中の休暇には代行がある")
+  invariant OnLeaveIsCovered {
+    forall l: Leave {
+      tickets[l].phase == OnLeave => tickets[l].cover
+    }
+  }
+
+  @requirement("REQ-LEAVE-008", "チケットは設計の矢印に沿ってだけ動く")
+  trans PhaseMoves {
+    forall l: Leave {
+      moves(old(tickets[l].phase), tickets[l].phase)
+    }
+  }
+
+  @requirement("MODEL-LEAVE-002", "待ち行列の申請はいずれ決まる")
+  leadsTo QueuedIsDecided {
+    forall l: Leave {
+      tickets[l].phase == AutoQueue or tickets[l].phase == ManagerQueue ~> tickets[l].phase == Granted or tickets[l].phase == Refused
+    }
+  }
+
+  @requirement("MODEL-LEAVE-003", "承認された休暇はいずれ取得か取り下げになる")
+  leadsTo GrantedEnds {
+    forall l: Leave {
+      tickets[l].phase == Granted ~> tickets[l].phase == OnLeave or tickets[l].phase == Withdrawn
+    }
+  }
+
+  // 二つの待ち行列とすべての終わり方に到達できる。2 日と 3 日(要件の AUTO_LIMIT + 1
+  // と MAX_DAYS)は数で書き、定数を変えるとここで分かるようにする。
+  reachable SystemQueueAndStart {
+    exists a: Leave {
+      exists b: Leave {
+        tickets[a].phase == AutoQueue and tickets[b].phase == OnLeave
+      }
+    }
+  }
+
+  reachable OtherEndings {
+    exists a: Leave {
+      exists b: Leave {
+        tickets[a].phase == Refused and tickets[a].days == 2 and tickets[b].phase == Withdrawn and tickets[b].days == 3
+      }
+    }
+  }
+
+  terminal {
+    forall l: Leave {
+      tickets[l].phase == OnLeave or tickets[l].phase == Refused or tickets[l].phase == Withdrawn
+    }
+  }
+}
+
+verify {
+  instances Leave = 2
+  values Days = 0..4
+}

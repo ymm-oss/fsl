@@ -15,6 +15,12 @@ How the table works:
   English word can be two keywords (`in` after `event … =` and after
   `concept … =` are different rows). Within one place each spelling means one
   keyword.
+- **`and` / `かつ` after `then`.** The scenario row is read only right after
+  `then o1 is Stage` (`結果 申請1 は 支払済み`), where it is refused: a
+  scenario checks one instance's stage. To check more, write one expression
+  after `then`, where `and` / `かつ` is the Boolean operator ("Boolean
+  operators of an expression"):
+  `結果 stage(申請1) == 支払済み かつ 申請1.申請金額 == 1`.
 - **Only these words.** The header `fsl 5`, `implements … from` and its
   mapping, expression operators other than `and` / `or`, kernel members
   (`terminal`, `time`, `state`, …) and the `verify` world's `..` stay English.
@@ -91,7 +97,7 @@ what the parser reads.
 | `as` | `役名` |  |
 | `via` | `契機` |  |
 
-**`[fault] event name = phrase [with …] A -> B | in S [set …] [covers …]`**
+**`[fault] event name = phrase [with …] (A -> B) | A -> B | in S [set …] [covers …]`**
 
 | English | Japanese | Note |
 |---|---|---|
@@ -108,22 +114,24 @@ what the parser reads.
 |---|---|---|
 | `input` | `入力` |  |
 
-**`allow P only when X | only for C`**
+**`allow P only when X | only for C` (`C`: concepts, `S E`, `E in S`)**
 
 | English | Japanese | Note |
 |---|---|---|
 | `allow` | `許可` |  |
 | `only when` | `条件` |  |
 | `only for` | `対象` |  |
+| `in` | `段階` |  |
 | `only as` | `立場` | reserved: not read yet |
 
-**`never P when X | for C`**
+**`never P when X | for C` (`C`: concepts, `S E`, `E in S`)**
 
 | English | Japanese | Note |
 |---|---|---|
 | `never` | `禁止` |  |
 | `when` | `条件` |  |
 | `for` | `対象` |  |
+| `in` | `段階` |  |
 | `because` | `理由` | reserved: not read yet |
 
 **`P only after Q`**
@@ -155,11 +163,12 @@ what the parser reads.
 |---|---|---|
 | `deadline` | `期限` |  |
 
-**`decide ID "text" for S E { … [otherwise => …] } [assuming Q]`**
+**`decide ID "text" for S E | for E in S { … [otherwise => …] } [assuming Q]`**
 
 | English | Japanese | Note |
 |---|---|---|
 | `for` | `対象` |  |
+| `in` | `段階` |  |
 | `otherwise` | `それ以外` |  |
 | `assuming` | `仮定` |  |
 

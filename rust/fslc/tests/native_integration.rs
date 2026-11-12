@@ -240,9 +240,8 @@ fn assert_installer_release_contract(root: &Path) {
     assert!(installer.contains("mv -fh \"$ACTIVATION_LINK\" \"$CURRENT_LINK\""));
     assert!(installer.contains("mv -fT \"$ACTIVATION_LINK\" \"$CURRENT_LINK\""));
     assert!(installer.contains("stage_release_asset \"fsl-skills.tar.gz\""));
-    assert!(installer.contains("[ \"$RELEASE_TAG\" != \"v3.0.0\" ]"));
-    assert!(installer.contains("archive/refs/tags/$RELEASE_TAG.tar.gz"));
-    assert!(installer.contains("d2d691a98af28f4aaa77ded08b35978539a0d1e3c65e8b7f29783f143a447598"));
+    // The skills come only from the checksummed bundle of the resolved tag.
+    assert!(!installer.contains("archive/refs/tags/"));
     assert!(installer.contains("EXPECTED_VERSION=\"fslc ${RELEASE_TAG#v}\""));
     assert!(installer.contains("RESOLVED_VERSION=$(fslc --version"));
     assert!(installer.contains("diff -qr \"$STAGING_DIR\" \"$RELEASE_DIR\""));
@@ -1011,6 +1010,471 @@ fn installer_keeps_skill_backups_outside_the_skills_directory() {
     assert_eq!(read_text(&skills.join("fsl/SKILL.md")), "second copy");
     assert_eq!(read_text(&copy.join("SKILL.md")), "hand copy");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Runs the installer against the local release in a cleared environment whose
+/// home is `home`, with the extra variables `vars`.
+#[cfg(unix)]
+fn run_installer(home: &Path, fakebin: &Path, release: &Path, vars: &[(&str, &Path)]) -> Output {
+    Command::new("bash")
+        .arg(root().join("install.sh"))
+        .env_clear()
+        .env("HOME", home)
+        .env("PATH", format!("{}:/usr/bin:/bin", fakebin.display()))
+        .env("FAKE_RELEASE", release)
+        .envs(vars.iter().copied())
+        .output()
+        .unwrap()
+}
+
+/// The deprecated `FSL_INSTALL_DIR` still selects the data directory, and the
+/// warning that says so goes to stderr with the installer's other warnings, so
+/// a script that reads the installer's stdout does not get it. `FSL_DATA_DIR`
+/// takes precedence over it, without a warning.
+#[cfg(unix)]
+#[test]
+fn installer_warns_about_fsl_install_dir_on_stderr() {
+    let dir =
+        std::env::temp_dir().join(format!("fsl-installer-deprecation-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (release, fakebin) = stage_fake_installer_release(&dir);
+    let warning = "Warning: FSL_INSTALL_DIR is deprecated; use FSL_DATA_DIR instead.";
+
+    let home = dir.join("deprecated");
+    let legacy = home.join("legacy-data");
+    let deprecated = run_installer(&home, &fakebin, &release, &[("FSL_INSTALL_DIR", &legacy)]);
+    let stdout = String::from_utf8_lossy(&deprecated.stdout);
+    let stderr = String::from_utf8_lossy(&deprecated.stderr);
+    assert!(deprecated.status.success(), "{deprecated:?}");
+    assert!(
+        stderr.lines().any(|line| line == warning),
+        "stderr: {stderr}"
+    );
+    assert!(!stdout.contains("FSL_INSTALL_DIR"), "stdout: {stdout}");
+    assert!(present(&legacy.join("current")));
+
+    let home = dir.join("both");
+    let data = home.join("data");
+    let both = run_installer(
+        &home,
+        &fakebin,
+        &release,
+        &[
+            ("FSL_DATA_DIR", &data),
+            ("FSL_INSTALL_DIR", &home.join("legacy-data")),
+        ],
+    );
+    assert!(both.status.success(), "{both:?}");
+    assert!(!String::from_utf8_lossy(&both.stdout).contains("FSL_INSTALL_DIR"));
+    assert!(!String::from_utf8_lossy(&both.stderr).contains("FSL_INSTALL_DIR"));
+    assert!(present(&data.join("current")));
+    assert!(!present(&home.join("legacy-data")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The PATH hint names the directory the command links went to, which
+/// `FSL_BIN_DIR` selects, and the line it suggests puts that directory's `fslc`
+/// on `PATH` when a shell runs it, even when the directory's name holds a
+/// space or a character special inside double quotes. A directory already on
+/// `PATH` gets no hint.
+#[cfg(unix)]
+#[test]
+fn installer_path_hint_names_the_command_link_directory() {
+    let dir = std::env::temp_dir().join(format!("fsl-installer-path-hint-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (release, fakebin) = stage_fake_installer_release(&dir);
+    let home = dir.join("home");
+    let install = |vars: &[(&str, &Path)]| -> String {
+        let installed = run_installer(&home, &fakebin, &release, vars);
+        assert!(installed.status.success(), "{installed:?}");
+        String::from_utf8_lossy(&installed.stdout).into_owned()
+    };
+    // The line the hint suggests for `bin`, under the shell `shell`.
+    let suggested = |shell: &str, rc: &str, bin: &Path, vars: &[(&str, &Path)]| -> String {
+        let mut vars = vars.to_vec();
+        vars.push(("SHELL", Path::new(shell)));
+        let stdout = install(&vars);
+        let hint = format!(
+            "{} is not on your PATH. Add this line to {rc}: ",
+            bin.display()
+        );
+        stdout
+            .lines()
+            .find_map(|line| line.strip_prefix(&hint))
+            .unwrap_or_else(|| panic!("no PATH hint for {}: {stdout}", bin.display()))
+            .to_owned()
+    };
+    // Where `fslc` resolves after a shell without the links on PATH runs `line`.
+    let follow = |line: &str| -> PathBuf {
+        let followed = Command::new("bash")
+            .arg("-c")
+            .arg(format!("{line}\ncommand -v fslc"))
+            .env_clear()
+            .env("HOME", &home)
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        assert!(followed.status.success(), "{line}: {followed:?}");
+        PathBuf::from(String::from_utf8_lossy(&followed.stdout).trim_end())
+    };
+
+    let default_bin = home.join(".local/bin");
+    let line = suggested("/bin/bash", "~/.bashrc", &default_bin, &[]);
+    assert_eq!(line, "export PATH=\"$HOME/.local/bin:$PATH\"");
+    assert_eq!(follow(&line), default_bin.join("fslc"));
+
+    for (shell, rc, name) in [
+        ("/bin/zsh", "~/.zshrc", "opt-bin"),
+        ("/bin/bash", "~/.bashrc", "a b$c\"d`e\\f"),
+    ] {
+        let bin = home.join(name);
+        let line = suggested(shell, rc, &bin, &[("FSL_BIN_DIR", &bin)]);
+        assert_eq!(follow(&line), bin.join("fslc"), "{line}");
+    }
+
+    let bin = home.join("opt-bin");
+    let stdout = install(&[("FSL_BIN_DIR", &bin), ("SHELL", Path::new("/bin/sh"))]);
+    assert!(
+        stdout.contains(&format!(
+            "{} is not on your PATH. Add it in your shell configuration.",
+            bin.display()
+        )),
+        "{stdout}"
+    );
+    let on_path = format!("{}:{}:/usr/bin:/bin", fakebin.display(), bin.display());
+    let stdout = install(&[
+        ("FSL_BIN_DIR", &bin),
+        ("SHELL", Path::new("/bin/bash")),
+        ("PATH", Path::new(&on_path)),
+    ]);
+    assert!(!stdout.contains("is not on your PATH"), "{stdout}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The README's uninstall block, exactly as a reader copies it.
+#[cfg(unix)]
+fn readme_uninstall_block() -> String {
+    let readme = std::fs::read_to_string(root().join("README.md")).expect("README");
+    let section = readme
+        .find("\nUninstall, using the same ")
+        .expect("the README's uninstall instructions");
+    let fence = "\n```bash\n";
+    let open = section
+        + readme[section..]
+            .find(fence)
+            .expect("the README's uninstall block")
+        + fence.len();
+    let close = open
+        + readme[open..]
+            .find("\n```\n")
+            .expect("the end of the README's uninstall block")
+        + 1;
+    let block = &readme[open..close];
+    assert!(
+        block.starts_with("(\n  data_dir=\"${FSL_DATA_DIR:-"),
+        "the block after the uninstall instructions is not the uninstall block:\n{block}"
+    );
+    block.to_owned()
+}
+
+/// Runs the README's uninstall block with bash in a cleared environment whose
+/// home is `home`, with the extra variables `vars`, and returns its stdout.
+#[cfg(unix)]
+fn run_readme_uninstall(home: &Path, vars: &[(&str, &Path)]) -> String {
+    let uninstalled = Command::new("bash")
+        .arg("-c")
+        .arg(readme_uninstall_block())
+        .env_clear()
+        .env("HOME", home)
+        .env("PATH", "/usr/bin:/bin")
+        .envs(vars.iter().copied())
+        .output()
+        .unwrap();
+    assert!(uninstalled.status.success(), "{uninstalled:?}");
+    String::from_utf8_lossy(&uninstalled.stdout).into_owned()
+}
+
+/// A local release staged in a fresh directory for one uninstall case.
+#[cfg(unix)]
+struct FakeRelease {
+    dir: PathBuf,
+    release: PathBuf,
+    fakebin: PathBuf,
+}
+
+#[cfg(unix)]
+impl FakeRelease {
+    fn new(case: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "fsl-readme-uninstall-{case}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (release, fakebin) = stage_fake_installer_release(&dir);
+        Self {
+            dir,
+            release,
+            fakebin,
+        }
+    }
+
+    /// Installs from the release into `home`, which must succeed, and returns
+    /// the installer's stderr.
+    fn install(&self, home: &Path, vars: &[(&str, &Path)]) -> String {
+        let installed = run_installer(home, &self.fakebin, &self.release, vars);
+        assert!(installed.status.success(), "{installed:?}");
+        String::from_utf8_lossy(&installed.stderr).into_owned()
+    }
+}
+
+/// Asserts that nothing, not even a dangling link, is left at `paths` by an
+/// uninstall that printed `stdout`.
+#[cfg(unix)]
+fn assert_gone(paths: &[PathBuf], stdout: &str) {
+    for path in paths {
+        assert!(!present(path), "{} survived: {stdout}", path.display());
+    }
+}
+
+/// The release bundles every directory under skills/, so the README's
+/// uninstall block must name each of them or it leaves a dangling skill link.
+#[cfg(unix)]
+#[test]
+fn readme_uninstall_block_names_every_skill_the_release_ships() {
+    let block = readme_uninstall_block();
+    let named: BTreeSet<String> = block
+        .split("\"$skills_dir/")
+        .skip(1)
+        .map(|rest| rest[..rest.find('"').unwrap()].to_owned())
+        .collect();
+    let shipped: BTreeSet<String> = std::fs::read_dir(root().join("skills"))
+        .unwrap()
+        .map(|entry| entry.unwrap())
+        .filter(|entry| entry.file_type().unwrap().is_dir())
+        .map(|entry| entry.file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(
+        named, shipped,
+        "skill links the README uninstall block removes"
+    );
+}
+
+/// The README's uninstall block, copied verbatim, removes a default install
+/// and leaves only the bin and skills directories behind.
+#[cfg(unix)]
+#[test]
+fn readme_uninstall_block_removes_a_default_install() {
+    let fake = FakeRelease::new("default");
+    let dir = &fake.dir;
+    let home = dir.join("home");
+    let (data, bin, skills) = (
+        home.join(".local/share/fsl"),
+        home.join(".local/bin"),
+        home.join(".claude/skills"),
+    );
+    fake.install(&home, &[]);
+    assert!(present(&data.join("current")) && present(&bin.join("fslc")));
+    let stdout = run_readme_uninstall(&home, &[]);
+    assert_gone(
+        &[
+            bin.join("fslc"),
+            bin.join("fslc-lsp"),
+            skills.join("fsl"),
+            skills.join("fsl-verify"),
+            data.clone(),
+        ],
+        &stdout,
+    );
+    assert!(bin.is_dir() && skills.is_dir());
+    assert_eq!(stdout, "");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The README's uninstall block, pasted into a shell, leaves none of its
+/// variables set in that shell.
+#[cfg(unix)]
+#[test]
+fn readme_uninstall_block_leaves_no_variables_in_the_shell() {
+    let fake = FakeRelease::new("variables");
+    let dir = &fake.dir;
+    let home = dir.join("home");
+    fake.install(&home, &[]);
+    let pasted = Command::new("bash")
+        .arg("-c")
+        .arg(format!(
+            "{}for name in data_dir bin_dir skills_dir link; do \
+             [ -z \"${{!name+set}}\" ] || echo \"$name is still set\"; done\n",
+            readme_uninstall_block()
+        ))
+        .env_clear()
+        .env("HOME", &home)
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(pasted.status.success(), "{pasted:?}");
+    assert_eq!(String::from_utf8_lossy(&pasted.stdout), "");
+    assert!(!present(&home.join(".local/share/fsl")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// `FSL_DATA_DIR` and `FSL_BIN_DIR` select the install the README's uninstall
+/// block removes: the defaults name no FSL data directory here. A skill backup
+/// survives, and so does the data directory that holds it.
+#[cfg(unix)]
+#[test]
+fn readme_uninstall_block_follows_fsl_data_dir_and_fsl_bin_dir() {
+    let fake = FakeRelease::new("custom");
+    let dir = &fake.dir;
+    let write = write_test_file;
+    let home = dir.join("home");
+    let (data, bin, skills) = (
+        home.join("data"),
+        home.join("bin"),
+        home.join(".claude/skills"),
+    );
+    let vars = [
+        ("FSL_DATA_DIR", data.as_path()),
+        ("FSL_BIN_DIR", bin.as_path()),
+    ];
+    write(&skills.join("fsl/SKILL.md"), "hand copy", false);
+    fake.install(&home, &vars);
+    let backup = data.join("skill-backups/claude/fsl-20000101T000000Z/SKILL.md");
+    assert_eq!(read_text(&backup), "hand copy");
+    let stdout = run_readme_uninstall(&home, &[]);
+    assert!(
+        stdout.contains(&format!(
+            "Skipped: {} is not an FSL data directory",
+            home.join(".local/share/fsl").display()
+        )),
+        "{stdout}"
+    );
+    assert!(present(&data.join("current")) && present(&bin.join("fslc")));
+    let stdout = run_readme_uninstall(&home, &vars);
+    assert_gone(
+        &[
+            bin.join("fslc"),
+            bin.join("fslc-lsp"),
+            skills.join("fsl"),
+            skills.join("fsl-verify"),
+            data.join("current"),
+            data.join("releases"),
+        ],
+        &stdout,
+    );
+    assert_eq!(read_text(&backup), "hand copy");
+    assert!(
+        stdout.contains(&format!("Kept {}:", data.display())),
+        "{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The README's uninstall block leaves a skill link another tool placed, and a
+/// real directory where a skill link would go, where they are.
+#[cfg(unix)]
+#[test]
+fn readme_uninstall_block_keeps_what_another_tool_placed() {
+    let fake = FakeRelease::new("foreign");
+    let dir = &fake.dir;
+    let write = write_test_file;
+    let home = dir.join("home");
+    let skills = home.join(".claude/skills");
+    let other = dir.join("mise/installs/fslc/4.8.0/skills/fsl-verify");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::create_dir_all(&skills).unwrap();
+    std::os::unix::fs::symlink(&other, skills.join("fsl-verify")).unwrap();
+    let stderr = fake.install(&home, &[]);
+    assert!(
+        stderr.contains(&format!("Skipped {}:", skills.join("fsl-verify").display())),
+        "{stderr}"
+    );
+    write(&skills.join("fsl-design/SKILL.md"), "real directory", false);
+    let stdout = run_readme_uninstall(&home, &[]);
+    assert_gone(
+        &[skills.join("fsl"), home.join(".local/share/fsl")],
+        &stdout,
+    );
+    assert_eq!(
+        std::fs::read_link(skills.join("fsl-verify")).unwrap(),
+        other
+    );
+    assert_eq!(
+        read_text(&skills.join("fsl-design/SKILL.md")),
+        "real directory"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The deprecated `FSL_INSTALL_DIR` selects the install the README's uninstall
+/// block removes, as `FSL_DATA_DIR` does.
+#[cfg(unix)]
+#[test]
+fn readme_uninstall_block_follows_the_deprecated_fsl_install_dir() {
+    let fake = FakeRelease::new("deprecated");
+    let dir = &fake.dir;
+    let home = dir.join("home");
+    let data = home.join("legacy-data");
+    fake.install(&home, &[("FSL_INSTALL_DIR", &data)]);
+    let stdout = run_readme_uninstall(&home, &[("FSL_INSTALL_DIR", &data)]);
+    assert_gone(
+        &[
+            home.join(".local/bin/fslc"),
+            home.join(".claude/skills/fsl"),
+            data,
+        ],
+        &stdout,
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A directory with `releases` but no `current` link, or the reverse, is not
+/// an FSL data directory: the README's uninstall block removes nothing in it,
+/// nothing linking into it, and not the default install beside it.
+#[cfg(unix)]
+#[test]
+fn readme_uninstall_block_skips_a_directory_that_is_not_fsl_data() {
+    let fake = FakeRelease::new("not-fsl");
+    let dir = &fake.dir;
+    let write = write_test_file;
+    let home = dir.join("home");
+    let skills = home.join(".claude/skills");
+    fake.install(&home, &[]);
+    let only_releases = home.join("only-releases");
+    write(&only_releases.join("releases/kept/SKILL.md"), "kept", false);
+    std::os::unix::fs::symlink(
+        only_releases.join("releases/kept"),
+        skills.join("fsl-delivery"),
+    )
+    .unwrap();
+    let only_current = home.join("only-current");
+    write(&only_current.join("payload/SKILL.md"), "kept", false);
+    std::os::unix::fs::symlink("payload", only_current.join("current")).unwrap();
+    std::os::unix::fs::symlink(only_current.join("payload"), skills.join("fsl-business")).unwrap();
+    for data in [&only_releases, &only_current] {
+        let stdout = run_readme_uninstall(&home, &[("FSL_DATA_DIR", data)]);
+        assert!(
+            stdout.contains(&format!(
+                "Skipped: {} is not an FSL data directory",
+                data.display()
+            )),
+            "{stdout}"
+        );
+    }
+    assert_eq!(
+        read_text(&only_releases.join("releases/kept/SKILL.md")),
+        "kept"
+    );
+    assert_eq!(read_text(&skills.join("fsl-delivery/SKILL.md")), "kept");
+    assert!(present(&only_current.join("current")));
+    assert_eq!(read_text(&skills.join("fsl-business/SKILL.md")), "kept");
+    for path in [
+        home.join(".local/share/fsl/current"),
+        home.join(".local/bin/fslc"),
+        skills.join("fsl"),
+    ] {
+        assert!(present(&path), "{} was removed", path.display());
+    }
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

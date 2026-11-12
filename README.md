@@ -97,27 +97,30 @@ it back, for example
 discard them, delete `<data>/skill-backups` and then the empty `<data>`. The command also
 leaves the bin and skills directories in place, even when they end up empty. If you
 uninstall without re-running the installer, an earlier installer's
-`~/.claude/skills/fsl*.pre-native-v3` stays where it is; move or delete it yourself.
+`~/.claude/skills/fsl*.pre-native-v3` stays where it is; move or delete it yourself. The
+command runs in a subshell, so it leaves none of its variables set in your shell.
 
 ```bash
-data_dir="${FSL_DATA_DIR:-${FSL_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fsl}}"
-bin_dir="${FSL_BIN_DIR:-$HOME/.local/bin}"
-skills_dir="$HOME/.claude/skills"
-if [ -L "$data_dir/current" ] && [ -d "$data_dir/releases" ]; then
-  for link in "$bin_dir/fslc" "$bin_dir/fslc-lsp" \
-    "$skills_dir/fsl" "$skills_dir/fsl-business" "$skills_dir/fsl-requirements" \
-    "$skills_dir/fsl-design" "$skills_dir/fsl-design-review" "$skills_dir/fsl-delivery" \
-    "$skills_dir/fsl-from-code" "$skills_dir/fsl-requirements-document" "$skills_dir/fsl-verify"; do
-    if [ -L "$link" ]; then
-      case "$(readlink "$link")" in "$data_dir"/*) rm -f "$link" ;; esac
-    fi
-  done
-  rm -f "$data_dir/current"
-  rm -rf "$data_dir/releases"
-  rmdir "$data_dir" 2>/dev/null || echo "Kept $data_dir: it still holds skill-backups/ or other files."
-else
-  echo "Skipped: $data_dir is not an FSL data directory (no current link and releases directory)."
-fi
+(
+  data_dir="${FSL_DATA_DIR:-${FSL_INSTALL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/fsl}}"
+  bin_dir="${FSL_BIN_DIR:-$HOME/.local/bin}"
+  skills_dir="$HOME/.claude/skills"
+  if [ -L "$data_dir/current" ] && [ -d "$data_dir/releases" ]; then
+    for link in "$bin_dir/fslc" "$bin_dir/fslc-lsp" \
+      "$skills_dir/fsl" "$skills_dir/fsl-business" "$skills_dir/fsl-requirements" \
+      "$skills_dir/fsl-design" "$skills_dir/fsl-design-review" "$skills_dir/fsl-delivery" \
+      "$skills_dir/fsl-from-code" "$skills_dir/fsl-requirements-document" "$skills_dir/fsl-verify"; do
+      if [ -L "$link" ]; then
+        case "$(readlink "$link")" in "$data_dir"/*) rm -f "$link" ;; esac
+      fi
+    done
+    rm -f "$data_dir/current"
+    rm -rf "$data_dir/releases"
+    rmdir "$data_dir" 2>/dev/null || echo "Kept $data_dir: it still holds skill-backups/ or other files."
+  else
+    echo "Skipped: $data_dir is not an FSL data directory (no current link and releases directory)."
+  fi
+)
 ```
 
 A mise installation is removed with `mise uninstall` instead. Its skill links are removed
@@ -125,9 +128,8 @@ by `mise skills sync` once the tool is gone, or by turning on `skills.prune`.
 
 See the [Releases](https://github.com/ymm-oss/fsl/releases) page for the current version. Official releases contain checksummed native binaries,
 the VSCode extension, and Kernel bundles; every release after v3.0.0 also contains a
-checksummed Agent Skill bundle, and the installer separately verifies a pinned
-source-archive checksum for the v3.0.0 compatibility path (v3.0.0 predates the checksummed
-skill bundle). The Python compatibility reference
+checksummed Agent Skill bundle, which is where the installer takes the skills from. The
+installer does not install v3.0.0, which predates the bundle. The Python compatibility reference
 remains in this repository at version 2.7.0, but this installer does not install it and it
 is not published to PyPI. The Rust workspace crates are not published to crates.io.
 Publishing either surface requires an explicit manifest, workflow, and documentation
@@ -230,7 +232,7 @@ runs, with no skill integration and no PATH setup.
 
 | OS / arch | File to download |
 | --- | --- |
-| macOS (Apple Silicon, M1 and later) | `fslc-macos-arm64` |
+| macOS (Apple Silicon, M1 and later, macOS 14 or later) | `fslc-macos-arm64` |
 | Linux (x86_64, glibc 2.39+) | `fslc-linux-x64` |
 | Linux (ARM64, glibc 2.39+) | `fslc-linux-arm64` |
 | Windows (x64) | `fslc-windows-x64.exe` |

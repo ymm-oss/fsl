@@ -37,9 +37,8 @@ checksummed Agent Skill bundle, VS Code extension, and Public Kernel contract
 bundles produced by `.github/workflows/release.yml`.
 `install.sh` resolves the latest published tag once and uses that same tag for
 the skill bundle and both native binaries. It installs only those payloads into
-the user's data directory; it does not clone the repository. The v3.0.0
-compatibility path extracts only the skills from that exact tag's source archive
-because the first native release predates the checksummed skill bundle.
+the user's data directory; it does not clone the repository. It stops when the
+tag has no checksummed skill bundle; v3.0.0, the first native release, has none.
 
 Linux artifacts target glibc 2.39 or newer. The release workflow pins both Linux
 runners to Ubuntu 24.04 and rejects binaries that require a newer GLIBC symbol.
@@ -170,7 +169,9 @@ It also rejects a dynamic dependency on `libz3`.
    `./tools/aggregate_changelog.sh check-section --version X.Y.Z`: it applies the
    fragment rules to the section (declared category leads in order, one (id, category)
    pair each, breaking labels only under `Changed`), and the merge-readiness automation
-   lane runs it on every released section from 5.0.0 on.
+   lane runs it on every released section from 5.0.0 on. When the summary
+   `docs/release-notes/vX.Y.Z.md` (step 8) exists, it also requires every id of every
+   breaking entry to appear as `#N` under the summary's `## Breaking changes` heading.
 
    **A version-only release with an empty `changelog.d/` is legitimate** (decided in review,
    #737, comment 2026-08-07, second round): the command above succeeds on an empty
@@ -211,6 +212,9 @@ It also rejects a dynamic dependency on `libz3`.
    The summary is release-page prose, not a second changelog. Use absolute URLs, because
    relative links do not resolve on a GitHub Release page. The `CHANGELOG.md` section remains
    the complete record. The summary may land on `main` before the release commit or inside it.
+   A reader of the release page sees only the summary, so list every breaking entry of the
+   section, by its `#N`, under a `## Breaking changes` heading; step 7's `check-section`
+   fails when one is missing.
 9. Run the complete product gate:
 
    ```bash
@@ -220,6 +224,32 @@ It also rejects a dynamic dependency on `libz3`.
 10. Commit `chore(release): vX.Y.Z`, open a pull request to `main`, and merge it
    only after required checks pass. Record the exact merged `main` SHA as the
    release candidate.
+
+**Fragments that merge after the release commit.** A pull request that merges to `main`
+after the release commit and before the tag can still add a `changelog.d/` fragment, and the
+tag-time `check-stale` guard refuses the tag while one remains. When the release is to include
+it, fold it into the existing section; running `release` again would add a second
+`## [X.Y.Z]` heading:
+
+```bash
+./tools/aggregate_changelog.sh fold --version X.Y.Z
+./tools/aggregate_changelog.sh check-section --version X.Y.Z
+```
+
+`fold` renders each fragment exactly as `release` does and inserts it before the first bullet
+of the section whose declared category and first id sort after the fragment's, which is where
+`release` would have put it. Existing entries keep their order and the heading keeps its date.
+It deletes the folded fragments and verifies that the section gained exactly one bullet per
+fragment, byte for byte and in that position, and that nothing else in `CHANGELOG.md` changed.
+It refuses and writes nothing when `## [X.Y.Z]` is missing or is not the newest section, when
+`[Unreleased]` has content, when the tag `vX.Y.Z` exists locally (after the tag, `changelog.d/`
+holds the next release's fragments), when the section already breaks the `check-section`
+rules, or when a fragment's (id, category) is already an entry of the section. With no
+fragments it changes nothing. It does not edit `docs/release-notes/vX.Y.Z.md`: add a folded
+user-visible change there yourself, and `check-section` fails until every folded breaking entry
+is listed under `## Breaking changes`. The fold changes the tree, so record the merged `main`
+SHA as the candidate again (step 10); evidence for the earlier candidate does not transfer.
+5.0.0 folded fragments this way by hand in #1733, #1790, #1793, #1796 and #1802.
 
 ## 2. Prove and promote the candidate
 

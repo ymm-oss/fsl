@@ -27,6 +27,16 @@ pub fn version() -> &'static str {
     })
 }
 
+/// Run `callback` with every [`Z3Solver`] it creates on a new Z3 context.
+///
+/// Solvers created on one thread share that thread's context, and the model a
+/// check returns can depend on what earlier solvers on it did; a satisfiability
+/// verdict cannot. Work run here leaves the calling thread's context as it
+/// found it, so it does not change the models of later solvers there.
+pub fn with_fresh_context<R: Send + Sync>(callback: impl FnOnce() -> R + Send + Sync) -> R {
+    z3::with_z3_config(&z3::Config::new(), callback)
+}
+
 #[derive(Clone, Debug)]
 pub enum Z3Term {
     Bool(Bool),

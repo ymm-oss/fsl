@@ -1418,11 +1418,7 @@ fn walk_init_write_ownership(
                 } else {
                     init_write_keys(target, contribution.as_ref())
                 };
-                if keys.iter().any(|key| {
-                    possibly_assigned
-                        .iter()
-                        .any(|previous| init_write_keys_overlap(previous, key))
-                }) {
+                if init_writes_overlap(&possibly_assigned, &keys) {
                     let scope = if in_forall { "init forall" } else { "init" };
                     return Err(runtime_error_at(
                         format!("state variable '{logical}' assigned more than once in {scope}"),
@@ -1520,11 +1516,7 @@ fn walk_init(
                 } else {
                     init_write_keys(target, contribution.as_ref())
                 };
-                if keys.iter().any(|key| {
-                    possibly_assigned
-                        .iter()
-                        .any(|previous| init_write_keys_overlap(previous, key))
-                }) {
+                if init_writes_overlap(&possibly_assigned, &keys) {
                     let scope = if in_forall { "init forall" } else { "init" };
                     return Err(runtime_error_at(
                         format!("state variable '{logical}' assigned more than once in {scope}"),
@@ -1834,7 +1826,39 @@ fn init_write_keys(target: &LValue, coverage: Option<&Coverage>) -> BTreeSet<Ini
     )])
 }
 
+/// Whether one of `keys` overlaps one of `previous`
+/// ([`init_write_keys_overlap`]). Keys on different roots never overlap, so
+/// each key is compared only with the `previous` keys on its own root: a
+/// `forall` writing every key of one map no longer compares each key with
+/// every key an earlier `forall` wrote to another map.
+fn init_writes_overlap(previous: &BTreeSet<InitWriteKey>, keys: &BTreeSet<InitWriteKey>) -> bool {
+    let roots = keys
+        .iter()
+        .map(init_write_key_root)
+        .collect::<BTreeSet<_>>();
+    let candidates = previous
+        .iter()
+        .filter(|previous| roots.contains(init_write_key_root(previous)))
+        .collect::<Vec<_>>();
+    keys.iter().any(|key| {
+        candidates
+            .iter()
+            .any(|previous| init_write_keys_overlap(previous, key))
+    })
+}
+
+fn init_write_key_root(key: &InitWriteKey) -> &str {
+    match key {
+        InitWriteKey::Root(root)
+        | InitWriteKey::ConcreteIndex(root, _)
+        | InitWriteKey::ConcreteIndexField(root, _, _)
+        | InitWriteKey::RootField(root, _) => root,
+    }
+}
+
 fn init_write_keys_overlap(left: &InitWriteKey, right: &InitWriteKey) -> bool {
+    #[cfg(test)]
+    crate::evaluation_counts::INIT_WRITE_COMPARISONS.with(|count| count.set(count.get() + 1));
     match (left, right) {
         (
             InitWriteKey::Root(left),

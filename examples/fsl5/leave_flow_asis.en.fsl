@@ -1,0 +1,42 @@
+fsl 5
+// The leave-approval flow as it is today (As-Is), written as an FSL 5
+// business layer. leave_flow_tobe.en.fsl is the reformed flow; it refines
+// this one through leave_flow_tobe_refines_asis.fsl.
+// leave_flow_asis.ja.fsl is the same model with Japanese texts and comments.
+business LeaveFlowAsIs {
+  actor Employee, Manager
+  entity Leave
+
+  // Today a manager decides every request, however short the leave.
+  process Leave {
+    stages Draft, Submitted, Approved, Taken, Rejected, Cancelled
+    initial Draft
+    transition submit Draft -> Submitted by Employee
+    transition approve Submitted -> Approved by Manager
+    transition reject Submitted -> Rejected by Manager
+    transition take Approved -> Taken by Employee
+    transition cancel Approved -> Cancelled by Employee
+  }
+
+  kpi taken_leaves = count Leave in Taken
+
+  control CTRL-LEAVEFLOW-001 "Leave is taken or cancelled only after it was approved"
+    owner Manager
+    severity high
+    applies_to Leave
+
+  policy POL-LEAVEFLOW-001 "No leave is taken or cancelled without an approval"
+    satisfies CTRL-LEAVEFLOW-001
+    every Leave reaching Taken or Cancelled must have passed through Approved
+  policy POL-LEAVEFLOW-004 "A leave is decided only after it was submitted"
+    every Leave reaching Approved or Rejected must have passed through Submitted
+  policy POL-LEAVEFLOW-003 "Every approved leave is eventually taken or cancelled"
+    every Leave in Approved must eventually be Taken or Cancelled
+  goal GOAL-LEAVEFLOW-001 "A leave can be taken" some Leave can reach Taken
+  goal GOAL-LEAVEFLOW-002 "A leave can be rejected" some Leave can reach Rejected
+  goal GOAL-LEAVEFLOW-003 "A leave can be cancelled" some Leave can reach Cancelled
+}
+
+verify {
+  instances Leave = 2
+}

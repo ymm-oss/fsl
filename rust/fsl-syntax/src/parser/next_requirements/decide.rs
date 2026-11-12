@@ -2,7 +2,8 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! The next-edition decision table `decide ID "text" for Stage Entity { rows
-//! [otherwise => outcome] } [assuming Q]` (fsl 5 plan §3 S7, design B.3–B.5).
+//! [otherwise => outcome] } [assuming Q]` (fsl 5 plan §3 S7, design B.3–B.5);
+//! `for Entity in Stage` is the same table.
 //!
 //! A row is `Concept {and Concept} => Actor verb {or verb} {covers ID "text"}`
 //! (or `Stage Entity => …`). Every event that leaves the table's stage must be
@@ -106,14 +107,18 @@ impl DecideDeclaration {
 
 impl Parser<'_> {
     /// `decide ID "text" for Stage Entity { row … [otherwise => outcome] }
-    /// [assuming Q]`.
+    /// [assuming Q]`, or the same `for Entity in Stage`.
     pub(super) fn decide_declaration(&mut self) -> Result<DecideDeclaration, ParseError> {
         let start = self.bump_kw(Kw::Decide);
         let id = self.req_id()?;
         let (text, text_span) = self.expect_string_with_span()?;
         self.expect_kw(Kw::DecideFor)?;
-        let stage = self.word()?;
-        let entity = self.word()?;
+        let first = self.word()?;
+        let (stage, entity) = if self.eat_kw(Kw::DecideForIn) {
+            (self.stage_after_in(&first)?, first)
+        } else {
+            (first, self.word()?)
+        };
         self.expect_symbol("{")?;
         let mut rows = Vec::new();
         while !self.eat_symbol("}") {

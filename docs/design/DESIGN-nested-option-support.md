@@ -1406,9 +1406,11 @@ Run the following procedure before merge and record its result in the PR evidenc
    be re-measured from the base SHA.
 3. List every form whose `result` changes from `ok` to `error`. Each is a
    breaking removal: record it in this design note (§3.2), `docs/manual/LANGUAGE.md`,
-   `docs/manual/LANGUAGE.ja.md` (section-aligned), `skills/fsl/references/syntax.md`,
-   and a `changed` fragment in `changelog.d/`, and rename or replace the
-   fixture and test that pinned the acceptance.
+   `docs/manual/LANGUAGE.ja.md` (section-aligned), `skills/fsl/references/syntax.md`
+   (and a layer skill's `references/syntax.md` that documents the form, such as
+   `skills/fsl-requirements/references/syntax.md`), and a `changed` fragment in
+   `changelog.d/`, and rename or replace the fixture and test that pinned the
+   acceptance.
 4. If the list is empty, state the command, both SHAs, and the form count in
    the PR evidence. "No transition" is a measured claim, not a default.
 

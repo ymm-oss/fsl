@@ -94,7 +94,8 @@ pub(crate) fn compose_internal(alias: &str, name: &str) -> String {
 
 /// The stage state of a requirements `process`: `claim_stage` for `Claim`.
 pub(crate) fn process_stage_state(process: &str) -> String {
-    format!("{}_stage", process.to_lowercase())
+    // One rule with the parser, which reads a scenario instance's stage by it.
+    fsl_syntax::entity_stage_state(process)
 }
 
 /// The stage enum of a requirements `process`: `ClaimStage` for `Claim`.
@@ -104,7 +105,8 @@ pub(crate) fn process_stage_enum(process: &str) -> String {
 
 /// The state of one data field of a requirements `process`: `claim_amount`.
 pub(crate) fn process_field_state(process: &str, field: &str) -> String {
-    format!("{}_{}", process.to_lowercase(), field)
+    // One rule with the parser, which reads a scenario instance's field by it.
+    fsl_syntax::entity_field_state(process, field)
 }
 
 /// The binder a next-edition entity's events and initial values quantify

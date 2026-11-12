@@ -97,6 +97,7 @@
 #       Control 4's release-time half: fails if changelog.d/ still has any
 #       fragment at tag time.
 #   aggregate_changelog.sh check-section [--changelog FILE] [--version X.Y.Z]
+#                                        [--summary-dir DIR]
 #       Applies the fragment rules to an aggregated `## [X.Y.Z]` section of
 #       CHANGELOG.md, where hand edits after `release` (and the pre-mechanism
 #       `[Unreleased]` body `release` moves verbatim) are not covered by
@@ -104,7 +105,10 @@
 #       word and an id, `- <Category> (#N[, ...]):`; categories must follow
 #       DECLARED_CATEGORY_ORDER; an (id, category) pair may appear once; and a
 #       `breaking` / `breaking removal` label may appear only under `Changed`.
-#       Without --version it checks every released section from
+#       When the release summary DIR/vX.Y.Z.md exists (DIR defaults to
+#       docs/release-notes beside the changelog), every id of every breaking
+#       entry must also be referenced under its `## Breaking changes` heading
+#       (issue #1806). Without --version it checks every released section from
 #       CHECK_SECTION_FLOOR (5.0.0) on; older sections predate these rules and
 #       are not checked (issue #1763).
 #   aggregate_changelog.sh release --version X.Y.Z --date YYYY-MM-DD
@@ -116,8 +120,16 @@
 #       consumed fragments -- all before returning, so the authority
 #       handover from fragment to version section is a single atomic step
 #       for the caller to commit.
+#   aggregate_changelog.sh fold --version X.Y.Z [--changelog FILE]
+#                               [--fragments-dir DIR]
+#       Folds fragments that merged after the release commit into the
+#       existing, newest `## [X.Y.Z]` section: each bullet rendered as
+#       `release` renders it, placed where `release`'s order puts it, the
+#       heading date unchanged, the fragments deleted, conservation verified
+#       (verify_fold). With no fragments it changes nothing (issue #1806).
 #   aggregate_changelog.sh selftest
 #       Executes the accepting and rejecting fixtures for all six controls,
+#       check-section (including its release-notes cross-check) and fold,
 #       printing each rejecting fixture's exit status.
 
 set -euo pipefail
@@ -1072,10 +1084,14 @@ released_section_versions() {
 }
 
 # Prints one diagnostic line per violation in section $2 of $1; exits 1 if
-# there was any, 2 if the section does not exist.
+# there was any, 2 if the section does not exist. When $3 names a file, it
+# also writes one line per bullet whose lead parses, in section order:
+# "<bullet number>\t<category>\t<first id>\t<breaking 0|1>\t<line>\t<id,id,...>"
+# (ids exclude `refs` lists). fold and the release-notes cross-check read
+# these leads instead of parsing the section a second way.
 check_section_body() {
-  local changelog="$1" version="$2"
-  awk -v want="$version" -v cats="${DECLARED_CATEGORY_ORDER[*]}" '
+  local changelog="$1" version="$2" leads_out="${3:-}"
+  awk -v want="$version" -v cats="${DECLARED_CATEGORY_ORDER[*]}" -v leads_out="$leads_out" '
     function report(code, msg) {
       printf "%s: [%s] %s:%d: %s\n", code, want, FILENAME, NR, msg
       bad++
@@ -1126,7 +1142,7 @@ check_section_body() {
       labels = paren
       gsub(/;/, ",", labels)
       m = split(labels, item, ",")
-      ids = 0; breaking = 0; in_refs = 0
+      ids = 0; breaking = 0; in_refs = 0; first = 0; idlist = ""
       for (j = 1; j <= m; j++) {
         s = item[j]
         sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s)
@@ -1140,6 +1156,8 @@ check_section_body() {
           if (tok[i] !~ /^#[0-9]+$/) continue
           id = substr(tok[i], 2) + 0
           ids++
+          if (ids == 1) first = id
+          idlist = idlist (ids > 1 ? "," : "") id
           key = id SUBSEP cat
           if (key in seen) {
             report("changelog-section-duplicate-id", "#" id " appears twice under `" word "` (first at line " seen[key] ")")
@@ -1153,6 +1171,8 @@ check_section_body() {
       }
       if (ids == 0) {
         report("changelog-section-id-missing", "`" word " (" paren ")` names no issue or pull-request id")
+      } else if (leads_out != "") {
+        printf "%d\t%s\t%d\t%d\t%d\t%s\n", bullets, cat, first, breaking, NR, idlist > leads_out
       }
       next
     }
@@ -1165,16 +1185,61 @@ check_section_body() {
   ' "$changelog"
 }
 
+# Release-notes cross-check (issue #1806). A release with a hand-written
+# summary publishes that summary, not the section, as its GitHub Release body
+# (tools/release-notes.sh build), so a breaking entry the summary leaves out
+# is invisible to a reader of the release. Every id of every breaking entry
+# in $1 (check_section_body's leads) must appear as a `#N` token inside the
+# summary's `## Breaking changes` section, up to the next `## ` heading.
+# `refs` ids are not the entry's own and are not required. Without a summary
+# the release body is the section itself, so there is nothing to compare.
+# Prints one diagnostic per unlisted id and returns 1 if there was any;
+# otherwise prints the number of breaking ids checked.
+check_release_notes_breaking() {
+  local leads="$1" summary="$2" version="$3" changelog="$4"
+  local required listed
+  required="$(awk -F '\t' '$4 == 1 { n = split($6, a, ","); for (i = 1; i <= n; i++) print a[i] "\t" $5 }' "$leads")"
+  if [ -z "$required" ]; then
+    echo 0
+    return 0
+  fi
+  listed="$(awk '
+    /^## / { in_breaking = ($0 ~ /^## Breaking changes[ \t]*$/); next }
+    in_breaking {
+      line = $0
+      while (match(line, /#[0-9]+/)) {
+        print substr(line, RSTART + 1, RLENGTH - 1) + 0
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }
+  ' "$summary" | sort -u)"
+  local id line missing=0 count=0
+  while IFS=$'\t' read -r id line; do
+    count=$((count + 1))
+    if ! printf '%s\n' "$listed" | grep -qxF "$id"; then
+      echo "changelog-section-breaking-unlisted: [$version] $changelog:$line: breaking entry #$id is not referenced under \`## Breaking changes\` in $summary" >&2
+      missing=$((missing + 1))
+    fi
+  done <<<"$required"
+  [ "$missing" -eq 0 ] || return 1
+  echo "$count"
+}
+
 check_section() {
-  local changelog="CHANGELOG.md" version=""
+  local changelog="CHANGELOG.md" version="" summary_dir=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --changelog) [ "$#" -ge 2 ] || fail "check-section: --changelog needs a value"; changelog="$2"; shift 2 ;;
       --version) [ "$#" -ge 2 ] || fail "check-section: --version needs a value"; version="$2"; shift 2 ;;
-      *) echo "usage: $0 check-section [--changelog FILE] [--version X.Y.Z]" >&2; exit 2 ;;
+      --summary-dir) [ "$#" -ge 2 ] || fail "check-section: --summary-dir needs a value"; summary_dir="$2"; shift 2 ;;
+      *) echo "usage: $0 check-section [--changelog FILE] [--version X.Y.Z] [--summary-dir DIR]" >&2; exit 2 ;;
     esac
   done
   [ -f "$changelog" ] || fail "check-section: '$changelog' not found"
+  # Beside the changelog, as release-notes.sh's DEFAULT_SUMMARY_DIR is beside
+  # the default CHANGELOG.md, so a fixture changelog never reads the
+  # repository's own summaries.
+  [ -n "$summary_dir" ] || summary_dir="$(dirname "$changelog")/docs/release-notes"
   local -a versions=()
   local v listed
   if [ -n "$version" ]; then
@@ -1193,17 +1258,34 @@ check_section() {
     [ "${#versions[@]}" -gt 0 ] \
       || fail "changelog-section-missing: no released section at or above $CHECK_SECTION_FLOOR in '$changelog'"
   fi
-  local status failed=0
+  local status failed=0 tmp summary count notes=""
+  tmp="$(mktemp -d)" || fail "check-section: could not create a scratch directory"
   for v in "${versions[@]}"; do
+    : >"$tmp/leads"
     set +e
-    check_section_body "$changelog" "$v" >&2
+    check_section_body "$changelog" "$v" "$tmp/leads" >&2
     status=$?
     set -e
     [ "$status" -eq 0 ] || failed=1
+    summary="$summary_dir/v$v.md"
+    if [ ! -f "$summary" ]; then
+      notes="$notes; $v: no $summary, the release body is the section"
+    elif [ "$status" -ne 2 ]; then
+      set +e
+      count="$(check_release_notes_breaking "$tmp/leads" "$summary" "$v" "$changelog")"
+      status=$?
+      set -e
+      if [ "$status" -eq 0 ]; then
+        notes="$notes; $v: $count breaking id(s) listed in $summary"
+      else
+        failed=1
+      fi
+    fi
   done
+  rm -rf "$tmp"
   [ "$failed" -eq 0 ] \
-    || fail "aggregate_changelog: check-section FAIL -- '$changelog' section(s) ${versions[*]} break the fragment rules (see above)"
-  echo "aggregate_changelog: check-section PASS -- '$changelog' section(s) ${versions[*]}: declared category leads in order, one (id, category) each, breaking labels only under Changed"
+    || fail "aggregate_changelog: check-section FAIL -- '$changelog' section(s) ${versions[*]} break the fragment rules or the release-notes cross-check (see above)"
+  echo "aggregate_changelog: check-section PASS -- '$changelog' section(s) ${versions[*]}: declared category leads in order, one (id, category) each, breaking labels only under Changed$notes"
 }
 
 release() {
@@ -1285,6 +1367,276 @@ release() {
   fi
 
   echo "aggregate_changelog: released $version, aggregated ${#sorted[@]} fragment(s), '$fragdir' is now empty"
+}
+
+# ---- post-release-commit fold (issue #1806) --------------------------------
+#
+# A fragment that merges after the release commit and before the tag is not
+# in the `## [X.Y.Z]` section `release` wrote, and check-stale refuses the tag
+# while it sits in changelog.d/. 5.0.0 folded such fragments by hand five
+# times (#1733, #1790, #1793, #1796, #1802): each bullet byte-identical to
+# what `release` renders, placed where `release`'s order puts it, the heading
+# date unchanged. `fold` does exactly that.
+#
+# Placement is a stable merge of the sorted fragments into the section's
+# existing bullets: a fragment goes immediately before the first bullet whose
+# (declared category rank, first id) is greater than the fragment's
+# (rank, id), or after the section's last bullet when there is none. The
+# section's own order within a category is not re-sorted: 5.0.0 keeps
+# pre-mechanism entries out of id order (see check_section_body), and a
+# fold must not move them.
+#
+# Refusals, each before anything is written:
+#   fold-section-missing      no `## [X.Y.Z] - YYYY-MM-DD` heading, or more than one
+#   fold-section-not-latest   X.Y.Z is not the section right after `[Unreleased]`
+#   fold-unreleased-not-empty `[Unreleased]` has content `release` would have
+#                             moved into X.Y.Z; fold cannot place it
+#   fold-version-tagged       tag vX.Y.Z exists in the changelog's repository
+#   fold-section-invalid      the section already breaks check-section's rules
+#   fold-duplicate-entry      a fragment's (id, category) is already an entry
+#                             of the section
+#   fold-conservation-failed  verify_fold rejected the result
+# With no fragments it changes nothing and exits 0, so a second run is a
+# no-op. The release notes are prose and are not edited here; check-section's
+# release-notes cross-check fails if a folded breaking entry is not listed.
+
+# Prints every line of $1 outside the body of the `## [$2]` section (its
+# heading included), so two changelogs that differ only inside that body
+# print the same text.
+outside_section_body() {
+  awk -v heading="## [$2]" '
+    /^## \[/ { in_section = (!done && substr($0, 1, length(heading)) == heading); if (in_section) done = 1; print; next }
+    !in_section { print }
+  ' "$1"
+}
+
+# The raw body of the `## [$2]` section of $1 (between its heading and the
+# next `## [` heading), with a trailing "." so command substitution keeps
+# its trailing blank lines.
+section_body_raw() {
+  awk -v heading="## [$2]" '
+    /^## \[/ { if (in_section) exit; if (substr($0, 1, length(heading)) == heading) in_section = 1; next }
+    in_section { print }
+  ' "$1"
+  printf '.'
+}
+
+# Counts the leading and trailing blank lines of stdin as "<lead> <trail>".
+blank_edges() {
+  awk '
+    { lines[NR] = $0 }
+    END {
+      s = 1; while (s <= NR && lines[s] ~ /^[ \t]*$/) s++
+      e = NR; while (e >= s && lines[e] ~ /^[ \t]*$/) e--
+      print (s - 1), (NR - e)
+    }
+  '
+}
+
+# Conservation for fold, the counterpart of verify_conservation: $2 (the
+# written changelog) must equal $1 (the changelog before the fold) outside
+# the body of `## [$3]`, keep that body's leading and trailing blank lines
+# when it had bullets, and hold exactly the old bullets plus one rendered
+# bullet per fragment of $4 -- the old bullets byte for byte and in their old
+# order, the new ones byte for byte and in control 3's order. Every bullet is
+# consumed from the front of one of the two queues, so a dropped, duplicated,
+# reordered or edited bullet fails. Each folded bullet must also follow
+# exactly as many old bullets as the placement rule gives, recomputed here
+# from the old section's leads rather than taken from fold's awk. The result
+# must still pass check_section_body.
+verify_fold() {
+  local before="$1" after="$2" version="$3" fragdir="$4"
+  local outside_before outside_after
+  outside_before="$(outside_section_body "$before" "$version")"
+  outside_after="$(outside_section_body "$after" "$version")"
+  [ "$outside_before" = "$outside_after" ] \
+    || fail "fold-conservation-failed: '$after' differs from '$before' outside the body of ## [$version]"
+  local old_raw new_raw old_body new_body old_edges new_edges
+  old_raw="$(section_body_raw "$before" "$version")"; old_raw="${old_raw%.}"
+  new_raw="$(section_body_raw "$after" "$version")"; new_raw="${new_raw%.}"
+  old_body="$(printf '%s' "$old_raw" | trim_blank_edges)"
+  new_body="$(printf '%s' "$new_raw" | trim_blank_edges)"
+  old_edges="$(printf '%s' "$old_raw" | blank_edges)"
+  new_edges="$(printf '%s' "$new_raw" | blank_edges)"
+  if [ -n "$old_body" ] && [ "$old_edges" != "$new_edges" ]; then
+    fail "fold-conservation-failed: the blank lines around the bullets of ## [$version] changed"
+  fi
+  local -a old=() new=() frag=()
+  local seg f listed scratch
+  scratch="$(mktemp)" || fail "could not create a bullet inventory"
+  if [ -n "$old_body" ]; then
+    split_bullets "$old_body" >"$scratch"
+    while IFS= read -r -d '' seg; do old+=("$seg"); done <"$scratch"
+  fi
+  split_bullets "$new_body" >"$scratch"
+  while IFS= read -r -d '' seg; do new+=("$seg"); done <"$scratch"
+  rm -f "$scratch"
+  # Old bullet keys (category rank, first id), in section order.
+  local -a old_rank=() old_id=() after_old=()
+  local leads_file lead_cat lead_first
+  leads_file="$(mktemp)" || fail "could not create a lead inventory"
+  check_section_body "$before" "$version" "$leads_file" >/dev/null 2>&1 || true
+  while IFS=$'\t' read -r _ lead_cat lead_first _; do
+    old_rank+=("$(category_index "$lead_cat")")
+    old_id+=("$lead_first")
+  done <"$leads_file"
+  rm -f "$leads_file"
+  [ "${#old_rank[@]}" -eq "${#old[@]}" ] \
+    || fail "fold-conservation-failed: ## [$version] of '$before' has ${#old[@]} bullet(s) but ${#old_rank[@]} parsed lead(s)"
+  local meta frag_rank frag_id p
+  listed="$(sort_fragments "$fragdir")"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    frag+=("$(render_fragment "$fragdir/$f")")
+    meta="$(parse_fragment_name "$f")"
+    frag_id="${meta%%$'\t'*}"
+    frag_rank="$(category_index "${meta##*$'\t'}")"
+    p=0
+    while [ "$p" -lt "${#old_rank[@]}" ] \
+      && ! { [ "${old_rank[$p]}" -gt "$frag_rank" ] || { [ "${old_rank[$p]}" -eq "$frag_rank" ] && [ "${old_id[$p]}" -gt "$frag_id" ]; }; }; do
+      p=$((p + 1))
+    done
+    after_old+=("$p")
+  done <<<"$listed"
+  if [ "${#new[@]}" -ne $((${#old[@]} + ${#frag[@]})) ]; then
+    fail "fold-conservation-failed: ## [$version] has ${#new[@]} bullet(s), expected ${#old[@]} existing + ${#frag[@]} folded"
+  fi
+  local i=0 j=0 k
+  for k in "${!new[@]}"; do
+    if [ "$j" -lt "${#frag[@]}" ] && [ "${new[$k]}" = "${frag[$j]}" ]; then
+      [ "$i" -eq "${after_old[$j]}" ] \
+        || fail "fold-conservation-failed: bullet $((k + 1)) of ## [$version] follows $i existing bullet(s); release's order puts it after ${after_old[$j]}"
+      j=$((j + 1))
+    elif [ "$i" -lt "${#old[@]}" ] && [ "${new[$k]}" = "${old[$i]}" ]; then
+      i=$((i + 1))
+    else
+      fail "fold-conservation-failed: bullet $((k + 1)) of ## [$version] is neither the next existing bullet nor the next folded fragment"
+    fi
+  done
+  check_section_body "$after" "$version" >&2 \
+    || fail "fold-conservation-failed: the folded ## [$version] breaks the check-section rules (see above)"
+}
+
+fold() {
+  local version="" changelog="CHANGELOG.md" fragdir="changelog.d"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --version) [ "$#" -ge 2 ] || fail "fold: --version needs a value"; version="$2"; shift 2 ;;
+      --changelog) [ "$#" -ge 2 ] || fail "fold: --changelog needs a value"; changelog="$2"; shift 2 ;;
+      --fragments-dir) [ "$#" -ge 2 ] || fail "fold: --fragments-dir needs a value"; fragdir="$2"; shift 2 ;;
+      *) echo "usage: $0 fold --version X.Y.Z [--changelog FILE] [--fragments-dir DIR]" >&2; exit 2 ;;
+    esac
+  done
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "fold: --version must be SemVer X.Y.Z, got '$version'"
+  [ -f "$changelog" ] || fail "fold: '$changelog' not found"
+
+  validate_fragment_names "$fragdir"
+  check_duplicates "$fragdir"
+  validate_fragment_hygiene_all "$fragdir"
+  local -a sorted=()
+  local f listed
+  listed="$(sort_fragments "$fragdir")"
+  while IFS= read -r f; do [ -n "$f" ] && sorted+=("$f"); done <<<"$listed"
+  if [ "${#sorted[@]}" -gt 0 ]; then
+    for f in "${sorted[@]}"; do
+      fragment_is_empty "$fragdir/$f" && fail "changelog-fragment-empty: $fragdir/$f"
+    done
+  fi
+
+  local headings first_heading
+  headings="$(awk -v heading="## [$version]" 'substr($0, 1, length(heading)) == heading' "$changelog")"
+  [[ "$headings" =~ ^\#\#\ \[[0-9]+\.[0-9]+\.[0-9]+\]\ -\ [0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] \
+    || fail "fold-section-missing: '$changelog' needs exactly one '## [$version] - YYYY-MM-DD' heading"
+  grep -qxF '## [Unreleased]' "$changelog" \
+    || fail "fold-section-not-latest: '$changelog' has no '## [Unreleased]' heading"
+  first_heading="$(after_unreleased "$changelog")"
+  first_heading="${first_heading%%$'\n'*}"
+  [ "$first_heading" = "$headings" ] \
+    || fail "fold-section-not-latest: '$headings' is not the section right after '## [Unreleased]' ('$first_heading' is)"
+  local unreleased
+  unreleased="$(unreleased_raw_body "$changelog" | trim_blank_edges)"
+  [ -z "$unreleased" ] \
+    || fail "fold-unreleased-not-empty: '## [Unreleased]' in '$changelog' has content that release would have moved into $version"
+  # After the tag, changelog.d/ holds the next release's fragments. Only a
+  # tag ref present locally is seen: an unfetched tag, or a changelog outside
+  # a Git work tree, is not.
+  if git -C "$(dirname "$changelog")" rev-parse -q --verify "refs/tags/v$version^{commit}" >/dev/null 2>&1; then
+    fail "fold-version-tagged: v$version is already tagged; its fragments belong to the next release"
+  fi
+
+  # A global and an EXIT trap: every refusal below exits through fail().
+  FOLD_TMP="$(mktemp -d)" || fail "fold: could not create a scratch directory"
+  trap 'rm -rf "$FOLD_TMP"' EXIT
+  local tmp="$FOLD_TMP"
+  : >"$tmp/leads"
+  check_section_body "$changelog" "$version" "$tmp/leads" >&2 \
+    || fail "fold-section-invalid: ## [$version] in '$changelog' breaks the check-section rules (see above)"
+
+  if [ "${#sorted[@]}" -eq 0 ]; then
+    echo "aggregate_changelog: fold $version -- '$fragdir' has no fragments, '$changelog' unchanged"
+    return 0
+  fi
+
+  local meta id cat idx line i=0
+  : >"$tmp/manifest"
+  for f in "${sorted[@]}"; do
+    meta="$(parse_fragment_name "$f")"
+    id="${meta%%$'\t'*}"
+    cat="${meta##*$'\t'}"
+    line="$(awk -F '\t' -v cat="$cat" -v id="$id" '
+      $2 == cat { n = split($6, a, ","); for (i = 1; i <= n; i++) if (a[i] + 0 == id + 0) { print $5; exit } }
+    ' "$tmp/leads")"
+    [ -z "$line" ] \
+      || fail "fold-duplicate-entry: $fragdir/$f: (#$id, $cat) is already an entry of ## [$version] ($changelog:$line)"
+    idx="$(category_index "$cat")"
+    i=$((i + 1))
+    render_fragment "$fragdir/$f" >"$tmp/bullet.$i"
+    printf '%s\t%s\t%s\n' "$idx" "$id" "$tmp/bullet.$i" >>"$tmp/manifest"
+  done
+
+  awk -v heading="## [$version]" -v cats="${DECLARED_CATEGORY_ORDER[*]}" \
+      -v leads="$tmp/leads" -v manifest="$tmp/manifest" '
+    BEGIN {
+      n = split(cats, c, " ")
+      for (i = 1; i <= n; i++) rank[c[i]] = i - 1
+      while ((getline l < leads) > 0) { split(l, f, "\t"); brank[f[1]] = rank[f[2]]; bid[f[1]] = f[3] + 0 }
+      while ((getline l < manifest) > 0) { split(l, f, "\t"); nf++; frank[nf] = f[1] + 0; fid[nf] = f[2] + 0; fpath[nf] = f[3] }
+      next_f = 1
+    }
+    # Prints the queued fragments that sort before (r, id); r = n + 1 drains the queue.
+    function emit_before(r, id,    l) {
+      while (next_f <= nf && (frank[next_f] < r || (frank[next_f] == r && fid[next_f] < id))) {
+        while ((getline l < fpath[next_f]) > 0) print l
+        close(fpath[next_f])
+        next_f++
+      }
+    }
+    function flush_blanks() { for (; blanks > 0; blanks--) print "" }
+    function end_section() {
+      if (content) { emit_before(n + 1, 0); flush_blanks() }
+      else { blanks = 0; print ""; emit_before(n + 1, 0); print "" }
+      in_section = 0
+    }
+    /^## \[/ {
+      if (in_section) end_section()
+      else if (!done && substr($0, 1, length(heading)) == heading) { in_section = 1; done = 1 }
+      print
+      next
+    }
+    !in_section { print; next }
+    /^[ \t]*$/ { blanks++; next }
+    /^- / { bullet++; flush_blanks(); emit_before(brank[bullet], bid[bullet]); print; content = 1; next }
+    { flush_blanks(); print; content = 1 }
+    END { if (in_section) end_section() }
+  ' "$changelog" >"$changelog.new" || { rm -f "$changelog.new"; fail "fold: could not write '$changelog.new'"; }
+
+  ( verify_fold "$changelog" "$changelog.new" "$version" "$fragdir" ) \
+    || { rm -f "$changelog.new"; exit 1; }
+  mv "$changelog.new" "$changelog"
+  for f in "${sorted[@]}"; do
+    rm -f "$fragdir/$f"
+  done
+  echo "aggregate_changelog: folded ${#sorted[@]} fragment(s) into $version (heading '$headings' unchanged), '$fragdir' is now empty"
 }
 
 # ---- selftest --------------------------------------------------------------
@@ -2333,7 +2685,210 @@ selftest_section() {
   st_expect_fail "check-section rejecting: no released section at or above the floor" \
     check_section --changelog "$tmp/old-only.md"
 
+  # Release-notes cross-check (issue #1806). The changelogs live in rn/, so
+  # rn/docs/release-notes/v5.1.0.md is their default summary and the fixtures
+  # above keep having none. The breaking ids of `good` are #8, #9 and #10.
+  mkdir -p "$tmp/rn/docs/release-notes" "$tmp/other"
+  local notes="$tmp/rn/docs/release-notes/v5.1.0.md"
+  st_write_section rn/good.md "" "${good[@]}" ""
+  printf '%s\n' '# 5.1.0' '' '## Breaking changes' '' '- A form is refused (#8).' '' \
+    '### CLI' '' '- A CLI change (#9, PR #10).' '' '## Other fixes' '' '- #12.' >"$notes"
+  st_expect_pass "check-section accepting: every breaking id is under the summary's ## Breaking changes, ### subsections included" \
+    check_section --changelog "$tmp/rn/good.md"
+  st_write_section rn/refs.md "" "${good[@]:0:7}" "- Changed (#30, refs #31, breaking): a breaking entry with a reference." "${good[@]:7}" ""
+  printf '%s\n' '## Breaking changes' '' '- #8, #9, #10 and #30.' >"$notes"
+  st_expect_pass "check-section accepting: a breaking entry's refs id (#31) need not be listed" \
+    check_section --changelog "$tmp/rn/refs.md"
+  printf '%s\n' '## Headline' '' '- #10 leads the release.' '' '## Breaking changes' '' '- #8 and #9.' >"$notes"
+  st_expect_fail "check-section rejecting: a breaking id (#10) referenced only outside ## Breaking changes" \
+    check_section --changelog "$tmp/rn/good.md"
+  st_expect_fail "check-section rejecting: --version runs the cross-check too" \
+    check_section --changelog "$tmp/rn/good.md" --version 5.1.0
+  printf '%s\n' '## Breaking changes' '' '- #8, #9 and #100.' >"$notes"
+  st_expect_fail "check-section rejecting: #100 is not a reference to #10" \
+    check_section --changelog "$tmp/rn/good.md"
+  printf '%s\n' '# 5.1.0' '' 'Breaking changes: #8, #9, #10.' >"$notes"
+  st_expect_fail "check-section rejecting: a summary with no ## Breaking changes heading" \
+    check_section --changelog "$tmp/rn/good.md"
+  printf '%s\n' '## Breaking changes' '' '- #8, #9, #10.' >"$tmp/other/v5.1.0.md"
+  st_expect_pass "check-section accepting: --summary-dir names the summary directory" \
+    check_section --changelog "$tmp/rn/good.md" --summary-dir "$tmp/other"
+  rm -f "$notes"
+  st_expect_pass "check-section accepting: without a summary the release body is the section, nothing to cross-check" \
+    check_section --changelog "$tmp/rn/good.md"
+
   unset -f st_write_section
+  rm -rf "$tmp"
+}
+
+# fold (issue #1806): the accepting fixture places a fragment at the start of
+# a category, inside a category kept out of id order, after a bullet that only
+# refs its id, into a category the section does not have, and at the end of
+# the section, and compares the whole file with the expected one.
+selftest_fold() {
+  local tmp; tmp="$(mktemp -d)"
+  local -a head=('# Changelog' '' 'Intro.' '' '## [Unreleased]' '' '## [5.1.0] - 2026-12-01' '')
+  local -a tail=('' '## [5.0.0] - 2026-11-07' '' '- Added (#1): older.' '' '[Unreleased]: https://example.invalid/compare/v5.1.0...HEAD')
+  local -a section=(
+    "- Added (#7): a capability."
+    "- Changed (#20): a change."
+    "- Changed (#5): an entry kept out of id order."
+    "- Changed (#30, breaking): a CLI change."
+    "  Continuation line."
+    ""
+    "  A second paragraph."
+    "- Fixed (#8): a fix."
+    "- Fixed (#12, refs #40): a cross-reference."
+    "- Documented (#7): a write-up."
+  )
+  # $1 = fixture dir; the rest = section lines.
+  st_fold_fixture() {
+    local d="$1"; shift
+    rm -rf "$d"; mkdir -p "$d/changelog.d"
+    printf 'Fragment contract.\n' >"$d/changelog.d/README.md"
+    printf '%s\n' "${head[@]}" "$@" "${tail[@]}" >"$d/CHANGELOG.md"
+  }
+  st_fold_main_fragments() {
+    local d="$1"
+    st_setup_frag "$d/changelog.d" "3-a.added.md" "Added (#3): before #7."
+    st_setup_frag "$d/changelog.d" "25-b.changed.md" "Changed (#25): after #5, before #30."
+    st_setup_frag "$d/changelog.d" "40-c.fixed.md" "Fixed (#40): a multi-line fragment" "whose second line is indented."
+    st_setup_frag "$d/changelog.d" "2-d.required.md" "Required (#2): a category the section did not have."
+    st_setup_frag "$d/changelog.d" "9-e.decided.md" "Decided (#9): the last category, at the end of the section."
+  }
+  # shellcheck disable=SC2329  # invoked through st_expect_pass/st_expect_fail
+  st_fold() {  # $1 = fixture dir, $2.. = extra fold arguments
+    local d="$1"; shift
+    "$SELF" fold --changelog "$d/CHANGELOG.md" --fragments-dir "$d/changelog.d" "$@"
+  }
+  # Succeeds when fold fails with diagnostic $1 ($2 = fixture dir, $3.. = fold arguments).
+  # shellcheck disable=SC2329  # invoked through st_expect_pass
+  st_fold_reports() {
+    local code="$1" out; shift
+    if out="$(st_fold "$@" 2>&1)"; then return 1; fi
+    printf '%s\n' "$out" | grep -q "^$code"
+  }
+  # $1 = label, $2 = expected diagnostic, $3 = fixture dir, $4.. = fold
+  # arguments. A refusal names its own diagnostic, since another refusal can
+  # catch the same input later, and leaves the changelog and every fragment as
+  # they were.
+  st_fold_refuses() {
+    local label="$1" code="$2" d="$3"; shift 3
+    rm -rf "$d.snapshot"; cp -R "$d" "$d.snapshot"
+    st_expect_fail "fold rejecting: $label" st_fold "$d" "$@"
+    st_expect_pass "fold rejecting: $label -- reported as $code" st_fold_reports "$code" "$d" "$@"
+    st_expect_pass "fold rejecting: $label -- CHANGELOG.md and changelog.d/ untouched" diff -r "$d.snapshot" "$d"
+  }
+
+  local d="$tmp/main"
+  st_fold_fixture "$d" "${section[@]}"
+  st_fold_main_fragments "$d"
+  printf '%s\n' "${head[@]}" \
+    "- Added (#3): before #7." \
+    "- Added (#7): a capability." \
+    "- Changed (#20): a change." \
+    "- Changed (#5): an entry kept out of id order." \
+    "- Changed (#25): after #5, before #30." \
+    "- Changed (#30, breaking): a CLI change." \
+    "  Continuation line." \
+    "" \
+    "  A second paragraph." \
+    "- Fixed (#8): a fix." \
+    "- Fixed (#12, refs #40): a cross-reference." \
+    "- Fixed (#40): a multi-line fragment" \
+    "  whose second line is indented." \
+    "- Required (#2): a category the section did not have." \
+    "- Documented (#7): a write-up." \
+    "- Decided (#9): the last category, at the end of the section." \
+    "${tail[@]}" >"$tmp/main.expected"
+  st_expect_pass "fold accepting: five fragments folded into 5.1.0" st_fold "$d" --version 5.1.0
+  st_expect_pass "fold accepting: the result is byte-identical to the expected changelog (date unchanged)" \
+    cmp "$tmp/main.expected" "$d/CHANGELOG.md"
+  local listing
+  listing="$(ls -A "$d/changelog.d")"
+  st_expect_pass "fold accepting: changelog.d/ keeps only README.md" test "$listing" = "README.md"
+  st_expect_pass "fold accepting: a second run with no fragments exits 0" st_fold "$d" --version 5.1.0
+  st_expect_pass "fold accepting: ... and leaves the changelog unchanged" cmp "$tmp/main.expected" "$d/CHANGELOG.md"
+
+  # A version-only release wrote a section with no bullets.
+  d="$tmp/empty"
+  rm -rf "$d"; mkdir -p "$d/changelog.d"
+  printf '%s\n' '# Changelog' '' '## [Unreleased]' '' '## [5.1.0] - 2026-12-01' '' '' '' '## [5.0.0] - 2026-11-07' '' '- Added (#1): older.' >"$d/CHANGELOG.md"
+  st_setup_frag "$d/changelog.d" "4-x.fixed.md" "Fixed (#4): the only entry."
+  printf '%s\n' '# Changelog' '' '## [Unreleased]' '' '## [5.1.0] - 2026-12-01' '' '- Fixed (#4): the only entry.' '' '## [5.0.0] - 2026-11-07' '' '- Added (#1): older.' >"$tmp/empty.expected"
+  st_expect_pass "fold accepting: into a section with no bullets" st_fold "$d" --version 5.1.0
+  st_expect_pass "fold accepting: ... laid out as release lays out a section" cmp "$tmp/empty.expected" "$d/CHANGELOG.md"
+
+  d="$tmp/refuse"
+  st_fold_fixture "$d" "${section[@]}"
+  st_fold_main_fragments "$d"
+  st_fold_refuses "--version names no section" fold-section-missing "$d" --version 5.2.0
+  st_fold_refuses "--version is not the newest section" fold-section-not-latest "$d" --version 5.0.0
+  st_fold_refuses "--version is not SemVer" "fold: --version must be SemVer" "$d" --version v5.1.0
+
+  d="$tmp/unreleased"
+  st_fold_fixture "$d" "${section[@]}"
+  st_fold_main_fragments "$d"
+  sed -i 's/^## \[Unreleased\]$/&\n\n- Fixed (#99): a body release would have moved./' "$d/CHANGELOG.md"
+  st_fold_refuses "[Unreleased] has content" fold-unreleased-not-empty "$d" --version 5.1.0
+
+  d="$tmp/dup"
+  st_fold_fixture "$d" "${section[@]}"
+  st_setup_frag "$d/changelog.d" "30-x.changed.md" "Changed (#30): #30 is already a Changed entry."
+  st_fold_refuses "(id, category) already in the section" fold-duplicate-entry "$d" --version 5.1.0
+  st_fold_fixture "$d" "${section[@]}"
+  st_setup_frag "$d/changelog.d" "0008-y.fixed.md" "Fixed (#8): zero-padded #8."
+  st_fold_refuses "zero-padded alias of a section entry (#0008 == #8)" fold-duplicate-entry "$d" --version 5.1.0
+  st_fold_fixture "$d" "${section[@]}"
+  st_setup_frag "$d/changelog.d" "8-z.changed.md" "Changed (#8): Fixed #8 is another category."
+  st_expect_pass "fold accepting: the same id in another category is not a duplicate" st_fold "$d" --version 5.1.0
+
+  d="$tmp/badfrag"
+  st_fold_fixture "$d" "${section[@]}"
+  st_setup_frag "$d/changelog.d" "6-w.fixed.md" "Fixed #6 has no parenthesised label."
+  st_fold_refuses "a fragment whose bullet breaks the section rules" fold-conservation-failed "$d" --version 5.1.0
+  st_fold_fixture "$d" "${section[@]}"
+  printf '\n\n' >"$d/changelog.d/6-w.fixed.md"
+  st_fold_refuses "an empty fragment" changelog-fragment-empty "$d" --version 5.1.0
+  st_fold_fixture "$d" "${section[@]}"
+  st_setup_frag "$d/changelog.d" "6-w.removed.md" "Removed (#6): undeclared."
+  st_fold_refuses "an undeclared category" changelog-fragment-name-invalid "$d" --version 5.1.0
+
+  d="$tmp/invalid"
+  st_fold_fixture "$d" "- Fixed (#17): Fixed before Added." "${section[@]}"
+  st_setup_frag "$d/changelog.d" "3-a.added.md" "Added (#3): would go first."
+  st_fold_refuses "the section already breaks the rules" fold-section-invalid "$d" --version 5.1.0
+
+  d="$tmp/tagged"
+  st_fold_fixture "$d" "${section[@]}"
+  st_fold_main_fragments "$d"
+  ( cd "$d" && git init -q && git config user.email "selftest@example.invalid" && git config user.name "selftest" \
+      && git add -A && git commit -q -m base && git tag v5.1.0 )
+  st_fold_refuses "the version is already tagged" fold-version-tagged "$d" --version 5.1.0
+
+  # verify_fold against shams of the accepted result.
+  d="$tmp/verify"
+  st_fold_fixture "$d" "${section[@]}"
+  st_fold_main_fragments "$d"
+  local before="$d/CHANGELOG.md"
+  st_expect_pass "fold verify accepting: the expected result" verify_fold "$before" "$tmp/main.expected" 5.1.0 "$d/changelog.d"
+  grep -v '^- Required (#2)' "$tmp/main.expected" >"$tmp/sham-drop"
+  st_expect_fail "fold verify rejecting: a dropped fragment" verify_fold "$before" "$tmp/sham-drop" 5.1.0 "$d/changelog.d"
+  sed 's/^- Fixed (#8): a fix\.$/- Fixed (#8): a reworded fix./' "$tmp/main.expected" >"$tmp/sham-edit"
+  st_expect_fail "fold verify rejecting: an existing bullet edited" verify_fold "$before" "$tmp/sham-edit" 5.1.0 "$d/changelog.d"
+  sed 's/^## \[5\.1\.0\] - 2026-12-01$/## [5.1.0] - 2026-12-02/' "$tmp/main.expected" >"$tmp/sham-date"
+  st_expect_fail "fold verify rejecting: the heading date moved" verify_fold "$before" "$tmp/sham-date" 5.1.0 "$d/changelog.d"
+  sed 's/^- Added (#1): older\.$/- Added (#1): older, edited./' "$tmp/main.expected" >"$tmp/sham-outside"
+  st_expect_fail "fold verify rejecting: another section edited" verify_fold "$before" "$tmp/sham-outside" 5.1.0 "$d/changelog.d"
+  sed 's/^- Changed (#20): a change\.$/- Changed (#20): a change.\n- Changed (#20): a change./' "$tmp/main.expected" >"$tmp/sham-dup"
+  sed -i '/^- Changed (#5): /d' "$tmp/sham-dup"
+  st_expect_fail "fold verify rejecting: an existing bullet duplicated in place of another" verify_fold "$before" "$tmp/sham-dup" 5.1.0 "$d/changelog.d"
+  awk '/^- Added \(#3\)/ { held = $0; next } { print } /^- Added \(#7\)/ { print held }' "$tmp/main.expected" >"$tmp/sham-order"
+  st_expect_fail "fold verify rejecting: an existing bullet and a folded one swapped" verify_fold "$before" "$tmp/sham-order" 5.1.0 "$d/changelog.d"
+  sed 's/^## \[5\.1\.0\] - 2026-12-01$/&\n/' "$tmp/main.expected" >"$tmp/sham-blank"
+  st_expect_fail "fold verify rejecting: a blank line added around the bullets" verify_fold "$before" "$tmp/sham-blank" 5.1.0 "$d/changelog.d"
+
+  unset -f st_fold_fixture st_fold_main_fragments st_fold st_fold_reports st_fold_refuses
   rm -rf "$tmp"
 }
 
@@ -2370,9 +2925,10 @@ selftest() {
   # fixtures were dead code from a `selftest` caller's perspective.
   selftest_control6
   selftest_section
+  selftest_fold
   echo
   if [ "$ST_FAILURES" -eq 0 ]; then
-    echo "aggregate_changelog: selftest PASS -- all six controls' and check-section's accepting and rejecting fixtures behaved as expected"
+    echo "aggregate_changelog: selftest PASS -- all six controls', check-section's (with the release-notes cross-check) and fold's accepting and rejecting fixtures behaved as expected"
   else
     echo "aggregate_changelog: selftest FAIL -- $ST_FAILURES assertion(s) failed" >&2
     exit 1
@@ -2385,9 +2941,10 @@ case "${1:-}" in
   check-stale) shift; check_stale "$@" ;;
   check-section) shift; check_section "$@" ;;
   release) shift; release "$@" ;;
+  fold) shift; fold "$@" ;;
   selftest) shift; selftest "$@" ;;
   *)
-    echo "usage: $0 {check|check-pr|check-stale|check-section|release|selftest} [args]" >&2
+    echo "usage: $0 {check|check-pr|check-stale|check-section|release|fold|selftest} [args]" >&2
     exit 2
     ;;
 esac

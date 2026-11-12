@@ -5,6 +5,221 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-11-12
+
+- Added (#1803): an `fsl 5` requirements event may write its move in parentheses after the phrase
+  and its inputs, `event reject = Manager rejects Claim (Submitted -> Rejected)` /
+  `出来事 reject = 上長 が 申請 を 却下する (提出済み -> 却下済み)`, so the sentence ends before the move.
+  The bare `Submitted -> Rejected` stays accepted, and both forms lower to the same kernel. `fmt`
+  keeps the form written, with one space before `(`. The parentheses hold one move: a stay keeps
+  `in S` / `段階 S` without them, so `(in S)` and `(S)` are parse errors, and full-width `（ ）` is
+  `fullwidth_symbol`. The language references and the `fsl-requirements` skill now show the
+  parenthesized form.
+- Added (#1806): `tools/aggregate_changelog.sh fold --version X.Y.Z` folds
+  fragments that merged after the release commit into the existing, newest
+  `## [X.Y.Z]` section, which 5.0.0 did by hand five times. Each bullet is
+  rendered as `release` renders it and goes before the first bullet whose
+  declared category and first id sort after it. Existing entries keep their
+  order, the heading keeps its date, and the folded fragments are deleted. A
+  conservation check rejects any other change to `CHANGELOG.md`. `fold` refuses,
+  writing nothing, when the section is missing or not the newest, when
+  `[Unreleased]` has content, when the tag `vX.Y.Z` exists locally, when the
+  section already fails `check-section`, or when a fragment's (id, category) is
+  already an entry. With no fragments it changes nothing. Run on the parent trees
+  of #1790, #1793, #1796 and #1802, it reproduces their committed `CHANGELOG.md`
+  byte for byte. `docs/design/RELEASE.md` describes the step. The `selftest` usage
+  text and success line now name all the fixtures it runs: the six controls,
+  `check-section` and `fold`.
+- Added (#1812): an `fsl 5` scenario can use its own instance names in two more
+  places. A relation role's value may name an instance of the related entity
+  (`User places o1 with buyer u1`, `購入者 利用者1 で`); such names are numbered from 0
+  per entity in order of first use together with the steps' instances, count
+  against `verify { instances }` (`scenario_instance_overflow`), and a name of
+  another entity's instance is refused; a number written as a role value takes
+  no slot (after `with buyer 0` the first User name is 0 too). In `then <expr>`,
+  `o1.qty` and `stage(o1)` / `Order.stage(o1)` read the lowered state at `o1`'s
+  number (`order_qty[0]`, `order_stage[0]`), in English and in Japanese; a
+  binder of the same name, or an `is some(o1)` pattern anywhere in the check,
+  keeps it, and a bare name is not read as an instance. `with buyer 0` and
+  `order_qty[0]` still work, and a name the document declares as a constant,
+  resource, enum member or stage keeps its meaning, so no document that checked
+  changes: `fslc check` of the 665 corpus `.fsl` files is byte-equal before and
+  after. The name form desugars to the number form, so `scenarios`, `testgen`,
+  `explain`, `kernel` and `document` print the same output for both (instance
+  names were never printed). The missing-role message now says `with <role>
+  <instance>` instead of `with <role> <number>`. Documented in both language
+  references, `skills/fsl-requirements/references/syntax.md` (replacing #1825's
+  "its name cannot be written there") and `keywords.md`,
+  `skills/fsl/references/syntax.md`, and `docs/design/DESIGN-dialects.md`.
+- Added (#1815): in an FSL 5 `requirements` document, every `for` that names a
+  stage-qualified entity also reads it entity first, as `always` and `count` write
+  it: `decide ID "text" for Order in Placed { … }`, `allow … only for Order in
+  Placed`, `never … for Order in Packed`, alone or in an `and` (Japanese keywords:
+  `対象 Order 段階 Placed`). Each lowers to the same kernel and the same lowering
+  text as `for Placed Order`, and `fmt` keeps the order written (`fmt --lang`
+  translates `in` / `段階`). `Entity in Stage` names one stage, as `Stage Entity`
+  does: `for Order in Placed, Packed` is refused at the comma, naming the other
+  order. Inside a rule the `in` stands on the entity's line, the same newline rule
+  as `Stage Entity`; the stage after it may wrap, as a term after `and` may. `always … is`, decision-table rows, `count`, `concept` and
+  `policy` keep their existing orders. Both language references and the
+  fsl-requirements skill reference and keyword table state the form.
+- Added (#1817): `fslc explain` and `fslc lint` show the readings an FSL 5 requirements document leaves implicit. `explain` JSON gains `readings` (only for a requirements document headed `fsl 5`): per entity the initial stage, the stage order and the number of `lifecycle` lines; per event its verb and whether the phrase left it out, whether it is fair, where each input is stored (`by`: `same_name`, `set` or `relation`, or nowhere) and each guard marked `conjunctive`. `--readable` adds a `Lifecycles:` section and `verb:` / `fair:` / `input …:` / `guards:` lines under each event's action. `lint` adds info notes in `files[].notes[]` with a top-level `note_count` (both only when there is a note): `input_stored_by_name`, `verb_from_event_name` and `initial_stage_from_line_order` (more than one lifecycle line). Notes are not findings: `findings`, `finding_count` and every exit code are unchanged, and no other `explain` key changes. `fslc html` embeds the `explain` JSON, so its report of an FSL 5 requirements document gains `readings` and an `html` approval record of one reports `rendering_changed`.
+- Changed (#1783): in a document headed `fsl 5`, `fslc fmt` indents the lines a
+  declaration continues on one level deeper than its first line, as it already
+  did for the requirements dialect's statements: a business `control`'s
+  `owner` / `severity` / `applies_to`, a `policy` or `goal`'s `satisfies` and
+  body (`every …`, `invariant { … }`, `some … can reach …`), a `def` body and a
+  `map … =` continuation. A brace opened on such a line indents its contents
+  from there. Before, these lines were flattened to the declaration's own
+  indentation, so the business example of `skills/fsl-business/SKILL.md` was not
+  fmt-canonical. `fmt --check` now reports a previously canonical `fsl 5`
+  document written in the flat layout as `changed`; the formatted document lowers
+  to the same kernel. A headerless (FSL 4) document's canonical form is
+  unchanged. The `examples/fsl5/` documents are reformatted, and
+  `fsl5_fmt.rs` checks the layout, the skill example and those examples.
+- Fixed (#1750): the `install.sh` PATH hint names the directory that holds the
+  command links. With `FSL_BIN_DIR` set, the suggested `export PATH=...` line
+  used to add `$HOME/.local/bin`, so `fslc` stayed off `PATH` for a user who
+  followed it. A test runs the installer against a local release and runs the
+  suggested line, also for a directory whose name holds a space, `$`, `"`, a
+  backtick and a backslash. The installer no longer carries the v3.0.0 path that
+  took the skills from a source archive: it only installs the latest release,
+  which has a checksummed skill bundle. The README uninstall command runs in a
+  subshell, so pasting it leaves no `data_dir`, `bin_dir`, `skills_dir` or
+  `link` variable set; a test checks that.
+- Fixed (#1789): the native/WASM parity gate no longer fails when the two builds
+  pick different actions for a reachable or deadlock witness, such as
+  `auto_approve` and `approve` for `Submitted -> Approved`. It accepts that
+  difference only if both witnesses have the same states and changes, each
+  action's location is its native source location, and both witnesses replay
+  through native `fslc replay`. All other envelope fields are compared as before.
+  A new self-test checks that the gate still rejects a witness action whose guard
+  fails, a witness that reaches a different state, differing changes, unchecked
+  action metadata, and a moved action location.
+- Fixed (#1807): `install.sh` prints the `FSL_INSTALL_DIR` deprecation warning
+  on stderr, like its other warnings and the notice for a skill link another tool
+  placed. It used to print it on stdout, so a script that captured the
+  installer's stdout got the warning mixed in. A test runs the installer against
+  a local release and checks the warning's channel, and that `FSL_DATA_DIR` still
+  takes precedence over `FSL_INSTALL_DIR` without a warning.
+- Fixed (#1808): in an FSL 5 `requirements` document, a second relation made by
+  the same event (`Order belongs to User as buyer via place` and `Order belongs
+  to User as payer via place`, or `所属先 … 役名 … 契機 place` twice) is now
+  refused at the second relation with its own code, `event_already_makes_relation`,
+  and a message naming the first relation ("event 'place' already makes the
+  relation 'buyer'; an event can make one relation, so give 'payer' its own
+  event"). It was refused at the event as `generated_name_collision`, telling the
+  author to rename an input the document does not write. The document is still
+  refused (`kind: "parse"`, exit 2). An authored input named like the generated
+  one (`with u: Qty`) keeps `generated_name_collision` and its "rename the input"
+  message. The limit is now stated in both language references and the
+  fsl-requirements and fsl-verify skill references.
+- Fixed (#1817): `fsl5_implicit_readings.rs` writes each scratch document into a directory unique to the process and call. Before, tests running in parallel rewrote the same `readings_en.fsl`, `readings_ja.fsl`, `explicit_en.fsl`, `explicit_ja.fsl` and `cart_v1.fsl`, so one test could read another's half-written or differently edited document and fail. No product behavior changes.
+- Fixed (#1838): the counterfactual phases of `fslc explain` and `fslc html`
+  skip runs whose result is already known: one run with all invariants screens
+  out those no weakening breaks, fair removals that differ only in `fair` share
+  one analysis, a preempted target's concrete search runs once instead of once
+  per step count, and the reachable phase reuses the invariant phase's runs and
+  skips specs with no reachable. The shortcuts run on a separate Z3 context, and
+  an outcome whose trace the solver chose is recomputed from the runs made in
+  the former order, so output is unchanged byte for byte apart from
+  `cost.elapsed_s`. Unit tests pin the number of bounded runs and concrete
+  searches on a small spec, and compare the invariant phase's output with
+  making each of its runs.
+- Fixed (#1839): `fslc explain --readable` no longer runs the bounded verifier,
+  the witness search or the counterfactual analysis, none of which its text
+  prints. Only its `Implements:` section still runs a refinement check bounded
+  by `--depth`. The readable text is unchanged byte for byte; a unit test fails
+  if `--readable` runs the bounded verifier.
+- Fixed (#1842): replaying a requirements document's `acceptance` and
+  `forbidden` cases, which `fslc check`, `verify`, every `analyze` projection and
+  the other trace-reading commands do first, no longer slows down with
+  `verify { instances }` or a `values` scope. Building the concrete initial state
+  copied the whole state for each `init` assignment and compared each `init`
+  write with every earlier one, so it was quadratic in the instance count, and the
+  replay built it again for every case. Each step also evaluated the guards of
+  every instance of every action. `init` now writes in place, the replay builds
+  the initial state once, and a step evaluates only the call it names for an
+  action whose guards cannot fail in the current state. Any other action still has
+  every instance evaluated, so trace verdicts and errors are unchanged. On
+  `examples/fsl5/leave_request.en.fsl` with `instances Leave = 2048`,
+  `analyze --projection action_state_graph --format mermaid` takes 0.07 s instead
+  of 13 s; with `values Days = 0..262144`, 0.04 s instead of 4 s.
+- Required (#1806): `tools/aggregate_changelog.sh check-section` fails
+  `changelog-section-breaking-unlisted` when a release has the summary
+  `docs/release-notes/vX.Y.Z.md` and an id of a breaking entry of `## [X.Y.Z]`
+  does not appear as `#N` under the summary's `## Breaking changes` heading. The
+  summary replaces the section as the GitHub Release body, so an omitted breaking
+  change was invisible on the release page, and the 5.0.0 review compared the ids
+  by hand. Ids in a `refs` list are not required. `--summary-dir DIR` overrides
+  the default `docs/release-notes` beside the changelog. The merge-readiness
+  automation lane already runs `check-section`. On 5.0.0 it checks 67 ids from 61
+  breaking entries, and all are listed.
+- Required (#1807): the README's uninstall block is tested. A test copies it
+  verbatim from `README.md`, and fails when it cannot find it, then runs it
+  against installs from a local release: a default install, one placed with
+  `FSL_DATA_DIR` and `FSL_BIN_DIR` and one with the deprecated `FSL_INSTALL_DIR`.
+  It checks that the block keeps the skill backups, a skill link another tool
+  placed and a real directory under a skill name, and that it removes nothing when
+  the data directory lacks a `current` link or a `releases` directory. The test
+  also fails when the block does not name every skill the release bundle ships.
+- Documented (#1781, refs #1766): `examples/fsl5/` adds the business and design
+  layers of the leave-request examples (#1777), each in English and Japanese
+  texts: an As-Is and a To-Be `business` flow (`leave_flow_asis`,
+  `leave_flow_tobe`) and a kernel `spec` design (`leave_design`), connected by
+  three refinement mappings (To-Be refines As-Is, the requirements refine the
+  To-Be, the design refines the requirements), each `refines` at depth 8 for
+  either spelling. FSL 5 has no design dialect of its own, and its Japanese
+  keywords and glossary are read in `requirements` only, so the `.ja.fsl` files of
+  these two layers differ from the `.en.fsl` ones only in comments and quoted
+  texts. `refine_corpus_parity.rs` registers the three mappings. The corpus helper
+  `top_level_keyword` now skips an `fsl 5` header line, so a headed refinement
+  file is recognized as a mapping, and the LSP corpus test expects the next
+  lexicon only for an `fsl 5` requirements document, which is what the language
+  server indexes with it.
+- Documented (#1784): `docs/manual/LANGUAGE.md` and `LANGUAGE.ja.md` §13.3
+  and the fsl-business skill now describe the `business` form
+  `policy ID "text" [satisfies CTRL, ...] invariant { expr }`. It is one kernel
+  invariant named `ID`, with the policy as its `requirement`, and nothing else is
+  synthesized. The documentation lists the names the body can read: `stage(c)`,
+  the stage map `<entity>_stage`, the enum `<Entity>Stage`, and the history flag
+  `<entity>_stage_via_<W>[_<W>...]`, which exists only while a no-bypass policy
+  over those waypoints is declared. The design note's example
+  (`DESIGN-dialects.md` §3.1, now an `fsl check` fence) replaces a
+  `… => true` tautology with a policy that reads that flag to say that an
+  approval is final; the skill example gains the same rule as `POL-RET-003`.
+  `rust/fslc/tests/issue_1784_business_policy_invariant.rs` verifies and proves
+  both examples, finds the policy violated when an `Approved -> Rejected`
+  transition is added, and rejects the flag once the no-bypass policy is removed.
+- Documented (#1804): the requirements skill no longer shows a scenario check as `then o1 is Stage [and …]`. The parser refuses anything after `then o1 is Stage`, in English and in Japanese (`結果 申請1 は 支払済み かつ …`), with `kind: "parse"` and "a scenario checks one instance's stage; write the other checks as an expression after `then`". `skills/fsl-requirements/references/syntax.md` now gives the other form, one expression over the lowered state such as `then order_stage[0] == Cancelled and order_qty[0] == 1`, in a new checked scenario `AC-ORD-002`. `keywords.md` says that the scenario `and` / `かつ` row is read only to refuse that form. No behavior changes.
+- Documented (#1807): the README's download table states that the macOS binary
+  needs macOS 14 or later, the deployment target the release builds with, as the
+  Linux rows already state their glibc floor.
+- Documented (#1809, refs #1801): the `fsl-design`, `fsl-requirements` and
+  `fsl-verify` skills and both language references now say that two `only after`
+  prerequisite sets of one entity that would get the same history field name
+  each get a numbered suffix (`order_did_a_or_b_1`, `order_did_a_or_b_2`), and
+  that the number depends on the entity's other history fields and declared
+  fields, not on rule order, so an edit elsewhere in the document can renumber
+  the field names shown in counterexamples. No behavior change.
+- Documented (#1810): the `fslc migrate` synopsis in `LANGUAGE.md` §7, its
+  Japanese copy and `skills/fsl/references/commands.md` shows `--edition` as
+  optional, `[--edition current|next|4|5]` with default `next`, as
+  `fslc migrate --help` does. Three other synopsis rows now match their `--help`
+  too: `counterexample export` requires `-o`, and `sweep --instances`/`--depth`
+  and `domain generate --target` are optional. `DESIGN-migration.md` no longer
+  says the migrator adds "only" metadata, mapping and default edits: it lists the
+  `fsl 5` header, the process-form conversion and the derived terminal
+  (`derived_terminal_added`) as well. No behavior change.
+- Documented (#1811): the FSL 5 requirements references now say that a scenario step may be written `Actor instance verb` (`User o1 places with buyer 0, qty 1`) as well as `Actor verb instance`. The parser already accepted it, with the same Kernel. `skills/fsl-requirements/references/syntax.md` and both language references add the form; without particles, the verb is the first of the two words that is some event's verb. Three examples no longer read the wrong way. The `syntax.md` actor `Fault` is renamed `Weather`, and the `fault event` row says the keyword, not the actor's name, makes an event unfair. The Japanese goal `GOAL-RET-001`, which says some return can reach Refunded, is titled `返品は返金されることがある` (it was `返品は返金まで進める`, which reads as a promise for every return) in `glossary.md` and its fixture `returns_ja.fsl`. The Japanese event examples put the input before the verb (`… 返品金額 で 申請する`, `… 申請金額 で 提出する`), and the references state that the other order is the same phrase. No behavior changes.
+- Documented (#1836): the Japanese language reference's §7 synopsis now shows that
+  `check`, `verify` and `scenarios` take a literate `.md` file, as the English one
+  does; both references' migration paragraph now names the `fsl 5` header
+  insertion, the requirements `process`-form conversion and its derived terminal;
+  the release skill gains the `check-section` and `fold` steps from
+  `docs/design/RELEASE.md`; and the breaking-removal rule in `AGENTS.md` also
+  names the layer skill's syntax reference.
+
 ## [5.0.0] - 2026-11-07
 
 - Added (#1344): HTML-only `--no-timing` omits execution timing fields from
@@ -10376,7 +10591,8 @@ The de facto first release. FSL (AI-native formal specification language) and th
   an example conformance test against a plain Python implementation.
 - A one-liner installer (with ZIP-download support) and an Agent Skill for AI agents.
 
-[Unreleased]: https://github.com/ymm-oss/fsl/compare/v5.0.0...HEAD
+[Unreleased]: https://github.com/ymm-oss/fsl/compare/v5.1.0...HEAD
+[5.1.0]: https://github.com/ymm-oss/fsl/compare/v5.0.0...v5.1.0
 [5.0.0]: https://github.com/ymm-oss/fsl/compare/v4.12.0...v5.0.0
 [4.12.0]: https://github.com/ymm-oss/fsl/compare/v4.11.0...v4.12.0
 [4.11.0]: https://github.com/ymm-oss/fsl/compare/v4.10.0...v4.11.0

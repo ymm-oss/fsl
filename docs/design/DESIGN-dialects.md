@@ -302,6 +302,84 @@ reports the source process/entity declaration, not an unwritten binder token;
 the relation-parameter refusal reports the source event. Hidden projection
 binders are not covered by this visible-name restriction.
 
+#### One relation per event (#1808)
+
+An event makes at most one relation. The event that makes a relation is done by
+the related entity and takes that entity's instance as its first input, named by
+the entity (`u` for `User`), so a second relation via the same event would need a
+second input of the same name. The alternative the issue proposed, binding every
+role the event makes to that one input so that the roles always hold the same
+instance, is not adopted.
+
+The second relation was already refused, but as a collision with an input the
+document does not write. It now has its own code. The event's relations are
+checked in the order written: the actor rule first, then this limit, then the
+collision of the generated input with an authored one.
+
+| Form | Base `f1e9ba71` | This change |
+|---|---|---|
+| `Order belongs to User as buyer via place` and `… as payer via place` (also `所属先 … 役名 … 契機 place`) | exit 2, `parse`, `generated_name_collision`, "event 'place' takes the 'User' that makes the relation 'payer' as its input 'u', which it already has; rename the input", at the event | exit 2, `parse`, `event_already_makes_relation`, "event 'place' already makes the relation 'buyer'; an event can make one relation, so give 'payer' its own event", at the second relation |
+| one relation via `place`, `place` declaring `with u: Qty` | exit 2, `generated_name_collision`, "… rename the input", at the event | unchanged |
+| `… as buyer via place` and `Order belongs to Box as stock via place` | exit 2, `parse`, the actor message (`the actor of 'place' is 'User'`), at the event's actor | unchanged |
+
+No form changes from `ok` to `error`: `fslc check` of the 655 `.fsl` files under
+`specs/`, `examples/` and `rust/fslc/tests/fixtures/`, with a binary built from
+`f1e9ba71` in its tree and one built from this change in its tree (the change
+edits no `.fsl` file), gives the same result, kind, diagnostic code and exit
+code for every file.
+
+#### A stage-qualified entity after `for`, in either order (#1815)
+
+A stage-qualified entity is written stage first after `for` (`decide … for Placed
+Order`, `allow … only for Placed Order`, `never … for Packed Order`) and entity
+first elsewhere (`always Order not in Empty has buyer`, `count Order in Refunded`,
+`concept C = Order in Placed`, `policy … every Order in Placed …`). Every `for`
+now also reads `Entity in Stage`, so an author who learned one order from
+`always` or `count` need not guess the other.
+
+- **Grammar.** `in` is a keyword row of each context that reads a `for`
+  (`Allow`, `Never`, `Decide`), spelled `in` / `段階` as in every other context
+  that has one, so `fmt --lang` translates it and `fmt` keeps the order written.
+  `for Entity in Stage` names one stage, as `for Stage Entity` does: a list is
+  refused at its comma with a message that names the other order. `for Order not
+  in Placed` is not a form.
+- **Lowering.** Both orders build the same `Stage Entity` conjunct (rules) or the
+  same table stage and entity (`decide`). The kernel, and the canonical text of
+  each lowering step (`for Placed Order …`), are the same for both orders.
+- **The newline boundary.** A rule's concept expression (`conjuncts` in
+  `rules.rs`) reads a second word on the first word's line as the entity of
+  `Stage Entity`, because a statement starts on a new line. Before this change
+  `only for Order in Placed` read `Order in` as `Stage Entity` with an entity
+  named `in`, and `Placed` began the next statement. `Entity in Stage` is now read
+  first, and its `in` must stand on the entity's line, the same rule: a
+  statement on the next line that starts with a word spelled `in` / `段階` (a
+  property named so) stays a statement of its own, and `only for Order` followed
+  by `in Placed` on the next line is refused as before. The stage that an `in`
+  requires may follow on the next line, as the term that an `and` requires may:
+  the boundary only decides whether a word belongs. The table header has no
+  such boundary: `{` ends it, as it did for `for Stage Entity`.
+- **Not changed.** `always C1 is C2` reads `Stage Entity` only, because `always E
+  in …` begins `always E in S… has X`. A decision table row reads `Stage Entity`
+  only. `count`, `concept`, `policy` and `always … has` read `Entity in S…` only.
+
+| Form | Base `0de2dfc8` | This change |
+|---|---|---|
+| `decide … for Order in Placed {` / `決定表 … 対象 Order 段階 Placed {` | exit 2, `parse`, "expected '{'" at the stage after `in` / `段階` (read as `Stage Entity` with an entity named `in`) | exit 0; the kernel of `for Placed Order` |
+| `allow … only for Order in Placed` / `never … for Order in Packed` (also `対象 Order 段階 Placed`, and in an `and` either side) | exit 2, `parse`, "expected identifier" at the next line, or "expected 'only after'" | exit 0; the kernel of `Placed Order` |
+| `for Order in Placed, Packed` (table or rule) | exit 2, `parse`, "expected '{'" / "expected identifier" | exit 2, `parse`, "`Order in Placed` after `for` names one stage, as `Placed Order` does", at the comma |
+| `only for Order` and `in Placed` on the next line | exit 2, `parse`, "expected identifier" | unchanged |
+| `always Order in Placed is C`, a row `Order in Placed =>`, `count Placed Order` | exit 2, `parse` | unchanged |
+
+No form changes from `ok` to `error`: `fslc check` of the 665 `.fsl` files under
+`specs/`, `examples/` and `rust/fslc/tests/fixtures/`, with a binary built from
+`0de2dfc8` and one built from this change in the same tree (the change edits no
+`.fsl` file), gives the same exit, result, kind, diagnostic code and message for
+every file. No entity can be named `in` or `段階` and be used by an event (the
+event line is a parse error), so no accepted document wrote `for Stage in`.
+`rust/fslc/tests/issue_1815_for_entity_in_stage.rs` and
+`rust/fsl-lsp/tests/fsl5.rs` (`for_entity_in_stage_uses_the_entity_and_the_stage`)
+hold the contract.
+
 #### Repeated scenario step inputs (#1682)
 
 **Breaking removal (#1682).** The desugaring of a `scenario` or `forbidden` step
@@ -626,6 +704,144 @@ Documented in `docs/manual/LANGUAGE.md` and `docs/manual/LANGUAGE.ja.md`, `skill
 `skills/fsl-requirements/references/syntax.md` (pointed to from `skills/fsl/references/syntax.md`),
 and `changelog.d/1798-*.md`.
 
+#### Instance names in role values and checks (#1812)
+
+A scenario names its instances (`o1`, `申請1`), but a relation role's value took the related
+entity's raw number (`with buyer 0`) and a `then` expression only the lowered state
+(`order_qty[0]`). Both now take the trace's names; the number forms keep working. The rewrite is
+part of the step desugaring (`TraceNames` in `rust/fsl-syntax/src/parser/next_requirements.rs`),
+so every later stage sees exactly the number form it saw before: the lowering, `check`'s replay,
+the Monitor, BMC and BFS are unchanged, and `scenarios`, `testgen`, `explain`, `kernel` and
+`document` print the same output for the name form and the number form.
+
+- **Numbering.** One counter per entity, per trace. A name is numbered on its first use, as a
+  step's instance or as a role value, from 0; within a step the instance comes before its role
+  value (an event makes one relation, #1808, so a step has at most one role value). A name used
+  again is the same instance; a name of another entity's instance as a role value is refused
+  (`'t1' is an instance of 'Ticket', but the relation 'assignee' of event 'take' takes a
+  'Agent'`). The `verify` bound applies to role-introduced names (`scenario_instance_overflow`).
+  A number written as a role value does not take a slot: after `with assignee 0`, the first
+  Agent name is Agent 0 too. Refusing that mix would need the values of constants as well; it
+  is documented instead.
+  An instance of an entity with no lifecycle (`entity User`) has no stage: `then u1 is S` and
+  `stage(u1)` are refused (`… which has no lifecycle`).
+- **Which bare name is an instance.** A role value is any expression; only a single bare name
+  is read as an instance name, and only when the document does not declare it as a `const`, a
+  `resource`, an `enum` member or a lifecycle stage. Measured on base `0de2dfc8`: a constant
+  (`with buyer ALICE`) and an Int resource (`with buyer stock`) are accepted today and keep
+  their value; an enum member or stage resolves but fails typing (`acceptance`, "is not a value
+  of type 'User'") and keeps doing so. Every other bare name is now an instance name. On base
+  it was `public Kernel cannot type identifier`, or, for a name spelled like a lowered
+  per-entity state (`with buyer order_qty`), the same `acceptance` error, since such a state is a
+  map from instance numbers (`argument {"0":0,"1":0} … is not a value of type 'User'`). The only
+  scalar states a requirements document lowers to are its resources (in the 19 corpus
+  documents that lower, `stock` and `desk_open`), so no form that checked changes its meaning.
+  Lowered names are not excluded: core adds some itself (`*_stage_via_*` history), and the
+  parser cannot list them.
+- **Checks.** In `then <expr>`, `o1.field` becomes `entity_field[n]` and `stage(o1)` /
+  `Order.stage(o1)` becomes `entity_stage[n]`, with `n` the instance's number, through the same
+  binder-aware resolver as #1798 (which now also hands `stage(name)` to its callback). A
+  quantifier or aggregate binder of the same name keeps the name, as do the declared names
+  above. So does an `is some(o1)` pattern anywhere in the check (`names::pattern_names`): the
+  resolver does not treat patterns as binders (#1552), and the pattern's scope (its logical
+  continuation, `DESIGN-pattern-binding-scope.md`) is the lowering's to decide, so the whole
+  check keeps the name. Inside the scope that is the pattern variable, as on base; outside it
+  base already failed (`cannot type identifier`, or `stage(o1) cannot be resolved`), and still
+  does. A bare name is not rewritten: the kernel's identifiers there include lowered states,
+  history fields and ages that the parser does not enumerate, so reading a bare instance name
+  could silently change the meaning of a check that reads one of them. The state names come
+  from `fsl_syntax::entity_stage_state` / `entity_field_state`, to which
+  `fsl_core::naming::process_stage_state` / `process_field_state` delegate.
+
+Measured with `check` on base `0de2dfc8` and this change, on a probe document (`entity User`,
+`Order belongs to User as buyer via place`, `instances User = 2`):
+
+| Form | Base | This change |
+|---|---|---|
+| `User places o1 with buyer u1, qty 1` | exit 2, `semantics`, `cannot type identifier 'u1'` | exit 0, as `with buyer 0` |
+| `then o1.qty == 1` / `== 2` | exit 2, `semantics`, `cannot type identifier 'o1'` | exit 0 / exit 2, `acceptance` |
+| `then stage(o1) == Placed`, `then Order.stage(o1) == Placed` | exit 2, `semantics`, `stage(o1) cannot be resolved` | exit 0 |
+| `with buyer ALICE` (`const ALICE = 1`), `with buyer stock` (`resource stock: Qty = 1`) | exit 0, the value 1 | unchanged |
+| `with buyer Web` (enum member), `with buyer Placed` (stage) | exit 2, `acceptance`, not a value of type 'User' | unchanged |
+| `then exists o1: Order { o1.qty == 1 }` | exit 2, `semantics`, field access requires struct | unchanged |
+| `then some(Note { qty: 1 }) is some(o1) and o1.qty == 1` / `== 2`, in a document without the relation and with `struct Note { qty: Qty }`, after `User places o1 with qty 2` | exit 0 / exit 2, `acceptance`: the pattern's `o1` | unchanged |
+| `then o1.buyer == some(u1)` (a bare name) | exit 2, `semantics`, `cannot type identifier 'u1'` | unchanged |
+| Japanese: `利用者 が 注文1 を 購入者 利用者1 で 注文数 1 で 発注する`, `結果 注文1.注文数 == 1 かつ stage(注文1) == 発注済み` | exit 2, `semantics` | exit 0; `fmt --lang en --names canonical` keeps the names and lowers to the same kernel |
+
+Corpus: `fslc check` of every `.fsl` under `specs/`, `examples/` and `rust/fslc/tests/fixtures/`
+(665 forms) with a debug binary built from `0de2dfc8` and one built from this change, both run in
+this change's tree (it edits no `.fsl` file): complete stdout and exit code are byte-equal for
+all 665. The executable evidence is in `rust/fslc/tests/fsl5_relations.rs`
+(`a_role_value_is_an_instance_name_of_the_related_entity`,
+`a_declared_name_as_a_role_value_keeps_its_meaning`,
+`a_scenario_check_reads_an_instance_by_its_name`,
+`japanese_instance_names_in_role_values_and_checks`). Documented in `docs/manual/LANGUAGE.md` and
+`docs/manual/LANGUAGE.ja.md` ("Relations, resources, and projections", "Scenarios and
+stopping"), `skills/fsl-requirements/references/syntax.md` and `keywords.md`,
+`skills/fsl/references/syntax.md`, and `changelog.d/1812-*.md`.
+
+#### Parenthesized event move (#1803)
+
+An `fsl 5` event may write its move in parentheses after the phrase and its inputs:
+`event reject = Manager rejects Claim (Submitted -> Rejected)`,
+`event submit = Employee submits Claim with amount (Draft -> Submitted)`,
+`出来事 reject = 上長 が 申請 を 却下する (提出済み -> 却下済み)`. Written bare, the phrase and the
+move run together (`rejects Claim Submitted`, `却下する 提出済み`); the parentheses end the
+sentence at its verb. The bare form stays accepted, and both lower to the same kernel. This is an
+additive change: no form that checked before changes meaning.
+
+The event parser (`event_declaration` in `rust/fsl-syntax/src/parser/next_requirements.rs`) reads
+`( S -> T )` where it read `S -> T`. Inside the parentheses it refuses `in S` / `段階 S` and a lone
+`S` with one message that names both forms, located at `(`. A missing `)` is `expected ')'`. A
+second `(` is `expected identifier`. The stay stays `in S` / `段階 S`; the issue's `(S)` for a stay
+is not adopted. Full-width `（ ）` was already refused when lexing (`fullwidth_symbol`, "write
+'('"), and that refusal stays.
+
+Why `(` there cannot mean anything else:
+
+- The lexer reads `(` as a one-character symbol, never as part of an identifier.
+- Both phrase loops, plain and with particles, take only identifiers, so they stop at `(`. The
+  particle detector `phrase_has_particles` scans the line up to `->`, so it decides the same way
+  for both forms.
+- Before this change, the token after the phrase and its inputs had to be `with`, `in` / `段階`,
+  or the first stage of `S -> T`. A `(` there was `expected identifier`, so no document that parsed
+  before has one there.
+- An input's type is `qualified_name`, `Ident [. Ident]`. It has no type arguments and no call, so
+  `with amount: Amount (Draft -> Submitted)` reads the type `Amount` and then the move.
+- `set` and `covers` come after the move and are unchanged.
+
+`fmt` keeps the form written and does not canonicalize. The formatter prints a `(` after an
+identifier with no space, as in a call, so the parser records the `(` of each parenthesized move
+(`SourceSpellings::parenthesized_moves`). The formatter writes one space before those, so
+`Claim(Submitted -> Rejected)` prints as `Claim (Submitted -> Rejected)`. Without that record,
+`fmt` printed `Claim(Submitted -> Rejected)`; it parses the same, but it is not the documented
+layout. `fmt --lang` and `fmt --names` respell words where they stand; the move keeps its
+parentheses. `fslc migrate --edition 5`
+still writes the bare form. The LSP index reads stages between the parentheses as uses of the
+lifecycle's stages, as it does for a bare move.
+
+Evidence: `rust/fslc/tests/issue_1803_parenthesized_move.rs` and
+`the_stages_of_a_parenthesized_move_are_uses_of_the_lifecycle_stages` in
+`rust/fsl-lsp/tests/fsl5.rs`. Seven `fsl 5` fixtures were tested, English, Japanese with
+particles, all-Japanese, relations, stays and multi-entity. With every move in parentheses, and
+with every other one, each gives the same `check` packet and the same `fslc kernel` JSON as the
+fixture as written, compared in full. `fmt` prints both forms, and a mix of them, unchanged.
+`--lang ja|en` commutes with adding the parentheses. Each refusal above is tested in English and in
+Japanese. All of these fail on base `9bcff3eb`, which refuses every parenthesized move with
+`expected identifier` at `(`.
+
+Corpus: base `9bcff3eb` and this change were each materialized in their own tree with
+`git archive <sha> | tar -x`. `FSLC_CACHE=off <binary> check|kernel|fmt <form>` ran there with a
+debug `fslc` built from that SHA, over every `.fsl` under `specs/`, `examples/` and
+`rust/fslc/tests/fixtures/` (665 files, 31 of them `fsl 5`). Stdout and exit code are
+byte-identical for every file and command. The change edits no `.fsl` file. Of the existing
+tests, it changes only the event heading that `rust/fslc/tests/fsl5_keywords.rs` renders into
+`skills/fsl-requirements/references/keywords.md`.
+Documented in `docs/manual/LANGUAGE.md` and `docs/manual/LANGUAGE.ja.md`, the regenerated
+`docs/intro/language.{en,ja}.html`, `skills/fsl-requirements/` (`SKILL.md`,
+`references/syntax.md`, `references/glossary.md`, `references/keywords.md`),
+`skills/fsl-design/SKILL.md`, and `changelog.d/1803-parenthesized-event-move.added.md`.
+
 ### 2.3 Tests (tests/test_req_dialect.py)
 
 Use the return requirements (almost the same as §2.1) as a fixture:
@@ -644,7 +860,7 @@ Add `business <Name> { ... }` at top level. The expander
 
 ### 3.1 Syntax
 
-```fsl
+```fsl check
 business ReturnHandling {
   actor Customer, Manager                  // → enum Actor { Customer, Manager } (an informational annotation, omittable if not referenced)
   entity Return                            // → entity sort; verification size lives in verify
@@ -666,9 +882,11 @@ business ReturnHandling {
     severity high
     applies_to Return
 
-  policy PAY-1 "refunds only for approved cases" invariant {
-    // stage(c) is available in expressions (c is an entity-typed bound variable)
-    forall c: Return { stage(c) == Refunded => true }   // example
+  policy PAY-1 "refunds only for approved cases"
+    every Return reaching Refunded must have passed through Approved
+  policy PAY-3 "an approval is final" invariant {
+    // stage(c) (c is an entity-typed bound variable) and the history flag PAY-1 synthesizes (rule 8)
+    forall c: Return { stage(c) == Requested or stage(c) == Rejected => not return_stage_via_Approved[c] }
   }
   policy PAY-2 "every request is eventually adjudicated"
     satisfies CTRL-REFUND-REVIEW
@@ -710,7 +928,16 @@ verify {
    or properties by itself. A control becomes checkable when a policy or goal
    declares `satisfies <ControlID>`.
 5. `policy <ID> "<text>" [satisfies <ControlID>, ...] invariant { expr }` →
-   invariant (with meta). The same optional `satisfies` clause is available on
+   one invariant named `<ID>` (with meta); nothing else is synthesized. `expr`
+   reads `stage(c)`, the stage map and enum of rule 2, and the history flags of
+   rule 8, which exist only while a precedence policy over that waypoint set is
+   declared (otherwise the name does not type). Every stage of a pure stage
+   graph is reachable, each case independently, so an invariant over `stage(c)`
+   alone is either a tautology or violated; `PAY-3` in §3.1 reads PAY-1's flag
+   (#1784, which replaced a `… => true` example). A transition
+   `Approved -> Rejected` violates it, and
+   `rust/fslc/tests/issue_1784_business_policy_invariant.rs` keeps that
+   negative control. The same optional `satisfies` clause is available on
    all policy forms and on goals. Unknown control references are type errors;
    declared but unused controls produce an `unused_control` warning. When a
    satisfied policy/goal fails, the JSON `requirement` object includes

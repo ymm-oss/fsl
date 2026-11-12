@@ -13,6 +13,11 @@ taxonomies `deprecated`, `non_canonical`, `ambiguous_intent`, or
 `unsupported_in_edition`, severity, exact span, edition, canonical replacement,
 and whether its edits are machine-applicable.
 
+Info notes on the implicit readings of an FSL 5 requirements document
+(`files[].notes[]` with `note_count`, both only when there is a note) are not
+findings: they never count in `finding_count` or change the exit code
+(`DESIGN-explain.md` §7, #1817).
+
 The "check failure" half of exit 2 is unconditional per input, shared by
 `lint` and `migrate` (#517): every input is checked-model-validated
 regardless of whether it happens to contain any legacy syntax for
@@ -110,8 +115,19 @@ with `machine_applicable: false`.
 
 The formatter and migrator share one byte-edit overlap/boundary validator and
 one planner for enum, logical-operator, and quantifier canonicalization. The
-migrator adds only semantic edits for metadata, mappings, and defaults. The
-written document keeps the input's line endings and byte order mark (#1755):
+migrator adds these changes:
+
+- semantic edits for metadata, mappings, and defaults (the rewrite table above);
+- for the next edition, the `fsl 5` edition header (`missing_edition_header`);
+- for the next edition, the process-form conversion of a headerless
+  `requirements` document (`legacy_process_form`);
+- with that conversion, when the input declares no `terminal`, a derived
+  terminal (`derived_terminal_added`). The migrator writes no `terminal { }`:
+  the converted document has the terminal states the next edition derives from
+  the final lifecycle stages. This is the one Public Kernel difference the
+  conversion may make, and it can change the deadlock verdict.
+
+The written document keeps the input's line endings and byte order mark (#1755):
 the formatter, the header insertion and the process-form rendering produce LF
 lines, and the formatter drops a byte order mark, so the planned replacement is
 laid out again before it is checked and written. Every line ends as the input's

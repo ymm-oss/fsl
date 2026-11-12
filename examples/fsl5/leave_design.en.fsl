@@ -1,0 +1,172 @@
+fsl 5
+// The design layer of the leave requests: an FSL 5 kernel spec that refines
+// leave_request.en.fsl through leave_design_refines_request.fsl. A request goes
+// by its length to one of two queues; the requirements see both as Submitted.
+// leave_design.ja.fsl is the same model with Japanese texts and comments.
+spec LeaveDesign {
+  entity Leave
+  number Days
+  const AUTO_LIMIT = 1
+  const MAX_DAYS = 3
+
+  enum Phase {
+    Drafting, AutoQueue, ManagerQueue, Granted, OnLeave, Refused, Withdrawn
+  }
+
+  struct Ticket {
+    phase: Phase, days: Days, cover: Bool
+  }
+
+  // The arrows of the design: a ticket's phase changes only along these.
+  def moves(a: Phase, b: Phase) =
+    a == b
+    or a == Drafting and b == AutoQueue
+    or a == Drafting and b == ManagerQueue
+    or a == AutoQueue and b == Granted
+    or a == ManagerQueue and b == Granted
+    or a == ManagerQueue and b == Refused
+    or a == Granted and b == OnLeave
+    or a == Granted and b == Withdrawn
+
+  state {
+    tickets: Map<Leave, Ticket>
+  }
+
+  init {
+    forall l: Leave {
+      tickets[l] = Ticket {
+        phase: Drafting, days: 0, cover: false
+      }
+    }
+  }
+
+  @requirement("REQ-LEAVE-001", "a request of 1 to MAX_DAYS days is queued by its length")
+  fair action file(l: Leave, d: Days) {
+    requires tickets[l].phase == Drafting
+    requires d > 0 and d <= MAX_DAYS
+    tickets[l].phase = if d <= AUTO_LIMIT then AutoQueue else ManagerQueue
+    tickets[l].days = d
+  }
+
+  @requirement("REQ-LEAVE-003", "the system grants a request in the automatic queue")
+  fair action auto_grant(l: Leave) {
+    requires tickets[l].phase == AutoQueue
+    tickets[l].phase = Granted
+  }
+
+  @requirement("REQ-LEAVE-004", "a manager grants a request in the manager queue")
+  fair action manager_grant(l: Leave) {
+    requires tickets[l].phase == ManagerQueue
+    tickets[l].phase = Granted
+  }
+
+  @requirement("REQ-LEAVE-004", "a manager refuses a request in the manager queue")
+  fair action manager_refuse(l: Leave) {
+    requires tickets[l].phase == ManagerQueue
+    tickets[l].phase = Refused
+  }
+
+  @requirement("REQ-LEAVE-007", "a substitute is assigned to a granted leave")
+  fair action assign_cover(l: Leave) {
+    requires tickets[l].phase == Granted
+    tickets[l].cover = true
+  }
+
+  @requirement("REQ-LEAVE-005", "the leave starts once a substitute is assigned")
+  fair action start_leave(l: Leave) {
+    requires tickets[l].phase == Granted
+    requires tickets[l].cover
+    tickets[l].phase = OnLeave
+  }
+
+  @requirement("MODEL-LEAVE-001", "a granted leave is withdrawn (the requirements' cancel)")
+  fair action withdraw(l: Leave) {
+    requires tickets[l].phase == Granted
+    tickets[l].phase = Withdrawn
+  }
+
+  @requirement("REQ-LEAVE-006", "a filed request keeps a valid length")
+  invariant DaysInRange {
+    forall l: Leave {
+      tickets[l].phase != Drafting => tickets[l].days > 0 and tickets[l].days <= MAX_DAYS
+    }
+  }
+
+  @requirement("REQ-LEAVE-003", "only a short request is in the automatic queue")
+  invariant AutoQueueIsShort {
+    forall l: Leave {
+      tickets[l].phase == AutoQueue => tickets[l].days <= AUTO_LIMIT
+    }
+  }
+
+  @requirement("REQ-LEAVE-009", "only a longer request is in the manager queue or refused")
+  invariant ManagerSeesLongOnly {
+    forall l: Leave {
+      tickets[l].phase == ManagerQueue or tickets[l].phase == Refused => tickets[l].days > AUTO_LIMIT
+    }
+  }
+
+  @requirement("REQ-LEAVE-007", "a substitute is assigned only to a granted leave")
+  invariant CoverOnlyWhenGranted {
+    forall l: Leave {
+      tickets[l].cover => tickets[l].phase == Granted or tickets[l].phase == OnLeave or tickets[l].phase == Withdrawn
+    }
+  }
+
+  @requirement("REQ-LEAVE-005", "a leave in progress has a substitute")
+  invariant OnLeaveIsCovered {
+    forall l: Leave {
+      tickets[l].phase == OnLeave => tickets[l].cover
+    }
+  }
+
+  @requirement("REQ-LEAVE-008", "a ticket moves only along the arrows of the design")
+  trans PhaseMoves {
+    forall l: Leave {
+      moves(old(tickets[l].phase), tickets[l].phase)
+    }
+  }
+
+  @requirement("MODEL-LEAVE-002", "every queued request is eventually decided")
+  leadsTo QueuedIsDecided {
+    forall l: Leave {
+      tickets[l].phase == AutoQueue or tickets[l].phase == ManagerQueue ~> tickets[l].phase == Granted or tickets[l].phase == Refused
+    }
+  }
+
+  @requirement("MODEL-LEAVE-003", "every granted leave is eventually taken or withdrawn")
+  leadsTo GrantedEnds {
+    forall l: Leave {
+      tickets[l].phase == Granted ~> tickets[l].phase == OnLeave or tickets[l].phase == Withdrawn
+    }
+  }
+
+  // Both queues and every ending are reachable. 2 and 3 days are written out
+  // (AUTO_LIMIT + 1 and MAX_DAYS of the requirements) so a change shows here.
+  reachable SystemQueueAndStart {
+    exists a: Leave {
+      exists b: Leave {
+        tickets[a].phase == AutoQueue and tickets[b].phase == OnLeave
+      }
+    }
+  }
+
+  reachable OtherEndings {
+    exists a: Leave {
+      exists b: Leave {
+        tickets[a].phase == Refused and tickets[a].days == 2 and tickets[b].phase == Withdrawn and tickets[b].days == 3
+      }
+    }
+  }
+
+  terminal {
+    forall l: Leave {
+      tickets[l].phase == OnLeave or tickets[l].phase == Refused or tickets[l].phase == Withdrawn
+    }
+  }
+}
+
+verify {
+  instances Leave = 2
+  values Days = 0..4
+}

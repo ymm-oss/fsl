@@ -7,7 +7,7 @@ if [ -n "${FSL_DATA_DIR:-}" ]; then
   INSTALL_DIR="$FSL_DATA_DIR"
 elif [ -n "${FSL_INSTALL_DIR:-}" ]; then
   INSTALL_DIR="$FSL_INSTALL_DIR"
-  echo "Warning: FSL_INSTALL_DIR is deprecated; use FSL_DATA_DIR instead."
+  echo "Warning: FSL_INSTALL_DIR is deprecated; use FSL_DATA_DIR instead." >&2
 else
   INSTALL_DIR="$DATA_HOME/fsl"
 fi
@@ -102,35 +102,13 @@ stage_release_asset() {
 }
 
 stage_skills() {
-  local archive source_root skill_name
+  local archive
   archive="$STAGING_DIR/fsl-skills.tar.gz"
   mkdir -p "$STAGING_DIR/skills"
-  if [ "$RELEASE_TAG" != "v3.0.0" ]; then
-    stage_release_asset "fsl-skills.tar.gz" "$archive" \
-      || fail "Failed to download the checksummed skill bundle from $RELEASE_TAG."
-    tar -xzf "$archive.download" -C "$STAGING_DIR"
-    rm -f "$archive.download"
-    return
-  fi
-
-  # v3.0.0 predates the checksummed skill bundle. Keep compatibility by
-  # extracting only the skills from the immutable release tag archive.
-  rm -f "$archive.download" "$archive.sha256.download"
-  echo "The release has no skill bundle; extracting skills from source tag $RELEASE_TAG."
-  archive="$STAGING_DIR/source.tar.gz"
-  download_file "https://github.com/ymm-oss/fsl/archive/refs/tags/$RELEASE_TAG.tar.gz" "$archive" \
-    || fail "Failed to download the source archive for $RELEASE_TAG."
-  [ "$(hash_file "$archive")" = "d2d691a98af28f4aaa77ded08b35978539a0d1e3c65e8b7f29783f143a447598" ] \
-    || fail "Checksum verification failed for the v3.0.0 source archive."
-  mkdir -p "$STAGING_DIR/source"
-  tar -xzf "$archive" -C "$STAGING_DIR/source"
-  source_root=$(find "$STAGING_DIR/source" -mindepth 1 -maxdepth 1 -type d | head -n 1)
-  [ -n "$source_root" ] || fail "The source archive for $RELEASE_TAG is empty."
-  for skill_name in fsl fsl-business fsl-requirements fsl-design fsl-design-review fsl-delivery; do
-    [ -d "$source_root/skills/$skill_name" ] || fail "The $skill_name skill is missing from $RELEASE_TAG."
-    cp -R "$source_root/skills/$skill_name" "$STAGING_DIR/skills/$skill_name"
-  done
-  rm -rf "$STAGING_DIR/source" "$archive"
+  stage_release_asset "fsl-skills.tar.gz" "$archive" \
+    || fail "Failed to download the checksummed skill bundle from $RELEASE_TAG."
+  tar -xzf "$archive.download" -C "$STAGING_DIR"
+  rm -f "$archive.download"
 }
 
 RELEASE_TAG=$(latest_release_tag)
@@ -339,11 +317,18 @@ link_command fslc-lsp "$FSL_LSP_BIN"
 case ":$PATH:" in
   *":$LOCAL_BIN:"*) ;;
   *)
+    # The suggested line puts LOCAL_BIN inside double quotes, so the characters
+    # special there are escaped.
+    if [ "$LOCAL_BIN" = "$HOME/.local/bin" ]; then
+      PATH_ENTRY="\$HOME/.local/bin"
+    else
+      PATH_ENTRY=$(printf '%s\n' "$LOCAL_BIN" | sed 's/[\\"$`]/\\&/g')
+    fi
     SHELL_NAME=$(basename "${SHELL:-}")
     if [ "$SHELL_NAME" = "zsh" ]; then
-      echo "$LOCAL_BIN is not on your PATH. Add this line to ~/.zshrc: export PATH=\"\$HOME/.local/bin:\$PATH\""
+      echo "$LOCAL_BIN is not on your PATH. Add this line to ~/.zshrc: export PATH=\"$PATH_ENTRY:\$PATH\""
     elif [ "$SHELL_NAME" = "bash" ]; then
-      echo "$LOCAL_BIN is not on your PATH. Add this line to ~/.bashrc: export PATH=\"\$HOME/.local/bin:\$PATH\""
+      echo "$LOCAL_BIN is not on your PATH. Add this line to ~/.bashrc: export PATH=\"$PATH_ENTRY:\$PATH\""
     else
       echo "$LOCAL_BIN is not on your PATH. Add it in your shell configuration."
     fi

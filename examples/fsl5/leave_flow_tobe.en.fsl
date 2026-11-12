@@ -1,0 +1,55 @@
+fsl 5
+// The reformed leave-approval flow (To-Be), written as an FSL 5 business
+// layer. The system approves a short leave instead of a manager, and the
+// flow commits to deciding every request (CTRL-LEAVEFLOW-002).
+// It refines leave_flow_asis.en.fsl through leave_flow_tobe_refines_asis.fsl,
+// and the requirements layer (leave_request.en.fsl) refines it through
+// leave_request_refines_tobe.fsl.
+// leave_flow_tobe.ja.fsl is the same model with Japanese texts and comments.
+business LeaveFlowToBe {
+  actor Employee, Manager, System
+  entity Leave
+
+  // The stages are listed in the order the requirements layer's lifecycle
+  // lines meet them, so both layers have the same stage enum.
+  process Leave {
+    stages Draft, Submitted, Approved, Taken, Rejected, Cancelled
+    initial Draft
+    transition submit Draft -> Submitted by Employee
+    transition auto_approve Submitted -> Approved by System
+    transition approve Submitted -> Approved by Manager
+    transition reject Submitted -> Rejected by Manager
+    transition take Approved -> Taken by Employee
+    transition cancel Approved -> Cancelled by Employee
+  }
+
+  kpi taken_leaves = count Leave in Taken
+  kpi open_requests = count Leave in Submitted
+
+  control CTRL-LEAVEFLOW-001 "Leave is taken or cancelled only after it was approved"
+    owner Manager
+    severity high
+    applies_to Leave
+  control CTRL-LEAVEFLOW-002 "No request waits for a decision forever"
+    owner Manager
+    severity medium
+    applies_to Leave
+
+  policy POL-LEAVEFLOW-001 "No leave is taken or cancelled without an approval"
+    satisfies CTRL-LEAVEFLOW-001
+    every Leave reaching Taken or Cancelled must have passed through Approved
+  policy POL-LEAVEFLOW-002 "Every submitted leave is eventually decided"
+    satisfies CTRL-LEAVEFLOW-002
+    every Leave in Submitted must eventually be Approved or Rejected
+  policy POL-LEAVEFLOW-003 "Every approved leave is eventually taken or cancelled"
+    every Leave in Approved must eventually be Taken or Cancelled
+  policy POL-LEAVEFLOW-004 "A leave is decided only after it was submitted"
+    every Leave reaching Approved or Rejected must have passed through Submitted
+  goal GOAL-LEAVEFLOW-001 "A leave can be taken" some Leave can reach Taken
+  goal GOAL-LEAVEFLOW-002 "A leave can be rejected" some Leave can reach Rejected
+  goal GOAL-LEAVEFLOW-003 "A leave can be cancelled" some Leave can reach Cancelled
+}
+
+verify {
+  instances Leave = 2
+}

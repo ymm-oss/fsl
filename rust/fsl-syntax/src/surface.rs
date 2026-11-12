@@ -790,6 +790,83 @@ pub struct NextEditionRequirements {
     /// the repeated name, in source order. The desugared event call carries
     /// one value per input, so the core refuses these before lowering.
     pub repeated_step_inputs: Vec<(String, Span)>,
+    /// How each event was read where the source leaves it implicit, in
+    /// source order. For `explain` and `lint` only: the lowering reads the
+    /// desugared transitions, never these.
+    pub event_readings: Vec<EventReading>,
+    /// How each entity's lifecycle lines were read, in the order of
+    /// [`Self::entities`]; for `explain` and `lint` only.
+    pub lifecycle_readings: Vec<LifecycleReading>,
+}
+
+/// How an `event` was read (#1817): whether its phrase names a verb, and
+/// where each of its inputs is stored.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EventReading {
+    pub event: String,
+    pub entity: String,
+    /// The verb scenario steps use ([`EventForm::verb`]).
+    pub verb: String,
+    /// `true` when the phrase leaves the verb out (`Shop Order`): the event
+    /// name is then the verb.
+    pub verb_omitted: bool,
+    /// The event's inputs in the order its action takes them.
+    pub inputs: Vec<InputReading>,
+    /// The declaration, as the desugared transition's span.
+    pub span: Span,
+    /// The phrase, from the actor to the last input.
+    pub phrase_span: Span,
+}
+
+/// One input of an [`EventReading`].
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InputReading {
+    pub name: String,
+    /// The fields the event stores the input in unchanged, in assignment
+    /// order; empty when it stores the input nowhere (an input read only
+    /// inside a larger expression is not stored).
+    pub stored: Vec<(String, InputStore)>,
+    /// `false` for the actor's instance a relation's event takes as its
+    /// first input, which the source does not write.
+    pub written: bool,
+    pub span: Span,
+}
+
+/// Why an event stores an input in a field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InputStore {
+    /// The input is named like a field of the entity (`with qty`).
+    SameName,
+    /// `set field = input name`.
+    Set,
+    /// The relation's role the event records.
+    Relation,
+}
+
+impl InputStore {
+    /// The word `explain` reports.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SameName => "same_name",
+            Self::Set => "set",
+            Self::Relation => "relation",
+        }
+    }
+}
+
+/// How an entity's lifecycle lines were read (#1817): the first stage of
+/// the first line is the initial one, and the stages are ordered as they
+/// first appear.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LifecycleReading {
+    pub entity: String,
+    pub initial: String,
+    pub stages: Vec<String>,
+    /// How many `lifecycle` lines the entity has.
+    pub lines: usize,
+    /// The initial stage as the first line writes it.
+    pub initial_span: Span,
 }
 
 /// `Entity belongs to Target as role via event`: each instance of `entity`
@@ -844,7 +921,22 @@ pub fn entity_binder(entity: &str) -> String {
         .map_or_else(|| "c".to_owned(), |first| first.to_lowercase().collect())
 }
 
-/// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`.
+/// The state holding the stage of each instance of a next-edition entity
+/// (or a requirements `process`): `claim_stage` for `Claim`.
+#[must_use]
+pub fn entity_stage_state(entity: &str) -> String {
+    format!("{}_stage", entity.to_lowercase())
+}
+
+/// The state holding one field of each instance of a next-edition entity
+/// (or a requirements `process`): `claim_amount` for `Claim.amount`.
+#[must_use]
+pub fn entity_field_state(entity: &str, field: &str) -> String {
+    format!("{}_{}", entity.to_lowercase(), field)
+}
+
+/// `decide ID "text" for Stage Entity { rows [otherwise => …] } [assuming Q]`
+/// (or `for Entity in Stage`).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DecisionTable {
     pub id: String,

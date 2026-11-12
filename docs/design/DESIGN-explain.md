@@ -12,7 +12,9 @@ formulas" to "adjudicating concrete examples."
 `fslc explain <f> [--depth K] --readable` emits the deterministic text review
 view. **No LLM used** (deterministic formatting only; prose generation is left
 to the agent-side skill). The verification engine is unmodified; #6 mutate and
-verify are reused.
+verify are reused. The text prints no witness or counterfactual, so
+`--readable` does not compute them (#1839); only its `Implements:` section
+runs a refinement check.
 
 ```json
 {"result":"explained",
@@ -85,8 +87,8 @@ verification logic is written. Key points:
   not just the bounded verifier's first reported failure for the mutant.
 - **Non-user-check preemption (#1350):** if the target-isolated verifier first
   reports `type_bound`, `trans`, `partial_op` or `ensures`, try the existing
-  solver-independent concrete search at each step count through the requested
-  depth. It skips guard-partial action instances and errored/violating children
+  solver-independent concrete search for the fewest steps through the
+  requested depth. It skips guard-partial action instances and errored/violating children
   while exploring other instances and queued paths; a failed initialization or
   an initially violated/unevaluable state cannot supply a concrete trace.
   A target witness competes under the same ranking tuple. If none is found,
@@ -101,8 +103,7 @@ verification logic is written. Key points:
   initialization/initial-state checks failed: REASON`, preserving the reported
   cause without inventing free roots. Distinct reasons are retained per target;
   they do not replace the existing preemption or bounded-init skip clauses.
-  Constructor failure stops retries at larger exact depths because no concrete
-  root exists. This does not enumerate nondeterministic initial states. Entries
+  Constructor failure ends the search because no concrete root exists. This does not enumerate nondeterministic initial states. Entries
   whose concrete search did run keep their existing note unchanged, and selected
   candidates still take precedence. A declined optional canonicalization of a
   solver-target witness keeps its BMC evidence as described above.
@@ -121,6 +122,47 @@ verification logic is written. Key points:
   `counterfactual_scope.liveness:"skipped"`, and `--readable` states the same
   scope. This prevents quantified liveness from multiplying every safety
   weakening without silently implying that liveness was analyzed (#633).
+
+**Amendment (#1838): cost.** The counterfactual phases dominated `explain` and
+`html`. They now skip work whose result is already known, and their output is
+unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
+
+- **Screening.** Before the per-invariant runs, one bounded run of the
+  weakened model retains all its invariants. A violated invariant is dropped
+  and the run repeated; a run that ends without a violation proves the same
+  for each remaining invariant's own run, which is then skipped. A run asserts
+  the init and transition constraints, which do not depend on the invariants,
+  and assumes a check only after proving it, so a run that retains one of the
+  invariants asks only questions the screening run answered `unsat`. Any other
+  outcome screens nothing.
+- **Fair removals.** The verifier reads `fair` only in the `leadsTo` lasso
+  search and the Monitor never reads it. Counterfactual models clear `leadsTo`,
+  so fair removals whose models are equal once `fair` is ignored share one
+  analysis.
+- **One concrete search.** A preempted target's concrete search runs once,
+  breadth-first, to the requested depth. The Monitor reports a violation at
+  the step it occurs and every level is generated before the next, so its
+  first match is the one the former exact search per step count found first.
+- **Reachable phase.** A weakening of a spec with no reachable is not run. A
+  weakened model that the invariant phase already ran with all its invariants
+  reuses that run's verdicts: whether it found a violation and which
+  reachables it left unreached.
+
+- **Solver-chosen values.** Verdicts do not depend on which runs came before,
+  but the model a run returns can: solvers on one thread share a Z3 context.
+  An outcome carries a solver-chosen value when concrete search does not
+  replace its trace (a removed init assignment, an edge the Monitor rejects)
+  or when its preemption note names a check whose public name depends on the
+  run's last action. The screening and shared analysis therefore run on a
+  fresh context (`fsl_solver_z3::with_fresh_context`). Which outcome an entry
+  prints is known from verdicts alone: the rank is trace length, operator and
+  source line, and a note is printed only when no weakening violates the
+  invariant. If a printed outcome carries a solver-chosen value, the
+  per-invariant runs are then made in order on the thread's own context, as
+  before #1838, up to the last such outcome, and the solver-chosen outcomes
+  are taken from them. The unit test
+  `shared_counterfactual_runs_print_the_unshared_output` compares this with
+  making every run in order from the same context.
 
 ## 5. Ripple / tests
 
@@ -202,3 +244,54 @@ declaration with no registered `OriginChain`:
   in §2 — an `Implements:` section from the existing
   `requirements_implements_output` when the source declares
   `implements X from "Y"`.
+
+## 7. Implicit readings of FSL 5 requirements (#1817)
+
+Several FSL 5 requirements forms take their meaning from a name match, a word
+count or line order: `with qty` stores the input in the field `qty`; the first
+`lifecycle` line's first stage is initial and the stages are ordered as they
+first appear; `Shop Order` (two words) makes the event name the verb; every
+event but a `fault event` is fair; `allow … only when` adds a guard rather than
+granting permission. Each was documented, but no output said which reading was
+taken, so an edit could change meaning without a message. Decision (user,
+2026-11-11): output only, in `explain` and `lint`; no language change (an
+explicit `initial` declaration was suggested and is out of scope).
+
+- **Where the readings come from.** Only the desugaring knows why an input is
+  stored, whether a verb was written and how many lifecycle lines there were.
+  It records `EventReading` / `LifecycleReading` on
+  `NextEditionRequirements::event_readings` / `lifecycle_readings`, which the
+  lowering never reads. Kernel origins are not extended: they reach the Kernel
+  and the existing `skeleton.actions[].origin` of `explain`, so every
+  document's `check`, `kernel` and existing `explain` output stays as it was.
+  Fairness and the guards are the Kernel action's, found through the event's
+  origin (its `event` lowering step and declaration span), so `explain` shows
+  what `verify` checks.
+- **`explain`.** JSON gains one key, `readings`, only for a requirements
+  document headed `fsl 5` (LANGUAGE.md §13.2 lists its fields). Each guard is
+  marked `conjunctive: true` with the origins `explain --lowering` gives it.
+  `--readable` adds a `Lifecycles:` section and `verb:` / `fair:` / `input …:`
+  / `guards:` lines; no existing line changes. `explain --lowering` is
+  unchanged. `fslc html` embeds the `explain` JSON in its raw-data section, so
+  its report of such a document carries `readings` too and an `html` approval
+  record of it reports `rendering_changed`; the template is unchanged, so
+  `HTML_RENDERER_VERSION` stays (`DESIGN-approval.md`, "Renderer version"). The output is respelled like the rest of `explain`'s, so enum-like
+  values (`same_name`, `set`, `relation`) avoid words a glossary would name.
+- **`lint`.** The three readings an edit can silently change are info notes
+  (`input_stored_by_name`, `verb_from_event_name`,
+  `initial_stage_from_line_order`; the last only with more than one lifecycle
+  line), taxonomy `ambiguous_intent`, in `files[].notes[]` with a top-level
+  `note_count`, both present only when there is a note, so `lint` of every
+  other document prints the bytes it printed before (the full-stdout goldens
+  of `issue_1434_publication.rs` and `specialized_preflight_preservation.rs`
+  hold). They are kept out of `findings` because `finding_count` is the
+  lint outcome (`outcome.rs`, "done at `finding_count: 0`") and `lint` exits 1
+  whenever it reports a finding: as findings they would turn every such
+  document's `lint` from exit 0 to 1. Fairness and conjunctive guards are not
+  notes: they cannot change without an edit to the `fault` keyword or the
+  rules, which already says what it does.
+- **Evidence.** `rust/fslc/tests/fsl5_implicit_readings.rs` (English and
+  Japanese spellings, each reading made explicit as a negative control, notes
+  beside a finding). Base `9bcff3eb` and head `check`, `kernel` and `lint`
+  exit codes over `specs/`, `examples/` and `rust/fslc/tests/fixtures/` are
+  identical, and head `explain` JSON equals base apart from `readings`.

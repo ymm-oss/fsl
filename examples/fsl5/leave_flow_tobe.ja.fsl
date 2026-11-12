@@ -1,0 +1,54 @@
+fsl 5
+// 見直し後の休暇承認の流れ(To-Be)を FSL 5 の業務層で書いた例。短い休暇は上長に
+// 代わってシステムが承認し、どの申請もいずれ決まることを約束する(CTRL-LEAVEFLOW-002)。
+// leave_flow_tobe_refines_asis.fsl を通して leave_flow_asis.ja.fsl を詳細化し、
+// 要件層(leave_request.ja.fsl)は leave_request_refines_tobe.fsl を通してこの流れを
+// 詳細化する。leave_flow_tobe.en.fsl と同じモデルで、名前は英語の正規名のまま、
+// 引用文とコメントだけを日本語で書く。
+business LeaveFlowToBe {
+  actor Employee, Manager, System
+  entity Leave
+
+  // 段階は要件層のライフサイクルの行に現れる順に並べる。こうすると両層の段階の
+  // 列挙型が一致する。
+  process Leave {
+    stages Draft, Submitted, Approved, Taken, Rejected, Cancelled
+    initial Draft
+    transition submit Draft -> Submitted by Employee
+    transition auto_approve Submitted -> Approved by System
+    transition approve Submitted -> Approved by Manager
+    transition reject Submitted -> Rejected by Manager
+    transition take Approved -> Taken by Employee
+    transition cancel Approved -> Cancelled by Employee
+  }
+
+  kpi taken_leaves = count Leave in Taken
+  kpi open_requests = count Leave in Submitted
+
+  control CTRL-LEAVEFLOW-001 "休暇は承認された後にだけ取得または取消する"
+    owner Manager
+    severity high
+    applies_to Leave
+  control CTRL-LEAVEFLOW-002 "決定を永遠に待つ申請はない"
+    owner Manager
+    severity medium
+    applies_to Leave
+
+  policy POL-LEAVEFLOW-001 "承認を経ずに休暇を取得も取消もしない"
+    satisfies CTRL-LEAVEFLOW-001
+    every Leave reaching Taken or Cancelled must have passed through Approved
+  policy POL-LEAVEFLOW-002 "申請された休暇はいずれ決まる"
+    satisfies CTRL-LEAVEFLOW-002
+    every Leave in Submitted must eventually be Approved or Rejected
+  policy POL-LEAVEFLOW-003 "承認された休暇はいずれ取得か取消になる"
+    every Leave in Approved must eventually be Taken or Cancelled
+  policy POL-LEAVEFLOW-004 "休暇は申請された後にだけ決める"
+    every Leave reaching Approved or Rejected must have passed through Submitted
+  goal GOAL-LEAVEFLOW-001 "休暇は取得まで進める" some Leave can reach Taken
+  goal GOAL-LEAVEFLOW-002 "休暇は却下されうる" some Leave can reach Rejected
+  goal GOAL-LEAVEFLOW-003 "休暇は取り消されうる" some Leave can reach Cancelled
+}
+
+verify {
+  instances Leave = 2
+}

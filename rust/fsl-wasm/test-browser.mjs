@@ -10,7 +10,10 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import "./build.mjs";
-import { assertNormalizerContract, differences, normalizeEnvelope } from "./parity.mjs";
+import {
+  assertNormalizerContract, assertWitnessReplayContract, differences, normalizeEnvelope, reconcileWitnesses,
+  WITNESS_REPLAY_FIXTURE,
+} from "./parity.mjs";
 import { workerMessageError } from "./web/worker-protocol.mjs";
 import { classifyOutcome, ParityViolationError, ProbeTimeoutError } from "./browser-outcome.mjs";
 import { specImports } from "./spec-imports.mjs";
@@ -112,6 +115,46 @@ async function nativeEnvelope(testCase) {
     throw new Error(`native CLI JSON failure: ${error}\n${result.stderr}`);
   }
 }
+
+// #1789: native `replay` (the solver-free Monitor) and the native Kernel
+// action spans are the evidence reconcileWitnesses uses for differing witnesses.
+let witnessReplayFiles = 0;
+function witnessOracle(path) {
+  let locations;
+  return {
+    async replay(trace) {
+      witnessReplayFiles += 1;
+      const file = join(dist, `witness-replay-${witnessReplayFiles}.json`);
+      await writeFile(file, JSON.stringify(trace), "utf8");
+      const result = await command(nativeBinary, ["replay", path, "--trace", file], nativeCommandTimeoutMs);
+      let envelope;
+      try {
+        envelope = JSON.parse(result.stdout);
+      } catch {
+        envelope = undefined;
+      }
+      return { status: result.status, envelope, stderr: result.stderr };
+    },
+    actionLocations() {
+      locations ??= command(nativeBinary, ["kernel", path], nativeCommandTimeoutMs).then((result) => {
+        const kernel = JSON.parse(result.stdout);
+        if (result.status !== 0 || !Array.isArray(kernel.actions)) {
+          throw new Error(kernel.message ?? `fslc kernel exited ${result.status}`);
+        }
+        const spans = new Map(kernel.actions.map((action) => [
+          action.name, { line: action.span.line, column: action.span.column },
+        ]));
+        if (spans.size !== kernel.actions.length) throw new Error("fslc kernel repeats an action name");
+        return spans;
+      });
+      return locations;
+    },
+  };
+}
+await assertWitnessReplayContract({
+  verify: (path) => nativeEnvelope({ cmd: "verify", path, options: { depth: 3, deadlock: "warn" } }),
+  oracleFor: witnessOracle,
+});
 
 async function collectFslFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -329,6 +372,17 @@ parityCases.push({
   files: {},
   options: {},
   expected_status: 2,
+});
+// #1789: two state-identical actions, so the Worker may pick either witness.
+parityCases.push({
+  id: `parity-${parityCases.length}`,
+  cmd: "verify",
+  path: WITNESS_REPLAY_FIXTURE,
+  source: await readFile(join(repository, WITNESS_REPLAY_FIXTURE), "utf8"),
+  source_file: WITNESS_REPLAY_FIXTURE,
+  files: {},
+  options: { depth: 3, deadlock: "warn" },
+  expected_status: 0,
 });
 // #1457: require real verdicts, not parity between two unsupported errors.
 // Positive cases force the symbolic route; negative controls also preserve
@@ -931,7 +985,15 @@ for (let index = 0; index < parityCases.length; index += 1) {
     continue;
   }
   const envelopeDifferences = differences(normalizedNative, normalizedWasm);
+  let unexplainedDifferences = envelopeDifferences;
   if (envelopeDifferences.length > 0) {
+    const reconciled = await reconcileWitnesses(nativeEnvelope, wasmEnvelope, witnessOracle(testCase.path));
+    if (reconciled.replayed.length > 0) {
+      logPhase("witness-replay", `case=${testCase.path} accepted=${reconciled.replayed.join(",")}`);
+    }
+    unexplainedDifferences = reconciled.differences;
+  }
+  if (unexplainedDifferences.length > 0) {
     mismatches.push({
       schema: "fsl-native-wasm-parity-failure.v1",
       case: {
@@ -939,7 +1001,7 @@ for (let index = 0; index < parityCases.length; index += 1) {
         command: parityCases[index].cmd,
         options: parityCases[index].options,
       },
-      differences: envelopeDifferences,
+      differences: unexplainedDifferences,
       native: nativeEnvelope,
       wasm: wasmEnvelope,
     });

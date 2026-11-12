@@ -36,7 +36,7 @@ entry per finding in `findings[]` (for example `legacy_string_metadata` for a
   number Qty
   const BULK = 2
   const SLA = 2
-  actor User, Shop, Courier, Fault
+  actor User, Shop, Courier, Weather
 
   entity User
 
@@ -60,7 +60,7 @@ entry per finding in `findings[]` (for example `legacy_string_metadata` for a
 | **entity** `User` | an identity with no lifecycle; the number of instances is set by `verify { instances User = N }` |
 | **entity** `Order { field: Type = init … }` | a field of every instance; every field needs an initial value |
 | **lifecycle** `A -> B -> C` | the stages and the moves between them; one line per path, the first stage is the initial one. The stages become an enum **in the order they first appear**, which an upper layer's stage list must repeat |
-| `Order` **belongs to** `User` **as** `buyer` **via** `place` | every `Order` gets the field `buyer` (no one until `place` happens); the event `place` takes the `User` instance that does it as its first input and records it |
+| `Order` **belongs to** `User` **as** `buyer` **via** `place` | every `Order` gets the field `buyer` (no one until `place` happens); the event `place` takes the `User` instance that does it as its first input and records it. An event makes at most one relation: a second `Order belongs to User as … via place` is refused (`event_already_makes_relation`); give it its own event |
 | **resource** `stock: Qty = 2` | one value that belongs to no entity; events `set` it |
 
 Each name and each requirement ID is declared once. A second `actor` of
@@ -105,28 +105,37 @@ source's words.
 
 ```fsl check
 
-  event place   = User places Order with qty      Empty -> Placed
+  event place   = User places Order with qty (Empty -> Placed)
     set stock = stock - input qty
-  event pay     = User pays Order                 in Placed
-  event pack    = Shop packs Order                Placed -> Packed
-  event cancel  = Shop cancels Order              Placed -> Cancelled
-  event ship    = Shop ships Order                Packed -> Shipped
-  event deliver = Courier delivers Order          Shipped -> Delivered
+  event pay     = User pays Order in Placed
+  event pack    = Shop packs Order (Placed -> Packed)
+  event cancel  = Shop cancels Order (Placed -> Cancelled)
+  event ship    = Shop ships Order (Packed -> Shipped)
+  event deliver = Courier delivers Order (Shipped -> Delivered)
     covers REQ-ORD-007 "A shipped order is delivered by the courier"
-  fault event damage = Fault damages Order        in Shipped
+  fault event damage = Weather damages Order in Shipped
     set damaged = true
-  event replace = Shop replaces Order             in Shipped
+  event replace = Shop replaces Order in Shipped
     set damaged = false
 ```
 
 | Form | Meaning |
 |---|---|
-| **event** `name = Actor verb Entity A -> B` | one move along a lifecycle edge (`event_not_on_lifecycle` if it is not an edge); `name` is the canonical action name implementations see |
-| … **in** `S` | an event that stays in stage `S` |
+| **event** `name = Actor verb Entity (A -> B)` | one move along a lifecycle edge (`event_not_on_lifecycle` if it is not an edge); `name` is the canonical action name implementations see |
+| … `A -> B` | the same move without parentheses |
+| … **in** `S` | an event that stays in stage `S`; a stay takes no parentheses |
 | … **with** `field` | an input stored in the field of that name; `with i: Type` is an input that is not a field; several inputs are a comma list |
 | **set** `x = expr, y = expr` | other updates; `input qty` names the input where a field has the same name (a bare `qty` there is `ambiguous_input_field`; `input qty` inside a binder named `qty` is `captured_by_binder`) |
 | **covers** `ID "text"` | the requirement this event carries |
-| **fault event** | not fair: something that may happen, never something that must eventually happen |
+| **fault event** | not fair: something that may happen, never something that must eventually happen. The keyword makes it so, not the actor's name (`Weather`) |
+
+The move comes after the phrase and its inputs. In parentheses it reads as a
+note on the sentence, which ends with its verb in Japanese:
+`出来事 pack = 店舗 が 注文 を 梱包する (受注 -> 梱包済み)`. The bare form
+is equally accepted: `event pack = Shop packs Order Placed -> Packed` is the
+same event, and both lower to the same model. `fmt` keeps the form you wrote.
+The parentheses hold one move only: `(in Placed)` and `(Placed)` are refused
+(`kind: "parse"`), and full-width `（ ）` is refused as `fullwidth_symbol`.
 
 The verb may be left out (`Shop Order`); it then is the event name. Every
 lifecycle edge should have an event (`lifecycle_edge_without_event` warns
@@ -134,6 +143,17 @@ otherwise). Events other than `fault event` are fair. Scenario steps are
 matched to events by actor and verb: `unknown_verb`, `unknown_event_phrase`
 (with the actor's verbs) and `ambiguous_step` say why a step matched none or
 several.
+
+Three of these readings come from a name match, a word count or line order,
+so an edit can change them silently: renaming `with qty` (or the field) drops
+the store, reordering `lifecycle` lines changes the initial stage and the stage
+order, and `Shop Order` makes the event name the verb. `fslc explain` shows
+how each was read (`readings` in JSON; `Lifecycles:`, `verb:`, `fair:`,
+`input …:` and `guards:` lines with `--readable`), and `fslc lint` notes each
+as info in `files[].notes[]`: `input_stored_by_name`, `verb_from_event_name`,
+`initial_stage_from_line_order` (only with more than one lifecycle line). A
+note is not a finding and never changes `lint`'s exit code; keep the form when
+it is what the source means.
 
 ## Rules
 
@@ -168,14 +188,22 @@ in any order:
 | Statement | Lowers to |
 |---|---|
 | **allow** `Actor verb Entity` **only when** `cond` | a guard on the event: it may happen only when `cond` holds |
-| **allow** … **only for** `Concept` | a guard: only for instances of the concept |
-| **never** `Actor verb Entity` **when** `cond` / **for** `Concept` | a guard: not when `cond` holds / not for the concept |
+| **allow** … **only for** `Concept` | a guard: only for instances of the concept; terms join with **and**, and a term may name one stage, `Stage Entity` or `Entity` **in** `Stage` (the same guard) |
+| **never** `Actor verb Entity` **when** `cond` / **for** `Concept` | a guard: not when `cond` holds / not for the concept (terms as after **only for**) |
 | `P` **only after** `Q` | a hidden history field (`order_did_pay`) that `Q`'s events set and `P`'s require |
 | `Name:` `E` **enters** `T` **only from** `S, …` | a transition property `Name` |
 | `Name:` **always** `C1` **is** `C2` | an invariant: every instance of `C1` (a concept, or `Stage Entity`) is in `C2` |
 | `Name:` **always** `E` [**not**] **in** `S, …` **has** `x` | an invariant: in (or outside) those stages the field condition holds; `has role` means the relation is set |
 | **deadline** `age <= bound` | the requirement's deadline, over an `age` of the `time` block below |
 
+- The history field of `only after` is named after `Q`'s events, joined by
+  `_or_` (`order_did_pay`, `order_did_pay_or_ship`). When two prerequisite
+  sets of one entity would get the same name (the events `a` and `b`
+  together, and a single event named `a_or_b`, both give `did_a_or_b`), each
+  gets a numbered suffix: `order_did_a_or_b_1`, `order_did_a_or_b_2`.
+  The number depends on the entity's other history fields and declared
+  fields, not on rule order, so adding a rule or a field elsewhere can
+  renumber it, and the field names in counterexamples change with it.
 - An `allow` / `never` / `only after` statement rejects calls. Give it a
   `forbidden` trace that tries one (`never_rule_without_forbidden` warns when
   no forbidden trace ends in an event the rule guards).
@@ -186,6 +214,13 @@ in any order:
   when the source states it; it is then still checked.
 - Name every `always` / `enters` statement: the name is the property's name in
   results and diagnostics (otherwise a generated one).
+- After `for`, `Order in Placed` and `Placed Order` are one term (`対象 Order 段階
+  Placed` in Japanese keywords); `fmt` keeps the order written. Either names one
+  stage: for several, declare a concept (`concept Open = Order in Placed, Packed`).
+  The `in` stands on the entity's line, as the entity of `Placed Order` stands on
+  the stage's: a statement starts on a new line (the stage after `in` may
+  wrap, as a term after `and` may). `always` keeps its forms,
+  `always Placed Order is …` and `always Order in Placed has …`.
 
 ## Decision tables
 
@@ -199,7 +234,7 @@ in any order:
 
 | Form | Meaning |
 |---|---|
-| **decide** `ID "text"` **for** `Stage Entity` `{ rows }` | who may do what to an instance in that stage, case by case |
+| **decide** `ID "text"` **for** `Stage Entity` `{ rows }` | who may do what to an instance in that stage, case by case; **for** `Entity` **in** `Stage` is the same table |
 | `Concept {and Concept} => Actor verb {or verb}` | a row: in this case, this actor may take these events |
 | `Stage Entity => …` | a row by stage |
 | … **covers** `ID "text"` (on the next line) | the requirement this row carries |
@@ -255,35 +290,40 @@ nothing.
 ```fsl check
 
   scenario AC-ORD-001 "A paid single order is delivered" {
-    User places o1 with buyer 0, qty 1
+    User places o1 with buyer u1, qty 1
     User pays o1
     Shop packs o1
     Shop ships o1
     Courier delivers o1
     then o1 is Delivered
   }
+  scenario AC-ORD-002 "A cancelled order keeps its quantity" {
+    User places o1 with buyer u1, qty 1
+    Shop cancels o1
+    then stage(o1) == Cancelled and o1.qty == 1
+  }
   forbidden FB-ORD-001 "An unpaid order is not packed" {
-    User places o1 with buyer 0, qty 1
+    User places o1 with buyer u1, qty 1
     Shop packs o1
     then rejected
   }
   forbidden FB-ORD-002 "A bulk order is not cancelled" {
-    User places o1 with buyer 0, qty 2
+    User places o1 with buyer u1, qty 2
     Shop cancels o1
     then rejected
   }
   forbidden FB-ORD-003 "A damaged order is not delivered" {
-    User places o1 with buyer 0, qty 1
+    User places o1 with buyer u1, qty 1
     User pays o1
     Shop packs o1
     Shop ships o1
-    Fault damages o1
+    Weather damages o1
     Courier delivers o1
     then rejected
   }
   forbidden FB-ORD-004 "No order is placed beyond the stock" {
-    User places o1 with buyer 0, qty 2
-    User places o2 with buyer 1, qty 1
+    User places o1 with buyer u1, qty 2
+    User places o2 with buyer u2, qty 1
     then rejected
   }
 }
@@ -298,8 +338,9 @@ verify {
 |---|---|
 | **scenario** `ID "text"` `{ steps  then check }` | a positive trace: every step must be enabled and the check must hold |
 | **forbidden** `ID "text"` `{ steps  then rejected }` | a negative trace: the steps before the last are enabled, and the last is rejected |
-| `Actor verb instance` [**with** `input value, …`] | a step; `o1`, `o2` are instance names, numbered in order of first use (more than `verify` allows is `scenario_instance_overflow`); a relation's role is an input (`with buyer 0`) |
-| **then** `o1` **is** `Stage` [**and** …] | the check after the last step |
+| `Actor verb instance` [**with** `input value, …`] | a step; `o1`, `o2` are instance names. A relation's role is an input whose value names an instance of the related entity (`with buyer u1`) or gives its number (`with buyer 0`). Names are numbered from 0 per entity in order of first use, a step's instance before its role value (more than `verify` allows is `scenario_instance_overflow`); a name the spec declares as a constant, resource, enum member or stage keeps that meaning, and a name of another entity's instance is refused. Only names are counted: after `with buyer 0`, the first User name is 0 too. `Actor instance verb` is the same step (`User o1 places with buyer u1, qty 1`): of the two words, the verb is the first that is some event's verb |
+| **then** `o1` **is** `Stage` | the check after the last step: the stage of one instance. Nothing may follow it: `then o1 is Delivered and …` is refused (`kind: "parse"`) |
+| **then** `expression` | any other check after the last step, as one expression joined with `and` (`AC-ORD-002`). `o1.qty` is a field of `o1` and `stage(o1)` (or `Order.stage(o1)`) its stage: the lowered state at `o1`'s number (`order_qty[0]`, which may also be written). A name is read only there, not as a bare value (`o1.buyer == some(0)`); a binder, an `is some(o1)` pattern anywhere in the check, or a declared constant, resource, enum member or stage of the same name keeps its meaning |
 | **verify** `{ instances E = N  values T = lo..hi }` | the finite world every command checks in; results hold for these sizes only |
 
 `check` runs every scenario and forbidden trace. Each failure is

@@ -127,7 +127,8 @@ fslc help [COMMAND [SUBCOMMAND]]               # same help as fslc [COMMAND ...]
 fslc check <f> [--edition current|next|4|5]     # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
 fslc lint <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)
-fslc migrate <path>... --edition next [--write] # dry run by default; atomic validated write set
+                                                 # files[].notes[] / note_count (only when there is a note): info notes on fsl 5 implicit readings; never findings, never the exit code
+fslc migrate <path>... [--edition current|next|4|5] [--write] # default edition next; dry run by default; atomic validated write set
                                                  # exit 0 migrated, 1 migrate_manual_required (no inputs written), 2 refused/I/O/check failure (same check-failure contract as lint)
                                                  # --write refuses a read-only, symlinked or non-regular changed input before writing any input (kind io, exit 2)
                                                  # written (top level and per files[] entry) = a file was replaced; --write with changed: 0 reports written: false
@@ -153,7 +154,7 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                # `refinement_failed` or `impl_violated` becomes the top-level result with exit 1.
                # --property/--exclude-property/--from-state skip it: implements.result
                # "not_evaluated" + reason, result/exit unchanged (never a pass).
-fslc sweep <f> --instances NAME=LO..HI --depth LO..HI [--property Name]
+fslc sweep <f> [--instances NAME=LO..HI]... [--depth LO..HI] [--property Name]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
 fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
 fslc mutate <f> [--depth K=8] [--by-requirement] [--oracle-attribution] [--max-mutants N=200]
@@ -208,7 +209,7 @@ fslc approval diff <f> --record <record.json> [--depth K]
 fslc domain check <f> [--depth K] [--engine bmc|induction]  # Functional DDD / effect findings
 fslc domain analyze <f>                                      # aggregate/effect ownership summary
 fslc domain expand <f> [-o out.fsl]                          # generated kernel FSL
-fslc domain generate <f> --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
+fslc domain generate <f> [--target typescript|python|kotlin|swift|rust] [-o dir] # Functional DDD scaffold
 fslc domain testgen <f> [--target vitest] [--allow-unwired] [-o out]  # adapter/conformance scaffold
 fslc domain replay <f> --logs events.jsonl                  # runtime command/event/effect evidence
 fslc db check <f> [--depth K] [--engine bmc|induction]  # dbsystem compatibility findings
@@ -928,7 +929,12 @@ substituted default — only an *absent* `depth`/`refine_depth` key defaults.
   `--readable` emits a text view that surfaces verification bounds, fairness,
   KPI projections, branch lowering (one `branch:` line per split action),
   and a synthesized `Implements:` refinement mapping when the source
-  declares one. Invariants for which none is found normally carry the JSON
+  declares one. For a requirements document headed `fsl 5`, JSON adds
+  `readings` (`entities[]`: initial stage, stage order, lifecycle line count;
+  `events[]`: verb and `verb_omitted`, `fair`, where each input is `stored`
+  and `by` what, and each guard as `conjunctive`) and `--readable` a
+  `Lifecycles:` section and `verb:` / `fair:` / `input …:` / `guards:` lines
+  under each event's action (LANGUAGE.md §13.2). Invariants for which none is found normally carry the JSON
   `note` `no counterfactual within depth K`. If a non-user check preempts the
   target search and bounded concrete fallback finds no witness, the note instead
   says `preempted by KIND NAME at step k`. If concrete startup fails, it also

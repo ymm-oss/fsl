@@ -121,7 +121,8 @@ a separate activity (`fsl-requirements-document`).
    is missing). Name every `always` / `enters` statement (`AmountPositive:
    always …`): the name is the property's name in results and diagnostics.
 4. Where the source decides "who handles it / which way" by case, write a
-   `decide ID "text" for Stage Entity { Case => Actor verb … }` table. `check`
+   `decide ID "text" for Stage Entity { Case => Actor verb … }` table (or
+   `for Entity in Stage`, the same table). `check`
    proves over the field domains that the rows cover every case
    (`decide_not_exhaustive`, with the uncovered values) and never overlap
    (`decide_overlap`, with the shared values). Close a real gap with a row or
@@ -169,11 +170,11 @@ requirements ReturnRequirements {
   concept SmallReturn = Return where amount <= AUTO_LIMIT
   concept LargeReturn = Return where amount > AUTO_LIMIT
 
-  event request      = Customer requests Return with amount   Draft -> Requested
-  event auto_approve = System approves Return                Requested -> Approved
-  event mgr_approve  = Manager approves Return               Requested -> Approved
-  event reject       = Manager rejects Return                Requested -> Rejected
-  event refund       = Finance refunds Return                Approved -> Refunded
+  event request      = Customer requests Return with amount (Draft -> Requested)
+  event auto_approve = System approves Return (Requested -> Approved)
+  event mgr_approve  = Manager approves Return (Requested -> Approved)
+  event reject       = Manager rejects Return (Requested -> Rejected)
+  event refund       = Finance refunds Return (Approved -> Refunded)
 
   rule REQ-RET-001 "A return is requested with a positive amount" {
     allow Customer requests Return only when input amount > 0

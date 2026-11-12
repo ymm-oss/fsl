@@ -27,6 +27,9 @@ pub struct SourceSpellings {
     /// row, a rule statement, a concept): a line a statement continues on is
     /// indented one level deeper than its first line.
     pub statements: Vec<Span>,
+    /// The `(` of each event move written in parentheses, `(S -> T)`: the
+    /// formatter keeps one space before it.
+    pub parenthesized_moves: Vec<Span>,
     /// Token ranges of the expressions read in the next edition's members
     /// (not in the published items, whose words stay English): their `and`
     /// / `or` are keywords of [`crate::keywords::KeywordContext::Expression`].

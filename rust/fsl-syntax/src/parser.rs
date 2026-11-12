@@ -186,15 +186,27 @@ pub(crate) struct IdSpelling {
     pub(crate) hyphens: Vec<usize>,
 }
 
-/// Parse a shared-grammar document and return, beside it, every identifier
-/// read by [`Parser::req_id`] in source order.
+/// What a frontend read beside the document, for the formatter.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct FormatReading {
+    /// Every identifier [`Parser::req_id`] read, in source order.
+    pub(crate) ids: Vec<IdSpelling>,
+    /// The extent of each declaration a line may continue (a business
+    /// declaration other than `process`, a `def`, a `map`), in source order:
+    /// in the next edition the formatter indents a line it continues on one
+    /// level deeper than its first line.
+    pub(crate) statements: Vec<Span>,
+}
+
+/// Parse a shared-grammar document and return, beside it, what the parser
+/// read for the formatter ([`FormatReading`]).
 pub(crate) fn parse_shared_tokens(
     source: &str,
     tokens: Vec<Token>,
     cursor: usize,
     edition: Edition,
     diagnose_legacy_operators: bool,
-) -> Result<(SurfaceDocument, Vec<IdSpelling>), ParseError> {
+) -> Result<(SurfaceDocument, FormatReading), ParseError> {
     let mut parser = Parser::new(source, tokens, cursor);
     parser.edition = edition;
     parser.diagnose_legacy_operators = diagnose_legacy_operators;
@@ -218,7 +230,13 @@ pub(crate) fn parse_shared_tokens(
     if !matches!(parser.peek().kind, TokenKind::Eof) {
         return Err(parser.error("unexpected token after surface document"));
     }
-    Ok((document, parser.ids))
+    Ok((
+        document,
+        FormatReading {
+            ids: parser.ids,
+            statements: parser.statements,
+        },
+    ))
 }
 
 struct Parser<'a> {
@@ -231,6 +249,8 @@ struct Parser<'a> {
     diagnose_legacy_operators: bool,
     /// Every identifier [`Self::req_id`] has read, in source order.
     ids: Vec<IdSpelling>,
+    /// [`FormatReading::statements`].
+    statements: Vec<Span>,
     /// Whether keywords are read through the keyword table, in English or in
     /// Japanese ([`crate::keywords`]): only in the body of a next-edition
     /// requirements document. Otherwise only the English spelling is read.
@@ -254,6 +274,7 @@ impl<'a> Parser<'a> {
             edition: Edition::Fsl4,
             diagnose_legacy_operators: false,
             ids: Vec::new(),
+            statements: Vec::new(),
             keywords: false,
             spellings: crate::SourceSpellings::default(),
             published_item: false,
@@ -361,7 +382,12 @@ impl<'a> Parser<'a> {
         let mut items = Vec::new();
         while !self.eat_symbol("}") {
             self.take_leading_annotations()?;
+            let start = self.peek().span;
+            let block = self.peek_ident("process");
             let item = self.business_item()?;
+            if !block {
+                self.statements.push(join_span(start, self.last_span()));
+            }
             self.expect_no_pending_annotations()?;
             items.push(item);
         }
@@ -649,6 +675,7 @@ impl<'a> Parser<'a> {
             spellings.phrases.extend(parsed.phrases);
             spellings.checks = parsed.checks;
             spellings.statements = parsed.statements;
+            spellings.parenthesized_moves = parsed.parenthesized_moves;
             spellings.expressions = parsed.expressions;
             spellings
                 .keywords
@@ -1559,10 +1586,12 @@ impl<'a> Parser<'a> {
                 None
             };
             self.expect_symbol("=")?;
+            let expr = Box::new(self.expression(0)?);
+            self.statements.push(join_span(span, self.last_span()));
             return Ok(RefinementItem::Map {
                 name,
                 binder,
-                expr: Box::new(self.expression(0)?),
+                expr,
                 span,
             });
         }
@@ -1768,10 +1797,12 @@ impl<'a> Parser<'a> {
             }
         }
         self.expect_symbol("=")?;
+        let value = Box::new(self.expression(0)?);
+        self.statements.push(join_span(span, self.last_span()));
         Ok(SpecItem::Def {
             name,
             params,
-            value: Box::new(self.expression(0)?),
+            value,
             span,
         })
     }

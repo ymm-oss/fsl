@@ -384,7 +384,8 @@ fn aliases_resolve_inside_entity_event_and_scenario() {
 
 /// `explain --names canonical` of a glossary document is `explain` of its
 /// canonical twin, apart from the requirement wording, source positions and
-/// origins (the two files differ in layout) and timings.
+/// origins (the two files differ in layout: the `line` of each `readings`
+/// guard origin too) and timings.
 #[test]
 fn explain_names_canonical_is_the_canonical_explanation() {
     fn comparable(mut value: Value) -> Value {
@@ -396,6 +397,11 @@ fn explain_names_canonical_is_the_canonical_explanation() {
                         !PROSE_KEYS.contains(&key.as_str())
                             && !["loc", "origin", "cost"].contains(&key.as_str())
                     });
+                    if let Some(Value::Array(origins)) = object.get_mut("origins") {
+                        for origin in origins.iter_mut().filter_map(Value::as_object_mut) {
+                            assert!(origin.remove("line").is_some(), "{origin:?}");
+                        }
+                    }
                     object.values_mut().for_each(strip);
                 }
                 _ => {}
@@ -426,12 +432,15 @@ fn explain_names_canonical_is_the_canonical_explanation() {
         if source.twin_next {
             assert_eq!(twin["edition"], "next", "{}", source.context());
             assert_eq!(twin["fsl_edition"], 5, "{}", source.context());
+            assert!(twin.get("readings").is_some(), "{}", source.context());
         } else {
             assert!(twin.get("edition").is_none(), "{}", source.context());
             assert!(twin.get("fsl_edition").is_none(), "{}", source.context());
+            assert!(twin.get("readings").is_none(), "{}", source.context());
             let primary = canonical.as_object_mut().expect("primary explanation");
             primary.remove("edition");
             primary.remove("fsl_edition");
+            assert!(primary.remove("readings").is_some(), "{}", source.context());
         }
         assert_eq!(
             comparable(canonical),

@@ -1,0 +1,34 @@
+fsl 5
+// expected-command: refine leave_design.en.fsl leave_request.en.fsl leave_design_refines_request.fsl --depth 8
+// expected-result: refines
+// The design refines the requirements layer. The mapping names the lowered
+// requirements state (leave_stage, leave_days, leave_substitute) and actions,
+// which are the same for leave_request.en.fsl and leave_request.ja.fsl.
+// Both queues are Submitted. The design's enum members are named apart from the
+// requirements stages (Drafting, not Draft), so no bare member is ambiguous here.
+// The requirements policies POL-LEAVE-001/002 are not pulled through this
+// mapping: `preserve progress { respond <name> by … }` reads an identifier, and
+// a policy ID is not one. The design states the same progress itself
+// (QueuedIsDecided, GrantedEnds) and verifies it.
+refinement LeaveDesignRefinesRequests {
+  impl LeaveDesign
+  abs LeaveRequests
+
+  map leave_stage[l: Leave] =
+    if tickets[l].phase == Drafting then Draft
+    else if tickets[l].phase == AutoQueue or tickets[l].phase == ManagerQueue then Submitted
+    else if tickets[l].phase == Granted then Approved
+    else if tickets[l].phase == OnLeave then Taken
+    else if tickets[l].phase == Refused then Rejected
+    else Cancelled
+  map leave_days[l: Leave] = tickets[l].days
+  map leave_substitute[l: Leave] = tickets[l].cover
+
+  action file(l, d) -> submit(l, d)
+  action auto_grant(l) -> auto_approve(l)
+  action manager_grant(l) -> approve(l)
+  action manager_refuse(l) -> reject(l)
+  action assign_cover(l) -> arrange(l)
+  action start_leave(l) -> take(l)
+  action withdraw(l) -> cancel(l)
+}

@@ -592,6 +592,45 @@ const CASES: &[Case] = &[
                       requirements' externally visible state without dropping progress) and \
                       README.md:84-87",
     },
+    Case {
+        implementation: "examples/fsl5/leave_flow_tobe.en.fsl",
+        abstraction: "examples/fsl5/leave_flow_asis.en.fsl",
+        mapping: "examples/fsl5/leave_flow_tobe_refines_asis.fsl",
+        declaration: Some(Declaration {
+            path: "examples/fsl5/leave_flow_tobe_refines_asis.fsl",
+            anchor: "expected-result",
+        }),
+        depth: 8,
+        expected_result: "refines",
+        expected_kind: None,
+        declared_by: "examples/fsl5/leave_flow_tobe_refines_asis.fsl:2-3",
+    },
+    Case {
+        implementation: "examples/fsl5/leave_request.en.fsl",
+        abstraction: "examples/fsl5/leave_flow_tobe.en.fsl",
+        mapping: "examples/fsl5/leave_request_refines_tobe.fsl",
+        declaration: Some(Declaration {
+            path: "examples/fsl5/leave_request_refines_tobe.fsl",
+            anchor: "expected-result",
+        }),
+        depth: 8,
+        expected_result: "refines",
+        expected_kind: None,
+        declared_by: "examples/fsl5/leave_request_refines_tobe.fsl:2-3",
+    },
+    Case {
+        implementation: "examples/fsl5/leave_design.en.fsl",
+        abstraction: "examples/fsl5/leave_request.en.fsl",
+        mapping: "examples/fsl5/leave_design_refines_request.fsl",
+        declaration: Some(Declaration {
+            path: "examples/fsl5/leave_design_refines_request.fsl",
+            anchor: "expected-result",
+        }),
+        depth: 8,
+        expected_result: "refines",
+        expected_kind: None,
+        declared_by: "examples/fsl5/leave_design_refines_request.fsl:2-3",
+    },
 ];
 
 /// The measured fact that keeps an exclusion honest. Re-checked by

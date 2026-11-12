@@ -2405,8 +2405,8 @@ additional removals in #1463.</p></div></details>
 </ul></div></details>
 <details id="7-the-verifier-fslc"><summary>7. The verifier `fslc`<span class="tree-blurb"> — The fslc CLI surface, result kinds, exit codes, coverage diagnosis.</span></summary><div class="tree-body"><pre><code>fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check     &lt;file.fsl|file.md&gt;                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
-fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
-fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
+fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics, fsl 5 info notes (§13.2); never mutates
+fslc migrate   &lt;path&gt;... [--edition current|next|4|5] [--write] # dry-run edits (default edition next); --write applies validated set
 fslc fmt       &lt;file.fsl|-&gt; [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
@@ -2429,9 +2429,9 @@ fslc verify    &lt;file.fsl|file.md&gt; [--depth K]     # BMC (default K=8, coun
                                                  #   induction still checks every implicit type bound in its base case
                [--exclude-property &lt;Name&gt;]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
-fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|auto] -o reproducer.json
                                                # slice 1: export a safety-invariant counterexample to reproducer.v1
-fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
+fslc sweep     &lt;file.fsl&gt; [--instances E=lo..hi]... [--depth lo..hi] [--property Name]
                                                  # opt-in scope sweep over bounded verification
 fslc scenarios &lt;file.fsl|file.md&gt; [--depth K]     # generate integration-test scaffold JSON
 fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # spec-action trace conformance (§12)
@@ -2477,7 +2477,7 @@ fslc typestate &lt;file.fsl&gt; [--ts]                 # decide applicability of
 fslc domain check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
 fslc domain analyze &lt;file.fsl&gt;                                  # aggregate/effect ownership summary
 fslc domain expand &lt;file.fsl&gt; [-o out.fsl]                      # generated kernel FSL
-fslc domain generate &lt;file.fsl&gt; --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
+fslc domain generate &lt;file.fsl&gt; [--target typescript|python|kotlin|swift|rust] [-o dir] # Functional DDD scaffold
 fslc domain testgen &lt;file.fsl&gt; [--target vitest] [--allow-unwired] [-o out]  # domain adapter/conformance scaffold
 fslc domain replay &lt;file.fsl&gt; --logs events.jsonl              # domain runtime replay evidence
 fslc db check  &lt;file.fsl&gt; [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
@@ -2490,8 +2490,16 @@ fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runti
 <code>non_canonical</code>, <code>ambiguous_intent</code>, and <code>unsupported_in_edition</code>. Migration
 handles legacy domain enums/operators, declaration string metadata, colon
 quantifiers, unambiguous local inline action mappings, and implicit defaults.
-It refuses source/comment movement that cannot be proven safe. <code>&amp;&amp;</code> remains an
-invalid token and is therefore reported with an <code>and</code> suggestion but is never
+For the next edition (the <code>migrate</code> default) it also inserts the <code>fsl 5</code>
+edition header into a headerless document (<code>missing_edition_header</code>; not a
+causal or AI declaration, <code>refinement</code>, or <code>compose</code>, which get no header) and
+converts each <code>process</code> of a headerless <code>requirements</code> document into an entity
+with its lifecycle, one event per transition, and a rule per guarded
+requirement (<code>legacy_process_form</code>). When that document declares no
+<code>terminal</code>, the converted document has the terminal states derived from the
+final lifecycle stages (<code>derived_terminal_added</code>), which can change the
+deadlock verdict. It refuses source/comment movement that cannot be proven
+safe. <code>&amp;&amp;</code> remains an invalid token and is therefore reported with an <code>and</code> suggestion but is never
 machine-applied. See <code>docs/design/DESIGN-migration.md</code> for atomicity and bulk-update
 steps.</p>
 <p>For already-invalid expression <code>||</code> and <code>-&gt;</code> in spec, requirements, compose,
@@ -4632,7 +4640,9 @@ traceable. The following is one complete specification; the later syntax fences
 are fragments to read in the context of their declarations.
 A longer worked example, one leave-request model written once with the English
 spellings and once with the Japanese spellings, is in
-<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a>.</p>
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a>.
+The same directory carries the leave-request business layer (As-Is and To-Be)
+and design layer, connected to it by <code>fslc refine</code>.</p>
 <pre><code class="language-fsl">fsl 5
 requirements Support {
   actor Agent
@@ -4645,11 +4655,11 @@ requirements Support {
   Ticket belongs to Agent as assignee via take
   resource desk_open: Bool = true
 
-  event take = Agent takes Ticket Open -&gt; Assigned
-  event close = Agent closes Ticket Assigned -&gt; Closed
-  event escalate = Agent escalates Ticket Assigned -&gt; Escalated
+  event take = Agent takes Ticket (Open -&gt; Assigned)
+  event close = Agent closes Ticket (Assigned -&gt; Closed)
+  event escalate = Agent escalates Ticket (Assigned -&gt; Escalated)
     set desk_open = false
-  event withdraw = Agent withdraws Ticket Open -&gt; Withdrawn
+  event withdraw = Agent withdraws Ticket (Open -&gt; Withdrawn)
 
   rule REQ-DESK-001 &quot;A ticket is taken only while the desk is open&quot; {
     allow Agent takes Ticket only when desk_open
@@ -4666,7 +4676,7 @@ requirements Support {
   measure closed_tickets = count Ticket in Closed
 
   scenario AC-TICKET-001 &quot;An agent takes and closes a ticket&quot; {
-    Agent takes t1 with assignee 1
+    Agent takes t1 with assignee a1
     Agent closes t1
     then t1 is Closed
   }
@@ -4708,10 +4718,15 @@ A field is state, so it cannot be a quantifier range bound
 (<code>exists x in qty..qty { ... }</code> is <code>binder bound is not a static integer</code>). Lowered fields use
 canonical <code>entity_field</code> names (for example <code>order_qty</code> and <code>order_stage</code>);
 design and <code>implements</code> mappings refer to those names.</p>
-<p><strong>Events.</strong> <code>event place = User places Order with qty Empty -&gt; Placed</code> names the
+<p><strong>Events.</strong> <code>event place = User places Order with qty (Empty -&gt; Placed)</code> names the
 canonical action <code>place</code> and its actor/verb/entity phrase. A move must be a
 lifecycle edge (<code>event_not_on_lifecycle</code>); <code>in Placed</code> instead describes a
-same-stage event. <code>with qty</code> stores an input in that field;
+same-stage event. The move follows the phrase and its inputs, in parentheses or
+bare: <code>event place = User places Order with qty Empty -&gt; Placed</code> is equally
+accepted and lowers to the same model, and <code>fmt</code> keeps the form written. The
+parentheses hold one move: a stay takes none (<code>(in Placed)</code> and <code>(Placed)</code> are
+parse errors), and full-width <code>（ ）</code> is <code>fullwidth_symbol</code>.
+<code>with qty</code> stores an input in that field;
 <code>with n: Qty</code> declares an explicitly typed input. If <code>n</code> matches no entity
 field, it adds no automatic field assignment; if it matches a field, that field
 is assigned even when the input's type is explicit.
@@ -4723,6 +4738,33 @@ An omitted verb defaults to the event name. <code>covers REQ-ID "source text"</c
 records traceability. Declare every actor, including those used in scenarios
 (<code>actor_not_declared</code>). Ordinary events are fair; <code>fault event</code> is not fair.
 A declared edge with no event warns <code>lifecycle_edge_without_event</code>.</p>
+<p><strong>Seeing the implicit readings (#1817).</strong> Several of these forms take their
+meaning from a name match, word count or line order, so an edit can change
+the meaning without a message: renaming <code>with qty</code> or the field <code>qty</code> drops the
+store; reordering lifecycle lines changes the initial stage and the stage
+order; <code>Shop Order</code> makes the event name the verb. <code>fslc explain</code> shows each
+reading. Its JSON gains <code>readings</code> (only for a requirements document headed
+<code>fsl 5</code>): <code>entities[]</code> with <code>entity</code>, <code>initial</code>, <code>stages</code> (in enum order) and
+<code>lifecycle_lines</code>, and <code>events[]</code> with <code>event</code>, <code>entity</code>, <code>verb</code>,
+<code>verb_omitted</code>, <code>fair</code>, <code>inputs[]</code> (<code>name</code>, <code>written</code>, and <code>stored[]</code> of
+<code>{field, by}</code>, <code>by</code> one of <code>same_name</code>, <code>set</code> for <code>set f = input name</code>, and
+<code>relation</code> for the actor's instance a relation's event records, which the
+source does not write; an input used only inside a larger expression is
+stored nowhere, <code>stored: []</code>), and <code>guards[]</code> (each <code>requires</code> of the event's
+action: <code>index</code>, <code>expr</code>, <code>conjunctive: true</code>, and the <code>origins</code> that
+<code>explain --lowering</code> lists). Every guard of an event must hold: an
+<code>allow … only when</code> adds one; it never makes an event possible that another
+guard refuses. <code>--readable</code> shows the same as a <code>Lifecycles:</code> section and, under
+each event's action, <code>verb:</code> (when left out), <code>fair:</code>, <code>input …:</code> and a
+<code>guards:</code> line. Nothing else in <code>explain</code>'s output changes. <code>fslc lint</code> reports
+three info notes in <code>files[].notes[]</code> (counted in <code>note_count</code>), with the
+fields of a finding, taxonomy <code>ambiguous_intent</code> and <code>severity: "info"</code>:
+<code>input_stored_by_name</code> (at the input), <code>verb_from_event_name</code> (at the
+phrase) and <code>initial_stage_from_line_order</code> (at the initial stage, for an
+entity with more than one lifecycle line). Both keys appear only when there
+is a note, so <code>lint</code> of any other document prints what it printed before. A
+note is not a finding: it changes neither <code>findings</code>, <code>finding_count</code> nor the
+exit code.</p>
 <p><strong>Rules.</strong> A <code>rule ID "source text" { statement+ }</code> conjoins all its statements;
 separate rules guarding the same event also conjoin. The complete statement set is:</p>
 <table>
@@ -4739,15 +4781,15 @@ separate rules guarding the same event also conjoin. The complete statement set 
 </tr>
 <tr>
 <td><code>allow Actor verb Entity only for Concept</code></td>
-<td>The event requires membership in the concept.</td>
+<td>The event requires membership in the concept. <code>and</code> joins terms, and a term may name one stage instead, in either order: <code>Placed Order</code> or <code>Order in Placed</code> is the same guard.</td>
 </tr>
 <tr>
 <td><code>never Actor verb Entity when condition</code> / <code>for Concept</code></td>
-<td>The event requires the condition to be false / the entity to be outside the concept.</td>
+<td>The event requires the condition to be false / the entity to be outside the concept (terms as after <code>only for</code>).</td>
 </tr>
 <tr>
 <td><code>Actor verb Entity only after Actor other Entity</code></td>
-<td>Unless the lifecycle already guarantees the order, a hidden per-instance history field is set by the prerequisite event and required by the later event.</td>
+<td>Unless the lifecycle already guarantees the order, a hidden per-instance history field is set by the prerequisite event and required by the later event. The field is named after the prerequisite events (<code>order_did_pay</code>); when two prerequisite sets of one entity would get the same name, each gets a numbered suffix (<code>order_did_a_or_b_1</code>, <code>order_did_a_or_b_2</code>). The number depends on the entity's other history fields and declared fields, not on rule order, so an edit elsewhere can change the field names shown in counterexamples.</td>
 </tr>
 <tr>
 <td><code>Name: Entity enters Target only from Source, Other</code></td>
@@ -4783,6 +4825,16 @@ case of a submitted claim (the entities, events and concepts must be declared):<
     covers REQ-3 &quot;A large claim is approved or rejected by a manager&quot;
 } assuming amount &gt; 0
 </code></pre>
+<p>The header may name its stage either way: <code>for Claim in Submitted</code> (Japanese
+<code>対象 申請 段階 提出済み</code>) is the same table as <code>for Submitted Claim</code>, lowered
+identically, and <code>fmt</code> keeps the order written. After any <code>for</code> — the table's,
+<code>only for</code>'s and <code>never … for</code>'s — <code>Entity in Stage</code> names one stage, as
+<code>Stage Entity</code> does (<code>for Order in Placed, Packed</code> is refused at the comma); in a
+rule, its <code>in</code> stands on the entity's line, as the entity of <code>Stage Entity</code> stands
+on the stage's, because a statement starts on a new line (the stage that <code>in</code>
+requires may follow on the next line, as the term that <code>and</code> requires may).
+<code>always</code> keeps its two forms: <code>always Stage Entity is …</code> and
+<code>always Entity in S… has …</code>.</p>
 <p>A row condition is a concept, a conjunction of concepts (<code>and</code>), or <code>Stage Entity</code>.
 <code>otherwise =&gt; Actor verb</code> covers the complement of the other rows. Each event
 leaving the table's stage must be listed (<code>decide_event_not_listed</code>). The rows
@@ -4799,9 +4851,14 @@ via take</code> adds an initially unset optional role to each ticket. The relate
 must be declared with <code>entity</code>, and the <code>via</code> event's actor must be that entity,
 so <code>Agent</code> is declared as both <code>actor</code> and <code>entity</code>. The event records its
 counterpart as its first input, and every scenario step of that event must supply
-it: <code>with assignee 1</code> selects Agent instance 1. The value is an instance number;
-an instance label (<code>with assignee a1</code>) is refused. <code>resource stock: Qty = 2</code> declares shared
-state outside any entity; events update it with <code>set</code>, and guards may read it.
+it: <code>with assignee a1</code> names an Agent instance, numbered like the trace's other
+instance labels (see "Scenarios and stopping"), and <code>with assignee 1</code> still selects
+Agent instance 1 by number. A name the document declares as a constant, resource,
+enum member, or stage keeps that meaning there (<code>with assignee LEAD</code> is the constant
+<code>LEAD</code>); any other name is an instance label. An event makes at most one
+relation: a second relation to the same entity via the same event is refused at
+that relation (<code>event_already_makes_relation</code>), so give it its own event.
+<code>resource stock: Qty = 2</code> declares shared state outside any entity; events update it with <code>set</code>, and guards may read it.
 <code>measure m = count Concept</code> or <code>count Entity in S, T</code> is a projection, not a new
 counter, history field, or automatic invariant. <code>kpi m = count Entity in S</code> is the
 same kind of projection, but it takes exactly one entity and one stage:
@@ -4810,15 +4867,29 @@ same kind of projection, but it takes exactly one entity and one stage:
 Goals (<code>some E can reach S</code>) are reachability properties; policies
 (<code>every E in S must eventually be T or U</code>) are progress properties over fair events.
 Their IDs and quoted text remain part of traceability.</p>
-<p><strong>Scenarios and stopping.</strong> An actor/verb phrase resolves to an event; unknown or
+<p><strong>Scenarios and stopping.</strong> A step is <code>Actor verb instance [with input value, …]</code>
+(<code>Agent takes t1 with assignee a1</code>). <code>Actor instance verb …</code> is the same step
+(<code>Agent t1 takes with assignee a1</code>): of the two words, the verb is the first that is
+some event's verb. An actor/verb phrase resolves to an event; unknown or
 ambiguous matches report <code>unknown_verb</code>, <code>unknown_event_phrase</code>, or
-<code>ambiguous_step</code>. Instance labels (<code>t1</code>, <code>t2</code>) are local to a trace and allocated
-in order of first use; exceeding <code>verify</code> counts is <code>scenario_instance_overflow</code>.
-<code>then t1 is Closed</code> checks one instance's final stage. To check more, write an
-expression over the lowered state, indexed by instance number (the first label used
-for an entity is 0): <code>then ticket_stage[0] == Closed and ticket_stage[1] == Open</code>.
-Labels cannot appear in that expression, and <code>then t1 is Closed and t2 is Open</code> is
-refused. A scenario must execute
+<code>ambiguous_step</code>. Instance labels (<code>t1</code>, <code>t2</code>, and <code>a1</code> as a relation role's
+value) are local to a trace and numbered from 0 per entity in order of first use,
+a step's instance before its role value; exceeding <code>verify</code> counts is
+<code>scenario_instance_overflow</code>. A label names an instance of one entity: a role value
+naming an instance of another entity is refused. Only labels are counted, so a number
+written as a role value is that instance whatever the labels: after <code>with assignee 0</code>,
+the first Agent label is instance 0 too.
+<code>then t1 is Closed</code> checks one instance's final stage. To check more, write one
+expression: in it, <code>t1.field</code> is the field of instance <code>t1</code> and <code>stage(t1)</code> (or
+<code>Ticket.stage(t1)</code>) its stage, read from the lowered state at the instance's number
+(<code>t1.assignee</code> is <code>ticket_assignee[0]</code>):
+<code>then stage(t1) == Closed and t1.assignee == some(0)</code>. The lowered spelling
+(<code>ticket_stage[0] == Closed</code>) is still accepted. A label is read only in those two
+positions, not as a bare value (compare a role with a number, as above); a quantifier
+or aggregate binder of the same name hides it in its scope, an <code>is some(t1)</code> pattern
+anywhere in the expression hides it in the whole expression, and a constant, resource,
+enum member, or stage of the same name keeps its meaning.
+<code>then t1 is Closed and t2 is Open</code> is refused. A scenario must execute
 every step and satisfy its final check (<code>kind: "acceptance"</code>, <code>failed_step</code> for a
 failed step). A forbidden trace must execute its prefix and reject its last
 step: an accepted last step is <code>kind: "forbidden"</code>; a rejected prefix is
@@ -4967,13 +5038,13 @@ keywords can mix; the header, <code>implements … from</code> and mappings, ker
 </tr>
 <tr>
 <td>Allow rule / 許可規則</td>
-<td><code>allow</code>; <code>only when</code>; <code>only for</code></td>
-<td><code>許可</code>; <code>条件</code>; <code>対象</code></td>
+<td><code>allow</code>; <code>only when</code>; <code>only for</code>; <code>in</code></td>
+<td><code>許可</code>; <code>条件</code>; <code>対象</code>; <code>段階</code></td>
 </tr>
 <tr>
 <td>Never rule / 禁止規則</td>
-<td><code>never</code>; <code>when</code>; <code>for</code></td>
-<td><code>禁止</code>; <code>条件</code>; <code>対象</code></td>
+<td><code>never</code>; <code>when</code>; <code>for</code>; <code>in</code></td>
+<td><code>禁止</code>; <code>条件</code>; <code>対象</code>; <code>段階</code></td>
 </tr>
 <tr>
 <td>Ordering / 順序</td>
@@ -4997,8 +5068,8 @@ keywords can mix; the header, <code>implements … from</code> and mappings, ker
 </tr>
 <tr>
 <td>Decision table / 決定表</td>
-<td><code>for</code>; <code>otherwise</code>; <code>assuming</code></td>
-<td><code>対象</code>; <code>それ以外</code>; <code>仮定</code></td>
+<td><code>for</code>; <code>in</code>; <code>otherwise</code>; <code>assuming</code></td>
+<td><code>対象</code>; <code>段階</code>; <code>それ以外</code>; <code>仮定</code></td>
 </tr>
 <tr>
 <td>Decision outcome / 決定表の結果</td>
@@ -5044,9 +5115,12 @@ not accepted constructs. Do not use them as glossary aliases.</p>
 instance), <code>で</code> the input, and <code>は</code> the topic. <code>に</code> is recognized as a
 counterpart marker, but no phrase of this edition accepts that role; it is not
 a way to supply a relation input.
-For example, <code>従業員 が 経費申請 を 提出する 申請金額 で</code> is an event phrase;
-<code>従業員 が c1 を 提出する 申請金額 1 で</code> is a scenario step. With particles,
-every phrase word except the verb needs its role marker, and word order can vary.
+For example, <code>従業員 が 経費申請 を 申請金額 で 提出する</code> is an event phrase;
+<code>従業員 が c1 を 申請金額 1 で 提出する</code> is a scenario step. With particles,
+every phrase word except the verb needs its role marker, and word order can vary:
+<code>従業員 が 経費申請 を 提出する 申請金額 で</code> is the same event phrase.
+The event's move follows its phrase, so the sentence still ends with its verb:
+<code>出来事 submit = 従業員 が 経費申請 を 申請金額 で 提出する (下書き -&gt; 提出済み)</code>.
 Partial marking is <code>mixed_particles</code>, a wrong role is <code>particle_role_mismatch</code>,
 and an attached particle (<code>従業員が</code>) is <code>particle_needs_space</code>.
 <code>fmt --lang ja|en</code> selects keyword spellings; <code>--names alias|canonical</code> selects
@@ -5733,18 +5807,21 @@ process/entity declaration or the relation event declaration. Hidden KPI
 projection bindings are not source names and instead freshen on collision.</p>
 <h3 id="133-consulting-layer-business-the-fsl-biz-dialect">13.3 Consulting layer: <code>business</code> (the fsl-biz dialect)</h3>
 <p>Write business processes, policies, and KPIs with zero implementation
-vocabulary (syntax details in <code>DESIGN-dialects.md</code> §3). A process expands into
-enum+Map+transition actions, a policy into invariant / leadsTo, and a kpi into a
-declarative count projection recorded as metadata. A contradiction in the regulations =
-an invariant violation, a dead process step = a coverage diagnosis, an
-unreachable business goal = reachable_failed, and a case left unattended = a
-leadsTo counterexample — all can be detected mechanically.</p>
+vocabulary (syntax details in <code>DESIGN-dialects.md</code> §3). An <code>fsl 5</code> As-Is/To-Be
+pair in English and Japanese texts, refined by the requirements of §13.2, is in
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a>.
+A process expands into enum+Map+transition actions, a policy into invariant /
+leadsTo, and a kpi into a declarative count projection recorded as metadata. A
+contradiction in the regulations = an invariant violation, a dead process step =
+a coverage diagnosis, an unreachable business goal = reachable_failed, and a
+case left unattended = a leadsTo counterexample — all can be detected
+mechanically.</p>
 <p>A business process is a pure stage graph, so a <code>transition</code> accepts only its
 name, source and target stages, actor and <code>covers</code> annotations. Writing <code>with</code>,
 <code>when</code> or <code>set</code> on one is a located error: those clauses carry data, the
 business dialect has nowhere to lower them, and silently dropping them would
 verify a model the author never wrote. Declare the process in a <code>requirements</code>
-spec (§13.4) to give them meaning.</p>
+spec (§13.2) to give them meaning.</p>
 <p>For PM/consulting-facing files, use the readable stage syntax for common
 response policies and goals:</p>
 <pre><code class="language-fsl">business ReturnHandling {
@@ -5778,8 +5855,9 @@ verify {
 }
 </code></pre>
 <p>The explicit forms remain available when the rule is not just stage progression:
-<code>policy ... responds { forall c: Return { stage(c) == Requested ~&gt; ... } }</code> and
-<code>goal ... { exists c: Return { stage(c) == Refunded } }</code>.</p>
+<code>policy ... responds { forall c: Return { stage(c) == Requested ~&gt; ... } }</code>,
+<code>goal ... { exists c: Return { stage(c) == Refunded } }</code>, and
+<code>policy ... invariant { … }</code> (below).</p>
 <p>For a <strong>no-bypass</strong> control — a target stage that must never be reached
 without first passing through a required waypoint — use the precedence form
 (#75; design rationale in <code>DESIGN-precedence-policy.md</code>):</p>
@@ -5804,6 +5882,54 @@ needed — no ghost counterexample-to-induction from the history flag being
 "true but not yet provably so" at an arbitrary induction step.</p>
 <pre><code class="language-json">{&quot;result&quot;: &quot;proved&quot;, &quot;k_used&quot;: {&quot;CTRL-APPROVAL&quot;: 1, &quot;CTRL-APPROVAL_stability&quot;: 1}}
 </code></pre>
+<p><code>policy ID "text" [satisfies CTRL, ...] invariant { expr }</code> states any other
+safety rule over the business state. It compiles to one kernel invariant named
+<code>ID</code>, carrying the policy's id and text as its <code>requirement</code>, and synthesizes
+nothing else. The expression reads the names the business lowering
+synthesizes:</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stage(c)</code></td>
+<td>the stage of <code>c</code>, where <code>c</code> is bound to an entity type (<code>forall c: Return { … }</code>); it reads <code>return_stage[c]</code></td>
+</tr>
+<tr>
+<td><code>return_stage</code></td>
+<td>the stage map <code>Map&lt;Return, ReturnStage&gt;</code> of process <code>Return</code>: the entity name lowercased, then <code>_stage</code></td>
+</tr>
+<tr>
+<td><code>ReturnStage</code>, <code>Requested</code>, …</td>
+<td>the stage enum, <code>&lt;Entity&gt;Stage</code>, and its members</td>
+</tr>
+<tr>
+<td><code>return_stage_via_Approved</code></td>
+<td>the history flag <code>Map&lt;Return, Bool&gt;</code> of a no-bypass policy over the waypoint <code>Approved</code> (<code>return_stage_via_Approved_Rejected</code> for the waypoints <code>Approved or Rejected</code>, in the process's stage order). It exists only while such a policy is declared; otherwise <code>check</code> rejects the name</td>
+</tr>
+</tbody>
+</table>
+<p>The no-bypass policy that synthesizes a flag also adds the invariant
+<code>&lt;PolicyId&gt;_stability</code>, named after the first policy over that waypoint set.
+Every stage of a pure stage graph is reachable, for each case independently,
+so a condition over <code>stage(c)</code> alone either always holds or is violated. The
+form says something when it reads a history flag:</p>
+<pre><code class="language-fsl">policy PAY-1 &quot;refunds only for approved cases&quot;
+  every Return reaching Refunded must have passed through Approved
+policy PAY-3 &quot;an approval is final&quot; invariant {
+  forall c: Return { stage(c) == Requested or stage(c) == Rejected =&gt; not return_stage_via_Approved[c] }
+}
+</code></pre>
+<p>Added to <code>ReturnHandling</code> above, <code>PAY-3</code> verifies and proves by induction (with
+<code>PAY-1</code> and <code>PAY-1_stability</code>). Adding <code>transition revoke Approved -&gt; Rejected
+by Manager</code> makes it <code>violated</code>, with the <code>requirement</code>
+<code>{"id": "PAY-3", "text": "an approval is final"}</code>. The complete example is
+checked as written in <code>DESIGN-dialects.md</code> §3.1, and the fsl-business skill's
+example carries the same rule as <code>POL-RET-003</code>.</p>
 <p>Business has no <code>terminal</code> syntax of its own. Instead, each process's <strong>sink
 stages</strong> (stages with no outgoing <code>transition</code>) are collected automatically:
 if every process has at least one sink, a kernel <code>terminal { }</code> is generated
@@ -6611,7 +6737,9 @@ DESIGN-*.md).</p>
   branch lowering, synthesized refinement mappings, automatic checks, tags) +
   counterfactuals ("without this rule, this procedure could break it") + witness
   narration. Moves human review from reading logical formulas to adjudicating
-  concrete examples. JSON mode remains available without <code>--readable</code>. →
+  concrete examples. JSON mode remains available without <code>--readable</code>. For a
+  requirements document headed <code>fsl 5</code> it also shows the readings the source
+  leaves implicit (<code>readings</code>; §13.2 "Seeing the implicit readings"). →
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
 - <strong><code>fslc analyze</code></strong> — emits structural observation JSON. <code>--projection tsg</code>
   returns the Typed Semantic Graph of requirements, actions, state, properties,

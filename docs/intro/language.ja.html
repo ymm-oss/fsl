@@ -2234,14 +2234,14 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
   (ガードするには <code>requires q.size() &lt; N</code> と書きます)。</li>
 </ul></div></details>
 <details id="7-the-verifier-fslc"><summary>7. 検証器 `fslc`<span class="tree-blurb"> — fslc コマンド一覧、結果種別、終了コード、カバレッジ診断。</span></summary><div class="tree-body"><pre><code>fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
-fslc check     &lt;file.fsl&gt;                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
-fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
-fslc migrate   &lt;path&gt;... --edition next [--write] # dry-run edits; --write applies validated set
+fslc check     &lt;file.fsl|file.md&gt;                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
+fslc lint      &lt;path&gt;... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics, fsl 5 info notes (§13.2); never mutates
+fslc migrate   &lt;path&gt;... [--edition current|next|4|5] [--write] # dry-run edits (default edition next); --write applies validated set
 fslc fmt       &lt;file.fsl|-&gt; [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       &lt;path&gt;... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    &lt;file.fsl&gt; [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance &lt;file.fsl&gt; [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
-fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, counterexample is shortest)
+fslc verify    &lt;file.fsl|file.md&gt; [--depth K]     # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -2259,11 +2259,11 @@ fslc verify    &lt;file.fsl&gt; [--depth K]            # BMC (default K=8, count
                                                  #   induction は全ての暗黙の型境界をベースケースでも検査
                [--exclude-property &lt;Name&gt;]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
-fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+fslc counterexample export &lt;file.fsl&gt; [--depth K] [--engine bmc|explicit|auto] -o reproducer.json
                                                # slice 1: safety-invariant counterexample を reproducer.v1 へ export
-fslc sweep     &lt;file.fsl&gt; --instances E=lo..hi --depth lo..hi [--property Name]
+fslc sweep     &lt;file.fsl&gt; [--instances E=lo..hi]... [--depth lo..hi] [--property Name]
                                                  # opt-in scope sweep over bounded verification
-fslc scenarios &lt;file.fsl&gt; [--depth K]            # generate integration-test scaffold JSON
+fslc scenarios &lt;file.fsl|file.md&gt; [--depth K]     # generate integration-test scaffold JSON
 fslc replay    &lt;file.fsl&gt; --trace &lt;events.json&gt;  # spec-action trace conformance (§12)
 fslc replay    &lt;file.fsl&gt; --from-log &lt;events.jsonl&gt; --mapping &lt;mapping.fsl&gt;
                                                  # production log mapping + conformance (§12)
@@ -2307,7 +2307,7 @@ fslc typestate &lt;file.fsl&gt; [--ts]                 # decide applicability of
 fslc domain check &lt;file.fsl&gt; [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
 fslc domain analyze &lt;file.fsl&gt;                                  # aggregate/effect ownership summary
 fslc domain expand &lt;file.fsl&gt; [-o out.fsl]                      # generated kernel FSL
-fslc domain generate &lt;file.fsl&gt; --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
+fslc domain generate &lt;file.fsl&gt; [--target typescript|python|kotlin|swift|rust] [-o dir] # Functional DDD scaffold
 fslc domain testgen &lt;file.fsl&gt; [--target vitest] [--allow-unwired] [-o out]  # domain adapter/conformance scaffold
 fslc domain replay &lt;file.fsl&gt; --logs events.jsonl              # domain runtime replay evidence
 fslc db check  &lt;file.fsl&gt; [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
@@ -2320,7 +2320,14 @@ fslc ai replay &lt;file.fsl&gt; --logs events.jsonl                   # AI runti
 <code>non_canonical</code>、<code>ambiguous_intent</code>、<code>unsupported_in_edition</code> を使います。
 マイグレーションは、レガシーの domain enum/演算子、宣言の文字列メタデータ、コロン
 量化子、曖昧さのないローカルなインライン action マッピング、暗黙のデフォルトを
-扱います。安全と証明できないソース/コメントの移動は拒否します。<code>&amp;&amp;</code> は引き続き
+扱います。次のエディション(<code>migrate</code> の既定)では、ヘッダーのない文書に <code>fsl 5</code>
+エディションヘッダーを挿入し(<code>missing_edition_header</code>。causal と AI の宣言、
+<code>refinement</code>、<code>compose</code> には挿入しません)、ヘッダーのない <code>requirements</code> 文書の
+各 <code>process</code> を、ライフサイクルを持つ entity、transition ごとの event、ガード付きの
+要件ごとの rule に変換します(<code>legacy_process_form</code>)。その文書が <code>terminal</code> を宣言
+していない場合、変換後の文書は最終のライフサイクル段階から導出される終端状態を持ち
+(<code>derived_terminal_added</code>)、deadlock の判定が変わることがあります。安全と証明
+できないソース/コメントの移動は拒否します。<code>&amp;&amp;</code> は引き続き
 不正なトークンであり、そのため <code>and</code> の提案つきで報告されますが、機械適用される
 ことはありません。原子性と一括更新の手順は <code>docs/design/DESIGN-migration.md</code> を参照。</p>
 <p>spec、requirements、compose、business policy、refinement の map の式で既に不正な
@@ -4317,7 +4324,9 @@ CTI を閉じるために存在する、あるいは実装のガードが抽象�
 検証対象と要件を結び付けます。次は一つの完全な仕様です。この後の構文フェンスは、
 必要な宣言があることを前提とした断片です。
 休暇申請の一つのモデルを英語の綴りと日本語の綴りで一度ずつ書いた、より長い例が
-<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a> にあります。</p>
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a> にあります。
+同じディレクトリに、休暇申請の業務層(As-Is と To-Be)と設計層もあり、
+<code>fslc refine</code> でこの要件とつながっています。</p>
 <pre><code class="language-fsl">fsl 5
 requirements Support {
   actor Agent
@@ -4330,11 +4339,11 @@ requirements Support {
   Ticket belongs to Agent as assignee via take
   resource desk_open: Bool = true
 
-  event take = Agent takes Ticket Open -&gt; Assigned
-  event close = Agent closes Ticket Assigned -&gt; Closed
-  event escalate = Agent escalates Ticket Assigned -&gt; Escalated
+  event take = Agent takes Ticket (Open -&gt; Assigned)
+  event close = Agent closes Ticket (Assigned -&gt; Closed)
+  event escalate = Agent escalates Ticket (Assigned -&gt; Escalated)
     set desk_open = false
-  event withdraw = Agent withdraws Ticket Open -&gt; Withdrawn
+  event withdraw = Agent withdraws Ticket (Open -&gt; Withdrawn)
 
   rule REQ-DESK-001 &quot;A ticket is taken only while the desk is open&quot; {
     allow Agent takes Ticket only when desk_open
@@ -4351,7 +4360,7 @@ requirements Support {
   measure closed_tickets = count Ticket in Closed
 
   scenario AC-TICKET-001 &quot;An agent takes and closes a ticket&quot; {
-    Agent takes t1 with assignee 1
+    Agent takes t1 with assignee a1
     Agent closes t1
     then t1 is Closed
   }
@@ -4392,10 +4401,15 @@ lifecycle 行を追加すると別のパスを表せます。<code>number Qty</c
 （<code>exists x in qty..qty { ... }</code> は <code>binder bound is not a static integer</code>）。
 変換後のフィールド名は <code>order_qty</code>、<code>order_stage</code> など、正規名の <code>entity_field</code> です。
 設計と <code>implements</code> のマッピングでは、その名前を使います。</p>
-<p><strong>出来事。</strong> <code>event place = User places Order with qty Empty -&gt; Placed</code> は、
+<p><strong>出来事。</strong> <code>event place = User places Order with qty (Empty -&gt; Placed)</code> は、
 正規の action 名 <code>place</code> と、アクター・動詞・エンティティの句を定めます。
 遷移は lifecycle の辺でなければなりません（<code>event_not_on_lifecycle</code>）。
 代わりに <code>in Placed</code> と書くと、同じ段階にとどまる出来事です。
+遷移は句と入力の後に、括弧で囲んでも囲まずにも書けます。
+<code>event place = User places Order with qty Empty -&gt; Placed</code> も同じく受理され、同じモデルに
+変換されます。<code>fmt</code> は書かれた形を保ちます。括弧の中は遷移 1 つだけです。とどまる出来事には
+括弧を付けません（<code>(in Placed)</code> と <code>(Placed)</code> は構文エラー）。全角の <code>（ ）</code> は
+<code>fullwidth_symbol</code> です。
 <code>with qty</code> は入力を同名フィールドに格納します。<code>with n: Qty</code> は型を明記した入力です。
 <code>n</code> と同名のフィールドがなければ、自動のフィールド代入は行いません。同名のフィールドが
 あれば、入力の型を明記していても代入します。入力も <code>set x = expr, y = expr</code> の更新も、
@@ -4406,6 +4420,29 @@ lifecycle 行を追加すると別のパスを表せます。<code>number Qty</c
 <code>covers REQ-ID "原文"</code> はトレーサビリティです。シナリオで使うものも含め、アクターを
 宣言してください（<code>actor_not_declared</code>）。通常の event は fair、<code>fault event</code> は
 fair ではありません。辺に対応する event がなければ <code>lifecycle_edge_without_event</code> の警告です。</p>
+<p><strong>暗黙の読み方を見る（#1817）。</strong> これらの形のいくつかは、名前の一致・語の数・行の順で
+意味が決まるため、編集で意味が変わっても何のメッセージも出ません。<code>with qty</code> か
+フィールド <code>qty</code> の名前を変えると格納が消え、lifecycle の行を並べ替えると初期段階と
+段階の順が変わり、<code>Shop Order</code> では event 名が動詞になります。<code>fslc explain</code> はそれぞれの
+読み方を示します。JSON には <code>readings</code> が加わります（<code>fsl 5</code> ヘッダーの requirements
+文書のときだけ）。<code>entities[]</code> は <code>entity</code>、<code>initial</code>、<code>stages</code>（enum の順）、
+<code>lifecycle_lines</code> を持ち、<code>events[]</code> は <code>event</code>、<code>entity</code>、<code>verb</code>、<code>verb_omitted</code>、
+<code>fair</code>、<code>inputs[]</code>（<code>name</code>、<code>written</code>、<code>{field, by}</code> の <code>stored[]</code>。<code>by</code> は
+<code>same_name</code>、<code>set f = input name</code> の <code>set</code>、関係の event が記録するアクターの
+インスタンス（原文には書かない入力）の <code>relation</code> のいずれか。より大きな式の中でだけ
+使う入力はどこにも格納されず <code>stored: []</code>）、<code>guards[]</code>（event の action の
+<code>requires</code> ごとに <code>index</code>、<code>expr</code>、<code>conjunctive: true</code>、<code>explain --lowering</code> が示す
+<code>origins</code>）を持ちます。event のガードはすべて成り立たなければなりません。
+<code>allow … only when</code> はガードを一つ加えるだけで、別のガードが拒む event を可能にする
+ことはありません。<code>--readable</code> は同じ内容を <code>Lifecycles:</code> 節と、各 event の action の下の
+<code>verb:</code>（省いたとき）、<code>fair:</code>、<code>input …:</code>、<code>guards:</code> の行で示します。<code>explain</code> の
+出力のほかの部分は変わりません。<code>fslc lint</code> は三つの情報ノートを <code>files[].notes[]</code>
+（件数は <code>note_count</code>）に報告します。各ノートは finding と同じフィールドを持ち、
+分類は <code>ambiguous_intent</code>、<code>severity: "info"</code> です。<code>input_stored_by_name</code>（入力の
+位置）、<code>verb_from_event_name</code>（句の位置）、<code>initial_stage_from_line_order</code>
+（lifecycle の行が二つ以上あるエンティティの初期段階の位置）です。二つのキーはノートが
+あるときだけ現れるため、ほかの文書の <code>lint</code> の出力は以前と同じです。ノートは finding では
+ありません。<code>findings</code>、<code>finding_count</code>、exit code のいずれも変えません。</p>
 <p><strong>規則。</strong> <code>rule ID "原文" { statement+ }</code> は内部の文をすべて論理積で組み合わせます。
 同じ出来事を制約する別の rule も論理積になります。使える文は次のとおりです。</p>
 <table>
@@ -4422,15 +4459,15 @@ fair ではありません。辺に対応する event がなければ <code>life
 </tr>
 <tr>
 <td><code>allow Actor verb Entity only for Concept</code></td>
-<td>区分に属することをガードにします。</td>
+<td>区分に属することをガードにします。項は <code>and</code> で結べます。区分の代わりに段階を一つ、どちらの順でも書けます。<code>Placed Order</code> と <code>Order in Placed</code> は同じガードです。</td>
 </tr>
 <tr>
 <td><code>never Actor verb Entity when condition</code> / <code>for Concept</code></td>
-<td>条件が偽であること／区分に属さないことをガードにします。</td>
+<td>条件が偽であること／区分に属さないことをガードにします（項は <code>only for</code> と同じ）。</td>
 </tr>
 <tr>
 <td><code>Actor verb Entity only after Actor other Entity</code></td>
-<td>lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。</td>
+<td>lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。フィールド名は前提の出来事から作ります（<code>order_did_pay</code>）。一つのエンティティで二つの前提の集合が同じ名前になる場合は、それぞれに番号が付きます（<code>order_did_a_or_b_1</code>、<code>order_did_a_or_b_2</code>）。番号は rule の順序ではなく、そのエンティティの他の履歴フィールドと宣言済みフィールドで決まるため、別の箇所の編集で反例に出るフィールド名が変わることがあります。</td>
 </tr>
 <tr>
 <td><code>Name: Entity enters Target only from Source, Other</code></td>
@@ -4466,6 +4503,15 @@ trace がないと <code>never_rule_without_forbidden</code> が警告します�
     covers REQ-3 &quot;A large claim is approved or rejected by a manager&quot;
 } assuming amount &gt; 0
 </code></pre>
+<p>見出しの段階はどちらの順でも書けます。<code>for Claim in Submitted</code>（日本語では
+<code>対象 申請 段階 提出済み</code>）は <code>for Submitted Claim</code> と同じ表で、同じように下ろされ、
+<code>fmt</code> は書かれた順を保ちます。どの <code>for</code> の後でも（表の <code>for</code>、<code>only for</code>、
+<code>never … for</code>）、<code>Entity in Stage</code> は <code>Stage Entity</code> と同じく段階を一つだけ指します
+（<code>for Order in Placed, Packed</code> はカンマの位置で拒否されます）。rule の中では、
+<code>Stage Entity</code> のエンティティが段階と同じ行に書かれるのと同じく、<code>in</code> はエンティティと
+同じ行に書きます。文は新しい行から始まるからです（<code>in</code> に続く段階は、<code>and</code> に続く
+項と同じく次の行に書けます）。<code>always</code> の形は変わりません。
+<code>always Stage Entity is …</code> と <code>always Entity in S… has …</code> です。</p>
 <p>行の条件には区分、<code>and</code> で結んだ区分、<code>Stage Entity</code> を使えます。
 <code>otherwise =&gt; Actor verb</code> は他の行が成り立たない場合を受け持ちます。
 表の段階から出るすべての出来事を列挙する必要があります（<code>decide_event_not_listed</code>）。
@@ -4481,8 +4527,14 @@ trace がないと <code>never_rule_without_forbidden</code> が警告します�
 最初は未設定の optional な役割を追加します。関係先は <code>entity</code> で宣言し、<code>via</code> の event の
 アクターはその関係先でなければなりません。そのため <code>Agent</code> は <code>actor</code> と <code>entity</code> の両方で
 宣言します。この event は最初の入力で相手を受け取って記録し、この event のシナリオの
-ステップでは必ず相手を指定します。<code>with assignee 1</code> は Agent のインスタンス 1 を選びます。
-値はインスタンス番号です。インスタンス名（<code>with assignee a1</code>）は拒否されます。
+ステップでは必ず相手を指定します。<code>with assignee a1</code> は Agent のインスタンスを名前で指し、
+trace の他のインスタンス名と同じ規則で番号を割り当てます（「シナリオと停止」を参照）。
+<code>with assignee 1</code> は従来どおり Agent のインスタンス 1 を番号で選びます。文書が定数、資源、
+列挙値、段階として宣言している名前はそこでもその意味のままです（<code>with assignee LEAD</code> は
+定数 <code>LEAD</code>）。それ以外の名前はインスタンス名です。
+一つの event が作る関係は一つまでです。同じ関係先への二つ目の関係に同じ event を <code>via</code> で
+書くと、その関係の位置で拒否します（<code>event_already_makes_relation</code>）。二つ目の関係には別の
+event を用意します。
 <code>resource stock: Qty = 2</code> はエンティティに属さない共有状態です。event は <code>set</code> で更新し、
 ガードからも参照できます。<code>measure m = count Concept</code> または <code>count Entity in S, T</code>
 は値の射影であり、新しいカウンター、履歴フィールド、自動の不変条件を作りません。
@@ -4491,14 +4543,27 @@ trace がないと <code>never_rule_without_forbidden</code> が警告します�
 ので、これらには <code>measure</code> を使ってください。goal の <code>some E can reach S</code> は到達可能性、policy の
 <code>every E in S must eventually be T or U</code> は fair な event の下での進行性です。
 どちらも ID と原文をトレーサビリティに残します。</p>
-<p><strong>シナリオと停止。</strong> アクターと動詞の句は event に対応します。対応がない、または曖昧なら
+<p><strong>シナリオと停止。</strong> ステップは <code>Actor verb instance [with input value, …]</code> と書きます
+（<code>Agent takes t1 with assignee a1</code>）。<code>Actor instance verb …</code> も同じステップです
+（<code>Agent t1 takes with assignee a1</code>）。二語のうち、いずれかの event の動詞である最初の語が動詞です。
+アクターと動詞の句は event に対応します。対応がない、または曖昧なら
 <code>unknown_verb</code>、<code>unknown_event_phrase</code>、<code>ambiguous_step</code> で知らせます。
-<code>t1</code>、<code>t2</code> などのインスタンス名は trace 内だけの名前で、初出順に割り当てます。
-<code>verify</code> の個数を超えると <code>scenario_instance_overflow</code> です。
-<code>then t1 is Closed</code> は一つのインスタンスの最終段階を検査します。複数を検査するには、
-変換後の状態をインスタンス番号で引く式を書きます（エンティティごとに最初の名前が 0 です）。
-例: <code>then ticket_stage[0] == Closed and ticket_stage[1] == Open</code>。この式ではインスタンス名を
-使えず、<code>then t1 is Closed and t2 is Open</code> は拒否されます。scenario は全ステップを実行し、
+<code>t1</code>、<code>t2</code> や関係の役割の値に書いた <code>a1</code> などのインスタンス名は trace 内だけの名前で、
+エンティティごとに初出順に 0 から番号を割り当てます。一つのステップではインスタンスが役割の値より
+先です。<code>verify</code> の個数を超えると <code>scenario_instance_overflow</code> です。インスタンス名は一つの
+エンティティのインスタンスを指し、別のエンティティのインスタンス名を役割の値に書くと拒否されます。
+数えるのはインスタンス名だけなので、役割の値に書いた番号は名前と関係なくその番号のインスタンスです。
+<code>with assignee 0</code> のあとでも、最初の Agent のインスタンス名は 0 番です。
+<code>then t1 is Closed</code> は一つのインスタンスの最終段階を検査します。複数を検査するには一つの式を
+書きます。式の中では <code>t1.field</code> がインスタンス <code>t1</code> のフィールド、<code>stage(t1)</code>（または
+<code>Ticket.stage(t1)</code>）がその段階で、変換後の状態をインスタンスの番号で引いたものです
+（<code>t1.assignee</code> は <code>ticket_assignee[0]</code>）。
+例: <code>then stage(t1) == Closed and t1.assignee == some(0)</code>。変換後の書き方
+（<code>ticket_stage[0] == Closed</code>）も引き続き使えます。インスタンス名を読むのはこの二つの位置だけで、
+単独の値としては読みません（役割は上の例のように番号と比べます）。同じ名前の量化子・集計の
+束縛変数はその範囲でインスタンス名を隠し、式のどこかにある <code>is some(t1)</code> のパターンは式全体で
+インスタンス名を隠します。同じ名前の定数、資源、列挙値、段階はその意味のままです。
+<code>then t1 is Closed and t2 is Open</code> は拒否されます。scenario は全ステップを実行し、
 最後の条件を満たす必要があります。失敗は <code>kind: "acceptance"</code>、ステップの失敗には
 <code>failed_step</code> が付きます。forbidden trace は途中まで実行でき、最後のステップだけを
 拒否する必要があります。最後が受理されると <code>kind: "forbidden"</code>、途中で拒否されると
@@ -4638,13 +4703,13 @@ glossary の別の正規名か、変換後の仕様が宣言する名前と同�
 </tr>
 <tr>
 <td>Allow rule / 許可規則</td>
-<td><code>allow</code>; <code>only when</code>; <code>only for</code></td>
-<td><code>許可</code>; <code>条件</code>; <code>対象</code></td>
+<td><code>allow</code>; <code>only when</code>; <code>only for</code>; <code>in</code></td>
+<td><code>許可</code>; <code>条件</code>; <code>対象</code>; <code>段階</code></td>
 </tr>
 <tr>
 <td>Never rule / 禁止規則</td>
-<td><code>never</code>; <code>when</code>; <code>for</code></td>
-<td><code>禁止</code>; <code>条件</code>; <code>対象</code></td>
+<td><code>never</code>; <code>when</code>; <code>for</code>; <code>in</code></td>
+<td><code>禁止</code>; <code>条件</code>; <code>対象</code>; <code>段階</code></td>
 </tr>
 <tr>
 <td>Ordering / 順序</td>
@@ -4668,8 +4733,8 @@ glossary の別の正規名か、変換後の仕様が宣言する名前と同�
 </tr>
 <tr>
 <td>Decision table / 決定表</td>
-<td><code>for</code>; <code>otherwise</code>; <code>assuming</code></td>
-<td><code>対象</code>; <code>それ以外</code>; <code>仮定</code></td>
+<td><code>for</code>; <code>in</code>; <code>otherwise</code>; <code>assuming</code></td>
+<td><code>対象</code>; <code>段階</code>; <code>それ以外</code>; <code>仮定</code></td>
 </tr>
 <tr>
 <td>Decision outcome / 決定表の結果</td>
@@ -4715,9 +4780,12 @@ allow の <code>only as</code> / <code>立場</code>、never の <code>because</
 インスタンス）、<code>で</code> は入力、<code>は</code> は主題を表します。<code>に</code> は相手を示す印として
 認識しますが、このエディションにはその役割を受け取る句がありません。relation の入力を
 渡す書き方には使えません。
-例えば <code>従業員 が 経費申請 を 提出する 申請金額 で</code> は event の句、
-<code>従業員 が c1 を 提出する 申請金額 1 で</code> はシナリオのステップです。
+例えば <code>従業員 が 経費申請 を 申請金額 で 提出する</code> は event の句、
+<code>従業員 が c1 を 申請金額 1 で 提出する</code> はシナリオのステップです。
 助詞を使う句では、動詞以外の各語に役割の印を付けると、語順を変えられます。
+<code>従業員 が 経費申請 を 提出する 申請金額 で</code> も同じ event の句です。
+出来事の遷移は句の後に書くので、文は動詞で終わります。
+<code>出来事 submit = 従業員 が 経費申請 を 申請金額 で 提出する (下書き -&gt; 提出済み)</code>。
 一部だけに付けると <code>mixed_particles</code>、役割が違うと <code>particle_role_mismatch</code>、
 <code>従業員が</code> のように語につなげると <code>particle_needs_space</code> です。
 <code>fmt --lang ja|en</code> でキーワード、<code>--names alias|canonical</code> で用語の綴りを選びます。
@@ -5374,16 +5442,19 @@ relation 引数は元の event 宣言を指します。source から見えない
 この制限とは別で、衝突するときだけ fresh にします。</p>
 <h3 id="133-businessfsl-biz">13.3 業務コンサルティングレイヤー: <code>business</code>(fsl-biz ダイアレクト)</h3>
 <p>業務プロセス、ポリシー、KPI を、実装の語彙ゼロで書きます(構文の詳細は
-<code>DESIGN-dialects.md</code> §3)。process は enum+Map+transition の action へ、policy は
-invariant / leadsTo へ、kpi はメタデータとして記録される宣言的な count の射影へ
-展開されます。規程の矛盾 = invariant 違反、死んだプロセスステップ = カバレッジ
-診断、到達不能な業務ゴール = reachable_failed、放置された案件 = leadsTo の反例 —
-すべて機械的に検出できます。</p>
+<code>DESIGN-dialects.md</code> §3)。§13.2 の要件が詳細化する <code>fsl 5</code> の As-Is/To-Be の
+組を英語と日本語の引用文で書いた例が
+<a href="https://github.com/ymm-oss/fsl/tree/main/examples/fsl5"><code>examples/fsl5/</code></a> にあります。
+process は enum+Map+transition の action へ、policy は invariant / leadsTo へ、
+kpi はメタデータとして記録される宣言的な count の射影へ展開されます。規程の
+矛盾 = invariant 違反、死んだプロセスステップ = カバレッジ診断、到達不能な業務
+ゴール = reachable_failed、放置された案件 = leadsTo の反例 — すべて機械的に検出
+できます。</p>
 <p>business の process は純粋なステージグラフなので、<code>transition</code> が取るのは名前、
 遷移元と遷移先のステージ、actor、<code>covers</code> 注釈だけです。<code>with</code> / <code>when</code> / <code>set</code>
 を書くと位置付きのエラーになります。これらはデータを運ぶ節で、business ダイアレ
 クトには落とす先がなく、黙って捨てると作者が書いていないモデルを検証してしまう
-ためです。意味を与えるには <code>requirements</code> spec(§13.4)で process を宣言します。</p>
+ためです。意味を与えるには <code>requirements</code> spec(§13.2)で process を宣言します。</p>
 <p>PM/コンサルタント向けのファイルでは、よくある応答ポリシーとゴールに、読みやすい
 stage 構文を使ってください:</p>
 <pre><code class="language-fsl">business ReturnHandling {
@@ -5417,8 +5488,9 @@ verify {
 }
 </code></pre>
 <p>規則が単なる stage の進行でないときは、明示の形式が引き続き使えます:
-<code>policy ... responds { forall c: Return { stage(c) == Requested ~&gt; ... } }</code> と
-<code>goal ... { exists c: Return { stage(c) == Refunded } }</code>。</p>
+<code>policy ... responds { forall c: Return { stage(c) == Requested ~&gt; ... } }</code>、
+<code>goal ... { exists c: Return { stage(c) == Refunded } }</code>、
+<code>policy ... invariant { … }</code>(後述)。</p>
 <p><strong>バイパス禁止(no-bypass)</strong>のコントロール — 必須の経由地点を先に通らずには決して
 到達してはならないターゲット stage — には、precedence 形式を使います
 (#75。設計の根拠は <code>DESIGN-precedence-policy.md</code>):</p>
@@ -5443,6 +5515,53 @@ or Rejected</code> — そして、同じ <code>(process, waypoint-set)</code> �
 よるゴーストの counterexample-to-induction は生じません。</p>
 <pre><code class="language-json">{&quot;result&quot;: &quot;proved&quot;, &quot;k_used&quot;: {&quot;CTRL-APPROVAL&quot;: 1, &quot;CTRL-APPROVAL_stability&quot;: 1}}
 </code></pre>
+<p><code>policy ID "text" [satisfies CTRL, ...] invariant { expr }</code> は、business の状態に
+ついてのそれ以外の安全性の規則を書きます。これは <code>ID</code> という名前の kernel
+invariant 1 つにコンパイルされ、policy の id と text を <code>requirement</code> として運び、
+それ以外には何も合成しません。式は、business の lowering が合成する名前を読みます:</p>
+<table>
+<thead>
+<tr>
+<th>名前</th>
+<th>何か</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stage(c)</code></td>
+<td>エンティティ型に束縛された <code>c</code>(<code>forall c: Return { … }</code>)の stage。<code>return_stage[c]</code> を読みます</td>
+</tr>
+<tr>
+<td><code>return_stage</code></td>
+<td>process <code>Return</code> の stage マップ <code>Map&lt;Return, ReturnStage&gt;</code>。エンティティ名を小文字にし、<code>_stage</code> を付けた名前です</td>
+</tr>
+<tr>
+<td><code>ReturnStage</code>、<code>Requested</code>、…</td>
+<td>stage の enum <code>&lt;Entity&gt;Stage</code> とそのメンバー</td>
+</tr>
+<tr>
+<td><code>return_stage_via_Approved</code></td>
+<td>経由地点 <code>Approved</code> の上の no-bypass policy の履歴フラグ <code>Map&lt;Return, Bool&gt;</code>(経由地点が <code>Approved or Rejected</code> なら、process の stage の順で <code>return_stage_via_Approved_Rejected</code>)。そのような policy が宣言されているときだけ存在し、そうでなければ <code>check</code> はこの名前を拒否します</td>
+</tr>
+</tbody>
+</table>
+<p>フラグを合成する no-bypass policy は、invariant <code>&lt;PolicyId&gt;_stability</code> も追加します。
+その名前は、その経由地点集合の上の最初の policy から付けられます。純粋な stage
+グラフでは、どのケースについても独立にすべての stage に到達できるので、
+<code>stage(c)</code> だけの条件は常に成り立つか、違反されるかのどちらかです。この形式が
+意味を持つのは、履歴フラグを読むときです:</p>
+<pre><code class="language-fsl">policy PAY-1 &quot;refunds only for approved cases&quot;
+  every Return reaching Refunded must have passed through Approved
+policy PAY-3 &quot;an approval is final&quot; invariant {
+  forall c: Return { stage(c) == Requested or stage(c) == Rejected =&gt; not return_stage_via_Approved[c] }
+}
+</code></pre>
+<p>上の <code>ReturnHandling</code> に加えると、<code>PAY-3</code> は verify され、induction で証明されます
+(<code>PAY-1</code> と <code>PAY-1_stability</code> とともに)。<code>transition revoke Approved -&gt; Rejected
+by Manager</code> を加えると <code>violated</code> になり、<code>requirement</code> は
+<code>{"id": "PAY-3", "text": "an approval is final"}</code> です。完全な例は
+<code>DESIGN-dialects.md</code> §3.1 に書かれたとおりに検査され、fsl-business スキルの例は
+同じ規則を <code>POL-RET-003</code> として持ちます。</p>
 <p>business には独自の <code>terminal</code> 構文はありません。代わりに、各 process の
 <strong>シンクステージ</strong>(出て行く <code>transition</code> のないステージ)が自動的に収集されます:
 すべての process が少なくとも 1 つのシンクを持つなら、process にわたる
@@ -6233,7 +6352,8 @@ DESIGN-*.md があります)。</p>
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
   それを壊せる」)+ witness のナレーションの上のテキストビュー。人間のレビューを、
   論理式を読むことから、具体例を裁定することへ移します。<code>--readable</code> なしでは
-  JSON モードが引き続き利用できます。→
+  JSON モードが引き続き利用できます。<code>fsl 5</code> ヘッダーの requirements 文書では、原文が
+  暗黙にしている読み方も示します（<code>readings</code>。§13.2「暗黙の読み方を見る」）。→
   <a href="https://github.com/ymm-oss/fsl/blob/main/docs/design/DESIGN-explain.md"><code>DESIGN-explain.md</code></a>
 - <strong><code>fslc analyze</code></strong> — 構造的な観測 JSON を出力します。<code>--projection tsg</code> は、
   要件、action、状態、プロパティ、シナリオの Typed Semantic Graph を返します。

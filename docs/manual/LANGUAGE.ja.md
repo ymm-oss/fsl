@@ -1937,14 +1937,14 @@ BMC は ranking エラーで何も discharge せず、自分の lasso 探索を�
 
 ```
 fslc help      [COMMAND [SUBCOMMAND]]            # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
-fslc check     <file.fsl>                        # syntax / names / types, and an inline implements block (depth-bounded, no Z3)
-fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics; never mutates
-fslc migrate   <path>... --edition next [--write] # dry-run edits; --write applies validated set
+fslc check     <file.fsl|file.md>                  # syntax / names / types, and an inline implements block (depth-bounded, no Z3); .md = literate FSL
+fslc lint      <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy diagnostics, fsl 5 info notes (§13.2); never mutates
+fslc migrate   <path>... [--edition current|next|4|5] [--write] # dry-run edits (default edition next); --write applies validated set
 fslc fmt       <file.fsl|-> [--edition current|next|4|5] # canonical FSL to stdout; never mutates input
 fslc fmt       <path>... --check                 # JSON format_check; exit 0 clean, 1 changed, 2 error
 fslc kernel    <file.fsl> [--kernel-version 1|2] # normalized typed Kernel JSON (default v1)
 fslc conformance <file.fsl> [--depth K] [--kernel-version 1|2] # matching vectors (default v1)
-fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexample is shortest)
+fslc verify    <file.fsl|file.md> [--depth K]     # BMC (default K=8, counterexample is shortest)
                [--engine induction] [--k N]      # k-induction: unbounded-depth proof
                [--engine explicit]               # concrete-state BFS (native fslc): closure ⇒ proved
                [--explicit-budget N]             #   max visited states (default 1000000); over ⇒ unknown_budget
@@ -1962,11 +1962,11 @@ fslc verify    <file.fsl> [--depth K]            # BMC (default K=8, counterexam
                                                  #   induction は全ての暗黙の型境界をベースケースでも検査
                [--exclude-property <Name>]...    # skip named invariant/trans/leadsTo/reachable
                [--strict-tags] [--requirements ids.txt]  # tag matching (§15)
-fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] [-o reproducer.json]
+fslc counterexample export <file.fsl> [--depth K] [--engine bmc|explicit|auto] -o reproducer.json
                                                # slice 1: safety-invariant counterexample を reproducer.v1 へ export
-fslc sweep     <file.fsl> --instances E=lo..hi --depth lo..hi [--property Name]
+fslc sweep     <file.fsl> [--instances E=lo..hi]... [--depth lo..hi] [--property Name]
                                                  # opt-in scope sweep over bounded verification
-fslc scenarios <file.fsl> [--depth K]            # generate integration-test scaffold JSON
+fslc scenarios <file.fsl|file.md> [--depth K]     # generate integration-test scaffold JSON
 fslc replay    <file.fsl> --trace <events.json>  # spec-action trace conformance (§12)
 fslc replay    <file.fsl> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                  # production log mapping + conformance (§12)
@@ -2010,7 +2010,7 @@ fslc typestate <file.fsl> [--ts]                 # decide applicability of state
 fslc domain check <file.fsl> [--depth K] [--engine bmc|induction] # Functional DDD / effect findings
 fslc domain analyze <file.fsl>                                  # aggregate/effect ownership summary
 fslc domain expand <file.fsl> [-o out.fsl]                      # generated kernel FSL
-fslc domain generate <file.fsl> --target typescript|python|kotlin|swift|rust [-o dir] # Functional DDD scaffold
+fslc domain generate <file.fsl> [--target typescript|python|kotlin|swift|rust] [-o dir] # Functional DDD scaffold
 fslc domain testgen <file.fsl> [--target vitest] [--allow-unwired] [-o out]  # domain adapter/conformance scaffold
 fslc domain replay <file.fsl> --logs events.jsonl              # domain runtime replay evidence
 fslc db check  <file.fsl> [--depth K] [--engine bmc|induction] # dbsystem compatibility findings (§13.5)
@@ -2024,7 +2024,14 @@ fslc ai replay <file.fsl> --logs events.jsonl                   # AI runtime eve
 `non_canonical`、`ambiguous_intent`、`unsupported_in_edition` を使います。
 マイグレーションは、レガシーの domain enum/演算子、宣言の文字列メタデータ、コロン
 量化子、曖昧さのないローカルなインライン action マッピング、暗黙のデフォルトを
-扱います。安全と証明できないソース/コメントの移動は拒否します。`&&` は引き続き
+扱います。次のエディション(`migrate` の既定)では、ヘッダーのない文書に `fsl 5`
+エディションヘッダーを挿入し(`missing_edition_header`。causal と AI の宣言、
+`refinement`、`compose` には挿入しません)、ヘッダーのない `requirements` 文書の
+各 `process` を、ライフサイクルを持つ entity、transition ごとの event、ガード付きの
+要件ごとの rule に変換します(`legacy_process_form`)。その文書が `terminal` を宣言
+していない場合、変換後の文書は最終のライフサイクル段階から導出される終端状態を持ち
+(`derived_terminal_added`)、deadlock の判定が変わることがあります。安全と証明
+できないソース/コメントの移動は拒否します。`&&` は引き続き
 不正なトークンであり、そのため `and` の提案つきで報告されますが、機械適用される
 ことはありません。原子性と一括更新の手順は `docs/design/DESIGN-migration.md` を参照。
 
@@ -4091,6 +4098,8 @@ CTI を閉じるために存在する、あるいは実装のガードが抽象�
 必要な宣言があることを前提とした断片です。
 休暇申請の一つのモデルを英語の綴りと日本語の綴りで一度ずつ書いた、より長い例が
 [`examples/fsl5/`](https://github.com/ymm-oss/fsl/tree/main/examples/fsl5) にあります。
+同じディレクトリに、休暇申請の業務層(As-Is と To-Be)と設計層もあり、
+`fslc refine` でこの要件とつながっています。
 
 ```fsl check
 fsl 5
@@ -4105,11 +4114,11 @@ requirements Support {
   Ticket belongs to Agent as assignee via take
   resource desk_open: Bool = true
 
-  event take = Agent takes Ticket Open -> Assigned
-  event close = Agent closes Ticket Assigned -> Closed
-  event escalate = Agent escalates Ticket Assigned -> Escalated
+  event take = Agent takes Ticket (Open -> Assigned)
+  event close = Agent closes Ticket (Assigned -> Closed)
+  event escalate = Agent escalates Ticket (Assigned -> Escalated)
     set desk_open = false
-  event withdraw = Agent withdraws Ticket Open -> Withdrawn
+  event withdraw = Agent withdraws Ticket (Open -> Withdrawn)
 
   rule REQ-DESK-001 "A ticket is taken only while the desk is open" {
     allow Agent takes Ticket only when desk_open
@@ -4126,7 +4135,7 @@ requirements Support {
   measure closed_tickets = count Ticket in Closed
 
   scenario AC-TICKET-001 "An agent takes and closes a ticket" {
-    Agent takes t1 with assignee 1
+    Agent takes t1 with assignee a1
     Agent closes t1
     then t1 is Closed
   }
@@ -4169,10 +4178,15 @@ lifecycle 行を追加すると別のパスを表せます。`number Qty` の有
 変換後のフィールド名は `order_qty`、`order_stage` など、正規名の `entity_field` です。
 設計と `implements` のマッピングでは、その名前を使います。
 
-**出来事。** `event place = User places Order with qty Empty -> Placed` は、
+**出来事。** `event place = User places Order with qty (Empty -> Placed)` は、
 正規の action 名 `place` と、アクター・動詞・エンティティの句を定めます。
 遷移は lifecycle の辺でなければなりません（`event_not_on_lifecycle`）。
 代わりに `in Placed` と書くと、同じ段階にとどまる出来事です。
+遷移は句と入力の後に、括弧で囲んでも囲まずにも書けます。
+`event place = User places Order with qty Empty -> Placed` も同じく受理され、同じモデルに
+変換されます。`fmt` は書かれた形を保ちます。括弧の中は遷移 1 つだけです。とどまる出来事には
+括弧を付けません（`(in Placed)` と `(Placed)` は構文エラー）。全角の `（ ）` は
+`fullwidth_symbol` です。
 `with qty` は入力を同名フィールドに格納します。`with n: Qty` は型を明記した入力です。
 `n` と同名のフィールドがなければ、自動のフィールド代入は行いません。同名のフィールドが
 あれば、入力の型を明記していても代入します。入力も `set x = expr, y = expr` の更新も、
@@ -4184,15 +4198,39 @@ lifecycle 行を追加すると別のパスを表せます。`number Qty` の有
 宣言してください（`actor_not_declared`）。通常の event は fair、`fault event` は
 fair ではありません。辺に対応する event がなければ `lifecycle_edge_without_event` の警告です。
 
+**暗黙の読み方を見る（#1817）。** これらの形のいくつかは、名前の一致・語の数・行の順で
+意味が決まるため、編集で意味が変わっても何のメッセージも出ません。`with qty` か
+フィールド `qty` の名前を変えると格納が消え、lifecycle の行を並べ替えると初期段階と
+段階の順が変わり、`Shop Order` では event 名が動詞になります。`fslc explain` はそれぞれの
+読み方を示します。JSON には `readings` が加わります（`fsl 5` ヘッダーの requirements
+文書のときだけ）。`entities[]` は `entity`、`initial`、`stages`（enum の順）、
+`lifecycle_lines` を持ち、`events[]` は `event`、`entity`、`verb`、`verb_omitted`、
+`fair`、`inputs[]`（`name`、`written`、`{field, by}` の `stored[]`。`by` は
+`same_name`、`set f = input name` の `set`、関係の event が記録するアクターの
+インスタンス（原文には書かない入力）の `relation` のいずれか。より大きな式の中でだけ
+使う入力はどこにも格納されず `stored: []`）、`guards[]`（event の action の
+`requires` ごとに `index`、`expr`、`conjunctive: true`、`explain --lowering` が示す
+`origins`）を持ちます。event のガードはすべて成り立たなければなりません。
+`allow … only when` はガードを一つ加えるだけで、別のガードが拒む event を可能にする
+ことはありません。`--readable` は同じ内容を `Lifecycles:` 節と、各 event の action の下の
+`verb:`（省いたとき）、`fair:`、`input …:`、`guards:` の行で示します。`explain` の
+出力のほかの部分は変わりません。`fslc lint` は三つの情報ノートを `files[].notes[]`
+（件数は `note_count`）に報告します。各ノートは finding と同じフィールドを持ち、
+分類は `ambiguous_intent`、`severity: "info"` です。`input_stored_by_name`（入力の
+位置）、`verb_from_event_name`（句の位置）、`initial_stage_from_line_order`
+（lifecycle の行が二つ以上あるエンティティの初期段階の位置）です。二つのキーはノートが
+あるときだけ現れるため、ほかの文書の `lint` の出力は以前と同じです。ノートは finding では
+ありません。`findings`、`finding_count`、exit code のいずれも変えません。
+
 **規則。** `rule ID "原文" { statement+ }` は内部の文をすべて論理積で組み合わせます。
 同じ出来事を制約する別の rule も論理積になります。使える文は次のとおりです。
 
 | 文の断片 | 検査する意味 |
 |---|---|
 | `allow Actor verb Entity only when condition` | 条件を出来事のガードにします。 |
-| `allow Actor verb Entity only for Concept` | 区分に属することをガードにします。 |
-| `never Actor verb Entity when condition` / `for Concept` | 条件が偽であること／区分に属さないことをガードにします。 |
-| `Actor verb Entity only after Actor other Entity` | lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。 |
+| `allow Actor verb Entity only for Concept` | 区分に属することをガードにします。項は `and` で結べます。区分の代わりに段階を一つ、どちらの順でも書けます。`Placed Order` と `Order in Placed` は同じガードです。 |
+| `never Actor verb Entity when condition` / `for Concept` | 条件が偽であること／区分に属さないことをガードにします（項は `only for` と同じ）。 |
+| `Actor verb Entity only after Actor other Entity` | lifecycle が既に順序を保証している場合を除き、前提の出来事がインスタンスごとの隠れた履歴フィールドを立て、後続の出来事がそれを要求します。フィールド名は前提の出来事から作ります（`order_did_pay`）。一つのエンティティで二つの前提の集合が同じ名前になる場合は、それぞれに番号が付きます（`order_did_a_or_b_1`、`order_did_a_or_b_2`）。番号は rule の順序ではなく、そのエンティティの他の履歴フィールドと宣言済みフィールドで決まるため、別の箇所の編集で反例に出るフィールド名が変わることがあります。 |
 | `Name: Entity enters Target only from Source, Other` | 遷移元を制限する二状態の性質です。 |
 | `Name: always Concept1 is Concept2` | 前者なら後者も成り立つという不変条件です。`Stage Entity` もケースとして使えます。 |
 | `Name: always Entity in S, T has condition` | 指定段階でフィールド条件を要求する不変条件です。`not in` は指定段階の外を選びます。relation の役名だけなら、関係が設定済みであることを表します。 |
@@ -4218,6 +4256,16 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
 } assuming amount > 0
 ```
 
+見出しの段階はどちらの順でも書けます。`for Claim in Submitted`（日本語では
+`対象 申請 段階 提出済み`）は `for Submitted Claim` と同じ表で、同じように下ろされ、
+`fmt` は書かれた順を保ちます。どの `for` の後でも（表の `for`、`only for`、
+`never … for`）、`Entity in Stage` は `Stage Entity` と同じく段階を一つだけ指します
+（`for Order in Placed, Packed` はカンマの位置で拒否されます）。rule の中では、
+`Stage Entity` のエンティティが段階と同じ行に書かれるのと同じく、`in` はエンティティと
+同じ行に書きます。文は新しい行から始まるからです（`in` に続く段階は、`and` に続く
+項と同じく次の行に書けます）。`always` の形は変わりません。
+`always Stage Entity is …` と `always Entity in S… has …` です。
+
 行の条件には区分、`and` で結んだ区分、`Stage Entity` を使えます。
 `otherwise => Actor verb` は他の行が成り立たない場合を受け持ちます。
 表の段階から出るすべての出来事を列挙する必要があります（`decide_event_not_listed`）。
@@ -4234,8 +4282,14 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
 最初は未設定の optional な役割を追加します。関係先は `entity` で宣言し、`via` の event の
 アクターはその関係先でなければなりません。そのため `Agent` は `actor` と `entity` の両方で
 宣言します。この event は最初の入力で相手を受け取って記録し、この event のシナリオの
-ステップでは必ず相手を指定します。`with assignee 1` は Agent のインスタンス 1 を選びます。
-値はインスタンス番号です。インスタンス名（`with assignee a1`）は拒否されます。
+ステップでは必ず相手を指定します。`with assignee a1` は Agent のインスタンスを名前で指し、
+trace の他のインスタンス名と同じ規則で番号を割り当てます（「シナリオと停止」を参照）。
+`with assignee 1` は従来どおり Agent のインスタンス 1 を番号で選びます。文書が定数、資源、
+列挙値、段階として宣言している名前はそこでもその意味のままです（`with assignee LEAD` は
+定数 `LEAD`）。それ以外の名前はインスタンス名です。
+一つの event が作る関係は一つまでです。同じ関係先への二つ目の関係に同じ event を `via` で
+書くと、その関係の位置で拒否します（`event_already_makes_relation`）。二つ目の関係には別の
+event を用意します。
 `resource stock: Qty = 2` はエンティティに属さない共有状態です。event は `set` で更新し、
 ガードからも参照できます。`measure m = count Concept` または `count Entity in S, T`
 は値の射影であり、新しいカウンター、履歴フィールド、自動の不変条件を作りません。
@@ -4245,14 +4299,27 @@ decide REQ-2-3 "Who handles a submitted claim" for Submitted Claim {
 `every E in S must eventually be T or U` は fair な event の下での進行性です。
 どちらも ID と原文をトレーサビリティに残します。
 
-**シナリオと停止。** アクターと動詞の句は event に対応します。対応がない、または曖昧なら
+**シナリオと停止。** ステップは `Actor verb instance [with input value, …]` と書きます
+（`Agent takes t1 with assignee a1`）。`Actor instance verb …` も同じステップです
+（`Agent t1 takes with assignee a1`）。二語のうち、いずれかの event の動詞である最初の語が動詞です。
+アクターと動詞の句は event に対応します。対応がない、または曖昧なら
 `unknown_verb`、`unknown_event_phrase`、`ambiguous_step` で知らせます。
-`t1`、`t2` などのインスタンス名は trace 内だけの名前で、初出順に割り当てます。
-`verify` の個数を超えると `scenario_instance_overflow` です。
-`then t1 is Closed` は一つのインスタンスの最終段階を検査します。複数を検査するには、
-変換後の状態をインスタンス番号で引く式を書きます（エンティティごとに最初の名前が 0 です）。
-例: `then ticket_stage[0] == Closed and ticket_stage[1] == Open`。この式ではインスタンス名を
-使えず、`then t1 is Closed and t2 is Open` は拒否されます。scenario は全ステップを実行し、
+`t1`、`t2` や関係の役割の値に書いた `a1` などのインスタンス名は trace 内だけの名前で、
+エンティティごとに初出順に 0 から番号を割り当てます。一つのステップではインスタンスが役割の値より
+先です。`verify` の個数を超えると `scenario_instance_overflow` です。インスタンス名は一つの
+エンティティのインスタンスを指し、別のエンティティのインスタンス名を役割の値に書くと拒否されます。
+数えるのはインスタンス名だけなので、役割の値に書いた番号は名前と関係なくその番号のインスタンスです。
+`with assignee 0` のあとでも、最初の Agent のインスタンス名は 0 番です。
+`then t1 is Closed` は一つのインスタンスの最終段階を検査します。複数を検査するには一つの式を
+書きます。式の中では `t1.field` がインスタンス `t1` のフィールド、`stage(t1)`（または
+`Ticket.stage(t1)`）がその段階で、変換後の状態をインスタンスの番号で引いたものです
+（`t1.assignee` は `ticket_assignee[0]`）。
+例: `then stage(t1) == Closed and t1.assignee == some(0)`。変換後の書き方
+（`ticket_stage[0] == Closed`）も引き続き使えます。インスタンス名を読むのはこの二つの位置だけで、
+単独の値としては読みません（役割は上の例のように番号と比べます）。同じ名前の量化子・集計の
+束縛変数はその範囲でインスタンス名を隠し、式のどこかにある `is some(t1)` のパターンは式全体で
+インスタンス名を隠します。同じ名前の定数、資源、列挙値、段階はその意味のままです。
+`then t1 is Closed and t2 is Open` は拒否されます。scenario は全ステップを実行し、
 最後の条件を満たす必要があります。失敗は `kind: "acceptance"`、ステップの失敗には
 `failed_step` が付きます。forbidden trace は途中まで実行でき、最後のステップだけを
 拒否する必要があります。最後が受理されると `kind: "forbidden"`、途中で拒否されると
@@ -4357,13 +4424,13 @@ glossary の別の正規名か、変換後の仕様が宣言する名前と同�
 | Relation / 関係 | `belongs to`; `as`; `via` | `所属先`; `役名`; `契機` |
 | Event / 出来事 | `fault`; `in`; `set`; `covers` | `異常`; `段階`; `更新`; `対応要件` |
 | Event/rule expressions / 出来事・規則の式 | `input` | `入力` |
-| Allow rule / 許可規則 | `allow`; `only when`; `only for` | `許可`; `条件`; `対象` |
-| Never rule / 禁止規則 | `never`; `when`; `for` | `禁止`; `条件`; `対象` |
+| Allow rule / 許可規則 | `allow`; `only when`; `only for`; `in` | `許可`; `条件`; `対象`; `段階` |
+| Never rule / 禁止規則 | `never`; `when`; `for`; `in` | `禁止`; `条件`; `対象`; `段階` |
 | Ordering / 順序 | `only after` | `先行条件` |
 | Entry / 遷移元の制限 | `enters`; `only from` | `遷移先`; `遷移元` |
 | Safety rule / 不変条件 | `always`; `is`; `in`; `not in`; `has` | `常に`; `は`; `段階`; `段階以外`; `必須` |
 | Deadline / 期限 | `deadline` | `期限` |
-| Decision table / 決定表 | `for`; `otherwise`; `assuming` | `対象`; `それ以外`; `仮定` |
+| Decision table / 決定表 | `for`; `in`; `otherwise`; `assuming` | `対象`; `段階`; `それ以外`; `仮定` |
 | Decision outcome / 決定表の結果 | `or` | `または` |
 | Goal / 目標 | `some`; `can reach` | `いずれかの`; `到達可能` |
 | Policy / 方針 | `every`; `in`; `must eventually be`; `or` | `すべての`; `段階`; `いずれ必ず`; `または` |
@@ -4380,9 +4447,12 @@ allow の `only as` / `立場`、never の `because` / `理由` は予約済み�
 インスタンス）、`で` は入力、`は` は主題を表します。`に` は相手を示す印として
 認識しますが、このエディションにはその役割を受け取る句がありません。relation の入力を
 渡す書き方には使えません。
-例えば `従業員 が 経費申請 を 提出する 申請金額 で` は event の句、
-`従業員 が c1 を 提出する 申請金額 1 で` はシナリオのステップです。
+例えば `従業員 が 経費申請 を 申請金額 で 提出する` は event の句、
+`従業員 が c1 を 申請金額 1 で 提出する` はシナリオのステップです。
 助詞を使う句では、動詞以外の各語に役割の印を付けると、語順を変えられます。
+`従業員 が 経費申請 を 提出する 申請金額 で` も同じ event の句です。
+出来事の遷移は句の後に書くので、文は動詞で終わります。
+`出来事 submit = 従業員 が 経費申請 を 申請金額 で 提出する (下書き -> 提出済み)`。
 一部だけに付けると `mixed_particles`、役割が違うと `particle_role_mismatch`、
 `従業員が` のように語につなげると `particle_needs_space` です。
 `fmt --lang ja|en` でキーワード、`--names alias|canonical` で用語の綴りを選びます。
@@ -4921,17 +4991,20 @@ relation 引数は元の event 宣言を指します。source から見えない
 ### 13.3 業務コンサルティングレイヤー: `business`(fsl-biz ダイアレクト)
 
 業務プロセス、ポリシー、KPI を、実装の語彙ゼロで書きます(構文の詳細は
-`DESIGN-dialects.md` §3)。process は enum+Map+transition の action へ、policy は
-invariant / leadsTo へ、kpi はメタデータとして記録される宣言的な count の射影へ
-展開されます。規程の矛盾 = invariant 違反、死んだプロセスステップ = カバレッジ
-診断、到達不能な業務ゴール = reachable_failed、放置された案件 = leadsTo の反例 —
-すべて機械的に検出できます。
+`DESIGN-dialects.md` §3)。§13.2 の要件が詳細化する `fsl 5` の As-Is/To-Be の
+組を英語と日本語の引用文で書いた例が
+[`examples/fsl5/`](https://github.com/ymm-oss/fsl/tree/main/examples/fsl5) にあります。
+process は enum+Map+transition の action へ、policy は invariant / leadsTo へ、
+kpi はメタデータとして記録される宣言的な count の射影へ展開されます。規程の
+矛盾 = invariant 違反、死んだプロセスステップ = カバレッジ診断、到達不能な業務
+ゴール = reachable_failed、放置された案件 = leadsTo の反例 — すべて機械的に検出
+できます。
 
 business の process は純粋なステージグラフなので、`transition` が取るのは名前、
 遷移元と遷移先のステージ、actor、`covers` 注釈だけです。`with` / `when` / `set`
 を書くと位置付きのエラーになります。これらはデータを運ぶ節で、business ダイアレ
 クトには落とす先がなく、黙って捨てると作者が書いていないモデルを検証してしまう
-ためです。意味を与えるには `requirements` spec(§13.4)で process を宣言します。
+ためです。意味を与えるには `requirements` spec(§13.2)で process を宣言します。
 
 PM/コンサルタント向けのファイルでは、よくある応答ポリシーとゴールに、読みやすい
 stage 構文を使ってください:
@@ -4969,8 +5042,9 @@ verify {
 ```
 
 規則が単なる stage の進行でないときは、明示の形式が引き続き使えます:
-`policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }` と
-`goal ... { exists c: Return { stage(c) == Refunded } }`。
+`policy ... responds { forall c: Return { stage(c) == Requested ~> ... } }`、
+`goal ... { exists c: Return { stage(c) == Refunded } }`、
+`policy ... invariant { … }`(後述)。
 
 **バイパス禁止(no-bypass)**のコントロール — 必須の経由地点を先に通らずには決して
 到達してはならないターゲット stage — には、precedence 形式を使います
@@ -5002,6 +5076,39 @@ or Rejected` — そして、同じ `(process, waypoint-set)` の上の 2 つの
 ```json
 {"result": "proved", "k_used": {"CTRL-APPROVAL": 1, "CTRL-APPROVAL_stability": 1}}
 ```
+
+`policy ID "text" [satisfies CTRL, ...] invariant { expr }` は、business の状態に
+ついてのそれ以外の安全性の規則を書きます。これは `ID` という名前の kernel
+invariant 1 つにコンパイルされ、policy の id と text を `requirement` として運び、
+それ以外には何も合成しません。式は、business の lowering が合成する名前を読みます:
+
+| 名前 | 何か |
+|---|---|
+| `stage(c)` | エンティティ型に束縛された `c`(`forall c: Return { … }`)の stage。`return_stage[c]` を読みます |
+| `return_stage` | process `Return` の stage マップ `Map<Return, ReturnStage>`。エンティティ名を小文字にし、`_stage` を付けた名前です |
+| `ReturnStage`、`Requested`、… | stage の enum `<Entity>Stage` とそのメンバー |
+| `return_stage_via_Approved` | 経由地点 `Approved` の上の no-bypass policy の履歴フラグ `Map<Return, Bool>`(経由地点が `Approved or Rejected` なら、process の stage の順で `return_stage_via_Approved_Rejected`)。そのような policy が宣言されているときだけ存在し、そうでなければ `check` はこの名前を拒否します |
+
+フラグを合成する no-bypass policy は、invariant `<PolicyId>_stability` も追加します。
+その名前は、その経由地点集合の上の最初の policy から付けられます。純粋な stage
+グラフでは、どのケースについても独立にすべての stage に到達できるので、
+`stage(c)` だけの条件は常に成り立つか、違反されるかのどちらかです。この形式が
+意味を持つのは、履歴フラグを読むときです:
+
+```fsl
+policy PAY-1 "refunds only for approved cases"
+  every Return reaching Refunded must have passed through Approved
+policy PAY-3 "an approval is final" invariant {
+  forall c: Return { stage(c) == Requested or stage(c) == Rejected => not return_stage_via_Approved[c] }
+}
+```
+
+上の `ReturnHandling` に加えると、`PAY-3` は verify され、induction で証明されます
+(`PAY-1` と `PAY-1_stability` とともに)。`transition revoke Approved -> Rejected
+by Manager` を加えると `violated` になり、`requirement` は
+`{"id": "PAY-3", "text": "an approval is final"}` です。完全な例は
+`DESIGN-dialects.md` §3.1 に書かれたとおりに検査され、fsl-business スキルの例は
+同じ規則を `POL-RET-003` として持ちます。
 
 business には独自の `terminal` 構文はありません。代わりに、各 process の
 **シンクステージ**(出て行く `transition` のないステージ)が自動的に収集されます:
@@ -5803,7 +5910,8 @@ DESIGN-*.md があります)。
   マッピング、自動検査、タグ)+ counterfactual(「この規則がなければ、この手順で
   それを壊せる」)+ witness のナレーションの上のテキストビュー。人間のレビューを、
   論理式を読むことから、具体例を裁定することへ移します。`--readable` なしでは
-  JSON モードが引き続き利用できます。→
+  JSON モードが引き続き利用できます。`fsl 5` ヘッダーの requirements 文書では、原文が
+  暗黙にしている読み方も示します（`readings`。§13.2「暗黙の読み方を見る」）。→
   [`DESIGN-explain.md`](../design/DESIGN-explain.md)
 - **`fslc analyze`** — 構造的な観測 JSON を出力します。`--projection tsg` は、
   要件、action、状態、プロパティ、シナリオの Typed Semantic Graph を返します。
