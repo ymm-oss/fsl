@@ -124,12 +124,13 @@ and versioning follows [Semantic Versioning](https://semver.org/). Each version 
   an outcome whose trace the solver chose is recomputed from the runs made in
   the former order, so output is unchanged byte for byte apart from
   `cost.elapsed_s`. Unit tests pin the number of bounded runs and concrete
-  searches on a small spec and compare the output with making every run.
+  searches on a small spec, and compare the invariant phase's output with
+  making each of its runs.
 - Fixed (#1839): `fslc explain --readable` no longer runs the bounded verifier,
   the witness search or the counterfactual analysis, none of which its text
-  prints, so its cost no longer grows with `--depth`. The readable text is
-  unchanged byte for byte; a unit test fails if `--readable` runs the bounded
-  verifier.
+  prints. Only its `Implements:` section still runs a refinement check bounded
+  by `--depth`. The readable text is unchanged byte for byte; a unit test fails
+  if `--readable` runs the bounded verifier.
 - Fixed (#1842): replaying a requirements document's `acceptance` and
   `forbidden` cases, which `fslc check`, `verify`, every `analyze` projection and
   the other trace-reading commands do first, no longer slows down with
