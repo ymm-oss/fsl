@@ -2380,6 +2380,67 @@ pub fn render_boundary_output(
     (Value::Object(output), 1)
 }
 
+/// Whether a `reachable` left unreached fails a bounded run.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UnreachedReachables {
+    Fail,
+    Allow,
+}
+
+/// The first failure of a bounded run.
+#[derive(Debug)]
+pub enum BmcRunFailure<'m, 'r> {
+    /// A safety violation, `partial_op` included.
+    Violation(&'r BmcViolation),
+    /// The model's reachables the run left unreached, in `result.reachables`
+    /// order. Never empty.
+    Unreached(Vec<&'m fsl_core::PropertyDef>),
+    /// The step at which no action is enabled.
+    Deadlock(usize),
+    LeadsTo(&'r BmcViolation),
+}
+
+/// The first failure of `result`, a bounded run of `model`, in the order the
+/// `verify` envelope reports it: violation, unreached reachable, deadlock,
+/// leadsTo. A deadlock counts only under [`DeadlockMode::Error`]; an unreached
+/// reachable only under [`UnreachedReachables::Fail`].
+#[must_use]
+pub fn first_bmc_failure<'m, 'r>(
+    model: &'m KernelModel,
+    result: &'r BmcResult,
+    deadlock: DeadlockMode,
+    unreached: UnreachedReachables,
+) -> Option<BmcRunFailure<'m, 'r>> {
+    if let Some(violation) = &result.violation {
+        return Some(BmcRunFailure::Violation(violation));
+    }
+    if unreached == UnreachedReachables::Fail {
+        let unreached = result
+            .reachables
+            .iter()
+            .filter(|(_, witness)| witness.is_none())
+            .filter_map(|(name, _)| {
+                model
+                    .reachables
+                    .iter()
+                    .find(|property| property.name == *name)
+            })
+            .collect::<Vec<_>>();
+        if !unreached.is_empty() {
+            return Some(BmcRunFailure::Unreached(unreached));
+        }
+    }
+    if deadlock == DeadlockMode::Error
+        && let Some(step) = result.deadlock_step
+    {
+        return Some(BmcRunFailure::Deadlock(step));
+    }
+    result
+        .leadsto_violation
+        .as_ref()
+        .map(BmcRunFailure::LeadsTo)
+}
+
 /// Render one complete bounded-verification envelope and its process status.
 #[must_use]
 pub fn render_bmc_output(
@@ -2388,40 +2449,29 @@ pub fn render_bmc_output(
     result: &BmcResult,
     options: BmcOutputOptions<'_>,
 ) -> (Value, i32) {
-    if let Some(violation) = &result.violation {
-        if violation.kind == "partial_op" {
+    match first_bmc_failure(model, result, options.deadlock, UnreachedReachables::Fail) {
+        Some(BmcRunFailure::Violation(violation)) if violation.kind == "partial_op" => {
             let boundary = fsl_runtime::Violation {
                 kind: violation.kind.clone(),
                 name: violation.name.clone(),
                 step: violation.step,
             };
-            return render_boundary_output(envelope, model, &boundary, &violation.trace, &options);
+            render_boundary_output(envelope, model, &boundary, &violation.trace, &options)
         }
-        return render_violation(envelope, model, violation, &options);
+        Some(BmcRunFailure::Violation(violation)) => {
+            render_violation(envelope, model, violation, &options)
+        }
+        Some(BmcRunFailure::Unreached(unreached)) => {
+            render_reachable_failure(envelope, model, result, &unreached, &options)
+        }
+        Some(BmcRunFailure::Deadlock(step)) => {
+            render_deadlock_failure(envelope, model, result, step, &options)
+        }
+        Some(BmcRunFailure::LeadsTo(violation)) => {
+            render_leadsto_failure(envelope, model, violation, &options)
+        }
+        None => render_success(envelope, model, result, &options),
     }
-    let unreached = result
-        .reachables
-        .iter()
-        .filter(|(_, witness)| witness.is_none())
-        .filter_map(|(name, _)| {
-            model
-                .reachables
-                .iter()
-                .find(|property| property.name == *name)
-        })
-        .collect::<Vec<_>>();
-    if !unreached.is_empty() {
-        return render_reachable_failure(envelope, model, result, &unreached, &options);
-    }
-    if options.deadlock == DeadlockMode::Error
-        && let Some(step) = result.deadlock_step
-    {
-        return render_deadlock_failure(envelope, model, result, step, &options);
-    }
-    if let Some(violation) = &result.leadsto_violation {
-        return render_leadsto_failure(envelope, model, violation, &options);
-    }
-    render_success(envelope, model, result, &options)
 }
 
 /// Render an explicit-state result through the same bounded-verification
@@ -3847,6 +3897,183 @@ mod tests {
             false,
         );
         assert!(rendered.is_err());
+    }
+
+    /// Two reachables declared out of name order, so a test can tell
+    /// `result.reachables` order from declaration order.
+    fn two_reachables_model() -> KernelModel {
+        checked_model(
+            r"spec FailureOrder {
+  state { done: Bool }
+  init { done = false }
+  action finish() { requires not done done = true }
+  reachable Zed { done }
+  reachable Alpha { not done }
+}",
+        )
+    }
+
+    fn violation_named(name: &str) -> BmcViolation {
+        BmcViolation {
+            kind: "invariant".to_owned(),
+            name: name.to_owned(),
+            step: 1,
+            last_action: None,
+            trace: Vec::new(),
+            leads_to: None,
+        }
+    }
+
+    fn bmc_result(
+        reachables: &[(&str, bool)],
+        violation: bool,
+        deadlock: bool,
+        leadsto: bool,
+    ) -> BmcResult {
+        BmcResult {
+            spec: "FailureOrder".to_owned(),
+            depth: 3,
+            violation: violation.then(|| violation_named("Safety")),
+            leadsto_violation: leadsto.then(|| violation_named("Response")),
+            reachables: reachables
+                .iter()
+                .map(|(name, reached)| {
+                    (
+                        (*name).to_owned(),
+                        reached.then(|| fsl_verifier::ReachableWitness {
+                            step: 1,
+                            trace: Vec::new(),
+                        }),
+                    )
+                })
+                .collect(),
+            reachable_diagnostics: BTreeMap::new(),
+            deadlock_step: deadlock.then_some(2),
+            deadlock_trace: None,
+            action_coverage: BTreeMap::new(),
+            frontier_progress: false,
+            vacuity: Vec::new(),
+        }
+    }
+
+    fn failure_label(failure: Option<&BmcRunFailure<'_, '_>>) -> &'static str {
+        match failure {
+            Some(BmcRunFailure::Violation(_)) => "violation",
+            Some(BmcRunFailure::Unreached(_)) => "unreached",
+            Some(BmcRunFailure::Deadlock(_)) => "deadlock",
+            Some(BmcRunFailure::LeadsTo(_)) => "leadsto",
+            None => "none",
+        }
+    }
+
+    /// Every combination of the four failure fields under every argument
+    /// pair: the first failure is the first of violation, unreached
+    /// (`Fail` only), deadlock (`Error` only), leadsTo that the run has.
+    #[test]
+    fn first_bmc_failure_follows_the_verify_order_under_each_argument() {
+        let model = two_reachables_model();
+        let deadlock_modes = [
+            DeadlockMode::Warn,
+            DeadlockMode::Error,
+            DeadlockMode::Ignore,
+        ];
+        let policies = [UnreachedReachables::Fail, UnreachedReachables::Allow];
+        let mut cases = 0;
+        for bits in 0..16_u8 {
+            let violation = bits & 1 != 0;
+            let unreached = bits & 2 != 0;
+            let deadlock = bits & 4 != 0;
+            let leadsto = bits & 8 != 0;
+            let result = bmc_result(
+                &[("Alpha", true), ("Zed", !unreached)],
+                violation,
+                deadlock,
+                leadsto,
+            );
+            for deadlock_mode in deadlock_modes {
+                for policy in policies {
+                    let expected = [
+                        (violation, "violation"),
+                        (
+                            unreached && policy == UnreachedReachables::Fail,
+                            "unreached",
+                        ),
+                        (deadlock && deadlock_mode == DeadlockMode::Error, "deadlock"),
+                        (leadsto, "leadsto"),
+                    ]
+                    .into_iter()
+                    .find_map(|(fails, label)| fails.then_some(label))
+                    .unwrap_or("none");
+                    let failure = first_bmc_failure(&model, &result, deadlock_mode, policy);
+                    assert_eq!(
+                        failure_label(failure.as_ref()),
+                        expected,
+                        "violation={violation} unreached={unreached} deadlock={deadlock} \
+                         leadsto={leadsto} mode={deadlock_mode:?} policy={policy:?}"
+                    );
+                    cases += 1;
+                }
+            }
+        }
+        assert_eq!(cases, 96);
+    }
+
+    /// The failure carries the field it names: the violation, the deadlock
+    /// step, the leadsTo violation, and the unreached model reachables in
+    /// `result.reachables` order.
+    #[test]
+    fn first_bmc_failure_carries_the_failing_field() {
+        let model = two_reachables_model();
+        let fail = UnreachedReachables::Fail;
+
+        let result = bmc_result(&[], true, true, true);
+        let Some(BmcRunFailure::Violation(violation)) =
+            first_bmc_failure(&model, &result, DeadlockMode::Error, fail)
+        else {
+            panic!("expected a violation");
+        };
+        assert_eq!(violation.name, "Safety");
+
+        let result = bmc_result(&[], false, true, true);
+        let failure = first_bmc_failure(&model, &result, DeadlockMode::Error, fail);
+        assert!(
+            matches!(failure, Some(BmcRunFailure::Deadlock(2))),
+            "{failure:?}"
+        );
+
+        let result = bmc_result(&[], false, true, true);
+        let Some(BmcRunFailure::LeadsTo(violation)) =
+            first_bmc_failure(&model, &result, DeadlockMode::Warn, fail)
+        else {
+            panic!("expected a leadsTo violation");
+        };
+        assert_eq!(violation.name, "Response");
+
+        let result = bmc_result(
+            &[("Alpha", false), ("Ghost", false), ("Zed", false)],
+            false,
+            false,
+            false,
+        );
+        let Some(BmcRunFailure::Unreached(unreached)) =
+            first_bmc_failure(&model, &result, DeadlockMode::Warn, fail)
+        else {
+            panic!("expected unreached reachables");
+        };
+        let names = unreached
+            .iter()
+            .map(|property| property.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["Alpha", "Zed"]);
+
+        // A run entry the model does not declare is no failure of the model.
+        let result = bmc_result(
+            &[("Alpha", true), ("Ghost", false), ("Zed", true)],
+            false,
+            false,
+            false,
+        );
+        assert!(first_bmc_failure(&model, &result, DeadlockMode::Warn, fail).is_none());
     }
 
     #[test]

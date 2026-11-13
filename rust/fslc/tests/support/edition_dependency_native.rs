@@ -251,7 +251,7 @@ fn ledger_overlay_uses_captured_root_after_disk_changes() {
         depth: 2, deadlock: "ignore".into(), engine: "bmc".into(),
     });
     let request = LedgerReportRequest {
-        path: &path, depth: 2, deadlock_mode: "ignore", engine: "bmc",
+        path: &path, options: DerivedRunOptions::ledger(2, "ignore", "bmc"),
         impl_log: None, evidence_paths: &[], output_path: None,
     };
     let (rendered, status) = generate_unapproved_ledger_report_from_source(&request, &source, None);
@@ -433,14 +433,17 @@ fn dependency_edition_standalone_and_nested_whole_reports_keep_independent_findi
         };
         for kind in ["html", "ledger"] {
             let standalone = if kind == "html" {
-                run_html_report_with_timing(&path, 2, "ignore", "bmc", None, false)
+                run_html_report_with_timing(
+                    &path,
+                    DerivedRunOptions::html(2, "ignore", "bmc"),
+                    None,
+                    false,
+                )
             } else {
                 run_ledger_report_from_source(
                     &LedgerReportRequest {
                         path: &path,
-                        depth: 2,
-                        deadlock_mode: "ignore",
-                        engine: "bmc",
+                        options: DerivedRunOptions::ledger(2, "ignore", "bmc"),
                         impl_log: None,
                         evidence_paths: &[],
                         output_path: None,
