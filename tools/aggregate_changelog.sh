@@ -2945,6 +2945,7 @@ case "${1:-}" in
   selftest) shift; selftest "$@" ;;
   *)
     echo "usage: $0 {check|check-pr|check-stale|check-section|release|fold|selftest} [args]" >&2
+    echo "       check-pr reads BASE_SHA and HEAD_SHA from the environment" >&2
     exit 2
     ;;
 esac

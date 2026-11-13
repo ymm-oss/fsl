@@ -14,7 +14,10 @@ view. **No LLM used** (deterministic formatting only; prose generation is left
 to the agent-side skill). The verification engine is unmodified; #6 mutate and
 verify are reused. The text prints no witness or counterfactual, so
 `--readable` does not compute them (#1839); only its `Implements:` section
-runs a refinement check.
+runs a refinement check. Its second line is still
+`Counterfactual scope: invariant/reachable (leadsTo liveness skipped; use verify)`
+(`rust/fslc/src/main.rs:10996-11000`). That line states the scope of the JSON
+form's counterfactual analysis; the readable text computed none.
 
 ```json
 {"result":"explained",
@@ -160,22 +163,72 @@ unchanged byte for byte apart from `cost.elapsed_s`; no budget truncates them.
   invariant. If a printed outcome carries a solver-chosen value, the
   per-invariant runs are then made in order on the thread's own context, as
   before #1838, up to the last such outcome, and the solver-chosen outcomes
-  are taken from them. The unit test
-  `shared_counterfactual_runs_print_the_unshared_output` compares this with
-  making every run in order from the same context.
+  are taken from them.
+- **Tests.** `shared_counterfactual_runs_print_the_unshared_output`
+  (`rust/fslc/src/main.rs:20108`) compares the JSON of `explain` at depth 4
+  on `examples/nfr/support_sla.fsl` and `examples/self/refinement_algebra.fsl`,
+  without `cost.elapsed_s`, with a reference whose invariant phase makes each
+  per-invariant run in order on one context: no screening, no fair-removal
+  sharing, no fresh context and no replay (`unshared_counterfactual_runs`,
+  read at `main.rs:10344` and `10643`). The reachable phase has no such switch:
+  both sides skip weakenings without a reachable and share fair-removal runs
+  (`main.rs:9821-9841`), so the test does not check those shortcuts.
+  `explain_counterfactual_runs_are_pinned` (`main.rs:20056`) pins, on one
+  small spec, the property and weakening operator of each entry of both
+  phases and the number of bounded runs and concrete searches. `screening_keeps_counterfactuals_behind_a_preempting_bound`
+  (`main.rs:20150`) checks that a screening run stopped by a type bound
+  screens nothing: the counterfactual and the preemption note remain.
 
-## 5. Ripple / tests
+## 5. Implementation / tests
 
-New `src/fslc/explain.py` (~120 lines, reusing mutate/verify) + a cli subcommand. Display
-names only (no internal-name leakage), including nested counterfactual violation payloads
-where `invariant` carries the public dotted name and no raw `internal_invariant` duplicate is
-emitted. JSON-serializable. tests/test_explain.py: cart_v1
-skeleton / the `ShippedWasPaid` counterfactual appears via **assignment removal** /
-the dialect cancel_flow carries the original requirement text / compose does not crash /
-exit 0. Roadmap #1. The frozen Python test also expects no counterfactual for
-`NonNegativeRevenue`; that historical first-kill behavior is not the native
-contract after #1350. Native regression tests cover shared-mutant per-invariant
-and per-reachable attribution plus the actual violating successor and its changes.
+`explain` is implemented in native Rust in `rust/fslc/src/main.rs`; the
+frozen Python `src/fslc/explain.py` is a compatibility reference only.
+
+- **Entry.** `explain` parses with `mutate` and `typestate`
+  (`MutationFamilyOptions`) and calls `run_explain` (`main.rs:1329-1342`,
+  `10844`). `run_explain_from_source_with_names` (`main.rs:10890`) runs
+  `run_explain_lowering_from_source` for `--lowering` (`main.rs:10874`; its
+  output is `result`, `spec` and `lowering` only) and `run_explain_from_source`
+  (`main.rs:10923`) otherwise, then respells the output with
+  `name_display::respell`, glossary aliases unless `--names canonical`
+  (`main.rs:10903-10913`).
+- **JSON.** `run_explain_from_source` returns the trace gate's error for a
+  spec whose acceptance/forbidden traces the gate refuses
+  (`main.rs:10933-10939`, #1242), then adds `counterfactual_scope`, the
+  `skeleton` from `model_skeleton` (`main.rs:9247`) and, for an `fsl 5`
+  requirements document, `readings` (`main.rs:10946-10958`). Without
+  `--readable` it adds `witnesses` (`witness_scenarios`, `explain_witnesses`;
+  `main.rs:6099`, `9406`), `counterfactuals`
+  (`invariant_counterfactuals_from_source`, `main.rs:10566`, over mutate's
+  built-in `assignment_remove`/`requires_remove`/`fair_remove` mutants,
+  `main.rs:10606-10613`) and, when non-empty, `reachable_counterfactuals`
+  (`reachable_counterfactuals_from_source`, `main.rs:9779`, over
+  `weakening_candidates`, `main.rs:9658`) (`main.rs:10961-10994`).
+- **Readable text.** `main.rs:10995-11168` writes the header, `Verification
+  world:`, `State:`, `Lifecycles:`, `Implements:`, `Actions:`, `Properties:`
+  and `Automatic checks:` (type bounds only) into `readable`. `Implements:`
+  comes from `readable_implements_text_from_source` (`main.rs:10826`), which
+  runs `implements_result_from_source` (`main.rs:18789`) bounded by `--depth`.
+- **Display names.** Names are printed through `model.names()` public
+  spellings (for example `main.rs:11014-11021`, `11141-11145`), and branch
+  actions recover their authored name from origin metadata
+  (`main.rs:11040-11047`, §6).
+- **Tests.** `rust/fslc/tests/explain_cli.rs` (skeleton, branch display
+  names, `spec_kind`, `auto_checks`, generated-declaration provenance,
+  readable origins and counterfactual controls); the #1350 files
+  `issue_1350_explain_lowering.rs` (named guards in both counterfactual
+  phases), `issue_1350_preemption.rs` and
+  `issue_1350_preemption_fallback_edges.rs` (non-target preemption and the
+  concrete fallback search) and `issue_1350_shared_guard.rs` (one weakening
+  credited to every affected invariant or reachable); `fsl5_implicit_readings.rs`
+  (`readings`); and in `main.rs`
+  `readable_explain_runs_no_bounded_verification` (`main.rs:20027`, #1839)
+  plus the #1838 tests in §4. The frozen Python `tests/test_explain.py` covers
+  the Python reference (cart_v1 skeleton, `ShippedWasPaid` via assignment
+  removal, cancel_flow requirement text, compose, no raw
+  `internal_invariant`). It also expects no counterfactual for
+  `NonNegativeRevenue`; that historical first-kill behavior is not the native
+  contract after #1350.
 
 ## 6. Native skeleton restoration (issues #528, #530)
 
