@@ -9540,228 +9540,74 @@ fn explain_witnesses(model: &KernelModel, scenarios: &Value) -> Value {
     Value::Array(witnesses)
 }
 
-#[derive(Clone)]
-struct WeakeningCandidate {
-    spec: fsl_syntax::SurfaceSpec,
-    op: &'static str,
-    span: fsl_syntax::Span,
-    target: String,
-    origin: Option<&'static str>,
-}
-
-fn statement_removals(
-    statements: &[KernelStatement],
-) -> Vec<(Vec<KernelStatement>, fsl_syntax::Span)> {
-    let mut output = Vec::new();
-    for (index, statement) in statements.iter().enumerate() {
-        match statement {
-            KernelStatement::Assign { span, .. } => {
-                let mut replacement = statements.to_vec();
-                replacement.remove(index);
-                output.push((replacement, *span));
-            }
-            KernelStatement::If {
-                condition,
-                then_statements,
-                else_statements,
-                span,
-            } => {
-                for (nested, nested_span) in statement_removals(then_statements) {
-                    let mut replacement = statements.to_vec();
-                    replacement[index] = KernelStatement::If {
-                        condition: condition.clone(),
-                        then_statements: nested,
-                        else_statements: else_statements.clone(),
-                        span: *span,
-                    };
-                    output.push((replacement, nested_span));
-                }
-                for (nested, nested_span) in statement_removals(else_statements) {
-                    let mut replacement = statements.to_vec();
-                    replacement[index] = KernelStatement::If {
-                        condition: condition.clone(),
-                        then_statements: then_statements.clone(),
-                        else_statements: nested,
-                        span: *span,
-                    };
-                    output.push((replacement, nested_span));
-                }
-            }
-            KernelStatement::ForAll {
-                binder,
-                statements: body,
-                span,
-            } => {
-                for (nested, nested_span) in statement_removals(body) {
-                    let mut replacement = statements.to_vec();
-                    replacement[index] = KernelStatement::ForAll {
-                        binder: binder.clone(),
-                        statements: nested,
-                        span: *span,
-                    };
-                    output.push((replacement, nested_span));
-                }
-            }
+/// The root document both counterfactual phases weaken: the validated kernel
+/// syntax of a spec, business, requirements or compose document, or `None`
+/// for any other document.
+fn counterfactual_document(path: &Path, source: &str) -> Option<fsl_syntax::SurfaceSpec> {
+    match parse_surface_document_from_source(path, source).ok()? {
+        fsl_syntax::SurfaceDocument::Spec(_)
+        | fsl_syntax::SurfaceDocument::Business(_)
+        | fsl_syntax::SurfaceDocument::Requirements(_)
+        | fsl_syntax::SurfaceDocument::Compose(_) => {
+            let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
+            fsl_core::parse_kernel_source_with_options(source, &resolver, crate::parse_options())
+                .ok()?
+                .into_validated_syntax()
+                .ok()
         }
-    }
-    output
-}
-
-fn action_statement_removals(
-    statement: &KernelStatement,
-) -> Vec<(Option<KernelStatement>, fsl_syntax::Span)> {
-    match statement {
-        KernelStatement::Assign { span, .. } => vec![(None, *span)],
-        KernelStatement::If {
-            condition,
-            then_statements,
-            else_statements,
-            span,
-        } => {
-            let mut output = Vec::new();
-            for (nested, nested_span) in statement_removals(then_statements) {
-                output.push((
-                    Some(KernelStatement::If {
-                        condition: condition.clone(),
-                        then_statements: nested,
-                        else_statements: else_statements.clone(),
-                        span: *span,
-                    }),
-                    nested_span,
-                ));
-            }
-            for (nested, nested_span) in statement_removals(else_statements) {
-                output.push((
-                    Some(KernelStatement::If {
-                        condition: condition.clone(),
-                        then_statements: then_statements.clone(),
-                        else_statements: nested,
-                        span: *span,
-                    }),
-                    nested_span,
-                ));
-            }
-            output
-        }
-        KernelStatement::ForAll {
-            binder,
-            statements,
-            span,
-        } => statement_removals(statements)
-            .into_iter()
-            .map(|(statements, nested_span)| {
-                (
-                    Some(KernelStatement::ForAll {
-                        binder: binder.clone(),
-                        statements,
-                        span: *span,
-                    }),
-                    nested_span,
-                )
-            })
-            .collect(),
+        _ => None,
     }
 }
 
-fn weakening_candidates(
-    spec: &fsl_syntax::SurfaceSpec,
-    action_label: &dyn Fn(&str) -> String,
-) -> Vec<WeakeningCandidate> {
-    let mut candidates = Vec::new();
-    for (item_index, item) in spec.items.iter().enumerate() {
-        match item {
-            fsl_syntax::SpecItem::Init {
-                statements,
-                meta,
-                annotations,
-            } => {
-                for (replacement, span) in statement_removals(statements) {
-                    let mut mutated = spec.clone();
-                    mutated.items[item_index] = fsl_syntax::SpecItem::Init {
-                        statements: replacement,
-                        meta: meta.clone(),
-                        annotations: annotations.clone(),
-                    };
-                    candidates.push(WeakeningCandidate {
-                        spec: mutated,
-                        op: "assignment-removal",
-                        span,
-                        target: "init assignment".to_owned(),
-                        origin: Some("init"),
-                    });
-                }
-            }
-            fsl_syntax::SpecItem::Action {
-                name,
-                items,
-                span: action_span,
-                fair,
-                ..
-            } => {
-                let label = action_label(name);
-                let mut require_number = 0;
-                for (part_index, part) in items.iter().enumerate() {
-                    if let fsl_syntax::ActionItem::Requires(_, span) = part {
-                        require_number += 1;
-                        let mut mutated = spec.clone();
-                        if let fsl_syntax::SpecItem::Action { items, .. } =
-                            &mut mutated.items[item_index]
-                        {
-                            items.remove(part_index);
-                        }
-                        candidates.push(WeakeningCandidate {
-                            spec: mutated,
-                            op: "requires-removal",
-                            span: *span,
-                            target: format!("{label} requires #{require_number}"),
-                            origin: None,
-                        });
-                    }
-                }
-                for (part_index, part) in items.iter().enumerate() {
-                    let fsl_syntax::ActionItem::Statement(statement) = part else {
-                        continue;
-                    };
-                    for (replacement, span) in action_statement_removals(statement) {
-                        let mut mutated = spec.clone();
-                        if let fsl_syntax::SpecItem::Action { items, .. } =
-                            &mut mutated.items[item_index]
-                        {
-                            if let Some(replacement) = replacement {
-                                items[part_index] = fsl_syntax::ActionItem::Statement(replacement);
-                            } else {
-                                items.remove(part_index);
-                            }
-                        }
-                        candidates.push(WeakeningCandidate {
-                            spec: mutated,
-                            op: "assignment-removal",
-                            span,
-                            target: format!("{label} assignment"),
-                            origin: None,
-                        });
-                    }
-                }
-                if *fair {
-                    let mut mutated = spec.clone();
-                    if let fsl_syntax::SpecItem::Action { fair, .. } =
-                        &mut mutated.items[item_index]
-                    {
-                        *fair = false;
-                    }
-                    candidates.push(WeakeningCandidate {
-                        spec: mutated,
-                        op: "fair-removal",
-                        span: *action_span,
-                        target: format!("{label} fair"),
-                        origin: None,
-                    });
-                }
-            }
-            _ => {}
-        }
+/// The weakenings both counterfactual phases try, in
+/// [`fsl_tools::enumerate_builtin_mutants`] order, each with its location.
+fn counterfactual_weakenings(
+    document: &fsl_syntax::SurfaceSpec,
+) -> impl Iterator<Item = (fsl_tools::BuiltinMutant, fsl_syntax::Span)> {
+    fsl_tools::enumerate_builtin_mutants(document)
+        .into_iter()
+        .filter(|candidate| {
+            matches!(
+                candidate.op.as_str(),
+                "assignment_remove" | "requires_remove" | "fair_remove"
+            )
+        })
+        .filter_map(|candidate| {
+            let span = candidate.span?;
+            Some((candidate, span))
+        })
+}
+
+/// The `weakening` object of a counterfactual entry for `candidate`, one of
+/// [`counterfactual_weakenings`]. `init` marks it as a weakening of `init`.
+fn weakening_json(
+    names: &KernelModel,
+    candidate: &fsl_tools::BuiltinMutant,
+    span: &fsl_syntax::Span,
+    lines: &[&str],
+    init: bool,
+) -> Value {
+    let op = match candidate.op.as_str() {
+        "assignment_remove" => "assignment-removal",
+        "requires_remove" => "requires-removal",
+        "fair_remove" => "fair-removal",
+        _ => unreachable!("filtered weakening operator"),
+    };
+    let line = usize::try_from(span.start.line).unwrap_or_default();
+    let mut weakening = json!({
+        "op": op,
+        "loc": span.python_loc(),
+        "target": names
+            .names()
+            .public_action_target(&candidate.target, candidate.action.as_deref())
+            .as_str(),
+        "source_text": lines.get(line.saturating_sub(1)).map(|line| line.trim()),
+    });
+    if init && let Value::Object(value) = &mut weakening {
+        value.insert("origin".to_owned(), json!("init"));
+        value.insert("label".to_owned(), json!("init weakening"));
     }
-    candidates
+    weakening
 }
 
 /// The reachables a bounded run of the weakened `model` leaves unreached, or
@@ -9791,28 +9637,8 @@ fn reachable_counterfactuals_from_source(
     depth: usize,
     runs: &WeakenedModelRuns,
 ) -> Value {
-    let Ok(parsed) = parse_surface_document_from_source(path, source) else {
+    let Some(document) = counterfactual_document(path, source) else {
         return json!([]);
-    };
-    let document = match parsed {
-        fsl_syntax::SurfaceDocument::Spec(_)
-        | fsl_syntax::SurfaceDocument::Business(_)
-        | fsl_syntax::SurfaceDocument::Requirements(_)
-        | fsl_syntax::SurfaceDocument::Compose(_) => {
-            let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
-            let Ok(kernel) = fsl_core::parse_kernel_source_with_options(
-                source,
-                &resolver,
-                crate::parse_options(),
-            ) else {
-                return json!([]);
-            };
-            let Ok(document) = kernel.into_validated_syntax() else {
-                return json!([]);
-            };
-            document
-        }
-        _ => return json!([]),
     };
     let lines = source.lines().collect::<Vec<_>>();
     let mut output = Vec::new();
@@ -9820,8 +9646,8 @@ fn reachable_counterfactuals_from_source(
         KernelModel,
         Option<std::collections::BTreeSet<String>>,
     )> = None;
-    for candidate in weakening_candidates(&document, &|name| names.action_display_name(name)) {
-        let Ok(mut model) = fsl_core::build_surface_model(candidate.spec) else {
+    for (candidate, span) in counterfactual_weakenings(&document) {
+        let Ok(mut model) = fsl_core::build_surface_model(candidate.materialize(&document)) else {
             continue;
         };
         model.inherit_compose_names(names);
@@ -9834,7 +9660,7 @@ fn reachable_counterfactuals_from_source(
         // cost while discarding its result, especially for quantified
         // liveness with mixed fair/non-fair actions (issue #633).
         model.leadstos.clear();
-        let fairless = (candidate.op == "fair-removal").then(|| without_fairness(&model));
+        let fairless = (candidate.op == "fair_remove").then(|| without_fairness(&model));
         let unreached = if let Some((_, unreached)) = fair_removal_unreached
             .as_ref()
             .filter(|(cached, _)| fairless.as_ref() == Some(cached))
@@ -9855,22 +9681,9 @@ fn reachable_counterfactuals_from_source(
             .iter()
             .filter(|property| unreached.contains(&property.name))
         {
-            let line = usize::try_from(candidate.span.start.line).unwrap_or_default();
-            let mut weakening = json!({
-                "op":candidate.op,
-                "loc":candidate.span.python_loc(),
-                "target":candidate.target,
-                "source_text":lines.get(line.saturating_sub(1)).map(|line|line.trim()),
-            });
-            if let Some(origin) = candidate.origin
-                && let Value::Object(value) = &mut weakening
-            {
-                value.insert("origin".to_owned(), json!(origin));
-                value.insert("label".to_owned(), json!("init weakening"));
-            }
             let mut item = json!({
                 "property":model.names().public_property(&property.name).into_string(),
-                "weakening":weakening,
+                "weakening":weakening_json(names, &candidate, &span, &lines, candidate.edits_init()),
                 "result":"reachable_failed",
                 "requirement":Value::Null,
             });
@@ -10586,28 +10399,8 @@ fn invariant_counterfactuals_from_source(
     depth: usize,
     runs: &mut WeakenedModelRuns,
 ) -> Value {
-    let Ok(parsed) = parse_surface_document_from_source(path, source) else {
+    let Some(document) = counterfactual_document(path, source) else {
         return json!([]);
-    };
-    let document = match parsed {
-        fsl_syntax::SurfaceDocument::Spec(_)
-        | fsl_syntax::SurfaceDocument::Business(_)
-        | fsl_syntax::SurfaceDocument::Requirements(_)
-        | fsl_syntax::SurfaceDocument::Compose(_) => {
-            let resolver = dependency_resolver(path.parent().unwrap_or_else(|| Path::new(".")));
-            let Ok(kernel) = fsl_core::parse_kernel_source_with_options(
-                source,
-                &resolver,
-                crate::parse_options(),
-            ) else {
-                return json!([]);
-            };
-            let Ok(document) = kernel.into_validated_syntax() else {
-                return json!([]);
-            };
-            document
-        }
-        _ => return json!([]),
     };
     let Ok(original) = fsl_core::build_surface_model(document.clone()) else {
         return json!([]);
@@ -10619,18 +10412,7 @@ fn invariant_counterfactuals_from_source(
         std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
     let mut skipped_init_roots = std::collections::BTreeSet::new();
     let mut weakenings = Vec::new();
-    for candidate in fsl_tools::enumerate_builtin_mutants(&document)
-        .into_iter()
-        .filter(|candidate| {
-            matches!(
-                candidate.op.as_str(),
-                "assignment_remove" | "requires_remove" | "fair_remove"
-            )
-        })
-    {
-        let Some(span) = candidate.span else {
-            continue;
-        };
+    for (candidate, span) in counterfactual_weakenings(&document) {
         let mutated_spec = candidate.materialize(&document);
         let removed_init_root = (candidate.op == "assignment_remove"
             && candidate.action.as_deref() == Some("init"))
@@ -10741,28 +10523,13 @@ fn invariant_counterfactuals_from_source(
             let violation = &canonical_violation;
             let (trace, explanation) =
                 invariant_violation_explanation(&model, &canonical_violation, started);
-            let line = usize::try_from(span.start.line).unwrap_or_default();
-            let op = match candidate.op.as_str() {
-                "assignment_remove" => "assignment-removal",
-                "requires_remove" => "requires-removal",
-                "fair_remove" => "fair-removal",
-                _ => unreachable!("filtered weakening operator"),
-            };
-            let mut weakening = json!({
-                "op": op,
-                "loc": span.python_loc(),
-                "target": names
-                    .names()
-                    .public_action_target(&candidate.target, candidate.action.as_deref())
-                    .as_str(),
-                "source_text": lines.get(line.saturating_sub(1)).map(|line| line.trim()),
-            });
-            if candidate.action.as_deref() == Some("init")
-                && let Value::Object(value) = &mut weakening
-            {
-                value.insert("origin".to_owned(), json!("init"));
-                value.insert("label".to_owned(), json!("init weakening"));
-            }
+            let weakening = weakening_json(
+                names,
+                candidate,
+                span,
+                &lines,
+                candidate.action.as_deref() == Some("init"),
+            );
             let key = counterfactual_rank(&candidate.op, span, &canonical_violation);
             let property = original
                 .invariants
