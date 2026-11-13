@@ -488,6 +488,8 @@ pub fn check_requirements_implements(
     model: &KernelModel,
     depth: usize,
 ) -> Result<Option<Value>, RequirementsImplementsError> {
+    use crate::outcome::{RefineFailure, RefineOutcome, refine_outcome};
+
     let Some(contract) = contract else {
         return Ok(None);
     };
@@ -497,8 +499,9 @@ pub fn check_requirements_implements(
                 message: error.to_string(),
                 span: None,
             })?;
-    Ok(Some(match checked.verdict() {
-        fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
+    let outcome = refine_outcome(checked.verdict());
+    Ok(Some(match outcome {
+        RefineOutcome::Inconclusive { states_explored } => {
             // The correspondence walk hit `IMPLEMENTS_SEARCH_BUDGET` states
             // (issue #1041) before deciding `refines`/`refinement_failed`/
             // `impl_violated` within `depth`: reporting any of those would be a
@@ -508,30 +511,30 @@ pub fn check_requirements_implements(
             // only meaningful on a walk that actually reached a decision.
             json!({
                 "abs": contract.abstraction.name,
-                "result": "unknown_budget",
+                "result": outcome.result(),
                 "states_explored": states_explored,
                 "hint": "inline implements correspondence search reached its state budget; \
                          narrow the verify {} domains of both layers, or verify each layer separately \
                          with `fslc verify` (`fslc refine` shares the same budget)",
             })
         }
-        fsl_runtime::RefinementVerdict::ImplViolated { violation, .. } => {
+        RefineOutcome::Failed(RefineFailure::ImplViolated { violation, .. }) => {
             // The impl itself violates its own type bounds/invariants (#466):
             // a property of the refinement input, not a refinement fidelity
             // verdict, so it must not be reported `refines`.
             json!({
                 "abs": contract.abstraction.name,
-                "result": "impl_violated",
+                "result": outcome.result(),
                 "violation": {"result": "violated", "kind": violation.kind},
             })
         }
-        fsl_runtime::RefinementVerdict::Failed(failure) => json!({
+        RefineOutcome::Failed(RefineFailure::RefinementFailed(failure)) => json!({
             "abs": contract.abstraction.name,
-            "result": "refinement_failed",
+            "result": outcome.result(),
             "violation": {"result": "refinement_failed", "kind": failure.kind},
         }),
-        fsl_runtime::RefinementVerdict::Refines => {
-            json!({"abs": contract.abstraction.name, "result": "refines"})
+        RefineOutcome::Refines => {
+            json!({"abs": contract.abstraction.name, "result": outcome.result()})
         }
     }))
 }

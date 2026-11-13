@@ -857,6 +857,113 @@ impl Verdict {
     }
 }
 
+/// The public reading of one refinement walk: the one owner of the
+/// projection `fsl_runtime::RefinementVerdict` -> (result word, exit code,
+/// failure kind), built by [`refine_outcome`]. `fslc refine` (and `chain`'s
+/// refine layer through it), inline `implements`, the Worker's governance
+/// preservations, `fslc diff` and the `mutate` implements oracle read it; each
+/// still renders its own JSON around the evidence a variant carries.
+///
+/// The variants are the failure kind. [`RefineOutcome::Inconclusive`] is a
+/// walk cut off by `fsl_runtime::IMPLEMENTS_SEARCH_BUDGET`: it decided
+/// nothing, so `mutate` reports the mutant inconclusive, while a command that
+/// publishes the walk reports `unknown_budget` and exits 1.
+/// [`RefineOutcome::Failed`] is a decided failure.
+///
+/// This is a refine-side type rather than a `Verdict::Refines` variant.
+/// [`Verdict`] is the vocabulary of a verification envelope's `result`:
+/// `tests/corpus_check_sweep.rs` restates each of its verification verdicts
+/// as a public `verify` exit, and `Verdict::from_result("refines")` is pinned
+/// to `None` because `refines` is not a `check`/`verify` result. The failure
+/// arms take their word and exit from [`Verdict`], so the exit table keeps
+/// one owner; only `refines` and its exit 0 are spelled here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+pub enum RefineOutcome<'a> {
+    /// `refines`: every implementation transition within the depth corresponds.
+    Refines,
+    /// `unknown_budget`: the walk stopped at its state budget before deciding
+    /// within the depth. Neither `refines` nor a failure is known.
+    Inconclusive { states_explored: usize },
+    /// A decided failure: `impl_violated` or `refinement_failed`.
+    Failed(RefineFailure<'a>),
+}
+
+/// A decided refinement failure and the evidence behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+pub enum RefineFailure<'a> {
+    /// `impl_violated`: the implementation violates its own semantics within
+    /// the depth, before any correspondence was attempted.
+    ImplViolated {
+        violation: &'a fsl_runtime::Violation,
+        trace: &'a [fsl_core::TraceStep],
+    },
+    /// `refinement_failed`: an implementation transition does not correspond
+    /// to the abstraction.
+    RefinementFailed(&'a fsl_runtime::RefinementFailure),
+}
+
+impl RefineFailure<'_> {
+    /// The [`Verdict`] that owns this failure's word and exit.
+    pub const fn verdict(self) -> Verdict {
+        match self {
+            Self::ImplViolated { .. } => Verdict::ImplViolated,
+            Self::RefinementFailed(_) => Verdict::RefinementFailed,
+        }
+    }
+}
+
+impl RefineOutcome<'_> {
+    /// The [`Verdict`] of a walk that did not refine; `None` for `refines`.
+    #[must_use]
+    pub const fn verdict(self) -> Option<Verdict> {
+        match self {
+            Self::Refines => None,
+            Self::Inconclusive { .. } => Some(Verdict::UnknownBudget),
+            Self::Failed(failure) => Some(failure.verdict()),
+        }
+    }
+
+    /// The public `result` word.
+    #[must_use]
+    pub const fn result(self) -> &'static str {
+        match self.verdict() {
+            Some(verdict) => verdict.result(),
+            None => "refines",
+        }
+    }
+
+    /// The process exit status of a command that reports this walk as its
+    /// verdict.
+    #[must_use]
+    pub const fn exit_code(self) -> i32 {
+        match self.verdict() {
+            Some(verdict) => verdict.exit_code(),
+            None => SUCCESS_EXIT,
+        }
+    }
+}
+
+/// Read a refinement check's verdict as its [`RefineOutcome`]. The only
+/// `match` on `fsl_runtime::RefinementVerdict` in `fslc-rust` and
+/// `fsl-wasm` product code; `fsl-runtime`'s own `fsl-refine` driver keeps its
+/// own, because `fsl-runtime` cannot depend on this crate.
+pub fn refine_outcome(verdict: fsl_runtime::RefinementVerdict<'_>) -> RefineOutcome<'_> {
+    match verdict {
+        fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
+            RefineOutcome::Inconclusive { states_explored }
+        }
+        fsl_runtime::RefinementVerdict::ImplViolated { violation, trace } => {
+            RefineOutcome::Failed(RefineFailure::ImplViolated { violation, trace })
+        }
+        fsl_runtime::RefinementVerdict::Failed(failure) => {
+            RefineOutcome::Failed(RefineFailure::RefinementFailed(failure))
+        }
+        fsl_runtime::RefinementVerdict::Refines => RefineOutcome::Refines,
+    }
+}
+
 /// Whether `status` is one of the error exits (spec error or internal), as
 /// opposed to a verdict about the spec.
 #[must_use]
@@ -1357,5 +1464,74 @@ mod tests {
         }
         assert_eq!(Verdict::from_result("error"), None);
         assert_eq!(Verdict::from_result("refines"), None);
+    }
+
+    /// Issue #1870: each `RefinementVerdict` arm's public word, exit and
+    /// failure kind, written out here independently of the owner, and the
+    /// class [`outcome_class`] gives the word.
+    #[test]
+    fn refine_outcome_projects_every_refinement_verdict() {
+        use super::{RefineOutcome, refine_outcome};
+        use fsl_runtime::RefinementVerdict;
+
+        let violation = fsl_runtime::Violation {
+            kind: "invariant".to_owned(),
+            name: "Inv".to_owned(),
+            step: 1,
+        };
+        let failure = fsl_runtime::RefinementFailure {
+            kind: "stutter_changed_abs".to_owned(),
+            at: None,
+            step: 1,
+            impl_action: None,
+            alpha_before: None,
+            alpha_after_expected: None,
+            alpha_after_actual: None,
+            abs_violation: None,
+            alpha_after_attempted: None,
+            impl_trace: Vec::new(),
+        };
+        for (verdict, result, exit, inconclusive) in [
+            (
+                RefinementVerdict::BudgetExhausted { states_explored: 7 },
+                "unknown_budget",
+                1,
+                true,
+            ),
+            (
+                RefinementVerdict::ImplViolated {
+                    violation: &violation,
+                    trace: &[],
+                },
+                "impl_violated",
+                1,
+                false,
+            ),
+            (
+                RefinementVerdict::Failed(&failure),
+                "refinement_failed",
+                1,
+                false,
+            ),
+            (RefinementVerdict::Refines, "refines", 0, false),
+        ] {
+            let outcome = refine_outcome(verdict);
+            assert_eq!(outcome.result(), result, "{verdict:?}");
+            assert_eq!(outcome.exit_code(), exit, "{verdict:?}");
+            assert_eq!(
+                matches!(outcome, RefineOutcome::Inconclusive { .. }),
+                inconclusive,
+                "{verdict:?}"
+            );
+            assert_eq!(
+                outcome_class(&json!({"result": outcome.result()})).is_success(),
+                exit == 0,
+                "{verdict:?}"
+            );
+        }
+        assert_eq!(
+            refine_outcome(RefinementVerdict::BudgetExhausted { states_explored: 7 }),
+            RefineOutcome::Inconclusive { states_explored: 7 }
+        );
     }
 }
