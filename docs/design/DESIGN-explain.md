@@ -199,11 +199,19 @@ frozen Python `src/fslc/explain.py` is a compatibility reference only.
   requirements document, `readings` (`main.rs:10946-10958`). Without
   `--readable` it adds `witnesses` (`witness_scenarios`, `explain_witnesses`;
   `main.rs:6099`, `9406`), `counterfactuals`
-  (`invariant_counterfactuals_from_source`, `main.rs:10566`, over mutate's
-  built-in `assignment_remove`/`requires_remove`/`fair_remove` mutants,
-  `main.rs:10606-10613`) and, when non-empty, `reachable_counterfactuals`
-  (`reachable_counterfactuals_from_source`, `main.rs:9779`, over
-  `weakening_candidates`, `main.rs:9658`) (`main.rs:10961-10994`).
+  (`invariant_counterfactuals_from_source`, `main.rs:10395`) and, when
+  non-empty, `reachable_counterfactuals`
+  (`reachable_counterfactuals_from_source`, `main.rs:9633`)
+  (`main.rs:10961-10994`). Both phases read their document through
+  `counterfactual_document` (`main.rs:9546`) and try the same weakenings,
+  `counterfactual_weakenings` (`main.rs:9564`): mutate's built-in
+  `assignment_remove`/`requires_remove`/`fair_remove` mutants in
+  `fsl_tools::enumerate_builtin_mutants` order (#1169). `weakening_json`
+  (`main.rs:9583`) prints each as its `weakening` object; its `init`
+  argument is the one difference between the phases: the reachable phase
+  marks a mutant of the `init` block (`BuiltinMutant::edits_init`), the
+  invariant phase every mutant whose action is named `init`, which includes
+  the mutants of an action named `init`.
 - **Readable text.** `main.rs:10995-11168` writes the header, `Verification
   world:`, `State:`, `Lifecycles:`, `Implements:`, `Actions:`, `Properties:`
   and `Automatic checks:` (type bounds only) into `readable`. `Implements:`
