@@ -1214,8 +1214,9 @@ refinement <Name> {
 ```
 
 `<AbsLeadsTo>` is the upper `leadsTo`'s canonical name, matched exactly and
-read like a requirement-style ID: a business policy is named by its policy ID
-as declared, bare (`respond POL-WAIT-001 by promote`, #1782). A quoted name is
+read like a requirement-style ID: a business or `fsl 5` requirements policy is
+named by its policy ID as declared, bare (`respond POL-WAIT-001 by promote`,
+#1782). A quoted name is
 a parse error. An unknown name is `error/type` at `respond`, and the message
 lists the upper spec's `leadsTo` names.
 

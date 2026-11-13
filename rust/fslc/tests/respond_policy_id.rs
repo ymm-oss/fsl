@@ -2,10 +2,11 @@
 // Copyright 2026 Ryoichi Izumita
 
 //! #1782 / #1276: `preserve progress { respond <ID> by … }` names an abstract
-//! leadsTo by its canonical ID. A business policy's leadsTo is named only by
-//! its policy ID (`POL-WAIT-001`), so `respond` reads that ID with the same
-//! rule as the `policy` declaration, and the refinement checks the property
-//! the business spec declares without the spec being rewritten.
+//! leadsTo by its canonical ID. A business (or `fsl 5` requirements) policy's
+//! leadsTo is named only by its policy ID (`POL-WAIT-001`), so `respond` reads
+//! that ID with the same rule as the `policy` declaration, and the refinement
+//! checks the property the upper spec declares without the spec being
+//! rewritten.
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -95,7 +96,31 @@ impl Fixture {
     }
 }
 
-fn mapping(implementation: &str, respond: &str) -> String {
+/// The same policy declared in an `fsl 5` requirements document, whose
+/// policies also lower to a leadsTo named by the policy ID.
+const REQUIREMENTS: &str = "fsl 5
+requirements WaitingRequirements {
+  actor System
+  entity Ticket {
+    lifecycle Waiting -> Done
+  }
+  event promote = System promotes Ticket Waiting -> Done
+  policy POL-WAIT-001 \"a waiting ticket is promoted\"
+    every Ticket in Waiting must eventually be Done
+}
+
+verify {
+  instances Ticket = 1
+}
+";
+
+/// The abstraction name and source of each layer whose policy `respond` names.
+const ABSTRACTIONS: [(&str, &str); 2] = [
+    ("WaitingBusiness", BUSINESS),
+    ("WaitingRequirements", REQUIREMENTS),
+];
+
+fn mapping(implementation: &str, abstraction: &str, respond: &str) -> String {
     let stutters = if implementation == "Loses" {
         "  action park() -> stutter\n  action unpark() -> stutter\n"
     } else {
@@ -104,7 +129,7 @@ fn mapping(implementation: &str, respond: &str) -> String {
     format!(
         "refinement R {{
   impl {implementation}
-  abs WaitingBusiness
+  abs {abstraction}
   map ticket_stage[t: Ticket] = if phase == Served then Done else Waiting
 {stutters}  action promote() -> promote(0)
   preserve progress {{
@@ -115,28 +140,49 @@ fn mapping(implementation: &str, respond: &str) -> String {
     )
 }
 
-fn refine(implementation: &str, respond: &str) -> (Value, i32) {
+fn refine_against(
+    implementation: &str,
+    (abstraction, source): (&str, &str),
+    respond: &str,
+) -> (Value, i32) {
     let file = if implementation == "Keeps" {
         ("impl.fsl", KEEPS)
     } else {
         ("impl.fsl", LOSES)
     };
-    let mapping = mapping(implementation, respond);
-    Fixture::new(&[file, ("abs.fsl", BUSINESS), ("map.fsl", &mapping)])
+    let mapping = mapping(implementation, abstraction, respond);
+    Fixture::new(&[file, ("abs.fsl", source), ("map.fsl", &mapping)])
         .json(&["refine", "impl.fsl", "abs.fsl", "map.fsl"])
+}
+
+fn refine(implementation: &str, respond: &str) -> (Value, i32) {
+    refine_against(implementation, ABSTRACTIONS[0], respond)
 }
 
 #[test]
 fn a_flow_that_keeps_a_policy_id_progress_refines() {
-    for _ in 0..2 {
-        let (envelope, exit) = refine("Keeps", "POL-WAIT-001");
-        assert_eq!(exit, 0, "{envelope:#}");
-        assert_eq!(envelope["result"], "refines", "{envelope:#}");
+    for abstraction in ABSTRACTIONS {
+        for _ in 0..2 {
+            let (envelope, exit) = refine_against("Keeps", abstraction, "POL-WAIT-001");
+            assert_eq!(exit, 0, "{}: {envelope:#}", abstraction.0);
+            assert_eq!(envelope["result"], "refines", "{envelope:#}");
+        }
     }
 }
 
 #[test]
 fn a_flow_that_loses_a_policy_id_progress_is_progress_lost() {
+    for abstraction in ABSTRACTIONS {
+        let (envelope, exit) = refine_against("Loses", abstraction, "POL-WAIT-001");
+        assert_eq!(exit, 1, "{}: {envelope:#}", abstraction.0);
+        assert_eq!(envelope["result"], "refinement_failed", "{envelope:#}");
+        assert_eq!(envelope["kind"], "progress_lost", "{envelope:#}");
+        assert_eq!(envelope["invariant"], "POL-WAIT-001", "{envelope:#}");
+        assert_eq!(
+            envelope["progress"]["leadsTo"], "POL-WAIT-001",
+            "{envelope:#}"
+        );
+    }
     for _ in 0..2 {
         let (envelope, exit) = refine("Loses", "POL-WAIT-001");
         assert_eq!(exit, 1, "{envelope:#}");
@@ -220,7 +266,7 @@ fn a_quoted_name_is_refused() {
 
 #[test]
 fn fmt_prints_a_respond_policy_id_as_written() {
-    let mapping = mapping("Keeps", "POL-WAIT-001");
+    let mapping = mapping("Keeps", "WaitingBusiness", "POL-WAIT-001");
     let next = format!("fsl 5\n{mapping}");
     let fixture = Fixture::new(&[
         ("map.fsl", &mapping),
@@ -241,6 +287,27 @@ fn fmt_prints_a_respond_policy_id_as_written() {
     let output = fixture.run(&["fmt", "spaced.fsl"]);
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(String::from_utf8_lossy(&output.stdout), mapping);
+}
+
+/// A non-ASCII name is refused at `respond` the way a non-ASCII policy ID is
+/// refused at `policy`: the requirement-ID rule reports it before the
+/// next edition's canonical-name check.
+#[test]
+fn a_non_ascii_name_is_refused_like_a_non_ascii_policy_id() {
+    let mapping = format!("fsl 5\n{}", mapping("Keeps", "WaitingBusiness", "待機"));
+    let policy = format!("fsl 5\n{}", BUSINESS.replace("POL-WAIT-001", "待機"));
+    let fixture = Fixture::new(&[("map.fsl", &mapping), ("policy.fsl", &policy)]);
+    for (file, line, column) in [("map.fsl", 8, 13), ("policy.fsl", 12, 10)] {
+        let (envelope, exit) = fixture.json(&["check", file]);
+        assert_eq!(exit, 2, "{envelope:#}");
+        assert_eq!(envelope["kind"], "parse", "{envelope:#}");
+        assert_eq!(
+            envelope["diagnostic_code"], "non_ascii_requirement_id",
+            "{envelope:#}"
+        );
+        assert_eq!(envelope["loc"]["line"], line, "{envelope:#}");
+        assert_eq!(envelope["loc"]["column"], column, "{envelope:#}");
+    }
 }
 
 /// The inline seam still refuses `preserve progress` (#1275) at the

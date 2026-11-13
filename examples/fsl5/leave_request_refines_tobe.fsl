@@ -8,9 +8,9 @@ fsl 5
 // one to one. The history flags of the two business no-bypass policies are
 // read off the stage: a leave has passed through Approved exactly when it is
 // Approved, Taken or Cancelled, and through Submitted when it is past Draft.
-// The two business policies are not pulled through this mapping: `preserve
-// progress { respond <name> by … }` reads an identifier, and a policy ID such
-// as POL-LEAVEFLOW-002 is not one. The requirements layer states the same two
+// The two business policies are not pulled through this mapping, although
+// `preserve progress { respond POL-LEAVEFLOW-002 by … }` can name one by its
+// policy ID (#1782). The requirements layer states the same two
 // policies itself (POL-LEAVE-001, POL-LEAVE-002) and verifies them.
 refinement LeaveRequestsRefineToBe {
   impl LeaveRequests

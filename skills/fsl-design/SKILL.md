@@ -186,9 +186,9 @@ return automatically, which the upper decision table forbids.
   error (`ambiguous enum member`).
 - `refine` carries safety. An upper `policy` / `leadsTo` is checked through the
   mapping only with `preserve progress { respond … by … }`; otherwise verify
-  progress in the design itself. Name an upper business policy by its policy
-  ID exactly as declared, bare (`respond POL-WAIT-001 by promote`); do not
-  rename the upper ID. An unknown name is refused with the upper `leadsTo`
+  progress in the design itself. Name an upper business or requirements policy
+  by its policy ID exactly as declared, bare (`respond POL-WAIT-001 by
+  promote`); do not rename the upper ID. An unknown name is refused with the upper `leadsTo`
   names listed.
 - Tag each design declaration with the requirement it realizes:
   `@requirement("REQ-RET-003", "…")` with the upper spec's rule, decision

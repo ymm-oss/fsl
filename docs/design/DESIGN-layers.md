@@ -257,7 +257,7 @@ connect to the implementation via testgen/replay/Monitor (all implemented).
    standalone refinement mapping file (an inline `implements` block rejects it,
    #1275, because the inline seam checks safety only). `<AbsLeadsTo>` is the
    abstract `leadsTo`'s canonical name, read like a requirement-style ID: a
-   business policy's progress property is named by its policy ID as declared
+   business (or `fsl 5` requirements) policy's progress property is named by its policy ID as declared
    (`respond POL-WAIT-001 by …`, #1782), and an unknown name is refused with the
    abstraction's `leadsTo` names listed. That opt-in pulls the upper `leadsTo` through the state
    mapping and reports `refinement_failed / progress_lost` if the lower layer can

@@ -3611,9 +3611,10 @@ actions are review metadata and must name impl actions; they do not create
 fairness or prove implementation conformance. Fairness still comes from
 lower-layer `fair action` declarations.
 The `respond` name is the abstract `leadsTo`'s canonical name and is matched
-exactly. It is read like a requirement-style ID (§13.1.1), so a business
+exactly. It is read with the grammar of a requirement-style ID (§13.1.1; the
+`lint` ID templates do not apply to it), so a business or `fsl 5` requirements
 policy's progress property is named by its policy ID as the `policy` declares
-it — `respond POL-WAIT-001 by promote` — with no rewriting of the business spec
+it — `respond POL-WAIT-001 by promote` — with no rewriting of the upper spec
 (#1782). Write the ID bare, as the declaration does; a quoted name is a parse
 error, and `fmt` prints the ID without spaces. A name the abstraction does not
 declare is `error/type` (exit 2) at `respond`, and its message lists the
