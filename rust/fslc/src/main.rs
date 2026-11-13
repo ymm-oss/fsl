@@ -1396,18 +1396,18 @@ fn command() -> Result<(Value, i32), String> {
                 ),
                 "html" => run_html_report_with_timing(
                     path,
-                    options.depth,
-                    &options.deadlock,
-                    &options.engine,
+                    DerivedRunOptions::html(options.depth, &options.deadlock, &options.engine),
                     options.output.as_deref(),
                     options.no_timing,
                 ),
                 "ledger" => run_ledger_report(
                     &LedgerReportRequest {
                         path,
-                        depth: options.depth,
-                        deadlock_mode: &options.deadlock,
-                        engine: &options.engine,
+                        options: DerivedRunOptions::ledger(
+                            options.depth,
+                            &options.deadlock,
+                            &options.engine,
+                        ),
                         impl_log: options.impl_log.as_deref(),
                         evidence_paths: &options.evidence,
                         output_path: options.output.as_deref(),
@@ -5846,6 +5846,10 @@ fn scenarios_from_checked_traces(
     deadlock_mode: &str,
     allow_unreached: bool,
 ) -> (Value, i32) {
+    let deadlock = match fslc_rust::verification_output::DeadlockMode::parse(deadlock_mode) {
+        Ok(mode) => mode,
+        Err(error) => return error_exit(error_output("usage", &error)),
+    };
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
         Err(error) => return error_exit(error_output("internal", &error.to_string())),
@@ -5854,10 +5858,13 @@ fn scenarios_from_checked_traces(
         Ok(result) => result,
         Err(error) => return error_exit(error_output("semantics", &error.to_string())),
     };
-    if result.violation.is_some()
-        || result.leadsto_violation.is_some()
-        || (!allow_unreached && result.reachables.values().any(Option::is_none))
-        || (deadlock_mode == "error" && result.deadlock_step.is_some())
+    let unreached = if allow_unreached {
+        fslc_rust::verification_output::UnreachedReachables::Allow
+    } else {
+        fslc_rust::verification_output::UnreachedReachables::Fail
+    };
+    if fslc_rust::verification_output::first_bmc_failure(model, &result, deadlock, unreached)
+        .is_some()
     {
         return run_verify_admitted_from_source(
             path,
@@ -6062,7 +6069,7 @@ fn scenarios_from_checked_traces(
         scenarios.push(Value::Object(scenario));
     }
     if let Some(trace) = &result.deadlock_trace
-        && deadlock_mode != "ignore"
+        && deadlock != fslc_rust::verification_output::DeadlockMode::Ignore
     {
         let mut scenario = scenario_from_trace(model, trace);
         scenario.insert("name".to_owned(), json!("deadlock_terminal"));
@@ -9774,7 +9781,7 @@ fn unreached_reachables(
         return unreached.clone();
     }
     let mut solver = fsl_solver_z3::Z3Solver::new().ok()?;
-    unreached_after(&explain_bounded_run(model, &mut solver, depth))
+    unreached_after(model, &explain_bounded_run(model, &mut solver, depth))
 }
 
 fn reachable_counterfactuals_from_source(
@@ -10272,7 +10279,7 @@ impl WeakenedModelRuns {
         let fingerprint = Self::fingerprint(model);
         if self.find(fingerprint, model).is_none() {
             self.0
-                .push((fingerprint, model.clone(), unreached_after(result)));
+                .push((fingerprint, model.clone(), unreached_after(model, result)));
         }
     }
 
@@ -10298,10 +10305,18 @@ impl WeakenedModelRuns {
 /// The reachables a run left unreached, or `None` when it reported a
 /// violation or failed.
 fn unreached_after(
+    model: &KernelModel,
     result: &Result<fsl_verifier::BmcResult, fsl_verifier::VerifyError>,
 ) -> Option<std::collections::BTreeSet<String>> {
     let result = result.as_ref().ok()?;
-    if result.violation.is_some() || result.leadsto_violation.is_some() {
+    if fslc_rust::verification_output::first_bmc_failure(
+        model,
+        result,
+        fslc_rust::verification_output::DeadlockMode::Ignore,
+        fslc_rust::verification_output::UnreachedReachables::Allow,
+    )
+    .is_some()
+    {
         return None;
     }
     Some(
@@ -10899,7 +10914,7 @@ fn run_explain_from_source_with_names(
     let (mut output, status) = if lowering {
         run_explain_lowering_from_source(path, source)
     } else {
-        run_explain_from_source(path, source, depth, readable)
+        run_explain_from_source(path, source, depth, EXPLAIN_WITNESS_DEADLOCK_MODE, readable)
     };
     // Only a model with a glossary is respelled (`respell` leaves any other
     // output as it is).
@@ -10925,6 +10940,7 @@ fn run_explain_from_source(
     path: &Path,
     source: &str,
     depth: usize,
+    witness_deadlock_mode: &str,
     readable: bool,
 ) -> (Value, i32) {
     let (_kernel, model) = match load_kernel_model_from_source(path, source) {
@@ -10960,8 +10976,14 @@ fn run_explain_from_source(
     // The readable text prints no witness or counterfactual, so it does not
     // compute them (#1839).
     if !readable {
-        let scenarios =
-            witness_scenarios(path, source, &model, trace_contract.as_ref(), depth, "warn");
+        let scenarios = witness_scenarios(
+            path,
+            source,
+            &model,
+            trace_contract.as_ref(),
+            depth,
+            witness_deadlock_mode,
+        );
         output.insert(
             "witnesses".to_owned(),
             explain_witnesses(&model, &scenarios),
@@ -11343,6 +11365,7 @@ fn mutation_model_verdict(
     depth: usize,
     bmc: &mut MutationBmc<'_>,
 ) -> (MutationOracle, Option<(String, Option<String>)>) {
+    use fslc_rust::verification_output::BmcRunFailure;
     loop {
         let result = match bmc(&model, depth) {
             Ok(result) => result,
@@ -11351,46 +11374,54 @@ fn mutation_model_verdict(
             }
             Err(BmcFailure::Oracle(failure)) => return (MutationOracle::Error(failure), None),
         };
-        if let Some(violation) = result.violation {
-            if violation.kind == "ensures"
-                && fsl_runtime::replay_trace(model.clone(), &violation.trace).is_err()
-                && let Some(action) = model
-                    .actions
-                    .iter_mut()
-                    .find(|action| action.name == violation.name)
-                && !action.ensures.is_empty()
-            {
-                action.ensures.clear();
-                action.ensure_spans.clear();
-                continue;
-            }
-            return (
-                MutationOracle::killed(
-                    model.action_scoped_display_name(
-                        &violation.name,
-                        violation.last_action.as_deref(),
+        let failure = fslc_rust::verification_output::first_bmc_failure(
+            &model,
+            &result,
+            fslc_rust::verification_output::DeadlockMode::Ignore,
+            fslc_rust::verification_output::UnreachedReachables::Fail,
+        );
+        return match failure {
+            Some(BmcRunFailure::Violation(violation)) => {
+                if violation.kind == "ensures"
+                    && fsl_runtime::replay_trace(model.clone(), &violation.trace).is_err()
+                    && let Some(action) = model
+                        .actions
+                        .iter_mut()
+                        .find(|action| action.name == violation.name)
+                    && !action.ensures.is_empty()
+                {
+                    action.ensures.clear();
+                    action.ensure_spans.clear();
+                    continue;
+                }
+                (
+                    MutationOracle::killed(
+                        model.action_scoped_display_name(
+                            &violation.name,
+                            violation.last_action.as_deref(),
+                        ),
+                        property_requirements(&model, &violation.name),
                     ),
-                    property_requirements(&model, &violation.name),
-                ),
-                Some((violation.name, violation.last_action)),
-            );
-        }
-        if let Some(property) = model.reachables.iter().find(|property| {
-            result
-                .reachables
-                .get(&property.name)
-                .is_some_and(Option::is_none)
-        }) {
-            return (
-                MutationOracle::killed(
-                    model.names().public_property(&property.name).into_string(),
-                    annotation_requirement_ids(&property.annotations),
-                ),
-                None,
-            );
-        }
-        if let Some(violation) = result.leadsto_violation {
-            return (
+                    Some((violation.name.clone(), violation.last_action.clone())),
+                )
+            }
+            Some(BmcRunFailure::Unreached(unreached)) => {
+                // The kill names the first unreached reachable in declaration
+                // order, not in `verify`'s name order.
+                let property = model
+                    .reachables
+                    .iter()
+                    .find(|property| unreached.iter().any(|missed| missed.name == property.name))
+                    .unwrap_or(unreached[0]);
+                (
+                    MutationOracle::killed(
+                        model.names().public_property(&property.name).into_string(),
+                        annotation_requirement_ids(&property.annotations),
+                    ),
+                    None,
+                )
+            }
+            Some(BmcRunFailure::LeadsTo(violation)) => (
                 MutationOracle::killed(
                     model
                         .names()
@@ -11399,9 +11430,9 @@ fn mutation_model_verdict(
                     property_requirements(&model, &violation.name),
                 ),
                 None,
-            );
-        }
-        return (MutationOracle::Clean, None);
+            ),
+            Some(BmcRunFailure::Deadlock(_)) | None => (MutationOracle::Clean, None),
+        };
     }
 }
 
@@ -13836,9 +13867,7 @@ fn report_verification_error(verification: &Value, status: i32) -> Option<(Value
 fn report_verification_from_source(
     path: &Path,
     source: &str,
-    depth: usize,
-    deadlock_mode: &str,
-    engine: &str,
+    options: DerivedRunOptions<'_>,
     edition: Option<&SourceEdition>,
 ) -> (Value, i32) {
     let dependencies = fslc_rust::migration::DependencyScope::enter();
@@ -13846,9 +13875,9 @@ fn report_verification_from_source(
         run_verify_admitted_from_source(
             path,
             source,
-            depth,
-            deadlock_mode,
-            engine,
+            options.depth,
+            options.deadlock_mode,
+            options.engine,
             DEFAULT_EXPLICIT_BUDGET,
             1,
             None,
@@ -13857,9 +13886,9 @@ fn report_verification_from_source(
         run_verify_from_source(
             path,
             source,
-            depth,
-            deadlock_mode,
-            engine,
+            options.depth,
+            options.deadlock_mode,
+            options.engine,
             DEFAULT_EXPLICIT_BUDGET,
             1,
         )
@@ -13880,9 +13909,7 @@ fn finish_admitted_report(result: (Value, i32), editions: &[SourceEdition]) -> (
 
 fn run_html_report_with_timing(
     path: &Path,
-    depth: usize,
-    deadlock_mode: &str,
-    engine: &str,
+    options: DerivedRunOptions<'_>,
     output_path: Option<&Path>,
     no_timing: bool,
 ) -> (Value, i32) {
@@ -13895,9 +13922,7 @@ fn run_html_report_with_timing(
                 run_html_report_from_source_with_timing(
                     path,
                     &sources[0],
-                    depth,
-                    deadlock_mode,
-                    engine,
+                    options,
                     output_path,
                     no_timing,
                     Some(&editions[0]),
@@ -13925,22 +13950,17 @@ fn run_html_report_from_source(
     run_html_report_from_source_with_timing(
         path,
         source,
-        depth,
-        deadlock_mode,
-        engine,
+        DerivedRunOptions::html(depth, deadlock_mode, engine),
         output_path,
         false,
         None,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_html_report_from_source_with_timing(
     path: &Path,
     source: &str,
-    depth: usize,
-    deadlock_mode: &str,
-    engine: &str,
+    options: DerivedRunOptions<'_>,
     output_path: Option<&Path>,
     no_timing: bool,
     edition: Option<&SourceEdition>,
@@ -13948,9 +13968,7 @@ fn run_html_report_from_source_with_timing(
     run_html_report_from_source_with_label(
         path,
         source,
-        depth,
-        deadlock_mode,
-        engine,
+        options,
         output_path,
         no_timing,
         edition,
@@ -13958,20 +13976,17 @@ fn run_html_report_from_source_with_timing(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn run_html_report_from_source_with_label(
     path: &Path,
     source: &str,
-    depth: usize,
-    deadlock_mode: &str,
-    engine: &str,
+    options: DerivedRunOptions<'_>,
     output_path: Option<&Path>,
     no_timing: bool,
     edition: Option<&SourceEdition>,
     render_source: Option<&str>,
 ) -> (Value, i32) {
     let (mut verification, verification_status) =
-        report_verification_from_source(path, source, depth, deadlock_mode, engine, edition);
+        report_verification_from_source(path, source, options, edition);
     if let Some(error) = report_verification_error(&verification, verification_status) {
         return error;
     }
@@ -13979,7 +13994,13 @@ fn run_html_report_from_source_with_label(
         Ok(model) => model,
         Err(error) => return (spec_load_error_output(&error), 2),
     };
-    let (mut explained, explain_status) = run_explain_from_source(path, source, depth, false);
+    let (mut explained, explain_status) = run_explain_from_source(
+        path,
+        source,
+        options.depth,
+        options.witness_deadlock_mode,
+        false,
+    );
     if explain_status != 0 {
         return (explained, explain_status);
     }
@@ -14259,9 +14280,7 @@ fn approval_artifact(
         "ledger" => {
             let request = LedgerReportRequest {
                 path,
-                depth: inputs.depth,
-                deadlock_mode: &inputs.deadlock,
-                engine: &inputs.engine,
+                options: DerivedRunOptions::ledger(inputs.depth, &inputs.deadlock, &inputs.engine),
                 impl_log: None,
                 evidence_paths: &[],
                 output_path: None,
@@ -14280,9 +14299,7 @@ fn approval_artifact(
         "html" => run_html_report_from_source_with_label(
             path,
             source,
-            inputs.depth,
-            &inputs.deadlock,
-            &inputs.engine,
+            DerivedRunOptions::html(inputs.depth, &inputs.deadlock, &inputs.engine),
             None,
             false,
             Some(edition),
@@ -14891,11 +14908,47 @@ fn overlay_evaluation_error(record_path: &Path, failure: (Value, i32)) -> (Value
     ))
 }
 
-struct LedgerReportRequest<'a> {
-    path: &'a Path,
+/// The deadlock mode of `explain`'s witnesses. `explain` has no `--deadlock`.
+const EXPLAIN_WITNESS_DEADLOCK_MODE: &str = "warn";
+
+/// The bounded-run options a derived command (`html`, `ledger`) builds once
+/// from its request and passes to each stage.
+#[derive(Clone, Copy)]
+struct DerivedRunOptions<'a> {
     depth: usize,
+    /// The verification stage's deadlock mode.
     deadlock_mode: &'a str,
     engine: &'a str,
+    /// The witness stage's deadlock mode.
+    witness_deadlock_mode: &'a str,
+}
+
+impl<'a> DerivedRunOptions<'a> {
+    /// `ledger`'s witnesses follow the requested deadlock mode.
+    fn ledger(depth: usize, deadlock_mode: &'a str, engine: &'a str) -> Self {
+        Self {
+            depth,
+            deadlock_mode,
+            engine,
+            witness_deadlock_mode: deadlock_mode,
+        }
+    }
+
+    /// `html`'s explain stage keeps `explain`'s witness deadlock mode
+    /// whatever the requested one.
+    fn html(depth: usize, deadlock_mode: &'a str, engine: &'a str) -> Self {
+        Self {
+            depth,
+            deadlock_mode,
+            engine,
+            witness_deadlock_mode: EXPLAIN_WITNESS_DEADLOCK_MODE,
+        }
+    }
+}
+
+struct LedgerReportRequest<'a> {
+    path: &'a Path,
+    options: DerivedRunOptions<'a>,
     impl_log: Option<&'a Path>,
     evidence_paths: &'a [PathBuf],
     output_path: Option<&'a Path>,
@@ -15030,14 +15083,8 @@ fn prepare_ledger_report_from_source(
     source: &str,
     edition: Option<&SourceEdition>,
 ) -> Result<PreparedLedgerReport, (Value, i32)> {
-    let (verification, verification_status) = report_verification_from_source(
-        request.path,
-        source,
-        request.depth,
-        request.deadlock_mode,
-        request.engine,
-        edition,
-    );
+    let (verification, verification_status) =
+        report_verification_from_source(request.path, source, request.options, edition);
     // Preserve this error before replay, evidence or witnesses. Only
     // `result:"error"` stops here: a failed or unestablished verdict still renders,
     // so direct reports exit nonzero and approval-only digests stay comparable.
@@ -15085,8 +15132,8 @@ fn prepare_ledger_report_from_source(
         source,
         &model,
         trace_contract.as_ref(),
-        request.depth,
-        request.deadlock_mode,
+        request.options.depth,
+        request.options.witness_deadlock_mode,
     );
     let evidence = evidence
         .into_iter()
@@ -19404,9 +19451,7 @@ mod exit_status_tests {
         let source = std::fs::read_to_string(&path).unwrap();
         let request = LedgerReportRequest {
             path: &path,
-            depth: 3,
-            deadlock_mode: "ignore",
-            engine: "bmc",
+            options: DerivedRunOptions::ledger(3, "ignore", "bmc"),
             impl_log: None,
             evidence_paths: &[],
             output_path: None,
@@ -19468,9 +19513,7 @@ mod exit_status_tests {
             let evidence = if replay { vec![] } else { vec![absent.clone()] };
             let request = LedgerReportRequest {
                 path: &path,
-                depth: 3,
-                deadlock_mode: "ignore",
-                engine: "bmc",
+                options: DerivedRunOptions::ledger(3, "ignore", "bmc"),
                 impl_log: replay.then_some(absent.as_path()),
                 evidence_paths: &evidence,
                 output_path: None,
@@ -19986,7 +20029,13 @@ spec InitTraceability {
         let captured = read_spec_source(&fixture.path).expect("capture source A");
         std::fs::write(&fixture.path, "not valid FSL source").expect("replace with source B");
 
-        let (output, status) = run_explain_from_source(&fixture.path, &captured, 4, true);
+        let (output, status) = run_explain_from_source(
+            &fixture.path,
+            &captured,
+            4,
+            EXPLAIN_WITNESS_DEADLOCK_MODE,
+            true,
+        );
         assert_eq!(status, 0, "{output:#}");
         assert_eq!(output["result"], "explained", "{output:#}");
         assert_eq!(output["spec"], "VacuousLeadstoFixture", "{output:#}");
@@ -20032,8 +20081,13 @@ spec InitTraceability {
     fn readable_explain_runs_no_bounded_verification() {
         let fixture = SnapshotFixture::new("explain-readable-runs", EXPLAIN_RUN_COUNT_SPEC);
         explain_run_observer::bounded_runs();
-        let (readable, status) =
-            run_explain_from_source(&fixture.path, EXPLAIN_RUN_COUNT_SPEC, 4, true);
+        let (readable, status) = run_explain_from_source(
+            &fixture.path,
+            EXPLAIN_RUN_COUNT_SPEC,
+            4,
+            EXPLAIN_WITNESS_DEADLOCK_MODE,
+            true,
+        );
         assert_eq!(status, 0, "{readable:#}");
         assert!(
             readable["readable"]
@@ -20046,8 +20100,13 @@ spec InitTraceability {
             0,
             "explain --readable ran the bounded verifier"
         );
-        let (explained, status) =
-            run_explain_from_source(&fixture.path, EXPLAIN_RUN_COUNT_SPEC, 4, false);
+        let (explained, status) = run_explain_from_source(
+            &fixture.path,
+            EXPLAIN_RUN_COUNT_SPEC,
+            4,
+            EXPLAIN_WITNESS_DEADLOCK_MODE,
+            false,
+        );
         assert_eq!(status, 0, "{explained:#}");
         assert!(
             explain_run_observer::bounded_runs() > 0,
@@ -20062,8 +20121,13 @@ spec InitTraceability {
         let fixture = SnapshotFixture::new("explain-run-count", EXPLAIN_RUN_COUNT_SPEC);
         explain_run_observer::bounded_runs();
         explain_run_observer::concrete_searches();
-        let (explained, status) =
-            run_explain_from_source(&fixture.path, EXPLAIN_RUN_COUNT_SPEC, 4, false);
+        let (explained, status) = run_explain_from_source(
+            &fixture.path,
+            EXPLAIN_RUN_COUNT_SPEC,
+            4,
+            EXPLAIN_WITNESS_DEADLOCK_MODE,
+            false,
+        );
         assert_eq!(status, 0, "{explained:#}");
         let runs = (
             explain_run_observer::bounded_runs(),
@@ -20125,7 +20189,13 @@ spec InitTraceability {
             let explain = |unshared| {
                 explain_run_observer::set_unshared(unshared);
                 let (mut output, status) = fsl_solver_z3::with_fresh_context(|| {
-                    run_explain_from_source(&fixture.path, source, 4, false)
+                    run_explain_from_source(
+                        &fixture.path,
+                        source,
+                        4,
+                        EXPLAIN_WITNESS_DEADLOCK_MODE,
+                        false,
+                    )
                 });
                 explain_run_observer::set_unshared(false);
                 assert_eq!(status, 0, "{output:#}");
@@ -20177,7 +20247,8 @@ spec InitTraceability {
 }
 ";
         let fixture = SnapshotFixture::new("explain-screen-preempt", SPEC);
-        let (explained, status) = run_explain_from_source(&fixture.path, SPEC, 6, false);
+        let (explained, status) =
+            run_explain_from_source(&fixture.path, SPEC, 6, EXPLAIN_WITNESS_DEADLOCK_MODE, false);
         assert_eq!(status, 0, "{explained:#}");
         let entries = explained["counterfactuals"]
             .as_array()
@@ -20244,9 +20315,7 @@ spec InitTraceability {
 
         let request = LedgerReportRequest {
             path: &fixture.path,
-            depth: 4,
-            deadlock_mode: "warn",
-            engine: "bmc",
+            options: DerivedRunOptions::ledger(4, "warn", "bmc"),
             impl_log: None,
             evidence_paths: &[],
             output_path: None,
