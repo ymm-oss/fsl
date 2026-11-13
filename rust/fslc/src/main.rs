@@ -21335,3 +21335,164 @@ fn internal_input_two_normalizes_to_three_before_exit_contract_check() {
         final_status
     ));
 }
+
+#[cfg(test)]
+mod counterfactual_weakening_tests {
+    //! Issue #1169: both counterfactual phases take their weakenings from
+    //! `fsl_tools::enumerate_builtin_mutants`. The pinned lists are the ones
+    //! the reachable phase's former enumerator produced.
+    use super::*;
+
+    /// Init and action assignments nested in `if` / `forall`, two `requires`,
+    /// a `fair` action, and an action named `init`.
+    const KINDS: &str = r"spec WeakeningKinds {
+  type Small = 0..2
+  type Id = 0..1
+  state { x: Small, a: Map<Id, Bool>, done: Bool, seen: Bool }
+  init {
+    x = 0
+    if x == 0 { done = false } else { done = true }
+    forall i in 0..1 { a[i] = false }
+    seen = false
+  }
+  fair action step() {
+    requires x < 2
+    requires not done
+    if x == 0 { x = 1 } else { x = 2 }
+    forall i in 0..1 { a[i] = true }
+  }
+  action init() {
+    requires x == 1
+    done = true
+    seen = true
+  }
+  invariant Bounded { x <= 2 }
+  reachable Finished { done }
+}
+";
+
+    /// One JSON object per line.
+    const KINDS_WEAKENINGS: &str = r#"{"op":"assignment-removal","loc":{"line":6,"column":5},"target":"init assignment","source_text":"x = 0","origin":"init","label":"init weakening"}
+{"op":"assignment-removal","loc":{"line":7,"column":17},"target":"init assignment","source_text":"if x == 0 { done = false } else { done = true }","origin":"init","label":"init weakening"}
+{"op":"assignment-removal","loc":{"line":7,"column":39},"target":"init assignment","source_text":"if x == 0 { done = false } else { done = true }","origin":"init","label":"init weakening"}
+{"op":"assignment-removal","loc":{"line":8,"column":24},"target":"init assignment","source_text":"forall i in 0..1 { a[i] = false }","origin":"init","label":"init weakening"}
+{"op":"assignment-removal","loc":{"line":9,"column":5},"target":"init assignment","source_text":"seen = false","origin":"init","label":"init weakening"}
+{"op":"requires-removal","loc":{"line":12,"column":5},"target":"step requires #1","source_text":"requires x < 2"}
+{"op":"requires-removal","loc":{"line":13,"column":5},"target":"step requires #2","source_text":"requires not done"}
+{"op":"assignment-removal","loc":{"line":14,"column":17},"target":"step assignment","source_text":"if x == 0 { x = 1 } else { x = 2 }"}
+{"op":"assignment-removal","loc":{"line":14,"column":32},"target":"step assignment","source_text":"if x == 0 { x = 1 } else { x = 2 }"}
+{"op":"assignment-removal","loc":{"line":15,"column":24},"target":"step assignment","source_text":"forall i in 0..1 { a[i] = true }"}
+{"op":"fair-removal","loc":{"line":11,"column":3},"target":"step fair","source_text":"fair action step() {"}
+{"op":"requires-removal","loc":{"line":18,"column":5},"target":"init requires #1","source_text":"requires x == 1"}
+{"op":"assignment-removal","loc":{"line":19,"column":5},"target":"init assignment","source_text":"done = true"}
+{"op":"assignment-removal","loc":{"line":20,"column":5},"target":"init assignment","source_text":"seen = true"}"#;
+
+    fn weakenings(path: &Path, source: &str) -> Vec<Value> {
+        let (_, names) = load_kernel_model_from_source(path, source).expect("load fixture");
+        let document = counterfactual_document(path, source).expect("counterfactual document");
+        let lines = source.lines().collect::<Vec<_>>();
+        counterfactual_weakenings(&document)
+            .map(|(candidate, span)| {
+                weakening_json(&names, &candidate, &span, &lines, candidate.edits_init())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_owner_list_is_the_former_reachable_phase_list() {
+        let expected = KINDS_WEAKENINGS
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("pinned weakening"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            weakenings(Path::new("weakening_kinds.fsl"), KINDS),
+            expected
+        );
+    }
+
+    /// `op|line|column|target|init` per weakening; `init` marks an init
+    /// weakening.
+    const BANK_SYSTEM_WEAKENINGS: &str = "\
+assignment-removal|15|5|init assignment|init
+assignment-removal|16|5|init assignment|init
+assignment-removal|18|5|init assignment|init
+assignment-removal|19|5|init assignment|init
+assignment-removal|10|11|init assignment|init
+requires-removal|25|5|bank.settle requires #1|
+assignment-removal|26|5|bank.settle assignment|
+assignment-removal|27|5|bank.settle assignment|
+requires-removal|20|5|deposit_audited requires #1|
+requires-removal|23|5|deposit_audited requires #2|
+requires-removal|24|5|deposit_audited requires #3|
+assignment-removal|21|5|deposit_audited assignment|
+assignment-removal|25|5|deposit_audited assignment|
+assignment-removal|26|5|deposit_audited assignment|
+requires-removal|31|5|withdraw_audited requires #1|
+requires-removal|32|5|withdraw_audited requires #2|
+assignment-removal|33|5|withdraw_audited assignment|
+assignment-removal|18|5|withdraw_audited assignment|";
+
+    #[test]
+    fn compose_component_actions_keep_their_alias_spelling() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../specs/bank_system.fsl");
+        let source = std::fs::read_to_string(&path).expect("read bank_system.fsl");
+        // `source_text` is not pinned: a component's span is a line of the
+        // component file, but the text is read from the compose root.
+        let actual = weakenings(&path, &source)
+            .iter()
+            .map(|weakening| {
+                assert!(weakening.get("source_text").is_some(), "{weakening}");
+                format!(
+                    "{}|{}|{}|{}|{}",
+                    weakening["op"].as_str().expect("op"),
+                    weakening["loc"]["line"],
+                    weakening["loc"]["column"],
+                    weakening["target"].as_str().expect("target"),
+                    if weakening.get("origin") == Some(&json!("init")) {
+                        "init"
+                    } else {
+                        ""
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual, BANK_SYSTEM_WEAKENINGS.lines().collect::<Vec<_>>());
+    }
+
+    /// An action named `init`: its weakenings are not init weakenings.
+    const ACTION_INIT: &str = r"spec ActionInit {
+  type Small = 0..3
+  state { x: Small, done: Bool }
+  init { x = 0  done = false }
+  fair action init() {
+    requires x == 0
+    x = x + 1
+  }
+  action finish() {
+    requires x == 1
+    done = true
+  }
+  invariant Low { x <= 1 }
+  reachable Finished { done }
+}
+";
+
+    #[test]
+    fn reachable_counterfactuals_do_not_mark_an_action_named_init() {
+        let path = Path::new("action_init.fsl");
+        let (_, names) = load_kernel_model_from_source(path, ACTION_INIT).expect("load fixture");
+        let output = reachable_counterfactuals_from_source(
+            &names,
+            path,
+            ACTION_INIT,
+            4,
+            &WeakenedModelRuns::default(),
+        );
+        let expected = r#"{"property":"Finished","weakening":{"op":"assignment-removal","loc":{"line":7,"column":5},"target":"init assignment","source_text":"x = x + 1"},"result":"reachable_failed","requirement":null}
+{"property":"Finished","weakening":{"op":"assignment-removal","loc":{"line":11,"column":5},"target":"finish assignment","source_text":"done = true"},"result":"reachable_failed","requirement":null}"#
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).expect("pinned counterfactual"))
+            .collect::<Vec<_>>();
+        assert_eq!(output, Value::Array(expected));
+    }
+}
