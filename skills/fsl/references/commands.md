@@ -3,13 +3,16 @@
 After the core skill's `check` → bounded `verify` → induction loop, use these
 commands only when the task calls for them.
 
-As needed: `fslc explain file.fsl --depth 8 --readable`
-   (emits, as deterministic JSON, the spec skeleton, implicit type-bound/partial_op
-   checks, a "what if this rule were absent" counterfactual for each user
-   invariant, and reachable/scenarios witnesses; `--readable` emits a text view
-   that surfaces verification bounds, fairness, KPI projections, branch lowering,
-   and synthesized refinement mappings. For PMs/consultants, ask them to
-   adjudicate concrete traces rather than logical formulas),
+As needed: `fslc explain file.fsl --depth 8`
+   (emits, as deterministic JSON, the spec skeleton with KPI projections, implicit
+   type-bound/partial_op checks, a "what if this rule were absent" counterfactual
+   for each user invariant, and reachable/scenarios witnesses; `--readable`
+   instead emits a text view of the skeleton only: verification bounds, state,
+   fairness, branch lowering, the inline `implements` target's refinement
+   result, properties and type-bound checks. It computes no counterfactual or
+   witness, and `--depth` bounds only its `implements` check. For
+   PMs/consultants, ask them to adjudicate the JSON's concrete traces rather
+   than logical formulas),
    `fslc analyze file.fsl --profile ai-review`
    (emits structural review findings over the Typed Semantic Graph, such as
    disconnected requirements, unanchored properties, progressless cycles,
@@ -125,7 +128,8 @@ colon-quantifier warning for them; metadata slots and requirement maps are not d
 ```
 fslc help [COMMAND [SUBCOMMAND]]               # same help as fslc [COMMAND ...] --help, exit 0; bare fslc is a usage error naming every command
 fslc check <f> [--edition current|next|4|5]     # syntax / names / types, and an inline implements block (depth-bounded, no Z3); f = .fsl or .md (literate)
-fslc lint <path>... [--edition current|next|4|5] [--project fsl-project.toml] # edition + ID-policy findings; never mutates
+           [--strict-tags] [--requirements ids.txt]
+fslc lint <path>... [--edition current|next|4|5] [--project fsl-project.toml] [--strict-names] # edition + ID-policy findings; never mutates
                                                  # exit 0 no findings, 1 findings exist, 2 I/O or check failure (unconditional per input, refused legacy tokens excepted)
                                                  # files[].notes[] / note_count (only when there is a note): info notes on fsl 5 implicit readings; never findings, never the exit code
 fslc migrate <path>... [--edition current|next|4|5] [--write] # default edition next; dry run by default; atomic validated write set
@@ -133,8 +137,8 @@ fslc migrate <path>... [--edition current|next|4|5] [--write] # default edition 
                                                  # --write refuses a read-only, symlinked or non-regular changed input before writing any input (kind io, exit 2)
                                                  # written (top level and per files[] entry) = a file was replaced; --write with changed: 0 reports written: false
                                                  # keeps line endings (first line's CRLF/LF on every line) and a UTF-8 BOM; fmt still prints LF without the BOM
-fslc fmt <f|-> [--edition current|next|4|5]     # canonical source on stdout; input is never mutated
-fslc fmt <path>... --check                      # JSON; exit 0 clean, 1 changed, 2 error
+fslc fmt <f|-> [--edition current|next|4|5] [--lang ja|en] [--names alias|canonical] # canonical source on stdout; input is never mutated
+fslc fmt <path>... --check [--edition current|next|4|5] [--lang ja|en] [--names alias|canonical] # JSON; exit 0 clean, 1 changed, 2 error
 fslc kernel <f> [--kernel-version 1|2]          # normalized typed Kernel JSON (default v1)
 fslc conformance <f> [--depth K=4] [--kernel-version 1|2] # matching vectors (default v1)
 fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
@@ -148,29 +152,32 @@ fslc verify <f> [--depth K=8] [--engine bmc|induction|explicit|auto] [--k N=1]
                [--instances NAME=N]...              # override verify-block `instances NAME = N`
                [--values NAME=LO..HI]...            # override verify-block `values NAME = LO..HI`
                [--from-state state.json]            # complete Monitor/replay state; replaces init (BMC only)
-               [--strict-tags] [--requirements ids.txt] [--no-cache]
+               [--strict-tags] [--requirements ids.txt] [--no-cache] [--edition current|next|4|5]
                [--lemma "<expr>"]...                 # induction only; independently adjudicated
                # Inline `implements`: `refines` keeps the ordinary top-level result/exit;
                # `refinement_failed` or `impl_violated` becomes the top-level result with exit 1.
                # --property/--exclude-property/--from-state skip it: implements.result
                # "not_evaluated" + reason, result/exit unchanged (never a pass).
-fslc sweep <f> [--instances NAME=LO..HI]... [--depth LO..HI] [--property Name]
+fslc sweep <f> [--instances NAME=LO..HI]... [--values NAME=LO..HI]... [--depth LO..HI] [--property Name]
+               [--engine bmc|induction] [--k N] [--deadlock warn|error|ignore] [--vacuity warn|error|ignore]
+               [--strict-tags] [--requirements ids.txt]
                                                      # grid of verify runs; JSON sweep.results/minimal_counterexample
-fslc explain <f> [--depth K=8] [--readable]    # JSON by default; --readable emits a text review view
+fslc explain <f> [--depth K=8] [--readable] [--lowering] [--names canonical|alias] # JSON by default; --readable emits a text review view
 fslc mutate <f> [--depth K=8] [--by-requirement] [--oracle-attribution] [--max-mutants N=200]
               [--from mutants.jsonl] [--fail-on-survivors] [--min-kill-rate R]
-fslc scenarios <f> [--depth K]                  # reach_* / cover_* / respond_* / deadlock_terminal
+fslc scenarios <f> [--depth K] [--deadlock warn|error|ignore] # reach_* / cover_* / respond_* / deadlock_terminal
 fslc replay <f> --trace <events.json>           # conformant | nonconformant
-fslc counterexample export <f> [--depth K] [--engine bmc|explicit|auto] -o <reproducer.json>
+fslc counterexample export <f> [--depth K] [--engine bmc|explicit|auto] [--deadlock warn|error|ignore] -o <reproducer.json>
                                                 # reproducer.v1 artifact from a safety-invariant violation
 fslc replay <f> --from-log <events.jsonl> --mapping <mapping.fsl>
                                                 # production JSONL -> mapped action/state -> Monitor
-fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [--allow-unwired] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit); unwired tests FAIL unless --allow-unwired (skip; rejected for kotlin)
+fslc testgen <f> [--depth K] [--strict] [--target pytest|vitest|swift|kotlin|dart|phpunit] [--deadlock warn|error|ignore] [--allow-unwired] [-o out]  # Adapter skeleton + conformance tests (pytest default / Vitest / Swift Testing / kotlin.test / package:test / PHPUnit); unwired tests FAIL unless --allow-unwired (skip; rejected for kotlin)
 fslc testplan <f> [--depth K=4]                 # closed test-plan.v1 selection of conformance vectors
                                                 # (accepting + requires_failed); formal_result:"not_run",
                                                 # assurance_effect:"none"; pass a spec at the
                                                 # implementation's layer granularity
-fslc refine <impl> <abs> <mapping> [--depth K]  # refines | refinement_failed | impl_violated | unknown_budget
+fslc refine <impl> <abs> <mapping> [<abs> <mapping>]... [--depth K]  # refines | refinement_failed | impl_violated | unknown_budget
+                                                # more (abs mapping) pairs run one composed chain check
 fslc diff <old> <new> [--depth K] [--mapping <mapping>]
           [--forbid behavior_added,invariant_weakened,forbidden_relaxed]
                                                   # bounded semantic change report; impl_violated and
@@ -182,8 +189,9 @@ fslc chain [fsl-project.toml] [--keep-going] [--jobs N]
                                                 # manifest-driven business -> req -> design -> impl table + JSON
 fslc analyze <file-or-dir>... [--projection tsg|action_state_graph|action_dependency_graph|code_audit|impact_graph|requirement_property_graph|property_state_graph|refinement_graph|traceability_graph] [--code FILE_OR_DIR] [--focus NODE] [--profile ai-review] [--export tag-review] [--format json|dot|mermaid]  # structural/tag/code review
 fslc typestate <f> [--ts]                       # state machine -> ghost-type applicability + TS skeleton
-fslc html <f> [--depth K] [-o report.html] [--engine bmc|induction] [--no-timing]  # self-contained HTML review report (dev audience)
-fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
+fslc html <f> [--depth K] [-o report.html] [--deadlock warn|error|ignore] [--engine bmc|induction] [--no-timing]  # self-contained HTML review report (dev audience)
+fslc ledger <f> [--depth K] [--impl-log run.json] [-o ledger.md] [--deadlock warn|error|ignore] [--engine bmc|induction] [--evidence result.json]... [--approval record.json]...
+                [--trust-key public.pem]...
                                                         # business audit ledger by requirement id (PM/audit)
 fslc document generate <f> [--view requirements] [--lang ja|en] [--strict] [--strict-rendering]
                [--glossary glossary.json] [--evidence evidence.json]... [--approval record.json]... [--trust-key public.pem]... [-o requirements.md]
@@ -200,24 +208,25 @@ fslc document check <f> <document.md> [--glossary glossary.json] [--evidence evi
                                                         # structural drift check: generated claim blocks vs a fresh re-render;
                                                         # document_conformant (0) | document_drifted (1); never interprets prose
 fslc approval create <f> --kind ledger|html|scenarios|requirements_document --artifact <reviewed> --approver <name>
-               [--requirement ID]... [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
+               [--requirement ID]... [--depth K] [--deadlock warn|error|ignore] [--engine bmc|induction]
+               [--signing-key private.pem] [--glossary glossary.json] [--evidence evidence.json]... [-o record.json]
                                                         # bind the reviewed artifact to normalized spec + Git baseline;
                                                         # new records use v5/v6; requirements_document binds a claim_set_digest
-fslc approval check <f> --record <record.json>          # approved | drifted with machine reasons
-fslc approval diff <f> --record <record.json> [--depth K]
+fslc approval check <f> --record <record.json> [--trust-key public.pem]... # approved | drifted with machine reasons
+fslc approval diff <f> --record <record.json> [--depth K] [--trust-key public.pem]...
                                                         # semantic diff from approved commit to current working spec
-fslc domain check <f> [--depth K] [--engine bmc|induction]  # Functional DDD / effect findings
+fslc domain check <f> [--depth K] [--engine bmc|induction] [--deadlock warn|error|ignore] [--edition current|next|4|5]  # Functional DDD / effect findings
 fslc domain analyze <f>                                      # aggregate/effect ownership summary
 fslc domain expand <f> [-o out.fsl]                          # generated kernel FSL
-fslc domain generate <f> [--target typescript|python|kotlin|swift|rust] [-o dir] # Functional DDD scaffold
-fslc domain testgen <f> [--target vitest] [--allow-unwired] [-o out]  # adapter/conformance scaffold
+fslc domain generate <f> [--profile functional-ddd] [--target typescript|python|kotlin|swift|rust] [-o dir] # Functional DDD scaffold
+fslc domain testgen <f> [--depth K] [--strict] [--target vitest|pytest|swift|kotlin|dart|phpunit] [--deadlock warn|error|ignore] [--allow-unwired] [-o out]  # adapter/conformance scaffold
 fslc domain replay <f> --logs events.jsonl                  # runtime command/event/effect evidence
-fslc db check <f> [--depth K] [--engine bmc|induction]  # dbsystem compatibility findings
+fslc db check <f> [--depth K] [--engine bmc|induction] [--deadlock warn|error|ignore]  # dbsystem compatibility findings
 fslc db observe <f> --trace events.json                 # runtime observation evidence
 fslc db import <sql|schema.prisma> [--source auto|sql|prisma] [--name Name] [-o out.fsl]
                                                         # SQL DDL / minimal Prisma -> dbsystem
-fslc ai check <f> [--depth K] [--engine bmc|induction]  # ai_component hard-contract findings
-fslc ai replay <f> --logs events.jsonl                  # AI runtime replay evidence, not proof
+fslc ai check <f> [--depth K] [--engine bmc|induction] [--deadlock warn|error|ignore]  # ai_component hard-contract findings
+fslc ai replay <f> --logs events.jsonl [--component Name] # AI runtime replay evidence, not proof
                                                         # check/compat/replay fail closed on invalid ai_component (exit 2)
 fslc ai eval <f> [--records <path>] [--dataset <Name>] [--slice <Name>] [--property <Name>]
                                                         # Wilson-bound check over precomputed eval JSONL
