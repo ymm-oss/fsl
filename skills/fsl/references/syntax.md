@@ -1213,6 +1213,12 @@ refinement <Name> {
 }
 ```
 
+`<AbsLeadsTo>` is the upper `leadsTo`'s canonical name, matched exactly and
+read like a requirement-style ID: a business policy is named by its policy ID
+as declared, bare (`respond POL-WAIT-001 by promote`, #1782). A quoted name is
+a parse error. An unknown name is `error/type` at `respond`, and the message
+lists the upper spec's `leadsTo` names.
+
 For `preserve progress`, scalar and indexed maps substitute simultaneously
 (#1613). A source read `a[e]` under `map a[i: K] = expr` inserts the
 implementation expression with `i := pull(e)` exactly once; do not remap reads

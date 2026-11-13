@@ -2,7 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use fsl_core::{KernelModel, Refinement, merge_refinement_model, pull_refinement_leadsto};
+use fsl_core::{
+    KernelModel, Refinement, merge_refinement_model, pull_refinement_leadsto,
+    unknown_abstract_leadsto_message,
+};
 use fsl_solver::SmtSolver;
 
 use crate::{BmcViolation, VerifyError, verify_bounded};
@@ -52,9 +55,9 @@ pub async fn check_refinement_progress<S: SmtSolver>(
                 .iter()
                 .find(|property| property.name == declaration.leads_to)
                 .ok_or_else(|| {
-                    VerifyError::new(format!(
-                        "unknown abstract leadsTo '{}'",
-                        declaration.leads_to
+                    VerifyError::new(unknown_abstract_leadsto_message(
+                        abstraction,
+                        &declaration.leads_to,
                     ))
                 })?;
             pull_refinement_leadsto(

@@ -1642,7 +1642,9 @@ impl<'a> Parser<'a> {
             while !self.eat_symbol("}") {
                 let response_span = self.peek().span;
                 self.expect_ident_value("respond")?;
-                let name = self.expect_ident()?;
+                // An abstract leadsTo lowered from a business policy is named
+                // by its policy ID (`POL-WAIT-001`), read by the same rule.
+                let name = self.req_id()?;
                 self.expect_ident_value("by")?;
                 let mut actions = vec![self.expect_ident()?];
                 while self.eat_symbol(",") {
@@ -2817,6 +2819,35 @@ verify { values Id = 0..2 }
         assert_eq!(
             ids,
             ["REQ-CHECKOUT-001", "AC-CHECKOUT-002", "FB-CHECKOUT-003"]
+        );
+    }
+
+    #[test]
+    fn respond_reads_a_policy_id_like_its_declaration() {
+        let source = "refinement R { impl I abs A
+  preserve progress { respond POL-WAIT-001 by go, stop respond L by go } }";
+        let SurfaceDocument::Refinement(refinement) =
+            parse_surface_document(source).expect("refinement should parse")
+        else {
+            panic!("expected refinement document");
+        };
+        let responses = refinement
+            .items
+            .iter()
+            .find_map(|item| match item {
+                RefinementItem::PreserveProgress { responses, .. } => Some(responses),
+                _ => None,
+            })
+            .expect("preserve progress");
+        assert_eq!(
+            responses
+                .iter()
+                .map(|(name, actions, _)| (name.as_str(), actions.clone()))
+                .collect::<Vec<_>>(),
+            [
+                ("POL-WAIT-001", vec!["go".to_owned(), "stop".to_owned()]),
+                ("L", vec!["go".to_owned()]),
+            ]
         );
     }
 }
