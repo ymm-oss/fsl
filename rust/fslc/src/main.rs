@@ -12,8 +12,9 @@ use fsl_core::{
 };
 use fslc_rust::literate_access::literate_access;
 use fslc_rust::outcome::{
-    FAILURE_EXIT, OutcomeClass, SUCCESS_EXIT, SweepCellClass, Verdict, error_exit,
-    exit_status_matches, is_error_exit, normalized_exit_status, outcome_class, sweep_cell_class,
+    FAILURE_EXIT, OutcomeClass, RefineFailure, RefineOutcome, SUCCESS_EXIT, SweepCellClass,
+    Verdict, error_exit, exit_status_matches, is_error_exit, normalized_exit_status, outcome_class,
+    refine_outcome, sweep_cell_class,
 };
 use fslc_rust::spec_load::{SpecLoadError, kernel_load_error, surface_parse_failure};
 use fslc_rust::verification_output::{
@@ -11899,19 +11900,22 @@ fn apply_implements_mutation_oracle(
             .map_err(|error| {
                 MutationOracle::Error(OracleFailure::new("implements", error.to_string()))
             })?;
-    let killer_requirements = match checked.verdict() {
-        fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
+    let failure = match refine_outcome(checked.verdict()) {
+        RefineOutcome::Inconclusive { states_explored } => {
             return Ok(ImplementsOracle::Inconclusive { states_explored });
         }
-        fsl_runtime::RefinementVerdict::Refines => return Ok(ImplementsOracle::Decided),
+        RefineOutcome::Refines => return Ok(ImplementsOracle::Decided),
+        RefineOutcome::Failed(failure) => failure,
+    };
+    let killer_requirements = match failure {
         // The mutant violates its own type bounds/invariants — a property of
         // the mutated impl spec, not a refinement fidelity failure, but a
         // real, detectable difference (#466): it must not be reported clean.
-        fsl_runtime::RefinementVerdict::ImplViolated { trace, .. } => trace
+        RefineFailure::ImplViolated { trace, .. } => trace
             .last()
             .and_then(|step| step.action.as_ref())
             .map(|action| action.name.as_str()),
-        fsl_runtime::RefinementVerdict::Failed(failure) => failure
+        RefineFailure::RefinementFailed(failure) => failure
             .impl_action
             .as_ref()
             .map(|instance| instance.name.as_str()),
@@ -17532,8 +17536,9 @@ fn diff_direction_from_check(
     depth: usize,
     checked: &fsl_runtime::RefinementCheck,
 ) -> (DiffDirectionResult, Value, Option<Value>) {
-    match checked.verdict() {
-        fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
+    let outcome = refine_outcome(checked.verdict());
+    match outcome {
+        RefineOutcome::Inconclusive { states_explored } => {
             // The walk stopped at its state budget before deciding within
             // `depth` (#1262): the unvisited part may hold a difference, so
             // this is neither `refines` nor a located failure. No
@@ -17542,11 +17547,11 @@ fn diff_direction_from_check(
             // gate failure.
             (
                 DiffDirectionResult::UnknownBudget,
-                json!({"result":"unknown_budget","states_explored":states_explored}),
+                json!({"result":outcome.result(),"states_explored":states_explored}),
                 None,
             )
         }
-        fsl_runtime::RefinementVerdict::ImplViolated { violation, trace } => {
+        RefineOutcome::Failed(RefineFailure::ImplViolated { violation, trace }) => {
             // The implementation side of this direction violates its own type
             // bounds/invariants (#466) — not a behavior difference to review,
             // but a broken input. `refines`/`no_semantic_change` would hide a
@@ -17554,7 +17559,7 @@ fn diff_direction_from_check(
             // its own finding kind and made an unconditional gate failure below
             // (unlike ordinary findings, never opt-in via `--forbid`).
             let public = json!({
-                "result":"impl_violated","checked_to_depth":depth,
+                "result":outcome.result(),"checked_to_depth":depth,
                 "violation_kind":violation.kind,
                 "invariant":implementation
                     .action_scoped_display_name(&violation.name, trace_last_action(trace)),
@@ -17566,7 +17571,7 @@ fn diff_direction_from_check(
             });
             (DiffDirectionResult::ImplViolated, public, Some(raw))
         }
-        fsl_runtime::RefinementVerdict::Failed(failure) => {
+        RefineOutcome::Failed(RefineFailure::RefinementFailed(failure)) => {
             let impl_action = failure.impl_action.as_ref().map(|action| {
                 let definition = implementation
                     .actions
@@ -17586,7 +17591,7 @@ fn diff_direction_from_check(
                 failure.alpha_after_actual.as_ref(),
             );
             let mut public = json!({
-                "result":"refinement_failed","checked_to_depth":depth,
+                "result":outcome.result(),"checked_to_depth":depth,
                 "kind":failure.kind,"violated_at_step":failure.step,
             });
             if let Some(violation) = &failure.abs_violation {
@@ -17600,9 +17605,9 @@ fn diff_direction_from_check(
             });
             (DiffDirectionResult::RefinementFailed, public, Some(raw))
         }
-        fsl_runtime::RefinementVerdict::Refines => (
+        RefineOutcome::Refines => (
             DiffDirectionResult::Refines,
-            json!({"result":"refines","checked_to_depth":depth}),
+            json!({"result":outcome.result(),"checked_to_depth":depth}),
             None,
         ),
     }

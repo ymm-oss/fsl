@@ -44,6 +44,9 @@ fn main() {
     });
     match result {
         Ok(checked) => {
+            // Not `fslc_rust::outcome::refine_outcome`, which owns this
+            // projection for `fslc` and the Worker: `fsl-runtime` must not
+            // depend on `fslc-rust`.
             let (verdict, kind) = match checked.verdict() {
                 fsl_runtime::RefinementVerdict::BudgetExhausted { .. } => ("unknown_budget", None),
                 fsl_runtime::RefinementVerdict::ImplViolated { violation, .. } => {

@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use fsl_core::{FslValue, KernelModel, TraceStep, TypeRef};
-use fslc_rust::outcome::{Verdict, error_exit};
+use fslc_rust::outcome::{RefineFailure, RefineOutcome, Verdict, error_exit, refine_outcome};
 use fslc_rust::spec_load::SpecLoadError;
 use serde_json::{Map, Value, json};
 
@@ -275,7 +275,7 @@ pub(crate) fn refine_budget_output(
     let mut output = envelope();
     output.insert("impl".to_owned(), json!(checked.implementation()));
     output.insert("abs".to_owned(), json!(checked.abstraction()));
-    output.insert("result".to_owned(), json!("unknown_budget"));
+    output.insert("result".to_owned(), json!(Verdict::UnknownBudget.result()));
     output.insert("states_explored".to_owned(), json!(states_explored));
     output.insert(
         "hint".to_owned(),
@@ -353,8 +353,9 @@ fn run_refine_with_loaders(
             Ok(checked) => checked,
             Err(error) => return error_exit(error_output("type", &error.to_string())),
         };
-    let failure = match checked.verdict() {
-        fsl_runtime::RefinementVerdict::ImplViolated { violation, trace } => {
+    let outcome = refine_outcome(checked.verdict());
+    let failure = match outcome {
+        RefineOutcome::Failed(RefineFailure::ImplViolated { violation, trace }) => {
             return (
                 Value::Object(impl_self_violation_output(
                     &implementation,
@@ -362,17 +363,17 @@ fn run_refine_with_loaders(
                     trace,
                     checked.depth(),
                 )),
-                Verdict::ImplViolated.exit_code(),
+                outcome.exit_code(),
             );
         }
-        fsl_runtime::RefinementVerdict::BudgetExhausted { states_explored } => {
+        RefineOutcome::Inconclusive { states_explored } => {
             return (
                 Value::Object(refine_budget_output(&checked, states_explored)),
-                1,
+                outcome.exit_code(),
             );
         }
-        fsl_runtime::RefinementVerdict::Failed(failure) => Some(failure),
-        fsl_runtime::RefinementVerdict::Refines => None,
+        RefineOutcome::Failed(RefineFailure::RefinementFailed(failure)) => Some(failure),
+        RefineOutcome::Refines => None,
     };
     let progress = if failure.is_none() && !mapping.progress.is_empty() {
         let mut solver = match fsl_solver_z3::Z3Solver::new() {
@@ -396,7 +397,7 @@ fn run_refine_with_loaders(
     output.insert("impl".to_owned(), json!(checked.implementation()));
     output.insert("abs".to_owned(), json!(checked.abstraction()));
     if let Some(failure) = failure {
-        output.insert("result".to_owned(), json!("refinement_failed"));
+        output.insert("result".to_owned(), json!(outcome.result()));
         output.insert("kind".to_owned(), json!(failure.kind));
         if let Some(at) = &failure.at {
             output.insert("at".to_owned(), json!(at));
@@ -467,7 +468,7 @@ fn run_refine_with_loaders(
             json!("the impl step does not correspond to the mapped abs action; fix the map expressions, the action correspondence, or guard the impl action"),
         );
         output.insert("trace_type".to_owned(), json!("refinement"));
-        return (Value::Object(output), 1);
+        return (Value::Object(output), outcome.exit_code());
     }
     if let Some(violation) = progress
         .as_ref()
@@ -558,7 +559,7 @@ fn run_refine_with_loaders(
         output.insert("trace_type".to_owned(), json!("refinement"));
         return (Value::Object(output), 1);
     }
-    output.insert("result".to_owned(), json!("refines"));
+    output.insert("result".to_owned(), json!(outcome.result()));
     output.insert("checked_to_depth".to_owned(), json!(checked.depth()));
     output.insert(
         "action_map".to_owned(),
@@ -608,5 +609,5 @@ fn run_refine_with_loaders(
             ),
         );
     }
-    (Value::Object(output), 0)
+    (Value::Object(output), outcome.exit_code())
 }

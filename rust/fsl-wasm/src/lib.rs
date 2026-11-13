@@ -426,17 +426,9 @@ async fn governance_output(
                 // walk cut off by its state budget, `impl_violated` for an
                 // impl that breaks its own semantics (#1315), and no progress
                 // stage for either.
-                match checked.verdict() {
-                    fsl_runtime::RefinementVerdict::BudgetExhausted { .. } => {
-                        return Ok(json!("unknown_budget"));
-                    }
-                    fsl_runtime::RefinementVerdict::ImplViolated { .. } => {
-                        return Ok(json!("impl_violated"));
-                    }
-                    fsl_runtime::RefinementVerdict::Failed(_) => {
-                        return Ok(json!("refinement_failed"));
-                    }
-                    fsl_runtime::RefinementVerdict::Refines => {}
+                let outcome = fslc_rust::outcome::refine_outcome(checked.verdict());
+                if outcome.verdict().is_some() {
+                    return Ok(json!(outcome.result()));
                 }
                 if !mapping.progress.is_empty() {
                     let mut solver = fsl_solver_z3js::Z3JsSolver::new();
@@ -453,7 +445,7 @@ async fn governance_output(
                         return Ok(json!("refinement_failed"));
                     }
                 }
-                Ok(json!("refines"))
+                Ok(json!(outcome.result()))
             }
         },
     )
