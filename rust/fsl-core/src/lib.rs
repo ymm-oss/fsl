@@ -130,6 +130,7 @@ pub use refinement::{
     parse_refinement, parse_refinement_with_options, pull_refinement_leadsto,
     requirements_implements, requirements_implements_with_bounds,
     requirements_implements_with_bounds_with_options, requirements_implements_with_options,
+    unknown_abstract_leadsto_message,
 };
 pub use resolve_aliases::lower_requirements;
 pub use rule_guards::{GuardConflict, RULE_CONFLICT_UNSATISFIABLE_GUARD};

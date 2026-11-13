@@ -251,9 +251,9 @@ const GALLERY_FAILURE_FIXTURE: &str = "error/adversarial gallery fixture: its su
      `check`/`verify` failure whose documented output and tests pin these IDs";
 const LINT_UNREADABLE_DIALECT: &str = "`lint` cannot read this dialect yet (#609)";
 const POLICY_NAMED_BY_PRESERVE_PROGRESS: &str = "the policy IDs are the names the \
-     requirements->business refinement's `preserve progress { respond <name> by ... }` targets, \
-     and `respond` takes an identifier (#1782), so a canonical hyphenated POL ID would drop \
-     that liveness check";
+     requirements->business refinement's `preserve progress { respond <name> by ... }` targets; \
+     `respond` reads a canonical hyphenated POL ID since #1782, but renaming them changes the \
+     business spec, the refinement and their README together, which is a separate change";
 const GOVERNANCE_SATISFIED_BY_SCOPE_RESCAN: &str = "lint false positive (#1788): on a \
      `CTRL-EXPENSE-001 is satisfied_by policy ...` line the canonical control ID is accepted, \
      but its scope segment is rescanned as a second control ID `EXPENSE-001`";

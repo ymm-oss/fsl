@@ -7,8 +7,8 @@ fsl 5
 // Both queues are Submitted. The design's enum members are named apart from the
 // requirements stages (Drafting, not Draft), so no bare member is ambiguous here.
 // The requirements policies POL-LEAVE-001/002 are not pulled through this
-// mapping: `preserve progress { respond <name> by … }` reads an identifier, and
-// a policy ID is not one. The design states the same progress itself
+// mapping, although `preserve progress { respond <ID> by … }` can name a
+// policy ID (#1782). The design states the same progress itself
 // (QueuedIsDecided, GrantedEnds) and verifies it.
 refinement LeaveDesignRefinesRequests {
   impl LeaveDesign

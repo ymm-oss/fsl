@@ -3371,6 +3371,14 @@ refinement DesignRefinesReq {
 メタデータで、impl の action を名指ししなければなりません。公平性を作ることも、
 実装のコンフォーマンスを証明することもありません。公平性は依然として下位レイヤーの
 `fair action` 宣言から来ます。
+`respond` の名前は抽象の `leadsTo` の正規の名前で、厳密に照合します。要件形式の ID
+と同じ文法で読む(§13.1.1。`lint` の ID テンプレートは適用しません)ので、業務層や
+`fsl 5` の要件層の policy の進行性は `policy` が宣言したとおりの policy ID で名指しします
+— `respond POL-WAIT-001 by promote`。上の層の仕様を書き換える必要はありません(#1782)。ID は宣言と同じく引用符なしで書きます。引用符つきの名前は
+構文エラーで、`fmt` は ID を空白なしで出力します。抽象側が宣言していない名前は
+`respond` の位置の `error/type`(exit 2)で、メッセージに抽象側の `leadsTo` 名の一覧が
+入ります: `unknown abstract leadsTo 'POL_WAIT_001'; abstract spec 'WaitingBusiness'
+declares leadsTo 'POL-WAIT-001'`。
 抽象の Int/Bool 定数は P/Q、`decreases`、範囲と入れ子のフィルターでリテラルになります。
 別モデルの impl 定数との binder 衝突と、読まれる抽象の const/state の同名は拒否します。
 const と同名の local は先に `check` が拒否します。**破壊的な受理の削除 (#1595):** 性質の pattern が、字句 scope で使う map の

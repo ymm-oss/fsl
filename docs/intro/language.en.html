@@ -3859,6 +3859,16 @@ is <code>refinement_failed</code> with <code>kind:"progress_lost"</code> and
 actions are review metadata and must name impl actions; they do not create
 fairness or prove implementation conformance. Fairness still comes from
 lower-layer <code>fair action</code> declarations.
+The <code>respond</code> name is the abstract <code>leadsTo</code>'s canonical name and is matched
+exactly. It is read with the grammar of a requirement-style ID (§13.1.1; the
+<code>lint</code> ID templates do not apply to it), so a business or <code>fsl 5</code> requirements
+policy's progress property is named by its policy ID as the <code>policy</code> declares
+it — <code>respond POL-WAIT-001 by promote</code> — with no rewriting of the upper spec
+(#1782). Write the ID bare, as the declaration does; a quoted name is a parse
+error, and <code>fmt</code> prints the ID without spaces. A name the abstraction does not
+declare is <code>error/type</code> (exit 2) at <code>respond</code>, and its message lists the
+abstraction's <code>leadsTo</code> names: <code>unknown abstract leadsTo 'POL_WAIT_001';
+abstract spec 'WaitingBusiness' declares leadsTo 'POL-WAIT-001'</code>.
 Abstract Int/Bool constants become literals in P/Q, <code>decreases</code>, domains and nested filters.
 Impl-constant/read const-state collisions are refused; <code>check</code> already rejects const-namesake locals.
 <strong>Breaking removal (#1595):</strong> property patterns matching free impl names from lexically used maps are refused outside

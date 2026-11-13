@@ -90,7 +90,12 @@ refinement CartImplRefinesCart {
   optional liveness-preserving refinement check. It does not change ordinary
   safety refinement. When present, fslc pulls the named abstract `leadsTo` P/Q
   through the state mapping and runs the same bounded lasso/stall search on impl
-  executions. The `by` actions are validated impl action names and are returned
+  executions. `<AbsLeadsTo>` is read by the parser's requirement-ID rule
+  (`Parser::req_id`, the rule that reads a `policy` ID), so it is the canonical
+  name the abstract Kernel `leads_to` is keyed by — a business policy ID such as
+  `POL-WAIT-001` included — and is matched exactly (#1782). An unknown name is
+  `error/type` at `respond` whose message lists the abstraction's `leadsTo`
+  names (`fsl_core::unknown_abstract_leadsto_message`). The `by` actions are validated impl action names and are returned
   in JSON as review context; they do not create fairness or implementation
   conformance by themselves. Fairness still comes from the impl actions marked
   `fair`. Failures report `kind:"progress_lost"` plus
