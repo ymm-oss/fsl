@@ -12,12 +12,16 @@
 //! [`command_with_cache_dir`].
 //!
 //! "Per test" is per thread: libtest runs each test on its own thread, and
-//! the directory is removed when that thread exits. A consumer pulls this in
-//! with `#[path = "support/fslc_cli.rs"] mod fslc_cli;`. A module may be
-//! compiled into one test binary more than once, so directories are claimed
-//! with an exclusive `create_dir` rather than a per-copy counter.
-//! `tests/cli_cache_isolation_guard.rs` fails when a test file spawns the
-//! binary without this module and without its own cache setup.
+//! the directory is removed when that thread exits. A thread still running
+//! when the process exits leaves its directory behind; the process id in the
+//! name keeps a later run from reusing it. Directories are claimed with an
+//! exclusive `create_dir`, so two copies of this module in one binary cannot
+//! share one either.
+//!
+//! A test crate root declares `#[path = "support/fslc_cli.rs"] mod fslc_cli;`
+//! once; a module nested under it uses `crate::fslc_cli`.
+//! `tests/cli_cache_isolation_guard.rs` fails when a function spawns the
+//! binary bare without its own cache setup.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
