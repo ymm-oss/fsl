@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -15,7 +17,7 @@ fn run(command: &str, source: &str) -> (Value, i32) {
         .unwrap()
         .parent()
         .unwrap();
-    let mut process = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut process = fslc_cli::command();
     if command == "native-check" {
         process.args(["check", source]);
     } else {

@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Ryoichi Izumita
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use fsl_tools::{artifact_digest, lifecycle_record_digest};
 use serde_json::{Value, json};
-use std::{path::Path, process::Command};
+use std::path::Path;
 #[path = "support/scratch_identity.rs"]
 mod scratch_identity;
 const ROUTES: [&[&str]; 3] = [
@@ -36,7 +39,7 @@ fn run(artifact: &Value, route: &[&str], lifecycle: bool, as_of: bool) -> (Value
     std::fs::create_dir(&scratch).unwrap();
     let evidence = scratch.join("S1.json");
     std::fs::write(&evidence, artifact.to_string()).unwrap();
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.current_dir(root).args(["causal", route[0], MODEL]);
     command.args(&route[1..]).arg("--evidence").arg(&evidence);
     if as_of {

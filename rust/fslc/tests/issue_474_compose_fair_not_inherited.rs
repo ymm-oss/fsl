@@ -21,8 +21,10 @@
 //! - `no_fair_loss`: the synchronized action references only non-fair
 //!   constituents -> no warning (there is nothing lost).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -42,7 +44,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(workspace_root())
         .output()

@@ -4,9 +4,11 @@
 //! errors or successful reads. Expectations come from LANGUAGE.md §6 and
 //! DESIGN-seq-partial-operations.md, not another engine's classification.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use fsl_core::{FsResolver, build_model, parse_kernel_source};
@@ -36,8 +38,7 @@ impl Fixture {
     }
 
     fn run(&self, command: &str, options: &[&str]) -> (Value, i32) {
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-            .env_remove("FSLC_CACHE")
+        let output = fslc_cli::command()
             .arg(command)
             .arg(&self.0)
             .args(options)

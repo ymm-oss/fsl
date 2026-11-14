@@ -19,8 +19,10 @@
 //!   state.
 //! - The declarations' errors.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -68,7 +70,7 @@ fn fslc_with(args: &[&str], label: &str, source: &str) -> (Value, i32) {
     let command = args[0];
     let scratch = Scratch::new(label);
     scratch.write("doc.fsl", source);
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(&scratch.0)
         .output()
@@ -253,7 +255,7 @@ fn with_ac1(body: &str) -> String {
 fn fslc_text(args: &[&str], label: &str, source: &str) -> (String, i32) {
     let scratch = Scratch::new(label);
     scratch.write("doc.fsl", source);
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(&scratch.0)
         .output()

@@ -45,9 +45,11 @@
 //! one exists and otherwise chosen to exercise the mapping, because depth
 //! bounds the search rather than declaring the expected verdict.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::process::Command;
 use std::sync::Mutex;
 
 use serde_json::{Map, Value};
@@ -810,7 +812,7 @@ fn manifest_rows_agree_with_the_expectations_their_mapping_files_declare() {
 }
 
 fn run_refine(implementation: &str, abstraction: &str, mapping: &str, depth: u32) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "refine",
             implementation,

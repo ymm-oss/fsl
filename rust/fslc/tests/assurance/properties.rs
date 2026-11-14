@@ -29,7 +29,6 @@
 //! body (or running the probe here), never transcribed from a filename.
 
 use std::collections::BTreeSet;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -237,7 +236,7 @@ pub fn axis() -> Axis {
 }
 
 fn run_verify(arguments: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = crate::fslc_cli::command()
         .args(arguments)
         .current_dir(workspace_root())
         .output()

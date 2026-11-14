@@ -2,6 +2,9 @@
 
 //! None-valued lexical binders retain type context for both admitted outer kinds.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[allow(dead_code)]
 #[path = "support/collection_replay.rs"]
 mod collection_replay;

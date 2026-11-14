@@ -7,8 +7,10 @@
 //! `rank_failure: "deadlock"`, independent of `--deadlock` (which governs only
 //! the ordinary, reachability-based deadlock report).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -48,7 +50,7 @@ impl Drop for Fixture {
 }
 
 fn verify(path: &str, engine: &str, depth: &str, deadlock: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "verify",
             path,

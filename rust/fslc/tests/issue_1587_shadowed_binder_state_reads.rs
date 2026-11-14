@@ -3,6 +3,9 @@
 
 //! #1587: locally bound x is not a read of state x in any consumer.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::process::Command;
 

@@ -4,8 +4,10 @@
 //! Controls for #844 slice 1: `fslc testplan` selects bounded conformance vectors
 //! into a closed `test-plan.v1` document without reimplementing oracle semantics.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fsl_core::{KERNEL_SCHEMA_VERSION, TEST_PLAN_V1_SCHEMA_ID, TEST_PLAN_V1_SCHEMA_VERSION};
 use fsl_tools::validate_test_plan_v1;
@@ -24,7 +26,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()
@@ -159,7 +161,7 @@ fn validate_test_plan_rejects_unknown_fields() {
 /// REJECTING CONTROL. Layer-selection guidance must be present in CLI help.
 #[test]
 fn cli_help_documents_same_layer_requirement() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["testplan", "--help"])
         .current_dir(root())
         .output()

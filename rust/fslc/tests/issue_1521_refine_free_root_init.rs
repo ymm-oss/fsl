@@ -6,8 +6,10 @@
 //! engine's observation. Never-assigned roots remain free (singleton control).
 //! Verdict contracts are separate, not envelope parity (assurance/cost differ).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
@@ -56,10 +58,9 @@ impl Fixture {
                 "--no-cache",
             ],
         };
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(args)
             .current_dir(&self.0)
-            .env_remove("FSLC_CACHE")
             .output()
             .expect("run native fslc");
         let actual: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {

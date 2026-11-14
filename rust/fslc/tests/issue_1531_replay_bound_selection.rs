@@ -4,6 +4,9 @@
 //! the literal transitions and the accepted fail-closed Seq policy, not from
 //! another engine's output. Every engine/depth is a separate fail-first cell.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -88,10 +91,9 @@ impl Model {
     }
 
     fn run_bin(&self, binary: &str, args: &[&str]) -> (Value, i32) {
-        let output = Command::new(binary)
+        let output = fslc_cli::isolate(&mut Command::new(binary))
             .args(args)
             .current_dir(&self.0)
-            .env_remove("FSLC_CACHE")
             .output()
             .expect("run native binary");
         let exit = output.status.code().expect("native exit code");

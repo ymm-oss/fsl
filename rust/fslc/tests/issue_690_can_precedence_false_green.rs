@@ -33,8 +33,10 @@
 //! the task report, not this file, for the reverted-fix transcript, since
 //! this file must keep pinning the *fixed* behavior on `main`.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -50,7 +52,7 @@ fn root() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()
@@ -65,7 +67,7 @@ fn run(args: &[&str]) -> (Value, i32) {
 }
 
 fn expanded_source() -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["domain", "expand", FIXTURE])
         .current_dir(root())
         .output()
@@ -127,7 +129,7 @@ fn verify_agrees_between_typed_model_and_rendered_kernel() {
     let expanded_path = directory.join("can_expansion_precedence.expanded.fsl");
     std::fs::write(&expanded_path, expanded_source()).expect("write expanded kernel source");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "verify",
             expanded_path.to_str().expect("utf8 path"),

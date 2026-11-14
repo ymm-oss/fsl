@@ -6,9 +6,12 @@
 //! classifier is one side of the contract under test, so reusing it here would
 //! let the implementation and its oracle repeat the same defect.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
@@ -246,7 +249,7 @@ fn parse_cli_output(arguments: &[String], output: &Output) -> RawCliOutput {
 }
 
 fn run_cli_at(cwd: &Path, arguments: &[String]) -> RawCliOutput {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(cwd)
         .output()

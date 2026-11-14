@@ -3,8 +3,11 @@
 //! `--as-of` on `causal analyze` and `causal ledger` must name a real
 //! Gregorian date as ASCII `YYYY-MM-DD` (#1422). A malformed value used to
 //! exit 0 and silently count nothing as stale.
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use serde_json::{Value, json};
-use std::{path::Path, process::Command};
+use std::path::Path;
 
 const ROUTES: [&[&str]; 3] = [
     &["analyze", "--projection", "causal_evidence_graph"],
@@ -16,7 +19,7 @@ const EVIDENCE: &str = "examples/causal/evidence/onboarding-2026.causal.json";
 const LIFECYCLE: &str = "examples/causal/evidence/onboarding-2026.lifecycle.json";
 
 fn run(route: &[&str], evidence: &str, as_of: &str) -> (Value, i32, Vec<u8>) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
         .args(["causal", route[0], MODEL])
         .args(&route[1..])

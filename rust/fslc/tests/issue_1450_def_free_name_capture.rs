@@ -3,6 +3,9 @@
 
 //! #1450: preserve def-body free globals rather than capture them at a call.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_scratch.rs"]
 #[allow(dead_code)]
 mod compose_scratch;
@@ -17,11 +20,13 @@ use std::process::Command;
 fn invoke(dir: &Path, args: &[&str]) -> (Value, i32) {
     let binary = std::env::var_os("FSL_MATRIX_BINARY")
         .map_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_fslc")), PathBuf::from);
-    let output = Command::new(std::fs::canonicalize(binary).expect("selected native binary"))
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("native fslc");
+    let output = fslc_cli::isolate(&mut Command::new(
+        std::fs::canonicalize(binary).expect("selected native binary"),
+    ))
+    .args(args)
+    .current_dir(dir)
+    .output()
+    .expect("native fslc");
     assert!(output.stderr.is_empty(), "{:?}", output.stderr);
     (
         serde_json::from_slice(&output.stdout).expect("native JSON"),

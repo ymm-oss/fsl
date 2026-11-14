@@ -12,8 +12,10 @@
 //! documents with that gap closed are accepted by the same commands, so the
 //! rejection is the solver's answer and not the deferral itself.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -45,7 +47,7 @@ impl Drop for Scratch {
 /// `fslc <command> doc.fsl` in `directory`: the JSON envelope (`None` for a
 /// command whose success is not JSON) and exit.
 fn fslc(directory: &Path, command: &[&str]) -> (Option<Value>, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(command)
         .arg("doc.fsl")
         .current_dir(directory)

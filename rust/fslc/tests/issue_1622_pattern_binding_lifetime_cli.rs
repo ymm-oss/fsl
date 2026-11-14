@@ -2,8 +2,10 @@
 
 //! Source-level preservation and init truth. Collision-reservation bypasses
 //! are exercised directly in fsl-verifier, never by relaxing CLI admission.
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
@@ -27,10 +29,9 @@ impl Fixture {
     }
 
     fn run(&self, args: &[&str], tag: &str) -> (Value, i32) {
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(args)
             .current_dir(&self.0)
-            .env_remove("FSLC_CACHE")
             .output()
             .expect("fslc");
         let exit = output.status.code().expect("exit");

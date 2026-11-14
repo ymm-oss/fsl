@@ -15,8 +15,11 @@
 //!
 //! Every test here fails on `origin/main` (ade95232).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
@@ -40,7 +43,7 @@ fn scratch(files: &[(&str, &str)]) -> PathBuf {
 }
 
 fn verify(dir: &Path, file: &str, depth: &str) -> (Value, i32) {
-    let output: Output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output: Output = fslc_cli::command()
         .args(["verify", file, "--depth", depth, "--no-cache"])
         .current_dir(dir)
         .output()

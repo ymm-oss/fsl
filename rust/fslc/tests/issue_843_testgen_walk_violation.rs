@@ -14,8 +14,10 @@
 //! that silently does nothing passing it, and `--target pytest` (which drives
 //! the walk live) disagreeing with the five baked targets on the same input.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Map, Value};
 
@@ -32,7 +34,7 @@ fn fixture(name: &str) -> String {
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

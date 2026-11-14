@@ -7,8 +7,10 @@
 //! `result:"verified_under_assumptions"`/`formal_result:"verified"`/exit 0
 //! regardless of what the embedded `kernel.result` actually says.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -21,7 +23,7 @@ fn root() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

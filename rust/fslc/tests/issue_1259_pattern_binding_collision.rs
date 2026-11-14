@@ -10,8 +10,10 @@
 //! bmc/induction reported a false `violated` (or a false "undefined") where
 //! explicit proved the spec. The reproducers below are the issue's.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -25,7 +27,7 @@ fn fixture(tag: &str, text: &str) -> PathBuf {
 }
 
 fn run(command: &str, path: &PathBuf, extra: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg(command)
         .arg(path)
         .args(extra)

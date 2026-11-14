@@ -19,9 +19,11 @@
 //! from [`KEYWORDS`] and [`PARTICLES`], and the skill's English example and
 //! its Japanese spelling are one spec.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fsl_syntax::keywords::{
     KEYWORDS, KeywordContext, PARTICLES, Position, SHARED_JAPANESE, Status,
@@ -37,7 +39,7 @@ fn e2e() -> PathBuf {
 
 /// `(stdout as JSON, exit)` of `fslc check <file>` in `directory`.
 fn check(directory: &Path, file: &str) -> (Value, i32) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.args(["check", file]).current_dir(directory);
     let output = command.output().expect("run fslc check");
     let value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {

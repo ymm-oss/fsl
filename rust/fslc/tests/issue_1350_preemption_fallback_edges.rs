@@ -2,9 +2,11 @@
 
 //! Fallback search keeps valid siblings and never starts from a violated root.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const GUARD_PARTIAL: &str = r"spec C {
   type N = 0..5
@@ -112,7 +114,7 @@ fn fixture_path(label: &str, extension: &str) -> PathBuf {
 fn run_json(source: &str, label: &str, args: &[&str], status: i32) -> Value {
     let path = fixture_path(label, "fsl");
     std::fs::write(&path, source).expect("write inline fixture");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg(args[0])
         .arg(&path)
         .args(&args[1..])

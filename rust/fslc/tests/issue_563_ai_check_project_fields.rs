@@ -14,8 +14,10 @@
 //! `examples/ai/support_answer_quality.fsl`, which declares one `dataset`, one
 //! `evaluator`, and one `failure_mode`.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -52,7 +54,7 @@ fn workspace_root() -> &'static Path {
 }
 
 fn ai_check(spec: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["ai", "check", spec])
         .current_dir(workspace_root())
         .output()

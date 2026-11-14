@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::json;
@@ -49,7 +51,7 @@ fn generated_content_with(
     let directory = root.join("rust/target/testgen-contract");
     std::fs::create_dir_all(&directory).expect("create testgen output directory");
     let output_path = directory.join(format!("{stem}-{target}.out"));
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["testgen", spec, "--depth", depth, "--target", target])
         .args(extra)
         .arg("-o")
@@ -123,7 +125,7 @@ fn allow_unwired_reproduces_the_pre_1200_skipping_scaffolds() {
 /// refuses the target instead of generating that silent green.
 #[test]
 fn allow_unwired_rejects_kotlin_and_unwired_kotlin_fails() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "testgen",
             "specs/cart_v1.fsl",
@@ -302,7 +304,7 @@ fn symlink_source_name_and_canonical_pytest_path_remain_distinct() {
     symlink(root.join("specs/cart_v1.fsl"), &alias).expect("create spec symlink");
     let output_path = generated.join("cart.py");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg("testgen")
         .arg(&alias)
         .args(["--depth", "3", "--target", "pytest", "-o"])

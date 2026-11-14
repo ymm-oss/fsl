@@ -3,6 +3,9 @@
 
 //! #1528: declaration binders must not capture definition-body free state names.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_scratch.rs"]
 #[allow(dead_code)]
 mod compose_scratch;

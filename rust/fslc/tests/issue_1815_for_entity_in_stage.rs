@@ -9,6 +9,9 @@
 //! one stage, as `Stage Entity` does, and stands on the entity's line: a rule
 //! statement starts on a new line.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

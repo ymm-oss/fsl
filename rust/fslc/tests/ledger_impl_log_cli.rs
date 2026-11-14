@@ -22,9 +22,12 @@
 //! still renders in full. That is why the `*_still_generates` tests below
 //! assert exit 1, not exit 0.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
@@ -58,7 +61,7 @@ fn scratch_dir(name: &str) -> PathBuf {
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .output()
         .expect("run native fslc")

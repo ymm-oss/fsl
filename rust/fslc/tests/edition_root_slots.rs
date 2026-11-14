@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/edition_cases.rs"]
 pub(crate) mod cases;
 
@@ -7,7 +10,7 @@ use cases::{Results, Scratch, value};
 use serde_json::Value;
 
 fn run(scratch: &Scratch, args: &[String]) -> std::process::Output {
-    cases::invoke(env!("CARGO_BIN_EXE_fslc"), args, &scratch.0)
+    cases::invoke(fslc_cli::command(), args, &scratch.0)
 }
 
 #[test]
@@ -67,11 +70,8 @@ pub(crate) fn explicit_refine_diff_replay_and_batch_slots_are_admitted_individua
                 cases::rejected_metadata()
             };
             scratch.write(slot, &rejected);
-            let wanted = cases::refusal(
-                env!("CARGO_BIN_EXE_fslc"),
-                &scratch.0,
-                std::path::Path::new(slot),
-            );
+            let wanted =
+                cases::refusal(fslc_cli::command(), &scratch.0, std::path::Path::new(slot));
             let output = run(&scratch, &args);
             results.error_envelope(&format!("slot/{template}/{slot}"), &output, &wanted, true);
         }
@@ -143,7 +143,7 @@ pub(crate) fn manifest_layers_and_mapping_refuse_before_the_implementation_marke
             }
             let path = scratch.write(&format!("{layer}.fsl"), &rejected);
             scratch.write("project.toml", &manifest);
-            let wanted = cases::refusal(env!("CARGO_BIN_EXE_fslc"), &scratch.0, &path);
+            let wanted = cases::refusal(fslc_cli::command(), &scratch.0, &path);
             let output = run(&scratch, &args);
             results.error_envelope(
                 &format!("chain/{layer}/{jobs}/{keep_going}/{checks_only}"),
@@ -167,7 +167,7 @@ pub(crate) fn causal_explicit_mapping_is_a_root_and_missing_sidecars_lose_to_ref
     let scratch = Scratch::new();
     let source = cases::rejected_domain();
     let mapping = scratch.write("mapping.fsl", &source);
-    let wanted = cases::refusal(env!("CARGO_BIN_EXE_fslc"), &scratch.0, &mapping);
+    let wanted = cases::refusal(fslc_cli::command(), &scratch.0, &mapping);
     for missing in [false, true] {
         let log = if missing {
             scratch.0.join("missing.jsonl")

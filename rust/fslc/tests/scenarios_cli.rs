@@ -5,14 +5,15 @@
 //! gets reported is wrong, missing, or actively misleading. Every test here
 //! fails if the corresponding fix is reverted.
 
-use std::process::Command;
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
 
 fn run_cli(args: &[&str]) -> (serde_json::Value, i32) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
         .expect("workspace root");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root)
         .output()

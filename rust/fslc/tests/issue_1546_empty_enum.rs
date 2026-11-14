@@ -3,8 +3,10 @@
 //! #1546: every model consumer rejects an empty enum at its declaration,
 //! including unused declarations and tool-less AI components.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
@@ -53,7 +55,7 @@ enum Consumer {
 }
 
 fn run(fixture: &Fixture, consumer: Consumer) -> (Value, i32) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     match consumer {
         Consumer::Check => command.arg("check"),
         Consumer::AiCheck => command.args(["ai", "check"]),
@@ -76,7 +78,6 @@ fn run(fixture: &Fixture, consumer: Consumer) -> (Value, i32) {
         _ => &mut command,
     };
     let output = command
-        .env_remove("FSLC_CACHE")
         .current_dir(root())
         .output()
         .expect("run native CLI");

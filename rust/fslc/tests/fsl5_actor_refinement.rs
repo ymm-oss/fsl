@@ -6,8 +6,10 @@
 //! used by scenario steps, rules and decisions. Requirement
 //! annotations on either side must not replace the actor's semantic identity.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -26,7 +28,7 @@ fn fixture(label: &str, source: &str, business: &str) -> PathBuf {
 }
 
 fn fslc(directory: &Path, args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(directory)
         .output()

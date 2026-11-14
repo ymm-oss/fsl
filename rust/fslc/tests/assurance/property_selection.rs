@@ -34,8 +34,6 @@
 //! both lanes -- not silently absent, and not miscoded `UnsupportedFailClosed`
 //! (there is no selection attempt to reject; the name never exists to try).
 
-use std::process::Command;
-
 use serde_json::Value;
 
 use crate::claim::{Axis, Citation, Claim, workspace_root};
@@ -179,7 +177,7 @@ pub fn axis() -> Axis {
 }
 
 fn run_verify(arguments: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = crate::fslc_cli::command()
         .args(arguments)
         .current_dir(workspace_root())
         .output()

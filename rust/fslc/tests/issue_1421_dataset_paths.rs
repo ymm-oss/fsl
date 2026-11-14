@@ -4,9 +4,12 @@
 //! AI1/AI2: declared sources belong to the declaring file; explicit records
 //! remain caller-relative. Preserve complete statistical/error envelopes.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -154,7 +157,7 @@ fn eval(
     if let Some(dataset) = dataset {
         args.extend(["--dataset", dataset]);
     }
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(cwd)
         .output()

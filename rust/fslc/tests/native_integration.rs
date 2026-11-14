@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -299,7 +302,7 @@ fn assert_installer_release_contract(root: &Path) {
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

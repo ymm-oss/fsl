@@ -9,7 +9,6 @@
 //! its CLI, Worker, and C4 ownership posture is reviewed.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -154,7 +153,7 @@ fn every_registered_dialect_has_a_corpus_representative_and_reviewed_posture() {
 /// manifest separately exercises the owning command for every mapping.
 #[test]
 fn refinement_bare_check_fails_closed_and_stays_owned_by_refine() {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = crate::fslc_cli::command()
         .args(["check", "specs/cart_refines.fsl"])
         .current_dir(root())
         .output()

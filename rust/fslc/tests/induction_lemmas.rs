@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-use std::process::Command;
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
 
 fn verify(fixture: &str, lemmas: &[&str]) -> (serde_json::Value, i32) {
     verify_property(fixture, lemmas, None)
@@ -32,7 +33,7 @@ fn verify_property(
     if let Some(property) = property {
         arguments.extend(["--property", property]);
     }
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(root)
         .output()

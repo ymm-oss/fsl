@@ -9,8 +9,10 @@
 //! lowering; slice 2 retired the #796 post-validation that previously masked
 //! renderer divergence at the CLI boundary.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -30,7 +32,7 @@ fn root() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()
@@ -45,7 +47,7 @@ fn run(args: &[&str]) -> (Value, i32) {
 }
 
 fn run_text(args: &[&str]) -> (String, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()
@@ -73,7 +75,7 @@ fn run_against_two_snapshot_fifo(command: &str) -> (String, i32) {
     let mut fixture = TwoSnapshotFifo::new("domain", invalid, valid);
     let fifo_argument = fixture.fifo.to_string_lossy().into_owned();
     let mut child = ReapedChild::new(
-        Command::new(env!("CARGO_BIN_EXE_fslc"))
+        fslc_cli::command()
             .args(["domain", command, &fifo_argument])
             .current_dir(root())
             .stdout(Stdio::piped())

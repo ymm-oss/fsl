@@ -22,9 +22,12 @@
 //! direct call and requires these tests to fail, so "the guard disappeared" is
 //! machine-checked rather than assumed.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::Value;
@@ -162,7 +165,7 @@ fn refinement_trio(directory: &Path, n: usize) -> Trio {
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

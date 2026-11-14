@@ -52,7 +52,8 @@
 //! (issue #281's annotation-syntax sample); it is a registered
 //! `EvidenceExclusion` below, not a seventh roster row.
 
-use std::process::Command;
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
 
 use serde_json::Value;
 
@@ -332,7 +333,7 @@ fn manifest_rows_agree_with_their_citations() {
 }
 
 fn run_fslc(args: &[String]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

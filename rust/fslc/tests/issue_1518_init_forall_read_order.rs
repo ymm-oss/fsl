@@ -20,8 +20,10 @@
 //! not an invariant proof. Positive invariants independently specify every
 //! initial component and are checked by each verification engine.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
@@ -57,10 +59,9 @@ impl Fixture {
                 "--no-cache",
             ],
         };
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(&args)
             .current_dir(&self.0)
-            .env_remove("FSLC_CACHE")
             .output()
             .expect("run native fslc");
         let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
@@ -564,7 +565,7 @@ fn rf1_refine_rejects_init_read_order() {
 ",
     )
     .expect("write RF1 mapping");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "refine",
             "model.fsl",
@@ -574,7 +575,6 @@ fn rf1_refine_rejects_init_read_order() {
             "4",
         ])
         .current_dir(&fixture.0)
-        .env_remove("FSLC_CACHE")
         .output()
         .expect("run native RF1 refine");
     let actual: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {

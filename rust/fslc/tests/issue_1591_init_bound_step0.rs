@@ -4,7 +4,9 @@
 //! #1591: an init type-bound failure precedes every action, even at depth zero.
 //! Expectations follow the source values and declared bounds, not base output.
 
-use std::process::Command;
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::{Value, json};
@@ -73,10 +75,9 @@ fn verify_property(
     ));
     std::fs::create_dir_all(&directory).expect("create fixture directory");
     std::fs::write(directory.join("model.fsl"), source).expect("write fixture");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command
         .current_dir(&directory)
-        .env_remove("FSLC_CACHE")
         .args(["verify", "model.fsl", "--engine", engine, "--depth"])
         .arg(depth.to_string())
         .arg("--no-cache");

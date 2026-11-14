@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/edition_dependency_cases.rs"]
 mod cases;
 #[path = "support/edition_cases.rs"]
@@ -13,7 +16,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 fn run(s: &common::Scratch, command: &str) -> std::process::Output {
-    common::command(env!("CARGO_BIN_EXE_fslc"), &s.0, command)
+    common::command(fslc_cli::command(), &s.0, command)
 }
 
 fn git(s: &common::Scratch, args: &[&str]) {
@@ -1055,7 +1058,7 @@ fn dependency_edition_a16_cache_and_c04_materialized_source_controls() {
     s.write("root.fsl", source);
     s.write("dep.fsl", cases::LEAF);
     let cached = |extra: &[&str]| {
-        std::process::Command::new(env!("CARGO_BIN_EXE_fslc"))
+        fslc_cli::command()
             .args(["verify", "root.fsl", "--depth", "2"])
             .args(extra)
             .current_dir(&s.0)
@@ -1211,8 +1214,8 @@ fn dependency_edition_plain_kernel_schema_controls() {
             "--kernel-version".into(),
             version.to_string(),
         ];
-        let first = common::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &root);
-        let second = common::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &root);
+        let first = common::invoke(fslc_cli::command(), &args, &root);
+        let second = common::invoke(fslc_cli::command(), &args, &root);
         let actual = payload(&first);
         let expected = kernel_contract_expected(version);
         assert!(

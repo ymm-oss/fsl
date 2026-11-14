@@ -9,6 +9,9 @@
 //! `renderer_changed` comparison; every digest binding still applies, and
 //! any other value is compared exactly.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,7 +21,7 @@ use serde_json::{Value, json};
 static NEXT_REPOSITORY: AtomicU64 = AtomicU64::new(0);
 
 fn run(cwd: &Path, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(arguments)
         .current_dir(cwd)
         .output()

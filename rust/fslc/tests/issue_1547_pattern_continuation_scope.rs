@@ -2,6 +2,9 @@
 
 //! #1547: bindings exist only in a match's true continuation.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/pattern_continuation.rs"]
 mod forms;
 #[path = "support/pattern_reuse.rs"]
@@ -27,7 +30,7 @@ fn observe(dir: &Path, file: &str, consumer: &str) -> (Value, i32) {
     if !matches!(consumer, "check" | "kernel" | "default") {
         args.extend(["--engine", consumer]);
     }
-    let output = Command::new(std::fs::canonicalize(binary).unwrap())
+    let output = fslc_cli::isolate(&mut Command::new(std::fs::canonicalize(binary).unwrap()))
         .args(args)
         .current_dir(dir)
         .output()
