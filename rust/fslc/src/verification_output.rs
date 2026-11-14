@@ -2537,7 +2537,7 @@ pub fn render_explicit_output(
         return Ok((output, status));
     }
 
-    if result.budget_exceeded {
+    if explicit_budget_unknown(result, deadlock) {
         return Ok(render_explicit_budget(
             envelope,
             model,
@@ -2590,6 +2590,19 @@ pub fn render_explicit_output(
         &statistics,
         skip_vacuity_probe,
     ))
+}
+
+/// Whether [`render_explicit_output`] reports `result` as `unknown_budget`:
+/// the state budget ran out before a violation or, under
+/// [`DeadlockMode::Error`], a deadlock was found.
+#[must_use]
+pub fn explicit_budget_unknown(
+    result: &fsl_runtime::ExplicitResult,
+    deadlock: DeadlockMode,
+) -> bool {
+    result.violation.is_none()
+        && !(deadlock == DeadlockMode::Error && result.deadlock_step.is_some())
+        && result.budget_exceeded
 }
 
 /// Project a solver-free explicit-state result onto the bounded-verification
