@@ -3450,7 +3450,7 @@ mod tests {
     }
 
     #[test]
-    fn lemma_verdict_decides_adoption_and_the_rendered_status() {
+    fn adjudicated_lemma_entry_reports_its_verdict() {
         let model = inline_model(
             r"spec LemmaVerdicts {
   state { x: Int }
@@ -3459,16 +3459,16 @@ mod tests {
   invariant Small { x < 100 }
 }",
         );
-        for (source, verdict, proof) in [
-            ("x >= 0", LemmaVerdict::Proved, "proved"),
-            ("x == 0", LemmaVerdict::Rejected, "violated"),
-            ("x != 1", LemmaVerdict::Rejected, "unknown_cti"),
+        for (source, verdict, status, proof) in [
+            ("x >= 0", LemmaVerdict::Proved, "proved", "proved"),
+            ("x == 0", LemmaVerdict::Rejected, "rejected", "violated"),
+            ("x != 1", LemmaVerdict::Rejected, "rejected", "unknown_cti"),
         ] {
             let expression = fsl_syntax::parse_expr(source).expect("parse lemma");
             let (produced, entry) =
                 adjudicate_lemma(&model, "AuxiliaryLemma1", &expression, source, 3, 1);
             assert_eq!(produced, verdict, "{source}: {entry}");
-            assert_eq!(entry["status"], verdict.status(), "{source}: {entry}");
+            assert_eq!(entry["status"], status, "{source}: {entry}");
             assert_eq!(entry["proof"]["result"], proof, "{source}: {entry}");
             assert_eq!(entry["used"], false, "{source}: {entry}");
         }
