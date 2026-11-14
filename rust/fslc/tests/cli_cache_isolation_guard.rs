@@ -5,12 +5,16 @@
 //!
 //! The verify cache is on by default and otherwise lives in the developer's
 //! (or CI runner's) cache directory, so a child that inherits the
-//! environment can see what an earlier run left there. A Rust source file
-//! under `rust/fslc/tests` that names the binary variable must either use
-//! `support/fslc_cli.rs` or set up its own cache (`FSLC_CACHE` to `off`, or
-//! its own `FSLC_CACHE_DIR`). A literal `Command::new(env!(..))` of the
-//! binary is accepted only with its own cache setup, so a file that already
-//! uses the helper cannot keep a bare spawn beside it. There is no allowlist.
+//! environment can see what an earlier run left there. Two rules hold for
+//! every Rust source file under `rust/fslc/tests`, with no allowlist:
+//!
+//! - A literal `Command::new(env!(..))` of the binary is accepted only when
+//!   the function body that holds it sets up its own cache (`FSLC_CACHE` to
+//!   `off`, or its own `FSLC_CACHE_DIR`). A setup in another function of the
+//!   same file does not cover it.
+//! - A file that names the binary variable in any other way (a path handed
+//!   to a script or embedded in a manifest) uses `support/fslc_cli.rs` or
+//!   sets up its own cache somewhere in the file.
 //!
 //! Matching runs on tokens, so a comment or doc string that names the
 //! binary is neither a spawn nor a cache setup.
@@ -23,38 +27,46 @@ use proc_macro2::{Delimiter, TokenStream, TokenTree};
 // Spelled in two parts so this file does not name the binary variable itself.
 const BINARY_VARIABLE: &str = concat!("CARGO_BIN_EXE_", "fslc");
 
-/// The strongest cache setup seen in a file; a later, weaker one does not
-/// lower it.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Setup {
-    #[default]
-    None,
-    Helper,
-    OwnCache,
-}
-
 #[derive(Debug, Default)]
 struct Findings {
     names_binary: bool,
-    bare_spawn: bool,
-    setup: Setup,
+    uses_helper: bool,
+    own_cache_in_file: bool,
+    uncovered_spawn_lines: Vec<usize>,
 }
 
 impl Findings {
-    fn raise(&mut self, setup: Setup) {
-        self.setup = self.setup.max(setup);
+    fn violation(&self) -> Option<String> {
+        if !self.uncovered_spawn_lines.is_empty() {
+            Some(format!(
+                "bare Command::new(env!(..)) of fslc in a function without its own cache setup \
+                 at line(s) {:?}",
+                self.uncovered_spawn_lines
+            ))
+        } else if self.names_binary && !self.uses_helper && !self.own_cache_in_file {
+            Some("names the fslc binary without support/fslc_cli.rs or its own cache setup".into())
+        } else {
+            None
+        }
+    }
+}
+
+/// What a token subtree holds that a function body above it resolves.
+#[derive(Default)]
+struct Pending {
+    own_cache: bool,
+    spawn_lines: Vec<usize>,
+}
+
+impl Pending {
+    fn absorb(&mut self, child: Self) {
+        self.own_cache |= child.own_cache;
+        self.spawn_lines.extend(child.spawn_lines);
     }
 
-    fn violation(&self) -> Option<&'static str> {
-        match self.setup {
-            Setup::OwnCache => None,
-            _ if self.bare_spawn => {
-                Some("bare Command::new(env!(..)) of fslc without its own cache setup")
-            }
-            Setup::None if self.names_binary => {
-                Some("names the fslc binary without support/fslc_cli.rs or its own cache setup")
-            }
-            _ => None,
+    fn resolve(self, findings: &mut Findings) {
+        if !self.own_cache {
+            findings.uncovered_spawn_lines.extend(self.spawn_lines);
         }
     }
 }
@@ -95,27 +107,43 @@ fn is_binary_argument(token: Option<&TokenTree>) -> bool {
         && matches!(argument.as_slice(), [name] if string_value(name).as_deref() == Some(BINARY_VARIABLE))
 }
 
-fn scan(stream: TokenStream, findings: &mut Findings) {
+/// Scan one token list. A brace group that follows an `fn` signature is a
+/// function body: its spawns are resolved against its own cache setup and
+/// do not reach the caller. Every other group passes its spawns up.
+fn scan(stream: TokenStream, findings: &mut Findings) -> Pending {
     let tokens: Vec<TokenTree> = stream.into_iter().collect();
+    let mut pending = Pending::default();
+    let mut in_signature = false;
     for (index, token) in tokens.iter().enumerate() {
         let next = |offset: usize| tokens.get(index + offset);
         match token {
-            TokenTree::Group(group) => scan(group.stream(), findings),
+            TokenTree::Group(group) => {
+                let child = scan(group.stream(), findings);
+                if group.delimiter() == Delimiter::Brace && in_signature {
+                    pending.own_cache |= child.own_cache;
+                    child.resolve(findings);
+                } else {
+                    pending.absorb(child);
+                }
+                if group.delimiter() == Delimiter::Brace {
+                    in_signature = false;
+                }
+            }
+            TokenTree::Ident(ident) if ident == "fn" => in_signature = true,
+            TokenTree::Punct(punct) if punct.as_char() == ';' => in_signature = false,
             TokenTree::Literal(_) => match string_value(token).as_deref() {
                 Some(name) if name == BINARY_VARIABLE => findings.names_binary = true,
-                Some("FSLC_CACHE_DIR") if is_punct(next(1), ',') => {
-                    findings.raise(Setup::OwnCache);
-                }
+                Some("FSLC_CACHE_DIR") if is_punct(next(1), ',') => pending.own_cache = true,
                 Some("FSLC_CACHE")
                     if is_punct(next(1), ',')
                         && next(2).and_then(string_value).as_deref() == Some("off") =>
                 {
-                    findings.raise(Setup::OwnCache);
+                    pending.own_cache = true;
                 }
                 _ => {}
             },
             TokenTree::Ident(ident) if ident == "fslc_cli" && is_punct(next(1), ':') => {
-                findings.raise(Setup::Helper);
+                findings.uses_helper = true;
             }
             TokenTree::Ident(ident)
                 if ident == "Command"
@@ -124,17 +152,20 @@ fn scan(stream: TokenStream, findings: &mut Findings) {
                     && is_ident(next(3), "new")
                     && is_binary_argument(next(4)) =>
             {
-                findings.bare_spawn = true;
+                pending.spawn_lines.push(ident.span().start().line);
             }
             _ => {}
         }
     }
+    pending
 }
 
 fn findings(source: &str) -> Findings {
     let stream = TokenStream::from_str(source).expect("tokenize test source");
     let mut findings = Findings::default();
-    scan(stream, &mut findings);
+    let file = scan(stream, &mut findings);
+    findings.own_cache_in_file |= file.own_cache;
+    file.resolve(&mut findings);
     findings
 }
 
@@ -161,7 +192,7 @@ fn every_fslc_spawn_isolates_the_verify_cache() {
     for path in &files {
         let source = std::fs::read_to_string(path).expect("read test source");
         let found = findings(&source);
-        if found.names_binary || found.setup == Setup::Helper {
+        if found.names_binary || found.uses_helper {
             spawning += 1;
         }
         if let Some(reason) = found.violation() {
@@ -210,6 +241,25 @@ fn the_classifier_rejects_bare_spawns_and_accepts_isolated_ones() {
         fn run() { Command::new(env!("CARGO_BIN_EXE_fslc")).output(); }
     "#;
     let unrelated = r#"fn run() { Command::new("git").env("FSLC_CACHE", "on"); }"#;
+    let setup_in_another_function = r#"
+        fn run() { Command::new(env!("CARGO_BIN_EXE_fslc")).output(); }
+        fn run_cached(dir: &Path) { Command::new(env!("CARGO_BIN_EXE_fslc")).env("FSLC_CACHE_DIR", dir); }
+    "#;
+    let setup_in_the_same_function = r#"fn run() {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+        command.env("FSLC_CACHE", "off");
+    }"#;
+    let closure_in_a_function = r#"fn runs() {
+        let run = |args| Command::new(env!("CARGO_BIN_EXE_fslc")).args(args).env("FSLC_CACHE", "off");
+    }"#;
+    let method_without_setup = r#"impl Fixture {
+        fn cached(&self) { Command::new(env!("CARGO_BIN_EXE_fslc")).env("FSLC_CACHE_DIR", &self.0); }
+        fn run(&self) { Command::new(env!("CARGO_BIN_EXE_fslc")).output(); }
+    }"#;
+    let path_with_setup_elsewhere = r#"
+        fn binary() -> &'static str { env!("CARGO_BIN_EXE_fslc") }
+        fn run() { Command::new(binary()).env("FSLC_CACHE", "off"); }
+    "#;
 
     for (label, source, rejected) in [
         ("bare", bare, true),
@@ -223,6 +273,19 @@ fn the_classifier_rejects_bare_spawns_and_accepts_isolated_ones() {
         ("removal_only", removal_only, true),
         ("commented", commented, true),
         ("unrelated", unrelated, false),
+        ("setup_in_another_function", setup_in_another_function, true),
+        (
+            "setup_in_the_same_function",
+            setup_in_the_same_function,
+            false,
+        ),
+        ("closure_in_a_function", closure_in_a_function, false),
+        ("method_without_setup", method_without_setup, true),
+        (
+            "path_with_setup_elsewhere",
+            path_with_setup_elsewhere,
+            false,
+        ),
     ] {
         let found = findings(source);
         assert_eq!(
