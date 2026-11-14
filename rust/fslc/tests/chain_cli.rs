@@ -7,6 +7,9 @@
 //! documented bare-filename invocation is a confidently-green false negative
 //! (AGENTS.md). Every test here fails if the corresponding fix is reverted.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[cfg(unix)]
 use std::fmt::Write as _;
 use std::fs;
@@ -109,7 +112,7 @@ fn copy_chain_fixture(dir: &Path) {
 }
 
 fn run(cwd: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(cwd)
         .output()

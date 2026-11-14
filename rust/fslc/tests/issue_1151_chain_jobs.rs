@@ -13,6 +13,9 @@
 //! the solver's `memory_mb`, which Z3 keeps per process and so includes other
 //! workers' memory.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -357,7 +360,7 @@ fn jobs_rejects_a_missing_zero_or_non_integer_value() {
 /// removed, and without `versions`, which a chain layer's detail does not
 /// carry.
 fn standalone_verify(dir: &Path, file: &str, depth: &str) -> Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["verify", file, "--depth", depth, "--no-cache"])
         .current_dir(dir)
         .output()

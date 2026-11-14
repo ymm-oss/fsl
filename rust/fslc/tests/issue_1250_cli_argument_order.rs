@@ -7,6 +7,9 @@
 //! never makes `3` a path), and an unknown or value-less option stays a
 //! `usage` error instead of an `io` error about a file named `--x`.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -28,7 +31,7 @@ fn root() -> &'static Path {
 /// Exit code plus stdout; a JSON envelope loses its `cost` members (solver
 /// timing, the one field the issue excludes from the comparison).
 fn run(args: &[&str]) -> (i32, Value) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

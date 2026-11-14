@@ -68,7 +68,10 @@ pub fn command() -> Command {
 #[allow(dead_code)]
 pub fn command_with_cache_dir(dir: impl AsRef<Path>) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
-    isolate_with_cache_dir(&mut command, dir);
+    command
+        .env("FSLC_CACHE_DIR", dir.as_ref())
+        .env_remove("FSLC_CACHE")
+        .env_remove("FSLC_CACHE_VERIFY");
     command
 }
 
@@ -76,13 +79,12 @@ pub fn command_with_cache_dir(dir: impl AsRef<Path>) -> Command {
 /// path, or a binary chosen by an override variable) the current test's
 /// private verify cache.
 #[allow(dead_code)]
-pub fn isolate(command: &mut Command) -> &mut Command {
-    isolate_with_cache_dir(command, cache_dir())
-}
-
-fn isolate_with_cache_dir(command: &mut Command, dir: impl AsRef<Path>) -> &mut Command {
-    command
-        .env("FSLC_CACHE_DIR", dir.as_ref())
-        .env_remove("FSLC_CACHE")
-        .env_remove("FSLC_CACHE_VERIFY")
+pub fn isolate(target: &mut Command) -> &mut Command {
+    for (key, value) in command().get_envs() {
+        match value {
+            Some(value) => target.env(key, value),
+            None => target.env_remove(key),
+        };
+    }
+    target
 }
