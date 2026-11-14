@@ -4,6 +4,9 @@
 //! #1451: later-assigned init reads follow the concrete root-coverage oracle;
 //! never-assigned reads remain free (#493), despite explicit's support limit.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_scratch.rs"]
 #[allow(dead_code)]
 mod compose_scratch;
@@ -27,11 +30,13 @@ fn observe(dir: &Path, file: &str, consumer: &str) -> (Value, i32) {
     if !matches!(consumer, "check" | "default") {
         args.extend(["--engine", consumer]);
     }
-    let output = Command::new(std::fs::canonicalize(binary).expect("selected native"))
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .expect("native CLI");
+    let output = fslc_cli::isolate(&mut Command::new(
+        std::fs::canonicalize(binary).expect("selected native"),
+    ))
+    .args(args)
+    .current_dir(dir)
+    .output()
+    .expect("native CLI");
     assert!(output.stderr.is_empty(), "{:?}", output.stderr);
     (
         serde_json::from_slice(&output.stdout).expect("native JSON"),

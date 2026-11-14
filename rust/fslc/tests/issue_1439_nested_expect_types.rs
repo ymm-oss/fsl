@@ -2,8 +2,10 @@
 
 //! #1439: Bool outer expressions must not hide ill-typed nested operands.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -21,7 +23,7 @@ fn rejects_nested(label: &str, predicate: &str, next_edition: bool) {
         "{header}requirements E {{\n  enum Color {{ Red, Blue }}\n  state {{ c: Color }}\n  init {{ c = Red }}\n  requirement REQ-1 \"paint\" {{\n    action paint(x: Color) {{ c = x }}\n  }}\n  {trace} AC-1 \"nested comparison\" {{\n    paint(Blue)\n    {keyword} {predicate}\n  }}\n}}\n"
     );
     std::fs::write(directory.join("nested.fsl"), source).expect("write nested fixture");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command
         .args(["check", "nested.fsl"])
         .current_dir(&directory);

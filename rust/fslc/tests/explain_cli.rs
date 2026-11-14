@@ -6,14 +6,15 @@
 //! mis-rendered structural information. Detector tests reject a reverted fix;
 //! explicitly labelled preservation controls protect previously working inputs.
 
-use std::process::Command;
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
 
 fn run_cli(args: &[&str]) -> (serde_json::Value, i32) {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
         .expect("workspace root");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root)
         .output()
@@ -32,7 +33,7 @@ fn run_cli_text(args: &[&str]) -> String {
         .parent()
         .and_then(std::path::Path::parent)
         .expect("workspace root");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root)
         .output()
@@ -635,7 +636,7 @@ fn run_fsl5_e2e(args: &[&str]) -> (String, i32) {
 /// `(stdout, exit)` of `fslc <args...>` run in the fixture directory
 /// `tests/fixtures/fsl5/<example>`.
 fn run_fsl5(example: &str, args: &[&str]) -> (String, i32) {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.args(args).current_dir(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/fsl5")

@@ -7,7 +7,8 @@
 //! contract; `--oracle-attribution` is the only surface that exposes full killer
 //! sets and per-oracle sole/shared counts keyed by oracle display names.
 
-use std::process::Command;
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
 
 fn workspace_root() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -18,7 +19,7 @@ fn workspace_root() -> std::path::PathBuf {
 }
 
 fn run_cli(args: &[&str]) -> (serde_json::Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(workspace_root())
         .output()
@@ -33,7 +34,7 @@ fn run_cli(args: &[&str]) -> (serde_json::Value, i32) {
 }
 
 fn run_cli_stdout(args: &[&str]) -> (Vec<u8>, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(workspace_root())
         .output()

@@ -23,9 +23,11 @@
 //! - What the lowering records: the origin's lowering steps and the
 //!   requirement annotations, and `deadline` as the requirement block's.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -77,7 +79,7 @@ impl Drop for Scratch {
 
 /// `fslc <command> <file>` in `directory`.
 fn fslc(command: &str, directory: &Path, file: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([command, file])
         .current_dir(directory)
         .output()
@@ -735,7 +737,7 @@ fn ghost_collision_verdicts(label: &str, source: &str) -> [(Option<String>, Opti
     let scratch = Scratch::new(label, None);
     scratch.write("doc.fsl", source);
     let run = |args: &[&str]| {
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(args)
             .current_dir(&scratch.0)
             .output()
@@ -1354,7 +1356,7 @@ fn three_engines(label: &str, source: &str) -> Vec<(String, Option<String>, i32)
     ]
     .iter()
     .map(|args| {
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(*args)
             .arg("doc.fsl")
             .current_dir(&scratch.0)

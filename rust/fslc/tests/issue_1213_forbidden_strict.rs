@@ -7,8 +7,10 @@
 //! not-enabled last step (`requires_failed` / `bad_call`) satisfies it; a
 //! violation is a `kind:"forbidden"` error that names the violation.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -43,7 +45,7 @@ fn wallet(action_body: &str, extra: &str) -> String {
 }
 
 fn run(args: &[&std::ffi::OsStr]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .output()
         .expect("run native CLI");
@@ -529,7 +531,7 @@ fn two_step_overdraft(action_body: &str) -> String {
 }
 
 fn run_in(directory: &Path, args: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(directory)
         .output()

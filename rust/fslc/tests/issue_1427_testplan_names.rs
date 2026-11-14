@@ -7,9 +7,11 @@
 //! The JSON pair is captured from the real limit fixture's kernel/conformance CLI
 //! output, then its single guard and boundary vectors are adapted, not reimplemented.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -22,7 +24,7 @@ fn root() -> PathBuf {
 }
 
 fn cli(args: &[&str]) -> Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

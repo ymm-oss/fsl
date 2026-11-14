@@ -9,8 +9,10 @@
 //! values in invariants (symbolic) and the entire replay state (Monitor).
 //! N1–N6 preserve incomplete-init and overlapping-write refusals.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
@@ -86,10 +88,9 @@ fn observe(source: &str, consumer: Consumer) -> (Value, i32) {
         ],
         Consumer::Monitor => &["replay", "model.fsl", "--trace", "trace.json"],
     };
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(&fixture.0)
-        .env_remove("FSLC_CACHE")
         .output()
         .expect("run working-tree native fslc");
     let value: Value = serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {

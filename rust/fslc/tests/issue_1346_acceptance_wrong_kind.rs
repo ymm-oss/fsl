@@ -4,8 +4,10 @@
 //! Issue #1346: step arguments are not enum ordinals. Acceptance retains its
 //! rejection and exit status, but diagnoses malformed arguments like forbidden.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -15,7 +17,7 @@ fn run_spec(source: &str, name: &str) -> (Value, i32) {
         .join(format!("fslc-issue-1346-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&directory).expect("create scratch directory");
     std::fs::write(directory.join("spec.fsl"), source).expect("write spec");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["check", "spec.fsl"])
         .current_dir(&directory)
         .output()

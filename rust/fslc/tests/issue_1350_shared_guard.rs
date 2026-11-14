@@ -2,9 +2,11 @@
 
 //! One weakening must be credited to every affected invariant or reachable.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use serde_json::{Value, json};
 use std::path::Path;
-use std::process::Command;
 
 const SINGLE_INVARIANT: &str = r"spec C {
   type N = 0..3
@@ -52,7 +54,7 @@ fn run_cli(source: &str, fixture: &str, command: &str, expected_status: i32) -> 
         std::thread::current().id()
     ));
     std::fs::write(&path, source).expect("write explain fixture");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             command,
             path.to_str().expect("UTF-8 fixture path"),

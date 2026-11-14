@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -49,10 +52,7 @@ impl Drop for FixtureDir {
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
-        .args(args)
-        .output()
-        .expect("run fslc")
+    fslc_cli::command().args(args).output().expect("run fslc")
 }
 
 fn json(output: &Output) -> Value {
@@ -92,7 +92,7 @@ fn text(path: &Path) -> String {
 }
 
 fn edition_command(verb: &str) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.arg(verb);
     command
 }
@@ -506,7 +506,7 @@ fn domain_quantifier_rejection_and_warning_absence_match_the_base_contract() {
         "domain D { aggregate A { state { ready: Bool = false } command Finish {} event Finished {} decide Finish { emits Finished } evolve Finished { ready = true } invariant Typed { forall i in 0..1: ready == true or ready == false } } }\n"
     );
     let path = directory.write("quantifier.fsl", source);
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "domain",
             "check",
@@ -558,10 +558,7 @@ fn current_domain_warnings_exclude_unrelated_planner_codes() {
         vec!["verify", path, "--depth", "2", "--no-cache"],
         vec!["domain", "check", path, "--depth", "2"],
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-            .args(&args)
-            .output()
-            .expect("run fslc");
+        let output = fslc_cli::command().args(&args).output().expect("run fslc");
         assert_eq!(
             output.status.code(),
             Some(0),
@@ -1510,7 +1507,7 @@ fn entries(directory: &Path) -> Vec<PathBuf> {
 
 #[cfg(unix)]
 fn migrate_write(paths: &[&PathBuf]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .arg("migrate")
         .args(paths)
         .args(["--edition", "next", "--write"])
@@ -1549,7 +1546,7 @@ fn readonly_input_is_refused_like_a_readonly_output_target() {
     let artifact = directory.write("artifact.md", "previous artifact\n");
     std::fs::set_permissions(&artifact, Permissions::from_mode(0o444)).expect("mark read-only");
     // `document generate` needs a repository-relative source identity.
-    let reference = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let reference = fslc_cli::command()
         .args([
             "document",
             "generate",

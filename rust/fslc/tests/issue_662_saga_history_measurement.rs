@@ -4,8 +4,10 @@
 //! Reproducible measurements for the #662 design decision. This intentionally
 //! does not implement the selected saga-state representation.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use fsl_core::{TypeDef, TypeRef};
 
@@ -21,7 +23,7 @@ fn root() -> PathBuf {
 }
 
 fn expanded_model() -> fsl_core::KernelModel {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["domain", "expand", FIXTURE])
         .current_dir(root())
         .output()

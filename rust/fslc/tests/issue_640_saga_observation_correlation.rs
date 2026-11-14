@@ -4,10 +4,13 @@
 //! Regression controls for #640(a): saga observations must not duplicate an
 //! effect-owned outcome without the effect's persistent correlation guard.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use serde_json::Value;
 
@@ -22,7 +25,7 @@ fn root() -> PathBuf {
 }
 
 fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()
@@ -75,7 +78,7 @@ impl TemporarySpec {
     }
 
     fn verify(&self, depth: &str) -> (Value, i32) {
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .arg("verify")
             .arg(&self.0)
             .args(["--depth", depth, "--no-cache"])

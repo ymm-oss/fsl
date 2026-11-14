@@ -15,8 +15,10 @@
 //!   green, which is its own evidence that the rules take effect.
 //! - **Acceptance 3**: one failing document per diagnostic of the stage.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -63,7 +65,7 @@ impl Drop for Scratch {
 
 /// `fslc check <file>` in `directory`.
 fn check(directory: &Path, file: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["check", file])
         .current_dir(directory)
         .output()

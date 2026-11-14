@@ -5,6 +5,9 @@
 //! Dense cases always run in killable child processes, including the public
 //! function case; a base calibration cannot strand an exponential DFS forever.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::fmt::Write as _;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -141,7 +144,7 @@ fn dense_cli_walk_returns_a_lower_bound_within_sixty_seconds() {
     let directory = scratch("dense-model");
     let path = directory.join("model.fsl");
     std::fs::write(&path, dense_source()).expect("write dense model");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command
         .args(["causal", "analyze"])
         .arg(&path)

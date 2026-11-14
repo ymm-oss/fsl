@@ -13,9 +13,11 @@
 //! detector) must not. A green positive path alone is not evidence a
 //! detector works (AGENTS.md); this test is the negative control.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -36,7 +38,7 @@ fn injected_dir() -> PathBuf {
 }
 
 fn run_cli(args: &[&str]) -> Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(root())
         .output()

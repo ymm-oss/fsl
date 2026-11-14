@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/edition_cases.rs"]
 pub(crate) mod cases;
 
@@ -7,7 +10,7 @@ use cases::{Results, Scratch, value, without_versions};
 use serde_json::{Value, json};
 
 fn run(scratch: &Scratch, template: &str) -> std::process::Output {
-    cases::command(env!("CARGO_BIN_EXE_fslc"), &scratch.0, template)
+    cases::command(fslc_cli::command(), &scratch.0, template)
 }
 
 // Count complete findings across the envelope, not only its outer warnings.
@@ -375,7 +378,7 @@ pub(crate) fn verify_cache_miss_and_hit_each_finish_one_complete_warning() {
     let expected = finding(source, "legacy_string_metadata", 1, 55, 76);
     let mut results = Results::default();
     for hit in [false, true] {
-        let output = std::process::Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(["verify", "source.fsl", "--depth", "2"])
             .current_dir(&scratch.0)
             .env("FSLC_CACHE", "on")
@@ -411,7 +414,7 @@ pub(crate) fn causal_unreadable_later_root_precedes_earlier_parse_error() {
         "causal observe-expectations broken.fsl --mapping missing.fsl --from-log {repo}/examples/causal/evidence/incident-observation-log.jsonl --scope {repo}/examples/causal/evidence/incident-replay-scope.json --period-start 2026-01-01 --period-end 2026-03-31 --out observations.json",
     ] {
         let args = cases::expand(command, &[("{repo}", cases::root())]);
-        let output = cases::invoke(env!("CARGO_BIN_EXE_fslc"), &args, &scratch.0);
+        let output = cases::invoke(fslc_cli::command(), &args, &scratch.0);
         let actual = without_versions(value(&output));
         let io = std::fs::read_to_string(scratch.0.join("missing.fsl")).unwrap_err();
         // Both roots name the unreadable path the same way: #1170 phase 2
@@ -555,7 +558,7 @@ pub(crate) fn chain_owns_warnings_in_layer_detail_and_refuses_before_effects() {
             "chain.toml",
             &format!("{manifest}[impl]\ncommand = \"touch marker\"\nevidence = \"exit_code\"\n"),
         );
-        let expected = cases::refusal(env!("CARGO_BIN_EXE_fslc"), &scratch.0, &path);
+        let expected = cases::refusal(fslc_cli::command(), &scratch.0, &path);
         let output = run(&scratch, "chain chain.toml --keep-going");
         results.error_envelope(
             &format!("chain/{mode}/refusal"),
@@ -614,7 +617,7 @@ pub(crate) fn causal_root_keeps_one_owned_warning_and_refuses_before_output() {
         assert_eq!(actual["loc"], json!({"line":1,"column":1}));
         scratch.write("source.fsl", &cases::rejected_metadata());
         let wanted = cases::refusal(
-            env!("CARGO_BIN_EXE_fslc"),
+            fslc_cli::command(),
             &scratch.0,
             std::path::Path::new("source.fsl"),
         );
@@ -715,7 +718,7 @@ pub(crate) fn counterexample_refuses_before_model_and_source_preflight() {
     ] {
         let scratch = Scratch::new();
         let path = scratch.write("source.fsl", &source);
-        let expected = cases::refusal(env!("CARGO_BIN_EXE_fslc"), &scratch.0, &path);
+        let expected = cases::refusal(fslc_cli::command(), &scratch.0, &path);
         let output = run(
             &scratch,
             &format!(
@@ -744,7 +747,7 @@ pub(crate) fn counterexample_refuses_before_digest_rereads_the_root() {
         serde_json::from_value(json!({"fsl":"1.0"})).unwrap(),
     );
     let output = cases::invoke_input(
-        env!("CARGO_BIN_EXE_fslc"),
+        fslc_cli::command(),
         &cases::split("counterexample export /dev/stdin --depth 2 -o out.json"),
         &scratch.0,
         &source,
@@ -810,7 +813,7 @@ pub(crate) fn sweep_reuses_one_captured_root_across_all_depth_cells() {
     ] {
         let expected = cases::findings(source, path, fsl_syntax::Edition::Fsl4);
         let output = cases::invoke_input(
-            env!("CARGO_BIN_EXE_fslc"),
+            fslc_cli::command(),
             &cases::split(command),
             &scratch.0,
             source,

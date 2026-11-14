@@ -4,7 +4,9 @@
 //! Action and constant envelopes are pinned to existing addition/subtraction
 //! overflow behavior; init locations follow #1543's containing statement rule.
 
-use std::process::Command;
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
@@ -20,7 +22,7 @@ fn run(source: &str, engine: Option<&str>) -> (Value, i32) {
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::write(&path, source).expect("write inline fixture");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = fslc_cli::command();
     command.arg(if engine.is_some() { "verify" } else { "check" });
     command.arg(&path).env_remove("FSLC_CACHE");
     if let Some(engine) = engine {

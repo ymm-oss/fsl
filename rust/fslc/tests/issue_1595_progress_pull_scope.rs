@@ -5,8 +5,10 @@
 //! These are verdict contracts, not envelope parity: refine reports implementation
 //! traces and progress metadata, whereas BMC reports abstract traces and assurance.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::{Value, json};
@@ -70,10 +72,9 @@ impl Fixture {
                 "--no-cache",
             ]
         };
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(args)
             .current_dir(&self.0)
-            .env_remove("FSLC_CACHE")
             .output()
             .expect("run native fslc");
         for stream in [&output.stdout, &output.stderr] {

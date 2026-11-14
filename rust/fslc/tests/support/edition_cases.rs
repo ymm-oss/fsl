@@ -125,14 +125,17 @@ pub fn commit(s: &Scratch, files: &[&str]) -> String {
     git(s, &["rev-parse", "HEAD"])
 }
 
-pub fn invoke(binary: &str, args: &[String], cwd: &Path) -> std::process::Output {
-    cli_command(binary, args, cwd)
+pub fn invoke(fslc: std::process::Command, args: &[String], cwd: &Path) -> std::process::Output {
+    cli_command(fslc, args, cwd)
         .output()
         .expect("execute working-tree CLI")
 }
 
-fn cli_command(binary: &str, args: &[String], cwd: &Path) -> std::process::Command {
-    let mut command = std::process::Command::new(binary);
+fn cli_command(
+    mut command: std::process::Command,
+    args: &[String],
+    cwd: &Path,
+) -> std::process::Command {
     command
         .args(args)
         .current_dir(cwd)
@@ -143,14 +146,14 @@ fn cli_command(binary: &str, args: &[String], cwd: &Path) -> std::process::Comma
 
 #[cfg(unix)]
 pub fn invoke_input(
-    binary: &str,
+    fslc: std::process::Command,
     args: &[String],
     cwd: &Path,
     source: &str,
 ) -> std::process::Output {
     use std::io::Write;
     use std::process::Stdio;
-    let mut child = cli_command(binary, args, cwd)
+    let mut child = cli_command(fslc, args, cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -171,8 +174,8 @@ pub fn split(template: &str) -> Vec<String> {
     template.split_whitespace().map(str::to_owned).collect()
 }
 
-pub fn command(binary: &str, cwd: &Path, template: &str) -> std::process::Output {
-    invoke(binary, &split(template), cwd)
+pub fn command(fslc: std::process::Command, cwd: &Path, template: &str) -> std::process::Output {
+    invoke(fslc, &split(template), cwd)
 }
 
 pub fn expand(template: &str, replacements: &[(&str, PathBuf)]) -> Vec<String> {
@@ -188,12 +191,8 @@ pub fn expand(template: &str, replacements: &[(&str, PathBuf)]) -> Vec<String> {
         .collect()
 }
 
-pub fn refusal(binary: &str, cwd: &Path, path: &Path) -> Value {
-    let output = invoke(
-        binary,
-        &["check".into(), path.to_str().unwrap().into()],
-        cwd,
-    );
+pub fn refusal(fslc: std::process::Command, cwd: &Path, path: &Path) -> Value {
+    let output = invoke(fslc, &["check".into(), path.to_str().unwrap().into()], cwd);
     assert_eq!(output.status.code(), Some(2));
     let output = without_versions(value(&output));
     assert!(matches!(

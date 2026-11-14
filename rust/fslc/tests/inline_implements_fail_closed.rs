@@ -3,8 +3,10 @@
 
 //! Native fail-closed contract for inline `implements` (#1002).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 #[path = "support/migration_warnings.rs"]
@@ -24,7 +26,7 @@ fn repository_root() -> PathBuf {
 }
 
 fn run(command: &str, arguments: &[&str]) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg(command)
         .args(arguments)
         .current_dir(repository_root())
@@ -42,7 +44,7 @@ fn run(command: &str, arguments: &[&str]) -> (Value, i32) {
 /// `ledger` writes Markdown, not JSON, so its exit code has to be read without
 /// parsing stdout. Returns the parsed envelope only when there is one.
 fn run_raw(command: &str, arguments: &[&str]) -> (Option<Value>, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg(command)
         .args(arguments)
         .current_dir(repository_root())

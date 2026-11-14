@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[allow(dead_code)]
 #[path = "support/collection_replay.rs"]
 mod support;

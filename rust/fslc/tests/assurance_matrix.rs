@@ -24,6 +24,9 @@
 //! corrupted citation and an unclaimed cell -- without this, a checker that
 //! always returns `Ok` would pass the two tests above vacuously.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "assurance/claim.rs"]
 mod claim;
 #[path = "assurance/dialects.rs"]

@@ -7,9 +7,12 @@
 //! product command. It composes the existing native process contracts without
 //! adding grammar, Kernel, runtime, solver, or verifier semantics.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -70,7 +73,7 @@ fn schema_result(value: &Value) -> Result<(), String> {
 }
 
 fn run(cwd: &Path, arguments: &[String]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .args(arguments)
         .current_dir(cwd)
         .output()

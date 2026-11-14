@@ -16,7 +16,6 @@
 //! `support/mod.rs`: each integration test is its own crate.
 
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -41,7 +40,7 @@ pub const EXCLUDED_KEYS: &[&str] = &[
 pub fn kernel_v2(path: &Path) -> Value {
     let directory = path.parent().expect("kernel source directory");
     let file = path.file_name().expect("kernel source file name");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_fslc"));
+    let mut command = crate::fslc_cli::command();
     command
         .args(["kernel", "--kernel-version", "2"])
         .arg(file)

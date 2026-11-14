@@ -4,9 +4,11 @@
 //! induction cases previously compared only by
 //! `tools/check_rust_dialect_parity.py` (issue #761 F2).
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -43,7 +45,7 @@ fn repository_root() -> PathBuf {
 }
 
 fn run_induction(path: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "verify",
             path,

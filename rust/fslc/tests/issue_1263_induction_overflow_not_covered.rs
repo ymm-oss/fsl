@@ -8,8 +8,10 @@
 //! machine-readable `not_covered: ["int_overflow"]`, present exactly when a
 //! proof site holds an operator that can overflow.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
@@ -50,7 +52,7 @@ impl Drop for Fixture {
 
 fn verify(fixture: &Fixture, engine: &str, depth: usize) -> (Value, i32) {
     let depth = depth.to_string();
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args([
             "verify",
             fixture.text(),

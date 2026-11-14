@@ -21,8 +21,10 @@
 //! both files as source strings to a temp directory instead, matching that
 //! file's `Fixture` pattern.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
@@ -139,7 +141,7 @@ requirements SmallCounterReq {
 }
 
 fn run_check(path: &Path) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["check"])
         .arg(path)
         .output()
@@ -154,7 +156,7 @@ fn run_check(path: &Path) -> (Value, i32) {
 }
 
 fn run_verify(path: &Path, depth: &str) -> (Value, i32) {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(["verify"])
         .arg(path)
         .args(["--depth", depth, "--deadlock", "ignore", "--no-cache"])

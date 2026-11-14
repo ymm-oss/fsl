@@ -4,7 +4,9 @@
 //! enclosing init/forall or the failing subexpression. Each engine has its own
 //! cell and source-derived expectation; agreement is not an engine oracle.
 
-use std::process::Command;
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
@@ -19,11 +21,10 @@ fn verify(source: &str, engine: &str) -> (Value, i32) {
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::write(&path, source).expect("write inline fixture");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg("verify")
         .arg(&path)
         .args(["--engine", engine, "--depth", "4", "--no-cache"])
-        .env_remove("FSLC_CACHE")
         .output()
         .expect("run working-tree CLI");
     assert!(output.stderr.is_empty(), "{engine}: {output:?}");

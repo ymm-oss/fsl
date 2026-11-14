@@ -3,6 +3,9 @@
 //! Literal packet anchors grounded on f8e3726e before observer implementation.
 //! These assert named contract fields, NOT whole-envelope/engine agreement.
 //! BMC and explicit share the diagnostic collector and are not independent proof.
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,10 +22,9 @@ const FALLBACK: &str = "spec W { state { o: Option<Int> = some(1) } action tick(
 
 fn run(dir: &Path, args: &[&str], tag: &str, source: &str) -> (Value, i32) {
     let binary = env!("CARGO_BIN_EXE_fslc");
-    let output = Command::new(binary)
+    let output = fslc_cli::isolate(&mut Command::new(binary))
         .args(args)
         .current_dir(dir)
-        .env_remove("FSLC_CACHE")
         .output()
         .expect("native fslc");
     let exit = output.status.code().expect("exit code");

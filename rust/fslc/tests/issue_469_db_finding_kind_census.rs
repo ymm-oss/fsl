@@ -19,9 +19,11 @@
 //! observe` runtime-evidence findings, never emitted by `db check`, and are
 //! excluded from this static-check census on purpose.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::Value;
 
@@ -33,7 +35,7 @@ fn workspace_root() -> &'static Path {
 }
 
 fn run(args: &[&str]) -> Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .current_dir(workspace_root())
         .output()

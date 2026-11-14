@@ -8,6 +8,9 @@
 //! State reads must still reject, now naming the resolved public `a.on`; const
 //! initializers and range bounds must check and affect the actual verdict.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_scratch.rs"]
 mod compose_scratch;
 

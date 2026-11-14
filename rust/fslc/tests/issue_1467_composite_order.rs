@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Ordering must decide short-circuit/partiality, not just a commutative count.
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/issue_1467_order_reachability.rs"]
 mod order_reachability;
 #[allow(dead_code)]

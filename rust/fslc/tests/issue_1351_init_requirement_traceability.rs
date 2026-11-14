@@ -3,9 +3,12 @@
 //! Decision A for #1351: init is a traceability anchor, not an orphan.
 //! The genuine-orphan and full-output controls preserve the detector's scope.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use serde_json::{Value, json};
 
@@ -72,7 +75,7 @@ fn fixture(directory: &Path, name: &str, source: &str) -> PathBuf {
 }
 
 fn invoke(command: &str, path: &Path, suffix: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_fslc"))
+    fslc_cli::command()
         .arg(command)
         .arg(path)
         .args(suffix)

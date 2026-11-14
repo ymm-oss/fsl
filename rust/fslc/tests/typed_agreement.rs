@@ -16,6 +16,9 @@
 //! metamorphic agreement (#537 C6)" section for the accepted design this
 //! implements, including why Z3js/Worker parity is out of scope here.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "typed_agreement/engines.rs"]
 mod engines;
 #[path = "assurance/enum_rows.rs"]
@@ -434,7 +437,7 @@ fn is_guarded_binder_read(failure: &serde_json::Value) -> bool {
 }
 
 fn cli_json(args: &[&str]) -> serde_json::Value {
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(args)
         .output()
         .expect("run native CLI");

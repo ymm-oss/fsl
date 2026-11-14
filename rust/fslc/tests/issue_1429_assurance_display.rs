@@ -7,13 +7,15 @@
 //! on each run. Expectations are literals from the accepted contract, never the
 //! production classifier.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/ledger_findings.rs"]
 #[allow(dead_code)]
 mod findings;
 
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
 use serde_json::{Value, json};
 
@@ -149,11 +151,7 @@ fn ledger_and_html_assurance_require_reported_completeness() {
     )
     .unwrap();
     let fslc = |args: &[&str], exit: i32| -> Value {
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
-            .args(args)
-            .arg(&spec)
-            .output()
-            .unwrap();
+        let output = fslc_cli::command().args(args).arg(&spec).output().unwrap();
         assert_eq!(output.status.code(), Some(exit), "fslc {args:?}");
         serde_json::from_slice(&output.stdout).unwrap()
     };

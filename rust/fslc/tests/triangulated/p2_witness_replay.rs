@@ -3,7 +3,6 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
-use std::process::Command;
 use std::task::{Context, Poll, Waker};
 
 use fsl_core::{FsResolver, FslValue, KernelModel, Span, TraceStep};
@@ -271,7 +270,7 @@ fn corrupting_each_witness_identity_field_cuts_a_p2_edge() {
 #[test]
 fn p2_cli_observation_preserves_full_witness_identity() {
     let fixture = repository_root().join("rust/fslc/tests/fixtures/issue_502_reachable_empty.fsl");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = crate::fslc_cli::command()
         .args([
             "verify",
             fixture.to_str().expect("UTF-8 path"),
@@ -312,7 +311,7 @@ fn p2_cli_observation_preserves_full_witness_identity() {
 #[test]
 fn p2_cli_transition_identity_resolves_the_matching_property() {
     let fixture = repository_root().join("rust/fslc/tests/fixtures/assurance_trans_violation.fsl");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = crate::fslc_cli::command()
         .args([
             "verify",
             fixture.to_str().expect("UTF-8 path"),

@@ -4,6 +4,9 @@
 //! The static rule and the engines answer the same question from different inputs,
 //! so this grid is the gate on their drift: scope by source shape by state Set write.
 //! Controls stay in the grid, and each listed family pins its own verdict.
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use serde_json::Value;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -923,7 +926,7 @@ mod limited {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("m.fsl"), source).unwrap();
-        let mut child = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let mut child = fslc_cli::command()
             .args(["check", "m.fsl"])
             .current_dir(&dir)
             .stdout(std::process::Stdio::null())

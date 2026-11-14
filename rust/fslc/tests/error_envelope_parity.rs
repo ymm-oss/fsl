@@ -15,6 +15,9 @@
 //! fails loudly so the entry must be deliberately moved into the uniform
 //! matrix.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -2032,7 +2035,7 @@ impl ApprovalFixture {
     }
 
     fn run_success(&self, arguments: &[&str]) {
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(arguments)
             .current_dir(&self.root)
             .output()
@@ -2174,7 +2177,7 @@ fn run_from(
 }
 
 fn run_arguments(command: &str, arguments: &[String], current_dir: &Path) -> Actual {
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .args(arguments)
         .current_dir(current_dir)
         .output()
@@ -3747,7 +3750,7 @@ fn empty_membership_has_a_defined_result_for_every_document_command() {
                 .position(|arg| arg == COUNTEREXAMPLE_OUTPUT)
                 .expect("output argument");
             arguments[output_index] = artifact.display().to_string();
-            let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+            let output = fslc_cli::command()
                 .args(arguments)
                 .current_dir(workspace_root())
                 .output()

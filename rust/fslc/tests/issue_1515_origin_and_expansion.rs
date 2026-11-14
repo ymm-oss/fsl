@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //! #1515: source-visible names and pre-expansion refusals keep their owner.
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use serde_json::{Value, json};
 use std::{path::Path, process::Command};
 #[allow(dead_code)]

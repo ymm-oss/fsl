@@ -2,9 +2,11 @@
 
 //! A first non-user check failure must not hide a target counterfactual.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const BOUNDS_PREEMPTION: &str = r"spec C {
   type N = 0..1
@@ -75,7 +77,7 @@ fn fixture_path(label: &str, extension: &str) -> PathBuf {
 fn run_cli(source: &str, label: &str, args: &[&str], expected_status: i32) -> String {
     let path = fixture_path(label, "fsl");
     std::fs::write(&path, source).expect("write inline fixture");
-    let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+    let output = fslc_cli::command()
         .arg(args[0])
         .arg(&path)
         .args(&args[1..])

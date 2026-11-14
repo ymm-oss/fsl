@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use serde_json::{Value, json};
 
 fn diagnostic_cases() -> Vec<(String, Value)> {
@@ -28,12 +31,7 @@ fn native_stdout_bytes_keep_the_complete_base_envelopes() {
     for (i, (source, diagnostic)) in cases.into_iter().enumerate() {
         let path = root.join(format!("case-{i}.fsl"));
         std::fs::write(&path, source).unwrap();
-        let output = std::process::Command::new(env!("CARGO_BIN_EXE_fslc"))
-            .arg("check")
-            .arg(path)
-            .env_remove("FSLC_CACHE")
-            .output()
-            .unwrap();
+        let output = fslc_cli::command().arg("check").arg(path).output().unwrap();
         assert_eq!(
             output.status.code(),
             Some(if diagnostic["result"] == "ok" { 0 } else { 2 })

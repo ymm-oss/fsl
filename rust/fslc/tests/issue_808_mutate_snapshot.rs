@@ -13,13 +13,14 @@
 //! dead-ghost tautologies), so a torn read can hide a real hollow spec
 //! behind a healthy-looking number computed against the wrong content.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[cfg(unix)]
 #[path = "support/fifo_snapshot.rs"]
 mod fifo_snapshot;
 
 #[cfg(unix)]
-use std::process::Command;
-
 #[cfg(unix)]
 use fifo_snapshot::{ReapedChild, TwoSnapshotFifo, WriterOutcome, wait_for_output};
 #[cfg(unix)]
@@ -34,7 +35,7 @@ fn mutate_against_two_snapshot_fifo() -> (Value, i32) {
     let mut fixture = TwoSnapshotFifo::new("mutate", source_a, source_b);
     let path = fixture.fifo.to_string_lossy().into_owned();
     let mut child = ReapedChild::new(
-        Command::new(env!("CARGO_BIN_EXE_fslc"))
+        fslc_cli::command()
             // `mutate` accepts only `--depth`, `--by-requirement`,
             // `--max-mutants` and `--from`. Passing an unsupported option
             // makes the CLI exit with `kind: usage` before it ever opens the

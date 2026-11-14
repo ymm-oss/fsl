@@ -8,6 +8,9 @@
 //! Same-name Const factors instead require located const-shadow refusals;
 //! State/Member factors retain the capture oracle and all fresh controls remain.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 #[path = "support/compose_aggregate_pattern.rs"]
 mod aggregate;
 #[path = "support/compose_scratch.rs"]

@@ -6,9 +6,11 @@
 //! capacity bounded. Each engine has its own test, including on a failing base,
 //! so a symbolic failure cannot hide explicit or Monitor observations.
 
+#[path = "support/fslc_cli.rs"]
+mod fslc_cli;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use fsl_core::{FsResolver, FslValue, build_model, parse_kernel_source};
@@ -1315,10 +1317,9 @@ impl Model {
     }
 
     fn run(&self, cell: &Cell, args: &[&str]) -> (Value, i32) {
-        let output = Command::new(env!("CARGO_BIN_EXE_fslc"))
+        let output = fslc_cli::command()
             .args(args)
             .current_dir(&self.0)
-            .env_remove("FSLC_CACHE")
             .output()
             .expect("run native fslc");
         let status = output.status.code().expect("native exit code");
