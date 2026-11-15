@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 
 use crate::annotation_parse::leading_annotations;
 use crate::lexer::lex_declaration_prefix;
-use crate::parser::FormatReading;
+use crate::parser::{FormatReading, IdSpelling};
 use crate::{
     Annotations, Edition, ParseError, ParseOptions, SurfaceDocument, Token, TokenKind,
     edition_header, lex_with,
@@ -207,6 +207,20 @@ pub fn parse_document_with(
     options: &ParseOptions,
 ) -> Result<ParsedDocument, ParseError> {
     parse_document_with_ids(source, *options).map(|(parsed, _)| parsed)
+}
+
+/// [`parse_document_with`] plus every requirement-style identifier
+/// (`REQ-1`, `POL-WAIT-001`) the frontend read, in source order: where the
+/// parser read one, and the value it read. Only the shared grammar reads any.
+///
+/// # Errors
+///
+/// Returns the errors of [`parse_document_with`].
+pub fn parse_document_with_requirement_ids(
+    source: SourceFile<'_>,
+    options: &ParseOptions,
+) -> Result<(ParsedDocument, Vec<IdSpelling>), ParseError> {
+    parse_document_with_ids(source, *options).map(|(parsed, reading)| (parsed, reading.ids))
 }
 
 /// [`parse_document_with`] plus what the frontend read for the formatter

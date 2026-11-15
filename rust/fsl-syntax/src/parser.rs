@@ -178,12 +178,13 @@ pub fn parse_surface_document_with(
 /// One requirement-style identifier (`REQ-1`, `AC-PAY-2`, `CTRL-1`) read by
 /// the shared parser: its value, the span from its first to its last
 /// component, and the offset of each `-` joining the components. The
-/// formatter prints these hyphens without spaces so an ID reads as written.
+/// formatter prints these hyphens without spaces so an ID reads as written;
+/// the language server indexes the span as one name.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct IdSpelling {
-    pub(crate) value: String,
-    pub(crate) span: Span,
-    pub(crate) hyphens: Vec<usize>,
+pub struct IdSpelling {
+    pub value: String,
+    pub span: Span,
+    pub hyphens: Vec<usize>,
 }
 
 /// What a frontend read beside the document, for the formatter.

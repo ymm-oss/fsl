@@ -2590,4 +2590,395 @@ verify { instances Claim = 1 }
             );
         }
     }
+
+    /// #1880: a business document whose `policy POL-WAIT-001` is declared
+    /// after `policy POL-HOLD-002`, which shares its prefix.
+    const ID_BUSINESS: &str = "business WaitingBusiness {
+  actor System
+  entity Ticket
+  process Ticket {
+    stages Waiting, Held, Done
+    initial Waiting
+    transition promote Waiting -> Done by System
+    transition hold Waiting -> Held by System
+    transition release Held -> Done by System
+  }
+  policy POL-HOLD-002 \"a held ticket is released\"
+    every Ticket in Held must eventually be Done
+  policy POL-WAIT-001 \"a waiting ticket is promoted\"
+    every Ticket in Waiting must eventually be Done or Held
+  goal GOAL-DONE-001 \"a ticket can be done\" some Ticket can reach Done
+}
+
+verify {
+  instances Ticket = 1
+}
+";
+
+    /// #1880: the same policies in an `fsl 5` requirements document.
+    const ID_REQUIREMENTS: &str = "fsl 5
+requirements WaitingRequirements {
+  actor System
+  entity Ticket {
+    lifecycle Waiting -> Done
+    lifecycle Waiting -> Held -> Done
+  }
+  event promote = System promotes Ticket Waiting -> Done
+  event hold = System holds Ticket Waiting -> Held
+  event release = System releases Ticket Held -> Done
+  policy POL-HOLD-002 \"a held ticket is released\"
+    every Ticket in Held must eventually be Done
+  policy POL-WAIT-001 \"a waiting ticket is promoted\"
+    every Ticket in Waiting must eventually be Done or Held
+  goal GOAL-DONE-001 \"a ticket can be done\" some Ticket can reach Done
+}
+
+verify {
+  instances Ticket = 1
+}
+";
+
+    const ID_IMPLEMENTATION: &str = "spec Keeps {
+  enum Phase { Queued, Served }
+  state { phase: Phase }
+  init { phase = Queued }
+  fair action promote() { requires phase == Queued   phase = Served }
+}
+";
+
+    /// Each layer that declares the policies, with its name.
+    const ID_LAYERS: [(&str, &str); 2] = [
+        (ID_BUSINESS, "WaitingBusiness"),
+        (ID_REQUIREMENTS, "WaitingRequirements"),
+    ];
+
+    /// A refinement of the layer `abstraction` whose `respond` names
+    /// `POL-WAIT-001`.
+    fn id_refinement(abstraction: &str) -> String {
+        format!(
+            "refinement R {{
+  impl Keeps
+  abs {abstraction}
+  map ticket_stage[t: Ticket] = if phase == Served then Done else Waiting
+  action promote() -> promote(0)
+  preserve progress {{
+    respond POL-WAIT-001 by promote
+  }}
+}}
+"
+        )
+    }
+
+    /// The range of the `nth` (0-based) `needle` of `source`.
+    fn range_of(source: &str, needle: &str, nth: usize) -> Range {
+        let byte = source
+            .match_indices(needle)
+            .nth(nth)
+            .unwrap_or_else(|| panic!("{needle} #{nth}"))
+            .0;
+        let line_start = source[..byte].rfind('\n').map_or(0, |newline| newline + 1);
+        let line = u32::try_from(source[..byte].matches('\n').count()).expect("fits");
+        let character = u32::try_from(byte - line_start).expect("fits");
+        let width = u32::try_from(needle.len()).expect("fits");
+        Range::new(
+            Position::new(line, character),
+            Position::new(line, character + width),
+        )
+    }
+
+    /// Every position of `range`, one per character.
+    fn positions_in(range: Range) -> impl Iterator<Item = Position> {
+        (range.start.character..range.end.character)
+            .map(move |character| Position::new(range.start.line, character))
+    }
+
+    struct IdWorkspace {
+        root: PathBuf,
+        state: ServerState,
+        layer: Url,
+        layer_text: String,
+        refines: Url,
+        refines_text: String,
+    }
+
+    impl IdWorkspace {
+        fn new(name: &str, layer_text: &str, abstraction: &str) -> Self {
+            let root = fixture_root(name);
+            let refines_text = id_refinement(abstraction);
+            let layer = fixture_uri(&root, "layer.fsl", layer_text);
+            let implementation = fixture_uri(&root, "keeps.fsl", ID_IMPLEMENTATION);
+            let refines = fixture_uri(&root, "refines.fsl", &refines_text);
+            let documents = [
+                (&layer, layer_text),
+                (&implementation, ID_IMPLEMENTATION),
+                (&refines, refines_text.as_str()),
+            ]
+            .into_iter()
+            .map(|(uri, text)| {
+                (
+                    uri.clone(),
+                    OpenDocument {
+                        text: text.to_owned(),
+                        version: 1,
+                    },
+                )
+            })
+            .collect();
+            Self {
+                root,
+                state: ServerState {
+                    documents,
+                    roots: Vec::new(),
+                    parse_options: fsl_syntax::ParseOptions::stable(),
+                },
+                layer,
+                layer_text: layer_text.to_owned(),
+                refines,
+                refines_text,
+            }
+        }
+
+        fn definition(&self, uri: &Url, position: Position) -> Option<Location> {
+            serde_json::from_value(request(
+                &self.state,
+                "textDocument/definition",
+                serde_json::json!({"textDocument":{"uri":uri},"position":position}),
+            ))
+            .expect("definition")
+        }
+
+        fn hover(&self, uri: &Url, position: Position) -> Option<(String, Range)> {
+            let hover: Option<Hover> = serde_json::from_value(request(
+                &self.state,
+                "textDocument/hover",
+                serde_json::json!({"textDocument":{"uri":uri},"position":position}),
+            ))
+            .expect("hover");
+            hover.map(|hover| {
+                let HoverContents::Markup(markup) = hover.contents else {
+                    panic!("markdown hover");
+                };
+                (markup.value, hover.range.expect("hover range"))
+            })
+        }
+
+        fn references(&self, uri: &Url, position: Position) -> Vec<Location> {
+            serde_json::from_value(request(
+                &self.state,
+                "textDocument/references",
+                serde_json::json!({
+                    "textDocument":{"uri":uri},
+                    "position":position,
+                    "context":{"includeDeclaration":true}
+                }),
+            ))
+            .expect("references")
+        }
+
+        /// The layer and refinement texts after the rename, or `None` when
+        /// it is refused.
+        fn rename(
+            &self,
+            uri: &Url,
+            position: Position,
+            new_name: &str,
+        ) -> Option<(String, String)> {
+            let edit: Option<WorkspaceEdit> = serde_json::from_value(request(
+                &self.state,
+                "textDocument/rename",
+                serde_json::json!({
+                    "textDocument":{"uri":uri},
+                    "position":position,
+                    "newName":new_name
+                }),
+            ))
+            .expect("rename");
+            let changes = edit?.changes.unwrap_or_default();
+            assert!(
+                changes
+                    .keys()
+                    .all(|edited| *edited == self.layer || *edited == self.refines),
+                "{changes:?}"
+            );
+            let apply = |uri: &Url, text: &str| {
+                let mut edits = changes.get(uri).cloned().unwrap_or_default();
+                edits.sort_by_key(|edit| (edit.range.start.line, edit.range.start.character));
+                let mut text = text.to_owned();
+                for edit in edits.iter().rev() {
+                    let start = offset_at_position(&text, edit.range.start);
+                    let end = offset_at_position(&text, edit.range.end);
+                    text.replace_range(start..end, &edit.new_text);
+                }
+                text
+            };
+            Some((
+                apply(&self.layer, &self.layer_text),
+                apply(&self.refines, &self.refines_text),
+            ))
+        }
+    }
+
+    impl Drop for IdWorkspace {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// #1880: hover and definition on any character of a hyphenated policy
+    /// or goal ID, at its declaration in a business or `fsl 5` requirements
+    /// document and at a refinement's `respond`, act on the whole ID, and
+    /// the references are the declaration and the `respond`.
+    #[test]
+    fn requirement_id_hover_definition_and_references_act_on_the_whole_id() {
+        for (layer_text, abstraction) in ID_LAYERS {
+            let workspace = IdWorkspace::new("id-navigation", layer_text, abstraction);
+            let declared = range_of(layer_text, "POL-WAIT-001", 0);
+            let responded = range_of(&workspace.refines_text, "POL-WAIT-001", 0);
+            let expected_references = vec![
+                Location::new(workspace.layer.clone(), declared),
+                Location::new(workspace.refines.clone(), responded),
+            ];
+            for (uri, range) in [
+                (&workspace.layer, declared),
+                (&workspace.refines, responded),
+            ] {
+                for position in positions_in(range) {
+                    let at = format!("{abstraction} {position:?}");
+                    assert_eq!(
+                        workspace.definition(uri, position),
+                        Some(Location::new(workspace.layer.clone(), declared)),
+                        "{at}"
+                    );
+                    let (value, hovered) = workspace.hover(uri, position).expect(&at);
+                    assert!(
+                        value.contains("**property** `POL-WAIT-001`"),
+                        "{at}: {value}"
+                    );
+                    assert_eq!(hovered, declared, "{at}");
+                    assert_eq!(
+                        workspace.references(uri, position),
+                        expected_references,
+                        "{at}"
+                    );
+                }
+            }
+            let goal = range_of(layer_text, "GOAL-DONE-001", 0);
+            for position in positions_in(goal) {
+                let at = format!("{abstraction} {position:?}");
+                let (value, hovered) = workspace.hover(&workspace.layer, position).expect(&at);
+                assert!(
+                    value.contains("**property** `GOAL-DONE-001`"),
+                    "{at}: {value}"
+                );
+                assert_eq!(hovered, goal, "{at}");
+            }
+        }
+    }
+
+    /// #1880: renaming from any character of the ID, at the declaration or
+    /// at `respond`, replaces the whole ID in both files and nothing else.
+    #[test]
+    fn requirement_id_rename_replaces_the_whole_id() {
+        for (layer_text, abstraction) in ID_LAYERS {
+            let workspace = IdWorkspace::new("id-rename", layer_text, abstraction);
+            let expected_layer = layer_text.replacen("POL-WAIT-001", "PolicyWait", 1);
+            let expected_refines = workspace
+                .refines_text
+                .replace("respond POL-WAIT-001", "respond PolicyWait");
+            for (uri, range) in [
+                (&workspace.layer, range_of(layer_text, "POL-WAIT-001", 0)),
+                (
+                    &workspace.refines,
+                    range_of(&workspace.refines_text, "POL-WAIT-001", 0),
+                ),
+            ] {
+                for position in positions_in(range) {
+                    assert_eq!(
+                        workspace.rename(uri, position, "PolicyWait"),
+                        Some((expected_layer.clone(), expected_refines.clone())),
+                        "{abstraction} {position:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// #1880: `POL-HOLD-002`, declared first and sharing the prefix, is its
+    /// own symbol: it navigates to itself, and `respond POL-WAIT-001` is no
+    /// reference of it.
+    #[test]
+    fn requirement_ids_sharing_a_prefix_do_not_collide() {
+        for (layer_text, abstraction) in ID_LAYERS {
+            let workspace = IdWorkspace::new("id-prefix", layer_text, abstraction);
+            let held = range_of(layer_text, "POL-HOLD-002", 0);
+            for position in positions_in(held) {
+                let at = format!("{abstraction} {position:?}");
+                assert_eq!(
+                    workspace.definition(&workspace.layer, position),
+                    Some(Location::new(workspace.layer.clone(), held)),
+                    "{at}"
+                );
+                let (value, hovered) = workspace.hover(&workspace.layer, position).expect(&at);
+                assert!(
+                    value.contains("**property** `POL-HOLD-002`"),
+                    "{at}: {value}"
+                );
+                assert_eq!(hovered, held, "{at}");
+                assert_eq!(
+                    workspace.references(&workspace.layer, position),
+                    vec![Location::new(workspace.layer.clone(), held)],
+                    "{at}"
+                );
+            }
+        }
+    }
+
+    /// #1880: plain identifiers beside the IDs keep their behaviour: the
+    /// actor `System` of the layer, the specifications a refinement names
+    /// and the implementation action after `respond … by`.
+    #[test]
+    fn plain_identifiers_beside_requirement_ids_are_unchanged() {
+        for (layer_text, abstraction) in ID_LAYERS {
+            let workspace = IdWorkspace::new("id-plain", layer_text, abstraction);
+            let actor = range_of(layer_text, "System", 0);
+            let used = range_of(layer_text, "System", 1).start;
+            assert_eq!(
+                workspace.definition(&workspace.layer, used),
+                Some(Location::new(workspace.layer.clone(), actor)),
+                "{abstraction}"
+            );
+            let (value, hovered) = workspace
+                .hover(&workspace.layer, used)
+                .expect("System hover");
+            assert!(
+                value.contains("**variable** `System`"),
+                "{abstraction}: {value}"
+            );
+            assert_eq!(hovered, actor, "{abstraction}");
+            assert_eq!(
+                workspace.rename(&workspace.layer, used, "Robot"),
+                Some((
+                    layer_text.replace("System", "Robot"),
+                    workspace.refines_text.clone()
+                )),
+                "{abstraction}"
+            );
+
+            for (needle, offset, target) in [
+                ("impl Keeps", 5, "keeps.fsl"),
+                ("by promote", 3, "keeps.fsl"),
+                (abstraction, 0, "layer.fsl"),
+            ] {
+                let written = range_of(&workspace.refines_text, needle, 0).start;
+                let position = Position::new(written.line, written.character + offset);
+                let definition = workspace
+                    .definition(&workspace.refines, position)
+                    .unwrap_or_else(|| panic!("{abstraction}: {needle}"));
+                assert!(
+                    definition.uri.path().ends_with(target),
+                    "{abstraction}: {needle}: {definition:?}"
+                );
+            }
+        }
+    }
 }
