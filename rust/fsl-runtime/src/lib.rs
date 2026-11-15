@@ -26,6 +26,9 @@ mod scope_tests;
 #[cfg(test)]
 mod enabled_calls_tests;
 
+#[cfg(test)]
+mod explicit_search_tests;
+
 /// Work counters the structural tests of #1842 read, so a scaling
 /// regression fails without a wall-clock deadline.
 #[cfg(test)]
@@ -1460,10 +1463,17 @@ impl Monitor {
     /// Returns [`RuntimeError`] when parameter domains cannot be enumerated
     /// or a guard fails for a reason other than a partial operation.
     pub fn candidates(&self) -> Result<Vec<ActionCandidate>, RuntimeError> {
+        self.candidates_at(&self.state)
+    }
+
+    /// [`Monitor::candidates`] at `state` instead of the monitor's own
+    /// state, so a search enumerates a state it holds without copying it
+    /// into the monitor first.
+    fn candidates_at(&self, state: &State) -> Result<Vec<ActionCandidate>, RuntimeError> {
         let mut candidates = Vec::new();
         for action in &self.model.actions {
             for params in action_parameter_bindings(action, &self.model)? {
-                match evaluate_action_guards(action, &params, &self.state, &self.model) {
+                match evaluate_action_guards(action, &params, state, &self.model) {
                     Ok(Some(bindings)) => {
                         candidates.push(ActionCandidate::Enabled(EnabledAction {
                             action: action.name.clone(),
@@ -1508,28 +1518,31 @@ impl Monitor {
     }
 
     /// [`Monitor::step_candidate`] for a candidate that [`Monitor::candidates`]
-    /// just enumerated at the current state, for the refinement searches
-    /// (issue #1247). `step_selected` re-evaluates every guard to reject a
-    /// stale instance; here the instance's `bindings` are the ones those
-    /// guards produced at this very state, so the re-evaluation could only
-    /// recompute them. Not for an instance from another state (replay, a
-    /// caller-held `EnabledAction`): those go through `step_candidate`.
+    /// just enumerated at `state`, for the searches that enumerate and step
+    /// the same state (issue #1247, #1851). `step_selected` re-evaluates
+    /// every guard to reject a stale instance; here the instance's `bindings`
+    /// are the ones those guards produced at this very state, so the
+    /// re-evaluation could only recompute them. Not for an instance from
+    /// another state (replay, a caller-held `EnabledAction`): those go
+    /// through `step_candidate`.
     ///
     /// `state` is the state the candidate was enumerated at; the monitor's
     /// own state is neither read nor updated, so a search steps every
     /// candidate of one state without re-pointing the monitor at it each
     /// time. `step` is the logical step of `state`; the monitor's own
-    /// `step` is not used either.
+    /// `step` is not used either. `checked_bounds` is
+    /// [`Monitor::step_selected`]'s selection of implicit state bounds.
     fn step_enumerated(
         &self,
         state: &State,
         step: usize,
         candidate: &ActionCandidate,
+        checked_bounds: Option<&BTreeSet<String>>,
     ) -> Result<StepResult, RuntimeError> {
         let mut step = step;
         match candidate {
             ActionCandidate::Enabled(instance) => {
-                Self::execute_from(&self.model, state, &mut step, instance, None)
+                Self::execute_from(&self.model, state, &mut step, instance, checked_bounds)
             }
             ActionCandidate::GuardPartial(instance) => {
                 Ok(guard_partial_result(instance, state.clone(), step + 1))
@@ -2006,21 +2019,19 @@ pub struct BfsResult {
 }
 
 fn terminal_holds(monitor: &Monitor) -> Result<bool, RuntimeError> {
-    let Some(terminal) = &monitor.model.terminal else {
+    terminal_holds_at(&monitor.model, &monitor.state)
+}
+
+fn terminal_holds_at(model: &KernelModel, state: &State) -> Result<bool, RuntimeError> {
+    let Some(terminal) = &model.terminal else {
         return Ok(false);
     };
-    with_total_division(|| {
-        match eval(
-            terminal,
-            &monitor.state,
-            &mut Bindings::new(),
-            &monitor.model,
-            None,
-        )? {
+    with_total_division(
+        || match eval(terminal, state, &mut Bindings::new(), model, None)? {
             Value::Bool(value) => Ok(value),
             _ => Err(runtime_error("terminal expression must be Boolean")),
-        }
-    })
+        },
+    )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2709,7 +2720,7 @@ pub fn check_refinement_with_budget(
         for (_, state_index, candidate) in candidates {
             let (state_id, state) = (layer[state_index].0, &layer[state_index].1);
             let alpha_before = &alphas[state_index];
-            let stepped = scratch.step_enumerated(state, step, &candidate)?;
+            let stepped = scratch.step_enumerated(state, step, &candidate, None)?;
             let enabled = candidate.instance();
             if stepped.violation.is_some() {
                 // Unreachable in practice: `first_self_violation` above
@@ -3244,39 +3255,36 @@ pub fn find_boundary_violation(
     depth: usize,
     budget: usize,
 ) -> Result<BoundaryProbe, RuntimeError> {
+    // `visited` and the parent links are one packed `StateStore`, and each
+    // candidate is stepped from the state it was enumerated at without
+    // evaluating its guards again (issue #1851, the #1247 path). A queue
+    // node keeps its `State` next to its store id, so a popped state is not
+    // decoded again.
     let mut scratch = Monitor::new(model.clone())?;
-    let initial_state = scratch.state.clone();
-    let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
-    let mut visited = BTreeSet::from([initial_state.clone()]);
-    let mut parents = BTreeMap::<State, trace::ParentLink>::new();
+    let initial_state = std::mem::take(&mut scratch.state);
+    let (mut visited, root) = trace::StateStore::with_root(&initial_state);
 
     if !model.actions.is_empty()
         && let Some(violation) = check_state_bounds(&initial_state, model, 0, None)?
     {
         return Ok(BoundaryProbe {
-            finding: Some((
-                violation,
-                trace::reconstruct_trace(&initial_state, &parents),
-            )),
+            finding: Some((violation, visited.trace(root))),
             exhausted: false,
             states_explored: visited.len(),
         });
     }
 
-    while let Some((state, step)) = queue.pop_front() {
+    let mut queue = VecDeque::from([(initial_state, root, 0_usize)]);
+    while let Some((state, id, step)) = queue.pop_front() {
         if step >= depth {
             continue;
         }
-        scratch.state = state.clone();
-        scratch.step = step;
-        for candidate in scratch.candidates()? {
+        for candidate in scratch.candidates_at(&state)? {
             let instance = candidate.instance();
-            scratch.state = state.clone();
-            scratch.step = step;
-            let stepped = scratch.step_candidate(&candidate, None)?;
+            let stepped = scratch.step_enumerated(&state, step, &candidate, None)?;
             if let Some(violation) = stepped.violation.clone() {
                 if matches!(violation.kind.as_str(), "partial_op" | "type_bound") {
-                    let mut found_trace = trace::reconstruct_trace(&state, &parents);
+                    let mut found_trace = visited.trace(id);
                     found_trace.push(trace_step_from_result(step + 1, &state, instance, &stepped));
                     return Ok(BoundaryProbe {
                         finding: Some((violation, found_trace)),
@@ -3286,18 +3294,9 @@ pub fn find_boundary_violation(
                 }
                 continue;
             }
-            let child_state = stepped.state.clone();
-            if visited.insert(child_state.clone()) {
-                parents.insert(
-                    child_state.clone(),
-                    trace::ParentLink {
-                        parent: state.clone(),
-                        action: TraceAction {
-                            name: instance.action.clone(),
-                            params: instance.params.clone(),
-                        },
-                    },
-                );
+            if let Some(child) =
+                visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
+            {
                 if visited.len() >= budget {
                     return Ok(BoundaryProbe {
                         finding: None,
@@ -3305,7 +3304,7 @@ pub fn find_boundary_violation(
                         states_explored: visited.len(),
                     });
                 }
-                queue.push_back((child_state, step + 1));
+                queue.push_back((stepped.state, child, step + 1));
             }
         }
     }
@@ -3410,7 +3409,7 @@ fn first_self_violation(
         let state = &scratch.state;
         for candidate in scratch.candidates()? {
             let instance = candidate.instance();
-            let stepped = scratch.step_enumerated(state, step, &candidate)?;
+            let stepped = scratch.step_enumerated(state, step, &candidate, None)?;
             if let Some(violation) = stepped.violation.clone() {
                 let mut found_trace = visited.trace(id);
                 found_trace.push(trace_step_from_result(step + 1, state, instance, &stepped));
@@ -3512,22 +3511,23 @@ pub fn expression_reachability(
     if expressions.is_empty() {
         return Ok(Vec::new());
     }
+    // Visited states are one packed `StateStore`, and each candidate is
+    // stepped from the state it was enumerated at without evaluating its
+    // guards again (issue #1851, the #1247 path).
     let mut scratch = Monitor::new(model.clone())?;
-    let initial_state = scratch.state.clone();
-    let mut queue = VecDeque::from([(initial_state.clone(), 0_usize)]);
-    let mut visited = BTreeSet::from([initial_state]);
+    let initial_state = std::mem::take(&mut scratch.state);
+    let (mut visited, root) = trace::StateStore::with_root(&initial_state);
+    let mut queue = VecDeque::from([(initial_state, root, 0_usize)]);
     let mut results: Vec<Option<Reachability>> = vec![None; expressions.len()];
     let mut pending: BTreeSet<usize> = (0..expressions.len()).collect();
 
-    'walk: while let Some((state, step)) = queue.pop_front() {
-        scratch.state = state.clone();
-        scratch.step = step;
+    'walk: while let Some((state, id, step)) = queue.pop_front() {
         let mut resolved = Vec::new();
         for &index in &pending {
             let truth = with_total_division(|| {
                 eval(
                     &expressions[index],
-                    &scratch.state,
+                    &state,
                     &mut Bindings::new(),
                     &scratch.model,
                     None,
@@ -3558,21 +3558,22 @@ pub fn expression_reachability(
         if step >= depth {
             continue;
         }
-        for candidate in scratch.candidates()? {
-            scratch.state = state.clone();
-            scratch.step = step;
-            let stepped = scratch.step_candidate(&candidate, None)?;
+        for candidate in scratch.candidates_at(&state)? {
+            let stepped = scratch.step_enumerated(&state, step, &candidate, None)?;
             if stepped.violation.is_some() {
                 continue;
             }
-            if visited.insert(stepped.state.clone()) {
+            let instance = candidate.instance();
+            if let Some(child) =
+                visited.insert_child(&stepped.state, id, &instance.action, &instance.params)
+            {
                 if visited.len() >= budget {
                     for &index in &pending {
                         results[index] = Some(Reachability::Exhausted);
                     }
                     break 'walk;
                 }
-                queue.push_back((stepped.state, step + 1));
+                queue.push_back((stepped.state, child, step + 1));
             }
         }
     }
