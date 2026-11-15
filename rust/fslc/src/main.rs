@@ -314,7 +314,8 @@ fn run_fmt(options: &FmtOptions) -> (FmtCliOutput, i32) {
             (FmtCliOutput::Json(output), status)
         }
         FmtCliOutput::Source(source) => {
-            fslc_rust::migration::finish_dependency_reports(&log, (Value::Null, status), true);
+            let _ =
+                fslc_rust::migration::finish_dependency_reports(&log, (Value::Null, status), true);
             (FmtCliOutput::Source(source), status)
         }
     }

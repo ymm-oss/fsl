@@ -725,6 +725,7 @@ impl DependencyRecords {
 }
 
 /// Deliver recorded dependency findings without replacing root edition metadata.
+#[must_use]
 pub fn finish_dependency_reports(
     log: &DependencyRecords,
     result: (Value, i32),
