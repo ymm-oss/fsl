@@ -2790,9 +2790,14 @@ async fn probe_not<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<
     probe(solver, &solver.not(condition)?).await
 }
 
+/// The classification stays in this body: the P2 mutation scope
+/// (`p2.bmc.probe-classification`) examines it here.
 async fn probe<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool, VerifyError> {
-    let result = scoped_check(solver, [condition], PopFailure::OverAssert).await?;
-    Ok(!OnUnknown::Fail("solver returned unknown").proves_unsat(result)?)
+    match scoped_check(solver, [condition], PopFailure::OverAssert).await? {
+        SatResult::Sat => Ok(true),
+        SatResult::Unsat => Ok(false),
+        SatResult::Unknown => Err(VerifyError::solver("solver returned unknown")),
+    }
 }
 
 #[cfg(test)]
