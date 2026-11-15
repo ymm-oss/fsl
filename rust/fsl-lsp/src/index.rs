@@ -2707,7 +2707,7 @@ mod tests {
         let requirement = index
             .symbols
             .iter()
-            .find(|symbol| symbol.name == "REQ")
+            .find(|symbol| symbol.name == "REQ-1")
             .expect("`requirement REQ-1` must declare its ID");
         assert_eq!(requirement.role, SymbolRole::Property);
         assert!(index.misprojected_declarations().is_empty());

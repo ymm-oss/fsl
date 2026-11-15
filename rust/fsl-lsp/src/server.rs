@@ -2877,6 +2877,8 @@ verify {
 
     /// #1880: renaming from any character of the ID, at the declaration or
     /// at `respond`, replaces the whole ID in both files and nothing else.
+    /// The replacement is an identifier, as for any rename: a hyphenated
+    /// one is refused.
     #[test]
     fn requirement_id_rename_replaces_the_whole_id() {
         for (layer_text, abstraction) in ID_LAYERS {
@@ -2899,6 +2901,11 @@ verify {
                         "{abstraction} {position:?}"
                     );
                 }
+                assert_eq!(
+                    workspace.rename(uri, range.start, "POL-WAIT-002"),
+                    None,
+                    "{abstraction}"
+                );
             }
         }
     }
