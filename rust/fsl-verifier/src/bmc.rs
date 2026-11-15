@@ -18,7 +18,7 @@ use crate::eval::{
 use crate::induction::{InductionCti, partial_witness};
 use crate::init_definedness::{InitFailureSite, init_failure_sites, init_may_fail};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
-use crate::scoped_query::{OnUnknown, PopFailure, scoped_check};
+use crate::scoped_query::{OnUnknown, PopFailure, scoped_check, scoped_query};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
@@ -2314,21 +2314,14 @@ async fn build_witness<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     upto: usize,
 ) -> Result<Vec<TraceStep>, VerifyError> {
-    solver.push();
-    if let Err(error) = solver.assert(condition) {
-        solver.pop(1)?;
-        return Err(error.into());
-    }
-    let checked = solver.check().await;
-    let projected = match checked {
-        Ok(SatResult::Sat) => project_trace(solver, model, states, choices, instances, upto),
-        Ok(SatResult::Unsat) => Err(VerifyError::new("witness condition became unsatisfiable")),
-        Ok(SatResult::Unknown) => Err(VerifyError::solver("solver returned unknown for witness")),
-        Err(error) => Err(error.into()),
-    };
-    let popped = solver.pop(1);
-    popped?;
-    projected
+    scoped_query(solver, [condition], PopFailure::First, |solver, result| {
+        if OnUnknown::Fail("solver returned unknown for witness").proves_unsat(result)? {
+            Err(VerifyError::new("witness condition became unsatisfiable"))
+        } else {
+            project_trace(solver, model, states, choices, instances, upto)
+        }
+    })
+    .await
 }
 
 fn states_equal<S: SmtSolver>(

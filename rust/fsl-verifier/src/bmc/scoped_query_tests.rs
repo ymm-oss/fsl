@@ -137,16 +137,18 @@ enum Caller {
     TermsAreUnsat,
     ProvenUnsat,
     PartialWitness,
+    BuildWitness,
     RankMeasurePath,
 }
 
-const CALLERS: [Caller; 7] = [
+const CALLERS: [Caller; 8] = [
     Caller::Probe,
     Caller::ProbeNot,
     Caller::Entailed,
     Caller::TermsAreUnsat,
     Caller::ProvenUnsat,
     Caller::PartialWitness,
+    Caller::BuildWitness,
     Caller::RankMeasurePath,
 ];
 
@@ -176,7 +178,7 @@ fn model() -> KernelModel {
 }
 
 /// The caller's verdict as a Boolean: `partial_witness` answers whether a
-/// witness was projected.
+/// witness was projected, `build_witness` that one was.
 fn run(caller: Caller, solver: &mut Stub) -> Result<bool, VerifyError> {
     let term = Sort::Bool;
     match caller {
@@ -199,6 +201,10 @@ fn run(caller: Caller, solver: &mut Stub) -> Result<bool, VerifyError> {
             block_on(partial_witness(solver, &model, &term, &[], &[], &[], 0))
                 .map(|witness| witness.is_some())
         }
+        Caller::BuildWitness => {
+            let model = model();
+            block_on(build_witness(solver, &model, &term, &[], &[], &[], 0)).map(|_| true)
+        }
         Caller::RankMeasurePath => block_on(rank_measure_path_is_reachable(solver, &term)),
     }
 }
@@ -209,6 +215,7 @@ fn asserted_terms(caller: Caller) -> usize {
         | Caller::ProbeNot
         | Caller::Entailed
         | Caller::PartialWitness
+        | Caller::BuildWitness
         | Caller::RankMeasurePath => 1,
         Caller::ProvenUnsat => 2,
         Caller::TermsAreUnsat => 3,
@@ -236,13 +243,17 @@ fn scripted(caller: Caller, fault: Fault) -> (SolverResult<SatResult>, Result<bo
     let unknown = match caller {
         Caller::Probe | Caller::ProbeNot => Err(VerifyError::solver("solver returned unknown")),
         Caller::PartialWitness => Err(VerifyError::solver("solver returned unknown in induction")),
+        Caller::BuildWitness => Err(VerifyError::solver("solver returned unknown for witness")),
         Caller::RankMeasurePath => Err(VerifyError::solver(
             "solver returned unknown in ranking proof",
         )),
         Caller::Entailed | Caller::TermsAreUnsat | Caller::ProvenUnsat => Ok(false),
     };
     let pop_hides_assert = !matches!(caller, Caller::TermsAreUnsat);
-    let pop_hides_check = matches!(caller, Caller::PartialWitness | Caller::RankMeasurePath);
+    let pop_hides_check = matches!(
+        caller,
+        Caller::PartialWitness | Caller::BuildWitness | Caller::RankMeasurePath
+    );
     let pop = Err(VerifyError::solver(POP_FAILED));
     let result = match fault {
         Fault::None => unknown,
