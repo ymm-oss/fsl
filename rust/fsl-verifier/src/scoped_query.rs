@@ -5,7 +5,7 @@
 //! the solver gave it; each caller folds `unknown` itself through
 //! [`OnUnknown`].
 
-use fsl_solver::{SatResult, SmtSolver};
+use fsl_solver::{SatResult, SmtSolver, SolverError};
 
 use crate::VerifyError;
 
@@ -60,6 +60,23 @@ where
     scoped_query(solver, terms, pop_failure, |_, result| Ok(result)).await
 }
 
+/// Check the conjunction of `conjuncts` in a fresh scope and return the
+/// solver's answer unchanged. The conjunction is built after the scope is
+/// opened: Z3's search, and so the statistics `verify` reports, depends on
+/// whether a term was created before or after a `push`.
+pub(crate) async fn scoped_check_conjunction<S: SmtSolver>(
+    solver: &mut S,
+    conjuncts: &[S::Term],
+    pop_failure: PopFailure,
+) -> Result<SatResult, VerifyError> {
+    solver.push();
+    let conjunction = match solver.and(conjuncts) {
+        Ok(conjunction) => conjunction,
+        Err(error) => return Err(closed_before_check(solver, error, pop_failure)),
+    };
+    asserted_and_checked(solver, [&conjunction], pop_failure, |_, result| Ok(result)).await
+}
+
 /// Check `terms` in a fresh scope and read the answer with `inside` while the
 /// scope, and so the model of a `sat` answer, is still open.
 pub(crate) async fn scoped_query<'t, S, T>(
@@ -73,13 +90,34 @@ where
     S::Term: 't,
 {
     solver.push();
+    asserted_and_checked(solver, terms, pop_failure, inside).await
+}
+
+/// Pop the open scope after `error` failed it before its check.
+fn closed_before_check<S: SmtSolver>(
+    solver: &mut S,
+    error: SolverError,
+    pop_failure: PopFailure,
+) -> VerifyError {
+    match solver.pop(1) {
+        Err(popped) if pop_failure != PopFailure::Last => popped.into(),
+        _ => error.into(),
+    }
+}
+
+async fn asserted_and_checked<'t, S, T>(
+    solver: &mut S,
+    terms: impl IntoIterator<Item = &'t S::Term>,
+    pop_failure: PopFailure,
+    inside: impl FnOnce(&S, SatResult) -> Result<T, VerifyError>,
+) -> Result<T, VerifyError>
+where
+    S: SmtSolver,
+    S::Term: 't,
+{
     for term in terms {
         if let Err(error) = solver.assert(term) {
-            let popped = solver.pop(1);
-            if pop_failure != PopFailure::Last {
-                popped?;
-            }
-            return Err(error.into());
+            return Err(closed_before_check(solver, error, pop_failure));
         }
     }
     let answered = match solver.check().await {

@@ -18,7 +18,9 @@ use crate::eval::{
 use crate::induction::{InductionCti, partial_witness};
 use crate::init_definedness::{InitFailureSite, init_failure_sites, init_may_fail};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
-use crate::scoped_query::{OnUnknown, PopFailure, scoped_check, scoped_query};
+use crate::scoped_query::{
+    OnUnknown, PopFailure, scoped_check, scoped_check_conjunction, scoped_query,
+};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
@@ -2780,8 +2782,7 @@ async fn extend_range_lemmas<S: SmtSolver>(
 /// `true` only when the conjunction is proved unsatisfiable; `unknown` keeps
 /// the lemma out instead of failing the run.
 async fn entailed<S: SmtSolver>(solver: &mut S, query: &[S::Term]) -> Result<bool, VerifyError> {
-    let conjunction = solver.and(query)?;
-    let result = scoped_check(solver, [&conjunction], PopFailure::OverAssert).await?;
+    let result = scoped_check_conjunction(solver, query, PopFailure::OverAssert).await?;
     OnUnknown::NotProved.proves_unsat(result)
 }
 

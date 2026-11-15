@@ -11,6 +11,7 @@ use super::*;
 use crate::induction::{partial_witness, rank_measure_path_is_reachable};
 use crate::vacuity::proven_unsat;
 
+const AND_FAILED: &str = "stub and failed";
 const ASSERT_FAILED: &str = "stub assert failed";
 const CHECK_FAILED: &str = "stub check failed";
 const POP_FAILED: &str = "stub pop failed";
@@ -19,6 +20,7 @@ const POP_FAILED: &str = "stub pop failed";
 // and every check gives the one scripted answer.
 struct Stub {
     answer: SolverResult<SatResult>,
+    fail_and: bool,
     fail_assert: bool,
     fail_pop: bool,
     calls: Vec<&'static str>,
@@ -61,6 +63,9 @@ impl SmtSolver for Stub {
         Ok(Sort::Bool)
     }
     fn and(&self, _: &[Sort]) -> SolverResult<Sort> {
+        if self.fail_and {
+            return Err(SolverError::new(AND_FAILED));
+        }
         Ok(Sort::Bool)
     }
     fn or(&self, _: &[Sort]) -> SolverResult<Sort> {
@@ -156,6 +161,8 @@ const CALLERS: [Caller; 8] = [
 enum Fault {
     None,
     Pop,
+    /// `entailed` only: its conjunction cannot be built inside the scope.
+    And,
     AssertAndPop,
     CheckAndPop,
 }
@@ -224,7 +231,9 @@ fn asserted_terms(caller: Caller) -> usize {
 
 fn calls(caller: Caller, fault: Fault) -> Vec<&'static str> {
     let mut calls = vec!["push"];
-    if matches!(fault, Fault::AssertAndPop) {
+    if matches!(fault, Fault::And) {
+        calls.push("pop");
+    } else if matches!(fault, Fault::AssertAndPop) {
         calls.extend(["assert", "pop"]);
     } else {
         calls.extend(std::iter::repeat_n("assert", asserted_terms(caller)));
@@ -234,7 +243,9 @@ fn calls(caller: Caller, fault: Fault) -> Vec<&'static str> {
 }
 
 /// The stub's scripted answer, and the result the caller returned for it
-/// before #1873, read from the caller's own body.
+/// before #1873, read from the caller's own body. The one exception is
+/// `Fault::And`: `entailed` used to return without closing its scope when its
+/// conjunction could not be built; the owner closes it.
 fn scripted(caller: Caller, fault: Fault) -> (SolverResult<SatResult>, Result<bool, VerifyError>) {
     let answer = match fault {
         Fault::CheckAndPop => Err(SolverError::new(CHECK_FAILED)),
@@ -258,6 +269,7 @@ fn scripted(caller: Caller, fault: Fault) -> (SolverResult<SatResult>, Result<bo
     let result = match fault {
         Fault::None => unknown,
         Fault::Pop => pop,
+        Fault::And => Err(VerifyError::solver(AND_FAILED)),
         Fault::AssertAndPop if pop_hides_assert => pop,
         Fault::AssertAndPop => Err(VerifyError::solver(ASSERT_FAILED)),
         Fault::CheckAndPop if pop_hides_check => pop,
@@ -269,17 +281,20 @@ fn scripted(caller: Caller, fault: Fault) -> (SolverResult<SatResult>, Result<bo
 #[test]
 fn every_scoped_query_caller_keeps_its_unknown_fold_and_pop_order() {
     for caller in CALLERS {
-        for fault in [
+        let and = matches!(caller, Caller::Entailed).then_some(Fault::And);
+        let faults = [
             Fault::None,
             Fault::Pop,
             Fault::AssertAndPop,
             Fault::CheckAndPop,
-        ] {
+        ];
+        for fault in faults.into_iter().chain(and) {
             let (answer, expected) = scripted(caller, fault);
             let mut solver = Stub {
                 answer,
+                fail_and: matches!(fault, Fault::And),
                 fail_assert: matches!(fault, Fault::AssertAndPop),
-                fail_pop: !matches!(fault, Fault::None),
+                fail_pop: !matches!(fault, Fault::None | Fault::And),
                 calls: Vec::new(),
             };
             let produced = run(caller, &mut solver);
