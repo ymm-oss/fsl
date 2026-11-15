@@ -215,8 +215,28 @@ fn selected_transition_induction_model(
     Ok(Some(model))
 }
 
-#[allow(clippy::too_many_lines)]
+/// How an induction run that got past its base case ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum InductionVerdict {
+    Proved,
+    /// A counterexample to induction (`unknown_cti`).
+    Cti,
+    /// A ranked `leadsTo` whose ranking failed (`unknown_cti`, `leadsTo_rank`).
+    RankFailure,
+}
+
 pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i32) {
+    match run_induction(request) {
+        Ok((_, output)) | Err(output) => output,
+    }
+}
+
+/// `Err` is an output no induction verdict decided: an error, or the base
+/// case's own BMC envelope.
+#[allow(clippy::too_many_lines)]
+fn run_induction(
+    request: InductionRequest<'_>,
+) -> Result<(InductionVerdict, CommandResult), CommandResult> {
     let InductionRequest {
         selection,
         depth,
@@ -229,7 +249,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         .and_then(|model| model.map_or_else(|| load_selected_model(selection), Ok))
     {
         Ok(model) => model,
-        Err(error) => return (spec_load_error_output(&error), 2),
+        Err(error) => return Err((spec_load_error_output(&error), 2)),
     };
     let selection = ModelSelection {
         path: selection.path,
@@ -246,17 +266,15 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         initial_state: None,
         skip_vacuity_probe,
     };
-    let (base_solved, (base_value, base_status)) = match execute_bmc(&base_request, started, true) {
-        Ok(execution) => execution,
-        Err(output) => return output,
-    };
+    let (base_solved, base_verdict, (base_value, base_status)) =
+        execute_bmc(&base_request, started, true)?;
     let Value::Object(base) = &base_value else {
-        return error_exit(error_output(
+        return Err(error_exit(error_output(
             "internal",
             "BMC returned a non-object envelope",
-        ));
+        )));
     };
-    if base.get("result").and_then(Value::as_str) != Some("verified") {
+    if base_verdict != BmcVerdict::Verified {
         // A base-case `leadsTo` violation may be a raw BMC stall/lasso trace
         // that a ranking proof can diagnose more precisely (e.g. a missing
         // `fair` on the `helpful` action, or a permanently-blocked helpful
@@ -264,8 +282,7 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         // which prefers `_prove_ranked_leadstos`' rank_failure over the raw
         // BMC counterexample whenever ranking has something more specific to
         // say.
-        if base.get("result").and_then(Value::as_str) == Some("violated")
-            && base.get("violation_kind").and_then(Value::as_str) == Some("leadsTo")
+        if base_verdict == BmcVerdict::LeadsToViolated
             && let Ok(model) = load_induction_model(selection, auxiliary)
             && let Ok(mut solver) = fsl_solver_z3::Z3Solver::new()
             && let Ok(ranked) =
@@ -274,48 +291,57 @@ pub(super) fn run_induction_filtered(request: InductionRequest<'_>) -> (Value, i
         {
             let mut statistics = base_solved.statistics.clone();
             statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
-            return render_rank_failure(&model, failure, depth, started, &statistics);
+            return Ok((
+                InductionVerdict::RankFailure,
+                render_rank_failure(&model, failure, depth, started, &statistics),
+            ));
         }
-        return (base_value, base_status);
+        return Err((base_value, base_status));
     }
 
-    let model = match load_induction_model(selection, auxiliary) {
-        Ok(model) => model,
-        Err(output) => return output,
-    };
+    let model = load_induction_model(selection, auxiliary)?;
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
-        Err(error) => return error_exit(error_output("internal", &error.to_string())),
+        Err(error) => return Err(error_exit(error_output("internal", &error.to_string()))),
     };
     let induction = match block_on_native(fsl_verifier::prove_induction(&model, &mut solver, k)) {
         Ok(result) => result,
-        Err(error) => return error_exit(error_output("semantics", &error.to_string())),
+        Err(error) => return Err(error_exit(error_output("semantics", &error.to_string()))),
     };
 
     if let Some(cti) = &induction.cti {
         let mut statistics = base_solved.statistics.clone();
         statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
-        return render_induction_cti(&model, cti, depth, started, &statistics);
+        return Ok((
+            InductionVerdict::Cti,
+            render_induction_cti(&model, cti, depth, started, &statistics),
+        ));
     }
 
     let ranked = match block_on_native(fsl_verifier::prove_ranked_leadstos(&model, &mut solver)) {
         Ok(result) => result,
-        Err(error) => return error_exit(error_output("semantics", &error.to_string())),
+        Err(error) => return Err(error_exit(error_output("semantics", &error.to_string()))),
     };
     let mut statistics = base_solved.statistics.clone();
     statistics.merge(&fsl_solver::SmtSolver::statistics(&solver));
     if let Some(failure) = &ranked.failure {
-        return render_rank_failure(&model, failure, depth, started, &statistics);
+        return Ok((
+            InductionVerdict::RankFailure,
+            render_rank_failure(&model, failure, depth, started, &statistics),
+        ));
     }
-    render_induction_success(
-        &model,
-        base,
-        &induction,
-        &ranked,
-        depth,
-        started,
-        &statistics,
-    )
+    Ok((
+        InductionVerdict::Proved,
+        render_induction_success(
+            &model,
+            base,
+            &induction,
+            &ranked,
+            depth,
+            started,
+            &statistics,
+        ),
+    ))
 }
 
 fn load_induction_model(
@@ -1051,22 +1077,36 @@ pub(super) fn run_auto_filtered(request: ExplicitRequest<'_>) -> (Value, i32) {
             Ok(findings) => findings,
             Err(output) => return output,
         };
-    let (output, status) =
-        finish_explicit_output(fslc_rust::verification_output::render_explicit_output(
-            envelope(),
-            &model,
-            &result,
-            checked_bounds.as_ref(),
-            request.deadlock,
-            started.elapsed().as_secs_f64(),
-            &vacuity,
-            &reachable_diagnostics,
-            request.skip_vacuity_probe,
-        ));
-    if output.get("result").and_then(Value::as_str) == Some("unknown_budget") {
-        return auto_fallback_to_bmc(request, &budget_fallback_reason(&output), "budget");
+    let fallback = explicit_budget_fallback(&result, request.deadlock);
+    let rendered = fslc_rust::verification_output::render_explicit_output(
+        envelope(),
+        &model,
+        &result,
+        checked_bounds.as_ref(),
+        request.deadlock,
+        started.elapsed().as_secs_f64(),
+        &vacuity,
+        &reachable_diagnostics,
+        request.skip_vacuity_probe,
+    );
+    // Rendering replays the explicit witnesses; a replay failure is an
+    // internal error, never a fallback.
+    if let Some(reason) = fallback
+        && rendered.is_ok()
+    {
+        return auto_fallback_to_bmc(request, &reason, "budget");
     }
-    (output, status)
+    finish_explicit_output(rendered)
+}
+
+/// The reason `--engine auto` falls back to BMC after a completed explicit
+/// run: the run is `unknown_budget`. `None` keeps the explicit verdict.
+fn explicit_budget_fallback(
+    result: &fsl_runtime::ExplicitResult,
+    deadlock: DeadlockMode,
+) -> Option<String> {
+    fslc_rust::verification_output::explicit_budget_unknown(result, deadlock)
+        .then(|| budget_fallback_message(result.states_explored))
 }
 
 // A short-lived return value, not a stored collection; keep the raw runtime result.
@@ -1120,22 +1160,26 @@ fn annotate_auto_fallback(output: &mut Value, reason: &str, kind: &str) {
     );
 }
 
-/// Builds the budget-exhaustion fallback reason from the explicit engine's
-/// own `states_explored` count so the message names the actual state count
-/// observed, not a generic placeholder.
+/// Builds the budget-exhaustion fallback reason from a cached explicit
+/// envelope's `states_explored` count so the message names the actual state
+/// count observed, not a generic placeholder.
 fn budget_fallback_reason(explicit_output: &Value) -> String {
     match explicit_output
         .get("states_explored")
         .and_then(Value::as_u64)
     {
-        Some(states_explored) => format!(
-            "explicit-state exploration reached its {states_explored}-state budget; falling back to symbolic BMC"
-        ),
+        Some(states_explored) => budget_fallback_message(states_explored),
         None => {
             "explicit-state exploration exceeded the state budget; falling back to symbolic BMC"
                 .to_owned()
         }
     }
+}
+
+fn budget_fallback_message(states_explored: impl std::fmt::Display) -> String {
+    format!(
+        "explicit-state exploration reached its {states_explored}-state budget; falling back to symbolic BMC"
+    )
 }
 
 fn finish_explicit_output(rendered: Result<(Value, i32), String>) -> (Value, i32) {
@@ -1148,7 +1192,7 @@ fn finish_explicit_output(rendered: Result<(Value, i32), String>) -> (Value, i32
 pub(super) fn run_bmc_filtered(request: BmcRequest<'_>) -> (Value, i32) {
     let started = Instant::now();
     match execute_bmc(&request, started, false) {
-        Ok((_, output)) | Err(output) => output,
+        Ok((_, _, output)) | Err(output) => output,
     }
 }
 
@@ -1186,11 +1230,38 @@ fn contains_sequence(model: &KernelModel, ty: &TypeRef) -> bool {
     }
 }
 
+/// The verdict `render_bmc_output` reports for a solved run, read off the
+/// typed result.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BmcVerdict {
+    Verified,
+    /// A `leadsTo` violation, which the induction base hands to ranking.
+    LeadsToViolated,
+    Failed,
+}
+
+fn bmc_verdict(
+    model: &KernelModel,
+    result: &fsl_verifier::BmcResult,
+    deadlock: DeadlockMode,
+) -> BmcVerdict {
+    use fslc_rust::verification_output::{BmcRunFailure, UnreachedReachables, first_bmc_failure};
+
+    match first_bmc_failure(model, result, deadlock, UnreachedReachables::Fail) {
+        None => BmcVerdict::Verified,
+        // Without its diagnostics a `leadsTo` violation renders as an error.
+        Some(BmcRunFailure::LeadsTo(violation)) if violation.leads_to.is_some() => {
+            BmcVerdict::LeadsToViolated
+        }
+        Some(_) => BmcVerdict::Failed,
+    }
+}
+
 fn execute_bmc(
     request: &BmcRequest<'_>,
     started: Instant,
     symbolic_first: bool,
-) -> Result<(SolvedBmc, CommandResult), CommandResult> {
+) -> Result<(SolvedBmc, BmcVerdict, CommandResult), CommandResult> {
     let prepared = prepare_bmc(request)?;
     let deferred = symbolic_first
         && !prepared
@@ -1202,16 +1273,19 @@ fn execute_bmc(
         probe_bmc_boundary(request, &prepared, started)?;
     }
     let solved = solve_bmc(request, &prepared);
-    let output = match &solved {
-        Ok(solved) => render_bmc(request, &prepared, solved, started),
-        Err(output) => output.clone(),
+    let (verdict, output) = match &solved {
+        Ok(solved) => (
+            bmc_verdict(&prepared.model, &solved.result, request.deadlock),
+            render_bmc(request, &prepared, solved, started),
+        ),
+        Err(output) => (BmcVerdict::Failed, output.clone()),
     };
     // Only a successful all-bounds base makes the concrete search redundant.
     // Every non-success retains the existing boundary evidence and priority.
-    if deferred && output.0.get("result").and_then(Value::as_str) != Some("verified") {
+    if deferred && verdict != BmcVerdict::Verified {
         probe_bmc_boundary(request, &prepared, started)?;
     }
-    Ok((solved?, output))
+    Ok((solved?, verdict, output))
 }
 
 fn prepare_bmc(request: &BmcRequest<'_>) -> Result<PreparedBmc, CommandResult> {
@@ -1448,6 +1522,33 @@ fn lemma_violated_steps(
         .collect()
 }
 
+/// Whether `--lemma` may use a candidate as an auxiliary invariant.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LemmaVerdict {
+    Proved,
+    Rejected,
+}
+
+impl LemmaVerdict {
+    fn status(self) -> &'static str {
+        match self {
+            Self::Proved => "proved",
+            Self::Rejected => "rejected",
+        }
+    }
+}
+
+fn lemma_entry(
+    verdict: LemmaVerdict,
+    source: &str,
+    name: &str,
+    proof: Value,
+) -> (LemmaVerdict, Value) {
+    let mut entry = json!({"expression":source,"name":name,"status":verdict.status(),"used":false});
+    entry["proof"] = proof;
+    (verdict, entry)
+}
+
 fn adjudicate_lemma(
     model: &KernelModel,
     name: &str,
@@ -1455,7 +1556,8 @@ fn adjudicate_lemma(
     source: &str,
     depth: usize,
     k_ind: usize,
-) -> Value {
+) -> (LemmaVerdict, Value) {
+    let rejected = |proof| lemma_entry(LemmaVerdict::Rejected, source, name, proof);
     let mut candidate = model.clone();
     candidate.invariants.clear();
     candidate.transitions.clear();
@@ -1471,43 +1573,37 @@ fn adjudicate_lemma(
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
         Err(error) => {
-            return json!({
-                "expression":source,"name":name,"status":"rejected","used":false,
-                "proof":{"result":"error","kind":"internal","message":error.to_string()},
-            });
+            return rejected(
+                json!({"result":"error","kind":"internal","message":error.to_string()}),
+            );
         }
     };
     let bounded =
         match block_on_native(fsl_verifier::verify_bounded(&candidate, &mut solver, depth)) {
             Ok(result) => result,
             Err(error) => {
-                return json!({
-                    "expression":source,"name":name,"status":"rejected","used":false,
-                    "proof":{"result":"error","kind":"semantics","message":error.to_string()},
-                });
+                return rejected(
+                    json!({"result":"error","kind":"semantics","message":error.to_string()}),
+                );
             }
         };
     if let Some(violation) = bounded.violation {
-        return json!({
-            "expression":source,"name":name,"status":"rejected","used":false,
-            "proof":{
-                "result":"violated","violation_kind":violation.kind,
-                "invariant":candidate.action_scoped_display_name(
-                    &violation.name,
-                    violation.last_action.as_deref(),
-                ),
-                "violated_at_step":violation.step,
-                "trace": ::fslc_rust::trace_json(&candidate, &violation.trace),
-            },
-        });
+        return rejected(json!({
+            "result":"violated","violation_kind":violation.kind,
+            "invariant":candidate.action_scoped_display_name(
+                &violation.name,
+                violation.last_action.as_deref(),
+            ),
+            "violated_at_step":violation.step,
+            "trace": ::fslc_rust::trace_json(&candidate, &violation.trace),
+        }));
     }
     let mut solver = match fsl_solver_z3::Z3Solver::new() {
         Ok(solver) => solver,
         Err(error) => {
-            return json!({
-                "expression":source,"name":name,"status":"rejected","used":false,
-                "proof":{"result":"error","kind":"internal","message":error.to_string()},
-            });
+            return rejected(
+                json!({"result":"error","kind":"internal","message":error.to_string()}),
+            );
         }
     };
     // Lemma truth only: the definedness obligation is asked in the target
@@ -1517,35 +1613,33 @@ fn adjudicate_lemma(
         &mut solver,
         k_ind,
     )) {
-        Ok(proof) if proof.cti.is_none() => json!({
-            "expression":source,"name":name,"status":"proved","used":false,
-            "proof":{
+        Ok(proof) if proof.cti.is_none() => lemma_entry(
+            LemmaVerdict::Proved,
+            source,
+            name,
+            json!({
                 "result":"proved","k":proof.k_used.get(name).copied().unwrap_or(k_ind),
                 "checked_to_depth":depth,"completeness":"unbounded",
-            },
-        }),
+            }),
+        ),
         Ok(proof) => {
             let cti = proof.cti.as_ref().expect("non-proved induction has a CTI");
-            json!({
-                "expression":source,"name":name,"status":"rejected","used":false,
-                "proof":{
-                    "result":"unknown_cti",
-                    "invariant":candidate
-                        .action_scoped_display_name(&cti.name, trace_last_action(&cti.trace)),
-                    "k":cti.k,
-                    "checked_to_depth":depth,"completeness":"bounded",
-                    "trace_type":"induction_cti",
-                    "cti":{
-                        "states": ::fslc_rust::trace_json(&candidate, &cti.trace),
-                        "violated_at":cti.k,
-                    },
+            rejected(json!({
+                "result":"unknown_cti",
+                "invariant":candidate
+                    .action_scoped_display_name(&cti.name, trace_last_action(&cti.trace)),
+                "k":cti.k,
+                "checked_to_depth":depth,"completeness":"bounded",
+                "trace_type":"induction_cti",
+                "cti":{
+                    "states": ::fslc_rust::trace_json(&candidate, &cti.trace),
+                    "violated_at":cti.k,
                 },
-            })
+            }))
         }
-        Err(error) => json!({
-            "expression":source,"name":name,"status":"rejected","used":false,
-            "proof":{"result":"error","kind":"semantics","message":error.to_string()},
-        }),
+        Err(error) => {
+            rejected(json!({"result":"error","kind":"semantics","message":error.to_string()}))
+        }
     }
 }
 
@@ -1649,7 +1743,7 @@ fn run_induction_with_lemmas(
                 continue;
             }
         };
-        let entry = adjudicate_lemma(
+        let (verdict, entry) = adjudicate_lemma(
             &model,
             &name,
             &expression,
@@ -1657,7 +1751,7 @@ fn run_induction_with_lemmas(
             options.depth,
             options.k_ind,
         );
-        if entry.get("status").and_then(Value::as_str) == Some("proved") {
+        if verdict == LemmaVerdict::Proved {
             proved_candidates.push((entries.len(), name.clone(), expression, source.to_owned()));
         }
         entries.push(entry);
@@ -1667,20 +1761,19 @@ fn run_induction_with_lemmas(
     // since `run_induction_with_lemmas` is called directly from
     // `run_verify_cli_from_source` rather than through `execute_cli_verification`.
     let skip_vacuity_probe = options.vacuity == "ignore";
-    let (mut result, status) = loop {
-        let (current, status) = run_induction_filtered(InductionRequest {
+    let (proved, (mut result, status)) = loop {
+        let (current, status) = match run_induction(InductionRequest {
             selection,
             depth: options.depth,
             deadlock,
             k: options.k_ind,
             auxiliary: &auxiliary,
             skip_vacuity_probe,
-        });
-        if current.get("result").and_then(Value::as_str) != Some("unknown_cti")
-            || current.get("violation_kind").and_then(Value::as_str) == Some("leadsTo_rank")
-        {
-            break (current, status);
-        }
+        }) {
+            Ok((InductionVerdict::Cti, output)) => output,
+            Ok((verdict, output)) => break (verdict == InductionVerdict::Proved, output),
+            Err(output) => break (false, output),
+        };
         let Some((candidate_index, violated_steps)) = proved_candidates
             .iter()
             .enumerate()
@@ -1689,7 +1782,7 @@ fn run_induction_with_lemmas(
                 (!steps.is_empty()).then_some((index, steps))
             })
         else {
-            break (current, status);
+            break (false, (current, status));
         };
         let (entry_index, name, expression, source) = proved_candidates.remove(candidate_index);
         if let Value::Object(entry) = &mut entries[entry_index] {
@@ -1706,7 +1799,6 @@ fn run_induction_with_lemmas(
         auxiliary.push((name, expression));
         auxiliary_sources.push(source);
     };
-    let proved = result.get("result").and_then(Value::as_str) == Some("proved");
     if let Value::Object(output) = &mut result {
         output.insert("lemmas".to_owned(), Value::Array(entries));
         output.insert("lemma_cti_exclusions".to_owned(), Value::Array(exclusions));
@@ -3238,6 +3330,148 @@ mod tests {
         assert_eq!(status, 3);
         assert_eq!(output["result"], "error");
         assert_eq!(output["kind"], "internal");
+    }
+
+    fn inline_model(source: &str) -> KernelModel {
+        let kernel = fsl_core::parse_kernel_source(source, &fsl_core::FsResolver::new("."))
+            .expect("lower inline fixture");
+        fsl_core::build_model(kernel).expect("build inline fixture")
+    }
+
+    fn rendered_explicit_result(
+        model: &KernelModel,
+        result: &fsl_runtime::ExplicitResult,
+        deadlock: DeadlockMode,
+    ) -> Value {
+        let (output, _) =
+            finish_explicit_output(fslc_rust::verification_output::render_explicit_output(
+                envelope(),
+                model,
+                result,
+                None,
+                deadlock,
+                0.0,
+                &[],
+                &std::collections::BTreeMap::new(),
+                true,
+            ));
+        output["result"].clone()
+    }
+
+    #[test]
+    fn auto_falls_back_on_an_explicit_run_that_exhausts_its_budget() {
+        let model = inline_model(
+            r"spec AutoBudget {
+  state { n: Int }
+  init { n = 0 }
+  action step() { requires n < 9 n = n + 1 }
+  invariant NonNegative { n >= 0 }
+}",
+        );
+        let result = fsl_runtime::verify_explicit(model.clone(), 8, 2).expect("explicit run");
+        assert!(result.budget_exceeded, "{result:?}");
+        let expected = format!(
+            "explicit-state exploration reached its {}-state budget; falling back to symbolic BMC",
+            result.states_explored
+        );
+        for deadlock in [DeadlockMode::Ignore, DeadlockMode::Error] {
+            assert_eq!(
+                explicit_budget_fallback(&result, deadlock).as_deref(),
+                Some(expected.as_str())
+            );
+            assert_eq!(
+                rendered_explicit_result(&model, &result, deadlock),
+                "unknown_budget"
+            );
+        }
+    }
+
+    #[test]
+    fn auto_keeps_an_explicit_verdict_found_before_the_budget_ran_out() {
+        let closed = inline_model(
+            r"spec AutoClosed {
+  state { done: Bool }
+  init { done = false }
+  action finish() { requires not done done = true }
+  invariant Boolean { done or not done }
+}",
+        );
+        let result = fsl_runtime::verify_explicit(closed.clone(), 4, 100).expect("explicit run");
+        assert!(
+            result.closure && result.deadlock_step.is_some(),
+            "{result:?}"
+        );
+        assert_eq!(
+            explicit_budget_fallback(&result, DeadlockMode::Ignore),
+            None
+        );
+        assert_eq!(
+            rendered_explicit_result(&closed, &result, DeadlockMode::Ignore),
+            "proved"
+        );
+
+        // A deadlock decides only under `--deadlock error`.
+        let mut deadlocked = result;
+        deadlocked.budget_exceeded = true;
+        assert_eq!(
+            explicit_budget_fallback(&deadlocked, DeadlockMode::Error),
+            None
+        );
+        assert_eq!(
+            rendered_explicit_result(&closed, &deadlocked, DeadlockMode::Error),
+            "violated"
+        );
+        assert!(explicit_budget_fallback(&deadlocked, DeadlockMode::Ignore).is_some());
+        assert_eq!(
+            rendered_explicit_result(&closed, &deadlocked, DeadlockMode::Ignore),
+            "unknown_budget"
+        );
+
+        let violating = inline_model(
+            r"spec AutoViolated {
+  state { done: Bool }
+  init { done = false }
+  action finish() { requires not done done = true }
+  invariant NeverDone { not done }
+}",
+        );
+        let mut violated =
+            fsl_runtime::verify_explicit(violating.clone(), 4, 100).expect("explicit run");
+        assert!(violated.violation.is_some(), "{violated:?}");
+        violated.budget_exceeded = true;
+        assert_eq!(
+            explicit_budget_fallback(&violated, DeadlockMode::Ignore),
+            None
+        );
+        assert_eq!(
+            rendered_explicit_result(&violating, &violated, DeadlockMode::Ignore),
+            "violated"
+        );
+    }
+
+    #[test]
+    fn adjudicated_lemma_entry_reports_its_verdict() {
+        let model = inline_model(
+            r"spec LemmaVerdicts {
+  state { x: Int }
+  init { x = 0 }
+  action step() { x = x + 2 }
+  invariant Small { x < 100 }
+}",
+        );
+        for (source, verdict, status, proof) in [
+            ("x >= 0", LemmaVerdict::Proved, "proved", "proved"),
+            ("x == 0", LemmaVerdict::Rejected, "rejected", "violated"),
+            ("x != 1", LemmaVerdict::Rejected, "rejected", "unknown_cti"),
+        ] {
+            let expression = fsl_syntax::parse_expr(source).expect("parse lemma");
+            let (produced, entry) =
+                adjudicate_lemma(&model, "AuxiliaryLemma1", &expression, source, 3, 1);
+            assert_eq!(produced, verdict, "{source}: {entry}");
+            assert_eq!(entry["status"], status, "{source}: {entry}");
+            assert_eq!(entry["proof"]["result"], proof, "{source}: {entry}");
+            assert_eq!(entry["used"], false, "{source}: {entry}");
+        }
     }
 
     #[test]
