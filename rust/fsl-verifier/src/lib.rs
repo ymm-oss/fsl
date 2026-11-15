@@ -13,6 +13,7 @@ mod init_definedness;
 mod issue_1481_zero_capacity_seq_terms;
 mod liveness;
 mod refinement;
+mod scoped_query;
 mod symmetry;
 mod trace;
 mod transition;

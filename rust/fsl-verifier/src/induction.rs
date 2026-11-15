@@ -22,6 +22,7 @@ use crate::eval::{
     eval_with_bindings_in, evaluation_status, property_evaluation_status_in,
 };
 use crate::liveness::{leadsto_bindings, leadsto_condition, leadsto_condition_in};
+use crate::scoped_query::{OnUnknown, PopFailure, scoped_check, scoped_query};
 use crate::trace::{has_missing_sequence_slots, project_trace};
 use crate::transition::{
     ActionInstance, action_has_partial_operation_candidate, action_instances,
@@ -492,21 +493,14 @@ pub(crate) async fn partial_witness<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     upto: usize,
 ) -> Result<Option<Vec<fsl_core::TraceStep>>, VerifyError> {
-    solver.push();
-    if let Err(error) = solver.assert(condition) {
-        solver.pop(1)?;
-        return Err(error.into());
-    }
-    let outcome = match solver.check().await {
-        Ok(SatResult::Sat) => {
+    scoped_query(solver, [condition], PopFailure::First, |solver, result| {
+        if OnUnknown::Fail("solver returned unknown in induction").proves_unsat(result)? {
+            Ok(None)
+        } else {
             project_trace(solver, model, states, choices, instances, upto).map(Some)
         }
-        Ok(SatResult::Unsat) => Ok(None),
-        Ok(SatResult::Unknown) => Err(VerifyError::solver("solver returned unknown in induction")),
-        Err(error) => Err(error.into()),
-    };
-    solver.pop(1)?;
-    outcome
+    })
+    .await
 }
 
 fn key_domain_cti(name: String, k: usize, trace: Vec<fsl_core::TraceStep>) -> InductionCti {
@@ -1772,24 +1766,12 @@ pub async fn ranked_leadsto_lasso_discharges<S: SmtSolver>(
     ranked.into_iter().take(result.proofs.len()).collect()
 }
 
-async fn rank_measure_path_is_reachable<S: SmtSolver>(
+pub(crate) async fn rank_measure_path_is_reachable<S: SmtSolver>(
     solver: &mut S,
     path: &S::Term,
 ) -> Result<bool, VerifyError> {
-    solver.push();
-    let result: Result<SatResult, VerifyError> = async {
-        solver.assert(path)?;
-        Ok(solver.check().await?)
-    }
-    .await;
-    solver.pop(1)?;
-    match result? {
-        SatResult::Sat => Ok(true),
-        SatResult::Unsat => Ok(false),
-        SatResult::Unknown => Err(VerifyError::solver(
-            "solver returned unknown in ranking proof",
-        )),
-    }
+    let result = scoped_check(solver, [path], PopFailure::First).await?;
+    Ok(!OnUnknown::Fail("solver returned unknown in ranking proof").proves_unsat(result)?)
 }
 
 /// Preserve the pre-#1481 error for a reached read with no

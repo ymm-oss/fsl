@@ -18,6 +18,9 @@ use crate::eval::{
 use crate::induction::{InductionCti, partial_witness};
 use crate::init_definedness::{InitFailureSite, init_failure_sites, init_may_fail};
 use crate::liveness::{LeadstoBinding, leadsto_bindings, leadsto_condition};
+use crate::scoped_query::{
+    OnUnknown, PopFailure, scoped_check, scoped_check_conjunction, scoped_query,
+};
 use crate::symmetry::canonical_constraint;
 use crate::trace::project_trace;
 use crate::transition::{
@@ -218,19 +221,12 @@ async fn terms_are_unsat<S: SmtSolver>(
     active: &[usize],
     target: &S::Term,
 ) -> Result<bool, VerifyError> {
-    solver.push();
-    let outcome = async {
-        for index in active {
-            solver.assert(&constraints[*index].term)?;
-        }
-        solver.assert(target)?;
-        solver.check().await.map_err(VerifyError::from)
-    }
-    .await;
-    let pop = solver.pop(1).map_err(VerifyError::from);
-    let result = outcome?;
-    pop?;
-    Ok(result == SatResult::Unsat)
+    let terms = active
+        .iter()
+        .map(|index| &constraints[*index].term)
+        .chain([target]);
+    let result = scoped_check(solver, terms, PopFailure::Last).await?;
+    OnUnknown::NotProved.proves_unsat(result)
 }
 
 /// Explore all symbolic executions up to `depth` using a backend-neutral SMT solver.
@@ -2320,21 +2316,14 @@ async fn build_witness<S: SmtSolver>(
     instances: &[ActionInstance<S::Term>],
     upto: usize,
 ) -> Result<Vec<TraceStep>, VerifyError> {
-    solver.push();
-    if let Err(error) = solver.assert(condition) {
-        solver.pop(1)?;
-        return Err(error.into());
-    }
-    let checked = solver.check().await;
-    let projected = match checked {
-        Ok(SatResult::Sat) => project_trace(solver, model, states, choices, instances, upto),
-        Ok(SatResult::Unsat) => Err(VerifyError::new("witness condition became unsatisfiable")),
-        Ok(SatResult::Unknown) => Err(VerifyError::solver("solver returned unknown for witness")),
-        Err(error) => Err(error.into()),
-    };
-    let popped = solver.pop(1);
-    popped?;
-    projected
+    scoped_query(solver, [condition], PopFailure::First, |solver, result| {
+        if OnUnknown::Fail("solver returned unknown for witness").proves_unsat(result)? {
+            Err(VerifyError::new("witness condition became unsatisfiable"))
+        } else {
+            project_trace(solver, model, states, choices, instances, upto)
+        }
+    })
+    .await
 }
 
 fn states_equal<S: SmtSolver>(
@@ -2793,33 +2782,18 @@ async fn extend_range_lemmas<S: SmtSolver>(
 /// `true` only when the conjunction is proved unsatisfiable; `unknown` keeps
 /// the lemma out instead of failing the run.
 async fn entailed<S: SmtSolver>(solver: &mut S, query: &[S::Term]) -> Result<bool, VerifyError> {
-    solver.push();
-    if let Err(error) = solver.assert(&solver.and(query)?) {
-        solver.pop(1)?;
-        return Err(error.into());
-    }
-    let checked = solver.check().await;
-    let popped = solver.pop(1);
-    let result = checked?;
-    popped?;
-    Ok(result == SatResult::Unsat)
+    let result = scoped_check_conjunction(solver, query, PopFailure::OverAssert).await?;
+    OnUnknown::NotProved.proves_unsat(result)
 }
 
 async fn probe_not<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool, VerifyError> {
     probe(solver, &solver.not(condition)?).await
 }
 
+/// The classification stays in this body: the P2 mutation scope
+/// (`p2.bmc.probe-classification`) examines it here.
 async fn probe<S: SmtSolver>(solver: &mut S, condition: &S::Term) -> Result<bool, VerifyError> {
-    solver.push();
-    if let Err(error) = solver.assert(condition) {
-        solver.pop(1)?;
-        return Err(error.into());
-    }
-    let checked = solver.check().await;
-    let popped = solver.pop(1);
-    let result = checked?;
-    popped?;
-    match result {
+    match scoped_check(solver, [condition], PopFailure::OverAssert).await? {
         SatResult::Sat => Ok(true),
         SatResult::Unsat => Ok(false),
         SatResult::Unknown => Err(VerifyError::solver("solver returned unknown")),
@@ -2892,3 +2866,5 @@ mod tests {
 }
 #[cfg(test)]
 mod integer_range_tests;
+#[cfg(test)]
+mod scoped_query_tests;
