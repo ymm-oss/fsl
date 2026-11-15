@@ -4933,18 +4933,9 @@ fn format_chain_table(result: &Value) -> String {
 
 #[allow(clippy::too_many_lines)]
 fn run_replay(path: &Path, trace_path: &Path) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
-        None,
-        false,
-        |sources, editions| {
-            finish_admitted(
-                run_replay_from_source(path, &sources[0], trace_path),
-                editions,
-                false,
-            )
-        },
-    )
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_replay_from_source(path, source, trace_path)
+    })
 }
 
 /// Replay one trace against one caller-owned root-source snapshot.
@@ -5683,12 +5674,8 @@ fn run_scenarios(
     depth: usize,
     deadlock_mode: &str,
 ) -> (Value, i32) {
-    run_admitted_roots(vec![(path, source)], None, false, |sources, editions| {
-        finish_admitted(
-            run_scenarios_from_source(path, &sources[0], depth, deadlock_mode),
-            editions,
-            false,
-        )
+    run_admitted_root(path, source, None, false, |source| {
+        run_scenarios_from_source(path, source, depth, deadlock_mode)
     })
 }
 
@@ -6431,18 +6418,9 @@ fn portable_cli_source_path(path: &Path) -> Result<String, String> {
 }
 
 fn run_kernel_contract(path: &Path, version: fsl_core::PublicKernelVersion) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
-        None,
-        true,
-        |sources, editions| {
-            finish_admitted(
-                run_kernel_contract_from_source(path, &sources[0], version),
-                editions,
-                true,
-            )
-        },
-    )
+    run_admitted_root(path, read_spec_source(path), None, true, |source| {
+        run_kernel_contract_from_source(path, source, version)
+    })
 }
 
 fn run_kernel_contract_from_source(
@@ -6534,18 +6512,9 @@ fn run_conformance(
     depth: usize,
     version: fsl_core::PublicKernelVersion,
 ) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
-        None,
-        true,
-        |sources, editions| {
-            finish_admitted(
-                run_conformance_from_source(path, &sources[0], depth, version),
-                editions,
-                true,
-            )
-        },
-    )
+    run_admitted_root(path, read_spec_source(path), None, true, |source| {
+        run_conformance_from_source(path, source, depth, version)
+    })
 }
 
 fn run_conformance_from_source(
@@ -6571,18 +6540,9 @@ fn run_conformance_from_source(
 }
 
 fn run_testplan(path: &Path, depth: usize) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
-        None,
-        true,
-        |sources, editions| {
-            finish_admitted(
-                run_testplan_from_source(path, &sources[0], depth),
-                editions,
-                true,
-            )
-        },
-    )
+    run_admitted_root(path, read_spec_source(path), None, true, |source| {
+        run_testplan_from_source(path, source, depth)
+    })
 }
 
 fn run_testplan_from_source(path: &Path, source: &str, depth: usize) -> (Value, i32) {
@@ -6669,31 +6629,31 @@ fn run_check_with_tags_from_source(
     requirements: Option<&Path>,
     edition: Option<fsl_syntax::EditionRequest>,
 ) -> (Value, i32) {
-    let dependencies = fslc_rust::migration::DependencyScope::enter();
-    let admission = match fslc_rust::migration::admit_source(
-        source,
-        &display_path.to_string_lossy(),
-        edition,
-        crate::parse_options(),
-        &envelope,
-        true,
-    ) {
+    let admission = match admit_root_source(display_path, source, edition) {
         Ok(admission) => admission,
         Err(refusal) => return refusal,
     };
-    let (mut output, status) = run_check_from_source(path, display_path, source, &admission);
-    if status == 0 && strict_tags {
-        let model = match load_model_from_source(path, source) {
-            Ok(model) => model,
-            Err(error) => return dependencies.finish((spec_load_error_output(&error), 2), false),
-        };
-        if let Err(error) =
-            add_strict_tag_warnings_from_source(&mut output, &model, source, true, requirements)
-        {
-            return error_exit(io_error_output(&error));
+    // A requirements read failure is reported without the dependency findings
+    // or the edition metadata.
+    let mut unscoped = None;
+    let result = run_prepared_roots(std::slice::from_ref(&admission), false, || {
+        let (mut output, status) = run_check_from_source(path, display_path, source, &admission);
+        if status == 0 && strict_tags {
+            let model = match load_model_from_source(path, source) {
+                Ok(model) => model,
+                Err(error) => return (spec_load_error_output(&error), 2),
+            };
+            if let Err(error) =
+                add_strict_tag_warnings_from_source(&mut output, &model, source, true, requirements)
+            {
+                let error = error_exit(io_error_output(&error));
+                unscoped = Some(error.clone());
+                return error;
+            }
         }
-    }
-    dependencies.finish(admission.finish((output, status)), false)
+        admission.finish((output, status))
+    });
+    unscoped.unwrap_or(result)
 }
 
 fn parse_surface_document_from_source(
@@ -10631,25 +10591,9 @@ fn run_explain(
     names: Option<name_display::NameSpelling>,
     lowering: bool,
 ) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
-        None,
-        readable,
-        |sources, editions| {
-            finish_admitted(
-                run_explain_from_source_with_names(
-                    path,
-                    &sources[0],
-                    depth,
-                    readable,
-                    names,
-                    lowering,
-                ),
-                editions,
-                readable,
-            )
-        },
-    )
+    run_admitted_root(path, read_spec_source(path), None, readable, |source| {
+        run_explain_from_source_with_names(path, source, depth, readable, names, lowering)
+    })
 }
 
 /// `explain --lowering`: only where each lowered `requires` and property
@@ -13067,17 +13011,12 @@ fn mutation_progress(
 }
 
 fn run_typestate(path: &Path, typescript_only: bool) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
+    run_admitted_root(
+        path,
+        read_spec_source(path),
         None,
         typescript_only,
-        |sources, editions| {
-            finish_admitted(
-                run_typestate_from_source(path, &sources[0]),
-                editions,
-                typescript_only,
-            )
-        },
+        |source| run_typestate_from_source(path, source),
     )
 }
 
@@ -13449,23 +13388,20 @@ fn run_testgen(
     strict: bool,
     output_path: Option<&Path>,
 ) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
+    run_admitted_root(
+        path,
+        read_spec_source(path),
         None,
         output_path.is_none(),
-        |sources, editions| {
-            finish_admitted(
-                run_testgen_from_source(
-                    path,
-                    &sources[0],
-                    depth,
-                    target,
-                    deadlock_mode,
-                    strict,
-                    output_path,
-                ),
-                editions,
-                output_path.is_none(),
+        |source| {
+            run_testgen_from_source(
+                path,
+                source,
+                depth,
+                target,
+                deadlock_mode,
+                strict,
+                output_path,
             )
         },
     )
@@ -18235,18 +18171,9 @@ fn run_approval_diff(
     depth: usize,
     trust_keys: &[PathBuf],
 ) -> (Value, i32) {
-    run_admitted_roots(
-        vec![(path, read_spec_source(path))],
-        None,
-        false,
-        |sources, editions| {
-            finish_admitted(
-                run_approval_diff_from_source(path, &sources[0], record_path, depth, trust_keys),
-                editions,
-                false,
-            )
-        },
-    )
+    run_admitted_root(path, read_spec_source(path), None, false, |source| {
+        run_approval_diff_from_source(path, source, record_path, depth, trust_keys)
+    })
 }
 
 #[allow(clippy::too_many_lines)]
