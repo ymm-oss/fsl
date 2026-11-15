@@ -2,6 +2,8 @@
 //! #1873: every scoped-query caller keeps its `unknown` fold, its solver call
 //! sequence, and the error it reports when the closing `pop` fails too.
 
+use std::cell::RefCell;
+
 use fsl_core::{FsResolver, build_model, parse_kernel_source};
 use fsl_solver::{
     CheckFuture, ModelValue, SolverError, SolverResult, Sort, VerificationStatistics,
@@ -23,7 +25,7 @@ struct Stub {
     fail_and: bool,
     fail_assert: bool,
     fail_pop: bool,
-    calls: Vec<&'static str>,
+    calls: RefCell<Vec<&'static str>>,
 }
 
 macro_rules! binary_terms {
@@ -63,6 +65,7 @@ impl SmtSolver for Stub {
         Ok(Sort::Bool)
     }
     fn and(&self, _: &[Sort]) -> SolverResult<Sort> {
+        self.calls.borrow_mut().push("and");
         if self.fail_and {
             return Err(SolverError::new(AND_FAILED));
         }
@@ -95,11 +98,11 @@ impl SmtSolver for Stub {
         Ok(term.clone())
     }
     fn push(&mut self) {
-        self.calls.push("push");
+        self.calls.get_mut().push("push");
     }
     fn pop(&mut self, levels: u32) -> SolverResult<()> {
         assert_eq!(levels, 1, "a scoped query pops its own scope only");
-        self.calls.push("pop");
+        self.calls.get_mut().push("pop");
         if self.fail_pop {
             return Err(SolverError::new(POP_FAILED));
         }
@@ -109,7 +112,7 @@ impl SmtSolver for Stub {
         panic!("unexpected reset");
     }
     fn assert(&mut self, _: &Sort) -> SolverResult<()> {
-        self.calls.push("assert");
+        self.calls.get_mut().push("assert");
         if self.fail_assert {
             return Err(SolverError::new(ASSERT_FAILED));
         }
@@ -119,7 +122,7 @@ impl SmtSolver for Stub {
         panic!("unexpected tracked assertion");
     }
     fn check(&mut self) -> CheckFuture<'_> {
-        self.calls.push("check");
+        self.calls.get_mut().push("check");
         let answer = self.answer.clone();
         Box::pin(async move { answer })
     }
@@ -231,6 +234,9 @@ fn asserted_terms(caller: Caller) -> usize {
 
 fn calls(caller: Caller, fault: Fault) -> Vec<&'static str> {
     let mut calls = vec!["push"];
+    if matches!(caller, Caller::Entailed) {
+        calls.push("and");
+    }
     if matches!(fault, Fault::And) {
         calls.push("pop");
     } else if matches!(fault, Fault::AssertAndPop) {
@@ -303,7 +309,7 @@ fn every_scoped_query_caller_keeps_its_reading_of_sat_and_unsat() {
                 fail_and: false,
                 fail_assert: false,
                 fail_pop: false,
-                calls: Vec::new(),
+                calls: RefCell::default(),
             };
             assert_eq!(
                 run(caller, &mut solver),
@@ -311,7 +317,7 @@ fn every_scoped_query_caller_keeps_its_reading_of_sat_and_unsat() {
                 "{caller:?} on {answer:?}"
             );
             assert_eq!(
-                solver.calls,
+                solver.calls.into_inner(),
                 calls(caller, Fault::None),
                 "{caller:?} on {answer:?}"
             );
@@ -336,12 +342,12 @@ fn every_scoped_query_caller_keeps_its_unknown_fold_and_pop_order() {
                 fail_and: matches!(fault, Fault::And),
                 fail_assert: matches!(fault, Fault::AssertAndPop),
                 fail_pop: !matches!(fault, Fault::None | Fault::And),
-                calls: Vec::new(),
+                calls: RefCell::default(),
             };
             let produced = run(caller, &mut solver);
             assert_eq!(produced, expected, "{caller:?} under {fault:?}");
             assert_eq!(
-                solver.calls,
+                solver.calls.into_inner(),
                 calls(caller, fault),
                 "{caller:?} under {fault:?}"
             );

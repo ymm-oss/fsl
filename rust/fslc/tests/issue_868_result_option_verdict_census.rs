@@ -845,7 +845,7 @@ const CLASSIFICATIONS: &[Classification] = &[
     entry!(
         Ordinary,
         "rust/fsl-verifier/src/bmc/scoped_query_tests.rs",
-        132,
+        135,
         "model_eval",
         SolverResultOption
     ),
